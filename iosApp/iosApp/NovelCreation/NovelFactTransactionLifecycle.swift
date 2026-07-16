@@ -686,6 +686,9 @@ private extension DefaultNovelCreation {
         if error is CancellationError {
             return "The fact synchronization was cancelled and can be retried."
         }
+        if case .invalidInput(let detail) = error as? NovelError {
+            return detail
+        }
         return error.localizedDescription
     }
 }

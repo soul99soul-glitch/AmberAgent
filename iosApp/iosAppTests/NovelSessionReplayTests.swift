@@ -365,6 +365,23 @@ final class NovelSessionReplayTests: XCTestCase {
             retryable.rows[1].actions,
             [.init(action: .retryPending(pending.id), blocker: nil)]
         )
+
+        let manualSyncPending = makePending(
+            fixture: fixture,
+            candidateID: nil,
+            status: .retryable,
+            kind: .manualSync
+        )
+        let blockedByStateSync = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            candidates: [candidate],
+            pending: [manualSyncPending]
+        ))
+        XCTAssertEqual(
+            blockedByStateSync.rows[1].actions.first?.blocker,
+            .branchNeedsSync
+        )
         XCTAssertEqual(retryable.rows[0].digest, available.rows[0].digest)
         XCTAssertNotEqual(retryable.rows[1].digest, available.rows[1].digest)
 
@@ -389,6 +406,45 @@ final class NovelSessionReplayTests: XCTestCase {
             candidates: [candidate]
         ))
         XCTAssertEqual(stale.rows[1].actions.first?.blocker, .staleCandidate)
+    }
+
+    func testProseCandidateRowPreservesItsGenerationGranularity() throws {
+        let fixture = try makeFixture()
+        let candidateID = NovelCandidateID()
+        let run = makeRun(
+            fixture: fixture,
+            kind: .prose,
+            candidateID: candidateID,
+            granularity: .continuation
+        )
+        let message = makeMessage(
+            sequence: 0,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .proseCandidate,
+            content: "雨水沿着屋檐落下。",
+            runID: run.id,
+            candidateID: candidateID
+        )
+        var session = fixture.session
+        session.messages = [message]
+        let candidate = makeCandidate(
+            fixture: fixture,
+            id: candidateID,
+            sourceMessageID: message.id,
+            kind: .prose,
+            status: .available,
+            content: message.content
+        )
+
+        let model = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            candidates: [candidate],
+            runs: [terminalRun(run)]
+        ))
+
+        XCTAssertEqual(model.rows.first?.granularity, .continuation)
     }
 
     func testCollectedCandidateProjectsCommittedStateChangeAndForkAction() throws {
@@ -1136,7 +1192,8 @@ private extension NovelSessionReplayTests {
         fixture: Fixture,
         kind: NovelRunKind,
         candidateID: NovelCandidateID? = nil,
-        sourceVersionID: NovelChapterVersionID? = nil
+        sourceVersionID: NovelChapterVersionID? = nil,
+        granularity: NovelGenerationGranularity? = nil
     ) -> NovelActiveRunRecord {
         NovelActiveRunRecord(
             id: NovelRunID(),
@@ -1146,7 +1203,7 @@ private extension NovelSessionReplayTests {
             sessionID: fixture.session.id,
             kind: kind,
             mode: kind == .discussion || kind == .quickStart ? .discussPlan : .writeProse,
-            granularity: kind == .prose ? .wholeChapter : nil,
+            granularity: kind == .prose ? granularity ?? .wholeChapter : nil,
             userMessageID: NovelMessageID(),
             messageID: NovelMessageID(),
             candidateID: candidateID,
@@ -1221,12 +1278,13 @@ private extension NovelSessionReplayTests {
 
     func makePending(
         fixture: Fixture,
-        candidateID: NovelCandidateID,
-        status: NovelPendingOperationStatus
+        candidateID: NovelCandidateID?,
+        status: NovelPendingOperationStatus,
+        kind: NovelPendingOperationKind = .collection
     ) -> NovelPendingOperationRecord {
         NovelPendingOperationRecord(
             id: NovelPendingOperationID(),
-            kind: .collection,
+            kind: kind,
             status: status,
             branchID: fixture.branch.id,
             operationID: NovelOperationID(),

@@ -22,7 +22,11 @@ struct NovelProjectManagementView: View {
                             .foregroundStyle(AmberTheme.muted)
                     }
                 }
-                .disabled(project.loadError != nil)
+                .disabled(
+                    project.loadError != nil ||
+                        (viewModel.isProjectSelectionBlocked &&
+                            viewModel.selectedProjectID != project.id)
+                )
             }
         }
         .listStyle(.insetGrouped)
@@ -47,6 +51,9 @@ struct NovelProjectSettingsDetailView: View {
     @State private var markdownDocument: NovelMarkdownFileDocument?
     @State private var markdownFileName = "Novel.md"
     @State private var isExportingMarkdown = false
+    @State private var projectDocument: NovelProjectFileDocument?
+    @State private var projectFileName = "Novel.ambernovel"
+    @State private var isExportingProject = false
 
     var body: some View {
         Form {
@@ -87,6 +94,11 @@ struct NovelProjectSettingsDetailView: View {
             }
 
             Section("管理") {
+                Button(action: exportProject) {
+                    Label("导出项目包", systemImage: "archivebox")
+                }
+                .disabled(currentProject == nil || viewModel.isPerforming)
+
                 Button(action: exportMarkdown) {
                     Label("导出正文", systemImage: "square.and.arrow.up")
                 }
@@ -98,6 +110,13 @@ struct NovelProjectSettingsDetailView: View {
         .navigationTitle(currentProject?.name ?? "项目设置")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $activeSheet, content: sheetContent)
+        .fileExporter(
+            isPresented: $isExportingProject,
+            document: projectDocument,
+            contentType: .amberNovelProject,
+            defaultFilename: projectFileName,
+            onCompletion: handleExportResult
+        )
         .fileExporter(
             isPresented: $isExportingMarkdown,
             document: markdownDocument,
@@ -239,13 +258,22 @@ struct NovelProjectSettingsDetailView: View {
 
     private func exportMarkdown() {
         Task { @MainActor in
-            guard await viewModel.stopActiveRunsForProjectOperation(projectID: projectID),
-                  let artifact = await viewModel.exportBranchMarkdown() else {
+            guard let artifact = await viewModel.exportBranchMarkdown() else {
                 return
             }
             markdownDocument = NovelMarkdownFileDocument(markdown: artifact.markdown)
             markdownFileName = artifact.fileName
             isExportingMarkdown = true
+        }
+    }
+
+    private func exportProject() {
+        Task { @MainActor in
+            guard let artifact = await viewModel.exportProjectPackage() else { return }
+            projectDocument = NovelProjectFileDocument(data: artifact.data)
+            let stem = NovelPresentation.fileName(artifact.projectName, fallback: "Novel")
+            projectFileName = "\(stem).ambernovel"
+            isExportingProject = true
         }
     }
 

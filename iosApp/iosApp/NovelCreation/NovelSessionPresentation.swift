@@ -16,6 +16,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
     let messageID: NovelMessageID
     let candidateID: NovelCandidateID?
     let mode: NovelSessionMode
+    let granularity: NovelGenerationGranularity?
     let kind: NovelSessionMessageKind
     let content: String
     /// Monotonic per-tail revision owned by the Session ViewModel.
@@ -36,6 +37,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         messageID = run.messageID
         candidateID = run.candidateID
         mode = run.mode
+        granularity = run.granularity
         kind = switch run.kind {
         case .quickStart, .discussion: .discussion
         case .prose: .proseCandidate
@@ -59,6 +61,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
             messageID: messageID,
             candidateID: candidateID,
             mode: mode,
+            granularity: granularity,
             kind: kind,
             content: content,
             renderRevision: renderRevision,
@@ -85,6 +88,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         messageID: NovelMessageID,
         candidateID: NovelCandidateID?,
         mode: NovelSessionMode,
+        granularity: NovelGenerationGranularity?,
         kind: NovelSessionMessageKind,
         content: String,
         renderRevision: UInt64,
@@ -97,6 +101,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         self.messageID = messageID
         self.candidateID = candidateID
         self.mode = mode
+        self.granularity = granularity
         self.kind = kind
         self.content = content
         self.renderRevision = renderRevision
@@ -187,6 +192,7 @@ struct NovelSessionRowModel: Identifiable, Equatable, Sendable {
     let sequence: Int64
     let role: NovelSessionRole
     let mode: NovelSessionMode
+    let granularity: NovelGenerationGranularity?
     let kind: NovelSessionMessageKind
     let content: String
     let createdAt: Date
@@ -378,6 +384,8 @@ private struct NovelSessionProjectionIndex {
     let workingChapterVersionIDs: Set<NovelChapterVersionID>
     let runningRunIDs: Set<NovelRunID>
     let branchPendingOperationIDs: Set<NovelPendingOperationID>
+    let branchManualSyncPendingOperationIDs: Set<NovelPendingOperationID>
+    let branchProseBlockingPendingOperationIDs: Set<NovelPendingOperationID>
     let branchBlockingPolishTransactionIDs: Set<NovelPendingOperationID>
 
     init(input: NovelSessionProjectionInput) {
@@ -391,6 +399,8 @@ private struct NovelSessionProjectionIndex {
         var pendingCandidateIDs: Set<NovelCandidateID> = []
         var pendingByCandidateID: [NovelCandidateID: NovelPendingOperationRecord] = [:]
         var branchPendingOperationIDs: Set<NovelPendingOperationID> = []
+        var branchManualSyncPendingOperationIDs: Set<NovelPendingOperationID> = []
+        var branchProseBlockingPendingOperationIDs: Set<NovelPendingOperationID> = []
         for pending in input.pendingOperations {
             if let candidateID = pending.candidateID {
                 pendingCandidateIDs.insert(candidateID)
@@ -400,11 +410,19 @@ private struct NovelSessionProjectionIndex {
             }
             if pending.branchID == input.branch.id {
                 branchPendingOperationIDs.insert(pending.id)
+                if pending.kind == .manualSync {
+                    branchManualSyncPendingOperationIDs.insert(pending.id)
+                }
+                if pending.blocksProseGeneration {
+                    branchProseBlockingPendingOperationIDs.insert(pending.id)
+                }
             }
         }
         self.pendingCandidateIDs = pendingCandidateIDs
         self.pendingByCandidateID = pendingByCandidateID
         self.branchPendingOperationIDs = branchPendingOperationIDs
+        self.branchManualSyncPendingOperationIDs = branchManualSyncPendingOperationIDs
+        self.branchProseBlockingPendingOperationIDs = branchProseBlockingPendingOperationIDs
 
         var polishCandidateIDs: Set<NovelCandidateID> = []
         var polishByCandidateID: [NovelCandidateID: NovelPendingPolishTransactionRecord] = [:]
@@ -478,8 +496,17 @@ private struct NovelSessionProjectionIndex {
         runningRunIDs.count > (runID.map(runningRunIDs.contains) == true ? 1 : 0)
     }
 
-    func hasPendingOperation(excluding pendingID: NovelPendingOperationID?) -> Bool {
-        branchPendingOperationIDs.count > (pendingID.map(branchPendingOperationIDs.contains) == true ? 1 : 0)
+    func pendingOperationBlocker(
+        excluding pendingID: NovelPendingOperationID?
+    ) -> NovelSessionActionBlocker? {
+        let excludesPending = pendingID.map(branchPendingOperationIDs.contains) == true
+        let remainingCount = branchPendingOperationIDs.count - (excludesPending ? 1 : 0)
+        guard remainingCount > 0 else { return nil }
+
+        let excludesManualSync = pendingID.map(branchManualSyncPendingOperationIDs.contains) == true
+        let remainingManualSyncCount = branchManualSyncPendingOperationIDs.count -
+            (excludesManualSync ? 1 : 0)
+        return remainingCount == remainingManualSyncCount ? .branchNeedsSync : .pendingOperation
     }
 
     func hasBlockingPolishTransaction(excluding transactionID: NovelPendingOperationID?) -> Bool {
@@ -558,6 +585,7 @@ private extension NovelSessionPresentation {
             transientRevision: nil,
             transientPhase: nil,
             runStatus: runStatus,
+            granularity: run?.granularity,
             candidate: presentedCandidate,
             committedChange: changeSummary,
             actions: actions
@@ -567,6 +595,7 @@ private extension NovelSessionPresentation {
             sequence: message.sequence,
             role: message.role,
             mode: message.mode,
+            granularity: run?.granularity,
             kind: message.kind,
             content: presentedContent,
             createdAt: message.createdAt,
@@ -633,6 +662,7 @@ private extension NovelSessionPresentation {
             sequence: sequence,
             role: .assistant,
             mode: tail.mode,
+            granularity: tail.granularity,
             kind: presentedKind,
             content: presentedContent,
             createdAt: tail.startedAt,
@@ -647,6 +677,7 @@ private extension NovelSessionPresentation {
                 transientRevision: tail.renderRevision,
                 transientPhase: tail.phase,
                 runStatus: transientRunStatus(for: tail.phase),
+                granularity: tail.granularity,
                 candidate: nil,
                 committedChange: nil,
                 actions: actions
@@ -845,7 +876,7 @@ private extension NovelSessionPresentation {
             }
         case .collected, .adopted:
             var result: [NovelSessionRowActionAvailability] = []
-            if candidate.collectedCheckpointID == input.branch.headCheckpointID {
+            if undoRemovesCandidateCheckpoint(candidate, input: input, index: index) {
                 result.append(availability(
                     .undoCommittedChange(
                         checkpointID: input.branch.headCheckpointID,
@@ -862,7 +893,14 @@ private extension NovelSessionPresentation {
             }
             if candidate.kind == .prose,
                candidate.status == .collected,
-               input.branch.headCheckpointID == candidate.baseCheckpointID {
+               NovelCandidateSemantics.cloneBaseMatches(
+                   candidate,
+                   currentCheckpointID: input.branch.headCheckpointID,
+                   checkpoints: input.checkpoints,
+                   sourceMessage: input.session.messages.first {
+                       $0.id == candidate.sourceMessageID
+                   }
+               ) {
                 result.append(availability(
                     .cloneCollectedProse(candidate.id),
                     blocker: candidateMutationBlocker(
@@ -877,6 +915,28 @@ private extension NovelSessionPresentation {
         case .interrupted, .superseded, .inheritedReadOnly:
             return []
         }
+    }
+
+    static func undoRemovesCandidateCheckpoint(
+        _ candidate: NovelCandidateRecord,
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
+    ) -> Bool {
+        guard let candidateCheckpointID = candidate.collectedCheckpointID,
+              let head = index.checkpointByID[input.branch.headCheckpointID],
+              let target = NovelBranchSemantics.undoTarget(
+                  for: head,
+                  branch: input.branch,
+                  checkpoints: input.checkpoints
+              ) else {
+            return false
+        }
+        if candidateCheckpointID == head.id { return true }
+        guard head.parentCheckpointID == candidateCheckpointID,
+              let candidateCheckpoint = index.checkpointByID[candidateCheckpointID] else {
+            return false
+        }
+        return target.id == candidateCheckpoint.parentCheckpointID
     }
 
     static func retryBlocker(
@@ -897,7 +957,7 @@ private extension NovelSessionPresentation {
             if run.kind == .polish, input.branch.syncStatus == .needsSync {
                 return .branchNeedsSync
             }
-            if !index.branchPendingOperationIDs.isEmpty {
+            if !index.branchProseBlockingPendingOperationIDs.isEmpty {
                 return .pendingOperation
             }
             if input.branch.headCheckpointID != run.baseCheckpointID ||
@@ -939,7 +999,7 @@ private extension NovelSessionPresentation {
             if tail.kind == .polishCandidate, input.branch.syncStatus == .needsSync {
                 return .branchNeedsSync
             }
-            if !index.branchPendingOperationIDs.isEmpty {
+            if !index.branchProseBlockingPendingOperationIDs.isEmpty {
                 return .pendingOperation
             }
         }
@@ -958,10 +1018,24 @@ private extension NovelSessionPresentation {
         if candidate.kind == .polish, input.branch.syncStatus == .needsSync {
             return .branchNeedsSync
         }
-        if requiresCurrentBase,
-           (candidate.baseCheckpointID != input.branch.headCheckpointID ||
-            candidate.baseHeadRevision != input.branch.headRevision) {
-            return .staleCandidate
+        if requiresCurrentBase {
+            let baseMatches: Bool
+            if candidate.kind == .prose {
+                let sourceMessage = input.session.messages.first {
+                    $0.id == candidate.sourceMessageID
+                }
+                baseMatches = NovelCandidateSemantics.collectionBaseMatches(
+                    candidate,
+                    targetCheckpointID: input.branch.headCheckpointID,
+                    targetHeadRevision: input.branch.headRevision,
+                    checkpoints: input.checkpoints,
+                    sourceMessage: sourceMessage
+                )
+            } else {
+                baseMatches = candidate.baseCheckpointID == input.branch.headCheckpointID &&
+                    candidate.baseHeadRevision == input.branch.headRevision
+            }
+            if !baseMatches { return .staleCandidate }
         }
         if candidate.kind == .polish,
            let sourceID = candidate.sourceChapterVersionID,
@@ -991,10 +1065,13 @@ private extension NovelSessionPresentation {
             index.hasRunningRun(excluding: excludingRunID) {
             return .generationRunning
         }
-        if includePending,
-           (index.hasPendingOperation(excluding: excludingPendingID) ||
-            index.hasBlockingPolishTransaction(excluding: excludingPolishTransactionID)) {
-            return .pendingOperation
+        if includePending {
+            if let blocker = index.pendingOperationBlocker(excluding: excludingPendingID) {
+                return blocker
+            }
+            if index.hasBlockingPolishTransaction(excluding: excludingPolishTransactionID) {
+                return .pendingOperation
+            }
         }
         return nil
     }
@@ -1037,7 +1114,17 @@ private extension NovelSessionPresentation {
         if let blocker = baseMutationBlocker(input: input, index: index, includePending: true) {
             return blocker
         }
-        return input.branch.syncStatus == .needsSync ? .branchNeedsSync : nil
+        guard input.branch.syncStatus == .needsSync else { return nil }
+        guard let head = input.checkpoints.first(where: {
+            $0.id == input.branch.headCheckpointID
+        }), NovelBranchSemantics.canUndoHead(
+            head,
+            branch: input.branch,
+            checkpoints: input.checkpoints
+        ) else {
+            return .branchNeedsSync
+        }
+        return nil
     }
 
     static func availability(
@@ -1052,6 +1139,7 @@ private extension NovelSessionPresentation {
         transientRevision: UInt64?,
         transientPhase: NovelSessionTransientTailPhase?,
         runStatus: NovelRunStatus?,
+        granularity: NovelGenerationGranularity?,
         candidate: NovelSessionCandidatePresentation?,
         committedChange: NovelSessionCommittedChangeSummary?,
         actions: [NovelSessionRowActionAvailability]
@@ -1073,7 +1161,8 @@ private extension NovelSessionPresentation {
         } ?? "none"
         let actionToken = actions.map(actionToken).joined(separator: "|")
         return NovelSessionRowDigest(
-            layout: "\(contentToken);\(runStatus?.rawValue ?? "-");\(candidateToken);" +
+            layout: "\(contentToken);\(runStatus?.rawValue ?? "-");" +
+                "\(granularity?.rawValue ?? "-");\(candidateToken);" +
                 "\(committedToken);\(actionToken)",
             presentation: actionToken
         )

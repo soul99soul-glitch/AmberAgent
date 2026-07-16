@@ -271,7 +271,7 @@ struct NovelBranchesView: View {
     }
 
     private var undoTitle: String {
-        guard let kind = checkpointLineage.first?.kind else { return "撤销上一次操作" }
+        guard let kind = semanticUndoKind else { return "撤销上一次操作" }
         return switch kind {
         case .collection: "撤销上一次收录"
         case .polish: "撤销上一次润色"
@@ -288,11 +288,17 @@ struct NovelBranchesView: View {
             return "当前分支还没有可撤销的创作记录。"
         }
         guard checkpointLineage.count >= 2 else { return "当前分支还没有可撤销的创作记录。" }
-        guard selectedBranch?.syncStatus == .synchronized else {
+        guard let project = viewModel.projectSnapshot,
+              let branch = selectedBranch,
+              let head = checkpointLineage.first,
+              NovelBranchSemantics.canUndoHead(
+                  head,
+                  branch: branch,
+                  checkpoints: project.checkpoints
+              ) else {
             return "请先同步手动改写，再撤销上一次操作。"
         }
-        guard let branchID = selectedBranch?.id,
-              let project = viewModel.projectSnapshot else { return "当前分支尚未载入。" }
+        guard let branchID = selectedBranch?.id else { return "当前分支尚未载入。" }
         if project.pendingOperations.contains(where: { $0.branchID == branchID }) ||
             project.polishTransactions.contains(where: {
                 $0.branchID == branchID &&
@@ -301,6 +307,25 @@ struct NovelBranchesView: View {
             return "当前分支还有未完成的正文操作。"
         }
         return nil
+    }
+
+    private var semanticUndoKind: NovelCheckpointKind? {
+        guard let project = viewModel.projectSnapshot,
+              let branch = selectedBranch,
+              let head = checkpointLineage.first,
+              let target = NovelBranchSemantics.undoTarget(
+                  for: head,
+                  branch: branch,
+                  checkpoints: project.checkpoints
+              ) else {
+            return nil
+        }
+        guard let directParentID = head.parentCheckpointID,
+              target.id != directParentID,
+              let directParent = project.checkpoints.first(where: { $0.id == directParentID }) else {
+            return head.kind
+        }
+        return directParent.kind
     }
 }
 

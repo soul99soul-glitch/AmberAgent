@@ -11,7 +11,7 @@ final class NovelPromptCatalogTests: XCTestCase {
 
         XCTAssertEqual(
             sha256(snapshot),
-            "785994b7678d722eccd081da0e774219342a6dceef5d229777d2997158e05b69"
+            "9f35846459ff25dd841e1005c83893a734a5fd681493e8cdc108d51a40613920"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -23,11 +23,49 @@ final class NovelPromptCatalogTests: XCTestCase {
         let polish = NovelPromptCatalog.template(for: .wholeChapterPolish).systemText
 
         XCTAssertTrue(discussion.contains("Do not write canonical manuscript"))
+        XCTAssertTrue(discussion.contains("ask one focused question"))
+        XCTAssertTrue(discussion.contains("recommended option"))
+        XCTAssertTrue(discussion.contains("own words"))
         XCTAssertTrue(continuation.contains("does not become canonical"))
+        XCTAssertTrue(continuation.contains("one focused scene or passage"))
+        XCTAssertTrue(continuation.contains("Do not close the chapter"))
         XCTAssertTrue(wholeChapter.contains("complete next chapter"))
+        XCTAssertTrue(wholeChapter.contains("chapter-level arc"))
+        XCTAssertTrue(wholeChapter.contains("Markdown H1 chapter heading"))
         XCTAssertTrue(polish.contains("must not add, remove, reorder"))
         XCTAssertTrue(polish.contains("relationships, motivations, secrets, outcomes"))
         XCTAssertTrue(polish.contains(NovelPromptCatalog.polishCompletionSentinel))
+    }
+
+    func testHistoricalUserVisiblePromptsRemainVerifiable() throws {
+        let quickStartV2 = try XCTUnwrap(NovelPromptCatalog.systemText(
+            for: .quickStart,
+            version: "novel.quick-start.v2"
+        ))
+        XCTAssertEqual(
+            sha256(quickStartV2),
+            "68cfc3eb39c5ee7b963bef2ce639fe83737de3c013ca72262387445313d66828"
+        )
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: "novel.discussion.v1"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .proseContinuation,
+            version: "novel.prose-continuation.v1"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .proseWholeChapter,
+            version: "novel.prose-whole-chapter.v1"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .proseWholeChapter,
+            version: "novel.prose-whole-chapter.v2"
+        ))
+        XCTAssertNil(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: "novel.discussion.unknown"
+        ))
     }
 
     func testStructuredPromptsPublishDecoderExactContracts() throws {

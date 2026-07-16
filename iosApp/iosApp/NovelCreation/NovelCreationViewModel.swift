@@ -26,6 +26,86 @@ private struct NovelAutomaticStateSyncTarget: Equatable, Sendable {
     let branchID: NovelBranchID
 }
 
+struct NovelStateSyncActivity: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case preparing
+        case analyzing
+    }
+
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let pendingID: NovelPendingOperationID
+    let phase: Phase
+    let startedAt: Date
+    let requestStartedAt: Date?
+    let completedCharacters: Int
+    let totalCharacters: Int?
+    let completedChunks: Int
+
+    var completionFraction: Double? {
+        guard let totalCharacters, totalCharacters > 0 else { return nil }
+        return min(1, max(0, Double(completedCharacters) / Double(totalCharacters)))
+    }
+
+    var displayedCompletionFraction: Double? {
+        guard completedCharacters > 0 else { return nil }
+        return completionFraction
+    }
+
+    static func preparing(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        pendingID: NovelPendingOperationID,
+        startedAt: Date
+    ) -> NovelStateSyncActivity {
+        NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .preparing,
+            startedAt: startedAt,
+            requestStartedAt: nil,
+            completedCharacters: 0,
+            totalCharacters: nil,
+            completedChunks: 0
+        )
+    }
+
+    static func project(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        pending: NovelPendingOperationRecord,
+        snapshot: NovelProjectSnapshot,
+        attemptOperationID: NovelOperationID,
+        startedAt: Date
+    ) -> NovelStateSyncActivity? {
+        guard pending.kind == .manualSync,
+              let chapters = try? NovelFactTransactionReducer.decodeManualPayload(
+                  pending.selectedText
+              ) else { return nil }
+        let manuscript = NovelFactTransactionReducer.manualRebuildManuscript(chapters)
+        let progress = pending.manualSyncProgress
+        let requestStartedAt = snapshot.generationReceipts
+            .filter {
+                $0.factTransaction?.pendingID == pending.id &&
+                    $0.factTransaction?.attemptOperationID == attemptOperationID
+            }
+            .max(by: { $0.createdAt < $1.createdAt })?
+            .createdAt
+        return NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pending.id,
+            phase: .analyzing,
+            startedAt: startedAt,
+            requestStartedAt: requestStartedAt,
+            completedCharacters: min(progress?.consumedCharacterCount ?? 0, manuscript.count),
+            totalCharacters: manuscript.count,
+            completedChunks: progress?.completedChunks.count ?? 0
+        )
+    }
+}
+
 @MainActor
 @Observable
 final class NovelCreationViewModel {
@@ -37,6 +117,7 @@ final class NovelCreationViewModel {
     var injectionPreview: NovelInjectionPreviewSnapshot?
     var isLoading = false
     private(set) var isPerforming = false
+    private(set) var stateSyncActivity: NovelStateSyncActivity?
     var errorMessage: String?
     var reloadNoticeMessage: String?
     private(set) var reloadNoticeProjectID: NovelProjectID?
@@ -53,6 +134,8 @@ final class NovelCreationViewModel {
     @ObservationIgnored private var quickStartCreationStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var cancelledQuickStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var operationOwnerID: UUID?
+    @ObservationIgnored private var stateSyncActivityOwnerID: UUID?
+    @ObservationIgnored private var stateSyncActivityTask: Task<Void, Never>?
     @ObservationIgnored private var automaticStateSyncTask: Task<Void, Never>?
     @ObservationIgnored private var automaticStateSyncTarget: NovelAutomaticStateSyncTarget?
     @ObservationIgnored private var queuedAutomaticStateSyncTarget: NovelAutomaticStateSyncTarget?
@@ -87,6 +170,10 @@ final class NovelCreationViewModel {
         return projectSnapshot.access == .readWrite &&
             !requiresReload &&
             !projectSnapshot.activeRuns.contains(where: { $0.status == .running })
+    }
+
+    var isProjectSelectionBlocked: Bool {
+        isPerforming || automaticStateSyncTask != nil
     }
 
     var presentedMessage: String? {
@@ -136,6 +223,8 @@ final class NovelCreationViewModel {
     }
 
     func interruptSessionForBackground(deadline: Date) async {
+        automaticStateSyncTask?.cancel()
+        queuedAutomaticStateSyncTarget = nil
         let summaries = (try? await projectSummaries()) ?? []
         var projectIDs = Set(summaries.map(\.id))
         if let selectedProjectID { projectIDs.insert(selectedProjectID) }
@@ -150,7 +239,9 @@ final class NovelCreationViewModel {
     }
 
     private func hasActiveBackgroundGeneration() async -> Bool {
-        if isPerforming || quickStartStartingProjectID != nil { return true }
+        if isPerforming || automaticStateSyncTask != nil || quickStartStartingProjectID != nil {
+            return true
+        }
         guard let summaries = try? await projectSummaries() else { return false }
         for summary in summaries where summary.loadError == nil {
             if let snapshot = try? await project(id: summary.id),
@@ -186,6 +277,10 @@ final class NovelCreationViewModel {
 
     @discardableResult
     func selectProject(_ projectID: NovelProjectID) async -> Bool {
+        if selectedProjectID != projectID, isProjectSelectionBlocked {
+            report(NovelError.projectBusy(selectedProjectID ?? projectID))
+            return false
+        }
         let intentToken = UUID()
         selectionIntentToken = intentToken
         let token = UUID()
@@ -1093,7 +1188,9 @@ final class NovelCreationViewModel {
             $0.branchID == branch.branch.id
         }
         guard branchPending.isEmpty ||
-                (branchPending.count == 1 && branchPending[0].kind == .manualSync) else {
+                (branchPending.count == 1 &&
+                    branchPending[0].kind == .manualSync &&
+                    branchPending[0].status == .pending) else {
             return
         }
         scheduleAutomaticStateSync(
@@ -1298,11 +1395,28 @@ final class NovelCreationViewModel {
         reload: Bool = true,
         reportsError: Bool = true
     ) async -> Bool {
+        if let projectID, selectedProjectID != projectID, isProjectSelectionBlocked {
+            report(NovelError.projectBusy(selectedProjectID ?? action.projectID))
+            return false
+        }
         let ownerID = UUID()
         guard reloadNoticeProjectID != action.projectID,
               acquireOperation(ownerID: ownerID) else { return false }
+        let stateSyncContext = stateSyncContext(for: action)
+        if let stateSyncContext {
+            startStateSyncActivity(
+                ownerID: ownerID,
+                projectID: action.projectID,
+                branchID: stateSyncContext.branchID,
+                pendingID: stateSyncContext.pendingID,
+                attemptOperationID: stateSyncContext.attemptOperationID
+            )
+        }
         let startingSelectionToken = selectionToken
-        defer { releaseOperation(ownerID: ownerID) }
+        defer {
+            if stateSyncContext != nil { stopStateSyncActivity(ownerID: ownerID) }
+            releaseOperation(ownerID: ownerID)
+        }
 
         do {
             _ = try await creation.perform(action)
@@ -1356,6 +1470,70 @@ final class NovelCreationViewModel {
         reloadNoticeBranchID = nil
     }
 
+    private func stateSyncContext(
+        for action: NovelAction
+    ) -> (
+        branchID: NovelBranchID,
+        pendingID: NovelPendingOperationID,
+        attemptOperationID: NovelOperationID
+    )? {
+        switch action {
+        case .syncManualEdits(let command):
+            return (command.branchID, command.pendingID, command.context.operationID)
+        case .retryPending(let command):
+            guard let pending = projectSnapshot?.pendingOperations.first(where: {
+                $0.id == command.pendingID && $0.kind == .manualSync
+            }) else { return nil }
+            return (pending.branchID, command.pendingID, command.context.operationID)
+        default:
+            return nil
+        }
+    }
+
+    private func startStateSyncActivity(
+        ownerID: UUID,
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        pendingID: NovelPendingOperationID,
+        attemptOperationID: NovelOperationID
+    ) {
+        let startedAt = Date()
+        stateSyncActivityOwnerID = ownerID
+        stateSyncActivity = .preparing(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            startedAt: startedAt
+        )
+        stateSyncActivityTask?.cancel()
+        stateSyncActivityTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, self.stateSyncActivityOwnerID == ownerID {
+                if let snapshot = try? await self.project(id: projectID),
+                   let pending = snapshot.pendingOperations.first(where: { $0.id == pendingID }),
+                   let activity = NovelStateSyncActivity.project(
+                       projectID: projectID,
+                       branchID: branchID,
+                       pending: pending,
+                       snapshot: snapshot,
+                       attemptOperationID: attemptOperationID,
+                       startedAt: startedAt
+                   ), self.stateSyncActivityOwnerID == ownerID {
+                    self.stateSyncActivity = activity
+                }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private func stopStateSyncActivity(ownerID: UUID) {
+        guard stateSyncActivityOwnerID == ownerID else { return }
+        stateSyncActivityTask?.cancel()
+        stateSyncActivityTask = nil
+        stateSyncActivityOwnerID = nil
+        stateSyncActivity = nil
+    }
+
     private func startAutomaticStateSync(_ target: NovelAutomaticStateSyncTarget) {
         automaticStateSyncTarget = target
         automaticStateSyncTask = Task { @MainActor [weak self] in
@@ -1391,7 +1569,9 @@ final class NovelCreationViewModel {
                 $0.branchID == target.branchID
             }
             guard branchPending.isEmpty ||
-                    (branchPending.count == 1 && branchPending[0].kind == .manualSync) else {
+                    (branchPending.count == 1 &&
+                        branchPending[0].kind == .manualSync &&
+                        branchPending[0].status == .pending) else {
                 return
             }
             if isPerforming || branchSnapshot.branch.activeRunID != nil {

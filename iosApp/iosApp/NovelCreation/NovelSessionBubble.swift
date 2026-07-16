@@ -4,6 +4,7 @@ struct NovelSessionBubble: View {
     let messageID: NovelMessageID
     let role: NovelSessionRole
     let kind: NovelSessionMessageKind
+    let granularity: NovelGenerationGranularity?
     let content: String
     let isStreaming: Bool
     let transientPhase: NovelSessionTransientTailPhase?
@@ -179,8 +180,19 @@ struct NovelSessionBubble: View {
             Label("候选生成已中断", systemImage: "pause.circle")
                 .foregroundStyle(AmberTheme.accentAmber)
         case .available, .adopted, nil:
-            Label("正文候选 · 收录后才进入正式剧情", systemImage: "doc.text")
+            Label(proseCandidateLabel, systemImage: "doc.text")
                 .foregroundStyle(AmberTheme.muted)
+        }
+    }
+
+    private var proseCandidateLabel: String {
+        switch granularity {
+        case .continuation:
+            "正文片段 · 收录后进入本章"
+        case .wholeChapter:
+            "完整章节 · 收录后成为新章"
+        case nil:
+            "正文候选 · 收录后才进入正式剧情"
         }
     }
 
@@ -232,7 +244,10 @@ struct NovelSessionBubble: View {
         Button {
             onAction(item.action)
         } label: {
-            Label(item.action.displayTitle, systemImage: item.action.systemImage)
+            Label(
+                item.action.displayTitle(granularity: granularity),
+                systemImage: item.action.systemImage
+            )
                 .font(.footnote.weight(.semibold))
                 .lineLimit(1)
         }
@@ -256,9 +271,14 @@ struct NovelSessionBubble: View {
 }
 
 private extension NovelSessionRowAction {
-    var displayTitle: String {
+    func displayTitle(granularity: NovelGenerationGranularity?) -> String {
         switch self {
-        case .collectProse: "收录正文"
+        case .collectProse:
+            switch granularity {
+            case .continuation: "收录到本章"
+            case .wholeChapter: "作为新章收录"
+            case nil: "收录正文"
+            }
         case .adoptPolish: "采用润色版"
         case .retryGeneration: "重新生成"
         case .retryTerminalPersistence: "重试保存"
@@ -301,7 +321,7 @@ private extension NovelSessionActionBlocker {
         switch self {
         case .projectReadOnly: "项目当前只读"
         case .branchInactive: "分支已不可编辑"
-        case .branchNeedsSync: "请先同步手动改写"
+        case .branchNeedsSync: "剧情状态同步未完成"
         case .generationRunning: "请先停止当前生成"
         case .pendingOperation: "有正文操作正在处理"
         case .transactionInProgress: "操作正在处理"

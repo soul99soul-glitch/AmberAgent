@@ -944,7 +944,11 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         try data.write(to: url, options: [])
         try failIfRequested(.afterTempWrite)
         let staged = try readData(at: url, projectID: document.project.id)
-        let decoded = try decodeProject(staged, projectID: document.project.id)
+        let decoded = try decodeProject(
+            staged,
+            projectID: document.project.id,
+            normalizesLegacySyncStatus: false
+        )
         guard decoded == document else {
             throw NovelError.repositoryFailure("Staged novel document changed during verification.")
         }
@@ -962,14 +966,18 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
 
     private func decodeProject(
         _ data: Data,
-        projectID: NovelProjectID
+        projectID: NovelProjectID,
+        normalizesLegacySyncStatus: Bool = true
     ) throws -> NovelProjectDocumentV1 {
         do {
             let header = try makeDecoder().decode(SchemaHeader.self, from: data)
             guard header.schemaVersion == NovelProjectDocumentV1.currentSchemaVersion else {
                 throw NovelError.unsupportedSchema(header.schemaVersion)
             }
-            let document = try makeDecoder().decode(NovelProjectDocumentV1.self, from: data)
+            let decoded = try makeDecoder().decode(NovelProjectDocumentV1.self, from: data)
+            let document = normalizesLegacySyncStatus
+                ? NovelBranchSemantics.normalizingDecodedSyncStatus(decoded)
+                : decoded
             guard document.project.id == projectID else {
                 throw NovelError.corruptedProject(
                     projectID: projectID,

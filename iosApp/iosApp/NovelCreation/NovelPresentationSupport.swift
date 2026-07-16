@@ -150,6 +150,17 @@ extension NovelInjectionSelectionReason {
 }
 
 enum NovelPresentation {
+    static func chapterDisplayTitle(
+        storedTitle: String,
+        content: String,
+        ordinal: Int
+    ) -> String {
+        let stored = storedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard stored.isEmpty || isGenericChapterTitle(stored) else { return stored }
+
+        return chapterHeadingTitle(from: content) ?? (stored.isEmpty ? "第 \(ordinal) 章" : stored)
+    }
+
     static func operationErrorMessage(_ error: Error) -> String {
         if let failure = error as? NovelStructuredModelExecutionFailure {
             return failureMessage(failure.failure)
@@ -191,6 +202,8 @@ enum NovelPresentation {
             return "模型没有返回内容，请重新生成。"
         case "terminal_persist_failed":
             return "内容已经生成，但保存失败，请重试保存。"
+        case "provider_stream_failed", "grok_web_stream_failed":
+            return "模型上游服务在生成过程中中断，已保留当前回复，可以重试。"
         default:
             let message = failure.message.trimmingCharacters(in: .whitespacesAndNewlines)
             if message.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) {
@@ -199,6 +212,60 @@ enum NovelPresentation {
             return failure.isRetryable
                 ? "生成暂时失败，请稍后重试。"
                 : "生成没有完成，请检查项目模型或输入后重试。"
+        }
+    }
+
+    static func stateSyncFailureMessage(_ message: String) -> String {
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == "The model returned malformed JSON." {
+            return "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
+        }
+        return trimmed.isEmpty ? "剧情状态同步失败，请重试。" : trimmed
+    }
+
+    private static func chapterHeadingTitle(from content: String) -> String? {
+        guard var line = content
+            .split(whereSeparator: { $0.isNewline })
+            .map(String.init)
+            .map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .first(where: { !$0.isEmpty }) else {
+            return nil
+        }
+
+        let isMarkdownHeading = line.first == "#"
+        if isMarkdownHeading {
+            while line.first == "#" {
+                line.removeFirst()
+            }
+            line = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let marker = line.firstIndex(of: "章") {
+            let prefix = String(line[...marker])
+            if isGenericChapterTitle(prefix) {
+                let remainder = line[line.index(after: marker)...]
+                    .drop(while: { $0.isWhitespace || "·•:：-—–_".contains($0) })
+                let title = String(remainder).trimmingCharacters(in: .whitespacesAndNewlines)
+                return title.isEmpty ? nil : title
+            }
+        }
+
+        return isMarkdownHeading && !line.isEmpty ? line : nil
+    }
+
+    private static func isGenericChapterTitle(_ title: String) -> Bool {
+        let compact = title.filter { !$0.isWhitespace }
+        let lowercased = compact.lowercased()
+        if lowercased.hasPrefix("chapter") {
+            let number = lowercased.dropFirst("chapter".count)
+            return !number.isEmpty && number.allSatisfy(\.isNumber)
+        }
+
+        guard compact.first == "第", compact.last == "章" else { return false }
+        let number = compact.dropFirst().dropLast()
+        let chineseNumerals = "零〇一二三四五六七八九十百千万两"
+        return !number.isEmpty && number.allSatisfy {
+            $0.isNumber || chineseNumerals.contains($0)
         }
     }
 

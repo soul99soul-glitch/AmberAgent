@@ -1777,7 +1777,6 @@ private struct ChatStableStreamingMarkdownView: View {
     let config: SwiftStreamingMarkdown.MarkdownRenderConfig
     var cacheIdentity: String? = nil
     @StateObject private var controller = ChatStableStreamingMarkdownController()
-    @State private var plainFallbackID = "chat-streaming-plain-\(UUID().uuidString)"
 
     var body: some View {
         let resolution = controller.resolution(
@@ -1786,12 +1785,13 @@ private struct ChatStableStreamingMarkdownView: View {
             cacheIdentity: cacheIdentity
         )
         let renderable = resolution.renderable
-            ?? SwiftStreamingMarkdown.RenderableDocument(plainText: text, id: plainFallbackID, config: config)
+            ?? SwiftStreamingMarkdown.RenderableDocument(plainText: text, id: "0", config: config)
         SwiftStreamingMarkdown.DocumentView(
             renderableDocument: renderable,
             config: config,
             animateInitialText: !resolution.suppressesInitialFade,
-            usesLayerBackedTableAnimation: config.shouldAnimateText
+            usesLayerBackedTableAnimation: config.shouldAnimateText,
+            usesTextKit1ForAttachmentFreeText: true
         )
             .task(id: ChatStableStreamingMarkdownParseKey(
                 text: text,

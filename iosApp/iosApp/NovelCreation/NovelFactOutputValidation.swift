@@ -47,7 +47,7 @@ extension NovelFactTransactionReducer {
         baseState: NovelStateSnapshotRecord,
         branchID: NovelBranchID,
         in document: NovelProjectDocumentV1
-    ) throws {
+    ) throws -> NovelStateRebuildV1 {
         let validated = try validate(value)
         guard let branch = document.branches.first(where: { $0.id == branchID }) else {
             throw NovelError.branchNotFound(branchID)
@@ -62,13 +62,21 @@ extension NovelFactTransactionReducer {
             createdAt: baseState.createdAt,
             settingProposalIDs: baseState.settingProposalIDs
         )
-        try validateStateFacts(
+        let sanitized = try sanitizedManualRebuild(
             validated,
+            evidenceSource: evidenceSource,
+            branch: branch,
+            baseState: projectedBase,
+            document: document
+        )
+        try validateStateFacts(
+            sanitized,
             evidenceSource: evidenceSource,
             branch: branch,
             baseState: projectedBase,
             in: document
         )
+        return sanitized
     }
 
     static func validateStateFacts(
@@ -131,30 +139,15 @@ extension NovelFactTransactionReducer {
             evidenceMatches($0.evidence, in: evidenceSource)
         }
 
-        let effective: [NovelEffectiveMaterialRevision]
-        do {
-            effective = try NovelMaterialResolver.effectiveRevisions(
-                document: document,
-                branch: branch
-            )
-        } catch NovelMaterialResolutionError.missingRevision(let revisionID) {
-            throw NovelError.invalidInput(
-                "The branch references missing material revision \(revisionID)."
-            )
-        }
-        let known = Set(effective.map { normalizedEntity($0.revision.title) })
         let referenced = events.flatMap(\.entityReferences) +
             characterChanges.map(\.characterName) +
             relationshipChanges.flatMap { [$0.sourceEntity, $0.targetEntity] }
-        var unresolved: [String] = []
-        var unresolvedKeys: Set<String> = []
-        for name in baseState.unresolvedEntityNames + referenced {
-            let key = normalizedEntity(name)
-            guard !key.isEmpty, !known.contains(key), unresolvedKeys.insert(key).inserted else {
-                continue
-            }
-            unresolved.append(name)
-        }
+        let unresolved = try sanitizedUnresolvedEntityNames(
+            base: baseState.unresolvedEntityNames,
+            referenced: referenced,
+            branch: branch,
+            document: document
+        )
         return NovelStateDeltaV1(
             schemaVersion: value.schemaVersion,
             stateSummary: hasEvidenceBackedFacts ? value.stateSummary : baseState.summary,
@@ -200,6 +193,52 @@ extension NovelFactTransactionReducer {
             branch: branch,
             baseUnresolved: baseState.unresolvedEntityNames,
             in: document
+        )
+    }
+
+    private static func sanitizedManualRebuild(
+        _ value: NovelStateRebuildV1,
+        evidenceSource: String,
+        branch: NovelBranchRecord,
+        baseState: NovelStateSnapshotRecord,
+        document: NovelProjectDocumentV1
+    ) throws -> NovelStateRebuildV1 {
+        let events = value.events.filter { evidenceMatches($0.evidence, in: evidenceSource) }
+        let characterStates = value.characterStates.filter {
+            evidenceMatches($0.evidence, in: evidenceSource)
+        }
+        let relationships = value.relationships.filter {
+            evidenceMatches($0.evidence, in: evidenceSource)
+        }
+        let foreshadowing = value.foreshadowing.filter {
+            evidenceMatches($0.evidence, in: evidenceSource)
+        }
+        let settingProposals = value.settingProposals.filter {
+            evidenceMatches($0.evidence, in: evidenceSource)
+        }
+        let hasEvidenceBackedFacts = !events.isEmpty ||
+            !characterStates.isEmpty ||
+            !relationships.isEmpty ||
+            !foreshadowing.isEmpty
+        let referenced = events.flatMap(\.entityReferences) +
+            characterStates.map(\.characterName) +
+            relationships.flatMap { [$0.sourceEntity, $0.targetEntity] }
+        let unresolved = try sanitizedUnresolvedEntityNames(
+            base: baseState.unresolvedEntityNames,
+            referenced: referenced,
+            branch: branch,
+            document: document
+        )
+        return NovelStateRebuildV1(
+            schemaVersion: value.schemaVersion,
+            stateSummary: hasEvidenceBackedFacts ? value.stateSummary : baseState.summary,
+            branchOutline: hasEvidenceBackedFacts ? value.branchOutline : baseState.branchOutline,
+            events: events,
+            characterStates: characterStates,
+            relationships: relationships,
+            foreshadowing: foreshadowing,
+            unresolvedEntityNames: unresolved,
+            settingProposals: settingProposals
         )
     }
 
@@ -371,6 +410,36 @@ extension NovelFactTransactionReducer {
         let source = normalizeEvidenceWhitespace(manuscript)
         let normalized = normalizeEvidenceWhitespace(evidence)
         return !normalized.isEmpty && source.contains(normalized)
+    }
+
+    private static func sanitizedUnresolvedEntityNames(
+        base: [String],
+        referenced: [String],
+        branch: NovelBranchRecord,
+        document: NovelProjectDocumentV1
+    ) throws -> [String] {
+        let effective: [NovelEffectiveMaterialRevision]
+        do {
+            effective = try NovelMaterialResolver.effectiveRevisions(
+                document: document,
+                branch: branch
+            )
+        } catch NovelMaterialResolutionError.missingRevision(let revisionID) {
+            throw NovelError.invalidInput(
+                "The branch references missing material revision \(revisionID)."
+            )
+        }
+        let known = Set(effective.map { normalizedEntity($0.revision.title) })
+        var unresolved: [String] = []
+        var unresolvedKeys: Set<String> = []
+        for name in base + referenced {
+            let key = normalizedEntity(name)
+            guard !key.isEmpty,
+                  !known.contains(key),
+                  unresolvedKeys.insert(key).inserted else { continue }
+            unresolved.append(name)
+        }
+        return unresolved
     }
 
     private static func validateEntities(

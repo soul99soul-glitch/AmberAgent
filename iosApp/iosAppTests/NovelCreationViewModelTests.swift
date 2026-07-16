@@ -83,6 +83,82 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testProjectSelectionDoesNotSwitchWhileAnotherProjectOperationIsRunning() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let firstDocument = try NovelTestFixtures.document()
+        let secondDocument = try NovelTestFixtures.document()
+        _ = try await repository.createProject(firstDocument)
+        _ = try await repository.createProject(secondDocument)
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        let didSelectFirstProject = await viewModel.selectProject(firstDocument.project.id)
+        XCTAssertTrue(didSelectFirstProject)
+        let operationOwnerID = UUID()
+        XCTAssertTrue(viewModel.acquireSessionOperation(ownerID: operationOwnerID))
+
+        let didSwitch = await viewModel.selectProject(secondDocument.project.id)
+
+        XCTAssertFalse(didSwitch)
+        XCTAssertEqual(viewModel.selectedProjectID, firstDocument.project.id)
+        XCTAssertEqual(viewModel.projectSnapshot?.project.id, firstDocument.project.id)
+        XCTAssertEqual(viewModel.branchSnapshot?.projectID, firstDocument.project.id)
+        viewModel.releaseSessionOperation(ownerID: operationOwnerID)
+    }
+
+    func testProjectCreationDoesNotSwitchWhileAutomaticSyncIsScheduled() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let document = try NovelTestFixtures.document()
+        _ = try await repository.createProject(document)
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        let didSelect = await viewModel.selectProject(document.project.id)
+        XCTAssertTrue(didSelect)
+        viewModel.scheduleAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: try XCTUnwrap(document.branches.first?.id)
+        )
+
+        let createdProjectID = await viewModel.createProject(
+            name: "不应创建",
+            mode: .blank
+        )
+
+        XCTAssertNil(createdProjectID)
+        XCTAssertEqual(viewModel.selectedProjectID, document.project.id)
+        let projectIDs = try await repository.listProjects().map(\.id)
+        XCTAssertEqual(projectIDs, [document.project.id])
+        await viewModel.interruptSessionForBackground(deadline: .distantPast)
+    }
+
+    func testBackgroundWaitIncludesAutomaticSyncBeforeItsDelayedStart() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let document = try NovelTestFixtures.document()
+        _ = try await repository.createProject(document)
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        let didSelect = await viewModel.selectProject(document.project.id)
+        XCTAssertTrue(didSelect)
+        let branchID = try XCTUnwrap(document.branches.first?.id)
+        viewModel.scheduleAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: branchID
+        )
+        var waitFinished = false
+        let waitTask = Task { @MainActor in
+            await viewModel.waitForBackgroundGeneration()
+            waitFinished = true
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(waitFinished)
+
+        await waitTask.value
+        XCTAssertTrue(waitFinished)
+    }
+
     func testCreateMaterialAndReloadThroughDeepInterface() async throws {
         let repository = InMemoryNovelProjectRepository()
         let viewModel = NovelCreationViewModel(

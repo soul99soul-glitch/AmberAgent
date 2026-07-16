@@ -402,6 +402,61 @@ final class ChatViewModelSearchToolDeclarationTests: XCTestCase {
         XCTAssertFalse(disabledNames.contains("scrape_web"))
     }
 
+    func testNovelDiscussionSearchExecutorsReuseTheConfiguredChatTransport() async throws {
+        let store = makeSharedSettings(enableWebSearch: true)
+        let selectedService = store.snapshot.searchServices[Int(store.snapshot.searchServiceSelected)]
+        store.restoreSnapshot(
+            IosSettingsMutations.shared.setSearchServiceEnabled(
+                settings: store.snapshot,
+                id: selectedService.id.description(),
+                enabled: false
+            )
+        )
+        let transport = MockSearchTransport(responses: [
+            .html("""
+            <html><body>
+            <a rel="nofollow" class='result-link' href="/l/?kh=-1&amp;uddg=https%3A%2F%2Fexample.com%2Fhistory">History</a>
+            <td class='result-snippet'>Verified history source.</td>
+            </body></html>
+            """)
+        ])
+        let runtime = ChatToolRuntime(
+            settingsStore: SettingsStore(),
+            sharedSettings: store,
+            localToolExecutor: nil,
+            searchTransport: transport,
+            mcpManager: IOSMcpManager(serverProvider: { [] })
+        )
+
+        let executors = runtime.discussionSearchToolExecutors()
+        XCTAssertEqual(Set(executors.keys), IOSSearchExecutor.supportedToolNames)
+        let executor = UncheckedToolExecutorBox(try XCTUnwrap(executors["search_web"]))
+        let outcome = await executor.execute(
+            name: "search_web",
+            arguments: #"{"query":"唐代史料","max_results":1}"#,
+            isUserInitiated: false
+        )
+
+        guard case .filled(let output) = outcome else {
+            return XCTFail("Expected a filled search result.")
+        }
+        XCTAssertTrue(output.contains("History"))
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
+    func testNovelDiscussionSearchExecutorsFollowTheGlobalSearchSwitch() {
+        let store = makeSharedSettings(enableWebSearch: false)
+        let runtime = ChatToolRuntime(
+            settingsStore: SettingsStore(),
+            sharedSettings: store,
+            localToolExecutor: nil,
+            searchTransport: MockSearchTransport(responses: []),
+            mcpManager: IOSMcpManager(serverProvider: { [] })
+        )
+
+        XCTAssertTrue(runtime.discussionSearchToolExecutors().isEmpty)
+    }
+
     private func makeSharedSettings(enableWebSearch: Bool) -> IOSSharedSettingsStore {
         let suiteName = "ChatSearchTools-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -414,6 +469,26 @@ final class ChatViewModelSearchToolDeclarationTests: XCTestCase {
             )
         )
         return store
+    }
+}
+
+private final class UncheckedToolExecutorBox: @unchecked Sendable {
+    private let base: any IOSToolExecutor
+
+    init(_ base: any IOSToolExecutor) {
+        self.base = base
+    }
+
+    func execute(
+        name: String,
+        arguments: String,
+        isUserInitiated: Bool
+    ) async -> IOSAgentToolOutcome {
+        await base.execute(
+            name: name,
+            arguments: arguments,
+            isUserInitiated: isUserInitiated
+        )
     }
 }
 

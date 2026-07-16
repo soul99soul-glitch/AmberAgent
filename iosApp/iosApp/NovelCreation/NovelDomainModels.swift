@@ -772,6 +772,10 @@ struct NovelPendingOperationRecord: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.lastError = lastError
     }
+
+    var blocksProseGeneration: Bool {
+        kind != .manualSync || status != .retryable
+    }
 }
 
 enum NovelSettingProposalOrigin: Codable, Equatable, Sendable {

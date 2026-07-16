@@ -14,6 +14,18 @@ struct NovelGrokIsolationOptions: Equatable, Sendable {
         disableSearch: true,
         disableMemory: true
     )
+
+    static let discussion = NovelGrokIsolationOptions(
+        disableSearch: false,
+        disableMemory: true
+    )
+
+    static func forPurpose(
+        _ purpose: NovelModelPurpose,
+        searchEnabled: Bool
+    ) -> NovelGrokIsolationOptions {
+        purpose == .discussion && searchEnabled ? .discussion : .novel
+    }
 }
 
 struct NovelLiveTransportRequest: @unchecked Sendable {
@@ -91,6 +103,8 @@ actor NovelLiveModelAdapter: NovelModelRunning {
 
     private let catalogProvider: @Sendable () async -> NovelLiveModelCatalog
     private let kmpTransport: NovelLiveTransport
+    private let discussionTransport: NovelLiveTransport?
+    private let discussionSearchEnabled: @Sendable () async -> Bool
     private let grokTransport: NovelLiveTransport
     private let codex: NovelLiveCodexHooks
 
@@ -102,7 +116,8 @@ actor NovelLiveModelAdapter: NovelModelRunning {
     @MainActor
     init(
         sharedSettings: IOSSharedSettingsStore,
-        streamingProvider: any IOSAgentStreamingProvider = OpenAIKmpProviderAdapter(),
+        streamingProvider: any IOSAgentTextProvider & IOSAgentStreamingProvider = OpenAIKmpProviderAdapter(),
+        toolRuntime: ChatToolRuntime? = nil,
         grokTransport: NovelLiveTransport? = nil
     ) {
         let settingsSource = NovelSharedSettingsSource(sharedSettings)
@@ -110,6 +125,15 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             await settingsSource.catalog()
         }
         self.kmpTransport = Self.kmpTransport(using: streamingProvider)
+        self.discussionTransport = toolRuntime.map { runtime in
+            Self.discussionSearchTransport(
+                using: streamingProvider,
+                executors: { runtime.discussionSearchToolExecutors() }
+            )
+        }
+        self.discussionSearchEnabled = {
+            await settingsSource.webSearchEnabled()
+        }
         self.grokTransport = grokTransport ?? Self.productionGrokTransport
         self.codex = .production
     }
@@ -117,11 +141,15 @@ actor NovelLiveModelAdapter: NovelModelRunning {
     init(
         catalogProvider: @escaping @Sendable () async -> NovelLiveModelCatalog,
         kmpTransport: @escaping NovelLiveTransport,
+        discussionTransport: NovelLiveTransport? = nil,
+        discussionSearchEnabled: @escaping @Sendable () async -> Bool = { true },
         grokTransport: NovelLiveTransport? = nil,
         codex: NovelLiveCodexHooks = .passthrough
     ) {
         self.catalogProvider = catalogProvider
         self.kmpTransport = kmpTransport
+        self.discussionTransport = discussionTransport
+        self.discussionSearchEnabled = discussionSearchEnabled
         self.grokTransport = grokTransport ?? Self.isolatedGrokUnavailableTransport
         self.codex = codex
     }
@@ -159,10 +187,21 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             try ensureRoute(route, stillMatches: request.model)
             try ensureRunStillActive(request.runID)
 
+            let isGrokWeb = IOSGrokWebProviderResolver.isGrokWebProvider(route.provider)
+            let userEnabledSearch: Bool
+            if request.purpose == .discussion {
+                userEnabledSearch = await discussionSearchEnabled()
+            } else {
+                userEnabledSearch = false
+            }
+            let searchEnabled = userEnabledSearch
+                && (isGrokWeb || discussionTransport != nil)
+            try ensureRunStillActive(request.runID)
             let messages = Self.makeMessages(request.messages)
             var parameters = try Self.makeParameters(
                 request.parameters,
-                model: route.model
+                model: route.model,
+                includeSearchTools: searchEnabled && !isGrokWeb
             )
             var effectiveProvider = route.provider
             if codex.isCodex(route.provider) {
@@ -181,14 +220,24 @@ actor NovelLiveModelAdapter: NovelModelRunning {
                 onComplete: { callbackSink.send(.completed) },
                 onFailure: { callbackSink.send(.failed($0)) }
             )
-            let isGrokWeb = IOSGrokWebProviderResolver.isGrokWebProvider(route.provider)
             let transportRequest = NovelLiveTransportRequest(
                 providerSetting: effectiveProvider,
                 messages: messages,
                 parameters: parameters,
-                grokIsolation: isGrokWeb ? .novel : nil
+                grokIsolation: isGrokWeb ? .forPurpose(
+                    request.purpose,
+                    searchEnabled: searchEnabled
+                ) : nil
             )
-            let handle = (isGrokWeb ? grokTransport : kmpTransport)(
+            let transport: NovelLiveTransport
+            if isGrokWeb {
+                transport = grokTransport
+            } else if searchEnabled, let discussionTransport {
+                transport = discussionTransport
+            } else {
+                transport = kmpTransport
+            }
+            let handle = transport(
                 transportRequest,
                 callbacks
             )
@@ -371,7 +420,7 @@ private extension NovelLiveModelAdapter {
     )
 
     static let isolatedGrokUnavailableTransport: NovelLiveTransport = { request, callbacks in
-        guard request.grokIsolation == .novel else {
+        guard request.grokIsolation != nil else {
             callbacks.onFailure(failure(
                 code: "grok_isolation_missing",
                 message: "Grok Web 小说请求缺少隔离选项。"
@@ -386,7 +435,7 @@ private extension NovelLiveModelAdapter {
     }
 
     static let productionGrokTransport: NovelLiveTransport = { request, callbacks in
-        guard request.grokIsolation == .novel else {
+        guard let isolation = request.grokIsolation else {
             callbacks.onFailure(failure(
                 code: "grok_isolation_missing",
                 message: "Grok Web 小说请求缺少隔离选项。"
@@ -407,7 +456,10 @@ private extension NovelLiveModelAdapter {
                 try await IOSGrokWebClient(providerId: providerID).streamText(
                     messages: request.messages,
                     params: request.parameters,
-                    options: .novel,
+                    options: IOSGrokWebRequestOptions(
+                        disableSearch: isolation.disableSearch,
+                        disableMemory: isolation.disableMemory
+                    ),
                     onChunk: callbacks.onChunk
                 )
                 guard !Task.isCancelled else { return }
@@ -451,7 +503,73 @@ private extension NovelLiveModelAdapter {
             }
         }
     }
+}
 
+extension NovelLiveModelAdapter {
+    static func discussionSearchTransport(
+        using provider: any IOSAgentTextProvider,
+        executors: @escaping @MainActor @Sendable () -> [String: any IOSToolExecutor]
+    ) -> NovelLiveTransport {
+        { request, callbacks in
+            let task = Task { @MainActor in
+                let engine = IOSAgentToolEngine(
+                    provider: provider,
+                    executors: executors(),
+                    configuration: .init(maxSteps: 4, honorApprovalPause: false)
+                )
+                let result = await engine.run(
+                    providerSetting: request.providerSetting,
+                    messages: request.messages,
+                    params: request.parameters,
+                    onAssistantText: { text in
+                        callbacks.onChunk(replacementChunk(text))
+                    }
+                )
+                guard !Task.isCancelled else { return }
+                if let failureMessage = result.providerFailureMessage {
+                    callbacks.onFailure(failure(
+                        code: "discussion_provider_failed",
+                        message: failureMessage,
+                        isRetryable: true
+                    ))
+                    return
+                }
+                if result.hitStepLimit {
+                    callbacks.onFailure(failure(
+                        code: "discussion_tool_step_limit",
+                        message: "讨论时连续搜索次数过多，请缩小问题后重试。",
+                        isRetryable: true
+                    ))
+                    return
+                }
+                if result.pendingApproval != nil {
+                    callbacks.onFailure(failure(
+                        code: "discussion_tool_approval_required",
+                        message: "当前搜索需要额外确认，请检查搜索服务设置后重试。",
+                        isRetryable: true
+                    ))
+                    return
+                }
+                let finalText = lastAssistantText(in: result.messages)
+                guard !finalText.isEmpty else {
+                    callbacks.onFailure(failure(
+                        code: "discussion_empty_response",
+                        message: "模型完成了搜索，但没有返回讨论内容，请重试。",
+                        isRetryable: true
+                    ))
+                    return
+                }
+                callbacks.onChunk(replacementChunk(finalText))
+                callbacks.onComplete()
+            }
+            return NovelLiveCancellationHandle {
+                task.cancel()
+            }
+        }
+    }
+}
+
+private extension NovelLiveModelAdapter {
     static func makeMessages(_ messages: [NovelModelMessage]) -> [UIMessage] {
         messages.map { message in
             let role: MessageRole
@@ -476,7 +594,8 @@ private extension NovelLiveModelAdapter {
 
     static func makeParameters(
         _ source: NovelModelParameters,
-        model: Model
+        model: Model,
+        includeSearchTools: Bool = false
     ) throws -> TextGenerationParams {
         if let maxTokens = source.maxOutputTokens, maxTokens <= 0 {
             throw failure(
@@ -495,7 +614,9 @@ private extension NovelLiveModelAdapter {
             inputModalities: model.inputModalities,
             outputModalities: model.outputModalities,
             abilities: model.abilities,
-            tools: Set<BuiltInTools>(),
+            tools: includeSearchTools
+                ? Set([BuiltInTools.Search.shared])
+                : Set<BuiltInTools>(),
             contextWindowTokens: model.contextWindowTokens,
             providerOverwrite: model.providerOverwrite
         )
@@ -507,7 +628,10 @@ private extension NovelLiveModelAdapter {
             maxTokens: source.maxOutputTokens.map {
                 KotlinInt(value: Int32(clamping: $0))
             },
-            tools: [],
+            tools: includeSearchTools ? [
+                ToolKt.createSearchWebToolDeclaration(),
+                ToolKt.createScrapeWebToolDeclaration(),
+            ] : [],
             reasoningLevel: supportsReasoning ? reasoningLevel(source.reasoningLevel) : .off,
             customHeaders: model.customHeaders,
             customBody: customBodies
@@ -574,6 +698,24 @@ private extension NovelLiveModelAdapter {
 
     static func text(in message: UIMessage) -> String {
         message.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+    }
+
+    static func lastAssistantText(in messages: [UIMessage]) -> String {
+        messages.reversed().first(where: { $0.role == MessageRole.assistant }).map(text(in:)) ?? ""
+    }
+
+    static func replacementChunk(_ text: String) -> MessageChunk {
+        MessageChunk(
+            id: UUID().uuidString,
+            model: "",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: nil,
+                message: UIMessage.companion.assistant(prompt: text),
+                finishReason: nil
+            )],
+            usage: nil
+        )
     }
 
     static func nowLocalDateTime() -> Kotlinx_datetimeLocalDateTime {
@@ -716,5 +858,10 @@ private final class NovelSharedSettingsSource: @unchecked Sendable {
             currentModel: sharedSettings.snapshot.getCurrentChatModel(),
             providers: sharedSettings.snapshot.providers
         )
+    }
+
+    @MainActor
+    func webSearchEnabled() -> Bool {
+        sharedSettings.snapshot.enableWebSearch
     }
 }

@@ -4,6 +4,134 @@ import XCTest
 final class NovelManualEditSyncTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_200_000)
 
+    func testManualSyncDropsUnsupportedFactsWithoutRejectingTheWholeRebuild() throws {
+        let document = try NovelTestFixtures.document()
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "Mara has entered the archive.",
+            branchOutline: "Mara begins investigating the archive.",
+            events: [
+                NovelStateEventV1(
+                    id: "supported",
+                    kind: "entry",
+                    summary: "Mara opened the archive.",
+                    entityReferences: [],
+                    evidence: "Mara opened the archive."
+                ),
+                NovelStateEventV1(
+                    id: "paraphrased",
+                    kind: "discovery",
+                    summary: "Mara found the hidden records.",
+                    entityReferences: [],
+                    evidence: "She discovered secret records inside."
+                )
+            ],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: ["Unsupported name"],
+            settingProposals: []
+        )
+
+        let sanitized = try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: "Mara opened the archive.",
+            accumulated: nil,
+            baseState: document.stateSnapshots[0],
+            branchID: document.branches[0].id,
+            in: document
+        )
+
+        XCTAssertEqual(sanitized.stateSummary, rebuild.stateSummary)
+        XCTAssertEqual(sanitized.branchOutline, rebuild.branchOutline)
+        XCTAssertEqual(sanitized.events.map(\.id), ["supported"])
+        XCTAssertTrue(sanitized.unresolvedEntityNames.isEmpty)
+    }
+
+    func testManualSyncKeepsProjectedStateWhenNoReliableFactsSurvive() throws {
+        let document = try NovelTestFixtures.document()
+        let baseState = document.stateSnapshots[0]
+        let projected = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "The first chunk established the archive.",
+            branchOutline: "Mara continues through the archive.",
+            events: [],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: [],
+            settingProposals: []
+        )
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "An unsupported new state.",
+            branchOutline: "An unsupported new direction.",
+            events: [NovelStateEventV1(
+                id: "unsupported",
+                kind: "discovery",
+                summary: "Mara found hidden records.",
+                entityReferences: ["Mara"],
+                evidence: "This evidence is absent from the manuscript."
+            )],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: ["Mara"],
+            settingProposals: []
+        )
+
+        let sanitized = try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: "Mara opened the archive.",
+            accumulated: projected,
+            baseState: baseState,
+            branchID: document.branches[0].id,
+            in: document
+        )
+
+        XCTAssertTrue(sanitized.events.isEmpty)
+        XCTAssertEqual(sanitized.stateSummary, projected.stateSummary)
+        XCTAssertEqual(sanitized.branchOutline, projected.branchOutline)
+    }
+
+    func testDirectManualSyncFinalizeRejectsDerivedStateWithoutReliableFacts() throws {
+        let document = try documentWithPendingManualSync()
+        let pending = try XCTUnwrap(document.pendingOperations.first(where: {
+            $0.kind == .manualSync
+        }))
+        let input = try NovelFactTransactionReducer.manualRebuildInput(
+            pendingID: pending.id,
+            in: document
+        )
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "Unsupported state summary.",
+            branchOutline: "Unsupported branch direction.",
+            events: [],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: input.baseStateSnapshot.unresolvedEntityNames,
+            settingProposals: []
+        )
+
+        XCTAssertThrowsError(try NovelFactTransactionReducer.finalizeManualSync(
+            pendingID: pending.id,
+            rebuild: rebuild,
+            artifacts: NovelTestFixtures.factTransactionArtifacts(
+                document: document,
+                pendingID: pending.id
+            ),
+            in: document,
+            now: now.addingTimeInterval(2)
+        )) { error in
+            guard case .invalidInput(let message) = error as? NovelError else {
+                return XCTFail("Expected invalidInput, got \(error)")
+            }
+            XCTAssertTrue(message.contains("without evidence-backed facts"))
+        }
+    }
+
     func testChunkIDsStayBoundedAndRepeatedEvidenceKeepsChunkChronology() throws {
         let longRelationshipID = String(repeating: "r", count: 128)
         let longEventID = String(repeating: "e", count: 128)

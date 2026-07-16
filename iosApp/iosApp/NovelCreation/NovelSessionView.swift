@@ -8,11 +8,14 @@ enum NovelComposerIntent: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    static let discussionOptions: [NovelComposerIntent] = [.discuss]
+    static let proseOptions: [NovelComposerIntent] = [.continueProse, .wholeChapter]
+
     var title: String {
         switch self {
         case .discuss: "讨论"
-        case .continueProse: "续写"
-        case .wholeChapter: "整章"
+        case .continueProse: "写一段"
+        case .wholeChapter: "写整章"
         }
     }
 
@@ -314,7 +317,11 @@ struct NovelSessionView: View {
 
     private func composer(listModel: NovelSessionListModel?) -> some View {
         VStack(spacing: 8) {
-            if !viewModel.retryableBranchPendingOperations.isEmpty && !viewModel.isBusy {
+            if let activity = workspace.stateSyncActivity,
+               activity.projectID == workspace.selectedProjectID,
+               activity.branchID == workspace.selectedBranchID {
+                stateSyncProgressBanner(activity)
+            } else if !viewModel.retryableBranchPendingOperations.isEmpty && !viewModel.isBusy {
                 synchronizationBanner
             }
 
@@ -407,6 +414,73 @@ struct NovelSessionView: View {
             }
         }
         .padding(.horizontal, 4)
+    }
+
+    private func stateSyncProgressBanner(_ activity: NovelStateSyncActivity) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let fraction = activity.displayedCompletionFraction
+            let percent = fraction.map { Int(($0 * 100).rounded(.down)) }
+            let waitingSince = activity.requestStartedAt ?? activity.startedAt
+            let elapsed = Int(max(0, context.date.timeIntervalSince(waitingSince)))
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(AmberTheme.accentAmber)
+
+                    Text(activity.phase == .preparing ? "正在准备剧情状态" : "正在同步剧情状态")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.foreground2)
+
+                    Spacer(minLength: 8)
+
+                    if let percent {
+                        Text("\(percent)%")
+                            .font(.footnote.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(AmberTheme.accentAmber)
+                    }
+                }
+
+                if let fraction {
+                    ProgressView(value: fraction)
+                        .tint(AmberTheme.accentAmber)
+                }
+
+                Text(stateSyncProgressDetail(
+                    activity: activity,
+                    percent: percent,
+                    elapsed: elapsed
+                ))
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted2)
+                .monospacedDigit()
+            }
+            .padding(.horizontal, 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("剧情状态同步")
+            .accessibilityValue(
+                percent.map { "正文已处理 \($0)%，已等待 \(elapsed) 秒" }
+                    ?? "已等待 \(elapsed) 秒"
+            )
+        }
+    }
+
+    private func stateSyncProgressDetail(
+        activity: NovelStateSyncActivity,
+        percent: Int?,
+        elapsed: Int
+    ) -> String {
+        guard let percent else {
+            if activity.phase == .analyzing {
+                return "正在分析第 \(activity.completedChunks + 1) 段 · 已等待 \(elapsed) 秒 · 单段最长 60 秒"
+            }
+            return "已等待 \(elapsed) 秒 · 正在准备请求"
+        }
+        let chunkDetail = activity.completedChunks > 0
+            ? " · 已完成 \(activity.completedChunks) 段"
+            : ""
+        return "正文已处理 \(percent)%\(chunkDetail) · 已等待 \(elapsed) 秒 · 单段最长 60 秒"
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -526,8 +600,15 @@ struct NovelSessionView: View {
 
             Menu {
                 Picker("创作方式", selection: composerIntentBinding) {
-                    ForEach(NovelComposerIntent.allCases) { intent in
-                        Text(intent.title).tag(intent)
+                    Section("构思") {
+                        ForEach(NovelComposerIntent.discussionOptions) { intent in
+                            Text(intent.title).tag(intent)
+                        }
+                    }
+                    Section("写正文") {
+                        ForEach(NovelComposerIntent.proseOptions) { intent in
+                            Text(intent.title).tag(intent)
+                        }
                     }
                 }
             } label: {
@@ -686,17 +767,25 @@ struct NovelSessionView: View {
     }
 
     private var inputPlaceholder: String {
-        if viewModel.mode == .discussPlan { return "和 Agent 讨论剧情与设定" }
-        return viewModel.granularity == .wholeChapter ? "描述这一章要发生什么" : "描述接下来要写什么"
+        if viewModel.mode == .discussPlan { return "想聊哪段剧情、人物或设定？" }
+        return viewModel.granularity == .wholeChapter
+            ? "描述下一章的目标或关键事件"
+            : "描述接下来发生什么"
     }
 
     private var syncBannerText: String {
         if let pending = viewModel.retryableBranchPendingOperations.first {
             let failure = pending.lastError?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let failure, !failure.isEmpty {
-                return failure
+                let reason = NovelPresentation.stateSyncFailureMessage(failure)
+                if pending.kind == .manualSync {
+                    return "\(reason) 仍可继续讨论或生成正文；收录前请重试。"
+                }
+                return reason
             }
-            return pending.kind == .collection ? "旧版收录的剧情状态同步未完成" : "剧情状态同步尚未完成"
+            return pending.kind == .collection
+                ? "旧版收录的剧情状态同步未完成"
+                : "上次剧情同步未完成。仍可继续讨论或生成正文；收录前请重试。"
         }
         return "剧情状态同步尚未完成"
     }
@@ -938,6 +1027,7 @@ private struct NovelSessionRowView: View, Equatable {
             messageID: row.id,
             role: row.role,
             kind: row.kind,
+            granularity: row.granularity,
             content: row.content,
             isStreaming: row.isStreaming,
             transientPhase: row.transientPhase,

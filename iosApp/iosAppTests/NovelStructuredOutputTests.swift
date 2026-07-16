@@ -267,6 +267,48 @@ final class NovelStructuredOutputTests: XCTestCase {
         )
     }
 
+    func testManualRebuildAcceptsCommonModelJSONWrappers() throws {
+        var object = rebuildObject()
+        object["stateSummary"] = "Lin entered the {sealed} archive."
+        let json = try XCTUnwrap(String(data: try data(object), encoding: .utf8))
+
+        let fenced = try NovelStructuredOutputDecoder.decodeStateRebuild(
+            from: "```json\n\(json)\n```"
+        )
+        let explained = try NovelStructuredOutputDecoder.decodeStateRebuild(
+            from: "好的，以下是整理结果：\n\(json)\n以上为本次同步。"
+        )
+
+        XCTAssertEqual(fenced.stateSummary, "Lin entered the {sealed} archive.")
+        XCTAssertEqual(explained.events.map(\.id), ["event-rebuilt-1"])
+    }
+
+    func testStructuredDecoderRejectsMultipleJSONObjects() throws {
+        let json = try XCTUnwrap(
+            String(data: try data(rebuildObject()), encoding: .utf8)
+        )
+
+        assertFailure(
+            category: .malformedJSON,
+            try NovelStructuredOutputDecoder.decodeStateRebuild(
+                from: "\(json)\n\(json)"
+            )
+        )
+    }
+
+    func testWrappedPayloadStillUsesStrictSchemaValidation() throws {
+        var unknown = rebuildObject()
+        unknown["invented"] = true
+        let json = try XCTUnwrap(String(data: try data(unknown), encoding: .utf8))
+
+        assertFailure(
+            category: .unknownField,
+            try NovelStructuredOutputDecoder.decodeStateRebuild(
+                from: "Result:\n```json\n\(json)\n```"
+            )
+        )
+    }
+
     func testPolishDriftAcceptsConsistentCompatibleAndIncompatiblePayloads() throws {
         let compatible = try NovelStructuredOutputDecoder.decodePolishDrift(
             from: try data(driftObject(compatible: true, differences: []))

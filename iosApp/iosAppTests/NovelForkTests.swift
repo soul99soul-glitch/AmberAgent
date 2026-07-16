@@ -187,6 +187,103 @@ final class NovelForkTests: XCTestCase {
         XCTAssertNoThrow(try NovelDocumentValidator.validate(result))
     }
 
+    func testForkFromImmediatelyCollectedCheckpointPreservesNeedsSync() throws {
+        let collected = try NovelBranchTestFixtures.documentWithImmediatelyCollectedCandidate()
+        let parent = collected.branches[0]
+        let checkpoint = try NovelBranchTestFixtures.checkpoint(
+            parent.headCheckpointID,
+            in: collected
+        )
+        XCTAssertEqual(checkpoint.kind, .collection)
+        XCTAssertEqual(parent.syncStatus, .needsSync)
+
+        let command = NovelBranchTestFixtures.forkCommand(
+            document: collected,
+            sourceBranchID: parent.id,
+            checkpointID: checkpoint.id,
+            name: "Unsynchronized Fork"
+        )
+        let forked = try NovelReducer.apply(.forkBranch(command), to: collected).document
+        let child = try NovelBranchTestFixtures.branch(command.branchID, in: forked)
+
+        XCTAssertEqual(child.headCheckpointID, checkpoint.id)
+        XCTAssertEqual(child.workingChapterSelections, checkpoint.chapterSelections)
+        XCTAssertEqual(child.currentStateSnapshotID, checkpoint.stateSnapshotID)
+        XCTAssertEqual(child.syncStatus, .needsSync)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(forked))
+    }
+
+    func testPackageDecodeNormalizesHistoricalForkSyncStatus() throws {
+        let collected = try NovelBranchTestFixtures.documentWithImmediatelyCollectedCandidate()
+        let parent = collected.branches[0]
+        let command = NovelBranchTestFixtures.forkCommand(
+            document: collected,
+            sourceBranchID: parent.id,
+            checkpointID: parent.headCheckpointID,
+            name: "Historical Fork"
+        )
+        var historical = try NovelReducer.apply(.forkBranch(command), to: collected).document
+        let childIndex = try XCTUnwrap(historical.branches.firstIndex {
+            $0.id == command.branchID
+        })
+        historical.branches[childIndex].syncStatus = .synchronized
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(historical))
+
+        let package = try NovelProjectPackageCodec.encode(historical)
+        let decoded = try NovelProjectPackageCodec.decode(package.data).document
+
+        XCTAssertEqual(
+            decoded.branches.first { $0.id == command.branchID }?.syncStatus,
+            .needsSync
+        )
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(decoded))
+    }
+
+    func testCollectionBaseBridgeRejectsCandidateThatPredatesManualSync() throws {
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let generated = try NovelBranchTestFixtures.appendCompletedRun(
+            to: document,
+            branchID: branch.id,
+            kind: .prose,
+            content: "Mara opened the archive."
+        )
+        let candidateID = try XCTUnwrap(generated.candidateID)
+        let candidate = try NovelBranchTestFixtures.candidate(
+            candidateID,
+            in: generated.document
+        )
+        let sourceMessage = try XCTUnwrap(generated.document.sessions[0].messages.first {
+            $0.id == candidate.sourceMessageID
+        })
+        let base = try NovelBranchTestFixtures.checkpoint(
+            candidate.baseCheckpointID,
+            in: generated.document
+        )
+        let synchronizedHead = NovelBranchCheckpointRecord(
+            id: NovelCheckpointID(),
+            kind: .manualSync,
+            createdOnBranchID: branch.id,
+            parentCheckpointID: base.id,
+            chapterSelections: base.chapterSelections,
+            stateSnapshotID: NovelStateSnapshotID(),
+            sessionCursor: .through(sequence: sourceMessage.sequence),
+            branchOverrideRevisionIDs: base.branchOverrideRevisionIDs,
+            sourceCandidateID: nil,
+            baseHeadRevision: candidate.baseHeadRevision,
+            operationID: NovelOperationID(),
+            createdAt: sourceMessage.createdAt.addingTimeInterval(1)
+        )
+
+        XCTAssertFalse(NovelCandidateSemantics.collectionBaseMatches(
+            candidate,
+            targetCheckpointID: synchronizedHead.id,
+            targetHeadRevision: candidate.baseHeadRevision + 1,
+            checkpoints: generated.document.checkpoints + [synchronizedHead],
+            sourceMessage: sourceMessage
+        ))
+    }
+
     func testParentAndChildWorkingStateEvolveIndependentlyAndFileRoundTrip() async throws {
         let collected = try NovelBranchTestFixtures.documentWithCollectedCandidate()
         let parentID = collected.branches[0].id
@@ -258,6 +355,31 @@ enum NovelBranchTestFixtures {
             in: generated.document,
             title: "Chapter One"
         )
+    }
+
+    static func documentWithImmediatelyCollectedCandidate(
+        content: String = "Mara opened the sealed door."
+    ) throws -> NovelProjectDocumentV1 {
+        let document = try NovelTestFixtures.document(now: epoch)
+        let branchID = document.branches[0].id
+        let generated = try appendCompletedRun(
+            to: document,
+            branchID: branchID,
+            kind: .prose,
+            content: content
+        )
+        let candidateID = try require(generated.candidateID, "Missing prose candidate.")
+        let command = try collectCommand(
+            candidateID,
+            document: generated.document,
+            title: "Chapter One"
+        )
+        return try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
+            command,
+            payloadSHA256: command.canonicalPayloadSHA256(),
+            in: generated.document,
+            now: timestamp(for: generated.document, offset: 3)
+        ).document
     }
 
     static func appendCompletedRun(

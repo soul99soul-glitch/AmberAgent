@@ -278,8 +278,12 @@ enum NovelFactTransactionReducer {
               candidate.collectedCheckpointID == nil else {
             throw NovelError.invalidInput("The candidate is not collectable prose for this branch.")
         }
-        guard candidate.baseCheckpointID == branch.headCheckpointID,
-              candidate.baseHeadRevision == branch.headRevision else {
+        guard NovelCandidateSemantics.collectionBaseMatches(
+            candidate,
+            targetCheckpointID: branch.headCheckpointID,
+            targetHeadRevision: branch.headRevision,
+            in: document
+        ) else {
             throw NovelError.staleBranchHeadRevision(
                 expected: candidate.baseHeadRevision,
                 actual: branch.headRevision
@@ -433,8 +437,12 @@ enum NovelFactTransactionReducer {
         }
         guard candidate.status == .available,
               candidate.collectedCheckpointID == nil,
-              candidate.baseCheckpointID == pending.baseCheckpointID,
-              candidate.baseHeadRevision == pending.baseHeadRevision else {
+              NovelCandidateSemantics.collectionBaseMatches(
+                  candidate,
+                  targetCheckpointID: pending.baseCheckpointID,
+                  targetHeadRevision: pending.baseHeadRevision,
+                  in: document
+              ) else {
             throw NovelError.invalidInput("The pending collection candidate is stale.")
         }
         guard let proposedVersion = pending.proposedChapterVersion,
@@ -822,9 +830,7 @@ enum NovelFactTransactionReducer {
         let baseState = try stateSnapshot(rebuildBase.stateSnapshotID, in: document)
         let chapters = try decodeManualPayload(pending.selectedText)
         try validateManualPayload(chapters, pending: pending, in: document)
-        let manuscript = chapters.map {
-            "# \($0.title)\n\n\($0.content)"
-        }.joined(separator: "\n\n")
+        let manuscript = manualRebuildManuscript(chapters)
         return NovelManualRebuildInput(
             structuredRunID: NovelRunID(pending.id.rawValue),
             pending: pending,
@@ -1577,6 +1583,12 @@ enum NovelFactTransactionReducer {
         } catch {
             throw NovelError.invalidInput("The manual synchronization payload is unreadable: \(error)")
         }
+    }
+
+    static func manualRebuildManuscript(_ chapters: [NovelManualRebuildChapter]) -> String {
+        chapters.map {
+            "# \($0.title)\n\n\($0.content)"
+        }.joined(separator: "\n\n")
     }
 
     static func validateManualPayload(

@@ -191,11 +191,11 @@ enum NovelStructuredOutputDecoder {
     static func decodeQuickStartSuggestions(
         from data: Data
     ) throws -> NovelQuickStartSuggestionsV2 {
-        let object = try StrictJSON.rootObject(from: data)
-        try StrictJSON.validateQuickStartSuggestions(object)
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validateQuickStartSuggestions(root.object)
         let value: NovelQuickStartSuggestionsV2 = try decode(
             NovelQuickStartSuggestionsV2.self,
-            from: data
+            from: root.data
         )
         try NovelStructuredOutputValidation.validate(value)
         return value
@@ -206,9 +206,9 @@ enum NovelStructuredOutputDecoder {
     }
 
     static func decodeStateDelta(from data: Data) throws -> NovelStateDeltaV1 {
-        let object = try StrictJSON.rootObject(from: data)
-        try StrictJSON.validateStateDelta(object)
-        let value: NovelStateDeltaV1 = try decode(NovelStateDeltaV1.self, from: data)
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validateStateDelta(root.object)
+        let value: NovelStateDeltaV1 = try decode(NovelStateDeltaV1.self, from: root.data)
         try NovelStructuredOutputValidation.validate(value)
         return value
     }
@@ -218,9 +218,9 @@ enum NovelStructuredOutputDecoder {
     }
 
     static func decodeStateRebuild(from data: Data) throws -> NovelStateRebuildV1 {
-        let object = try StrictJSON.rootObject(from: data)
-        try StrictJSON.validateStateRebuild(object)
-        let value: NovelStateRebuildV1 = try decode(NovelStateRebuildV1.self, from: data)
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validateStateRebuild(root.object)
+        let value: NovelStateRebuildV1 = try decode(NovelStateRebuildV1.self, from: root.data)
         try NovelStructuredOutputValidation.validate(value)
         return value
     }
@@ -230,9 +230,9 @@ enum NovelStructuredOutputDecoder {
     }
 
     static func decodePolishDrift(from data: Data) throws -> NovelPolishDriftV1 {
-        let object = try StrictJSON.rootObject(from: data)
-        try StrictJSON.validatePolishDrift(object)
-        let value: NovelPolishDriftV1 = try decode(NovelPolishDriftV1.self, from: data)
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validatePolishDrift(root.object)
+        let value: NovelPolishDriftV1 = try decode(NovelPolishDriftV1.self, from: root.data)
         try NovelStructuredOutputValidation.validate(value)
         return value
     }
@@ -526,11 +526,12 @@ private enum NovelStructuredOutputValidation {
 private enum StrictJSON {
     typealias Object = [String: Any]
 
-    static func rootObject(from data: Data) throws -> Object {
-        try JSONDuplicateKeyValidator.validate(data)
+    static func rootObject(from data: Data) throws -> (object: Object, data: Data) {
+        let objectData = try singleObjectData(from: data)
+        try JSONDuplicateKeyValidator.validate(objectData)
         let value: Any
         do {
-            value = try JSONSerialization.jsonObject(with: data)
+            value = try JSONSerialization.jsonObject(with: objectData)
         } catch {
             throw NovelStructuredOutputFailure(
                 category: .malformedJSON,
@@ -545,7 +546,84 @@ private enum StrictJSON {
                 message: "The model output must be one JSON object."
             )
         }
-        return object
+        return (object, objectData)
+    }
+
+    private static func singleObjectData(from data: Data) throws -> Data {
+        if (try? JSONSerialization.jsonObject(with: data)) != nil {
+            return data
+        }
+
+        let bytes = Array(data)
+        var candidates: [Data] = []
+        var index = bytes.startIndex
+
+        while index < bytes.endIndex {
+            guard bytes[index] == 0x7B,
+                  let endIndex = balancedObjectEnd(in: bytes, startingAt: index) else {
+                index += 1
+                continue
+            }
+
+            let candidate = Data(bytes[index...endIndex])
+            if let value = try? JSONSerialization.jsonObject(with: candidate),
+               value is Object {
+                candidates.append(candidate)
+                index = endIndex + 1
+            } else {
+                index += 1
+            }
+        }
+
+        guard candidates.count == 1, let candidate = candidates.first else {
+            let message = candidates.count > 1
+                ? "The model returned more than one JSON object."
+                : "The model returned malformed JSON."
+            throw NovelStructuredOutputFailure(
+                category: .malformedJSON,
+                path: "$",
+                message: message
+            )
+        }
+        return candidate
+    }
+
+    private static func balancedObjectEnd(
+        in bytes: [UInt8],
+        startingAt startIndex: Int
+    ) -> Int? {
+        var depth = 0
+        var isInsideString = false
+        var index = startIndex
+
+        while index < bytes.endIndex {
+            let byte = bytes[index]
+            if isInsideString {
+                if byte == 0x5C {
+                    index += 2
+                    continue
+                }
+                if byte == 0x22 {
+                    isInsideString = false
+                }
+            } else {
+                switch byte {
+                case 0x22:
+                    isInsideString = true
+                case 0x7B:
+                    depth += 1
+                case 0x7D:
+                    depth -= 1
+                    if depth == 0 {
+                        return index
+                    }
+                default:
+                    break
+                }
+            }
+            index += 1
+        }
+        return nil
     }
 
     static func validateQuickStartSuggestions(_ object: Object) throws {

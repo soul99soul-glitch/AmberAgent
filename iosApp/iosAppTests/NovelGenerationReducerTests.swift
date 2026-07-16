@@ -578,6 +578,56 @@ final class NovelGenerationReducerTests: XCTestCase {
         assertInvalid(changedPrompt, containing: "fixed Prompt receipt evidence")
     }
 
+    func testValidatorAcceptsHistoricalDiscussionPromptEvidence() throws {
+        let original = try NovelTestFixtures.document()
+        let request = makeRequest(document: original, kind: .discussion)
+        let started = try begin(request, in: original)
+        let version = "novel.discussion.v1"
+        let historicalPrompt = try XCTUnwrap(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: version
+        ))
+        let historical = try mutateEncodedDocument(started) { object in
+            var injections = try XCTUnwrap(object["injectionReceipts"] as? [[String: Any]])
+            var sections = try XCTUnwrap(injections[0]["sections"] as? [[String: Any]])
+            sections[0]["contentSHA256"] = NovelDocumentValidator.sha256(historicalPrompt)
+            injections[0]["sections"] = sections
+            injections[0]["promptVersion"] = version
+            object["injectionReceipts"] = injections
+
+            var generations = try XCTUnwrap(object["generationReceipts"] as? [[String: Any]])
+            generations[0]["promptVersion"] = version
+            object["generationReceipts"] = generations
+        }
+
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(historical))
+    }
+
+    func testValidatorAcceptsHistoricalQuickStartPromptEvidence() throws {
+        let original = try quickStartDocument()
+        let request = makeRequest(document: original, kind: .quickStart)
+        let started = try begin(request, in: original)
+        let version = "novel.quick-start.v2"
+        let historicalPrompt = try XCTUnwrap(NovelPromptCatalog.systemText(
+            for: .quickStart,
+            version: version
+        ))
+        let historical = try mutateEncodedDocument(started) { object in
+            var injections = try XCTUnwrap(object["injectionReceipts"] as? [[String: Any]])
+            var sections = try XCTUnwrap(injections[0]["sections"] as? [[String: Any]])
+            sections[0]["contentSHA256"] = NovelDocumentValidator.sha256(historicalPrompt)
+            injections[0]["sections"] = sections
+            injections[0]["promptVersion"] = version
+            object["injectionReceipts"] = injections
+
+            var generations = try XCTUnwrap(object["generationReceipts"] as? [[String: Any]])
+            generations[0]["promptVersion"] = version
+            object["generationReceipts"] = generations
+        }
+
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(historical))
+    }
+
     func testValidatorRejectsRunPointingAtReceiptOwnedByAnotherRun() throws {
         let original = try NovelTestFixtures.document()
         let request = makeRequest(document: original, kind: .discussion)

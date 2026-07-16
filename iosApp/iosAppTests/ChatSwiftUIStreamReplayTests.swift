@@ -2,7 +2,7 @@ import XCTest
 import SwiftUI
 import QuartzCore
 import Shared
-import SwiftStreamingMarkdown
+@testable import SwiftStreamingMarkdown
 @testable import iosApp
 
 /// 默认路径(`ChatSwiftUIMessageList`)的执行层集成回放门禁。
@@ -125,8 +125,10 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             let contentHeight: CGFloat
             let distanceToBottom: CGFloat
             let contentOffsetX: CGFloat
+            let contentOffsetY: CGFloat
             let paragraphHeight: CGFloat?
             let paragraphLength: Int?
+            let paragraphUsesTextKit1: Bool?
         }
 
         private weak var scrollView: UIScrollView?
@@ -159,13 +161,15 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 contentHeight: scrollView.contentSize.height,
                 distanceToBottom: max(0, scrollView.contentSize.height - visibleBottom),
                 contentOffsetX: scrollView.contentOffset.x,
+                contentOffsetY: scrollView.contentOffset.y,
                 paragraphHeight: paragraph?.frame.height,
-                paragraphLength: paragraph?.attributedText.length
+                paragraphLength: paragraph?.attributedText.length,
+                paragraphUsesTextKit1: paragraph?.usesTextKit1
             ))
         }
 
-        private static func streamingParagraph(in view: UIView) -> UITextView? {
-            if let textView = view as? UITextView,
+        static func streamingParagraph(in view: UIView) -> ParagraphUIView? {
+            if let textView = view as? ParagraphUIView,
                textView.text.hasPrefix("连续正文开始。") {
                 return textView
             }
@@ -798,6 +802,17 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
     }
 
     func testContinuousProseGrowthStaysLineSizedWhileFollowingBottom() {
+        let blockKey = IOSDisplayPreferenceKeys.streamingBlockMarkdown
+        let previousBlockSetting = UserDefaults.standard.object(forKey: blockKey)
+        UserDefaults.standard.set(true, forKey: blockKey)
+        defer {
+            if let previousBlockSetting {
+                UserDefaults.standard.set(previousBlockSetting, forKey: blockKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: blockKey)
+            }
+        }
+
         let fixture = makeFixture()
         defer { fixture.tearDown() }
 
@@ -807,7 +822,15 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         XCTAssertTrue(pumpUntil(timeout: 4.0) { fixture.model.latestViewport.isAtBottom })
 
         let assistantID = KotlinUuid.companion.random()
-        var text = "连续正文开始。"
+        var tailText = "连续正文开始。" + String(
+            repeating: "这是一段没有空行分隔的长篇连续正文，用来复现真实回答累计变长后同一段落仍在增长的布局压力。",
+            count: 180
+        )
+        XCTAssertGreaterThan(tailText.utf16.count, 7_400, "fixture 必须覆盖单个真实长段落")
+        let settledPrefix = (1...12)
+            .map { "第\($0)段已经闭合，不应随末尾长段落的 delta 重新布局。" }
+            .joined(separator: "\n\n")
+        var text = settledPrefix + "\n\n" + tailText
         fixture.model.messages.append(makeAssistantMessage(
             id: assistantID,
             text: text,
@@ -815,6 +838,12 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         ))
         fixture.model.send(.streamDelta)
         XCTAssertTrue(pumpUntil(timeout: 4.0) { fixture.model.latestViewport.isAtBottom })
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            guard let paragraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
+                return false
+            }
+            return paragraph.usesTextKit1 && paragraph.attributedText.length == tailText.utf16.count
+        })
         pump(seconds: 0.4)
 
         guard let scrollView = fixture.scrollView else {
@@ -823,7 +852,9 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
         probe.start()
         for _ in 0..<60 {
-            text += String(repeating: "流", count: 12)
+            let delta = String(repeating: "流", count: 12)
+            tailText += delta
+            text += delta
             fixture.model.messages[fixture.model.messages.count - 1] = makeAssistantMessage(
                 id: assistantID,
                 text: text,
@@ -846,13 +877,29 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 let delta = currentHeight - previousHeight
                 return delta > 0.5 ? delta : nil
             }
+        let textGrowthSteps = zip(settledSamples, settledSamples.dropFirst()).compactMap {
+            previous, current -> Int? in
+            guard let previousLength = previous.paragraphLength,
+                  let currentLength = current.paragraphLength else { return nil }
+            let delta = currentLength - previousLength
+            return delta > 0 ? delta : nil
+        }
         let contentGrowthP95 = percentile(contentGrowthSteps, percentile: 0.95)
         let paragraphGrowthP95 = percentile(paragraphGrowthSteps, percentile: 0.95)
+        let textGrowthP95 = percentile(textGrowthSteps.map(CGFloat.init), percentile: 0.95)
         let maxBottomDebt = settledSamples.map(\.distanceToBottom).max() ?? .greatestFiniteMagnitude
         let horizontalOffsets = settledSamples.map(\.contentOffsetX)
         let horizontalDrift = (horizontalOffsets.max() ?? 0) - (horizontalOffsets.min() ?? 0)
 
-        XCTAssertEqual(probe.samples.last?.paragraphLength, text.utf16.count)
+        XCTAssertEqual(probe.samples.last?.paragraphLength, tailText.utf16.count)
+        XCTAssertEqual(
+            probe.samples.last?.paragraphUsesTextKit1,
+            true,
+            "无附件长段落必须走低成本布局"
+        )
+        XCTAssertGreaterThanOrEqual(textGrowthSteps.count, 45, "可见文本不能数批才发布：\(textGrowthSteps)")
+        XCTAssertLessThanOrEqual(textGrowthP95, 24, "绝大多数更新最多合并两个 snapshot：\(textGrowthSteps)")
+        XCTAssertLessThanOrEqual(textGrowthSteps.max() ?? .max, 36, "不能积累四五行文本后再发布：\(textGrowthSteps)")
         XCTAssertGreaterThanOrEqual(
             contentGrowthSteps.count,
             30,
@@ -869,6 +916,11 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             "绝大多数段落高度发布必须保持单行级：\(paragraphGrowthSteps)"
         )
         XCTAssertLessThanOrEqual(
+            paragraphGrowthSteps.max() ?? .greatestFiniteMagnitude,
+            40,
+            "增长中的段落本身不能一次发布多行高度：\(paragraphGrowthSteps)"
+        )
+        XCTAssertLessThanOrEqual(
             contentGrowthSteps.max() ?? .greatestFiniteMagnitude,
             64,
             "60Hz 模拟器可以漏采一个中间帧，但列表不能积累三行以上再发布：\(contentGrowthSteps)"
@@ -877,6 +929,136 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             maxBottomDebt,
             72,
             "贴底流式不能积累两行以上的未跟随高度：\(maxBottomDebt)"
+        )
+        XCTAssertLessThanOrEqual(
+            horizontalDrift,
+            0.5,
+            "重复语义 bottom edge 写不能让垂直聊天列表产生横向漂移：\(horizontalOffsets)"
+        )
+    }
+
+    /// 24KB 长文规模下的 viewport 跟随节拍 canary。
+    ///
+    /// 「四五行攒一批再上移」的根因是每次发布的主线程成本随全文长度增长
+    /// (核心是 UITextView 整段替换 + 容器尺寸抖动导致的 TextKit 全量重排版),
+    /// 7.5KB 的既有回放测不到:退化从 ~24KB(模拟器)开始出现,真机再快
+    /// 2-4 倍到达。本 canary 直接断言 viewport offset 的推进次数与幅度,
+    /// 而不是字符长度或段落高度;修复前(全量替换路径)offset 推进次数
+    /// 约 55、单次幅度 p95 约 41pt,修复后约 106 次、p95 约 29pt。
+    func testLongProseViewportFollowStaysLineSizedAtTwentyFourKB() {
+        let blockKey = IOSDisplayPreferenceKeys.streamingBlockMarkdown
+        let previousBlockSetting = UserDefaults.standard.object(forKey: blockKey)
+        UserDefaults.standard.set(true, forKey: blockKey)
+        defer {
+            if let previousBlockSetting {
+                UserDefaults.standard.set(previousBlockSetting, forKey: blockKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: blockKey)
+            }
+        }
+
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 30)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 6.0) { fixture.model.latestViewport.isAtBottom })
+
+        let assistantID = KotlinUuid.companion.random()
+        var tailText = "连续正文开始。" + String(
+            repeating: "这是一段没有空行分隔的长篇连续正文，用来复现真实回答累计变长后同一段落仍在增长的布局压力。",
+            count: 540
+        )
+        XCTAssertGreaterThan(tailText.utf16.count, 23_000, "fixture 必须覆盖 24KB 量级的真实长段落")
+        let settledPrefix = (1...40)
+            .map { "第\($0)段已经闭合，正文内容围绕流式渲染的分层职责展开，不应随末尾长段落的 delta 重新布局。" }
+            .joined(separator: "\n\n")
+        var text = settledPrefix + "\n\n" + tailText
+        fixture.model.messages.append(makeAssistantMessage(
+            id: assistantID,
+            text: text,
+            finished: false
+        ))
+        fixture.model.send(.streamDelta)
+        XCTAssertTrue(pumpUntil(timeout: 6.0) { fixture.model.latestViewport.isAtBottom })
+        XCTAssertTrue(pumpUntil(timeout: 6.0) {
+            guard let paragraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
+                return false
+            }
+            return paragraph.usesTextKit1 && paragraph.attributedText.length == tailText.utf16.count
+        })
+        pump(seconds: 0.4)
+
+        guard let scrollView = fixture.scrollView else {
+            return XCTFail("Expected the default SwiftUI list scroll view")
+        }
+        let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
+        probe.start()
+        for _ in 0..<60 {
+            let delta = String(repeating: "流", count: 12)
+            tailText += delta
+            text += delta
+            fixture.model.messages[fixture.model.messages.count - 1] = makeAssistantMessage(
+                id: assistantID,
+                text: text,
+                finished: false
+            )
+            fixture.model.send(.streamDelta)
+            pump(seconds: 0.048)
+        }
+        pump(seconds: 0.8)
+        probe.stop()
+
+        let settledSamples = probe.samples.filter { ($0.paragraphLength ?? 0) >= 100 }
+        let textGrowthSteps = zip(settledSamples, settledSamples.dropFirst()).compactMap {
+            previous, current -> CGFloat? in
+            guard let previousLength = previous.paragraphLength,
+                  let currentLength = current.paragraphLength,
+                  currentLength > previousLength else { return nil }
+            return CGFloat(currentLength - previousLength)
+        }
+        let contentGrowthSteps = zip(settledSamples, settledSamples.dropFirst())
+            .map { $1.contentHeight - $0.contentHeight }
+            .filter { $0 > 0.5 }
+        let offsetAdvanceSteps = zip(settledSamples, settledSamples.dropFirst())
+            .map { $1.contentOffsetY - $0.contentOffsetY }
+            .filter { $0 > 0.5 }
+        let maxBottomDebt = settledSamples.map(\.distanceToBottom).max() ?? .greatestFiniteMagnitude
+        let horizontalOffsets = settledSamples.map(\.contentOffsetX)
+        let horizontalDrift = (horizontalOffsets.max() ?? 0) - (horizontalOffsets.min() ?? 0)
+
+        XCTAssertEqual(probe.samples.last?.paragraphLength, tailText.utf16.count)
+        XCTAssertEqual(probe.samples.last?.paragraphUsesTextKit1, true, "24KB 无附件长段落必须走 TextKit 1")
+        XCTAssertGreaterThanOrEqual(
+            textGrowthSteps.count,
+            45,
+            "24KB 长文的可见文本不能数批才发布：\(textGrowthSteps)"
+        )
+        XCTAssertLessThanOrEqual(
+            percentile(textGrowthSteps, percentile: 0.95),
+            24,
+            "24KB 长文的绝大多数更新最多合并两个 snapshot：\(textGrowthSteps)"
+        )
+        XCTAssertLessThanOrEqual(
+            percentile(contentGrowthSteps, percentile: 0.95),
+            40,
+            "24KB 长文的绝大多数列表高度发布必须保持单行级：\(contentGrowthSteps)"
+        )
+        XCTAssertGreaterThanOrEqual(
+            offsetAdvanceSteps.count,
+            75,
+            "viewport 必须逐行连续跟随,不能积累数行合并成少数几次上移(修复前约 55 次)：\(offsetAdvanceSteps.count)"
+        )
+        XCTAssertLessThanOrEqual(
+            percentile(offsetAdvanceSteps, percentile: 0.95),
+            40,
+            "viewport 单次上移幅度 p95 必须保持在约 1.5 行内(修复前约 41pt)：\(offsetAdvanceSteps)"
+        )
+        XCTAssertLessThanOrEqual(
+            maxBottomDebt,
+            72,
+            "24KB 贴底流式不能积累两行以上的未跟随高度：\(maxBottomDebt)"
         )
         XCTAssertLessThanOrEqual(
             horizontalDrift,

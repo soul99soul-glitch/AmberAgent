@@ -19,6 +19,7 @@ public struct DocumentView: View {
   let config: MarkdownRenderConfig
   let animateInitialText: Bool
   let usesLayerBackedTableAnimation: Bool
+  let usesTextKit1ForAttachmentFreeText: Bool
 
   /// Create a `DocumentView`.
   /// - Parameters:
@@ -27,18 +28,22 @@ public struct DocumentView: View {
   ///   - animateInitialText: Whether newly mounted paragraphs should fade in.
   ///   - usesLayerBackedTableAnimation: Whether table text entrances should be
   ///     composited by Core Animation instead of SwiftUI's text renderer.
+  ///   - usesTextKit1ForAttachmentFreeText: Whether attachment-free paragraphs
+  ///     should use TextKit 1's lower-cost full-height layout path.
   ///   - listener: Optional listener that receives render and interaction events.
   public init(
     renderableDocument: RenderableDocument,
     config: MarkdownRenderConfig = .default,
     animateInitialText: Bool = true,
     usesLayerBackedTableAnimation: Bool = false,
+    usesTextKit1ForAttachmentFreeText: Bool = false,
     listener: MarkdownListener? = nil
   ) {
     self.renderableDocument = renderableDocument
     self.config = config
     self.animateInitialText = animateInitialText
     self.usesLayerBackedTableAnimation = usesLayerBackedTableAnimation
+    self.usesTextKit1ForAttachmentFreeText = usesTextKit1ForAttachmentFreeText
     self._controller = StateObject(wrappedValue: MarkdownController(listener: listener))
   }
 
@@ -47,6 +52,7 @@ public struct DocumentView: View {
     .environment(\.markdownConfig, config)
     .environment(\.markdownAnimateInitialText, animateInitialText)
     .environment(\.markdownUsesLayerBackedTableAnimation, usesLayerBackedTableAnimation)
+    .environment(\.markdownUsesTextKit1ForAttachmentFreeText, usesTextKit1ForAttachmentFreeText)
     .environment(\.markdownController, controller)
     .task {
       controller.onAppear(markdown: renderableDocument)
@@ -68,6 +74,7 @@ extension EnvironmentValues {
   /// Whether table text entrances should run on Core Animation layers instead
   /// of invalidating the surrounding SwiftUI table on every animation frame.
   @Entry public var markdownUsesLayerBackedTableAnimation: Bool = false
+  @Entry var markdownUsesTextKit1ForAttachmentFreeText: Bool = false
   /// The shared controller used by descendant Markdown views to route
   /// table/context-menu events to the configured `MarkdownListener`.
   @Entry public var markdownController: MarkdownController?

@@ -13,8 +13,12 @@ class ParagraphUIViewCache {
 
   static let shared: ParagraphUIViewCache = .init()
 
-  func createOrReuseParagraphUIView(contents: NSMutableAttributedString, lineSpacing: CGFloat?) -> ParagraphUIView {
-    if let availableView = takeAvailableCachedView() {
+  func createOrReuseParagraphUIView(
+    contents: NSMutableAttributedString,
+    lineSpacing: CGFloat?,
+    usesTextKit1: Bool = false
+  ) -> ParagraphUIView {
+    if let availableView = takeAvailableCachedView(usesTextKit1: usesTextKit1) {
       // Vendored fix (AmberAgent): a reused view may carry a TextKit2 text container
       // sized for a previous, wider context (e.g. an unconstrained table cell).
       // Without a reset the stale layout fragments render wider than the new bounds.
@@ -22,7 +26,7 @@ class ParagraphUIViewCache {
       return availableView
     }
 
-    return ParagraphUIView()
+    return usesTextKit1 ? ParagraphUIView.makeTextKit1View() : ParagraphUIView()
   }
 
   func recycle(_ view: ParagraphUIView) {
@@ -36,10 +40,10 @@ class ParagraphUIViewCache {
     }
   }
 
-  private func takeAvailableCachedView() -> ParagraphUIView? {
+  private func takeAvailableCachedView(usesTextKit1: Bool) -> ParagraphUIView? {
     $cachedViews.mutate { cachedViews in
       guard let index = cachedViews.firstIndex(where: { view in
-        view.superview == nil && view.window == nil
+        view.superview == nil && view.window == nil && view.usesTextKit1 == usesTextKit1
       }) else {
         return nil
       }

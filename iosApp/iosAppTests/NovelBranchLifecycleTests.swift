@@ -190,6 +190,139 @@ final class NovelBranchLifecycleTests: XCTestCase {
         }
     }
 
+    func testUndoFromManualSyncSkipsUnsynchronizedCollectionCheckpoint() async throws {
+        let collected = try NovelBranchTestFixtures.documentWithImmediatelyCollectedCandidate()
+        let collectedBranch = collected.branches[0]
+        let collectionCheckpointID = collectedBranch.headCheckpointID
+        let collectionCheckpoint = try XCTUnwrap(collected.checkpoints.first {
+            $0.id == collectionCheckpointID
+        })
+        let synchronizedParentID = try XCTUnwrap(collectionCheckpoint.parentCheckpointID)
+        XCTAssertEqual(collectedBranch.syncStatus, .needsSync)
+
+        let sync = NovelSyncManualEditsCommand(
+            context: NovelBranchTestFixtures.mutationContext(
+                document: collected,
+                branchID: collectedBranch.id
+            ),
+            projectID: collected.project.id,
+            branchID: collectedBranch.id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: collectedBranch.workingRevision
+        )
+        let prepared = try NovelFactTransactionReducer.prepareManualSync(
+            sync,
+            payloadSHA256: sync.canonicalPayloadSHA256(),
+            in: collected
+        ).document
+        let baseState = try XCTUnwrap(prepared.stateSnapshots.first {
+            $0.id == collectedBranch.currentStateSnapshotID
+        })
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "Mara opened the sealed door.",
+            branchOutline: "Mara opened the sealed door.",
+            events: [NovelStateEventV1(
+                id: "door-opened",
+                kind: "progress",
+                summary: "Mara opened the sealed door.",
+                entityReferences: ["Mara"],
+                evidence: "Mara opened the sealed door."
+            )],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: Array(Set(baseState.unresolvedEntityNames + ["Mara"])).sorted(),
+            settingProposals: []
+        )
+        let synchronized = try NovelFactTransactionReducer.finalizeManualSync(
+            pendingID: sync.pendingID,
+            rebuild: rebuild,
+            artifacts: NovelTestFixtures.factTransactionArtifacts(
+                document: prepared,
+                pendingID: sync.pendingID
+            ),
+            in: prepared
+        ).document
+        XCTAssertEqual(synchronized.branches[0].syncStatus, .synchronized)
+
+        let legacyCommand = undoCommand(
+            document: synchronized,
+            branchID: collectedBranch.id
+        )
+        let synchronizedHead = try XCTUnwrap(synchronized.checkpoints.first {
+            $0.id == synchronized.branches[0].headCheckpointID
+        })
+        let legacyTarget = try XCTUnwrap(synchronized.checkpoints.first {
+            $0.id == synchronizedHead.parentCheckpointID
+        })
+        let legacyAppliedAt = synchronized.project.updatedAt.addingTimeInterval(1)
+        let legacyRevision = synchronized.project.revision + 1
+        var legacy = synchronized
+        legacy.branches[0].headCheckpointID = legacyTarget.id
+        legacy.branches[0].currentStateSnapshotID = legacyTarget.stateSnapshotID
+        legacy.branches[0].workingChapterSelections = legacyTarget.chapterSelections
+        legacy.branches[0].overrideRevisionIDs = legacyTarget.branchOverrideRevisionIDs
+        legacy.branches[0].headRevision += 1
+        legacy.branches[0].workingRevision += 1
+        legacy.branches[0].syncStatus = .synchronized
+        legacy.branches[0].updatedAt = legacyAppliedAt
+        legacy.project.revision = legacyRevision
+        legacy.project.updatedAt = legacyAppliedAt
+        legacy.appliedOperations.append(NovelAppliedOperationRecord(
+            operationID: legacyCommand.context.operationID,
+            kind: .undoBranchHead,
+            payloadSHA256: try NovelAction.undoBranchHead(legacyCommand).canonicalPayloadSHA256(),
+            outcome: .branchHeadMoved(
+                projectID: legacy.project.id,
+                branchID: collectedBranch.id,
+                fromCheckpointID: synchronizedHead.id,
+                toCheckpointID: legacyTarget.id,
+                headRevision: legacy.branches[0].headRevision,
+                revision: legacyRevision
+            ),
+            appliedProjectRevision: legacyRevision,
+            appliedAt: legacyAppliedAt
+        ))
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(legacy))
+        XCTAssertThrowsError(
+            try NovelDocumentValidator.validateTransition(from: synchronized, to: legacy)
+        )
+
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let projectsDirectory = root.appendingPathComponent("projects", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: projectsDirectory,
+            withIntermediateDirectories: true
+        )
+        let legacyData = try JSONEncoder().encode(legacy)
+        try legacyData.write(
+            to: projectsDirectory.appendingPathComponent("\(legacy.project.id.description).json"),
+            options: .atomic
+        )
+        let loaded = try await NovelFileProjectRepository(rootDirectory: root)
+            .loadProject(id: legacy.project.id)
+        XCTAssertEqual(loaded.access, .readWrite)
+        XCTAssertEqual(loaded.document.branches[0].headCheckpointID, legacyTarget.id)
+        XCTAssertEqual(loaded.document.branches[0].syncStatus, .needsSync)
+
+        let undone = try NovelReducer.apply(
+            .undoBranchHead(undoCommand(
+                document: synchronized,
+                branchID: collectedBranch.id
+            )),
+            to: synchronized
+        ).document
+        let branch = undone.branches[0]
+
+        XCTAssertEqual(branch.headCheckpointID, synchronizedParentID)
+        XCTAssertEqual(branch.syncStatus, .synchronized)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(undone))
+    }
+
     func testCollectUndoCloneRecollectRepeatedChainSurvivesRestart() async throws {
         let firstCollection = try NovelBranchTestFixtures.documentWithCollectedCandidate(
             content: "Mara crossed the threshold."

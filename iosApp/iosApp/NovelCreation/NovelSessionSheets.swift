@@ -8,8 +8,11 @@ struct NovelSessionChapterOption: Identifiable, Equatable {
     var id: NovelChapterID { selection.chapterID }
 
     var displayTitle: String {
-        let title = version.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? "第 \(ordinal) 章" : title
+        NovelPresentation.chapterDisplayTitle(
+            storedTitle: version.title,
+            content: version.content,
+            ordinal: ordinal
+        )
     }
 }
 
@@ -50,13 +53,19 @@ struct NovelCollectCandidateSheet: View {
         self.chapters = chapters
         self.onCollect = onCollect
         let paragraphIDs = Set(paragraphs.map(\.id))
+        let candidateText = paragraphs.map(\.text).joined(separator: "\n\n")
         self._selectedParagraphIDs = State(initialValue: paragraphIDs)
-        self._editedText = State(initialValue: paragraphs.map(\.text).joined(separator: "\n\n"))
+        self._editedText = State(initialValue: candidateText)
         self._targetChoice = State(initialValue: NovelCollectionTargetChoice.initial(
             chapterCount: chapters.count,
             granularity: suggestedGranularity
         ))
-        self._nextChapterTitle = State(initialValue: "第 \(chapters.count + 1) 章")
+        let nextOrdinal = chapters.count + 1
+        self._nextChapterTitle = State(initialValue: NovelPresentation.chapterDisplayTitle(
+            storedTitle: "第 \(nextOrdinal) 章",
+            content: candidateText,
+            ordinal: nextOrdinal
+        ))
     }
 
     var body: some View {

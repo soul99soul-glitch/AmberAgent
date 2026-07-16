@@ -234,6 +234,92 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(request.messages.map { $0.toText() }, ["仅使用小说上下文。", "继续写。"])
     }
 
+    func testDiscussionRequestAdvertisesOnlySearchTools() async throws {
+        let fixture = makeFixture(apiKey: "test-key")
+        let captured = LockedBox<NovelLiveTransportRequest?>(nil)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in
+                XCTFail("Discussion search must not use the one-shot KMP transport.")
+                return nil
+            },
+            discussionTransport: { request, callbacks in
+                captured.set(request)
+                callbacks.onComplete()
+                return nil
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        _ = await Self.collect(try await adapter.start(makeRequest(
+            model: resolved,
+            purpose: .discussion
+        )))
+
+        let request = try XCTUnwrap(captured.value)
+        XCTAssertEqual(request.parameters.tools.count, 2)
+        XCTAssertEqual(request.parameters.model.tools.count, 1)
+    }
+
+    func testDiscussionTransportExecutesSearchAndResumesTheModel() async throws {
+        let fixture = makeFixture(apiKey: "test-key")
+        let provider = ScriptedNovelDiscussionProvider()
+        let executor = RecordingNovelSearchExecutor()
+        let transport = NovelLiveModelAdapter.discussionSearchTransport(
+            using: provider,
+            executors: { ["search_web": executor] }
+        )
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in
+                XCTFail("Discussion search must use the tool transport.")
+                return nil
+            },
+            discussionTransport: transport
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        let events = await Self.collect(try await adapter.start(makeRequest(
+            model: resolved,
+            purpose: .discussion
+        )))
+
+        XCTAssertEqual(events, [
+            .textReplacement("根据检索结果，建议先核对史料再调整人物动机。"),
+            .completed,
+        ])
+        XCTAssertEqual(provider.callCount, 2)
+        XCTAssertTrue(provider.secondTurnReceivedToolOutput)
+        XCTAssertEqual(executor.calls, ["search_web"])
+    }
+
+    func testDiscussionWithoutEnabledSearchUsesNormalTransportWithoutTools() async throws {
+        let fixture = makeFixture(apiKey: "test-key")
+        let captured = LockedBox<NovelLiveTransportRequest?>(nil)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { request, callbacks in
+                captured.set(request)
+                callbacks.onComplete()
+                return nil
+            },
+            discussionTransport: { _, _ in
+                XCTFail("Disabled search must not enter the tool loop.")
+                return nil
+            },
+            discussionSearchEnabled: { false }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        _ = await Self.collect(try await adapter.start(makeRequest(
+            model: resolved,
+            purpose: .discussion
+        )))
+
+        XCTAssertTrue(captured.value?.parameters.tools.isEmpty == true)
+        XCTAssertTrue(captured.value?.parameters.model.tools.isEmpty == true)
+    }
+
     func testCodexPreparationOrderIsResolveThenAugmentThenDiagnostic() async throws {
         let fixture = makeFixture(apiKey: "test-key")
         let order = LockedBox<[String]>([])
@@ -253,7 +339,12 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         )
         let adapter = NovelLiveModelAdapter(
             catalogProvider: { fixture.catalog },
-            kmpTransport: { _, callbacks in
+            kmpTransport: { _, _ in
+                XCTFail("Codex discussion must use the tool transport.")
+                return nil
+            },
+            discussionTransport: { request, callbacks in
+                XCTAssertEqual(request.parameters.tools.count, 2)
                 order.mutate { $0.append("transport") }
                 callbacks.onComplete()
                 return nil
@@ -261,7 +352,10 @@ final class NovelLiveModelAdapterTests: XCTestCase {
             codex: hooks
         )
         let resolved = try await adapter.resolveModel(for: .global)
-        let events = await Self.collect(try await adapter.start(makeRequest(model: resolved)))
+        let events = await Self.collect(try await adapter.start(makeRequest(
+            model: resolved,
+            purpose: .discussion
+        )))
 
         XCTAssertEqual(events, [.completed])
         XCTAssertEqual(order.value, ["resolve", "augment", "diagnose", "transport"])
@@ -287,7 +381,11 @@ final class NovelLiveModelAdapterTests: XCTestCase {
             catalogProvider: {
                 NovelLiveModelCatalog(currentModel: model, providers: [provider])
             },
-            kmpTransport: { request, callbacks in
+            kmpTransport: { _, _ in
+                XCTFail("Claude discussion must use the tool transport.")
+                return nil
+            },
+            discussionTransport: { request, callbacks in
                 captured.set(request)
                 callbacks.onComplete()
                 return nil
@@ -295,10 +393,14 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         )
 
         let resolved = try await adapter.resolveModel(for: .global)
-        let events = await Self.collect(try await adapter.start(makeRequest(model: resolved)))
+        let events = await Self.collect(try await adapter.start(makeRequest(
+            model: resolved,
+            purpose: .discussion
+        )))
 
         XCTAssertEqual(events, [.completed])
         XCTAssertTrue(captured.value?.providerSetting is ProviderSetting.Claude)
+        XCTAssertEqual(captured.value?.parameters.tools.count, 2)
         XCTAssertNil(captured.value?.grokIsolation)
     }
 
@@ -353,6 +455,55 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(kmpCalls.value, 0)
         XCTAssertEqual(captured.value?.grokIsolation, .novel)
         XCTAssertTrue(captured.value?.providerSetting is ProviderSetting.OpenAI)
+    }
+
+    func testGrokDiscussionEnablesChatSearchWhileKeepingMemoryIsolated() async throws {
+        let model = makeModel(modelID: "grok-4.20-fast")
+        let provider = ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "Grok Web",
+            models: [model],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "",
+            baseUrl: IOSGrokWebConstants.webBaseUrl,
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+        let providerID = IOSGrokWebProviderResolver.providerKey(provider)
+        guard IOSGrokWebAuthStore.save(
+            providerId: providerID,
+            cookieHeader: "sso=novel-discussion-test-session"
+        ) else {
+            throw XCTSkip("Simulator keychain is unavailable.")
+        }
+        defer { IOSGrokWebAuthStore.clear(providerId: providerID) }
+
+        let captured = LockedBox<NovelLiveTransportRequest?>(nil)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: {
+                NovelLiveModelCatalog(currentModel: model, providers: [provider])
+            },
+            kmpTransport: { _, _ in nil },
+            grokTransport: { request, callbacks in
+                captured.set(request)
+                callbacks.onComplete()
+                return nil
+            }
+        )
+
+        let resolved = try await adapter.resolveModel(for: .global)
+        _ = await Self.collect(try await adapter.start(makeRequest(
+            model: resolved,
+            purpose: .discussion
+        )))
+
+        XCTAssertEqual(captured.value?.grokIsolation, .discussion)
     }
 
     func testSynchronousTerminalBeforeHandleInstallationDoesNotTurnStartIntoFailure() async throws {
@@ -476,12 +627,13 @@ final class NovelLiveModelAdapterTests: XCTestCase {
 
     private func makeRequest(
         model: NovelResolvedModel,
+        purpose: NovelModelPurpose = .prose,
         reasoning: NovelModelReasoningLevel = .off
     ) -> NovelModelRequest {
         NovelModelRequest(
             runID: NovelRunID(),
             model: model,
-            purpose: .prose,
+            purpose: purpose,
             messages: [
                 NovelModelMessage(role: .system, content: "仅使用小说上下文。"),
                 NovelModelMessage(role: .user, content: "继续写。"),
@@ -570,5 +722,101 @@ private final class LockedBox<Value>: @unchecked Sendable {
         lock.lock()
         body(&storage)
         lock.unlock()
+    }
+}
+
+private final class RecordingNovelSearchExecutor: IOSToolExecutor, @unchecked Sendable {
+    private let recordedCalls = LockedBox<[String]>([])
+
+    var calls: [String] {
+        recordedCalls.value
+    }
+
+    func execute(
+        name: String,
+        arguments: String,
+        isUserInitiated: Bool
+    ) async -> IOSAgentToolOutcome {
+        recordedCalls.mutate { $0.append(name) }
+        return .filled(#"{"results":[{"title":"史料","url":"https://example.test"}]}"#)
+    }
+}
+
+private final class ScriptedNovelDiscussionProvider: IOSAgentTextProvider, @unchecked Sendable {
+    private let state = LockedBox((calls: 0, receivedToolOutput: false))
+
+    var callCount: Int {
+        state.value.calls
+    }
+
+    var secondTurnReceivedToolOutput: Bool {
+        state.value.receivedToolOutput
+    }
+
+    func generateText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams
+    ) async throws -> MessageChunk {
+        var currentCall = 0
+        state.mutate { state in
+            state.calls += 1
+            currentCall = state.calls
+            if currentCall == 2 {
+                state.receivedToolOutput = messages
+                .flatMap(\.parts)
+                .compactMap { $0 as? UIMessagePart.Tool }
+                .contains { !$0.output.isEmpty }
+            }
+        }
+
+        if currentCall == 1 {
+            return chunk(parts: [UIMessagePart.Tool(
+                toolCallId: "novel-search-1",
+                toolName: "search_web",
+                input: #"{"query":"唐代凌烟阁功臣名单"}"#,
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            )])
+        }
+        return chunk(parts: [UIMessagePart.Text(
+            text: "根据检索结果，建议先核对史料再调整人物动机。",
+            metadata: nil
+        )])
+    }
+
+    private func chunk(parts: [UIMessagePart]) -> MessageChunk {
+        let message = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: parts,
+            annotations: [],
+            createdAt: Kotlinx_datetimeLocalDateTime(
+                year: 2026,
+                month: 7,
+                day: 14,
+                hour: 0,
+                minute: 0,
+                second: 0,
+                nanosecond: 0
+            ),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        return MessageChunk(
+            id: UUID().uuidString,
+            model: "novel-live",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: nil,
+                message: message,
+                finishReason: "stop"
+            )],
+            usage: nil
+        )
     }
 }

@@ -158,6 +158,24 @@ public struct IOSAgentToolEngineResult: Sendable {
     /// Whether the loop ended because `maxSteps` was reached while tool calls
     /// were still pending (the caller may treat this as a soft failure).
     public let hitStepLimit: Bool
+    /// Provider failure captured by the engine. Callers that own a durable run
+    /// can map this to their normal failure terminal instead of parsing the
+    /// compatibility transcript message appended below.
+    public let providerFailureMessage: String?
+
+    public init(
+        messages: [UIMessage],
+        stepsExecuted: Int,
+        pendingApproval: IOSPendingToolApproval?,
+        hitStepLimit: Bool,
+        providerFailureMessage: String? = nil
+    ) {
+        self.messages = messages
+        self.stepsExecuted = stepsExecuted
+        self.pendingApproval = pendingApproval
+        self.hitStepLimit = hitStepLimit
+        self.providerFailureMessage = providerFailureMessage
+    }
 }
 
 /// A tool call that needs foreground approval before the engine can continue.
@@ -475,31 +493,63 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     messages: working + [failureMessage],
                     stepsExecuted: steps,
                     pendingApproval: nil,
-                    hitStepLimit: false
+                    hitStepLimit: false,
+                    providerFailureMessage: error.localizedDescription
                 )
             }
 
-            // Append the assistant turn produced by this step.
-            let assistantMessage = assistantMessage(from: chunk)
+            let rawAssistantMessage = assistantMessage(from: chunk)
+            let emittedTools = pendingToolCalls(in: rawAssistantMessage)
+            let alreadyCompleted = completedToolKeys(in: working)
+            let assistantMessage: UIMessage? = rawAssistantMessage.flatMap { message in
+                guard message.role == MessageRole.assistant, !alreadyCompleted.isEmpty else {
+                    return message
+                }
+                let retainedParts = message.parts.filter { part in
+                    guard let tool = part as? UIMessagePart.Tool, tool.output.isEmpty else {
+                        return true
+                    }
+                    return !alreadyCompleted.contains(Self.toolCallKey(tool))
+                }
+                guard !retainedParts.isEmpty else { return nil }
+                guard retainedParts.count != message.parts.count else { return message }
+                return UIMessage(
+                    id: message.id,
+                    role: message.role,
+                    parts: retainedParts,
+                    annotations: message.annotations,
+                    createdAt: message.createdAt,
+                    finishedAt: message.finishedAt,
+                    modelId: message.modelId,
+                    usage: message.usage,
+                    translation: message.translation
+                )
+            }
             if let assistantMessage {
                 working.append(assistantMessage)
             }
 
-            // Gather all pending tool calls in the just-produced turn.
-            var pendingTools = pendingToolCalls(in: assistantMessage)
-            // Drop any call whose result is ALREADY filled earlier in the
-            // transcript (same toolCallKey). A background pre-execution (see
-            // `executePreExistingPendingTools`) or a provider that echoes a
-            // completed call id would otherwise re-run the executor, double-
-            // charging side effects like image generation. The empty-output
-            // echo is collapsed into the already-completed one instead.
-            if !pendingTools.isEmpty {
-                let alreadyCompleted = completedToolKeys(in: working)
-                if !alreadyCompleted.isEmpty {
-                    pendingTools = pendingTools.filter { !alreadyCompleted.contains(Self.toolCallKey($0)) }
-                }
-            }
+            // Only fresh pending tools remain in the retained assistant turn.
+            // Completed echoes are removed without discarding concurrent text
+            // or a different tool call emitted by the same provider response.
+            let pendingTools = pendingToolCalls(in: assistantMessage)
             if pendingTools.isEmpty {
+                let hasAssistantContent = assistantMessage?.parts.contains { part in
+                    if let text = part as? UIMessagePart.Text {
+                        return !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }
+                    if let tool = part as? UIMessagePart.Tool {
+                        return !tool.output.isEmpty
+                    }
+                    return true
+                } ?? false
+                if !emittedTools.isEmpty, !hasAssistantContent {
+                    // The provider only echoed calls that were already completed.
+                    // Drop any whitespace-only remainder and ask for the final answer.
+                    if assistantMessage != nil { working.removeLast() }
+                    steps += 1
+                    continue
+                }
                 // No more tool calls — the model is done.
                 return IOSAgentToolEngineResult(
                     messages: working,

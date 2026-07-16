@@ -166,6 +166,15 @@ final class NovelInjectionPlannerTests: XCTestCase {
                 budget: budget
             )
         )
+        let discussion = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: document.branches[0].id,
+                promptKind: .discussion,
+                userText: "Should the confrontation happen now?",
+                budget: budget
+            )
+        )
         let wholeChapter = try NovelInjectionPlanner.plan(
             document: document,
             request: NovelInjectionPlanningRequest(
@@ -187,11 +196,16 @@ final class NovelInjectionPlannerTests: XCTestCase {
         )
 
         let continuationContext = try XCTUnwrap(chapterSection(in: continuation))
+        let discussionContext = try XCTUnwrap(chapterSection(in: discussion))
         let wholeContext = try XCTUnwrap(chapterSection(in: wholeChapter))
         let polishContext = try XCTUnwrap(chapterSection(in: polish))
         XCTAssertEqual(continuationContext.label, "CURRENT CHAPTER TAIL")
         XCTAssertEqual(continuationContext.reason, .currentChapterTail)
         XCTAssertFalse(continuationContext.content.contains("OPENING-"))
+        XCTAssertEqual(discussionContext.label, "CURRENT MANUSCRIPT TAIL")
+        XCTAssertEqual(discussionContext.reason, .currentChapterTail)
+        XCTAssertTrue(discussionContext.content.contains("FINAL-TAIL"))
+        XCTAssertFalse(discussionContext.content.contains("OPENING-"))
         XCTAssertEqual(wholeContext.label, "PREVIOUS CHAPTER TAIL")
         XCTAssertEqual(wholeContext.reason, .previousChapterTail)
         XCTAssertFalse(wholeContext.content.contains("OPENING-"))

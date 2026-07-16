@@ -275,7 +275,10 @@ enum NovelInjectionPlanner {
             throw NovelInjectionPlanningError.branchRequiresSync(branch.id)
         }
         if request.promptKind.requiresIdleBranch,
-           document.pendingOperations.contains(where: { $0.branchID == branch.id }) {
+           document.pendingOperations.contains(where: {
+               $0.branchID == branch.id &&
+                   (!request.promptKind.allowsRetryableManualSync || $0.blocksProseGeneration)
+           }) {
             throw NovelInjectionPlanningError.branchRequiresSync(branch.id)
         }
 
@@ -533,6 +536,10 @@ private extension NovelPromptKind {
             false
         }
     }
+
+    var allowsRetryableManualSync: Bool {
+        self == .proseContinuation || self == .proseWholeChapter
+    }
 }
 
 private extension NovelInjectionPlanner {
@@ -653,17 +660,18 @@ private extension NovelInjectionPlanner {
             )
         }
 
-        guard request.promptKind == .proseContinuation ||
+        guard request.promptKind == .discussion ||
+                request.promptKind == .proseContinuation ||
                 request.promptKind == .proseWholeChapter else {
             return nil
         }
         guard let selection = branch.workingChapterSelections.last else {
-            let label = request.promptKind == .proseContinuation
-                ? "CURRENT CHAPTER TAIL"
-                : "PREVIOUS CHAPTER TAIL"
-            let reason: NovelInjectionSelectionReason = request.promptKind == .proseContinuation
-                ? .currentChapterTail
-                : .previousChapterTail
+            let isWholeChapter = request.promptKind == .proseWholeChapter
+            let label = isWholeChapter ? "PREVIOUS CHAPTER TAIL" :
+                request.promptKind == .discussion ? "CURRENT MANUSCRIPT TAIL" : "CURRENT CHAPTER TAIL"
+            let reason: NovelInjectionSelectionReason = isWholeChapter
+                ? .previousChapterTail
+                : .currentChapterTail
             return makeSection(
                 kind: .chapterContext(nil),
                 label: label,
@@ -680,6 +688,14 @@ private extension NovelInjectionPlanner {
         let tail = String(version.content.suffix(request.budget.chapterTailCharacterLimit))
         let content = "Title: \(version.title)\n\n" +
             (wasTruncated ? "[Earlier chapter text omitted]\n" : "") + tail
+        if request.promptKind == .discussion {
+            return makeSection(
+                kind: .chapterContext(version.id),
+                label: "CURRENT MANUSCRIPT TAIL",
+                content: content,
+                reason: .currentChapterTail
+            )
+        }
         if request.promptKind == .proseContinuation {
             return makeSection(
                 kind: .chapterContext(version.id),

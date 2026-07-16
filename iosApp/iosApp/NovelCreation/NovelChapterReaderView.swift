@@ -60,72 +60,77 @@ struct NovelChapterReaderView: View {
     private var readerToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(chapterOrdinalTitle)
+                HStack(spacing: 12) {
+                    Text(chapterOrdinalTitle)
+                    Text(currentChapterWordCountTitle)
+                }
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
-                Text(currentVersion?.title ?? "正文")
+                Text(currentChapterTitle)
                     .font(.headline)
                     .lineLimit(1)
             }
+            .frame(minWidth: 180, maxWidth: 220, alignment: .leading)
         }
 
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button {
-                    if let selection = currentSelection {
-                        activeSheet = .versions(selection)
-                    }
-                } label: {
-                    Label("版本历史", systemImage: "clock.arrow.circlepath")
-                }
-
-                Button {
-                    if let currentVersion {
-                        activeSheet = .edit(currentVersion)
-                    }
-                } label: {
-                    Label(editMenuTitle, systemImage: "square.and.pencil")
-                }
-                .disabled(editBlockReason != nil)
-
-                Button {
-                    startPolish()
-                } label: {
-                    Label(polishMenuTitle, systemImage: "wand.and.sparkles")
-                }
-                .disabled(polishBlockReason != nil)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .frame(width: 40, height: 40)
-                    .contentShape(Circle())
-                    .modifier(ComposerDockCircleGlass(tint: nil))
+        if #available(iOS 26.0, *) {
+            ToolbarItem(placement: .topBarTrailing) {
+                readerActionsMenu
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("章节操作")
+            .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                readerActionsMenu
+            }
         }
+    }
+
+    private var readerActionsMenu: some View {
+        Menu {
+            Button {
+                if let selection = currentSelection {
+                    activeSheet = .versions(selection)
+                }
+            } label: {
+                Label("版本历史", systemImage: "clock.arrow.circlepath")
+            }
+
+            Button {
+                if let currentVersion {
+                    activeSheet = .edit(currentVersion)
+                }
+            } label: {
+                Label(editMenuTitle, systemImage: "square.and.pencil")
+            }
+            .disabled(editBlockReason != nil)
+
+            Button {
+                startPolish()
+            } label: {
+                Label(polishMenuTitle, systemImage: "wand.and.sparkles")
+            }
+            .disabled(polishBlockReason != nil)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+                .frame(width: 40, height: 40)
+                .contentShape(Circle())
+                .modifier(ComposerDockCircleGlass(tint: nil))
+        }
+        .buttonStyle(.plain)
+        .buttonBorderShape(.circle)
+        .accessibilityLabel("章节操作")
     }
 
     private var reader: some View {
         ScrollView {
             if let version = currentVersion {
-                VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(version.title)
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text("\(version.content.count.formatted()) 字")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                    }
-
-                    ChatAssistantMarkdownView(
-                        markdown: version.content,
-                        renderCacheNamespace: "novel:chapter:\(version.id)"
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                ChatAssistantMarkdownView(
+                    markdown: version.content,
+                    renderCacheNamespace: "novel:chapter:\(version.id)"
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 22)
                 .padding(.top, 28)
                 .padding(.bottom, 44)
@@ -138,46 +143,48 @@ struct NovelChapterReaderView: View {
     }
 
     private var chapterNavigation: some View {
-        HStack(spacing: 0) {
-            Button {
-                moveChapter(by: -1)
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "chevron.left")
-                    Text("上一章")
+        AmberGlassGroup(spacing: 24) {
+            HStack(spacing: 24) {
+                Button {
+                    moveChapter(by: -1)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                        Text("上一章")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .padding(.horizontal, 14)
+                    .frame(height: 40)
+                    .contentShape(Capsule())
+                    .amberGlass(cornerRadius: 20)
                 }
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
-            .disabled(currentIndex <= 0)
+                .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
+                .disabled(currentIndex <= 0)
 
-            Divider()
-                .frame(height: 20)
+                Spacer(minLength: 24)
 
-            Button {
-                moveChapter(by: 1)
-            } label: {
-                HStack(spacing: 7) {
-                    Text("下一章")
-                    Image(systemName: "chevron.right")
+                Button {
+                    moveChapter(by: 1)
+                } label: {
+                    HStack(spacing: 6) {
+                        Text("下一章")
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .padding(.horizontal, 14)
+                    .frame(height: 40)
+                    .contentShape(Capsule())
+                    .amberGlass(cornerRadius: 20)
                 }
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .frame(height: 48)
-                .contentShape(Rectangle())
+                .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
+                .disabled(currentIndex < 0 || currentIndex >= chapterSelections.count - 1)
             }
-            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
-            .disabled(currentIndex < 0 || currentIndex >= chapterSelections.count - 1)
+            .frame(maxWidth: .infinity)
         }
-        .foregroundStyle(AmberTheme.foreground2)
-        .frame(maxWidth: 360)
-        .amberGlass(cornerRadius: 24, interactive: false)
         .padding(.horizontal, 20)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.top, 2)
     }
 
     private var chapterSelections: [NovelChapterSelection] {
@@ -200,6 +207,20 @@ struct NovelChapterReaderView: View {
     private var chapterOrdinalTitle: String {
         guard currentIndex >= 0 else { return "正文" }
         return "第 \(currentIndex + 1) 章"
+    }
+
+    private var currentChapterTitle: String {
+        guard let version = currentVersion, currentIndex >= 0 else { return "正文" }
+        return NovelPresentation.chapterDisplayTitle(
+            storedTitle: version.title,
+            content: version.content,
+            ordinal: currentIndex + 1
+        )
+    }
+
+    private var currentChapterWordCountTitle: String {
+        guard let currentVersion else { return "" }
+        return "\(currentVersion.content.count.formatted()) 字"
     }
 
     private var editBlockReason: String? {

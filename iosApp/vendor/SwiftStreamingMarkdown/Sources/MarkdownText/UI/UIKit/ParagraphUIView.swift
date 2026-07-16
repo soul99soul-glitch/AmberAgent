@@ -37,6 +37,35 @@ class ParagraphUIView: UITextView {
   var textContextMenu: TextContextMenu?
   var markdownController: MarkdownController?
 
+  var usesTextKit1: Bool {
+    textLayoutManager == nil
+  }
+
+  /// Large but finite measuring height. TextKit 1 falls into pathologically
+  /// slow line-fragment math when the container height is
+  /// `.greatestFiniteMagnitude`, so measurement uses a finite sentinel that
+  /// still exceeds any realistic paragraph (~400k lines of body text).
+  private static let unboundedMeasuringHeight: CGFloat = 10_000_000
+
+  static func makeTextKit1View() -> ParagraphUIView {
+    let storage = NSTextStorage()
+    let layoutManager = NSLayoutManager()
+    let textContainer = NSTextContainer(size: .zero)
+    storage.addLayoutManager(layoutManager)
+    layoutManager.addTextContainer(textContainer)
+    let view = ParagraphUIView(frame: .zero, textContainer: textContainer)
+    // Height must not track the view's current bounds: a tracked container is
+    // resized on every measurement pass, which discards TextKit 1's layout
+    // cache and forces streaming paragraphs to re-lay-out their full length on
+    // every appended chunk. A fixed unbounded height keeps layout incremental.
+    view.textContainer.heightTracksTextView = false
+    view.textContainer.size = CGSize(
+      width: view.textContainer.size.width,
+      height: ParagraphUIView.unboundedMeasuringHeight
+    )
+    return view
+  }
+
   // To override the behaviour of this property, do so on ParagraphView's SwiftUI wrapper.
   var onUrlTap: (URL) -> Void = { UIApplication.shared.open($0) }
 
@@ -104,6 +133,30 @@ class ParagraphUIView: UITextView {
     invalidateIntrinsicContentSize()
   }
 
+  override func sizeThatFits(_ size: CGSize) -> CGSize {
+    guard usesTextKit1, size.width > 0, size.width.isFinite else {
+      return super.sizeThatFits(size)
+    }
+    // UITextView's own sizeThatFits mutates the text container per call, which
+    // throws away TextKit 1's incremental layout and re-lays-out the entire
+    // paragraph on every streaming publish. Measuring against a stable,
+    // height-unbounded container only lays out lines that are not cached yet.
+    let containerWidth = size.width
+      - textContainerInset.left - textContainerInset.right
+    let measuringSize = CGSize(width: containerWidth, height: ParagraphUIView.unboundedMeasuringHeight)
+    if textContainer.size != measuringSize {
+      textContainer.size = measuringSize
+    }
+    // glyphRange(for:) forces any missing layout; ensureLayout(for:) is the
+    // known-slow API here and must not be used on the streaming path.
+    _ = layoutManager.glyphRange(for: textContainer)
+    let used = layoutManager.usedRect(for: textContainer)
+    return CGSize(
+      width: (used.width + textContainerInset.left + textContainerInset.right).rounded(.up),
+      height: (used.height + textContainerInset.top + textContainerInset.bottom).rounded(.up)
+    )
+  }
+
   func setParagraphContents(_ newContents: NSMutableAttributedString, lineSpacing: CGFloat? = nil, animatedByWord: Bool) {
     // Keep the cached interface style up to date for citation preview rendering.
     // This runs on the main thread so it's safe to read traitCollection here.
@@ -112,6 +165,33 @@ class ParagraphUIView: UITextView {
     guard paragraphContents != newContents || self.lineSpacing != lineSpacing else {
       return
     }
+
+    // Streaming publishes on the TextKit 1 path almost always extend the
+    // previous contents. Appending only the new tail keeps TextKit's layout
+    // for the existing text valid (a full attributedText replacement
+    // invalidates the whole paragraph), and keeps in-flight word fades running.
+    if animatedByWord,
+       usesTextKit1,
+       self.lineSpacing == lineSpacing,
+       let appendedRange = paragraphContents.appendedTailRange(toBecome: newContents) {
+      self.paragraphContents = newContents
+      let suffix = NSMutableAttributedString(
+        attributedString: newContents.attributedSubstring(from: appendedRange)
+      )
+      if let lineSpacing {
+        suffix.setLineSpacing(lineSpacing)
+      }
+      invalidateCachedSize()
+      textStorage.beginEditing()
+      textStorage.append(suffix)
+      textStorage.endEditing()
+      setNeedsLayout()
+      configureAccessibility(for: textStorage)
+      invalidateIntrinsicContentSize()
+      appendFadeAnimations(in: appendedRange)
+      return
+    }
+
     self.paragraphContents = newContents
     self.lineSpacing = lineSpacing
 
@@ -148,29 +228,35 @@ class ParagraphUIView: UITextView {
 
     if animatedByWord,
        newContentLength > 0 {
-      // Animate word by word
-      let newContentRange = NSRange(location: oldAttributedString.length, length: newContentLength)
-      let wordRanges = attributedText.splitIntoWords(withIn: newContentRange)
-      let wordCount = wordRanges.count
-      let delayBetweenWords: Double = 0.1 / Double(wordCount)
-      let baseStartTime = CACurrentMediaTime()
-      for (index, wordRange) in wordRanges.enumerated() {
-        let animationData = FadeAnimationData(
-          startTime: baseStartTime + Double(index) * delayBetweenWords,
-          duration: Self.animationDuration,
-          range: wordRange
-        )
-        activeAnimations.append(animationData)
-      }
-
-      updateTextViewWithCurrentAnimations()
-
-      if fadeAnimationDisplayLink == nil {
-        setUpDisplayLink()
-      }
+      appendFadeAnimations(
+        in: NSRange(location: oldAttributedString.length, length: newContentLength)
+      )
     } else {
       // If no animation needed anymore, clean up all existings animations if any.
       activeAnimations.removeAll()
+    }
+  }
+
+  private func appendFadeAnimations(in newContentRange: NSRange) {
+    guard newContentRange.length > 0 else { return }
+    // Animate word by word
+    let wordRanges = attributedText.splitIntoWords(withIn: newContentRange)
+    let wordCount = wordRanges.count
+    let delayBetweenWords: Double = 0.1 / Double(wordCount)
+    let baseStartTime = CACurrentMediaTime()
+    for (index, wordRange) in wordRanges.enumerated() {
+      let animationData = FadeAnimationData(
+        startTime: baseStartTime + Double(index) * delayBetweenWords,
+        duration: Self.animationDuration,
+        range: wordRange
+      )
+      activeAnimations.append(animationData)
+    }
+
+    updateTextViewWithCurrentAnimations()
+
+    if fadeAnimationDisplayLink == nil {
+      setUpDisplayLink()
     }
   }
 
@@ -429,6 +515,37 @@ fileprivate extension NSMutableAttributedString {
     paragraphStyle.lineSpacing = lineSpacing
     paragraphStyle.alignment = .left
     addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: length))
+  }
+}
+
+extension NSAttributedString {
+  /// If `other` extends the receiver by appending characters while leaving
+  /// every existing character and attribute run untouched, returns the
+  /// appended tail range in `other`; otherwise returns nil. The comparison is
+  /// O(attribute runs + appended length), never O(total length) of attribute
+  /// content, so streaming callers can probe it on every publish.
+  func appendedTailRange(toBecome other: NSAttributedString) -> NSRange? {
+    let prefixLength = length
+    guard prefixLength > 0, other.length > prefixLength else { return nil }
+    let comparison = (other.string as NSString).compare(
+      string,
+      options: .literal,
+      range: NSRange(location: 0, length: prefixLength)
+    )
+    guard comparison == .orderedSame else { return nil }
+
+    var index = 0
+    while index < prefixLength {
+      var selfRange = NSRange()
+      var otherRange = NSRange()
+      let selfAttributes = attributes(at: index, effectiveRange: &selfRange)
+      let otherAttributes = other.attributes(at: index, effectiveRange: &otherRange)
+      guard (selfAttributes as NSDictionary).isEqual(to: otherAttributes) else {
+        return nil
+      }
+      index = min(selfRange.location + selfRange.length, otherRange.location + otherRange.length)
+    }
+    return NSRange(location: prefixLength, length: other.length - prefixLength)
   }
 }
 

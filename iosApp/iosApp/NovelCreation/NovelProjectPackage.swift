@@ -185,7 +185,8 @@ enum NovelProjectPackageCodec {
 
         let document: NovelProjectDocumentV1
         do {
-            document = try makeDecoder().decode(NovelProjectDocumentV1.self, from: projectData)
+            let decoded = try makeDecoder().decode(NovelProjectDocumentV1.self, from: projectData)
+            document = NovelBranchSemantics.normalizingDecodedSyncStatus(decoded)
         } catch {
             throw NovelError.invalidPackage("The project payload could not be decoded.")
         }

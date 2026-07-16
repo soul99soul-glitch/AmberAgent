@@ -1,15 +1,15 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
 ## Repository
 
-- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
+- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 当前同时包含本轮 iOS 流式展示/滚动收敛改动与并行的 Live Activity / Dynamic Island 未提交改动；另保留既有 `iosApp/vendor/SwiftStreamingMarkdown/Package.resolved` 修改和 4 份未跟踪旧 handoff。各自范围不要互相覆盖。
+- Worktree: 2026-07-16 小说创作连续工作、流式展示/滚动收敛与 vendor TextKit 增量布局已完成整合并纳入当前分支；开始新任务仍以实时 `git status` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,32 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-16 Native Timeline terminal render continuity
+
+- 真机确认逐行跟随主要来自「原生滚动容器」后，进一步定位到生成结束瞬间的独立跳变：最后一条 assistant 在流式中由缓存的 `ChatLiveTailModel` 承载，但 `isStreaming/isGenerationActive` 同时变 false 时，旧 guard 会先返回 nil，导致同一消息行从 live-tail 子树切换成普通 bubble 子树。外层 message id 没变，内部 Markdown/UIKit 渲染树仍会被替换一次。
+- 修复只调整现有 model cache 的读取顺序：完成态若已有同 message id 的 live-tail model 就继续复用，并通过原有 `update` 写入最终消息、终态 generation 状态与 render state；只有从未创建过 model 的非流式完成行仍返回 nil。没有新增滚动几何补偿、节拍、动画或 terminal 延时。
+- 新增 `testNativeTimelineKeepsLiveTailModelAcrossGenerationCompletion`。旧顺序下稳定失败，修复后与 `ChatMessageProjectionTests`、`NativeTimelineScrollCoreTests`、强制 `ChatStreamReplayTests` 合跑为 116 passed、1 expected skip、0 failed（`/tmp/amber-native-terminal-final/Logs/Test/Test-iosApp-2026.07.16_09-24-05-+0800.xcresult`）；默认路径 `ChatSwiftUIStreamReplayTests` 另跑 16 passed、0 failed（`/tmp/amber-native-terminal-final/Logs/Test/Test-iosApp-2026.07.16_09-27-24-+0800.xcresult`）；`git diff --check` 通过。当前 iPhone Air 在 `devicectl` 中为 unavailable，因此“生成结束不再跳一下”仍需下一次设备在线后装机目测；原生容器与表格流式块渲染同时开启的问题是另一条边界，本切片未宣称解决。
+
+### 2026-07-16 streaming batch-scroll root cause correction and incremental TextKit repair
+
+- 「四五行攒一批再上移」的根因已用可复现证据修正:不是 Markdown 解析节拍(8KB 全文 parse+convert 实测仅 ~4ms),也不是底部跟随状态机(事件驱动、无合并),而是**每次流式发布的主线程成本 O(全文)**:`ParagraphUIView` 整段替换 `attributedText` + `UITextView.sizeThatFits` 每次改动 text container 尺寸,把 TextKit 布局缓存全部作废。规模递增回放(真实 `ChatSwiftUIMessageList` + 12 字/48ms)证明批量随文档长度线性出现:模拟器 8KB 完美逐行、24KB 起 offset 推进次数减半、48KB 合并 2-3 行;真机快 2-4 倍到达,恰在 8-16K 字真实回答区间。走 `setParagraphContents` 的旧路径在 24K 单段落时每次发布 61.7ms(模拟器),真机即 4-5 行一批。
+- 修复全部收在 vendor TextKit 1 路径内(vendor 默认 TK2 行为不变,仅 AmberAgent 的 `usesTextKit1ForAttachmentFreeText` 命中):TK1 视图创建时固定测量容器(`heightTracksTextView = false` + 有限大高度哨兵,`.greatestFiniteMagnitude` 是 TK1 病理路径);`sizeThatFits` 改为稳定容器 `glyphRange(for:) + usedRect` 增量测量;`setParagraphContents` 新增流式 append 快路径——新内容是旧内容的 attributed 前缀扩展时只把尾部 delta 插入 `textStorage`,进行中的逐词淡入不再被每次发布打断(动画只升不降);字符或属性被 speculative rewrite 改写时自动回退整段替换。24K 单段落每次发布从 61.7ms 降到 ~10ms,增量测量与全量布局结果逐点相等。
+- 红→绿门禁:`ParagraphStreamingAppendTests` 用机器无关的成本比值断言(增量发布必须比同内容全量布局快 2.5 倍以上;修复关闭时实测比值 1.87 必红,修复后 ~4x),另含 append 前缀判定、rewrite 回退与增量==全量等价契约。`ChatSwiftUIStreamReplayTests` 新增 24KB viewport 跟随节拍 canary(直接断言 offset 推进次数与幅度,不再只看字符长度);此前发现 24KB 阈值在 M 系列模拟器上对旧代码不构成稳定红区,故机制红绿判定以比值门禁为准。
+- 最终验证:`ParagraphStreamingAppendTests` 7 passed、`ChatSwiftUIStreamReplayTests` 16 passed、强制 `ChatStreamReplayTests` 16 passed + 1 expected skip、`ChatMessageProjectionTests` 71 passed、vendor `SwiftStreamingMarkdownTests` 全套 68 passed(含快照),`git diff --check` 通过。真机 120Hz 长文手感仍需装机后人工观察;此前 TextKit 1 切换只降低了单次全量测量常数、未改变 O(全文)/次的量级,故真机无感——本轮把量级降为 O(delta)/次。
+
+### 2026-07-16 long-prose streaming line-growth repair
+
+- 真机“四五行攒成一批再上移”的根因不在 provider 节拍或底部跟随动画，而在增长中的长段落布局：约 8KB 的同一段落每次更新走 TextKit 2 全高测量时，主线程单次约需 47ms；对照 TextKit 1 约 15ms，且高度始终按 24-25pt 单行增长。
+- 最终方案没有手写第二套 Markdown 分块或语法判定。真实 Markdown parser、`48ms / 12 Character` 展示节拍、`80ms` 语义底锚动画和逐词淡入均保持不变；AmberAgent 仅对无 `NSTextAttachment` 的 heading/paragraph 显式使用 TextKit 1，引用附件与行内公式继续 TextKit 2，vendor 默认仍为关闭。fallback 使用与 parser 首段一致的稳定 id，避免冷启动随机 remount。
+- 生产链回放使用 12 段稳定前缀加约 7.5KB 的增长尾段，连续 60 次按 `12 字 / 48ms` 更新；可见字符发布次数、合并上限、单行高度、底部欠账和横向漂移均有直接断言。`ChatMessageProjectionTests` 71 passed，完整 `ChatSwiftUIStreamReplayTests` 15 passed，强制 `ChatStreamReplayTests` 16 passed、1 expected skip；性能基线长矩阵曾被系统 signal kill，隔离重跑其唯一未完成的端到端项通过。当前精简方案已完成真机签名校验、覆盖安装并成功启动；真实 provider 的长文本手感仍需人工观察。
+
+### 2026-07-15 remote streaming baseline and local novel integration
+
+- 当前分支已从 `7e0d6a798` 原地 fast-forward 到远端 `9773cb802`，没有 commit、push、stash、reset 或 checkout。合并前 52 个本地修改路径均保留为 unstaged；9 个同路径改动以旧 HEAD 为 base 做三方整合，只有 `PROJECT_STATE.md` 与 `NovelCreationViewModel.selectProject` 需要文本裁决。
+- `selectProject` 继续先拒绝 operation/自动同步期间的跨项目选择，再发布远端 `selectionIntentToken`；远端 `selectBranch` 的目标预检、active run 中断、owner/intent 复验和失败恢复完整保留。同项目刷新 race canary 验证旧 branch intent 会在中断前失效，同时不放开跨项目并发切换。
+- 组合态的 `NovelCreationViewModelTests`、`NovelSessionViewModelTests`、`NovelSessionReplayTests`、`NovelCreationPresentationTests`、`IOSNovelCreationWiringTests`、`IOSAgentToolEngineTests` 与 `IOSSearchExecutorTests` 在 iPhone 17 Pro Simulator 为 168 passed、0 failed、0 skipped（`/tmp/amberagent-9773-novel-combined.xcresult`）；强制 `ChatStreamReplayTests` 为 16 passed、1 expected skip、0 failed（`/tmp/amberagent-9773-chat-replay.xcresult`）。三路只读复审没有发现 P0/P1，`git diff --check` 通过。
+- 最终 Stable Debug arm64 真机包使用 Team `89QRFX9548` 自动签名并明确 `BUILD SUCCEEDED`，`codesign --deep --strict` 通过，已覆盖安装并由 `devicectl` 成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`；进程回读确认主应用与 Activity Widget 均在运行。真实 120Hz 长流、复杂 Markdown、底部跟随和小说 provider E2E 仍需当前整合包的人工操作证据。
 
 ### 2026-07-15 iOS Live Activity / Dynamic Island task beacon
 
@@ -37,11 +63,98 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 - 小说 Session 增加 keyed `48ms` 展示缓冲，delta、replacement、Quick Start 隐藏 JSON 与 terminal snapshot 共用同一所有权边界；终态始终回到领域层权威文本。实时与终态 Markdown 的异步正向增高分别进入既有 live/terminal 跟随事件；用户在 `96pt` 近底区松手会立即提交一次语义到底。跨分支时先只读验证目标，再线性化检查 project/source/run ownership 后中断旧 durable run；目标快照只读一次，中断后只刷新 project metadata，刷新失败则一次性恢复源分支权威快照。独立的 selection intent token 保证后发项目选择不会被内部 terminal refresh 或旧 branch 请求覆盖。
 - 最终绿色门禁拆为两个分片：其余 6 个受影响套件 161 passed、0 failed（`Test-iosApp-2026.07.15_19-18-09-+0800.xcresult`），强制 `ChatStreamReplayTests` 16 passed、1 expected skip、0 failed（`Test-iosApp-2026.07.15_19-16-06-+0800.xcresult`），合计 177 passed、1 expected skip。一次 178 项长进程在 176 passed 后由系统 signal kill 单个 Chat 回放，独立完整重跑已通过，未改 Chat 或放宽断言。三路最终只读审查均为 PASS、无剩余 P0-P2；Stable Debug generic iOS Simulator arm64 构建和 `git diff --check` 通过。当前 Debug 包已使用 Personal Team `89QRFX9548` 完成真机签名、覆盖安装并由 `devicectl` 成功启动到 iPhone Air；120Hz 长流手感、键盘/安全区、复杂 Markdown 异步增高、横向代码/表格手势与真实 provider 长输出仍需实际操作验证。
 
+### 2026-07-15 novel P1/P2 review closure
+
+- 分支状态改由 checkpoint 语义推导：即时收录 checkpoint 与从它 Fork 的分支保持 `needsSync`；读取旧项目或项目包时只单向归一化这类历史错误状态，不改 schema，也不放宽新写入的 staged equality。旧版 direct-parent undo 仍可读取，新产生的 undo 强制走当前语义目标；收录后自动同步在气泡与分支页表现为一次「撤销上一次收录」，手动改写漂移仍明确阻止。
+- 候选正文补齐 retryable sync bridge：同步重试成功后仍可收录此前生成的正文；收录、同步、撤销后可 clone 并再次收录，同时继续拒绝早于同步游标或真实 base 漂移的候选。Quick Start v2 固定 Prompt receipt 恢复历史校验；手动剧情同步在没有可靠事实时沿用原摘要/大纲，所有 finalize 入口使用同一 derived-state 校验，不能借零事实改写派生状态。
+- 通用工具循环只过滤已经完成工具的空回显，保留同回合正文和新工具调用；自动剧情同步的 activity、busy、选择、新建、导入与后台租约按真实项目生命周期收口。完整项目包补回系统导出入口，Markdown 导出不再中断生成，项目加载失败页提供原因与重试。
+- 三路 subagent 对领域/历史兼容、模型工具循环、UI 生命周期复审后均未发现剩余 P0-P2。最终 28 个 `Novel*Tests` 加 `IOSNovelCreationWiringTests`、`IOSAgentToolEngineTests`、`IOSSearchExecutorTests` 在 iPhone 17 Pro Simulator 为 446 passed、0 failed、0 skipped；结果位于 `/tmp/amber-novel-p1p2-integrated/Logs/Test/Test-iosApp-2026.07.15_01-34-32-+0800.xcresult`，`git diff --check` 通过。Stable Debug arm64 真机包随后使用 Team `89QRFX9548` 自动签名并明确 `BUILD SUCCEEDED`，`codesign --deep --strict` 通过，已覆盖安装并由 `devicectl` 成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`。真实 provider 与交互 E2E 仍待用户操作，P3 明确未纳入。
+
+### 2026-07-15 novel reader and project list detail polish
+
+- 章节阅读器顶栏把字数收回到「第 N 章」后方并保留 12pt 间距，不再用弹性空白把两项拉到标题区两端。右上角菜单在 iOS 26 隐藏系统 toolbar 的共享跑道背景，仅保留现有 40x40 圆形 Liquid Glass 层；低版本继续使用同一圆形 fallback，没有增加第二层玻璃。
+- 小说项目列表的左右内容 inset 从 16pt 收到 22pt，项目图标由 32/16pt 调到 36/18pt，并删除整行已经可点击时多余的右侧箭头；侧滑、长按重命名和删除入口保持不变。
+- 项目重命名保存前先结束输入法组合态，并在主线程下一轮读取 SwiftUI 已提交的最终文本再执行原有 rename action；保存按钮不再因旧名称判断而阻止用户提交尚在组合中的最后一个拼音候选。没有改项目 schema、reducer 或持久化链路。
+- 红测试先复现旧顶栏、列表和重命名接线不满足契约；修复后 `IOSNovelCreationWiringTests` 与 `NovelCreationPresentationTests` 在 iPhone 17 Pro Simulator 为 41 passed、0 failed、0 skipped，`git diff --check` 通过。Stable Debug arm64 真机包已自动签名并明确 `BUILD SUCCEEDED`，`codesign --deep --strict` 通过，已覆盖安装到设备 `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动仅因设备锁定被系统拒绝。最终圆形、列表光学对齐和中文拼音末字提交仍需解锁后真机目视/输入确认。
+
+### 2026-07-14 model-independent novel discussion search
+
+- 搜索能力现在属于小说「讨论」Agent，而不是某个模型的特例。启用全局「网页搜索」后，Grok Web 继续使用原生搜索；OpenAI、Claude 与 Codex 的讨论请求声明 Chat 同款 `search_web` / `scrape_web`，进入现有 `IOSAgentToolEngine`，执行 Chat 的真实搜索器并把结果回填给模型继续回答。
+- `AppShell` 把同一个 `ChatToolRuntime` 注入小说 composition，没有复制搜索 provider、fallback 或第二套网络实现。全局关闭网页搜索时，所有模型都回到无工具讨论；写一段、写整章、Quick Start、润色和剧情状态同步始终不声明搜索工具。
+- 工具循环的文本、完成、上游失败、取消和后台继续仍收口到既有 `NovelLiveModelAdapter` 与 durable generation lifecycle；最多 4 轮，避免模型反复搜索不结束。搜索执行失败会作为工具结果返回模型，上游模型失败则进入小说原有可重试失败终态。
+- 红测试先确认非 Grok 讨论的工具声明为 0；修复后适配器、真实 Chat 搜索执行器、通用工具循环、App 装配与小说生成生命周期共 96 tests passed、0 failed。`git diff --check` 通过。Stable Debug arm64 真机包已使用 Personal Team `89QRFX9548` 完成自动签名并明确 `BUILD SUCCEEDED`，`codesign --deep --strict` 通过，已覆盖安装到设备 `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动仅因设备锁定被系统拒绝。真实 provider 搜索仍需解锁后分别用已配置的 OpenAI、Claude、Codex 与 Grok 模型验证。
+
+### 2026-07-14 manuscript reader title deduplication
+
+- 章节阅读器不再在正文 Markdown 上方重复渲染一组章节名与字数；正文现在直接从自身保存的 Markdown 内容开始，因此带 H1 的正式正文只在正文内保留一次标题，同时顶栏继续保留便于导航识别的章节名。
+- 字数移入顶栏第一行，与左侧「第 N 章」同排并在 180-220pt 的中心标题区域右对齐；第二行仍显示章节名。前后章、版本、编辑、润色和正文内容均未改变。
+- 红测试先确认 `currentChapterTitle` 在 Reader 内被渲染两次，修复后转绿；`IOSNovelCreationWiringTests` 与 `NovelCreationPresentationTests` 在 iPhone 17 Pro Simulator 为 39 passed、0 failed、0 skipped，`git diff --check` 通过。Stable Debug arm64 真机包增量构建成功，`codesign --deep --strict` 通过并已覆盖安装到设备 `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动仅因设备锁定被系统拒绝，顶栏最终宽度待解锁后目视确认。
+
+### 2026-07-14 Grok discussion web search and actionable stream failure
+
+- 真机项目「重回大唐」的失败 run 已从项目文件取证：模型先输出「我先查核名单与关键人物背景」，约 6 分钟后以 `provider_stream_failed / upstream request failed` 结束；没有工具拒绝事件，partial 回复已按既有 durable run 路径保存。根因边界是小说 Grok 请求此前始终传 `disableSearch: true`，所以该句只是模型描述计划，并未实际获得搜索能力。
+- 该切口先接通了小说「讨论」的 Grok Web 原生搜索并继续关闭 Grok Web 记忆；随后已由上方 model-independent slice 扩展为 OpenAI、Claude、Codex 复用 Chat 搜索工具循环。写一段、写整章、Quick Start、润色和剧情状态提取/重建仍保持搜索关闭。
+- `provider_stream_failed` 与 `grok_web_stream_failed` 现在明确显示「模型上游服务在生成过程中中断，已保留当前回复，可以重试」，不再把真实上游中断泛化成无原因的暂时失败。
+- `NovelLiveModelAdapterTests` 与 `NovelCreationPresentationTests` 定点为 35 passed；加上生成生命周期、Session ViewModel 和设置回归共 122 passed、1 failed，唯一失败是既有 `IOSSettingsWiringTests.testStreamingBlockMarkdownToggleIsConsumedByTableBlockRenderer` 仍查找旧 Markdown 表格渲染源码字符串，单独重跑同样失败，与小说/Grok 改动无关；相关 Grok payload test 单独通过。`git diff --check` 通过。Stable Debug arm64 真机包自动签名构建明确 `BUILD SUCCEEDED`，`codesign --deep --strict` 通过并已覆盖安装到设备 `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动仅因设备锁定被系统拒绝。真实 Grok 搜索结果仍需解锁后在讨论模式发起需要时效知识的问题验证。
+
+### 2026-07-14 manuscript directory framing and chapter titles
+
+- 「正文」目录不再依赖 system plain List 的行背景，改为页面背景上的单个紧凑章节组：使用现有 `surface` 与 `borderSoft` 形成明确外框，行高收紧、分隔线内缩，并删除整行可点击时重复出现的右侧箭头。
+- 章节显示标题优先保留用户明确编辑过的标题；旧章节若仍是「第 N 章」占位名，会从正文首个 Markdown/章节标题行识别真实题名，因此现有「第一章 破庙里的活人气」可直接显示为「破庙里的活人气」。同一显示规则也用于章节阅读器和收录目标名称，不迁移或重写旧正文。
+- 整章 Prompt 升级为 v3，要求在同一次正文生成中给出一个 Markdown H1 章节题名；收录 Sheet 直接从候选正文预填章节标题，仍允许用户编辑。没有新增标题总结请求、provider 调用、后台任务或第二条持久化链路；v1/v2 Prompt 文本继续保留供历史 receipt 校验。
+- `NovelCreationPresentationTests`、`IOSNovelCreationWiringTests`、`NovelPromptCatalogTests` 为 43 passed；`NovelGenerationReducerTests`、`NovelDocumentValidationTests`、`NovelCollectionTests`、`NovelGenerationLifecycleTests` 为 80 passed，均 0 failed、0 skipped；`git diff --check` 通过。Stable Debug arm64 真机包自动签名构建成功并通过 `codesign --deep --strict`，已覆盖安装到设备 `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动仅因设备锁定被系统拒绝，最终目录视觉待解锁后确认。
+
+### 2026-07-14 manuscript reader directory simplification
+
+- 「正文」Tab 现在只承担阅读入口：首屏直接显示「目录」和当前分支的正式章节，点击章节沿既有原生 push 进入阅读器；不再展示分支同步卡片、Quick Start 状态、技术性正文说明或不可交互的创作统计。
+- 「主线已同步」「对话消息」「存档点」等内部状态已从正文页移除。同步失败与重试继续由创作页现有 Banner 负责，版本历史、编辑和整章润色继续留在章节阅读器右上角菜单，没有删除领域能力。
+- 目录改为紧凑的原生 plain List，章节标题直接使用保存的标题，不再拼成「第 1 章 · 第 1 章」；保留章节序号、字数和进入提示。新增 reader-first wiring 契约，`IOSNovelCreationWiringTests` 在 iPhone 17 Pro Simulator 为 15 passed、0 failed、0 skipped，`git diff --check` 通过。
+- 章节阅读器右上角菜单删除叠在系统 toolbar glass 内部的第二层 `ComposerDockCircleGlass`，只保留一层圆形 toolbar 按钮。底部整块相连的章节导航拆为两个独立 40pt 高玻璃胶囊，取消中间分隔线与 360pt 底板，水平分置并将上下额外留白从 16pt 收至 2pt，使控件更小、更靠近底部安全区。
+- Stable Debug arm64 真机包完成自动签名构建和 `codesign --deep --strict` 校验，已覆盖安装并由 `devicectl` 成功启动到设备 `94918570-0680-5B93-8E38-7E6B355D4426`。
+
+### 2026-07-14 retryable state sync no longer freezes drafting
+
+- 剧情同步的 `.pending` 与已经失败等待重试的 `.retryable` 现在有明确不同的创作语义：真正运行的同步继续保持单项目事务串行，并展示阶段、等待秒数和已提交分段进度；失败态不再伪装成仍在运行。
+- 同分支只有 retryable `manualSync` 时，用户可以继续讨论、生成一段或生成整章候选；生成链路的 ViewModel、注入规划、领域 reducer 与历史气泡重试投影使用同一条阻塞规则，不只是在 UI 上放开按钮。候选正文仍不能收录或润色，直到剧情状态重试成功，避免正式正文与派生状态继续分叉。
+- 失败提示保留模型错误原因，并明确说明「仍可继续讨论或生成正文；收录前请重试」。生产调用链红测试先复现 `canSend == false`，修复后验证新候选可完整生成、原 retryable pending 保留且收录仍被阻止；相关 6 个测试类在 iPhone 17 Pro Simulator 为 121 passed、0 failed、0 skipped。
+- Stable Debug arm64 真机包使用 Personal Team `89QRFX9548` 自动签名构建成功，`codesign --deep --strict` 通过，已覆盖安装并由 `devicectl` 成功启动到设备 `94918570-0680-5B93-8E38-7E6B355D4426`。
+
+### 2026-07-14 novel discussion and prose intent differentiation
+
+- 输入区仍只保留一个原生创作方式 `Menu`，菜单按「构思 / 写正文」分组，用户可一步选择「讨论 / 写一段 / 写整章」；没有增加常驻分段控件、第二个玻璃按钮或 Sheet。三种状态分别使用对应占位文案，切到讨论不会覆盖上次正文颗粒度。
+- 讨论 Prompt 升级为小说策划与编辑行为：针对剧情因果、人物欲望与动机、关系、世界规则和节奏给出具体判断；信息确实影响建议时只问一个关键问题，提供 2-4 个有取舍的选择、明确推荐项，并允许用户直接输入自己的方案。讨论现在同时注入当前正文尾部，不再只凭资料和剧情状态泛谈。
+- 「写一段」明确只完成一个场景或局部剧情节拍，不擅自收束整章；「写整章」明确要求完整章节弧线、持续推进和结尾落点。候选气泡与主操作分别显示「正文片段 / 完整章节」和「收录到本章 / 作为新章收录」，但两者仍复用同一生成、后台持久化、候选与收录事务链路。
+- 新 Prompt 使用 v2，文档校验按 receipt 中的历史版本解析固定 Prompt 证据，保留 discussion、continuation 和 whole-chapter v1 文本，因此现有项目不会因升级 Prompt 被判为损坏。12 个相关测试类在 iPhone 17 Pro Simulator 为 210 passed、0 failed、0 skipped，`git diff --check` 通过。
+- Android 普通 Chat 已有完整 `ask_user` 工具与选项/自由输入卡片；iOS 普通 Chat 和小说模型请求尚无通用工具调用链，只有模型议会专用的自由文本提问 Sheet。本轮没有复制一套伪工具或引入暂停/恢复状态机，讨论问题继续通过普通聊天回复与输入框闭环。
+- Stable Debug arm64 真机包使用 Personal Team `89QRFX9548` 自动签名构建成功，第二次传输已覆盖安装到设备 `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动仅因设备锁定被系统拒绝。
+
+### 2026-07-14 novel state sync leniency and first-chunk feedback
+
+- 真机项目「大明」再次取证确认：最新重试已创建新的模型请求 receipt，但第一段结果因模型改写了 evidence、未能逐字出现在正文中而在提交前失败，所以 `manualSyncProgress` 仍为空；界面显示 0% 并非请求未启动，而是此前百分比只能来自已经原子提交的正文分段。
+- 手动剧情同步不再因一条不匹配的事实依据否决整次重建。能够在当前正文分段中定位的事件、人物状态、关系、伏笔和设定建议继续进入正式事实；模型改写或杜撰依据的单条记录会被丢弃，剧情摘要和分支大纲仍可更新。未解析人物也按保留下来的事实重新计算，避免模型冗余字段再次阻断同步；正式正文始终不被模型结果改写。
+- 结构化输出只放宽模型常见外壳：接受单个 JSON 对象外的 Markdown 代码围栏、思考/说明文字，仍拒绝多对象、截断 JSON、重复键、未知/缺失字段、错误类型和语义冲突，不做内容修补或二次模型请求。
+- 首段尚未提交时不再展示会长期停住的 0% 进度条，改为明确显示「正在分析第 N 段」、真实等待秒数和单段 60 秒上限；有耐久分段进度后才显示真实正文百分比。相关 structured output、manual sync、fact lifecycle、document validation、Prompt、presentation 和 session 回归在 iPhone 17 Pro Simulator 为 132 passed、0 failed、0 skipped，`git diff --check` 通过。
+- Stable Debug arm64 真机包使用 Personal Team `89QRFX9548` 自动签名并明确 `BUILD SUCCEEDED`，已覆盖安装到设备 `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动仅因设备锁定被系统拒绝，解锁后可在「大明」项目直接重试现有待同步操作。
+
+### 2026-07-14 novel state sync progress visibility
+
+- 创作页在剧情状态同步实际运行时展示紧凑进度区：百分比来自 durable `manualSyncProgress.consumedCharacterCount` 与正式正文总字符数，不使用随时间增长的虚假完成度；分块完成后同时显示已完成段数。
+- 当前模型分段尚未提交时，每秒显示该段真实等待时间，并明确提示单段请求最长 60 秒。重试只读取当前 attempt 的 generation receipt 作为计时起点，不会把上一次失败的旧时间带进来；终止后进度观察任务随原操作 owner 一起清除。
+- 没有改变同步 Prompt、分块算法、provider、项目 schema、重试或 60 秒超时。自动同步与显式重试两条生产路径均有进度发布契约；6 个受影响测试类在 iPhone 17 Pro Simulator 为 115 passed、0 failed、0 skipped，`git diff --check` 通过。
+- Stable Debug arm64 真机包使用 Personal Team `89QRFX9548` 自动签名并明确 `BUILD SUCCEEDED`，已覆盖安装到 iPhone Air；自动启动只因设备锁定被系统拒绝，因此进度区最终视觉与真实 provider 百分比变化仍需解锁后操作确认。
+
+### 2026-07-14 retryable novel state sync entry repair
+
+- 真机项目文件确认进入「大明」时没有活跃正文 run，只有一条 `manualSync`、`retryable` 的失败记录，最近错误为模型返回 malformed JSON。此前 workspace appearance 把 `pending` 和已经失败的 `retryable` 都自动恢复，导致每次进入都重新请求，并把阻塞原因泛化成「有正文操作正在处理」。
+- 自动恢复现在只接续真正未完成的 `pending`；`retryable` 保留原错误并等待用户明确点击「重试」，不再因进入项目而重复请求。Session 投影把 `manualSync` pending 显示为「剧情状态同步未完成」，collection pending 才继续使用正文操作提示；现有 malformed JSON 失败显示可执行的中文说明。
+- 没有修改项目 schema、pending 记录、provider、60 秒上限或手动重试调用链。红测试先复现了自动重试与错误 blocker；`NovelSessionViewModelTests`、`NovelSessionReplayTests`、`NovelFactTransactionLifecycleTests`、`IOSNovelCreationWiringTests` 及新增 presentation 定点均在 iPhone 17 Pro Simulator 通过，`git diff --check` 通过。
+- Stable Debug arm64 真机包使用 Personal Team `89QRFX9548` 自动签名并明确 `BUILD SUCCEEDED`，第二次设备传输成功覆盖安装到 iPhone Air；自动启动因设备锁定被系统拒绝，因此进入项目后的最终提示仍需解锁后人工确认。
+
 ### 2026-07-14 novel state synchronization end-to-end closure
 
 - 真机项目「大明」的反复提示已用持久化文件定位：分支是 `needsSync`，同一条 `manualSync` 已落成 `retryable`，最近五次请求都在 60 秒内没有首个有效输出；单次估算输入 17,712 tokens，其中最近 12 条讨论约 14,195 tokens，而正式正文约 2,904 tokens。界面每次进入展示的是同一条遗留任务，不是每次新建失败。
 - 手动剧情状态重建现在只使用正式正文、现有剧情状态和项目资料，不再把最近聊天消息重复注入；durable pending 的 session cursor 仍原样保留给最终 checkpoint，未改变项目格式、提示词、结构化输出或 60 秒超时。
-- workspace 现有单飞调度器可恢复同一分支唯一的 `.pending` / `.retryable` `manualSync`，直接走既有 `retryPending`，不会制造第二条任务；项目首次真实出现、切分支和从后台回到 active 都走同一入口。每次触发最多一次 provider 请求，没有计时器、退避器或内部重试循环，legacy `collection` pending 仍不自动执行。
+- workspace 现有单飞调度器只自动恢复同一分支唯一且真正未完成的 `.pending` `manualSync`，直接走既有 `retryPending`，不会制造第二条任务；失败后的 `.retryable` 等待用户明确重试。项目首次真实出现、切分支和从后台回到 active 都走同一入口。每次触发最多一次 provider 请求，没有计时器、退避器或内部重试循环，legacy `collection` pending 仍不自动执行。
 - 后台 expiration 现在会同时取消润色、手动状态同步和 pending 重试；同步任务沿既有失败收口把 pending 持久化为 `retryable`。成功仍删除 pending 并发布 `synchronized`，失败保留正文和精确 `lastError`；自动执行期间隐藏无意义的重试 Banner，执行失败后再显示真实原因与手动重试。
 - `NovelFactTransactionLifecycleTests`、`NovelSessionViewModelTests`、`IOSNovelCreationWiringTests` 三组闭环回归，以及 `NovelManualEditSyncTests`、`NovelGenerationLifecycleTests`、`NovelCreationViewModelTests`、`NovelSessionReplayTests`、`NovelInjectionPlannerTests`、`NovelPolishTests` 六组扩展回归均在 iPhone 17 Pro Simulator 通过；`git diff --check`、Stable Debug generic iOS arm64 自动签名构建和 `codesign --deep --strict` 均通过。最终 `app.amber.ios` 已于 20:05 覆盖安装并由 `devicectl` 成功启动到连接的 iPhone Air。真实 provider 对设备上现存 pending 的最终成功结果仍需用户进入「大明」触发后确认，不把构建/模拟器证据冒充真机 E2E。
 
@@ -483,6 +596,8 @@ Do not prioritize C7 multi-tool batching unless the user explicitly changes dire
 
 ## Known Open Items
 
+- 小说项目选择仍有两个非阻塞 P2 边界：缺少“被 busy guard 拒绝的跨项目选择不会取消已挂起 branch intent”的直接 canary；同项目 `selectProject` 当前可在任意 `isPerforming` 期间刷新并改变 selection token，若与普通 mutation 并发，可能跳过其终态 reload。现有 branch preflight race test 有意依赖同项目刷新，不能粗暴改成 busy 时全部禁止，需另行收窄契约。
+- 小说 48ms 展示缓冲已通过 burst/replacement/FIFO 门禁，但 transient tail 经 flush 后继续保留 `granularity` 目前只有代码链路证据，缺一条直接行为断言；不影响当前组合态构建与装机结论。
 - Native Timeline scroll-driver 仍缺 safe-area composer 防双算、terminal 释放、最终高度收缩、rubber-band 手势所有权和真实窗口执行层回放；这些闭环完成前保持实验开关关闭。
 - 默认 clean-list 的动态尾行已从历史 `LazyVStack` 分离，模拟器回放不再复现巨型尾行卸载或数行估算跳变；真机逐行观感与长历史滑动性能尚待当前安装包交互确认，不得用全量 `VStack` 或 offset 补偿替代该结构。
 - `IOS_FIX_PLAN_2026-07-08.md` still marks B3b inline math as `BLOCKED-DESIGN`.

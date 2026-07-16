@@ -20,6 +20,7 @@ struct NovelProjectWorkspaceView: View {
     @State private var isConfirmingPreviousRestore = false
     @State private var branchNotice: String?
     @State private var hasCompletedInitialNavigation = false
+    @State private var routedProjectLoadFailure: String?
 
     init(
         viewModel: NovelCreationViewModel,
@@ -38,6 +39,20 @@ struct NovelProjectWorkspaceView: View {
                 sectionPicker
                 accessBanner
                 content
+            } else if let routedProjectLoadFailure {
+                VStack(spacing: 16) {
+                    ContentUnavailableView(
+                        "无法读取小说项目",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text(routedProjectLoadFailure)
+                    )
+                    Button("重新读取") {
+                        Task { @MainActor in await loadRoutedProject() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isProjectSelectionBlocked)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ProgressView("正在读取小说项目")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -80,10 +95,7 @@ struct NovelProjectWorkspaceView: View {
         }
         .task(id: hasCompletedInitialNavigation) {
             guard hasCompletedInitialNavigation else { return }
-            if !hasLoadedRoutedProject {
-                guard await viewModel.selectProject(projectID) else { return }
-            }
-            viewModel.scheduleAutomaticStateSyncIfNeeded()
+            await loadRoutedProject()
         }
         .overlay(alignment: .top) {
             if let branchNotice {
@@ -360,6 +372,17 @@ struct NovelProjectWorkspaceView: View {
         viewModel.selectedProjectID == projectID &&
             viewModel.projectSnapshot?.project.id == projectID &&
             viewModel.branchSnapshot?.projectID == projectID
+    }
+
+    private func loadRoutedProject() async {
+        routedProjectLoadFailure = nil
+        if !hasLoadedRoutedProject {
+            guard await viewModel.selectProject(projectID) else {
+                routedProjectLoadFailure = viewModel.errorMessage ?? "项目读取失败，请重试。"
+                return
+            }
+        }
+        viewModel.scheduleAutomaticStateSyncIfNeeded()
     }
 
     private var writingRequirementsMaterial: NovelMaterialRecord? {

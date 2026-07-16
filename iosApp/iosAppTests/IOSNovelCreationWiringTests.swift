@@ -24,6 +24,15 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(home.contains("route: .memory"))
     }
 
+    func testNovelDiscussionSharesTheChatSearchRuntime() throws {
+        let appShell = try source("iosApp/AppShell.swift")
+        let composition = try source("iosApp/NovelCreation/NovelCreationComposition.swift")
+
+        XCTAssertTrue(appShell.contains("toolRuntime: backgroundToolRuntime"))
+        XCTAssertTrue(composition.contains("toolRuntime: ChatToolRuntime?"))
+        XCTAssertTrue(composition.contains("toolRuntime: toolRuntime"))
+    }
+
     func testBackgroundLeaseWaitsForExpirationBeforeInterrupting() async {
         var expirationHandler: (@Sendable () -> Void)?
         var endedTaskIDs: [UIBackgroundTaskIdentifier] = []
@@ -142,10 +151,55 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(reader.contains(".toolbar { readerToolbar }"))
         XCTAssertTrue(reader.contains(".safeAreaInset(edge: .bottom"))
         XCTAssertTrue(reader.contains("ComposerDockCircleGlass(tint: nil)"))
+        XCTAssertTrue(reader.contains(".buttonBorderShape(.circle)"))
+        XCTAssertTrue(reader.contains(".sharedBackgroundVisibility(.hidden)"))
+        XCTAssertFalse(reader.contains(".frame(maxWidth: .infinity, alignment: .trailing)"))
+        XCTAssertEqual(
+            reader.components(separatedBy: "Text(currentChapterTitle)").count - 1,
+            1,
+            "The reader should not repeat the derived chapter title above manuscript content."
+        )
+        XCTAssertTrue(reader.contains("Text(currentChapterWordCountTitle)"))
+        XCTAssertTrue(reader.contains("AmberGlassGroup(spacing: 24)"))
+        XCTAssertGreaterThanOrEqual(
+            reader.components(separatedBy: ".amberGlass(cornerRadius: 20)").count - 1,
+            2
+        )
+        XCTAssertFalse(reader.contains(".frame(maxWidth: 360)"))
+        XCTAssertFalse(reader.contains("Divider()\n                .frame(height: 20)"))
         XCTAssertFalse(reader.contains(".navigationBarBackButtonHidden(true)"))
         XCTAssertTrue(session.contains("private func dismissKeyboard()"))
         XCTAssertGreaterThanOrEqual(session.components(separatedBy: "dismissKeyboard()").count - 1, 3)
         XCTAssertTrue(session.contains("#selector(UIResponder.resignFirstResponder)"))
+    }
+
+    func testManuscriptTabIsAReaderDirectoryWithoutInternalWorkflowStats() throws {
+        let chapters = try source("iosApp/NovelCreation/NovelChapterViews.swift")
+
+        XCTAssertTrue(chapters.contains("Text(\"目录\")"))
+        XCTAssertTrue(chapters.contains("onOpenChapter(selection)"))
+        XCTAssertTrue(chapters.contains("NovelPresentation.chapterDisplayTitle("))
+        XCTAssertTrue(chapters.contains("ScrollView"))
+        XCTAssertTrue(chapters.contains(".stroke(AmberTheme.borderSoft"))
+        XCTAssertFalse(chapters.contains("List {"))
+        XCTAssertFalse(chapters.contains("chevron.right"))
+        XCTAssertFalse(chapters.contains("statusSection"))
+        XCTAssertFalse(chapters.contains("sessionSection"))
+        XCTAssertFalse(chapters.contains("quickStartControl"))
+        XCTAssertFalse(chapters.contains("创作记录"))
+        XCTAssertFalse(chapters.contains("存档点"))
+        XCTAssertFalse(chapters.contains("已同步"))
+        XCTAssertFalse(chapters.contains("章节只显示当前分支存档点"))
+    }
+
+    func testWholeChapterCollectionPrefillsTheGeneratedTitleWithoutASecondRequest() throws {
+        let sheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+        let prompts = try source("iosApp/NovelCreation/NovelPromptCatalog.swift")
+
+        XCTAssertTrue(sheets.contains("NovelPresentation.chapterDisplayTitle("))
+        XCTAssertTrue(prompts.contains("Markdown H1 chapter heading"))
+        XCTAssertTrue(prompts.contains("novel.prose-whole-chapter.v3"))
+        XCTAssertFalse(sheets.contains("generateChapterTitle"))
     }
 
     func testNovelComposerRevealsFocusedControlsWithoutPermanentSegmentedChrome() throws {
@@ -244,6 +298,18 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(list.contains(".buttonStyle(.glassProminent)"))
     }
 
+    func testNovelProjectListUsesAQuietInsetRowAndIMECommittedRename() throws {
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+
+        XCTAssertFalse(list.contains("Image(systemName: \"chevron.right\")"))
+        XCTAssertTrue(list.contains("leading: 22, bottom: 6, trailing: 22"))
+        XCTAssertTrue(list.contains(".font(.system(size: 18, weight: .semibold))"))
+        XCTAssertTrue(list.contains(".frame(width: 36, height: 36)"))
+        XCTAssertTrue(list.contains("private func commitNameAndSave()"))
+        XCTAssertTrue(list.contains("#selector(UIResponder.resignFirstResponder)"))
+        XCTAssertTrue(list.contains("DispatchQueue.main.async"))
+    }
+
     func testProjectListStartsNativePushBeforeLoadingTheWorkspace() throws {
         let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
         let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
@@ -310,6 +376,62 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("更早的创作记录"))
         XCTAssertTrue(sessionViewModel.contains("projectionCache?.key == key"))
         XCTAssertTrue(sessionViewModel.contains("func projectedListModel("))
+    }
+
+    func testNovelWorkspaceLoadFailureKeepsAnInlineRetryPath() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+
+        XCTAssertTrue(workspace.contains("routedProjectLoadFailure"))
+        XCTAssertTrue(workspace.contains("ContentUnavailableView("))
+        XCTAssertTrue(workspace.contains("Button(\"重新读取\")"))
+        XCTAssertTrue(workspace.contains("await loadRoutedProject()"))
+    }
+
+    func testNovelProjectSettingsExportsPackageWithoutStoppingMarkdownGeneration() throws {
+        let settings = try source("iosApp/NovelCreation/NovelProjectSettingsDetailView.swift")
+
+        XCTAssertTrue(settings.contains("Label(\"导出项目包\", systemImage: \"archivebox\")"))
+        XCTAssertTrue(settings.contains("NovelProjectFileDocument(data: artifact.data)"))
+        XCTAssertTrue(settings.contains("contentType: .amberNovelProject"))
+        let markdownExport = try XCTUnwrap(settings.range(of: "private func exportMarkdown()"))
+        let resultHandler = try XCTUnwrap(settings.range(
+            of: "private func handleExportResult",
+            range: markdownExport.upperBound..<settings.endIndex
+        ))
+        let markdownBody = settings[markdownExport.lowerBound..<resultHandler.lowerBound]
+        XCTAssertFalse(markdownBody.contains("stopActiveRunsForProjectOperation"))
+    }
+
+    func testStateSyncActivityIsProjectScopedAndScheduledSyncKeepsBackgroundLease() throws {
+        let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        XCTAssertTrue(viewModel.contains("let projectID: NovelProjectID"))
+        XCTAssertTrue(viewModel.contains("let branchID: NovelBranchID"))
+        XCTAssertTrue(session.contains("activity.projectID == workspace.selectedProjectID"))
+        XCTAssertTrue(session.contains("activity.branchID == workspace.selectedBranchID"))
+        let backgroundCheck = try XCTUnwrap(viewModel.range(
+            of: "private func hasActiveBackgroundGeneration()"
+        ))
+        let loadProjects = try XCTUnwrap(viewModel.range(
+            of: "func loadProjects(",
+            range: backgroundCheck.upperBound..<viewModel.endIndex
+        ))
+        let backgroundBody = viewModel[backgroundCheck.lowerBound..<loadProjects.lowerBound]
+        XCTAssertTrue(backgroundBody.contains("automaticStateSyncTask != nil"))
+    }
+
+    func testCreateAndImportEntrypointsUseTheProjectSelectionBlock() throws {
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
+
+        XCTAssertGreaterThanOrEqual(
+            list.components(separatedBy: ".disabled(viewModel.isProjectSelectionBlocked)").count - 1,
+            5
+        )
+        XCTAssertTrue(viewModel.contains(
+            "if let projectID, selectedProjectID != projectID, isProjectSelectionBlocked"
+        ))
     }
 
     func testNovelWorkspaceDoesNotRepeatRoutineStatusAboveAndInsideConversation() throws {

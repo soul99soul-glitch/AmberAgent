@@ -590,9 +590,14 @@ enum NovelGenerationDocumentValidator {
               injection.runID == run.id else {
             return
         }
-        let promptHash = NovelDocumentValidator.sha256(
-            NovelPromptCatalog.template(for: promptKind(for: run)).systemText
-        )
+        guard let promptText = NovelPromptCatalog.systemText(
+            for: promptKind(for: run),
+            version: injection.promptVersion
+        ) else {
+            issues.append("Run \(run.id) has an unknown Prompt version.")
+            return
+        }
+        let promptHash = NovelDocumentValidator.sha256(promptText)
         let promptSections = injection.sections.filter {
             if case .fixedPrompt = $0.kind { return true }
             return false

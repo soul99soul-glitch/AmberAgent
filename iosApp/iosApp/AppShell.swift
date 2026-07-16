@@ -58,7 +58,8 @@ struct AppShell: View {
         let novelCreationErrorMessage: String?
         do {
             novelCreationViewModel = try NovelCreationComposition.makeViewModel(
-                sharedSettings: sharedSettingsStore
+                sharedSettings: sharedSettingsStore,
+                toolRuntime: backgroundToolRuntime
             )
             novelCreationErrorMessage = nil
         } catch {

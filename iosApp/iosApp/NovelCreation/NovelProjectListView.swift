@@ -97,6 +97,7 @@ struct NovelProjectListView: View {
                     Image(systemName: "square.and.arrow.down")
                 }
                 .accessibilityLabel("导入小说项目")
+                .disabled(viewModel.isProjectSelectionBlocked)
             }
 
             ToolbarSpacer(.fixed, placement: .topBarTrailing)
@@ -192,6 +193,7 @@ struct NovelProjectListView: View {
             .buttonBorderShape(.capsule)
             .controlSize(.large)
             .accessibilityLabel("新建小说项目")
+            .disabled(viewModel.isProjectSelectionBlocked)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 10)
@@ -211,7 +213,11 @@ struct NovelProjectListView: View {
                         NovelProjectRow(project: project)
                     }
                     .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .disabled(
+                        viewModel.isProjectSelectionBlocked &&
+                            viewModel.selectedProjectID != project.id
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 22, bottom: 6, trailing: 22))
                     .listRowBackground(AmberTheme.background)
                     .listRowSeparatorTint(AmberTheme.borderSoft)
                     .contextMenu {
@@ -268,11 +274,13 @@ struct NovelProjectListView: View {
                 activeSheet = .create
             }
             .buttonStyle(.borderedProminent)
+            .disabled(viewModel.isProjectSelectionBlocked)
 
             Button("导入项目") {
                 isImportingPackage = true
             }
             .buttonStyle(.bordered)
+            .disabled(viewModel.isProjectSelectionBlocked)
         }
     }
 
@@ -351,14 +359,14 @@ private struct NovelProjectRow: View {
     let project: NovelProjectSummary
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Image(systemName: project.loadError != nil
                 ? "exclamationmark.triangle"
                 : project.isDegraded ? "exclamationmark.book.closed" : "text.book.closed")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(project.isDegraded ? AmberTheme.accentAmber : AmberTheme.accent)
-                .frame(width: 32, height: 32)
-                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 7))
+                .frame(width: 36, height: 36)
+                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.loadError == nil ? project.name : "无法读取的项目")
@@ -381,12 +389,6 @@ private struct NovelProjectRow: View {
                 .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            if project.loadError == nil {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted2)
-            }
         }
         .frame(minHeight: 44)
         .contentShape(Rectangle())
@@ -472,7 +474,7 @@ private struct NovelProjectCreateSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("创建") { create() }
-                        .disabled(!canCreate || viewModel.isPerforming)
+                        .disabled(!canCreate || viewModel.isProjectSelectionBlocked)
                 }
             }
         }
@@ -512,6 +514,7 @@ struct NovelProjectRenameSheet: View {
     let currentName: String
     let canRename: Bool
     @State private var name: String
+    @FocusState private var isNameFocused: Bool
 
     init(viewModel: NovelCreationViewModel, project: NovelProjectSummary) {
         self.viewModel = viewModel
@@ -531,6 +534,9 @@ struct NovelProjectRenameSheet: View {
         NavigationStack {
             Form {
                 TextField("小说名称", text: $name)
+                    .focused($isNameFocused)
+                    .submitLabel(.done)
+                    .onSubmit(commitNameAndSave)
             }
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
@@ -541,11 +547,10 @@ struct NovelProjectRenameSheet: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
+                    Button("保存") { commitNameAndSave() }
                         .disabled(
                             !canRename ||
-                                name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                                name.trimmingCharacters(in: .whitespacesAndNewlines) == currentName
+                                name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         )
                 }
             }
@@ -554,9 +559,27 @@ struct NovelProjectRenameSheet: View {
         .presentationDragIndicator(.visible)
     }
 
-    private func save() {
+    private func commitNameAndSave() {
+        isNameFocused = false
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        DispatchQueue.main.async {
+            save(name.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    private func save(_ committedName: String) {
+        guard !committedName.isEmpty else { return }
+        guard committedName != currentName else {
+            dismiss()
+            return
+        }
         Task { @MainActor in
-            await viewModel.renameProject(name)
+            await viewModel.renameProject(committedName)
             guard viewModel.errorMessage == nil else { return }
             dismiss()
         }
@@ -630,7 +653,7 @@ struct NovelProjectImportSheet: View {
                         .disabled(viewModel.isPerforming)
                 }
             }
-            .disabled(viewModel.isPerforming)
+            .disabled(viewModel.isProjectSelectionBlocked)
             .overlay {
                 if viewModel.isPerforming { ProgressView() }
             }

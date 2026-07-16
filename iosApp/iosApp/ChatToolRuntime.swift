@@ -123,6 +123,19 @@ final class ChatToolRuntime {
         self.mcpManager = mcpManager
     }
 
+    /// Search-only executor set for autonomous agent surfaces that already use
+    /// the global Web Search switch as their consent boundary.
+    func discussionSearchToolExecutors() -> [String: any IOSToolExecutor] {
+        guard sharedSettings.snapshot.enableWebSearch else { return [:] }
+        return Dictionary(uniqueKeysWithValues: IOSSearchExecutor.supportedToolNames.map { name in
+            (name, IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                let call = self.toolCall(name: toolName, input: arguments)
+                return .filled(await self.dispatchSearchToolCall(call))
+            })
+        })
+    }
+
     func backgroundToolExecutors(
         providerSetting: ProviderSetting,
         params: TextGenerationParams,

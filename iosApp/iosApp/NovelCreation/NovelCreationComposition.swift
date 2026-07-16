@@ -6,12 +6,14 @@ enum NovelCreationComposition {
 
     static func makeViewModel(
         sharedSettings: IOSSharedSettingsStore,
+        toolRuntime: ChatToolRuntime? = nil,
         rootDirectory: URL? = nil
     ) throws -> NovelCreationViewModel {
         if let rootDirectory {
             return NovelCreationViewModel(
                 creation: makeCreation(
                     sharedSettings: sharedSettings,
+                    toolRuntime: toolRuntime,
                     rootDirectory: rootDirectory
                 )
             )
@@ -22,6 +24,7 @@ enum NovelCreationComposition {
         let directory = try NovelFileProjectRepository.defaultRootDirectory()
         let creation = makeCreation(
             sharedSettings: sharedSettings,
+            toolRuntime: toolRuntime,
             rootDirectory: directory
         )
         productionCreation = creation
@@ -30,10 +33,14 @@ enum NovelCreationComposition {
 
     private static func makeCreation(
         sharedSettings: IOSSharedSettingsStore,
+        toolRuntime: ChatToolRuntime?,
         rootDirectory: URL
     ) -> any NovelCreation {
         let repository = NovelFileProjectRepository(rootDirectory: rootDirectory)
-        let modelAdapter = NovelLiveModelAdapter(sharedSettings: sharedSettings)
+        let modelAdapter = NovelLiveModelAdapter(
+            sharedSettings: sharedSettings,
+            toolRuntime: toolRuntime
+        )
         return DefaultNovelCreation(
             repository: repository,
             modelRunner: modelAdapter,

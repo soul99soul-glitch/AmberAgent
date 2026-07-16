@@ -353,9 +353,9 @@ enum NovelManualSyncProgressReducer {
             }
         }
 
-        let validated = try strictRebuild(rebuild)
-        try NovelFactTransactionReducer.validateManualChunkOutput(
-            validated,
+        let decoded = try strictRebuild(rebuild)
+        let validated = try NovelFactTransactionReducer.validateManualChunkOutput(
+            decoded,
             evidenceSource: selection.manuscript,
             accumulated: existingProgress?.accumulatedRebuild,
             baseState: input.baseStateSnapshot,
@@ -725,7 +725,7 @@ enum NovelManualSyncProgressValidator {
                 issues.append("Pending manual synchronization \(pending.id) has invalid chunk evidence.")
             }
             do {
-                try NovelFactTransactionReducer.validateManualChunkOutput(
+                _ = try NovelFactTransactionReducer.validateManualChunkOutput(
                     chunk.rebuild,
                     evidenceSource: manuscript,
                     accumulated: accumulated,

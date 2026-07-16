@@ -821,7 +821,7 @@ private extension NovelSessionViewModel {
         case .discussion:
             return true
         case .prose:
-            return branchPendingOperations.isEmpty
+            return !branchPendingOperations.contains(where: \.blocksProseGeneration)
         case .polish:
             return branch.syncStatus == .synchronized && branchPendingOperations.isEmpty
         case .quickStart:

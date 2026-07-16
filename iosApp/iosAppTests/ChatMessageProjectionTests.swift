@@ -150,6 +150,49 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertEqual(completed.first?.kind, "text")
     }
 
+    func testTextKit1LongParagraphMeasuresEachAppendAtLineGranularity() {
+        let width: CGFloat = 337.3
+        let view = ParagraphUIView.makeTextKit1View()
+        view.frame = CGRect(x: 0, y: 0, width: width, height: 1)
+        XCTAssertTrue(view.usesTextKit1)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 17),
+            .foregroundColor: UIColor.label
+        ]
+        var text = "连续正文开始。" + String(
+            repeating: "这是一段没有空行分隔的长篇连续正文，用来复现真实回答累计变长后同一段落仍在增长的布局压力。",
+            count: 180
+        )
+        func contents() -> NSMutableAttributedString {
+            NSMutableAttributedString(string: text, attributes: attributes)
+        }
+
+        view.setParagraphContents(contents(), lineSpacing: 4, animatedByWord: false)
+        var measuredHeight = view.sizeThatFits(CGSize(
+            width: width,
+            height: .greatestFiniteMagnitude
+        )).height
+        view.frame.size.height = measuredHeight
+        var positiveGrowth: [CGFloat] = []
+
+        for _ in 0..<60 {
+            text += String(repeating: "流", count: 12)
+            view.setParagraphContents(contents(), lineSpacing: 4, animatedByWord: false)
+            let nextHeight = view.sizeThatFits(CGSize(
+                width: width,
+                height: .greatestFiniteMagnitude
+            )).height
+            if nextHeight > measuredHeight + 0.5 {
+                positiveGrowth.append(nextHeight - measuredHeight)
+            }
+            measuredHeight = nextHeight
+            view.frame.size.height = nextHeight
+        }
+
+        XCTAssertGreaterThanOrEqual(positiveGrowth.count, 30)
+        XCTAssertLessThanOrEqual(positiveGrowth.max() ?? .greatestFiniteMagnitude, 26)
+    }
+
     func testStreamingTableParserDoesNotLeakTrimmedTrailingRowAsPipeText() {
         let markdown = """
         | 阶段 | 能力 |
@@ -477,6 +520,33 @@ final class ChatMessageProjectionTests: XCTestCase {
 
         ParagraphUIViewCache.shared.recycle(first)
         ParagraphUIViewCache.shared.recycle(second)
+    }
+
+    func testParagraphViewCacheDoesNotCrossTextLayoutEngines() {
+        let contents = NSMutableAttributedString(string: "layout engine isolation")
+        let textKit1 = ParagraphUIViewCache.shared.createOrReuseParagraphUIView(
+            contents: contents,
+            lineSpacing: nil,
+            usesTextKit1: true
+        )
+        XCTAssertTrue(textKit1.usesTextKit1)
+        ParagraphUIViewCache.shared.recycle(textKit1)
+
+        let textKit2 = ParagraphUIViewCache.shared.createOrReuseParagraphUIView(
+            contents: contents,
+            lineSpacing: nil,
+            usesTextKit1: false
+        )
+        XCTAssertFalse(textKit2.usesTextKit1)
+        ParagraphUIViewCache.shared.recycle(textKit2)
+
+        let reusedTextKit1 = ParagraphUIViewCache.shared.createOrReuseParagraphUIView(
+            contents: contents,
+            lineSpacing: nil,
+            usesTextKit1: true
+        )
+        XCTAssertTrue(reusedTextKit1.usesTextKit1)
+        ParagraphUIViewCache.shared.recycle(reusedTextKit1)
     }
 
     func testInitialLoadRowsDoNotAnimateInsertion() {
@@ -1102,6 +1172,58 @@ final class ChatMessageProjectionTests: XCTestCase {
         )
 
         XCTAssertEqual(remembered, Set([assistantID]))
+    }
+
+    func testNativeTimelineKeepsLiveTailModelAcrossGenerationCompletion() throws {
+        let assistant = UIMessage.companion.assistant(prompt: "流式回答")
+        let messageID = ChatMessageProjector.messageId(for: assistant)
+        let store = ChatRenderStateStore()
+        let streamingRow = ChatMessageRowModel(
+            rowId: messageID,
+            messageId: messageID,
+            message: assistant,
+            role: MessageRole.assistant,
+            parts: assistant.parts,
+            index: 0,
+            isLast: true,
+            isStreaming: true,
+            hasEverStreamed: true,
+            canAnimateInsertion: false
+        )
+        let streamingState = store.stateForRow(
+            streamingRow,
+            isLiveRenderingFarFromBottom: false
+        )
+        let streamingModel = try XCTUnwrap(store.liveTailModel(
+            for: streamingRow,
+            renderState: streamingState,
+            isGenerationActive: true
+        ))
+        let completedRow = ChatMessageRowModel(
+            rowId: messageID,
+            messageId: messageID,
+            message: assistant,
+            role: MessageRole.assistant,
+            parts: assistant.parts,
+            index: 0,
+            isLast: true,
+            isStreaming: false,
+            hasEverStreamed: true,
+            canAnimateInsertion: false
+        )
+        let completedState = store.stateForRow(
+            completedRow,
+            isLiveRenderingFarFromBottom: false
+        )
+
+        let completedModel = store.liveTailModel(
+            for: completedRow,
+            renderState: completedState,
+            isGenerationActive: false
+        )
+
+        XCTAssertNotNil(completedModel)
+        XCTAssertTrue(streamingModel === completedModel)
     }
 
     func testNativeStaticTimelineRendererMemoryResetsOnConversationBoundary() {

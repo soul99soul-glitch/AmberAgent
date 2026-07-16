@@ -124,6 +124,7 @@ enum NovelDocumentValidator {
         validateSettingProposalTransition(from: current, to: next, issues: &issues)
         validatePendingOperationTransition(from: current, to: next, issues: &issues)
         validateFactAttemptTransition(from: current, to: next, issues: &issues)
+        validateNewUndoTransitions(from: current, to: next, issues: &issues)
         NovelGenerationDocumentValidator.validateTransition(
             from: current,
             to: next,
@@ -132,6 +133,31 @@ enum NovelDocumentValidator {
 
         if !issues.isEmpty {
             throw NovelError.invalidDocument(Array(Set(issues)).sorted())
+        }
+    }
+
+    private static func validateNewUndoTransitions(
+        from current: NovelProjectDocumentV1,
+        to next: NovelProjectDocumentV1,
+        issues: inout [String]
+    ) {
+        for operation in next.appliedOperations.dropFirst(current.appliedOperations.count) {
+            guard operation.kind == .undoBranchHead,
+                  case let .branchHeadMoved(
+                      _, branchID, fromCheckpointID, toCheckpointID, _, _
+                  ) = operation.outcome,
+                  let branch = current.branches.first(where: { $0.id == branchID }),
+                  let from = current.checkpoints.first(where: { $0.id == fromCheckpointID }) else {
+                continue
+            }
+            let expected = NovelBranchSemantics.undoTarget(
+                for: from,
+                branch: branch,
+                checkpoints: current.checkpoints
+            )
+            if branch.headCheckpointID != fromCheckpointID || expected?.id != toCheckpointID {
+                issues.append("A new branch undo did not use the current semantic target.")
+            }
         }
     }
 
@@ -649,10 +675,21 @@ enum NovelDocumentValidator {
                     issues.append("Checkpoint \(checkpoint.id) has no source candidate.")
                     continue
                 }
+                let baseMatches: Bool
+                if checkpoint.kind == .collection, let parentID = checkpoint.parentCheckpointID {
+                    baseMatches = NovelCandidateSemantics.collectionBaseMatches(
+                        candidate,
+                        targetCheckpointID: parentID,
+                        targetHeadRevision: checkpoint.baseHeadRevision,
+                        in: document
+                    )
+                } else {
+                    baseMatches = candidate.baseCheckpointID == checkpoint.parentCheckpointID &&
+                        candidate.baseHeadRevision == checkpoint.baseHeadRevision
+                }
                 if candidate.branchID != checkpoint.createdOnBranchID ||
                     candidate.sessionID != sourceBranch.sessionID ||
-                    candidate.baseCheckpointID != checkpoint.parentCheckpointID ||
-                    candidate.baseHeadRevision != checkpoint.baseHeadRevision {
+                    !baseMatches {
                     issues.append("Checkpoint \(checkpoint.id) crosses its source candidate branch or base.")
                 }
                 guard let sourceMessage = session.messages.first(where: {
@@ -761,7 +798,11 @@ enum NovelDocumentValidator {
                       source.kind == candidate.kind,
                       source.content == candidate.content,
                       source.sourceChapterVersionID == candidate.sourceChapterVersionID,
-                      source.baseCheckpointID == candidate.baseCheckpointID,
+                      NovelCandidateSemantics.cloneBaseMatches(
+                          source,
+                          currentCheckpointID: candidate.baseCheckpointID,
+                          in: document
+                      ),
                       source.createdAt <= candidate.createdAt,
                       source.collectedCheckpointID != nil,
                       candidate.status != .inheritedReadOnly else {
@@ -824,9 +865,19 @@ enum NovelDocumentValidator {
                 if checkpoint.sourceCandidateID != candidate.id {
                     issues.append("Candidate \(candidate.id) and collected checkpoint disagree.")
                 }
-                if checkpoint.createdOnBranchID != candidate.branchID ||
-                    checkpoint.parentCheckpointID != candidate.baseCheckpointID ||
-                    checkpoint.baseHeadRevision != candidate.baseHeadRevision {
+                let baseMatches: Bool
+                if checkpoint.kind == .collection, let parentID = checkpoint.parentCheckpointID {
+                    baseMatches = NovelCandidateSemantics.collectionBaseMatches(
+                        candidate,
+                        targetCheckpointID: parentID,
+                        targetHeadRevision: checkpoint.baseHeadRevision,
+                        in: document
+                    )
+                } else {
+                    baseMatches = checkpoint.parentCheckpointID == candidate.baseCheckpointID &&
+                        checkpoint.baseHeadRevision == candidate.baseHeadRevision
+                }
+                if checkpoint.createdOnBranchID != candidate.branchID || !baseMatches {
                     issues.append("Candidate \(candidate.id) was collected across a branch or base.")
                 }
             } else if candidate.status == .collected || candidate.status == .adopted {
@@ -985,8 +1036,12 @@ enum NovelDocumentValidator {
                 if pending.rebuildBaseCheckpointID != nil {
                     issues.append("Collection pending operation \(pending.id) contains a rebuild base.")
                 }
-                if candidate.baseCheckpointID != pending.baseCheckpointID ||
-                    candidate.baseHeadRevision != pending.baseHeadRevision {
+                if !NovelCandidateSemantics.collectionBaseMatches(
+                    candidate,
+                    targetCheckpointID: pending.baseCheckpointID,
+                    targetHeadRevision: pending.baseHeadRevision,
+                    in: document
+                ) {
                     issues.append("Pending operation \(pending.id) does not match its candidate base guard.")
                 }
                 if candidate.kind != .prose ||
@@ -1267,11 +1322,25 @@ enum NovelDocumentValidator {
                 )
             ):
                 let from = document.checkpoints.first(where: { $0.id == fromCheckpointID })
+                let branch = document.branches.first(where: { $0.id == branchID })
+                let directParent = from.flatMap { checkpoint in
+                    checkpoint.parentCheckpointID.flatMap { parentID in
+                        document.checkpoints.first(where: { $0.id == parentID })
+                    }
+                }
+                let expectedTarget = from.flatMap { checkpoint in
+                    branch.flatMap {
+                        NovelBranchSemantics.undoTarget(
+                            for: checkpoint,
+                            branch: $0,
+                            checkpoints: document.checkpoints
+                        )
+                    }
+                }
+                let validTargetIDs = Set([directParent?.id, expectedTarget?.id].compactMap { $0 })
                 if revision != operation.appliedProjectRevision ||
-                    from?.parentCheckpointID != toCheckpointID ||
-                    !document.branches.contains(where: {
-                        $0.id == branchID && $0.headRevision >= headRevision
-                    }) {
+                    !validTargetIDs.contains(toCheckpointID) ||
+                    (branch?.headRevision ?? -1) < headRevision {
                     issues.append("Branch undo operation \(operation.operationID) has invalid outcome data.")
                 }
             case let (
@@ -1970,8 +2039,20 @@ enum NovelDocumentValidator {
                   branchID == branch.id else {
                 continue
             }
+            let current = checkpointByID[fromCheckpointID]
+            let directParent = current.flatMap { checkpoint in
+                checkpoint.parentCheckpointID.flatMap { checkpointByID[$0] }
+            }
+            let expectedTarget = current.flatMap {
+                NovelBranchSemantics.undoTarget(
+                    for: $0,
+                    branch: branch,
+                    checkpoints: document.checkpoints
+                )
+            }
+            let validTargetIDs = Set([directParent?.id, expectedTarget?.id].compactMap { $0 })
             if fromCheckpointID != headID ||
-                checkpointByID[fromCheckpointID]?.parentCheckpointID != toCheckpointID ||
+                !validTargetIDs.contains(toCheckpointID) ||
                 outcomeHeadRevision != headRevision + 1 {
                 issues.append("Branch \(branch.id) undo timeline is not contiguous.")
             }

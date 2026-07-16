@@ -158,6 +158,20 @@ final class IOSAgentToolEngineTests: XCTestCase {
         }
     }
 
+    final class ThrowingProvider: IOSAgentTextProvider, @unchecked Sendable {
+        func generateText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams
+        ) async throws -> MessageChunk {
+            throw NSError(
+                domain: "AgentToolEngineTests",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "upstream unavailable"]
+            )
+        }
+    }
+
     final class ScriptedStreamingProvider: IOSAgentTextProvider, IOSAgentStreamingProvider, @unchecked Sendable {
         let chunks: [MessageChunk]
 
@@ -279,6 +293,19 @@ final class IOSAgentToolEngineTests: XCTestCase {
         let last = result.messages.last
         XCTAssertEqual(last?.role, MessageRole.assistant)
         XCTAssertTrue(last?.parts.first is UIMessagePart.Text)
+    }
+
+    func testProviderFailureIsExposedWithoutParsingTheTranscript() async {
+        let engine = IOSAgentToolEngine(provider: ThrowingProvider(), executors: [:])
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("hello")],
+            params: makeParams(tools: [])
+        )
+
+        XCTAssertEqual(result.providerFailureMessage, "upstream unavailable")
+        XCTAssertTrue(result.messages.last?.toText().contains("[engine] provider error") == true)
     }
 
     func testToolOutputFilledInPlaceWithExecutorResult() async {
@@ -636,5 +663,73 @@ final class IOSAgentToolEngineTests: XCTestCase {
 
         // Even though the model re-issued img-1, the executor must run only once.
         XCTAssertEqual(executor.calls.count, 1, "a tool whose output is already filled must not be re-executed")
+        XCTAssertEqual(provider.callCount, 2, "the engine must continue to the provider's final text turn")
+        XCTAssertEqual(result.messages.last?.toText(), "done")
+    }
+
+    func testCompletedToolEchoIsRemovedWhenSameTurnAlsoContainsTextAndANewTool() async {
+        let mixedTurn = makeMessage(
+            role: MessageRole.assistant,
+            parts: [
+                UIMessagePart.Text(text: "I will search next.", metadata: nil),
+                UIMessagePart.Tool(
+                    toolCallId: "img-1",
+                    toolName: "generate_image",
+                    input: "{\"prompt\":\"cat\"}",
+                    output: [],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                ),
+                UIMessagePart.Tool(
+                    toolCallId: "search-1",
+                    toolName: "search_web",
+                    input: "{\"query\":\"cat care\"}",
+                    output: [],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                )
+            ]
+        )
+        let provider = ScriptedProvider([mixedTurn, assistantText("done")])
+        let imageExecutor = RecordingExecutor(.filled("{\"image\":true}"))
+        let searchExecutor = RecordingExecutor(.filled("{\"results\":[]}"))
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: [
+                "generate_image": imageExecutor,
+                "search_web": searchExecutor,
+            ],
+            configuration: .init(maxSteps: 4)
+        )
+        let input: [UIMessage] = [
+            userMessage("draw, then research"),
+            toolCallMessage(
+                toolCallId: "img-1",
+                toolName: "generate_image",
+                input: "{\"prompt\":\"cat\"}"
+            )
+        ]
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: input,
+            params: makeParams(tools: ["generate_image", "search_web"])
+        )
+
+        XCTAssertEqual(imageExecutor.calls.count, 1)
+        XCTAssertEqual(searchExecutor.calls.count, 1)
+        XCTAssertEqual(provider.callCount, 2)
+        XCTAssertEqual(result.messages.last?.toText(), "done")
+        XCTAssertTrue(result.messages.contains { $0.toText().contains("I will search next.") })
+        let toolParts = result.messages.flatMap { message in
+            message.parts.compactMap { $0 as? UIMessagePart.Tool }
+        }
+        XCTAssertEqual(toolParts.filter { $0.toolCallId == "img-1" }.count, 1)
+        XCTAssertEqual(toolParts.filter { $0.toolCallId == "search-1" }.count, 1)
+        XCTAssertFalse(
+            toolParts.first(where: { $0.toolCallId == "search-1" })?.output.isEmpty ?? true
+        )
     }
 }

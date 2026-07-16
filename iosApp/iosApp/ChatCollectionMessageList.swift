@@ -4189,7 +4189,7 @@ private struct ChatLiveTailBubble: View {
     }
 }
 
-private final class ChatLiveTailModel: ObservableObject {
+final class ChatLiveTailModel: ObservableObject {
     let objectWillChange = ObservableObjectPublisher()
     private(set) var message: UIMessage
     private(set) var isGenerationActive: Bool
@@ -4589,18 +4589,18 @@ final class ChatRenderStateStore {
         )
     }
 
-    fileprivate func liveTailModel(
+    func liveTailModel(
         for row: ChatMessageRowModel,
         renderState: ChatRenderState,
         isGenerationActive: Bool
     ) -> ChatLiveTailModel? {
         guard row.isLast,
               row.role == MessageRole.assistant,
-              (row.isStreaming || isGenerationActive),
               renderState.hasEverStreamed else { return nil }
         if let model = liveTailModelsByMessageID[row.messageId] {
             return model
         }
+        guard row.isStreaming || isGenerationActive else { return nil }
         let model = ChatLiveTailModel(
             message: row.message,
             isGenerationActive: isGenerationActive,

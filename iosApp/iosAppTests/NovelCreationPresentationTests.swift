@@ -33,6 +33,83 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
     }
 
+    func testMalformedPersistedStateSyncFailureHasActionableCopy() {
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage("The model returned malformed JSON."),
+            "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
+        )
+    }
+
+    func testStateSyncOnlyShowsPercentageAfterDurableProgressExists() {
+        let projectID = NovelProjectID()
+        let branchID = NovelBranchID()
+        let pendingID = NovelPendingOperationID()
+        let waiting = NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .analyzing,
+            startedAt: Date(),
+            requestStartedAt: Date(),
+            completedCharacters: 0,
+            totalCharacters: 100,
+            completedChunks: 0
+        )
+        let progressed = NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .analyzing,
+            startedAt: Date(),
+            requestStartedAt: Date(),
+            completedCharacters: 40,
+            totalCharacters: 100,
+            completedChunks: 1
+        )
+
+        XCTAssertEqual(waiting.completionFraction, 0)
+        XCTAssertNil(waiting.displayedCompletionFraction)
+        XCTAssertEqual(progressed.displayedCompletionFraction, 0.4)
+    }
+
+    func testChapterTitleUsesTheGeneratedMarkdownHeadingInsteadOfAGenericStoredTitle() {
+        XCTAssertEqual(
+            NovelPresentation.chapterDisplayTitle(
+                storedTitle: "第 1 章",
+                content: "# 第一章 破庙里的活人气\n\n雨是昨夜才停的。",
+                ordinal: 1
+            ),
+            "破庙里的活人气"
+        )
+        XCTAssertEqual(
+            NovelPresentation.chapterDisplayTitle(
+                storedTitle: "第二章",
+                content: "## 第二章：风雪夜归人\n\n城门将闭。",
+                ordinal: 2
+            ),
+            "风雪夜归人"
+        )
+    }
+
+    func testChapterTitlePreservesAnExplicitStoredTitleAndFallsBackWithoutAHeading() {
+        XCTAssertEqual(
+            NovelPresentation.chapterDisplayTitle(
+                storedTitle: "夜雨入城",
+                content: "# 第一章 破庙里的活人气",
+                ordinal: 1
+            ),
+            "夜雨入城"
+        )
+        XCTAssertEqual(
+            NovelPresentation.chapterDisplayTitle(
+                storedTitle: "第 3 章",
+                content: "雨是昨夜才停的。",
+                ordinal: 3
+            ),
+            "第 3 章"
+        )
+    }
+
     func testCharacterEventMatcherPrefersNormalizedNameMatches() {
         XCTAssertTrue(NovelCharacterEventMatcher.matches(
             characterName: "沈 雾",
@@ -69,6 +146,14 @@ final class NovelCreationPresentationTests: XCTestCase {
     }
 
     func testComposerIntentMapsToTheExistingRequestContract() {
+        XCTAssertEqual(NovelComposerIntent.discussionOptions, [.discuss])
+        XCTAssertEqual(
+            NovelComposerIntent.proseOptions,
+            [.continueProse, .wholeChapter]
+        )
+        XCTAssertEqual(NovelComposerIntent.discuss.title, "讨论")
+        XCTAssertEqual(NovelComposerIntent.continueProse.title, "写一段")
+        XCTAssertEqual(NovelComposerIntent.wholeChapter.title, "写整章")
         XCTAssertEqual(NovelComposerIntent.discuss.requestValues.mode, .discussPlan)
         XCTAssertEqual(NovelComposerIntent.continueProse.requestValues.mode, .writeProse)
         XCTAssertEqual(
@@ -148,6 +233,14 @@ final class NovelCreationPresentationTests: XCTestCase {
                 isRetryable: true
             )),
             "网络连接已断开"
+        )
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "provider_stream_failed",
+                message: #"OpenAI stream error: {"type":"upstream_error","message":"Upstream request failed"}"#,
+                isRetryable: true
+            )),
+            "模型上游服务在生成过程中中断，已保留当前回复，可以重试。"
         )
     }
 

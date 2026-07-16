@@ -302,8 +302,9 @@ final class NovelProjectPackageTests: NovelPolishTestCase {
         }
     }
 
-    func testActiveRunBlocksExportsRejectReplaceAndDelete() async throws {
-        let document = try documentWithChapterAndState().document
+    func testActiveRunAllowsMarkdownSnapshotButBlocksPackageAndMutatingLifecycle() async throws {
+        let fixture = try documentWithChapterAndState()
+        let document = fixture.document
         let artifact = try NovelProjectPackageCodec.encode(document)
         let repository = InMemoryNovelProjectRepository()
         _ = try await repository.createProject(document)
@@ -327,12 +328,16 @@ final class NovelProjectPackageTests: NovelPolishTestCase {
         await NovelXCTAssertThrowsErrorAsync(
             try await creation.snapshot(.projectPackage(document.project.id))
         ) { XCTAssertEqual($0 as? NovelError, busy) }
-        await NovelXCTAssertThrowsErrorAsync(
-            try await creation.snapshot(.branchMarkdown(
-                projectID: document.project.id,
-                branchID: document.branches[0].id
-            ))
-        ) { XCTAssertEqual($0 as? NovelError, busy) }
+        guard case .markdown(let markdown) = try await creation.snapshot(.branchMarkdown(
+            projectID: document.project.id,
+            branchID: document.branches[0].id
+        )) else {
+            return XCTFail("Expected a Markdown snapshot while generation remains active.")
+        }
+        XCTAssertTrue(markdown.markdown.contains(fixture.sourceContent))
+        let runningAfterExport = try await repository.loadProject(id: document.project.id).document
+        XCTAssertEqual(runningAfterExport.activeRuns.first?.status, .running)
+        XCTAssertEqual(runningAfterExport.branches.first?.activeRunID, request.id)
 
         let reject = NovelImportProjectCommand(
             context: NovelTestFixtures.context(),

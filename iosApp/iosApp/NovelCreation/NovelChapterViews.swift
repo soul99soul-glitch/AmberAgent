@@ -5,129 +5,38 @@ struct NovelChapterManagementView: View {
     let onOpenChapter: (NovelChapterSelection) -> Void
 
     var body: some View {
-        List {
-            statusSection
-            chaptersSection
-            sessionSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                directoryHeader
+                chapterList
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 24)
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.top, 4, for: .scrollContent)
+        .scrollIndicators(.hidden)
         .background(AmberTheme.background)
     }
 
-    @ViewBuilder
-    private var statusSection: some View {
-        if let project = viewModel.projectSnapshot, let branch = viewModel.branchSnapshot {
-            Section {
-                HStack(spacing: 12) {
-                    Image(systemName: branch.branch.syncStatus == .synchronized ? "checkmark.circle" : "exclamationmark.arrow.triangle.2.circlepath")
-                        .font(.title3)
-                        .foregroundStyle(
-                            branch.branch.syncStatus == .synchronized
-                                ? AmberTheme.accentGreen
-                                : AmberTheme.accentAmber
-                        )
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(branch.branch.name)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text(statusDescription(project: project, branch: branch))
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if let pending = project.pendingOperations.first(where: {
-                        $0.branchID == branch.branch.id &&
-                            $0.kind == .manualSync &&
-                            $0.status == .retryable
-                    }) {
-                        Button {
-                            Task { @MainActor in
-                                await viewModel.retryPending(pending.id)
-                            }
-                        } label: {
-                            Label(
-                                "重试同步",
-                                systemImage: "arrow.clockwise"
-                            )
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!viewModel.canMutate)
-                    }
-                }
-                .padding(.vertical, 4)
-
-                quickStartControl
+    private var directoryHeader: some View {
+        HStack {
+            Text("目录")
+                .font(.headline)
+                .foregroundStyle(AmberTheme.foreground)
+            Spacer()
+            if let count = viewModel.branchSnapshot?.chapterSelections.count, count > 0 {
+                Text("共 \(count) 章")
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.muted)
             }
         }
+        .padding(.horizontal, 2)
     }
 
     @ViewBuilder
-    private var quickStartControl: some View {
-        switch viewModel.quickStartStatus {
-        case .idle:
-            EmptyView()
-        case .starting, .generating:
-            Label("正在生成可确认的创作建议", systemImage: "sparkles")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AmberTheme.accent)
-        case .failed(let message):
-            HStack(spacing: 12) {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(AmberTheme.accentAmber)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    Task { @MainActor in
-                        await viewModel.startQuickStartSuggestions()
-                    }
-                } label: {
-                    Label("重新生成", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isPerforming)
-            }
-        case .persistenceBlocked(let runID, let message):
-            HStack(spacing: 12) {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(AmberTheme.accentAmber)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    Task { @MainActor in
-                        await viewModel.retryQuickStartPersistence(runID: runID)
-                    }
-                } label: {
-                    Label("重试保存", systemImage: "externaldrive.badge.arrow.down")
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isPerforming)
-            }
-        case .refreshFailed(let message):
-            HStack(spacing: 12) {
-                Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(AmberTheme.accentAmber)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    Task { @MainActor in
-                        await viewModel.reloadQuickStartProject()
-                    }
-                } label: {
-                    Label("重新载入", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isPerforming)
-            }
-        }
-    }
-
-    private var chaptersSection: some View {
-        Section {
-            if let branch = viewModel.branchSnapshot, !branch.chapterSelections.isEmpty {
+    private var chapterList: some View {
+        if let branch = viewModel.branchSnapshot, !branch.chapterSelections.isEmpty {
+            VStack(spacing: 0) {
                 ForEach(Array(branch.chapterSelections.enumerated()), id: \.element.chapterID) { index, selection in
                     if let version = version(selection.versionID) {
                         Button {
@@ -136,63 +45,53 @@ struct NovelChapterManagementView: View {
                             NovelChapterRow(index: index + 1, version: version)
                         }
                         .buttonStyle(.plain)
+
+                        if index < branch.chapterSelections.count - 1 {
+                            Divider()
+                                .overlay(AmberTheme.borderSoft)
+                                .padding(.leading, 58)
+                        }
                     }
                 }
-            } else {
-                VStack(spacing: 8) {
-                    Image(systemName: "doc.text")
-                        .font(.title2)
-                        .foregroundStyle(AmberTheme.accent)
-                    Text("还没有正式章节")
-                        .font(.headline)
-                    Text("在创作对话中收录的正文会按章节出现在这里。")
-                        .font(.footnote)
-                        .foregroundStyle(AmberTheme.muted)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 22)
             }
-        } header: {
-            Text("正式正文")
-        } footer: {
-            Text("章节只显示当前分支存档点中的正式版本；未收录候选和待同步草稿不会混入正文。")
-        }
-    }
-
-    @ViewBuilder
-    private var sessionSection: some View {
-        if let branch = viewModel.branchSnapshot {
-            Section("创作记录") {
-                LabeledContent("对话消息", value: "\(branch.session.messages.count)")
-                LabeledContent("存档点", value: "\(checkpointCount)")
+            .background(
+                AmberTheme.surface,
+                in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous)
+                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous))
+        } else {
+            VStack(spacing: 8) {
+                Image(systemName: "doc.text")
+                    .font(.title2)
+                    .foregroundStyle(AmberTheme.accent)
+                Text("还没有正式章节")
+                    .font(.headline)
+                Text("在创作对话中收录的正文会按章节出现在这里。")
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 24)
+            .background(
+                AmberTheme.surface,
+                in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous)
+                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
             }
         }
-    }
-
-    private var checkpointCount: Int {
-        guard let project = viewModel.projectSnapshot,
-              let branch = viewModel.branchSnapshot?.branch else { return 0 }
-        return NovelPresentation.checkpointLineage(for: branch, in: project).count
     }
 
     private func version(_ id: NovelChapterVersionID) -> NovelChapterVersionRecord? {
         viewModel.projectSnapshot?.chapterVersions.first { $0.id == id }
     }
 
-    private func statusDescription(
-        project: NovelProjectSnapshot,
-        branch: NovelBranchSnapshot
-    ) -> String {
-        if project.access != .readWrite { return "只读恢复模式" }
-        if branch.branch.activeRunID != nil { return "Agent 正在生成" }
-        let retryableCount = project.pendingOperations.filter { $0.status == .retryable }.count
-        if retryableCount > 0 {
-            return "有 \(retryableCount) 项剧情状态同步失败"
-        }
-        if branch.branch.syncStatus == .needsSync { return "正在后台同步剧情状态" }
-        return branch.branch.syncStatus.displayName
-    }
 }
 
 private struct NovelChapterRow: View {
@@ -204,11 +103,15 @@ private struct NovelChapterRow: View {
             Text("\(index)")
                 .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(AmberTheme.accent)
-                .frame(width: 34, height: 34)
+                .frame(width: 32, height: 32)
                 .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("第 \(index) 章 · \(version.title)")
+                Text(NovelPresentation.chapterDisplayTitle(
+                    storedTitle: version.title,
+                    content: version.content,
+                    ordinal: index
+                ))
                     .font(.body.weight(.medium))
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
@@ -217,12 +120,9 @@ private struct NovelChapterRow: View {
                     .foregroundStyle(AmberTheme.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted2)
         }
-        .frame(minHeight: 54)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .contentShape(Rectangle())
     }
 }

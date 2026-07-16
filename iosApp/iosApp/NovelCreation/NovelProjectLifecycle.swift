@@ -78,10 +78,7 @@ extension DefaultNovelCreation {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) async throws -> NovelMarkdownExportArtifact {
-        try beginLifecycleRead(projectID: projectID)
-        defer { endLifecycleRead(projectID: projectID) }
         let loaded = try await loadCommittedProject(id: projectID)
-        try guardNoRunningWork(projectID: projectID, document: loaded.document)
         return try NovelMarkdownExporter.export(loaded.document, branchID: branchID)
     }
 

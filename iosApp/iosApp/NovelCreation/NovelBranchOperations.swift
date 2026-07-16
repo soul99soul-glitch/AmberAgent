@@ -2,6 +2,86 @@ import CryptoKit
 import Foundation
 
 enum NovelBranchSemantics {
+    static func normalizingDecodedSyncStatus(
+        _ document: NovelProjectDocumentV1
+    ) -> NovelProjectDocumentV1 {
+        var normalized = document
+        for index in normalized.branches.indices where
+            normalized.branches[index].syncStatus == .synchronized {
+            guard let head = normalized.checkpoints.first(where: {
+                $0.id == normalized.branches[index].headCheckpointID
+            }), syncStatus(for: head, checkpoints: normalized.checkpoints) == .needsSync else {
+                continue
+            }
+            normalized.branches[index].syncStatus = .needsSync
+        }
+        return normalized
+    }
+
+    static func syncStatus(
+        for checkpoint: NovelBranchCheckpointRecord,
+        in document: NovelProjectDocumentV1
+    ) -> NovelBranchSyncStatus {
+        syncStatus(for: checkpoint, checkpoints: document.checkpoints)
+    }
+
+    static func syncStatus(
+        for checkpoint: NovelBranchCheckpointRecord,
+        checkpoints: [NovelBranchCheckpointRecord]
+    ) -> NovelBranchSyncStatus {
+        guard checkpoint.kind == .collection,
+              let parentID = checkpoint.parentCheckpointID,
+              let parent = checkpoints.first(where: { $0.id == parentID }),
+              checkpoint.stateSnapshotID == parent.stateSnapshotID else {
+            return .synchronized
+        }
+        return .needsSync
+    }
+
+    static func canUndoHead(
+        _ checkpoint: NovelBranchCheckpointRecord,
+        branch: NovelBranchRecord,
+        checkpoints: [NovelBranchCheckpointRecord]
+    ) -> Bool {
+        if branch.syncStatus == .synchronized { return true }
+        return branch.syncStatus == .needsSync &&
+            branch.workingChapterSelections == checkpoint.chapterSelections &&
+            branch.overrideRevisionIDs == checkpoint.branchOverrideRevisionIDs &&
+            syncStatus(for: checkpoint, checkpoints: checkpoints) == .needsSync
+    }
+
+    static func undoTarget(
+        for checkpoint: NovelBranchCheckpointRecord,
+        checkpoints: [NovelBranchCheckpointRecord]
+    ) -> NovelBranchCheckpointRecord? {
+        guard let parentID = checkpoint.parentCheckpointID,
+              let parent = checkpoints.first(where: { $0.id == parentID }) else {
+            return nil
+        }
+        guard checkpoint.kind == .manualSync,
+              syncStatus(for: parent, checkpoints: checkpoints) == .needsSync,
+              let grandparentID = parent.parentCheckpointID,
+              let grandparent = checkpoints.first(where: { $0.id == grandparentID }) else {
+            return parent
+        }
+        return grandparent
+    }
+
+    static func undoTarget(
+        for checkpoint: NovelBranchCheckpointRecord,
+        branch: NovelBranchRecord,
+        checkpoints: [NovelBranchCheckpointRecord]
+    ) -> NovelBranchCheckpointRecord? {
+        guard let parentID = checkpoint.parentCheckpointID,
+              let directParent = checkpoints.first(where: { $0.id == parentID }) else {
+            return nil
+        }
+        if branch.forkOrigin?.checkpointID == directParent.id {
+            return directParent
+        }
+        return undoTarget(for: checkpoint, checkpoints: checkpoints)
+    }
+
     static func checkpointBelongsToBranch(
         _ checkpointID: NovelCheckpointID,
         branch: NovelBranchRecord,
@@ -203,7 +283,7 @@ extension NovelReducer {
             currentStateSnapshotID: checkpoint.stateSnapshotID,
             headRevision: 0,
             workingRevision: 0,
-            syncStatus: .synchronized,
+            syncStatus: NovelBranchSemantics.syncStatus(for: checkpoint, in: document),
             lifecycle: .active,
             overrideRevisionIDs: checkpoint.branchOverrideRevisionIDs,
             workingChapterSelections: checkpoint.chapterSelections,
@@ -331,35 +411,49 @@ extension NovelReducer {
             throw NovelError.branchNotFound(command.branchID)
         }
         try requireIdleBranch(branch, in: document)
-        guard branch.syncStatus == .synchronized,
-              branch.workingRevision == command.expectedWorkingRevision else {
-            throw NovelError.invalidInput("Synchronize the working manuscript before undoing its head.")
-        }
         let boundaryID = branch.forkOrigin?.checkpointID ?? document.checkpoints.first(where: {
             $0.kind == .initial
         })?.id
         guard branch.headCheckpointID != boundaryID,
               let current = document.checkpoints.first(where: {
                   $0.id == branch.headCheckpointID
-              }), let parentID = current.parentCheckpointID,
-              let parent = document.checkpoints.first(where: { $0.id == parentID }),
+              }) else {
+            throw NovelError.invalidInput("The branch head cannot move past its history boundary.")
+        }
+        let target = NovelBranchSemantics.undoTarget(
+            for: current,
+            branch: branch,
+            checkpoints: document.checkpoints
+        )
+        guard let target,
               NovelBranchSemantics.checkpointBelongsToBranch(
-                  parent.id,
+                  target.id,
                   branch: branch,
                   document: document
               ) else {
             throw NovelError.invalidInput("The branch head cannot move past its history boundary.")
         }
+        guard branch.workingRevision == command.expectedWorkingRevision,
+              NovelBranchSemantics.canUndoHead(
+                  current,
+                  branch: branch,
+                  checkpoints: document.checkpoints
+              ) else {
+            throw NovelError.invalidInput("Synchronize the working manuscript before undoing its head.")
+        }
         try requireUnusedBranchOperation(command.context.operationID, in: document)
 
         var next = document
-        next.branches[index].headCheckpointID = parent.id
-        next.branches[index].currentStateSnapshotID = parent.stateSnapshotID
-        next.branches[index].workingChapterSelections = parent.chapterSelections
-        next.branches[index].overrideRevisionIDs = parent.branchOverrideRevisionIDs
+        next.branches[index].headCheckpointID = target.id
+        next.branches[index].currentStateSnapshotID = target.stateSnapshotID
+        next.branches[index].workingChapterSelections = target.chapterSelections
+        next.branches[index].overrideRevisionIDs = target.branchOverrideRevisionIDs
         next.branches[index].headRevision += 1
         next.branches[index].workingRevision += 1
-        next.branches[index].syncStatus = .synchronized
+        next.branches[index].syncStatus = NovelBranchSemantics.syncStatus(
+            for: target,
+            in: document
+        )
         next.branches[index].updatedAt = now
         next.project.revision += 1
         next.project.updatedAt = now
@@ -367,7 +461,7 @@ extension NovelReducer {
             projectID: command.projectID,
             branchID: branch.id,
             fromCheckpointID: current.id,
-            toCheckpointID: parent.id,
+            toCheckpointID: target.id,
             headRevision: next.branches[index].headRevision,
             revision: next.project.revision
         )
@@ -408,7 +502,11 @@ extension NovelReducer {
         }), source.kind == .prose,
         source.status == .collected,
         source.collectedCheckpointID != nil,
-        branch.headCheckpointID == source.baseCheckpointID else {
+        NovelCandidateSemantics.cloneBaseMatches(
+            source,
+            currentCheckpointID: branch.headCheckpointID,
+            in: document
+        ) else {
             throw NovelError.invalidInput("Only previously collected prose can be cloned.")
         }
         guard document.candidates.allSatisfy({ $0.id != command.candidateID }) else {

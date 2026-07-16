@@ -28,6 +28,7 @@ struct BlockView: View {
 struct SingleBlockView: View {
 
   @Environment(\.markdownConfig) var config: MarkdownRenderConfig
+  @Environment(\.markdownUsesTextKit1ForAttachmentFreeText) var usesTextKit1ForAttachmentFreeText
 
   let renderable: MarkdownRenderable
 
@@ -39,15 +40,27 @@ struct SingleBlockView: View {
     Group {
       switch renderable {
       case .heading(_, _, let contents):
+        let usesTextKit1 = shouldUseTextKit1(for: contents)
         HStack(spacing: 0) {
-          ParagraphView(contents: contents, lineSpacing: config.headingLineSpacing)
+          ParagraphView(
+            contents: contents,
+            lineSpacing: config.headingLineSpacing,
+            usesTextKit1: usesTextKit1
+          )
+            .id(usesTextKit1)
             .transition(.opacity)
             .accessibilityAddTraits(.isHeader)
           Spacer()
         }
       case .paragraph(_, let contents):
+        let usesTextKit1 = shouldUseTextKit1(for: contents)
         HStack(spacing: 0) {
-          ParagraphView(contents: contents, lineSpacing: config.paragraphLineSpacing)
+          ParagraphView(
+            contents: contents,
+            lineSpacing: config.paragraphLineSpacing,
+            usesTextKit1: usesTextKit1
+          )
+            .id(usesTextKit1)
             .fixedSize(horizontal: false, vertical: true)
             .transition(.opacity)
           Spacer()
@@ -80,5 +93,19 @@ struct SingleBlockView: View {
         BlockQuoteView(item: item)
       }
     }
+  }
+
+  private func shouldUseTextKit1(for contents: NSAttributedString) -> Bool {
+    guard usesTextKit1ForAttachmentFreeText else { return false }
+    var containsAttachment = false
+    contents.enumerateAttribute(
+      .attachment,
+      in: NSRange(location: 0, length: contents.length)
+    ) { value, _, stop in
+      guard value != nil else { return }
+      containsAttachment = true
+      stop.pointee = true
+    }
+    return !containsAttachment
   }
 }

@@ -52,6 +52,12 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             "summary": "Mara entered the archive.",
             "entityReferences": ["Mara"],
             "evidence": "Mara opened the archive."
+          }, {
+            "id": "event-paraphrased",
+            "kind": "discovery",
+            "summary": "Mara found hidden records.",
+            "entityReferences": ["Mara"],
+            "evidence": "She discovered secret records inside."
           }],
           "characterStates": [],
           "relationships": [],
@@ -95,6 +101,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let final = try await harness.repository.document(collect.projectID)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertEqual(final.stateSnapshots.last?.summary, "Mara entered the archive and heard the bell.")
+        XCTAssertEqual(final.events.map(\.summary), ["Mara entered the archive."])
         let requests = await harness.adapter.requests
         XCTAssertEqual(requests.count, 1)
         let policies = await harness.adapter.resolvedPolicies
