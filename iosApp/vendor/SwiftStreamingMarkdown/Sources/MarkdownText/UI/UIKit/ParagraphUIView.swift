@@ -186,7 +186,11 @@ class ParagraphUIView: UITextView {
       textStorage.append(suffix)
       textStorage.endEditing()
       setNeedsLayout()
-      configureAccessibility(for: textStorage)
+      // TextKit 1 is selected only for attachment-free paragraphs. Avoid a
+      // full attributed-range scan on every append when no citation action can
+      // exist on this path.
+      accessibilityLabel = textStorage.string
+      accessibilityCustomActions = nil
       invalidateIntrinsicContentSize()
       appendFadeAnimations(in: appendedRange)
       return

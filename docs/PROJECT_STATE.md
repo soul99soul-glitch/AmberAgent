@@ -22,6 +22,14 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
+### 2026-07-16 production streaming-scroll ownership correction
+
+- 标准 Chat 不再向用户暴露或读取「原生滚动容器（实验性）」开关，生产路由稳定收敛到默认 `ChatSwiftUIMessageList`（原生 SwiftUI `ScrollView`），既有 collection fallback 保留；未完成的 Native Timeline 实现与定点测试仅作为 dormant code 留存，不再参与生产分流。Native 生命周期顺手补齐了无单一文本快照时的 freeze 收口，避免隐藏路径留下 live render state。
+- 小说页把「流式快照变化」与「实测内容高度增长」分开：raw delta 只更新状态，live/terminal measured growth 是唯一自动到底写入者，同轮 geometry 不再重复触发 viewport 写入。现有 `followGeneration` 设置现在真实控制 live 和 terminal 自动跟随；关闭时保持历史浏览语义，显式到底仍可用。显式到底动画由单一短窗口持有，期间增长只合并为一次 pending replay，拖动、重置和离页沿同一任务取消。
+- 模型会议的 `CouncilChatViewModel` 改为由 `AppShell` 唯一持有并注入唯一 `.council` destination；重复的 `.councilChat` route 已删除，避免两个页面生命周期竞争同一个 runtime attachment。离页待提问解除、后台讨论完成和归档语义未改。
+- Markdown 仍实时解析并保留逐词淡入。无附件 TextKit 1 append 只更新纯文本 accessibility label，不再逐次扫描 attributed ranges；首次段落淡入继续保留，只有同一 block 因 TextKit 1/2 engine flip 重建时抑制整段重复淡入。冻结快照统一使用「恰好一个非空 Text part」规则，不再用 `toText()` 重建空行。
+- 修复后的 Novel/Markdown/projection/wiring 定点套件为 116 passed、0 failed（`/tmp/amber-stream-scroll-audit/Logs/Test/Test-iosApp-2026.07.16_14-37-28-+0800.xcresult`），Council 为 26 passed、0 failed（`/tmp/amber-stream-scroll-audit/Logs/Test/Test-iosApp-2026.07.16_14-39-28-+0800.xcresult`），最终默认 Chat 门禁为 73 passed、1 expected skip、0 failed（`/tmp/amber-stream-scroll-audit/Logs/Test/Test-iosApp-2026.07.16_14-52-00-+0800.xcresult`）。长表格帧间隔 canary 在宿主负载约 24 时出现一次 outlier；未调整阈值，负载恢复后的隔离重跑与完整门禁均通过。Stable Debug generic iOS Simulator arm64 构建和 `git diff --check` 通过；三路只读复审均无 P0-P2。19:33 使用 Team `89QRFX9548` 完成当前工作区的 Debug 真机构建，已覆盖安装并由 `devicectl` 成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`，设备回读确认 `app.amber.ios` 1.0 (1) 已安装；本机 `codesign --verify --deep --strict` 对 Personal Team 证书链返回 `CSSMERR_TP_NOT_TRUSTED`，但设备安装与启动校验均通过。真机 120Hz、键盘/安全区转场与真实 provider 长输出仍需设备人工验证。
+
 ### 2026-07-16 Native Timeline terminal render continuity
 
 - 真机确认逐行跟随主要来自「原生滚动容器」后，进一步定位到生成结束瞬间的独立跳变：最后一条 assistant 在流式中由缓存的 `ChatLiveTailModel` 承载，但 `isStreaming/isGenerationActive` 同时变 false 时，旧 guard 会先返回 nil，导致同一消息行从 live-tail 子树切换成普通 bubble 子树。外层 message id 没变，内部 Markdown/UIKit 渲染树仍会被替换一次。

@@ -53,11 +53,14 @@ enum NovelSessionMeasuredGrowthPolicy {
         previousContentHeight: CGFloat,
         currentContentHeight: CGFloat,
         userDragging: Bool,
-        isLiveTail: Bool
+        isLiveTail: Bool,
+        isAtBottom: Bool
     ) -> NovelSessionBottomFollowEvent? {
         guard currentContentHeight - previousContentHeight > 0.5,
               !userDragging else { return nil }
-        return isLiveTail ? .streamDelta : .terminalLayoutChanged
+        return isLiveTail
+            ? .measuredStreamGrowth(isAtBottom: isAtBottom)
+            : .measuredTerminalGrowth(isAtBottom: isAtBottom)
     }
 }
 
@@ -77,12 +80,15 @@ struct NovelSessionView: View {
     let onOpenSettingProposals: (NovelSettingProposalRoute) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
     @State private var scrollPosition = ScrollPosition()
     @State private var followState = NovelSessionBottomFollowState(mode: .followingBottom)
     @State private var latestAtBottom = true
     @State private var latestNearBottom = true
     @State private var userDragging = false
     @State private var terminalSettleTask: Task<Void, Never>?
+    @State private var explicitBottomAnimationTask: Task<Void, Never>?
+    @State private var explicitBottomFollowPending = false
     @State private var composerInputHeight: CGFloat = 40
     @State private var composerBarHeight: CGFloat = 0
     @State private var composerInputController = ComposerInputController()
@@ -136,6 +142,7 @@ struct NovelSessionView: View {
         }
         .onDisappear {
             terminalSettleTask?.cancel()
+            cancelExplicitBottomAnimation()
         }
         .confirmationDialog(
             "放弃这次润色？",
@@ -291,15 +298,18 @@ struct NovelSessionView: View {
         } action: { oldValue, newValue in
             latestAtBottom = newValue.isAtBottom
             latestNearBottom = newValue.isNearBottom
-            if oldValue.isAtBottom != newValue.isAtBottom {
-                dispatchFollowEvent(.viewportChanged(isAtBottom: newValue.isAtBottom))
-            }
-            if let event = NovelSessionMeasuredGrowthPolicy.event(
+            let measuredGrowthEvent = NovelSessionMeasuredGrowthPolicy.event(
                 previousContentHeight: oldValue.contentHeight,
                 currentContentHeight: newValue.contentHeight,
                 userDragging: userDragging,
-                isLiveTail: isLiveTailPhase(listSignal.activeTailPhase)
-            ) {
+                isLiveTail: isLiveTailPhase(listSignal.activeTailPhase),
+                isAtBottom: newValue.isAtBottom
+            )
+            if oldValue.isAtBottom != newValue.isAtBottom,
+               measuredGrowthEvent == nil {
+                dispatchFollowEvent(.viewportChanged(isAtBottom: newValue.isAtBottom))
+            }
+            if let event = measuredGrowthEvent {
                 dispatchFollowEvent(event)
             }
         }
@@ -924,7 +934,17 @@ struct NovelSessionView: View {
     }
 
     private func dispatchFollowEvent(_ event: NovelSessionBottomFollowEvent) {
-        let transition = NovelSessionBottomFollowPolicy.reduce(state: followState, event: event)
+        switch event {
+        case .reset, .userDragBegan:
+            cancelExplicitBottomAnimation()
+        default:
+            break
+        }
+        let transition = NovelSessionBottomFollowPolicy.reduce(
+            state: followState,
+            event: event,
+            followEnabled: followGeneration
+        )
         followState = transition.state
         for command in transition.commands {
             executeFollowCommand(command)
@@ -941,22 +961,11 @@ struct NovelSessionView: View {
             }
         case .followBottom(let animated):
             if animated {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
-                }
-            } else if NovelSessionFollowAnimationPolicy.shouldAnimate(
-                isStreaming: viewModel.isStreaming,
-                reduceMotion: accessibilityReduceMotion
-            ) {
-                withAnimation(.linear(duration: 0.08)) {
-                    scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
-                }
+                startExplicitBottomAnimation()
+            } else if explicitBottomAnimationTask != nil {
+                explicitBottomFollowPending = true
             } else {
-                var transaction = Transaction()
-                transaction.animation = nil
-                withTransaction(transaction) {
-                    scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
-                }
+                performLiveBottomFollow()
             }
         case .setBottomButton:
             break
@@ -967,6 +976,60 @@ struct NovelSessionView: View {
                 guard !Task.isCancelled else { return }
                 dispatchFollowEvent(.terminalQuietElapsed(token: token))
             }
+        }
+    }
+
+    private func startExplicitBottomAnimation() {
+        cancelExplicitBottomAnimation()
+        guard !accessibilityReduceMotion else {
+            scrollToBottomWithoutAnimation()
+            return
+        }
+        withAnimation(.easeOut(duration: 0.2)) {
+            scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
+        }
+        explicitBottomAnimationTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(0.2))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            let shouldReplay = explicitBottomFollowPending &&
+                followGeneration &&
+                !userDragging
+            explicitBottomFollowPending = false
+            explicitBottomAnimationTask = nil
+            if shouldReplay {
+                performLiveBottomFollow()
+            }
+        }
+    }
+
+    private func cancelExplicitBottomAnimation() {
+        explicitBottomFollowPending = false
+        explicitBottomAnimationTask?.cancel()
+        explicitBottomAnimationTask = nil
+    }
+
+    private func performLiveBottomFollow() {
+        if NovelSessionFollowAnimationPolicy.shouldAnimate(
+            isStreaming: viewModel.isStreaming,
+            reduceMotion: accessibilityReduceMotion
+        ) {
+            withAnimation(.linear(duration: 0.08)) {
+                scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
+            }
+        } else {
+            scrollToBottomWithoutAnimation()
+        }
+    }
+
+    private func scrollToBottomWithoutAnimation() {
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
+            scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
         }
     }
 

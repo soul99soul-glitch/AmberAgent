@@ -81,7 +81,7 @@ struct CouncilView: View {
             AmberSectionLabel(text: "启动")
             AmberFormGroup {
                 Button {
-                    router.navigate(to: .councilChat)
+                    router.navigate(to: .council)
                 } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "bubble.left.and.bubble.right.fill")

@@ -650,7 +650,10 @@ struct NativeChatTimelineView: View {
                 }
                 .onDisappear {
                     guard entry.hasEverStreamed else { return }
-                    renderStateStore.freeze(messageID: messageId, latestText: message.toText())
+                    renderStateStore.freeze(
+                        messageID: messageId,
+                        latestText: message.singleNonEmptyTextPart
+                    )
                 }
             }
         case .pendingAssistant:
@@ -4473,12 +4476,7 @@ private final class ChatListControllerStore {
     func latestText(for itemID: String) -> String? {
         guard let renderModel = renderModelsByID[itemID],
               case let .message(messageModel) = renderModel else { return nil }
-        let textParts = messageModel.row.message.parts.compactMap { part -> String? in
-            guard let text = part as? UIMessagePart.Text, !text.text.isEmpty else { return nil }
-            return text.text
-        }
-        guard textParts.count == 1 else { return nil }
-        return textParts[0]
+        return messageModel.row.message.singleNonEmptyTextPart
     }
 
     func isLastAssistantItem(_ itemID: String) -> Bool {

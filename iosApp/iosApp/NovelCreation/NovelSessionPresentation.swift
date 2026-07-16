@@ -1218,6 +1218,8 @@ enum NovelSessionBottomFollowEvent: Equatable, Sendable {
     case initialRowsPresented(hasRows: Bool)
     case streamStarted
     case streamDelta
+    case measuredStreamGrowth(isAtBottom: Bool)
+    case measuredTerminalGrowth(isAtBottom: Bool)
     case userDragBegan(isAtBottom: Bool)
     case userDragEnded(isAtBottom: Bool)
     case viewportChanged(isAtBottom: Bool)
@@ -1244,7 +1246,8 @@ enum NovelSessionBottomFollowPolicy {
 
     static func reduce(
         state: NovelSessionBottomFollowState,
-        event: NovelSessionBottomFollowEvent
+        event: NovelSessionBottomFollowEvent,
+        followEnabled: Bool = true
     ) -> NovelSessionBottomFollowTransition {
         var next = state
         var commands: [NovelSessionBottomFollowCommand] = []
@@ -1258,7 +1261,23 @@ enum NovelSessionBottomFollowPolicy {
             next.mode = .followingBottom
             if hasRows { commands.append(.anchorBottom) }
 
-        case .streamStarted, .streamDelta:
+        case .streamStarted:
+            if case .settlingTerminal = next.mode {
+                next.mode = .followingBottom
+            }
+
+        case .streamDelta:
+            break
+
+        case .measuredStreamGrowth(let isAtBottom):
+            guard followEnabled else {
+                handleDisabledMeasuredGrowth(
+                    isAtBottom: isAtBottom,
+                    state: &next,
+                    commands: &commands
+                )
+                break
+            }
             switch next.mode {
             case .followingBottom:
                 commands.append(.followBottom(animated: false))
@@ -1269,25 +1288,41 @@ enum NovelSessionBottomFollowPolicy {
                 break
             }
 
+        case .measuredTerminalGrowth(let isAtBottom):
+            guard followEnabled else {
+                handleDisabledMeasuredGrowth(
+                    isAtBottom: isAtBottom,
+                    state: &next,
+                    commands: &commands
+                )
+                break
+            }
+            scheduleTerminalSettle(state: &next, commands: &commands)
+
         case .userDragBegan(let isAtBottom):
             next.mode = .browsingHistory
             setBottomButton(!isAtBottom, state: &next, commands: &commands)
 
         case .userDragEnded(let isAtBottom):
-            if isAtBottom {
+            if isAtBottom, followEnabled {
                 next.mode = .followingBottom
                 setBottomButton(false, state: &next, commands: &commands)
                 commands.append(.followBottom(animated: false))
             } else {
                 next.mode = .browsingHistory
-                setBottomButton(true, state: &next, commands: &commands)
+                setBottomButton(!isAtBottom, state: &next, commands: &commands)
             }
 
         case .viewportChanged(let isAtBottom):
             switch next.mode {
             case .followingBottom, .settlingTerminal:
                 if !isAtBottom {
-                    commands.append(.followBottom(animated: false))
+                    if followEnabled {
+                        commands.append(.followBottom(animated: false))
+                    } else {
+                        next.mode = .browsingHistory
+                        setBottomButton(true, state: &next, commands: &commands)
+                    }
                 }
             case .browsingHistory:
                 // Passive geometry cannot resume follow. Only the user's drag ending at
@@ -1303,24 +1338,15 @@ enum NovelSessionBottomFollowPolicy {
             commands.append(.followBottom(animated: true))
 
         case .terminalReached, .terminalLayoutChanged:
-            switch next.mode {
-            case .followingBottom, .settlingTerminal:
-                next.nextSettleToken &+= 1
-                let token = next.nextSettleToken
-                next.mode = .settlingTerminal(token: token)
-                commands.append(.followBottom(animated: false))
-                commands.append(.scheduleTerminalQuietSettle(
-                    token: token,
-                    delay: terminalQuietDelay
-                ))
-            case .awaitingInitialRows, .browsingHistory:
-                break
-            }
+            guard followEnabled else { break }
+            scheduleTerminalSettle(state: &next, commands: &commands)
 
         case .terminalQuietElapsed(let token):
             guard next.mode == .settlingTerminal(token: token) else { break }
             next.mode = .followingBottom
-            commands.append(.followBottom(animated: false))
+            if followEnabled {
+                commands.append(.followBottom(animated: false))
+            }
         }
 
         return NovelSessionBottomFollowTransition(state: next, commands: commands)
@@ -1328,6 +1354,43 @@ enum NovelSessionBottomFollowPolicy {
 }
 
 private extension NovelSessionBottomFollowPolicy {
+    static func handleDisabledMeasuredGrowth(
+        isAtBottom: Bool,
+        state: inout NovelSessionBottomFollowState,
+        commands: inout [NovelSessionBottomFollowCommand]
+    ) {
+        switch state.mode {
+        case .followingBottom, .settlingTerminal:
+            if !isAtBottom {
+                state.mode = .browsingHistory
+                setBottomButton(true, state: &state, commands: &commands)
+            }
+        case .browsingHistory:
+            setBottomButton(!isAtBottom, state: &state, commands: &commands)
+        case .awaitingInitialRows:
+            break
+        }
+    }
+
+    static func scheduleTerminalSettle(
+        state: inout NovelSessionBottomFollowState,
+        commands: inout [NovelSessionBottomFollowCommand]
+    ) {
+        switch state.mode {
+        case .followingBottom, .settlingTerminal:
+            state.nextSettleToken &+= 1
+            let token = state.nextSettleToken
+            state.mode = .settlingTerminal(token: token)
+            commands.append(.followBottom(animated: false))
+            commands.append(.scheduleTerminalQuietSettle(
+                token: token,
+                delay: terminalQuietDelay
+            ))
+        case .awaitingInitialRows, .browsingHistory:
+            break
+        }
+    }
+
     static func setBottomButton(
         _ visible: Bool,
         state: inout NovelSessionBottomFollowState,

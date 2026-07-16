@@ -199,7 +199,7 @@ final class NovelSessionReplayTests: XCTestCase {
             }
             let transition = NovelSessionBottomFollowPolicy.reduce(
                 state: follow,
-                event: .streamDelta
+                event: .measuredStreamGrowth(isAtBottom: false)
             )
             if (30..<90).contains(index) {
                 XCTAssertFalse(transition.commands.contains { command in
@@ -979,7 +979,10 @@ final class NovelSessionReplayTests: XCTestCase {
             event: .userDragEnded(isAtBottom: false)
         ).state
         XCTAssertEqual(state.mode, .browsingHistory)
-        transition = NovelSessionBottomFollowPolicy.reduce(state: state, event: .streamDelta)
+        transition = NovelSessionBottomFollowPolicy.reduce(
+            state: state,
+            event: .measuredStreamGrowth(isAtBottom: false)
+        )
         XCTAssertTrue(transition.commands.isEmpty)
         transition = NovelSessionBottomFollowPolicy.reduce(
             state: transition.state,
@@ -1083,25 +1086,28 @@ final class NovelSessionReplayTests: XCTestCase {
                 previousContentHeight: 120,
                 currentContentHeight: 132,
                 userDragging: false,
-                isLiveTail: true
+                isLiveTail: true,
+                isAtBottom: false
             ),
-            .streamDelta
+            .measuredStreamGrowth(isAtBottom: false)
         )
         XCTAssertEqual(
             NovelSessionMeasuredGrowthPolicy.event(
                 previousContentHeight: 132,
                 currentContentHeight: 148,
                 userDragging: false,
-                isLiveTail: false
+                isLiveTail: false,
+                isAtBottom: false
             ),
-            .terminalLayoutChanged
+            .measuredTerminalGrowth(isAtBottom: false)
         )
         XCTAssertNil(
             NovelSessionMeasuredGrowthPolicy.event(
                 previousContentHeight: 148,
                 currentContentHeight: 164,
                 userDragging: true,
-                isLiveTail: true
+                isLiveTail: true,
+                isAtBottom: false
             )
         )
         XCTAssertNil(
@@ -1109,9 +1115,80 @@ final class NovelSessionReplayTests: XCTestCase {
                 previousContentHeight: 164,
                 currentContentHeight: 152,
                 userDragging: false,
-                isLiveTail: true
+                isLiveTail: true,
+                isAtBottom: false
             )
         )
+    }
+
+    func testRawStreamDeltaDoesNotOwnScrollingAndDisabledFollowShowsBottomButtonAfterGrowth() {
+        let following = NovelSessionBottomFollowState(mode: .followingBottom)
+
+        let rawDelta = NovelSessionBottomFollowPolicy.reduce(
+            state: following,
+            event: .streamDelta
+        )
+        XCTAssertTrue(rawDelta.commands.isEmpty)
+
+        let disabledGrowth = NovelSessionBottomFollowPolicy.reduce(
+            state: following,
+            event: .measuredStreamGrowth(isAtBottom: false),
+            followEnabled: false
+        )
+        XCTAssertEqual(disabledGrowth.state.mode, .browsingHistory)
+        XCTAssertTrue(disabledGrowth.state.showsBottomButton)
+        XCTAssertFalse(disabledGrowth.commands.contains { command in
+            if case .followBottom = command { return true }
+            return false
+        })
+
+        let shortContentGrowth = NovelSessionBottomFollowPolicy.reduce(
+            state: following,
+            event: .measuredStreamGrowth(isAtBottom: true),
+            followEnabled: false
+        )
+        XCTAssertEqual(shortContentGrowth.state.mode, .followingBottom)
+        XCTAssertFalse(shortContentGrowth.state.showsBottomButton)
+        XCTAssertTrue(shortContentGrowth.commands.isEmpty)
+
+        let disabledTerminalGrowth = NovelSessionBottomFollowPolicy.reduce(
+            state: following,
+            event: .measuredTerminalGrowth(isAtBottom: false),
+            followEnabled: false
+        )
+        XCTAssertEqual(disabledTerminalGrowth.state.mode, .browsingHistory)
+        XCTAssertTrue(disabledTerminalGrowth.state.showsBottomButton)
+
+        let disabledNearBottomDrag = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(
+                mode: .browsingHistory,
+                showsBottomButton: true
+            ),
+            event: .userDragEnded(isAtBottom: true),
+            followEnabled: false
+        )
+        XCTAssertEqual(disabledNearBottomDrag.state.mode, .browsingHistory)
+        XCTAssertFalse(disabledNearBottomDrag.state.showsBottomButton)
+        XCTAssertFalse(disabledNearBottomDrag.commands.contains { command in
+            if case .followBottom = command { return true }
+            return false
+        })
+    }
+
+    func testExplicitBottomAnimationOwnsItsFullWindowAndReplaysOnePendingFollow() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: iosRoot.appendingPathComponent("iosApp/NovelCreation/NovelSessionView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("explicitBottomAnimationTask != nil"))
+        XCTAssertTrue(source.contains("explicitBottomFollowPending = true"))
+        XCTAssertTrue(source.contains("try await Task.sleep(for: .seconds(0.2))"))
+        XCTAssertTrue(source.contains("if shouldReplay"))
+        XCTAssertTrue(source.contains("case .reset, .userDragBegan:"))
     }
 
 }

@@ -8,6 +8,30 @@ import SwiftUI
 @MainActor
 final class IOSCouncilRunnerMechanicsTests: XCTestCase {
 
+    func testAppShellOwnsOneCouncilRuntimeAndOneDestination() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let iosRoot = testDirectory.deletingLastPathComponent()
+        let shell = try String(
+            contentsOf: iosRoot.appendingPathComponent("iosApp/AppShell.swift"),
+            encoding: .utf8
+        )
+        let runtime = try String(
+            contentsOf: iosRoot.appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(shell.contains("@State private var councilChatViewModel: CouncilChatViewModel"))
+        XCTAssertTrue(shell.contains("councilChatViewModel: councilChatViewModel"))
+        XCTAssertEqual(
+            shell.components(separatedBy: "viewModel: councilChatViewModel").count - 1,
+            1,
+            "The single Council route must receive the AppShell-owned runtime."
+        )
+        XCTAssertFalse(shell.contains("case councilChat"))
+        XCTAssertTrue(runtime.contains("viewModel: CouncilChatViewModel? = nil"))
+        XCTAssertTrue(runtime.contains("viewModel ?? CouncilChatViewModel("))
+    }
+
     func testCouncilPresentationSessionCoalescesSnapshotsUntilFlushWindow() async throws {
         let probe = CouncilPresentationProbe()
         let didPublish = expectation(description: "Council presentation window flushed")

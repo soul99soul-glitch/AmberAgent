@@ -30,6 +30,23 @@ final class ParagraphStreamingAppendTests: XCTestCase {
 
     // MARK: - appendedTailRange 判定
 
+    func testRemountedStreamingParagraphSuppressesWholeParagraphFade() {
+        XCTAssertFalse(
+            ParagraphInitialFadePolicy.shouldAnimate(
+                configShouldAnimateText: true,
+                animateInitialText: true,
+                suppressesInitialFade: true
+            )
+        )
+        XCTAssertTrue(
+            ParagraphInitialFadePolicy.shouldAnimate(
+                configShouldAnimateText: true,
+                animateInitialText: true,
+                suppressesInitialFade: false
+            )
+        )
+    }
+
     func testAppendedTailRangeDetectsPureAppend() {
         let old = NSAttributedString(string: "前缀文本", attributes: attributes)
         let new = NSAttributedString(string: "前缀文本追加", attributes: attributes)
@@ -193,5 +210,20 @@ final class ParagraphStreamingAppendTests: XCTestCase {
         var effectiveRange = NSRange()
         let font = view.textStorage.attribute(.font, at: 5, effectiveRange: &effectiveRange) as? UIFont
         XCTAssertEqual(font?.fontDescriptor.symbolicTraits.contains(.traitBold), true)
+    }
+
+    func testAttachmentFreeAppendUpdatesPlainAccessibilityWithoutCustomActions() {
+        let view = ParagraphUIView.makeTextKit1View()
+        view.setParagraphContents(
+            NSMutableAttributedString(string: "第一段", attributes: attributes),
+            animatedByWord: false
+        )
+        view.setParagraphContents(
+            NSMutableAttributedString(string: "第一段继续", attributes: attributes),
+            animatedByWord: true
+        )
+
+        XCTAssertEqual(view.accessibilityLabel, "第一段继续")
+        XCTAssertNil(view.accessibilityCustomActions)
     }
 }

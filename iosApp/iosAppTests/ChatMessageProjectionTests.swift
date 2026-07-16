@@ -6,6 +6,42 @@ import Shared
 @MainActor
 final class ChatMessageProjectionTests: XCTestCase {
 
+    func testFrozenMarkdownSnapshotUsesTheSingleNonEmptyTextPartVerbatim() {
+        let messageID = KotlinUuid.companion.random()
+        let message = UIMessage(
+            id: messageID,
+            role: MessageRole.assistant,
+            parts: [
+                UIMessagePart.Text(text: "", metadata: nil),
+                UIMessagePart.Text(text: "正文", metadata: nil),
+            ],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+
+        XCTAssertEqual(message.singleNonEmptyTextPart, "正文")
+
+        let multipleTextParts = UIMessage(
+            id: messageID,
+            role: MessageRole.assistant,
+            parts: [
+                UIMessagePart.Text(text: "第一段", metadata: nil),
+                UIMessagePart.Text(text: "第二段", metadata: nil),
+            ],
+            annotations: [],
+            createdAt: message.createdAt,
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        XCTAssertNil(multipleTextParts.singleNonEmptyTextPart)
+    }
+
     func testPackedAstReaderParsesBlockMathNode() throws {
         let markdown = "$$E=mc^2$$"
         let node = try XCTUnwrap(Self.firstNode(ofType: .mathBlock, in: Self.astNodes(for: markdown)))

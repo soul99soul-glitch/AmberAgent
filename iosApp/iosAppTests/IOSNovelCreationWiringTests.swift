@@ -349,6 +349,10 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains(
             "@State private var followState = NovelSessionBottomFollowState(mode: .followingBottom)"
         ))
+        XCTAssertTrue(session.contains(
+            "@AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true"
+        ))
+        XCTAssertTrue(session.contains("followEnabled: followGeneration"))
         let bindingTaskEnd = try XCTUnwrap(session.range(
             of: ".onChange(of: listSignal)",
             range: bindingTaskStart.upperBound..<session.endIndex

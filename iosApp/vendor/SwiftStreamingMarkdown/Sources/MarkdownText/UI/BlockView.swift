@@ -29,6 +29,7 @@ struct SingleBlockView: View {
 
   @Environment(\.markdownConfig) var config: MarkdownRenderConfig
   @Environment(\.markdownUsesTextKit1ForAttachmentFreeText) var usesTextKit1ForAttachmentFreeText
+  @State private var hasMountedText = false
 
   let renderable: MarkdownRenderable
 
@@ -45,11 +46,13 @@ struct SingleBlockView: View {
           ParagraphView(
             contents: contents,
             lineSpacing: config.headingLineSpacing,
-            usesTextKit1: usesTextKit1
+            usesTextKit1: usesTextKit1,
+            suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
           )
             .id(usesTextKit1)
             .transition(.opacity)
             .accessibilityAddTraits(.isHeader)
+            .onAppear { hasMountedText = true }
           Spacer()
         }
       case .paragraph(_, let contents):
@@ -58,11 +61,13 @@ struct SingleBlockView: View {
           ParagraphView(
             contents: contents,
             lineSpacing: config.paragraphLineSpacing,
-            usesTextKit1: usesTextKit1
+            usesTextKit1: usesTextKit1,
+            suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
           )
             .id(usesTextKit1)
             .fixedSize(horizontal: false, vertical: true)
             .transition(.opacity)
+            .onAppear { hasMountedText = true }
           Spacer()
         }
       case .latex(_, let latexString):

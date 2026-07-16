@@ -18,6 +18,7 @@ struct AppShell: View {
     @State private var mcpConfigStore: IOSMcpConfigStore
     @State private var conversationStore: IOSConversationStore
     @State private var chatViewModel: ChatViewModel
+    @State private var councilChatViewModel: CouncilChatViewModel
     @State private var novelCreationViewModel: NovelCreationViewModel?
     @State private var novelLifecycleCoordinator: NovelWorkspaceLifecycleCoordinator
     @State private var novelCreationErrorMessage: String?
@@ -35,6 +36,7 @@ struct AppShell: View {
         let systemPermissionCoordinator = IOSSystemPermissionCoordinator()
         let sharedSettingsStore = IOSSharedSettingsStore()
         let conversationStore = IOSConversationStore()
+        let providerRegistry = ProviderRegistryStore(settingsStore: settingsStore)
         let localToolExecutor = IOSLocalToolExecutor(
             permissionStore: permissionStore,
             documentStore: documentAccessStore,
@@ -54,6 +56,12 @@ struct AppShell: View {
             sharedSettings: sharedSettingsStore,
             localToolExecutor: localToolExecutor
         )
+        let councilChatViewModel = CouncilChatViewModel(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettingsStore,
+            providerRegistry: providerRegistry,
+            permissionStore: permissionStore
+        )
         let novelCreationViewModel: NovelCreationViewModel?
         let novelCreationErrorMessage: String?
         do {
@@ -72,11 +80,12 @@ struct AppShell: View {
         self._workspaceStore = State(initialValue: workspaceStore)
         self._systemPermissionCoordinator = State(initialValue: systemPermissionCoordinator)
         self._localToolExecutor = State(initialValue: localToolExecutor)
-        self._providerRegistry = State(initialValue: ProviderRegistryStore(settingsStore: settingsStore))
+        self._providerRegistry = State(initialValue: providerRegistry)
         self._sharedSettings = State(initialValue: sharedSettingsStore)
         self._mcpConfigStore = State(initialValue: IOSMcpConfigStore())
         self._conversationStore = State(initialValue: conversationStore)
         self._chatViewModel = State(initialValue: chatViewModel)
+        self._councilChatViewModel = State(initialValue: councilChatViewModel)
         self._novelCreationViewModel = State(initialValue: novelCreationViewModel)
         self._novelLifecycleCoordinator = State(
             initialValue: NovelWorkspaceLifecycleCoordinator()
@@ -109,6 +118,7 @@ struct AppShell: View {
                     systemPermissionCoordinator: systemPermissionCoordinator,
                     localToolExecutor: localToolExecutor,
                     chatViewModel: chatViewModel,
+                    councilChatViewModel: councilChatViewModel,
                     novelCreationViewModel: novelCreationViewModel,
                     novelCreationErrorMessage: novelCreationErrorMessage,
                     router: rootRouter
@@ -388,7 +398,6 @@ enum Route: Hashable {
     case workspace
     case memory
     case council
-    case councilChat
     case councilSettings
     case seatEditor
     case subagents
@@ -427,6 +436,7 @@ private extension View {
         systemPermissionCoordinator: IOSSystemPermissionCoordinator,
         localToolExecutor: IOSLocalToolExecutor,
         chatViewModel: ChatViewModel,
+        councilChatViewModel: CouncilChatViewModel,
         novelCreationViewModel: NovelCreationViewModel?,
         novelCreationErrorMessage: String?,
         router: RouterPath
@@ -615,14 +625,8 @@ private extension View {
                     settingsStore: settingsStore,
                     sharedSettings: sharedSettings,
                     providerRegistry: providerRegistry,
-                    permissionStore: permissionStore
-                )
-            case .councilChat:
-                CouncilChatRuntimeView(
-                    settingsStore: settingsStore,
-                    sharedSettings: sharedSettings,
-                    providerRegistry: providerRegistry,
-                    permissionStore: permissionStore
+                    permissionStore: permissionStore,
+                    viewModel: councilChatViewModel
                 )
             case .councilSettings:
                 CouncilSettingsView(

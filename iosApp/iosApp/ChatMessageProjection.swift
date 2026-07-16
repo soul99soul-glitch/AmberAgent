@@ -1,6 +1,18 @@
 import Foundation
 import Shared
 
+extension UIMessage {
+    var singleNonEmptyTextPart: String? {
+        var result: String?
+        for part in parts {
+            guard let text = part as? UIMessagePart.Text, !text.text.isEmpty else { continue }
+            guard result == nil else { return nil }
+            result = text.text
+        }
+        return result
+    }
+}
+
 struct ChatMessageRowModel: Identifiable {
     let rowId: String
     let messageId: String

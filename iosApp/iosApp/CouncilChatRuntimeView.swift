@@ -71,13 +71,14 @@ struct CouncilChatRuntimeView: View {
         settingsStore: SettingsStore,
         sharedSettings: IOSSharedSettingsStore,
         providerRegistry: ProviderRegistryStore? = nil,
-        permissionStore: IOSPermissionStore = IOSPermissionStore()
+        permissionStore: IOSPermissionStore = IOSPermissionStore(),
+        viewModel: CouncilChatViewModel? = nil
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
         self.providerRegistry = providerRegistry
         self.permissionStore = permissionStore
-        self._viewModel = State(initialValue: CouncilChatViewModel(
+        self._viewModel = State(initialValue: viewModel ?? CouncilChatViewModel(
             settingsStore: settingsStore,
             sharedSettings: sharedSettings,
             providerRegistry: providerRegistry,

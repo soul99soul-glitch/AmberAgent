@@ -9,16 +9,13 @@ final class IOSSettingsWiringTests: XCTestCase {
         return try String(contentsOf: fileURL, encoding: .utf8)
     }
 
-    func testNativeTimelineExperimentalToggleWritesEveryRequiredFlag() throws {
+    func testNativeTimelineExperimentalToggleIsNotExposedInDisplaySettings() throws {
         let settings = try source("iosApp/DisplayFontSettingsView.swift")
 
-        XCTAssertTrue(settings.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
-        XCTAssertTrue(settings.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
-        XCTAssertTrue(settings.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
-        XCTAssertTrue(settings.contains("nativeTimelineStaticRender && nativeTimelineStreamingTail && nativeTimelineScrollDriver"))
-        XCTAssertTrue(settings.contains("nativeTimelineStaticRender = enabled"))
-        XCTAssertTrue(settings.contains("nativeTimelineStreamingTail = enabled"))
-        XCTAssertTrue(settings.contains("nativeTimelineScrollDriver = enabled"))
+        XCTAssertFalse(settings.contains("原生滚动容器（实验性）"))
+        XCTAssertFalse(settings.contains("NativeChatTimelineStaticRenderFeatureFlags.key"))
+        XCTAssertFalse(settings.contains("NativeChatTimelineStreamingTailFeatureFlags.key"))
+        XCTAssertFalse(settings.contains("NativeTimelineScrollFeatureFlags.key"))
     }
 
     func testNovelCreationAdvancedEntryOpensFeatureAndSharedSettingsPersistRoleDefaults() throws {
@@ -54,17 +51,13 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
     }
 
-    func testNativeTimelineRouteReadsSettingsToggleFlags() throws {
+    func testProductionChatRouteDoesNotReadNativeTimelineFlags() throws {
         let chatView = try source("iosApp/ChatView.swift")
-        let list = try source("iosApp/ChatCollectionMessageList.swift")
 
-        XCTAssertTrue(chatView.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
-        XCTAssertTrue(chatView.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
-        XCTAssertTrue(chatView.contains("nativeTimelineStaticRenderEnabled: nativeTimelineStaticRenderEnabled"))
-        XCTAssertTrue(chatView.contains("nativeTimelineStreamingTailEnabled: nativeTimelineStreamingTailEnabled"))
-        XCTAssertTrue(list.contains("NativeChatTimelineRoutePolicy.shouldUseNativeTimeline"))
-        XCTAssertTrue(list.contains("staticRenderEnabled: nativeTimelineStaticRenderEnabled"))
-        XCTAssertTrue(list.contains("streamingTailEnabled: nativeTimelineStreamingTailEnabled"))
+        XCTAssertFalse(chatView.contains("NativeChatTimelineStaticRenderFeatureFlags.key"))
+        XCTAssertFalse(chatView.contains("NativeChatTimelineStreamingTailFeatureFlags.key"))
+        XCTAssertFalse(chatView.contains("NativeChatTimelineView("))
+        XCTAssertTrue(chatView.contains("ChatSwiftUIMessageListFeatureFlags.isEnabled ? .swiftUICleanList : .collection"))
     }
 
     func testNativeTimelineScrollDriverFlagIsConsumedByNativeTimelineView() throws {
@@ -106,7 +99,8 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(bubble.contains("@AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown)"))
         XCTAssertTrue(bubble.contains("guard streamingBlockMarkdown else { return false }"))
         XCTAssertTrue(bubble.contains("ChatStreamingMarkdownBlockParser.containsTable"))
-        XCTAssertTrue(bubble.contains("ChatStableStreamingMarkdownView(text: table.markdown, config: config)"))
+        XCTAssertTrue(bubble.contains("text: table.markdown"))
+        XCTAssertTrue(bubble.contains("cacheIdentity: renderCacheNamespace.map"))
     }
 
     func testGrokWebLoginIsWiredToProviderSettingsAndChatRuntime() throws {

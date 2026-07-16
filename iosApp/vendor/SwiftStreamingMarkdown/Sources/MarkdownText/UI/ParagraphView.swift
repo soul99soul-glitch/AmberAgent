@@ -14,6 +14,7 @@ struct ParagraphView: UIViewRepresentable {
   var contents: NSMutableAttributedString
   var lineSpacing: CGFloat?
   var usesTextKit1 = false
+  var suppressesInitialFade = false
 
   func makeCoordinator() -> Coordinator {
     Coordinator()
@@ -31,7 +32,11 @@ struct ParagraphView: UIViewRepresentable {
     view.setTextContextMenu(config.textContextMenu)
     view.setMarkdownController(markdownController)
 
-    if config.shouldAnimateText && animateInitialText {
+    if ParagraphInitialFadePolicy.shouldAnimate(
+      configShouldAnimateText: config.shouldAnimateText,
+      animateInitialText: animateInitialText,
+      suppressesInitialFade: suppressesInitialFade
+    ) {
       view.alpha = 0
       UIView.animate(withDuration: ParagraphUIView.animationDuration) {
         view.alpha = 1
@@ -100,6 +105,16 @@ struct ParagraphView: UIViewRepresentable {
     var sizeCache: [CGFloat: CGSize] = [:]
     var lastContents: NSMutableAttributedString?
     var lastLineSpacing: CGFloat?
+  }
+}
+
+enum ParagraphInitialFadePolicy {
+  static func shouldAnimate(
+    configShouldAnimateText: Bool,
+    animateInitialText: Bool,
+    suppressesInitialFade: Bool
+  ) -> Bool {
+    configShouldAnimateText && animateInitialText && !suppressesInitialFade
   }
 }
 

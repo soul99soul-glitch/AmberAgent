@@ -111,8 +111,6 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
-    @AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key) private var nativeTimelineStaticRenderEnabled = false
-    @AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key) private var nativeTimelineStreamingTailEnabled = false
     @State private var pasteHintShown = false
     @State private var viewportState = ChatViewportState()
     @State private var scrollToBottomTrigger = 0
@@ -696,30 +694,7 @@ struct ChatView: View {
     private var messageList: some View {
         let route = messageListRoute
         return Group {
-            if route == .nativeTimelineSwiftUI {
-                NativeChatTimelineView(
-                    signal: viewModel.messageUpdateSignal,
-                    configurationIssue: configurationIssue,
-                    isGenerationActive: viewModel.isGenerationActive,
-                    isLoading: viewModel.isLoading,
-                    isRecognizingImages: viewModel.isRecognizingImages,
-                    contextCompactState: viewModel.contextCompactState,
-                    followGeneration: followGeneration,
-                    displaySetting: sharedSettings.displaySetting,
-                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
-                    reasoningLevelLabel: composerReasoningLabel,
-                    workspaceStore: workspaceStore,
-                    scrollToBottomTrigger: scrollToBottomTrigger,
-                    scrollToBottomSource: scrollToBottomSource,
-                    composerHeight: composerBarHeight,
-                    messagesProvider: { viewModel.messages },
-                    variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
-                    onAction: handleChatListAction,
-                    onViewportStateChange: applyCollectionViewportState,
-                    onDismissKeyboard: dismissKeyboard
-                )
-                .id(NativeChatTimelineSessionIdentity.viewID(conversationId: conversationStore.currentConversation?.id))
-            } else if route == .swiftUICleanList {
+            if route == .swiftUICleanList {
                 ChatSwiftUIMessageList(
                     signal: viewModel.messageUpdateSignal,
                     configurationIssue: configurationIssue,
@@ -764,15 +739,7 @@ struct ChatView: View {
     }
 
     private var messageListRoute: ChatMessageListRoute {
-        ChatMessageListRoutePolicy.route(
-            nativeTimelineStaticRenderEnabled: nativeTimelineStaticRenderEnabled,
-            nativeTimelineStreamingTailEnabled: nativeTimelineStreamingTailEnabled,
-            swiftUICleanListEnabled: ChatSwiftUIMessageListFeatureFlags.isEnabled,
-            messages: viewModel.messages,
-            event: viewModel.messageUpdateSignal.event,
-            isGenerationActive: viewModel.isGenerationActive,
-            isLoading: viewModel.isLoading
-        )
+        ChatSwiftUIMessageListFeatureFlags.isEnabled ? .swiftUICleanList : .collection
     }
 
     private var isStreamingFollowActive: Bool {
