@@ -22,6 +22,20 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
+### 2026-07-17 novel workspace native glass section navigation
+
+- 小说工作区顶部「创作 / 正文 / 设定」不再使用灰色 `Picker(.segmented)`，改为单一 `44pt` 原生交互式 Liquid Glass Capsule；三个按钮保持等宽、原有 `NovelWorkspaceSection` 状态与页面切换不变。选中项使用同一玻璃平面内的半透明胶囊填充和 matched-geometry 位移动画，避免在玻璃上再叠玻璃；保留 `16pt` 页面边距、动态提案数量、Reduce Motion、禁用态、选择触感和 VoiceOver 选中语义。iOS 26 以下提供 `ultraThinMaterial` fallback。
+- 19:19 真机截图暴露浅色模式选中填充使用白色透明层，在白色玻璃上几乎不可见。选中游标已改为同一玻璃平面内的 `6.5%` 黑色透明胶囊，并增加 `0.5pt` 高光描边和轻阴影；仍只有外层一处 `glassEffect`，不是玻璃叠玻璃。
+- 参考图复核进一步确认透底差异来自布局而非透明度：Tab 原先是普通 `VStack` 子项，会把三个页面的滚动内容整体向下顶开，玻璃后方只有空白画布。Tab 现通过 `.safeAreaBar(edge: .top)` 成为顶部 chrome；滚动内容初始保持可读，向上滚动时会进入玻璃后方并由原生 Liquid Glass 折射，没有新增固定 top padding 或第二套滚动状态。
+- arm64 generic iOS Simulator Debug 构建通过；导航玻璃 wiring canary 与 `NovelCreationPresentationTests` 在 iPhone 17 Pro / iOS 26.5 Simulator 合跑为 24 passed、0 failed，`swiftc -parse` 与 `git diff --check` 通过。完整 `IOSNovelCreationWiringTests` 尝试中另有 22 passed、1 failed，失败为未触及的 `NovelSessionView.swift` projection 字符串断言 `testSessionBodyBuildsOneProjectionAndPassesItDown`；当前没有可直接进入目标小说项目的视觉 fixture，因此参考图级运行截图仍待真机页面复验。
+- 悬浮透底修复后的 wiring 定点与 `NovelCreationPresentationTests` 为 24 passed、0 failed，`swiftc -parse` 与 `git diff --check` 通过。该修复已包含在 19:45 的最新完整真机包中，完成严格签名校验、覆盖安装和启动。最终滚动透射视觉仍以设备人工复验为准。
+
+### 2026-07-17 chat top glass capsule and system-owned soft edge
+
+- 标准 Chat 顶部中间的会话标题与活动状态不再悬空显示纯文字，统一使用非交互的原生 Liquid Glass Capsule；左右按钮与中间胶囊在 iOS 26+ 进入同一个 `GlassEffectContainer`，低版本保留 `ultraThinMaterial`、轻描边与阴影 fallback。标题仍不可点击，现有活动状态、翻转动画、文字截断和左右按钮行为未改。
+- 首轮自绘 `ultraThinMaterial + gradient mask` 真机验证失败：材质取代系统 edge effect 后只覆盖 `safeAreaBar` 内部，正文直接漏进状态栏，同时与标题/按钮玻璃形成发白的双层材质。后续增加 `.safeAreaBar` bottom padding 同样无效，因为系统 `.soft` 的采样曲线不读取该 padding。20:03 真机图又证明“从按钮底部向下增加 40pt 材质”的方向理解错误：它产生了一条突兀的白色横带。该附加材质、额外 padding 和几何补偿现已全部删除；顶部只保留三条列表的系统 `.soft`，覆盖区从系统状态栏开始，`54pt` 顶栏内的控件改为底对齐，使 soft edge 的下边界与按钮底部重合。
+- 返回与新会话的圆形玻璃仍在 `GlassEffectContainer` 内统一折射，但 monochrome `UIColor.label` glyph 改为容器外独立 sibling overlay；底层透明按钮继续负责点击、按压动画和 VoiceOver。这样 Liquid Glass 不能再通过 child foreground levels 把浅色模式 glyph 降为灰色。iPhone 17 Pro / iOS 26.5 Simulator 全新构建并真实启动后，Chat 截图确认白色横带消失、两枚 glyph 为黑色；顶栏两项契约加完整 `ChatStreamReplayTests` 为 18 passed、0 failed、1 expected skip，`swiftc -parse` 与 `git diff --check` 通过。arm64 真机包已用全新 DerivedData 构建并确认 bundle `app.amber.ios`、Team `89QRFX9548`；覆盖安装时 iPhone Air 在 CoreDevice 中变为 `unavailable`，因此 20:02 的错误白带包仍是设备端最后确认安装版本，纠正版待设备重新可用后安装。
+
 ### 2026-07-17 novel discussion completion and streaming presentation correction
 
 - 讨论模式不再向 provider 人为设置最大输出 token；provider 若仍明确以 `length` / `max_tokens` / `max_output_tokens` 结束，当前半截内容会保留，并进入原有可重试失败态，不再被误记为一次完整回复。普通 KMP 流和讨论工具循环共用这一终态语义，没有增加内容猜测、自动续写或第二次请求。

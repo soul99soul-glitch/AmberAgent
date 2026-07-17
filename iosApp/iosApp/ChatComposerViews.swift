@@ -263,23 +263,41 @@ struct ComposerDockCircleGlass: ViewModifier {
     }
 }
 
+struct ChatToolbarIconGlyph: View {
+    let systemImage: String
+    let symbolSize: CGFloat
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .symbolRenderingMode(.monochrome)
+            .font(.system(size: symbolSize, weight: .semibold))
+            .foregroundStyle(Color(uiColor: .label))
+            .frame(
+                width: ChatTopBarLayout.toolbarButtonDiameter,
+                height: ChatTopBarLayout.toolbarButtonDiameter
+            )
+    }
+}
+
 struct ChatToolbarIconButton: View {
     let systemImage: String
     let accessibilityLabel: String
     var size: CGFloat
     var symbolSize: CGFloat
+    var showsGlyph = true
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: symbolSize, weight: .semibold))
-                .foregroundStyle(AmberTheme.foreground2)
-                .frame(width: size, height: size)
-                .contentShape(Circle())
-                .background {
-                    circleGlass
+            ZStack {
+                circleGlass
+
+                if showsGlyph {
+                    ChatToolbarIconGlyph(systemImage: systemImage, symbolSize: symbolSize)
                 }
+            }
+            .frame(width: size, height: size)
+            .contentShape(Circle())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .lightImpact))
         .accessibilityLabel(accessibilityLabel)

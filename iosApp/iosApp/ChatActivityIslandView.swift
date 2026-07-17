@@ -110,6 +110,7 @@ struct ChatActivityIslandView: View {
         .frame(minHeight: state.isActive ? 42 : 34)
         .frame(maxWidth: state.isActive ? 268 : 230)
         .modifier(ChatActivityIslandSoftField(tint: state.tint.color, isActive: state.isActive))
+        .modifier(ChatActivityIslandGlass())
         .contentShape(Capsule())
         .animation(
             reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82),
@@ -154,6 +155,26 @@ struct ChatActivityIslandView: View {
             Spacer(minLength: 0)
         }
         .contentTransition(.opacity)
+    }
+}
+
+private struct ChatActivityIslandGlass: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content
+                .glassEffect(.regular, in: Capsule())
+        } else {
+            content
+                .background {
+                    Capsule().fill(.ultraThinMaterial)
+                        .overlay {
+                            Capsule()
+                                .stroke(AmberTheme.border.opacity(0.28), lineWidth: 0.5)
+                        }
+                }
+                .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
+        }
     }
 }
 

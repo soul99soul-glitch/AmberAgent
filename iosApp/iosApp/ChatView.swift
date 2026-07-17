@@ -4,6 +4,11 @@ import UIKit
 import UniformTypeIdentifiers
 import PhotosUI
 
+enum ChatTopBarLayout {
+    static let controlsHeight: CGFloat = 54
+    static let toolbarButtonDiameter: CGFloat = 38
+}
+
 private enum ComposerPanel: String, Identifiable {
     case thinking
     case context
@@ -525,6 +530,29 @@ struct ChatView: View {
 
     private var topBar: some View {
         ZStack {
+            Group {
+                if #available(iOS 26.0, *) {
+                    GlassEffectContainer(spacing: 12) {
+                        topBarGlassContent
+                    }
+                } else {
+                    topBarGlassContent
+                }
+            }
+
+            // Glyphs intentionally live outside `GlassEffectContainer`. Liquid Glass adjusts the
+            // foreground levels of child content for vibrancy; keeping navigation glyphs in a
+            // sibling layer preserves the system label's true black/white contrast.
+            topBarGlyphOverlay
+        }
+        .padding(.horizontal, 18)
+        // Bottom-align the 38pt controls so the native top bar — and therefore the system soft
+        // edge running from the status bar downward — ends exactly at the controls' bottom edge.
+        .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)
+    }
+
+    private var topBarGlassContent: some View {
+        ZStack {
             HStack {
                 backToolbarButton
 
@@ -538,10 +566,18 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
                 .allowsHitTesting(false)
         }
-        .padding(.horizontal, 18)
-        // Extend the system soft edge below the title without moving the controls.
-        .frame(height: 54)
-        .padding(.bottom, 32)
+    }
+
+    private var topBarGlyphOverlay: some View {
+        HStack {
+            ChatToolbarIconGlyph(systemImage: "chevron.left", symbolSize: 18)
+
+            Spacer()
+
+            ChatToolbarIconGlyph(systemImage: "square.and.pencil", symbolSize: 16)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private var topIslandState: ChatActivityIslandState {
@@ -677,13 +713,25 @@ struct ChatView: View {
     }
 
     private var backToolbarButton: some View {
-        ChatToolbarIconButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 38, symbolSize: 18) {
+        ChatToolbarIconButton(
+            systemImage: "chevron.left",
+            accessibilityLabel: "返回",
+            size: ChatTopBarLayout.toolbarButtonDiameter,
+            symbolSize: 18,
+            showsGlyph: false
+        ) {
             dismiss()
         }
     }
 
     private var newChatToolbarButton: some View {
-        ChatToolbarIconButton(systemImage: "square.and.pencil", accessibilityLabel: "新建对话", size: 38, symbolSize: 16) {
+        ChatToolbarIconButton(
+            systemImage: "square.and.pencil",
+            accessibilityLabel: "新建对话",
+            size: ChatTopBarLayout.toolbarButtonDiameter,
+            symbolSize: 16,
+            showsGlyph: false
+        ) {
             guard viewModel.prepareForConversationChange() else { return }
             Task { @MainActor in
                 // newConversation 会 bump conversationSwitchedRevision,onChange 观察者会

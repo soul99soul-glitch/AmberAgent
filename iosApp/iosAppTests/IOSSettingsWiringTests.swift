@@ -104,8 +104,15 @@ final class IOSSettingsWiringTests: XCTestCase {
         }
     }
 
-    func testCustomTopBarsKeepSoftScrollEdgesAcrossAllChatListRoutes() throws {
+    func testChatTopBarSoftEdgeEndsAtBottomAlignedControls() {
+        XCTAssertEqual(ChatTopBarLayout.controlsHeight, 54)
+        XCTAssertEqual(ChatTopBarLayout.toolbarButtonDiameter, 38)
+    }
+
+    func testCustomTopBarsUseNativeSoftEdgesAndLiquidGlassControls() throws {
         let chatView = try source("iosApp/ChatView.swift")
+        let activityIsland = try source("iosApp/ChatActivityIslandView.swift")
+        let composer = try source("iosApp/ChatComposerViews.swift")
         let chat = try source("iosApp/ChatCollectionMessageList.swift")
         let appearance = try source("iosApp/AppearanceSettingsView.swift")
         let swiftUISoftEdgeCount = chat.components(
@@ -115,7 +122,18 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(swiftUISoftEdgeCount, 2)
         XCTAssertTrue(chat.contains("collectionView.topEdgeEffect.style = .soft"))
         XCTAssertTrue(appearance.contains(".scrollEdgeEffectStyle(.soft, for: .top)"))
-        XCTAssertTrue(chatView.contains(".frame(height: 54)\n        .padding(.bottom, 32)"))
+        XCTAssertFalse(chatView.contains("ChatTopEdgeFadeMaterial"))
+        XCTAssertFalse(chatView.contains("bottomExtension"))
+        XCTAssertTrue(
+            chatView.contains(".frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)")
+        )
+        XCTAssertTrue(chatView.contains("GlassEffectContainer(spacing: 12)"))
+        XCTAssertTrue(composer.contains(".foregroundStyle(Color(uiColor: .label))"))
+        XCTAssertTrue(composer.contains(".symbolRenderingMode(.monochrome)"))
+        XCTAssertTrue(chatView.contains("topBarGlyphOverlay"))
+        XCTAssertTrue(chatView.contains("showsGlyph: false"))
+        XCTAssertTrue(activityIsland.contains(".glassEffect(.regular, in: Capsule())"))
+        XCTAssertTrue(activityIsland.contains("Capsule().fill(.ultraThinMaterial)"))
     }
 
     func testStreamingMarkdownRendererTogglesAreWiredAndMutuallyExclusive() throws {

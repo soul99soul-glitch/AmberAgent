@@ -36,9 +36,13 @@ struct NovelProjectWorkspaceView: View {
     var body: some View {
         VStack(spacing: 0) {
             if hasCompletedInitialNavigation && hasLoadedRoutedProject {
-                sectionPicker
-                accessBanner
-                content
+                VStack(spacing: 0) {
+                    accessBanner
+                    content
+                }
+                .safeAreaBar(edge: .top, spacing: 0) {
+                    sectionPicker
+                }
             } else if let routedProjectLoadFailure {
                 VStack(spacing: 16) {
                     ContentUnavailableView(
@@ -165,15 +169,12 @@ struct NovelProjectWorkspaceView: View {
     }
 
     private var sectionPicker: some View {
-        Picker("小说工作区", selection: $section) {
-            ForEach(NovelWorkspaceSection.allCases) { value in
-                Text(sectionTitle(value)).tag(value)
-            }
-        }
-        .pickerStyle(.segmented)
+        NovelWorkspaceGlassTabBar(
+            selection: $section,
+            title: sectionTitle
+        )
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
-        .accessibilityLabel("小说工作区")
         .disabled(isSessionTransitionBusy)
     }
 
@@ -497,6 +498,96 @@ struct NovelProjectWorkspaceView: View {
         }
     }
 
+}
+
+private struct NovelWorkspaceGlassTabBar: View {
+    @Binding var selection: NovelWorkspaceSection
+    let title: (NovelWorkspaceSection) -> String
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.isEnabled) private var isEnabled
+    @Namespace private var selectionNamespace
+
+    var body: some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                tabs
+                    .padding(3)
+                    .glassEffect(.regular.interactive(), in: Capsule())
+            } else {
+                tabs
+                    .padding(3)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay {
+                        Capsule()
+                            .stroke(.white.opacity(0.55), lineWidth: 0.5)
+                    }
+                    .shadow(color: .black.opacity(0.10), radius: 12, y: 2)
+            }
+        }
+        .frame(height: 44)
+        .opacity(isEnabled ? 1 : 0.5)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("小说工作区")
+    }
+
+    private var tabs: some View {
+        HStack(spacing: 0) {
+            ForEach(NovelWorkspaceSection.allCases) { value in
+                tab(value)
+            }
+        }
+    }
+
+    private func tab(_ value: NovelWorkspaceSection) -> some View {
+        let isSelected = selection == value
+
+        return Button {
+            guard !isSelected else { return }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                selection = value
+            }
+        } label: {
+            Text(title(value))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(isSelected ? AmberTheme.foreground : AmberTheme.foreground2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background {
+                    if isSelected {
+                        Capsule()
+                            .fill(selectionFill)
+                            .overlay {
+                                Capsule()
+                                    .stroke(selectionStroke, lineWidth: 0.5)
+                            }
+                            .shadow(
+                                color: .black.opacity(colorScheme == .dark ? 0.18 : 0.08),
+                                radius: 5,
+                                y: 1
+                            )
+                            .matchedGeometryEffect(
+                                id: "selected-workspace-section",
+                                in: selectionNamespace
+                            )
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.98, haptic: .selection))
+        .accessibilityLabel(title(value))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var selectionFill: Color {
+        colorScheme == .dark ? .white.opacity(0.12) : .black.opacity(0.065)
+    }
+
+    private var selectionStroke: Color {
+        colorScheme == .dark ? .white.opacity(0.16) : .white.opacity(0.62)
+    }
 }
 
 private struct NovelNavigationDidAppearObserver: UIViewControllerRepresentable {

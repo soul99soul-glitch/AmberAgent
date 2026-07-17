@@ -173,6 +173,27 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("#selector(UIResponder.resignFirstResponder)"))
     }
 
+    func testWorkspaceTabsUseOneNativeLiquidGlassNavigationPlane() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+
+        XCTAssertTrue(workspace.contains("NovelWorkspaceGlassTabBar("))
+        XCTAssertTrue(workspace.contains("ForEach(NovelWorkspaceSection.allCases)"))
+        XCTAssertTrue(workspace.contains(".safeAreaBar(edge: .top, spacing: 0)"))
+        XCTAssertTrue(workspace.contains(".glassEffect(.regular.interactive(), in: Capsule())"))
+        XCTAssertTrue(workspace.contains(".background(.ultraThinMaterial, in: Capsule())"))
+        XCTAssertTrue(workspace.contains("id: \"selected-workspace-section\""))
+        XCTAssertTrue(workspace.contains(".black.opacity(0.065)"))
+        XCTAssertTrue(workspace.contains(".stroke(selectionStroke, lineWidth: 0.5)"))
+        XCTAssertTrue(workspace.contains(".accessibilityAddTraits(isSelected ? .isSelected : [])"))
+        XCTAssertFalse(workspace.contains("Picker(\"小说工作区\""))
+        XCTAssertFalse(workspace.contains(".pickerStyle(.segmented)"))
+        XCTAssertEqual(
+            workspace.components(separatedBy: ".glassEffect(").count - 1,
+            1,
+            "The workspace tabs should be one glass navigation plane, not stacked glass surfaces."
+        )
+    }
+
     func testManuscriptTabIsAReaderDirectoryWithoutInternalWorkflowStats() throws {
         let chapters = try source("iosApp/NovelCreation/NovelChapterViews.swift")
 
