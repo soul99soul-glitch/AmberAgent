@@ -1,5 +1,5 @@
-// DeepReadHomePage — 杂志风热榜首页 v2
-// 卡片式设计 + 综合热点头条(大图位)+ 分源列表 + 点击 Deep Read
+// DeepReadHomePage — 杂志风热榜首页(设计系统驱动)
+// 用 design/tokens + design/components 统一视觉规范
 
 import {
   createTopicIdWithRuntime, normalizeUrlArkTs, run,
@@ -10,21 +10,14 @@ import { createNewsNowProvider } from '../platform_impl/NewsNowProvider.ets';
 import type { NewsNowProvider, HotItem, SourceSection } from '../platform_impl/NewsNowProvider.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { router } from '@kit.ArkUI';
+import {
+  BG, SURFACE, SURFACE2, INK, INK2, INK3, INK4, LINE, ACCENT, ACCENT_LIGHT,
+  TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS,
+} from '../design/tokens.ets';
+import { RubricHead, LeadCard, IndexRow, EmptyState, SkeletonRow } from '../design/components.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Index';
-
-// ── 配色(照搬 Android AmberTokens AmberLight) ──
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const SURFACE2: string = '#EFECE4';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const INK4: string = '#B6B1A4';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
-const ACCENT_BG: string = '#FFF5F0';
 
 const arktsTopicRuntime: TopicIdRuntime = {
   normalizeUrlInput: (url: string): string => normalizeUrlArkTs(url),
@@ -43,10 +36,6 @@ const deriveTopicIdArkTs = createTopicIdWithRuntime(arktsTopicRuntime);
 interface GenTextParams { model: string; messages: UIMessage[]; }
 class MockAiClient implements AiClient {
   async generateText(_p: GenTextParams): Promise<UIMessage[]> { return []; }
-}
-
-function padRank(n: number): string {
-  return n < 10 ? '0' + n.toString() : n.toString();
 }
 
 @Entry
@@ -76,7 +65,7 @@ struct DeepReadHomePage {
       this.sections = all.filter((s: SourceSection): boolean => s.items.length > 0);
       this.combined = this.newsNow.buildCombinedTopics(all);
       this.loadState = this.sections.length > 0 ? 'loaded' : 'error';
-      this.errorMsg = this.sections.length === 0 ? '所有源抓取失败,请检查网络' : '';
+      this.errorMsg = this.sections.length === 0 ? '所有源抓取失败' : '';
       this.lastUpdated = new Date().toLocaleTimeString();
     } catch (e) {
       this.loadState = 'error';
@@ -114,9 +103,10 @@ struct DeepReadHomePage {
 
   build(): void {
     Column() {
-      // ── 顶栏 ──
+      // ── 顶栏:品牌 + 操作 ──
       Row() {
-        Text('深度阅读').fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
+        Text('DeepRead')
+          .fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
         Blank()
         if (this.loadState === 'loading') {
           LoadingProgress().width(16).height(16).color(ACCENT).margin({ right: 20 })
@@ -130,116 +120,92 @@ struct DeepReadHomePage {
       .width('100%').height(56).padding({ left: 24, right: 24 })
       .backgroundColor(BG)
 
-      // ── 搜索框 ──
+      // ── 搜索框:视觉主角 ──
       Row() {
         TextInput({ text: this.title, placeholder: '搜索或输入话题…' })
-          .layoutWeight(1).height(44).fontSize(15)
+          .layoutWeight(1).fontSize(15)
           .fontColor(INK).placeholderColor(INK4)
-          .backgroundColor(SURFACE).borderRadius(12)
-          .border({ width: 1, color: LINE })
-          .padding({ left: 14, right: 14 })
+          .backgroundColor('rgba(0,0,0,0)')
           .onChange((v: string) => { this.title = v; })
           .onSubmit(() => {
             if (this.title.trim().length > 0 && !this.running) this.startDeepRead(this.title, null);
           })
       }
-      .width('92%').margin({ bottom: 8 })
+      .width('92%').height(48).padding({ left: 14, right: 14 })
+      .backgroundColor(SURFACE).borderRadius(RADIUS)
+      .border({ width: 1, color: LINE })
+      .margin({ bottom: 8 })
 
-      // ── 加载/错误状态 ──
+      // ── 运行状态 ──
+      if (this.running) {
+        Row() {
+          LoadingProgress().width(12).height(12).color(ACCENT)
+          Text(this.status).fontSize(META).fontColor(INK2).margin({ left: 6 })
+        }.margin({ bottom: 8 })
+      }
+
+      // ── 内容区 ──
       if (this.loadState === 'loading') {
         Column() {
-          LoadingProgress().width(40).height(40).color(ACCENT)
-          Text('正在抓取热榜…').fontSize(13).fontColor(INK3).margin({ top: 12 })
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          ForEach([1, 2, 3, 4, 5], () => {
+            SkeletonRow()
+          })
+        }
+        .width('100%').layoutWeight(1)
+        .padding({ left: 24, right: 24, top: 24 })
       } else if (this.loadState === 'error') {
         Column() {
-          Text('⚠️ ' + this.errorMsg).fontSize(13).fontColor(INK3)
-          Text('重试').fontSize(14).fontColor(ACCENT).margin({ top: 12 })
-            .onClick(() => { this.loadHotlist(); })
+          EmptyState({
+            icon: '',
+            title: '抓取失败',
+            subtitle: 'NewsNow 热榜源暂时无法连接\n请检查网络后重试',
+            actionLabel: '重试',
+            onAction: () => { this.loadHotlist(); },
+          })
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
       } else {
-        // ── 热榜内容 ──
         List({ space: 0 }) {
-          // ── 综合热点:头条大图位 ──
+          // ── 综合热点 ──
           if (this.combined.length > 0) {
             ListItem() {
-              Column() {
-                Row() {
-                  Text('//').fontSize(12).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                  Text(' 综合热点').fontSize(12).fontWeight(FontWeight.Medium).fontColor(INK2)
-                  Blank()
-                  if (this.lastUpdated.length > 0) {
-                    Text('更新于 ' + this.lastUpdated).fontSize(10).fontColor(INK4)
-                  }
-                }
-                .width('100%').padding({ top: 16, bottom: 8 })
-
-                // 头条卡片
-                Column() {
-                  Text(this.combined[0].title)
-                    .fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
-                    .lineHeight(26).maxLines(2)
-                  Row() {
-                    if (this.combined[0].heat.length > 0) {
-                      Text(this.combined[0].heat).fontSize(11).fontColor(INK3)
-                    }
-                  }.margin({ top: 6 })
-                }
-                .width('100%').padding(16).backgroundColor(SURFACE).borderRadius(12)
-                .border({ width: 1, color: LINE })
-                .onClick(() => { this.startDeepRead(this.combined[0].title, this.combined[0].url); })
-              }
-              .width('100%').padding({ bottom: 4 })
+              RubricHead({ label: '综合热点', status: this.lastUpdated.length > 0 ? '更新于 ' + this.lastUpdated : '' })
             }
-
-            // 第 2~9 条:紧凑列表
-            ForEach(this.combined.slice(1, 9), (item: HotItem, idx: number) => {
+            // 头条卡片
+            ListItem() {
+              LeadCard({
+                title: this.combined[0].title,
+                heat: this.combined[0].heat,
+                onTap: () => { this.startDeepRead(this.combined[0].title, this.combined[0].url); },
+              })
+            }
+            // 第 2~8 条
+            ForEach(this.combined.slice(1, 8), (item: HotItem, idx: number) => {
               ListItem() {
-                Row() {
-                  Text(padRank(idx + 2)).fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK4)
-                    .width(28)
-                  Text(item.title)
-                    .fontSize(14).fontColor(INK).layoutWeight(1).maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  if (item.heat.length > 0) {
-                    Text(item.heat).fontSize(10).fontColor(INK4).margin({ left: 8 })
-                  }
-                }
-                .width('100%').padding({ top: 13, bottom: 13 })
-                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-                .onClick(() => { this.startDeepRead(item.title, item.url); })
+                IndexRow({
+                  rank: idx + 2,
+                  title: item.title,
+                  heat: item.heat,
+                  last: idx === 6,
+                  onTap: () => { this.startDeepRead(item.title, item.url); },
+                })
               }
             })
           }
 
           // ── 分源列表 ──
           ForEach(this.sections, (section: SourceSection) => {
-            // 栏目标题
             ListItem() {
-              Row() {
-                Text('//').fontSize(12).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                Text(' ' + section.sourceName).fontSize(12).fontWeight(FontWeight.Medium).fontColor(INK2)
-                Blank()
-                Text(section.items.length + ' 条').fontSize(10).fontColor(INK4)
-              }
-              .width('100%').padding({ top: 20, bottom: 8 })
+              RubricHead({ label: section.sourceName, status: section.items.length + ' 条' })
             }
-
-            // 源条目(前 6 条)
             ForEach(section.items.slice(0, 6), (item: HotItem, idx: number) => {
               ListItem() {
-                Row() {
-                  Text(padRank(idx + 1)).fontSize(13).fontColor(INK4).width(28)
-                  Text(item.title)
-                    .fontSize(14).fontColor(INK).layoutWeight(1).maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  if (item.heat.length > 0) {
-                    Text(item.heat).fontSize(10).fontColor(INK4).margin({ left: 8 })
-                  }
-                }
-                .width('100%').padding({ top: 12, bottom: 12 })
-                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-                .onClick(() => { this.startDeepRead(item.title, item.url); })
+                IndexRow({
+                  rank: idx + 1,
+                  title: item.title,
+                  heat: item.heat,
+                  last: idx === 5,
+                  onTap: () => { this.startDeepRead(item.title, item.url); },
+                })
               }
             })
           })
@@ -248,14 +214,10 @@ struct DeepReadHomePage {
           if (this.articleText.length > 0) {
             ListItem() {
               Column() {
-                Row() {
-                  Text('//').fontSize(12).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                  Text(' 文章').fontSize(12).fontWeight(FontWeight.Medium).fontColor(INK2)
-                }
-                .width('100%').margin({ bottom: 8 })
-                Text(this.articleText).fontSize(14).fontColor(INK2).lineHeight(22)
+                RubricHead({ label: '文章' })
+                Text(this.articleText).fontSize(BODY).fontColor(INK2).lineHeight(22)
               }
-              .width('100%').padding(16).backgroundColor(ACCENT_BG).borderRadius(12).margin({ top: 16, bottom: 24 })
+              .width('100%').padding(PAD_CARD).backgroundColor(ACCENT_LIGHT).borderRadius(RADIUS).margin({ top: 8, bottom: 24 })
             }
           }
         }

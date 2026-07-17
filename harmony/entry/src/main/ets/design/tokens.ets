@@ -1,0 +1,20 @@
+// 设计 token — 照搬 Android AmberTokens + Typography 层级
+export const BG: string = '#F4F2EC';
+export const SURFACE: string = '#FAF9F5';
+export const SURFACE2: string = '#EFECE4';
+export const INK: string = '#1B1A17';
+export const INK2: string = '#57544C';
+export const INK3: string = '#8F8B80';
+export const INK4: string = '#B6B1A4';
+export const LINE: string = '#E4E0D6';
+export const ACCENT: string = '#B8623A';
+export const ACCENT_LIGHT: string = '#FFF5F0';
+export const SIGNAL: string = '#5E9C6E';
+export const ERROR: string = '#C93A2F';
+export const TITLE: number = 18;
+export const BODY: number = 14;
+export const META: number = 12;
+export const LABEL: number = 10;
+export const PAD_CARD: number = 16;
+export const PAD_ITEM: number = 13;
+export const RADIUS: number = 12;
