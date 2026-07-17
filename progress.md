@@ -60,6 +60,11 @@
   - 复核后仅剩非阻塞建议；已修正 `G0-T06` missing detail 同时列出 `hvigor` 与 `hvigorw`
   - 最新 Gate 0 仍为 blocked：本机缺 DevEco/Command Line Tools、hvigor/ohpm/hdc、device/emulator target
   - 创建 `docs/harmony-detailed-porting-plan.md`，补充 Android 原项目背景、路径、技术栈、模块架构、核心数据模型、平台能力迁移映射和分阶段鸿蒙化计划
+  - 2026-07-16 重新检查工具链：Command Line Tools、SDK、hvigorw、ohpm、hdc 已可用；修正 `hdc list targets` 输出 `[Empty]` 被误判为 found 的 Gate 0 bug
+  - 发现本机 HarmonyOS SDK 为 API 26 / `26.0.0.23`，将 `harmony/build-profile.json5` 从旧格式 `5.0.0(12)` 对齐到 `26.0.0`
+  - 定位命令行构建所需环境变量：`DEVECO_SDK_HOME` 需指向 SDK 父目录，`OHOS_BASE_SDK_HOME` 指向 `default/openharmony`
+  - 新增 `scripts/harmony-inventory/build-harmony-app.mjs`，自动补齐命令行构建环境
+  - 运行 `node scripts/harmony-inventory/build-harmony-app.mjs`，真实 HarmonyOS 工程 `assembleApp` 构建成功；仍未上机运行，因为 `hdc list targets` 返回 `[Empty]`
 - Files created/modified:
   - `.gitignore`
   - `.ignore`
@@ -80,6 +85,7 @@
   - `scripts/harmony-inventory/check-harmony-gate0.mjs`
   - `scripts/harmony-inventory/validate-harmony-fixtures.mjs`
   - `scripts/harmony-inventory/check-source-contracts.mjs`
+  - `scripts/harmony-inventory/build-harmony-app.mjs`
   - `docs/harmony-gate0-report.md`
   - `harmony/tests/fixtures/**`
   - `harmony/spikes/source-only/**`
@@ -101,11 +107,13 @@
 | Final source-only validation | `node scripts/harmony-inventory/validate-harmony-fixtures.mjs && node scripts/harmony-inventory/check-source-contracts.mjs` | fixtures/contracts 通过 | 54 条 JSON/JSONL、10 组 contract checks 通过 | pass |
 | Gate 0 unblock package review | oracle reviewer | 必须修正项为 0 | 可继续；DevEco GUI 不再是唯一硬阻塞 | pass |
 | Latest Gate 0 check | `node scripts/harmony-inventory/check-harmony-gate0.mjs || true` | 生成 toolchain report | `blocked`; 缺工具来源、hvigor/ohpm/hdc/device target | pass |
+| HarmonyOS command-line build | `node scripts/harmony-inventory/build-harmony-app.mjs` | `assembleApp` 构建通过 | `BUILD SUCCESSFUL`; 未配置 signing，未连接 device target | pass |
 
 ### Phase 4 Final State
 - **Status:** complete_source_only
-- **Blocked by:** Gate 0 toolchain readiness (`DevEco Studio` 或 `Command Line Tools` 工具来源、`hvigor`, `ohpm`, `hdc`, device/emulator target missing)
-- **Next when unblocked:** run P0 device/SDK spikes for SSE, RDB/Preferences, ArkUI + Markdown streaming
+- **Status:** command_line_build_verified
+- **Blocked by:** runtime/device Gate 0 readiness (`hdc list targets` returns `[Empty]`; no device/emulator target; signing still not configured)
+- **Next when unblocked:** install/run on target, then run P0 runtime spikes for SSE, RDB/Preferences, ArkUI + Markdown streaming
 
 ## Error Log
 
@@ -145,4 +153,3 @@
   - `node scripts/harmony-inventory/validate-harmony-fixtures.mjs` → 54 条通过（不变）。
 - **Decision:** 本次只改文档、不碰 ArkTS 代码（Gate 0 仍 blocked，不写业务代码）；修正随 Phase 0 产物一起提交。
 - **Next:** 提交后仍停在 Gate 0 blocked；解锁工具链后按 §5.3 spike 清单 + §8 Phase 0 真实 spike 推进。
-

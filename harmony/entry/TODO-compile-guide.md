@@ -1,10 +1,10 @@
 # Deep Read 鸿蒙 Entry — 编译校正指南
 
-**前置:装好 DevEco Studio + API 24 SDK + 配 `DEVECO_SDK_HOME`,然后在 `harmony/` 跑 `hvigorw assembleHap`。**
+**当前状态：API 26 Command Line Tools 已能编译当前 Deep Read entry stub。推荐从仓库根目录运行 `node scripts/harmony-inventory/build-harmony-app.mjs`。**
 
-本文档列出 entry 模块所有 TODO 标记点,按文件分组,给出:当前代码的猜测用法 / 官方 API 参考 / 预期编译错误 / 校正方向。逐个消除后即可编出第一个 `.hap`。
+本文档列出 entry 模块仍需功能接线的 TODO 标记点，按文件分组给出：当前代码的猜测用法 / 官方 API 参考 / 运行期风险 / 校正方向。当前工程已经能编出 unsigned `.hap/.app`；这些 TODO 不再是“能否编译”的 blocker，而是 P0/P1 真实能力验证前必须补的功能缺口。
 
-> 参考文档(HarmonyOS API 24):
+> 参考文档(HarmonyOS API 26):
 > - RCP: https://developer.huawei.com/consumer/cn/doc/harmonyos-references/js-apis-rcp
 > - relationalStore: https://developer.huawei.com/consumer/cn/doc/harmonyos-references/js-apis-data-relationalstore
 > - preferences: https://developer.huawei.com/consumer/cn/doc/harmonyos-references/js-apis-data-preferences
@@ -95,15 +95,17 @@
 
 ---
 
-## 编译顺序建议(装好工具链后)
+## 编译/验证顺序建议
 
-1. **先编 deepread 作为依赖** — 确认纯逻辑层能在 ArkTS 编译器下过(这是最大风险点:纯 TS 的 `interface + factory` 是否全过 ArkTS 严格模式)。若有错,按错误信息调整 deepread 源码(优先改代码,不关严格模式)。
-2. **编 entry** — 逐个按上表校正。优先级:`RcpHttpClient`(网络基础)→ `RdbRepository` + `PreferencesStorage`(持久化)→ `AppContainer`(接通)→ 页面/组件。
-3. **第一个 `.hap`** — 哪怕 UI 简陋、通知/Want 没接,只要列表页能打开 + 能触发 run 即达主档验收。
-4. **补 SSE 流式 + retry**(OpenAiCompatibleAiClient L102/L114)— 纯逻辑在 deepread,接 RCP dataStream。
-5. **Phase 8 Rust NAPI reader**(可选)— ArkTS fallback 已在,这是性能升级,最后做。
+1. **命令行构建** — 从仓库根目录运行 `node scripts/harmony-inventory/build-harmony-app.mjs`。当前已验证 `BUILD SUCCESSFUL`，产物 unsigned。
+2. **连接设备/模拟器 + 配签名** — `hdc list targets` 不能再是 `[Empty]`，并配置 debug signing。没有这一步不能做 runtime spike。
+3. **跑 entry runtime smoke** — 安装并打开当前 Deep Read stub，确认首页能启动、页面路由不崩。
+4. **补 RCP SSE + retry** — `OpenAiCompatibleAiClient` 接 RCP dataStream → `sse_assembler` → `append_chunk`，这是 H0-01 的真实验证路径。
+5. **补 RDB + Preferences 真实现** — 当前存在 memory fallback/TODO，不能算 H0-02/H0-03 通过。
+6. **补 Markdown/streaming UI** — 当前 ArticleRenderer 仍是基础展示，不能算 H0-04 通过。
+7. **Rust NAPI reader** — 可选性能升级，最后做。
 
-## 逻辑层已验证的部分(装好工具链后无需重测)
+## 逻辑层已验证的部分
 
 deepread 450 tests pass,tsc clean:
 - domain(models/enums/helpers/topic_id)

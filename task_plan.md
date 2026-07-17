@@ -6,7 +6,7 @@
 
 ## Current Phase
 
-Phase 4 source-only complete; Gate 0 unblock package reviewed; blocked on local HarmonyOS toolchain/device target
+Phase 4 source-only complete; command-line HarmonyOS build verified; blocked on device/emulator target and signing for runtime spikes
 
 ## Phases
 
@@ -42,6 +42,8 @@ Phase 4 source-only complete; Gate 0 unblock package reviewed; blocked on local 
 - [x] 升级 Gate 0 探测与 setup checklist，支持 Command Line Tools 作为 DevEco GUI 之外的解锁路线
 - [x] reviewer 复核 Gate 0 unblock package；无必须修正项
 - [x] 创建 `docs/harmony-detailed-porting-plan.md`，补充 Android 项目背景和完整鸿蒙化执行计划
+- [x] 修正 Gate 0 `hdc [Empty]` 误判，命令行工具链从“看起来 ready”改为“build 可用但 runtime target 缺失”
+- [x] 将 `harmony/build-profile.json5` 对齐本机 HarmonyOS API 26 SDK，并通过 `node scripts/harmony-inventory/build-harmony-app.mjs` 验证 `assembleApp` 成功
 - **Status:** complete
 
 ## Key Questions
@@ -62,6 +64,7 @@ Phase 4 source-only complete; Gate 0 unblock package reviewed; blocked on local 
 | Rust NAPI 不作为 Chat 生死门 | reviewer 指出 Android 侧 native 均有 fallback，Phase 0 真正 go/no-go 是 SSE、RDB/Preferences、ArkUI+Markdown |
 | 不手写假 DevEco 工程文件 | 避免提交看起来像工程但无法编译的 hvigor/module.json5；仅创建 README 占位，等工具链验证后再生成 |
 | Gate 0 工具来源可为 DevEco GUI 或 Command Line Tools | Command Line Tools 可提供 hvigor/ohpm/hdc；GUI 主要用于工程创建、自动签名和调试体验 |
+| Gate 0 分为 build readiness 和 runtime readiness | 当前 build 已通过；runtime spike 仍需设备/模拟器 target 与签名 |
 
 ## Errors Encountered
 

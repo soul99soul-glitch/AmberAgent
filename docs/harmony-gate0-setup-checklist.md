@@ -76,6 +76,19 @@ HDC 常见环境变量：
 export HDC_SERVER_PORT=7035
 ```
 
+如果使用 Huawei Command Line Tools，命令行构建还需要这两个路径。注意：`DEVECO_SDK_HOME` 指向 SDK 父目录，不是 `default` 子目录。
+
+```bash
+export DEVECO_SDK_HOME="$HOME/Library/Huawei/commandline/command-line-tools/sdk"
+export OHOS_BASE_SDK_HOME="$HOME/Library/Huawei/commandline/command-line-tools/sdk/default/openharmony"
+```
+
+本仓库已提供可重复构建脚本，会自动补齐上述环境变量：
+
+```bash
+node scripts/harmony-inventory/build-harmony-app.mjs
+```
+
 官方参考：
 
 - https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/ide-commandline-get
@@ -122,6 +135,14 @@ Gate 0 status: ready
 如果仍然是 `blocked`，先看 `docs/harmony-gate0-report.md` 的 Blocking Missing Items。不要跳过 Gate 0 直接写 DevEco 工程。
 
 注意：当前脚本把设备/模拟器 target 也作为 Gate 0 ready 的一部分。如果只是想先确认命令行构建工具，`hdc` 可用但没有 target 时仍会显示 blocked。
+
+如果只验证构建，不安装到设备，可运行：
+
+```bash
+node scripts/harmony-inventory/build-harmony-app.mjs
+```
+
+当前已知：命令行构建可以在没有 target 时通过；真实 P0 runtime spike 仍需要 `hdc list targets` 能看到设备或模拟器。
 
 ## 7. Gate 0 ready 后立刻做什么
 
