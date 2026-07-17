@@ -65,7 +65,11 @@ struct CouncilChatRuntimeView: View {
     @State private var measuredGrowthFollowTask: Task<Void, Never>?
     @State private var measuredGrowthFollowPending = false
     @State private var terminalSettleTask: Task<Void, Never>?
+    @State private var scrollDriver = NativeTimelineScrollDriver()
+    @State private var nativeScrollFallbackReason: NativeTimelineScrollFallbackReason?
+    @State private var isNativeScrollSurfaceVisible = false
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeScrollDriverEnabled = false
 
     init(
         settingsStore: SettingsStore,
@@ -96,15 +100,27 @@ struct CouncilChatRuntimeView: View {
             }
         }
         .onAppear {
+            isNativeScrollSurfaceVisible = true
             viewModel.runtimeDidAppear()
         }
         // 离开页面(返回/切走)时立即存一份当前 transcript,避免运行中退出导致刚流式出的内容
         // 在下次进入前丢失(运行任务仍会在后台跑完并再存一次,以更完整的为准)。
         .onDisappear {
+            isNativeScrollSurfaceVisible = false
             cancelPendingMeasuredGrowthFollow()
             terminalSettleTask?.cancel()
+            scrollDriver.invalidate()
             viewModel.runtimeDidDisappear()
             viewModel.persistTranscript()
+        }
+        .onChange(of: followGeneration) { _, enabled in
+            scrollDriver.setAutomaticFollowEnabled(enabled)
+        }
+        .onChange(of: nativeScrollDriverEnabled) { _, enabled in
+            if !enabled {
+                nativeScrollFallbackReason = nil
+                scrollDriver.invalidate()
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
@@ -285,6 +301,17 @@ struct CouncilChatRuntimeView: View {
             .padding(.bottom, 18)
             .frame(maxWidth: .infinity, minHeight: 0)
             .scrollTargetLayout()
+            .background {
+                if isNativeScrollDriverDesired {
+                    NativeTimelineScrollViewResolver(
+                        onResolve: handleNativeScrollViewResolved,
+                        onMetricsChanged: {
+                            guard isNativeScrollDriverActive else { return }
+                            scrollDriver.handleLayoutMetricsChanged()
+                        }
+                    )
+                }
+            }
         }
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -295,14 +322,27 @@ struct CouncilChatRuntimeView: View {
             switch phase {
             case .tracking, .interacting:
                 userDragging = true
+                if isNativeScrollDriverActive {
+                    scrollDriver.submit(.userDragBegan)
+                }
                 cancelPendingMeasuredGrowthFollow()
                 terminalSettleTask?.cancel()
             case .idle:
                 let endedUserDrag = userDragging
                 userDragging = false
                 if endedUserDrag {
-                    followPaused = !transcriptNearBottom
-                    if transcriptNearBottom, followGeneration {
+                    let returnedToBottom = NativeTimelineScrollReturnPolicy.returnedToBottom(
+                        liveDistanceToBottom: isNativeScrollDriverActive
+                            ? scrollDriver.distanceToBottomNow()
+                            : nil,
+                        cachedNearBottom: transcriptNearBottom,
+                        threshold: ChatLayout.nearBottomResumeThreshold
+                    )
+                    followPaused = !returnedToBottom
+                    if isNativeScrollDriverActive {
+                        scrollDriver.submit(.userDragEnded(isAtBottom: returnedToBottom))
+                    }
+                    if returnedToBottom, followGeneration {
                         scheduleMeasuredGrowthFollowToBottom()
                     }
                 }
@@ -354,11 +394,19 @@ struct CouncilChatRuntimeView: View {
         .onChange(of: viewModel.messages.first?.id) { _, _ in
             // 新房间/历史重放不继承上一房间的“用户暂停跟随”状态。
             followPaused = false
+            if isNativeScrollDriverActive {
+                scrollDriver.submit(.conversationReset)
+            }
             scheduleTerminalBottomSettle()
         }
     }
 
     private func scheduleMeasuredGrowthFollowToBottom() {
+        guard followGeneration, !followPaused, !userDragging else { return }
+        if isNativeScrollDriverActive {
+            scrollDriver.submit(.streamContentGrew)
+            return
+        }
         // A 48ms text presentation flush can be followed by multiple asynchronous
         // Markdown height publications. Keep ownership for the full 80ms animation
         // so later geometry callbacks cannot restart it mid-flight.
@@ -424,11 +472,48 @@ struct CouncilChatRuntimeView: View {
     }
 
     private func scrollToTranscriptBottom() {
+        if isNativeScrollDriverActive {
+            scrollDriver.submit(
+                .explicitBottom(source: .streamGrowth, animated: false, keyboardToken: nil)
+            )
+            return
+        }
         var transaction = Transaction()
         transaction.disablesAnimations = true
         transaction.animation = nil
         withTransaction(transaction) {
             scrollPosition.scrollTo(edge: .bottom)
+        }
+    }
+
+    private var isNativeScrollDriverDesired: Bool {
+        nativeScrollDriverEnabled &&
+            nativeScrollFallbackReason == nil &&
+            isNativeScrollSurfaceVisible
+    }
+
+    private var isNativeScrollDriverActive: Bool {
+        isNativeScrollDriverDesired && scrollDriver.isAttached
+    }
+
+    private func handleNativeScrollViewResolved(_ scrollView: UIScrollView) {
+        guard isNativeScrollDriverDesired else { return }
+        let wasAttached = scrollDriver.isAttached
+        scrollDriver.setAutomaticFollowEnabled(followGeneration)
+        scrollDriver.onFallback = { reason, shouldReplayBottom in
+            guard nativeScrollFallbackReason == nil else { return }
+            nativeScrollFallbackReason = reason
+            guard shouldReplayBottom, !userDragging else { return }
+            scrollToTranscriptBottom()
+        }
+        scrollDriver.attach(scrollView)
+        guard !wasAttached, scrollDriver.isAttached else { return }
+        if userDragging || followPaused {
+            scrollDriver.submit(.userDragBegan)
+        } else {
+            scrollDriver.submit(
+                .explicitBottom(source: .button, animated: false, keyboardToken: nil)
+            )
         }
     }
 
@@ -1039,7 +1124,7 @@ private struct CouncilRoomSettingsSheet: View {
                     Divider().overlay(AmberTheme.borderSoft)
 
                     Stepper(
-                        "席位超时 \(roomSettingsStore.settings.limits.seatTimeoutSeconds)s",
+                        "单次模型超时 \(roomSettingsStore.settings.limits.seatTimeoutSeconds)s",
                         value: Binding(
                             get: { roomSettingsStore.settings.limits.seatTimeoutSeconds },
                             set: { roomSettingsStore.updateLimits(seatTimeoutSeconds: $0) }
@@ -1199,6 +1284,7 @@ final class CouncilChatViewModel {
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
     @ObservationIgnored private var activeDiscussionID: UUID?
     @ObservationIgnored private var isRuntimeAttached = false
+    @ObservationIgnored private var isApplicationActive = true
     @ObservationIgnored private var currentObjective = ""
     @ObservationIgnored private var currentTaskId: String?
     @ObservationIgnored private var pendingObjective = ""
@@ -1219,6 +1305,7 @@ final class CouncilChatViewModel {
         transcriptDefaults: UserDefaults = .standard,
         archiveStore: CouncilRoomArchiveStore = .shared
     ) {
+        let restoredRoom = CouncilTranscriptStore.load(defaults: transcriptDefaults)
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
         self.providerRegistry = providerRegistry
@@ -1226,15 +1313,29 @@ final class CouncilChatViewModel {
         self.runner = runner ?? IOSCouncilRoomRunner(permissionStore: permissionStore)
         self.transcriptDefaults = transcriptDefaults
         self.archiveStore = archiveStore
-        // 默认载回上一轮 transcript(退出后再进仍能看到历史);为空则空白开场。
-        self.messages = CouncilTranscriptStore.load(defaults: transcriptDefaults)
-        refreshSettingsBackedParticipants()
+        self.messages = restoredRoom?.messages.map { $0.restored() } ?? []
+        if let restoredRoom {
+            currentTaskId = restoredRoom.taskId.trimmedNilIfBlank
+            currentObjective = restoredRoom.objective
+            lastRunObjective = restoredRoom.objective
+            selectedMode = CouncilDiscussionMode(rawValue: restoredRoom.modeRaw) ?? .freeChat
+            participants = restoredRoom.participants.map { $0.restored() }
+            failedSpeakerIds = Set(restoredRoom.failedSpeakerIds)
+            invitedSpeakerIds = Set(participants.filter { !$0.isHost }.map(\.id))
+            roomStateOverride = restoredRoom.statusRaw.trimmedNilIfBlank
+        }
+        if participants.isEmpty {
+            refreshSettingsBackedParticipants()
+        }
     }
 
     func persistTranscript() {
         // 重放历史议会时不要把只读快照写回单房间草稿,否则会覆盖实时房间的进度。
         guard !isReplay else { return }
-        CouncilTranscriptStore.save(messages, defaults: transcriptDefaults)
+        CouncilTranscriptStore.save(
+            persistedRoom(taskId: currentTaskId ?? ""),
+            defaults: transcriptDefaults
+        )
     }
 
     func runtimeDidAppear() {
@@ -1246,10 +1347,21 @@ final class CouncilChatViewModel {
         skipAskUser()
     }
 
+    func runtimeWillEnterBackground() {
+        isApplicationActive = false
+        skipAskUser()
+        persistTranscript()
+        archiveCurrentRoom()
+    }
+
+    func runtimeDidBecomeActive() {
+        isApplicationActive = true
+    }
+
     var canSend: Bool {
         !isRunning &&
-            !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            currentConfigurationIssue == nil &&
+            !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// 用户提交对主持人提问的回答，恢复议会。
@@ -1268,7 +1380,8 @@ final class CouncilChatViewModel {
     }
 
     var currentModelId: String {
-        let trimmed = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = sharedSettings.resolveCurrentModelId()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "gpt-4o" : trimmed
     }
 
@@ -1278,8 +1391,8 @@ final class CouncilChatViewModel {
 
     var roomStateText: String {
         if let roomStateOverride { return roomStateOverride }
-        if settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return "缺少 API Key"
+        if let issue = currentConfigurationIssue {
+            return issue.title
         }
         if isRunning {
             return selectedMode.runningState
@@ -1296,6 +1409,25 @@ final class CouncilChatViewModel {
         isReplay ? currentTaskId : nil
     }
 
+    func recoverInterruptedTasks(_ taskIds: [String]) {
+        guard let currentTaskId, taskIds.contains(currentTaskId) else { return }
+        if let room = archiveStore.load(taskId: currentTaskId) {
+            currentObjective = room.objective
+            lastRunObjective = room.objective
+            selectedMode = CouncilDiscussionMode(rawValue: room.modeRaw) ?? selectedMode
+            participants = room.participants.map { $0.restored() }
+            failedSpeakerIds = Set(room.failedSpeakerIds)
+            messages = room.messages.map { $0.restored() }
+        }
+        finishStreamingMessages(as: .failed)
+        isRunning = false
+        activeSpeakerId = nil
+        invitedSpeakerIds.removeAll()
+        roomStateOverride = IOSAdvancedTaskStatus.interrupted.title
+        persistTranscript()
+        archiveCurrentRoom()
+    }
+
     /// 当前讨论轮次：只数真正的「第 N 轮」轮次分隔，不把开场 / 主持调研 / 席位组建 /
     /// 轮末点评 / 主持总结等阶段胶囊也算进轮次（否则开场阶段就会误显示「第 6 轮」）。
     var discussionRound: Int {
@@ -1309,11 +1441,11 @@ final class CouncilChatViewModel {
     var availableModelIds: [String] {
         var seen = Set<String>()
         var ids: [String] = []
-        // All chat models across every configured provider (shared settings),
-        // not just the legacy registry's single selected provider.
-        for option in sharedSettings.availableChatModels() {
-            guard seen.insert(option.modelId).inserted else { continue }
-            ids.append(option.modelId)
+        for model in sharedSettings.resolveCurrentProviderSetting()?.models ?? []
+            where model.type == ModelType.chat {
+            let modelId = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !modelId.isEmpty, seen.insert(modelId).inserted else { continue }
+            ids.append(modelId)
         }
         let current = currentModelId.trimmingCharacters(in: .whitespacesAndNewlines)
         if !current.isEmpty, seen.insert(current).inserted {
@@ -1350,12 +1482,12 @@ final class CouncilChatViewModel {
     func send() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
-        guard !settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        if let issue = currentConfigurationIssue {
             appendMessage(
                 kind: .system,
                 author: "议会",
-                body: "当前服务商缺少 API Key，无法启动模型议会。",
-                systemImage: "key.slash",
+                body: issue.message,
+                systemImage: "exclamationmark.triangle",
                 tint: AmberTheme.accentRed,
                 subtitle: "配置阻塞",
                 status: .failed
@@ -1371,6 +1503,9 @@ final class CouncilChatViewModel {
         let text = pendingObjective.trimmingCharacters(in: .whitespacesAndNewlines)
         pendingObjective = ""
         guard !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
+        if currentTaskId != nil || !messages.isEmpty {
+            resetRoom()
+        }
         inputText = ""
         currentObjective = text
         lastRunObjective = text
@@ -1400,7 +1535,7 @@ final class CouncilChatViewModel {
 
     func cancelDiscussion() {
         stopActiveDiscussion()
-        finishStreamingMessages(as: .completed)
+        finishStreamingMessages(as: .failed)
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         failedSpeakerIds.removeAll()
@@ -1470,17 +1605,7 @@ final class CouncilChatViewModel {
     /// 检查点调用;不在 per-token 的 updateMessage 上调用,避免每个 token 写一次文件。
     private func archiveCurrentRoom() {
         guard !isReplay, let taskId = currentTaskId, !messages.isEmpty else { return }
-        let room = CouncilPersistedRoom(
-            taskId: taskId,
-            objective: currentObjective,
-            modeRaw: selectedMode.rawValue,
-            statusRaw: roomStateOverride ?? "",
-            failedSpeakerIds: Array(failedSpeakerIds),
-            participants: participants.map(CouncilPersistedParticipant.init),
-            messages: messages.map(CouncilPersistedMessage.init),
-            updatedAtMs: Date().timeIntervalSince1970 * 1000
-        )
-        archiveStore.save(room)
+        archiveStore.save(persistedRoom(taskId: taskId))
     }
 
     func restartLastDiscussion() {
@@ -1517,24 +1642,36 @@ final class CouncilChatViewModel {
             currentModelId: currentModelId
         )
         refreshSettingsBackedParticipants()
+        guard let currentModel = sharedSettings.snapshot.getCurrentChatModel(),
+              let providerSetting = ChatProviderConfiguration.provider(
+                  for: currentModel,
+                  providers: sharedSettings.snapshot.providers
+              ) else {
+            appendMessage(
+                kind: .system,
+                author: "议会",
+                body: ChatConfigurationIssue.missingProvider.message,
+                systemImage: "exclamationmark.triangle",
+                tint: AmberTheme.accentRed,
+                subtitle: "配置阻塞",
+                status: .failed
+            )
+            isRunning = false
+            activeDiscussionID = nil
+            discussionTask = nil
+            roomStateOverride = "失败"
+            persistTranscript()
+            return
+        }
         let request = IOSCouncilRoomRunRequest(
             objective: objective,
             mode: selectedMode.runMode,
             settings: roomSettingsStore.settings,
-            currentModelId: currentModelId,
-            // Resolve from the shared settings store (canonical: formal Provider
-            // UI writes it, chat reads it) so a provider configured in Settings
-            // is honored — not the legacy ProviderRegistryStore (key-less +
-            // ignores the selected model). Legacy fallback when nothing usable.
-            providerSetting: sharedSettings.resolveCurrentProviderSetting()
-                ?? IOSCouncilRoomRunner.makeProviderSetting(
-                    baseUrl: settingsStore.baseUrl,
-                    apiKey: settingsStore.currentApiKey
-                ),
+            currentModelId: currentModel.modelId,
+            currentModel: currentModel,
+            providerSetting: providerSetting,
             searchSettings: sharedSettings.snapshot,
-            // 默认同意联网调研:主持人始终用已配置的搜索服务(无配置时走内置 DuckDuckGo/Bing
-            // 兜底)做调研,不再受聊天页 web-search 总开关或确认面板影响。
-            researchConsent: .allowed,
+            researchConsent: researchAllowed ? .allowed : .unavailable,
             dynamicSeatGeneration: roomSettingsStore.dynamicSeatGeneration
         )
         let summary = await runner.run(request: request, onEvent: { [weak self] event in
@@ -1544,7 +1681,8 @@ final class CouncilChatViewModel {
             // 暂停议会，等用户回答。用户回答后恢复；跳过则返回 nil。
             guard let self,
                   self.activeDiscussionID == discussionID,
-                  self.isRuntimeAttached else { return nil }
+                  self.isRuntimeAttached,
+                  self.isApplicationActive else { return nil }
             return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
                 self.pendingAskUser = IOSCouncilAskUserState(
                     question: question,
@@ -1556,7 +1694,7 @@ final class CouncilChatViewModel {
         if currentTaskId == nil {
             currentTaskId = summary.taskId
         }
-        finishStreamingMessages(as: summary.status == .failed ? .failed : .completed)
+        finishStreamingMessages(as: summary.status == .completed ? .completed : .failed)
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         isRunning = false
@@ -1576,6 +1714,30 @@ final class CouncilChatViewModel {
         } else {
             inputText += " \(token) "
         }
+    }
+
+    private var currentConfigurationIssue: ChatConfigurationIssue? {
+        guard let model = sharedSettings.snapshot.getCurrentChatModel() else {
+            return .missingModel
+        }
+        let provider = ChatProviderConfiguration.provider(
+            for: model,
+            providers: sharedSettings.snapshot.providers
+        )
+        return ChatProviderConfiguration.issue(for: model, provider: provider)
+    }
+
+    private func persistedRoom(taskId: String) -> CouncilPersistedRoom {
+        CouncilPersistedRoom(
+            taskId: taskId,
+            objective: currentObjective,
+            modeRaw: selectedMode.rawValue,
+            statusRaw: roomStateOverride ?? "",
+            failedSpeakerIds: Array(failedSpeakerIds),
+            participants: participants.map(CouncilPersistedParticipant.init),
+            messages: messages.map(CouncilPersistedMessage.init),
+            updatedAtMs: Date().timeIntervalSince1970 * 1000
+        )
     }
 
     @discardableResult
@@ -1631,6 +1793,7 @@ final class CouncilChatViewModel {
         switch event {
         case .taskStarted(let id):
             currentTaskId = id
+            persistTranscript()
             archiveCurrentRoom()
         case .state(let state):
             roomStateOverride = state
@@ -1694,7 +1857,7 @@ final class CouncilChatViewModel {
                         : "\(participant.displayName)：\(participant.roleDescription)（\(modelLabel(for: participant))）"
                 }
                 .joined(separator: "\n"),
-            budgetSummary: "模式：\(selectedMode.title)\n最大席位：\(roomSettingsStore.settings.limits.maxSeats)\n默认轮数：\(roomSettingsStore.settings.limits.defaultRounds)\n席位超时：\(roomSettingsStore.settings.limits.seatTimeoutSeconds)s\n输出预算：\(roomSettingsStore.settings.limits.outputBudgetCharacters)\n提供商：当前 OpenAI-compatible 配置\n主持模型：\(roomSettingsStore.settings.host.modelId.trimmedOr(currentModelId))",
+            budgetSummary: "模式：\(selectedMode.title)\n最大席位：\(roomSettingsStore.settings.limits.maxSeats)\n默认轮数：\(roomSettingsStore.settings.limits.defaultRounds)\n单次模型超时：\(roomSettingsStore.settings.limits.seatTimeoutSeconds)s\n输出预算：\(roomSettingsStore.settings.limits.outputBudgetCharacters)\n提供商：\(sharedSettings.resolveCurrentProviderSetting()?.name ?? "未配置")\n主持模型：\(roomSettingsStore.settings.host.modelId.trimmedOr(currentModelId))",
             transcript: roomTranscript(limit: 80)
         )
     }
@@ -1774,7 +1937,7 @@ final class CouncilChatViewModel {
         stopActiveDiscussion()
         guard shouldCheckpoint else { return }
 
-        finishStreamingMessages(as: .completed)
+        finishStreamingMessages(as: .failed)
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         isRunning = false
@@ -2196,7 +2359,7 @@ enum CouncilMessageStatus {
     init(rawKey: String) {
         switch rawKey {
         case "failed": self = .failed
-        // 重载会把仍标记为 speaking 的消息当作已完成(上一轮早已结束,不应再显示"思考中")。
+        case "speaking": self = .failed
         default: self = .completed
         }
     }
@@ -2214,6 +2377,26 @@ struct CouncilPersistedMessage: Codable, Equatable {
     let tintHex: String
     let subtitle: String?
     let status: String
+
+    init(
+        id: String,
+        kind: String,
+        author: String,
+        body: String,
+        systemImage: String,
+        tintHex: String,
+        subtitle: String?,
+        status: String
+    ) {
+        self.id = id
+        self.kind = kind
+        self.author = author
+        self.body = body
+        self.systemImage = systemImage
+        self.tintHex = tintHex
+        self.subtitle = subtitle
+        self.status = status
+    }
 
     init(_ message: CouncilChatMessage) {
         self.id = message.id.uuidString
@@ -2240,23 +2423,35 @@ struct CouncilPersistedMessage: Codable, Equatable {
     }
 }
 
-/// UserDefaults 持久化上一轮议会 transcript(单房间,只保留最近一份)。
+/// UserDefaults 持久化当前房间快照。旧版只保存消息数组，读取时原样迁移。
 enum CouncilTranscriptStore {
     private static let key = "app.amber.ios.councilTranscript.v1"
 
-    static func save(_ messages: [CouncilChatMessage], defaults: UserDefaults) {
-        let dtos = messages.map(CouncilPersistedMessage.init)
-        if let data = try? JSONEncoder().encode(dtos) {
+    static func save(_ room: CouncilPersistedRoom, defaults: UserDefaults) {
+        if let data = try? JSONEncoder().encode(room) {
             defaults.set(data, forKey: key)
         }
     }
 
-    static func load(defaults: UserDefaults) -> [CouncilChatMessage] {
-        guard let data = defaults.data(forKey: key),
-              let dtos = try? JSONDecoder().decode([CouncilPersistedMessage].self, from: data) else {
-            return []
+    static func load(defaults: UserDefaults) -> CouncilPersistedRoom? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        let decoder = JSONDecoder()
+        if let room = try? decoder.decode(CouncilPersistedRoom.self, from: data) {
+            return room
         }
-        return dtos.map { $0.restored() }
+        guard let messages = try? decoder.decode([CouncilPersistedMessage].self, from: data) else {
+            return nil
+        }
+        return CouncilPersistedRoom(
+            taskId: "",
+            objective: "",
+            modeRaw: CouncilDiscussionMode.freeChat.rawValue,
+            statusRaw: "",
+            failedSpeakerIds: [],
+            participants: [],
+            messages: messages,
+            updatedAtMs: 0
+        )
     }
 
     static func clear(defaults: UserDefaults) {
@@ -2368,6 +2563,35 @@ final class CouncilRoomArchiveStore {
 
     func delete(taskId: String) {
         try? fileManager.removeItem(at: fileURL(for: taskId))
+    }
+
+    func markInterrupted(taskIds: [String]) {
+        for taskId in taskIds {
+            guard let room = load(taskId: taskId) else { continue }
+            let messages = room.messages.map { message in
+                guard message.status == "speaking" else { return message }
+                return CouncilPersistedMessage(
+                    id: message.id,
+                    kind: message.kind,
+                    author: message.author,
+                    body: message.body,
+                    systemImage: message.systemImage,
+                    tintHex: message.tintHex,
+                    subtitle: message.subtitle,
+                    status: "failed"
+                )
+            }
+            save(CouncilPersistedRoom(
+                taskId: room.taskId,
+                objective: room.objective,
+                modeRaw: room.modeRaw,
+                statusRaw: IOSAdvancedTaskStatus.interrupted.title,
+                failedSpeakerIds: room.failedSpeakerIds,
+                participants: room.participants,
+                messages: messages,
+                updatedAtMs: Date().timeIntervalSince1970 * 1000
+            ))
+        }
     }
 
     private func fileURL(for taskId: String) -> URL {

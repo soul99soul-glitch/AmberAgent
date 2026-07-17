@@ -361,6 +361,29 @@ final class IOSAdvancedTaskStore {
             .map { $0 }
     }
 
+    /// Called once at app startup. A process-local Council run cannot still own
+    /// work after relaunch, so persisted running rows must become honest terminals.
+    @discardableResult
+    func markInterruptedCouncilTasks(now: Date = Date()) -> [String] {
+        let ids = tasks
+            .filter { $0.kind == .modelCouncil && $0.status == .running }
+            .map(\.id)
+        guard !ids.isEmpty else { return [] }
+
+        let idSet = Set(ids)
+        for index in tasks.indices where idSet.contains(tasks[index].id) {
+            tasks[index].status = .interrupted
+            tasks[index].resultSummary = "模型议会因应用进程结束而中断。"
+            tasks[index].error = ""
+            tasks[index].retryable = false
+            tasks[index].cancelCapability = false
+            tasks[index].metadata["interruption_reason"] = "process_terminated"
+            tasks[index].updatedAt = now
+        }
+        persist()
+        return ids
+    }
+
     @discardableResult
     func upsert(_ record: IOSAdvancedTaskRecord) -> IOSAdvancedTaskRecord {
         var sanitized = record

@@ -37,6 +37,7 @@ struct NovelLiveTransportRequest: @unchecked Sendable {
 
 struct NovelLiveTransportCallbacks: @unchecked Sendable {
     let onChunk: @Sendable (MessageChunk) -> Void
+    let onAskUser: @Sendable (NovelAskUserPrompt, String) -> Void
     let onComplete: @Sendable () -> Void
     let onFailure: @Sendable (NovelModelFailure) -> Void
 }
@@ -128,7 +129,7 @@ actor NovelLiveModelAdapter: NovelModelRunning {
         self.discussionTransport = toolRuntime.map { runtime in
             Self.discussionSearchTransport(
                 using: streamingProvider,
-                executors: { runtime.discussionSearchToolExecutors() }
+                executors: { runtime.novelDiscussionToolExecutors() }
             )
         }
         self.discussionSearchEnabled = {
@@ -201,7 +202,10 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             var parameters = try Self.makeParameters(
                 request.parameters,
                 model: route.model,
-                includeSearchTools: searchEnabled && !isGrokWeb
+                includeSearchTools: searchEnabled && !isGrokWeb,
+                includeAskUserTool: request.purpose == .discussion &&
+                    discussionTransport != nil &&
+                    !isGrokWeb
             )
             var effectiveProvider = route.provider
             if codex.isCodex(route.provider) {
@@ -217,6 +221,7 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             )
             let callbacks = NovelLiveTransportCallbacks(
                 onChunk: { callbackSink.send(.chunk($0)) },
+                onAskUser: { callbackSink.send(.askUser($0, preface: $1)) },
                 onComplete: { callbackSink.send(.completed) },
                 onFailure: { callbackSink.send(.failed($0)) }
             )
@@ -232,7 +237,7 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             let transport: NovelLiveTransport
             if isGrokWeb {
                 transport = grokTransport
-            } else if searchEnabled, let discussionTransport {
+            } else if request.purpose == .discussion, let discussionTransport {
                 transport = discussionTransport
             } else {
                 transport = kmpTransport
@@ -394,12 +399,22 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             for event in Self.events(from: chunk) {
                 active.continuation.yield(event)
             }
+            if let failure = Self.outputLimitFailure(in: chunk) {
+                receive(.failed(failure), runID: runID)
+            }
         case .completed:
             activeRuns.removeValue(forKey: runID)
             if !active.handleInstalled {
                 terminalBeforeHandleInstall.insert(runID)
             }
             active.continuation.yield(.completed)
+            active.continuation.finish()
+        case .askUser(let prompt, let preface):
+            activeRuns.removeValue(forKey: runID)
+            if !active.handleInstalled {
+                terminalBeforeHandleInstall.insert(runID)
+            }
+            active.continuation.yield(.askUser(prompt, preface: preface))
             active.continuation.finish()
         case .failed(let failure):
             activeRuns.removeValue(forKey: runID)
@@ -515,7 +530,7 @@ extension NovelLiveModelAdapter {
                 let engine = IOSAgentToolEngine(
                     provider: provider,
                     executors: executors(),
-                    configuration: .init(maxSteps: 4, honorApprovalPause: false)
+                    configuration: .init(maxSteps: 4, honorApprovalPause: true)
                 )
                 let result = await engine.run(
                     providerSetting: request.providerSetting,
@@ -540,6 +555,20 @@ extension NovelLiveModelAdapter {
                         message: "讨论时连续搜索次数过多，请缩小问题后重试。",
                         isRetryable: true
                     ))
+                    return
+                }
+                if let approval = result.pendingApproval,
+                   approval.toolName == "ask_user" {
+                    do {
+                        let prompt = try decodeAskUserPrompt(approval.arguments)
+                        callbacks.onAskUser(prompt, lastAssistantText(in: result.messages))
+                    } catch {
+                        callbacks.onFailure(failure(
+                            code: "discussion_ask_user_invalid",
+                            message: "模型提出的问题格式无法读取，请重试。",
+                            isRetryable: true
+                        ))
+                    }
                     return
                 }
                 if result.pendingApproval != nil {
@@ -595,7 +624,8 @@ private extension NovelLiveModelAdapter {
     static func makeParameters(
         _ source: NovelModelParameters,
         model: Model,
-        includeSearchTools: Bool = false
+        includeSearchTools: Bool = false,
+        includeAskUserTool: Bool = false
     ) throws -> TextGenerationParams {
         if let maxTokens = source.maxOutputTokens, maxTokens <= 0 {
             throw failure(
@@ -628,10 +658,11 @@ private extension NovelLiveModelAdapter {
             maxTokens: source.maxOutputTokens.map {
                 KotlinInt(value: Int32(clamping: $0))
             },
-            tools: includeSearchTools ? [
-                ToolKt.createSearchWebToolDeclaration(),
-                ToolKt.createScrapeWebToolDeclaration(),
-            ] : [],
+            tools: (includeAskUserTool ? [ToolKt.createAskUserToolDeclaration()] : []) +
+                (includeSearchTools ? [
+                    ToolKt.createSearchWebToolDeclaration(),
+                    ToolKt.createScrapeWebToolDeclaration(),
+                ] : []),
             reasoningLevel: supportsReasoning ? reasoningLevel(source.reasoningLevel) : .off,
             customHeaders: model.customHeaders,
             customBody: customBodies
@@ -696,12 +727,33 @@ private extension NovelLiveModelAdapter {
         return events
     }
 
+    static func outputLimitFailure(in chunk: MessageChunk) -> NovelModelFailure? {
+        let reasons = Set(chunk.choices.compactMap { $0.finishReason?.lowercased() })
+        guard !reasons.isDisjoint(with: ["length", "max_tokens", "max_output_tokens"]) else {
+            return nil
+        }
+        return NovelModelFailure(
+            code: "output_limit_reached",
+            message: "模型回复达到输出上限，请重试。",
+            isRetryable: true
+        )
+    }
+
     static func text(in message: UIMessage) -> String {
         message.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
     }
 
     static func lastAssistantText(in messages: [UIMessage]) -> String {
         messages.reversed().first(where: { $0.role == MessageRole.assistant }).map(text(in:)) ?? ""
+    }
+
+    static func decodeAskUserPrompt(_ arguments: String) throws -> NovelAskUserPrompt {
+        guard let data = arguments.data(using: .utf8) else {
+            throw NovelError.invalidInput("Ask User arguments are not UTF-8.")
+        }
+        let prompt = try JSONDecoder().decode(NovelAskUserPrompt.self, from: data)
+        try NovelGenerationReducer.validateAskUserPrompt(prompt)
+        return prompt
     }
 
     static func replacementChunk(_ text: String) -> MessageChunk {
@@ -775,6 +827,7 @@ private extension NovelLiveModelAdapter {
 
 fileprivate enum NovelLiveCallbackFrame: @unchecked Sendable {
     case chunk(MessageChunk)
+    case askUser(NovelAskUserPrompt, preface: String)
     case completed
     case failed(NovelModelFailure)
 }

@@ -1,3 +1,4 @@
+import SwiftUI
 import UIKit
 
 @MainActor
@@ -9,23 +10,19 @@ final class NativeTimelineScrollDriver: NSObject {
     private var displayLink: CADisplayLink?
     private var lastDisplayLinkTimestamp: CFTimeInterval?
     private var generation: UInt64 = 0
-    private var keyboardOverlap: CGFloat = 0
-    private var composerHeight: CGFloat = 0
-    private var hasAttachedScrollView = false
+    private var lastViewportMetrics: ViewportMetrics?
+    private var automaticFollowEnabled = true
     private var fallbackReason: NativeTimelineScrollFallbackReason?
     private var horizontalOffsetDriftClampUsed = false
 
     func attach(_ scrollView: UIScrollView) {
         guard fallbackReason == nil else { return }
         guard self.scrollView !== scrollView else { return }
-        let shouldReplayInitialBottom = !hasAttachedScrollView
-        hasAttachedScrollView = true
         self.scrollView = scrollView
+        lastViewportMetrics = ViewportMetrics(scrollView)
         horizontalOffsetDriftClampUsed = false
         scrollView.keyboardDismissMode = .interactive
-        if shouldReplayInitialBottom {
-            submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
-        }
+        _ = validateScrollViewHealth()
     }
 
     func invalidate() {
@@ -33,13 +30,32 @@ final class NativeTimelineScrollDriver: NSObject {
         stopFrameDriver()
         state = .idle
         scrollView = nil
-        hasAttachedScrollView = false
+        lastViewportMetrics = nil
         fallbackReason = nil
         horizontalOffsetDriftClampUsed = false
     }
 
+    func setAutomaticFollowEnabled(_ enabled: Bool) {
+        guard automaticFollowEnabled != enabled else { return }
+        automaticFollowEnabled = enabled
+        generation &+= 1
+        stopFrameDriver()
+        state = .idle
+        if !enabled {
+            cancelProgrammaticMotion()
+        }
+    }
+
     func submit(_ intent: NativeTimelineScrollIntent, now: TimeInterval = CACurrentMediaTime()) {
         guard fallbackReason == nil else { return }
+        if !automaticFollowEnabled {
+            switch intent {
+            case .streamContentGrew, .userDragEnded(isAtBottom: true):
+                return
+            default:
+                break
+            }
+        }
         generation &+= 1
         let token = generation
         if case .userDragBegan = intent {
@@ -51,12 +67,26 @@ final class NativeTimelineScrollDriver: NSObject {
     func handleLayoutMetricsChanged() {
         guard fallbackReason == nil else { return }
         guard let scrollView else { return }
+        guard validateScrollViewHealth() else { return }
+        guard automaticFollowEnabled else { return }
         scrollView.layoutIfNeeded()
+        let viewportMetrics = ViewportMetrics(scrollView)
+        if viewportMetrics != lastViewportMetrics {
+            lastViewportMetrics = viewportMetrics
+            submit(.viewportChanged)
+            return
+        }
         reduceAndPerform(.layoutSettled(token: nil), token: generation)
     }
 
     func isAtBottomNow() -> Bool {
-        sampleGeometry().isNearBottom
+        guard let distance = distanceToBottomNow() else { return false }
+        return distance <= NativeTimelineScrollCore.resumeEpsilon
+    }
+
+    func distanceToBottomNow() -> CGFloat? {
+        guard let scrollView else { return nil }
+        return distanceToBottom(in: scrollView)
     }
 
     var isAttached: Bool {
@@ -95,22 +125,6 @@ final class NativeTimelineScrollDriver: NSObject {
         perform(result.actions, token: token)
     }
 
-    func handleKeyboardWillChange(_ notification: Notification, composerHeight: CGFloat) {
-        guard fallbackReason == nil else { return }
-        guard let frameValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue,
-              let scrollView else { return }
-        let keyboardFrame = frameValue.cgRectValue
-        let scrollFrame = scrollView.convert(scrollView.bounds, to: nil)
-        let overlap = max(0, scrollFrame.maxY - keyboardFrame.minY)
-        submit(
-            .keyboardWillChange(
-                token: generation &+ 1,
-                overlap: overlap,
-                composerHeight: composerHeight
-            )
-        )
-    }
-
     private func perform(_ actions: [NativeTimelineScrollAction], token: UInt64) {
         guard fallbackReason == nil else { return }
         for action in actions {
@@ -123,9 +137,6 @@ final class NativeTimelineScrollDriver: NSObject {
                 startFrameDriver()
             case .stopFrameDriver:
                 stopFrameDriver()
-            case let .updateObstruction(keyboardOverlap, composerHeight):
-                self.keyboardOverlap = keyboardOverlap
-                self.composerHeight = composerHeight
             case .markKeyboardFocusComplete:
                 break
             }
@@ -242,8 +253,6 @@ final class NativeTimelineScrollDriver: NSObject {
                 viewportHeight: 1,
                 adjustedInsetTop: 0,
                 adjustedInsetBottom: 0,
-                keyboardOverlap: keyboardOverlap,
-                composerHeight: composerHeight,
                 distanceToBottom: 0,
                 userInteracting: false
             )
@@ -254,8 +263,6 @@ final class NativeTimelineScrollDriver: NSObject {
             viewportHeight: scrollView.bounds.height,
             adjustedInsetTop: scrollView.adjustedContentInset.top,
             adjustedInsetBottom: scrollView.adjustedContentInset.bottom,
-            keyboardOverlap: keyboardOverlap,
-            composerHeight: composerHeight,
             distanceToBottom: distanceToBottom(in: scrollView),
             userInteracting: scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating
         )
@@ -301,7 +308,7 @@ final class NativeTimelineScrollDriver: NSObject {
     }
 
     private func effectiveBottomInset(in scrollView: UIScrollView) -> CGFloat {
-        max(scrollView.adjustedContentInset.bottom, keyboardOverlap + composerHeight)
+        scrollView.adjustedContentInset.bottom
     }
 
     private func isKeyboardFocus(token: UInt64) -> Bool {
@@ -339,8 +346,6 @@ final class NativeTimelineScrollDriver: NSObject {
         case let .explicitBottom(source, animated, _):
             guard source == .composerFocus else { return intent }
             return .explicitBottom(source: source, animated: animated, keyboardToken: token)
-        case let .keyboardWillChange(_, overlap, composerHeight):
-            return .keyboardWillChange(token: token, overlap: overlap, composerHeight: composerHeight)
         default:
             return intent
         }
@@ -369,7 +374,6 @@ final class NativeTimelineScrollDriver: NSObject {
         stopFrameDriver()
         state = .idle
         scrollView = nil
-        hasAttachedScrollView = false
         NativeTimelineScrollDiagnostics.logFallback(
             reason: reason,
             geometry: geometry
@@ -388,6 +392,139 @@ final class NativeTimelineScrollDriver: NSObject {
         case .idle, .pausedForUser:
             return false
         }
+    }
+}
+
+@MainActor
+private struct ViewportMetrics: Equatable {
+    let size: CGSize
+    let adjustedContentInset: UIEdgeInsets
+
+    init(_ scrollView: UIScrollView) {
+        size = scrollView.bounds.size
+        adjustedContentInset = scrollView.adjustedContentInset
+    }
+}
+
+/// Resolves the `UIScrollView` owned by a SwiftUI `ScrollView` and reports native
+/// layout/interaction metric changes to the shared bottom-follow driver.
+struct NativeTimelineScrollViewResolver: UIViewRepresentable {
+    let onResolve: (UIScrollView) -> Void
+    let onMetricsChanged: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onMetricsChanged: onMetricsChanged)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isHidden = true
+        return view
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.invalidate()
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        DispatchQueue.main.async { [weak view] in
+            guard let scrollView = view?.nativeTimelineAncestor(of: UIScrollView.self) else { return }
+            onResolve(scrollView)
+            context.coordinator.observe(scrollView)
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        private let onMetricsChanged: () -> Void
+        private weak var observedScrollView: UIScrollView?
+        private var displayLink: CADisplayLink?
+        private var pendingCallback = false
+        private var lastMetrics: Metrics?
+        private var invalidated = false
+
+        init(onMetricsChanged: @escaping () -> Void) {
+            self.onMetricsChanged = onMetricsChanged
+        }
+
+        func invalidate() {
+            invalidated = true
+            displayLink?.invalidate()
+            displayLink = nil
+            observedScrollView = nil
+        }
+
+        func observe(_ scrollView: UIScrollView) {
+            guard !invalidated else { return }
+            guard observedScrollView !== scrollView else { return }
+            observedScrollView = scrollView
+            lastMetrics = Metrics(scrollView)
+            startDisplayLinkIfNeeded()
+            scheduleCallback()
+        }
+
+        private func startDisplayLinkIfNeeded() {
+            guard displayLink == nil else { return }
+            let link = CADisplayLink(target: self, selector: #selector(displayLinkTick))
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+
+        @objc
+        private func displayLinkTick() {
+            guard let scrollView = observedScrollView else { return }
+            let metrics = Metrics(scrollView)
+            guard metrics != lastMetrics else { return }
+            lastMetrics = metrics
+            scheduleCallback()
+        }
+
+        private func scheduleCallback() {
+            guard !invalidated else { return }
+            guard !pendingCallback else { return }
+            pendingCallback = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                pendingCallback = false
+                guard !invalidated else { return }
+                onMetricsChanged()
+            }
+        }
+
+        @MainActor
+        private struct Metrics: Equatable {
+            let contentOffset: CGPoint
+            let contentSize: CGSize
+            let bounds: CGRect
+            let adjustedContentInset: UIEdgeInsets
+            let isDragging: Bool
+            let isTracking: Bool
+            let isDecelerating: Bool
+
+            init(_ scrollView: UIScrollView) {
+                contentOffset = scrollView.contentOffset
+                contentSize = scrollView.contentSize
+                bounds = scrollView.bounds
+                adjustedContentInset = scrollView.adjustedContentInset
+                isDragging = scrollView.isDragging
+                isTracking = scrollView.isTracking
+                isDecelerating = scrollView.isDecelerating
+            }
+        }
+    }
+}
+
+private extension UIView {
+    func nativeTimelineAncestor<T: UIView>(of type: T.Type) -> T? {
+        var current = superview
+        while let view = current {
+            if let match = view as? T {
+                return match
+            }
+            current = view.superview
+        }
+        return nil
     }
 }
 

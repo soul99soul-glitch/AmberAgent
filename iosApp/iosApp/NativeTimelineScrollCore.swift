@@ -9,12 +9,23 @@ enum NativeTimelineScrollFeatureFlags {
     }
 }
 
+enum NativeTimelineScrollReturnPolicy {
+    static func returnedToBottom(
+        liveDistanceToBottom: CGFloat?,
+        cachedNearBottom: Bool,
+        threshold: CGFloat
+    ) -> Bool {
+        guard let liveDistanceToBottom, liveDistanceToBottom.isFinite else {
+            return cachedNearBottom
+        }
+        return liveDistanceToBottom <= threshold
+    }
+}
+
 enum NativeTimelineBottomIntentSource: String, Equatable {
     case button
     case composerFocus
     case streamGrowth
-    case keyboardChange
-    case viewportShrink
 }
 
 enum NativeTimelineScrollFallbackReason: String, Equatable {
@@ -41,8 +52,6 @@ struct NativeTimelineScrollGeometry: Equatable {
     var viewportHeight: CGFloat
     var adjustedInsetTop: CGFloat
     var adjustedInsetBottom: CGFloat
-    var keyboardOverlap: CGFloat
-    var composerHeight: CGFloat
     var distanceToBottom: CGFloat
     var userInteracting: Bool
 
@@ -62,14 +71,14 @@ struct NativeTimelineScrollGeometry: Equatable {
     }
 
     var effectiveBottomInset: CGFloat {
-        max(adjustedInsetBottom, keyboardOverlap + composerHeight)
+        adjustedInsetBottom
     }
 }
 
 enum NativeTimelineScrollIntent: Equatable {
     case explicitBottom(source: NativeTimelineBottomIntentSource, animated: Bool, keyboardToken: UInt64?)
     case streamContentGrew
-    case keyboardWillChange(token: UInt64, overlap: CGFloat, composerHeight: CGFloat)
+    case viewportChanged
     case layoutSettled(token: UInt64?)
     case userDragBegan
     case userDragEnded(isAtBottom: Bool)
@@ -78,7 +87,6 @@ enum NativeTimelineScrollIntent: Equatable {
 
 enum NativeTimelineScrollAction: Equatable {
     case requestBottomAnchor(animated: Bool, source: NativeTimelineBottomIntentSource)
-    case updateObstruction(keyboardOverlap: CGFloat, composerHeight: CGFloat)
     case writeOffsetY(CGFloat)
     case startFrameDriver
     case stopFrameDriver
@@ -102,7 +110,6 @@ enum NativeTimelineScrollCore {
         if geometry.userInteracting {
             switch intent {
             case .explicitBottom,
-                 .keyboardWillChange,
                  .userDragEnded,
                  .conversationReset:
                 break
@@ -167,22 +174,21 @@ enum NativeTimelineScrollCore {
                 )
             }
 
-        case let .keyboardWillChange(token, overlap, composerHeight):
-            var actions: [NativeTimelineScrollAction] = [
-                .updateObstruction(keyboardOverlap: overlap, composerHeight: composerHeight)
-            ]
+        case .viewportChanged:
             switch state {
-            case .keyboardFocus:
-                actions.append(.requestBottomAnchor(animated: true, source: .keyboardChange))
+            case .followingBottom, .keyboardFocus:
                 return (
-                    .keyboardFocus(NativeTimelineKeyboardFocusTransaction(token: token, stableFrames: 0)),
-                    actions
+                    .followingBottom(
+                        virtualOffset: min(geometry.offsetY, geometry.bottomTarget),
+                        target: geometry.bottomTarget,
+                        lastFollowRequestAt: now
+                    ),
+                    abs(geometry.offsetY - geometry.bottomTarget) < arrivalEpsilon
+                        ? []
+                        : [.startFrameDriver]
                 )
-            case .followingBottom where geometry.isAtBottom:
-                actions.append(.requestBottomAnchor(animated: true, source: .keyboardChange))
-                return (state, actions)
-            default:
-                return (state, actions)
+            case .idle, .pausedForUser:
+                return (state, [])
             }
 
         case let .layoutSettled(layoutToken):

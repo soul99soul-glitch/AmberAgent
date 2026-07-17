@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -21,6 +21,51 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-17 novel discussion completion and streaming presentation correction
+
+- 讨论模式不再向 provider 人为设置最大输出 token；provider 若仍明确以 `length` / `max_tokens` / `max_output_tokens` 结束，当前半截内容会保留，并进入原有可重试失败态，不再被误记为一次完整回复。普通 KMP 流和讨论工具循环共用这一终态语义，没有增加内容猜测、自动续写或第二次请求。
+- 小说会话冷进入恢复为 `awaitingInitialRows`，已经加载好的历史行会在页面出现后只做一次底部呈现；发送开始时同一状态机立即锚定新用户消息和等待尾部，并交回既有 Native scroll driver 处理后续实测增长，避免初始空屏、用户气泡飞出视野以及从 idle 状态开始的流式跳动。没有新增几何补偿或第二套滚动驱动。
+- `NovelGenerationLifecycleTests`、`NovelLiveModelAdapterTests`、`IOSAgentToolEngineTests`、`NovelSessionReplayTests` 与强制 `ChatStreamReplayTests` 在 iPhone 17 Pro Simulator 通过；`git diff --check` 通过。真实 provider 的长回复与真机 120Hz 视觉仍需安装后人工复验，本切片未执行真机安装。
+
+### 2026-07-17 model council execution-chain closure
+
+- 模型议会统一读取当前共享 `Provider` / `Model` / generation params，不再克隆 provider identity 或从全局设置补猜调用参数；Codex 继续经过既有 header resolver，Grok Web 经过既有 web client，OpenAI-compatible / Claude 复用现有 KMP streamer。模型与 provider 不匹配时在发起任务前明确阻止，搜索能力严格跟随现有 Web Search 开关。
+- 工具调用补齐既有审批策略、拒绝审计与结构化失败语义；`max_seats` 明确表示非主持席且限制为 2...8。主持定题、席位输出和最终汇总共享单次模型超时，空定题/空汇总终止整轮，单席空输出只失败该席，合法的 `Error:` 正文不再被误判。第二次发送创建独立 room/task，后台、取消、进程终止和启动恢复都收口到可持久化的终态，没有新增自动重试或第二套 provider 引擎。
+- iPhone 17 Pro Simulator 上模型议会、归档、设置、工具与 provider wiring 的组合门禁为 80 passed、0 failed；强制 `ChatStreamReplayTests` 最终为 16 passed、1 expected skip、0 failed（`/tmp/amber-council-dd/Logs/Test/Test-iosApp-2026.07.17_00-24-00-+0800.xcresult`）。`:ai-core:compileKotlinIosSimulatorArm64`、改动 Swift 文件 parse 与 `git diff --check` 通过。真实 provider 登录态、网络调用与真机交互尚未执行，不能仅凭 canary 宣称外部链路已验证。
+
+### 2026-07-16 novel Ask User and character alias closure
+
+- 小说讨论模式复用现有 Agent tool loop，新增持久化的行内 Ask User：模型每轮最多提出一个关键问题，用户可单选建议或直接输入，回答作为下一条普通讨论消息继续生成；搜索关闭时 Ask User 仍可用，搜索开启时继续复用 Chat 的 `search_web` / `scrape_web`。Grok Web 仅保留严格整对象 JSON fallback，没有新增第二套 Agent 引擎。
+- 角色资料新增项目级别名；Quick Start 可给出别名，人物设定页可直接编辑。注入始终携带规范名与别名映射，剧情状态校验按精确归一化匹配同一人物；无法唯一匹配的 `character.*` 引用才在会话末尾提示用户关联到已有角色，关联复用原资料修订链路。
+- 为避免无用泛化，Ask User 已收紧为单轮单问题，仅支持单选或自由输入，没有多问、多选、模糊人物合并或通用表单框架。KMP iOS Simulator 编译与 Shared framework 链接通过；Ask User 生命周期、持久化/恢复、模型适配、注入、文档兼容、项目配置、提示词、搜索开关、小说 wiring 和 `ChatStreamReplayTests` 等受影响定点回归通过；`git diff --check` 通过。尚未在真实 provider 和真机上完成交互目测。
+
+### 2026-07-16 iOS 27 soft scroll-edge restoration
+
+- Chat 顶部自定义 `safeAreaBar` 不再依赖系统 `.automatic` scroll-edge 选择：Native Timeline、默认 SwiftUI clean list 与 legacy `UICollectionView` 三条消息列表路径均显式使用官方 `.soft` 顶部边缘效果，恢复渐变模糊并避免 iOS 27 Beta 自动切成带硬分界线的 `.hard`。同样使用自定义顶部安全区栏的「外观」页也显式固定为 `.soft`；会话列表原有 `.soft` 保持不变。没有添加手写渐变、遮罩或模糊参数。
+- iOS 27 真机截图进一步确认 `.soft` 默认衰减区过短，滚动正文仍会穿到会话标题后方。顶栏现向下增加 `32pt` 透明占位来扩展系统 edge-effect 边界，让正文进入标题区域前先经过完整渐变；返回、标题和新建控件仍保留原来的 `54pt` 布局位置。没有给正文添加静态 top padding，也没有手写模糊层。
+- `16pt` 版本的 production wiring canary、`IOSSettingsWiringTests` 与强制 `ChatStreamReplayTests` 合跑为 35 passed、1 expected skip、0 failed，且 23:37 已覆盖安装并成功启动到 iOS 27.0 Beta 真机。随后把延展量提升到 `32pt` 的源码与 canary 已完成且 `swiftc -parse`、`git diff --check` 通过，但当前工作区同时存在另一组未完成的小说资料解析改动，整包构建被 `NovelMaterialResolver.swift` 的泛型推断错误阻断，因此真机当前仍是 `16pt` 包，不能把 `32pt` 表述为已装机验证。
+
+### 2026-07-16 Native Timeline blank-space and displacement-flash correction
+
+- 三路独立 review 从滚动几何、事件所有权和渲染生命周期交叉定位到同一主因：Chat 已通过 `safeAreaInset` 让 UIKit 的 `bounds + adjustedContentInset` 表达键盘和输入框后的真实 viewport，Native driver 却又把 `keyboardOverlap + composerHeight` 叠加进 bottom target。真实 `UIWindow` 红测试中，UIKit 合法底端是 `880pt`，旧 driver 会写到 `1172pt`，多出的 `292pt` 正好是重复遮挡量，直接解释发送后空屏、输入框上方大空白和大位移闪烁。
+- 修复收回所有权而非添加几何补偿：Native bottom target 只认 UIKit `adjustedContentInset.bottom`；键盘通知、SwiftUI viewport shrink 与 layout frame 不再各自发起独立到底动画，viewport 改变统一由 resolver 转成一次可重定位的 `viewportChanged`，继续使用既有 120Hz frame driver；用户正在拖动时仍立即暂停。resolver teardown 也关闭了异步回调在离页后复活 display link 的窗口。
+- Native Timeline 现在与 clean-list 一样，仅把稳定历史放进 `LazyVStack`，动态流式尾部和末尾锚点留在普通 `VStack`，避免靠近底部时 live/static Markdown 子树反复卸载重建；同一 signal revision 的 live-tail model 更新改为幂等，减少无新内容时的重复发布。没有改 provider 展示节拍、屏幕内动画等级或使用 `contentOffset` 补偿。
+- 定点 `NativeTimelineScrollCoreTests` 与 live-tail revision canary 通过；强制 `ChatStreamReplayTests` 通过；`git diff --check` 通过。组合门禁中只有默认 clean-list 的 `testPerfGrowingTableStreamingKeepsDisplayLinkResponsive` 独立重跑仍失败（一次证据为 p95 `127.38ms`、max `175.14ms`，阈值未放宽），与本次 Native 路由修复分开记录。Debug 真机包已完成构建、严格签名校验、覆盖安装并于 23:22 成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`；发送时键盘转场、长流回底与终态的实际视觉仍需设备人工复验，不能仅凭装机宣称闭环。
+- 2026-07-17 的真机视频进一步确认，正常拖动跨越远底阈值时最后一条超长 assistant 曾在 live/frozen Markdown 子树间切换，造成内容高度短暂塌陷、整屏空白后由底部重入。当前修复保持尾行渲染树与 live-tail model 身份稳定，远离底部时只暂停 model 发布，历史行仍维持 lazy/frozen。强制 `ChatStreamReplayTests` 为 16 passed、1 expected skip、0 failed（`/tmp/amber-chat-blank-replay/Logs/Test/Test-iosApp-2026.07.17_00-35-57-+0800.xcresult`）；当前完整工作区的 Debug 真机包已通过构建和严格签名校验，并于 00:42 覆盖安装、成功启动到同一 iPhone Air。视频症状是否消失仍需本包人工复测。
+
+### 2026-07-16 shared native streaming-scroll ownership closure
+
+- 「原生滚动容器（实验性）」不再只影响标准 Chat。原先内嵌在 `ChatCollectionMessageList.swift` 的 SwiftUI `UIScrollView` resolver 已移动到 `NativeTimelineScrollDriver.swift`，与既有 120Hz frame driver 形成可被不同会话页面复用的底层能力；小说创作和模型议会只把 measured growth、拖动、显式到底、会话重置与终态 settle 翻译成共享语义 intent，没有复用 Chat 的消息投影或行视觉。
+- 对抗性 review 找到的所有 P1 已在所有权层收口：driver `attach` 只连接、不再隐式抢到底部；`followGeneration=false` 会停止自动跟随并屏蔽后续流式增长/布局增长；拖动结束统一以当前原生容器距底距离为准，只有原生容器缺席才退回 SwiftUI 缓存几何；页面离开先标记不可见再 invalidate，异步 resolver 不会在离页后重新 attach。重新 attach 时 Chat 还会把“当前不在底部”视为历史浏览，小说/议会沿用各自持久的 pause 状态，不会因生命周期重连把用户拉到底部。
+- P2 的设置耦合已拆开：「原生滚动容器」只控制三页面共享 driver；「Chat 原生时间线」只成对控制 Chat 的静态列表与流式尾部路由。两者不再用三开关 AND 绑定，关闭 Chat 实验渲染不会让小说/议会丢失底层原生滚动能力。共享 driver 行为新增 attach、禁用跟随、重连保位与实时距底判定测试，production wiring canary 覆盖三页面的 follow、生命周期和拖动接线。
+- 受影响的七个套件合跑为 203 tests、1 expected skip、0 failed（`/tmp/amber-native-scroll-red/Logs/Test/Test-iosApp-2026.07.16_22-33-46-+0800.xcresult`）；最终生命周期条件落地后，强制 `ChatStreamReplayTests` 与 `IOSSettingsWiringTests` 再跑为 35 tests、1 expected skip、0 failed（`/tmp/amber-native-scroll-red/Logs/Test/Test-iosApp-2026.07.16_22-37-50-+0800.xcresult`）。Debug 真机包使用 Team `89QRFX9548` 构建成功并通过 `codesign --verify --deep --strict`，22:39 已覆盖安装且成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`；真实 provider 下 Chat、小说与议会的长流手感仍需设备人工验证。
+
+### 2026-07-16 Native Timeline production-route regression correction
+
+- 真机反馈确认 21:00 后重新出现「四五行一抽一抽上移」不是 provider、TextKit 或滚动状态机的新回归，而是提交 `4b2a1c8e8` 移除了「原生滚动容器（实验性）」设置与 `ChatView` 的 Native Timeline 生产分支；用户昨日已开启的持久化开关因此被忽略，标准 Chat 实际回退到默认 `ChatSwiftUIMessageList`。
+- 最小修复只恢复三项 Native Timeline 开关的联动设置、`ChatView` 对两项路由开关的读取和既有 `ChatMessageListRoutePolicy` / `NativeChatTimelineView` 分支。开关关闭时仍走默认 SwiftUI clean list；没有改 provider 展示节拍、Markdown/TextKit、滚动几何、动画参数或今天其余 novel/council/vendor 修复。
+- 两条 production wiring canary 先在入口缺失时稳定失败，恢复后转绿；`IOSSettingsWiringTests`、`ChatMessageProjectionTests`、`NativeTimelineScrollCoreTests`、强制 `ChatStreamReplayTests` 与默认路径 `ChatSwiftUIStreamReplayTests` 合跑为 150 passed、1 skipped、0 failed（`/tmp/amber-native-route-regression/Logs/Test/Test-iosApp-2026.07.16_21-27-07-+0800.xcresult`），`git diff --check` 通过。Debug 真机包完成自动签名构建与 `codesign --verify --deep --strict`，21:33 已覆盖安装并成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`。原生容器与表格流式块渲染同时开启的既知兼容问题仍未在本切片扩修；真实 provider 逐行手感仍需设备人工复验。
 
 ### 2026-07-16 production streaming-scroll ownership correction
 

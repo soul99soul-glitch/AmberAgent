@@ -12,9 +12,16 @@ struct DisplayFontSettingsView: View {
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown) private var streamingBlockMarkdown = true
+    @AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key) private var nativeTimelineStaticRender = false
+    @AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key) private var nativeTimelineStreamingTail = false
+    @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeTimelineScrollDriver = false
 
     private var selectedFont: IOSChatFont {
         IOSChatFont(rawValue: chatFont) ?? .default
+    }
+
+    private var nativeChatTimelineEnabled: Bool {
+        nativeTimelineStaticRender && nativeTimelineStreamingTail
     }
 
     private var fontScaleLabel: String {
@@ -137,6 +144,22 @@ struct DisplayFontSettingsView: View {
                 DisplayToggleRow(title: "生成时跟随滚动", isOn: followGeneration) { followGeneration.toggle() }
                 DisplayDivider()
                 DisplayToggleRow(
+                    title: "原生滚动容器（实验性）",
+                    subtitle: "为 Chat 原生时间线、小说创作和模型议会启用原生流式滚动；异常时关闭即可回到各页面默认滚动。",
+                    isOn: nativeTimelineScrollDriver
+                ) {
+                    nativeTimelineScrollDriver.toggle()
+                }
+                DisplayDivider()
+                DisplayToggleRow(
+                    title: "Chat 原生时间线（实验性）",
+                    subtitle: "切换 Chat 的消息列表与流式尾部渲染路径，不影响小说创作和模型议会。",
+                    isOn: nativeChatTimelineEnabled
+                ) {
+                    setNativeChatTimelineEnabled(!nativeChatTimelineEnabled)
+                }
+                DisplayDivider()
+                DisplayToggleRow(
                     title: "表格流式块渲染（实验性）",
                     subtitle: "含表格的生成中消息按段落/表格分块渲染，表格走聊天专用轻量布局；异常时关闭即可回到原渲染器。",
                     isOn: streamingBlockMarkdown
@@ -167,6 +190,11 @@ struct DisplayFontSettingsView: View {
                 }
             }
         }
+    }
+
+    private func setNativeChatTimelineEnabled(_ enabled: Bool) {
+        nativeTimelineStaticRender = enabled
+        nativeTimelineStreamingTail = enabled
     }
 
 }

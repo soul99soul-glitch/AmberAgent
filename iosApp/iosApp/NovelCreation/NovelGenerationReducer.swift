@@ -78,6 +78,9 @@ enum NovelGenerationReducer {
         try validateArtifacts(artifacts, request: request, document: document)
 
         let session = document.sessions[sessionIndex]
+        if let response = request.askUserResponse {
+            try validateAskUserResponse(response, in: session)
+        }
         let userMessage = NovelSessionMessageRecord(
             id: request.userMessageID,
             sequence: Int64(session.messages.count),
@@ -87,7 +90,8 @@ enum NovelGenerationReducer {
             content: request.userText,
             createdAt: now,
             runID: request.id,
-            candidateID: nil
+            candidateID: nil,
+            interaction: request.askUserResponse.map(NovelSessionInteraction.askUserAnswer)
         )
         let activeRun = NovelActiveRunRecord(
             id: request.id,
@@ -269,6 +273,83 @@ enum NovelGenerationReducer {
         )
     }
 
+    static func completeAwaitingUser(
+        runID: NovelRunID,
+        prompt: NovelAskUserPrompt,
+        preface: String,
+        in document: NovelProjectDocumentV1,
+        now: Date = Date()
+    ) throws -> (
+        document: NovelProjectDocumentV1,
+        message: NovelSessionMessageSnapshot?
+    ) {
+        try validateAskUserPrompt(prompt)
+        guard let runIndex = document.activeRuns.firstIndex(where: { $0.id == runID }) else {
+            return (document, nil)
+        }
+        let existingRun = document.activeRuns[runIndex]
+        if existingRun.status == .completed,
+           let session = document.sessions.first(where: { $0.id == existingRun.sessionID }),
+           let message = session.messages.first(where: { $0.id == existingRun.messageID }),
+           message.interaction == .askUser(prompt) {
+            return (
+                document,
+                NovelSessionMessageSnapshot(
+                    projectID: document.project.id,
+                    branchID: existingRun.branchID,
+                    message: message
+                )
+            )
+        }
+        guard existingRun.status == .running,
+              existingRun.kind == .discussion else {
+            return (document, nil)
+        }
+        let branchIndex = try branchIndex(for: existingRun.branchID, in: document)
+        guard document.branches[branchIndex].activeRunID == runID,
+              let sessionIndex = document.sessions.firstIndex(where: {
+                  $0.id == existingRun.sessionID && $0.branchID == existingRun.branchID
+              }) else {
+            return (document, nil)
+        }
+        let content = preface.trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = NovelSessionMessageRecord(
+            id: existingRun.messageID,
+            sequence: Int64(document.sessions[sessionIndex].messages.count),
+            role: .assistant,
+            mode: existingRun.mode,
+            kind: .discussion,
+            content: content,
+            createdAt: now,
+            runID: runID,
+            candidateID: nil,
+            interaction: .askUser(prompt)
+        )
+
+        var next = document
+        next.sessions[sessionIndex].messages.append(message)
+        next.sessions[sessionIndex].revision += 1
+        finish(
+            runIndex: runIndex,
+            branchIndex: branchIndex,
+            status: .completed,
+            content: content,
+            interruptionReason: nil,
+            failure: nil,
+            now: now,
+            document: &next
+        )
+        try NovelDocumentValidator.validateTransition(from: document, to: next)
+        return (
+            next,
+            NovelSessionMessageSnapshot(
+                projectID: next.project.id,
+                branchID: existingRun.branchID,
+                message: message
+            )
+        )
+    }
+
     static func quickStartMarkdown(
         _ suggestions: NovelQuickStartSuggestionsV2
     ) -> String {
@@ -314,7 +395,8 @@ enum NovelGenerationReducer {
                 content: suggestion.content,
                 createdAt: now,
                 isResolved: false,
-                origin: .quickStart(runID: run.id, suggestedKind: kind)
+                origin: .quickStart(runID: run.id, suggestedKind: kind),
+                suggestedCharacterAliases: kind == .character ? suggestion.aliases ?? [] : nil
             )
         }
     }
@@ -496,6 +578,21 @@ enum NovelGenerationReducer {
     }
 }
 
+extension NovelGenerationReducer {
+    static func validateAskUserPrompt(_ prompt: NovelAskUserPrompt) throws {
+        guard !prompt.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NovelError.invalidInput("Ask User requires question text.")
+        }
+        let options = NovelCharacterIdentityResolver.normalizedAliases(prompt.options)
+        guard options.count == prompt.options.count else {
+            throw NovelError.invalidInput("Ask User options must be unique and non-empty.")
+        }
+        guard options.isEmpty || (2...6).contains(options.count) else {
+            throw NovelError.invalidInput("Ask User requires no options or two to six choices.")
+        }
+    }
+}
+
 private extension NovelGenerationReducer {
     struct InterruptedResult {
         let document: NovelProjectDocumentV1
@@ -609,7 +706,8 @@ private extension NovelGenerationReducer {
                   request.mode == .discussPlan,
                   request.granularity == nil,
                   request.candidateID == nil,
-                  request.sourceChapterVersionID == nil else {
+                  request.sourceChapterVersionID == nil,
+                  request.askUserResponse == nil else {
                 throw NovelError.invalidInput("The quick-start run shape is invalid.")
             }
         case .discussion:
@@ -630,7 +728,8 @@ private extension NovelGenerationReducer {
             guard request.mode == .writeProse,
                   request.granularity != nil,
                   request.candidateID != nil,
-                  request.sourceChapterVersionID == nil else {
+                  request.sourceChapterVersionID == nil,
+                  request.askUserResponse == nil else {
                 throw NovelError.invalidInput("The prose run shape is invalid.")
             }
         case .polish:
@@ -645,11 +744,35 @@ private extension NovelGenerationReducer {
             guard request.mode == .writeProse,
                   request.granularity == nil,
                   request.candidateID != nil,
+                  request.askUserResponse == nil,
                   let sourceID = request.sourceChapterVersionID,
                   branch.workingChapterSelections.contains(where: { $0.versionID == sourceID }),
                   document.chapterVersions.contains(where: { $0.id == sourceID }) else {
                 throw NovelError.invalidInput("The polish run shape or source version is invalid.")
             }
+        }
+    }
+
+    static func validateAskUserResponse(
+        _ response: NovelAskUserResponse,
+        in session: NovelSessionRecord
+    ) throws {
+        guard let promptMessage = session.messages.first(where: {
+            $0.id == response.promptMessageID && $0.role == .assistant
+        }), case .some(.askUser(let prompt)) = promptMessage.interaction else {
+            throw NovelError.invalidInput("The Ask User prompt no longer belongs to this session.")
+        }
+        guard !session.messages.contains(where: { message in
+            guard case .some(.askUserAnswer(let existing)) = message.interaction else {
+                return false
+            }
+            return existing.promptMessageID == response.promptMessageID
+        }) else {
+            throw NovelError.invalidInput("This Ask User prompt has already been answered.")
+        }
+        try validateAskUserPrompt(prompt)
+        guard !response.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NovelError.invalidInput("Ask User requires a non-empty answer.")
         }
     }
 

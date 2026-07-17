@@ -437,6 +437,47 @@ final class NovelInjectionPlannerTests: XCTestCase {
         XCTAssertTrue(plan.contextText.contains("- Masked Archivist"))
     }
 
+    func testCharacterAliasesAreAlwaysInjectedAndNoLongerRemainUnresolved() throws {
+        var document = try NovelTestFixtures.document()
+        _ = addMaterial(
+            to: &document,
+            kind: .character,
+            title: "朱元璋",
+            content: "开篇仍使用乳名。",
+            tags: [],
+            mode: .off,
+            aliases: ["朱重八", "朱重九"]
+        )
+        let stateIndex = try XCTUnwrap(document.stateSnapshots.firstIndex {
+            $0.id == document.branches[0].currentStateSnapshotID
+        })
+        let current = document.stateSnapshots[stateIndex]
+        document.stateSnapshots[stateIndex] = NovelStateSnapshotRecord(
+            id: current.id,
+            eventIDs: current.eventIDs,
+            summary: current.summary,
+            branchOutline: current.branchOutline,
+            unresolvedEntityNames: ["朱重八"],
+            createdAt: current.createdAt
+        )
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: document.branches[0].id,
+                promptKind: .stateDeltaV1,
+                userText: "朱重八走进濠州城。"
+            )
+        )
+        let state = try XCTUnwrap(plan.sections.first {
+            if case .currentState = $0.kind { return true }
+            return false
+        })
+
+        XCTAssertTrue(state.content.contains("- 朱元璋 | aliases: 朱重八, 朱重九"))
+        XCTAssertTrue(state.content.contains("Unresolved entities:\n(none)"))
+    }
+
     func testSessionCursorLimitExcludesDiscussionAfterFactTransactionStarted() throws {
         var document = try NovelTestFixtures.document()
         let firstID = NovelMessageID()
@@ -572,14 +613,16 @@ final class NovelInjectionPlannerTests: XCTestCase {
         title: String,
         content: String,
         tags: [String],
-        mode: NovelInjectionMode
+        mode: NovelInjectionMode,
+        aliases: [String] = []
     ) -> (materialID: NovelMaterialID, revisionID: NovelMaterialRevisionID) {
         let revisionID = NovelMaterialRevisionID()
         document.materials.append(NovelMaterialRecord(
             id: materialID,
             kind: kind,
             currentRevisionID: revisionID,
-            revisionIDs: [revisionID]
+            revisionIDs: [revisionID],
+            aliases: aliases
         ))
         document.materialRevisions.append(NovelMaterialRevisionRecord(
             id: revisionID,

@@ -111,6 +111,9 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key) private var nativeTimelineStaticRenderEnabled = false
+    @AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key) private var nativeTimelineStreamingTailEnabled = false
+    @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeTimelineScrollDriverEnabled = false
     @State private var pasteHintShown = false
     @State private var viewportState = ChatViewportState()
     @State private var scrollToBottomTrigger = 0
@@ -536,7 +539,9 @@ struct ChatView: View {
                 .allowsHitTesting(false)
         }
         .padding(.horizontal, 18)
+        // Extend the system soft edge below the title without moving the controls.
         .frame(height: 54)
+        .padding(.bottom, 32)
     }
 
     private var topIslandState: ChatActivityIslandState {
@@ -694,7 +699,30 @@ struct ChatView: View {
     private var messageList: some View {
         let route = messageListRoute
         return Group {
-            if route == .swiftUICleanList {
+            if route == .nativeTimelineSwiftUI {
+                NativeChatTimelineView(
+                    signal: viewModel.messageUpdateSignal,
+                    configurationIssue: configurationIssue,
+                    isGenerationActive: viewModel.isGenerationActive,
+                    isLoading: viewModel.isLoading,
+                    isRecognizingImages: viewModel.isRecognizingImages,
+                    contextCompactState: viewModel.contextCompactState,
+                    followGeneration: followGeneration,
+                    displaySetting: sharedSettings.displaySetting,
+                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
+                    reasoningLevelLabel: composerReasoningLabel,
+                    workspaceStore: workspaceStore,
+                    nativeScrollDriverEnabled: nativeTimelineScrollDriverEnabled,
+                    scrollToBottomTrigger: scrollToBottomTrigger,
+                    scrollToBottomSource: scrollToBottomSource,
+                    messagesProvider: { viewModel.messages },
+                    variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
+                    onAction: handleChatListAction,
+                    onViewportStateChange: applyCollectionViewportState,
+                    onDismissKeyboard: dismissKeyboard
+                )
+                .id(NativeChatTimelineSessionIdentity.viewID(conversationId: conversationStore.currentConversation?.id))
+            } else if route == .swiftUICleanList {
                 ChatSwiftUIMessageList(
                     signal: viewModel.messageUpdateSignal,
                     configurationIssue: configurationIssue,
@@ -739,7 +767,15 @@ struct ChatView: View {
     }
 
     private var messageListRoute: ChatMessageListRoute {
-        ChatSwiftUIMessageListFeatureFlags.isEnabled ? .swiftUICleanList : .collection
+        ChatMessageListRoutePolicy.route(
+            nativeTimelineStaticRenderEnabled: nativeTimelineStaticRenderEnabled,
+            nativeTimelineStreamingTailEnabled: nativeTimelineStreamingTailEnabled,
+            swiftUICleanListEnabled: ChatSwiftUIMessageListFeatureFlags.isEnabled,
+            messages: viewModel.messages,
+            event: viewModel.messageUpdateSignal.event,
+            isGenerationActive: viewModel.isGenerationActive,
+            isLoading: viewModel.isLoading
+        )
     }
 
     private var isStreamingFollowActive: Bool {
@@ -833,6 +869,19 @@ struct ChatView: View {
                     },
                     onDeny: {
                         viewModel.denyPendingMcpTool()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if let request = viewModel.pendingCouncilApproval {
+                CouncilToolApprovalCard(
+                    request: request,
+                    onApprove: {
+                        viewModel.approvePendingCouncilTool()
+                    },
+                    onDeny: {
+                        viewModel.denyPendingCouncilTool()
                     }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1156,7 +1205,8 @@ struct ChatView: View {
             viewModel.pendingWebMountApproval != nil ||
             viewModel.pendingWorkspaceApproval != nil ||
             viewModel.pendingIshHandoffApproval != nil ||
-            viewModel.pendingMcpApproval != nil
+            viewModel.pendingMcpApproval != nil ||
+            viewModel.pendingCouncilApproval != nil
     }
 
     private var showsComposerMeta: Bool {

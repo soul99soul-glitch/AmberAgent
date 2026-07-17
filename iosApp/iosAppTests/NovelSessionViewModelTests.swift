@@ -97,6 +97,36 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(request.purpose, .discussion)
     }
 
+    func testAskUserAnswerStartsTheNextDiscussionTurn() async throws {
+        let prompt = NovelAskUserPrompt(
+            question: "他此刻更害怕失去谁？",
+            options: ["家人", "同伴"]
+        )
+        let harness = try await makeHarness(scripts: [
+            NovelModelScript(steps: [.askUser(prompt, preface: "先确认人物动机。")]),
+            NovelModelScript(steps: [.replacement("那就先强化他保护家人的选择。"), .complete]),
+        ])
+        harness.session.mode = .discussPlan
+
+        let didStart = await harness.session.send(text: "帮我梳理人物动机")
+        XCTAssertTrue(didStart)
+        let didAsk = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(didAsk)
+        let promptMessage = try XCTUnwrap(harness.session.durableMessages.last)
+        XCTAssertEqual(promptMessage.interaction, .askUser(prompt))
+
+        let didAnswer = await harness.session.answerAskUser(
+            promptMessageID: promptMessage.id,
+            answer: "家人"
+        )
+        XCTAssertTrue(didAnswer)
+        let didFinish = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(didFinish)
+        XCTAssertEqual(harness.session.durableMessages.count, 4)
+        XCTAssertEqual(harness.session.durableMessages[2].content, "家人")
+        XCTAssertEqual(harness.session.durableMessages[3].content, "那就先强化他保护家人的选择。")
+    }
+
     func testWholeChapterUsesOneMonotonicTransientTailThenPersistsCandidate() async throws {
         let longBody = String(repeating: "长章正文。", count: 2_000)
         let harness = try await makeHarness(scripts: [NovelModelScript(steps: [

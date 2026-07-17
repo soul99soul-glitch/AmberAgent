@@ -414,7 +414,8 @@ final class NovelCreationViewModelTests: XCTestCase {
                 revisionID: NovelMaterialRevisionID(),
                 kind: .world,
                 tags: ["列车"],
-                injectionMode: .smart
+                injectionMode: .smart,
+                aliases: []
             )
         )
         let material = try XCTUnwrap(viewModel.activeMaterials.first)

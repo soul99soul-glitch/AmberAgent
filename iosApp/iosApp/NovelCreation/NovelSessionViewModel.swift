@@ -6,12 +6,18 @@ struct NovelSessionBinding: Equatable, Sendable {
     let branchID: NovelBranchID
 }
 
+struct NovelCharacterIdentityMention: Identifiable, Equatable, Sendable {
+    let name: String
+    var id: String { NovelCharacterIdentityResolver.normalize(name) }
+}
+
 private struct NovelSessionRunDraft: Equatable, Sendable {
     let kind: NovelRunKind
     let mode: NovelSessionMode
     let granularity: NovelGenerationGranularity?
     let userText: String
     let sourceChapterVersionID: NovelChapterVersionID?
+    let askUserResponse: NovelAskUserResponse?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
 }
@@ -168,6 +174,56 @@ final class NovelSessionViewModel {
     var durableMessages: [NovelSessionMessageRecord] {
         guard snapshotMatchesBinding else { return [] }
         return workspace.branchSnapshot?.session.messages ?? []
+    }
+
+    var pendingCharacterIdentityMentions: [NovelCharacterIdentityMention] {
+        guard snapshotMatchesBinding,
+              let project = workspace.projectSnapshot,
+              let branch = workspace.branchSnapshot else { return [] }
+        let state = branch.currentState
+        let identities = workspace.activeMaterials.compactMap { material -> NovelCharacterIdentity? in
+            guard material.kind == .character,
+                  let revision = NovelPresentation.effectiveRevision(
+                      for: material,
+                      project: project,
+                      branch: branch
+                  ) else { return nil }
+            return NovelCharacterIdentity(
+                materialID: material.id,
+                canonicalName: revision.title,
+                aliases: material.aliases
+            )
+        }
+        let resolver = NovelCharacterIdentityResolver(identities: identities)
+        let unresolvedByKey = Dictionary(
+            state.unresolvedEntityNames.map {
+                (NovelCharacterIdentityResolver.normalize($0), $0)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let eventIDs = Set(state.eventIDs)
+        var namesByKey: [String: String] = [:]
+        for event in project.events where eventIDs.contains(event.id) && event.kind.hasPrefix("character.") {
+            for reference in event.entityReferences {
+                let key = NovelCharacterIdentityResolver.normalize(reference)
+                guard let unresolved = unresolvedByKey[key], !resolver.isKnown(reference) else { continue }
+                namesByKey[key] = unresolved
+            }
+        }
+        return namesByKey.values.sorted().map(NovelCharacterIdentityMention.init(name:))
+    }
+
+    var characterIdentityChoices: [(material: NovelMaterialRecord, title: String)] {
+        guard let project = workspace.projectSnapshot else { return [] }
+        return workspace.activeMaterials.compactMap { material in
+            guard material.kind == .character,
+                  let revision = NovelPresentation.effectiveRevision(
+                      for: material,
+                      project: project,
+                      branch: workspace.branchSnapshot
+                  ) else { return nil }
+            return (material, revision.title)
+        }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
     func projectedListModel(
@@ -387,10 +443,66 @@ final class NovelSessionViewModel {
             granularity: kind == .prose ? granularity : nil,
             userText: text,
             sourceChapterVersionID: nil,
+            askUserResponse: nil,
             injectionOverrides: injectionOverrides,
             inputBudgetTokens: inputBudgetTokens
         )
         return await start(draft)
+    }
+
+    @discardableResult
+    func answerAskUser(
+        promptMessageID: NovelMessageID,
+        answer: String
+    ) async -> Bool {
+        guard let promptMessage = durableMessages.first(where: {
+            $0.id == promptMessageID && $0.role == .assistant
+        }), case .some(.askUser) = promptMessage.interaction else {
+            operationErrorMessage = "这个问题已经失效，请重新发起讨论。"
+            return false
+        }
+        let response = NovelAskUserResponse(
+            promptMessageID: promptMessageID,
+            answer: answer
+        )
+        let draft = NovelSessionRunDraft(
+            kind: .discussion,
+            mode: .discussPlan,
+            granularity: nil,
+            userText: answer,
+            sourceChapterVersionID: nil,
+            askUserResponse: response,
+            injectionOverrides: .none,
+            inputBudgetTokens: 16_000
+        )
+        return await start(draft)
+    }
+
+    @discardableResult
+    func associateCharacterAlias(
+        _ alias: String,
+        with materialID: NovelMaterialID
+    ) async -> Bool {
+        guard let project = workspace.projectSnapshot,
+              let material = workspace.activeMaterials.first(where: {
+                  $0.id == materialID && $0.kind == .character
+              }),
+              let revision = NovelPresentation.currentRevision(for: material, in: project) else {
+            operationErrorMessage = "目标角色已经不存在。"
+            return false
+        }
+        await workspace.saveMaterial(
+            materialID: material.id,
+            kind: .character,
+            title: revision.title,
+            content: revision.content,
+            tags: revision.tags,
+            injectionMode: revision.injectionMode,
+            aliases: material.aliases + [alias]
+        )
+        operationErrorMessage = workspace.errorMessage
+        _ = await refreshDurable(binding: binding, token: bindingToken)
+        return workspace.errorMessage == nil
     }
 
     func stop(reason: NovelRunInterruptionReason = .user) async {
@@ -654,6 +766,7 @@ final class NovelSessionViewModel {
             granularity: nil,
             userText: "请在不改变任何剧情事实的前提下润色《\(source.title)》。",
             sourceChapterVersionID: source.id,
+            askUserResponse: nil,
             injectionOverrides: .none,
             inputBudgetTokens: 16_000
         )
@@ -859,6 +972,7 @@ private extension NovelSessionViewModel {
             generationReceiptID: NovelReceiptID(),
             injectionReceiptID: NovelReceiptID(),
             sourceChapterVersionID: draft.sourceChapterVersionID,
+            askUserResponse: draft.askUserResponse,
             injectionOverrides: draft.injectionOverrides,
             inputBudgetTokens: draft.inputBudgetTokens,
             expectedProjectRevision: project.project.revision,
@@ -1074,6 +1188,12 @@ private extension NovelSessionViewModel {
             granularity: run.granularity,
             userText: user.content,
             sourceChapterVersionID: run.sourceChapterVersionID,
+            askUserResponse: {
+                guard case .some(.askUserAnswer(let response)) = user.interaction else {
+                    return nil
+                }
+                return response
+            }(),
             injectionOverrides: NovelInjectionOverrides(
                 forceIncludeMaterialIDs: injection.forceIncludeMaterialIDs,
                 forceExcludeMaterialIDs: injection.forceExcludeMaterialIDs
@@ -1106,6 +1226,7 @@ private extension NovelSessionViewModel {
             generationReceiptID: run.receiptID,
             injectionReceiptID: injection.id,
             sourceChapterVersionID: run.sourceChapterVersionID,
+            askUserResponse: draft.askUserResponse,
             injectionOverrides: draft.injectionOverrides,
             inputBudgetTokens: draft.inputBudgetTokens,
             expectedProjectRevision: project.project.revision,

@@ -143,6 +143,9 @@ struct AppShell: View {
             // 重启时把本进程正在运行的前台 run 改写为 interrupted。
             if !didRunStartupRecovery {
                 didRunStartupRecovery = true
+                let interruptedCouncilTaskIds = IOSAdvancedTaskStore.shared.markInterruptedCouncilTasks()
+                CouncilRoomArchiveStore.shared.markInterrupted(taskIds: interruptedCouncilTaskIds)
+                councilChatViewModel.recoverInterruptedTasks(interruptedCouncilTaskIds)
                 let backgroundRunIds = IOSChatBackgroundGenerationCoordinator.shared.restorableRunIds
                 _ = await IOSRunRecovery.recoverInterruptedRuns(
                     excludingRunIds: backgroundRunIds
@@ -168,6 +171,7 @@ struct AppShell: View {
     private func handleScenePhaseChange(_ phase: ScenePhase) {
         switch phase {
         case .background:
+            councilChatViewModel.runtimeWillEnterBackground()
             _ = chatViewModel.handoffGenerationToBackgroundIfNeeded()
             guard let novelCreationViewModel else { return }
             novelLifecycleCoordinator.enterBackground(
@@ -179,6 +183,7 @@ struct AppShell: View {
                 }
             )
         case .active:
+            councilChatViewModel.runtimeDidBecomeActive()
             novelLifecycleCoordinator.enterForeground()
         case .inactive:
             break

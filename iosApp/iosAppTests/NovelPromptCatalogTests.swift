@@ -11,7 +11,7 @@ final class NovelPromptCatalogTests: XCTestCase {
 
         XCTAssertEqual(
             sha256(snapshot),
-            "9f35846459ff25dd841e1005c83893a734a5fd681493e8cdc108d51a40613920"
+            "0ab0c80d550375e1b78582e4625930b01b0d9667046dc7261dc2503fb88ee626"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -23,9 +23,10 @@ final class NovelPromptCatalogTests: XCTestCase {
         let polish = NovelPromptCatalog.template(for: .wholeChapterPolish).systemText
 
         XCTAssertTrue(discussion.contains("Do not write canonical manuscript"))
-        XCTAssertTrue(discussion.contains("ask one focused question"))
-        XCTAssertTrue(discussion.contains("recommended option"))
-        XCTAssertTrue(discussion.contains("own words"))
+        XCTAssertTrue(discussion.contains("call ask_user"))
+        XCTAssertTrue(discussion.contains("Ask one focused decision"))
+        XCTAssertTrue(discussion.contains("recommended direction first"))
+        XCTAssertTrue(discussion.contains("options array when free input"))
         XCTAssertTrue(continuation.contains("does not become canonical"))
         XCTAssertTrue(continuation.contains("one focused scene or passage"))
         XCTAssertTrue(continuation.contains("Do not close the chapter"))
@@ -49,6 +50,14 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .discussion,
             version: "novel.discussion.v1"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: "novel.discussion.v2"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .quickStart,
+            version: "novel.quick-start.v3"
         ))
         XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .proseContinuation,
@@ -76,14 +85,14 @@ final class NovelPromptCatalogTests: XCTestCase {
 
         for field in [
             "schemaVersion", "overview", "world", "characters", "masterOutline",
-            "writingRequirements", "title", "content"
+            "writingRequirements", "title", "content", "aliases"
         ] {
             XCTAssertTrue(
                 quickStart.contains("\"\(field)\""),
                 "Quick Start Prompt is missing \(field)"
             )
         }
-        XCTAssertEqual(NovelPromptCatalog.template(for: .quickStart).version, "novel.quick-start.v3")
+        XCTAssertEqual(NovelPromptCatalog.template(for: .quickStart).version, "novel.quick-start.v4")
         XCTAssertNoThrow(
             try NovelStructuredOutputDecoder.decodeQuickStartSuggestions(from: quickStartExample)
         )
@@ -179,12 +188,12 @@ final class NovelPromptCatalogTests: XCTestCase {
     private var quickStartExample: String {
         """
         {
-          "schemaVersion": 2,
+          "schemaVersion": 3,
           "overview": "A memory mystery.",
           "world": {"title": "Rules", "content": "Memories can testify once."},
           "characters": [
-            {"title": "Mara", "content": "An advocate forgets her past."},
-            {"title": "Ivo", "content": "A witness remembers the wrong trial."}
+            {"title": "Mara", "content": "An advocate forgets her past.", "aliases": ["The Advocate"]},
+            {"title": "Ivo", "content": "A witness remembers the wrong trial.", "aliases": []}
           ],
           "masterOutline": {"title": "Appeal", "content": "A false memory reopens the case."},
           "writingRequirements": {"title": "Voice", "content": "Use concrete clues."}

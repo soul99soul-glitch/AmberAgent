@@ -398,7 +398,7 @@ enum NovelFactTransactionReducer {
             pending: pending,
             baseCheckpoint: baseCheckpoint,
             baseStateSnapshot: baseState,
-            baseContext: try stateContext(baseState, in: document),
+            baseContext: try stateContext(baseState, branchID: pending.branchID, in: document),
             manuscript: pending.selectedText
         )
     }
@@ -838,7 +838,7 @@ enum NovelFactTransactionReducer {
             baseStateSnapshot: baseState,
             chapters: chapters,
             sessionCursor: sessionCursor,
-            baseContext: try stateContext(baseState, in: document),
+            baseContext: try stateContext(baseState, branchID: pending.branchID, in: document),
             manuscript: manuscript
         )
     }
@@ -1627,8 +1627,15 @@ enum NovelFactTransactionReducer {
 
     private static func stateContext(
         _ snapshot: NovelStateSnapshotRecord,
+        branchID: NovelBranchID,
         in document: NovelProjectDocumentV1
     ) throws -> String {
+        let branchIndex = try requireBranch(branchID, in: document)
+        let snapshot = try effectiveStateSnapshot(
+            snapshot,
+            branch: document.branches[branchIndex],
+            document: document
+        )
         var events: [NovelStoryEventRecord] = []
         for eventID in snapshot.eventIDs {
             guard let event = document.events.first(where: { $0.id == eventID }) else {

@@ -180,6 +180,13 @@ struct NovelSessionCommittedChangeSummary: Equatable, Sendable {
     let eventSummaries: [String]
 }
 
+struct NovelAskUserPresentation: Equatable, Sendable {
+    let prompt: NovelAskUserPrompt
+    let response: NovelAskUserResponse?
+
+    var isAnswered: Bool { response != nil }
+}
+
 struct NovelSessionRowDigest: Equatable, Hashable, Sendable {
     /// Inputs that can change the row's measured height.
     let layout: String
@@ -200,6 +207,7 @@ struct NovelSessionRowModel: Identifiable, Equatable, Sendable {
     let runStatus: NovelRunStatus?
     let candidate: NovelSessionCandidatePresentation?
     let committedChange: NovelSessionCommittedChangeSummary?
+    let askUser: NovelAskUserPresentation?
     let transientPhase: NovelSessionTransientTailPhase?
     let actions: [NovelSessionRowActionAvailability]
     let digest: NovelSessionRowDigest
@@ -381,6 +389,7 @@ private struct NovelSessionProjectionIndex {
     let checkpointByID: [NovelCheckpointID: NovelBranchCheckpointRecord]
     let stateByID: [NovelStateSnapshotID: NovelStateSnapshotRecord]
     let eventByID: [NovelEventID: NovelStoryEventRecord]
+    let askUserResponseByPromptMessageID: [NovelMessageID: NovelAskUserResponse]
     let workingChapterVersionIDs: Set<NovelChapterVersionID>
     let runningRunIDs: Set<NovelRunID>
     let branchPendingOperationIDs: Set<NovelPendingOperationID>
@@ -489,6 +498,14 @@ private struct NovelSessionProjectionIndex {
             eventByID[event.id] = event
         }
         self.eventByID = eventByID
+        var askResponses: [NovelMessageID: NovelAskUserResponse] = [:]
+        for message in input.session.messages {
+            guard case .some(.askUserAnswer(let response)) = message.interaction else { continue }
+            if askResponses[response.promptMessageID] == nil {
+                askResponses[response.promptMessageID] = response
+            }
+        }
+        askUserResponseByPromptMessageID = askResponses
         self.workingChapterVersionIDs = Set(input.branch.workingChapterSelections.map(\.versionID))
     }
 
@@ -570,6 +587,15 @@ private extension NovelSessionPresentation {
             index.runByID[runID]
         }
         let runStatus = run?.status
+        let askUser: NovelAskUserPresentation?
+        if case .some(.askUser(let prompt)) = message.interaction {
+            askUser = NovelAskUserPresentation(
+                prompt: prompt,
+                response: index.askUserResponseByPromptMessageID[message.id]
+            )
+        } else {
+            askUser = nil
+        }
         let presentedContent: String
         if message.kind == .error, let failure = run?.terminalFailure {
             presentedContent = NovelPresentation.failureMessage(failure)
@@ -588,6 +614,7 @@ private extension NovelSessionPresentation {
             granularity: run?.granularity,
             candidate: presentedCandidate,
             committedChange: changeSummary,
+            askUser: askUser,
             actions: actions
         )
         return NovelSessionRowModel(
@@ -603,6 +630,7 @@ private extension NovelSessionPresentation {
             runStatus: runStatus,
             candidate: presentedCandidate,
             committedChange: changeSummary,
+            askUser: askUser,
             transientPhase: nil,
             actions: actions,
             digest: digest
@@ -670,6 +698,7 @@ private extension NovelSessionPresentation {
             runStatus: transientRunStatus(for: tail.phase),
             candidate: nil,
             committedChange: nil,
+            askUser: nil,
             transientPhase: tail.phase,
             actions: actions,
             digest: digest(
@@ -680,6 +709,7 @@ private extension NovelSessionPresentation {
                 granularity: tail.granularity,
                 candidate: nil,
                 committedChange: nil,
+                askUser: nil,
                 actions: actions
             )
         )
@@ -1142,6 +1172,7 @@ private extension NovelSessionPresentation {
         granularity: NovelGenerationGranularity?,
         candidate: NovelSessionCandidatePresentation?,
         committedChange: NovelSessionCommittedChangeSummary?,
+        askUser: NovelAskUserPresentation?,
         actions: [NovelSessionRowActionAvailability]
     ) -> NovelSessionRowDigest {
         let contentToken: String
@@ -1159,11 +1190,15 @@ private extension NovelSessionPresentation {
         let committedToken = committedChange.map {
             "\($0.checkpointID):\($0.stateSnapshotID):\($0.eventSummaries.count)"
         } ?? "none"
+        let askUserToken = askUser.map { presentation in
+            "ask:\(presentation.prompt.question):" +
+                (presentation.isAnswered ? "answered" : "pending")
+        } ?? "none"
         let actionToken = actions.map(actionToken).joined(separator: "|")
         return NovelSessionRowDigest(
             layout: "\(contentToken);\(runStatus?.rawValue ?? "-");" +
                 "\(granularity?.rawValue ?? "-");\(candidateToken);" +
-                "\(committedToken);\(actionToken)",
+                "\(committedToken);\(askUserToken);\(actionToken)",
             presentation: actionToken
         )
     }
@@ -1262,9 +1297,9 @@ enum NovelSessionBottomFollowPolicy {
             if hasRows { commands.append(.anchorBottom) }
 
         case .streamStarted:
-            if case .settlingTerminal = next.mode {
-                next.mode = .followingBottom
-            }
+            next.mode = .followingBottom
+            setBottomButton(false, state: &next, commands: &commands)
+            commands.append(.anchorBottom)
 
         case .streamDelta:
             break

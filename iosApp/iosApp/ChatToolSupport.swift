@@ -83,6 +83,15 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
     var title: String { "执行 MCP 工具" }
 }
 
+struct CouncilToolApprovalRequest: Identifiable, Equatable {
+    let id: String
+    let objectivePreview: String
+    let maxSeats: Int?
+    let reason: String
+
+    var title: String { "启动模型议会" }
+}
+
 enum IshToolApprovalMode: String, Equatable {
     case handoff
     case embeddedExecute
@@ -309,6 +318,20 @@ enum ChatToolApprovalRequestBuilder {
             serverName: server,
             toolName: tool,
             argumentsPreview: ChatToolCallParsing.truncatedMcpArguments(args["arguments"]),
+            reason: reason
+        )
+    }
+
+    static func council(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> CouncilToolApprovalRequest? {
+        let args = ChatToolCallParsing.jsonObject(toolCall.input)
+        let objective = args?["objective"] as? String ?? toolCall.input
+        return CouncilToolApprovalRequest(
+            id: ChatToolCallParsing.requestId(for: toolCall),
+            objectivePreview: ChatToolCallParsing.truncatedSearchTarget(objective),
+            maxSeats: args?["max_seats"] as? Int,
             reason: reason
         )
     }
@@ -566,6 +589,7 @@ enum ChatToolOutputFormatter {
             }
             if object["ok"] as? Bool == false {
                 return stringValue(in: object, keys: ["reason", "error", "detail", "message"])
+                    ?? "工具执行失败"
             }
             if let denied = object["denied"] as? Bool, denied {
                 return stringValue(in: object, keys: ["reason", "error", "detail", "message"]) ?? "用户已拒绝"
@@ -573,6 +597,7 @@ enum ChatToolOutputFormatter {
             if let status = (object["status"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
                 if ["error", "failed", "failure", "denied", "timed_out", "timeout"].contains(status) {
                     return stringValue(in: object, keys: ["reason", "error", "detail", "message"])
+                        ?? "工具执行失败"
                 }
             }
             if let exitCode = object["exit_code"] as? Int, exitCode != 0 {

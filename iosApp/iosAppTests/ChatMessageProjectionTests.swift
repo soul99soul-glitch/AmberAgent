@@ -1,10 +1,61 @@
 import XCTest
+import Combine
 import Shared
 @testable import SwiftStreamingMarkdown
 @testable import iosApp
 
 @MainActor
 final class ChatMessageProjectionTests: XCTestCase {
+
+    func testLiveTailModelPublishesAtMostOncePerSignalRevision() {
+        let message = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(text: "stream", metadata: nil)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        let renderState = ChatRenderState(
+            rendererMode: .streamingMarkdown,
+            hasEverStreamed: true,
+            liveRenderingEnabled: true,
+            frozenMarkdownSnapshot: nil
+        )
+        let model = ChatLiveTailModel(
+            message: message,
+            isGenerationActive: true,
+            renderState: renderState
+        )
+        var publishedUpdates = 0
+        let cancellable = model.objectWillChange.sink { publishedUpdates += 1 }
+
+        model.update(
+            message: message,
+            isGenerationActive: true,
+            renderState: renderState,
+            sourceRevision: 7
+        )
+        model.update(
+            message: message,
+            isGenerationActive: true,
+            renderState: renderState,
+            sourceRevision: 7
+        )
+        XCTAssertEqual(publishedUpdates, 1)
+
+        model.update(
+            message: message,
+            isGenerationActive: true,
+            renderState: renderState,
+            sourceRevision: 8
+        )
+        XCTAssertEqual(publishedUpdates, 2)
+        withExtendedLifetime(cancellable) {}
+    }
 
     func testFrozenMarkdownSnapshotUsesTheSingleNonEmptyTextPartVerbatim() {
         let messageID = KotlinUuid.companion.random()

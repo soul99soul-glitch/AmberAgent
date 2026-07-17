@@ -397,9 +397,9 @@ struct NativeChatTimelineView: View {
     var generativeUiSetting: GenerativeUiSetting
     var reasoningLevelLabel: String?
     var workspaceStore: IOSWorkspaceStore
+    var nativeScrollDriverEnabled: Bool
     var scrollToBottomTrigger: Int
     var scrollToBottomSource: NativeTimelineBottomIntentSource
-    var composerHeight: CGFloat
     var messagesProvider: () -> [UIMessage]
     var variantInfoProvider: (Int) -> IOSConversationStore.VariantInfo?
     var onAction: (ChatListAction) -> Void
@@ -422,6 +422,7 @@ struct NativeChatTimelineView: View {
     @State private var nativeScrollFallbackReason: NativeTimelineScrollFallbackReason?
     @State private var nativeScrollFallbackShouldReplayBottom = false
     @State private var nativeScrollFallbackReplayToken: UInt64 = 0
+    @State private var isNativeScrollSurfaceVisible = false
 
     var body: some View {
         let messages = messagesProvider()
@@ -430,6 +431,13 @@ struct NativeChatTimelineView: View {
             event: signal.event,
             messages: messages
         )
+        let renderViewportState = {
+            var state = viewportState
+            // The native tail is kept outside LazyVStack. While history is visible,
+            // pause model publications instead of replacing its whole Markdown tree.
+            state.liveRenderingFarFromBottom = false
+            return state
+        }()
         let projection = projectionCache.projection(
             messages: messages,
             event: signal.event,
@@ -438,7 +446,7 @@ struct NativeChatTimelineView: View {
             isLoading: isLoading,
             isRecognizingImages: isRecognizingImages,
             contextCompactState: contextCompactState,
-            viewportState: viewportState,
+            viewportState: renderViewportState,
             displaySettingSignature: String(describing: displaySetting),
             generativeUiSettingSignature: String(describing: generativeUiSetting),
             renderStateRevision: renderStateRevision,
@@ -451,10 +459,22 @@ struct NativeChatTimelineView: View {
                 ? contentHashCache.streamingTailLayoutToken(for: row)
                 : contentHashCache.contentHash(for: row)
         }
+        let tailStartIndex = projection.entries.lastIndex(where: { $0.isLastMessage }) ?? projection.entries.endIndex
+        let historicalEntries = projection.entries.prefix(upTo: tailStartIndex)
+        let tailEntries = projection.entries.suffix(from: tailStartIndex)
 
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(projection.entries) { entry in
+            VStack(alignment: .leading, spacing: 14) {
+                if !historicalEntries.isEmpty {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        ForEach(historicalEntries) { entry in
+                            entryView(entry)
+                        }
+                    }
+                }
+
+                // Keep stable history lazy, but measure the dynamically growing tail exactly.
+                ForEach(tailEntries) { entry in
                     entryView(entry)
                 }
             }
@@ -464,7 +484,7 @@ struct NativeChatTimelineView: View {
             .scrollTargetLayout()
             .background {
                 if nativeScrollDriverDesired {
-                    ChatSwiftUIScrollViewResolver(
+                    NativeTimelineScrollViewResolver(
                         onResolve: { scrollView in
                             handleNativeScrollViewResolved(scrollView)
                         },
@@ -477,6 +497,7 @@ struct NativeChatTimelineView: View {
             }
         }
         .nativeTimelineScrollPosition($scrollPosition)
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
         .contentShape(Rectangle())
@@ -499,8 +520,11 @@ struct NativeChatTimelineView: View {
                 let endedUserScroll = nativeUserScrollActive
                 nativeUserScrollActive = false
                 if endedUserScroll {
-                    let returnedToBottom = isNativeMeasuredNearBottom(latestNativeScrollGeometry) ||
-                        scrollDriver.isAtBottomNow()
+                    let returnedToBottom = NativeTimelineScrollReturnPolicy.returnedToBottom(
+                        liveDistanceToBottom: scrollDriver.distanceToBottomNow(),
+                        cachedNearBottom: isNativeMeasuredNearBottom(latestNativeScrollGeometry),
+                        threshold: ChatLayout.nearBottomResumeThreshold
+                    )
                     scrollDriver.submit(.userDragEnded(isAtBottom: returnedToBottom))
                     if returnedToBottom {
                         resumeNativeBottomFollowAfterUserReturn()
@@ -546,11 +570,22 @@ struct NativeChatTimelineView: View {
             )
         }
         .onAppear {
+            isNativeScrollSurfaceVisible = true
             updateRendererMemory(event: signal.event, messages: messages)
             consumeExternalScrollToBottomTriggerIfNeeded()
         }
         .onDisappear {
+            isNativeScrollSurfaceVisible = false
             scrollDriver.invalidate()
+        }
+        .onChange(of: followGeneration) { _, enabled in
+            scrollDriver.setAutomaticFollowEnabled(enabled)
+        }
+        .onChange(of: nativeScrollDriverEnabled) { _, enabled in
+            if !enabled {
+                nativeScrollFallbackReason = nil
+                scrollDriver.invalidate()
+            }
         }
         .onChange(of: signal) { _, newSignal in
             updateRendererMemory(event: newSignal.event, messages: messagesProvider())
@@ -573,10 +608,6 @@ struct NativeChatTimelineView: View {
                 }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-            guard isNativeScrollDriverActive else { return }
-            scrollDriver.handleKeyboardWillChange(notification, composerHeight: composerHeight)
-        }
     }
 
     private var isNativeScrollDriverActive: Bool {
@@ -584,18 +615,23 @@ struct NativeChatTimelineView: View {
     }
 
     private var isNativeScrollDriverDesired: Bool {
-        NativeTimelineScrollFeatureFlags.isEnabled && nativeScrollFallbackReason == nil
+        nativeScrollDriverEnabled &&
+            nativeScrollFallbackReason == nil &&
+            isNativeScrollSurfaceVisible
     }
 
     private func handleNativeScrollViewResolved(_ scrollView: UIScrollView) {
         guard isNativeScrollDriverDesired else { return }
         let wasAttached = scrollDriver.isAttached
+        scrollDriver.setAutomaticFollowEnabled(followGeneration)
         scrollDriver.onFallback = { reason, shouldReplayBottom in
             handleNativeScrollFallback(reason, shouldReplayBottom: shouldReplayBottom)
         }
         scrollDriver.attach(scrollView)
-        guard !wasAttached else { return }
-        if followGeneration, isGenerationActive || isLoading || viewportState.isAtBottom {
+        guard !wasAttached, scrollDriver.isAttached else { return }
+        if nativeUserScrollActive || viewportState.followPaused || !viewportState.isAtBottom {
+            scrollDriver.submit(.userDragBegan)
+        } else {
             scrollDriver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
         }
     }
@@ -649,7 +685,7 @@ struct NativeChatTimelineView: View {
                     markRenderVisible(messageId)
                 }
                 .onDisappear {
-                    guard entry.hasEverStreamed else { return }
+                    guard entry.hasEverStreamed, !entry.isLastMessage else { return }
                     renderStateStore.freeze(
                         messageID: messageId,
                         latestText: message.singleNonEmptyTextPart
@@ -818,7 +854,8 @@ struct NativeChatTimelineView: View {
         liveTailModel?.update(
             message: row.message,
             isGenerationActive: isGenerationActive,
-            renderState: renderState
+            renderState: renderState,
+            sourceRevision: signal.revision
         )
     }
 
@@ -863,10 +900,7 @@ struct NativeChatTimelineView: View {
         guard wasAtBottom,
               previous.visibleHeight - current.visibleHeight > 2,
               current.contentHeight > current.visibleHeight + ChatLayout.bottomStickThreshold else { return }
-        guard !isNativeScrollDriverActive else {
-            scrollDriver.submit(.explicitBottom(source: .viewportShrink, animated: true, keyboardToken: nil))
-            return
-        }
+        guard !isNativeScrollDriverActive else { return }
         withAnimation(.easeOut(duration: 0.18)) {
             scrollPosition.scrollTo(id: ChatLayout.bottomAnchorID, anchor: .bottom)
         }
@@ -1464,6 +1498,7 @@ struct ChatSwiftUIMessageList: View {
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
         .contentShape(Rectangle())
@@ -2440,107 +2475,6 @@ private struct ChatSwiftUIBottomMaxYKey: PreferenceKey {
     }
 }
 
-private struct ChatSwiftUIScrollViewResolver: UIViewRepresentable {
-    let onResolve: (UIScrollView) -> Void
-    let onMetricsChanged: () -> Void
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onMetricsChanged: onMetricsChanged)
-    }
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.isHidden = true
-        return view
-    }
-
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        coordinator.invalidate()
-    }
-
-    func updateUIView(_ view: UIView, context: Context) {
-        DispatchQueue.main.async { [weak view] in
-            guard let scrollView = view?.chatSwiftUIAncestor(of: UIScrollView.self) else { return }
-            onResolve(scrollView)
-            context.coordinator.observe(scrollView)
-        }
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        private let onMetricsChanged: () -> Void
-        private weak var observedScrollView: UIScrollView?
-        private var displayLink: CADisplayLink?
-        private var pendingCallback = false
-        private var lastMetrics: Metrics?
-
-        init(onMetricsChanged: @escaping () -> Void) {
-            self.onMetricsChanged = onMetricsChanged
-        }
-
-        func invalidate() {
-            displayLink?.invalidate()
-            displayLink = nil
-            observedScrollView = nil
-        }
-
-        func observe(_ scrollView: UIScrollView) {
-            guard observedScrollView !== scrollView else { return }
-            observedScrollView = scrollView
-            lastMetrics = Metrics(scrollView)
-            startDisplayLinkIfNeeded()
-            scheduleCallback()
-        }
-
-        private func startDisplayLinkIfNeeded() {
-            guard displayLink == nil else { return }
-            let link = CADisplayLink(target: self, selector: #selector(displayLinkTick))
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 60)
-            link.add(to: .main, forMode: .common)
-            displayLink = link
-        }
-
-        @objc
-        private func displayLinkTick() {
-            guard let scrollView = observedScrollView else { return }
-            let metrics = Metrics(scrollView)
-            guard metrics != lastMetrics else { return }
-            lastMetrics = metrics
-            scheduleCallback()
-        }
-
-        private func scheduleCallback() {
-            guard !pendingCallback else { return }
-            pendingCallback = true
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                pendingCallback = false
-                onMetricsChanged()
-            }
-        }
-
-        private struct Metrics: Equatable {
-            let contentOffset: CGPoint
-            let contentSize: CGSize
-            let bounds: CGRect
-            let adjustedContentInset: UIEdgeInsets
-            let isDragging: Bool
-            let isTracking: Bool
-            let isDecelerating: Bool
-
-            init(_ scrollView: UIScrollView) {
-                contentOffset = scrollView.contentOffset
-                contentSize = scrollView.contentSize
-                bounds = scrollView.bounds
-                adjustedContentInset = scrollView.adjustedContentInset
-                isDragging = scrollView.isDragging
-                isTracking = scrollView.isTracking
-                isDecelerating = scrollView.isDecelerating
-            }
-        }
-    }
-}
-
 private struct ChatSwiftUIMessageBubble: View, @MainActor Equatable {
     let entryID: String
     let renderDigest: ChatRowDigest
@@ -2598,19 +2532,6 @@ private struct ChatSwiftUIMessageBubble: View, @MainActor Equatable {
             lhs.variantInfo == rhs.variantInfo &&
             lhs.renderState == rhs.renderState &&
             lhs.renderDigest == rhs.renderDigest
-    }
-}
-
-private extension UIView {
-    func chatSwiftUIAncestor<T: UIView>(of type: T.Type) -> T? {
-        var current = superview
-        while let view = current {
-            if let match = view as? T {
-                return match
-            }
-            current = view.superview
-        }
-        return nil
     }
 }
 
@@ -2750,6 +2671,7 @@ final class ChatCollectionViewController: UIViewController {
         view.backgroundColor = .clear
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
+        collectionView.topEdgeEffect.style = .soft
         collectionView.keyboardDismissMode = .onDrag
         collectionView.showsHorizontalScrollIndicator = false
         collectionView.delegate = self
@@ -4198,6 +4120,7 @@ final class ChatLiveTailModel: ObservableObject {
     private(set) var isGenerationActive: Bool
     private(set) var renderState: ChatRenderState
     private(set) var revision: Int = 0
+    private var lastSourceRevision: Int?
 
     init(message: UIMessage, isGenerationActive: Bool, renderState: ChatRenderState) {
         self.message = message
@@ -4205,11 +4128,23 @@ final class ChatLiveTailModel: ObservableObject {
         self.renderState = renderState
     }
 
-    func update(message: UIMessage, isGenerationActive: Bool, renderState: ChatRenderState) {
+    func update(
+        message: UIMessage,
+        isGenerationActive: Bool,
+        renderState: ChatRenderState,
+        sourceRevision: Int? = nil
+    ) {
+        if let sourceRevision,
+           sourceRevision == lastSourceRevision,
+           self.isGenerationActive == isGenerationActive,
+           self.renderState == renderState {
+            return
+        }
         objectWillChange.send()
         self.message = message
         self.isGenerationActive = isGenerationActive
         self.renderState = renderState
+        lastSourceRevision = sourceRevision
         revision &+= 1
     }
 }

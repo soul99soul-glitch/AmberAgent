@@ -13,8 +13,10 @@ struct NovelSessionBubble: View {
     let candidateStatus: NovelCandidateStatus?
     let polishTransactionStatus: NovelPolishTransactionStatus?
     let committedChange: NovelSessionCommittedChangeSummary?
+    let askUser: NovelAskUserPresentation?
     let actions: [NovelSessionRowActionAvailability]
     let onAction: (NovelSessionRowAction) -> Void
+    let onAnswerAskUser: (NovelMessageID, String) -> Void
 
     var body: some View {
         switch role {
@@ -45,7 +47,7 @@ struct NovelSessionBubble: View {
             ChatAssistantStack {
                 ChatAgentName()
 
-                if content.isEmpty {
+                if content.isEmpty, askUser == nil {
                     ChatAssistantText {
                         Text(emptyAssistantText)
                             .foregroundStyle(AmberTheme.muted)
@@ -58,6 +60,12 @@ struct NovelSessionBubble: View {
                         hasEverStreamed: hasEverStreamed
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let askUser {
+                    NovelAskUserCard(presentation: askUser) { answers in
+                        onAnswerAskUser(messageID, answers)
+                    }
                 }
 
                 statusLine
@@ -267,6 +275,122 @@ struct NovelSessionBubble: View {
             .background(AmberTheme.surface, in: Capsule())
             .frame(maxWidth: .infinity)
             .accessibilityLabel(content)
+    }
+}
+
+private struct NovelAskUserCard: View {
+    let presentation: NovelAskUserPresentation
+    let onSubmit: (String) -> Void
+
+    @State private var selectedOption: String?
+    @State private var customValue = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(
+                presentation.isAnswered ? "已回答" : "需要你决定",
+                systemImage: presentation.isAnswered
+                    ? "checkmark.circle.fill"
+                    : "questionmark.bubble.fill"
+            )
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(presentation.isAnswered ? AmberTheme.accentGreen : AmberTheme.accent)
+
+            if let response = presentation.response {
+                Text(response.answer)
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.foreground2)
+            } else {
+                questionEditor
+
+                Button("继续讨论") {
+                    onSubmit(answer)
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .disabled(!canSubmit)
+            }
+        }
+        .padding(16)
+        .amberGlass(cornerRadius: 18, interactive: false)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AmberTheme.accent.opacity(0.18), lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var questionEditor: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(presentation.prompt.question)
+                .font(.body.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ForEach(presentation.prompt.options, id: \.self) { option in
+                Button {
+                    select(option)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: selectedOption == option
+                            ? "checkmark.circle.fill"
+                            : "circle")
+                            .foregroundStyle(selectedOption == option
+                                ? AmberTheme.accent
+                                : AmberTheme.muted)
+                        Text(option)
+                            .foregroundStyle(AmberTheme.foreground)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .background(
+                        selectedOption == option
+                            ? AmberTheme.accentTint
+                            : AmberTheme.surface,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            TextField(
+                presentation.prompt.options.isEmpty ? "输入你的想法" : "或者直接输入自己的选择",
+                text: customInput,
+                axis: .vertical
+            )
+            .lineLimit(2...6)
+            .textFieldStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private var answer: String {
+        let custom = customValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return custom.isEmpty ? selectedOption ?? "" : custom
+    }
+
+    private var canSubmit: Bool {
+        !answer.isEmpty
+    }
+
+    private func select(_ option: String) {
+        customValue = ""
+        selectedOption = option
+    }
+
+    private var customInput: Binding<String> {
+        Binding(
+            get: { customValue },
+            set: {
+                customValue = $0
+                if !$0.isEmpty { selectedOption = nil }
+            }
+        )
     }
 }
 

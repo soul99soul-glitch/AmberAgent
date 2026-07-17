@@ -317,6 +317,7 @@ struct NovelMaterialEditorSheet: View {
     @State private var title: String
     @State private var content: String
     @State private var tags: String
+    @State private var aliases: String
     @State private var injectionMode: NovelInjectionMode
 
     init(
@@ -341,6 +342,7 @@ struct NovelMaterialEditorSheet: View {
         self._title = State(initialValue: revision?.title ?? "")
         self._content = State(initialValue: revision?.content ?? "")
         self._tags = State(initialValue: revision?.tags.joined(separator: "，") ?? "")
+        self._aliases = State(initialValue: material?.aliases.joined(separator: "，") ?? "")
         self._injectionMode = State(initialValue: revision?.injectionMode ?? .smart)
     }
 
@@ -363,6 +365,9 @@ struct NovelMaterialEditorSheet: View {
 
                 Section("内容") {
                     TextField("标题", text: $title)
+                    if kindChoice == .character {
+                        TextField("曾用名或别名，用逗号分隔", text: $aliases)
+                    }
                     TextEditor(text: $content)
                         .frame(minHeight: 220)
                     TextField("标签，用逗号分隔", text: $tags)
@@ -412,6 +417,10 @@ struct NovelMaterialEditorSheet: View {
             .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        let parsedAliases = aliases
+            .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         Task { @MainActor in
             viewModel.clearError()
             await viewModel.saveMaterial(
@@ -420,7 +429,8 @@ struct NovelMaterialEditorSheet: View {
                 title: title,
                 content: content,
                 tags: parsedTags,
-                injectionMode: injectionMode
+                injectionMode: injectionMode,
+                aliases: parsedAliases
             )
             guard viewModel.errorMessage == nil else { return }
             dismiss()
@@ -489,12 +499,16 @@ struct NovelProposalAcceptanceSheet: View {
     @State private var customKindName = ""
     @State private var selectedMaterialID: NovelMaterialID?
     @State private var tags = ""
+    @State private var aliases: String
     @State private var injectionMode: NovelInjectionMode = .smart
 
     init(viewModel: NovelCreationViewModel, proposal: NovelSettingProposalRecord) {
         self.viewModel = viewModel
         self.proposal = proposal
         self._kindChoice = State(initialValue: Self.initialKindChoice(for: proposal))
+        self._aliases = State(
+            initialValue: proposal.suggestedCharacterAliases?.joined(separator: "，") ?? ""
+        )
     }
 
     var body: some View {
@@ -528,6 +542,10 @@ struct NovelProposalAcceptanceSheet: View {
                     }
 
                     TextField("标签，用逗号分隔", text: $tags)
+
+                    if selectedKind == .character {
+                        TextField("曾用名或别名，用逗号分隔", text: $aliases)
+                    }
 
                     Picker("默认注入", selection: $injectionMode) {
                         ForEach(NovelInjectionMode.allCases, id: \.self) { mode in
@@ -591,6 +609,10 @@ struct NovelProposalAcceptanceSheet: View {
             .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        let parsedAliases = aliases
+            .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         Task { @MainActor in
             viewModel.clearError()
             await viewModel.resolveProposal(
@@ -600,7 +622,8 @@ struct NovelProposalAcceptanceSheet: View {
                     revisionID: NovelMaterialRevisionID(),
                     kind: selectedKind,
                     tags: parsedTags,
-                    injectionMode: injectionMode
+                    injectionMode: injectionMode,
+                    aliases: parsedAliases
                 )
             )
             guard viewModel.errorMessage == nil else { return }

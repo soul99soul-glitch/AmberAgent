@@ -52,6 +52,7 @@ enum ChatToolApprovalPrompt {
     case workspace(WorkspaceToolApprovalRequest)
     case ish(IshHandoffToolApprovalRequest)
     case mcp(McpToolApprovalRequest)
+    case council(CouncilToolApprovalRequest)
 
     var toolTitle: String {
         switch self {
@@ -67,6 +68,8 @@ enum ChatToolApprovalPrompt {
             request.title
         case .mcp:
             "MCP 工具"
+        case .council:
+            "模型议会"
         }
     }
 
@@ -83,6 +86,8 @@ enum ChatToolApprovalPrompt {
         case .ish:
             .command
         case .mcp:
+            .workflow
+        case .council:
             .workflow
         }
     }
@@ -123,17 +128,23 @@ final class ChatToolRuntime {
         self.mcpManager = mcpManager
     }
 
-    /// Search-only executor set for autonomous agent surfaces that already use
-    /// the global Web Search switch as their consent boundary.
-    func discussionSearchToolExecutors() -> [String: any IOSToolExecutor] {
-        guard sharedSettings.snapshot.enableWebSearch else { return [:] }
-        return Dictionary(uniqueKeysWithValues: IOSSearchExecutor.supportedToolNames.map { name in
-            (name, IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+    /// Tool set for the novel discussion agent. Ask User is always available;
+    /// search continues to respect the global Web Search consent switch.
+    func novelDiscussionToolExecutors() -> [String: any IOSToolExecutor] {
+        var executors: [String: any IOSToolExecutor] = [
+            "ask_user": IOSClosureToolExecutor { _, _, _ in
+                .needsApproval("等待用户回答")
+            }
+        ]
+        guard sharedSettings.snapshot.enableWebSearch else { return executors }
+        for name in IOSSearchExecutor.supportedToolNames {
+            executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
                 guard let self else { return .failed("Chat runtime is unavailable.") }
                 let call = self.toolCall(name: toolName, input: arguments)
                 return .filled(await self.dispatchSearchToolCall(call))
-            })
-        })
+            }
+        }
+        return executors
     }
 
     func backgroundToolExecutors(
@@ -518,6 +529,43 @@ final class ChatToolRuntime {
         )
     }
 
+    func finishCouncilApproval(
+        pending: ChatPendingToolApproval,
+        allow: Bool
+    ) async -> [UIMessage] {
+        recordToolApproval(
+            capabilityId: "ios.agent.model_council_run",
+            toolCall: pending.toolCall,
+            action: allow ? .allowed : .denied,
+            reason: allow ? "User approved model council run." : "User denied model council run.",
+            runId: pending.runId
+        )
+
+        let resultText: String
+        if allow {
+            resultText = await dispatchAdvancedToolCall(
+                pending.toolCall,
+                providerSetting: pending.providerSetting,
+                params: pending.params,
+                runId: pending.runId
+            )
+        } else {
+            resultText = IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": "model_council_run",
+                "status": "denied",
+                "denied": true,
+                "policy": "user_denied",
+                "reason": "用户拒绝启动模型议会。"
+            ])
+        }
+        return messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: resultText,
+            in: pending.baseMessages
+        )
+    }
+
     func messagesByFinishingToolCall(
         _ targetToolCall: UIMessagePart.Tool,
         outputText: String,
@@ -774,6 +822,15 @@ final class ChatToolRuntime {
                reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。"
            ) {
             return .waitingForApproval(.mcp(request))
+        }
+
+        if pending.toolCall.toolName == "model_council_run",
+           requiresCouncilApproval,
+           let request = ChatToolApprovalRequestBuilder.council(
+               for: pending.toolCall,
+               reason: "模型议会会发起多次模型请求，需要你确认。"
+           ) {
+            return .waitingForApproval(.council(request))
         }
 
         let resultText = await dispatchAdvancedToolCall(
@@ -1063,7 +1120,14 @@ final class ChatToolRuntime {
         runId: String
     ) async -> String {
         guard isAdvancedToolEnabled(toolCall.toolName) else {
-            return "\(toolCall.toolName) 未开启。请先在设置中启用对应能力。"
+            return IOSWorkspaceStore.json([
+                "ok": false,
+                "tool": toolCall.toolName,
+                "status": "denied",
+                "denied": true,
+                "policy": "disabled",
+                "reason": "\(toolCall.toolName) 未开启。请先在设置中启用对应能力。"
+            ])
         }
         switch toolCall.toolName {
         case "subagent_dispatch":
@@ -1086,9 +1150,14 @@ final class ChatToolRuntime {
         case "model_council_run":
             let args = ChatToolCallParsing.jsonObject(toolCall.input)
             let objective = args?["objective"] as? String ?? toolCall.input
-            let mode = args?["mode"] as? String ?? "compare"
-            let budget = args?["output_budget_chars"] as? Int ?? 12_000
-            return await councilRunner.run(objective: objective, mode: mode, outputBudgetChars: budget, selectedProvider: providerSetting)
+            let maxSeats = args?["max_seats"] as? Int
+            return await councilRunner.run(
+                objective: objective,
+                maxSeats: maxSeats,
+                providerSetting: providerSetting,
+                currentModel: params.model,
+                baseParams: params
+            )
         case "mcp_call":
             guard let args = ChatToolCallParsing.jsonObject(toolCall.input),
                   let server = args["server"] as? String,
@@ -1296,6 +1365,15 @@ final class ChatToolRuntime {
         guard let localToolExecutor else { return true }
         let snapshot = localToolExecutor.permissionsStatus()
         return snapshot.capabilities.first { $0.id == capabilityId }?.policy != IOSAgentPermissionPolicy.disabled.title
+    }
+
+    private var requiresCouncilApproval: Bool {
+        guard let policy = localToolExecutor?.permissionPolicy(
+            capabilityId: "ios.agent.model_council_run"
+        ) else {
+            return false
+        }
+        return policy == .askEveryTime || policy == .allowOncePerRun
     }
 
 #if DEBUG

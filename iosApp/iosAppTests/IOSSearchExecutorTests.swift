@@ -428,8 +428,8 @@ final class ChatViewModelSearchToolDeclarationTests: XCTestCase {
             mcpManager: IOSMcpManager(serverProvider: { [] })
         )
 
-        let executors = runtime.discussionSearchToolExecutors()
-        XCTAssertEqual(Set(executors.keys), IOSSearchExecutor.supportedToolNames)
+        let executors = runtime.novelDiscussionToolExecutors()
+        XCTAssertEqual(Set(executors.keys), IOSSearchExecutor.supportedToolNames.union(["ask_user"]))
         let executor = UncheckedToolExecutorBox(try XCTUnwrap(executors["search_web"]))
         let outcome = await executor.execute(
             name: "search_web",
@@ -454,7 +454,7 @@ final class ChatViewModelSearchToolDeclarationTests: XCTestCase {
             mcpManager: IOSMcpManager(serverProvider: { [] })
         )
 
-        XCTAssertTrue(runtime.discussionSearchToolExecutors().isEmpty)
+        XCTAssertEqual(Set(runtime.novelDiscussionToolExecutors().keys), ["ask_user"])
     }
 
     private func makeSharedSettings(enableWebSearch: Bool) -> IOSSharedSettingsStore {

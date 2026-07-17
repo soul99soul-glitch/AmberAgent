@@ -335,17 +335,19 @@ struct SeatEditorView: View {
     }
 
     private var currentModelId: String {
-        settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "gpt-4o" : settingsStore.modelId
+        sharedSettings.resolveCurrentModelId()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmedOr("gpt-4o")
     }
 
     private var availableModelIds: [String] {
         var seen = Set<String>()
         var ids: [String] = []
-        // All chat models across every configured provider (shared settings),
-        // not just the legacy registry's single selected provider.
-        for option in sharedSettings.availableChatModels() {
-            guard seen.insert(option.modelId).inserted else { continue }
-            ids.append(option.modelId)
+        for model in sharedSettings.resolveCurrentProviderSetting()?.models ?? []
+            where model.type == ModelType.chat {
+            let modelId = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !modelId.isEmpty, seen.insert(modelId).inserted else { continue }
+            ids.append(modelId)
         }
         if seen.insert(currentModelId).inserted {
             ids.insert(currentModelId, at: 0)

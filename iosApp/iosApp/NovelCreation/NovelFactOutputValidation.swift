@@ -86,6 +86,11 @@ extension NovelFactTransactionReducer {
         baseState: NovelStateSnapshotRecord,
         in document: NovelProjectDocumentV1
     ) throws {
+        let effectiveBaseState = try effectiveStateSnapshot(
+            baseState,
+            branch: branch,
+            document: document
+        )
         let factEvidence = value.events.map(\.evidence) +
             value.characterChanges.map(\.evidence) +
             value.relationshipChanges.map(\.evidence) +
@@ -98,7 +103,7 @@ extension NovelFactTransactionReducer {
             stateSummary: value.stateSummary,
             branchOutline: value.branchOutlinePatch ?? baseState.branchOutline,
             unresolved: value.unresolvedEntityNames,
-            baseState: baseState,
+            baseState: effectiveBaseState,
             hasEvidenceBackedFacts: !factEvidence.isEmpty
         )
         try validateEntities(
@@ -109,7 +114,7 @@ extension NovelFactTransactionReducer {
             },
             unresolved: value.unresolvedEntityNames,
             branch: branch,
-            baseUnresolved: baseState.unresolvedEntityNames,
+            baseUnresolved: effectiveBaseState.unresolvedEntityNames,
             in: document
         )
     }
@@ -168,6 +173,11 @@ extension NovelFactTransactionReducer {
         baseState: NovelStateSnapshotRecord,
         in document: NovelProjectDocumentV1
     ) throws {
+        let effectiveBaseState = try effectiveStateSnapshot(
+            baseState,
+            branch: branch,
+            document: document
+        )
         let factEvidence = value.events.map(\.evidence) +
             value.characterStates.map(\.evidence) +
             value.relationships.map(\.evidence) +
@@ -180,7 +190,7 @@ extension NovelFactTransactionReducer {
             stateSummary: value.stateSummary,
             branchOutline: value.branchOutline,
             unresolved: value.unresolvedEntityNames,
-            baseState: baseState,
+            baseState: effectiveBaseState,
             hasEvidenceBackedFacts: !factEvidence.isEmpty
         )
         try validateEntities(
@@ -191,7 +201,7 @@ extension NovelFactTransactionReducer {
             },
             unresolved: value.unresolvedEntityNames,
             branch: branch,
-            baseUnresolved: baseState.unresolvedEntityNames,
+            baseUnresolved: effectiveBaseState.unresolvedEntityNames,
             in: document
         )
     }
@@ -390,6 +400,29 @@ extension NovelFactTransactionReducer {
         }
     }
 
+    static func effectiveStateSnapshot(
+        _ state: NovelStateSnapshotRecord,
+        branch: NovelBranchRecord,
+        document: NovelProjectDocumentV1
+    ) throws -> NovelStateSnapshotRecord {
+        let unresolved = try sanitizedUnresolvedEntityNames(
+            base: state.unresolvedEntityNames,
+            referenced: [],
+            branch: branch,
+            document: document
+        )
+        guard unresolved != state.unresolvedEntityNames else { return state }
+        return NovelStateSnapshotRecord(
+            id: state.id,
+            eventIDs: state.eventIDs,
+            summary: state.summary,
+            branchOutline: state.branchOutline,
+            unresolvedEntityNames: unresolved,
+            createdAt: state.createdAt,
+            settingProposalIDs: state.settingProposalIDs
+        )
+    }
+
     private static func validateEvidence(
         _ evidence: [String],
         in manuscript: String
@@ -429,7 +462,7 @@ extension NovelFactTransactionReducer {
                 "The branch references missing material revision \(revisionID)."
             )
         }
-        let known = Set(effective.map { normalizedEntity($0.revision.title) })
+        let known = knownEntityNames(in: effective)
         var unresolved: [String] = []
         var unresolvedKeys: Set<String> = []
         for name in base + referenced {
@@ -462,7 +495,7 @@ extension NovelFactTransactionReducer {
                 "The branch references missing material revision \(revisionID)."
             )
         }
-        let known = Set(effective.map { normalizedEntity($0.revision.title) })
+        let known = knownEntityNames(in: effective)
         let unresolvedKeys = Set(unresolved.map(normalizedEntity))
         let baseUnresolvedKeys = Set(baseUnresolved.map(normalizedEntity))
         let referenced = eventReferences + characterNames + relationshipNames
@@ -491,6 +524,22 @@ extension NovelFactTransactionReducer {
                 )
             }
         }
+    }
+
+    private static func knownEntityNames(
+        in revisions: [NovelEffectiveMaterialRevision]
+    ) -> Set<String> {
+        let identities = revisions.compactMap { item -> NovelCharacterIdentity? in
+            guard item.material.kind == .character else { return nil }
+            return NovelCharacterIdentity(
+                materialID: item.material.id,
+                canonicalName: item.revision.title,
+                aliases: item.material.aliases
+            )
+        }
+        let resolver = NovelCharacterIdentityResolver(identities: identities)
+        let aliases = identities.flatMap(\.aliases).filter(resolver.isKnown)
+        return Set((revisions.map { $0.revision.title } + aliases).map(normalizedEntity))
     }
 
     private static func rawStoryEventDrafts(

@@ -125,6 +125,42 @@ final class NovelGenerationReducerTests: XCTestCase {
         XCTAssertEqual(completed.document.branches[0].syncStatus, .needsSync)
     }
 
+    func testAskUserQuestionAndAnswerPersistAcrossDiscussionRuns() throws {
+        let original = try NovelTestFixtures.document()
+        let questionRun = makeRequest(document: original, kind: .discussion)
+        let started = try begin(questionRun, in: original)
+        let prompt = NovelAskUserPrompt(
+            question: "朱重八和朱元璋是同一个角色吗？",
+            options: ["是", "不是"]
+        )
+
+        let awaiting = try NovelGenerationReducer.completeAwaitingUser(
+            runID: questionRun.id,
+            prompt: prompt,
+            preface: "先确认一个会影响人物经历归属的问题。",
+            in: started,
+            now: terminalTime
+        ).document
+
+        XCTAssertEqual(awaiting.sessions[0].messages.last?.interaction, .askUser(prompt))
+        XCTAssertNil(awaiting.branches[0].activeRunID)
+        XCTAssertEqual(awaiting.activeRuns.last?.status, .completed)
+
+        let response = NovelAskUserResponse(
+            promptMessageID: questionRun.assistantMessageID,
+            answer: "是"
+        )
+        let answerRun = makeRequest(
+            document: awaiting,
+            kind: .discussion,
+            askUserResponse: response
+        )
+        let resumed = try begin(answerRun, in: awaiting)
+
+        XCTAssertEqual(resumed.sessions[0].messages.last?.interaction, .askUserAnswer(response))
+        XCTAssertEqual(resumed.branches[0].activeRunID, answerRun.id)
+    }
+
     func testPolishCompletionBindsCandidateToCurrentSourceVersion() throws {
         let fixture = try documentWithChapter()
         let request = makeRequest(
@@ -717,6 +753,7 @@ private extension NovelGenerationReducerTests {
         kind: NovelRunKind,
         granularity: NovelGenerationGranularity? = nil,
         sourceChapterVersionID: NovelChapterVersionID? = nil,
+        askUserResponse: NovelAskUserResponse? = nil,
         expectedProjectRevision: Int64? = nil
     ) -> NovelRunRequest {
         let branch = document.branches[0]
@@ -743,6 +780,7 @@ private extension NovelGenerationReducerTests {
             generationReceiptID: NovelReceiptID(),
             injectionReceiptID: NovelReceiptID(),
             sourceChapterVersionID: sourceChapterVersionID,
+            askUserResponse: askUserResponse,
             inputBudgetTokens: 16_000,
             expectedProjectRevision: expectedProjectRevision ?? document.project.revision,
             expectedConfigRevision: document.project.configRevision,

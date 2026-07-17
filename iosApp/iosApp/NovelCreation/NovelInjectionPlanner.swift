@@ -283,6 +283,15 @@ enum NovelInjectionPlanner {
         }
 
         let prompt = NovelPromptCatalog.template(for: request.promptKind)
+        let materialSources = try effectiveMaterials(document: document, branch: branch)
+        let characterIdentities = materialSources.compactMap { source -> NovelCharacterIdentity? in
+            guard source.material.kind == .character else { return nil }
+            return NovelCharacterIdentity(
+                materialID: source.material.id,
+                canonicalName: source.revision.title,
+                aliases: source.material.aliases
+            )
+        }
         let chapterSection = try makeChapterSection(
             document: document,
             branch: branch,
@@ -291,6 +300,7 @@ enum NovelInjectionPlanner {
         let stateSection = request.pendingState.map(makePendingStateSection) ?? makeStateSection(
             state: state,
             branch: branch,
+            characterIdentities: characterIdentities,
             includeUnsynchronizedWarning: request.includeUnsynchronizedStateWarning
         )
         let seedSection = makeQuickStartSeedSection(document: document, request: request)
@@ -320,7 +330,6 @@ enum NovelInjectionPlanner {
             reason: .requiredUserInput
         )
 
-        let materialSources = try effectiveMaterials(document: document, branch: branch)
         let query = smartQuery(
             userText: request.userText,
             state: state,
@@ -583,13 +592,25 @@ private extension NovelInjectionPlanner {
     static func makeStateSection(
         state: NovelStateSnapshotRecord,
         branch: NovelBranchRecord,
+        characterIdentities: [NovelCharacterIdentity],
         includeUnsynchronizedWarning: Bool
     ) -> NovelInjectionSection {
-        let unresolved = state.unresolvedEntityNames.isEmpty
+        let identityResolver = NovelCharacterIdentityResolver(identities: characterIdentities)
+        let effectiveUnresolved = state.unresolvedEntityNames.filter { !identityResolver.isKnown($0) }
+        let unresolved = effectiveUnresolved.isEmpty
             ? "(none)"
-            : state.unresolvedEntityNames.map { "- \($0)" }.joined(separator: "\n")
+            : effectiveUnresolved.map { "- \($0)" }.joined(separator: "\n")
+        let identityMap = characterIdentities.isEmpty
+            ? "(none)"
+            : characterIdentities.map { identity in
+                let aliases = identity.aliases.isEmpty
+                    ? "(none)"
+                    : identity.aliases.joined(separator: ", ")
+                return "- \(identity.canonicalName) | aliases: \(aliases)"
+            }.joined(separator: "\n")
         var content = "Current summary:\n\(state.summary)\n\n" +
             "Branch outline:\n\(state.branchOutline)\n\n" +
+            "Character identity map (authoritative across branches):\n\(identityMap)\n\n" +
             "Unresolved entities:\n\(unresolved)"
         if includeUnsynchronizedWarning, branch.syncStatus == .needsSync {
             content += "\n\nWarning: the working manuscript has unsynchronized edits. " +
@@ -909,18 +930,34 @@ private extension NovelInjectionPlanner {
             .filter { !$0.isEmpty }
             .sorted()
             .joined(separator: ", ")
+        let aliases = source.material.kind == .character && !source.material.aliases.isEmpty
+            ? source.material.aliases.joined(separator: ", ")
+            : "(none)"
         return "Type: \(materialKindName(source.material.kind))\n" +
             "Title: \(source.revision.title)\n" +
+            "Aliases: \(aliases)\n" +
             "Tags: \(tags)\n\n" + source.revision.content
     }
 
     static func makeSessionSection(
         _ message: NovelSessionMessageRecord
     ) -> NovelInjectionSection {
-        makeSection(
+        let interaction: String
+        switch message.interaction {
+        case .askUser(let prompt):
+            interaction = "Question: \(prompt.question)"
+        case .askUserAnswer(let response):
+            interaction = "Answer: \(response.answer)"
+        case nil:
+            interaction = ""
+        }
+        let body = [message.content, interaction]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        return makeSection(
             kind: .sessionMessage(message.id),
             label: "RECENT SESSION MESSAGE #\(message.sequence)",
-            content: "Role: \(message.role.rawValue)\n\(message.content)",
+            content: "Role: \(message.role.rawValue)\n\(body)",
             reason: .recentSession
         )
     }

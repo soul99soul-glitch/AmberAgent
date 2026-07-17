@@ -22,6 +22,8 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
 
         XCTAssertTrue(shell.contains("@State private var councilChatViewModel: CouncilChatViewModel"))
         XCTAssertTrue(shell.contains("councilChatViewModel: councilChatViewModel"))
+        XCTAssertTrue(shell.contains("councilChatViewModel.runtimeWillEnterBackground()"))
+        XCTAssertTrue(shell.contains("councilChatViewModel.runtimeDidBecomeActive()"))
         XCTAssertEqual(
             shell.components(separatedBy: "viewModel: councilChatViewModel").count - 1,
             1,
@@ -290,7 +292,8 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(source.contains("if transcriptNearBottom, followGeneration {"))
+        XCTAssertTrue(source.contains("NativeTimelineScrollReturnPolicy.returnedToBottom("))
+        XCTAssertTrue(source.contains("if returnedToBottom, followGeneration {"))
     }
 
     func testCouncilMeasuredGrowthFollowOwnsFullAnimationWindow() throws {
@@ -470,6 +473,8 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
 
         XCTAssertEqual(outcome.status, .completed)
         XCTAssertEqual(outcome.failedSeats, [])
+        XCTAssertEqual(outcome.finalAnswer, "主持总结：先做当前服务商内多模型 Room。")
+        XCTAssertNil(outcome.failureReason)
         XCTAssertTrue(outcome.transcript.contains("主持总结"))
         XCTAssertEqual(streamer.callCount, 4)
         XCTAssertEqual(permissionStore.policies, policiesBefore, "Room consent must not mutate global permission policy.")
@@ -534,6 +539,171 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(task.status, .completed)
         XCTAssertTrue(task.retryable)
         XCTAssertTrue(task.error.contains("风险"))
+    }
+
+    func testRoomRunnerTreatsEmptySeatOutputAsThatSeatFailure() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let streamer = ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success(""),
+            .success("风险发言"),
+            .success("主持总结")
+        ])
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+
+        let outcome = await runner.run(
+            request: roomRequest(
+                settings: compactRoomSettings(defaultRounds: 1),
+                researchConsent: .unavailable
+            )
+        )
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(outcome.failedSeats, ["工程"])
+        XCTAssertEqual(outcome.finalAnswer, "主持总结")
+        XCTAssertFalse(outcome.transcript.contains("[工程]"))
+    }
+
+    func testRoomRunnerFailsWhenFinalTopicIsEmpty() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let runner = IOSCouncilRoomRunner(
+            streamer: ScriptedCouncilStreamer([.success("")]),
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+
+        let outcome = await runner.run(
+            request: roomRequest(
+                settings: compactRoomSettings(defaultRounds: 1),
+                researchConsent: .unavailable
+            )
+        )
+
+        XCTAssertEqual(outcome.status, .failed)
+        XCTAssertTrue(outcome.failureReason?.contains("最终议题") == true)
+        XCTAssertTrue(outcome.finalAnswer.isEmpty)
+    }
+
+    func testRoomRunnerFailsWhenFinalSynthesisIsEmpty() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let runner = IOSCouncilRoomRunner(
+            streamer: ScriptedCouncilStreamer([
+                .success("最终议题"),
+                .success("工程发言"),
+                .success("风险发言"),
+                .success("")
+            ]),
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+
+        let outcome = await runner.run(
+            request: roomRequest(
+                settings: compactRoomSettings(defaultRounds: 1),
+                researchConsent: .unavailable
+            )
+        )
+
+        XCTAssertEqual(outcome.status, .failed)
+        XCTAssertTrue(outcome.failureReason?.contains("最终综合") == true)
+        XCTAssertTrue(outcome.finalAnswer.isEmpty)
+    }
+
+    func testRoomRunnerAllowsLegitimateOutputBeginningWithError() async throws {
+        let runner = IOSCouncilRoomRunner(
+            streamer: ScriptedCouncilStreamer([
+                .success("Error: budgeting assumptions need review"),
+                .success("工程发言"),
+                .success("风险发言"),
+                .success("主持总结")
+            ]),
+            researcher: StaticCouncilResearcher(),
+            taskStore: IOSAdvancedTaskStore(userDefaults: isolatedDefaults(), storageKey: "tasks")
+        )
+
+        let outcome = await runner.run(
+            request: roomRequest(
+                settings: compactRoomSettings(defaultRounds: 1),
+                researchConsent: .unavailable
+            )
+        )
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(outcome.finalTopic, "Error: budgeting assumptions need review")
+    }
+
+    func testCouncilProviderResolutionPreservesCredentialIdentity() throws {
+        let provider = IOSCouncilRoomRunner.makeProviderSetting(
+            baseUrl: "https://example.com/v1",
+            apiKey: "test-key"
+        )
+
+        let resolved = try XCTUnwrap(
+            IOSCouncilRoomRunner.resolveProviderSetting(selected: provider)
+        )
+
+        XCTAssertTrue(resolved === provider)
+    }
+
+    func testCouncilStreamerUsesCodexAndGrokProductionRouting() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/CouncilRunner.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("IOSCodexProviderResolver.resolved(providerSetting)"))
+        XCTAssertTrue(source.contains("IOSCodexProviderResolver.augmentParamsForCodex("))
+        XCTAssertTrue(source.contains("IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI)"))
+        XCTAssertTrue(source.contains("IOSGrokWebClient(providerId: providerId).streamText("))
+    }
+
+    func testRoomRunnerPassesTheConfiguredModelInsteadOfSynthesizingOne() async throws {
+        let streamer = ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success("工程发言"),
+            .success("产品发言"),
+            .success("主持总结")
+        ])
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: StaticCouncilResearcher(),
+            taskStore: IOSAdvancedTaskStore(userDefaults: isolatedDefaults(), storageKey: "tasks")
+        )
+        let model = Model(
+            modelId: "gpt-main",
+            displayName: "Configured Council Model",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [ModelAbility.reasoning],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: KotlinInt(value: 32_000),
+            providerOverwrite: nil
+        )
+        var settings = IOSCouncilRoomSettings.defaults(currentModelId: model.modelId)
+        settings.limits.maxSeats = 2
+        settings.limits.defaultRounds = 1
+        var request = roomRequest(settings: settings)
+        request.currentModel = model
+
+        let outcome = await runner.run(request: request)
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(streamer.receivedModels.count, 4)
+        XCTAssertTrue(streamer.receivedModels.allSatisfy { $0 === model })
     }
 
     func testRoomRunnerPreservesExactPartialSeatTailWhenStreamFails() async throws {
@@ -688,7 +858,8 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertFalse(viewModel.messages.contains { $0.status == .speaking })
         XCTAssertEqual(
             viewModel.messages.first { $0.body == "旧轮精确尾部" }?.status,
-            .completed
+            .failed,
+            "取消时尚未完成的流式尾部不能伪装成已完成。"
         )
 
         viewModel.inputText = "第二轮"
@@ -730,6 +901,185 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertFalse(harness.viewModel.isRunning)
         XCTAssertNil(harness.viewModel.pendingAskUser)
         XCTAssertEqual(harness.viewModel.messages.last(where: { $0.kind == .host })?.body, "主持总结")
+    }
+
+    func testSecondSendStartsIsolatedCouncilRoomAndArchive() async throws {
+        let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([
+            .success("第一场最终议题"),
+            .success("第一场工程发言"),
+            .success("第一场风险发言"),
+            .success("第一场主持总结"),
+            .success("第二场最终议题"),
+            .success("第二场工程发言"),
+            .success("第二场风险发言"),
+            .success("第二场主持总结")
+        ]))
+
+        harness.viewModel.inputText = "第一场用户议题"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let firstTaskID = try XCTUnwrap(
+            harness.taskStore.recent(kind: .modelCouncil, limit: 1).first?.id
+        )
+
+        harness.viewModel.inputText = "第二场用户议题"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let taskIDs = harness.taskStore.recent(kind: .modelCouncil, limit: 2).map(\.id)
+        let secondTaskID = try XCTUnwrap(taskIDs.first { $0 != firstTaskID })
+        let firstArchive = try XCTUnwrap(harness.archiveStore.load(taskId: firstTaskID))
+        let secondArchive = try XCTUnwrap(harness.archiveStore.load(taskId: secondTaskID))
+
+        XCTAssertTrue(firstArchive.messages.contains { $0.body == "第一场用户议题" })
+        XCTAssertFalse(firstArchive.messages.contains { $0.body == "第二场用户议题" })
+        XCTAssertTrue(secondArchive.messages.contains { $0.body == "第二场用户议题" })
+        XCTAssertFalse(secondArchive.messages.contains { $0.body == "第一场用户议题" })
+        XCTAssertFalse(harness.viewModel.messages.contains { $0.body == "第一场用户议题" })
+    }
+
+    func testViewModelDoesNotResearchWhenWebSearchIsDisabled() async throws {
+        let researcher = RecordingCouncilResearcher()
+        let harness = try makeViewModelHarness(
+            streamer: ScriptedCouncilStreamer([
+                .success("最终议题"),
+                .success("工程发言"),
+                .success("风险发言"),
+                .success("主持总结")
+            ]),
+            researcher: researcher
+        )
+        harness.sharedSettings.setEnableWebSearch(false)
+
+        harness.viewModel.inputText = "不联网议题"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertEqual(researcher.callCount, 0)
+        let task = try XCTUnwrap(harness.taskStore.recent(kind: .modelCouncil, limit: 1).first)
+        XCTAssertEqual(task.toolScope, [])
+        XCTAssertEqual(task.metadata["research_consent"], IOSCouncilResearchConsent.unavailable.rawValue)
+    }
+
+    func testChatCouncilToolWaitsForPermissionBeforeStartingRun() async throws {
+        let defaults = isolatedDefaults()
+        let permissionStore = IOSPermissionStore(userDefaults: defaults, taskStore: nil)
+        let localToolExecutor = IOSLocalToolExecutor(
+            permissionStore: permissionStore,
+            documentStore: DocumentAccessStore(),
+            workspaceStore: IOSWorkspaceStore(
+                baseDirectory: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("council-tool-test-\(UUID().uuidString)")
+            )
+        )
+        let runtime = ChatToolRuntime(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: defaults),
+            localToolExecutor: localToolExecutor,
+            searchTransport: IOSURLSessionSearchHTTPTransport(),
+            mcpManager: IOSMcpManager(serverProvider: { [] })
+        )
+        let provider = IOSCouncilRoomRunner.makeProviderSetting(
+            baseUrl: "https://example.com/v1",
+            apiKey: "test-key"
+        )
+        let model = Model(
+            modelId: "gpt-main",
+            displayName: "Council Test Model",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let params = TextGenerationParams(
+            model: model,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "council-approval",
+            toolName: "model_council_run",
+            input: #"{"objective":"审查发布风险","max_seats":4}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let assistantSeed = UIMessage.companion.assistant(prompt: "")
+        let assistant = UIMessage(
+            id: assistantSeed.id,
+            role: assistantSeed.role,
+            parts: [toolCall],
+            annotations: assistantSeed.annotations,
+            createdAt: assistantSeed.createdAt,
+            finishedAt: assistantSeed.finishedAt,
+            modelId: assistantSeed.modelId,
+            usage: assistantSeed.usage,
+            translation: assistantSeed.translation
+        )
+        let context = ChatPendingToolApproval(
+            toolCall: toolCall,
+            providerSetting: provider,
+            params: params,
+            runId: "run-council-approval",
+            startedAt: 0,
+            inputDigest: "digest",
+            conversationId: nil,
+            baseMessages: [assistant]
+        )
+        let result = await runtime.execute(
+            ChatPendingToolCall(kind: .advanced, toolCall: toolCall),
+            context: context
+        )
+
+        guard case .waitingForApproval(.council(let request)) = result else {
+            return XCTFail("Council tool must wait for its configured approval policy.")
+        }
+        XCTAssertEqual(request.objectivePreview, "审查发布风险")
+        XCTAssertEqual(request.maxSeats, 4)
+
+        let deniedMessages = await runtime.finishCouncilApproval(
+            pending: context,
+            allow: false
+        )
+        let deniedTool = try XCTUnwrap(
+            deniedMessages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        XCTAssertEqual(
+            ChatToolOutputFormatter.failureReason(from: deniedTool.output),
+            "用户拒绝启动模型议会。"
+        )
+        XCTAssertEqual(permissionStore.approvalRecords.first?.action, .denied)
+    }
+
+    func testCouncilToolFailureWithoutReasonStillRendersAsFailure() {
+        let output: [UIMessagePart] = [
+            UIMessagePart.Text(
+                text: #"{"ok":false,"status":"failed"}"#,
+                metadata: nil
+            )
+        ]
+
+        XCTAssertEqual(
+            ChatToolOutputFormatter.failureReason(from: output),
+            "工具执行失败"
+        )
     }
 
     func testOpeningArchiveCheckpointsActiveCouncilTailBeforeReplacingRoom() async throws {
@@ -815,10 +1165,42 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
 
         XCTAssertEqual(outcome.status, .failed)
+        XCTAssertTrue(outcome.failureReason?.contains("API Key") == true)
         XCTAssertEqual(streamer.callCount, 0)
         let task = try XCTUnwrap(taskStore.recent(kind: .modelCouncil, limit: 1).first)
         XCTAssertEqual(task.status, .failed)
         XCTAssertTrue(task.error.contains("API Key"))
+    }
+
+    func testStartupRecoveryOnlyInterruptsRunningCouncilTasks() throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let runningCouncil = taskStore.startTask(
+            kind: .modelCouncil,
+            title: "running council",
+            objective: "council"
+        )
+        let completedCouncil = taskStore.startTask(
+            kind: .modelCouncil,
+            title: "completed council",
+            objective: "done"
+        )
+        _ = taskStore.updateTask(id: completedCouncil.id, status: .completed)
+        let runningSubAgent = taskStore.startTask(
+            kind: .subAgent,
+            title: "running subagent",
+            objective: "subagent"
+        )
+
+        let interruptedIDs = taskStore.markInterruptedCouncilTasks()
+        let secondPass = taskStore.markInterruptedCouncilTasks()
+
+        XCTAssertEqual(interruptedIDs, [runningCouncil.id])
+        XCTAssertTrue(secondPass.isEmpty)
+        XCTAssertEqual(taskStore.tasks.first { $0.id == runningCouncil.id }?.status, .interrupted)
+        XCTAssertEqual(taskStore.tasks.first { $0.id == runningCouncil.id }?.metadata["interruption_reason"], "process_terminated")
+        XCTAssertEqual(taskStore.tasks.first { $0.id == completedCouncil.id }?.status, .completed)
+        XCTAssertEqual(taskStore.tasks.first { $0.id == runningSubAgent.id }?.status, .running)
     }
 
     private func compactRoomSettings(
@@ -894,11 +1276,13 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
     }
 
     private func makeViewModelHarness(
-        streamer: any IOSCouncilTextStreaming
+        streamer: any IOSCouncilTextStreaming,
+        researcher: any IOSCouncilResearching = StaticCouncilResearcher()
     ) throws -> (
         viewModel: CouncilChatViewModel,
         archiveStore: CouncilRoomArchiveStore,
-        taskStore: IOSAdvancedTaskStore
+        taskStore: IOSAdvancedTaskStore,
+        sharedSettings: IOSSharedSettingsStore
     ) {
         let defaults = isolatedDefaults()
         let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
@@ -910,7 +1294,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
         let runner = IOSCouncilRoomRunner(
             streamer: streamer,
-            researcher: StaticCouncilResearcher(),
+            researcher: researcher,
             taskStore: taskStore,
             permissionStore: permissionStore
         )
@@ -953,7 +1337,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             transcriptDefaults: defaults,
             archiveStore: archiveStore
         )
-        return (viewModel, archiveStore, taskStore)
+        return (viewModel, archiveStore, taskStore, sharedSettings)
     }
 
     private func isolatedDefaults() -> UserDefaults {
@@ -980,6 +1364,7 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
     private var outputs: [Result<String, Error>]
     private(set) var callCount = 0
     private(set) var cancelCount = 0
+    private(set) var receivedModels: [Model] = []
 
     init(_ outputs: [Result<String, Error>]) {
         self.outputs = outputs
@@ -992,6 +1377,7 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
         onUpdate: @escaping @MainActor (String) -> Void
     ) async throws -> String {
         callCount += 1
+        receivedModels.append(params.model)
         guard !outputs.isEmpty else { throw CouncilTestError.unexpectedCall }
         let next = outputs.removeFirst()
         switch next {
@@ -1131,6 +1517,21 @@ private final class StaticCouncilResearcher: IOSCouncilResearching {
             ],
             failures: []
         )
+    }
+}
+
+@MainActor
+private final class RecordingCouncilResearcher: IOSCouncilResearching {
+    private(set) var callCount = 0
+
+    func research(
+        objective: String,
+        settings: Settings?,
+        maxSearches: Int,
+        maxScrapes: Int
+    ) async -> IOSCouncilResearchBundle {
+        callCount += 1
+        return IOSCouncilResearchBundle(searches: [], scrapedPages: [], failures: [])
     }
 }
 

@@ -4,11 +4,19 @@ import Foundation
 struct NovelQuickStartSuggestionV1: Codable, Equatable, Sendable {
     let title: String
     let content: String
+    let aliases: [String]?
+
+    init(title: String, content: String, aliases: [String]? = nil) {
+        self.title = title
+        self.content = content
+        self.aliases = aliases
+    }
 }
 
 struct NovelQuickStartSuggestionsV2: Codable, Equatable, Sendable {
     static let legacySchemaVersion = 1
-    static let currentSchemaVersion = 2
+    static let previousSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     let schemaVersion: Int
     let overview: String
@@ -306,6 +314,7 @@ enum NovelStructuredOutputDecoder {
 private enum NovelStructuredOutputValidation {
     static func validate(_ value: NovelQuickStartSuggestionsV2) throws {
         guard value.schemaVersion == NovelQuickStartSuggestionsV2.legacySchemaVersion ||
+                value.schemaVersion == NovelQuickStartSuggestionsV2.previousSchemaVersion ||
                 value.schemaVersion == NovelQuickStartSuggestionsV2.currentSchemaVersion else {
             throw failure(
                 .unsupportedVersion,
@@ -333,6 +342,16 @@ private enum NovelStructuredOutputValidation {
         for (index, character) in value.characters.enumerated() {
             try required(character.title, path: "$.characters[\(index)].title")
             try required(character.content, path: "$.characters[\(index)].content")
+            if value.schemaVersion == NovelQuickStartSuggestionsV2.currentSchemaVersion {
+                let aliases = NovelCharacterIdentityResolver.normalizedAliases(character.aliases ?? [])
+                guard aliases.count == character.aliases?.count else {
+                    throw failure(
+                        .invalidValue,
+                        path: "$.characters[\(index)].aliases",
+                        message: "Character aliases must be unique non-empty strings."
+                    )
+                }
+            }
         }
     }
 
@@ -643,6 +662,7 @@ private enum StrictJSON {
         }
         let version = number.intValue
         guard version == NovelQuickStartSuggestionsV2.legacySchemaVersion ||
+                version == NovelQuickStartSuggestionsV2.previousSchemaVersion ||
                 version == NovelQuickStartSuggestionsV2.currentSchemaVersion else {
             throw NovelStructuredOutputFailure(
                 category: .unsupportedVersion,
@@ -695,9 +715,15 @@ private enum StrictJSON {
             let path = version == NovelQuickStartSuggestionsV2.legacySchemaVersion
                 ? "$.characters"
                 : "$.characters[\(index)]"
-            try keys(character, path: path, required: ["title", "content"])
+            let requiredKeys: Set<String> = version == NovelQuickStartSuggestionsV2.currentSchemaVersion
+                ? ["title", "content", "aliases"]
+                : ["title", "content"]
+            try keys(character, path: path, required: requiredKeys)
             try string(character["title"], path: path + ".title")
             try string(character["content"], path: path + ".content")
+            if version == NovelQuickStartSuggestionsV2.currentSchemaVersion {
+                try stringArray(character["aliases"], path: path + ".aliases")
+            }
         }
     }
 

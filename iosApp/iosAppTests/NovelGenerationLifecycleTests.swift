@@ -2,6 +2,22 @@ import XCTest
 @testable import iosApp
 
 final class NovelGenerationLifecycleTests: XCTestCase {
+    func testDiscussionDoesNotImposeAnOutputLimit() async throws {
+        let document = try NovelTestFixtures.document()
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.delta("Detailed discussion."), .complete])]
+        )
+
+        _ = await capturedEvents(try await harness.creation.start(
+            makeRequest(document: document, kind: .discussion)
+        ).events)
+
+        let requests = await harness.adapter.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertNil(request.parameters.maxOutputTokens)
+    }
+
     func testGenerationUsesCreativeModelInsteadOfStateSyncModel() async throws {
         var document = try NovelTestFixtures.document()
         document.project.modelPolicy = .fixed(providerID: "creative-provider", modelID: "creative-model")
@@ -62,6 +78,52 @@ final class NovelGenerationLifecycleTests: XCTestCase {
             return XCTFail("Expected a completed discussion")
         }
         XCTAssertEqual(snapshot.message.kind, .discussion)
+    }
+
+    func testAskUserEndsTheRunAndPersistsAnAnswerableMessage() async throws {
+        let document = try NovelTestFixtures.document()
+        let prompt = NovelAskUserPrompt(
+            question: "他此刻更害怕失去谁？",
+            options: ["家人", "同伴"]
+        )
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [
+                .askUser(prompt, preface: "这个选择会改变下一步建议。")
+            ])]
+        )
+        let request = makeRequest(document: document, kind: .discussion)
+
+        let events = await capturedEvents(try await harness.creation.start(request).events)
+        guard case .completed(let snapshot) = events.last else {
+            return XCTFail("Expected Ask User to persist as a completed discussion turn.")
+        }
+        let persisted = try await harness.repository.document(request.projectID)
+
+        XCTAssertEqual(snapshot.message.interaction, .askUser(prompt))
+        XCTAssertEqual(snapshot.message.content, "这个选择会改变下一步建议。")
+        XCTAssertNil(persisted.branches[0].activeRunID)
+        XCTAssertEqual(persisted.activeRuns.last?.status, .completed)
+    }
+
+    func testAskUserFallbackCompletesAsAnAnswerableMessage() async throws {
+        let prompt = NovelAskUserPrompt(question: "选择哪条线？", options: ["主线", "支线"])
+        let document = try NovelTestFixtures.document()
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [
+                .replacement(#"{"amberAskUser":{"question":"选择哪条线？","options":["主线","支线"]}}"#),
+                .complete,
+            ])]
+        )
+
+        let events = await capturedEvents(try await harness.creation.start(
+            makeRequest(document: document, kind: .discussion)
+        ).events)
+        guard case .completed(let snapshot) = events.last else {
+            return XCTFail("Expected fallback Ask User to complete the discussion turn.")
+        }
+        XCTAssertEqual(snapshot.message.interaction, .askUser(prompt))
     }
 
     func testDiscussionProseGranularitiesAndPolishCompleteWithoutChangingCanonicalState() async throws {
@@ -769,8 +831,8 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         let stored = try await harness.repository.document(document.project.id)
         XCTAssertEqual(stored.injectionReceipts.count, 1)
         XCTAssertEqual(stored.injectionReceipts[0].requestedInputBudgetTokens, 16_000)
-        XCTAssertEqual(stored.injectionReceipts[0].maxEstimatedInputTokens, 5_120)
-        XCTAssertLessThan(stored.injectionReceipts[0].estimatedInputTokens, 5_120)
+        XCTAssertEqual(stored.injectionReceipts[0].maxEstimatedInputTokens, 7_168)
+        XCTAssertLessThan(stored.injectionReceipts[0].estimatedInputTokens, 7_168)
     }
 
     func testConcurrentExactStartUsesOneReservationAndTwoSubscribers() async throws {

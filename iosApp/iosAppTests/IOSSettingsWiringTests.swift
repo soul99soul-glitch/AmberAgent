@@ -9,13 +9,20 @@ final class IOSSettingsWiringTests: XCTestCase {
         return try String(contentsOf: fileURL, encoding: .utf8)
     }
 
-    func testNativeTimelineExperimentalToggleIsNotExposedInDisplaySettings() throws {
+    func testNativeTimelineScrollAndChatRendererTogglesAreIndependent() throws {
         let settings = try source("iosApp/DisplayFontSettingsView.swift")
 
-        XCTAssertFalse(settings.contains("原生滚动容器（实验性）"))
-        XCTAssertFalse(settings.contains("NativeChatTimelineStaticRenderFeatureFlags.key"))
-        XCTAssertFalse(settings.contains("NativeChatTimelineStreamingTailFeatureFlags.key"))
-        XCTAssertFalse(settings.contains("NativeTimelineScrollFeatureFlags.key"))
+        XCTAssertTrue(settings.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
+        XCTAssertTrue(settings.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
+        XCTAssertTrue(settings.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
+        XCTAssertTrue(settings.contains("isOn: nativeTimelineScrollDriver"))
+        XCTAssertTrue(settings.contains("nativeTimelineScrollDriver.toggle()"))
+        XCTAssertTrue(settings.contains("isOn: nativeChatTimelineEnabled"))
+        XCTAssertTrue(settings.contains("nativeTimelineStaticRender && nativeTimelineStreamingTail"))
+        XCTAssertTrue(settings.contains("nativeTimelineStaticRender = enabled"))
+        XCTAssertTrue(settings.contains("nativeTimelineStreamingTail = enabled"))
+        XCTAssertFalse(settings.contains("nativeTimelineStaticRender && nativeTimelineStreamingTail && nativeTimelineScrollDriver"))
+        XCTAssertFalse(settings.contains("nativeTimelineScrollDriver = enabled"))
     }
 
     func testNovelCreationAdvancedEntryOpensFeatureAndSharedSettingsPersistRoleDefaults() throws {
@@ -51,22 +58,64 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
     }
 
-    func testProductionChatRouteDoesNotReadNativeTimelineFlags() throws {
+    func testNativeTimelineRouteReadsSettingsToggleFlags() throws {
         let chatView = try source("iosApp/ChatView.swift")
+        let list = try source("iosApp/ChatCollectionMessageList.swift")
 
-        XCTAssertFalse(chatView.contains("NativeChatTimelineStaticRenderFeatureFlags.key"))
-        XCTAssertFalse(chatView.contains("NativeChatTimelineStreamingTailFeatureFlags.key"))
-        XCTAssertFalse(chatView.contains("NativeChatTimelineView("))
-        XCTAssertTrue(chatView.contains("ChatSwiftUIMessageListFeatureFlags.isEnabled ? .swiftUICleanList : .collection"))
+        XCTAssertTrue(chatView.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
+        XCTAssertTrue(chatView.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
+        XCTAssertTrue(chatView.contains("nativeTimelineStaticRenderEnabled: nativeTimelineStaticRenderEnabled"))
+        XCTAssertTrue(chatView.contains("nativeTimelineStreamingTailEnabled: nativeTimelineStreamingTailEnabled"))
+        XCTAssertTrue(chatView.contains("NativeChatTimelineView("))
+        XCTAssertTrue(list.contains("NativeChatTimelineRoutePolicy.shouldUseNativeTimeline"))
+        XCTAssertTrue(list.contains("staticRenderEnabled: nativeTimelineStaticRenderEnabled"))
+        XCTAssertTrue(list.contains("streamingTailEnabled: nativeTimelineStreamingTailEnabled"))
     }
 
     func testNativeTimelineScrollDriverFlagIsConsumedByNativeTimelineView() throws {
+        let chatView = try source("iosApp/ChatView.swift")
         let list = try source("iosApp/ChatCollectionMessageList.swift")
 
+        XCTAssertTrue(chatView.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
+        XCTAssertTrue(chatView.contains("nativeScrollDriverEnabled: nativeTimelineScrollDriverEnabled"))
         XCTAssertTrue(list.contains("@State private var scrollDriver = NativeTimelineScrollDriver()"))
-        XCTAssertTrue(list.contains("NativeTimelineScrollFeatureFlags.isEnabled"))
+        XCTAssertTrue(list.contains("var nativeScrollDriverEnabled: Bool"))
         XCTAssertTrue(list.contains("scrollDriver.attach(scrollView)"))
+        XCTAssertTrue(list.contains("viewportState.followPaused || !viewportState.isAtBottom"))
         XCTAssertTrue(list.contains("scrollDriver.submit(.streamContentGrew)"))
+    }
+
+    func testNativeTimelineScrollDriverIsSharedByEveryStreamingConversationSurface() throws {
+        let driver = try source("iosApp/NativeTimelineScrollDriver.swift")
+        let chat = try source("iosApp/ChatCollectionMessageList.swift")
+        let council = try source("iosApp/CouncilChatRuntimeView.swift")
+        let novel = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        XCTAssertTrue(driver.contains("struct NativeTimelineScrollViewResolver"))
+        for surface in [chat, council, novel] {
+            XCTAssertTrue(surface.contains("@State private var scrollDriver = NativeTimelineScrollDriver()"))
+            XCTAssertTrue(surface.contains("NativeTimelineScrollViewResolver("))
+            XCTAssertTrue(surface.contains("scrollDriver.submit(.streamContentGrew)"))
+            XCTAssertTrue(surface.contains("scrollDriver.submit(.userDragBegan)"))
+            XCTAssertTrue(surface.contains("scrollDriver.submit(.userDragEnded(isAtBottom:"))
+            XCTAssertTrue(surface.contains("scrollDriver.setAutomaticFollowEnabled("))
+            XCTAssertTrue(surface.contains("NativeTimelineScrollReturnPolicy.returnedToBottom("))
+            XCTAssertTrue(surface.contains("isNativeScrollSurfaceVisible"))
+        }
+    }
+
+    func testCustomTopBarsKeepSoftScrollEdgesAcrossAllChatListRoutes() throws {
+        let chatView = try source("iosApp/ChatView.swift")
+        let chat = try source("iosApp/ChatCollectionMessageList.swift")
+        let appearance = try source("iosApp/AppearanceSettingsView.swift")
+        let swiftUISoftEdgeCount = chat.components(
+            separatedBy: ".scrollEdgeEffectStyle(.soft, for: .top)"
+        ).count - 1
+
+        XCTAssertGreaterThanOrEqual(swiftUISoftEdgeCount, 2)
+        XCTAssertTrue(chat.contains("collectionView.topEdgeEffect.style = .soft"))
+        XCTAssertTrue(appearance.contains(".scrollEdgeEffectStyle(.soft, for: .top)"))
+        XCTAssertTrue(chatView.contains(".frame(height: 54)\n        .padding(.bottom, 32)"))
     }
 
     func testStreamingMarkdownRendererTogglesAreWiredAndMutuallyExclusive() throws {

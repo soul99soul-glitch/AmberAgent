@@ -1482,6 +1482,7 @@ private final class ChatGenerationBindingState {
             setPendingWorkspaceApproval: { _ in },
             setPendingIshHandoffApproval: { _ in },
             setPendingMcpApproval: { _ in },
+            setPendingCouncilApproval: { _ in },
             setContextCompactState: { _ in },
             persistMessages: { [weak self] _ in
                 self?.persistedCount += 1

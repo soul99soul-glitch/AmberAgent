@@ -300,6 +300,12 @@ enum NovelDocumentValidator {
         )
 
         for material in document.materials {
+            if material.kind != .character, !material.aliases.isEmpty {
+                issues.append("Non-character material \(material.id) contains character aliases.")
+            }
+            if material.aliases != NovelCharacterIdentityResolver.normalizedAliases(material.aliases) {
+                issues.append("Material \(material.id) contains invalid or duplicate aliases.")
+            }
             if material.revisionIDs.isEmpty {
                 issues.append("Material \(material.id) has no revisions.")
             }
@@ -401,6 +407,7 @@ enum NovelDocumentValidator {
             if Set(session.messages.map(\.id)).count != session.messages.count {
                 issues.append("Session \(session.id) repeats a message ID.")
             }
+            validateSessionInteractions(session, issues: &issues)
             guard let head = document.checkpoints.first(where: {
                 $0.id == branch.headCheckpointID
             }) else {
@@ -482,6 +489,41 @@ enum NovelDocumentValidator {
         for session in document.sessions where
             !document.branches.contains(where: { $0.id == session.branchID && $0.sessionID == session.id }) {
             issues.append("Session \(session.id) has no owning branch.")
+        }
+    }
+
+    private static func validateSessionInteractions(
+        _ session: NovelSessionRecord,
+        issues: inout [String]
+    ) {
+        var askPrompts: [NovelMessageID: NovelAskUserPrompt] = [:]
+        var answeredPromptIDs: Set<NovelMessageID> = []
+        for message in session.messages {
+            switch message.interaction {
+            case .askUser(let prompt):
+                if message.role != .assistant || message.mode != .discussPlan || message.kind != .discussion {
+                    issues.append("Ask User message \(message.id) has an invalid role or mode.")
+                }
+                do {
+                    try NovelGenerationReducer.validateAskUserPrompt(prompt)
+                    askPrompts[message.id] = prompt
+                } catch {
+                    issues.append("Ask User message \(message.id) has an invalid prompt.")
+                }
+            case .askUserAnswer(let response):
+                if message.role != .user || message.mode != .discussPlan || message.kind != .userInput {
+                    issues.append("Ask User answer \(message.id) has an invalid role or mode.")
+                }
+                guard askPrompts[response.promptMessageID] != nil else {
+                    issues.append("Ask User answer \(message.id) references a missing or later prompt.")
+                    continue
+                }
+                if !answeredPromptIDs.insert(response.promptMessageID).inserted {
+                    issues.append("Ask User prompt \(response.promptMessageID) has multiple answers.")
+                }
+            case nil:
+                break
+            }
         }
     }
 

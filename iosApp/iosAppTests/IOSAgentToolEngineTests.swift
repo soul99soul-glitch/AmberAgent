@@ -555,6 +555,35 @@ final class IOSAgentToolEngineTests: XCTestCase {
         XCTAssertEqual(result.messages.last?.toText(), "Hello!")
     }
 
+    func testStreamingOutputLimitIsSurfacedAsProviderFailure() async {
+        let limited = MessageChunk(
+            id: "limited",
+            model: "test-model",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: assistantText("未写完"),
+                message: nil,
+                finishReason: "length"
+            )],
+            usage: nil
+        )
+        let recorder = AssistantTextRecorder()
+        let engine = IOSAgentToolEngine(
+            provider: ScriptedStreamingProvider([limited]),
+            executors: [:]
+        )
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("ask")],
+            params: makeParams(tools: []),
+            onAssistantText: { recorder.append($0) }
+        )
+
+        XCTAssertEqual(recorder.snapshot, ["未写完"])
+        XCTAssertEqual(result.providerFailureMessage, "模型回复达到输出上限，请重试。")
+    }
+
     func testCancellingEngineTaskStopsWaitingForStreamingTerminal() async {
         let engine = IOSAgentToolEngine(
             provider: DelayedCompletingStreamingProvider(delayNanos: 400_000_000),

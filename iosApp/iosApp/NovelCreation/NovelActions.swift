@@ -37,6 +37,31 @@ struct NovelReviseMaterialCommand: Equatable, Sendable {
     let content: String
     let tags: [String]
     let injectionMode: NovelInjectionMode
+    let aliases: [String]
+
+    init(
+        context: NovelMutationContext,
+        projectID: NovelProjectID,
+        materialID: NovelMaterialID,
+        revisionID: NovelMaterialRevisionID,
+        kind: NovelMaterialKind,
+        title: String,
+        content: String,
+        tags: [String],
+        injectionMode: NovelInjectionMode,
+        aliases: [String] = []
+    ) {
+        self.context = context
+        self.projectID = projectID
+        self.materialID = materialID
+        self.revisionID = revisionID
+        self.kind = kind
+        self.title = title
+        self.content = content
+        self.tags = tags
+        self.injectionMode = injectionMode
+        self.aliases = aliases
+    }
 }
 
 struct NovelDeleteMaterialCommand: Equatable, Sendable {
@@ -70,7 +95,8 @@ enum NovelSettingProposalResolution: Codable, Equatable, Sendable {
         revisionID: NovelMaterialRevisionID,
         kind: NovelMaterialKind,
         tags: [String],
-        injectionMode: NovelInjectionMode
+        injectionMode: NovelInjectionMode,
+        aliases: [String]
     )
     case reject
 }
@@ -433,7 +459,8 @@ enum NovelAction: Equatable, Sendable {
                 title: command.title,
                 content: command.content,
                 tags: command.tags,
-                injectionMode: command.injectionMode
+                injectionMode: command.injectionMode,
+                aliases: command.aliases
             ))
         case .deleteMaterial(let command):
             payload = .deleteMaterial(.init(
@@ -653,6 +680,7 @@ private enum NovelCanonicalActionPayload: Codable {
         let content: String
         let tags: [String]
         let injectionMode: NovelInjectionMode
+        let aliases: [String]
     }
 
     struct DeleteMaterial: Codable {
@@ -1022,6 +1050,7 @@ struct NovelRunRequest: Equatable, Sendable {
     let generationReceiptID: NovelReceiptID
     let injectionReceiptID: NovelReceiptID
     let sourceChapterVersionID: NovelChapterVersionID?
+    let askUserResponse: NovelAskUserResponse?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
     let expectedProjectRevision: Int64
@@ -1043,6 +1072,7 @@ struct NovelRunRequest: Equatable, Sendable {
         generationReceiptID: NovelReceiptID,
         injectionReceiptID: NovelReceiptID,
         sourceChapterVersionID: NovelChapterVersionID?,
+        askUserResponse: NovelAskUserResponse? = nil,
         injectionOverrides: NovelInjectionOverrides = .none,
         inputBudgetTokens: Int = 16_000,
         expectedProjectRevision: Int64,
@@ -1063,6 +1093,7 @@ struct NovelRunRequest: Equatable, Sendable {
         self.generationReceiptID = generationReceiptID
         self.injectionReceiptID = injectionReceiptID
         self.sourceChapterVersionID = sourceChapterVersionID
+        self.askUserResponse = askUserResponse
         self.injectionOverrides = NovelInjectionOverrides(
             forceIncludeMaterialIDs: Array(Set(injectionOverrides.forceIncludeMaterialIDs)).sorted {
                 $0.description < $1.description
@@ -1094,6 +1125,7 @@ struct NovelRunRequest: Equatable, Sendable {
             generationReceiptID: generationReceiptID,
             injectionReceiptID: injectionReceiptID,
             sourceChapterVersionID: sourceChapterVersionID,
+            askUserResponse: askUserResponse,
             injectionOverrides: injectionOverrides,
             inputBudgetTokens: inputBudgetTokens
         )
@@ -1118,6 +1150,7 @@ private struct NovelCanonicalRunPayload: Codable {
     let generationReceiptID: NovelReceiptID
     let injectionReceiptID: NovelReceiptID
     let sourceChapterVersionID: NovelChapterVersionID?
+    let askUserResponse: NovelAskUserResponse?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
 }

@@ -75,6 +75,29 @@ final class NovelStructuredOutputTests: XCTestCase {
         XCTAssertEqual(decoded.characters.map(\.title), ["Mara"])
     }
 
+    func testCurrentQuickStartSchemaCarriesCharacterAliases() throws {
+        let current = """
+        {
+          "schemaVersion": 3,
+          "overview": "A clear direction.",
+          "world": {"title": "World", "content": "Rules"},
+          "characters": [
+            {
+              "title": "朱元璋",
+              "content": "开篇仍使用乳名。",
+              "aliases": ["朱重八", "朱重九"]
+            }
+          ],
+          "masterOutline": {"title": "Outline", "content": "Arc"},
+          "writingRequirements": {"title": "Style", "content": "Voice"}
+        }
+        """
+
+        let decoded = try NovelStructuredOutputDecoder.decodeQuickStartSuggestions(from: current)
+
+        XCTAssertEqual(decoded.characters[0].aliases, ["朱重八", "朱重九"])
+    }
+
     func testStateDeltaDecodesCompleteVersionedPayload() throws {
         let decoded = try NovelStructuredOutputDecoder.decodeStateDelta(
             from: try data(deltaObject())

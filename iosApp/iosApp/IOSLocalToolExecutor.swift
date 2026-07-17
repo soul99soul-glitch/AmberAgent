@@ -316,6 +316,13 @@ final class IOSLocalToolExecutor {
         return .allow(capabilityId: capability.id)
     }
 
+    func permissionPolicy(capabilityId: String) -> IOSAgentPermissionPolicy? {
+        guard let capability = IOSCapabilityRegistry.capabilities.first(where: { $0.id == capabilityId }) else {
+            return nil
+        }
+        return permissionStore.policy(for: capability)
+    }
+
     func permissionsStatus(now: Date = Date()) -> IOSPermissionsStatusSnapshot {
         IOSPermissionsStatusSnapshot(
             generatedAt: now,

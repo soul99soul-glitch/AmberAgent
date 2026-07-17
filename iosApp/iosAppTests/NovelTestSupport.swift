@@ -15,6 +15,7 @@ enum NovelModelScriptStep: Equatable, Sendable {
     case delta(String)
     case replacement(String)
     case usage(NovelModelUsage)
+    case askUser(NovelAskUserPrompt, preface: String)
     case complete
     case fail(NovelModelFailure)
     case pause
@@ -133,6 +134,8 @@ actor ScriptedNovelModelAdapter: NovelModelRunning {
                 continuation.yield(.textReplacement(text))
             case .usage(let usage):
                 continuation.yield(.usage(usage))
+            case .askUser(let prompt, let preface):
+                continuation.yield(.askUser(prompt, preface: preface))
             case .complete:
                 continuation.yield(.completed)
             case .fail(let failure):

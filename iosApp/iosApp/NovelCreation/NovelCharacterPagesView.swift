@@ -2,11 +2,16 @@ import Foundation
 import SwiftUI
 
 enum NovelCharacterEventMatcher {
-    static func matches(characterName: String, entityReferences: [String]) -> Bool {
+    static func matches(
+        characterName: String,
+        aliases: [String] = [],
+        entityReferences: [String]
+    ) -> Bool {
         let name = normalized(characterName)
         guard !name.isEmpty else { return false }
         let references = entityReferences.map(normalized).filter { !$0.isEmpty }
-        if references.contains(name) { return true }
+        let identityNames = Set(([characterName] + aliases).map(normalized).filter { !$0.isEmpty })
+        if references.contains(where: identityNames.contains) { return true }
         guard name.count >= 2 else { return false }
         return references.contains { reference in
             reference.count >= 2 && (reference.contains(name) || name.contains(reference))
@@ -15,10 +20,17 @@ enum NovelCharacterEventMatcher {
 
     static func events(
         for characterName: String,
+        aliases: [String] = [],
         in events: [NovelStoryEventRecord]
     ) -> [NovelStoryEventRecord] {
         events
-            .filter { matches(characterName: characterName, entityReferences: $0.entityReferences) }
+            .filter {
+                matches(
+                    characterName: characterName,
+                    aliases: aliases,
+                    entityReferences: $0.entityReferences
+                )
+            }
             .sorted { $0.sequence > $1.sequence }
     }
 
@@ -121,7 +133,11 @@ struct NovelCharacterPagesView: View {
 
     private func characterButton(_ material: NovelMaterialRecord) -> some View {
         let title = materialTitle(material)
-        let latest = NovelCharacterEventMatcher.events(for: title, in: currentEvents).first
+        let latest = NovelCharacterEventMatcher.events(
+            for: title,
+            aliases: material.aliases,
+            in: currentEvents
+        ).first
         return Button {
             route = NovelCharacterRoute(materialID: material.id)
         } label: {
@@ -291,6 +307,7 @@ private struct NovelCharacterDetailView: View {
         let eventIDs = Set(state.eventIDs)
         return NovelCharacterEventMatcher.events(
             for: name,
+            aliases: material?.aliases ?? [],
             in: project.events.filter { eventIDs.contains($0.id) }
         )
     }

@@ -313,6 +313,7 @@ struct ChatGenerationBindings {
     let setPendingWorkspaceApproval: (WorkspaceToolApprovalRequest?) -> Void
     let setPendingIshHandoffApproval: (IshHandoffToolApprovalRequest?) -> Void
     let setPendingMcpApproval: (McpToolApprovalRequest?) -> Void
+    let setPendingCouncilApproval: (CouncilToolApprovalRequest?) -> Void
     let setContextCompactState: (ChatContextCompactState) -> Void
     let persistMessages: (KotlinUuid?) -> Void
     let capturePersistMessagesBaseline: (KotlinUuid?) -> IOSConversationWriteBaseline?
@@ -370,6 +371,7 @@ final class ChatGenerationCoordinator {
     private var pendingWorkspaceToolApproval: ChatPendingToolApproval?
     private var pendingIshHandoffToolApproval: ChatPendingToolApproval?
     private var pendingMcpToolApproval: ChatPendingToolApproval?
+    private var pendingCouncilToolApproval: ChatPendingToolApproval?
     private var backgroundHandoff: IOSChatBackgroundHandoff?
     private weak var pendingBackgroundConversationStore: IOSConversationStore?
     private var foregroundToolExecutionTask: Task<ChatToolRuntimeResult, Never>?
@@ -395,7 +397,8 @@ final class ChatGenerationCoordinator {
             pendingWebMountToolApproval != nil ||
             pendingWorkspaceToolApproval != nil ||
             pendingIshHandoffToolApproval != nil ||
-            pendingMcpToolApproval != nil
+            pendingMcpToolApproval != nil ||
+            pendingCouncilToolApproval != nil
     }
 
     init(
@@ -795,6 +798,14 @@ final class ChatGenerationCoordinator {
 
     func denyPendingMcpTool() async {
         await finishPendingMcpToolApproval(allow: false)
+    }
+
+    func approvePendingCouncilTool() async {
+        await finishPendingCouncilToolApproval(allow: true)
+    }
+
+    func denyPendingCouncilTool() async {
+        await finishPendingCouncilToolApproval(allow: false)
     }
 
     private func prepareAndStartStreaming(
@@ -1412,6 +1423,9 @@ final class ChatGenerationCoordinator {
         case .mcp(let request):
             pendingMcpToolApproval = pending
             bindings.setPendingMcpApproval(request)
+        case .council(let request):
+            pendingCouncilToolApproval = pending
+            bindings.setPendingCouncilApproval(request)
         }
         bindings.setMessages(pending.baseMessages)
         bindings.bumpMessageRevision(.awaitingToolApproval)
@@ -1504,6 +1518,21 @@ final class ChatGenerationCoordinator {
         guard currentRunId == pending.runId else { return }
         bindings.setIsLoading(true)
         let resumedMessages = await toolRuntime.finishMcpApproval(
+            pending: pending,
+            allow: allow
+        )
+        guard currentRunId == pending.runId else { return }
+        bindings.setMessages(resumedMessages)
+        bindings.bumpMessageRevision(.toolResultAppended)
+        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+    }
+
+    private func finishPendingCouncilToolApproval(allow: Bool) async {
+        guard let pending = pendingCouncilToolApproval else { return }
+        clearPendingCouncilApproval()
+        guard currentRunId == pending.runId else { return }
+        bindings.setIsLoading(true)
+        let resumedMessages = await toolRuntime.finishCouncilApproval(
             pending: pending,
             allow: allow
         )
@@ -1661,6 +1690,7 @@ final class ChatGenerationCoordinator {
         clearPendingWorkspaceApproval()
         clearPendingIshHandoffApproval()
         clearPendingMcpApproval()
+        clearPendingCouncilApproval()
     }
 
     private func clearPendingMemoryApproval() {
@@ -1691,6 +1721,11 @@ final class ChatGenerationCoordinator {
     private func clearPendingMcpApproval() {
         pendingMcpToolApproval = nil
         bindings.setPendingMcpApproval(nil)
+    }
+
+    private func clearPendingCouncilApproval() {
+        pendingCouncilToolApproval = nil
+        bindings.setPendingCouncilApproval(nil)
     }
 
     private static func toolCalls(in chunk: MessageChunk) -> [UIMessagePart.Tool] {

@@ -178,7 +178,9 @@ struct ChatToolStepModel: Identifiable {
             self.init(
                 id: stableID,
                 systemImage: "person.3.sequence",
-                title: executed ? "模型议会已完成" : "模型议会进行中",
+                title: executed
+                    ? (failureReason == nil ? "模型议会已完成" : "模型议会失败")
+                    : "模型议会进行中",
                 detail: failureReason,
                 state: Self.state(executed: executed, failureReason: failureReason)
             )

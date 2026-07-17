@@ -32,6 +32,7 @@ actor UnavailableNovelModelAdapter: NovelModelRunning {
 
 enum NovelRunTerminalIntent: Equatable, Sendable {
     case completed
+    case awaitingUser(NovelAskUserPrompt, preface: String)
     case interrupted(reason: NovelRunInterruptionReason, command: NovelCancelRunCommand?)
     case failed(NovelFailure)
 }
@@ -830,6 +831,7 @@ private extension DefaultNovelCreation {
                 var transportTerminal = false
                 for await event in modelEvents {
                     if case .completed = event { transportTerminal = true }
+                    if case .askUser = event { transportTerminal = true }
                     if case .failed = event { transportTerminal = true }
                     await self?.consumeModelEvent(event, runID: request.id)
                 }
@@ -1003,6 +1005,8 @@ private extension DefaultNovelCreation {
         case .usage(let usage):
             runtime.usage = usage
             generationRuntimes[runID] = runtime
+        case .askUser(let prompt, let preface):
+            await awaitUser(runID, prompt: prompt, preface: preface)
         case .completed:
             await completeRun(runID)
         case .failed(let failure):
@@ -1034,6 +1038,13 @@ private extension DefaultNovelCreation {
 
     func completeRun(_ runID: NovelRunID) async {
         guard var runtime = generationRuntimes[runID] else { return }
+        if runtime.kind == .discussion,
+           let prompt = try? Self.decodeAskUserFallback(runtime.partialContent) {
+            runtime.partialContent = ""
+            generationRuntimes[runID] = runtime
+            await awaitUser(runID, prompt: prompt, preface: "")
+            return
+        }
         guard !runtime.partialContent.trimmingCharacters(
             in: .whitespacesAndNewlines
         ).isEmpty else {
@@ -1083,6 +1094,34 @@ private extension DefaultNovelCreation {
             broadcast(.replaced(completed), runID: runID)
         }
         guard claimTerminal(runID: runID, intent: .completed) else { return }
+        _ = try? await persistTerminalClaim(runID)
+    }
+
+    func awaitUser(
+        _ runID: NovelRunID,
+        prompt: NovelAskUserPrompt,
+        preface: String
+    ) async {
+        do {
+            try NovelGenerationReducer.validateAskUserPrompt(prompt)
+        } catch {
+            await failRun(
+                runID,
+                failure: NovelFailure(
+                    code: "invalid_ask_user_output",
+                    message: "模型提出的问题格式无法读取，请重试。",
+                    isRetryable: true
+                )
+            )
+            return
+        }
+        guard claimTerminal(
+            runID: runID,
+            intent: .awaitingUser(
+                prompt,
+                preface: preface.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        ) else { return }
         _ = try? await persistTerminalClaim(runID)
     }
 
@@ -1160,6 +1199,29 @@ private extension DefaultNovelCreation {
             let reduced = try NovelGenerationReducer.complete(
                 runID: runID,
                 content: claim.partialContent,
+                in: document,
+                now: claim.claimedAt
+            )
+            guard let message = reduced.message else {
+                throw NovelError.storageIndeterminate(document.project.id)
+            }
+            return (
+                reduced.document,
+                NovelTerminalCommit(outcome: nil, event: .completed(message))
+            )
+
+        case .awaitingUser(let prompt, let preface):
+            if let replay = try replayTerminalCommit(
+                runID: runID,
+                claim: claim,
+                document: document
+            ) {
+                return (document, replay)
+            }
+            let reduced = try NovelGenerationReducer.completeAwaitingUser(
+                runID: runID,
+                prompt: prompt,
+                preface: preface,
                 in: document,
                 now: claim.claimedAt
             )
@@ -1261,6 +1323,16 @@ private extension DefaultNovelCreation {
                 throw NovelError.storageIndeterminate(document.project.id)
             }
             return NovelTerminalCommit(outcome: nil, event: .completed(message))
+        case .awaitingUser(let prompt, _):
+            guard run.status == .completed,
+                  let message = sessionMessageSnapshot(
+                      runID: runID,
+                      document: document
+                  ),
+                  message.message.interaction == .askUser(prompt) else {
+                throw NovelError.storageIndeterminate(document.project.id)
+            }
+            return NovelTerminalCommit(outcome: nil, event: .completed(message))
         case .interrupted(let reason, let command):
             guard command == nil,
                   run.status == .interrupted,
@@ -1281,6 +1353,21 @@ private extension DefaultNovelCreation {
             }
             return NovelTerminalCommit(outcome: nil, event: .failed(failure))
         }
+    }
+
+    static func decodeAskUserFallback(_ output: String) throws -> NovelAskUserPrompt? {
+        struct FallbackEnvelope: Decodable {
+            let amberAskUser: NovelAskUserPrompt
+        }
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.first == "{", trimmed.last == "}",
+              let data = trimmed.data(using: .utf8) else { return nil }
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard let dictionary = object as? [String: Any],
+              Set(dictionary.keys) == ["amberAskUser"] else { return nil }
+        let prompt = try JSONDecoder().decode(FallbackEnvelope.self, from: data).amberAskUser
+        try NovelGenerationReducer.validateAskUserPrompt(prompt)
+        return prompt
     }
 
     func sessionMessageSnapshot(
@@ -1435,11 +1522,18 @@ private extension DefaultNovelCreation {
 
     func modelParameters(for request: NovelRunRequest) -> NovelModelParameters {
         switch request.kind {
-        case .quickStart, .discussion:
+        case .quickStart:
             NovelModelParameters(
                 temperature: 0.7,
                 topP: 0.95,
                 maxOutputTokens: 2_048,
+                reasoningLevel: .automatic
+            )
+        case .discussion:
+            NovelModelParameters(
+                temperature: 0.7,
+                topP: 0.95,
+                maxOutputTokens: nil,
                 reasoningLevel: .automatic
             )
         case .prose:

@@ -101,6 +101,7 @@ enum NovelModelEvent: Equatable, Sendable {
     case textDelta(String)
     case textReplacement(String)
     case usage(NovelModelUsage)
+    case askUser(NovelAskUserPrompt, preface: String)
     case completed
     case failed(NovelModelFailure)
 }

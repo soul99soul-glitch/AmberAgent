@@ -199,6 +199,7 @@ private final class StreamStepState: @unchecked Sendable {
     let accumulator: MessageStreamAccumulator
     private let lock = NSLock()
     private var assistantText = ""
+    private var finishReason: String?
     private var continuation: CheckedContinuation<MessageChunk, Error>?
     private var job: Kotlinx_coroutines_coreJob?
     private var cancellationRequested = false
@@ -211,6 +212,9 @@ private final class StreamStepState: @unchecked Sendable {
         defer { lock.unlock() }
         var changed = false
         for choice in chunk.choices {
+            if let reason = choice.finishReason {
+                finishReason = reason
+            }
             if let delta = choice.delta, delta.role == MessageRole.assistant {
                 let deltaText = Self.text(in: delta)
                 if !deltaText.isEmpty {
@@ -226,6 +230,12 @@ private final class StreamStepState: @unchecked Sendable {
             }
         }
         return changed && !assistantText.isEmpty ? assistantText : nil
+    }
+
+    func terminalFinishReason() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return finishReason
     }
 
     func install(continuation: CheckedContinuation<MessageChunk, Error>) {
@@ -396,7 +406,12 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                         state.resume(returning: MessageChunk(
                             id: "",
                             model: "",
-                            choices: [UIMessageChoice(index: 0, delta: nil, message: finalMessage, finishReason: "stop")],
+                            choices: [UIMessageChoice(
+                                index: 0,
+                                delta: nil,
+                                message: finalMessage,
+                                finishReason: state.terminalFinishReason() ?? "stop"
+                            )],
                             usage: nil
                         ))
                     },
@@ -499,6 +514,15 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             }
 
             let rawAssistantMessage = assistantMessage(from: chunk)
+            if Self.reachedOutputLimit(chunk) {
+                return IOSAgentToolEngineResult(
+                    messages: rawAssistantMessage.map { working + [$0] } ?? working,
+                    stepsExecuted: steps + 1,
+                    pendingApproval: nil,
+                    hitStepLimit: false,
+                    providerFailureMessage: "模型回复达到输出上限，请重试。"
+                )
+            }
             let emittedTools = pendingToolCalls(in: rawAssistantMessage)
             let alreadyCompleted = completedToolKeys(in: working)
             let assistantMessage: UIMessage? = rawAssistantMessage.flatMap { message in
@@ -601,6 +625,11 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             }
         }
         return nil
+    }
+
+    private static func reachedOutputLimit(_ chunk: MessageChunk) -> Bool {
+        let reasons = Set(chunk.choices.compactMap { $0.finishReason?.lowercased() })
+        return !reasons.isDisjoint(with: ["length", "max_tokens", "max_output_tokens"])
     }
 
     private func pendingToolCalls(in message: UIMessage?) -> [UIMessagePart.Tool] {

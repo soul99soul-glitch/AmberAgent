@@ -24,6 +24,7 @@ struct AppearanceSettingsView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 48)
             }
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .scrollIndicators(.hidden)
         }
         .safeAreaBar(edge: .top, spacing: 0) { header }

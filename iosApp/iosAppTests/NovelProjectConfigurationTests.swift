@@ -179,7 +179,8 @@ final class NovelProjectConfigurationTests: XCTestCase {
                 revisionID: revisionID,
                 kind: .world,
                 tags: ["rule"],
-                injectionMode: .always
+                injectionMode: .always,
+                aliases: []
             )
         ))
 

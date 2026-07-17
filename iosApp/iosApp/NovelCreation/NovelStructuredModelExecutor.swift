@@ -406,6 +406,12 @@ struct NovelStructuredModelExecutor: Sendable {
                 text = replacement
             case .usage:
                 break
+            case .askUser:
+                throw NovelStructuredModelExecutionFailure(
+                    code: "unexpected_ask_user",
+                    message: "Ask User is only available in discussion mode.",
+                    isRetryable: true
+                )
             case .completed:
                 terminal = event
             case .failed(let failure):

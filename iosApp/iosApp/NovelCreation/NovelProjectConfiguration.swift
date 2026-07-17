@@ -114,7 +114,8 @@ enum NovelProjectConfigurationReducer {
             let revisionID,
             let kind,
             let tags,
-            let injectionMode
+            let injectionMode,
+            let aliases
         ):
             guard next.materialRevisions.allSatisfy({ $0.id != revisionID }) else {
                 throw NovelError.immutableRecordConflict("material revision \(revisionID)")
@@ -145,12 +146,17 @@ enum NovelProjectConfigurationReducer {
             if let materialIndex {
                 next.materials[materialIndex].currentRevisionID = revisionID
                 next.materials[materialIndex].revisionIDs.append(revisionID)
+                if kind == .character {
+                    next.materials[materialIndex].aliases = NovelCharacterIdentityResolver
+                        .normalizedAliases(next.materials[materialIndex].aliases + aliases)
+                }
             } else {
                 next.materials.append(NovelMaterialRecord(
                     id: materialID,
                     kind: kind,
                     currentRevisionID: revisionID,
-                    revisionIDs: [revisionID]
+                    revisionIDs: [revisionID],
+                    aliases: kind == .character ? aliases : []
                 ))
             }
             advanceConfigurationRevision(in: &next, now: now)

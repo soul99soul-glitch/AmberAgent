@@ -20,8 +20,6 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         viewportHeight: CGFloat = 800,
         adjustedInsetTop: CGFloat = 0,
         adjustedInsetBottom: CGFloat = 120,
-        keyboardOverlap: CGFloat = 0,
-        composerHeight: CGFloat = 72,
         distanceToBottom: CGFloat = 0,
         userInteracting: Bool = false
     ) -> NativeTimelineScrollGeometry {
@@ -31,8 +29,6 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
             viewportHeight: viewportHeight,
             adjustedInsetTop: adjustedInsetTop,
             adjustedInsetBottom: adjustedInsetBottom,
-            keyboardOverlap: keyboardOverlap,
-            composerHeight: composerHeight,
             distanceToBottom: distanceToBottom,
             userInteracting: userInteracting
         )
@@ -42,6 +38,77 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         UserDefaults.standard.removeObject(forKey: NativeTimelineScrollFeatureFlags.key)
 
         XCTAssertFalse(NativeTimelineScrollFeatureFlags.isEnabled)
+    }
+
+    @MainActor
+    func testAttachOnlyConnectsScrollViewWithoutChangingPositionOrFollowState() {
+        let driver = NativeTimelineScrollDriver()
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        scrollView.contentSize = CGSize(width: 390, height: 1_400)
+        scrollView.contentOffset = CGPoint(x: 0, y: 220)
+
+        driver.attach(scrollView)
+
+        XCTAssertEqual(scrollView.contentOffset.y, 220, accuracy: 0.5)
+        XCTAssertFalse(driver.isFollowingBottomOrKeyboardFocus)
+    }
+
+    @MainActor
+    func testDisablingAutomaticFollowStopsLayoutGrowthFromAdvancingOffset() {
+        let driver = NativeTimelineScrollDriver()
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        scrollView.contentSize = CGSize(width: 390, height: 1_400)
+        driver.attach(scrollView)
+        driver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
+        XCTAssertEqual(scrollView.contentOffset.y, 600, accuracy: 0.5)
+
+        driver.setAutomaticFollowEnabled(false)
+        scrollView.contentSize = CGSize(width: 390, height: 1_800)
+        driver.handleLayoutMetricsChanged()
+
+        XCTAssertEqual(scrollView.contentOffset.y, 600, accuracy: 0.5)
+        XCTAssertFalse(driver.isFollowingBottomOrKeyboardFocus)
+    }
+
+    @MainActor
+    func testInvalidateAndReattachPreservesExistingHistoryPosition() {
+        let driver = NativeTimelineScrollDriver()
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        scrollView.contentSize = CGSize(width: 390, height: 1_400)
+        driver.attach(scrollView)
+        driver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
+        driver.submit(.userDragBegan)
+        scrollView.contentOffset = CGPoint(x: 0, y: 180)
+
+        driver.invalidate()
+        driver.attach(scrollView)
+
+        XCTAssertEqual(scrollView.contentOffset.y, 180, accuracy: 0.5)
+        XCTAssertFalse(driver.isFollowingBottomOrKeyboardFocus)
+    }
+
+    func testReturnToBottomPolicyUsesLiveNativeDistanceInsteadOfStaleCachedGeometry() {
+        XCTAssertFalse(
+            NativeTimelineScrollReturnPolicy.returnedToBottom(
+                liveDistanceToBottom: 400,
+                cachedNearBottom: true,
+                threshold: 96
+            )
+        )
+        XCTAssertTrue(
+            NativeTimelineScrollReturnPolicy.returnedToBottom(
+                liveDistanceToBottom: 24,
+                cachedNearBottom: false,
+                threshold: 96
+            )
+        )
+        XCTAssertTrue(
+            NativeTimelineScrollReturnPolicy.returnedToBottom(
+                liveDistanceToBottom: nil,
+                cachedNearBottom: true,
+                threshold: 96
+            )
+        )
     }
 
     @MainActor
@@ -78,6 +145,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         scrollView.contentOffset = CGPoint(x: 4, y: 0)
 
         driver.attach(scrollView)
+        driver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
         scrollView.contentOffset.x = 4
         driver.handleLayoutMetricsChanged()
 
@@ -96,6 +164,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
         scrollView.contentSize = CGSize(width: 390, height: 1_400)
         driver.attach(scrollView)
+        driver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
         scrollView.contentOffset.x = 4
 
         driver.handleLayoutMetricsChanged()
@@ -245,17 +314,39 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         )
     }
 
-    func testBottomTargetAccountsForKeyboardAndComposerObstruction() {
+    func testBottomTargetUsesOnlyUIKitAdjustedInset() {
         let geo = geometry(
             contentHeight: 1_600,
             viewportHeight: 800,
-            adjustedInsetBottom: 80,
-            keyboardOverlap: 300,
-            composerHeight: 72
+            adjustedInsetBottom: 80
         )
 
-        XCTAssertEqual(geo.effectiveBottomInset, 372)
-        XCTAssertEqual(geo.bottomTarget, 1_172)
+        XCTAssertEqual(geo.effectiveBottomInset, 80)
+        XCTAssertEqual(geo.bottomTarget, 880)
+    }
+
+    @MainActor
+    func testExplicitBottomNeverScrollsPastUIKitBottomIntoBlankSpace() {
+        let driver = NativeTimelineScrollDriver()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        let viewController = UIViewController()
+        window.rootViewController = viewController
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        let scrollView = UIScrollView(frame: viewController.view.bounds)
+        viewController.view.addSubview(scrollView)
+        scrollView.contentSize = CGSize(width: 390, height: 1_600)
+        scrollView.contentInset.bottom = 80
+        driver.attach(scrollView)
+        driver.submit(.explicitBottom(source: .composerFocus, animated: false, keyboardToken: nil))
+
+        XCTAssertEqual(
+            scrollView.contentOffset.y,
+            880,
+            accuracy: 0.5,
+            "SwiftUI safe-area and keyboard layout already define the viewport; native follow must not expose blank space."
+        )
     }
 
     func testUserDragBeganCancelsFollowingAndPausesProgrammaticScroll() {
@@ -348,29 +439,77 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         )
     }
 
-    func testKeyboardWillChangeDuringFocusUpdatesObstructionAndKeepsBottomAnchored() {
-        let state = NativeTimelineScrollState.keyboardFocus(
-            NativeTimelineKeyboardFocusTransaction(token: 1, stableFrames: 1)
+    func testViewportChangeRebasesFollowingTargetAfterKeyboardDismissal() {
+        let state = NativeTimelineScrollState.followingBottom(
+            virtualOffset: 1_172,
+            target: 1_172,
+            lastFollowRequestAt: 1
         )
 
         let result = NativeTimelineScrollCore.reduce(
             state: state,
-            intent: .keyboardWillChange(token: 2, overlap: 336, composerHeight: 72),
-            geometry: geometry(offsetY: 200, distanceToBottom: 200),
+            intent: .viewportChanged,
+            geometry: geometry(
+                offsetY: 880,
+                contentHeight: 1_600,
+                viewportHeight: 800,
+                adjustedInsetBottom: 80,
+                distanceToBottom: 0
+            ),
             now: 2
         )
 
         XCTAssertEqual(
             result.state,
-            .keyboardFocus(NativeTimelineKeyboardFocusTransaction(token: 2, stableFrames: 0))
+            .followingBottom(virtualOffset: 880, target: 880, lastFollowRequestAt: 2)
         )
+        XCTAssertEqual(result.actions, [])
+    }
+
+    func testViewportChangeUsesFrameDriverInsteadOfRestartingBottomAnimation() {
+        let result = NativeTimelineScrollCore.reduce(
+            state: .keyboardFocus(NativeTimelineKeyboardFocusTransaction(token: 1, stableFrames: 0)),
+            intent: .viewportChanged,
+            geometry: geometry(
+                offsetY: 880,
+                contentHeight: 1_600,
+                viewportHeight: 500,
+                adjustedInsetBottom: 80,
+                distanceToBottom: 300
+            ),
+            now: 2
+        )
+
         XCTAssertEqual(
-            result.actions,
-            [
-                .updateObstruction(keyboardOverlap: 336, composerHeight: 72),
-                .requestBottomAnchor(animated: true, source: .keyboardChange)
-            ]
+            result.state,
+            .followingBottom(virtualOffset: 880, target: 1_180, lastFollowRequestAt: 2)
         )
+        XCTAssertEqual(result.actions, [.startFrameDriver])
+    }
+
+    func testViewportChangeDuringUserInteractionPausesInsteadOfPulling() {
+        let state = NativeTimelineScrollState.followingBottom(
+            virtualOffset: 880,
+            target: 880,
+            lastFollowRequestAt: 1
+        )
+
+        let result = NativeTimelineScrollCore.reduce(
+            state: state,
+            intent: .viewportChanged,
+            geometry: geometry(
+                offsetY: 700,
+                contentHeight: 1_600,
+                viewportHeight: 500,
+                adjustedInsetBottom: 80,
+                distanceToBottom: 480,
+                userInteracting: true
+            ),
+            now: 2
+        )
+
+        XCTAssertEqual(result.state, .pausedForUser)
+        XCTAssertEqual(result.actions, [.stopFrameDriver])
     }
 
     func testKeyboardFocusCompletesOnTokenedBottomLayoutFrame() {

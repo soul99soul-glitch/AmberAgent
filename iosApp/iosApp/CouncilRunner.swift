@@ -405,6 +405,8 @@ struct IOSCouncilRoomRunRequest {
     let mode: IOSCouncilRoomRunMode
     let settings: IOSCouncilRoomSettings
     let currentModelId: String
+    var currentModel: Model? = nil
+    var baseParams: TextGenerationParams? = nil
     let providerSetting: ProviderSetting
     let searchSettings: Settings?
     let researchConsent: IOSCouncilResearchConsent
@@ -416,6 +418,8 @@ struct IOSCouncilRoomRunSummary: Equatable {
     let taskId: String
     let status: IOSAdvancedTaskStatus
     let finalTopic: String
+    let finalAnswer: String
+    let failureReason: String?
     let failedSeats: [String]
     let transcript: String
 }
@@ -672,6 +676,7 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
     private let openAIProvider: OpenAIKmpProvider
     private let claudeProvider: ClaudeKmpProvider
     private var job: Kotlinx_coroutines_coreJob?
+    private var grokWebStreamTask: Task<Void, Never>?
     private var activeStream: IOSCouncilActiveTextStream?
 
     init(
@@ -688,7 +693,12 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
         params: TextGenerationParams,
         onUpdate: @escaping @MainActor (String) -> Void
     ) async throws -> String {
-        let accumulator = MessageStreamAccumulator(initialMessages: messages, model: params.model)
+        let effectiveProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
+        let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(
+            params,
+            provider: effectiveProvider
+        )
+        let accumulator = MessageStreamAccumulator(initialMessages: messages, model: effectiveParams.model)
         let eventSink = ChatStreamEventSink()
         let eventStream = AsyncStream<ChatStreamEvent>(bufferingPolicy: .unbounded) { continuation in
             eventSink.bind(continuation)
@@ -701,9 +711,9 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
         activeStream = stream
 
         job = dispatchCouncilStream(
-            providerSetting: providerSetting,
+            providerSetting: effectiveProvider,
             messages: messages,
-            params: params,
+            params: effectiveParams,
             onChunk: { chunk in
                 eventSink.yield(.chunk(chunk))
             },
@@ -729,7 +739,9 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
             case .error(let error):
                 _ = stream.flushAndClose(drainingQueuedChunks: false)
                 clearActiveStreamIfNeeded(stream)
-                return "Error: \(error.message ?? String(describing: error))"
+                throw IOSCouncilRoomRunnerError.generationFailed(
+                    error.message ?? String(describing: error)
+                )
             }
         }
 
@@ -752,6 +764,27 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
         onError: @escaping (KotlinThrowable) -> Void
     ) -> Kotlinx_coroutines_coreJob? {
         if let openAI = providerSetting as? ProviderSetting.OpenAI {
+            if IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI) {
+                grokWebStreamTask?.cancel()
+                let providerId = IOSGrokWebProviderResolver.providerKey(openAI)
+                grokWebStreamTask = Task {
+                    do {
+                        try await IOSGrokWebClient(providerId: providerId).streamText(
+                            messages: messages,
+                            params: params,
+                            onChunk: onChunk
+                        )
+                        guard !Task.isCancelled else { return }
+                        onComplete()
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        guard !Task.isCancelled else { return }
+                        onError(KotlinThrowable(message: (error as NSError).localizedDescription))
+                    }
+                }
+                return nil
+            }
             return openAIProvider.streamTextCancellable(
                 providerSetting: openAI, messages: messages, params: params,
                 onChunk: onChunk, onComplete: onComplete, onError: onError
@@ -774,16 +807,20 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
         }
         job?.cancel(cause: nil)
         job = nil
+        grokWebStreamTask?.cancel()
+        grokWebStreamTask = nil
     }
 
     private func clearActiveStreamIfNeeded(_ stream: IOSCouncilActiveTextStream) {
         guard activeStream === stream else { return }
         activeStream = nil
         job = nil
+        grokWebStreamTask = nil
     }
 
     deinit {
         job?.cancel(cause: nil)
+        grokWebStreamTask?.cancel()
     }
 }
 
@@ -795,7 +832,8 @@ private final class IOSCouncilStreamTail {
 enum IOSCouncilRoomRunnerError: LocalizedError, Equatable {
     case missingAPIKey
     case emptyObjective
-    case hostFailed(String)
+    case emptyOutput(String)
+    case generationFailed(String)
     case timedOut(String)
     case cancelled
 
@@ -803,7 +841,8 @@ enum IOSCouncilRoomRunnerError: LocalizedError, Equatable {
         switch self {
         case .missingAPIKey: "当前服务商缺少 API Key。"
         case .emptyObjective: "议题为空。"
-        case .hostFailed(let message): "主持人生成失败：\(message)"
+        case .emptyOutput(let stage): "\(stage)没有返回内容。"
+        case .generationFailed(let message): "模型生成失败：\(message)"
         case .timedOut(let speaker): "\(speaker) 发言超时。"
         case .cancelled: "模型议会已取消。"
         }
@@ -887,19 +926,32 @@ final class IOSCouncilRoomRunner {
         onEvent(.taskStarted(task.id))
 
         guard !objective.isEmpty else {
+            let message = IOSCouncilRoomRunnerError.emptyObjective.localizedDescription
             _ = taskStore.updateTask(
                 id: task.id,
                 status: .failed,
-                resultSummary: IOSCouncilRoomRunnerError.emptyObjective.localizedDescription,
+                resultSummary: message,
+                error: message,
                 retryable: true,
                 cancelCapability: false
             )
-            return IOSCouncilRoomRunSummary(taskId: task.id, status: .failed, finalTopic: "", failedSeats: [], transcript: "")
+            return IOSCouncilRoomRunSummary(
+                taskId: task.id,
+                status: .failed,
+                finalTopic: "",
+                finalAnswer: "",
+                failureReason: message,
+                failedSeats: [],
+                transcript: ""
+            )
         }
 
-        guard !Self.apiKey(of: request.providerSetting)
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            let message = IOSCouncilRoomRunnerError.missingAPIKey.localizedDescription
+        let validationModel = resolvedModel(modelId: request.currentModelId, request: request)
+        if let issue = ChatProviderConfiguration.issue(
+            for: validationModel,
+            provider: request.providerSetting
+        ) {
+            let message = issue.message
             onEvent(.append(systemMessage(body: message, subtitle: "配置阻塞", status: .failed)))
             _ = taskStore.updateTask(
                 id: task.id,
@@ -909,7 +961,15 @@ final class IOSCouncilRoomRunner {
                 retryable: true,
                 cancelCapability: false
             )
-            return IOSCouncilRoomRunSummary(taskId: task.id, status: .failed, finalTopic: "", failedSeats: [], transcript: message)
+            return IOSCouncilRoomRunSummary(
+                taskId: task.id,
+                status: .failed,
+                finalTopic: "",
+                finalAnswer: "",
+                failureReason: message,
+                failedSeats: [],
+                transcript: message
+            )
         }
 
         recordResearchConsent(request.researchConsent, objective: objective, runId: task.id)
@@ -990,19 +1050,39 @@ final class IOSCouncilRoomRunner {
                 status: .speaking
             )))
             onEvent(.roster([host] + activeSeats, activeSpeakerId: host.id, failedSpeakerIds: failedSeatIds))
-            let finalTopic = try await stream(
+            let defaultSeatsForTopic = activeSeats
+            let finalTopic = try await streamWithTimeout(
                 runGeneration: currentRunGeneration,
-                speaker: host,
-                systemPrompt: hostSystemPrompt(settings: settings),
-                userPrompt: finalTopicPrompt(objective: objective, research: research, limits: limits, defaultSeats: activeSeats),
-                request: request,
-                temperature: 0.35,
-                onUpdate: { text in
-                    onEvent(.updateMessage(id: topicMessageId, body: text.isEmpty ? "调研和完善议题中..." : text, status: .speaking))
-                }
-            )
+                seconds: limits.seatTimeoutSeconds,
+                timeoutLabel: "主持人议题整理"
+            ) {
+                try await self.stream(
+                    runGeneration: currentRunGeneration,
+                    speaker: host,
+                    systemPrompt: self.hostSystemPrompt(settings: settings),
+                    userPrompt: self.finalTopicPrompt(
+                        objective: objective,
+                        research: research,
+                        limits: limits,
+                        defaultSeats: defaultSeatsForTopic
+                    ),
+                    request: request,
+                    temperature: 0.35,
+                    onUpdate: { text in
+                        onEvent(.updateMessage(id: topicMessageId, body: text.isEmpty ? "调研和完善议题中..." : text, status: .speaking))
+                    }
+                )
+            }
+            guard let finalTopic = finalTopic.trimmedNilIfBlank else {
+                onEvent(.updateMessage(
+                    id: topicMessageId,
+                    body: "主持人未返回议题。",
+                    status: .failed
+                ))
+                throw IOSCouncilRoomRunnerError.emptyOutput("最终议题")
+            }
             try checkCancelled(runGeneration: currentRunGeneration)
-            onEvent(.updateMessage(id: topicMessageId, body: finalTopic.trimmedOr("主持人未返回议题。"), status: .completed))
+            onEvent(.updateMessage(id: topicMessageId, body: finalTopic, status: .completed))
             transcript.append("[\(host.name)] \(finalTopic)")
             taskStore.appendLog(id: task.id, chunk: "[\(host.name)] \(finalTopic)\n\n")
 
@@ -1010,15 +1090,26 @@ final class IOSCouncilRoomRunner {
             //（Android planned_seats 思路），贴合本议题;关 → 直接用用户已添加的席位,不自由发挥。
             if request.dynamicSeatGeneration {
                 onEvent(.state("组建议员席位中"))
-                let seatPlanRaw = (try? await stream(
+                let seatPlanRaw = (try? await streamWithTimeout(
                     runGeneration: currentRunGeneration,
-                    speaker: host,
-                    systemPrompt: seatPlanSystemPrompt(),
-                    userPrompt: seatPlanPrompt(objective: objective, finalTopic: finalTopic, research: research, limits: limits),
-                    request: request,
-                    temperature: 0.3,
-                    onUpdate: { _ in }
-                )) ?? ""
+                    seconds: limits.seatTimeoutSeconds,
+                    timeoutLabel: "主持人组席"
+                ) {
+                    try await self.stream(
+                        runGeneration: currentRunGeneration,
+                        speaker: host,
+                        systemPrompt: self.seatPlanSystemPrompt(),
+                        userPrompt: self.seatPlanPrompt(
+                            objective: objective,
+                            finalTopic: finalTopic,
+                            research: research,
+                            limits: limits
+                        ),
+                        request: request,
+                        temperature: 0.3,
+                        onUpdate: { _ in }
+                    )
+                }) ?? ""
                 try checkCancelled(runGeneration: currentRunGeneration)
                 let dynamicSeats = Self.plannedSeatsFromJSON(
                     seatPlanRaw,
@@ -1086,7 +1177,10 @@ final class IOSCouncilRoomRunner {
                                 }
                             )
                         }
-                        onEvent(.updateMessage(id: messageId, body: output.trimmedOr("没有输出。"), status: .completed))
+                        guard let output = output.trimmedNilIfBlank else {
+                            throw IOSCouncilRoomRunnerError.emptyOutput("\(seat.name)席位")
+                        }
+                        onEvent(.updateMessage(id: messageId, body: output, status: .completed))
                         transcript.append("[\(seat.name)] \(output)")
                         taskStore.appendLog(id: task.id, chunk: "[\(seat.name)] \(output)\n\n")
                     } catch {
@@ -1152,7 +1246,10 @@ final class IOSCouncilRoomRunner {
                                 }
                             )
                         }
-                        onEvent(.updateMessage(id: commentaryId, body: commentary.trimmedOr("主持人未返回点评。"), status: .completed))
+                        guard let commentary = commentary.trimmedNilIfBlank else {
+                            throw IOSCouncilRoomRunnerError.emptyOutput("主持人点评")
+                        }
+                        onEvent(.updateMessage(id: commentaryId, body: commentary, status: .completed))
                         transcript.append("[\(host.name) · 第\(round)轮点评] \(commentary)")
                         taskStore.appendLog(id: task.id, chunk: "[\(host.name) · 第\(round)轮点评] \(commentary)\n\n")
                     } catch {
@@ -1168,6 +1265,7 @@ final class IOSCouncilRoomRunner {
                     }
                     onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
                 }
+                onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
                 // 主持人轮末点评后，可以问用户是否有补充（任意阶段可暂停提问）。
                 let userReply = await askUser(
                     "第 \(round) 轮结束，主持人是否需要向用户确认信息？输入问题，或留空跳过。",
@@ -1195,23 +1293,41 @@ final class IOSCouncilRoomRunner {
                 status: .speaking
             )))
             onEvent(.roster([host] + activeSeats, activeSpeakerId: host.id, failedSpeakerIds: failedSeatIds))
-            let summary = try await stream(
+            let transcriptForSynthesis = transcript
+            let failedSeatsForSynthesis = activeSeats
+                .filter { failedSeatIds.contains($0.id) }
+                .map(\.name)
+            let summary = try await streamWithTimeout(
                 runGeneration: currentRunGeneration,
-                speaker: host,
-                systemPrompt: hostSystemPrompt(settings: settings),
-                userPrompt: synthesisPrompt(
-                    objective: objective,
-                    finalTopic: finalTopic,
-                    transcript: transcript,
-                    failedSeats: activeSeats.filter { failedSeatIds.contains($0.id) }.map(\.name)
-                ),
-                request: request,
-                temperature: 0.35,
-                onUpdate: { text in
-                    onEvent(.updateMessage(id: summaryId, body: text.isEmpty ? "总结中..." : text, status: .speaking))
-                }
-            )
-            onEvent(.updateMessage(id: summaryId, body: summary.trimmedOr("主持人未返回总结。"), status: .completed))
+                seconds: limits.seatTimeoutSeconds,
+                timeoutLabel: "主持人最终综合"
+            ) {
+                try await self.stream(
+                    runGeneration: currentRunGeneration,
+                    speaker: host,
+                    systemPrompt: self.hostSystemPrompt(settings: settings),
+                    userPrompt: self.synthesisPrompt(
+                        objective: objective,
+                        finalTopic: finalTopic,
+                        transcript: transcriptForSynthesis,
+                        failedSeats: failedSeatsForSynthesis
+                    ),
+                    request: request,
+                    temperature: 0.35,
+                    onUpdate: { text in
+                        onEvent(.updateMessage(id: summaryId, body: text.isEmpty ? "总结中..." : text, status: .speaking))
+                    }
+                )
+            }
+            guard let summary = summary.trimmedNilIfBlank else {
+                onEvent(.updateMessage(
+                    id: summaryId,
+                    body: "主持人未返回总结。",
+                    status: .failed
+                ))
+                throw IOSCouncilRoomRunnerError.emptyOutput("最终综合")
+            }
+            onEvent(.updateMessage(id: summaryId, body: summary, status: .completed))
             transcript.append("[\(host.name)] \(summary)")
             taskStore.appendLog(id: task.id, chunk: "[\(host.name)] \(summary)\n\n")
             onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
@@ -1237,6 +1353,8 @@ final class IOSCouncilRoomRunner {
                 taskId: task.id,
                 status: status,
                 finalTopic: finalTopic,
+                finalAnswer: summary,
+                failureReason: nil,
                 failedSeats: failedNames,
                 transcript: finalTranscript
             )
@@ -1244,10 +1362,20 @@ final class IOSCouncilRoomRunner {
             let isCancel = activeRunGeneration != currentRunGeneration
                 || error is CancellationError
                 || (error as? IOSCouncilRoomRunnerError) == .cancelled
-            let status: IOSAdvancedTaskStatus = isCancel ? .cancelled : .failed
+            let isTimeout: Bool
+            if case .timedOut? = error as? IOSCouncilRoomRunnerError {
+                isTimeout = true
+            } else {
+                isTimeout = false
+            }
+            let status: IOSAdvancedTaskStatus = isCancel ? .cancelled : (isTimeout ? .timedOut : .failed)
             let message = isCancel ? "模型议会已取消。" : error.localizedDescription
-            onEvent(.state(isCancel ? "已取消" : "失败"))
-            onEvent(.append(systemMessage(body: message, subtitle: isCancel ? "已取消" : "运行失败", status: .failed)))
+            onEvent(.state(isCancel ? "已取消" : (isTimeout ? "已超时" : "失败")))
+            onEvent(.append(systemMessage(
+                body: message,
+                subtitle: isCancel ? "已取消" : (isTimeout ? "已超时" : "运行失败"),
+                status: .failed
+            )))
             _ = taskStore.updateTask(
                 id: task.id,
                 status: status,
@@ -1261,6 +1389,8 @@ final class IOSCouncilRoomRunner {
                 taskId: task.id,
                 status: status,
                 finalTopic: "",
+                finalAnswer: "",
+                failureReason: message,
                 failedSeats: [],
                 transcript: clippedTranscript(transcript, budget: 24_000)
             )
@@ -1286,55 +1416,12 @@ final class IOSCouncilRoomRunner {
         )
     }
 
-    /// Resolves the provider setting Council should use, by honoring the user's
-    /// actually-selected provider — parity fix for `council.provider_real`
-    /// (SLICE_TEMPLATE pattern 1, copied from IOSDeepReadDraftGenerator). When
-    /// Claude is selected, Council dispatches through a `ProviderSetting.Claude`
-    /// (native /messages), not a rebuilt OpenAI /chat/completions. The lower-
-    /// level streamer (`dispatchCouncilStream`) already dispatches on the sealed
-    /// type, so passing a Claude setting flows to native. Returns nil for
-    /// non-OpenAI-compatible selections → caller should disable/guard (interim
-    /// safeguard). (locked_decision: no ProviderExecutionContext; reuse selected
-    /// ProviderSetting; only (provider, model, params) tuple.)
+    /// Council supports the same OpenAI/Claude provider objects used by Chat.
+    /// Preserve the object, especially its stable id used by OAuth/Web credentials.
     static func resolveProviderSetting(selected: ProviderSetting?) -> ProviderSetting? {
         guard let selected else { return nil }
-        let descriptionText = selected.descriptionText
-        let shortDescriptionText = selected.shortDescriptionText
-        switch selected {
-        case let openAI as ProviderSetting.OpenAI:
-            return ProviderSetting.OpenAI(
-                id: KotlinUuid.companion.random(),
-                enabled: openAI.enabled,
-                name: openAI.name,
-                models: openAI.models,
-                balanceOption: openAI.balanceOption,
-                builtIn: openAI.builtIn,
-                descriptionText: descriptionText,
-                shortDescriptionText: shortDescriptionText,
-                apiKey: openAI.apiKey,
-                baseUrl: openAI.baseUrl,
-                chatCompletionsPath: openAI.chatCompletionsPath,
-                useResponseApi: openAI.useResponseApi,
-                authMode: openAI.authMode,
-                brand: openAI.brand
-            )
-        case let claude as ProviderSetting.Claude:
-            return ProviderSetting.Claude(
-                id: KotlinUuid.companion.random(),
-                enabled: claude.enabled,
-                name: claude.name,
-                models: claude.models,
-                balanceOption: claude.balanceOption,
-                builtIn: claude.builtIn,
-                descriptionText: descriptionText,
-                shortDescriptionText: shortDescriptionText,
-                apiKey: claude.apiKey,
-                baseUrl: claude.baseUrl,
-                promptCaching: claude.promptCaching
-            )
-        default:
-            return nil
-        }
+        guard selected is ProviderSetting.OpenAI || selected is ProviderSetting.Claude else { return nil }
+        return selected
     }
 
     /// Parses the host's strict-JSON seat plan `{"seats":[{"name","lens"}]}` into
@@ -1389,7 +1476,8 @@ final class IOSCouncilRoomRunner {
             modelId: speaker.modelId,
             reasoning: speaker.reasoning,
             temperature: temperature,
-            outputBudgetCharacters: request.settings.limits.outputBudgetCharacters
+            outputBudgetCharacters: request.settings.limits.outputBudgetCharacters,
+            request: request
         )
         let messages = [
             UIMessage.companion.system(prompt: systemPrompt),
@@ -1402,9 +1490,6 @@ final class IOSCouncilRoomRunner {
             onUpdate: onUpdate
         )
         try checkCancelled(runGeneration: runGeneration)
-        if text.lowercased().hasPrefix("error:") {
-            throw IOSCouncilRoomRunnerError.hostFailed(text)
-        }
         return text
     }
 
@@ -1442,10 +1527,42 @@ final class IOSCouncilRoomRunner {
         modelId: String,
         reasoning: IOSCouncilReasoningPreset,
         temperature: Float,
-        outputBudgetCharacters: Int
+        outputBudgetCharacters: Int,
+        request: IOSCouncilRoomRunRequest
     ) -> TextGenerationParams {
+        let model = resolvedModel(modelId: modelId, request: request)
+        let abilities = model.abilities
+        let matchingBaseParams = request.baseParams.flatMap { params in
+            params.model.modelId == modelId ? params : nil
+        }
+        let maxTokens = Int32(min(max(outputBudgetCharacters / 4, 512), 8_192))
+        return TextGenerationParams(
+            model: model,
+            temperature: KotlinFloat(value: temperature),
+            topP: matchingBaseParams?.topP,
+            maxTokens: KotlinInt(value: maxTokens),
+            tools: [],
+            reasoningLevel: abilities.contains(.reasoning) ? reasoning.reasoningLevel : .off,
+            customHeaders: matchingBaseParams?.customHeaders ?? model.customHeaders,
+            customBody: matchingBaseParams?.customBody ?? model.customBodies
+        )
+    }
+
+    private func resolvedModel(
+        modelId: String,
+        request: IOSCouncilRoomRunRequest
+    ) -> Model {
+        if let currentModel = request.currentModel,
+           currentModel.modelId == modelId {
+            return currentModel
+        }
+        if let configured = request.providerSetting.models.first(where: {
+            $0.type == ModelType.chat && $0.modelId == modelId
+        }) {
+            return configured
+        }
         let abilities = ModelRegistry.shared.MODEL_ABILITIES.getData(modelId: modelId) as? [ModelAbility] ?? []
-        let model = Model(
+        return Model(
             modelId: modelId,
             displayName: modelId,
             id: KotlinUuid.companion.random(),
@@ -1458,17 +1575,6 @@ final class IOSCouncilRoomRunner {
             tools: Set<BuiltInTools>(),
             contextWindowTokens: nil,
             providerOverwrite: nil
-        )
-        let maxTokens = Int32(min(max(outputBudgetCharacters / 4, 512), 8_192))
-        return TextGenerationParams(
-            model: model,
-            temperature: KotlinFloat(value: temperature),
-            topP: nil,
-            maxTokens: KotlinInt(value: maxTokens),
-            tools: [],
-            reasoningLevel: abilities.contains(.reasoning) ? reasoning.reasoningLevel : .off,
-            customHeaders: [],
-            customBody: []
         )
     }
 
@@ -1587,17 +1693,6 @@ final class IOSCouncilRoomRunner {
         """
     }
 
-    /// 从 ProviderSetting 提取 API Key（支持 OpenAI / Claude）。
-    private static func apiKey(of setting: ProviderSetting) -> String {
-        if let openAI = setting as? ProviderSetting.OpenAI {
-            return openAI.apiKey ?? ""
-        }
-        if let claude = setting as? ProviderSetting.Claude {
-            return claude.apiKey ?? ""
-        }
-        return ""
-    }
-
     /// 主持人轮末点评 prompt：总结本轮发言，指出矛盾点和下一轮应聚焦的方向。
     static func roundEndCommentaryPrompt(
         objective: String,
@@ -1621,7 +1716,7 @@ final class IOSCouncilRoomRunner {
         guard consent == .allowed || consent == .denied else { return }
         let action: IOSToolApprovalAction = consent == .allowed ? .allowed : .denied
         let reason = consent == .allowed
-            ? "User approved bounded Council Room host research for this run."
+            ? "Council Room research is enabled in the current settings."
             : "User denied Council Room host research for this run."
         for tool in ["search_web", "scrape_web"] {
             _ = permissionStore?.recordApproval(
@@ -1774,20 +1869,18 @@ final class CouncilRunner {
     func run(
         objective: String,
         seats: [IOSCouncilSeatDescriptor] = [],
-        mode: String = "compare",
+        maxSeats: Int? = nil,
         outputBudgetChars: Int = 12_000,
-        selectedProvider: ProviderSetting? = nil
+        providerSetting: ProviderSetting,
+        currentModel: Model,
+        baseParams: TextGenerationParams
     ) async -> String {
-        let settingsStore = SettingsStore()
-        let currentModelId = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "gpt-4o"
-            : settingsStore.modelId
-        let providerMode = settingsStore.currentApiKey.isEmpty ? "missing_key" : "current_openai_compatible"
-        let effectiveSeats = seats.isEmpty ? Self.defaultSeatDescriptors() : seats
+        let currentModelId = currentModel.modelId
+        let requestedSeats = seats.isEmpty ? Self.defaultSeatDescriptors() : seats
+        let seatLimit = max(2, min(maxSeats ?? 8, 8))
+        let effectiveSeats = Array(requestedSeats.filter { $0.id != "host" }.prefix(seatLimit))
         var roomSettings = IOSCouncilRoomSettings.defaults(currentModelId: currentModelId)
-        roomSettings.seats = effectiveSeats
-            .filter { $0.id != "host" }
-            .map {
+        roomSettings.seats = effectiveSeats.map {
                 IOSCouncilRoomSeatConfig(
                     id: $0.id,
                     name: $0.name,
@@ -1802,46 +1895,51 @@ final class CouncilRunner {
             roomSettings.seats = IOSCouncilRoomSettings.defaults(currentModelId: currentModelId).seats
         }
         roomSettings.limits = IOSCouncilRoomLimits(
-            maxSeats: max(2, min(effectiveSeats.count, 8)),
-            defaultRounds: mode.lowercased().contains("debate") ? 2 : 1,
+            maxSeats: seatLimit,
+            defaultRounds: 1,
             seatTimeoutSeconds: 60,
             outputBudgetCharacters: outputBudgetChars
         )
+        let actualSeats = roomSettings.defaultSeats(currentModelId: currentModelId)
 
         isRunning = true
         defer { isRunning = false }
 
         let request = IOSCouncilRoomRunRequest(
             objective: objective,
-            mode: mode.lowercased().contains("debate") ? .debate : .freeChat,
+            mode: .freeChat,
             settings: roomSettings,
             currentModelId: currentModelId,
-            providerSetting: IOSCouncilRoomRunner.resolveProviderSetting(selected: selectedProvider)
-                ?? IOSCouncilRoomRunner.makeProviderSetting(
-                    baseUrl: settingsStore.baseUrl,
-                    apiKey: settingsStore.currentApiKey
-                ),
+            currentModel: currentModel,
+            baseParams: baseParams,
+            providerSetting: providerSetting,
             searchSettings: nil,
             researchConsent: .unavailable
         )
         let roomRunner = IOSCouncilRoomRunner(taskStore: taskStore)
         let outcome = await roomRunner.run(request: request)
         lastTask = taskStore.tasks.first { $0.id == outcome.taskId }
-        let summary = outcome.status == .completed
-            ? "模型议会已完成，席位：\(effectiveSeats.map(\.name).joined(separator: ", "))。"
+        let runSummary = outcome.status == .completed
+            ? "模型议会已完成，席位：\(actualSeats.map(\.name).joined(separator: ", "))。"
             : "模型议会未完成：\(outcome.status.title)。"
-        lastRunResult = "\(summary) taskId: \(outcome.taskId)，mode: \(mode)，provider: \(providerMode)。"
-        return Self.json([
+        lastRunResult = "\(runSummary) taskId: \(outcome.taskId)，provider: \(providerSetting.name)。"
+        var result: [String: Any] = [
             "ok": outcome.status == .completed,
             "task_id": outcome.taskId,
             "kind": IOSAdvancedTaskKind.modelCouncil.rawValue,
             "run_id": outcome.taskId,
             "status": outcome.status.rawValue,
-            "mode": mode,
-            "seat_count": effectiveSeats.count,
+            "mode": IOSCouncilRoomRunMode.freeChat.rawValue,
+            "seat_count": actualSeats.count,
             "budget_chars": outputBudgetChars,
             "summary": lastRunResult
-        ])
+        ]
+        if outcome.status == .completed {
+            result["final_answer"] = outcome.finalAnswer
+        } else {
+            result["reason"] = outcome.failureReason ?? outcome.status.title
+        }
+        return Self.json(result)
     }
 
     func runTestCycle() {

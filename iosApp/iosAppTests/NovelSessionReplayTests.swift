@@ -1047,6 +1047,34 @@ final class NovelSessionReplayTests: XCTestCase {
         ))
     }
 
+    func testStreamStartReanchorsTheUserMessageAndWaitingTail() {
+        let transition = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(mode: .browsingHistory, showsBottomButton: true),
+            event: .streamStarted
+        )
+
+        XCTAssertEqual(transition.state.mode, .followingBottom)
+        XCTAssertFalse(transition.state.showsBottomButton)
+        XCTAssertEqual(transition.commands, [
+            .setBottomButton(false),
+            .anchorBottom,
+        ])
+    }
+
+    func testSessionViewPresentsAlreadyLoadedRowsFromAwaitingInitialState() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: iosRoot.appendingPathComponent("iosApp/NovelCreation/NovelSessionView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("@State private var followState = NovelSessionBottomFollowState()"))
+        XCTAssertTrue(source.contains(".task(id: listSignal.sessionID)"))
+        XCTAssertTrue(source.contains("presentInitialRowsIfNeeded(listSignal)"))
+    }
+
     func testUserDragEndingNearBottomCommitsSemanticBottomFollow() {
         let state = NovelSessionBottomFollowState(
             mode: .browsingHistory,
@@ -1076,7 +1104,8 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertTrue(source.contains("NovelSessionMeasuredGrowthPolicy.event("))
         XCTAssertTrue(source.contains("dispatchFollowEvent(event)"))
         XCTAssertTrue(source.contains("!viewModel.retryableBranchPendingOperations.isEmpty"))
-        XCTAssertTrue(source.contains("dispatchFollowEvent(.userDragEnded(isAtBottom: latestNearBottom))"))
+        XCTAssertTrue(source.contains("NativeTimelineScrollReturnPolicy.returnedToBottom("))
+        XCTAssertTrue(source.contains("dispatchFollowEvent(.userDragEnded(isAtBottom: returnedToBottom))"))
         XCTAssertTrue(source.contains("ChatLayout.nearBottomResumeThreshold"))
     }
 

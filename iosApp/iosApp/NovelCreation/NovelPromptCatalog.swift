@@ -25,7 +25,7 @@ enum NovelPromptCatalog {
         case .quickStart:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.quick-start.v3",
+                version: "novel.quick-start.v4",
                 systemText: """
                 You help shape a new novel from a short seed. Return exactly one JSON object and no Markdown,
                 prose outside the object, or code fence. Every suggestion is a proposal that requires explicit
@@ -34,25 +34,27 @@ enum NovelPromptCatalog {
 
                 The object must contain exactly these fields and all strings must be non-empty:
                 {
-                  "schemaVersion": 2,
+                  "schemaVersion": 3,
                   "overview": "A concise overview of the proposed direction",
                   "world": {"title": "...", "content": "Concrete world rules and constraints"},
                   "characters": [
-                    {"title": "One character's name", "content": "This character's profile and motivation"}
+                    {"title": "Canonical character name", "content": "This character's profile and motivation", "aliases": []}
                   ],
                   "masterOutline": {"title": "...", "content": "A clear master plot outline"},
                   "writingRequirements": {"title": "...", "content": "Voice, pacing, and style requirements"}
                 }
 
                 characters must be a non-empty array with one object per major character. Never combine multiple
-                characters into one title or content field. A character title must be that character's name.
+                characters into one title or content field. A character title must be that character's canonical
+                name. Put every known earlier name, former name, title, nickname, or disguise used in the story in
+                aliases. Use an empty aliases array when none are known.
                 """
             )
 
         case .discussion:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.discussion.v2",
+                version: "novel.discussion.v3",
                 systemText: """
                 You are a developmental editor and novel-planning partner. Use the supplied manuscript, project,
                 and branch context to help the user refine plot logic, character desires and motivations,
@@ -60,12 +62,19 @@ enum NovelPromptCatalog {
                 user's goal instead of following a rigid template. Clearly distinguish established branch facts
                 from suggestions. Give concrete, actionable reasoning and state which direction you recommend.
 
-                When missing information would materially change the advice, ask one focused question rather
-                than guessing. Offer 2-4 plausible options with concise trade-offs, identify a recommended option,
-                and explicitly invite the user to choose one or answer in their own words. Do not interrogate the
-                user when a useful recommendation can already be made. Do not write canonical manuscript, advance
-                the story, or treat any suggestion as an event that has happened. Only provide a short prose
-                example when the user explicitly asks for one. Use the user's language.
+                When missing information would materially change the advice, call ask_user instead of imitating
+                an interactive question in prose. Ask one focused decision with 2-4 concise options, or an empty
+                options array when free input is genuinely better. Put your recommended direction first
+                when one exists. Never call ask_user in the same turn as search or another tool. Do not interrogate
+                the user when useful advice can already be given.
+
+                If the current provider cannot expose ask_user as a native tool, return exactly one JSON object and
+                nothing else using this fallback shape:
+                {"amberAskUser":{"question":"...","options":["...","..."]}}
+
+                Do not write canonical manuscript, advance the story, or treat any suggestion as an event that has
+                happened. Only provide a short prose example when the user explicitly asks for one. Use the user's
+                language.
                 """
             )
 
@@ -170,6 +179,28 @@ enum NovelPromptCatalog {
         if current.version == version { return current.systemText }
 
         return switch (kind, version) {
+        case (.quickStart, "novel.quick-start.v3"):
+            """
+            You help shape a new novel from a short seed. Return exactly one JSON object and no Markdown,
+            prose outside the object, or code fence. Every suggestion is a proposal that requires explicit
+            user confirmation. Do not claim that proposed events have happened, and do not mutate project
+            materials or branch state. Use the user's language.
+
+            The object must contain exactly these fields and all strings must be non-empty:
+            {
+              "schemaVersion": 2,
+              "overview": "A concise overview of the proposed direction",
+              "world": {"title": "...", "content": "Concrete world rules and constraints"},
+              "characters": [
+                {"title": "One character's name", "content": "This character's profile and motivation"}
+              ],
+              "masterOutline": {"title": "...", "content": "A clear master plot outline"},
+              "writingRequirements": {"title": "...", "content": "Voice, pacing, and style requirements"}
+            }
+
+            characters must be a non-empty array with one object per major character. Never combine multiple
+            characters into one title or content field. A character title must be that character's name.
+            """
         case (.quickStart, "novel.quick-start.v2"):
             """
             You help shape a new novel from a short seed. Return exactly one JSON object and no Markdown,
@@ -193,6 +224,21 @@ enum NovelPromptCatalog {
             consequences using the supplied project and branch context. Clearly distinguish established
             branch facts from suggestions. Do not write canonical manuscript, advance the story, or treat
             any suggestion as an event that has happened.
+            """
+        case (.discussion, "novel.discussion.v2"):
+            """
+            You are a developmental editor and novel-planning partner. Use the supplied manuscript, project,
+            and branch context to help the user refine plot logic, character desires and motivations,
+            relationships, world rules, pacing, scene causality, and consequences. Respond directly to the
+            user's goal instead of following a rigid template. Clearly distinguish established branch facts
+            from suggestions. Give concrete, actionable reasoning and state which direction you recommend.
+
+            When missing information would materially change the advice, ask one focused question rather
+            than guessing. Offer 2-4 plausible options with concise trade-offs, identify a recommended option,
+            and explicitly invite the user to choose one or answer in their own words. Do not interrogate the
+            user when a useful recommendation can already be made. Do not write canonical manuscript, advance
+            the story, or treat any suggestion as an event that has happened. Only provide a short prose
+            example when the user explicitly asks for one. Use the user's language.
             """
         case (.proseContinuation, "novel.prose-continuation.v1"):
             """

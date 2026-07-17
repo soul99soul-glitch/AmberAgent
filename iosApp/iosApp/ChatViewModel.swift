@@ -101,6 +101,7 @@ final class ChatViewModel {
     var pendingWorkspaceApproval: WorkspaceToolApprovalRequest?
     var pendingIshHandoffApproval: IshHandoffToolApprovalRequest?
     var pendingMcpApproval: McpToolApprovalRequest?
+    var pendingCouncilApproval: CouncilToolApprovalRequest?
     var configurationError: String?
     var contextCompactState: ChatContextCompactState = .idle
     private var pendingVisionFailures: [String: String] = [:]
@@ -430,6 +431,9 @@ final class ChatViewModel {
                 setPendingMcpApproval: { [weak self] request in
                     self?.pendingMcpApproval = request
                 },
+                setPendingCouncilApproval: { [weak self] request in
+                    self?.pendingCouncilApproval = request
+                },
                 setContextCompactState: { [weak self] state in
                     withAnimation(.easeOut(duration: 0.22)) {
                         self?.contextCompactState = state
@@ -590,7 +594,8 @@ final class ChatViewModel {
               pendingWebMountApproval == nil,
               pendingWorkspaceApproval == nil,
               pendingIshHandoffApproval == nil,
-              pendingMcpApproval == nil else { return }
+              pendingMcpApproval == nil,
+              pendingCouncilApproval == nil else { return }
 
         if autoGenerateResponses, let configurationIssue {
             configurationError = configurationIssue.message
@@ -871,7 +876,8 @@ final class ChatViewModel {
         guard pendingMemoryApproval == nil, pendingSearchApproval == nil,
               pendingWebMountApproval == nil, pendingWorkspaceApproval == nil,
               pendingIshHandoffApproval == nil,
-              pendingMcpApproval == nil else { return }
+              pendingMcpApproval == nil,
+              pendingCouncilApproval == nil else { return }
         guard let last = messages.last, last.role == MessageRole.assistant,
               !last.toText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
@@ -1329,6 +1335,18 @@ final class ChatViewModel {
     func denyPendingMcpTool() {
         Task { @MainActor in
             await generationCoordinator.denyPendingMcpTool()
+        }
+    }
+
+    func approvePendingCouncilTool() {
+        Task { @MainActor in
+            await generationCoordinator.approvePendingCouncilTool()
+        }
+    }
+
+    func denyPendingCouncilTool() {
+        Task { @MainActor in
+            await generationCoordinator.denyPendingCouncilTool()
         }
     }
 

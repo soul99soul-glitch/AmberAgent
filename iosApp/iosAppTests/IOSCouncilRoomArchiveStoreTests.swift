@@ -61,6 +61,50 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         XCTAssertEqual(loaded, room, "save→load 必须无损还原整场议会快照")
     }
 
+    func testCurrentTranscriptRoundTripKeepsTaskAndTerminalState() throws {
+        let defaults = isolatedDefaults()
+        let room = sampleRoom(taskId: "run-current")
+
+        CouncilTranscriptStore.save(room, defaults: defaults)
+
+        let loaded = try XCTUnwrap(CouncilTranscriptStore.load(defaults: defaults))
+        XCTAssertEqual(loaded.taskId, "run-current")
+        XCTAssertEqual(loaded.objective, room.objective)
+        XCTAssertEqual(loaded.statusRaw, room.statusRaw)
+        XCTAssertEqual(loaded.messages, room.messages)
+    }
+
+    func testInterruptedArchiveConvertsStreamingMessagesToFailed() throws {
+        let store = tempStore()
+        let room = sampleRoom(taskId: "run-interrupted")
+        let speaking = CouncilPersistedMessage(
+            id: room.messages[0].id,
+            kind: room.messages[0].kind,
+            author: room.messages[0].author,
+            body: room.messages[0].body,
+            systemImage: room.messages[0].systemImage,
+            tintHex: room.messages[0].tintHex,
+            subtitle: room.messages[0].subtitle,
+            status: "speaking"
+        )
+        store.save(CouncilPersistedRoom(
+            taskId: room.taskId,
+            objective: room.objective,
+            modeRaw: room.modeRaw,
+            statusRaw: "运行中",
+            failedSpeakerIds: room.failedSpeakerIds,
+            participants: room.participants,
+            messages: [speaking] + Array(room.messages.dropFirst()),
+            updatedAtMs: room.updatedAtMs
+        ))
+
+        store.markInterrupted(taskIds: [room.taskId])
+
+        let recovered = try XCTUnwrap(store.load(taskId: room.taskId))
+        XCTAssertEqual(recovered.statusRaw, IOSAdvancedTaskStatus.interrupted.title)
+        XCTAssertEqual(recovered.messages.first?.status, "failed")
+    }
+
     func testExistsAndDelete() {
         let store = tempStore()
         XCTAssertFalse(store.exists(taskId: "run-x"))

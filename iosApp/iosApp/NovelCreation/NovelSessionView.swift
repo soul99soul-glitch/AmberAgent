@@ -81,14 +81,18 @@ struct NovelSessionView: View {
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeScrollDriverEnabled = false
     @State private var scrollPosition = ScrollPosition()
-    @State private var followState = NovelSessionBottomFollowState(mode: .followingBottom)
+    @State private var followState = NovelSessionBottomFollowState()
     @State private var latestAtBottom = true
     @State private var latestNearBottom = true
     @State private var userDragging = false
     @State private var terminalSettleTask: Task<Void, Never>?
     @State private var explicitBottomAnimationTask: Task<Void, Never>?
     @State private var explicitBottomFollowPending = false
+    @State private var scrollDriver = NativeTimelineScrollDriver()
+    @State private var nativeScrollFallbackReason: NativeTimelineScrollFallbackReason?
+    @State private var isNativeScrollSurfaceVisible = false
     @State private var composerInputHeight: CGFloat = 40
     @State private var composerBarHeight: CGFloat = 0
     @State private var composerInputController = ComposerInputController()
@@ -134,15 +138,34 @@ struct NovelSessionView: View {
             guard abs(composerBarHeight - height) > 0.5 else { return }
             composerBarHeight = height
         }
+        .onAppear {
+            isNativeScrollSurfaceVisible = true
+        }
         .task(id: bindingTaskID) {
             await viewModel.bindToCurrentSelection()
+        }
+        .task(id: listSignal.sessionID) {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            presentInitialRowsIfNeeded(listSignal)
         }
         .onChange(of: listSignal) { oldValue, newValue in
             handleListSignalChange(from: oldValue, to: newValue)
         }
         .onDisappear {
+            isNativeScrollSurfaceVisible = false
             terminalSettleTask?.cancel()
             cancelExplicitBottomAnimation()
+            scrollDriver.invalidate()
+        }
+        .onChange(of: followGeneration) { _, enabled in
+            scrollDriver.setAutomaticFollowEnabled(enabled)
+        }
+        .onChange(of: nativeScrollDriverEnabled) { _, enabled in
+            if !enabled {
+                nativeScrollFallbackReason = nil
+                scrollDriver.invalidate()
+            }
         }
         .confirmationDialog(
             "放弃这次润色？",
@@ -243,6 +266,21 @@ struct NovelSessionView: View {
                     if let tailRow {
                         transcriptRow(tailRow)
                     }
+
+                    ForEach(viewModel.pendingCharacterIdentityMentions) { mention in
+                        NovelCharacterIdentityQuestionCard(
+                            mention: mention,
+                            choices: viewModel.characterIdentityChoices,
+                            isDisabled: viewModel.isBusy || viewModel.isRunning
+                        ) { materialID in
+                            Task { @MainActor in
+                                _ = await viewModel.associateCharacterAlias(
+                                    mention.name,
+                                    with: materialID
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Color.clear
@@ -257,6 +295,17 @@ struct NovelSessionView: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
             .scrollTargetLayout()
+            .background {
+                if isNativeScrollDriverDesired {
+                    NativeTimelineScrollViewResolver(
+                        onResolve: handleNativeScrollViewResolved,
+                        onMetricsChanged: {
+                            guard isNativeScrollDriverActive else { return }
+                            scrollDriver.handleLayoutMetricsChanged()
+                        }
+                    )
+                }
+            }
         }
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
@@ -275,11 +324,24 @@ struct NovelSessionView: View {
                 guard !userDragging else { return }
                 userDragging = true
                 dismissKeyboard()
+                if isNativeScrollDriverActive {
+                    scrollDriver.submit(.userDragBegan)
+                }
                 dispatchFollowEvent(.userDragBegan(isAtBottom: latestAtBottom))
             case .idle:
                 guard userDragging else { return }
                 userDragging = false
-                dispatchFollowEvent(.userDragEnded(isAtBottom: latestNearBottom))
+                let returnedToBottom = NativeTimelineScrollReturnPolicy.returnedToBottom(
+                    liveDistanceToBottom: isNativeScrollDriverActive
+                        ? scrollDriver.distanceToBottomNow()
+                        : nil,
+                    cachedNearBottom: latestNearBottom,
+                    threshold: ChatLayout.nearBottomResumeThreshold
+                )
+                if isNativeScrollDriverActive {
+                    scrollDriver.submit(.userDragEnded(isAtBottom: returnedToBottom))
+                }
+                dispatchFollowEvent(.userDragEnded(isAtBottom: returnedToBottom))
             case .animating, .decelerating:
                 break
             @unknown default:
@@ -316,13 +378,30 @@ struct NovelSessionView: View {
     }
 
     private func transcriptRow(_ row: NovelSessionRowModel) -> some View {
-        NovelSessionRowView(row: row, onAction: handleRowAction)
+        NovelSessionRowView(
+            row: row,
+            onAction: handleRowAction,
+            onAnswerAskUser: handleAskUserAnswer
+        )
             .equatable()
             .allowsHitTesting(
                 !viewModel.isBusy &&
                     !viewModel.hasRefreshError &&
                     !workspace.requiresReload
             )
+    }
+
+    private func handleAskUserAnswer(
+        _ messageID: NovelMessageID,
+        _ answer: String
+    ) {
+        dismissKeyboard()
+        Task { @MainActor in
+            _ = await viewModel.answerAskUser(
+                promptMessageID: messageID,
+                answer: answer
+            )
+        }
     }
 
     private func composer(listModel: NovelSessionListModel?) -> some View {
@@ -880,6 +959,9 @@ struct NovelSessionView: View {
     ) {
         guard oldValue.sessionID == newValue.sessionID else {
             historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
+            if isNativeScrollDriverActive {
+                scrollDriver.submit(.conversationReset)
+            }
             dispatchFollowEvent(.reset)
             dispatchFollowEvent(.initialRowsPresented(hasRows: newValue.rowCount > 0))
             return
@@ -908,6 +990,12 @@ struct NovelSessionView: View {
         } else if oldValue.rowCount != newValue.rowCount || oldValue.lastRowDigest != newValue.lastRowDigest {
             dispatchFollowEvent(.terminalLayoutChanged)
         }
+    }
+
+    private func presentInitialRowsIfNeeded(_ signal: NovelSessionListSignal) {
+        guard signal.sessionID != nil,
+              followState.mode == .awaitingInitialRows else { return }
+        dispatchFollowEvent(.initialRowsPresented(hasRows: signal.rowCount > 0))
     }
 
     private func isLiveTailPhase(_ phase: NovelSessionTransientTailPhase?) -> Bool {
@@ -954,12 +1042,32 @@ struct NovelSessionView: View {
     private func executeFollowCommand(_ command: NovelSessionBottomFollowCommand) {
         switch command {
         case .anchorBottom:
+            if isNativeScrollDriverActive {
+                scrollDriver.submit(
+                    .explicitBottom(source: .button, animated: false, keyboardToken: nil)
+                )
+                return
+            }
             var transaction = Transaction()
             transaction.animation = nil
             withTransaction(transaction) {
                 scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
             }
         case .followBottom(let animated):
+            if isNativeScrollDriverActive {
+                if animated {
+                    scrollDriver.submit(
+                        .explicitBottom(
+                            source: .button,
+                            animated: !accessibilityReduceMotion,
+                            keyboardToken: nil
+                        )
+                    )
+                } else {
+                    scrollDriver.submit(.streamContentGrew)
+                }
+                return
+            }
             if animated {
                 startExplicitBottomAnimation()
             } else if explicitBottomAnimationTask != nil {
@@ -1013,6 +1121,10 @@ struct NovelSessionView: View {
     }
 
     private func performLiveBottomFollow() {
+        if isNativeScrollDriverActive {
+            scrollDriver.submit(.streamContentGrew)
+            return
+        }
         if NovelSessionFollowAnimationPolicy.shouldAnimate(
             isStreaming: viewModel.isStreaming,
             reduceMotion: accessibilityReduceMotion
@@ -1026,11 +1138,55 @@ struct NovelSessionView: View {
     }
 
     private func scrollToBottomWithoutAnimation() {
+        if isNativeScrollDriverActive {
+            scrollDriver.submit(
+                .explicitBottom(source: .button, animated: false, keyboardToken: nil)
+            )
+            return
+        }
         var transaction = Transaction()
         transaction.animation = nil
         withTransaction(transaction) {
             scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
         }
+    }
+
+    private var isNativeScrollDriverDesired: Bool {
+        nativeScrollDriverEnabled &&
+            nativeScrollFallbackReason == nil &&
+            isNativeScrollSurfaceVisible
+    }
+
+    private var isNativeScrollDriverActive: Bool {
+        isNativeScrollDriverDesired && scrollDriver.isAttached
+    }
+
+    private func handleNativeScrollViewResolved(_ scrollView: UIScrollView) {
+        guard isNativeScrollDriverDesired else { return }
+        let wasAttached = scrollDriver.isAttached
+        scrollDriver.setAutomaticFollowEnabled(followGeneration)
+        scrollDriver.onFallback = { reason, shouldReplayBottom in
+            guard nativeScrollFallbackReason == nil else { return }
+            nativeScrollFallbackReason = reason
+            guard shouldReplayBottom, !userDragging else { return }
+            scrollToBottomWithoutAnimation()
+        }
+        scrollDriver.attach(scrollView)
+        guard !wasAttached, scrollDriver.isAttached else { return }
+        if userDragging || isBrowsingHistory {
+            scrollDriver.submit(.userDragBegan)
+        } else {
+            scrollDriver.submit(
+                .explicitBottom(source: .button, animated: false, keyboardToken: nil)
+            )
+        }
+    }
+
+    private var isBrowsingHistory: Bool {
+        if case .browsingHistory = followState.mode {
+            return true
+        }
+        return false
     }
 
     private static let bottomAnchorID = "novel-session-bottom-anchor"
@@ -1080,6 +1236,7 @@ private enum NovelSessionQuickStartRecovery {
 private struct NovelSessionRowView: View, Equatable {
     let row: NovelSessionRowModel
     let onAction: (NovelSessionRowAction) -> Void
+    let onAnswerAskUser: (NovelMessageID, String) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.row.id == rhs.row.id && lhs.row.digest == rhs.row.digest
@@ -1099,8 +1256,62 @@ private struct NovelSessionRowView: View, Equatable {
             candidateStatus: row.candidate?.status,
             polishTransactionStatus: row.candidate?.polishTransactionStatus,
             committedChange: row.committedChange,
+            askUser: row.askUser,
             actions: row.actions,
-            onAction: onAction
+            onAction: onAction,
+            onAnswerAskUser: onAnswerAskUser
         )
+    }
+}
+
+private struct NovelCharacterIdentityQuestionCard: View {
+    let mention: NovelCharacterIdentityMention
+    let choices: [(material: NovelMaterialRecord, title: String)]
+    let isDisabled: Bool
+    let onSelect: (NovelMaterialID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("确认人物身份", systemImage: "person.crop.circle.badge.questionmark")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AmberTheme.accent)
+
+            Text("正文中的“\(mention.name)”对应哪位角色？确认后，已有经历会自动归入同一人物。")
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if choices.isEmpty {
+                Text("请先在“设定”中建立角色档案。")
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+            } else {
+                ForEach(choices, id: \.material.id) { choice in
+                    Button {
+                        onSelect(choice.material.id)
+                    } label: {
+                        HStack {
+                            Text(choice.title)
+                                .foregroundStyle(AmberTheme.foreground)
+                            Spacer(minLength: 0)
+                            Image(systemName: "link")
+                                .foregroundStyle(AmberTheme.accent)
+                        }
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDisabled)
+                }
+            }
+        }
+        .padding(16)
+        .amberGlass(cornerRadius: 18, interactive: false)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AmberTheme.accent.opacity(0.18), lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
     }
 }

@@ -234,7 +234,42 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(request.messages.map { $0.toText() }, ["仅使用小说上下文。", "继续写。"])
     }
 
-    func testDiscussionRequestAdvertisesOnlySearchTools() async throws {
+    func testKMPOutputLimitDoesNotBecomeSuccessfulCompletion() async throws {
+        let fixture = makeFixture(apiKey: "test-key")
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, callbacks in
+                callbacks.onChunk(Self.deltaChunk("未写完的回复"))
+                callbacks.onChunk(MessageChunk(
+                    id: "limited",
+                    model: "novel-live",
+                    choices: [UIMessageChoice(
+                        index: 0,
+                        delta: nil,
+                        message: nil,
+                        finishReason: "length"
+                    )],
+                    usage: nil
+                ))
+                callbacks.onComplete()
+                return nil
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        let events = await Self.collect(try await adapter.start(makeRequest(model: resolved)))
+
+        XCTAssertEqual(events, [
+            .textDelta("未写完的回复"),
+            .failed(NovelModelFailure(
+                code: "output_limit_reached",
+                message: "模型回复达到输出上限，请重试。",
+                isRetryable: true
+            )),
+        ])
+    }
+
+    func testDiscussionRequestAdvertisesAskUserAndEnabledSearchTools() async throws {
         let fixture = makeFixture(apiKey: "test-key")
         let captured = LockedBox<NovelLiveTransportRequest?>(nil)
         let adapter = NovelLiveModelAdapter(
@@ -257,7 +292,7 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         )))
 
         let request = try XCTUnwrap(captured.value)
-        XCTAssertEqual(request.parameters.tools.count, 2)
+        XCTAssertEqual(Set(request.parameters.tools.map(\.name)), ["ask_user", "search_web", "scrape_web"])
         XCTAssertEqual(request.parameters.model.tools.count, 1)
     }
 
@@ -293,18 +328,18 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(executor.calls, ["search_web"])
     }
 
-    func testDiscussionWithoutEnabledSearchUsesNormalTransportWithoutTools() async throws {
+    func testDiscussionWithoutEnabledSearchStillAdvertisesAskUser() async throws {
         let fixture = makeFixture(apiKey: "test-key")
         let captured = LockedBox<NovelLiveTransportRequest?>(nil)
         let adapter = NovelLiveModelAdapter(
             catalogProvider: { fixture.catalog },
-            kmpTransport: { request, callbacks in
-                captured.set(request)
-                callbacks.onComplete()
+            kmpTransport: { _, _ in
+                XCTFail("Discussion Ask User must use the tool transport.")
                 return nil
             },
-            discussionTransport: { _, _ in
-                XCTFail("Disabled search must not enter the tool loop.")
+            discussionTransport: { request, callbacks in
+                captured.set(request)
+                callbacks.onComplete()
                 return nil
             },
             discussionSearchEnabled: { false }
@@ -316,7 +351,7 @@ final class NovelLiveModelAdapterTests: XCTestCase {
             purpose: .discussion
         )))
 
-        XCTAssertTrue(captured.value?.parameters.tools.isEmpty == true)
+        XCTAssertEqual(captured.value?.parameters.tools.map(\.name), ["ask_user"])
         XCTAssertTrue(captured.value?.parameters.model.tools.isEmpty == true)
     }
 
@@ -344,7 +379,7 @@ final class NovelLiveModelAdapterTests: XCTestCase {
                 return nil
             },
             discussionTransport: { request, callbacks in
-                XCTAssertEqual(request.parameters.tools.count, 2)
+                XCTAssertEqual(Set(request.parameters.tools.map(\.name)), ["ask_user", "search_web", "scrape_web"])
                 order.mutate { $0.append("transport") }
                 callbacks.onComplete()
                 return nil
@@ -400,7 +435,7 @@ final class NovelLiveModelAdapterTests: XCTestCase {
 
         XCTAssertEqual(events, [.completed])
         XCTAssertTrue(captured.value?.providerSetting is ProviderSetting.Claude)
-        XCTAssertEqual(captured.value?.parameters.tools.count, 2)
+        XCTAssertEqual(Set(captured.value?.parameters.tools.map(\.name) ?? []), ["ask_user", "search_web", "scrape_web"])
         XCTAssertNil(captured.value?.grokIsolation)
     }
 

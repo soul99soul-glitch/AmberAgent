@@ -801,7 +801,8 @@ final class NovelCreationViewModel {
         title: String,
         content: String,
         tags: [String],
-        injectionMode: NovelInjectionMode
+        injectionMode: NovelInjectionMode,
+        aliases: [String] = []
     ) async {
         guard let snapshot = projectSnapshot else { return }
         _ = await perform(.reviseMaterial(NovelReviseMaterialCommand(
@@ -813,7 +814,8 @@ final class NovelCreationViewModel {
             title: title,
             content: content,
             tags: tags,
-            injectionMode: injectionMode
+            injectionMode: injectionMode,
+            aliases: aliases
         )))
     }
 

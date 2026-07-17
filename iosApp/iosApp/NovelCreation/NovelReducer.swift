@@ -338,6 +338,9 @@ enum NovelReducer {
         try requireConfigRevision(command.context, document: document)
         let title = try normalizedRequired(command.title, field: "Material title")
         let content = command.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let aliases = command.kind == .character
+            ? NovelCharacterIdentityResolver.normalizedAliases(command.aliases)
+            : []
         guard document.materialRevisions.allSatisfy({ $0.id != command.revisionID }) else {
             throw NovelError.immutableRecordConflict("material revision \(command.revisionID)")
         }
@@ -373,12 +376,14 @@ enum NovelReducer {
         if let materialIndex {
             next.materials[materialIndex].currentRevisionID = revision.id
             next.materials[materialIndex].revisionIDs.append(revision.id)
+            next.materials[materialIndex].aliases = aliases
         } else {
             next.materials.append(NovelMaterialRecord(
                 id: command.materialID,
                 kind: command.kind,
                 currentRevisionID: revision.id,
-                revisionIDs: [revision.id]
+                revisionIDs: [revision.id],
+                aliases: aliases
             ))
         }
         next.project.revision += 1

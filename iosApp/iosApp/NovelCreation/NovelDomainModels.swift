@@ -135,6 +135,21 @@ enum NovelSessionMessageKind: String, Codable, Sendable {
     case error
 }
 
+struct NovelAskUserPrompt: Codable, Equatable, Sendable {
+    let question: String
+    let options: [String]
+}
+
+struct NovelAskUserResponse: Codable, Equatable, Sendable {
+    let promptMessageID: NovelMessageID
+    let answer: String
+}
+
+enum NovelSessionInteraction: Codable, Equatable, Sendable {
+    case askUser(NovelAskUserPrompt)
+    case askUserAnswer(NovelAskUserResponse)
+}
+
 enum NovelCandidateKind: String, Codable, Sendable {
     case prose
     case polish
@@ -208,19 +223,22 @@ struct NovelMaterialRecord: Codable, Equatable, Sendable {
     var currentRevisionID: NovelMaterialRevisionID
     var revisionIDs: [NovelMaterialRevisionID]
     var isDeleted: Bool
+    var aliases: [String]
 
     init(
         id: NovelMaterialID,
         kind: NovelMaterialKind,
         currentRevisionID: NovelMaterialRevisionID,
         revisionIDs: [NovelMaterialRevisionID],
-        isDeleted: Bool = false
+        isDeleted: Bool = false,
+        aliases: [String] = []
     ) {
         self.id = id
         self.kind = kind
         self.currentRevisionID = currentRevisionID
         self.revisionIDs = revisionIDs
         self.isDeleted = isDeleted
+        self.aliases = NovelCharacterIdentityResolver.normalizedAliases(aliases)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -229,6 +247,7 @@ struct NovelMaterialRecord: Codable, Equatable, Sendable {
         case currentRevisionID
         case revisionIDs
         case isDeleted
+        case aliases
     }
 
     init(from decoder: Decoder) throws {
@@ -241,6 +260,9 @@ struct NovelMaterialRecord: Codable, Equatable, Sendable {
         )
         revisionIDs = try values.decode([NovelMaterialRevisionID].self, forKey: .revisionIDs)
         isDeleted = try values.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+        aliases = NovelCharacterIdentityResolver.normalizedAliases(
+            try values.decodeIfPresent([String].self, forKey: .aliases) ?? []
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -250,6 +272,48 @@ struct NovelMaterialRecord: Codable, Equatable, Sendable {
         try values.encode(currentRevisionID, forKey: .currentRevisionID)
         try values.encode(revisionIDs, forKey: .revisionIDs)
         try values.encode(isDeleted, forKey: .isDeleted)
+        try values.encode(aliases, forKey: .aliases)
+    }
+}
+
+struct NovelCharacterIdentity: Equatable, Sendable {
+    let materialID: NovelMaterialID
+    let canonicalName: String
+    let aliases: [String]
+}
+
+struct NovelCharacterIdentityResolver: Sendable {
+    private let materialIDsByNormalizedName: [String: Set<NovelMaterialID>]
+
+    init(identities: [NovelCharacterIdentity]) {
+        var matches: [String: Set<NovelMaterialID>] = [:]
+        for identity in identities {
+            for name in [identity.canonicalName] + identity.aliases {
+                let normalized = Self.normalize(name)
+                guard !normalized.isEmpty else { continue }
+                matches[normalized, default: []].insert(identity.materialID)
+            }
+        }
+        materialIDsByNormalizedName = matches
+    }
+
+    func isKnown(_ name: String) -> Bool {
+        materialIDsByNormalizedName[Self.normalize(name)]?.count == 1
+    }
+
+    static func normalize(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    static func normalizedAliases(_ aliases: [String]) -> [String] {
+        var seen: Set<String> = []
+        return aliases.compactMap { alias in
+            let trimmed = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = normalize(trimmed)
+            guard !key.isEmpty, seen.insert(key).inserted else { return nil }
+            return trimmed
+        }
     }
 }
 
@@ -305,6 +369,31 @@ struct NovelSessionMessageRecord: Codable, Equatable, Sendable {
     let createdAt: Date
     let runID: NovelRunID?
     let candidateID: NovelCandidateID?
+    let interaction: NovelSessionInteraction?
+
+    init(
+        id: NovelMessageID,
+        sequence: Int64,
+        role: NovelSessionRole,
+        mode: NovelSessionMode,
+        kind: NovelSessionMessageKind,
+        content: String,
+        createdAt: Date,
+        runID: NovelRunID?,
+        candidateID: NovelCandidateID?,
+        interaction: NovelSessionInteraction? = nil
+    ) {
+        self.id = id
+        self.sequence = sequence
+        self.role = role
+        self.mode = mode
+        self.kind = kind
+        self.content = content
+        self.createdAt = createdAt
+        self.runID = runID
+        self.candidateID = candidateID
+        self.interaction = interaction
+    }
 }
 
 struct NovelCandidateRecord: Codable, Equatable, Sendable {
@@ -791,6 +880,7 @@ struct NovelSettingProposalRecord: Codable, Equatable, Sendable {
     let createdAt: Date
     var isResolved: Bool
     let origin: NovelSettingProposalOrigin?
+    let suggestedCharacterAliases: [String]?
 
     init(
         id: NovelProposalID,
@@ -799,7 +889,8 @@ struct NovelSettingProposalRecord: Codable, Equatable, Sendable {
         content: String,
         createdAt: Date,
         isResolved: Bool,
-        origin: NovelSettingProposalOrigin? = nil
+        origin: NovelSettingProposalOrigin? = nil,
+        suggestedCharacterAliases: [String]? = nil
     ) {
         self.id = id
         self.branchID = branchID
@@ -808,6 +899,7 @@ struct NovelSettingProposalRecord: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.isResolved = isResolved
         self.origin = origin
+        self.suggestedCharacterAliases = suggestedCharacterAliases
     }
 }
 

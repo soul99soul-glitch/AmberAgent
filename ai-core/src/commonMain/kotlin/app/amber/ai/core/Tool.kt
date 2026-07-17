@@ -52,6 +52,19 @@ fun createScrapeWebToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createAskUserToolDeclaration(): Tool = Tool(
+    name = "ask_user",
+    description = """
+        Pause the current discussion and ask the user one focused question.
+        Use only when the answer materially changes the advice. Provide concise options when useful;
+        use an empty options array when the user should answer freely. Never call this with another tool.
+    """.trimIndent().replace("\n", " "),
+    parameters = { askUserParameters() },
+    needsApproval = true,
+    allowsAutoApproval = false,
+    execute = { emptyList() }
+)
+
 fun createMemoryToolDeclaration(): Tool = Tool(
     name = "memory_tool",
     description = """
@@ -352,6 +365,7 @@ fun createSubAgentReportToolDeclaration(): Tool = Tool(
 )
 
 fun iosToolDeclaration(name: String): Tool? = when (name) {
+    "ask_user" -> createAskUserToolDeclaration()
     "search_web" -> createSearchWebToolDeclaration()
     "scrape_web" -> createScrapeWebToolDeclaration()
     "memory_tool" -> createMemoryToolDeclaration()
@@ -433,9 +447,8 @@ fun createSubAgentDispatchToolDeclaration(): Tool = Tool(
  * [Slice 3] Tool declaration for running the model council.
  *
  * The model calls this with an `objective` and (optionally) `max_seats`. The iOS
- * ChatViewModel dispatches to CouncilRunner.run(objective:) (which drives
- * IosCouncilFactory.startInput + ModelCouncilManager), then resumes the stream
- * with the council's synthesized result as the tool output.
+ * ChatViewModel dispatches to the native iOS Council room runner, then resumes
+ * the stream with the council's synthesized result as the tool output.
  */
 fun createModelCouncilRunToolDeclaration(): Tool = Tool(
     name = "model_council_run",
@@ -472,7 +485,9 @@ private fun modelCouncilRunParameters(): InputSchema = InputSchema.Obj(
         })
         put("max_seats", buildJsonObject {
             put("type", "integer")
-            put("description", "optional cap on the number of council seats")
+            put("minimum", 2)
+            put("maximum", 8)
+            put("description", "optional cap on non-host council seats (2-8)")
         })
     },
     required = listOf("objective")
@@ -857,6 +872,22 @@ private fun workspaceTool(
 )
 
 private fun emptyObjectParameters(): InputSchema = InputSchema.Obj(properties = buildJsonObject { })
+
+private fun askUserParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("question", buildJsonObject {
+            put("type", "string")
+            put("description", "The focused question to present inline to the user.")
+        })
+        put("options", buildJsonObject {
+            put("type", "array")
+            put("description", "Two to six suggested answers, or an empty array for free text.")
+            put("items", buildJsonObject { put("type", "string") })
+            put("maxItems", 6)
+        })
+    },
+    required = listOf("question", "options")
+)
 
 private fun webMountStationsParameters(): InputSchema = InputSchema.Obj(
     properties = buildJsonObject {
