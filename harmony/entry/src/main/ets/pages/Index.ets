@@ -103,18 +103,19 @@ struct DeepReadHomePage {
 
   build(): void {
     Column() {
-      // ── 顶栏:品牌 + 操作 ──
+      // ── 顶栏:品牌(衬线)+ 操作 ──
       Row() {
         Text('DeepRead')
           .fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontFamily('serif')
         Blank()
         if (this.loadState === 'loading') {
           LoadingProgress().width(16).height(16).color(ACCENT).margin({ right: 20 })
         } else {
-          Text('↻').fontSize(20).fontColor(INK3).margin({ right: 20 })
+          Text('刷新').fontSize(13).fontColor(INK3).margin({ right: 20 })
             .onClick(() => { this.loadHotlist(); })
         }
-        Text('⚙').fontSize(18).fontColor(INK3)
+        Text('设置').fontSize(13).fontColor(INK3)
           .onClick(() => { router.pushUrl({ url: 'pages/HistoryPage' }); })
       }
       .width('100%').height(56).padding({ left: 24, right: 24 })
@@ -158,7 +159,7 @@ struct DeepReadHomePage {
           EmptyState({
             icon: '',
             title: '抓取失败',
-            subtitle: 'NewsNow 热榜源暂时无法连接\n请检查网络后重试',
+            subtitle: 'NewsNow 热榜源暂时无法连接,请检查网络后重试',
             actionLabel: '重试',
             onAction: () => { this.loadHotlist(); },
           })
