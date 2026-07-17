@@ -1,4 +1,4 @@
-// DeepReadHomePage — 高端杂志排版(预置占位内容验证视觉)
+// DeepReadHomePage — 高端杂志排版(细节精修版)
 // 设计原则:大量留白 / 衬线标题 / 清晰层级 / hairline 节奏 / 铁锈橙 accent
 
 import {
@@ -61,12 +61,11 @@ struct DeepReadHomePage {
   @State loadState: string = 'idle';
   @State errorMsg: string = '';
   @State lastUpdated: string = '';
-  @State useMock: boolean = true;  // 演示模式:用预置内容
+  @State useMock: boolean = true;
   private newsNow: NewsNowProvider | null = null;
 
   aboutToAppear(): void {
     if (this.useMock) {
-      // 演示模式:直接加载预置内容
       this.combined = MOCK_COMBINED;
       this.sections = MOCK_SECTIONS;
       this.articleText = MOCK_ARTICLE;
@@ -128,15 +127,15 @@ struct DeepReadHomePage {
       // ── 顶栏:品牌(衬线大字) ──
       Row() {
         Text('DeepRead')
-          .fontSize(28).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(26).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif')
         Blank()
-        Text('↻').fontSize(18).fontColor(INK3).margin({ right: 20 })
+        Text('刷新').fontSize(13).fontColor(INK3).margin({ right: 20 })
           .onClick(() => { this.loadHotlist(); })
-        Text('⚙').fontSize(18).fontColor(INK3)
+        Text('设置').fontSize(13).fontColor(INK3)
           .onClick(() => { router.pushUrl({ url: 'pages/HistoryPage' }); })
       }
-      .width('100%').height(64).padding({ left: 28, right: 28 })
+      .width('100%').height(56).padding({ left: 24, right: 24 })
       .backgroundColor(BG)
 
       // ── 搜索框:白底大圆角 ──
@@ -150,17 +149,17 @@ struct DeepReadHomePage {
             if (this.title.trim().length > 0 && !this.running) this.startDeepRead(this.title, null);
           })
       }
-      .width('92%').height(52).padding({ left: 18, right: 18 })
-      .backgroundColor(SURFACE).borderRadius(14)
+      .width('92%').height(48).padding({ left: 16, right: 16 })
+      .backgroundColor(SURFACE).borderRadius(12)
       .border({ width: 1, color: LINE })
-      .margin({ bottom: 24 })
+      .margin({ bottom: 16 })
 
       // ── 运行状态 ──
       if (this.running) {
         Row() {
           LoadingProgress().width(14).height(14).color(ACCENT)
           Text(this.status).fontSize(13).fontColor(INK2).margin({ left: 8 })
-        }.margin({ bottom: 16 })
+        }.margin({ bottom: 12 })
       }
 
       // ── 内容区 ──
@@ -171,7 +170,6 @@ struct DeepReadHomePage {
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
       } else if (this.loadState === 'error') {
         Column() {
-          Text('⚠️').fontSize(28)
           Text('抓取失败').fontSize(18).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 12 })
           Text(this.errorMsg).fontSize(13).fontColor(INK3).margin({ top: 6 })
           Text('重试').fontSize(15).fontColor(ACCENT).margin({ top: 16 })
@@ -189,43 +187,41 @@ struct DeepReadHomePage {
                 Blank()
                 Text('9 源聚合').fontSize(11).fontColor(INK4)
               }
-              .width('100%').padding({ top: 24, bottom: 12 })
+              .width('100%').padding({ top: 20, bottom: 10 })
             }
 
-            // 头条卡片:超大标题 + 衬线
+            // 头条:衬线大标题 + 热度
             ListItem() {
               Column() {
                 Text(this.combined[0].title)
-                  .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+                  .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
                   .fontFamily('serif')
-                  .lineHeight(30).maxLines(3)
-                Row() {
-                  if (this.combined[0].heat.length > 0) {
-                    Text(this.combined[0].heat).fontSize(12).fontColor(INK3)
-                  }
-                }.margin({ top: 10 })
+                  .lineHeight(28).maxLines(3)
+                if (this.combined[0].heat.length > 0) {
+                  Text(this.combined[0].heat).fontSize(12).fontColor(INK3).margin({ top: 8 })
+                }
               }
-              .width('100%').padding({ top: 4, bottom: 20 })
+              .width('100%').padding({ top: 4, bottom: 16 })
               .border({ width: { bottom: 1 }, color: { bottom: LINE } })
               .onClick(() => { this.startDeepRead(this.combined[0].title, this.combined[0].url); })
             }
 
-            // 第 2~7 条:紧凑列表(大留白)
+            // 第 2~7 条:紧凑列表
             ForEach(this.combined.slice(1, 7), (item: HotItem, idx: number) => {
               ListItem() {
                 Row() {
                   Text((idx + 2) < 10 ? '0' + (idx + 2).toString() : (idx + 2).toString())
-                    .fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK4)
-                    .width(32).textAlign(TextAlign.Start)
+                    .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK4)
+                    .width(28).textAlign(TextAlign.Start)
                   Text(item.title)
-                    .fontSize(15).fontColor(INK).layoutWeight(1).maxLines(1)
+                    .fontSize(14).fontColor(INK).layoutWeight(1).maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .lineHeight(22)
+                    .lineHeight(21)
                   if (item.heat.length > 0) {
                     Text(item.heat).fontSize(11).fontColor(INK4).margin({ left: 12 })
                   }
                 }
-                .width('100%').padding({ top: 16, bottom: 16 })
+                .width('100%').padding({ top: 14, bottom: 14 })
                 .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
                 .onClick(() => { this.startDeepRead(item.title, item.url); })
               }
@@ -242,7 +238,7 @@ struct DeepReadHomePage {
                 Blank()
                 Text(section.items.length + ' 条').fontSize(11).fontColor(INK4)
               }
-              .width('100%').padding({ top: 28, bottom: 12 })
+              .width('100%').padding({ top: 24, bottom: 10 })
             }
 
             // 源条目(前 5 条)
@@ -250,16 +246,16 @@ struct DeepReadHomePage {
               ListItem() {
                 Row() {
                   Text((idx + 1) < 10 ? '0' + (idx + 1).toString() : (idx + 1).toString())
-                    .fontSize(14).fontColor(INK4).width(32)
+                    .fontSize(13).fontColor(INK4).width(28)
                   Text(item.title)
-                    .fontSize(15).fontColor(INK).layoutWeight(1).maxLines(1)
+                    .fontSize(14).fontColor(INK).layoutWeight(1).maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .lineHeight(22)
+                    .lineHeight(21)
                   if (item.heat.length > 0) {
                     Text(item.heat).fontSize(11).fontColor(INK4).margin({ left: 12 })
                   }
                 }
-                .width('100%').padding({ top: 14, bottom: 14 })
+                .width('100%').padding({ top: 13, bottom: 13 })
                 .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
                 .onClick(() => { this.startDeepRead(item.title, item.url); })
               }
@@ -274,15 +270,15 @@ struct DeepReadHomePage {
                   Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
                   Text(' 文章').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
                 }
-                .width('100%').margin({ bottom: 12 })
-                Text(this.articleText).fontSize(15).fontColor(INK2).lineHeight(24)
+                .width('100%').margin({ bottom: 10 })
+                Text(this.articleText).fontSize(14).fontColor(INK2).lineHeight(22)
               }
-              .width('100%').padding(20).backgroundColor(ACCENT_LIGHT).borderRadius(14).margin({ top: 8, bottom: 32 })
+              .width('100%').padding(18).backgroundColor(ACCENT_LIGHT).borderRadius(12).margin({ top: 8, bottom: 28 })
             }
           }
         }
         .width('100%').layoutWeight(1)
-        .padding({ left: 24, right: 24 })
+        .padding({ left: 20, right: 20 })
         .backgroundColor(BG)
       }
     }
