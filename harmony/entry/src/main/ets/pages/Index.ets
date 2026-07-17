@@ -188,6 +188,7 @@ struct DeepReadHomePage {
                 Text('9 源聚合').fontSize(11).fontColor(INK4)
               }
               .width('100%').padding({ top: 20, bottom: 10 })
+              .transition(TransitionEffect.OPACITY.animation({ duration: 300, curve: Curve.EaseIn }))
             }
 
             // 头条:衬线大标题 + 热度
@@ -203,6 +204,7 @@ struct DeepReadHomePage {
               }
               .width('100%').padding({ top: 4, bottom: 16 })
               .border({ width: { bottom: 1 }, color: { bottom: LINE } })
+              .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 50 }))
               .onClick(() => { this.startDeepRead(this.combined[0].title, this.combined[0].url); })
             }
 
@@ -223,6 +225,12 @@ struct DeepReadHomePage {
                 }
                 .width('100%').padding({ top: 14, bottom: 14 })
                 .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+                .stateStyles({
+                  pressed: { opacity: 0.7 },
+                  normal: { opacity: 1 },
+                })
+                .animation({ duration: 100, curve: Curve.EaseInOut })
+                .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100 + idx * 50 }))
                 .onClick(() => { this.startDeepRead(item.title, item.url); })
               }
             })
@@ -239,6 +247,7 @@ struct DeepReadHomePage {
                 Text(section.items.length + ' 条').fontSize(11).fontColor(INK4)
               }
               .width('100%').padding({ top: 24, bottom: 10 })
+              .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 50 }))
             }
 
             // 源条目(前 5 条)
@@ -257,6 +266,12 @@ struct DeepReadHomePage {
                 }
                 .width('100%').padding({ top: 13, bottom: 13 })
                 .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+                .stateStyles({
+                  pressed: { opacity: 0.7 },
+                  normal: { opacity: 1 },
+                })
+                .animation({ duration: 100, curve: Curve.EaseInOut })
+                .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100 + idx * 50 }))
                 .onClick(() => { this.startDeepRead(item.title, item.url); })
               }
             })
@@ -274,6 +289,8 @@ struct DeepReadHomePage {
                 Text(this.articleText).fontSize(14).fontColor(INK2).lineHeight(22)
               }
               .width('100%').padding(18).backgroundColor(ACCENT_LIGHT).borderRadius(12).margin({ top: 8, bottom: 28 })
+              .transition(TransitionEffect.OPACITY.animation({ duration: 400, delay: 200 }))
+              .transition(TransitionEffect.translate({ y: 20 }).animation({ duration: 400, delay: 200, curve: Curve.EaseOut }))
             }
           }
         }
