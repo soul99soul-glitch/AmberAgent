@@ -1532,11 +1532,19 @@ final class ChatGenerationCoordinator {
         clearPendingCouncilApproval()
         guard currentRunId == pending.runId else { return }
         bindings.setIsLoading(true)
-        let resumedMessages = await toolRuntime.finishCouncilApproval(
-            pending: pending,
-            allow: allow
-        )
+        let executionToken = UUID()
+        let executionTask: Task<ChatToolRuntimeResult, Never> = Task { @MainActor [toolRuntime] in
+            .completed(await toolRuntime.finishCouncilApproval(
+                pending: pending,
+                allow: allow
+            ))
+        }
+        foregroundToolExecutionToken = executionToken
+        foregroundToolExecutionTask = executionTask
+        let result = await executionTask.value
+        clearForegroundToolExecution(matching: executionToken)
         guard currentRunId == pending.runId else { return }
+        guard case .completed(let resumedMessages) = result else { return }
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)

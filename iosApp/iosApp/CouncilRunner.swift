@@ -843,9 +843,27 @@ enum IOSCouncilRoomRunnerError: LocalizedError, Equatable {
         case .emptyObjective: "议题为空。"
         case .emptyOutput(let stage): "\(stage)没有返回内容。"
         case .generationFailed(let message): "模型生成失败：\(message)"
-        case .timedOut(let speaker): "\(speaker) 发言超时。"
+        case .timedOut(let speaker): "\(speaker) 连续无输出，已超时。"
         case .cancelled: "模型议会已取消。"
         }
+    }
+}
+
+private final class IOSCouncilStreamHeartbeat: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastOutputNanoseconds = DispatchTime.now().uptimeNanoseconds
+
+    func recordOutput() {
+        lock.lock()
+        lastOutputNanoseconds = DispatchTime.now().uptimeNanoseconds
+        lock.unlock()
+    }
+
+    func hasBeenSilent(for timeoutNanoseconds: UInt64) -> Bool {
+        lock.lock()
+        let lastOutputNanoseconds = self.lastOutputNanoseconds
+        lock.unlock()
+        return DispatchTime.now().uptimeNanoseconds &- lastOutputNanoseconds >= timeoutNanoseconds
     }
 }
 
@@ -855,6 +873,7 @@ final class IOSCouncilRoomRunner {
     private let researcher: any IOSCouncilResearching
     private let taskStore: IOSAdvancedTaskStore
     private let permissionStore: IOSPermissionStore?
+    private let timeoutUnitNanoseconds: UInt64
     private var runGeneration: UInt64 = 0
     private var activeRunGeneration: UInt64?
 
@@ -862,12 +881,14 @@ final class IOSCouncilRoomRunner {
         streamer: any IOSCouncilTextStreaming = IOSCouncilTextStreamer(),
         researcher: any IOSCouncilResearching = IOSCouncilSearchResearcher(),
         taskStore: IOSAdvancedTaskStore = .shared,
-        permissionStore: IOSPermissionStore? = nil
+        permissionStore: IOSPermissionStore? = nil,
+        timeoutUnitNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.streamer = streamer
         self.researcher = researcher
         self.taskStore = taskStore
         self.permissionStore = permissionStore
+        self.timeoutUnitNanoseconds = timeoutUnitNanoseconds
     }
 
     func cancel() {
@@ -1055,7 +1076,7 @@ final class IOSCouncilRoomRunner {
                 runGeneration: currentRunGeneration,
                 seconds: limits.seatTimeoutSeconds,
                 timeoutLabel: "主持人议题整理"
-            ) {
+            ) { recordOutput in
                 try await self.stream(
                     runGeneration: currentRunGeneration,
                     speaker: host,
@@ -1069,6 +1090,7 @@ final class IOSCouncilRoomRunner {
                     request: request,
                     temperature: 0.35,
                     onUpdate: { text in
+                        if !text.isEmpty { recordOutput() }
                         onEvent(.updateMessage(id: topicMessageId, body: text.isEmpty ? "调研和完善议题中..." : text, status: .speaking))
                     }
                 )
@@ -1094,7 +1116,7 @@ final class IOSCouncilRoomRunner {
                     runGeneration: currentRunGeneration,
                     seconds: limits.seatTimeoutSeconds,
                     timeoutLabel: "主持人组席"
-                ) {
+                ) { recordOutput in
                     try await self.stream(
                         runGeneration: currentRunGeneration,
                         speaker: host,
@@ -1107,7 +1129,9 @@ final class IOSCouncilRoomRunner {
                         ),
                         request: request,
                         temperature: 0.3,
-                        onUpdate: { _ in }
+                        onUpdate: { text in
+                            if !text.isEmpty { recordOutput() }
+                        }
                     )
                 }) ?? ""
                 try checkCancelled(runGeneration: currentRunGeneration)
@@ -1152,7 +1176,7 @@ final class IOSCouncilRoomRunner {
                             runGeneration: currentRunGeneration,
                             seconds: limits.seatTimeoutSeconds,
                             timeoutLabel: seat.name
-                        ) {
+                        ) { recordOutput in
                             try await self.stream(
                                 runGeneration: currentRunGeneration,
                                 speaker: seat,
@@ -1169,6 +1193,7 @@ final class IOSCouncilRoomRunner {
                                 request: request,
                                 temperature: request.mode == .debate ? 0.55 : 0.75,
                                 onUpdate: { text in
+                                    if !text.isEmpty { recordOutput() }
                                     let body = text.isEmpty ? "思考中..." : text
                                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         latestMessage.body = text
@@ -1224,7 +1249,7 @@ final class IOSCouncilRoomRunner {
                             runGeneration: currentRunGeneration,
                             seconds: limits.seatTimeoutSeconds,
                             timeoutLabel: "主持人点评"
-                        ) {
+                        ) { recordOutput in
                             try await self.stream(
                                 runGeneration: currentRunGeneration,
                                 speaker: host,
@@ -1238,6 +1263,7 @@ final class IOSCouncilRoomRunner {
                                 request: request,
                                 temperature: 0.45,
                                 onUpdate: { text in
+                                    if !text.isEmpty { recordOutput() }
                                     let body = text.isEmpty ? "点评中..." : text
                                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         latestCommentary.body = text
@@ -1266,16 +1292,6 @@ final class IOSCouncilRoomRunner {
                     onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
                 }
                 onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
-                // 主持人轮末点评后，可以问用户是否有补充（任意阶段可暂停提问）。
-                let userReply = await askUser(
-                    "第 \(round) 轮结束，主持人是否需要向用户确认信息？输入问题，或留空跳过。",
-                    onEvent: onEvent,
-                    onAskUser: onAskUser
-                )
-                if let reply = userReply?.trimmedNilIfBlank {
-                    transcript.append("[用户] \(reply)")
-                    onEvent(.append(systemMessage(body: reply, subtitle: "用户回答", status: .completed)))
-                }
                 // 最后一轮不点评，直接进综合（阶段 6）。
             }
 
@@ -1301,7 +1317,7 @@ final class IOSCouncilRoomRunner {
                 runGeneration: currentRunGeneration,
                 seconds: limits.seatTimeoutSeconds,
                 timeoutLabel: "主持人最终综合"
-            ) {
+            ) { recordOutput in
                 try await self.stream(
                     runGeneration: currentRunGeneration,
                     speaker: host,
@@ -1315,6 +1331,7 @@ final class IOSCouncilRoomRunner {
                     request: request,
                     temperature: 0.35,
                     onUpdate: { text in
+                        if !text.isEmpty { recordOutput() }
                         onEvent(.updateMessage(id: summaryId, body: text.isEmpty ? "总结中..." : text, status: .speaking))
                     }
                 )
@@ -1497,15 +1514,24 @@ final class IOSCouncilRoomRunner {
         runGeneration: UInt64,
         seconds: Int,
         timeoutLabel: String,
-        operation: @escaping @Sendable () async throws -> String
+        operation: @escaping @Sendable (@escaping @Sendable () -> Void) async throws -> String
     ) async throws -> String {
-        try await withThrowingTaskGroup(of: String.self) { group in
+        let timeoutNanoseconds = UInt64(max(1, seconds)) * timeoutUnitNanoseconds
+        let pollIntervalNanoseconds = max(1, min(timeoutNanoseconds / 4, 250_000_000))
+        let heartbeat = IOSCouncilStreamHeartbeat()
+        return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
-                try await operation()
+                try await operation {
+                    heartbeat.recordOutput()
+                }
             }
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(max(1, seconds)) * 1_000_000_000)
-                throw IOSCouncilRoomRunnerError.timedOut(timeoutLabel)
+                while true {
+                    try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
+                    if heartbeat.hasBeenSilent(for: timeoutNanoseconds) {
+                        throw IOSCouncilRoomRunnerError.timedOut(timeoutLabel)
+                    }
+                }
             }
             do {
                 guard let result = try await group.next() else {
@@ -1822,13 +1848,21 @@ private extension String {
 final class CouncilRunner {
     @ObservationIgnored private var manager: ModelCouncilManager?
     @ObservationIgnored private let taskStore: IOSAdvancedTaskStore
+    @ObservationIgnored private let roomSettingsStore: IOSCouncilRoomSettingsStore
+    @ObservationIgnored private let roomStreamer: any IOSCouncilTextStreaming
 
     var lastRunResult: String = "(未运行)"
     var isRunning: Bool = false
     var lastTask: IOSAdvancedTaskRecord?
 
-    init(taskStore: IOSAdvancedTaskStore = .shared) {
+    init(
+        taskStore: IOSAdvancedTaskStore = .shared,
+        roomSettingsStore: IOSCouncilRoomSettingsStore = .shared,
+        roomStreamer: any IOSCouncilTextStreaming = IOSCouncilTextStreamer()
+    ) {
         self.taskStore = taskStore
+        self.roomSettingsStore = roomSettingsStore
+        self.roomStreamer = roomStreamer
     }
 
     var recentTasks: [IOSAdvancedTaskRecord] {
@@ -1870,17 +1904,16 @@ final class CouncilRunner {
         objective: String,
         seats: [IOSCouncilSeatDescriptor] = [],
         maxSeats: Int? = nil,
-        outputBudgetChars: Int = 12_000,
+        outputBudgetChars: Int? = nil,
         providerSetting: ProviderSetting,
         currentModel: Model,
         baseParams: TextGenerationParams
     ) async -> String {
         let currentModelId = currentModel.modelId
-        let requestedSeats = seats.isEmpty ? Self.defaultSeatDescriptors() : seats
-        let seatLimit = max(2, min(maxSeats ?? 8, 8))
-        let effectiveSeats = Array(requestedSeats.filter { $0.id != "host" }.prefix(seatLimit))
-        var roomSettings = IOSCouncilRoomSettings.defaults(currentModelId: currentModelId)
-        roomSettings.seats = effectiveSeats.map {
+        var roomSettings = roomSettingsStore.settings.normalized(currentModelId: currentModelId)
+        let seatLimit = max(2, min(maxSeats ?? roomSettings.limits.maxSeats, 8))
+        if !seats.isEmpty {
+            roomSettings.seats = Array(seats.filter { $0.id != "host" }.prefix(seatLimit)).map {
                 IOSCouncilRoomSeatConfig(
                     id: $0.id,
                     name: $0.name,
@@ -1891,15 +1924,12 @@ final class CouncilRunner {
                     isDefault: true
                 )
             }
-        if roomSettings.seats.count < 2 {
-            roomSettings.seats = IOSCouncilRoomSettings.defaults(currentModelId: currentModelId).seats
         }
-        roomSettings.limits = IOSCouncilRoomLimits(
-            maxSeats: seatLimit,
-            defaultRounds: 1,
-            seatTimeoutSeconds: 60,
-            outputBudgetCharacters: outputBudgetChars
-        )
+        roomSettings.limits.maxSeats = seatLimit
+        if let outputBudgetChars {
+            roomSettings.limits.outputBudgetCharacters = outputBudgetChars
+        }
+        roomSettings = roomSettings.normalized(currentModelId: currentModelId)
         let actualSeats = roomSettings.defaultSeats(currentModelId: currentModelId)
 
         isRunning = true
@@ -1914,9 +1944,10 @@ final class CouncilRunner {
             baseParams: baseParams,
             providerSetting: providerSetting,
             searchSettings: nil,
-            researchConsent: .unavailable
+            researchConsent: .unavailable,
+            dynamicSeatGeneration: seats.isEmpty ? roomSettingsStore.dynamicSeatGeneration : false
         )
-        let roomRunner = IOSCouncilRoomRunner(taskStore: taskStore)
+        let roomRunner = IOSCouncilRoomRunner(streamer: roomStreamer, taskStore: taskStore)
         let outcome = await roomRunner.run(request: request)
         lastTask = taskStore.tasks.first { $0.id == outcome.taskId }
         let runSummary = outcome.status == .completed
@@ -1931,7 +1962,7 @@ final class CouncilRunner {
             "status": outcome.status.rawValue,
             "mode": IOSCouncilRoomRunMode.freeChat.rawValue,
             "seat_count": actualSeats.count,
-            "budget_chars": outputBudgetChars,
+            "budget_chars": roomSettings.limits.outputBudgetCharacters,
             "summary": lastRunResult
         ]
         if outcome.status == .completed {

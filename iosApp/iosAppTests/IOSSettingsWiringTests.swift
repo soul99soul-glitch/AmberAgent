@@ -239,6 +239,41 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
     }
 
+    func testGrokWebClientClosesTransportWhenTerminalFrameArrives() throws {
+        let provider = try source("iosApp/IOSGrokWebProvider.swift")
+
+        XCTAssertTrue(provider.contains("return frame.isFinished"))
+    }
+
+    func testProviderConnectionTestWaitsForTheModelRequestResult() throws {
+        let detail = try source("iosApp/ProviderDetailView.swift")
+
+        XCTAssertFalse(
+            detail.contains("连接测试已发起；模型获取结果会显示在模型页。"),
+            "Starting an async request is not a successful connection result."
+        )
+    }
+
+    func testApprovedCouncilRunIsOwnedByTheCoordinatorCancellationTask() throws {
+        let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
+        let start = try XCTUnwrap(coordinator.range(of: "private func finishPendingCouncilToolApproval"))
+        let end = try XCTUnwrap(
+            coordinator.range(of: "private func resumeAfterApproval", range: start.upperBound..<coordinator.endIndex)
+        )
+        let approvalPath = coordinator[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(approvalPath.contains("foregroundToolExecutionTask = executionTask"))
+        XCTAssertTrue(approvalPath.contains("clearForegroundToolExecution(matching: executionToken)"))
+    }
+
+    func testCouncilSettingsExposeAnExplicitCurrentModelConnectivityProbe() throws {
+        let settings = try source("iosApp/CouncilSettingsView.swift")
+
+        XCTAssertTrue(settings.contains("测试当前议会模型"))
+        XCTAssertTrue(settings.contains("IOSCouncilModelConnectivityTester"))
+        XCTAssertTrue(settings.contains("实际回退"))
+    }
+
     func testGrokWebStreamParserSurfacesProviderError() {
         let line = #"data: {"error":{"message":"session expired"}}"#
 

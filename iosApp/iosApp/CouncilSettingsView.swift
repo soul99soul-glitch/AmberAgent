@@ -9,6 +9,8 @@ struct CouncilSettingsView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
     @State private var roomSettingsStore = IOSCouncilRoomSettingsStore.shared
+    @State private var connectivityState: CouncilModelConnectivityViewState = .idle
+    @State private var connectivityTask: Task<Void, Never>?
 
     init(
         settingsStore: SettingsStore,
@@ -31,6 +33,7 @@ struct CouncilSettingsView: View {
                     VStack(spacing: 0) {
                         intro
                         hostSection
+                        connectivitySection
                         limitsSection
                         seatDraftSection
                     }
@@ -43,6 +46,10 @@ struct CouncilSettingsView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             roomSettingsStore.bootstrapLegacySeatsIfNeeded(sharedSettings.savedCouncilSeats, currentModelId: currentModelId)
+        }
+        .onDisappear {
+            connectivityTask?.cancel()
+            connectivityTask = nil
         }
     }
 
@@ -109,6 +116,57 @@ struct CouncilSettingsView: View {
         }
     }
 
+    private var connectivitySection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "模型连通性")
+            AmberFormGroup {
+                Button(action: testCurrentCouncilModels) {
+                    CouncilSettingsRow(
+                        systemImage: "antenna.radiowaves.left.and.right",
+                        title: connectivityState.isTesting ? "正在测试当前议会模型" : "测试当前议会模型",
+                        trailing: connectivityState.summary
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(connectivityState.isTesting)
+
+                switch connectivityState {
+                case .idle, .testing:
+                    EmptyView()
+                case .failure(let message):
+                    CouncilSettingsDivider()
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.accentRed)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                case .results(let results):
+                    ForEach(results) { result in
+                        CouncilSettingsDivider()
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: result.isReachable ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundStyle(result.isReachable ? Color.green : AmberTheme.accentRed)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(result.configuredModelId)
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(AmberTheme.foreground)
+                                Text(result.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(result.isReachable ? AmberTheme.muted : AmberTheme.accentRed)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    }
+                }
+            }
+            CouncilFootnote(text: "只测试当前议会会实际调用的模型；每个实际模型发送一次极短生成请求，可能产生少量额度消耗。")
+        }
+    }
+
     private var limitsSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "功能限制")
@@ -136,7 +194,7 @@ struct CouncilSettingsView: View {
                 .padding(.vertical, 12)
                 CouncilSettingsDivider()
                 Stepper(
-                    "单次模型超时 \(roomSettingsStore.settings.limits.seatTimeoutSeconds)s",
+                    "单次模型无输出超时 \(roomSettingsStore.settings.limits.seatTimeoutSeconds)s",
                     value: Binding(
                         get: { roomSettingsStore.settings.limits.seatTimeoutSeconds },
                         set: { roomSettingsStore.updateLimits(seatTimeoutSeconds: $0) }
@@ -252,6 +310,252 @@ struct CouncilSettingsView: View {
         .buttonStyle(.plain)
     }
 
+    private func testCurrentCouncilModels() {
+        connectivityTask?.cancel()
+        guard let provider = sharedSettings.resolveCurrentProviderSetting() else {
+            connectivityState = .failure("当前没有可用的聊天服务商或模型。")
+            return
+        }
+        let settings = roomSettingsStore.settings
+        let dynamicSeatGeneration = roomSettingsStore.dynamicSeatGeneration
+        let modelId = currentModelId
+        connectivityState = .testing
+        connectivityTask = Task { @MainActor in
+            let tester = IOSCouncilModelConnectivityTester()
+            do {
+                let results = try await tester.test(
+                    settings: settings,
+                    dynamicSeatGeneration: dynamicSeatGeneration,
+                    providerSetting: provider,
+                    currentModelId: modelId
+                )
+                guard !Task.isCancelled else { return }
+                connectivityState = .results(results)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                connectivityState = .failure(error.localizedDescription)
+            }
+            connectivityTask = nil
+        }
+    }
+
+}
+
+private enum CouncilModelConnectivityViewState {
+    case idle
+    case testing
+    case results([IOSCouncilModelConnectivityResult])
+    case failure(String)
+
+    var isTesting: Bool {
+        if case .testing = self { return true }
+        return false
+    }
+
+    var summary: String {
+        switch self {
+        case .idle: "未测试"
+        case .testing: "测试中"
+        case .results(let results): "\(results.filter(\.isReachable).count)/\(results.count) 可用"
+        case .failure: "失败"
+        }
+    }
+}
+
+struct IOSCouncilModelConnectivityResult: Identifiable, Equatable {
+    let configuredModelId: String
+    let effectiveModelId: String
+    let errorMessage: String?
+
+    var id: String { configuredModelId }
+    var isReachable: Bool { errorMessage == nil }
+
+    var detail: String {
+        let route = configuredModelId == effectiveModelId
+            ? effectiveModelId
+            : "\(effectiveModelId)（实际回退）"
+        if let errorMessage {
+            return "\(route) · \(errorMessage)"
+        }
+        return "\(route) · 可用"
+    }
+}
+
+enum IOSCouncilModelConnectivityError: LocalizedError, Equatable {
+    case currentModelUnavailable(String)
+    case timedOut(String)
+    case emptyOutput(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .currentModelUnavailable(let modelId): "当前服务商中找不到当前模型 \(modelId)。"
+        case .timedOut(let modelId): "\(modelId) 在 20 秒内没有完成测试。"
+        case .emptyOutput(let modelId): "\(modelId) 返回了空内容。"
+        }
+    }
+}
+
+@MainActor
+final class IOSCouncilModelConnectivityTester {
+    private let streamer: any IOSCouncilTextStreaming
+    private let timeoutNanoseconds: UInt64
+
+    init(
+        streamer: any IOSCouncilTextStreaming = IOSCouncilTextStreamer(),
+        timeoutNanoseconds: UInt64 = 20_000_000_000
+    ) {
+        self.streamer = streamer
+        self.timeoutNanoseconds = timeoutNanoseconds
+    }
+
+    func test(
+        settings: IOSCouncilRoomSettings,
+        dynamicSeatGeneration: Bool,
+        providerSetting: ProviderSetting,
+        currentModelId: String
+    ) async throws -> [IOSCouncilModelConnectivityResult] {
+        let chatModels = providerSetting.models.filter { $0.type == ModelType.chat }
+        guard let currentModel = chatModels.first(where: { $0.modelId == currentModelId }) else {
+            throw IOSCouncilModelConnectivityError.currentModelUnavailable(currentModelId)
+        }
+        let supportedIds = Set(chatModels.map(\.modelId))
+        let normalized = settings.normalized(currentModelId: currentModelId)
+        let configuredIds = Self.configuredModelIds(
+            settings: normalized,
+            dynamicSeatGeneration: dynamicSeatGeneration,
+            currentModelId: currentModelId
+        )
+        var outcomes: [String: String?] = [:]
+        var effectiveModels: [String: Model] = [:]
+        for configuredId in configuredIds {
+            let effectiveId = supportedIds.contains(configuredId) ? configuredId : currentModelId
+            effectiveModels[effectiveId] = chatModels.first(where: { $0.modelId == effectiveId }) ?? currentModel
+        }
+
+        for effectiveId in effectiveModels.keys.sorted() {
+            try Task.checkCancellation()
+            guard let model = effectiveModels[effectiveId] else { continue }
+            if let issue = ChatProviderConfiguration.issue(for: model, provider: providerSetting) {
+                outcomes[effectiveId] = issue.message
+                continue
+            }
+            do {
+                let output = try await probe(model: model, providerSetting: providerSetting)
+                outcomes[effectiveId] = output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? IOSCouncilModelConnectivityError.emptyOutput(effectiveId).localizedDescription
+                    : nil
+            } catch is CancellationError {
+                streamer.cancel()
+                throw CancellationError()
+            } catch {
+                outcomes[effectiveId] = error.localizedDescription
+            }
+        }
+
+        return configuredIds.map { configuredId in
+            let effectiveId = supportedIds.contains(configuredId) ? configuredId : currentModelId
+            return IOSCouncilModelConnectivityResult(
+                configuredModelId: configuredId,
+                effectiveModelId: effectiveId,
+                errorMessage: outcomes[effectiveId] ?? nil
+            )
+        }
+    }
+
+    static func configuredModelIds(
+        settings: IOSCouncilRoomSettings,
+        dynamicSeatGeneration: Bool,
+        currentModelId: String
+    ) -> [String] {
+        let seats = dynamicSeatGeneration ? [] : settings.defaultSeats(currentModelId: currentModelId)
+        var seen = Set<String>()
+        return ([settings.host.modelId] + seats.map(\.modelId)).compactMap { rawId in
+            let modelId = rawId.trimmingCharacters(in: .whitespacesAndNewlines).trimmedOr(currentModelId)
+            return seen.insert(modelId).inserted ? modelId : nil
+        }
+    }
+
+    private func probe(model: Model, providerSetting: ProviderSetting) async throws -> String {
+        let params = TextGenerationParams(
+            model: model,
+            temperature: KotlinFloat(value: 0),
+            topP: nil,
+            maxTokens: KotlinInt(value: 16),
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: model.customHeaders,
+            customBody: model.customBodies
+        )
+        let messages = [UIMessage.companion.user(prompt: "只回复 OK")]
+        let timeoutNanoseconds = timeoutNanoseconds
+        let modelId = model.modelId
+        let operation = IOSCouncilModelProbeOperation(
+            streamer: streamer,
+            providerSetting: providerSetting,
+            messages: messages,
+            params: params
+        )
+        do {
+            return try await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask {
+                    try await operation.run()
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    throw IOSCouncilModelConnectivityError.timedOut(modelId)
+                }
+                do {
+                    guard let result = try await group.next() else {
+                        throw IOSCouncilModelConnectivityError.timedOut(modelId)
+                    }
+                    group.cancelAll()
+                    return result
+                } catch {
+                    group.cancelAll()
+                    operation.cancel()
+                    throw error
+                }
+            }
+        } catch {
+            streamer.cancel()
+            throw error
+        }
+    }
+}
+
+@MainActor
+private final class IOSCouncilModelProbeOperation {
+    private let streamer: any IOSCouncilTextStreaming
+    private let providerSetting: ProviderSetting
+    private let messages: [UIMessage]
+    private let params: TextGenerationParams
+
+    init(
+        streamer: any IOSCouncilTextStreaming,
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams
+    ) {
+        self.streamer = streamer
+        self.providerSetting = providerSetting
+        self.messages = messages
+        self.params = params
+    }
+
+    func run() async throws -> String {
+        try await streamer.streamText(
+            providerSetting: providerSetting,
+            messages: messages,
+            params: params,
+            onUpdate: { _ in }
+        )
+    }
+
+    func cancel() {
+        streamer.cancel()
+    }
 }
 
 private struct CouncilSettingsRow: View {

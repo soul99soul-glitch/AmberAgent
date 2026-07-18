@@ -673,20 +673,31 @@ struct ProviderDetailView: View {
         loadDraft()
     }
 
-    private func fetchModels(saveBeforeFetch: Bool = true, revealModels: Bool = false) {
+    private func fetchModels(
+        saveBeforeFetch: Bool = true,
+        revealModels: Bool = false,
+        reportsConnectionStatus: Bool = false
+    ) {
         if saveBeforeFetch {
             guard saveConfig(showSuccess: false) else { return }
         }
         guard let provider else { return }
+        if reportsConnectionStatus {
+            connectionStatus = .testing
+        }
         if revealModels {
             selectedTab = .models
         }
         guard ChatProviderConfiguration.supportsChatStreaming(provider) else {
-            fetchState = .failure("这个 Provider 类型的 iOS 模型获取尚未移植。")
+            let message = "这个 Provider 类型的 iOS 模型获取尚未移植。"
+            fetchState = .failure(message)
+            if reportsConnectionStatus { connectionStatus = .failure(message) }
             return
         }
         guard !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            fetchState = .failure(ChatConfigurationIssue.missingAPIKey.message)
+            let message = ChatConfigurationIssue.missingAPIKey.message
+            fetchState = .failure(message)
+            if reportsConnectionStatus { connectionStatus = .failure(message) }
             return
         }
         fetchState = .loading
@@ -701,9 +712,15 @@ struct ProviderDetailView: View {
                     models = []
                 }
                 availableModels = models
-                fetchState = .success(models.isEmpty ? "连接成功，但服务商没有返回可列出的模型。可手动添加 Model ID。" : "发现 \(models.count) 个模型。")
+                let message = models.isEmpty
+                    ? "连接成功，但服务商没有返回可列出的模型。可手动添加 Model ID。"
+                    : "连接成功，服务商返回 \(models.count) 个模型。"
+                fetchState = .success(message)
+                if reportsConnectionStatus { connectionStatus = .success(message) }
             } catch {
-                fetchState = .failure(ChatViewModel.userFacingGenerationError(error.localizedDescription, modelId: nil))
+                let message = ChatViewModel.userFacingGenerationError(error.localizedDescription, modelId: nil)
+                fetchState = .failure(message)
+                if reportsConnectionStatus { connectionStatus = .failure(message) }
             }
         }
     }
@@ -787,9 +804,7 @@ struct ProviderDetailView: View {
             connectionStatus = .failure(ChatConfigurationIssue.invalidBaseURL.message)
             return
         }
-        connectionStatus = .testing
-        fetchModels(saveBeforeFetch: false)
-        connectionStatus = .success("连接测试已发起；模型获取结果会显示在模型页。")
+        fetchModels(saveBeforeFetch: false, reportsConnectionStatus: true)
     }
 
     private func displayName(for model: Model) -> String {

@@ -1124,7 +1124,7 @@ private struct CouncilRoomSettingsSheet: View {
                     Divider().overlay(AmberTheme.borderSoft)
 
                     Stepper(
-                        "单次模型超时 \(roomSettingsStore.settings.limits.seatTimeoutSeconds)s",
+                        "单次模型无输出超时 \(roomSettingsStore.settings.limits.seatTimeoutSeconds)s",
                         value: Binding(
                             get: { roomSettingsStore.settings.limits.seatTimeoutSeconds },
                             set: { roomSettingsStore.updateLimits(seatTimeoutSeconds: $0) }
@@ -1857,7 +1857,7 @@ final class CouncilChatViewModel {
                         : "\(participant.displayName)：\(participant.roleDescription)（\(modelLabel(for: participant))）"
                 }
                 .joined(separator: "\n"),
-            budgetSummary: "模式：\(selectedMode.title)\n最大席位：\(roomSettingsStore.settings.limits.maxSeats)\n默认轮数：\(roomSettingsStore.settings.limits.defaultRounds)\n单次模型超时：\(roomSettingsStore.settings.limits.seatTimeoutSeconds)s\n输出预算：\(roomSettingsStore.settings.limits.outputBudgetCharacters)\n提供商：\(sharedSettings.resolveCurrentProviderSetting()?.name ?? "未配置")\n主持模型：\(roomSettingsStore.settings.host.modelId.trimmedOr(currentModelId))",
+            budgetSummary: "模式：\(selectedMode.title)\n最大席位：\(roomSettingsStore.settings.limits.maxSeats)\n默认轮数：\(roomSettingsStore.settings.limits.defaultRounds)\n单次模型无输出超时：\(roomSettingsStore.settings.limits.seatTimeoutSeconds)s\n输出预算：\(roomSettingsStore.settings.limits.outputBudgetCharacters)\n提供商：\(sharedSettings.resolveCurrentProviderSetting()?.name ?? "未配置")\n主持模型：\(roomSettingsStore.settings.host.modelId.trimmedOr(currentModelId))",
             transcript: roomTranscript(limit: 80)
         )
     }

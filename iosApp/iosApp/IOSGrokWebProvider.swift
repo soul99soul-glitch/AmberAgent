@@ -335,7 +335,7 @@ private final class IOSGrokWebBrowserTransport: NSObject, WKNavigationDelegate, 
     private var loadContinuation: CheckedContinuation<Void, Error>?
     private var streamContinuation: CheckedContinuation<Void, Error>?
     private var activeRequestId: String?
-    private var onLine: ((String) throws -> Void)?
+    private var onLine: ((String) throws -> Bool)?
 
     override init() {
         let configuration = WKWebViewConfiguration()
@@ -351,7 +351,7 @@ private final class IOSGrokWebBrowserTransport: NSObject, WKNavigationDelegate, 
         payload: [String: Any],
         headers: [String: String],
         cookieHeader: String,
-        onLine: @escaping (String) throws -> Void
+        onLine: @escaping (String) throws -> Bool
     ) async throws {
         do {
             await restoreAuthenticationCookies(from: cookieHeader)
@@ -420,7 +420,10 @@ private final class IOSGrokWebBrowserTransport: NSObject, WKNavigationDelegate, 
         case "line":
             guard let line = body["value"] as? String else { return }
             do {
-                try onLine?(line)
+                if try onLine?(line) == true {
+                    webView.evaluateJavaScript("window.__amberGrokAbort && window.__amberGrokAbort.abort();")
+                    finishStream(throwing: nil)
+                }
             } catch {
                 finishStream(throwing: error)
             }
@@ -557,13 +560,14 @@ struct IOSGrokWebClient {
                 headers: headers(),
                 cookieHeader: auth.cookieHeader
             ) { rawLine in
-                guard let frame = IOSGrokWebStreamParser.parse(rawLine) else { return }
+                guard let frame = IOSGrokWebStreamParser.parse(rawLine) else { return false }
                 if let message = frame.errorMessage {
                     throw IOSGrokWebError.browser(message)
                 }
                 if let token = frame.token {
                     onChunk(Self.textDeltaChunk(token: token, model: params.model))
                 }
+                return frame.isFinished
             }
         } catch let error as IOSGrokWebError {
             if case .httpStatus(let status) = error, status == 401 || status == 403 {

@@ -354,6 +354,98 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertNotEqual(a, c)
     }
 
+    func testChatCouncilToolUsesPersistedRoomModelsWhenArgumentsDoNotOverrideThem() async {
+        let defaults = isolatedDefaults()
+        let roomSettingsStore = IOSCouncilRoomSettingsStore(
+            userDefaults: defaults,
+            storageKey: "tool-room-settings",
+            currentModelId: "gpt-main"
+        )
+        roomSettingsStore.settings = compactRoomSettings(defaultRounds: 1)
+        roomSettingsStore.dynamicSeatGeneration = false
+        let models = ["gpt-main", "gpt-host", "gpt-engineer", "gpt-risk"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        let currentModel = models[0]
+        let baseParams = TextGenerationParams(
+            model: currentModel,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+        let streamer = ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success("工程发言"),
+            .success("风险发言"),
+            .success("主持总结")
+        ])
+        let runner = CouncilRunner(
+            taskStore: IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks"),
+            roomSettingsStore: roomSettingsStore,
+            roomStreamer: streamer
+        )
+
+        _ = await runner.run(
+            objective: "验证工具链设置",
+            providerSetting: provider,
+            currentModel: currentModel,
+            baseParams: baseParams
+        )
+
+        XCTAssertEqual(streamer.receivedModels.map(\.modelId), [
+            "gpt-host", "gpt-engineer", "gpt-risk", "gpt-host"
+        ])
+    }
+
+    func testCouncilConnectivityTesterShowsUnsupportedConfiguredModelFallback() async throws {
+        let models = ["gpt-main", "gpt-host", "gpt-engineer"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        let streamer = ScriptedCouncilStreamer([
+            .success("OK"),
+            .success("OK"),
+            .success("OK")
+        ])
+        let tester = IOSCouncilModelConnectivityTester(streamer: streamer)
+
+        let results = try await tester.test(
+            settings: compactRoomSettings(defaultRounds: 1),
+            dynamicSeatGeneration: false,
+            providerSetting: provider,
+            currentModelId: "gpt-main"
+        )
+
+        XCTAssertEqual(results.map(\.configuredModelId), ["gpt-host", "gpt-engineer", "gpt-risk"])
+        XCTAssertEqual(results.map(\.effectiveModelId), ["gpt-host", "gpt-engineer", "gpt-main"])
+        XCTAssertTrue(results.allSatisfy(\.isReachable))
+        XCTAssertTrue(results.last?.detail.contains("实际回退") == true)
+        XCTAssertEqual(streamer.receivedModels.map(\.modelId), ["gpt-engineer", "gpt-host", "gpt-main"])
+    }
+
+    func testCouncilConnectivityTimeoutCancelsTheBlockedProbe() async throws {
+        let models = ["gpt-main"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        let streamer = BlockingCouncilProbeStreamer()
+        let tester = IOSCouncilModelConnectivityTester(
+            streamer: streamer,
+            timeoutNanoseconds: 10_000_000
+        )
+
+        let results = try await tester.test(
+            settings: compactRoomSettings(defaultRounds: 1),
+            dynamicSeatGeneration: true,
+            providerSetting: provider,
+            currentModelId: "gpt-main"
+        )
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertFalse(results[0].isReachable)
+        XCTAssertTrue(results[0].detail.contains("没有完成测试"))
+        XCTAssertGreaterThan(streamer.cancelCount, 0)
+    }
+
     func testRoomSettingsPersistHostLimitsAndSeatPayload() throws {
         let defaults = isolatedDefaults()
         let store = IOSCouncilRoomSettingsStore(
@@ -493,6 +585,58 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(task.status, .completed)
         XCTAssertEqual(task.toolScope, ["search_web", "scrape_web"])
         XCTAssertEqual(task.metadata["room_mode"], IOSCouncilRoomRunMode.freeChat.rawValue)
+    }
+
+    func testRoomRunnerDoesNotInventAnAskUserQuestion() async {
+        let runner = IOSCouncilRoomRunner(
+            streamer: ScriptedCouncilStreamer([
+                .success("最终议题"),
+                .success("工程发言"),
+                .success("风险发言"),
+                .success("主持总结")
+            ]),
+            researcher: StaticCouncilResearcher(),
+            taskStore: IOSAdvancedTaskStore(userDefaults: isolatedDefaults(), storageKey: "tasks")
+        )
+        var askedQuestions: [String] = []
+
+        let outcome = await runner.run(
+            request: roomRequest(
+                settings: compactRoomSettings(defaultRounds: 1),
+                researchConsent: .unavailable
+            ),
+            onAskUser: { question in
+                askedQuestions.append(question)
+                return nil
+            }
+        )
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertTrue(
+            askedQuestions.isEmpty,
+            "The runtime must only pause for a concrete model-authored question, never a generic UI instruction."
+        )
+    }
+
+    func testRoomRunnerTimeoutMeasuresLackOfOutputInsteadOfTotalGenerationTime() async {
+        let runner = IOSCouncilRoomRunner(
+            streamer: ProgressingFinalCouncilStreamer(),
+            researcher: StaticCouncilResearcher(),
+            taskStore: IOSAdvancedTaskStore(userDefaults: isolatedDefaults(), storageKey: "tasks"),
+            timeoutUnitNanoseconds: 10_000_000
+        )
+        var settings = compactRoomSettings(defaultRounds: 1)
+        settings.limits.seatTimeoutSeconds = 15
+
+        let outcome = await runner.run(
+            request: roomRequest(
+                settings: settings,
+                researchConsent: .unavailable
+            )
+        )
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(outcome.finalAnswer, "第一段第二段")
     }
 
     func testRoomRunnerSeatFailureCompletesWithFailedSeat() async throws {
@@ -1243,6 +1387,42 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         ).normalized(currentModelId: currentModelId)
     }
 
+    private func makeCouncilModel(_ modelId: String) -> Model {
+        Model(
+            modelId: modelId,
+            displayName: modelId,
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [ModelAbility.reasoning],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+    }
+
+    private func makeCouncilProvider(models: [Model]) -> ProviderSetting {
+        ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "Council Test Provider",
+            models: models,
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "test-key",
+            baseUrl: "https://example.com/v1",
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+    }
+
     private func roomRequest(
         mode: IOSCouncilRoomRunMode = .freeChat,
         settings: IOSCouncilRoomSettings,
@@ -1451,6 +1631,55 @@ private final class CouncilTestAPIKeyStore: SettingsAPIKeyStore {
     func saveApiKey(_ key: String) -> Bool {
         self.key = key
         return true
+    }
+}
+
+@MainActor
+private final class ProgressingFinalCouncilStreamer: IOSCouncilTextStreaming {
+    private var immediateOutputs = ["最终议题", "工程发言", "风险发言"]
+
+    func streamText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onUpdate: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        if !immediateOutputs.isEmpty {
+            let text = immediateOutputs.removeFirst()
+            onUpdate(text)
+            return text
+        }
+        onUpdate("第一段")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        onUpdate("第一段第二段")
+        try await Task.sleep(nanoseconds: 100_000_000)
+        return "第一段第二段"
+    }
+
+    func cancel() {}
+}
+
+@MainActor
+private final class BlockingCouncilProbeStreamer: IOSCouncilTextStreaming {
+    private var continuation: CheckedContinuation<String, Error>?
+    private(set) var cancelCount = 0
+
+    func streamText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onUpdate: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func cancel() {
+        cancelCount += 1
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume(throwing: CancellationError())
     }
 }
 

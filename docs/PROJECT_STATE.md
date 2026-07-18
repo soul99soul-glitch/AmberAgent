@@ -22,6 +22,12 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
+### 2026-07-18 model council question, timeout, and connectivity closure
+
+- 议会原先在每轮末无条件把一段“输入问题，或留空跳过”的流程说明当成 Ask User 问题交给 Sheet；这不是模型生成的问题，也没有可回答的结构。该伪提问已删除，当前运行时不会再假装存在模型提问能力；未新增问题解析协议、自动追问或第二套暂停状态机。
+- 主持人最终综合等单次模型超时由绝对墙钟改为“连续无输出”超时，任意有效流式增量都会刷新计时；超时仍会取消当前 provider 流，没有自动重试或摘要续写。Grok Web 的终止帧现在会主动结束 browser transport，不再等待 HTTP EOF；Provider 详情的连接测试也只在真实模型列表请求返回后报告成功或失败。
+- 「设置 → 模型议会」新增当前议会模型连通性测试：按实际主持/默认席位路由发送极短生成请求，逐项显示可用、失败和“配置模型不存在而回退到当前模型”。普通 Chat 的 `model_council_run` 现读取同一份 Room 设置，审批后的执行任务也进入 coordinator 取消所有权。议会运行器、工具运行时和设置接线合跑为 73 passed、0 failed；强制 `ChatStreamReplayTests` 为 17 passed、1 expected skip、0 failed，`git diff --check` 通过。更大合跑在未触及的 search cancellation canary 等待 continuation 时卡住并人工中止，未把它记为议会产品失败；真实 provider 账号下的各模型结果仍需在设置页实际点击验证。
+
 ### 2026-07-17 novel workspace native glass section navigation
 
 - 小说工作区顶部「创作 / 正文 / 设定」不再使用灰色 `Picker(.segmented)`，改为单一 `44pt` 原生交互式 Liquid Glass Capsule；三个按钮保持等宽、原有 `NovelWorkspaceSection` 状态与页面切换不变。选中项使用同一玻璃平面内的半透明胶囊填充和 matched-geometry 位移动画，避免在玻璃上再叠玻璃；保留 `16pt` 页面边距、动态提案数量、Reduce Motion、禁用态、选择触感和 VoiceOver 选中语义。iOS 26 以下提供 `ultraThinMaterial` fallback。
