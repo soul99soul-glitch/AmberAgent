@@ -50,6 +50,7 @@ struct HistoryPage {
   @State saved: string = '';
   @State hotlistToggles: SourceToggle[] = [];
   @State searchToggles: SourceToggle[] = [];
+  @State showSearchConfig: boolean = false;
   @State bochaKey: string = '';
   @State braveKey: string = '';
   @State exaKey: string = '';
@@ -229,60 +230,74 @@ struct HistoryPage {
           .border({ width: 1, color: LINE })
           .margin({ bottom: 24 })
 
-          // ── 搜索配置分组 ──
+          // ── 搜索配置分组(收起状态只显示按钮) ──
           Column() {
             Row() {
               Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
               Text(' 搜索配置').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
+              Blank()
+              Text('展开').fontSize(12).fontColor(ACCENT)
+                .onClick(() => { this.showSearchConfig = !this.showSearchConfig; })
             }
             .width('100%').margin({ bottom: 16 })
 
-            Text('Tavily API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
-            TextInput({ text: this.tavilyKey, placeholder: 'tvly-...' })
-              .height(44).fontSize(14).fontColor(INK)
-              .placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.tavilyKey = v; })
-              .margin({ bottom: 20 })
+            if (!this.showSearchConfig) {
+              Text('点击展开配置搜索源 API Key')
+                .fontSize(13).fontColor(INK3)
+                .onClick(() => { this.showSearchConfig = true; })
+            } else {
+              // Tavily
+              Text('Tavily API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+              TextInput({ text: this.tavilyKey, placeholder: 'tvly-...' })
+                .height(44).fontSize(14).fontColor(INK)
+                .placeholderColor(INK4)
+                .backgroundColor(SURFACE2).borderRadius(10)
+                .padding({ left: 14, right: 14 })
+                .onChange((v: string) => { this.tavilyKey = v; })
+                .margin({ bottom: 16 })
 
-            Text('Bocha API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
-            TextInput({ text: this.bochaKey, placeholder: 'bocha-...' })
-              .height(44).fontSize(14).fontColor(INK)
-              .placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.bochaKey = v; })
-              .margin({ bottom: 20 })
+              // Bocha
+              Text('Bocha API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+              TextInput({ text: this.bochaKey, placeholder: 'bocha-...' })
+                .height(44).fontSize(14).fontColor(INK)
+                .placeholderColor(INK4)
+                .backgroundColor(SURFACE2).borderRadius(10)
+                .padding({ left: 14, right: 14 })
+                .onChange((v: string) => { this.bochaKey = v; })
+                .margin({ bottom: 16 })
 
-            Text('Brave API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
-            TextInput({ text: this.braveKey, placeholder: 'brave-...' })
-              .height(44).fontSize(14).fontColor(INK)
-              .placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.braveKey = v; })
-              .margin({ bottom: 20 })
+              // Brave
+              Text('Brave API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+              TextInput({ text: this.braveKey, placeholder: 'brave-...' })
+                .height(44).fontSize(14).fontColor(INK)
+                .placeholderColor(INK4)
+                .backgroundColor(SURFACE2).borderRadius(10)
+                .padding({ left: 14, right: 14 })
+                .onChange((v: string) => { this.braveKey = v; })
+                .margin({ bottom: 16 })
 
-            Text('Exa API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
-            TextInput({ text: this.exaKey, placeholder: 'exa-...' })
-              .height(44).fontSize(14).fontColor(INK)
-              .placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.exaKey = v; })
-              .margin({ bottom: 20 })
+              // Exa
+              Text('Exa API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+              TextInput({ text: this.exaKey, placeholder: 'exa-...' })
+                .height(44).fontSize(14).fontColor(INK)
+                .placeholderColor(INK4)
+                .backgroundColor(SURFACE2).borderRadius(10)
+                .padding({ left: 14, right: 14 })
+                .onChange((v: string) => { this.exaKey = v; })
+                .margin({ bottom: 16 })
 
-            Text('SearXNG Base URL(自建)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
-            TextInput({ text: this.searxUrl, placeholder: 'https://searx.example.com' })
-              .height(44).fontSize(14).fontColor(INK)
-              .placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.searxUrl = v; })
+              // SearXNG
+              Text('SearXNG Base URL(自建)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+              TextInput({ text: this.searxUrl, placeholder: 'https://searx.example.com' })
+                .height(44).fontSize(14).fontColor(INK)
+                .placeholderColor(INK4)
+                .backgroundColor(SURFACE2).borderRadius(10)
+                .padding({ left: 14, right: 14 })
+                .onChange((v: string) => { this.searxUrl = v; })
 
-            Text('不配 Tavily 也能用,NewsNow/DuckDuckGo/HackerNews/Jina 始终可用。')
-              .fontSize(11).fontColor(INK4).margin({ top: 12 })
+              Text('不配 Tavily 也能用,NewsNow/DuckDuckGo/HackerNews/Jina 始终可用。')
+                .fontSize(11).fontColor(INK4).margin({ top: 8 })
+            }
           }
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE })
