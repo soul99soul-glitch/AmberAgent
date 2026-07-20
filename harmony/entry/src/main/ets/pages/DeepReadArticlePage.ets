@@ -102,20 +102,16 @@ struct DeepReadArticlePage {
           .onClick(() => { router.back(); })
         Text('深度阅读').fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif').margin({ left: 12 }).layoutWeight(1)
-        if (this.running) {
-          LoadingProgress().width(16).height(16).color(ACCENT)
-        }
       }
       .width('100%').height(56).padding({ left: 24, right: 24 })
       .backgroundColor(BG)
 
       // ── 内容区 ──
       if (this.running) {
-        // 加载中:显示阶段进度
+        // 加载中:显示阶段进度(只保留中间一个 loading + 一个状态文字)
         Column() {
           LoadingProgress().width(40).height(40).color(ACCENT)
           Text(this.currentStage).fontSize(14).fontColor(INK2).margin({ top: 16 })
-          Text('正在深度阅读…').fontSize(12).fontColor(INK3).margin({ top: 6 })
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
       } else if (this.errorMsg.length > 0) {
         // 错误状态
