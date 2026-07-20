@@ -128,8 +128,9 @@ struct DeepReadHomePage {
         Text('设置').fontSize(13).fontColor(INK3)
           .onClick(() => { router.pushUrl({ url: 'pages/HistoryPage' }); })
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 })
+      .width('100%').height(56).padding({ left: 24, right: 24, top: 16 })
       .backgroundColor(BG)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP])
 
       // ── 搜索框 ──
       Row() {
