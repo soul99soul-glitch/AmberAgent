@@ -1,7 +1,18 @@
-// SettingsPage — 设置(配 API key)
+// SettingsPage — 杂志风设置页(分组卡片 + 衬线标题 + 表单排版)
 import { router } from '@kit.ArkUI';
 import { getAppContainer } from '../di/AppContainer.ets';
 import type { Storage } from '@amber/deepread-domain';
+
+const BG: string = '#F4F2EC';
+const SURFACE: string = '#FAF9F5';
+const SURFACE2: string = '#EFECE4';
+const INK: string = '#1B1A17';
+const INK2: string = '#57544C';
+const INK3: string = '#8F8B80';
+const INK4: string = '#B6B1A4';
+const LINE: string = '#E4E0D6';
+const ACCENT: string = '#B8623A';
+const ACCENT_LIGHT: string = '#FFF5F0';
 
 @Entry
 @Component
@@ -31,61 +42,89 @@ struct HistoryPage {
 
   build(): void {
     Column() {
-      // 顶栏
+      // ── 顶栏:品牌(衬线) + 返回 ──
       Row() {
-        Text('返回').fontSize(14).fontColor('#1976D2').onClick(() => router.back())
-        Text('设置').fontSize(18).fontWeight(FontWeight.Medium).margin({ left: 8 }).layoutWeight(1)
+        Text('←').fontSize(18).fontColor(INK3)
+          .onClick(() => { router.back(); })
+        Text('设置')
+          .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontFamily('serif')
+          .margin({ left: 12 })
       }
-      .width('100%').height(52).padding({ left: 16, right: 16 })
+      .width('100%').height(56).padding({ left: 24, right: 24 })
+      .backgroundColor(BG)
 
       Scroll() {
         Column() {
-          // AI 配置
-          Text('AI 配置').fontSize(15).fontWeight(FontWeight.Bold).margin({ top: 16, bottom: 8 }).width('100%')
+          // ── AI 配置分组 ──
+          Text('AI 配置').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
+            .margin({ top: 8, bottom: 8 }).width('100%')
 
-          Text('API Base URL').fontSize(12).fontColor('#666').margin({ bottom: 4 }).width('100%')
-          TextInput({ text: this.aiBaseUrl })
-            .height(40).fontSize(13).backgroundColor('#F5F5F5').borderRadius(8)
-            .onChange((v: string) => { this.aiBaseUrl = v; })
-            .margin({ bottom: 12 })
+          Column() {
+            Text('API Base URL').fontSize(12).fontColor(INK3).margin({ bottom: 4 }).width('100%')
+            TextInput({ text: this.aiBaseUrl })
+              .height(44).fontSize(14).fontColor(INK)
+              .backgroundColor(SURFACE2).borderRadius(10)
+              .onChange((v: string) => { this.aiBaseUrl = v; })
 
-          Text('API Key').fontSize(12).fontColor('#666').margin({ bottom: 4 }).width('100%')
-          TextInput({ text: this.aiKey, placeholder: 'sk-...' })
-            .height(40).fontSize(13).backgroundColor('#F5F5F5').borderRadius(8)
-            .onChange((v: string) => { this.aiKey = v; })
-            .margin({ bottom: 12 })
+            Text('API Key').fontSize(12).fontColor(INK3).margin({ top: 16, bottom: 4 }).width('100%')
+            TextInput({ text: this.aiKey, placeholder: 'sk-...' })
+              .height(44).fontSize(14).fontColor(INK)
+              .placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10)
+              .onChange((v: string) => { this.aiKey = v; })
 
-          Text('模型名称').fontSize(12).fontColor('#666').margin({ bottom: 4 }).width('100%')
-          TextInput({ text: this.model, placeholder: 'deepseek-chat' })
-            .height(40).fontSize(13).backgroundColor('#F5F5F5').borderRadius(8)
-            .onChange((v: string) => { this.model = v; })
-            .margin({ bottom: 16 })
+            Text('模型名称').fontSize(12).fontColor(INK3).margin({ top: 16, bottom: 4 }).width('100%')
+            TextInput({ text: this.model, placeholder: 'deepseek-chat' })
+              .height(44).fontSize(14).fontColor(INK)
+              .placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10)
+              .onChange((v: string) => { this.model = v; })
+          }
+          .width('100%').padding(16).backgroundColor(SURFACE).borderRadius(12)
+          .border({ width: 1, color: LINE })
 
-          // Tavily 搜索
-          Text('搜索配置').fontSize(15).fontWeight(FontWeight.Bold).margin({ bottom: 8 }).width('100%')
+          // ── 搜索配置分组 ──
+          Text('搜索配置').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
+            .margin({ top: 24, bottom: 8 }).width('100%')
 
-          Text('Tavily API Key(可选)').fontSize(12).fontColor('#666').margin({ bottom: 4 }).width('100%')
-          TextInput({ text: this.tavilyKey, placeholder: 'tvly-...' })
-            .height(40).fontSize(13).backgroundColor('#F5F5F5').borderRadius(8)
-            .onChange((v: string) => { this.tavilyKey = v; })
-            .margin({ bottom: 16 })
+          Column() {
+            Text('Tavily API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 4 }).width('100%')
+            TextInput({ text: this.tavilyKey, placeholder: 'tvly-...' })
+              .height(44).fontSize(14).fontColor(INK)
+              .placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10)
+              .onChange((v: string) => { this.tavilyKey = v; })
 
-          Text('不配 Tavily 也能用,NewsNow 国内热榜源始终可用。')
-            .fontSize(11).fontColor('#999').margin({ bottom: 16 })
+            Text('不配 Tavily 也能用,NewsNow 国内热榜源始终可用。')
+              .fontSize(11).fontColor(INK4).margin({ top: 10 }).width('100%')
+          }
+          .width('100%').padding(16).backgroundColor(SURFACE).borderRadius(12)
+          .border({ width: 1, color: LINE })
 
-          Button('保存')
-            .width('100%').height(44).fontSize(15)
-            .onClick(() => { this.save(); })
+          // ── 保存按钮:accent 大按钮 ──
+          Column() {
+            Text('保存').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+          }
+          .width('100%').height(48).borderRadius(12)
+          .backgroundColor(ACCENT)
+          .justifyContent(FlexAlign.Center)
+          .margin({ top: 28 })
+          .onClick(() => { this.save(); })
 
           if (this.saved.length > 0) {
-            Text(this.saved).fontSize(12).fontColor('#43A047').margin({ top: 8 })
+            Text(this.saved).fontSize(13).fontColor(ACCENT).margin({ top: 10 })
           }
+
+          // 底部留白
+          Column() {}.height(40)
         }
         .width('88%')
         .alignItems(HorizontalAlign.Start)
       }
       .layoutWeight(1)
     }
-    .width('100%').height('100%')
+    .width('100%').height('100%').backgroundColor(BG)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 }
