@@ -96,30 +96,14 @@ struct DeepReadHomePage {
 
   async startDeepRead(topicTitle: string, seedUrl: string | null): Promise<void> {
     if (topicTitle.trim().length === 0 || this.running) return;
-    this.running = true;
-    this.status = topicTitle.substring(0, 20);
-    this.articleText = '';
-    const notifier = getNotifier();
+    // 跳转到独立文章阅读页(对照 Android:点击热点 → DeepReadArticlePage)
     const topicId = deriveTopicIdArkTs({ url: seedUrl, title: topicTitle });
+    const notifier = getNotifier();
     await notifier.notifyRunning(topicId, topicTitle);
-    try {
-      const deps: RunManagerDeps = {
-        prefetcher: getPrefetcher(),
-        collectRun: async (m: UIMessage[]): Promise<UIMessage[]> => m,
-        aiClient: new MockAiClient(),
-        model: 'mock', playbookMarkdown: '', nowIso: (): string => '2026-06-25',
-      };
-      const result = await run(deps, topicId, topicTitle, { force: true, seedUrl });
-      if (result.ok) {
-        const o = result.output;
-        this.articleText =
-          (o.summary.length > 0 ? o.summary : '(待生成)') + '\n\n' +
-          '时间线 ' + (o.timeline !== null ? o.timeline.length : 0) + ' 条 · ' +
-          '扩展阅读 ' + o.extendedReading.length + ' 条';
-        this.status = '✓ 完成';
-      } else { this.status = '✗ ' + (result.error ?? ''); }
-    } catch (e) { this.status = '✗ ' + String(e).substring(0, 30); }
-    finally { await notifier.cancelRunning(topicId); this.running = false; }
+    const params: Record<string, string> = {};
+    params['topicId'] = topicId;
+    params['title'] = topicTitle;
+    router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
   }
 
   build(): void {
