@@ -1,4 +1,4 @@
-// SettingsPage — 杂志风设置页(精修版:左对齐标签+呼吸感+accent 锚点)
+// SettingsPage — 杂志风设置页(AI 配置 + 热榜源开关 + 搜索源开关 + 搜索配置)
 import { router } from '@kit.ArkUI';
 import { getAppContainer } from '../di/AppContainer.ets';
 import type { Storage } from '@amber/deepread-domain';
@@ -14,13 +14,27 @@ const INK3: string = '#8F8B80';
 const INK4: string = '#B6B1A4';
 const LINE: string = '#E4E0D6';
 const ACCENT: string = '#B8623A';
-const ACCENT_LIGHT: string = '#FFF5F0';
 
 interface SourceToggle {
   id: string;
   displayName: string;
   enabled: boolean;
 }
+
+// 搜索源定义(对照 Android SearchService)
+interface SearchSourceDef {
+  id: string;
+  displayName: string;
+  needKey: boolean;
+}
+
+const SEARCH_SOURCES: SearchSourceDef[] = [
+  { id: 'newsnow', displayName: 'NewsNow 国内热榜', needKey: false },
+  { id: 'duckduckgo', displayName: 'DuckDuckGo', needKey: false },
+  { id: 'hackernews', displayName: 'Hacker News', needKey: false },
+  { id: 'jina', displayName: 'Jina AI', needKey: false },
+  { id: 'tavily', displayName: 'Tavily', needKey: true },
+];
 
 @Entry
 @Component
@@ -30,7 +44,8 @@ struct HistoryPage {
   @State tavilyKey: string = '';
   @State model: string = 'deepseek-chat';
   @State saved: string = '';
-  @State toggles: SourceToggle[] = [];
+  @State hotlistToggles: SourceToggle[] = [];
+  @State searchToggles: SourceToggle[] = [];
   private storage: Storage | null = null;
 
   async aboutToAppear(): Promise<void> {
@@ -39,19 +54,28 @@ struct HistoryPage {
     this.aiBaseUrl = await this.storage.get<string>('ai_base_url', 'https://api.deepseek.com');
     this.tavilyKey = await this.storage.get<string>('tavily_api_key', '');
     this.model = await this.storage.get<string>('ai_model', 'deepseek-chat');
-    const loaded: SourceToggle[] = [];
+    // 热榜源开关
+    const hotlist: SourceToggle[] = [];
     for (let i = 0; i < NEWSNOW_PRESETS.length; i++) {
       const p: NewsNowPreset = NEWSNOW_PRESETS[i];
       const enabled: string = await this.storage.get<string>('source_' + p.id, 'true');
-      loaded.push({ id: p.id, displayName: p.displayName, enabled: enabled === 'true' });
+      hotlist.push({ id: p.id, displayName: p.displayName, enabled: enabled === 'true' });
     }
-    this.toggles = loaded;
+    this.hotlistToggles = hotlist;
+    // 搜索源开关
+    const search: SourceToggle[] = [];
+    for (let i = 0; i < SEARCH_SOURCES.length; i++) {
+      const s = SEARCH_SOURCES[i];
+      const enabled: string = await this.storage.get<string>('search_' + s.id, 'true');
+      search.push({ id: s.id, displayName: s.displayName, enabled: enabled === 'true' });
+    }
+    this.searchToggles = search;
   }
 
-  async toggleSource(id: string): Promise<void> {
+  async toggleHotlist(id: string): Promise<void> {
     const newToggles: SourceToggle[] = [];
-    for (let i = 0; i < this.toggles.length; i++) {
-      const t: SourceToggle = this.toggles[i];
+    for (let i = 0; i < this.hotlistToggles.length; i++) {
+      const t: SourceToggle = this.hotlistToggles[i];
       if (t.id === id) {
         const newEnabled: boolean = !t.enabled;
         newToggles.push({ id: t.id, displayName: t.displayName, enabled: newEnabled });
@@ -60,7 +84,22 @@ struct HistoryPage {
         newToggles.push(t);
       }
     }
-    this.toggles = newToggles;
+    this.hotlistToggles = newToggles;
+  }
+
+  async toggleSearch(id: string): Promise<void> {
+    const newToggles: SourceToggle[] = [];
+    for (let i = 0; i < this.searchToggles.length; i++) {
+      const t: SourceToggle = this.searchToggles[i];
+      if (t.id === id) {
+        const newEnabled: boolean = !t.enabled;
+        newToggles.push({ id: t.id, displayName: t.displayName, enabled: newEnabled });
+        await this.storage!.set<string>('search_' + id, newEnabled ? 'true' : 'false');
+      } else {
+        newToggles.push(t);
+      }
+    }
+    this.searchToggles = newToggles;
   }
 
   async save(): Promise<void> {
@@ -73,7 +112,7 @@ struct HistoryPage {
 
   build(): void {
     Column() {
-      // ── 顶栏:返回 + 衬线大标题 ──
+      // ── 顶栏:返回 + 衬线标题 ──
       Row() {
         Text('←').fontSize(18).fontColor(INK3)
           .onClick(() => { router.back(); })
@@ -93,9 +132,8 @@ struct HistoryPage {
               Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
               Text(' AI 配置').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
             }
-            .width('100%').margin({ bottom: 20 })
+            .width('100%').margin({ bottom: 16 })
 
-            // API Base URL
             Text('API Base URL').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
             TextInput({ text: this.aiBaseUrl })
               .height(44).fontSize(14).fontColor(INK)
@@ -104,7 +142,6 @@ struct HistoryPage {
               .onChange((v: string) => { this.aiBaseUrl = v; })
               .margin({ bottom: 20 })
 
-            // API Key
             Text('API Key').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
             TextInput({ text: this.aiKey, placeholder: 'sk-...' })
               .height(44).fontSize(14).fontColor(INK)
@@ -114,7 +151,6 @@ struct HistoryPage {
               .onChange((v: string) => { this.aiKey = v; })
               .margin({ bottom: 20 })
 
-            // 模型名称
             Text('模型名称').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
             TextInput({ text: this.model, placeholder: 'deepseek-chat' })
               .height(44).fontSize(14).fontColor(INK)
@@ -137,12 +173,37 @@ struct HistoryPage {
             }
             .width('100%').margin({ bottom: 16 })
 
-            ForEach(this.toggles, (t: SourceToggle) => {
+            ForEach(this.hotlistToggles, (t: SourceToggle) => {
               Row() {
                 Text(t.displayName).fontSize(14).fontColor(INK2).layoutWeight(1)
                 Toggle({ type: ToggleType.Switch, isOn: t.enabled })
                   .selectedColor(ACCENT)
-                  .onChange(() => { this.toggleSource(t.id); })
+                  .onChange(() => { this.toggleHotlist(t.id); })
+              }
+              .width('100%').padding({ top: 12, bottom: 12 })
+              .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+            })
+          }
+          .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
+          .border({ width: 1, color: LINE })
+          .margin({ bottom: 24 })
+
+          // ── 搜索源分组 ──
+          Column() {
+            Row() {
+              Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
+              Text(' 搜索源').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
+              Blank()
+              Text('Deep Read 搜索').fontSize(11).fontColor(INK4)
+            }
+            .width('100%').margin({ bottom: 16 })
+
+            ForEach(this.searchToggles, (t: SourceToggle) => {
+              Row() {
+                Text(t.displayName).fontSize(14).fontColor(INK2).layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: t.enabled })
+                  .selectedColor(ACCENT)
+                  .onChange(() => { this.toggleSearch(t.id); })
               }
               .width('100%').padding({ top: 12, bottom: 12 })
               .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
@@ -168,14 +229,14 @@ struct HistoryPage {
               .padding({ left: 14, right: 14 })
               .onChange((v: string) => { this.tavilyKey = v; })
 
-            Text('不配 Tavily 也能用,NewsNow 国内热榜源始终可用。')
+            Text('不配 Tavily 也能用,NewsNow/DuckDuckGo/HackerNews/Jina 始终可用。')
               .fontSize(11).fontColor(INK4).margin({ top: 12 })
           }
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE })
           .margin({ bottom: 28 })
 
-          // ── 保存按钮:accent 大按钮 ──
+          // ── 保存按钮 ──
           Column() {
             Text('保存').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
           }
