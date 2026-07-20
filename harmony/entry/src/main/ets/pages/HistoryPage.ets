@@ -133,15 +133,16 @@ struct HistoryPage {
       .width('100%').height(56).padding({ left: 24, right: 24 })
       .backgroundColor(BG)
 
-      Scroll() {
-        Column() {
-          // ── AI 配置分组 ──
+      List({ space: 0 }) {
+        // ── AI 配置分组 ──
+        ListItem() {
           Column() {
             Row() {
               Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
               Text(' AI 配置').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
             }
             .width('100%').margin({ bottom: 16 })
+            .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100, curve: Curve.EaseIn }))
 
             Text('API Base URL').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
             TextInput({ text: this.aiBaseUrl })
@@ -171,8 +172,10 @@ struct HistoryPage {
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE })
           .margin({ bottom: 24 })
+        }
 
-          // ── 热榜源分组 ──
+        // ── 热榜源分组 ──
+        ListItem() {
           Column() {
             Row() {
               Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
@@ -181,6 +184,7 @@ struct HistoryPage {
               Text('NewsNow').fontSize(11).fontColor(INK4)
             }
             .width('100%').margin({ bottom: 16 })
+            .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 200, curve: Curve.EaseIn }))
 
             ForEach(this.hotlistToggles, (t: SourceToggle) => {
               Row() {
@@ -196,8 +200,10 @@ struct HistoryPage {
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE })
           .margin({ bottom: 24 })
+        }
 
-          // ── 搜索源配置分组 ──
+        // ── 搜索源配置分组 ──
+        ListItem() {
           Column() {
             Row() {
               Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
@@ -206,11 +212,11 @@ struct HistoryPage {
               Text('Deep Read 搜索').fontSize(11).fontColor(INK4)
             }
             .width('100%').margin({ bottom: 16 })
+            .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 300, curve: Curve.EaseIn }))
 
             // 源选择器(自定义下拉菜单)
             Text('选择搜索源').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
 
-            // 当前选中项(点击展开)
             Row() {
               Text(KEYED_SOURCES.find((s) => s.id === this.selectedSource)?.displayName ?? '选择')
                 .fontSize(14).fontColor(INK).layoutWeight(1)
@@ -220,7 +226,6 @@ struct HistoryPage {
             .backgroundColor(SURFACE2).borderRadius(10)
             .onClick(() => { this.showSourcePicker = !this.showSourcePicker; })
 
-            // 展开的选项列表
             if (this.showSourcePicker) {
               Column() {
                 ForEach(KEYED_SOURCES, (s: SearchSourceDef) => {
@@ -237,6 +242,8 @@ struct HistoryPage {
               }
               .width('100%').backgroundColor(SURFACE).borderRadius(10)
               .border({ width: 1, color: LINE })
+              .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseIn }))
+              .transition(TransitionEffect.translate({ y: -10 }).animation({ duration: 200, curve: Curve.EaseOut }))
               .margin({ top: 4 })
             }
 
@@ -272,12 +279,16 @@ struct HistoryPage {
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE })
           .margin({ bottom: 24 })
+        }
 
-          // ── 说明 ──
+        // ── 说明 ──
+        ListItem() {
           Text('NewsNow/DuckDuckGo/HackerNews/Jina 始终可用,无需 key。')
             .fontSize(11).fontColor(INK4).margin({ bottom: 24 })
+        }
 
-          // ── 保存按钮 ──
+        // ── 保存按钮 ──
+        ListItem() {
           Column() {
             Text('保存全部').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
           }
@@ -285,15 +296,12 @@ struct HistoryPage {
           .backgroundColor(ACCENT)
           .justifyContent(FlexAlign.Center)
           .onClick(() => { this.save(); })
-
-          if (this.saved.length > 0) {
-            Text(this.saved).fontSize(13).fontColor(ACCENT).margin({ top: 10 })
-          }
-
-          Column() {}.height(40)
         }
-        .width('90%')
-        .alignItems(HorizontalAlign.Start)
+
+        // ── 保存状态 ──
+        ListItem() {
+          Text(this.saved.length > 0 ? this.saved : '').fontSize(13).fontColor(ACCENT).margin({ top: 10 })
+        }
       }
       .layoutWeight(1)
     }

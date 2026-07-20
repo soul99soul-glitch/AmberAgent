@@ -128,11 +128,10 @@ struct DeepReadHomePage {
         Text('设置').fontSize(13).fontColor(INK3)
           .onClick(() => { router.pushUrl({ url: 'pages/HistoryPage' }); })
       }
-      .width('100%').height(56).padding({ left: 24, right: 24, top: 16 })
+      .width('100%').height(56).padding({ left: 24, right: 24 })
       .backgroundColor(BG)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP])
 
-      // ── 搜索框:白底大圆角 ──
+      // ── 搜索框 ──
       Row() {
         TextInput({ text: this.title, placeholder: '搜索或输入话题…' })
           .layoutWeight(1).fontSize(15)
@@ -182,7 +181,7 @@ struct DeepReadHomePage {
                 Text('9 源聚合').fontSize(11).fontColor(INK4)
               }
               .width('100%').padding({ top: 20, bottom: 10 })
-              .transition(TransitionEffect.OPACITY.animation({ duration: 300, curve: Curve.EaseIn }))
+              .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 50, curve: Curve.EaseIn }))
             }
 
             // 头条:衬线大标题 + 热度
@@ -219,12 +218,8 @@ struct DeepReadHomePage {
                 }
                 .width('100%').padding({ top: 14, bottom: 14 })
                 .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-                .stateStyles({
-                  pressed: { opacity: 0.7 },
-                  normal: { opacity: 1 },
-                })
-                .animation({ duration: 100, curve: Curve.EaseInOut })
-                .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100 + idx * 50 }))
+                .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100 + idx * 60, curve: Curve.EaseIn }))
+                .transition(TransitionEffect.translate({ x: 20 }).animation({ duration: 300, delay: 100 + idx * 60, curve: Curve.EaseOut }))
                 .onClick(() => { this.startDeepRead(item.title, item.url); })
               }
             })
@@ -260,11 +255,6 @@ struct DeepReadHomePage {
                 }
                 .width('100%').padding({ top: 13, bottom: 13 })
                 .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-                .stateStyles({
-                  pressed: { opacity: 0.7 },
-                  normal: { opacity: 1 },
-                })
-                .animation({ duration: 100, curve: Curve.EaseInOut })
                 .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100 + idx * 50 }))
                 .onClick(() => { this.startDeepRead(item.title, item.url); })
               }

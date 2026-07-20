@@ -132,6 +132,7 @@ struct DeepReadArticlePage {
             // ── 标题:衬线大字 ──
             Text(this.title)
               .fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
+              .transition(TransitionEffect.OPACITY.animation({ duration: 400, curve: Curve.EaseIn }))
               .fontFamily('serif')
               .lineHeight(34).maxLines(3)
 
@@ -144,6 +145,7 @@ struct DeepReadArticlePage {
             // ── 概览 summary ──
             if (this.output.summary.length > 0) {
               Text(this.output.summary)
+                .transition(TransitionEffect.OPACITY.animation({ duration: 300, curve: Curve.EaseIn }))
                 .fontSize(16).fontColor(INK2)
                 .fontFamily('serif')
                 .lineHeight(26)
@@ -157,6 +159,7 @@ struct DeepReadArticlePage {
                 Text(' 时间线').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
               }
               .width('100%').margin({ bottom: 10 })
+              .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100, curve: Curve.EaseIn }))
 
               ForEach(this.timelineText(this.output), (item: string, idx: number) => {
                 Row() {
