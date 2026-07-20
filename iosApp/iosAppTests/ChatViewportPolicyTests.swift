@@ -202,6 +202,15 @@ final class ChatViewportPolicyTests: XCTestCase {
             ),
             .abort
         )
+        XCTAssertEqual(
+            ChatSwiftUIConversationAnchorRetryPolicy.decision(
+                taskCancelled: false,
+                tokenMatches: true,
+                canRunNow: true,
+                isAlreadyAnchored: true
+            ),
+            .abort
+        )
     }
 
     func testSwiftUIExplicitBottomButtonPreservesMeasuredGeometryUntilScrollArrives() {

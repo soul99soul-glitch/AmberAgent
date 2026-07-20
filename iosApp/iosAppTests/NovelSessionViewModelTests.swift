@@ -4,6 +4,167 @@ import XCTest
 
 @MainActor
 final class NovelSessionViewModelTests: XCTestCase {
+    func testDiscussionArchiveDistillsWithoutPersistingThenCommitsEditedDecisions() async throws {
+        var document = try NovelTestFixtures.document()
+        let omittedProse = String(repeating: "这段正文候选绝不能进入讨论蒸馏。", count: 80)
+        document.sessions[0].messages = [
+            NovelSessionMessageRecord(
+                id: NovelMessageID(), sequence: 0, role: .user, mode: .discussPlan,
+                kind: .userInput, content: "主角应在何时揭示身世？",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_001),
+                runID: nil, candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(), sequence: 1, role: .assistant, mode: .discussPlan,
+                kind: .discussion, content: "建议第三章末揭示。",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_002),
+                runID: nil, candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(), sequence: 2, role: .assistant, mode: .writeProse,
+                kind: .proseCandidate, content: omittedProse,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_003),
+                runID: nil, candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(), sequence: 3, role: .user, mode: .discussPlan,
+                kind: .userInput, content: "就定在第三章末。",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_004),
+                runID: nil, candidateID: nil
+            ),
+        ]
+        document.sessions[0].revision = 4
+        try NovelDocumentValidator.validate(document)
+        let archiveJSON = """
+        {"schemaVersion":1,"decisions":[{"topic":"身世揭示","decision":"第三章末揭示。","relatedMaterialID":null}],"summary":"已确定身世揭示时点。"}
+        """
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.delta(archiveJSON), .complete])]
+        )
+
+        let distilled = await harness.session.distillDiscussionArchive(chapterID: nil)
+        let draft = try XCTUnwrap(distilled)
+        XCTAssertEqual(draft.throughSequence, 3)
+        XCTAssertEqual(draft.decisions.map(\.topic), ["身世揭示"])
+        let requests = await harness.adapter.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertFalse(request.messages.map(\.content).joined().contains(omittedProse))
+
+        var persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertNil(persisted.sessions[0].archiveCursor)
+        XCTAssertFalse(persisted.materials.contains { $0.kind == .decisionLog })
+
+        let rejected = await harness.session.confirmDiscussionArchive(
+            draft,
+            decisions: [],
+            summary: draft.summary
+        )
+        XCTAssertFalse(rejected)
+        persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertNil(persisted.sessions[0].archiveCursor)
+
+        var edited = draft.decisions
+        edited[0].decision = "第五章开场揭示。"
+        let confirmed = await harness.session.confirmDiscussionArchive(
+            draft,
+            decisions: edited,
+            summary: "确认在第五章开场揭示身世。"
+        )
+        XCTAssertTrue(confirmed)
+
+        persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(persisted.sessions[0].archiveCursor, .through(sequence: 3))
+        XCTAssertEqual(persisted.sessions[0].discussionArchives?.last?.summary, "确认在第五章开场揭示身世。")
+        let decisionMaterial = try XCTUnwrap(
+            persisted.materials.first { $0.kind == .decisionLog }
+        )
+        XCTAssertEqual(
+            persisted.materialRevisions.first { $0.materialID == decisionMaterial.id }?.content,
+            "第五章开场揭示。"
+        )
+    }
+
+    func testStartingRunProjectsUserPromptBeforeProviderConnects() async throws {
+        var document = try NovelTestFixtures.document()
+        document.sessions[0].messages = [
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 0,
+                role: .user,
+                mode: .discussPlan,
+                kind: .userInput,
+                content: "上一轮问题",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                runID: nil,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 1,
+                role: .assistant,
+                mode: .discussPlan,
+                kind: .discussion,
+                content: String(repeating: "上一轮回答仍应留在视口布局中。", count: 80),
+                createdAt: Date(timeIntervalSince1970: 1_700_000_001),
+                runID: nil,
+                candidateID: nil
+            ),
+        ]
+        document.sessions[0].revision = 2
+        try NovelDocumentValidator.validate(document)
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.pause])],
+            usesAttachGate: true
+        )
+        let gate = try XCTUnwrap(harness.attachGate)
+        await gate.blockNextStart()
+
+        let sendTask = Task { @MainActor in
+            await harness.session.send(text: "这一轮问题必须立即可见")
+        }
+        let startBlocked = await eventually {
+            await gate.startIsBlocked()
+        }
+        XCTAssertTrue(startBlocked)
+
+        let project = try XCTUnwrap(harness.workspace.projectSnapshot)
+        let branch = try XCTUnwrap(harness.workspace.branchSnapshot)
+        let listModel = try XCTUnwrap(
+            harness.session.projectedListModel(project: project, branch: branch)
+        )
+        let rows = listModel.rows
+        XCTAssertEqual(rows.map(\.role), [.user, .assistant, .user, .assistant])
+        XCTAssertEqual(rows[0].content, "上一轮问题")
+        XCTAssertEqual(rows[2].content, "这一轮问题必须立即可见")
+        XCTAssertEqual(rows.last?.transientPhase, .waitingForFirstToken)
+        XCTAssertEqual(listModel.historicalRows.map(\.role), [.user, .assistant])
+        XCTAssertEqual(listModel.activeRunRows.map(\.role), [.user, .assistant])
+        let startingUserDigest = rows[2].digest
+
+        await gate.resumeBlockedStart()
+        let didStart = await sendTask.value
+        XCTAssertTrue(didStart)
+        let durablePromptPublished = await eventually {
+            harness.session.durableMessages.contains {
+                $0.content == "这一轮问题必须立即可见"
+            }
+        }
+        XCTAssertTrue(durablePromptPublished)
+        let refreshedProject = try XCTUnwrap(harness.workspace.projectSnapshot)
+        let refreshedBranch = try XCTUnwrap(harness.workspace.branchSnapshot)
+        let refreshedRows = try XCTUnwrap(
+            harness.session.projectedListModel(project: refreshedProject, branch: refreshedBranch)
+        ).rows
+        XCTAssertEqual(
+            refreshedRows.filter { $0.content == "这一轮问题必须立即可见" }.count,
+            1
+        )
+        XCTAssertEqual(refreshedRows[2].digest, startingUserDigest)
+        await harness.session.stop()
+    }
+
     func testSessionInitializesFromAnAlreadyCompleteWorkspaceSelection() async throws {
         let repository = InMemoryNovelProjectRepository()
         let document = try NovelTestFixtures.document()
@@ -440,9 +601,81 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(run.interruptionReason, .routeExit)
         XCTAssertEqual(run.partialContent, "保留的半段正文")
         XCTAssertEqual(document.sessions[0].messages.last?.kind, .interruptedDraft)
-        XCTAssertTrue(document.candidates.isEmpty)
+        XCTAssertEqual(document.candidates.first?.status, .interrupted)
+        XCTAssertEqual(document.candidates.first?.content, run.partialContent)
         let cancelledRunIDs = await harness.adapter.cancelledRunIDs
         XCTAssertTrue(cancelledRunIDs.contains(runID))
+    }
+
+    func testInterruptedProseCanBeCollectedThenUndoneWithoutLeavingRetryAction() async throws {
+        let partial = "Mara opened the archive.\n\nShe found a map."
+        let harness = try await makeHarness(scripts: [
+            NovelModelScript(steps: [.delta(partial), .pause]),
+            NovelModelScript(steps: [.delta(validRebuildJSON), .pause, .complete]),
+        ])
+        harness.session.mode = .writeProse
+        harness.session.granularity = .wholeChapter
+
+        let didStart = await harness.session.send(text: "写完整一章")
+        XCTAssertTrue(didStart)
+        let sawPartial = await eventually {
+            harness.session.transientTail?.content == partial
+        }
+        XCTAssertTrue(sawPartial)
+        await harness.session.stop()
+        let persistedInterruption = await eventually {
+            harness.workspace.projectSnapshot?.candidates.contains {
+                $0.kind == .prose && $0.status == .interrupted
+            } == true
+        }
+        XCTAssertTrue(persistedInterruption)
+
+        let candidate = try XCTUnwrap(
+            harness.workspace.projectSnapshot?.candidates.first {
+                $0.kind == .prose && $0.status == .interrupted
+            }
+        )
+        XCTAssertEqual(candidate.content, partial)
+        let paragraphs = harness.session.paragraphs(candidateID: candidate.id)
+        let collected = await harness.session.collectCandidate(
+            candidate.id,
+            selection: NovelParagraphSelection(paragraphIDs: paragraphs.map(\.id)),
+            target: .createNextChapter(chapterID: NovelChapterID(), title: "新章")
+        )
+        XCTAssertTrue(collected)
+
+        let collectedProject = try await harness.repository.loadProject(
+            id: harness.projectID
+        ).document
+        XCTAssertEqual(
+            collectedProject.candidates.first { $0.id == candidate.id }?.status,
+            .collected
+        )
+        XCTAssertEqual(collectedProject.chapterVersions.last?.content, partial)
+        let projected = try XCTUnwrap(harness.session.projectedListModel(
+            project: try XCTUnwrap(harness.workspace.projectSnapshot),
+            branch: try XCTUnwrap(harness.workspace.branchSnapshot)
+        ))
+        XCTAssertFalse(projected.rows.flatMap(\.actions).contains {
+            if case .retryGeneration = $0.action { return true }
+            return false
+        })
+
+        let syncStarted = await eventually { await harness.adapter.requests.count == 2 }
+        XCTAssertTrue(syncStarted)
+        let requests = await harness.adapter.requests
+        let syncRunID = try XCTUnwrap(requests.last?.runID)
+        await harness.adapter.resume(runID: syncRunID)
+        let syncCompleted = await eventually(timeout: 5) {
+            harness.workspace.branchSnapshot?.branch.syncStatus == .synchronized &&
+                !harness.workspace.isPerforming
+        }
+        XCTAssertTrue(syncCompleted, harness.workspace.errorMessage ?? "自动剧情同步未完成")
+
+        await harness.workspace.undoBranchHead()
+        await harness.session.bindToCurrentSelection()
+        let undone = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(undone.branches[0].headCheckpointID, candidate.baseCheckpointID)
     }
 
     func testSelectBranchTerminatesOldDurableRunBeforeRebinding() async throws {
@@ -1389,10 +1622,26 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertNil(harness.session.activeRunID)
         XCTAssertFalse(harness.session.canStop)
 
+        let terminalProject = try XCTUnwrap(harness.workspace.projectSnapshot)
+        let terminalBranch = try XCTUnwrap(harness.workspace.branchSnapshot)
+        let terminalList = try XCTUnwrap(
+            harness.session.projectedListModel(project: terminalProject, branch: terminalBranch)
+        )
+        let terminalRunRowIDs = terminalList.activeRunRows.map(\.id)
+        XCTAssertEqual(terminalRunRowIDs.count, 2)
+
         let didRefresh = await harness.session.refresh()
         XCTAssertTrue(didRefresh)
         XCTAssertNil(harness.session.transientTail)
         XCTAssertEqual(harness.session.durableMessages.last?.content, "已经完成的正文")
+        let durableProject = try XCTUnwrap(harness.workspace.projectSnapshot)
+        let durableBranch = try XCTUnwrap(harness.workspace.branchSnapshot)
+        let durableList = try XCTUnwrap(
+            harness.session.projectedListModel(project: durableProject, branch: durableBranch)
+        )
+        XCTAssertNil(durableList.activeTailID)
+        XCTAssertTrue(durableList.activeRunRows.isEmpty)
+        XCTAssertTrue(Set(terminalRunRowIDs).isSubset(of: Set(durableList.historicalRows.map(\.id))))
     }
 
     func testSelectedStableParagraphCollectsAndCommitsFacts() async throws {
@@ -2020,7 +2269,8 @@ private extension NovelSessionViewModelTests {
                 onOpenCollection: { _ in },
                 onOpenManualRewrite: { _ in },
                 onFork: { _ in },
-                onOpenSettingProposals: { _ in }
+                onOpenSettingProposals: { _ in },
+                onArchiveDiscussion: {}
             )
         }
     }

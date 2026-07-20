@@ -522,12 +522,54 @@ final class ChatMessageProjectionTests: XCTestCase {
         )
     }
 
-    func testStableStreamingMarkdownControllerRejectsInstanceRenderableAcrossSpeculativeModeChange() {
-        XCTAssertFalse(
-            ChatStableStreamingMarkdownControllerTestSupport
-                .hasInstanceRenderableAfterSpeculativeModeChange(),
-            "完成态不能先复用流式 speculative renderable 再异步重组。"
+    func testStableStreamingMarkdownControllerKeepsInstanceRenderableAcrossCompletionParse() {
+        let resolution = ChatStableStreamingMarkdownControllerTestSupport
+            .instanceResolutionAfterSpeculativeModeChange()
+
+        XCTAssertTrue(resolution.hasRenderable, "完成态解析落地前应保留同一文本的已渲染内容，不能退回纯文本。")
+        XCTAssertTrue(resolution.suppressesInitialFade, "完成态复用已有内容时不能让整段文字重新淡入。")
+    }
+
+    func testStableStreamingMarkdownControllerKeepsIdentityRenderableAcrossColdCompletion() {
+        let resolution = ChatStableStreamingMarkdownControllerTestSupport
+            .coldCompletionIdentityResolution()
+
+        XCTAssertTrue(resolution.hasRenderable, "完成瞬间发生视图重建时也不能退回纯文本。")
+        XCTAssertTrue(resolution.suppressesInitialFade, "冷完成复用已有内容时不能让整段文字重新淡入。")
+    }
+
+    func testStableStreamingMarkdownControllerKeepsSpeculativeRenderableForUnclosedMarkupAtCompletion() {
+        let resolution = ChatStableStreamingMarkdownControllerTestSupport
+            .instanceResolutionAfterSpeculativeModeChangeWithUnclosedMarkup()
+
+        XCTAssertTrue(
+            resolution.hasRenderable,
+            "中断/超时使文本停在未闭合语法时，完成态仍复用流式 renderable 保持连续，随后由立即重解析纠正。"
         )
+        XCTAssertTrue(
+            resolution.suppressesInitialFade,
+            "跨模式复用未闭合内容时同样不能让整段文字重新淡入。"
+        )
+    }
+
+    func testRenderableDocumentReusesOnlyUnchangedPrefixObjects() async {
+        let parser = MarkdownParserImpl()
+        let initial = await parser.parse(text: "First paragraph.\n\nSecond paragraph.")
+        let updated = await parser.parse(text: "First paragraph.\n\nSecond paragraph grows.")
+        let initialRenderable = await RenderableDocument(document: initial, config: .default)
+        let converted = await RenderableDocument(document: updated, config: .default)
+        let updatedRenderable = converted.reusingUnchangedPrefix(from: initialRenderable)
+
+        guard case let .paragraph(_, initialFirst) = initialRenderable.renderables[0],
+              case let .paragraph(_, updatedFirst) = updatedRenderable.renderables[0],
+              case let .paragraph(_, initialSecond) = initialRenderable.renderables[1],
+              case let .paragraph(_, updatedSecond) = updatedRenderable.renderables[1] else {
+            return XCTFail("Expected two paragraphs")
+        }
+
+        XCTAssertTrue(initialFirst === updatedFirst)
+        XCTAssertFalse(initialSecond === updatedSecond)
+        XCTAssertEqual(updatedSecond.string, "Second paragraph grows.")
     }
 
     func testStableStreamingMarkdownControllerRejectsInstanceRenderableAcrossVisualConfigChange() {
@@ -1233,6 +1275,15 @@ final class ChatMessageProjectionTests: XCTestCase {
             userInteracting: true
         )
         XCTAssertTrue(userDraggingAwayFromBottom.followPaused)
+
+        let driverPausedAfterDrag = NativeStaticTimelineViewportPolicy.state(
+            distanceToBottom: 950,
+            visibleHeight: 800,
+            contentHeight: 2_200,
+            hasMessages: true,
+            driverPausedForUser: true
+        )
+        XCTAssertTrue(driverPausedAfterDrag.followPaused, "手指抬起后的几何帧不能清掉 native driver 持有的历史浏览暂停。")
 
         let bottomOfScrollableContent = NativeStaticTimelineViewportPolicy.state(
             distanceToBottom: 0,

@@ -22,11 +22,219 @@ enum NovelSessionSheetSubmissionResult: Equatable {
     case failed(message: String)
 }
 
+enum NovelDiscussionArchivePreparationResult: Equatable {
+    case ready(NovelDiscussionArchiveDraft)
+    case failed(String)
+}
+
+struct NovelDiscussionArchiveOfferSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    /// Distill requires a synchronized, idle branch; collection always leaves needsSync.
+    let isReady: Bool
+    let onContinue: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Label("本章正文已收录", systemImage: "checkmark.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(AmberTheme.accent)
+                Text("可以把本章讨论中已经确认的决定整理成长期记忆。整理结果会先给你确认，不会直接写入项目。")
+                    .font(.body)
+                    .foregroundStyle(AmberTheme.foreground2)
+                if !isReady {
+                    Label("剧情状态同步完成后可归档", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+                Button("归档本章讨论", systemImage: "archivebox") {
+                    onContinue()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!isReady)
+                Button("暂不归档") { dismiss() }
+                    .buttonStyle(.bordered)
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .navigationTitle("收录完成")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+struct NovelDiscussionArchiveSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let onPrepare: @MainActor () async -> NovelDiscussionArchivePreparationResult
+    let onConfirm: @MainActor (
+        NovelDiscussionArchiveDraft,
+        [NovelDiscussionArchiveDraftDecision],
+        String
+    ) async -> Bool
+
+    @State private var draft: NovelDiscussionArchiveDraft?
+    @State private var decisions: [NovelDiscussionArchiveDraftDecision] = []
+    @State private var selectedDecisionIDs: Set<UUID> = []
+    @State private var summary = ""
+    @State private var failureMessage: String?
+    @State private var isPreparing = false
+    @State private var isSubmitting = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if isPreparing {
+                    Section {
+                        ProgressView("正在整理本轮讨论")
+                    }
+                } else if let failureMessage {
+                    Section("整理失败") {
+                        Label(failureMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(AmberTheme.accentRed)
+                        Button("重试") { prepare() }
+                    }
+                } else if draft != nil {
+                    Section("讨论摘要") {
+                        TextEditor(text: $summary)
+                            .frame(minHeight: 90)
+                        Text("\(summary.count)/300")
+                            .font(.caption)
+                            .foregroundStyle(summary.count <= 300 ? AmberTheme.muted : AmberTheme.accentRed)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+
+                    Section("确认决定") {
+                        ForEach($decisions) { $decision in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Toggle(
+                                    "收录此决定",
+                                    isOn: selectionBinding(for: decision.id)
+                                )
+                                TextField("决定主题", text: $decision.topic)
+                                    .font(.headline)
+                                TextEditor(text: $decision.decision)
+                                    .frame(minHeight: 72)
+                                Button(role: .destructive) {
+                                    removeDecision(decision.id)
+                                } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(AmberTheme.background)
+            .navigationTitle("归档讨论")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                        .disabled(isSubmitting)
+                }
+                if draft != nil, failureMessage == nil {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(confirmedDecisions.isEmpty ? "取消归档" : "确认归档") {
+                            submit()
+                        }
+                        .disabled(!canSubmit || isSubmitting)
+                    }
+                }
+            }
+            .overlay {
+                if isSubmitting {
+                    ProgressView("正在保存归档")
+                        .padding(16)
+                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
+                }
+            }
+        }
+        .interactiveDismissDisabled(isPreparing || isSubmitting)
+        .task { prepare() }
+    }
+
+    private var confirmedDecisions: [NovelDiscussionArchiveDraftDecision] {
+        decisions.filter { selectedDecisionIDs.contains($0.id) }
+    }
+
+    private var canSubmit: Bool {
+        if confirmedDecisions.isEmpty { return true }
+        let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmedSummary.isEmpty &&
+            trimmedSummary.count <= 300 &&
+            confirmedDecisions.allSatisfy {
+                !$0.topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                    !$0.decision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+    }
+
+    private func selectionBinding(for id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { selectedDecisionIDs.contains(id) },
+            set: { selected in
+                if selected {
+                    selectedDecisionIDs.insert(id)
+                } else {
+                    selectedDecisionIDs.remove(id)
+                }
+            }
+        )
+    }
+
+    private func removeDecision(_ id: UUID) {
+        decisions.removeAll { $0.id == id }
+        selectedDecisionIDs.remove(id)
+    }
+
+    private func prepare() {
+        guard !isPreparing else { return }
+        isPreparing = true
+        failureMessage = nil
+        Task { @MainActor in
+            let result = await onPrepare()
+            isPreparing = false
+            switch result {
+            case .ready(let prepared):
+                draft = prepared
+                decisions = prepared.decisions
+                selectedDecisionIDs = Set(prepared.decisions.map(\.id))
+                summary = prepared.summary
+            case .failed(let message):
+                failureMessage = message
+            }
+        }
+    }
+
+    private func submit() {
+        guard let draft else { return }
+        let confirmed = confirmedDecisions
+        guard !confirmed.isEmpty else {
+            dismiss()
+            return
+        }
+        guard canSubmit else { return }
+        isSubmitting = true
+        Task { @MainActor in
+            let succeeded = await onConfirm(draft, confirmed, summary)
+            isSubmitting = false
+            if succeeded {
+                dismiss()
+            } else {
+                failureMessage = "归档没有保存，请检查项目状态后重试。"
+            }
+        }
+    }
+}
+
 struct NovelCollectCandidateSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let paragraphs: [NovelParagraphRecord]
     let chapters: [NovelSessionChapterOption]
+    let onCompleted: @MainActor (NovelCollectionTarget) -> Void
     let onCollect: @MainActor (
         NovelParagraphSelection,
         NovelCollectionTarget
@@ -44,6 +252,7 @@ struct NovelCollectCandidateSheet: View {
         paragraphs: [NovelParagraphRecord],
         chapters: [NovelSessionChapterOption],
         suggestedGranularity: NovelGenerationGranularity,
+        onCompleted: @escaping @MainActor (NovelCollectionTarget) -> Void = { _ in },
         onCollect: @escaping @MainActor (
             NovelParagraphSelection,
             NovelCollectionTarget
@@ -51,6 +260,7 @@ struct NovelCollectCandidateSheet: View {
     ) {
         self.paragraphs = paragraphs
         self.chapters = chapters
+        self.onCompleted = onCompleted
         self.onCollect = onCollect
         let paragraphIDs = Set(paragraphs.map(\.id))
         let candidateText = paragraphs.map(\.text).joined(separator: "\n\n")
@@ -305,7 +515,10 @@ struct NovelCollectCandidateSheet: View {
             let result = await onCollect(selection, target)
             isSubmitting = false
             submissionResult = result
-            if result == .completed { dismiss() }
+            if result == .completed {
+                onCompleted(target)
+                dismiss()
+            }
         }
     }
 

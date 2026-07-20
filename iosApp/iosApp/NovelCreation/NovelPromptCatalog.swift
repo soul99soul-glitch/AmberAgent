@@ -7,6 +7,7 @@ enum NovelPromptKind: String, Codable, CaseIterable, Sendable {
     case proseWholeChapter
     case stateDeltaV1
     case manualSyncV1
+    case discussionArchiveV1
     case wholeChapterPolish
     case polishDriftV1
 }
@@ -140,6 +141,32 @@ enum NovelPromptCatalog {
                 derived state. Do not modify shared project settings.
 
                 \(stateRebuildJSONContract)
+                """
+            )
+
+        case .discussionArchiveV1:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.discussion-archive.v1",
+                systemText: """
+                Distill only decisions that the supplied novel-planning discussion explicitly settled or made
+                reliably unambiguous. Do not invent decisions, story events, or manuscript facts. The input does
+                not include full prose candidates. Use the discussion's language.
+
+                Return exactly one raw JSON object with no Markdown fence, comment, or trailing prose:
+                {
+                  "schemaVersion": 1,
+                  "decisions": [
+                    {
+                      "topic": "non-empty decision topic",
+                      "decision": "non-empty confirmed decision",
+                      "relatedMaterialID": null
+                    }
+                  ],
+                  "summary": "non-empty discussion summary, at most 300 characters"
+                }
+                decisions must be non-empty. relatedMaterialID is either null or a UUID explicitly supplied in
+                the discussion input. Do not add unknown keys.
                 """
             )
 

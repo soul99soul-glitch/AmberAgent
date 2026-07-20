@@ -303,8 +303,8 @@ final class NovelGenerationReducerTests: XCTestCase {
         XCTAssertEqual(interrupted.document.activeRuns[0].status, .interrupted)
         XCTAssertEqual(interrupted.document.activeRuns[0].interruptionReason, .background)
         XCTAssertEqual(interrupted.message?.message.kind, .interruptedDraft)
-        XCTAssertNil(interrupted.message?.message.candidateID)
-        XCTAssertTrue(interrupted.document.candidates.isEmpty)
+        XCTAssertEqual(interrupted.message?.message.candidateID, request.candidateID)
+        XCTAssertEqual(interrupted.document.candidates.first?.status, .interrupted)
 
         let lateComplete = try NovelGenerationReducer.complete(
             runID: request.id,
@@ -333,6 +333,32 @@ final class NovelGenerationReducerTests: XCTestCase {
         XCTAssertEqual(lateComplete.document, interrupted.document)
         XCTAssertEqual(lateFailure.document, interrupted.document)
         XCTAssertEqual(duplicateInterrupt.document, interrupted.document)
+    }
+
+    func testInterruptedProsePersistsCandidateFromTerminalPartialSnapshot() throws {
+        let document = try NovelTestFixtures.document()
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let started = try begin(request, in: document)
+
+        let interrupted = try NovelGenerationReducer.interrupt(
+            runID: request.id,
+            reason: .user,
+            partialContent: "只收录这份终态快照",
+            in: started,
+            now: terminalTime
+        )
+
+        let candidate = try XCTUnwrap(interrupted.document.candidates.first)
+        XCTAssertEqual(candidate.id, request.candidateID)
+        XCTAssertEqual(candidate.kind, .prose)
+        XCTAssertEqual(candidate.status, .interrupted)
+        XCTAssertEqual(candidate.content, "只收录这份终态快照")
+        XCTAssertEqual(interrupted.message?.message.candidateID, candidate.id)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(interrupted.document))
     }
 
     func testFailureStoresFailureAndPartialWithoutCreatingCandidate() throws {

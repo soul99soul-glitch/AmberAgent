@@ -263,11 +263,49 @@ extension NovelReducer {
             throw NovelError.invalidInput("The forked Session has incomplete candidate history.")
         }
 
+        var forkLineage: Set<NovelCheckpointID> = []
+        var lineageCheckpoint: NovelBranchCheckpointRecord? = checkpoint
+        while let current = lineageCheckpoint, forkLineage.insert(current.id).inserted {
+            lineageCheckpoint = current.parentCheckpointID.flatMap { parentID in
+                document.checkpoints.first(where: { $0.id == parentID })
+            }
+        }
+        let prefixSequences = Set(prefix.map(\.sequence))
+        let inheritedArchives = (sourceSession.discussionArchives ?? [])
+            .filter {
+                forkLineage.contains($0.checkpointID) && prefixSequences.contains($0.throughSequence)
+            }
+            .map { archive in
+                NovelDiscussionArchiveRecord(
+                    id: NovelBranchSemantics.inheritedMessageID(
+                        operationID: command.context.operationID,
+                        sourceID: archive.id
+                    ),
+                    checkpointID: archive.checkpointID,
+                    throughSequence: archive.throughSequence,
+                    messageCount: archive.messageCount,
+                    chapterID: archive.chapterID,
+                    summary: archive.summary,
+                    createdAt: archive.createdAt
+                )
+            }
+        let inheritedArchiveIDs = Set(inheritedArchives.map(\.id))
+        guard inheritedArchiveIDs.count == inheritedArchives.count,
+              inheritedArchiveIDs.isDisjoint(with: existingMessageIDs),
+              inheritedArchiveIDs.isDisjoint(with: Set(messageIDs)) else {
+            throw NovelError.immutableRecordConflict("forked discussion archive identity")
+        }
+        let inheritedArchiveCursor = inheritedArchives
+            .max { $0.throughSequence < $1.throughSequence }
+            .map { NovelSessionCursor.through(sequence: $0.throughSequence) }
+
         let session = NovelSessionRecord(
             id: command.sessionID,
             branchID: command.branchID,
             revision: 0,
-            messages: messages
+            messages: messages,
+            archiveCursor: inheritedArchiveCursor,
+            discussionArchives: inheritedArchives.isEmpty ? nil : inheritedArchives
         )
         let branch = NovelBranchRecord(
             id: command.branchID,
@@ -455,6 +493,26 @@ extension NovelReducer {
             in: document
         )
         next.branches[index].updatedAt = now
+        if let sessionIndex = next.sessions.firstIndex(where: { $0.id == branch.sessionID }) {
+            var lineage: Set<NovelCheckpointID> = []
+            var checkpoint: NovelBranchCheckpointRecord? = target
+            while let current = checkpoint, lineage.insert(current.id).inserted {
+                checkpoint = current.parentCheckpointID.flatMap { parentID in
+                    document.checkpoints.first(where: { $0.id == parentID })
+                }
+            }
+            let latestArchive = (next.sessions[sessionIndex].discussionArchives ?? [])
+                .filter { lineage.contains($0.checkpointID) }
+                .max { $0.throughSequence < $1.throughSequence }
+            next.sessions[sessionIndex].archiveCursor = latestArchive.map {
+                .through(sequence: $0.throughSequence)
+            }
+            if next.sessions[sessionIndex].archiveCursor != document.sessions.first(where: {
+                $0.id == branch.sessionID
+            })?.archiveCursor {
+                next.sessions[sessionIndex].revision += 1
+            }
+        }
         next.project.revision += 1
         next.project.updatedAt = now
         let outcome = NovelOutcome.branchHeadMoved(
@@ -469,6 +527,169 @@ extension NovelReducer {
             command.context,
             kind: .undoBranchHead,
             payloadSHA256: try NovelAction.undoBranchHead(command).canonicalPayloadSHA256(),
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validateTransition(from: document, to: next)
+        return (next, outcome)
+    }
+
+    static func archiveDiscussion(
+        _ command: NovelArchiveDiscussionCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date = Date()
+    ) throws -> (document: NovelProjectDocumentV1, outcome: NovelOutcome) {
+        let branchIndex = try requireBranchMutation(
+            command.context,
+            branchID: command.branchID,
+            in: document
+        )
+        let branch = document.branches[branchIndex]
+        guard branch.lifecycle == .active else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        try requireIdleBranch(branch, in: document)
+        guard branch.syncStatus == .synchronized else {
+            throw NovelError.invalidInput("Synchronize the working manuscript before archiving discussion.")
+        }
+        guard let sessionIndex = document.sessions.firstIndex(where: {
+            $0.id == branch.sessionID && $0.branchID == branch.id
+        }) else {
+            throw NovelError.sessionNotFound(branch.sessionID)
+        }
+        let session = document.sessions[sessionIndex]
+        let previousSequence: Int64 = switch session.archiveCursor {
+        case .through(let sequence): sequence
+        case .empty, nil: -1
+        }
+        guard command.throughSequence > previousSequence,
+              session.messages.contains(where: { $0.sequence == command.throughSequence }) else {
+            throw NovelError.invalidInput("Discussion archive cursor must advance within the Session history.")
+        }
+        let archivedMessages = session.messages.filter {
+            $0.sequence > previousSequence && $0.sequence <= command.throughSequence
+        }
+        guard !archivedMessages.isEmpty else {
+            throw NovelError.invalidInput("Discussion archive has no new messages.")
+        }
+        let summary = try normalizedRequired(command.summary, field: "Discussion archive summary")
+        guard summary.count <= 300 else {
+            throw NovelError.invalidInput("Discussion archive summary exceeds 300 characters.")
+        }
+        guard !command.decisions.isEmpty else {
+            throw NovelError.invalidInput("Discussion archive requires at least one confirmed decision.")
+        }
+        guard document.sessions.allSatisfy({ session in
+            !session.messages.contains(where: { $0.id == command.archiveID }) &&
+                !(session.discussionArchives ?? []).contains(where: { $0.id == command.archiveID })
+        }) else {
+            throw NovelError.immutableRecordConflict("discussion archive \(command.archiveID)")
+        }
+        if let chapterID = command.chapterID,
+           !document.chapters.contains(where: { $0.id == chapterID }) {
+            throw NovelError.invalidInput("Discussion archive references a missing chapter.")
+        }
+        guard Set(command.decisions.map(\.materialID)).count == command.decisions.count,
+              Set(command.decisions.map(\.revisionID)).count == command.decisions.count else {
+            throw NovelError.invalidInput("Discussion archive repeats a decision identifier.")
+        }
+        try requireUnusedBranchOperation(command.context.operationID, in: document)
+
+        var next = document
+        var decisionRevisionIDs: [NovelMaterialRevisionID] = []
+        for decision in command.decisions {
+            guard !next.materials.contains(where: { $0.id == decision.materialID }),
+                  !next.materialRevisions.contains(where: { $0.id == decision.revisionID }) else {
+                throw NovelError.immutableRecordConflict("discussion decision \(decision.materialID)")
+            }
+            if let relatedMaterialID = decision.relatedMaterialID,
+               !next.materials.contains(where: {
+                   $0.id == relatedMaterialID && !$0.isDeleted
+               }) {
+                throw NovelError.invalidInput("Discussion decision references a missing material.")
+            }
+            let topic = try normalizedRequired(decision.topic, field: "Discussion decision topic")
+            let content = try normalizedRequired(
+                decision.decision,
+                field: "Discussion decision content"
+            )
+            let tags = decision.relatedMaterialID.map {
+                ["related-material:\($0.description)"]
+            } ?? []
+            let revision = NovelMaterialRevisionRecord(
+                id: decision.revisionID,
+                materialID: decision.materialID,
+                revision: 1,
+                title: topic,
+                content: content,
+                tags: tags,
+                injectionMode: .always,
+                createdAt: now,
+                operationID: command.context.operationID
+            )
+            next.materialRevisions.append(revision)
+            next.materials.append(NovelMaterialRecord(
+                id: decision.materialID,
+                kind: .decisionLog,
+                currentRevisionID: revision.id,
+                revisionIDs: [revision.id]
+            ))
+            decisionRevisionIDs.append(revision.id)
+        }
+
+        next.branches[branchIndex].overrideRevisionIDs.append(contentsOf: decisionRevisionIDs)
+        next.sessions[sessionIndex].archiveCursor = .through(sequence: command.throughSequence)
+        next.sessions[sessionIndex].discussionArchives =
+            (next.sessions[sessionIndex].discussionArchives ?? []) + [NovelDiscussionArchiveRecord(
+                id: command.archiveID,
+                checkpointID: command.checkpointID,
+                throughSequence: command.throughSequence,
+                messageCount: archivedMessages.count,
+                chapterID: command.chapterID,
+                summary: summary,
+                createdAt: now
+            )]
+        next.sessions[sessionIndex].revision += 1
+        let checkpoint = NovelBranchCheckpointRecord(
+            id: command.checkpointID,
+            kind: .discussionArchive,
+            createdOnBranchID: branch.id,
+            parentCheckpointID: branch.headCheckpointID,
+            chapterSelections: branch.workingChapterSelections,
+            stateSnapshotID: branch.currentStateSnapshotID,
+            sessionCursor: session.messages.last.map {
+                .through(sequence: $0.sequence)
+            } ?? .empty,
+            branchOverrideRevisionIDs: next.branches[branchIndex].overrideRevisionIDs,
+            sourceCandidateID: nil,
+            baseHeadRevision: branch.headRevision,
+            operationID: command.context.operationID,
+            createdAt: now
+        )
+        try appendCheckpoint(
+            checkpoint,
+            to: &next,
+            expectedHeadRevision: branch.headRevision,
+            advancesWorkingRevision: false,
+            now: now
+        )
+        next.project.revision += 1
+        next.project.configRevision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.discussionArchived(
+            projectID: command.projectID,
+            branchID: branch.id,
+            archiveID: command.archiveID,
+            checkpointID: checkpoint.id,
+            decisionRevisionIDs: decisionRevisionIDs,
+            projectRevision: next.project.revision,
+            configRevision: next.project.configRevision
+        )
+        recordBranchOperation(
+            command.context,
+            kind: .archiveDiscussion,
+            payloadSHA256: try NovelAction.archiveDiscussion(command).canonicalPayloadSHA256(),
             outcome: outcome,
             in: &next,
             now: now

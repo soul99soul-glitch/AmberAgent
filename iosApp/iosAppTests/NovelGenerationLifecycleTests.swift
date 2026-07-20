@@ -282,7 +282,8 @@ final class NovelGenerationLifecycleTests: XCTestCase {
             XCTAssertEqual(final.activeRuns[0].status, .interrupted)
             XCTAssertEqual(final.activeRuns[0].partialContent, partial)
             XCTAssertEqual(final.sessions[0].messages.count, partial.isEmpty ? 1 : 2)
-            XCTAssertTrue(final.candidates.isEmpty)
+            XCTAssertEqual(final.candidates.count, partial.isEmpty ? 0 : 1)
+            XCTAssertEqual(final.candidates.first?.status, partial.isEmpty ? nil : .interrupted)
             XCTAssertNil(final.branches[0].activeRunID)
 
             let wroteSidecar = await eventually {
@@ -513,7 +514,7 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         let afterLateCallbacks = try await harness.repository.document(request.projectID)
         XCTAssertEqual(afterLateCallbacks, firstTerminal)
         XCTAssertEqual(afterLateCallbacks.activeRuns[0].status, .interrupted)
-        XCTAssertTrue(afterLateCallbacks.candidates.isEmpty)
+        XCTAssertEqual(afterLateCallbacks.candidates.first?.status, .interrupted)
         XCTAssertEqual(afterLateCallbacks.sessions[0].messages.filter { $0.role == .assistant }.count, 1)
     }
 
@@ -555,7 +556,7 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         XCTAssertEqual(recovered.activeRuns[0].partialContent, "Recover this draft")
         XCTAssertEqual(recovered.sessions[0].messages.last?.kind, .interruptedDraft)
         XCTAssertEqual(recovered.sessions[0].messages.last?.content, "Recover this draft")
-        XCTAssertTrue(recovered.candidates.isEmpty)
+        XCTAssertEqual(recovered.candidates.first?.status, .interrupted)
         let remainingSidecars = try await harness.repository.listRecoverySidecars()
         XCTAssertTrue(remainingSidecars.isEmpty)
 

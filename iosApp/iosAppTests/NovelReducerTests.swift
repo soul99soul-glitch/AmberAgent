@@ -2,6 +2,229 @@ import XCTest
 @testable import iosApp
 
 final class NovelReducerTests: XCTestCase {
+    func testArchivingDiscussionCommitsConfirmedDecisionsAndUndoRestoresArchiveState() throws {
+        var document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let branchID = document.branches[0].id
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        document.sessions[0].messages = [
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 0,
+                role: .user,
+                mode: .discussPlan,
+                kind: .userInput,
+                content: "主角是否隐瞒身世？",
+                createdAt: now,
+                runID: nil,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 1,
+                role: .assistant,
+                mode: .discussPlan,
+                kind: .discussion,
+                content: "决定隐瞒到第三章结尾。",
+                createdAt: now,
+                runID: nil,
+                candidateID: nil
+            ),
+        ]
+
+        let materialID = NovelMaterialID()
+        let revisionID = NovelMaterialRevisionID()
+        let archiveID = NovelMessageID()
+        let checkpointID = NovelCheckpointID()
+        let archived = try NovelReducer.apply(.archiveDiscussion(NovelArchiveDiscussionCommand(
+            context: NovelTestFixtures.context(
+                projectRevision: document.project.revision,
+                branchHeadRevision: document.branches[0].headRevision
+            ),
+            projectID: document.project.id,
+            branchID: branchID,
+            archiveID: archiveID,
+            checkpointID: checkpointID,
+            throughSequence: 1,
+            chapterID: nil,
+            summary: "确认主角隐瞒身世，并在第三章末揭示。",
+            decisions: [NovelConfirmedDiscussionDecision(
+                materialID: materialID,
+                revisionID: revisionID,
+                topic: "主角身世揭示时点",
+                decision: "隐瞒到第三章结尾。",
+                relatedMaterialID: nil
+            )]
+        )), to: document, now: now).document
+
+        XCTAssertEqual(archived.sessions[0].archiveCursor, .through(sequence: 1))
+        XCTAssertEqual(archived.sessions[0].discussionArchives?.map(\.id), [archiveID])
+        XCTAssertEqual(archived.checkpoints.last?.id, checkpointID)
+        XCTAssertEqual(archived.checkpoints.last?.kind, .discussionArchive)
+        XCTAssertEqual(archived.branches[0].workingRevision, document.branches[0].workingRevision)
+        XCTAssertEqual(archived.materials.last?.kind, .decisionLog)
+        XCTAssertEqual(archived.materialRevisions.last?.title, "主角身世揭示时点")
+        XCTAssertEqual(archived.materialRevisions.last?.content, "隐瞒到第三章结尾。")
+        XCTAssertEqual(
+            try NovelMaterialResolver.effectiveRevisions(
+                document: archived,
+                branch: archived.branches[0]
+            ).map(\.revision.id),
+            [revisionID]
+        )
+
+        let undone = try NovelReducer.apply(.undoBranchHead(NovelUndoBranchHeadCommand(
+            context: NovelTestFixtures.context(
+                projectRevision: archived.project.revision,
+                branchHeadRevision: archived.branches[0].headRevision
+            ),
+            projectID: archived.project.id,
+            branchID: branchID,
+            expectedWorkingRevision: archived.branches[0].workingRevision
+        )), to: archived, now: now.addingTimeInterval(1)).document
+
+        XCTAssertNil(undone.sessions[0].archiveCursor)
+        XCTAssertEqual(undone.sessions[0].discussionArchives?.map(\.id), [archiveID])
+        XCTAssertTrue(try NovelMaterialResolver.effectiveRevisions(
+            document: undone,
+            branch: undone.branches[0]
+        ).isEmpty)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(undone))
+    }
+
+    func testForkFromDiscussionArchiveCheckpointInheritsCursorAndKeepsInjectionReplacement() throws {
+        var document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let sourceBranchID = document.branches[0].id
+        let now = Date(timeIntervalSince1970: 1_700_000_100)
+        let proseCandidateID = NovelCandidateID()
+        let proseMessageID = NovelMessageID()
+        document.sessions[0].messages = [
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 0,
+                role: .user,
+                mode: .discussPlan,
+                kind: .userInput,
+                content: "RAW_FORK_ARCHIVED_USER",
+                createdAt: now,
+                runID: nil,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 1,
+                role: .assistant,
+                mode: .discussPlan,
+                kind: .discussion,
+                content: "RAW_FORK_ARCHIVED_ASSISTANT",
+                createdAt: now,
+                runID: nil,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 2,
+                role: .user,
+                mode: .writeProse,
+                kind: .userInput,
+                content: "生成整章",
+                createdAt: now,
+                runID: nil,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: proseMessageID,
+                sequence: 3,
+                role: .assistant,
+                mode: .writeProse,
+                kind: .proseCandidate,
+                content: "WHOLE_CHAPTER_CANDIDATE",
+                createdAt: now,
+                runID: nil,
+                candidateID: proseCandidateID
+            ),
+        ]
+        document.candidates.append(NovelCandidateRecord(
+            id: proseCandidateID,
+            kind: .prose,
+            branchID: sourceBranchID,
+            sessionID: document.sessions[0].id,
+            sourceMessageID: proseMessageID,
+            baseCheckpointID: document.branches[0].headCheckpointID,
+            baseHeadRevision: document.branches[0].headRevision,
+            status: .available,
+            content: "WHOLE_CHAPTER_CANDIDATE",
+            sourceChapterVersionID: nil,
+            collectedCheckpointID: nil,
+            createdAt: now
+        ))
+        let archived = try NovelReducer.apply(.archiveDiscussion(NovelArchiveDiscussionCommand(
+            context: NovelTestFixtures.context(
+                projectRevision: document.project.revision,
+                branchHeadRevision: document.branches[0].headRevision
+            ),
+            projectID: document.project.id,
+            branchID: sourceBranchID,
+            archiveID: NovelMessageID(),
+            checkpointID: NovelCheckpointID(),
+            throughSequence: 1,
+            chapterID: nil,
+            summary: "FORK_ARCHIVED_SUMMARY",
+            decisions: [NovelConfirmedDiscussionDecision(
+                materialID: NovelMaterialID(),
+                revisionID: NovelMaterialRevisionID(),
+                topic: "FORK_DECISION_TOPIC",
+                decision: "FORK_DECISION_CONTENT",
+                relatedMaterialID: nil
+            )]
+        )), to: document, now: now).document
+        let archiveCheckpointID = try XCTUnwrap(archived.checkpoints.last?.id)
+        XCTAssertEqual(archived.sessions[0].archiveCursor, .through(sequence: 1))
+        XCTAssertEqual(archived.checkpoints.last?.sessionCursor, .through(sequence: 3))
+        let forkedBranchID = NovelBranchID()
+        let forked = try NovelReducer.apply(.forkBranch(NovelForkBranchCommand(
+            context: NovelTestFixtures.context(
+                projectRevision: archived.project.revision,
+                branchHeadRevision: archived.branches[0].headRevision
+            ),
+            projectID: archived.project.id,
+            sourceBranchID: sourceBranchID,
+            checkpointID: archiveCheckpointID,
+            branchID: forkedBranchID,
+            sessionID: NovelSessionID(),
+            name: "归档后分支"
+        )), to: archived, now: now.addingTimeInterval(1)).document
+
+        let forkedSession = try XCTUnwrap(forked.sessions.first { $0.branchID == forkedBranchID })
+        XCTAssertEqual(forkedSession.messages.map(\.sequence), [0, 1, 2, 3])
+        XCTAssertEqual(forkedSession.messages.map(\.kind), [
+            .userInput,
+            .discussion,
+            .userInput,
+            .proseCandidate,
+        ])
+        XCTAssertEqual(forkedSession.archiveCursor, .through(sequence: 1))
+        XCTAssertEqual(forkedSession.discussionArchives?.count, 1)
+        XCTAssertEqual(forkedSession.discussionArchives?.first?.summary, "FORK_ARCHIVED_SUMMARY")
+        XCTAssertNotEqual(
+            forkedSession.discussionArchives?.first?.id,
+            archived.sessions[0].discussionArchives?.first?.id
+        )
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(forked))
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: forked,
+            request: NovelInjectionPlanningRequest(
+                branchID: forkedBranchID,
+                promptKind: .discussion,
+                userText: "继续"
+            )
+        )
+        XCTAssertFalse(plan.contextText.contains("RAW_FORK_ARCHIVED_USER"))
+        XCTAssertFalse(plan.contextText.contains("RAW_FORK_ARCHIVED_ASSISTANT"))
+        XCTAssertTrue(plan.contextText.contains("FORK_ARCHIVED_SUMMARY"))
+        XCTAssertTrue(plan.contextText.contains("FORK_DECISION_TOPIC"))
+    }
+
     func testBlankProjectCreatesInitialCheckpointStateBranchAndSession() throws {
         let command = NovelTestFixtures.createCommand()
         let result = try NovelReducer.createProject(

@@ -2,6 +2,47 @@ import XCTest
 @testable import iosApp
 
 final class NovelStructuredOutputTests: XCTestCase {
+    func testDiscussionArchiveDecoderExtractsOneWrappedObjectAndRejectsInvalidPayloads() throws {
+        let wrapped = """
+        归档结果如下：
+        ```json
+        {
+          "schemaVersion": 1,
+          "decisions": [{
+            "topic": "主角身世揭示时点",
+            "decision": "隐瞒到第三章结尾。",
+            "relatedMaterialID": null
+          }],
+          "summary": "确认主角隐瞒身世，并在第三章末揭示。"
+        }
+        ```
+        """
+
+        let decoded = try NovelStructuredOutputDecoder.decodeDiscussionArchive(from: wrapped)
+
+        XCTAssertEqual(decoded.decisions.map(\.topic), ["主角身世揭示时点"])
+        XCTAssertEqual(decoded.decisions.map(\.decision), ["隐瞒到第三章结尾。"])
+        XCTAssertEqual(decoded.summary, "确认主角隐瞒身世，并在第三章末揭示。")
+
+        assertFailure(
+            category: .invalidValue,
+            try NovelStructuredOutputDecoder.decodeDiscussionArchive(
+                from: wrapped.replacingOccurrences(
+                    of: "\"确认主角隐瞒身世，并在第三章末揭示。\"",
+                    with: "\"\(String(repeating: "摘", count: 301))\""
+                )
+            )
+        )
+        assertFailure(
+            category: .invalidValue,
+            try NovelStructuredOutputDecoder.decodeDiscussionArchive(
+                from: """
+                {"schemaVersion":1,"decisions":[],"summary":"没有决定"}
+                """
+            )
+        )
+    }
+
     func testQuickStartSuggestionsRequireIndependentCharacterSections() throws {
         let valid = """
         {

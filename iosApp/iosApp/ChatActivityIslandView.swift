@@ -109,6 +109,7 @@ struct ChatActivityIslandView: View {
         .padding(.vertical, state.isActive ? 7 : 8)
         .frame(minHeight: state.isActive ? 42 : 34)
         .frame(maxWidth: state.isActive ? 268 : 230)
+        .fixedSize(horizontal: true, vertical: false)
         .modifier(ChatActivityIslandSoftField(tint: state.tint.color, isActive: state.isActive))
         .modifier(ChatActivityIslandGlass())
         .contentShape(Capsule())
@@ -124,7 +125,6 @@ struct ChatActivityIslandView: View {
             .foregroundStyle(AmberTheme.foreground)
             .lineLimit(1)
             .minimumScaleFactor(0.84)
-            .frame(maxWidth: .infinity)
             .contentTransition(.opacity)
     }
 

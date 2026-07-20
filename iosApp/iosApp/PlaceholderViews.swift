@@ -352,12 +352,14 @@ enum AmberHaptics {
 struct AmberPressFeedbackStyle: ButtonStyle {
     var pressedScale: CGFloat = 0.96
     var haptic: AmberHapticEvent? = .lightImpact
+    var onPressChanged: ((Bool) -> Void)? = nil
 
     func makeBody(configuration: Configuration) -> some View {
         AmberPressFeedbackBody(
             configuration: configuration,
             pressedScale: pressedScale,
-            haptic: haptic
+            haptic: haptic,
+            onPressChanged: onPressChanged
         )
     }
 }
@@ -366,6 +368,7 @@ private struct AmberPressFeedbackBody: View {
     let configuration: ButtonStyleConfiguration
     let pressedScale: CGFloat
     let haptic: AmberHapticEvent?
+    let onPressChanged: ((Bool) -> Void)?
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -379,6 +382,7 @@ private struct AmberPressFeedbackBody: View {
                 value: configuration.isPressed
             )
             .onChange(of: configuration.isPressed) { _, isPressed in
+                onPressChanged?(isEnabled && isPressed)
                 defer { wasPressed = isPressed }
                 guard isEnabled, isPressed, !wasPressed, let haptic else { return }
                 AmberHaptics.trigger(haptic)

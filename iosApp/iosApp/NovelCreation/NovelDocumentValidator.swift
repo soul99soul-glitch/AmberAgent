@@ -386,6 +386,13 @@ enum NovelDocumentValidator {
         if Set(allMessageIDs).count != allMessageIDs.count {
             issues.append("A message ID is shared by multiple creation Sessions.")
         }
+        let allArchiveIDs = document.sessions.flatMap {
+            ($0.discussionArchives ?? []).map(\.id)
+        }
+        if Set(allArchiveIDs).count != allArchiveIDs.count ||
+            !Set(allArchiveIDs).isDisjoint(with: allMessageIDs) {
+            issues.append("A discussion archive ID is repeated or collides with a Session message.")
+        }
         for branch in document.branches {
             if branch.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 issues.append("Branch \(branch.id) has an empty name.")
@@ -406,6 +413,57 @@ enum NovelDocumentValidator {
             }
             if Set(session.messages.map(\.id)).count != session.messages.count {
                 issues.append("Session \(session.id) repeats a message ID.")
+            }
+            let archives = session.discussionArchives ?? []
+            for archive in archives {
+                if archive.messageCount <= 0 ||
+                    archive.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    archive.summary.count > 300 {
+                    issues.append("Discussion archive \(archive.id) has invalid presentation data.")
+                }
+                if !session.messages.contains(where: { $0.sequence == archive.throughSequence }) {
+                    issues.append("Discussion archive \(archive.id) has an invalid Session cursor.")
+                }
+                if let chapterID = archive.chapterID,
+                   !document.chapters.contains(where: { $0.id == chapterID }) {
+                    issues.append("Discussion archive \(archive.id) references a missing chapter.")
+                }
+                guard let checkpoint = document.checkpoints.first(where: {
+                    $0.id == archive.checkpointID
+                }) else {
+                    issues.append("Discussion archive \(archive.id) has no checkpoint.")
+                    continue
+                }
+                // Residual archives after undo stay on the creating branch; forks keep the source
+                // archive checkpoint id while it remains in head lineage.
+                let onCreatingBranch = checkpoint.createdOnBranchID == branch.id
+                let inHeadLineage = checkpointIsAncestorOrSelf(
+                    archive.checkpointID,
+                    of: branch.headCheckpointID,
+                    in: document
+                )
+                let checkpointCoversArchive = switch checkpoint.sessionCursor {
+                case .through(let sequence): sequence >= archive.throughSequence
+                case .empty: false
+                }
+                if checkpoint.kind != .discussionArchive ||
+                    !checkpointCoversArchive ||
+                    !(onCreatingBranch || inHeadLineage) {
+                    issues.append("Discussion archive \(archive.id) disagrees with its checkpoint.")
+                }
+            }
+            let activeArchives = archives.filter {
+                checkpointIsAncestorOrSelf(
+                    $0.checkpointID,
+                    of: branch.headCheckpointID,
+                    in: document
+                )
+            }
+            let expectedArchiveCursor = activeArchives.max {
+                $0.throughSequence < $1.throughSequence
+            }.map { NovelSessionCursor.through(sequence: $0.throughSequence) }
+            if session.archiveCursor != expectedArchiveCursor {
+                issues.append("Session \(session.id) archive cursor disagrees with branch history.")
             }
             validateSessionInteractions(session, issues: &issues)
             guard let head = document.checkpoints.first(where: {
@@ -606,7 +664,7 @@ enum NovelDocumentValidator {
             case .character: kindKey = "character"
             case .masterOutline: kindKey = "masterOutline"
             case .writingRequirements: kindKey = "writingRequirements"
-            case .custom:
+            case .decisionLog, .custom:
                 issues.append("Quick-start proposal \(proposal.id) suggests an unsupported material kind.")
                 continue
             }
@@ -748,7 +806,7 @@ enum NovelDocumentValidator {
                 if checkpoint.kind == .polish && candidate.kind != .polish {
                     issues.append("Polish checkpoint \(checkpoint.id) has a non-polish candidate.")
                 }
-            case .initial, .manualSync, .restore:
+            case .initial, .manualSync, .discussionArchive, .restore:
                 if checkpoint.sourceCandidateID != nil {
                     issues.append("Checkpoint \(checkpoint.id) unexpectedly has a source candidate.")
                 }
@@ -889,7 +947,22 @@ enum NovelDocumentValidator {
             if message.role != .assistant || message.content != candidate.content {
                 issues.append("Candidate \(candidate.id) source message has invalid role or content.")
             }
-            if candidate.kind == .prose && message.kind != .proseCandidate {
+            let rootCandidateID = NovelCandidateSemantics.rootCandidateID(
+                for: candidate,
+                candidatesByID: candidateByID
+            )
+            let isInterruptedProseMessage = message.kind == .interruptedDraft &&
+                message.runID.flatMap { runID in
+                    document.activeRuns.first {
+                        $0.id == runID &&
+                            $0.status == .interrupted &&
+                            $0.kind == .prose &&
+                            $0.candidateID == rootCandidateID
+                    }
+                } != nil
+            if candidate.kind == .prose &&
+                message.kind != .proseCandidate &&
+                !isInterruptedProseMessage {
                 issues.append("Prose candidate \(candidate.id) has the wrong message kind.")
             }
             if candidate.kind == .polish && message.kind != .polishCandidate {
@@ -1087,7 +1160,7 @@ enum NovelDocumentValidator {
                     issues.append("Pending operation \(pending.id) does not match its candidate base guard.")
                 }
                 if candidate.kind != .prose ||
-                    candidate.status != .available ||
+                    (candidate.status != .available && candidate.status != .interrupted) ||
                     candidate.collectedCheckpointID != nil {
                     issues.append("Pending operation \(pending.id) source candidate is not collectable prose.")
                 }
@@ -1384,6 +1457,41 @@ enum NovelDocumentValidator {
                     !validTargetIDs.contains(toCheckpointID) ||
                     (branch?.headRevision ?? -1) < headRevision {
                     issues.append("Branch undo operation \(operation.operationID) has invalid outcome data.")
+                }
+            case let (
+                .archiveDiscussion,
+                .discussionArchived(
+                    _, branchID, archiveID, checkpointID, decisionRevisionIDs,
+                    projectRevision, configRevision
+                )
+            ):
+                let archiveExists = document.sessions.contains { session in
+                    session.branchID == branchID &&
+                        (session.discussionArchives ?? []).contains {
+                            $0.id == archiveID && $0.checkpointID == checkpointID
+                        }
+                }
+                let decisionsExist = decisionRevisionIDs.allSatisfy { revisionID in
+                    guard let revision = document.materialRevisions.first(where: {
+                        $0.id == revisionID && $0.operationID == operation.operationID
+                    }) else { return false }
+                    return document.materials.contains {
+                        $0.id == revision.materialID && $0.kind == .decisionLog
+                    }
+                }
+                if projectRevision != operation.appliedProjectRevision ||
+                    configRevision < 1 ||
+                    configRevision > document.project.configRevision ||
+                    decisionRevisionIDs.isEmpty ||
+                    !archiveExists ||
+                    !decisionsExist ||
+                    !document.checkpoints.contains(where: {
+                        $0.id == checkpointID &&
+                            $0.kind == .discussionArchive &&
+                            $0.createdOnBranchID == branchID &&
+                            $0.operationID == operation.operationID
+                    }) {
+                    issues.append("Discussion archive \(operation.operationID) has invalid outcome data.")
                 }
             case let (
                 .cloneCandidate,
@@ -1830,6 +1938,9 @@ enum NovelDocumentValidator {
         to next: NovelProjectDocumentV1,
         issues: inout [String]
     ) {
+        let newOperationKinds = next.appliedOperations
+            .dropFirst(current.appliedOperations.count)
+            .map(\.kind)
         for session in current.sessions {
             guard let candidate = next.sessions.first(where: { $0.id == session.id }) else {
                 issues.append("A project transition removed Session \(session.id).")
@@ -1841,6 +1952,23 @@ enum NovelDocumentValidator {
             if candidate.messages.count < session.messages.count ||
                 !zip(session.messages, candidate.messages).allSatisfy({ $0 == $1 }) {
                 issues.append("A project transition rewrote Session \(session.id) history.")
+            }
+            if candidate.revision < session.revision {
+                issues.append("A project transition moved Session \(session.id) revision backwards.")
+            }
+            let currentArchives = session.discussionArchives ?? []
+            let nextArchives = candidate.discussionArchives ?? []
+            if nextArchives.count < currentArchives.count ||
+                !zip(currentArchives, nextArchives).allSatisfy({ $0 == $1 }) {
+                issues.append("A project transition rewrote Session \(session.id) archives.")
+            } else if nextArchives != currentArchives,
+                      !newOperationKinds.contains(.archiveDiscussion) {
+                issues.append("A project transition appended a Session archive without an archive operation.")
+            }
+            if candidate.archiveCursor != session.archiveCursor,
+               !newOperationKinds.contains(.archiveDiscussion),
+               !newOperationKinds.contains(.undoBranchHead) {
+                issues.append("A project transition moved a Session archive cursor without archive history.")
             }
         }
     }
@@ -2124,6 +2252,7 @@ enum NovelDocumentValidator {
              (.available, .adopted),
              (.available, .interrupted),
              (.available, .superseded),
+             (.interrupted, .collected),
              (.collected, .superseded),
              (.adopted, .superseded):
             true
@@ -2170,6 +2299,7 @@ extension NovelOutcome {
         case .branchRenamed(let projectID, _, _): projectID
         case .branchDeleted(let projectID, _, _): projectID
         case .branchHeadMoved(let projectID, _, _, _, _, _): projectID
+        case .discussionArchived(let projectID, _, _, _, _, _, _): projectID
         case .candidateCloned(let projectID, _, _, _, _): projectID
         case .polishCandidateAdopted(let projectID, _, _, _, _, _): projectID
         case .polishCandidateRejected(let projectID, _, _, _, _): projectID
@@ -2194,6 +2324,7 @@ extension NovelOutcome {
              .branchRenamed(_, let branchID, _),
              .branchDeleted(_, let branchID, _),
              .branchHeadMoved(_, let branchID, _, _, _, _),
+             .discussionArchived(_, let branchID, _, _, _, _, _),
              .candidateCloned(_, let branchID, _, _, _),
              .polishCandidateAdopted(_, let branchID, _, _, _, _),
              .polishCandidateRejected(_, let branchID, _, _, _),

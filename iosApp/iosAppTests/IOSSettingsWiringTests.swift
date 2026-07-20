@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import iosApp
 
 final class IOSSettingsWiringTests: XCTestCase {
@@ -81,7 +82,8 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(list.contains("@State private var scrollDriver = NativeTimelineScrollDriver()"))
         XCTAssertTrue(list.contains("var nativeScrollDriverEnabled: Bool"))
         XCTAssertTrue(list.contains("scrollDriver.attach(scrollView)"))
-        XCTAssertTrue(list.contains("viewportState.followPaused || !viewportState.isAtBottom"))
+        XCTAssertTrue(list.contains("hasMeasuredNativeScrollGeometry && !viewportState.isAtBottom"))
+        XCTAssertTrue(list.contains("driverPausedForUser: isNativeScrollDriverActive && scrollDriver.isPausedForUser"))
         XCTAssertTrue(list.contains("scrollDriver.submit(.streamContentGrew)"))
     }
 
@@ -104,15 +106,33 @@ final class IOSSettingsWiringTests: XCTestCase {
         }
     }
 
-    func testChatTopBarSoftEdgeEndsAtBottomAlignedControls() {
+    func testChatTopBarUsesStableControlDimensions() {
         XCTAssertEqual(ChatTopBarLayout.controlsHeight, 54)
         XCTAssertEqual(ChatTopBarLayout.toolbarButtonDiameter, 38)
+    }
+
+    @MainActor
+    func testChatTitleIslandUsesIntrinsicWidthUpToItsCollisionLimit() {
+        let shortHost = UIHostingController(
+            rootView: ChatActivityIslandView(state: .conversationTitle("Amber"))
+        )
+        let longHost = UIHostingController(
+            rootView: ChatActivityIslandView(state: .conversationTitle("两千字小文请求"))
+        )
+        let proposal = CGSize(width: 393, height: 100)
+        let shortWidth = shortHost.sizeThatFits(in: proposal).width
+        let longWidth = longHost.sizeThatFits(in: proposal).width
+
+        XCTAssertLessThan(shortWidth, 150)
+        XCTAssertGreaterThan(longWidth, shortWidth + 40)
+        XCTAssertLessThanOrEqual(longWidth, 230.5)
     }
 
     func testCustomTopBarsUseNativeSoftEdgesAndLiquidGlassControls() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let activityIsland = try source("iosApp/ChatActivityIslandView.swift")
         let composer = try source("iosApp/ChatComposerViews.swift")
+        let feedback = try source("iosApp/PlaceholderViews.swift")
         let chat = try source("iosApp/ChatCollectionMessageList.swift")
         let appearance = try source("iosApp/AppearanceSettingsView.swift")
         let swiftUISoftEdgeCount = chat.components(
@@ -127,11 +147,22 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(
             chatView.contains(".frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)")
         )
+        XCTAssertFalse(chatView.contains("edgeEffectTail"))
+        XCTAssertFalse(chatView.contains("edgeEffectHeight"))
         XCTAssertTrue(chatView.contains("GlassEffectContainer(spacing: 12)"))
         XCTAssertTrue(composer.contains(".foregroundStyle(Color(uiColor: .label))"))
         XCTAssertTrue(composer.contains(".symbolRenderingMode(.monochrome)"))
         XCTAssertTrue(chatView.contains("topBarGlyphOverlay"))
         XCTAssertTrue(chatView.contains("showsGlyph: false"))
+        XCTAssertGreaterThanOrEqual(
+            chatView.components(separatedBy: "ZStack(alignment: .bottom)").count - 1,
+            2
+        )
+        XCTAssertTrue(chatView.contains("isBackToolbarButtonPressed"))
+        XCTAssertTrue(chatView.contains("isNewChatToolbarButtonPressed"))
+        XCTAssertTrue(chatView.contains(".scaleEffect(isPressed ? 0.9 : 1)"))
+        XCTAssertTrue(composer.contains("onPressChanged: onPressChanged"))
+        XCTAssertTrue(feedback.contains("onPressChanged?(isEnabled && isPressed)"))
         XCTAssertTrue(activityIsland.contains(".glassEffect(.regular, in: Capsule())"))
         XCTAssertTrue(activityIsland.contains("Capsule().fill(.ultraThinMaterial)"))
     }

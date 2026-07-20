@@ -35,13 +35,16 @@ enum NovelMaterialResolver {
             }
         }
 
-        return try document.materials.filter { !$0.isDeleted }.map { material in
+        return try document.materials.filter { !$0.isDeleted }.compactMap { material in
             if let override = overridesByMaterial[material.id] {
                 return NovelEffectiveMaterialRevision(
                     material: material,
                     revision: override,
                     isBranchOverride: true
                 )
+            }
+            if material.kind == .decisionLog {
+                return nil
             }
             guard let revision = revisionByID[material.currentRevisionID] else {
                 throw NovelMaterialResolutionError.missingRevision(material.currentRevisionID)

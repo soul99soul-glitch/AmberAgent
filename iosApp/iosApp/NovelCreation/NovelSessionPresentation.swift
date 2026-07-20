@@ -13,6 +13,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
     let branchID: NovelBranchID
     let sessionID: NovelSessionID
     let runID: NovelRunID
+    let userMessageID: NovelMessageID
+    let startingUserContent: String?
     let messageID: NovelMessageID
     let candidateID: NovelCandidateID?
     let mode: NovelSessionMode
@@ -29,11 +31,14 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         run: NovelActiveRunRecord,
         content: String,
         renderRevision: UInt64,
+        startingUserContent: String? = nil,
         phase: NovelSessionTransientTailPhase
     ) {
         branchID = run.branchID
         sessionID = run.sessionID
         runID = run.id
+        userMessageID = run.userMessageID
+        self.startingUserContent = startingUserContent
         messageID = run.messageID
         candidateID = run.candidateID
         mode = run.mode
@@ -58,6 +63,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
             branchID: branchID,
             sessionID: sessionID,
             runID: runID,
+            userMessageID: userMessageID,
+            startingUserContent: startingUserContent,
             messageID: messageID,
             candidateID: candidateID,
             mode: mode,
@@ -85,6 +92,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         branchID: NovelBranchID,
         sessionID: NovelSessionID,
         runID: NovelRunID,
+        userMessageID: NovelMessageID,
+        startingUserContent: String?,
         messageID: NovelMessageID,
         candidateID: NovelCandidateID?,
         mode: NovelSessionMode,
@@ -98,6 +107,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         self.branchID = branchID
         self.sessionID = sessionID
         self.runID = runID
+        self.userMessageID = userMessageID
+        self.startingUserContent = startingUserContent
         self.messageID = messageID
         self.candidateID = candidateID
         self.mode = mode
@@ -121,7 +132,7 @@ enum NovelSettingProposalRoute: Hashable, Sendable {
         case .character: .characters
         case .world: .world
         case .masterOutline: .story
-        case .writingRequirements, .custom, nil: .more
+        case .writingRequirements, .decisionLog, .custom, nil: .more
         }
     }
 }
@@ -187,6 +198,15 @@ struct NovelAskUserPresentation: Equatable, Sendable {
     var isAnswered: Bool { response != nil }
 }
 
+struct NovelDiscussionArchivePresentation: Equatable, Sendable {
+    let id: NovelMessageID
+    let title: String
+    let summary: String
+    let messageCount: Int
+    let revealedRowCount: Int
+    let isExpanded: Bool
+}
+
 struct NovelSessionRowDigest: Equatable, Hashable, Sendable {
     /// Inputs that can change the row's measured height.
     let layout: String
@@ -208,6 +228,7 @@ struct NovelSessionRowModel: Identifiable, Equatable, Sendable {
     let candidate: NovelSessionCandidatePresentation?
     let committedChange: NovelSessionCommittedChangeSummary?
     let askUser: NovelAskUserPresentation?
+    let archive: NovelDiscussionArchivePresentation?
     let transientPhase: NovelSessionTransientTailPhase?
     let actions: [NovelSessionRowActionAvailability]
     let digest: NovelSessionRowDigest
@@ -226,6 +247,21 @@ struct NovelSessionListModel: Equatable, Sendable {
     let sessionID: NovelSessionID
     let rows: [NovelSessionRowModel]
     let activeTailID: NovelMessageID?
+
+    var historicalRows: [NovelSessionRowModel] {
+        guard let activeRunID else { return rows }
+        return rows.filter { $0.runID != activeRunID }
+    }
+
+    var activeRunRows: [NovelSessionRowModel] {
+        guard let activeRunID else { return [] }
+        return rows.filter { $0.runID == activeRunID }
+    }
+
+    private var activeRunID: NovelRunID? {
+        guard let activeTailID else { return nil }
+        return rows.first(where: { $0.id == activeTailID })?.runID
+    }
 }
 
 enum NovelSessionHistoryWindowPolicy {
@@ -238,6 +274,27 @@ enum NovelSessionHistoryWindowPolicy {
 
     static func expandedLimit(currentLimit: Int, totalCount: Int) -> Int {
         min(totalCount, max(0, currentLimit) + pageSize)
+    }
+
+    static func limitAfterArchiveExpansion(
+        currentLimit: Int,
+        revealedRowCount: Int
+    ) -> Int {
+        currentLimit + revealedRowCount
+    }
+
+    /// 活动 run 的行离开 eager 尾部时，窗口上限必须吸收真正转入历史的行数，
+    /// 否则完成瞬间窗口会裁掉完成前已可见的旧行，表现为内容位移。
+    /// 行数按快照差推导：整体消失的行（启动失败恢复）不计入，避免无谓扩窗。
+    static func limitAfterActiveRunReturnsToHistory(
+        currentLimit: Int,
+        activeRunRowCount: Int,
+        previousRowCount: Int,
+        currentRowCount: Int
+    ) -> Int {
+        let vanished = max(0, previousRowCount - currentRowCount)
+        let returned = max(0, activeRunRowCount - vanished)
+        return currentLimit + returned
     }
 }
 
@@ -253,6 +310,7 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
     let events: [NovelStoryEventRecord]
     let settingProposals: [NovelSettingProposalRecord]
     let access: NovelProjectLoadAccess
+    let expandedArchiveIDs: Set<NovelMessageID>
     let transientTail: NovelSessionTransientTail?
 
     init(
@@ -267,6 +325,7 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
         events: [NovelStoryEventRecord] = [],
         settingProposals: [NovelSettingProposalRecord] = [],
         access: NovelProjectLoadAccess,
+        expandedArchiveIDs: Set<NovelMessageID> = [],
         transientTail: NovelSessionTransientTail?
     ) {
         self.branch = branch
@@ -280,12 +339,14 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
         self.events = events
         self.settingProposals = settingProposals
         self.access = access
+        self.expandedArchiveIDs = expandedArchiveIDs
         self.transientTail = transientTail
     }
 
     init(
         project: NovelProjectSnapshot,
         branch: NovelBranchSnapshot,
+        expandedArchiveIDs: Set<NovelMessageID> = [],
         transientTail: NovelSessionTransientTail?
     ) {
         self.init(
@@ -300,6 +361,7 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
             events: project.events,
             settingProposals: branch.activeSettingProposals,
             access: project.access,
+            expandedArchiveIDs: expandedArchiveIDs,
             transientTail: transientTail
         )
     }
@@ -328,7 +390,7 @@ enum NovelSessionPresentation {
         )
         var projectedInterruptedRunIDs: Set<NovelRunID> = []
         var rows: [NovelSessionRowModel] = []
-        rows.reserveCapacity(messages.count + missingInterruptedRuns.count + 1)
+        rows.reserveCapacity(messages.count + missingInterruptedRuns.count + 2)
         for message in messages {
             rows.append(durableRow(message: message, input: input, index: index))
             for run in interruptedRunsByUserMessage[message.id] ?? [] {
@@ -349,15 +411,24 @@ enum NovelSessionPresentation {
                 index: index
             ))
         }
+        rows = foldingArchivedDiscussionRows(rows, input: input)
         var activeTailID: NovelMessageID?
 
         if let tail = input.transientTail,
            tail.branchID == input.branch.id,
            tail.sessionID == input.session.id,
            !durableIDs.contains(tail.messageID) {
+            if let startingUserContent = tail.startingUserContent,
+               !durableIDs.contains(tail.userMessageID) {
+                rows.append(startingUserRow(
+                    tail: tail,
+                    content: startingUserContent,
+                    sequence: Int64(rows.count)
+                ))
+            }
             rows.append(transientRow(
                 tail: tail,
-                sequence: Int64(messages.count),
+                sequence: Int64(rows.count),
                 input: input,
                 index: index
             ))
@@ -368,6 +439,166 @@ enum NovelSessionPresentation {
             sessionID: input.session.id,
             rows: rows,
             activeTailID: activeTailID
+        )
+    }
+}
+
+private extension NovelSessionPresentation {
+    static func startingUserRow(
+        tail: NovelSessionTransientTail,
+        content: String,
+        sequence: Int64
+    ) -> NovelSessionRowModel {
+        NovelSessionRowModel(
+            id: tail.userMessageID,
+            sequence: sequence,
+            role: .user,
+            mode: tail.mode,
+            granularity: tail.granularity,
+            kind: .userInput,
+            content: content,
+            createdAt: tail.startedAt,
+            runID: tail.runID,
+            runStatus: .running,
+            candidate: nil,
+            committedChange: nil,
+            askUser: nil,
+            archive: nil,
+            transientPhase: nil,
+            actions: [],
+            digest: digest(
+                messageID: tail.userMessageID,
+                transientRevision: nil,
+                transientPhase: nil,
+                runStatus: .running,
+                granularity: tail.granularity,
+                candidate: nil,
+                committedChange: nil,
+                askUser: nil,
+                actions: []
+            )
+        )
+    }
+}
+
+private extension NovelSessionPresentation {
+    static func foldingArchivedDiscussionRows(
+        _ rows: [NovelSessionRowModel],
+        input: NovelSessionProjectionInput
+    ) -> [NovelSessionRowModel] {
+        guard case .some(.through(let archiveCursor)) = input.session.archiveCursor,
+              let archives = input.session.discussionArchives,
+              !archives.isEmpty else { return rows }
+
+        let checkpointByID = Dictionary(
+            input.checkpoints.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var activeCheckpointIDs: Set<NovelCheckpointID> = []
+        var checkpointID: NovelCheckpointID? = input.branch.headCheckpointID
+        while let currentID = checkpointID,
+              activeCheckpointIDs.insert(currentID).inserted,
+              let checkpoint = checkpointByID[currentID] {
+            checkpointID = checkpoint.parentCheckpointID
+        }
+        let activeArchives = archives.filter {
+            $0.throughSequence <= archiveCursor && activeCheckpointIDs.contains($0.checkpointID)
+        }.sorted { lhs, rhs in
+            if lhs.throughSequence != rhs.throughSequence {
+                return lhs.throughSequence < rhs.throughSequence
+            }
+            return lhs.id.description < rhs.id.description
+        }
+        guard !activeArchives.isEmpty else { return rows }
+
+        var result: [NovelSessionRowModel] = []
+        result.reserveCapacity(rows.count + activeArchives.count)
+        var rowIndex = 0
+        var lowerSequence: Int64 = 0
+        for archive in activeArchives {
+            while rowIndex < rows.count, rows[rowIndex].sequence < lowerSequence {
+                result.append(rows[rowIndex])
+                rowIndex += 1
+            }
+            let rangeStart = rowIndex
+            while rowIndex < rows.count, rows[rowIndex].sequence <= archive.throughSequence {
+                rowIndex += 1
+            }
+            guard rangeStart < rowIndex else {
+                lowerSequence = archive.throughSequence + 1
+                continue
+            }
+            let isExpanded = input.expandedArchiveIDs.contains(archive.id)
+            let range = rows[rangeStart..<rowIndex]
+            let collapsedRows = range.filter(remainsVisibleWhileArchiveCollapsed)
+            let revealedRowCount = range.count - collapsedRows.count
+            result.append(archiveRow(
+                archive,
+                input: input,
+                revealedRowCount: revealedRowCount,
+                isExpanded: isExpanded
+            ))
+            if isExpanded {
+                result.append(contentsOf: range)
+            } else {
+                // Keep uncollected prose visible so collect remains reachable without expanding.
+                result.append(contentsOf: collapsedRows)
+            }
+            lowerSequence = archive.throughSequence + 1
+        }
+        result.append(contentsOf: rows[rowIndex...])
+        return result
+    }
+
+    static func remainsVisibleWhileArchiveCollapsed(_ row: NovelSessionRowModel) -> Bool {
+        guard let candidate = row.candidate, candidate.kind == .prose else { return false }
+        return candidate.status == .available || candidate.status == .interrupted
+    }
+
+    static func archiveRow(
+        _ archive: NovelDiscussionArchiveRecord,
+        input: NovelSessionProjectionInput,
+        revealedRowCount: Int,
+        isExpanded: Bool
+    ) -> NovelSessionRowModel {
+        let chapterTitle: String
+        if let chapterID = archive.chapterID,
+           let index = input.branch.workingChapterSelections.firstIndex(where: {
+               $0.chapterID == chapterID
+           }) {
+            chapterTitle = "第 \(index + 1) 章讨论已归档"
+        } else {
+            chapterTitle = "讨论已归档"
+        }
+        let presentation = NovelDiscussionArchivePresentation(
+            id: archive.id,
+            title: "\(chapterTitle)（\(archive.messageCount) 条）",
+            summary: archive.summary,
+            messageCount: archive.messageCount,
+            revealedRowCount: revealedRowCount,
+            isExpanded: isExpanded
+        )
+        return NovelSessionRowModel(
+            id: archive.id,
+            sequence: archive.throughSequence,
+            role: .system,
+            mode: .discussPlan,
+            granularity: nil,
+            kind: .discussion,
+            content: archive.summary,
+            createdAt: archive.createdAt,
+            runID: nil,
+            runStatus: nil,
+            candidate: nil,
+            committedChange: nil,
+            askUser: nil,
+            archive: presentation,
+            transientPhase: nil,
+            actions: [],
+            digest: NovelSessionRowDigest(
+                layout: "discussion-archive:\(archive.id.description)",
+                presentation: "\(isExpanded ? "expanded" : "collapsed"):\(revealedRowCount)"
+            )
         )
     }
 }
@@ -631,6 +862,7 @@ private extension NovelSessionPresentation {
             candidate: presentedCandidate,
             committedChange: changeSummary,
             askUser: askUser,
+            archive: nil,
             transientPhase: nil,
             actions: actions,
             digest: digest
@@ -656,10 +888,20 @@ private extension NovelSessionPresentation {
                 )
             )]
         case .interrupted:
-            actions = [availability(
+            var interruptedActions: [NovelSessionRowActionAvailability] = []
+            if tail.kind == .proseCandidate,
+               !tail.content.isEmpty,
+               let candidateID = tail.candidateID {
+                interruptedActions.append(availability(
+                    .collectProse(candidateID),
+                    blocker: transientCollectionBlocker(tail: tail, input: input, index: index)
+                ))
+            }
+            interruptedActions.append(availability(
                 .retryGeneration(tail.runID),
                 blocker: transientRetryBlocker(tail: tail, input: input, index: index)
-            )]
+            ))
+            actions = interruptedActions
         case .failed(let failure):
             actions = [availability(
                 .retryGeneration(tail.runID),
@@ -699,6 +941,7 @@ private extension NovelSessionPresentation {
             candidate: nil,
             committedChange: nil,
             askUser: nil,
+            archive: nil,
             transientPhase: tail.phase,
             actions: actions,
             digest: digest(
@@ -801,7 +1044,16 @@ private extension NovelSessionPresentation {
     ) -> [NovelSessionRowActionAvailability] {
         guard message.role == .assistant else { return [] }
         if let candidate {
-            return candidateActions(candidate, input: input, index: index)
+            var result = candidateActions(candidate, input: input, index: index)
+            if candidate.status == .interrupted,
+               let runID = message.runID,
+               let run = index.runByID[runID] {
+                result.append(availability(
+                    .retryGeneration(runID),
+                    blocker: retryBlocker(for: run, input: input, index: index)
+                ))
+            }
+            return result
         }
         if let runID = message.runID,
            index.runByID[runID]?.kind == .quickStart,
@@ -942,7 +1194,13 @@ private extension NovelSessionPresentation {
                 ))
             }
             return result
-        case .interrupted, .superseded, .inheritedReadOnly:
+        case .interrupted:
+            guard candidate.kind == .prose else { return [] }
+            return [availability(
+                .collectProse(candidate.id),
+                blocker: candidateMutationBlocker(candidate, input: input, index: index)
+            )]
+        case .superseded, .inheritedReadOnly:
             return []
         }
     }
@@ -1036,6 +1294,28 @@ private extension NovelSessionPresentation {
         return nil
     }
 
+    static func transientCollectionBlocker(
+        tail: NovelSessionTransientTail,
+        input: NovelSessionProjectionInput,
+        index: NovelSessionProjectionIndex
+    ) -> NovelSessionActionBlocker? {
+        if let blocker = baseMutationBlocker(
+            input: input,
+            index: index,
+            includePending: true,
+            excludingRunID: tail.runID
+        ) {
+            return blocker
+        }
+        guard input.branch.syncStatus == .synchronized else { return .branchNeedsSync }
+        guard let run = index.runByID[tail.runID],
+              run.baseCheckpointID == input.branch.headCheckpointID,
+              run.baseHeadRevision == input.branch.headRevision else {
+            return .staleCandidate
+        }
+        return nil
+    }
+
     static func candidateMutationBlocker(
         _ candidate: NovelCandidateRecord,
         input: NovelSessionProjectionInput,
@@ -1045,7 +1325,7 @@ private extension NovelSessionPresentation {
         if let blocker = baseMutationBlocker(input: input, index: index, includePending: true) {
             return blocker
         }
-        if candidate.kind == .polish, input.branch.syncStatus == .needsSync {
+        if input.branch.syncStatus == .needsSync {
             return .branchNeedsSync
         }
         if requiresCurrentBase {
@@ -1255,6 +1535,7 @@ enum NovelSessionBottomFollowEvent: Equatable, Sendable {
     case streamDelta
     case measuredStreamGrowth(isAtBottom: Bool)
     case measuredTerminalGrowth(isAtBottom: Bool)
+    case staticContentGrowth(isAtBottom: Bool)
     case userDragBegan(isAtBottom: Bool)
     case userDragEnded(isAtBottom: Bool)
     case viewportChanged(isAtBottom: Bool)
@@ -1334,6 +1615,12 @@ enum NovelSessionBottomFollowPolicy {
             }
             scheduleTerminalSettle(state: &next, commands: &commands)
 
+        case .staticContentGrowth(let isAtBottom):
+            // 静态排版增长不拥有滚动：不发滚动命令、不改模式，只让底部按钮
+            // 反映真实的到底状态，用户始终保有主动回底的入口。
+            guard next.mode != .awaitingInitialRows else { break }
+            setBottomButton(!isAtBottom, state: &next, commands: &commands)
+
         case .userDragBegan(let isAtBottom):
             next.mode = .browsingHistory
             setBottomButton(!isAtBottom, state: &next, commands: &commands)
@@ -1358,6 +1645,10 @@ enum NovelSessionBottomFollowPolicy {
                         next.mode = .browsingHistory
                         setBottomButton(true, state: &next, commands: &commands)
                     }
+                } else {
+                    // staticContentGrowth 可能在跟随态亮过按钮；几何回底后必须
+                    // 收掉，保证按钮始终反映真实到底状态（无按钮时是无操作）。
+                    setBottomButton(false, state: &next, commands: &commands)
                 }
             case .browsingHistory:
                 // Passive geometry cannot resume follow. Only the user's drag ending at

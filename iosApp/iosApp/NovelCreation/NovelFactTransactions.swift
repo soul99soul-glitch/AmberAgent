@@ -274,7 +274,7 @@ enum NovelFactTransactionReducer {
         guard candidate.branchID == branch.id,
               candidate.sessionID == branch.sessionID,
               candidate.kind == .prose,
-              candidate.status == .available,
+              candidate.status == .available || candidate.status == .interrupted,
               candidate.collectedCheckpointID == nil else {
             throw NovelError.invalidInput("The candidate is not collectable prose for this branch.")
         }
@@ -435,7 +435,7 @@ enum NovelFactTransactionReducer {
         }) else {
             throw NovelError.invalidInput("The pending collection lost its owning Session.")
         }
-        guard candidate.status == .available,
+        guard candidate.status == .available || candidate.status == .interrupted,
               candidate.collectedCheckpointID == nil,
               NovelCandidateSemantics.collectionBaseMatches(
                   candidate,

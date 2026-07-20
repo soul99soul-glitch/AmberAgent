@@ -67,6 +67,7 @@ private struct NovelSessionProjectionTailKey: Equatable {
     let branchID: NovelBranchID
     let sessionID: NovelSessionID
     let runID: NovelRunID
+    let startingUserContent: String?
     let messageID: NovelMessageID
     let renderRevision: UInt64
     let phase: NovelSessionTransientTailPhase
@@ -85,11 +86,13 @@ private struct NovelSessionProjectionCacheKey: Equatable {
     let activeRunID: NovelRunID?
     let sessionID: NovelSessionID
     let sessionRevision: Int64
+    let expandedArchiveIDs: Set<NovelMessageID>
     let transientTail: NovelSessionProjectionTailKey?
 
     init(
         project: NovelProjectSnapshot,
         branch: NovelBranchSnapshot,
+        expandedArchiveIDs: Set<NovelMessageID>,
         transientTail: NovelSessionTransientTail?
     ) {
         projectID = project.project.id
@@ -104,11 +107,13 @@ private struct NovelSessionProjectionCacheKey: Equatable {
         activeRunID = branch.branch.activeRunID
         sessionID = branch.session.id
         sessionRevision = branch.session.revision
+        self.expandedArchiveIDs = expandedArchiveIDs
         self.transientTail = transientTail.map {
             NovelSessionProjectionTailKey(
                 branchID: $0.branchID,
                 sessionID: $0.sessionID,
                 runID: $0.runID,
+                startingUserContent: $0.startingUserContent,
                 messageID: $0.messageID,
                 renderRevision: $0.renderRevision,
                 phase: $0.phase
@@ -176,6 +181,20 @@ final class NovelSessionViewModel {
         return workspace.branchSnapshot?.session.messages ?? []
     }
 
+    var hasArchivableDiscussion: Bool {
+        guard snapshotMatchesBinding,
+              let session = workspace.branchSnapshot?.session else { return false }
+        let previousSequence: Int64 = switch session.archiveCursor {
+        case .through(let sequence): sequence
+        case .empty, nil: -1
+        }
+        return session.messages.contains {
+            $0.sequence > previousSequence &&
+                $0.mode == .discussPlan &&
+                ($0.kind == .userInput || $0.kind == .discussion)
+        }
+    }
+
     var pendingCharacterIdentityMentions: [NovelCharacterIdentityMention] {
         guard snapshotMatchesBinding,
               let project = workspace.projectSnapshot,
@@ -228,13 +247,15 @@ final class NovelSessionViewModel {
 
     func projectedListModel(
         project: NovelProjectSnapshot,
-        branch: NovelBranchSnapshot
+        branch: NovelBranchSnapshot,
+        expandedArchiveIDs: Set<NovelMessageID> = []
     ) -> NovelSessionListModel? {
         guard binding?.projectID == project.project.id,
               binding?.branchID == branch.branch.id else { return nil }
         let key = NovelSessionProjectionCacheKey(
             project: project,
             branch: branch,
+            expandedArchiveIDs: expandedArchiveIDs,
             transientTail: transientTail
         )
         if projectionCache?.key == key {
@@ -243,6 +264,7 @@ final class NovelSessionViewModel {
         let model = NovelSessionPresentation.project(NovelSessionProjectionInput(
             project: project,
             branch: branch,
+            expandedArchiveIDs: expandedArchiveIDs,
             transientTail: transientTail
         ))
         projectionCache = NovelSessionProjectionCacheEntry(key: key, model: model)
@@ -657,7 +679,8 @@ final class NovelSessionViewModel {
               let branch = workspace.branchSnapshot,
               let candidate = candidate(id: candidateID),
               candidate.kind == .prose,
-              candidate.status == .available,
+              candidate.status == .available || candidate.status == .interrupted,
+              branch.branch.syncStatus == .synchronized,
               branchPendingOperations.isEmpty,
               snapshotMatchesBinding else { return false }
         do {
@@ -685,6 +708,63 @@ final class NovelSessionViewModel {
             branchID: branch.branch.id
         )
         return true
+    }
+
+    func distillDiscussionArchive(
+        chapterID: NovelChapterID?
+    ) async -> NovelDiscussionArchiveDraft? {
+        guard let binding,
+              snapshotMatchesBinding,
+              beginAction() else { return nil }
+        defer { endAction() }
+        do {
+            let draft = try await workspace.distillDiscussionArchive(
+                projectID: binding.projectID,
+                branchID: binding.branchID,
+                chapterID: chapterID
+            )
+            operationErrorMessage = nil
+            return draft
+        } catch {
+            operationErrorMessage = describe(error)
+            return nil
+        }
+    }
+
+    func confirmDiscussionArchive(
+        _ draft: NovelDiscussionArchiveDraft,
+        decisions: [NovelDiscussionArchiveDraftDecision],
+        summary: String
+    ) async -> Bool {
+        guard !decisions.isEmpty,
+              let project = workspace.projectSnapshot,
+              let branch = workspace.branchSnapshot,
+              let binding,
+              draft.projectID == binding.projectID,
+              draft.branchID == binding.branchID,
+              draft.sessionID == branch.session.id,
+              snapshotMatchesBinding else { return false }
+        let confirmed = decisions.map {
+            NovelConfirmedDiscussionDecision(
+                materialID: NovelMaterialID(),
+                revisionID: NovelMaterialRevisionID(),
+                topic: $0.topic,
+                decision: $0.decision,
+                relatedMaterialID: $0.relatedMaterialID
+            )
+        }
+        let action = NovelAction.archiveDiscussion(NovelArchiveDiscussionCommand(
+            context: mutationContext(project: project, branch: branch),
+            projectID: binding.projectID,
+            branchID: binding.branchID,
+            archiveID: NovelMessageID(),
+            checkpointID: NovelCheckpointID(),
+            throughSequence: draft.throughSequence,
+            chapterID: draft.chapterID,
+            summary: summary,
+            decisions: confirmed
+        ))
+        return await perform(action) != nil
     }
 
     func cloneCollectedProse(_ candidateID: NovelCandidateID) async -> NovelCandidateID? {
@@ -1005,7 +1085,12 @@ private extension NovelSessionViewModel {
             interruptionReason: nil,
             terminalFailure: nil
         )
-        installTail(run: placeholderRun, content: "", phase: .waitingForFirstToken)
+        installTail(
+            run: placeholderRun,
+            content: "",
+            startingUserContent: draft.userText,
+            phase: .waitingForFirstToken
+        )
         sessionStartingRunID = request.id
         let requestID = request.id
         defer {
@@ -1505,6 +1590,7 @@ private extension NovelSessionViewModel {
         run: NovelActiveRunRecord,
         content: String,
         renderRevision: UInt64 = 0,
+        startingUserContent: String? = nil,
         phase: NovelSessionTransientTailPhase
     ) {
         cancelPendingPresentation()
@@ -1513,6 +1599,7 @@ private extension NovelSessionViewModel {
             run: run,
             content: content,
             renderRevision: renderRevision,
+            startingUserContent: startingUserContent,
             phase: phase
         )
         terminalAwaitingRefresh = false
@@ -1537,6 +1624,7 @@ private extension NovelSessionViewModel {
             run: durable,
             content: current.content,
             renderRevision: current.renderRevision,
+            startingUserContent: current.startingUserContent,
             phase: current.phase
         )
     }

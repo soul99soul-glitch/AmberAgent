@@ -625,6 +625,7 @@ private extension NovelGenerationReducer {
         var next = document
         var snapshot: NovelSessionMessageSnapshot?
         if !partialContent.isEmpty {
+            let interruptedCandidateID = run.kind == .prose ? run.candidateID : nil
             let message = NovelSessionMessageRecord(
                 id: run.messageID,
                 sequence: Int64(document.sessions[sessionIndex].messages.count),
@@ -634,10 +635,26 @@ private extension NovelGenerationReducer {
                 content: partialContent,
                 createdAt: now,
                 runID: run.id,
-                candidateID: nil
+                candidateID: interruptedCandidateID
             )
             next.sessions[sessionIndex].messages.append(message)
             next.sessions[sessionIndex].revision += 1
+            if let candidateID = interruptedCandidateID {
+                next.candidates.append(NovelCandidateRecord(
+                    id: candidateID,
+                    kind: .prose,
+                    branchID: run.branchID,
+                    sessionID: run.sessionID,
+                    sourceMessageID: run.messageID,
+                    baseCheckpointID: run.baseCheckpointID,
+                    baseHeadRevision: run.baseHeadRevision,
+                    status: .interrupted,
+                    content: partialContent,
+                    sourceChapterVersionID: nil,
+                    collectedCheckpointID: nil,
+                    createdAt: now
+                ))
+            }
             snapshot = NovelSessionMessageSnapshot(
                 projectID: next.project.id,
                 branchID: run.branchID,

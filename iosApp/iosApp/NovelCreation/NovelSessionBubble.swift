@@ -98,8 +98,15 @@ struct NovelSessionBubble: View {
         } else if transientPhase == .interrupted ||
                     runStatus == .interrupted ||
                     kind == .interruptedDraft {
-            Label("生成已中断 · 草稿不会进入正文", systemImage: "pause.circle")
-                .foregroundStyle(AmberTheme.accentAmber)
+            let canCollect = actions.contains {
+                if case .collectProse = $0.action { return true }
+                return false
+            }
+            Label(
+                canCollect ? "生成已中断 · 可收录已生成部分" : "生成已中断",
+                systemImage: "pause.circle"
+            )
+            .foregroundStyle(AmberTheme.accentAmber)
         } else {
             switch kind {
             case .proseCandidate:

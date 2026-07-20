@@ -30,6 +30,8 @@ enum NativeTimelineBottomIntentSource: String, Equatable {
 
 enum NativeTimelineScrollFallbackReason: String, Equatable {
     case nonFiniteOffset
+    /// 2026-07-18 起收敛耗尽不再触发 fallback（driver 保持所有权，仅记诊断日志），
+    /// 生产路径已不构造此 case；保留是为了历史日志字符串的兼容。
     case bottomConvergenceExhausted
     case horizontalOffsetDrift
 }

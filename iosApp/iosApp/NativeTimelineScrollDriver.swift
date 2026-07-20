@@ -15,14 +15,22 @@ final class NativeTimelineScrollDriver: NSObject {
     private var fallbackReason: NativeTimelineScrollFallbackReason?
     private var horizontalOffsetDriftClampUsed = false
 
-    func attach(_ scrollView: UIScrollView) {
-        guard fallbackReason == nil else { return }
-        guard self.scrollView !== scrollView else { return }
+    @discardableResult
+    func attach(_ scrollView: UIScrollView) -> Bool {
+        guard fallbackReason == nil else { return false }
+        guard self.scrollView !== scrollView else { return false }
+        if self.scrollView != nil {
+            generation &+= 1
+            cancelProgrammaticMotion()
+            stopFrameDriver()
+            state = .idle
+        }
         self.scrollView = scrollView
         lastViewportMetrics = ViewportMetrics(scrollView)
         horizontalOffsetDriftClampUsed = false
         scrollView.keyboardDismissMode = .interactive
         _ = validateScrollViewHealth()
+        return isAttached
     }
 
     func invalidate() {
@@ -69,7 +77,6 @@ final class NativeTimelineScrollDriver: NSObject {
         guard let scrollView else { return }
         guard validateScrollViewHealth() else { return }
         guard automaticFollowEnabled else { return }
-        scrollView.layoutIfNeeded()
         let viewportMetrics = ViewportMetrics(scrollView)
         if viewportMetrics != lastViewportMetrics {
             lastViewportMetrics = viewportMetrics
@@ -156,7 +163,11 @@ final class NativeTimelineScrollDriver: NSObject {
 
     private func scheduleBottomConvergence(generationToken: UInt64, layoutToken: UInt64, remainingPasses: Int) {
         guard remainingPasses > 0 else {
-            reportFallback(.bottomConvergenceExhausted)
+            // 耗尽不交出所有权（契约见 testBottomConvergenceExhaustionKeepsNativeDriverAsOwner），
+            // 但未到底时必须留下可观测痕迹，否则"停在略高于底部"在生产不可排查。
+            if let scrollView, distanceToBottom(in: scrollView) > NativeTimelineScrollCore.bottomEpsilon {
+                NativeTimelineScrollDiagnostics.logBottomConvergenceExhausted(geometry: sampleGeometry())
+            }
             return
         }
         Task { @MainActor [weak self] in
@@ -407,7 +418,7 @@ private struct ViewportMetrics: Equatable {
 }
 
 /// Resolves the `UIScrollView` owned by a SwiftUI `ScrollView` and reports native
-/// layout/interaction metric changes to the shared bottom-follow driver.
+/// layout metric changes to the shared bottom-follow driver.
 struct NativeTimelineScrollViewResolver: UIViewRepresentable {
     let onResolve: (UIScrollView) -> Void
     let onMetricsChanged: () -> Void
@@ -493,23 +504,15 @@ struct NativeTimelineScrollViewResolver: UIViewRepresentable {
         }
 
         @MainActor
-        private struct Metrics: Equatable {
-            let contentOffset: CGPoint
+        struct Metrics: Equatable {
             let contentSize: CGSize
-            let bounds: CGRect
+            let viewportSize: CGSize
             let adjustedContentInset: UIEdgeInsets
-            let isDragging: Bool
-            let isTracking: Bool
-            let isDecelerating: Bool
 
             init(_ scrollView: UIScrollView) {
-                contentOffset = scrollView.contentOffset
                 contentSize = scrollView.contentSize
-                bounds = scrollView.bounds
+                viewportSize = scrollView.bounds.size
                 adjustedContentInset = scrollView.adjustedContentInset
-                isDragging = scrollView.isDragging
-                isTracking = scrollView.isTracking
-                isDecelerating = scrollView.isDecelerating
             }
         }
     }
@@ -531,6 +534,16 @@ private extension UIView {
 enum NativeTimelineScrollDiagnostics {
     static func logFallbackActivated(reason: NativeTimelineScrollFallbackReason) {
         print("[AA-NATIVE-SCROLL] fallbackActivated reason=\(reason.rawValue)")
+    }
+
+    static func logBottomConvergenceExhausted(geometry: NativeTimelineScrollGeometry) {
+        print(
+            "[AA-NATIVE-SCROLL] bottomConvergenceExhausted " +
+                "offsetY=\(String(format: "%.1f", geometry.offsetY)) " +
+                "distance=\(String(format: "%.1f", geometry.distanceToBottom)) " +
+                "content=\(String(format: "%.1f", geometry.contentHeight)) " +
+                "viewport=\(String(format: "%.1f", geometry.viewportHeight))"
+        )
     }
 
     static func logFallback(

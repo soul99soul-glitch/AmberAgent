@@ -294,6 +294,102 @@ final class NovelInjectionPlannerTests: XCTestCase {
         XCTAssertEqual(receipt.sections.map(\.contentSHA256), plan.sections.map(\.contentSHA256))
     }
 
+    func testInjectionPanelProjectionHandlesMissingReceipt() {
+        XCTAssertEqual(NovelInjectionPanelPresentation.project(nil), .empty)
+    }
+
+    func testInjectionPanelProjectionShowsIncludedMaterialsStateAndRecentRounds() throws {
+        var document = try NovelTestFixtures.document()
+        let included = addMaterial(
+            to: &document,
+            kind: .world,
+            title: "北境法则",
+            content: "北境长夜持续半年。",
+            tags: [],
+            mode: .always
+        )
+        let runIDs = [NovelRunID(), NovelRunID()]
+        document.sessions[0].messages = (0..<4).map { index in
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: Int64(index),
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                mode: .discussPlan,
+                kind: index.isMultiple(of: 2) ? .userInput : .discussion,
+                content: "消息 \(index)",
+                createdAt: document.project.updatedAt,
+                runID: runIDs[index / 2],
+                candidateID: nil
+            )
+        }
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: document.branches[0].id,
+                promptKind: .discussion,
+                userText: "继续讨论"
+            )
+        )
+        let receipt = NovelInjectionReceiptRecord(
+            id: NovelReceiptID(),
+            runID: NovelRunID(),
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            plan: plan,
+            overrides: .none,
+            providerID: "provider",
+            modelID: "model",
+            parameters: [:],
+            createdAt: document.project.updatedAt
+        )
+
+        let model = NovelInjectionPanelPresentation.project(receipt)
+        XCTAssertTrue(model.hasReceipt)
+        XCTAssertEqual(model.materials, [
+            NovelInjectionPanelMaterialModel(
+                id: included.materialID,
+                title: "北境法则",
+                kindTitle: "世界观"
+            )
+        ])
+        XCTAssertTrue(model.includesPlotState)
+        XCTAssertEqual(model.recentMessageRoundCount, 2)
+        XCTAssertEqual(model.budgetExcludedItemCount, 0)
+    }
+
+    func testInjectionPanelProjectionReportsBudgetExclusions() {
+        let prompt = NovelPromptCatalog.template(for: .discussion)
+        let canonical = "context"
+        let plan = NovelInjectionPlan(
+            prompt: prompt,
+            sections: [],
+            materialDecisions: [],
+            maxEstimatedInputTokens: 100,
+            estimatedInputTokens: 2,
+            contextText: canonical,
+            canonicalInput: canonical,
+            canonicalInputSHA256: NovelDocumentValidator.sha256(canonical),
+            budgetExcludedItemCount: 3
+        )
+        let receipt = NovelInjectionReceiptRecord(
+            id: NovelReceiptID(),
+            runID: NovelRunID(),
+            projectID: NovelProjectID(),
+            branchID: NovelBranchID(),
+            plan: plan,
+            overrides: .none,
+            providerID: "provider",
+            modelID: "model",
+            parameters: [:],
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        XCTAssertEqual(
+            NovelInjectionPanelPresentation.project(receipt).budgetExcludedItemCount,
+            3
+        )
+    }
+
     func testRelevantOldStoryEventOutranksRecentHistoryFromUserStateAndChapterQueries() throws {
         let cases: [(user: String, state: String, chapter: String?, entity: String, prompt: NovelPromptKind)] = [
             ("What did UserNeedle sacrifice?", "The branch is quiet.", nil, "UserNeedle", .discussion),
@@ -537,6 +633,132 @@ final class NovelInjectionPlannerTests: XCTestCase {
             if case .sessionMessage = $0.kind { return true }
             return false
         })
+    }
+
+    func testArchivedDiscussionReplacesOnlyRawDiscussionWithSummaryAndConfirmedDecisions() throws {
+        var document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let branchID = document.branches[0].id
+        let now = Date(timeIntervalSince1970: 1_700_000_200)
+        let proseCandidateID = NovelMessageID()
+        document.sessions[0].messages = [
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 0,
+                role: .user,
+                mode: .discussPlan,
+                kind: .userInput,
+                content: "RAW_ARCHIVED_USER_MESSAGE",
+                createdAt: now,
+                runID: nil,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: proseCandidateID,
+                sequence: 1,
+                role: .assistant,
+                mode: .writeProse,
+                kind: .proseCandidate,
+                content: "INTERLEAVED_PROSE_CANDIDATE",
+                createdAt: now,
+                runID: nil,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 2,
+                role: .assistant,
+                mode: .discussPlan,
+                kind: .discussion,
+                content: "RAW_ARCHIVED_ASSISTANT_MESSAGE",
+                createdAt: now,
+                runID: nil,
+                candidateID: nil
+            ),
+        ]
+
+        let archivedResult = try NovelReducer.apply(.archiveDiscussion(
+            NovelArchiveDiscussionCommand(
+                context: NovelTestFixtures.context(
+                    projectRevision: document.project.revision,
+                    branchHeadRevision: document.branches[0].headRevision
+                ),
+                projectID: document.project.id,
+                branchID: branchID,
+                archiveID: NovelMessageID(),
+                checkpointID: NovelCheckpointID(),
+                throughSequence: 2,
+                chapterID: nil,
+                summary: "ARCHIVED_DISCUSSION_SUMMARY",
+                decisions: [NovelConfirmedDiscussionDecision(
+                    materialID: NovelMaterialID(),
+                    revisionID: NovelMaterialRevisionID(),
+                    topic: "DECISION_TOPIC",
+                    decision: "CONFIRMED_DECISION_CONTENT",
+                    relatedMaterialID: nil
+                )]
+            )
+        ), to: document, now: now)
+        var archived = archivedResult.document
+        let postArchiveMessageID = NovelMessageID()
+        archived.sessions[0].messages.append(NovelSessionMessageRecord(
+            id: postArchiveMessageID,
+            sequence: 3,
+            role: .user,
+            mode: .discussPlan,
+            kind: .userInput,
+            content: "POST_ARCHIVE_MESSAGE",
+            createdAt: now.addingTimeInterval(1),
+            runID: nil,
+            candidateID: nil
+        ))
+        archived.sessions[0].revision += 1
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: archived,
+            request: NovelInjectionPlanningRequest(
+                branchID: branchID,
+                promptKind: .discussion,
+                userText: "继续讨论"
+            )
+        )
+
+        XCTAssertFalse(plan.contextText.contains("RAW_ARCHIVED_USER_MESSAGE"))
+        XCTAssertFalse(plan.contextText.contains("RAW_ARCHIVED_ASSISTANT_MESSAGE"))
+        XCTAssertTrue(plan.contextText.contains("INTERLEAVED_PROSE_CANDIDATE"))
+        XCTAssertTrue(plan.contextText.contains("ARCHIVED_DISCUSSION_SUMMARY"))
+        XCTAssertTrue(plan.contextText.contains("DECISION_TOPIC"))
+        XCTAssertTrue(plan.contextText.contains("CONFIRMED_DECISION_CONTENT"))
+        XCTAssertTrue(plan.contextText.contains("POST_ARCHIVE_MESSAGE"))
+        XCTAssertEqual(plan.sections.compactMap { section -> NovelMessageID? in
+            if case .sessionMessage(let messageID) = section.kind { return messageID }
+            return nil
+        }, [proseCandidateID, postArchiveMessageID])
+    }
+
+    func testSessionWithoutArchiveCursorPreservesRawInjectionBehavior() throws {
+        var document = try NovelTestFixtures.document()
+        document.sessions[0].messages = [NovelSessionMessageRecord(
+            id: NovelMessageID(),
+            sequence: 0,
+            role: .user,
+            mode: .discussPlan,
+            kind: .userInput,
+            content: "UNARCHIVED_RAW_MESSAGE",
+            createdAt: document.project.updatedAt,
+            runID: nil,
+            candidateID: nil
+        )]
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: document.branches[0].id,
+                promptKind: .discussion,
+                userText: "继续讨论"
+            )
+        )
+
+        XCTAssertTrue(plan.contextText.contains("UNARCHIVED_RAW_MESSAGE"))
     }
 
     private func chapterSection(in plan: NovelInjectionPlan) -> NovelInjectionSection? {

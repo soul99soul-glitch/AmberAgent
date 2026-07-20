@@ -238,6 +238,143 @@ actor DefaultNovelCreation: NovelCreation {
         return defaultModelPolicy(purpose)
     }
 
+    func distillDiscussionArchive(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        chapterID: NovelChapterID?
+    ) async throws -> NovelDiscussionArchiveDraft {
+        try await recoverGenerationStateIfNeeded()
+        let loaded = try await loadCommittedProject(id: projectID)
+        guard loaded.access == .readWrite else {
+            throw NovelError.degradedReadOnly(projectID: projectID)
+        }
+        guard let branch = loaded.document.branches.first(where: {
+            $0.id == branchID && $0.lifecycle == .active
+        }) else {
+            throw NovelError.branchNotFound(branchID)
+        }
+        guard branch.activeRunID == nil,
+              branch.syncStatus == .synchronized else {
+            throw NovelError.projectBusy(projectID)
+        }
+        guard let session = loaded.document.sessions.first(where: {
+            $0.id == branch.sessionID && $0.branchID == branch.id
+        }) else {
+            throw NovelError.sessionNotFound(branch.sessionID)
+        }
+        if let chapterID,
+           !loaded.document.chapters.contains(where: { $0.id == chapterID }) {
+            throw NovelError.invalidInput("Discussion archive references a missing chapter.")
+        }
+
+        let previousSequence: Int64 = switch session.archiveCursor {
+        case .through(let sequence): sequence
+        case .empty, nil: -1
+        }
+        let discussionMessages = session.messages.filter {
+            $0.sequence > previousSequence &&
+                $0.mode == .discussPlan &&
+                ($0.kind == .userInput || $0.kind == .discussion)
+        }
+        guard let throughSequence = discussionMessages.last?.sequence else {
+            throw NovelError.invalidInput("当前没有可归档的新讨论。")
+        }
+
+        let effectiveMaterials = try NovelMaterialResolver.effectiveRevisions(
+            document: loaded.document,
+            branch: branch
+        )
+        let materialLines = effectiveMaterials.map {
+            "\($0.material.id.description) | \($0.revision.title)"
+        }
+        let messageLines = discussionMessages.map { message in
+            let role = switch message.role {
+            case .user: "USER"
+            case .assistant: "ASSISTANT"
+            case .system: "SYSTEM"
+            }
+            return "[\(message.sequence)] \(role)\n\(message.content)"
+        }
+        let discussionInput = "AVAILABLE MATERIALS\n" +
+            (materialLines.isEmpty ? "(none)" : materialLines.joined(separator: "\n")) +
+            "\n\nDISCUSSION\n" + messageLines.joined(separator: "\n\n")
+
+        let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
+        let preparation = try await executor.prepare(
+            modelPolicy: modelPolicy(for: .creation, in: loaded.document),
+            taskKind: .discussionArchive,
+            requestedInputBudgetTokens: 16_000
+        )
+        let estimatedTokens = max(1, (discussionInput.utf8.count + 3) / 4)
+        guard estimatedTokens <= preparation.effectiveInputBudgetTokens else {
+            throw NovelError.injectionBudgetExceeded(
+                required: estimatedTokens,
+                limit: preparation.effectiveInputBudgetTokens,
+                items: [NovelInjectionBudgetItem(
+                    label: "Discussion since last archive",
+                    estimatedTokens: estimatedTokens
+                )]
+            )
+        }
+        let request = NovelStructuredModelExecutionRequest(
+            runID: NovelRunID(),
+            modelPolicy: preparation.modelPolicy,
+            task: .discussionArchive(discussion: discussionInput)
+        )
+        let invocation = try executor.prepareInvocation(request, preparation: preparation)
+        let evidence = try await executor.executePrepared(
+            invocation,
+            noOutputTimeout: factRequestTimeout
+        )
+        guard case .discussionArchive(let archive) = evidence.output else {
+            throw NovelStructuredModelExecutionFailure(
+                code: "invalid_structured_output",
+                message: "讨论归档返回了错误的结构。",
+                isRetryable: true
+            )
+        }
+
+        let availableMaterialIDs = Set(effectiveMaterials.map(\.material.id))
+        let decisions = try archive.decisions.map { item in
+            let relatedMaterialID: NovelMaterialID?
+            if let text = item.relatedMaterialID {
+                guard let uuid = UUID(uuidString: text) else {
+                    throw NovelStructuredModelExecutionFailure(
+                        code: "invalid_structured_output",
+                        message: "讨论归档引用了无效的资料 ID。",
+                        isRetryable: true
+                    )
+                }
+                let materialID = NovelMaterialID(uuid)
+                guard availableMaterialIDs.contains(materialID) else {
+                    throw NovelStructuredModelExecutionFailure(
+                        code: "invalid_structured_output",
+                        message: "讨论归档引用了当前项目中不存在的资料。",
+                        isRetryable: true
+                    )
+                }
+                relatedMaterialID = materialID
+            } else {
+                relatedMaterialID = nil
+            }
+            return NovelDiscussionArchiveDraftDecision(
+                id: UUID(),
+                topic: item.topic,
+                decision: item.decision,
+                relatedMaterialID: relatedMaterialID
+            )
+        }
+        return NovelDiscussionArchiveDraft(
+            projectID: projectID,
+            branchID: branchID,
+            sessionID: session.id,
+            throughSequence: throughSequence,
+            chapterID: chapterID,
+            summary: archive.summary,
+            decisions: decisions
+        )
+    }
+
     func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
         if case .projectImportPreview(let data) = scope {
             let decoded = try NovelProjectPackageCodec.decode(data)

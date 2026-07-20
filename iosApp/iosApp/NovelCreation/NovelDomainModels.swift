@@ -81,6 +81,7 @@ enum NovelMaterialKind: Codable, Equatable, Sendable {
     case character
     case masterOutline
     case writingRequirements
+    case decisionLog
     case custom(String)
 }
 
@@ -104,6 +105,7 @@ enum NovelCheckpointKind: String, Codable, CaseIterable, Sendable {
     case initial
     case collection
     case manualSync
+    case discussionArchive
     case polish
     case restore
 }
@@ -352,11 +354,23 @@ struct NovelBranchRecord: Codable, Equatable, Sendable {
     var activeRunID: NovelRunID?
 }
 
+struct NovelDiscussionArchiveRecord: Codable, Equatable, Sendable {
+    let id: NovelMessageID
+    let checkpointID: NovelCheckpointID
+    let throughSequence: Int64
+    let messageCount: Int
+    let chapterID: NovelChapterID?
+    let summary: String
+    let createdAt: Date
+}
+
 struct NovelSessionRecord: Codable, Equatable, Sendable {
     let id: NovelSessionID
     let branchID: NovelBranchID
     var revision: Int64
     var messages: [NovelSessionMessageRecord]
+    var archiveCursor: NovelSessionCursor? = nil
+    var discussionArchives: [NovelDiscussionArchiveRecord]? = nil
 }
 
 struct NovelSessionMessageRecord: Codable, Equatable, Sendable {
@@ -917,6 +931,7 @@ enum NovelOperationKind: String, Codable, Sendable {
     case renameBranch
     case deleteBranch
     case undoBranchHead
+    case archiveDiscussion
     case cloneCandidate
     case adoptPolishCandidate
     case abandonPolishTransaction

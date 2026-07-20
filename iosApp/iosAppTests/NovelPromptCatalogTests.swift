@@ -11,7 +11,7 @@ final class NovelPromptCatalogTests: XCTestCase {
 
         XCTAssertEqual(
             sha256(snapshot),
-            "0ab0c80d550375e1b78582e4625930b01b0d9667046dc7261dc2503fb88ee626"
+            "a28dbdb16a7e2431f54626e6ee8e43faccc6d3ba6f919a4a383c5c3fab032998"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -81,6 +81,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         let quickStart = NovelPromptCatalog.template(for: .quickStart).systemText
         let state = NovelPromptCatalog.template(for: .stateDeltaV1).systemText
         let rebuild = NovelPromptCatalog.template(for: .manualSyncV1).systemText
+        let archive = NovelPromptCatalog.template(for: .discussionArchiveV1).systemText
         let drift = NovelPromptCatalog.template(for: .polishDriftV1).systemText
 
         for field in [
@@ -111,6 +112,11 @@ final class NovelPromptCatalogTests: XCTestCase {
             XCTAssertTrue(rebuild.contains("\"\(field)\""), "State rebuild Prompt is missing \(field)")
         }
         for field in [
+            "schemaVersion", "decisions", "topic", "decision", "relatedMaterialID", "summary"
+        ] {
+            XCTAssertTrue(archive.contains("\"\(field)\""), "Discussion archive Prompt is missing \(field)")
+        }
+        for field in [
             "schemaVersion", "compatible", "differences", "category", "sourceEvidence",
             "candidateEvidence"
         ] {
@@ -121,6 +127,9 @@ final class NovelPromptCatalogTests: XCTestCase {
             XCTAssertTrue(prompt.contains("Do not use Markdown fences"))
             XCTAssertTrue(prompt.contains("Do not add unknown keys"))
         }
+        XCTAssertTrue(archive.contains("Return exactly one raw JSON object"))
+        XCTAssertTrue(archive.contains("no Markdown fence"))
+        XCTAssertTrue(archive.contains("Do not add unknown keys"))
         XCTAssertTrue(state.contains("introduced|advanced|resolved|reopened"))
         XCTAssertTrue(state.contains("complete current branch"))
         XCTAssertTrue(state.contains("replacement branch outline"))

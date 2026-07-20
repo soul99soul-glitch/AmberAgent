@@ -48,19 +48,29 @@ enum NovelSessionBottomProximityPolicy {
     }
 }
 
-enum NovelSessionMeasuredGrowthPolicy {
-    static func event(
+enum NovelSessionScrollGeometryPolicy {
+    static func events(
         previousContentHeight: CGFloat,
         currentContentHeight: CGFloat,
         userDragging: Bool,
         isLiveTail: Bool,
-        isAtBottom: Bool
-    ) -> NovelSessionBottomFollowEvent? {
-        guard currentContentHeight - previousContentHeight > 0.5,
-              !userDragging else { return nil }
-        return isLiveTail
-            ? .measuredStreamGrowth(isAtBottom: isAtBottom)
-            : .measuredTerminalGrowth(isAtBottom: isAtBottom)
+        isSettlingTerminal: Bool,
+        previousIsAtBottom: Bool,
+        currentIsAtBottom: Bool
+    ) -> [NovelSessionBottomFollowEvent] {
+        if currentContentHeight - previousContentHeight > 0.5 {
+            guard !userDragging else { return [] }
+            if isLiveTail {
+                return [.measuredStreamGrowth(isAtBottom: currentIsAtBottom)]
+            }
+            if isSettlingTerminal {
+                return [.measuredTerminalGrowth(isAtBottom: currentIsAtBottom)]
+            }
+            guard previousIsAtBottom != currentIsAtBottom else { return [] }
+            return [.staticContentGrowth(isAtBottom: currentIsAtBottom)]
+        }
+        guard previousIsAtBottom != currentIsAtBottom else { return [] }
+        return [.viewportChanged(isAtBottom: currentIsAtBottom)]
     }
 }
 
@@ -78,6 +88,7 @@ struct NovelSessionView: View {
     let onOpenManualRewrite: (NovelCandidateID) -> Void
     let onFork: (NovelCheckpointID) -> Void
     let onOpenSettingProposals: (NovelSettingProposalRoute) -> Void
+    let onArchiveDiscussion: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
@@ -101,6 +112,7 @@ struct NovelSessionView: View {
     @State private var pendingAbandonTransactionID: NovelPendingOperationID?
     @State private var pendingUndo: NovelPendingCommittedUndo?
     @State private var historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
+    @State private var expandedArchiveIDs: Set<NovelMessageID> = []
 
     var body: some View {
         let listModel = projectedListModel()
@@ -217,9 +229,8 @@ struct NovelSessionView: View {
         listSignal: NovelSessionListSignal
     ) -> some View {
         let rows = listModel?.rows ?? []
-        let tailID = listModel?.activeTailID
-        let historicalRows = tailID == nil ? rows : rows.filter { $0.id != tailID }
-        let tailRow = tailID.flatMap { id in rows.first(where: { $0.id == id }) }
+        let historicalRows = listModel?.historicalRows ?? []
+        let activeRunRows = listModel?.activeRunRows ?? []
         let historyStartIndex = NovelSessionHistoryWindowPolicy.startIndex(
             totalCount: historicalRows.count,
             limit: historyWindowLimit
@@ -263,8 +274,8 @@ struct NovelSessionView: View {
                         }
                     }
 
-                    if let tailRow {
-                        transcriptRow(tailRow)
+                    ForEach(activeRunRows) { row in
+                        transcriptRow(row)
                     }
 
                     ForEach(viewModel.pendingCharacterIdentityMentions) { mention in
@@ -360,18 +371,16 @@ struct NovelSessionView: View {
         } action: { oldValue, newValue in
             latestAtBottom = newValue.isAtBottom
             latestNearBottom = newValue.isNearBottom
-            let measuredGrowthEvent = NovelSessionMeasuredGrowthPolicy.event(
+            let followEvents = NovelSessionScrollGeometryPolicy.events(
                 previousContentHeight: oldValue.contentHeight,
                 currentContentHeight: newValue.contentHeight,
                 userDragging: userDragging,
                 isLiveTail: isLiveTailPhase(listSignal.activeTailPhase),
-                isAtBottom: newValue.isAtBottom
+                isSettlingTerminal: isSettlingTerminal,
+                previousIsAtBottom: oldValue.isAtBottom,
+                currentIsAtBottom: newValue.isAtBottom
             )
-            if oldValue.isAtBottom != newValue.isAtBottom,
-               measuredGrowthEvent == nil {
-                dispatchFollowEvent(.viewportChanged(isAtBottom: newValue.isAtBottom))
-            }
-            if let event = measuredGrowthEvent {
+            for event in followEvents {
                 dispatchFollowEvent(event)
             }
         }
@@ -381,7 +390,8 @@ struct NovelSessionView: View {
         NovelSessionRowView(
             row: row,
             onAction: handleRowAction,
-            onAnswerAskUser: handleAskUserAnswer
+            onAnswerAskUser: handleAskUserAnswer,
+            onToggleArchive: toggleArchive
         )
             .equatable()
             .allowsHitTesting(
@@ -700,6 +710,15 @@ struct NovelSessionView: View {
                         }
                     }
                 }
+                Divider()
+                Button("归档当前讨论", systemImage: "archivebox") {
+                    onArchiveDiscussion()
+                }
+                .disabled(
+                    !viewModel.hasArchivableDiscussion ||
+                        viewModel.needsSync ||
+                        viewModel.isBusy
+                )
             } label: {
                 Text(currentComposerIntent.title)
                     .font(.caption.weight(.semibold))
@@ -719,7 +738,10 @@ struct NovelSessionView: View {
             )
             .disabled(controlsDisabled)
             .popover(isPresented: $isContextPanelPresented, arrowEdge: .bottom) {
-                ComposerContextPanel(snapshot: contextRingSnapshot)
+                ComposerContextPanel(
+                    snapshot: contextRingSnapshot,
+                    novelInjection: contextPanelModel
+                )
                     .presentationCompactAdaptation(.popover)
             }
         }
@@ -737,7 +759,11 @@ struct NovelSessionView: View {
     private func projectedListModel() -> NovelSessionListModel? {
         guard let project = workspace.projectSnapshot,
               let branch = workspace.branchSnapshot else { return nil }
-        return viewModel.projectedListModel(project: project, branch: branch)
+        return viewModel.projectedListModel(
+            project: project,
+            branch: branch,
+            expandedArchiveIDs: expandedArchiveIDs
+        )
     }
 
     private func makeListSignal(
@@ -752,6 +778,7 @@ struct NovelSessionView: View {
             activeTailID: model?.activeTailID,
             activeTailDigest: tail?.digest,
             activeTailPhase: tail?.transientPhase,
+            activeRunRowCount: model?.activeRunRows.count ?? 0,
             lastRowDigest: model?.rows.last?.digest
         )
     }
@@ -832,6 +859,10 @@ struct NovelSessionView: View {
             contextWindowTokens: receipt?.maxEstimatedInputTokens,
             currentContextTokens: estimatedTokens
         )
+    }
+
+    private var contextPanelModel: NovelInjectionPanelModel {
+        NovelInjectionPanelPresentation.project(latestContextReceipt)
     }
 
     private var latestContextReceipt: NovelInjectionReceiptRecord? {
@@ -959,6 +990,7 @@ struct NovelSessionView: View {
     ) {
         guard oldValue.sessionID == newValue.sessionID else {
             historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
+            expandedArchiveIDs.removeAll()
             if isNativeScrollDriverActive {
                 scrollDriver.submit(.conversationReset)
             }
@@ -986,6 +1018,12 @@ struct NovelSessionView: View {
                 dispatchFollowEvent(.terminalLayoutChanged)
             }
         } else if oldValue.activeTailID != nil, newValue.activeTailID == nil {
+            historyWindowLimit = NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory(
+                currentLimit: historyWindowLimit,
+                activeRunRowCount: oldValue.activeRunRowCount,
+                previousRowCount: oldValue.rowCount,
+                currentRowCount: newValue.rowCount
+            )
             dispatchFollowEvent(.terminalReached)
         } else if oldValue.rowCount != newValue.rowCount || oldValue.lastRowDigest != newValue.lastRowDigest {
             dispatchFollowEvent(.terminalLayoutChanged)
@@ -1018,6 +1056,18 @@ struct NovelSessionView: View {
             withTransaction(transaction) {
                 scrollPosition.scrollTo(id: anchorID, anchor: .top)
             }
+        }
+    }
+
+    private func toggleArchive(_ archive: NovelDiscussionArchivePresentation) {
+        if expandedArchiveIDs.contains(archive.id) {
+            expandedArchiveIDs.remove(archive.id)
+        } else {
+            historyWindowLimit = NovelSessionHistoryWindowPolicy.limitAfterArchiveExpansion(
+                currentLimit: historyWindowLimit,
+                revealedRowCount: archive.revealedRowCount
+            )
+            expandedArchiveIDs.insert(archive.id)
         }
     }
 
@@ -1163,7 +1213,6 @@ struct NovelSessionView: View {
 
     private func handleNativeScrollViewResolved(_ scrollView: UIScrollView) {
         guard isNativeScrollDriverDesired else { return }
-        let wasAttached = scrollDriver.isAttached
         scrollDriver.setAutomaticFollowEnabled(followGeneration)
         scrollDriver.onFallback = { reason, shouldReplayBottom in
             guard nativeScrollFallbackReason == nil else { return }
@@ -1171,8 +1220,8 @@ struct NovelSessionView: View {
             guard shouldReplayBottom, !userDragging else { return }
             scrollToBottomWithoutAnimation()
         }
-        scrollDriver.attach(scrollView)
-        guard !wasAttached, scrollDriver.isAttached else { return }
+        let didAttach = scrollDriver.attach(scrollView)
+        guard didAttach, scrollDriver.isAttached else { return }
         if userDragging || isBrowsingHistory {
             scrollDriver.submit(.userDragBegan)
         } else {
@@ -1184,6 +1233,13 @@ struct NovelSessionView: View {
 
     private var isBrowsingHistory: Bool {
         if case .browsingHistory = followState.mode {
+            return true
+        }
+        return false
+    }
+
+    private var isSettlingTerminal: Bool {
+        if case .settlingTerminal = followState.mode {
             return true
         }
         return false
@@ -1203,6 +1259,7 @@ private struct NovelSessionListSignal: Equatable {
     let activeTailID: NovelMessageID?
     let activeTailDigest: NovelSessionRowDigest?
     let activeTailPhase: NovelSessionTransientTailPhase?
+    let activeRunRowCount: Int
     let lastRowDigest: NovelSessionRowDigest?
 }
 
@@ -1237,30 +1294,66 @@ private struct NovelSessionRowView: View, Equatable {
     let row: NovelSessionRowModel
     let onAction: (NovelSessionRowAction) -> Void
     let onAnswerAskUser: (NovelMessageID, String) -> Void
+    let onToggleArchive: (NovelDiscussionArchivePresentation) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.row.id == rhs.row.id && lhs.row.digest == rhs.row.digest
     }
 
     var body: some View {
-        NovelSessionBubble(
-            messageID: row.id,
-            role: row.role,
-            kind: row.kind,
-            granularity: row.granularity,
-            content: row.content,
-            isStreaming: row.isStreaming,
-            transientPhase: row.transientPhase,
-            hasEverStreamed: row.runID != nil,
-            runStatus: row.runStatus,
-            candidateStatus: row.candidate?.status,
-            polishTransactionStatus: row.candidate?.polishTransactionStatus,
-            committedChange: row.committedChange,
-            askUser: row.askUser,
-            actions: row.actions,
-            onAction: onAction,
-            onAnswerAskUser: onAnswerAskUser
-        )
+        if let archive = row.archive {
+            NovelDiscussionArchiveCard(archive: archive) {
+                onToggleArchive(archive)
+            }
+        } else {
+            NovelSessionBubble(
+                messageID: row.id,
+                role: row.role,
+                kind: row.kind,
+                granularity: row.granularity,
+                content: row.content,
+                isStreaming: row.isStreaming,
+                transientPhase: row.transientPhase,
+                hasEverStreamed: row.runID != nil,
+                runStatus: row.runStatus,
+                candidateStatus: row.candidate?.status,
+                polishTransactionStatus: row.candidate?.polishTransactionStatus,
+                committedChange: row.committedChange,
+                askUser: row.askUser,
+                actions: row.actions,
+                onAction: onAction,
+                onAnswerAskUser: onAnswerAskUser
+            )
+        }
+    }
+}
+
+private struct NovelDiscussionArchiveCard: View {
+    let archive: NovelDiscussionArchivePresentation
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(archive.title, systemImage: "archivebox.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(archive.summary)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .multilineTextAlignment(.leading)
+                Label(
+                    archive.isExpanded ? "收起讨论" : "展开讨论",
+                    systemImage: archive.isExpanded ? "chevron.up" : "chevron.down"
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.accent)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .amberGlass(cornerRadius: 8, interactive: true)
+        }
+        .buttonStyle(.plain)
     }
 }
 

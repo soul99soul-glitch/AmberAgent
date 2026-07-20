@@ -129,8 +129,11 @@ struct ChatView: View {
     @State private var chatListSummary = ChatListSummarySnapshot()
     @State private var nativeTimelineMirror = NativeChatTimelineMirror()
     @State private var messageEditDraft: ChatMessageEditDraft?
+    @State private var isBackToolbarButtonPressed = false
+    @State private var isNewChatToolbarButtonPressed = false
     @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         settingsStore: SettingsStore,
@@ -188,7 +191,6 @@ struct ChatView: View {
                     }
                     .transition(.opacity)
             }
-
         }
         .safeAreaBar(edge: .top, spacing: 0) {
             topBar
@@ -529,7 +531,7 @@ struct ChatView: View {
     }
 
     private var topBar: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             Group {
                 if #available(iOS 26.0, *) {
                     GlassEffectContainer(spacing: 12) {
@@ -546,13 +548,11 @@ struct ChatView: View {
             topBarGlyphOverlay
         }
         .padding(.horizontal, 18)
-        // Bottom-align the 38pt controls so the native top bar — and therefore the system soft
-        // edge running from the status bar downward — ends exactly at the controls' bottom edge.
         .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)
     }
 
     private var topBarGlassContent: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             HStack {
                 backToolbarButton
 
@@ -570,14 +570,35 @@ struct ChatView: View {
 
     private var topBarGlyphOverlay: some View {
         HStack {
-            ChatToolbarIconGlyph(systemImage: "chevron.left", symbolSize: 18)
+            topBarGlyph(
+                systemImage: "chevron.left",
+                symbolSize: 18,
+                isPressed: isBackToolbarButtonPressed
+            )
 
             Spacer()
 
-            ChatToolbarIconGlyph(systemImage: "square.and.pencil", symbolSize: 16)
+            topBarGlyph(
+                systemImage: "square.and.pencil",
+                symbolSize: 16,
+                isPressed: isNewChatToolbarButtonPressed
+            )
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+
+    private func topBarGlyph(
+        systemImage: String,
+        symbolSize: CGFloat,
+        isPressed: Bool
+    ) -> some View {
+        ChatToolbarIconGlyph(systemImage: systemImage, symbolSize: symbolSize)
+            .scaleEffect(isPressed ? 0.9 : 1)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72),
+                value: isPressed
+            )
     }
 
     private var topIslandState: ChatActivityIslandState {
@@ -718,7 +739,8 @@ struct ChatView: View {
             accessibilityLabel: "返回",
             size: ChatTopBarLayout.toolbarButtonDiameter,
             symbolSize: 18,
-            showsGlyph: false
+            showsGlyph: false,
+            onPressChanged: { isBackToolbarButtonPressed = $0 }
         ) {
             dismiss()
         }
@@ -730,7 +752,8 @@ struct ChatView: View {
             accessibilityLabel: "新建对话",
             size: ChatTopBarLayout.toolbarButtonDiameter,
             symbolSize: 16,
-            showsGlyph: false
+            showsGlyph: false,
+            onPressChanged: { isNewChatToolbarButtonPressed = $0 }
         ) {
             guard viewModel.prepareForConversationChange() else { return }
             Task { @MainActor in

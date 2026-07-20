@@ -580,8 +580,9 @@ final class ChatGenerationCoordinator {
                 presentation: failureReason == nil ? .completed(toolTitle: "图片生成") : .failed()
             )
             self.bindings.persistMessages(conversationId)
-            self.bindings.bumpMessageRevision(.generationCompleted)
-            self.finishStreaming()
+            self.finishStreaming(
+                terminalEvent: failureReason == nil ? .generationCompleted : .generationFailed
+            )
         }
     }
 
@@ -1226,11 +1227,10 @@ final class ChatGenerationCoordinator {
         var updated = bindings.getMessages()
         updated.append(errMsg)
         bindings.setMessages(updated)
-        bindings.bumpMessageRevision(.generationFailed)
         await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationId?.toHexDashString())
         await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
         bindings.persistMessages(conversationId)
-        finishStreaming()
+        finishStreaming(terminalEvent: .generationFailed)
     }
 
     private func handleCompletedStream(
@@ -1300,8 +1300,7 @@ final class ChatGenerationCoordinator {
             presentation: .completed()
         )
         bindings.persistMessages(conversationId)
-        bindings.bumpMessageRevision(.generationCompleted)
-        finishStreaming()
+        finishStreaming(terminalEvent: .generationCompleted)
     }
 
     private func failPendingToolCalls(
@@ -1322,8 +1321,7 @@ final class ChatGenerationCoordinator {
         await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationId?.toHexDashString())
         await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
         bindings.persistMessagesSnapshot(finalSnapshot, conversationId, writeBaseline)
-        bindings.bumpMessageRevision(.generationFailed)
-        finishStreaming()
+        finishStreaming(terminalEvent: .generationFailed)
     }
 
     private func executeToolCall(
@@ -1557,8 +1555,7 @@ final class ChatGenerationCoordinator {
         guard currentRunId == pending.runId else { return }
         guard dependencies.autoGenerateResponses else {
             bindings.persistMessages(pending.conversationId)
-            bindings.bumpMessageRevision(.generationCompleted)
-            finishStreaming()
+            finishStreaming(terminalEvent: .generationCompleted)
             return
         }
 
@@ -1635,7 +1632,7 @@ final class ChatGenerationCoordinator {
         return nil
     }
 
-    private func finishStreaming() {
+    private func finishStreaming(terminalEvent: ChatMessageUpdateReason? = nil) {
         cancelPendingStreamSnapshotPublish()
         cancelStreamEventConsumer()
         if let runId = currentRunId {
@@ -1653,6 +1650,9 @@ final class ChatGenerationCoordinator {
         pendingBackgroundConversationStore = nil
         bindings.setIsLoading(false)
         clearPendingApprovals()
+        if let terminalEvent {
+            bindings.bumpMessageRevision(terminalEvent)
+        }
     }
 
     private func cancelStreamEventConsumer() {

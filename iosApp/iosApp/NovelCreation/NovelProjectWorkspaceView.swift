@@ -237,7 +237,8 @@ struct NovelProjectWorkspaceView: View {
                 onOpenCollection: { activeSheet = .collectCandidate($0) },
                 onOpenManualRewrite: { activeSheet = .manualRewrite($0) },
                 onFork: { activeSheet = .forkCheckpoint($0) },
-                onOpenSettingProposals: openSettingProposals
+                onOpenSettingProposals: openSettingProposals,
+                onArchiveDiscussion: { activeSheet = .discussionArchive(nil) }
             )
         case .manuscript:
             NovelChapterManagementView(
@@ -314,7 +315,13 @@ struct NovelProjectWorkspaceView: View {
                 chapters: chapterOptions,
                 suggestedGranularity: sessionViewModel.collectionGranularity(
                     for: candidateID
-                )
+                ),
+                onCompleted: { target in
+                    guard sessionViewModel.collectionGranularity(for: candidateID) == .wholeChapter else {
+                        return
+                    }
+                    transition(to: .discussionArchiveOffer(chapterID(for: target)))
+                }
             ) { selection, target in
                 let succeeded = await sessionViewModel.collectCandidate(
                     candidateID,
@@ -357,6 +364,29 @@ struct NovelProjectWorkspaceView: View {
 
         case .proposal(let proposal):
             NovelProposalAcceptanceSheet(viewModel: viewModel, proposal: proposal)
+
+        case .discussionArchiveOffer(let chapterID):
+            NovelDiscussionArchiveOfferSheet(
+                isReady: !sessionViewModel.needsSync && !sessionViewModel.isBusy
+            ) {
+                transition(to: .discussionArchive(chapterID))
+            }
+
+        case .discussionArchive(let chapterID):
+            NovelDiscussionArchiveSheet {
+                guard let draft = await sessionViewModel.distillDiscussionArchive(
+                    chapterID: chapterID
+                ) else {
+                    return .failed(sessionViewModel.errorMessage ?? "讨论整理失败，请稍后重试。")
+                }
+                return .ready(draft)
+            } onConfirm: { draft, decisions, summary in
+                await sessionViewModel.confirmDiscussionArchive(
+                    draft,
+                    decisions: decisions,
+                    summary: summary
+                )
+            }
 
         }
     }
@@ -436,6 +466,13 @@ struct NovelProjectWorkspaceView: View {
                 version: version,
                 ordinal: index + 1
             )
+        }
+    }
+
+    private func chapterID(for target: NovelCollectionTarget) -> NovelChapterID {
+        switch target {
+        case .appendToChapter(let chapterID): chapterID
+        case .createNextChapter(let chapterID, _): chapterID
         }
     }
 
@@ -538,6 +575,7 @@ private struct NovelWorkspaceGlassTabBar: View {
                 tab(value)
             }
         }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: selection)
     }
 
     private func tab(_ value: NovelWorkspaceSection) -> some View {
@@ -545,9 +583,7 @@ private struct NovelWorkspaceGlassTabBar: View {
 
         return Button {
             guard !isSelected else { return }
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
-                selection = value
-            }
+            selection = value
         } label: {
             Text(title(value))
                 .font(.subheadline.weight(.semibold))
@@ -639,6 +675,8 @@ private enum NovelWorkspaceSheet: Identifiable {
     case manualRewrite(NovelCandidateID)
     case forkCheckpoint(NovelCheckpointID)
     case proposal(NovelSettingProposalRecord)
+    case discussionArchiveOffer(NovelChapterID?)
+    case discussionArchive(NovelChapterID?)
 
     var id: String {
         switch self {
@@ -651,6 +689,10 @@ private enum NovelWorkspaceSheet: Identifiable {
         case .manualRewrite(let candidateID): "manual-rewrite-\(candidateID)"
         case .forkCheckpoint(let checkpointID): "fork-checkpoint-\(checkpointID)"
         case .proposal(let proposal): "proposal-\(proposal.id)"
+        case .discussionArchiveOffer(let chapterID):
+            "discussion-archive-offer-\(chapterID?.description ?? "current")"
+        case .discussionArchive(let chapterID):
+            "discussion-archive-\(chapterID?.description ?? "current")"
         }
     }
 }

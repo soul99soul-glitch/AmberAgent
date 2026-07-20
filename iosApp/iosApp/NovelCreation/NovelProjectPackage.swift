@@ -439,6 +439,19 @@ extension NovelOutcome {
                 headRevision: headRevision,
                 revision: revision
             )
+        case .discussionArchived(
+            _, let branchID, let archiveID, let checkpointID, let decisionRevisionIDs,
+            let projectRevision, let configRevision
+        ):
+            return .discussionArchived(
+                projectID: projectID,
+                branchID: branchID,
+                archiveID: archiveID,
+                checkpointID: checkpointID,
+                decisionRevisionIDs: decisionRevisionIDs,
+                projectRevision: projectRevision,
+                configRevision: configRevision
+            )
         case .candidateCloned(_, let branchID, let sourceCandidateID, let candidateID, let revision):
             return .candidateCloned(
                 projectID: projectID,

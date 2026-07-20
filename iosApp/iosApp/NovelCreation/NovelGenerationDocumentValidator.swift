@@ -216,6 +216,45 @@ enum NovelGenerationDocumentValidator {
                 receipt.materialDecisions.count {
                 issues.append("Injection receipt \(receipt.id) repeats a material decision.")
             }
+            if let includedMaterials = receipt.includedMaterials {
+                let includedIDs = includedMaterials.map(\.materialID)
+                let expectedIDs = receipt.materialDecisions.filter(\.included).map(\.materialID)
+                if Set(includedIDs).count != includedIDs.count ||
+                    Set(includedIDs) != Set(expectedIDs) {
+                    issues.append("Injection receipt \(receipt.id) has an invalid included material list.")
+                }
+                for item in includedMaterials {
+                    guard let material = document.materials.first(where: { $0.id == item.materialID }),
+                          let decision = receipt.materialDecisions.first(where: {
+                              $0.materialID == item.materialID && $0.included
+                          }),
+                          let revision = document.materialRevisions.first(where: {
+                              $0.id == decision.revisionID && $0.materialID == item.materialID
+                          }),
+                          material.kind == item.kind,
+                          revision.title == item.title else {
+                        issues.append("Injection receipt \(receipt.id) has invalid material display evidence.")
+                        continue
+                    }
+                }
+            }
+            if let includesPlotState = receipt.includesPlotState {
+                let expected = receipt.sections.contains { section in
+                    switch section.kind {
+                    case .currentState, .pendingManualState: true
+                    default: false
+                    }
+                }
+                if includesPlotState != expected {
+                    issues.append("Injection receipt \(receipt.id) has invalid state-presence evidence.")
+                }
+            }
+            if let count = receipt.recentMessageRoundCount, count < 0 {
+                issues.append("Injection receipt \(receipt.id) has a negative recent-message count.")
+            }
+            if let count = receipt.budgetExcludedItemCount, count < 0 {
+                issues.append("Injection receipt \(receipt.id) has a negative budget exclusion count.")
+            }
             if let factTransaction = receipt.factTransaction {
                 let expectedPrompt: NovelPromptKind = factTransaction.kind == .stateDelta
                     ? .stateDeltaV1
@@ -534,21 +573,40 @@ enum NovelGenerationDocumentValidator {
                 issues.append("Interrupted run \(run.id) has invalid terminal state.")
             }
             if !run.partialContent.isEmpty {
+                let expectedCandidateID = run.kind == .prose ? run.candidateID : nil
                 if outputMessage?.role != .assistant ||
                     outputMessage?.kind != .interruptedDraft ||
                     outputMessage?.content != run.partialContent ||
                     outputMessage?.runID != run.id ||
-                    outputMessage?.candidateID != nil {
+                    outputMessage?.candidateID != expectedCandidateID {
                     issues.append("Interrupted run \(run.id) has an invalid partial message.")
                 }
             } else if outputMessage != nil {
                 issues.append("Interrupted run \(run.id) unexpectedly persisted an empty message.")
             }
-            if document.candidates.contains(where: {
+            if run.kind == .prose, !run.partialContent.isEmpty, let candidateID = run.candidateID {
+                guard let candidate = document.candidates.first(where: {
+                    $0.id == candidateID &&
+                        $0.kind == .prose &&
+                        $0.branchID == run.branchID &&
+                        $0.sessionID == run.sessionID &&
+                        $0.sourceMessageID == run.messageID &&
+                        $0.baseCheckpointID == run.baseCheckpointID &&
+                        $0.baseHeadRevision == run.baseHeadRevision &&
+                        $0.content == run.partialContent &&
+                        $0.sourceChapterVersionID == nil
+                }) else {
+                    issues.append("Interrupted prose run \(run.id) has no matching candidate.")
+                    return
+                }
+                if candidate.status != .interrupted && candidate.status != .collected {
+                    issues.append("Interrupted prose run \(run.id) has an invalid candidate lifecycle.")
+                }
+            } else if document.candidates.contains(where: {
                 $0.sourceMessageID == run.messageID ||
                     (run.candidateID != nil && $0.id == run.candidateID)
             }) {
-                issues.append("Interrupted run \(run.id) unexpectedly persisted a candidate.")
+                issues.append("Non-prose interrupted run \(run.id) unexpectedly persisted a candidate.")
             }
         case .failed:
             if run.terminalAt == nil ||

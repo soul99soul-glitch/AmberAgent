@@ -73,6 +73,7 @@ enum NovelInjectionSectionKind: Codable, Equatable, Sendable {
     case pendingManualState(NovelPendingOperationID, chunkIndex: Int)
     case quickStartSeed
     case chapterContext(NovelChapterVersionID?)
+    case discussionArchive(NovelMessageID, throughSequence: Int64)
     case sessionMessage(NovelMessageID)
     case storyEvent(NovelEventID)
     case material(NovelMaterialRevisionID)
@@ -88,6 +89,7 @@ enum NovelInjectionSelectionReason: String, Codable, Equatable, Sendable {
     case currentChapterTail
     case previousChapterTail
     case fullSourceChapter
+    case archivedDiscussion
     case recentSession
     case branchEventHistory
     case branchOverride
@@ -127,6 +129,12 @@ struct NovelInjectionReceiptSectionRecord: Codable, Equatable, Sendable {
     let contentSHA256: String
 }
 
+struct NovelInjectionMaterialReceiptItem: Codable, Equatable, Sendable {
+    let materialID: NovelMaterialID
+    let kind: NovelMaterialKind
+    let title: String
+}
+
 struct NovelInjectionReceiptRecord: Codable, Equatable, Sendable {
     let id: NovelReceiptID
     let runID: NovelRunID
@@ -141,6 +149,10 @@ struct NovelInjectionReceiptRecord: Codable, Equatable, Sendable {
     let parameters: [String: String]
     let sections: [NovelInjectionReceiptSectionRecord]
     let materialDecisions: [NovelMaterialInjectionDecision]
+    let includedMaterials: [NovelInjectionMaterialReceiptItem]?
+    let includesPlotState: Bool?
+    let recentMessageRoundCount: Int?
+    let budgetExcludedItemCount: Int?
     let forceIncludeMaterialIDs: [NovelMaterialID]
     let forceExcludeMaterialIDs: [NovelMaterialID]
     let requestedInputBudgetTokens: Int
@@ -186,6 +198,10 @@ struct NovelInjectionReceiptRecord: Codable, Equatable, Sendable {
             )
         }
         materialDecisions = plan.materialDecisions
+        includedMaterials = plan.includedMaterials
+        includesPlotState = plan.includesPlotState
+        recentMessageRoundCount = plan.recentMessageRoundCount
+        budgetExcludedItemCount = plan.budgetExcludedItemCount
         forceIncludeMaterialIDs = Array(Set(overrides.forceIncludeMaterialIDs)).sorted {
             $0.description < $1.description
         }
@@ -229,6 +245,105 @@ struct NovelInjectionPlan: Codable, Equatable, Sendable {
     let contextText: String
     let canonicalInput: String
     let canonicalInputSHA256: String
+    let includedMaterials: [NovelInjectionMaterialReceiptItem]
+    let includesPlotState: Bool
+    let recentMessageRoundCount: Int
+    let budgetExcludedItemCount: Int
+
+    init(
+        prompt: NovelPromptTemplate,
+        sections: [NovelInjectionSection],
+        materialDecisions: [NovelMaterialInjectionDecision],
+        maxEstimatedInputTokens: Int,
+        estimatedInputTokens: Int,
+        contextText: String,
+        canonicalInput: String,
+        canonicalInputSHA256: String,
+        includedMaterials: [NovelInjectionMaterialReceiptItem] = [],
+        includesPlotState: Bool = false,
+        recentMessageRoundCount: Int = 0,
+        budgetExcludedItemCount: Int = 0
+    ) {
+        self.prompt = prompt
+        self.sections = sections
+        self.materialDecisions = materialDecisions
+        self.maxEstimatedInputTokens = maxEstimatedInputTokens
+        self.estimatedInputTokens = estimatedInputTokens
+        self.contextText = contextText
+        self.canonicalInput = canonicalInput
+        self.canonicalInputSHA256 = canonicalInputSHA256
+        self.includedMaterials = includedMaterials
+        self.includesPlotState = includesPlotState
+        self.recentMessageRoundCount = recentMessageRoundCount
+        self.budgetExcludedItemCount = budgetExcludedItemCount
+    }
+}
+
+struct NovelInjectionPanelMaterialModel: Equatable, Identifiable, Sendable {
+    let id: NovelMaterialID
+    let title: String
+    let kindTitle: String
+}
+
+struct NovelInjectionPanelModel: Equatable, Sendable {
+    let hasReceipt: Bool
+    let materials: [NovelInjectionPanelMaterialModel]
+    let includesPlotState: Bool
+    let recentMessageRoundCount: Int
+    let budgetExcludedItemCount: Int
+
+    static let empty = NovelInjectionPanelModel(
+        hasReceipt: false,
+        materials: [],
+        includesPlotState: false,
+        recentMessageRoundCount: 0,
+        budgetExcludedItemCount: 0
+    )
+}
+
+enum NovelInjectionPanelPresentation {
+    static func project(_ receipt: NovelInjectionReceiptRecord?) -> NovelInjectionPanelModel {
+        guard let receipt else { return .empty }
+
+        let materials: [NovelInjectionPanelMaterialModel]
+        if let recorded = receipt.includedMaterials {
+            materials = recorded.map {
+                NovelInjectionPanelMaterialModel(
+                    id: $0.materialID,
+                    title: $0.title,
+                    kindTitle: $0.kind.displayName
+                )
+            }
+        } else {
+            materials = receipt.materialDecisions.filter(\.included).map {
+                NovelInjectionPanelMaterialModel(
+                    id: $0.materialID,
+                    title: $0.materialID.description,
+                    kindTitle: "资料"
+                )
+            }
+        }
+
+        let includesPlotState = receipt.includesPlotState ?? receipt.sections.contains { section in
+            switch section.kind {
+            case .currentState, .pendingManualState: true
+            default: false
+            }
+        }
+        let sessionMessageCount = receipt.sections.reduce(into: 0) { count, section in
+            if case .sessionMessage = section.kind { count += 1 }
+        }
+
+        return NovelInjectionPanelModel(
+            hasReceipt: true,
+            materials: materials,
+            includesPlotState: includesPlotState,
+            recentMessageRoundCount: receipt.recentMessageRoundCount ??
+                (sessionMessageCount + 1) / 2,
+            budgetExcludedItemCount: receipt.budgetExcludedItemCount ??
+                receipt.materialDecisions.filter { $0.reason == .budgetTrimmed }.count
+        )
+    }
 }
 
 struct NovelInjectionBudgetItem: Equatable, Sendable {
@@ -353,6 +468,13 @@ enum NovelInjectionPlanner {
         requiredSections.append(stateSection)
         if let seedSection { requiredSections.append(seedSection) }
         if let chapterSection { requiredSections.append(chapterSection) }
+        let archiveSections = activeDiscussionArchives(
+            document: document,
+            branch: branch,
+            session: session,
+            request: request
+        ).map(makeDiscussionArchiveSection)
+        requiredSections.append(contentsOf: archiveSections)
         requiredSections.append(contentsOf: protectedSections)
         requiredSections.append(userSection)
 
@@ -369,19 +491,29 @@ enum NovelInjectionPlanner {
         }
 
         var selectedSessionSections: [NovelInjectionSection] = []
-        let eligibleMessages: [NovelSessionMessageRecord]
+        let cursorEligibleMessages: [NovelSessionMessageRecord]
         switch request.sessionCursorLimit {
         case nil:
-            eligibleMessages = session.messages
+            cursorEligibleMessages = session.messages
         case .some(.empty):
-            eligibleMessages = []
+            cursorEligibleMessages = []
         case .some(.through(let sequence)):
             guard session.messages.contains(where: { $0.sequence == sequence }) else {
                 throw NovelInjectionPlanningError.invalidInput(
                     "The Session cursor limit is outside the branch Session."
                 )
             }
-            eligibleMessages = session.messages.filter { $0.sequence <= sequence }
+            cursorEligibleMessages = session.messages.filter { $0.sequence <= sequence }
+        }
+        let archivedThroughSequence = archiveSections.compactMap { section -> Int64? in
+            guard case .discussionArchive(_, let sequence) = section.kind else { return nil }
+            return sequence
+        }.max()
+        let eligibleMessages = cursorEligibleMessages.filter { message in
+            guard let archivedThroughSequence else { return true }
+            guard message.sequence <= archivedThroughSequence else { return true }
+            return message.mode != .discussPlan ||
+                (message.kind != .userInput && message.kind != .discussion)
         }
         let recentMessages = Array(
             eligibleMessages.suffix(request.budget.maximumRecentSessionMessages)
@@ -394,7 +526,7 @@ enum NovelInjectionPlanner {
                 state: stateSection,
                 seed: seedSection,
                 chapter: chapterSection,
-                sessions: selectedSessionSections + [section],
+                sessions: archiveSections + selectedSessionSections + [section],
                 events: [],
                 materials: protectedSections,
                 user: userSection
@@ -418,7 +550,7 @@ enum NovelInjectionPlanner {
                 state: stateSection,
                 seed: seedSection,
                 chapter: chapterSection,
-                sessions: selectedSessionSections,
+                sessions: archiveSections + selectedSessionSections,
                 events: proposedEvents,
                 materials: protectedSections,
                 user: userSection
@@ -442,7 +574,7 @@ enum NovelInjectionPlanner {
                 state: stateSection,
                 seed: seedSection,
                 chapter: chapterSection,
-                sessions: selectedSessionSections,
+                sessions: archiveSections + selectedSessionSections,
                 events: eventSections,
                 materials: protectedSections + proposedSmart.map(makeMaterialSection),
                 user: userSection
@@ -465,7 +597,7 @@ enum NovelInjectionPlanner {
                 state: stateSection,
                 seed: seedSection,
                 chapter: chapterSection,
-                sessions: selectedSessionSections,
+                sessions: archiveSections + selectedSessionSections,
                 events: proposedEvents,
                 materials: materialSections,
                 user: userSection
@@ -483,7 +615,7 @@ enum NovelInjectionPlanner {
             state: stateSection,
             seed: seedSection,
             chapter: chapterSection,
-            sessions: selectedSessionSections,
+            sessions: archiveSections + selectedSessionSections,
             events: finalEventSections,
             materials: materialSections,
             user: userSection
@@ -512,6 +644,41 @@ enum NovelInjectionPlanner {
                     contentSHA256: sha256(candidate.source.revision.content)
                 )
             }
+        let includedMaterialIDs = Set(decisions.filter(\.included).map(\.materialID))
+        let includedMaterials = classified
+            .filter { includedMaterialIDs.contains($0.source.material.id) }
+            .sorted(by: materialStableOrder)
+            .map {
+                NovelInjectionMaterialReceiptItem(
+                    materialID: $0.source.material.id,
+                    kind: $0.source.material.kind,
+                    title: $0.source.revision.title
+                )
+            }
+        let selectedSessionMessageIDs: Set<NovelMessageID> = Set(selectedSessionSections.compactMap { section in
+            guard case .sessionMessage(let messageID) = section.kind else { return nil }
+            return messageID
+        })
+        let selectedMessages: [NovelSessionMessageRecord] = recentMessages.filter {
+            selectedSessionMessageIDs.contains($0.id)
+        }
+        let linkedRunIDs: Set<NovelRunID> = Set(selectedMessages.compactMap { $0.runID })
+        let linkedRoundCount = linkedRunIDs.count
+        let unlinkedMessages: [NovelSessionMessageRecord] = selectedMessages.filter { $0.runID == nil }
+        let unlinkedUserCount = unlinkedMessages.filter { $0.role == .user }.count
+        let unlinkedAssistantCount = unlinkedMessages.filter { $0.role == .assistant }.count
+        let unlinkedSystemCount = unlinkedMessages.filter { $0.role == .system }.count
+        let unlinkedRoundCount = max(unlinkedUserCount, unlinkedAssistantCount) + unlinkedSystemCount
+        let includesPlotState = sections.contains { section in
+            switch section.kind {
+            case .currentState, .pendingManualState: true
+            default: false
+            }
+        }
+        let budgetExcludedItemCount =
+            max(0, recentMessages.count - selectedSessionSections.count) +
+            max(0, eventCandidates.count - selectedEvents.count) +
+            trimmedSmartIDs.count
 
         return NovelInjectionPlan(
             prompt: prompt,
@@ -521,7 +688,11 @@ enum NovelInjectionPlanner {
             estimatedInputTokens: estimatedTokens(canonicalInput),
             contextText: render(contextSections),
             canonicalInput: canonicalInput,
-            canonicalInputSHA256: sha256(canonicalInput)
+            canonicalInputSHA256: sha256(canonicalInput),
+            includedMaterials: includedMaterials,
+            includesPlotState: includesPlotState,
+            recentMessageRoundCount: linkedRoundCount + unlinkedRoundCount,
+            budgetExcludedItemCount: budgetExcludedItemCount
         )
     }
 }
@@ -532,7 +703,7 @@ private extension NovelPromptKind {
         case .wholeChapterPolish:
             true
         case .quickStart, .discussion, .proseContinuation, .proseWholeChapter,
-             .stateDeltaV1, .manualSyncV1, .polishDriftV1:
+             .stateDeltaV1, .manualSyncV1, .discussionArchiveV1, .polishDriftV1:
             false
         }
     }
@@ -541,7 +712,8 @@ private extension NovelPromptKind {
         switch self {
         case .proseContinuation, .proseWholeChapter, .wholeChapterPolish:
             true
-        case .quickStart, .discussion, .stateDeltaV1, .manualSyncV1, .polishDriftV1:
+        case .quickStart, .discussion, .stateDeltaV1, .manualSyncV1,
+             .discussionArchiveV1, .polishDriftV1:
             false
         }
     }
@@ -962,6 +1134,55 @@ private extension NovelInjectionPlanner {
         )
     }
 
+    static func activeDiscussionArchives(
+        document: NovelProjectDocumentV1,
+        branch: NovelBranchRecord,
+        session: NovelSessionRecord,
+        request: NovelInjectionPlanningRequest
+    ) -> [NovelDiscussionArchiveRecord] {
+        guard case .some(.through(let archiveCursor)) = session.archiveCursor else { return [] }
+        let upperSequence: Int64
+        switch request.sessionCursorLimit {
+        case nil:
+            upperSequence = archiveCursor
+        case .some(.empty):
+            return []
+        case .some(.through(let sequence)):
+            upperSequence = min(archiveCursor, sequence)
+        }
+
+        let checkpointByID = Dictionary(
+            document.checkpoints.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        var activeCheckpointIDs: Set<NovelCheckpointID> = []
+        var checkpointID: NovelCheckpointID? = branch.headCheckpointID
+        while let currentID = checkpointID,
+              activeCheckpointIDs.insert(currentID).inserted,
+              let checkpoint = checkpointByID[currentID] {
+            checkpointID = checkpoint.parentCheckpointID
+        }
+        return (session.discussionArchives ?? []).filter {
+            $0.throughSequence <= upperSequence && activeCheckpointIDs.contains($0.checkpointID)
+        }.sorted { lhs, rhs in
+            if lhs.throughSequence != rhs.throughSequence {
+                return lhs.throughSequence < rhs.throughSequence
+            }
+            return lhs.id.description < rhs.id.description
+        }
+    }
+
+    static func makeDiscussionArchiveSection(
+        _ archive: NovelDiscussionArchiveRecord
+    ) -> NovelInjectionSection {
+        makeSection(
+            kind: .discussionArchive(archive.id, throughSequence: archive.throughSequence),
+            label: "ARCHIVED DISCUSSION THROUGH MESSAGE #\(archive.throughSequence)",
+            content: archive.summary,
+            reason: .archivedDiscussion
+        )
+    }
+
     static func makeSection(
         kind: NovelInjectionSectionKind,
         label: String,
@@ -1027,6 +1248,7 @@ private extension NovelInjectionPlanner {
         case .character: "character"
         case .masterOutline: "master-outline"
         case .writingRequirements: "writing-requirements"
+        case .decisionLog: "decision-log"
         case .custom(let name): "custom:\(name)"
         }
     }
@@ -1037,7 +1259,8 @@ private extension NovelInjectionPlanner {
         case .character: 1
         case .masterOutline: 2
         case .writingRequirements: 3
-        case .custom: 4
+        case .decisionLog: 4
+        case .custom: 5
         }
     }
 
@@ -1110,13 +1333,25 @@ private extension NovelInjectionPlanner {
         _ lhs: NovelInjectionSection,
         _ rhs: NovelInjectionSection
     ) -> Bool {
-        guard case .sessionMessage(let lhsID) = lhs.kind,
-              case .sessionMessage(let rhsID) = rhs.kind else {
+        let lhsKey: (sequence: Int64, id: String)
+        switch lhs.kind {
+        case .discussionArchive(let id, let sequence):
+            lhsKey = (sequence, id.description)
+        case .sessionMessage(let id):
+            lhsKey = (Int64(lhs.label.components(separatedBy: "#").last ?? "") ?? 0, id.description)
+        default:
             return lhs.label < rhs.label
         }
-        let lhsSequence = Int64(lhs.label.components(separatedBy: "#").last ?? "") ?? 0
-        let rhsSequence = Int64(rhs.label.components(separatedBy: "#").last ?? "") ?? 0
-        if lhsSequence != rhsSequence { return lhsSequence < rhsSequence }
-        return lhsID.description < rhsID.description
+        let rhsKey: (sequence: Int64, id: String)
+        switch rhs.kind {
+        case .discussionArchive(let id, let sequence):
+            rhsKey = (sequence, id.description)
+        case .sessionMessage(let id):
+            rhsKey = (Int64(rhs.label.components(separatedBy: "#").last ?? "") ?? 0, id.description)
+        default:
+            return lhs.label < rhs.label
+        }
+        if lhsKey.sequence != rhsKey.sequence { return lhsKey.sequence < rhsKey.sequence }
+        return lhsKey.id < rhsKey.id
     }
 }

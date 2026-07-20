@@ -291,6 +291,7 @@ enum NovelMaterialKindChoice: String, CaseIterable, Identifiable {
         case .character: self = .character
         case .masterOutline: self = .masterOutline
         case .writingRequirements: self = .writingRequirements
+        case .decisionLog: self = .custom
         case .custom: self = .custom
         }
     }

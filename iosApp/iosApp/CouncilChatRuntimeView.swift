@@ -498,7 +498,6 @@ struct CouncilChatRuntimeView: View {
 
     private func handleNativeScrollViewResolved(_ scrollView: UIScrollView) {
         guard isNativeScrollDriverDesired else { return }
-        let wasAttached = scrollDriver.isAttached
         scrollDriver.setAutomaticFollowEnabled(followGeneration)
         scrollDriver.onFallback = { reason, shouldReplayBottom in
             guard nativeScrollFallbackReason == nil else { return }
@@ -506,8 +505,8 @@ struct CouncilChatRuntimeView: View {
             guard shouldReplayBottom, !userDragging else { return }
             scrollToTranscriptBottom()
         }
-        scrollDriver.attach(scrollView)
-        guard !wasAttached, scrollDriver.isAttached else { return }
+        let didAttach = scrollDriver.attach(scrollView)
+        guard didAttach, scrollDriver.isAttached else { return }
         if userDragging || followPaused {
             scrollDriver.submit(.userDragBegan)
         } else {

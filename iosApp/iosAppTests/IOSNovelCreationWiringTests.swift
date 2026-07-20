@@ -175,6 +175,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
 
     func testWorkspaceTabsUseOneNativeLiquidGlassNavigationPlane() throws {
         let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
 
         XCTAssertTrue(workspace.contains("NovelWorkspaceGlassTabBar("))
         XCTAssertTrue(workspace.contains("ForEach(NovelWorkspaceSection.allCases)"))
@@ -185,8 +186,16 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(workspace.contains(".black.opacity(0.065)"))
         XCTAssertTrue(workspace.contains(".stroke(selectionStroke, lineWidth: 0.5)"))
         XCTAssertTrue(workspace.contains(".accessibilityAddTraits(isSelected ? .isSelected : [])"))
+        XCTAssertTrue(workspace.contains(".frame(height: 44)"))
+        XCTAssertFalse(workspace.contains(".frame(minHeight: 44)"))
+        XCTAssertTrue(workspace.contains(
+            ".animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: selection)"
+        ))
+        XCTAssertFalse(workspace.contains("withAnimation(reduceMotion ? nil"))
         XCTAssertFalse(workspace.contains("Picker(\"小说工作区\""))
         XCTAssertFalse(workspace.contains(".pickerStyle(.segmented)"))
+        XCTAssertTrue(compendium.contains(".safeAreaInset(edge: .top, spacing: 0)"))
+        XCTAssertFalse(compendium.contains("VStack(spacing: 0) {\n            Picker(\"设定分类\""))
         XCTAssertEqual(
             workspace.components(separatedBy: ".glassEffect(").count - 1,
             1,
@@ -231,7 +240,8 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("currentComposerIntent.title"))
         XCTAssertTrue(session.contains("onOpenModel"))
         XCTAssertTrue(session.contains("ContextRingButton("))
-        XCTAssertTrue(session.contains("ComposerContextPanel(snapshot: contextRingSnapshot)"))
+        XCTAssertTrue(session.contains("ComposerContextPanel("))
+        XCTAssertTrue(session.contains("novelInjection: contextPanelModel"))
         XCTAssertTrue(session.contains(".presentationCompactAdaptation(.popover)"))
         XCTAssertTrue(session.contains("private var contextRingSnapshot: ChatContextSnapshot"))
         XCTAssertFalse(session.contains("Image(systemName: \"scope\")"))
@@ -250,6 +260,44 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         let ring = try XCTUnwrap(session.range(of: "ContextRingButton("))
         XCTAssertLessThan(spacer.lowerBound, intent.lowerBound)
         XCTAssertLessThan(intent.lowerBound, ring.lowerBound)
+    }
+
+    func testNovelContextPanelUsesLatestInjectionReceiptDetails() throws {
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+        let composer = try source("iosApp/ChatComposerViews.swift")
+        let planner = try source("iosApp/NovelCreation/NovelInjectionPlanner.swift")
+
+        XCTAssertTrue(session.contains(
+            "NovelInjectionPanelPresentation.project(latestContextReceipt)"
+        ))
+        XCTAssertTrue(session.contains("novelInjection: contextPanelModel"))
+        XCTAssertTrue(composer.contains("let novelInjection: NovelInjectionPanelModel?"))
+        XCTAssertTrue(planner.contains("let includedMaterials: [NovelInjectionMaterialReceiptItem]?"))
+        XCTAssertTrue(planner.contains("let recentMessageRoundCount: Int?"))
+        XCTAssertTrue(planner.contains("let budgetExcludedItemCount: Int?"))
+    }
+
+    func testDiscussionArchiveHasOnlyManualAndPostWholeChapterEntryPoints() throws {
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let sheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+        let bubble = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
+
+        XCTAssertTrue(session.contains("Button(\"归档当前讨论\""))
+        XCTAssertTrue(session.contains("onArchiveDiscussion"))
+        XCTAssertTrue(session.contains("viewModel.needsSync"))
+        XCTAssertTrue(workspace.contains("case .discussionArchiveOffer"))
+        XCTAssertTrue(workspace.contains("case .discussionArchive("))
+        XCTAssertTrue(workspace.contains("== .wholeChapter"))
+        XCTAssertTrue(workspace.contains("!sessionViewModel.needsSync && !sessionViewModel.isBusy"))
+        XCTAssertTrue(workspace.contains("NovelDiscussionArchiveSheet"))
+        XCTAssertTrue(sheets.contains("struct NovelDiscussionArchiveSheet"))
+        XCTAssertTrue(sheets.contains("let isReady: Bool"))
+        XCTAssertTrue(sheets.contains("剧情状态同步完成后可归档"))
+        XCTAssertTrue(sheets.contains("TextField(\"决定主题\""))
+        XCTAssertTrue(sheets.contains("Button(role: .destructive)"))
+        XCTAssertTrue(bubble.contains("canCollect ? \"生成已中断 · 可收录已生成部分\" : \"生成已中断\""))
+        XCTAssertFalse(workspace.contains("Timer.publish"))
     }
 
     func testProjectTitleOpensWritingAndHierarchicalContextSheet() throws {
@@ -368,7 +416,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(session.contains("selectionTaskID"))
         XCTAssertFalse(session.contains("runningRunTaskID"))
         XCTAssertTrue(session.contains(
-            "@State private var followState = NovelSessionBottomFollowState(mode: .followingBottom)"
+            "@State private var followState = NovelSessionBottomFollowState()"
         ))
         XCTAssertTrue(session.contains(
             "@AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true"

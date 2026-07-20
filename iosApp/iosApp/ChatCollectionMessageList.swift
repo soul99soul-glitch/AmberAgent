@@ -229,7 +229,8 @@ enum NativeStaticTimelineViewportPolicy {
         visibleHeight: CGFloat,
         contentHeight: CGFloat,
         hasMessages: Bool,
-        userInteracting: Bool = false
+        userInteracting: Bool = false,
+        driverPausedForUser: Bool = false
     ) -> ChatViewportState {
         let isScrollable = contentHeight > visibleHeight + ChatLayout.bottomStickThreshold
         let liveRenderingThreshold = max(
@@ -242,7 +243,7 @@ enum NativeStaticTimelineViewportPolicy {
         state.liveRenderingFarFromBottom = distanceToBottom > liveRenderingThreshold
         state.showScrollToBottom = hasMessages && isScrollable && !state.isAtBottom
         state.userDragging = userInteracting
-        state.followPaused = userInteracting && !state.isAtBottom
+        state.followPaused = driverPausedForUser || (userInteracting && !state.isAtBottom)
         return state
     }
 }
@@ -423,6 +424,7 @@ struct NativeChatTimelineView: View {
     @State private var nativeScrollFallbackShouldReplayBottom = false
     @State private var nativeScrollFallbackReplayToken: UInt64 = 0
     @State private var isNativeScrollSurfaceVisible = false
+    @State private var hasMeasuredNativeScrollGeometry = false
 
     var body: some View {
         let messages = messagesProvider()
@@ -545,6 +547,7 @@ struct NativeChatTimelineView: View {
                 contentHeight: geo.contentSize.height
             )
         } action: { previousGeometry, geometry in
+            hasMeasuredNativeScrollGeometry = true
             latestNativeScrollGeometry = geometry
             let wasAtBottom = viewportState.isAtBottom
             let messages = messagesProvider()
@@ -553,7 +556,8 @@ struct NativeChatTimelineView: View {
                 visibleHeight: geometry.visibleHeight,
                 contentHeight: geometry.contentHeight,
                 hasMessages: !messages.isEmpty,
-                userInteracting: nativeUserScrollActive
+                userInteracting: nativeUserScrollActive,
+                driverPausedForUser: isNativeScrollDriverActive && scrollDriver.isPausedForUser
             )
             let nextViewportState = rawViewportState
             publishViewportState(nextViewportState)
@@ -576,6 +580,7 @@ struct NativeChatTimelineView: View {
         }
         .onDisappear {
             isNativeScrollSurfaceVisible = false
+            hasMeasuredNativeScrollGeometry = false
             scrollDriver.invalidate()
         }
         .onChange(of: followGeneration) { _, enabled in
@@ -584,6 +589,7 @@ struct NativeChatTimelineView: View {
         .onChange(of: nativeScrollDriverEnabled) { _, enabled in
             if !enabled {
                 nativeScrollFallbackReason = nil
+                hasMeasuredNativeScrollGeometry = false
                 scrollDriver.invalidate()
             }
         }
@@ -622,14 +628,14 @@ struct NativeChatTimelineView: View {
 
     private func handleNativeScrollViewResolved(_ scrollView: UIScrollView) {
         guard isNativeScrollDriverDesired else { return }
-        let wasAttached = scrollDriver.isAttached
         scrollDriver.setAutomaticFollowEnabled(followGeneration)
         scrollDriver.onFallback = { reason, shouldReplayBottom in
             handleNativeScrollFallback(reason, shouldReplayBottom: shouldReplayBottom)
         }
-        scrollDriver.attach(scrollView)
-        guard !wasAttached, scrollDriver.isAttached else { return }
-        if nativeUserScrollActive || viewportState.followPaused || !viewportState.isAtBottom {
+        let didAttach = scrollDriver.attach(scrollView)
+        guard didAttach, scrollDriver.isAttached else { return }
+        if nativeUserScrollActive || viewportState.followPaused ||
+            (hasMeasuredNativeScrollGeometry && !viewportState.isAtBottom) {
             scrollDriver.submit(.userDragBegan)
         } else {
             scrollDriver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
@@ -940,6 +946,7 @@ struct NativeChatTimelineView: View {
         }
         switch event {
         case .conversationLoaded, .conversationSwitched:
+            hasMeasuredNativeScrollGeometry = false
             scrollDriver.submit(.conversationReset)
             scrollDriver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
         case .branchChanged:
@@ -1044,6 +1051,7 @@ struct NativeChatTimelineView: View {
     private func resetNativeSwiftUIFallbackViewportForConversationEntry() {
         nativeScrollFallbackReplayToken &+= 1
         nativeUserScrollActive = false
+        hasMeasuredNativeScrollGeometry = false
         var next = viewportState
         next.followPaused = false
         next.userDragging = false
@@ -1174,9 +1182,11 @@ enum ChatSwiftUIConversationAnchorRetryPolicy {
     static func decision(
         taskCancelled: Bool,
         tokenMatches: Bool,
-        canRunNow: Bool
+        canRunNow: Bool,
+        isAlreadyAnchored: Bool = false
     ) -> ChatSwiftUIConversationAnchorRetryDecision {
         guard !taskCancelled, tokenMatches else { return .abort }
+        guard !isAlreadyAnchored else { return .abort }
         return canRunNow ? .attempt : .wait
     }
 }
@@ -1373,6 +1383,7 @@ private final class ChatSwiftUIListScrollRuntime {
         visibleHeight: 1,
         contentHeight: 0
     )
+    var hasMeasuredScrollGeometry = false
     var streamFollowTask: Task<Void, Never>?
     var lastUserScrollActivityAt = Date.distantPast
     var conversationScrollTask: Task<Void, Never>?
@@ -1558,6 +1569,7 @@ struct ChatSwiftUIMessageList: View {
                 contentHeight: geo.contentSize.height
             )
         } action: { previousGeometry, geometry in
+            runtime.hasMeasuredScrollGeometry = true
             runtime.latestScrollGeometry = geometry
             let distanceToBottom = geometry.distanceToBottom
             runtime.scrollVisibleRectMaxY = distanceToBottom
@@ -1941,7 +1953,8 @@ struct ChatSwiftUIMessageList: View {
                 switch ChatSwiftUIConversationAnchorRetryPolicy.decision(
                     taskCancelled: Task.isCancelled,
                     tokenMatches: token == runtime.conversationScrollToken,
-                    canRunNow: canRunConversationBottomAnchorRetry
+                    canRunNow: canRunConversationBottomAnchorRetry,
+                    isAlreadyAnchored: runtime.hasMeasuredScrollGeometry && viewportState.isAtBottom
                 ) {
                 case .abort:
                     return
@@ -2255,6 +2268,7 @@ struct ChatSwiftUIMessageList: View {
     }
 
     private func resetLatestGeometryForContentReplacement() {
+        runtime.hasMeasuredScrollGeometry = false
         runtime.latestScrollGeometry = ChatSwiftUIScrollGeometry(
             distanceToBottom: 0,
             visibleHeight: max(1, runtime.latestScrollGeometry.visibleHeight),

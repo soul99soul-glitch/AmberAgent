@@ -1206,6 +1206,26 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertNotNil(harness.state.pendingSearchApproval)
     }
 
+    func testTerminalRevisionPublishesAfterCoordinatorBecomesInactive() async {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        harness.coordinator.installPendingSearchApprovalForTesting(
+            pending: harness.pending,
+            request: harness.request
+        )
+        var wasRunningAtTerminal: Bool?
+        harness.state.onBumpMessageRevision = { [weak coordinator = harness.coordinator] reason in
+            guard reason == .generationCompleted else { return }
+            wasRunningAtTerminal = coordinator?.isRunning
+        }
+
+        await harness.coordinator.denyPendingSearchTool()
+
+        XCTAssertEqual(wasRunningAtTerminal, false)
+        XCTAssertFalse(harness.coordinator.isRunning)
+    }
+
     func testCancelledApprovedSearchDoesNotReplayStaleMessages() async throws {
         let transport = BlockingChatSearchTransport(response: .html("""
         <html><body>
@@ -1453,6 +1473,7 @@ private final class ChatGenerationBindingState {
     var recordedRunStatuses: [String] = []
     var persistenceEvents: [String] = []
     var onRecordRun: (() -> Void)?
+    var onBumpMessageRevision: ((ChatMessageUpdateReason) -> Void)?
     var messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage] = { $0 }
 
     init(messages: [UIMessage]) {
@@ -1467,8 +1488,9 @@ private final class ChatGenerationBindingState {
             setMessages: { [weak self] messages in
                 self?.messages = messages
             },
-            bumpMessageRevision: { [weak self] _ in
+            bumpMessageRevision: { [weak self] reason in
                 self?.messageRevision += 1
+                self?.onBumpMessageRevision?(reason)
             },
             shouldPaceStreamPresentation: { true },
             setIsLoading: { [weak self] isLoading in

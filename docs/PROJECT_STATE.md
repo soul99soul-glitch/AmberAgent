@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-17
+Last updated: 2026-07-20
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -22,25 +22,88 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
+### 2026-07-20 novel session memory S1-S3 adversarial closure
+
+- 对 Grok review 修复做二次生产链核对后，补齐四个局部缺口，没有增加轮询、fallback、滚动补偿或第二套状态机。
+- 讨论归档 checkpoint 现在保存提交时的完整 Session 游标，归档自身的 `throughSequence` 仍只界定被摘要替换的讨论边界；因此从该 checkpoint Fork 会保留其后已存在的正文/其他消息。validator 接受覆盖归档边界的 checkpoint 游标，同时兼容旧文档中两者相等的记录。
+- 归档摘要只替换边界内 `.discussPlan` 的 user input / discussion 原文；交错的正文候选继续进入近期会话注入。结构化模型的连续无输出 heartbeat 只由非空 text delta / replacement 刷新，usage 不再延长等待窗口。
+- 归档卡展开时，历史窗口按投影中实际由隐藏变为可见的行数增长，不再使用包含仍外露正文候选的 `messageCount`；现有窗口策略与归档展开状态保持不变。
+- 四条契约均完成旧实现红测与最终绿测。与上一轮相同的 11 套件组合门禁在 iPhone 17 Pro Simulator 为 244 passed、1 expected skip、0 failed（`/tmp/amber-s123-precise-fixes-2026-07-20-rerun.xcresult`）。第一次 iPhone 17e 组合尝试在测试启动前遇到 SpringBoard preflight Busy，未计为产品失败；`git diff --check` 通过。真实 provider 与真机归档手感仍待外部验证。
+
+### 2026-07-19 novel session memory S1-S3 review fixes
+
+- 独立对抗性 review 的 P1/P2 已最小修复，未加第二套状态机或兜底轮询。
+- P1：整章收录后的归档 Offer 与菜单入口在 `needsSync` 或 busy 时禁用；Offer 明示「剧情状态同步完成后可归档」，避免与自动同步抢锁导致 distill 首试失败。
+- P2：中断文案仅在 actions 含 `collectProse` 时写「可收录」；Fork 从 discussionArchive 谱系继承 `archiveCursor`/`discussionArchives`（id 重映射），validator 允许创建分支残留或 head 谱系内的 archive checkpoint；折叠卡收起时仍露出 available/interrupted 正文候选以便收录。
+- 定点 + 组合门禁：`NovelReducerTests`、`NovelSessionReplayTests`、`NovelSessionViewModelTests`、注入/文档校验、结构化输出/执行器、wiring、`NativeTimelineScrollCoreTests`、强制 `ChatStreamReplayTests` 为 243 passed、1 expected skip、0 failed（`/tmp/amber-s123-review-fix-combined.xcresult`）；`git diff --check` 通过。真实 provider 与真机归档手感仍待外部验证。
+
+### 2026-07-19 novel session memory S1-S3
+
+- 中断正文候选现在可收录其已持久化 partial 内容；原有 needsSync、stale candidate、source chapter drift 等 blocker 保持不变，收录与撤销仍走既有事务链。
+- 注入 receipt 增补资料清单、剧情状态、近期消息轮数和预算排除计数；小说输入区只读面板展示这些事实，不提供 pin、排除或修改入口，也不改变 S2 前的注入选择。
+- 讨论归档只由整章收录后的可跳过步骤或会话菜单触发。单次结构化模型调用使用连续无输出超时，用户可逐项确认、编辑或删除决定；全拒不落盘。确认后决定以 branch override 的 `.decisionLog` material 落盘，摘要与游标进入可选归档字段并随 checkpoint/undo 语义生效。
+- 投影层以稳定 archive ID 把有效 checkpoint 谱系中游标前的行折叠为一张归档卡；展开复用既有 `historyWindowLimit`，原始 row ID 不变，未新增滚动状态机或几何补偿。注入层用有效归档摘要和 decisionLog 替换游标前原始消息；无 archive cursor 的旧文档保持旧投影与旧注入行为。
+- 最终组合门禁覆盖 reducer、文档/项目包兼容、注入、Session 投影/ViewModel、结构化输出/执行器、Prompt catalog、UI wiring、`NativeTimelineScrollCoreTests` 与强制 `ChatStreamReplayTests`：251 passed、1 expected skip、0 failed（`Test-iosApp-2026.07.19_13-55-28-+0800.xcresult`）。真实 provider 的蒸馏质量、网络超时表现与真机折叠/展开手感仍待外部验证；按计划停在 S3，S4-S7 未启动。
+
+### 2026-07-18 novel review fix batch: cold-row placeholder metrics, completion window continuity, static-growth affordance
+
+- 独立对抗性 review 判定"轻拖飞出"的最强残余根因是历史行冷实例化链路：LazyVStack 首次实例化时 `ChatStableStreamingMarkdownView` 的纯文本占位把每个空行渲染成整行文本高度，与异步解析后 blockSpacing 分段布局差出百 pt 级，解析落地瞬间整章收缩造成位移。占位现按空行拆段（vendor `RenderableDocument(plainText:id:config:splittingParagraphsOnBlankLines:)` 新增 opt-in 参数，默认单段行为不变，仅 AmberAgent fallback 调用点启用；chunk id 按索引稳定，append-only 更新不重建前缀段）。review 同时证伪了两条此前嫌疑：非动画 config 下占位→解析替换不会重淡入（`ParagraphInitialFadePolicy` 已由 `configShouldAnimateText` 门控），行距也已在视图层对占位生效——均未额外修改。
+- 完成瞬间 `historyWindowLimit` 原按合并后行集裁剪，会把完成前已可见的旧行裁出视图树造成位移。`NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory` 现按快照差只吸收真正转入历史的行数（启动失败整体消失的行不扩窗），在 `activeTailID` 清除分支接线；`NovelSessionListSignal` 增加 `activeRunRowCount` 供该推导。投影层无消费者的 `activeUserMessageID` 字段已删除。
+- 静态排版增长把用户推离底部时原先完全静默（SwiftUI 回退路径无任何补偿），新增 `.staticContentGrowth` follow 事件：只按真实到底状态刷新底部按钮，不发滚动命令、不改模式，静态增长仍不拥有滚动所有权。原生 driver 底部收敛耗尽保持所有权语义不变，未到底时补一条 `bottomConvergenceExhausted` 诊断日志；对应 fallback 枚举 case 标注为无生产构造路径。
+- 跨 speculative 模式复用 renderable 的取舍新增未闭合语法种子契约（中断/超时停在半截表格/强调时仍复用流式渲染保持连续、抑制重淡入，由立即重解析纠正）；vendor `reusingUnchangedPrefix` 补单段落增长用例（首段变化时不复用、内容取新值），占位拆段行为有默认/opt-in 双向断言。明确未修：`resolution()` 主线程 `hasPrefix` 前缀扫描（量级未采样）、`ParagraphUIView` 宽度猜测（proposal 正常路径不触发）、按钮回底动画取消瞬跳（无运行证据）。
+- `NovelSessionReplayTests`、`NovelSessionViewModelTests`、`ChatMessageProjectionTests`、`NativeTimelineScrollCoreTests` 与强制 `ChatStreamReplayTests` 合跑 211 passed、1 expected skip、0 failed；vendor `make test` 全套（含新增布局实验）81 passed、0 failed；`git diff --check` 通过。新契约测试（几何策略静态分支、窗口吸收算术、reducer 按钮语义、wiring source 断言）按构造对旧实现必红，未执行单独红跑。
+- 占位高度差已用布局级实验坐实为 E1：真实 `DocumentView` + TextKit 测高（生产等价参数 blockSpacing 8 / 行距 4 / collapsesSoftBreaks，24 段 CJK 散文、360pt 宽）下解析 1840pt、单段占位 2304pt（偏高 464pt）、拆段占位 1840pt（误差 0）；`testSplitPlaceholderTracksParsedLayoutHeightFarCloserThanLegacyPlaceholder` 以机器无关比值断言留作永久 canary。注意该差距只在生产 blockSpacing=8 下显现，vendor 默认 blockSpacing=30 与空行渲染高度相消（默认参数实测差仅 4pt），实验必须用生产参数。
+- 外部（codex）复审确认两个 P2 并已红→绿修复：①`staticContentGrowth` 在跟随态亮按钮后，`viewportChanged(true)` 原不收按钮导致"已到底仍显示箭头"——reducer 的 followingBottom/settlingTerminal 回底分支现同步收按钮（`testViewportReturnToBottomClearsStaleBottomButtonWhileFollowing` 旧代码必红已实测）；②占位拆段原只识别严格 `\n\n`，CRLF 与仅含空白的空行（cmark 均视为段落分隔）会退回单段占位——改为按行扫描空白行分组（`testPlainTextPlaceholderSplitsOnCRLFAndWhitespaceOnlyBlankLines` 旧代码必红已实测）。复跑 `NovelSessionReplayTests` + 强制 `ChatStreamReplayTests` 43 passed、1 expected skip、0 failed；vendor 全套 82 passed、0 failed，布局实验数值不变（splitDelta 仍为 0）。
+- 含全部修复的 Debug 真机包已用 Team `89QRFX9548` 构建、`codesign --verify --deep --strict` 通过并覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动因设备锁定被拒（RequestDenied）。待人工复验三个窗口：长章节轻拖上滑（飞出应显著减弱或消失）、生成完成瞬间（完成前可见旧行不再被裁掉）、冷进入后静止位置与底部按钮状态（含回底后按钮收起）。
+
 ### 2026-07-18 model council question, timeout, and connectivity closure
 
 - 议会原先在每轮末无条件把一段“输入问题，或留空跳过”的流程说明当成 Ask User 问题交给 Sheet；这不是模型生成的问题，也没有可回答的结构。该伪提问已删除，当前运行时不会再假装存在模型提问能力；未新增问题解析协议、自动追问或第二套暂停状态机。
 - 主持人最终综合等单次模型超时由绝对墙钟改为“连续无输出”超时，任意有效流式增量都会刷新计时；超时仍会取消当前 provider 流，没有自动重试或摘要续写。Grok Web 的终止帧现在会主动结束 browser transport，不再等待 HTTP EOF；Provider 详情的连接测试也只在真实模型列表请求返回后报告成功或失败。
 - 「设置 → 模型议会」新增当前议会模型连通性测试：按实际主持/默认席位路由发送极短生成请求，逐项显示可用、失败和“配置模型不存在而回退到当前模型”。普通 Chat 的 `model_council_run` 现读取同一份 Room 设置，审批后的执行任务也进入 coordinator 取消所有权。议会运行器、工具运行时和设置接线合跑为 73 passed、0 failed；强制 `ChatStreamReplayTests` 为 17 passed、1 expected skip、0 failed，`git diff --check` 通过。更大合跑在未触及的 search cancellation canary 等待 continuation 时卡住并人工中止，未把它记为议会产品失败；真实 provider 账号下的各模型结果仍需在设置页实际点击验证。
 
+### 2026-07-18 novel scroll ownership and completion identity correction
+
+- 真机视频中的进入过程不是正常导航动画：已有长章节先到达底部，随后静态 Markdown/TextKit 首次排版继续增加 `contentSize`。首次收紧 measured-growth 后，静态增长虽然不再产生 terminal event，却仍会从相邻的 `measuredEvent == nil` 分支漏成 `.viewportChanged`，在 `.followingBottom` 下继续发起到底命令。几何分类现由一个策略一次性返回事件；live tail、terminal settle、静态增长和纯 viewport 变化互斥，冷进入的静态历史排版不再绕路取得滚动所有权。
+- 最新一轮 user/assistant 行只在存在真实 transient tail 时留在普通 `VStack`，保证发送等待与流式阶段身份连续；耐久刷新清除 `activeTailID` 后，该 run 必须回到历史 `LazyVStack`。此前按“最后一个 run ID”把已完成整章永久留在 eager 尾部的尝试已被真机证伪：长章节进入后轻微拖动会触发超长 eager 子树重新核算，表现为大幅飞出并需要长距离滚回；该永久保留已删除。进入页的静态增长隔离、活动 run 的 user 气泡连续性和原生滚动跟随均未改，也没有增加偏移补偿。
+- 共享 `NativeTimelineScrollDriver` 在 SwiftUI 更换底层 `UIScrollView` 时会清除旧容器的运动状态，并明确通知 Chat、小说和模型议会重新投放各自的跟随/暂停语义；同一容器的重复 resolve 仍是幂等，attach 本身不改 replacement 的位置。没有增加几何补偿、重试循环或新状态机。
+- 三条生产契约 canary 在旧实现上分别因静态增长漏发 viewport follow、完成态行换父容器、replacement 继承旧 motion state 转红，修复后转绿。`NativeTimelineScrollCoreTests`、`NovelSessionReplayTests`、`NovelSessionViewModelTests`、强制 `ChatStreamReplayTests`、SwiftUI stream replay 与 viewport 合跑为 189 passed、1 expected skip、0 failed；额外 production wiring 为 44 passed、0 failed，`git diff --check` 通过。最新 Debug 包已使用 Team `89QRFX9548` 构建、严格验签并覆盖安装到 iPhone Air；自动启动仅因设备锁定被拒绝，视频场景仍需解锁后目视复验。
+- 永久 eager 尾部的回归 canary 已在旧实现上转红：`activeTailID == nil` 后 `activeRunRows` 仍错误包含完整 run；收紧后定点转绿。`NovelSessionViewModelTests`、`NovelSessionReplayTests`、`NativeTimelineScrollCoreTests` 与强制 `ChatStreamReplayTests` 组合门禁通过，`git diff --check` 通过；修正包已重新签名、覆盖安装并成功启动到 iPhone Air，轻拖手感仍以本次真机操作复验为准。
+
+### 2026-07-18 novel native-scroll layout feedback closure
+
+- 小说长文越生成越卡的根因位于原生滚动观测回路，而不是本轮先怀疑的 Markdown 全文解析：resolver 把随滚动变化的 `contentOffset` / `bounds.origin` 当作布局变化，并由 driver 对已完成的布局再次调用 `layoutIfNeeded()`，导致长列表在拖动和内容增长期间反复重入全量布局。无效的段落合并与 Markdown environment 实验均已撤除。
+- resolver 现在只观测 `contentSize`、viewport size 与 inset；纯 offset 变化继续由既有 `onScrollPhaseChange` 和跟随 driver 处理，不再触发布局回调。布局观测回调也不再强制第二次 layout pass；显式回底与 convergence 中原有的必要布局、120Hz frame driver 和屏内动画保持不变，没有增加几何补偿或 fallback。
+- 两个 canary 分别对“观测回调不得再次 layout”与“纯 offset 不得改变 resolver metrics”完成红到绿。原生滚动核心、小说长会话/回放、`ChatStreamReplayTests`、SwiftUI stream replay、viewport、projection 和 Paragraph append 合跑为 221 passed、1 expected skip、0 failed；`git diff --check` 通过。Debug device build 使用 Team `89QRFX9548` 自动签名成功并通过 `codesign --deep --strict`，已覆盖安装到 iPhone Air；自动启动仅因设备锁定被拒绝，长文手感与完成标识最终稳定性仍需解锁后真机目视确认。
+
+### 2026-07-18 novel send-start prompt continuity
+
+- 小说会话发送后、provider 尚未完成连接的窗口期不再只投影 assistant 等待胶囊。`NovelSessionTransientTail` 现在携带同一 run 的临时 user message identity 与输入正文；若耐久 session 快照尚未包含该 message ID，投影先显示 user 气泡，再紧接等待尾行，因此长连接等待时不会只剩胶囊和大片空白。
+- provider 启动成功后的 `.started` 刷新仍是耐久事实来源；耐久 user message 到达后按同一 message ID、同一 row digest 原位接管临时行，不重复、不重建。启动失败仍恢复发送前 tail，输入框沿原有 `send == false` 语义保留内容。没有修改滚动几何、bottom target、动画节拍或 provider 生命周期。
+- 新增阻塞 `NovelCreation.start` 的生产链 canary，覆盖上一轮长内容、新 user 气泡、等待尾行、耐久接管无重复与 digest 连续。`NovelSessionReplayTests`、`NovelSessionViewModelTests`、强制 `ChatStreamReplayTests` 合跑为 92 passed、1 expected skip、0 failed；`git diff --check` 通过。09:00 全新 Debug 包完成严格签名校验、覆盖安装并成功启动到 iPhone Air；Grok 长连接等待下的最终位置仍需设备人工复验。
+
+### 2026-07-18 chat terminal, re-entry, and long-stream stability closure
+
+- 终态事件现在由 `ChatGenerationCoordinator.finishStreaming` 在清空 run/consumer/loading/approval 所有权后统一发布，完成、失败、工具循环上限、审批结束和用户图片工具不再让滚动层在 coordinator 仍 active 时先执行 terminal settle；图片工具失败也不再误报 `generationCompleted`。
+- Native 重入只在拿到本轮真实几何后才把“未到底”解释为历史浏览，测量标记会在离页、关闭 driver 和切会话时复位；viewport 的暂停状态同时读取 driver 的 `pausedForUser`。底部 convergence 次数耗尽不再把健康的原生容器交给 SwiftUI fallback，默认 clean-list 的会话入场重试在真实到达底部后立即停止。
+- 完成态解析期间继续复用同视觉配置的既有 Markdown renderable，不再先退回 raw/plain text；append-only 文档复用未变化的 renderable 前缀，表格块的全文比较移到 detached 任务，主线程只发布最终合并结果。端到端 24KB 矩阵通过，当前采样为表格 `79.3ms/delta`、散文 `44.7ms/delta`；相较旧采样有有限改善，但仍高于 120Hz 帧预算，未用嵌套懒加载或降低屏内动画冒充闭环。
+- `ChatStreamReplayTests`、`ChatSwiftUIStreamReplayTests`、`ChatMessageProjectionTests`、`ChatViewportPolicyTests`、`NativeTimelineScrollCoreTests` 和新增终态/缓存定点均通过，`git diff --check` 通过。`ChatViewModelSelectedFileContextTests` 全类与多类联跑遇到 Xcode test worker `waiting for workers to materialize` 基础设施卡死；新增终态用例单跑通过。真机长流、回底和完成瞬间视觉尚未复验。
+
 ### 2026-07-17 novel workspace native glass section navigation
 
-- 小说工作区顶部「创作 / 正文 / 设定」不再使用灰色 `Picker(.segmented)`，改为单一 `44pt` 原生交互式 Liquid Glass Capsule；三个按钮保持等宽、原有 `NovelWorkspaceSection` 状态与页面切换不变。选中项使用同一玻璃平面内的半透明胶囊填充和 matched-geometry 位移动画，避免在玻璃上再叠玻璃；保留 `16pt` 页面边距、动态提案数量、Reduce Motion、禁用态、选择触感和 VoiceOver 选中语义。iOS 26 以下提供 `ultraThinMaterial` fallback。
+- 小说工作区顶部「创作 / 正文 / 设定」不再使用灰色 `Picker(.segmented)`，改为单一原生交互式 Liquid Glass Capsule；容器固定为紧凑的 `44pt`，避免 `safeAreaBar` 的纵向提案经 Tab 内部 `maxHeight` 传播后把玻璃拉伸到整页。三个按钮保持等宽、原有 `NovelWorkspaceSection` 状态与页面切换不变；选中项的 matched-geometry 动画只作用于 Tab 子树，不再把三个页面的切换纳入同一动画事务。保留 `16pt` 页面边距、动态提案数量、Reduce Motion、禁用态、选择触感和 VoiceOver 选中语义。iOS 26 以下提供 `ultraThinMaterial` fallback。
 - 19:19 真机截图暴露浅色模式选中填充使用白色透明层，在白色玻璃上几乎不可见。选中游标已改为同一玻璃平面内的 `6.5%` 黑色透明胶囊，并增加 `0.5pt` 高光描边和轻阴影；仍只有外层一处 `glassEffect`，不是玻璃叠玻璃。
-- 参考图复核进一步确认透底差异来自布局而非透明度：Tab 原先是普通 `VStack` 子项，会把三个页面的滚动内容整体向下顶开，玻璃后方只有空白画布。Tab 现通过 `.safeAreaBar(edge: .top)` 成为顶部 chrome；滚动内容初始保持可读，向上滚动时会进入玻璃后方并由原生 Liquid Glass 折射，没有新增固定 top padding 或第二套滚动状态。
-- arm64 generic iOS Simulator Debug 构建通过；导航玻璃 wiring canary 与 `NovelCreationPresentationTests` 在 iPhone 17 Pro / iOS 26.5 Simulator 合跑为 24 passed、0 failed，`swiftc -parse` 与 `git diff --check` 通过。完整 `IOSNovelCreationWiringTests` 尝试中另有 22 passed、1 failed，失败为未触及的 `NovelSessionView.swift` projection 字符串断言 `testSessionBodyBuildsOneProjectionAndPassesItDown`；当前没有可直接进入目标小说项目的视觉 fixture，因此参考图级运行截图仍待真机页面复验。
+- 参考图复核进一步确认透底差异来自布局而非透明度：Tab 原先是普通 `VStack` 子项，会把三个页面的滚动内容整体向下顶开，玻璃后方只有空白画布。Tab 现通过 `.safeAreaBar(edge: .top)` 成为顶部 chrome；「设定」页的分类 Picker 也从包住 List 的固定 `VStack` 移为 List 自身的顶部 safe-area inset，使三个页面的滚动容器都能直接进入外层玻璃后方。没有新增固定 top padding 或第二套滚动状态。
+- arm64 generic iOS Simulator Debug 构建通过；完整 `IOSNovelCreationWiringTests` 当前为 23 passed、0 failed。此前唯一失败是同一文件中仍要求冷进入 `.followingBottom` 的过时字符串断言；生产契约与 `NovelSessionReplayTests` 均已使用 `awaitingInitialRows`，现已统一为默认状态断言。当前没有可直接进入目标小说项目的视觉 fixture，因此参考图级运行截图仍待真机页面复验。
 - 悬浮透底修复后的 wiring 定点与 `NovelCreationPresentationTests` 为 24 passed、0 failed，`swiftc -parse` 与 `git diff --check` 通过。该修复已包含在 19:45 的最新完整真机包中，完成严格签名校验、覆盖安装和启动。最终滚动透射视觉仍以设备人工复验为准。
+- 22:37 真机截图发现 Tab 容器从固定 `44pt` 改成 `minHeight: 44` 后，会接收 `.safeAreaBar` 的整页纵向提案；内部标签的 `maxHeight: .infinity` 随即把 Liquid Glass 拉成全屏巨型胶囊。已恢复外层固定 `44pt`，没有增加高度探针或兜底状态；小说 wiring、呈现与完整 `ChatStreamReplayTests` 为 62 passed、1 fixture skip、0 failed。22:49 全新 Debug 包完成严格签名校验、覆盖安装并成功启动到 iPhone Air。
 
 ### 2026-07-17 chat top glass capsule and system-owned soft edge
 
 - 标准 Chat 顶部中间的会话标题与活动状态不再悬空显示纯文字，统一使用非交互的原生 Liquid Glass Capsule；左右按钮与中间胶囊在 iOS 26+ 进入同一个 `GlassEffectContainer`，低版本保留 `ultraThinMaterial`、轻描边与阴影 fallback。标题仍不可点击，现有活动状态、翻转动画、文字截断和左右按钮行为未改。
 - 首轮自绘 `ultraThinMaterial + gradient mask` 真机验证失败：材质取代系统 edge effect 后只覆盖 `safeAreaBar` 内部，正文直接漏进状态栏，同时与标题/按钮玻璃形成发白的双层材质。后续增加 `.safeAreaBar` bottom padding 同样无效，因为系统 `.soft` 的采样曲线不读取该 padding。20:03 真机图又证明“从按钮底部向下增加 40pt 材质”的方向理解错误：它产生了一条突兀的白色横带。该附加材质、额外 padding 和几何补偿现已全部删除；顶部只保留三条列表的系统 `.soft`，覆盖区从系统状态栏开始，`54pt` 顶栏内的控件改为底对齐，使 soft edge 的下边界与按钮底部重合。
-- 返回与新会话的圆形玻璃仍在 `GlassEffectContainer` 内统一折射，但 monochrome `UIColor.label` glyph 改为容器外独立 sibling overlay；底层透明按钮继续负责点击、按压动画和 VoiceOver。这样 Liquid Glass 不能再通过 child foreground levels 把浅色模式 glyph 降为灰色。iPhone 17 Pro / iOS 26.5 Simulator 全新构建并真实启动后，Chat 截图确认白色横带消失、两枚 glyph 为黑色；顶栏两项契约加完整 `ChatStreamReplayTests` 为 18 passed、0 failed、1 expected skip，`swiftc -parse` 与 `git diff --check` 通过。arm64 真机包已用全新 DerivedData 构建并确认 bundle `app.amber.ios`、Team `89QRFX9548`；覆盖安装时 iPhone Air 在 CoreDevice 中变为 `unavailable`，因此 20:02 的错误白带包仍是设备端最后确认安装版本，纠正版待设备重新可用后安装。
+- 返回与新会话的圆形玻璃仍在 `GlassEffectContainer` 内统一折射，但 monochrome `UIColor.label` glyph 保持为容器外独立 sibling overlay；底层透明按钮继续负责点击、按压动画和 VoiceOver。overlay 现在同步读取对应 Button 的按压态，玻璃圆形和 glyph 以同一曲线缩放；顶栏内外两层 ZStack 均按底部对齐，活动岛在 `34/42pt` 间切换时不再带动左右按钮上下跳。这样既保留浅色模式真黑 glyph，也不牺牲按压反馈。iPhone 17 Pro / iOS 26.5 Simulator 定点门禁加完整 `ChatStreamReplayTests` 当前为 18 passed、0 failed、1 fixture skip，`git diff --check` 通过；22:24 全新 Debug 真机包完成签名校验、覆盖安装并成功启动到 iPhone Air，设备进程列表确认主进程运行中。
+- 22:24 之后的连续真机复验确认：把 `.safeAreaBar` 改挂到 `messageList`、给 bar 增加 `16/32pt` padding，以及用第二层 frame 增加 `32pt` edge-effect 尾部，都没有让系统 `.soft` 的可见渐隐稳定下探到按钮下边界。以上实验已全部撤销，不保留失效常量、额外 bar 高度、自绘材质、正文 padding 或滚动补偿。顶部回到单一 `54pt` 控件平面与系统原生 `.soft`；标题/活动胶囊按固有宽度布局并保留 `230/268pt` 碰撞上限，按钮 glyph 对比度与按压同步修复继续保留。撤除后的 `IOSSettingsWiringTests` 与完整 `ChatStreamReplayTests` 为 37 passed、1 fixture skip、0 failed；22:54 全新 Debug 包完成严格签名校验、覆盖安装并成功启动到 iPhone Air。该视觉缺口暂缓，不再继续堆叠策略。
 
 ### 2026-07-17 novel discussion completion and streaming presentation correction
 
@@ -63,8 +126,7 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 ### 2026-07-16 iOS 27 soft scroll-edge restoration
 
 - Chat 顶部自定义 `safeAreaBar` 不再依赖系统 `.automatic` scroll-edge 选择：Native Timeline、默认 SwiftUI clean list 与 legacy `UICollectionView` 三条消息列表路径均显式使用官方 `.soft` 顶部边缘效果，恢复渐变模糊并避免 iOS 27 Beta 自动切成带硬分界线的 `.hard`。同样使用自定义顶部安全区栏的「外观」页也显式固定为 `.soft`；会话列表原有 `.soft` 保持不变。没有添加手写渐变、遮罩或模糊参数。
-- iOS 27 真机截图进一步确认 `.soft` 默认衰减区过短，滚动正文仍会穿到会话标题后方。顶栏现向下增加 `32pt` 透明占位来扩展系统 edge-effect 边界，让正文进入标题区域前先经过完整渐变；返回、标题和新建控件仍保留原来的 `54pt` 布局位置。没有给正文添加静态 top padding，也没有手写模糊层。
-- `16pt` 版本的 production wiring canary、`IOSSettingsWiringTests` 与强制 `ChatStreamReplayTests` 合跑为 35 passed、1 expected skip、0 failed，且 23:37 已覆盖安装并成功启动到 iOS 27.0 Beta 真机。随后把延展量提升到 `32pt` 的源码与 canary 已完成且 `swiftc -parse`、`git diff --check` 通过，但当前工作区同时存在另一组未完成的小说资料解析改动，整包构建被 `NovelMaterialResolver.swift` 的泛型推断错误阻断，因此真机当前仍是 `16pt` 包，不能把 `32pt` 表述为已装机验证。
+- iOS 27 真机截图确认 `.soft` 默认衰减区过短，滚动正文仍会穿到会话标题后方。此处曾用 `.padding(.bottom, 16/32)` 尝试延长顶栏，但后续真机证明 padding 并不能稳定控制系统 soft-edge 曲线；该实验已被 2026-07-17 的真实 bar 高度方案取代，不能再作为当前实现或装机状态读取。
 
 ### 2026-07-16 Native Timeline blank-space and displacement-flash correction
 

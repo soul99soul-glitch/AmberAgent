@@ -285,6 +285,7 @@ struct ChatToolbarIconButton: View {
     var size: CGFloat
     var symbolSize: CGFloat
     var showsGlyph = true
+    var onPressChanged: ((Bool) -> Void)? = nil
     let action: () -> Void
 
     var body: some View {
@@ -299,7 +300,11 @@ struct ChatToolbarIconButton: View {
             .frame(width: size, height: size)
             .contentShape(Circle())
         }
-        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .lightImpact))
+        .buttonStyle(AmberPressFeedbackStyle(
+            pressedScale: 0.9,
+            haptic: .lightImpact,
+            onPressChanged: onPressChanged
+        ))
         .accessibilityLabel(accessibilityLabel)
     }
 
@@ -809,33 +814,58 @@ struct ComposerThinkingPanel: View {
 
 struct ComposerContextPanel: View {
     let snapshot: ChatContextSnapshot
+    let novelInjection: NovelInjectionPanelModel?
+
+    init(
+        snapshot: ChatContextSnapshot,
+        novelInjection: NovelInjectionPanelModel? = nil
+    ) {
+        self.snapshot = snapshot
+        self.novelInjection = novelInjection
+    }
 
     var body: some View {
-        ComposerPopoverSurface(width: 248) {
-            HStack(spacing: 14) {
-                VStack {
-                    ZStack {
-                        Circle()
-                            .stroke(AmberTheme.surface2, lineWidth: 8)
-                        Circle()
-                            // 用量环按已用/上限比例填充。上限按模型真实 contextWindow 计算,
-                            // 模型未声明时回退 8K 视觉参考(见 snapshot.contextFillFraction)。
-                            // 0 token 时环为空（诚实）。
-                            .trim(from: 0, to: snapshot.contextFillFraction)
-                            .stroke(AmberTheme.accent, style: StrokeStyle(lineWidth: 8, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
+        ComposerPopoverSurface(width: novelInjection == nil ? 248 : 300) {
+            VStack(spacing: 14) {
+                HStack(spacing: 14) {
+                    VStack {
+                        ZStack {
+                            Circle()
+                                .stroke(AmberTheme.surface2, lineWidth: 8)
+                            Circle()
+                                // 用量环按已用/上限比例填充。上限按模型真实 contextWindow 计算,
+                                // 模型未声明时回退 8K 视觉参考(见 snapshot.contextFillFraction)。
+                                // 0 token 时环为空（诚实）。
+                                .trim(from: 0, to: snapshot.contextFillFraction)
+                                .stroke(
+                                    AmberTheme.accent,
+                                    style: StrokeStyle(lineWidth: 8, lineCap: .round)
+                                )
+                                .rotationEffect(.degrees(-90))
+                        }
+                        .frame(width: 52, height: 52)
                     }
-                    .frame(width: 52, height: 52)
-                }
-                .frame(width: 68)
+                    .frame(width: 68)
 
-                VStack(spacing: 8) {
-                    ComposerContextCompactStatRow(label: "总消息数", value: "\(snapshot.messageCount)")
-                    ComposerContextCompactStatRow(label: "总 token", value: "\(snapshot.totalTokens)")
-                    ComposerContextCompactStatRow(label: "速度", value: speedText)
-                    ComposerContextCompactStatRow(label: "缓存命中率", value: cacheHitRateText)
+                    VStack(spacing: 8) {
+                        ComposerContextCompactStatRow(
+                            label: "总消息数",
+                            value: "\(snapshot.messageCount)"
+                        )
+                        ComposerContextCompactStatRow(
+                            label: "总 token",
+                            value: "\(snapshot.totalTokens)"
+                        )
+                        ComposerContextCompactStatRow(label: "速度", value: speedText)
+                        ComposerContextCompactStatRow(label: "缓存命中率", value: cacheHitRateText)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity)
+
+                if let novelInjection {
+                    Divider()
+                    NovelInjectionPanelDetails(model: novelInjection)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 18)
@@ -855,6 +885,67 @@ struct ComposerContextPanel: View {
             return "暂无"
         }
         return String(format: "%.1f token/s", tokensPerSecond)
+    }
+}
+
+private struct NovelInjectionPanelDetails: View {
+    let model: NovelInjectionPanelModel
+
+    var body: some View {
+        if model.hasReceipt {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("设定条目")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+
+                    if model.materials.isEmpty {
+                        Text("本次未注入设定条目")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                    } else {
+                        ForEach(model.materials) { material in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Image(systemName: "book.closed")
+                                    .font(.caption2)
+                                    .foregroundStyle(AmberTheme.accent)
+                                Text(material.title)
+                                    .font(.caption)
+                                    .foregroundStyle(AmberTheme.foreground)
+                                    .lineLimit(2)
+                                Spacer(minLength: 8)
+                                Text(material.kindTitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(AmberTheme.muted)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+
+                VStack(spacing: 8) {
+                    ComposerContextCompactStatRow(
+                        label: "剧情状态",
+                        value: model.includesPlotState ? "已携带" : "未携带"
+                    )
+                    ComposerContextCompactStatRow(
+                        label: "会话窗口",
+                        value: "\(model.recentMessageRoundCount) 轮"
+                    )
+                    if model.budgetExcludedItemCount > 0 {
+                        ComposerContextCompactStatRow(
+                            label: "预算未纳入",
+                            value: "\(model.budgetExcludedItemCount) 项"
+                        )
+                    }
+                }
+            }
+        } else {
+            Text("尚无生成上下文记录")
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 

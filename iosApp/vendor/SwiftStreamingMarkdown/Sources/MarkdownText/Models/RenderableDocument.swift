@@ -43,13 +43,51 @@ public struct RenderableDocument: Equatable, Sendable {
   /// Construct a single plain-text paragraph with a caller-owned stable id.
   /// Streaming callers should keep this id stable across text updates so SwiftUI
   /// updates the existing paragraph view instead of recreating it from alpha 0.
-  public init(plainText: String, id: String, config: MarkdownRenderConfig) {
+  ///
+  /// `splittingParagraphsOnBlankLines` opts a placeholder document into one
+  /// paragraph renderable per blank-line-separated chunk, so its measured height
+  /// tracks the parsed document's blockSpacing-based layout instead of rendering
+  /// every blank line as a full text line. Default keeps the single-paragraph
+  /// behavior unchanged. Chunk ids derive from `id` plus the chunk index, which
+  /// stays stable for append-only text updates.
+  public init(
+    plainText: String,
+    id: String,
+    config: MarkdownRenderConfig,
+    splittingParagraphsOnBlankLines: Bool = false
+  ) {
     var attributes: [NSAttributedString.Key: Any] = [
       .font: config.paragraphStyle.textFonts.normal,
       .foregroundColor: config.paragraphStyle.textColor
     ]
     if let kern = config.paragraphStyle.textFonts.preferredLetterSpacing {
       attributes[.kern] = kern
+    }
+    if splittingParagraphsOnBlankLines {
+      // Match cmark's blank-line semantics: CRLF newlines and lines containing
+      // only spaces/tabs also separate paragraphs. Single pass over lines.
+      var chunks: [String] = []
+      var currentLines: [String] = []
+      let normalized = plainText.replacingOccurrences(of: "\r\n", with: "\n")
+      for line in normalized.components(separatedBy: "\n") {
+        if line.trimmingCharacters(in: .whitespaces).isEmpty {
+          if !currentLines.isEmpty {
+            chunks.append(currentLines.joined(separator: "\n"))
+            currentLines = []
+          }
+        } else {
+          currentLines.append(line)
+        }
+      }
+      if !currentLines.isEmpty {
+        chunks.append(currentLines.joined(separator: "\n"))
+      }
+      if chunks.count > 1 {
+        self.init(renderables: chunks.enumerated().map { index, chunk in
+          .paragraph(id: "\(id)-\(index)", content: NSMutableAttributedString(string: chunk, attributes: attributes))
+        })
+        return
+      }
     }
     let content = NSMutableAttributedString(string: plainText, attributes: attributes)
     self.init(renderables: [.paragraph(id: id, content: content)])
@@ -62,6 +100,27 @@ public struct RenderableDocument: Equatable, Sendable {
   /// An empty document, equivalent to `RenderableDocument(plainText: "", …)`
   /// but allocation-free.
   public static let empty = RenderableDocument(renderables: [])
+
+  /// Preserves object identity for the unchanged leading renderables of an
+  /// append-only document. Parsing and conversion still produce the complete
+  /// document; this only keeps stable SwiftUI/TextKit subtrees from receiving
+  /// freshly allocated attributed strings on every streamed suffix.
+  public func reusingUnchangedPrefix(from previous: RenderableDocument) -> RenderableDocument {
+    var merged = renderables
+    let sharedCount = min(merged.count, previous.renderables.count)
+    var index = 0
+    while index < sharedCount,
+          merged[index].id == previous.renderables[index].id,
+          merged[index] == previous.renderables[index] {
+      merged[index] = previous.renderables[index]
+      index += 1
+    }
+    if index == merged.count, merged.count == previous.renderables.count {
+      return previous
+    }
+    return RenderableDocument(renderables: merged)
+  }
+
 }
 
 extension RenderableDocument {

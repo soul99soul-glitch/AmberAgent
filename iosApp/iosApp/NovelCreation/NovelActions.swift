@@ -170,6 +170,26 @@ struct NovelUndoBranchHeadCommand: Equatable, Sendable {
     let expectedWorkingRevision: Int64
 }
 
+struct NovelConfirmedDiscussionDecision: Codable, Equatable, Sendable {
+    let materialID: NovelMaterialID
+    let revisionID: NovelMaterialRevisionID
+    let topic: String
+    let decision: String
+    let relatedMaterialID: NovelMaterialID?
+}
+
+struct NovelArchiveDiscussionCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let archiveID: NovelMessageID
+    let checkpointID: NovelCheckpointID
+    let throughSequence: Int64
+    let chapterID: NovelChapterID?
+    let summary: String
+    let decisions: [NovelConfirmedDiscussionDecision]
+}
+
 struct NovelCloneCandidateCommand: Equatable, Sendable {
     let context: NovelMutationContext
     let projectID: NovelProjectID
@@ -311,6 +331,7 @@ enum NovelAction: Equatable, Sendable {
     case renameBranch(NovelRenameBranchCommand)
     case deleteBranch(NovelDeleteBranchCommand)
     case undoBranchHead(NovelUndoBranchHeadCommand)
+    case archiveDiscussion(NovelArchiveDiscussionCommand)
     case cloneCandidate(NovelCloneCandidateCommand)
     case adoptPolishCandidate(NovelAdoptPolishCandidateCommand)
     case abandonPolishTransaction(NovelAbandonPolishTransactionCommand)
@@ -339,6 +360,7 @@ enum NovelAction: Equatable, Sendable {
         case .renameBranch(let command): command.projectID
         case .deleteBranch(let command): command.projectID
         case .undoBranchHead(let command): command.projectID
+        case .archiveDiscussion(let command): command.projectID
         case .cloneCandidate(let command): command.projectID
         case .adoptPolishCandidate(let command): command.projectID
         case .abandonPolishTransaction(let command): command.projectID
@@ -369,6 +391,7 @@ enum NovelAction: Equatable, Sendable {
         case .renameBranch(let command): command.context
         case .deleteBranch(let command): command.context
         case .undoBranchHead(let command): command.context
+        case .archiveDiscussion(let command): command.context
         case .cloneCandidate(let command): command.context
         case .adoptPolishCandidate(let command): command.context
         case .abandonPolishTransaction(let command): command.context
@@ -399,6 +422,7 @@ enum NovelAction: Equatable, Sendable {
         case .renameBranch: .renameBranch
         case .deleteBranch: .deleteBranch
         case .undoBranchHead: .undoBranchHead
+        case .archiveDiscussion: .archiveDiscussion
         case .cloneCandidate: .cloneCandidate
         case .adoptPolishCandidate: .adoptPolishCandidate
         case .abandonPolishTransaction: .abandonPolishTransaction
@@ -520,6 +544,17 @@ enum NovelAction: Equatable, Sendable {
             payload = .undoBranchHead(.init(
                 projectID: command.projectID,
                 branchID: command.branchID
+            ))
+        case .archiveDiscussion(let command):
+            payload = .archiveDiscussion(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                archiveID: command.archiveID,
+                checkpointID: command.checkpointID,
+                throughSequence: command.throughSequence,
+                chapterID: command.chapterID,
+                summary: command.summary,
+                decisions: command.decisions
             ))
         case .cloneCandidate(let command):
             payload = .cloneCandidate(.init(
@@ -742,6 +777,17 @@ private enum NovelCanonicalActionPayload: Codable {
         let branchID: NovelBranchID
     }
 
+    struct ArchiveDiscussion: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let archiveID: NovelMessageID
+        let checkpointID: NovelCheckpointID
+        let throughSequence: Int64
+        let chapterID: NovelChapterID?
+        let summary: String
+        let decisions: [NovelConfirmedDiscussionDecision]
+    }
+
     struct CloneCandidate: Codable {
         let projectID: NovelProjectID
         let branchID: NovelBranchID
@@ -847,6 +893,7 @@ private enum NovelCanonicalActionPayload: Codable {
     case renameBranch(RenameBranch)
     case deleteBranch(DeleteBranch)
     case undoBranchHead(UndoBranchHead)
+    case archiveDiscussion(ArchiveDiscussion)
     case cloneCandidate(CloneCandidate)
     case adoptPolishCandidate(AdoptPolishCandidate)
     case abandonPolishTransaction(AbandonPolishTransaction)
@@ -926,6 +973,15 @@ enum NovelOutcome: Codable, Equatable, Sendable {
         toCheckpointID: NovelCheckpointID,
         headRevision: Int64,
         revision: Int64
+    )
+    case discussionArchived(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        archiveID: NovelMessageID,
+        checkpointID: NovelCheckpointID,
+        decisionRevisionIDs: [NovelMaterialRevisionID],
+        projectRevision: Int64,
+        configRevision: Int64
     )
     case candidateCloned(
         projectID: NovelProjectID,
@@ -1174,6 +1230,23 @@ struct NovelFailure: Codable, Equatable, Sendable {
     let isRetryable: Bool
 }
 
+struct NovelDiscussionArchiveDraftDecision: Identifiable, Equatable, Sendable {
+    let id: UUID
+    var topic: String
+    var decision: String
+    let relatedMaterialID: NovelMaterialID?
+}
+
+struct NovelDiscussionArchiveDraft: Equatable, Sendable {
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let sessionID: NovelSessionID
+    let throughSequence: Int64
+    let chapterID: NovelChapterID?
+    let summary: String
+    let decisions: [NovelDiscussionArchiveDraftDecision]
+}
+
 struct NovelRun: Sendable {
     let id: NovelRunID
     let events: AsyncStream<NovelRunEvent>
@@ -1202,9 +1275,22 @@ protocol NovelCreation: Sendable {
         runID: NovelRunID?
     ) async
     func retryPendingTerminal(runID: NovelRunID) async throws
+    func distillDiscussionArchive(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        chapterID: NovelChapterID?
+    ) async throws -> NovelDiscussionArchiveDraft
 }
 
 extension NovelCreation {
+    func distillDiscussionArchive(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        chapterID: NovelChapterID?
+    ) async throws -> NovelDiscussionArchiveDraft {
+        throw NovelError.invalidInput("This novel runtime cannot distill discussion archives.")
+    }
+
     func interruptRun(_ command: NovelCancelRunCommand) async throws {
         _ = try await perform(.cancelRun(command))
     }

@@ -2,6 +2,28 @@ import XCTest
 @testable import iosApp
 
 final class NovelDocumentValidationTests: XCTestCase {
+    func testLegacySessionWithoutDiscussionArchiveFieldsKeepsPreviousBehavior() throws {
+        let document = try NovelTestFixtures.document()
+        let encoded = try JSONEncoder().encode(document)
+        var object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        var sessions = try XCTUnwrap(object["sessions"] as? [[String: Any]])
+        sessions[0].removeValue(forKey: "archiveCursor")
+        sessions[0].removeValue(forKey: "discussionArchives")
+        object["sessions"] = sessions
+        let legacyData = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+
+        let decoded = try JSONDecoder().decode(NovelProjectDocumentV1.self, from: legacyData)
+
+        XCTAssertNil(decoded.sessions[0].archiveCursor)
+        XCTAssertNil(decoded.sessions[0].discussionArchives)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(decoded))
+    }
+
     func testDocumentDecodeDefaultsMissingFactAttemptsToEmpty() throws {
         let document = try NovelTestFixtures.document()
         let encoded = try JSONEncoder().encode(document)

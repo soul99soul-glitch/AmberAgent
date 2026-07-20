@@ -155,6 +155,20 @@ struct NovelPolishDriftV1: Codable, Equatable, Sendable {
     let differences: [NovelPolishDifferenceV1]
 }
 
+struct NovelDiscussionArchiveDecisionV1: Codable, Equatable, Sendable {
+    let topic: String
+    let decision: String
+    let relatedMaterialID: String?
+}
+
+struct NovelDiscussionArchiveV1: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
+    let decisions: [NovelDiscussionArchiveDecisionV1]
+    let summary: String
+}
+
 enum NovelStructuredOutputErrorCategory: String, Codable, Equatable, Sendable {
     case malformedJSON
     case expectedObject
@@ -241,6 +255,21 @@ enum NovelStructuredOutputDecoder {
         let root = try StrictJSON.rootObject(from: data)
         try StrictJSON.validatePolishDrift(root.object)
         let value: NovelPolishDriftV1 = try decode(NovelPolishDriftV1.self, from: root.data)
+        try NovelStructuredOutputValidation.validate(value)
+        return value
+    }
+
+    static func decodeDiscussionArchive(from text: String) throws -> NovelDiscussionArchiveV1 {
+        try decodeDiscussionArchive(from: Data(text.utf8))
+    }
+
+    static func decodeDiscussionArchive(from data: Data) throws -> NovelDiscussionArchiveV1 {
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validateDiscussionArchive(root.object)
+        let value: NovelDiscussionArchiveV1 = try decode(
+            NovelDiscussionArchiveV1.self,
+            from: root.data
+        )
         try NovelStructuredOutputValidation.validate(value)
         return value
     }
@@ -407,6 +436,40 @@ private enum NovelStructuredOutputValidation {
                 .invalidValue,
                 path: "$.differences",
                 message: "An incompatible polish result must describe at least one difference."
+            )
+        }
+    }
+
+    static func validate(_ value: NovelDiscussionArchiveV1) throws {
+        try schemaVersion(
+            value.schemaVersion,
+            expected: NovelDiscussionArchiveV1.currentSchemaVersion
+        )
+        guard !value.decisions.isEmpty else {
+            throw failure(
+                .invalidValue,
+                path: "$.decisions",
+                message: "A discussion archive must contain at least one decision."
+            )
+        }
+        for (index, decision) in value.decisions.enumerated() {
+            try required(decision.topic, path: "$.decisions[\(index)].topic")
+            try required(decision.decision, path: "$.decisions[\(index)].decision")
+            if let relatedMaterialID = decision.relatedMaterialID,
+               UUID(uuidString: relatedMaterialID) == nil {
+                throw failure(
+                    .invalidReference,
+                    path: "$.decisions[\(index)].relatedMaterialID",
+                    message: "A related material ID must be a UUID."
+                )
+            }
+        }
+        try required(value.summary, path: "$.summary")
+        guard value.summary.count <= 300 else {
+            throw failure(
+                .invalidValue,
+                path: "$.summary",
+                message: "A discussion archive summary must not exceed 300 characters."
             )
         }
     }
@@ -789,6 +852,27 @@ private enum StrictJSON {
         }
     }
 
+    static func validateDiscussionArchive(_ object: Object) throws {
+        try keys(object, path: "$", required: ["schemaVersion", "decisions", "summary"])
+        try schemaVersion(
+            object["schemaVersion"],
+            expected: NovelDiscussionArchiveV1.currentSchemaVersion
+        )
+        try objectArray(
+            object["decisions"],
+            path: "$.decisions",
+            requiredKeys: ["topic", "decision"],
+            optionalKeys: ["relatedMaterialID"]
+        ) { item, path in
+            try string(item["topic"], path: path + ".topic")
+            try string(item["decision"], path: path + ".decision")
+            if let relatedMaterialID = item["relatedMaterialID"] {
+                try nullableString(relatedMaterialID, path: path + ".relatedMaterialID")
+            }
+        }
+        try string(object["summary"], path: "$.summary")
+    }
+
     static func path(_ codingPath: [any CodingKey]) -> String {
         codingPath.reduce("$") { result, key in
             if let index = key.intValue { return result + "[\(index)]" }
@@ -876,6 +960,7 @@ private enum StrictJSON {
         _ value: Any?,
         path: String,
         requiredKeys: Set<String>,
+        optionalKeys: Set<String> = [],
         validate: (Object, String) throws -> Void
     ) throws {
         guard let array = value as? [Any] else {
@@ -886,7 +971,12 @@ private enum StrictJSON {
             guard let object = element as? Object else {
                 throw typeFailure(path: itemPath, expected: "an object")
             }
-            try keys(object, path: itemPath, required: requiredKeys)
+            try keys(
+                object,
+                path: itemPath,
+                required: requiredKeys,
+                optional: optionalKeys
+            )
             try validate(object, itemPath)
         }
     }

@@ -14,6 +14,21 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         override var isDecelerating: Bool { reportsDecelerating }
     }
 
+    private final class NonConvergingScrollView: UIScrollView {
+        override func setContentOffset(_ contentOffset: CGPoint, animated: Bool) {
+            super.setContentOffset(CGPoint(x: 0, y: 0), animated: false)
+        }
+    }
+
+    private final class LayoutCountingScrollView: UIScrollView {
+        var layoutIfNeededCallCount = 0
+
+        override func layoutIfNeeded() {
+            layoutIfNeededCallCount += 1
+            super.layoutIfNeeded()
+        }
+    }
+
     private func geometry(
         offsetY: CGFloat = 0,
         contentHeight: CGFloat = 1_200,
@@ -50,6 +65,25 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         driver.attach(scrollView)
 
         XCTAssertEqual(scrollView.contentOffset.y, 220, accuracy: 0.5)
+        XCTAssertFalse(driver.isFollowingBottomOrKeyboardFocus)
+    }
+
+    @MainActor
+    func testReplacingAttachedScrollViewDropsMotionStateWithoutMovingReplacement() {
+        let driver = NativeTimelineScrollDriver()
+        let first = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        first.contentSize = CGSize(width: 390, height: 1_400)
+        driver.attach(first)
+        driver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
+        XCTAssertTrue(driver.isFollowingBottomOrKeyboardFocus)
+
+        let replacement = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        replacement.contentSize = CGSize(width: 390, height: 1_800)
+        replacement.contentOffset = CGPoint(x: 0, y: 240)
+        let didAttach = driver.attach(replacement)
+
+        XCTAssertTrue(didAttach)
+        XCTAssertEqual(replacement.contentOffset.y, 240, accuracy: 0.5)
         XCTAssertFalse(driver.isFollowingBottomOrKeyboardFocus)
     }
 
@@ -228,6 +262,54 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         await Task.yield()
 
         XCTAssertEqual(scrollView.contentOffset.y, 260)
+    }
+
+    @MainActor
+    func testBottomConvergenceExhaustionKeepsNativeDriverAsOwner() async {
+        var fallbackReason: NativeTimelineScrollFallbackReason?
+        let driver = NativeTimelineScrollDriver()
+        driver.onFallback = { reason, _ in fallbackReason = reason }
+        let scrollView = NonConvergingScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        scrollView.contentSize = CGSize(width: 390, height: 1_400)
+        driver.attach(scrollView)
+
+        driver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
+        for _ in 0..<12 {
+            await Task.yield()
+        }
+
+        XCTAssertNil(fallbackReason)
+        XCTAssertTrue(driver.isAttached)
+        XCTAssertTrue(driver.isFollowingBottomOrKeyboardFocus)
+    }
+
+    @MainActor
+    func testObservedMetricsChangeDoesNotForceASecondScrollLayoutPass() {
+        let driver = NativeTimelineScrollDriver()
+        let scrollView = LayoutCountingScrollView(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 800)
+        )
+        scrollView.contentSize = CGSize(width: 390, height: 1_400)
+        driver.attach(scrollView)
+        scrollView.layoutIfNeededCallCount = 0
+
+        driver.handleLayoutMetricsChanged()
+
+        XCTAssertEqual(scrollView.layoutIfNeededCallCount, 0)
+    }
+
+    @MainActor
+    func testResolverMetricsIgnorePureContentOffsetChanges() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        scrollView.contentSize = CGSize(width: 390, height: 1_400)
+        let initial = NativeTimelineScrollViewResolver.Coordinator.Metrics(scrollView)
+
+        scrollView.contentOffset.y = 240
+
+        XCTAssertEqual(
+            NativeTimelineScrollViewResolver.Coordinator.Metrics(scrollView),
+            initial
+        )
     }
 
     @MainActor

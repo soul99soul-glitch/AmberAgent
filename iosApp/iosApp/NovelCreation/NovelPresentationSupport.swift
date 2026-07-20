@@ -50,6 +50,7 @@ extension NovelMaterialKind {
         case .character: "人物档案"
         case .masterOutline: "总剧情大纲"
         case .writingRequirements: "写作要求"
+        case .decisionLog: "讨论决定"
         case .custom(let name): name.isEmpty ? "自定义" : name
         }
     }
@@ -60,6 +61,7 @@ extension NovelMaterialKind {
         case .character: "person.text.rectangle"
         case .masterOutline: "point.3.connected.trianglepath.dotted"
         case .writingRequirements: "text.badge.checkmark"
+        case .decisionLog: "checklist"
         case .custom: "doc.text"
         }
     }
@@ -107,6 +109,7 @@ extension NovelCheckpointKind {
         case .initial: "初始"
         case .collection: "正文收录"
         case .manualSync: "手动同步"
+        case .discussionArchive: "讨论归档"
         case .polish: "整章润色"
         case .restore: "版本恢复"
         }
@@ -135,6 +138,7 @@ extension NovelInjectionSelectionReason {
         case .currentChapterTail: "当前章尾"
         case .previousChapterTail: "上一章尾"
         case .fullSourceChapter: "完整来源章节"
+        case .archivedDiscussion: "归档讨论摘要"
         case .recentSession: "近期对话"
         case .branchEventHistory: "分支事件"
         case .branchOverride: "分支覆盖"

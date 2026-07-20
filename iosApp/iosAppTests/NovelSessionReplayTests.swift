@@ -80,6 +80,146 @@ final class NovelSessionReplayTests: XCTestCase {
         )
     }
 
+    func testDiscussionArchiveCardCountsAsOneRowAndExpansionPreservesRawRowIdentity() throws {
+        let fixture = try makeFixture()
+        let messages = (0..<4).map { index in
+            makeMessage(
+                sequence: Int64(index),
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                mode: .discussPlan,
+                kind: index.isMultiple(of: 2) ? .userInput : .discussion,
+                content: "讨论 \(index)"
+            )
+        }
+        let archiveID = NovelMessageID()
+        var session = fixture.session
+        session.messages = messages
+        session.archiveCursor = .through(sequence: 1)
+        session.discussionArchives = [NovelDiscussionArchiveRecord(
+            id: archiveID,
+            checkpointID: fixture.branch.headCheckpointID,
+            throughSequence: 1,
+            messageCount: 2,
+            chapterID: nil,
+            summary: "确认主角在第三章末揭示身世。",
+            createdAt: Self.now
+        )]
+
+        let collapsed = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session
+        ))
+        XCTAssertEqual(collapsed.rows.map(\.id), [archiveID, messages[2].id, messages[3].id])
+        XCTAssertEqual(collapsed.historicalRows.count, 3)
+        XCTAssertEqual(collapsed.rows.first?.archive?.messageCount, 2)
+        XCTAssertEqual(collapsed.rows.first?.archive?.isExpanded, false)
+
+        let expanded = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            expandedArchiveIDs: [archiveID]
+        ))
+        XCTAssertEqual(
+            expanded.rows.map(\.id),
+            [archiveID, messages[0].id, messages[1].id, messages[2].id, messages[3].id]
+        )
+        XCTAssertEqual(expanded.rows.first?.archive?.isExpanded, true)
+        XCTAssertEqual(collapsed.rows.first?.digest.layout, expanded.rows.first?.digest.layout)
+        XCTAssertNotEqual(
+            collapsed.rows.first?.digest.presentation,
+            expanded.rows.first?.digest.presentation
+        )
+    }
+
+    func testCollapsedArchiveKeepsUncollectedProseVisibleForCollect() throws {
+        let fixture = try makeFixture()
+        let candidateID = NovelCandidateID()
+        let discussionUser = makeMessage(
+            sequence: 0,
+            role: .user,
+            mode: .discussPlan,
+            kind: .userInput,
+            content: "先讨论再写"
+        )
+        let discussionAssistant = makeMessage(
+            sequence: 1,
+            role: .assistant,
+            mode: .discussPlan,
+            kind: .discussion,
+            content: "同意先埋伏笔"
+        )
+        let proseMessage = makeMessage(
+            sequence: 2,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .proseCandidate,
+            content: "未收录正文仍应可点收录",
+            candidateID: candidateID
+        )
+        let laterDiscussion = makeMessage(
+            sequence: 3,
+            role: .user,
+            mode: .discussPlan,
+            kind: .userInput,
+            content: "就按这个定"
+        )
+        let candidate = makeCandidate(
+            fixture: fixture,
+            id: candidateID,
+            sourceMessageID: proseMessage.id,
+            kind: .prose,
+            status: .interrupted,
+            content: proseMessage.content
+        )
+        let archiveID = NovelMessageID()
+        var session = fixture.session
+        session.messages = [discussionUser, discussionAssistant, proseMessage, laterDiscussion]
+        session.archiveCursor = .through(sequence: 3)
+        session.discussionArchives = [NovelDiscussionArchiveRecord(
+            id: archiveID,
+            checkpointID: fixture.branch.headCheckpointID,
+            throughSequence: 3,
+            messageCount: 4,
+            chapterID: nil,
+            summary: "讨论归档后未收录正文仍可见。",
+            createdAt: Self.now
+        )]
+
+        let collapsed = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            candidates: [candidate]
+        ))
+        XCTAssertEqual(collapsed.rows.map(\.id), [archiveID, proseMessage.id])
+        XCTAssertEqual(collapsed.rows.last?.candidate?.status, .interrupted)
+        XCTAssertTrue(collapsed.rows.last?.actions.contains {
+            if case .collectProse = $0.action { return true }
+            return false
+        } == true)
+        let revealedRowCount = try XCTUnwrap(
+            collapsed.rows.first?.archive?.revealedRowCount
+        )
+        XCTAssertEqual(revealedRowCount, 3)
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.limitAfterArchiveExpansion(
+                currentLimit: 4,
+                revealedRowCount: revealedRowCount
+            ),
+            7
+        )
+
+        let expanded = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            candidates: [candidate],
+            expandedArchiveIDs: [archiveID]
+        ))
+        XCTAssertEqual(
+            expanded.rows.map(\.id),
+            [archiveID, discussionUser.id, discussionAssistant.id, proseMessage.id, laterDiscussion.id]
+        )
+    }
+
     func testProjectionUsesOneStableAssistantRowFromStreamingThroughDurableTerminal() throws {
         let fixture = try makeFixture()
         let run = makeRun(fixture: fixture, kind: .discussion)
@@ -322,7 +462,7 @@ final class NovelSessionReplayTests: XCTestCase {
             session: session,
             candidates: [candidate]
         ))
-        XCTAssertNil(needsSync.rows[1].actions.first?.blocker)
+        XCTAssertEqual(needsSync.rows[1].actions.first?.blocker, .branchNeedsSync)
 
         let activeRun = makeRun(fixture: fixture, kind: .discussion)
         var runningBranch = fixture.branch
@@ -860,6 +1000,82 @@ final class NovelSessionReplayTests: XCTestCase {
         ])
     }
 
+    func testInterruptedProseRowsExposeCollectBesideRetryAndKeepSyncBlocker() throws {
+        let fixture = try makeFixture()
+        let candidateID = NovelCandidateID()
+        let run = terminalRun(
+            makeRun(fixture: fixture, kind: .prose, candidateID: candidateID),
+            status: .interrupted
+        )
+        let message = makeMessage(
+            id: run.messageID,
+            sequence: 0,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .interruptedDraft,
+            content: "保留的正文",
+            runID: run.id,
+            candidateID: candidateID
+        )
+        let candidate = makeCandidate(
+            fixture: fixture,
+            id: candidateID,
+            sourceMessageID: message.id,
+            kind: .prose,
+            status: .interrupted,
+            content: message.content
+        )
+        var session = fixture.session
+        session.messages = [message]
+
+        let durable = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            candidates: [candidate],
+            runs: [run]
+        ))
+        XCTAssertEqual(durable.rows[0].actions, [
+            .init(action: .collectProse(candidateID), blocker: nil),
+            .init(action: .retryGeneration(run.id), blocker: nil),
+        ])
+
+        let manualSync = makePending(
+            fixture: fixture,
+            candidateID: nil,
+            status: .retryable,
+            kind: .manualSync
+        )
+        let blocked = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            candidates: [candidate],
+            runs: [run],
+            pending: [manualSync]
+        ))
+        XCTAssertEqual(blocked.rows[0].actions.first?.blocker, .branchNeedsSync)
+
+        let transientRun = makeRun(
+            fixture: fixture,
+            kind: .prose,
+            candidateID: candidateID
+        )
+        let tail = NovelSessionTransientTail(
+            run: transientRun,
+            content: "保留的正文",
+            renderRevision: 1,
+            phase: .interrupted
+        )
+        let transient = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            runs: [transientRun],
+            tail: tail
+        ))
+        XCTAssertEqual(transient.rows[0].actions, [
+            .init(action: .collectProse(candidateID), blocker: nil),
+            .init(action: .retryGeneration(transientRun.id), blocker: nil),
+        ])
+    }
+
     func testZeroTokenInterruptedRunSurvivesDurableRefreshAndReopen() throws {
         let fixture = try makeFixture()
         let interruptedRun = terminalRun(
@@ -940,6 +1156,7 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertFalse(interruptedRow.isStreaming)
         XCTAssertEqual(interruptedRow.kind, .interruptedDraft)
         XCTAssertEqual(interruptedRow.actions, [
+            .init(action: .collectProse(try XCTUnwrap(run.candidateID)), blocker: nil),
             .init(action: .retryGeneration(run.id), blocker: nil)
         ])
 
@@ -1101,52 +1318,183 @@ final class NovelSessionReplayTests: XCTestCase {
         )
 
         XCTAssertTrue(source.contains("contentHeight: geometry.contentSize.height"))
-        XCTAssertTrue(source.contains("NovelSessionMeasuredGrowthPolicy.event("))
-        XCTAssertTrue(source.contains("dispatchFollowEvent(event)"))
+        XCTAssertTrue(source.contains("NovelSessionScrollGeometryPolicy.events("))
+        XCTAssertTrue(source.contains("for event in followEvents"))
         XCTAssertTrue(source.contains("!viewModel.retryableBranchPendingOperations.isEmpty"))
         XCTAssertTrue(source.contains("NativeTimelineScrollReturnPolicy.returnedToBottom("))
         XCTAssertTrue(source.contains("dispatchFollowEvent(.userDragEnded(isAtBottom: returnedToBottom))"))
         XCTAssertTrue(source.contains("ChatLayout.nearBottomResumeThreshold"))
+        XCTAssertTrue(
+            source.contains("NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory("),
+            "完成瞬间必须吸收转入历史的行数，否则窗口会裁掉完成前已可见的旧行。"
+        )
     }
 
     func testMeasuredContentGrowthUsesLiveOrTerminalFollowEvent() {
         XCTAssertEqual(
-            NovelSessionMeasuredGrowthPolicy.event(
+            NovelSessionScrollGeometryPolicy.events(
                 previousContentHeight: 120,
                 currentContentHeight: 132,
                 userDragging: false,
                 isLiveTail: true,
-                isAtBottom: false
+                isSettlingTerminal: false,
+                previousIsAtBottom: true,
+                currentIsAtBottom: false
             ),
-            .measuredStreamGrowth(isAtBottom: false)
+            [.measuredStreamGrowth(isAtBottom: false)]
         )
         XCTAssertEqual(
-            NovelSessionMeasuredGrowthPolicy.event(
+            NovelSessionScrollGeometryPolicy.events(
                 previousContentHeight: 132,
                 currentContentHeight: 148,
                 userDragging: false,
                 isLiveTail: false,
-                isAtBottom: false
+                isSettlingTerminal: false,
+                previousIsAtBottom: true,
+                currentIsAtBottom: false
             ),
-            .measuredTerminalGrowth(isAtBottom: false)
+            [.staticContentGrowth(isAtBottom: false)]
         )
-        XCTAssertNil(
-            NovelSessionMeasuredGrowthPolicy.event(
+        XCTAssertEqual(
+            NovelSessionScrollGeometryPolicy.events(
                 previousContentHeight: 148,
                 currentContentHeight: 164,
+                userDragging: false,
+                isLiveTail: false,
+                isSettlingTerminal: true,
+                previousIsAtBottom: true,
+                currentIsAtBottom: false
+            ),
+            [.measuredTerminalGrowth(isAtBottom: false)]
+        )
+        XCTAssertEqual(
+            NovelSessionScrollGeometryPolicy.events(
+                previousContentHeight: 164,
+                currentContentHeight: 180,
                 userDragging: true,
                 isLiveTail: true,
-                isAtBottom: false
-            )
+                isSettlingTerminal: false,
+                previousIsAtBottom: true,
+                currentIsAtBottom: false
+            ),
+            []
         )
-        XCTAssertNil(
-            NovelSessionMeasuredGrowthPolicy.event(
-                previousContentHeight: 164,
-                currentContentHeight: 152,
+        XCTAssertEqual(
+            NovelSessionScrollGeometryPolicy.events(
+                previousContentHeight: 180,
+                currentContentHeight: 168,
                 userDragging: false,
                 isLiveTail: true,
-                isAtBottom: false
-            )
+                isSettlingTerminal: false,
+                previousIsAtBottom: true,
+                currentIsAtBottom: false
+            ),
+            [.viewportChanged(isAtBottom: false)]
+        )
+    }
+
+    func testStaticContentGrowthDoesNotFallThroughToViewportFollow() {
+        // 到底状态翻转时只产生按钮语义事件，不落入会触发回底的 viewportChanged。
+        XCTAssertEqual(
+            NovelSessionScrollGeometryPolicy.events(
+                previousContentHeight: 120,
+                currentContentHeight: 180,
+                userDragging: false,
+                isLiveTail: false,
+                isSettlingTerminal: false,
+                previousIsAtBottom: true,
+                currentIsAtBottom: false
+            ),
+            [.staticContentGrowth(isAtBottom: false)]
+        )
+        // 未翻转的静态增长依旧完全静默。
+        XCTAssertEqual(
+            NovelSessionScrollGeometryPolicy.events(
+                previousContentHeight: 120,
+                currentContentHeight: 180,
+                userDragging: false,
+                isLiveTail: false,
+                isSettlingTerminal: false,
+                previousIsAtBottom: true,
+                currentIsAtBottom: true
+            ),
+            []
+        )
+    }
+
+    func testStaticContentGrowthOnlyUpdatesBottomButtonWithoutScrollCommands() {
+        let shifted = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(mode: .followingBottom),
+            event: .staticContentGrowth(isAtBottom: false)
+        )
+        XCTAssertEqual(shifted.state.mode, .followingBottom)
+        XCTAssertTrue(shifted.state.showsBottomButton)
+        XCTAssertEqual(shifted.commands, [.setBottomButton(true)])
+
+        let browsing = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(mode: .browsingHistory, showsBottomButton: true),
+            event: .staticContentGrowth(isAtBottom: true)
+        )
+        XCTAssertEqual(browsing.state.mode, .browsingHistory)
+        XCTAssertFalse(browsing.state.showsBottomButton)
+        XCTAssertEqual(browsing.commands, [.setBottomButton(false)])
+
+        let awaiting = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(),
+            event: .staticContentGrowth(isAtBottom: false)
+        )
+        XCTAssertEqual(awaiting.state.mode, .awaitingInitialRows)
+        XCTAssertTrue(awaiting.commands.isEmpty)
+    }
+
+    func testViewportReturnToBottomClearsStaleBottomButtonWhileFollowing() {
+        // staticContentGrowth 会在 followingBottom 下亮按钮；随后几何回底
+        // （viewportChanged(true)）必须收掉按钮，否则箭头与真实位置不一致。
+        let shifted = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(mode: .followingBottom),
+            event: .staticContentGrowth(isAtBottom: false)
+        )
+        XCTAssertTrue(shifted.state.showsBottomButton)
+
+        let returned = NovelSessionBottomFollowPolicy.reduce(
+            state: shifted.state,
+            event: .viewportChanged(isAtBottom: true)
+        )
+        XCTAssertEqual(returned.state.mode, .followingBottom)
+        XCTAssertFalse(returned.state.showsBottomButton)
+        XCTAssertEqual(returned.commands, [.setBottomButton(false)])
+    }
+
+    func testCompletionRaisesHistoryWindowLimitOnlyForRowsThatBecameHistorical() {
+        // 完成：run 的 2 行全部转入历史，窗口上限吸收 2 行，完成前可见的旧行保持可见。
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory(
+                currentLimit: 4,
+                activeRunRowCount: 2,
+                previousRowCount: 12,
+                currentRowCount: 12
+            ),
+            6
+        )
+        // 启动失败恢复：临时行整体消失，没有行转入历史，不得扩窗。
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory(
+                currentLimit: 4,
+                activeRunRowCount: 2,
+                previousRowCount: 12,
+                currentRowCount: 10
+            ),
+            4
+        )
+        // 部分留存（user 行已耐久、assistant 行消失）：只吸收留存的那一行。
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory(
+                currentLimit: 4,
+                activeRunRowCount: 2,
+                previousRowCount: 12,
+                currentRowCount: 11
+            ),
+            5
         )
     }
 
@@ -1253,6 +1601,7 @@ private extension NovelSessionReplayTests {
         events: [NovelStoryEventRecord] = [],
         proposals: [NovelSettingProposalRecord] = [],
         access: NovelProjectLoadAccess = .readWrite,
+        expandedArchiveIDs: Set<NovelMessageID> = [],
         tail: NovelSessionTransientTail? = nil
     ) -> NovelSessionProjectionInput {
         NovelSessionProjectionInput(
@@ -1267,6 +1616,7 @@ private extension NovelSessionReplayTests {
             events: events,
             settingProposals: proposals,
             access: access,
+            expandedArchiveIDs: expandedArchiveIDs,
             transientTail: tail
         )
     }

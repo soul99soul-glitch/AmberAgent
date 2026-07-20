@@ -8,18 +8,22 @@ struct NovelCompendiumView: View {
     let onAcceptProposal: (NovelSettingProposalRecord) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("设定分类", selection: $selection) {
-                ForEach(NovelCompendiumSection.allCases) { section in
-                    Text(section.title).tag(section)
-                }
+        content
+            .safeAreaInset(edge: .top, spacing: 0) {
+                categoryPicker
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .background(AmberTheme.background)
+    }
 
-            content
+    private var categoryPicker: some View {
+        Picker("设定分类", selection: $selection) {
+            ForEach(NovelCompendiumSection.allCases) { section in
+                Text(section.title).tag(section)
+            }
         }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .background(AmberTheme.background)
     }
 
@@ -353,7 +357,8 @@ private struct NovelCompendiumMoreView: View {
         viewModel.activeMaterials.filter {
             switch $0.kind {
             case .custom: return true
-            case .world, .character, .masterOutline, .writingRequirements: return false
+            case .world, .character, .masterOutline, .writingRequirements, .decisionLog:
+                return false
             }
         }
     }

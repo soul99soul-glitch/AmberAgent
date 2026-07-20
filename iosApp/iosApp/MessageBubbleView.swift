@@ -1031,9 +1031,7 @@ private final class ChatStreamingMarkdownBlockController: ObservableObject {
                 // 解析期间又来了 delta，也先发布这次前缀再继续消费最新 pending；
                 // 否则长内容解析慢于 chunk 间隔时会永久没有任何结果能发布。
                 lastPublishAt = Date()
-                ChatPerfTrace.measure("MarkdownBlockPublish", count: { parsed.count }) {
-                    publishPreservingSettledBlocks(parsed)
-                }
+                publishPreservingSettledBlocks(parsed)
             }
         }
     }
@@ -1642,6 +1640,7 @@ enum ChatStreamingTableDetectionTestSupport {
         return (detector.containsTable, detector.totalConsumedUTF8Count)
     }
 }
+
 #endif
 
 private struct ChatStreamingMarkdownTableView: View {
@@ -1784,8 +1783,16 @@ private struct ChatStableStreamingMarkdownView: View {
             config: config,
             cacheIdentity: cacheIdentity
         )
+        // 占位按空行拆段：空行不再按整行文本高度渲染，段间距由 BlockView 的
+        // blockSpacing 提供，使冷行首帧高度贴近异步解析后的真实高度，
+        // 消除历史行首次实例化时"占位偏高→解析后整章收缩"的可见位移。
         let renderable = resolution.renderable
-            ?? SwiftStreamingMarkdown.RenderableDocument(plainText: text, id: "0", config: config)
+            ?? SwiftStreamingMarkdown.RenderableDocument(
+                plainText: text,
+                id: "0",
+                config: config,
+                splittingParagraphsOnBlankLines: true
+            )
         SwiftStreamingMarkdown.DocumentView(
             renderableDocument: renderable,
             config: config,
@@ -1825,7 +1832,7 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
 
     private struct IdentityCacheKey: Hashable {
         let identity: String
-        let signature: RenderSignature
+        let visualConfigHash: Int
     }
 
     private struct IdentityCacheEntry {
@@ -1872,11 +1879,15 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
         let signature = Self.renderSignature(for: config)
         // 完全匹配:返回最新解析结果。utf16.count 先行短路,避免流式期每次
         // body 求值都对不等长文本做 O(n) 字符串比较。
-        if renderedSignature == signature,
+        if let renderedSignature,
+           renderedSignature.visualConfigHash == signature.visualConfigHash,
            let rendered = renderedText,
            rendered.utf16.count == text.utf16.count,
            rendered == text {
-            return (renderableDocument, false)
+            return (
+                renderableDocument,
+                renderedSignature.speculative != signature.speculative
+            )
         }
         // 解析落后于最新 delta:返回上一次成功解析的结果(对应稍旧的文本前缀),
         // 让已格式化的内容持续显示,新增尾部文本会在下次解析完成后补上。
@@ -1997,21 +2008,30 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
         // 让 PartialTableMarkupPostParsingRewriter/PartialStrongMarkupPostParsingRewriter 生效,
         // 半截表格/未闭合强调不会渲染成乱码,而是降级成段落,等后续 delta 补齐再升级。
         let animate = config.shouldAnimateText
+        let signature = Self.renderSignature(for: config)
+        let previousText = renderedText
+        let previousRenderable = renderedSignature?.visualConfigHash == signature.visualConfigHash
+            ? renderableDocument
+            : nil
         let renderable = await Task.detached(priority: .userInitiated) {
             let parser = SwiftStreamingMarkdown.MarkdownParserImpl()
             let option = SwiftStreamingMarkdown.MarkdownParseOption(speculativeRewrite: animate)
             let result = await ChatPerfTrace.measure("MarkdownParse", count: { text.utf16.count }) {
                 await parser.parse(text: text, option: option)
             }
-            return await ChatPerfTrace.measure("MarkdownConvert", count: { text.utf16.count }) {
+            let converted = await ChatPerfTrace.measure("MarkdownConvert", count: { text.utf16.count }) {
                 await SwiftStreamingMarkdown.RenderableDocument(
                     document: result.document,
                     config: config
                 )
             }
+            guard let previousText,
+                  let previousRenderable,
+                  text.utf16.count >= previousText.utf16.count,
+                  text.hasPrefix(previousText) else { return converted }
+            return converted.reusingUnchangedPrefix(from: previousRenderable)
         }.value
         guard !Task.isCancelled else { return }
-        let signature = Self.renderSignature(for: config)
         guard renderedText != text || renderedSignature != signature || renderableDocument != renderable else {
             return
         }
@@ -2077,7 +2097,7 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
         text: String,
         signature: RenderSignature
     ) -> SwiftStreamingMarkdown.RenderableDocument? {
-        let key = IdentityCacheKey(identity: identity, signature: signature)
+        let key = IdentityCacheKey(identity: identity, visualConfigHash: signature.visualConfigHash)
         guard let entry = identityCache[key] else { return nil }
         if entry.text.utf16.count == text.utf16.count, entry.text == text {
             return entry.renderable
@@ -2097,7 +2117,7 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
         text: String,
         signature: RenderSignature
     ) {
-        let key = IdentityCacheKey(identity: identity, signature: signature)
+        let key = IdentityCacheKey(identity: identity, visualConfigHash: signature.visualConfigHash)
         if identityCache[key] != nil {
             identityCacheOrder.removeAll { $0 == key }
         }
@@ -2248,14 +2268,67 @@ enum ChatStableStreamingMarkdownControllerTestSupport {
         return controller.renderable(for: requestedText, config: config) != nil
     }
 
-    static func hasInstanceRenderableAfterSpeculativeModeChange() -> Bool {
+    static func instanceResolutionAfterSpeculativeModeChange() -> (
+        hasRenderable: Bool,
+        suppressesInitialFade: Bool
+    ) {
         ChatStableStreamingMarkdownController.resetRenderableCacheForTesting()
         let controller = ChatStableStreamingMarkdownController()
         let streamingConfig = SwiftStreamingMarkdown.MarkdownRenderConfig.default
             .withShouldAnimateText(value: true)
         let completedConfig = streamingConfig.withShouldAnimateText(value: false)
         controller.seedRenderableForTesting(text: "same text", config: streamingConfig)
-        return controller.renderable(for: "same text", config: completedConfig) != nil
+        let resolution = controller.resolution(
+            for: "same text",
+            config: completedConfig,
+            cacheIdentity: nil
+        )
+        return (resolution.renderable != nil, resolution.suppressesInitialFade)
+    }
+
+    /// 跨 speculative 模式复用是刻意取舍：完成瞬间即使文本停在未闭合语法
+    /// （中断/超时终止），也先复用流式 renderable 保持画面连续，随后由
+    /// scheduleParse 的非动画分支立即重解析纠正。此函数把该取舍固化为契约。
+    static func instanceResolutionAfterSpeculativeModeChangeWithUnclosedMarkup() -> (
+        hasRenderable: Bool,
+        suppressesInitialFade: Bool
+    ) {
+        ChatStableStreamingMarkdownController.resetRenderableCacheForTesting()
+        let controller = ChatStableStreamingMarkdownController()
+        let streamingConfig = SwiftStreamingMarkdown.MarkdownRenderConfig.default
+            .withShouldAnimateText(value: true)
+        let unclosedText = "结尾停在未闭合的 **强调 与半截表格\n| 列一 | 列二 |\n|---|---|\n| 单元格 |"
+        controller.seedRenderableForTesting(text: unclosedText, config: streamingConfig)
+        let resolution = controller.resolution(
+            for: unclosedText,
+            config: streamingConfig.withShouldAnimateText(value: false),
+            cacheIdentity: nil
+        )
+        return (resolution.renderable != nil, resolution.suppressesInitialFade)
+    }
+
+    static func coldCompletionIdentityResolution() -> (
+        hasRenderable: Bool,
+        suppressesInitialFade: Bool
+    ) {
+        ChatStableStreamingMarkdownController.resetRenderableCacheForTesting()
+        let streamingConfig = SwiftStreamingMarkdown.MarkdownRenderConfig.default
+            .withShouldAnimateText(value: true)
+        let cacheIdentity = "message:text-0"
+        let firstController = ChatStableStreamingMarkdownController()
+        firstController.seedRenderableForTesting(
+            text: "completed text",
+            config: streamingConfig,
+            cacheIdentity: cacheIdentity
+        )
+
+        let completedController = ChatStableStreamingMarkdownController()
+        let resolution = completedController.resolution(
+            for: "completed text",
+            config: streamingConfig.withShouldAnimateText(value: false),
+            cacheIdentity: cacheIdentity
+        )
+        return (resolution.renderable != nil, resolution.suppressesInitialFade)
     }
 
     static func hasInstanceRenderableAfterVisualConfigChange() -> Bool {

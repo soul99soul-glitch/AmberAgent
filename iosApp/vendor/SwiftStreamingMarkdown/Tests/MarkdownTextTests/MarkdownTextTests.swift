@@ -300,4 +300,154 @@ final class MarkdownTextTests: XCTestCase {
     let nestedItalicFont = paragraphContent.attribute(.font, at: nestedItalicRange.location, effectiveRange: nil) as? UIFont
     XCTAssertEqual(nestedItalicFont, paragraphFonts.boldItalic)
   }
+
+  func testRenderableDocumentReusesOnlyUnchangedPrefixObjects() async throws {
+    let initial = await parser.parse(text: "First paragraph.\n\nSecond paragraph.")
+    let updated = await parser.parse(text: "First paragraph.\n\nSecond paragraph grows.")
+    let initialRenderable = await RenderableDocument(document: initial, config: .default)
+    let updatedRenderable = await RenderableDocument(document: updated, config: .default)
+      .reusingUnchangedPrefix(from: initialRenderable)
+
+    guard case let .paragraph(_, initialFirst) = initialRenderable.renderables[0],
+          case let .paragraph(_, updatedFirst) = updatedRenderable.renderables[0],
+          case let .paragraph(_, initialSecond) = initialRenderable.renderables[1],
+          case let .paragraph(_, updatedSecond) = updatedRenderable.renderables[1] else {
+      return XCTFail("Expected two paragraphs")
+    }
+
+    XCTAssertTrue(initialFirst === updatedFirst)
+    XCTAssertFalse(initialSecond === updatedSecond)
+    XCTAssertEqual(updatedSecond.string, "Second paragraph grows.")
+  }
+
+  func testReusingUnchangedPrefixKeepsFreshContentWhenSingleParagraphGrows() async throws {
+    let initial = await parser.parse(text: "A single growing paragraph")
+    let updated = await parser.parse(text: "A single growing paragraph gains more text.")
+    let initialRenderable = await RenderableDocument(document: initial, config: .default)
+    let updatedRenderable = await RenderableDocument(document: updated, config: .default)
+      .reusingUnchangedPrefix(from: initialRenderable)
+
+    guard case let .paragraph(_, initialOnly) = initialRenderable.renderables[0],
+          case let .paragraph(_, updatedOnly) = updatedRenderable.renderables[0] else {
+      return XCTFail("Expected single paragraphs")
+    }
+
+    XCTAssertFalse(initialOnly === updatedOnly)
+    XCTAssertEqual(updatedOnly.string, "A single growing paragraph gains more text.")
+  }
+
+  /// 布局级判别实验：占位与解析结果的实测高度差是"历史行首次实例化时整章位移"
+  /// 的直接来源。拆段占位必须显著比单段占位更贴近解析后的真实高度。
+  /// 用纯散文种子隔离"空行按整行渲染 vs blockSpacing 分段"这一项，
+  /// 比值断言保持机器无关。
+  @MainActor
+  func testSplitPlaceholderTracksParsedLayoutHeightFarCloserThanLegacyPlaceholder() async throws {
+    let paragraphs = (0..<24).map { index in
+      "第\(index)段：主角沿着长街走了很久，霓虹在雨水里化开，他想起许多旧事，却没有停下脚步，也没有回头。"
+    }
+    let text = paragraphs.joined(separator: "\n\n")
+    // 生产等价参数：默认 blockSpacing(30) 恰与空行渲染高度相消，测不出差距；
+    // AmberAgent 生产用 blockSpacing 8 + 行距 4，占位偏高在此参数下才会显现。
+    let config = MarkdownRenderConfig.default
+      .withBlockSpacing(value: 8)
+      .withParagraphLineSpacing(value: 4)
+      .withCollapsesSoftBreaks(value: true)
+    let parsedDocument = await parser.parse(text: text)
+    let parsed = await RenderableDocument(document: parsedDocument, config: config)
+    let legacy = RenderableDocument(plainText: text, id: "0", config: config)
+    let split = RenderableDocument(
+      plainText: text,
+      id: "0",
+      config: config,
+      splittingParagraphsOnBlankLines: true
+    )
+
+    func measuredHeight(_ document: RenderableDocument) -> CGFloat {
+      let host = UIHostingController(rootView: DocumentView(
+        renderableDocument: document,
+        config: config,
+        animateInitialText: false,
+        usesTextKit1ForAttachmentFreeText: true
+      ))
+      return host.sizeThatFits(
+        in: CGSize(width: 360, height: CGFloat.greatestFiniteMagnitude)
+      ).height
+    }
+
+    let parsedHeight = measuredHeight(parsed)
+    let legacyHeight = measuredHeight(legacy)
+    let splitHeight = measuredHeight(split)
+    let legacyDelta = abs(legacyHeight - parsedHeight)
+    let splitDelta = abs(splitHeight - parsedHeight)
+    print(
+      "[placeholder-metrics] parsed=\(parsedHeight) legacy=\(legacyHeight) " +
+        "split=\(splitHeight) legacyDelta=\(legacyDelta) splitDelta=\(splitDelta)"
+    )
+
+    XCTAssertGreaterThan(parsedHeight, 0)
+    XCTAssertGreaterThan(
+      legacyDelta, 100,
+      "单段占位与解析高度本应有显著差距；若此处失败说明实验前提已变化，需要重新评估占位策略。"
+    )
+    XCTAssertLessThan(
+      splitDelta * 4, legacyDelta,
+      "拆段占位的高度误差必须至少比单段占位小 4 倍，否则冷行实例化仍会产生可见位移。"
+    )
+  }
+
+  func testPlainTextPlaceholderSplitsParagraphsOnBlankLinesOnlyWhenOptedIn() {
+    let text = "第一段\n\n第二段\n\n\n第三段"
+
+    let legacy = RenderableDocument(plainText: text, id: "0", config: .default)
+    XCTAssertEqual(legacy.renderables.count, 1)
+    guard case let .paragraph(legacyID, legacyContent) = legacy.renderables[0] else {
+      return XCTFail("Expected a single paragraph by default")
+    }
+    XCTAssertEqual(legacyID, "0")
+    XCTAssertEqual(legacyContent.string, text)
+
+    let split = RenderableDocument(
+      plainText: text,
+      id: "0",
+      config: .default,
+      splittingParagraphsOnBlankLines: true
+    )
+    XCTAssertEqual(split.renderables.count, 3)
+    let expected = [("0-0", "第一段"), ("0-1", "第二段"), ("0-2", "第三段")]
+    for (index, expectation) in expected.enumerated() {
+      guard case let .paragraph(id, content) = split.renderables[index] else {
+        return XCTFail("Expected paragraph chunk at index \(index)")
+      }
+      XCTAssertEqual(id, expectation.0)
+      XCTAssertEqual(content.string, expectation.1)
+    }
+  }
+
+  func testPlainTextPlaceholderSplitsOnCRLFAndWhitespaceOnlyBlankLines() {
+    // cmark 把 CRLF 空行与仅含空格/Tab 的空行都视为段落分隔；
+    // 占位拆段必须覆盖同样的空行语义，否则这些输入仍退回单段占位。
+    let crlf = RenderableDocument(
+      plainText: "第一段\r\n\r\n第二段",
+      id: "0",
+      config: .default,
+      splittingParagraphsOnBlankLines: true
+    )
+    XCTAssertEqual(crlf.renderables.count, 2)
+
+    let whitespaceBlank = RenderableDocument(
+      plainText: "第一段\n \t \n第二段",
+      id: "0",
+      config: .default,
+      splittingParagraphsOnBlankLines: true
+    )
+    XCTAssertEqual(whitespaceBlank.renderables.count, 2)
+    guard whitespaceBlank.renderables.count == 2,
+          case let .paragraph(_, first) = whitespaceBlank.renderables[0],
+          case let .paragraph(_, second) = whitespaceBlank.renderables[1] else {
+      return XCTFail("Expected two paragraph chunks")
+    }
+    XCTAssertEqual(first.string, "第一段")
+    XCTAssertEqual(second.string, "第二段")
+  }
+
 }

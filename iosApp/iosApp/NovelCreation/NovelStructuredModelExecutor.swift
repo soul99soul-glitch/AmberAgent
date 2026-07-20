@@ -3,12 +3,14 @@ import Foundation
 enum NovelStructuredModelTaskKind: String, Codable, Equatable, Sendable {
     case stateDelta
     case stateRebuild
+    case discussionArchive
     case polishDrift
 }
 
 enum NovelStructuredModelTask: Equatable, Sendable {
     case stateDelta(context: String, manuscript: String)
     case stateRebuild(baseContext: String, manuscript: String)
+    case discussionArchive(discussion: String)
     case polishDrift(sourceChapter: String, candidate: String)
 }
 
@@ -21,6 +23,7 @@ struct NovelStructuredModelExecutionRequest: Equatable, Sendable {
 enum NovelStructuredModelOutput: Equatable, Sendable {
     case stateDelta(NovelStateDeltaV1)
     case stateRebuild(NovelStateRebuildV1)
+    case discussionArchive(NovelDiscussionArchiveV1)
     case polishDrift(NovelPolishDriftV1)
 }
 
@@ -105,6 +108,23 @@ private final class NovelStructuredModelRaceLatch: @unchecked Sendable {
     }
 }
 
+private final class NovelStructuredModelNoOutputHeartbeat: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastOutputUptime = ProcessInfo.processInfo.systemUptime
+
+    func recordOutput() {
+        lock.withLock {
+            lastOutputUptime = ProcessInfo.processInfo.systemUptime
+        }
+    }
+
+    func hasTimedOut(after timeout: TimeInterval) -> Bool {
+        lock.withLock {
+            ProcessInfo.processInfo.systemUptime - lastOutputUptime >= timeout
+        }
+    }
+}
+
 /// Executes the module's hidden JSON-only model calls. It deliberately sits
 /// above `NovelModelRunning`, so live and scripted transports share terminal
 /// handling and strict decoding before a reducer can see model output.
@@ -151,6 +171,22 @@ struct NovelStructuredModelExecutor: Sendable {
             parameters: request.task.parameters
         )
         return try await executePrepared(invocation)
+    }
+
+    func executeWithEvidence(
+        _ request: NovelStructuredModelExecutionRequest,
+        noOutputTimeout: TimeInterval
+    ) async throws -> NovelStructuredModelExecutionEvidence {
+        let model = try await resolveModel(for: request.modelPolicy)
+        let invocation = try makeInvocation(
+            request,
+            resolvedModel: model,
+            parameters: request.task.parameters
+        )
+        return try await executePrepared(
+            invocation,
+            noOutputTimeout: noOutputTimeout
+        )
     }
 
     func executeWithEvidence(
@@ -210,6 +246,13 @@ struct NovelStructuredModelExecutor: Sendable {
     func executePrepared(
         _ invocation: NovelStructuredModelInvocation
     ) async throws -> NovelStructuredModelExecutionEvidence {
+        try await executePrepared(invocation, onTextOutput: nil)
+    }
+
+    private func executePrepared(
+        _ invocation: NovelStructuredModelInvocation,
+        onTextOutput: (@Sendable () -> Void)?
+    ) async throws -> NovelStructuredModelExecutionEvidence {
         let request = invocation.executionRequest
         let modelRequest = invocation.modelRequest
         let stream: AsyncStream<NovelModelEvent>
@@ -232,7 +275,7 @@ struct NovelStructuredModelExecutor: Sendable {
         let text: String
         do {
             text = try await withTaskCancellationHandler {
-                try await consume(stream)
+                try await consume(stream, onTextOutput: onTextOutput)
             } onCancel: {
                 Task { await modelRunner.cancel(runID: request.runID) }
             }
@@ -272,6 +315,72 @@ struct NovelStructuredModelExecutor: Sendable {
             throw NovelStructuredModelExecutionFailure(
                 code: "invalid_structured_output",
                 message: error.localizedDescription,
+                isRetryable: true
+            )
+        }
+    }
+
+    func executePrepared(
+        _ invocation: NovelStructuredModelInvocation,
+        noOutputTimeout: TimeInterval
+    ) async throws -> NovelStructuredModelExecutionEvidence {
+        let timeout = max(0.01, noOutputTimeout)
+        let heartbeat = NovelStructuredModelNoOutputHeartbeat()
+        let latch = NovelStructuredModelRaceLatch()
+        let providerTask = Task.detached {
+            do {
+                latch.resolve(.succeeded(try await executePrepared(
+                    invocation,
+                    onTextOutput: { heartbeat.recordOutput() }
+                )))
+            } catch let failure as NovelStructuredModelExecutionFailure {
+                latch.resolve(.failed(failure))
+            } catch {
+                latch.resolve(.failed(NovelStructuredModelExecutionFailure(
+                    code: "model_stream_failed",
+                    message: error.localizedDescription,
+                    isRetryable: true
+                )))
+            }
+        }
+        let timeoutTask = Task.detached {
+            let interval = max(0.01, min(timeout / 4, 0.1))
+            while !Task.isCancelled {
+                try? await Task.sleep(
+                    nanoseconds: UInt64(interval * 1_000_000_000)
+                )
+                guard !Task.isCancelled else { return }
+                if heartbeat.hasTimedOut(after: timeout) {
+                    latch.resolve(.timedOut)
+                    return
+                }
+            }
+        }
+        let outcome = await withTaskCancellationHandler {
+            await latch.wait()
+        } onCancel: {
+            providerTask.cancel()
+            timeoutTask.cancel()
+            latch.resolve(.failed(NovelStructuredModelExecutionFailure(
+                code: "cancelled",
+                message: "讨论归档已取消。",
+                isRetryable: true
+            )))
+            Task { await modelRunner.cancel(runID: invocation.executionRequest.runID) }
+        }
+        timeoutTask.cancel()
+
+        switch outcome {
+        case .succeeded(let evidence):
+            return evidence
+        case .failed(let failure):
+            throw failure
+        case .timedOut:
+            providerTask.cancel()
+            await modelRunner.cancel(runID: invocation.executionRequest.runID)
+            throw NovelStructuredModelExecutionFailure(
+                code: "structured_no_output_timeout",
+                message: "模型持续无输出，请稍后重试。",
                 isRetryable: true
             )
         }
@@ -386,7 +495,10 @@ struct NovelStructuredModelExecutor: Sendable {
         return min(requestedInputBudgetTokens, available)
     }
 
-    private func consume(_ stream: AsyncStream<NovelModelEvent>) async throws -> String {
+    private func consume(
+        _ stream: AsyncStream<NovelModelEvent>,
+        onTextOutput: (@Sendable () -> Void)? = nil
+    ) async throws -> String {
         var text = ""
         var terminal: NovelModelEvent?
 
@@ -401,8 +513,10 @@ struct NovelStructuredModelExecutor: Sendable {
             }
             switch event {
             case .textDelta(let delta):
+                if !delta.isEmpty { onTextOutput?() }
                 text += delta
             case .textReplacement(let replacement):
+                if !replacement.isEmpty { onTextOutput?() }
                 text = replacement
             case .usage:
                 break
@@ -457,6 +571,7 @@ private extension NovelStructuredModelTask {
         switch self {
         case .stateDelta: .stateDelta
         case .stateRebuild: .stateRebuild
+        case .discussionArchive: .discussionArchive
         case .polishDrift: .polishDrift
         }
     }
@@ -465,6 +580,7 @@ private extension NovelStructuredModelTask {
         switch self {
         case .stateDelta: .stateDeltaV1
         case .stateRebuild: .manualSyncV1
+        case .discussionArchive: .discussionArchiveV1
         case .polishDrift: .polishDriftV1
         }
     }
@@ -473,6 +589,7 @@ private extension NovelStructuredModelTask {
         switch self {
         case .stateDelta: .stateExtraction
         case .stateRebuild: .stateRebuild
+        case .discussionArchive: .stateExtraction
         case .polishDrift: .driftCheck
         }
     }
@@ -496,6 +613,11 @@ private extension NovelStructuredModelTask {
                 ),
                 .init(role: .user, content: "ORDERED MANUSCRIPT INPUT\n" + manuscript)
             ]
+        case .discussionArchive(let discussion):
+            return [
+                .init(role: .system, content: prompt.systemText),
+                .init(role: .user, content: "DISCUSSION SINCE LAST ARCHIVE\n" + discussion)
+            ]
         case .polishDrift(let sourceChapter, let candidate):
             return Self.polishDriftMessages(
                 sourceChapter: sourceChapter,
@@ -514,6 +636,8 @@ private extension NovelStructuredModelTask {
             .stateDelta(try NovelStructuredOutputDecoder.decodeStateDelta(from: text))
         case .stateRebuild:
             .stateRebuild(try NovelStructuredOutputDecoder.decodeStateRebuild(from: text))
+        case .discussionArchive:
+            .discussionArchive(try NovelStructuredOutputDecoder.decodeDiscussionArchive(from: text))
         case .polishDrift:
             .polishDrift(try NovelStructuredOutputDecoder.decodePolishDrift(from: text))
         }
@@ -535,6 +659,13 @@ private extension NovelStructuredModelTaskKind {
                 temperature: 0.1,
                 topP: 0.8,
                 maxOutputTokens: 8_192,
+                reasoningLevel: .automatic
+            )
+        case .discussionArchive:
+            .init(
+                temperature: 0.1,
+                topP: 0.8,
+                maxOutputTokens: 4_096,
                 reasoningLevel: .automatic
             )
         case .polishDrift:

@@ -1039,6 +1039,18 @@ final class NovelCreationViewModel {
         try await creation.perform(action)
     }
 
+    func distillDiscussionArchive(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        chapterID: NovelChapterID?
+    ) async throws -> NovelDiscussionArchiveDraft {
+        try await creation.distillDiscussionArchive(
+            projectID: projectID,
+            branchID: branchID,
+            chapterID: chapterID
+        )
+    }
+
     func interruptSessionRun(_ command: NovelCancelRunCommand) async throws {
         let ownsQuickStartTask = quickStartTaskRunIDs[command.projectID] == command.runID
         if ownsQuickStartTask {
