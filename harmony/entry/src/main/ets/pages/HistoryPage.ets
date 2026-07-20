@@ -290,12 +290,15 @@ struct HistoryPage {
         // ── 保存按钮 ──
         ListItem() {
           Column() {
-            Text('保存全部').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+            Column() {
+              Text('保存全部').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+            }
+            .width('70%').height(48).borderRadius(12)
+            .backgroundColor(ACCENT)
+            .justifyContent(FlexAlign.Center)
+            .onClick(() => { this.save(); })
           }
-          .width('100%').height(48).borderRadius(12)
-          .backgroundColor(ACCENT)
-          .justifyContent(FlexAlign.Center)
-          .onClick(() => { this.save(); })
+          .width('100%').justifyContent(FlexAlign.Center)
         }
 
         // ── 保存状态 ──
