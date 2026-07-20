@@ -34,6 +34,10 @@ const SEARCH_SOURCES: SearchSourceDef[] = [
   { id: 'hackernews', displayName: 'Hacker News', needKey: false },
   { id: 'jina', displayName: 'Jina AI', needKey: false },
   { id: 'tavily', displayName: 'Tavily', needKey: true },
+  { id: 'bocha', displayName: 'Bocha(需 key)', needKey: true },
+  { id: 'brave', displayName: 'Brave(需 key)', needKey: true },
+  { id: 'exa', displayName: 'Exa(需 key)', needKey: true },
+  { id: 'searxng', displayName: 'SearXNG(自建)', needKey: false },
 ];
 
 @Entry
@@ -46,6 +50,10 @@ struct HistoryPage {
   @State saved: string = '';
   @State hotlistToggles: SourceToggle[] = [];
   @State searchToggles: SourceToggle[] = [];
+  @State bochaKey: string = '';
+  @State braveKey: string = '';
+  @State exaKey: string = '';
+  @State searxUrl: string = '';
   private storage: Storage | null = null;
 
   async aboutToAppear(): Promise<void> {
@@ -54,6 +62,10 @@ struct HistoryPage {
     this.aiBaseUrl = await this.storage.get<string>('ai_base_url', 'https://api.deepseek.com');
     this.tavilyKey = await this.storage.get<string>('tavily_api_key', '');
     this.model = await this.storage.get<string>('ai_model', 'deepseek-chat');
+    this.bochaKey = await this.storage.get<string>('bocha_api_key', '');
+    this.braveKey = await this.storage.get<string>('brave_api_key', '');
+    this.exaKey = await this.storage.get<string>('exa_api_key', '');
+    this.searxUrl = await this.storage.get<string>('searxng_base_url', '');
     // 热榜源开关
     const hotlist: SourceToggle[] = [];
     for (let i = 0; i < NEWSNOW_PRESETS.length; i++) {
@@ -107,6 +119,10 @@ struct HistoryPage {
     await this.storage!.set<string>('ai_base_url', this.aiBaseUrl);
     await this.storage!.set<string>('tavily_api_key', this.tavilyKey);
     await this.storage!.set<string>('ai_model', this.model);
+    await this.storage!.set<string>('bocha_api_key', this.bochaKey);
+    await this.storage!.set<string>('brave_api_key', this.braveKey);
+    await this.storage!.set<string>('exa_api_key', this.exaKey);
+    await this.storage!.set<string>('searxng_base_url', this.searxUrl);
     this.saved = '已保存 ✓';
   }
 
@@ -228,6 +244,42 @@ struct HistoryPage {
               .backgroundColor(SURFACE2).borderRadius(10)
               .padding({ left: 14, right: 14 })
               .onChange((v: string) => { this.tavilyKey = v; })
+              .margin({ bottom: 20 })
+
+            Text('Bocha API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+            TextInput({ text: this.bochaKey, placeholder: 'bocha-...' })
+              .height(44).fontSize(14).fontColor(INK)
+              .placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10)
+              .padding({ left: 14, right: 14 })
+              .onChange((v: string) => { this.bochaKey = v; })
+              .margin({ bottom: 20 })
+
+            Text('Brave API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+            TextInput({ text: this.braveKey, placeholder: 'brave-...' })
+              .height(44).fontSize(14).fontColor(INK)
+              .placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10)
+              .padding({ left: 14, right: 14 })
+              .onChange((v: string) => { this.braveKey = v; })
+              .margin({ bottom: 20 })
+
+            Text('Exa API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+            TextInput({ text: this.exaKey, placeholder: 'exa-...' })
+              .height(44).fontSize(14).fontColor(INK)
+              .placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10)
+              .padding({ left: 14, right: 14 })
+              .onChange((v: string) => { this.exaKey = v; })
+              .margin({ bottom: 20 })
+
+            Text('SearXNG Base URL(自建)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+            TextInput({ text: this.searxUrl, placeholder: 'https://searx.example.com' })
+              .height(44).fontSize(14).fontColor(INK)
+              .placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10)
+              .padding({ left: 14, right: 14 })
+              .onChange((v: string) => { this.searxUrl = v; })
 
             Text('不配 Tavily 也能用,NewsNow/DuckDuckGo/HackerNews/Jina 始终可用。')
               .fontSize(11).fontColor(INK4).margin({ top: 12 })
