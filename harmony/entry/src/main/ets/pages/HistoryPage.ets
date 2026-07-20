@@ -44,6 +44,7 @@ struct HistoryPage {
   @State saved: string = '';
   @State hotlistToggles: SourceToggle[] = [];
   @State selectedSource: string = 'tavily';
+  @State showSourcePicker: boolean = false;
   @State currentKey: string = '';
   @State testResult: string = '';
   @State testStatus: string = '';
@@ -206,16 +207,38 @@ struct HistoryPage {
             }
             .width('100%').margin({ bottom: 16 })
 
-            // 源选择器(单选按钮组)
-            ForEach(KEYED_SOURCES, (s: SearchSourceDef) => {
-              Row() {
-                Radio({ value: s.id, group: 'searchSource' })
-                  .checked(this.selectedSource === s.id)
-                  .onChange(() => { this.selectSource(s.id); })
-                Text(s.displayName).fontSize(14).fontColor(INK2).margin({ left: 8 })
+            // 源选择器(自定义下拉菜单)
+            Text('选择搜索源').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+
+            // 当前选中项(点击展开)
+            Row() {
+              Text(KEYED_SOURCES.find((s) => s.id === this.selectedSource)?.displayName ?? '选择')
+                .fontSize(14).fontColor(INK).layoutWeight(1)
+              Text('▼').fontSize(12).fontColor(INK3)
+            }
+            .width('100%').height(44).padding({ left: 14, right: 14 })
+            .backgroundColor(SURFACE2).borderRadius(10)
+            .onClick(() => { this.showSourcePicker = !this.showSourcePicker; })
+
+            // 展开的选项列表
+            if (this.showSourcePicker) {
+              Column() {
+                ForEach(KEYED_SOURCES, (s: SearchSourceDef) => {
+                  Row() {
+                    Text(s.displayName).fontSize(14).fontColor(s.id === this.selectedSource ? ACCENT : INK2)
+                  }
+                  .width('100%').padding({ top: 12, bottom: 12, left: 14, right: 14 })
+                  .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+                  .onClick(() => {
+                    this.selectSource(s.id);
+                    this.showSourcePicker = false;
+                  })
+                })
               }
-              .width('100%').padding({ top: 10, bottom: 10 })
-            })
+              .width('100%').backgroundColor(SURFACE).borderRadius(10)
+              .border({ width: 1, color: LINE })
+              .margin({ top: 4 })
+            }
 
             // 当前源的 key 输入
             Text('API Key').fontSize(12).fontColor(INK3).margin({ top: 16, bottom: 6 })
