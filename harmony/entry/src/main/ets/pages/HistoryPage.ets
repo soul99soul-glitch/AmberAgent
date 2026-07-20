@@ -1,4 +1,4 @@
-// SettingsPage — 杂志风设置页(分组卡片视觉层级 + 品牌感开关 + 呼吸感排版)
+// SettingsPage — 杂志风设置页(精修版:左对齐标签+呼吸感+accent 锚点)
 import { router } from '@kit.ArkUI';
 import { getAppContainer } from '../di/AppContainer.ets';
 import type { Storage } from '@amber/deepread-domain';
@@ -87,39 +87,47 @@ struct HistoryPage {
 
       Scroll() {
         Column() {
-          // ── AI 配置分组(白底大卡片) ──
+          // ── AI 配置分组 ──
           Column() {
             Row() {
               Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
               Text(' AI 配置').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
             }
-            .width('100%').margin({ bottom: 16 })
+            .width('100%').margin({ bottom: 20 })
 
-            Text('API Base URL').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+            // API Base URL
+            Text('API Base URL').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
             TextInput({ text: this.aiBaseUrl })
               .height(44).fontSize(14).fontColor(INK)
               .backgroundColor(SURFACE2).borderRadius(10)
+              .padding({ left: 14, right: 14 })
               .onChange((v: string) => { this.aiBaseUrl = v; })
+              .margin({ bottom: 20 })
 
-            Text('API Key').fontSize(12).fontColor(INK3).margin({ top: 14, bottom: 4 })
+            // API Key
+            Text('API Key').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
             TextInput({ text: this.aiKey, placeholder: 'sk-...' })
               .height(44).fontSize(14).fontColor(INK)
               .placeholderColor(INK4)
               .backgroundColor(SURFACE2).borderRadius(10)
+              .padding({ left: 14, right: 14 })
               .onChange((v: string) => { this.aiKey = v; })
+              .margin({ bottom: 20 })
 
-            Text('模型名称').fontSize(12).fontColor(INK3).margin({ top: 14, bottom: 4 })
+            // 模型名称
+            Text('模型名称').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
             TextInput({ text: this.model, placeholder: 'deepseek-chat' })
               .height(44).fontSize(14).fontColor(INK)
               .placeholderColor(INK4)
               .backgroundColor(SURFACE2).borderRadius(10)
+              .padding({ left: 14, right: 14 })
               .onChange((v: string) => { this.model = v; })
           }
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE })
           .margin({ bottom: 24 })
 
-          // ── 热榜源分组(白底大卡片) ──
+          // ── 热榜源分组 ──
           Column() {
             Row() {
               Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
@@ -144,7 +152,7 @@ struct HistoryPage {
           .border({ width: 1, color: LINE })
           .margin({ bottom: 24 })
 
-          // ── 搜索配置分组(白底大卡片) ──
+          // ── 搜索配置分组 ──
           Column() {
             Row() {
               Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
@@ -152,15 +160,16 @@ struct HistoryPage {
             }
             .width('100%').margin({ bottom: 16 })
 
-            Text('Tavily API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+            Text('Tavily API Key(可选)').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
             TextInput({ text: this.tavilyKey, placeholder: 'tvly-...' })
               .height(44).fontSize(14).fontColor(INK)
               .placeholderColor(INK4)
               .backgroundColor(SURFACE2).borderRadius(10)
+              .padding({ left: 14, right: 14 })
               .onChange((v: string) => { this.tavilyKey = v; })
 
             Text('不配 Tavily 也能用,NewsNow 国内热榜源始终可用。')
-              .fontSize(11).fontColor(INK4).margin({ top: 10 })
+              .fontSize(11).fontColor(INK4).margin({ top: 12 })
           }
           .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
           .border({ width: 1, color: LINE })
