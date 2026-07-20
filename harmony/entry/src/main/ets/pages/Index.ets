@@ -83,10 +83,19 @@ struct DeepReadHomePage {
         this.newsNow = createNewsNowProvider(getAppContainer().httpClient);
       }
       const all: SourceSection[] = await this.newsNow.fetchAllSources();
-      this.sections = all.filter((s: SourceSection): boolean => s.items.length > 0);
+      // 过滤禁用的源(设置页开关)
+      const storage = getAppContainer().storage;
+      const enabledSections: SourceSection[] = [];
+      for (const s of all) {
+        const enabled: string = await storage.get<string>('source_' + s.sourceId, 'true');
+        if (enabled === 'true' && s.items.length > 0) {
+          enabledSections.push(s);
+        }
+      }
+      this.sections = enabledSections;
       this.combined = this.newsNow.buildCombinedTopics(all);
-      this.loadState = this.sections.length > 0 ? 'loaded' : 'error';
-      this.errorMsg = this.sections.length === 0 ? '所有源抓取失败' : '';
+      this.loadState = enabledSections.length > 0 ? 'loaded' : 'error';
+      this.errorMsg = enabledSections.length === 0 ? '所有源抓取失败或全部禁用' : '';
       this.lastUpdated = new Date().toLocaleTimeString();
     } catch (e) {
       this.loadState = 'error';

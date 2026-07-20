@@ -1,7 +1,9 @@
-// SettingsPage — 杂志风设置页(分组卡片 + 衬线标题 + 表单排版)
+// SettingsPage — 杂志风设置页(AI 配置 + 搜索配置 + NewsNow 源开关)
 import { router } from '@kit.ArkUI';
 import { getAppContainer } from '../di/AppContainer.ets';
 import type { Storage } from '@amber/deepread-domain';
+import { NEWSNOW_PRESETS } from '../platform_impl/NewsNowProvider.ets';
+import type { NewsNowPreset } from '../platform_impl/NewsNowProvider.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -14,6 +16,13 @@ const LINE: string = '#E4E0D6';
 const ACCENT: string = '#B8623A';
 const ACCENT_LIGHT: string = '#FFF5F0';
 
+// 源开关状态:sourceId → enabled
+interface SourceToggle {
+  id: string;
+  displayName: string;
+  enabled: boolean;
+}
+
 @Entry
 @Component
 struct HistoryPage {
@@ -22,6 +31,7 @@ struct HistoryPage {
   @State tavilyKey: string = '';
   @State model: string = 'deepseek-chat';
   @State saved: string = '';
+  @State toggles: SourceToggle[] = [];
   private storage: Storage | null = null;
 
   async aboutToAppear(): Promise<void> {
@@ -30,6 +40,29 @@ struct HistoryPage {
     this.aiBaseUrl = await this.storage.get<string>('ai_base_url', 'https://api.deepseek.com');
     this.tavilyKey = await this.storage.get<string>('tavily_api_key', '');
     this.model = await this.storage.get<string>('ai_model', 'deepseek-chat');
+    // 加载源开关状态
+    const loaded: SourceToggle[] = [];
+    for (let i = 0; i < NEWSNOW_PRESETS.length; i++) {
+      const p: NewsNowPreset = NEWSNOW_PRESETS[i];
+      const enabled: string = await this.storage.get<string>('source_' + p.id, 'true');
+      loaded.push({ id: p.id, displayName: p.displayName, enabled: enabled === 'true' });
+    }
+    this.toggles = loaded;
+  }
+
+  async toggleSource(id: string): Promise<void> {
+    const newToggles: SourceToggle[] = [];
+    for (let i = 0; i < this.toggles.length; i++) {
+      const t: SourceToggle = this.toggles[i];
+      if (t.id === id) {
+        const newEnabled: boolean = !t.enabled;
+        newToggles.push({ id: t.id, displayName: t.displayName, enabled: newEnabled });
+        await this.storage!.set<string>('source_' + id, newEnabled ? 'true' : 'false');
+      } else {
+        newToggles.push(t);
+      }
+    }
+    this.toggles = newToggles;
   }
 
   async save(): Promise<void> {
@@ -42,7 +75,7 @@ struct HistoryPage {
 
   build(): void {
     Column() {
-      // ── 顶栏:品牌(衬线) + 返回 ──
+      // ── 顶栏:返回 + 衬线标题 ──
       Row() {
         Text('←').fontSize(18).fontColor(INK3)
           .onClick(() => { router.back(); })
@@ -84,6 +117,24 @@ struct HistoryPage {
           .width('100%').padding(16).backgroundColor(SURFACE).borderRadius(12)
           .border({ width: 1, color: LINE })
 
+          // ── NewsNow 源开关分组 ──
+          Text('热榜源').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
+            .margin({ top: 24, bottom: 8 }).width('100%')
+
+          Column() {
+            ForEach(this.toggles, (t: SourceToggle) => {
+              Row() {
+                Text(t.displayName).fontSize(14).fontColor(INK2).layoutWeight(1)
+                Toggle({ type: ToggleType.Switch, isOn: t.enabled })
+                  .onChange(() => { this.toggleSource(t.id); })
+              }
+              .width('100%').padding({ top: 12, bottom: 12 })
+              .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+            })
+          }
+          .width('100%').padding(16).backgroundColor(SURFACE).borderRadius(12)
+          .border({ width: 1, color: LINE })
+
           // ── 搜索配置分组 ──
           Text('搜索配置').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
             .margin({ top: 24, bottom: 8 }).width('100%')
@@ -102,7 +153,7 @@ struct HistoryPage {
           .width('100%').padding(16).backgroundColor(SURFACE).borderRadius(12)
           .border({ width: 1, color: LINE })
 
-          // ── 保存按钮:accent 大按钮 ──
+          // ── 保存按钮 ──
           Column() {
             Text('保存').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
           }
@@ -116,7 +167,6 @@ struct HistoryPage {
             Text(this.saved).fontSize(13).fontColor(ACCENT).margin({ top: 10 })
           }
 
-          // 底部留白
           Column() {}.height(40)
         }
         .width('88%')
