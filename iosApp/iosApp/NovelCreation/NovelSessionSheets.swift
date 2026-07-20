@@ -54,12 +54,14 @@ struct NovelDiscussionArchiveOfferSheet: View {
                 .disabled(!isReady)
                 Button("暂不归档") { dismiss() }
                     .buttonStyle(.bordered)
-                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
             .navigationTitle("收录完成")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .presentationSizing(.fitted)
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -786,11 +788,20 @@ struct NovelWritingContextSheet: View {
             }
 
             Section("高级") {
-                Stepper(value: $budgetTokens, in: 2_000...64_000, step: 2_000) {
-                    LabeledContent(
-                        "上下文长度",
-                        value: "约 \(budgetTokens.formatted()) 上下文单位"
-                    )
+                Slider(
+                    value: budgetSliderValue,
+                    in: 2_000...64_000,
+                    step: 2_000
+                ) {
+                    Text("上下文长度")
+                } currentValueLabel: {
+                    Text("约 \(budgetTokens.formatted())")
+                } minimumValueLabel: {
+                    Text("2K")
+                } maximumValueLabel: {
+                    Text("64K")
+                } tick: { value in
+                    Self.budgetTick(for: value)
                 }
             }
 
@@ -878,6 +889,21 @@ struct NovelWritingContextSheet: View {
                 choice == .exclude ? id : nil
             }
         )
+    }
+
+    private var budgetSliderValue: Binding<Double> {
+        Binding(
+            get: { Double(budgetTokens) },
+            set: { budgetTokens = Int($0.rounded()) }
+        )
+    }
+
+    private static func budgetTick(for value: Double) -> SliderTick<Double>? {
+        let tokens = Int(value.rounded())
+        guard [8_000, 16_000, 32_000].contains(tokens) else { return nil }
+        return SliderTick(value) {
+            Text("\(tokens / 1_000)K")
+        }
     }
 
     private var matchingPreview: NovelInjectionPreviewSnapshot? {

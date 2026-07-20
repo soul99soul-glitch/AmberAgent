@@ -387,10 +387,15 @@ struct NovelBranchRenameSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("分支名称")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted)
                 TextField("分支名称", text: $name)
+                    .textFieldStyle(.roundedBorder)
             }
-            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
             .background(AmberTheme.background)
             .navigationTitle("重命名分支")
             .navigationBarTitleDisplayMode(.inline)
@@ -404,7 +409,7 @@ struct NovelBranchRenameSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(220)])
+        .presentationSizing(.fitted)
         .presentationDragIndicator(.visible)
     }
 

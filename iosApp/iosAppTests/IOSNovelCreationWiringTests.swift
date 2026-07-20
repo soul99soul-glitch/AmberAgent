@@ -232,6 +232,40 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(sheets.contains("generateChapterTitle"))
     }
 
+    func testShortNovelSheetsUseContentFittedSizingWithoutFixedHeightCompensation() throws {
+        let workspaceSheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+        let projectList = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let branches = try source("iosApp/NovelCreation/NovelBranchesView.swift")
+
+        XCTAssertTrue(workspaceSheets.contains("struct NovelDiscussionArchiveOfferSheet"))
+        XCTAssertTrue(workspaceSheets.contains(".presentationSizing(.fitted)"))
+        XCTAssertTrue(projectList.contains("struct NovelProjectRenameSheet"))
+        XCTAssertTrue(projectList.contains(".presentationSizing(.fitted)"))
+        XCTAssertFalse(projectList.contains(".presentationDetents([.height(220)])"))
+        XCTAssertTrue(branches.contains("struct NovelBranchRenameSheet"))
+        XCTAssertTrue(branches.contains(".presentationSizing(.fitted)"))
+        XCTAssertFalse(branches.contains(".presentationDetents([.height(220)])"))
+    }
+
+    func testWritingContextUsesATickedNativeBudgetSlider() throws {
+        let sheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+
+        XCTAssertTrue(sheets.contains("value: budgetSliderValue"))
+        XCTAssertTrue(sheets.contains("step: 2_000"))
+        XCTAssertTrue(sheets.contains("Self.budgetTick(for: value)"))
+        XCTAssertTrue(sheets.contains("SliderTick(value)"))
+        XCTAssertFalse(sheets.contains("Stepper(value: $budgetTokens"))
+    }
+
+    func testChapterEditorExposesNativeFindAndReplace() throws {
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+
+        XCTAssertTrue(reader.contains("@State private var isFindPresented = false"))
+        XCTAssertTrue(reader.contains(".findNavigator(isPresented: $isFindPresented)"))
+        XCTAssertTrue(reader.contains("Image(systemName: \"magnifyingglass\")"))
+        XCTAssertTrue(reader.contains(".accessibilityLabel(\"查找和替换\")"))
+    }
+
     func testNovelComposerRevealsFocusedControlsWithoutPermanentSegmentedChrome() throws {
         let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
 

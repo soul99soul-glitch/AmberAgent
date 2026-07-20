@@ -6,6 +6,70 @@ struct NovelGenerationStartArtifacts: Equatable, Sendable {
 }
 
 enum NovelGenerationReducer {
+    static func normalizingLegacyInterruptedProseCandidates(
+        _ document: NovelProjectDocumentV1
+    ) -> NovelProjectDocumentV1 {
+        var normalized = document
+        var candidateIDs = Set(normalized.candidates.map(\.id))
+        var candidateMessageIDs = Set(normalized.candidates.map(\.sourceMessageID))
+
+        for run in normalized.activeRuns where
+            run.status == .interrupted &&
+            run.kind == .prose &&
+            !run.partialContent.isEmpty {
+            guard let candidateID = run.candidateID,
+                  !candidateIDs.contains(candidateID),
+                  !candidateMessageIDs.contains(run.messageID),
+                  let sessionIndex = normalized.sessions.firstIndex(where: {
+                      $0.id == run.sessionID && $0.branchID == run.branchID
+                  }),
+                  let messageIndex = normalized.sessions[sessionIndex].messages.firstIndex(where: {
+                      $0.id == run.messageID
+                  }) else {
+                continue
+            }
+            let message = normalized.sessions[sessionIndex].messages[messageIndex]
+            guard message.role == .assistant,
+                  message.mode == run.mode,
+                  message.kind == .interruptedDraft,
+                  message.content == run.partialContent,
+                  message.runID == run.id,
+                  message.candidateID == nil,
+                  message.interaction == nil else {
+                continue
+            }
+
+            normalized.sessions[sessionIndex].messages[messageIndex] = NovelSessionMessageRecord(
+                id: message.id,
+                sequence: message.sequence,
+                role: message.role,
+                mode: message.mode,
+                kind: message.kind,
+                content: message.content,
+                createdAt: message.createdAt,
+                runID: message.runID,
+                candidateID: candidateID
+            )
+            normalized.candidates.append(NovelCandidateRecord(
+                id: candidateID,
+                kind: .prose,
+                branchID: run.branchID,
+                sessionID: run.sessionID,
+                sourceMessageID: run.messageID,
+                baseCheckpointID: run.baseCheckpointID,
+                baseHeadRevision: run.baseHeadRevision,
+                status: .interrupted,
+                content: run.partialContent,
+                sourceChapterVersionID: nil,
+                collectedCheckpointID: nil,
+                createdAt: message.createdAt
+            ))
+            candidateIDs.insert(candidateID)
+            candidateMessageIDs.insert(run.messageID)
+        }
+        return normalized
+    }
+
     static func begin(
         _ request: NovelRunRequest,
         artifacts: NovelGenerationStartArtifacts,

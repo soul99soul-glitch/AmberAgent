@@ -532,13 +532,18 @@ struct NovelProjectRenameSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("小说名称")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted)
                 TextField("小说名称", text: $name)
                     .focused($isNameFocused)
                     .submitLabel(.done)
                     .onSubmit(commitNameAndSave)
+                    .textFieldStyle(.roundedBorder)
             }
-            .scrollContentBackground(.hidden)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
             .background(AmberTheme.background)
             .navigationTitle("重命名项目")
             .navigationBarTitleDisplayMode(.inline)
@@ -555,7 +560,7 @@ struct NovelProjectRenameSheet: View {
                 }
             }
         }
-        .presentationDetents([.height(220)])
+        .presentationSizing(.fitted)
         .presentationDragIndicator(.visible)
     }
 

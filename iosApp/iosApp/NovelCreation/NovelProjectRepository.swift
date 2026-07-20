@@ -975,9 +975,11 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
                 throw NovelError.unsupportedSchema(header.schemaVersion)
             }
             let decoded = try makeDecoder().decode(NovelProjectDocumentV1.self, from: data)
+            let generationNormalized = NovelGenerationReducer
+                .normalizingLegacyInterruptedProseCandidates(decoded)
             let document = normalizesLegacySyncStatus
-                ? NovelBranchSemantics.normalizingDecodedSyncStatus(decoded)
-                : decoded
+                ? NovelBranchSemantics.normalizingDecodedSyncStatus(generationNormalized)
+                : generationNormalized
             guard document.project.id == projectID else {
                 throw NovelError.corruptedProject(
                     projectID: projectID,

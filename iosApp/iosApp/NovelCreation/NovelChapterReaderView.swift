@@ -291,6 +291,7 @@ private struct NovelChapterEditSheet: View {
     @State private var title: String
     @State private var content: String
     @State private var isSaving = false
+    @State private var isFindPresented = false
     @State private var failureMessage: String?
 
     init(viewModel: NovelCreationViewModel, version: NovelChapterVersionRecord) {
@@ -307,6 +308,7 @@ private struct NovelChapterEditSheet: View {
                     TextField("章节标题", text: $title)
                     TextEditor(text: $content)
                         .frame(minHeight: 360)
+                        .findNavigator(isPresented: $isFindPresented)
                 }
 
                 Section {
@@ -337,6 +339,15 @@ private struct NovelChapterEditSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
                         .disabled(!canSave || isSaving)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isFindPresented = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("查找和替换")
+                    .disabled(isSaving)
                 }
             }
             .overlay {

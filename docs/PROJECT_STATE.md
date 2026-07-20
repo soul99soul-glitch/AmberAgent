@@ -22,6 +22,20 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
+### 2026-07-20 legacy interrupted-prose project compatibility
+
+- `dfe4f2c83` 把中断正文 partial 升级为可收录 candidate 后，validator 同时要求历史 interrupted prose run 具备 candidate 与 message 关联；旧版本合法落盘但没有这两项派生记录的项目因此被误判为 primary/previous 同时损坏，列表的 epoch 占位又显示成“56 年前”。设备上的“大名大明”两份 JSON 均完整，安装过程没有改写项目数据。
+- 解码边界现在只迁移这一种精确旧形状：run 为 interrupted prose、partial 与 assistant interruptedDraft 完全一致、run 自带未冲突 candidate ID、message 尚未关联且 document 无对应 candidate。迁移复用原 ID/内容/基线并生成 `.interrupted` candidate；任何不完全匹配的数据仍交给原 validator 严格拒绝。当前生成与写盘规则未放宽。
+- 本地仓库和项目包导入复用同一迁移。回归测试先在空实现上按预期转红，最终生成 reducer/lifecycle、仓储、项目包与文档校验 108 passed、0 failed（`/tmp/amber-legacy-prose-red/Logs/Test/Test-iosApp-2026.07.20_19-36-36-+0800.xcresult`）；真实设备只读副本经生产仓库读取器确认“大名大明” revision 109 为 read-write。
+- 当前 Debug 包完成严格验签、覆盖安装并成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`。设备上的旧 `index.json` 是页面扫描前的派生缓存；重新进入小说项目列表会按项目文件重建，不需要手工编辑或恢复 previous。
+
+### 2026-07-20 focused native SwiftUI interaction refinements
+
+- 小说项目/分支重命名与讨论归档等短 Sheet 改用内容自适应的 `.presentationSizing(.fitted)`；为避免 `Form` 的滚动容器理想高度干扰，两个单字段重命名页收敛为局部 `VStack`，原有焦点、提交与输入法收口保持不变。
+- 写作上下文预算保留 2K...64K、2K 步进与原有绑定，改用原生 `Slider` 并只标出 8K/16K/32K 三个有意义的刻度；章节编辑器接入系统 `.findNavigator`，提供原生查找与替换入口。
+- 顶部三段 Tab 没有叠加第二层 glass：现有实现已经是单个 regular glass 平面、半透明选中填充和内容下穿，符合 Liquid Glass 不混用 regular/clear、不做 glass-on-glass 的约束。
+- `IOSNovelCreationWiringTests` 与 `NovelCreationPresentationTests` 在 iPhone 17 Pro / iOS 26.5 Simulator 合跑为 51 passed、0 failed（`/tmp/amber-ui-tips-derived/Logs/Test/Test-iosApp-2026.07.20_18-28-28-+0800.xcresult`）；改动 Swift 文件 parse 与 `git diff --check` 通过。Sheet 键盘高度、Slider 手感和查找栏视觉仍待真机目测，本切片未安装真机包。
+
 ### 2026-07-20 novel session memory S1-S3 adversarial closure
 
 - 对 Grok review 修复做二次生产链核对后，补齐四个局部缺口，没有增加轮询、fallback、滚动补偿或第二套状态机。

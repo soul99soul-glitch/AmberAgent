@@ -361,6 +361,56 @@ final class NovelGenerationReducerTests: XCTestCase {
         XCTAssertNoThrow(try NovelDocumentValidator.validate(interrupted.document))
     }
 
+    func testLegacyInterruptedProseWithoutCandidateNormalizesAtDecodeBoundary() throws {
+        let document = try NovelTestFixtures.document()
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let started = try begin(request, in: document)
+        let interrupted = try NovelGenerationReducer.interrupt(
+            runID: request.id,
+            reason: .expiration,
+            partialContent: "旧版本持久化的中断正文",
+            in: started,
+            now: terminalTime
+        )
+
+        var legacy = interrupted.document
+        legacy.candidates.removeAll()
+        let messageIndex = try XCTUnwrap(
+            legacy.sessions[0].messages.firstIndex(where: { $0.id == request.assistantMessageID })
+        )
+        let message = legacy.sessions[0].messages[messageIndex]
+        legacy.sessions[0].messages[messageIndex] = NovelSessionMessageRecord(
+            id: message.id,
+            sequence: message.sequence,
+            role: message.role,
+            mode: message.mode,
+            kind: message.kind,
+            content: message.content,
+            createdAt: message.createdAt,
+            runID: message.runID,
+            candidateID: nil,
+            interaction: message.interaction
+        )
+        XCTAssertThrowsError(try NovelDocumentValidator.validate(legacy))
+
+        let normalized = NovelGenerationReducer
+            .normalizingLegacyInterruptedProseCandidates(legacy)
+
+        XCTAssertEqual(normalized.candidates.count, 1)
+        XCTAssertEqual(normalized.candidates[0].id, request.candidateID)
+        XCTAssertEqual(normalized.candidates[0].status, .interrupted)
+        XCTAssertEqual(normalized.candidates[0].content, "旧版本持久化的中断正文")
+        XCTAssertEqual(
+            normalized.sessions[0].messages[messageIndex].candidateID,
+            request.candidateID
+        )
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(normalized))
+    }
+
     func testFailureStoresFailureAndPartialWithoutCreatingCandidate() throws {
         let document = try NovelTestFixtures.document()
         let request = makeRequest(
