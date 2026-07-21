@@ -36,12 +36,6 @@ enum NovelComposerIntent: String, CaseIterable, Identifiable {
     }
 }
 
-enum NovelSessionFollowAnimationPolicy {
-    static func shouldAnimate(isStreaming: Bool, reduceMotion: Bool) -> Bool {
-        isStreaming && !reduceMotion
-    }
-}
-
 enum NovelSessionBottomProximityPolicy {
     static func isNearBottom(distanceToBottom: CGFloat) -> Bool {
         distanceToBottom <= ChatLayout.nearBottomResumeThreshold
@@ -320,6 +314,14 @@ struct NovelSessionView: View {
         }
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
+        // 流式底部锚点的唯一所有者:sizeChanges 底锚在布局事务内同步吸收
+        // 高度增长与收缩(逐帧零欠账,见 NovelSessionBottomAnchorProbeTests)。
+        // 必须门控:关闭「跟随生成」时不得替用户自动跟随;原生滚动驱动
+        // 持有容器时由 driver 经自有 layout-metrics 通道跟随,两个写入者
+        // 不能同时写同一偏移。
+        .modifier(NovelSessionSizeChangesPinModifier(
+            enabled: followGeneration && !isNativeScrollDriverDesired
+        ))
         .defaultScrollAnchor(.top, for: .alignment)
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
@@ -1175,16 +1177,7 @@ struct NovelSessionView: View {
             scrollDriver.submit(.streamContentGrew)
             return
         }
-        if NovelSessionFollowAnimationPolicy.shouldAnimate(
-            isStreaming: viewModel.isStreaming,
-            reduceMotion: accessibilityReduceMotion
-        ) {
-            withAnimation(.linear(duration: 0.08)) {
-                scrollPosition.scrollTo(id: Self.bottomAnchorID, anchor: .bottom)
-            }
-        } else {
-            scrollToBottomWithoutAnimation()
-        }
+        scrollToBottomWithoutAnimation()
     }
 
     private func scrollToBottomWithoutAnimation() {
@@ -1246,6 +1239,20 @@ struct NovelSessionView: View {
     }
 
     private static let bottomAnchorID = "novel-session-bottom-anchor"
+}
+
+/// 按语义开关与滚动所有权切换 `.sizeChanges` 底锚。行锚定位置(用户上滑
+/// 浏览历史)不会被它拽走(探针已实证),所以不需要再按跟随模式动态开关。
+private struct NovelSessionSizeChangesPinModifier: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            content
+        }
+    }
 }
 
 private struct NovelPendingCommittedUndo {

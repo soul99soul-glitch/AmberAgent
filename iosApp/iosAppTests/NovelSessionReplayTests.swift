@@ -30,21 +30,6 @@ final class NovelSessionReplayTests: XCTestCase {
         ))
     }
 
-    func testStreamingFollowAnimationHonorsReduceMotionAndLiveState() {
-        XCTAssertTrue(NovelSessionFollowAnimationPolicy.shouldAnimate(
-            isStreaming: true,
-            reduceMotion: false
-        ))
-        XCTAssertFalse(NovelSessionFollowAnimationPolicy.shouldAnimate(
-            isStreaming: false,
-            reduceMotion: false
-        ))
-        XCTAssertFalse(NovelSessionFollowAnimationPolicy.shouldAnimate(
-            isStreaming: true,
-            reduceMotion: true
-        ))
-    }
-
     func testDragResumeUsesSharedNearBottomThreshold() {
         let threshold = ChatLayout.nearBottomResumeThreshold
 
@@ -341,14 +326,10 @@ final class NovelSessionReplayTests: XCTestCase {
                 state: follow,
                 event: .measuredStreamGrowth(isAtBottom: false)
             )
-            if (30..<90).contains(index) {
-                XCTAssertFalse(transition.commands.contains { command in
-                    if case .followBottom = command { return true }
-                    return false
-                })
-            } else {
-                XCTAssertTrue(transition.commands.contains(.followBottom(animated: false)))
-            }
+            XCTAssertFalse(transition.commands.contains { command in
+                if case .followBottom = command { return true }
+                return false
+            })
             follow = transition.state
         }
 

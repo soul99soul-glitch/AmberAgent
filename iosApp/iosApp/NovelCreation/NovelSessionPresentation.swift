@@ -1596,10 +1596,11 @@ enum NovelSessionBottomFollowPolicy {
             }
             switch next.mode {
             case .followingBottom:
-                commands.append(.followBottom(animated: false))
+                // The ScrollView's size-change anchor absorbs live growth in the layout
+                // transaction. A second scroll command recreates the visible bottom debt.
+                break
             case .settlingTerminal:
                 next.mode = .followingBottom
-                commands.append(.followBottom(animated: false))
             case .awaitingInitialRows, .browsingHistory:
                 break
             }

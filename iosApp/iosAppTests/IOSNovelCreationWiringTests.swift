@@ -456,6 +456,16 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             "@AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true"
         ))
         XCTAssertTrue(session.contains("followEnabled: followGeneration"))
+        XCTAssertTrue(session.contains(
+            ".defaultScrollAnchor(.bottom, for: .sizeChanges)"
+        ))
+        // sizeChanges 底锚是流式底部锚点的唯一所有者,必须按「跟随生成」开关
+        // 与原生滚动驱动门控:关闭跟随时不得自动跟随,native driver 持有容器
+        // 时两个写入者不能同时写同一偏移。
+        XCTAssertTrue(session.contains(
+            "enabled: followGeneration && !isNativeScrollDriverDesired"
+        ))
+        XCTAssertFalse(session.contains("withAnimation(.linear(duration: 0.08))"))
         let bindingTaskEnd = try XCTUnwrap(session.range(
             of: ".onChange(of: listSignal)",
             range: bindingTaskStart.upperBound..<session.endIndex

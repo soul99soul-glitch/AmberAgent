@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -21,6 +21,15 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-21 novel whole-chapter streaming anchor stabilization
+
+- 两张真机截图的坐标对比确认：导航、既有可见正文与 composer 均未移动，只有正文候选状态行在新 Markdown 高度发布后下移约 `53pt`。当前生产路径会在布局完成后才收到 measured growth，并对语义为 `animated: false` 的自动跟随再执行 `0.08s` 线性动画，形成可见的「先欠账、再追回」。
+- 小说会话 ScrollView 现在使用原生 `.defaultScrollAnchor(.bottom, for: .sizeChanges)` 在同一布局事务内吸收流式高度变化；measured stream growth 不再发第二次滚动命令，其他自动回底也统一为无动画。现有 `NovelSessionBottomFollowState` 仍唯一负责跟随/浏览历史语义；没有移动状态行、增加 overlay、几何补偿、第二套状态机或修改 Markdown vendor。
+- iPhone 17 Pro / iOS 26.5 Simulator 上，size-change 增长、收缩与浏览历史兼容探针为 3 passed；小说 replay 与 wiring 为 57 passed；强制 `ChatStreamReplayTests`、Native driver 定点回归及小说长会话布局 canary 为 56 passed、1 expected skip。`git diff --check` 通过。以上只证明模拟器布局与回归门禁，真实 provider 下的真机 120Hz 连续流式视觉仍待本包安装后人工复验。
+- 二次审查补齐两个所有权缺口：`.sizeChanges` 底锚原无条件启用，会在「跟随生成」关闭时违背不自动跟随语义、并在原生滚动驱动持有容器时与 driver 双写同一偏移；现按 `followGeneration && !isNativeScrollDriverDesired` 门控（`NovelSessionSizeChangesPinModifier`），wiring canary 锁定门控条件。行锚定位置不被钉住拽走已由探针实证，无需再按跟随模式动态开关。
+- `NovelSessionBottomAnchorProbeTests` 固化为 7 条永久 canary：旧追赶算法在突发增长下必留瞬态欠账（机制证据）；无钉住时持续增长欠账逐拍累积（证伪「依赖天然锚定」的简化方向并锁定）；收缩停底只是 UIKit clamp；sizeChanges 在 33/120pt 突发增长与收缩下逐帧零欠账；行锚定位置不被拽走；显式回底后钉住恢复。合并门禁：探针、replay、wiring、ViewModel、presentation、Native 核心与强制 `ChatStreamReplayTests` 合计 198 passed、1 expected skip、0 failed（`/tmp/anchor-gate-run.log`）。
+- 当前工作区 Debug 包已使用 Team `89QRFX9548` 完成真机构建；App 与 Activity Widget 均通过 `codesign --verify --deep --strict`，新描述文件包含目标设备并有效至 2026-07-28。09:36 已覆盖安装并成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`，设备进程回读同时确认主 App 与 Widget 来自本次安装路径。以上证明构建、签名、安装与启动，不等同于真实 provider 下的长章节连续流式视觉验收。
 
 ### 2026-07-20 legacy interrupted-prose project compatibility
 
