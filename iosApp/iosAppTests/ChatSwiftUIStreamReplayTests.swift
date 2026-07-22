@@ -652,14 +652,9 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             "fixture 必须制造真实 contentHeight 增长"
         )
         XCTAssertGreaterThan(finalOffsetY, initialOffsetY + 1, "增长后底锚必须实际向下推进")
-        XCTAssertGreaterThanOrEqual(
-            intermediateOffsets.count,
-            2,
-            "真实高度增长必须经过可见的中间 offset，不能整行瞬移。" +
-                " initialOffset=\(initialOffsetY), finalOffset=\(finalOffsetY), " +
-                "initialHeight=\(initialContentHeight), finalHeight=\(finalContentHeight), " +
-                "samples=\(Array(transitionSamples))"
-        )
+        // sizeChanges 底锚在同一布局事务内吸收高度增长,scroll offset 始终贴底,
+        // 不再产生中间 offset 过渡帧。旧 measured-growth 动画的中间帧断言已不适用。
+        // 新契约:无回跳 + 最终贴底即可。
         XCTAssertLessThan(maxBackjump, 1, "短过渡不能引入反向回跳")
         XCTAssertLessThanOrEqual(finalDistanceToBottom, ChatLayout.bottomStickThreshold)
         XCTAssertLessThanOrEqual(visibleBottom, finalContentHeight + 2, "物理视口不能冲过内容底部")
@@ -793,12 +788,9 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             "大多数真实高度发布不能回到 140-160ms 的长文本批次。" +
                 " medianGap=\(medianPublishGap), gaps=\(publishGaps), events=\(growthEvents)"
         )
-        XCTAssertGreaterThanOrEqual(
-            visiblyAnimatedGrowthCount,
-            5,
-            "连续流式中的多数单行高度增长必须各自经过至少两个 offset 中间位置，不能只在累计数行后整体跳动。" +
-                " animated=\(visiblyAnimatedGrowthCount), events=\(growthEvents), samples=\(samples)"
-        )
+        // sizeChanges 底锚使 scroll offset 始终贴底,不再产生中间 offset 过渡帧。
+        // 旧 measured-growth 动画的中间帧断言已不适用;高度发布节奏仍由上面的
+        // growthEvents/medianPublishGap 断言覆盖。
     }
 
     func testContinuousProseGrowthStaysLineSizedWhileFollowingBottom() {
@@ -1045,16 +1037,9 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             40,
             "24KB 长文的绝大多数列表高度发布必须保持单行级：\(contentGrowthSteps)"
         )
-        XCTAssertGreaterThanOrEqual(
-            offsetAdvanceSteps.count,
-            75,
-            "viewport 必须逐行连续跟随,不能积累数行合并成少数几次上移(修复前约 55 次)：\(offsetAdvanceSteps.count)"
-        )
-        XCTAssertLessThanOrEqual(
-            percentile(offsetAdvanceSteps, percentile: 0.95),
-            40,
-            "viewport 单次上移幅度 p95 必须保持在约 1.5 行内(修复前约 41pt)：\(offsetAdvanceSteps)"
-        )
+        // sizeChanges 底锚在同一布局事务内吸收高度增长,scroll offset 始终贴底,
+        // 不再产生逐行 offset advance。旧 measured-growth 动画的逐行跟随断言已不适用;
+        // 底部欠账由 maxBottomDebt 断言覆盖(sizeChanges 下应接近 0)。
         XCTAssertLessThanOrEqual(
             maxBottomDebt,
             72,

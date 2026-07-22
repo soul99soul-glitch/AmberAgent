@@ -206,35 +206,62 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             currentContentHeight: 101,
             followEnabled: true,
             followPaused: false,
-            userDragging: false
+            userDragging: false,
+            alreadyAtBottom: false
         ))
         XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowMeasuredGrowth(
             previousContentHeight: 100,
             currentContentHeight: 99,
             followEnabled: true,
             followPaused: false,
-            userDragging: false
+            userDragging: false,
+            alreadyAtBottom: false
         ), "Content shrink is handled by terminal settle, not live-growth animation.")
         XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowMeasuredGrowth(
             previousContentHeight: 100,
             currentContentHeight: 120,
             followEnabled: true,
             followPaused: true,
-            userDragging: false
+            userDragging: false,
+            alreadyAtBottom: false
         ))
         XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowMeasuredGrowth(
             previousContentHeight: 100,
             currentContentHeight: 120,
             followEnabled: true,
             followPaused: false,
-            userDragging: true
+            userDragging: true,
+            alreadyAtBottom: false
         ))
         XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowMeasuredGrowth(
             previousContentHeight: 100,
             currentContentHeight: 120,
             followEnabled: false,
             followPaused: false,
-            userDragging: false
+            userDragging: false,
+            alreadyAtBottom: false
+        ))
+    }
+
+    func testCouncilMeasuredGrowthFollowSkipsWhenAlreadyPinnedToBottom() {
+        // The `.sizeChanges` anchor already pins content within the same layout
+        // transaction; a redundant 0.08s scrollTo(edge:.bottom) command re-creates
+        // the "double bottom-scroll command" anti-pattern from the novel-page fix.
+        XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowMeasuredGrowth(
+            previousContentHeight: 100,
+            currentContentHeight: 101,
+            followEnabled: true,
+            followPaused: false,
+            userDragging: false,
+            alreadyAtBottom: true
+        ), "Already-at-bottom growth must not re-issue a redundant follow animation.")
+        XCTAssertTrue(CouncilTranscriptFollowPolicy.shouldFollowMeasuredGrowth(
+            previousContentHeight: 100,
+            currentContentHeight: 101,
+            followEnabled: true,
+            followPaused: false,
+            userDragging: false,
+            alreadyAtBottom: false
         ))
     }
 
@@ -244,28 +271,73 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             currentVisibleHeight: 500,
             followEnabled: true,
             followPaused: false,
-            userDragging: false
+            userDragging: false,
+            alreadyAtBottom: false
         ))
         XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowViewportShrink(
             previousVisibleHeight: 500,
             currentVisibleHeight: 600,
             followEnabled: true,
             followPaused: false,
-            userDragging: false
+            userDragging: false,
+            alreadyAtBottom: false
         ))
         XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowViewportShrink(
             previousVisibleHeight: 600,
             currentVisibleHeight: 500,
             followEnabled: true,
             followPaused: true,
-            userDragging: false
+            userDragging: false,
+            alreadyAtBottom: false
         ))
         XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowViewportShrink(
             previousVisibleHeight: 600,
             currentVisibleHeight: 500,
             followEnabled: true,
             followPaused: false,
-            userDragging: true
+            userDragging: true,
+            alreadyAtBottom: false
+        ))
+    }
+
+    func testCouncilViewportShrinkSkipsWhenAlreadyPinnedToBottom() {
+        XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldFollowViewportShrink(
+            previousVisibleHeight: 600,
+            currentVisibleHeight: 500,
+            followEnabled: true,
+            followPaused: false,
+            userDragging: false,
+            alreadyAtBottom: true
+        ))
+        XCTAssertTrue(CouncilTranscriptFollowPolicy.shouldFollowViewportShrink(
+            previousVisibleHeight: 600,
+            currentVisibleHeight: 500,
+            followEnabled: true,
+            followPaused: false,
+            userDragging: false,
+            alreadyAtBottom: false
+        ))
+    }
+
+    func testLiveRenderingEnabledFreezesOnlyTheSpeakingRowWhileReadingHistory() {
+        // The row the user is actively reading (history, followPaused=true) must
+        // never be told to freeze — only the live speaking row underneath them
+        // should stop re-parsing/re-animating at full 48ms cadence.
+        XCTAssertFalse(CouncilTranscriptFollowPolicy.liveRenderingEnabled(
+            isSpeakingRow: true,
+            followPaused: true
+        ), "Speaking row must freeze while the user is reading scrollback.")
+        XCTAssertTrue(CouncilTranscriptFollowPolicy.liveRenderingEnabled(
+            isSpeakingRow: true,
+            followPaused: false
+        ), "Speaking row renders live while the user is following the bottom.")
+        XCTAssertTrue(CouncilTranscriptFollowPolicy.liveRenderingEnabled(
+            isSpeakingRow: false,
+            followPaused: true
+        ), "History rows must never be frozen, even while the user pauses following.")
+        XCTAssertTrue(CouncilTranscriptFollowPolicy.liveRenderingEnabled(
+            isSpeakingRow: false,
+            followPaused: false
         ))
     }
 

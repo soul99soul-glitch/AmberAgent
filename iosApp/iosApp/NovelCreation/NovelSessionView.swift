@@ -1321,7 +1321,7 @@ private struct NovelSessionRowView: View, Equatable {
                 content: row.content,
                 isStreaming: row.isStreaming,
                 transientPhase: row.transientPhase,
-                hasEverStreamed: row.runID != nil,
+                hasEverStreamed: row.role == .assistant,
                 runStatus: row.runStatus,
                 candidateStatus: row.candidate?.status,
                 polishTransactionStatus: row.candidate?.polishTransactionStatus,

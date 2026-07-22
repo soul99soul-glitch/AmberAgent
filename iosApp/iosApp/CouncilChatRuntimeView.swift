@@ -7,6 +7,7 @@ struct CouncilTranscriptScrollGeometry: Equatable {
     let contentHeight: CGFloat
     let visibleHeight: CGFloat
     let isNearBottom: Bool
+    let isAtBottom: Bool
 }
 
 enum CouncilTranscriptFollowPolicy {
@@ -18,16 +19,28 @@ enum CouncilTranscriptFollowPolicy {
         distanceToBottom <= ChatLayout.nearBottomResumeThreshold
     }
 
+    /// While the user is reading scrollback (`followPaused`), a still-speaking row
+    /// keeps parsing/re-animating at full speed underneath them. Only the row the
+    /// user is *not* looking at (the live speaking one) should freeze; history rows
+    /// must never have live rendering toggled off, or MessageBubbleView's
+    /// `hasEverStreamed && liveRenderingEnabled` renderer-switch guard would swap
+    /// their renderer mid-read.
+    static func liveRenderingEnabled(isSpeakingRow: Bool, followPaused: Bool) -> Bool {
+        !isSpeakingRow || !followPaused
+    }
+
     static func shouldFollowMeasuredGrowth(
         previousContentHeight: CGFloat,
         currentContentHeight: CGFloat,
         followEnabled: Bool,
         followPaused: Bool,
-        userDragging: Bool
+        userDragging: Bool,
+        alreadyAtBottom: Bool
     ) -> Bool {
         followEnabled &&
             !followPaused &&
             !userDragging &&
+            !alreadyAtBottom &&
             currentContentHeight > previousContentHeight + minimumMeasuredGrowth
     }
 
@@ -36,11 +49,13 @@ enum CouncilTranscriptFollowPolicy {
         currentVisibleHeight: CGFloat,
         followEnabled: Bool,
         followPaused: Bool,
-        userDragging: Bool
+        userDragging: Bool,
+        alreadyAtBottom: Bool
     ) -> Bool {
         followEnabled &&
             !followPaused &&
             !userDragging &&
+            !alreadyAtBottom &&
             currentVisibleHeight < previousVisibleHeight - minimumMeasuredGrowth
     }
 }
@@ -277,6 +292,7 @@ struct CouncilChatRuntimeView: View {
                 ForEach(viewModel.messages) { message in
                     CouncilMessageRow(
                         message: message,
+                        followPaused: followPaused,
                         onTapDetail: { viewModel.showCurrentDetail() },
                         onRestart: { viewModel.restart(withObjective: $0) }
                     )
@@ -313,6 +329,9 @@ struct CouncilChatRuntimeView: View {
                 }
             }
         }
+        .modifier(CouncilSizeChangesPinModifier(
+            enabled: followGeneration && !isNativeScrollDriverDesired
+        ))
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
@@ -361,7 +380,8 @@ struct CouncilChatRuntimeView: View {
                 visibleHeight: geometry.visibleRect.height,
                 isNearBottom: CouncilTranscriptFollowPolicy.shouldResumeFollowing(
                     distanceToBottom: distanceToBottom
-                )
+                ),
+                isAtBottom: distanceToBottom <= 1
             )
         } action: { previous, current in
             transcriptNearBottom = current.isNearBottom
@@ -373,14 +393,16 @@ struct CouncilChatRuntimeView: View {
                 currentContentHeight: current.contentHeight,
                 followEnabled: followGeneration,
                 followPaused: followPaused,
-                userDragging: userDragging
+                userDragging: userDragging,
+                alreadyAtBottom: current.isAtBottom
             )
             let shouldFollowViewportShrink = CouncilTranscriptFollowPolicy.shouldFollowViewportShrink(
                 previousVisibleHeight: previous.visibleHeight,
                 currentVisibleHeight: current.visibleHeight,
                 followEnabled: followGeneration,
                 followPaused: followPaused,
-                userDragging: userDragging
+                userDragging: userDragging,
+                alreadyAtBottom: current.isAtBottom
             )
             if shouldFollowMeasuredGrowth || shouldFollowViewportShrink {
                 scheduleMeasuredGrowthFollowToBottom()
@@ -657,6 +679,9 @@ private struct CouncilParticipantChip: View {
 
 private struct CouncilMessageRow: View, Equatable {
     let message: CouncilChatMessage
+    /// 用户是否暂停跟随(正在上滑读历史)。只影响仍在 `.speaking` 的行是否冻结渲染
+    /// ——历史行必须永远忽略这个值,否则会踩 MessageBubbleView 的 renderer-switch 保护。
+    let followPaused: Bool
     let onTapDetail: () -> Void
     /// 以指定议题重开议会(供用户气泡的「以此为题重开 / 编辑重开」)。
     let onRestart: (String) -> Void
@@ -666,12 +691,15 @@ private struct CouncilMessageRow: View, Equatable {
 
     // 只比较影响渲染的字段(闭包每次父刷新都新建但语义不变,忽略)。内部 @State
     // (editing/editDraft)变化不受此 == 影响,SwiftUI 仍会照常更新本行。
+    // followPaused 只在本行仍 speaking 时才参与比较:避免用户拖动滚动时让整份
+    // 已完成的历史行随之全部判定为「变化」而重渲染。
     nonisolated static func == (lhs: CouncilMessageRow, rhs: CouncilMessageRow) -> Bool {
         lhs.message.id == rhs.message.id
             && lhs.message.body == rhs.message.body
             && lhs.message.status == rhs.message.status
             && lhs.message.author == rhs.message.author
             && lhs.message.subtitle == rhs.message.subtitle
+            && (lhs.message.status != .speaking || lhs.followPaused == rhs.followPaused)
     }
 
     var body: some View {
@@ -805,7 +833,11 @@ private struct CouncilMessageRow: View, Equatable {
             markdown: message.displayBody,
             renderCacheNamespace: message.markdownRenderCacheNamespace,
             isStreaming: message.isStreamingMarkdown,
-            hasEverStreamed: message.hasEverStreamedMarkdown
+            hasEverStreamed: message.hasEverStreamedMarkdown,
+            liveRenderingEnabled: CouncilTranscriptFollowPolicy.liveRenderingEnabled(
+                isSpeakingRow: message.status == .speaking,
+                followPaused: followPaused
+            )
         )
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
@@ -2596,6 +2628,19 @@ final class CouncilRoomArchiveStore {
     private func fileURL(for taskId: String) -> URL {
         let safe = taskId.replacingOccurrences(of: "/", with: "_")
         return directory.appendingPathComponent("\(safe).json", isDirectory: false)
+    }
+}
+
+/// 按语义开关与滚动所有权切换 `.sizeChanges` 底锚,与小说创作和标准 Chat 统一。
+private struct CouncilSizeChangesPinModifier: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            content
+        }
     }
 }
 

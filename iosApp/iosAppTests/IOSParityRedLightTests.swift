@@ -1295,6 +1295,49 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    func testForegroundErrorTerminalDrainsPresentationBacklogBeforePublishingTerminalState() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let source = try String(
+            contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        guard let errorStart = source.range(of: "case .error(let error):"),
+              let eventLoopEnd = source.range(
+                of: "streamJob = dispatchStream(",
+                range: errorStart.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Expected .error terminal branch in the foreground event consumer")
+        }
+        let errorBody = source[errorStart.lowerBound..<eventLoopEnd.lowerBound]
+
+        guard let drainGuardRange = errorBody.range(
+            of: "guard await self.drainStreamPresentation(to: snapshot, runId: runId) else {"
+        ) else {
+            return XCTFail(
+                "Error terminal must drain the bounded UI presentation backlog (same guard as .complete) before publishing terminal state; otherwise a backlogged burst renders in one uncapped frame right before the error bubble."
+            )
+        }
+        guard let setMessagesRange = errorBody.range(
+            of: "self.bindings.setMessages(snapshot)",
+            range: drainGuardRange.upperBound..<errorBody.endIndex
+        ) else {
+            return XCTFail("Expected error terminal to publish the accumulated snapshot after draining, not before.")
+        }
+        guard let presentErrorRange = errorBody.range(
+            of: "await self.presentStreamError(",
+            range: setMessagesRange.upperBound..<errorBody.endIndex
+        ) else {
+            return XCTFail("Expected the error bubble to be presented only after the drained terminal snapshot is published.")
+        }
+        XCTAssertTrue(
+            drainGuardRange.upperBound <= setMessagesRange.lowerBound
+                && setMessagesRange.upperBound <= presentErrorRange.lowerBound,
+            "Symmetric with .complete: drain the paced backlog, then publish the terminal snapshot, then surface the error bubble."
+        )
+    }
+
     func testForegroundPresentationPacerSplitsBurstWithoutDroppingSuffix() {
         let user = UIMessage.companion.user(prompt: "question")
         let assistant = UIMessage.companion.assistant(prompt: "已显示")

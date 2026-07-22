@@ -149,6 +149,30 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         XCTAssertEqual(reDto.status, "failed")
     }
 
+    func testRestoredSpeakingStatusIsCleanedToFailed() {
+        // A message still `.speaking` when the process is killed mid-generation
+        // must not resurrect as "speaking" forever after a cold start; only a
+        // fresh discussion (resetRoom) should ever set `.speaking` again.
+        let speakingMessage = CouncilChatMessage(
+            kind: .host, author: "主持人", body: "正在生成", systemImage: "crown",
+            tint: .red, subtitle: nil, status: .speaking
+        )
+        let restoredSpeaking = CouncilPersistedMessage(speakingMessage).restored()
+        XCTAssertEqual(restoredSpeaking.status, .failed, "冷启动恢复的 speaking 行必须清洗为 failed,不能永远显示发言中")
+
+        let completedMessage = CouncilChatMessage(
+            kind: .host, author: "主持人", body: "已完成", systemImage: "crown",
+            tint: .red, subtitle: nil, status: .completed
+        )
+        XCTAssertEqual(CouncilPersistedMessage(completedMessage).restored().status, .completed)
+
+        let failedMessage = CouncilChatMessage(
+            kind: .host, author: "主持人", body: "失败了", systemImage: "crown",
+            tint: .red, subtitle: nil, status: .failed
+        )
+        XCTAssertEqual(CouncilPersistedMessage(failedMessage).restored().status, .failed)
+    }
+
     func testParticipantDTOPreservesIdentityAndModel() {
         let p = CouncilParticipant(
             id: "design", handle: "Design", displayName: "设计师",

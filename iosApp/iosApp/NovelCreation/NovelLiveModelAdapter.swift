@@ -521,6 +521,38 @@ private extension NovelLiveModelAdapter {
 }
 
 extension NovelLiveModelAdapter {
+    /// Accumulates assistant text across the tool engine's multi-step loop.
+    /// Each `streamStep` re-accumulates its own text from empty (see
+    /// `IOSAgentToolEngine.StreamStepState`), so without this, a later step's
+    /// `replacementChunk` (a full-replace signal) would erase any visible text
+    /// the model produced in an earlier step before invoking a tool.
+    /// `@unchecked Sendable` + `NSLock`: `onAssistantTurnStarted` fires from
+    /// the `@MainActor` engine loop, but `onAssistantText` fires from whatever
+    /// thread the KMP streaming bridge calls back on (not guaranteed MainActor).
+    private final class DiscussionStepTextAccumulator: @unchecked Sendable {
+        private let lock = NSLock()
+        private var committedSteps: [String] = []
+        private var currentStep = ""
+
+        func startNewTurn() {
+            lock.lock()
+            defer { lock.unlock() }
+            if !currentStep.isEmpty {
+                committedSteps.append(currentStep)
+            }
+            currentStep = ""
+        }
+
+        func update(currentStep text: String) -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            currentStep = text
+            return (committedSteps + [currentStep])
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+        }
+    }
+
     static func discussionSearchTransport(
         using provider: any IOSAgentTextProvider,
         executors: @escaping @MainActor @Sendable () -> [String: any IOSToolExecutor]
@@ -532,12 +564,16 @@ extension NovelLiveModelAdapter {
                     executors: executors(),
                     configuration: .init(maxSteps: 4, honorApprovalPause: true)
                 )
+                let stepText = DiscussionStepTextAccumulator()
                 let result = await engine.run(
                     providerSetting: request.providerSetting,
                     messages: request.messages,
                     params: request.parameters,
+                    onAssistantTurnStarted: {
+                        stepText.startNewTurn()
+                    },
                     onAssistantText: { text in
-                        callbacks.onChunk(replacementChunk(text))
+                        callbacks.onChunk(replacementChunk(stepText.update(currentStep: text)))
                     }
                 )
                 guard !Task.isCancelled else { return }
@@ -561,7 +597,7 @@ extension NovelLiveModelAdapter {
                    approval.toolName == "ask_user" {
                     do {
                         let prompt = try decodeAskUserPrompt(approval.arguments)
-                        callbacks.onAskUser(prompt, lastAssistantText(in: result.messages))
+                        callbacks.onAskUser(prompt, joinedAssistantText(in: result.messages))
                     } catch {
                         callbacks.onFailure(failure(
                             code: "discussion_ask_user_invalid",
@@ -579,7 +615,7 @@ extension NovelLiveModelAdapter {
                     ))
                     return
                 }
-                let finalText = lastAssistantText(in: result.messages)
+                let finalText = joinedAssistantText(in: result.messages)
                 guard !finalText.isEmpty else {
                     callbacks.onFailure(failure(
                         code: "discussion_empty_response",
@@ -743,8 +779,12 @@ private extension NovelLiveModelAdapter {
         message.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
     }
 
-    static func lastAssistantText(in messages: [UIMessage]) -> String {
-        messages.reversed().first(where: { $0.role == MessageRole.assistant }).map(text(in:)) ?? ""
+    static func joinedAssistantText(in messages: [UIMessage]) -> String {
+        messages
+            .filter { $0.role == MessageRole.assistant }
+            .map(text(in:))
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
     }
 
     static func decodeAskUserPrompt(_ arguments: String) throws -> NovelAskUserPrompt {

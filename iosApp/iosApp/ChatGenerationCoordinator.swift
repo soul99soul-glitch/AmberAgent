@@ -1072,6 +1072,11 @@ final class ChatGenerationCoordinator {
                     // The terminal snapshot is published below; it is no longer a cancel fallback.
                     self.activeStreamSession = nil
                     ChatStreamRecorder.shared.record(runId: runId, snapshot: snapshot)
+                    // 与 .complete 对称:先按 pacer 逐拍追平积压文本,再发布终态与错误气泡。
+                    // drain 失败(run 被取消/接管)时终态所有权已在别处,直接退出。
+                    guard await self.drainStreamPresentation(to: snapshot, runId: runId) else {
+                        return
+                    }
                     self.bindings.setMessages(snapshot)
                     self.bindings.bumpMessageRevision(.assistantStreamClosed)
                     await self.presentStreamError(

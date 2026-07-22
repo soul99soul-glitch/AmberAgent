@@ -2062,6 +2062,12 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
             signature: signature
         )
         if let exact = renderableCache[exactKey] {
+            // 命中移到队尾(LRU):多界面并发流式时,静态缓存按纯插入序驱逐会把
+            // 仍在活跃复用的条目挤出,复出成本是整段全文重解析。
+            if let index = renderableCacheOrder.lastIndex(of: exactKey) {
+                renderableCacheOrder.remove(at: index)
+                renderableCacheOrder.append(exactKey)
+            }
             return exact
         }
         guard signature.speculative else { return nil }

@@ -498,6 +498,9 @@ struct NativeChatTimelineView: View {
                 }
             }
         }
+        .modifier(ChatSizeChangesPinModifier(
+            enabled: followGeneration && !isNativeScrollDriverDesired
+        ))
         .nativeTimelineScrollPosition($scrollPosition)
         .scrollEdgeEffectStyle(.soft, for: .top)
         .scrollIndicators(.hidden)
@@ -682,7 +685,7 @@ struct NativeChatTimelineView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(
                     maxWidth: .infinity,
-                    alignment: entry.role == MessageRole.user ? .trailing : .leading
+                    alignment: entry.role == MessageRole.user ? .topTrailing : .topLeading
                 )
                 .id(entry.id)
                 .transition(userMessageInsertionTransition(for: entry))
@@ -1504,8 +1507,10 @@ struct ChatSwiftUIMessageList: View {
         // iOS 18 scrollPosition + defaultScrollAnchor。动态消息行不登记为 scroll
         // targets；底部跟随只写物理 edge，避免动态行高度变化时重复解析目标。
         // initialOffset 负责长会话初始入场;alignment 负责内容不足一屏时自然顶排。
-        // 不设置 sizeChanges 底锚:内容增长由语义 follow 合并驱动,避免布局帧和滚动帧互相抢锚。
-        // 不随 runtime.followMode 动态切换(避免 paused→following 转换时把用户位置拽回底部)。
+        // sizeChanges 底锚在同一布局事务内同步吸收流式高度增长(与小说创作统一);
+        // 探针已实证行锚定位置不会被拽走,所以不需要按 followMode 动态开关。
+        // 门控:关闭「跟随生成」时不得替用户自动跟随。
+        .modifier(ChatSizeChangesPinModifier(enabled: followGeneration))
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
@@ -1799,7 +1804,7 @@ struct ChatSwiftUIMessageList: View {
         .fixedSize(horizontal: false, vertical: true)
         .frame(
             maxWidth: .infinity,
-            alignment: row.role == MessageRole.user ? .trailing : .leading
+            alignment: row.role == MessageRole.user ? .topTrailing : .topLeading
         )
         .padding(.vertical, row.role == MessageRole.user ? ChatLayout.userMessageRowVerticalPadding : 0)
         .id(entry.id)
@@ -4796,5 +4801,19 @@ private final class ChatRowHeightCache {
 
     private func key(itemID: String, signature: String?, width: CGFloat) -> String {
         "\(itemID)-s\(signature ?? "none")-w\(Int(width.rounded()))"
+    }
+}
+
+/// 按「跟随生成」偏好开关 `.sizeChanges` 底锚,与小说创作统一。
+/// 行锚定位置(用户上滑浏览历史)不会被它拽走(探针已实证)。
+private struct ChatSizeChangesPinModifier: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            content
+        }
     }
 }

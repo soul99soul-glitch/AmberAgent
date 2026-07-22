@@ -328,6 +328,56 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(executor.calls, ["search_web"])
     }
 
+    /// Multi-step tool loop: the model speaks visible text before invoking a
+    /// tool (step 1), then streams its final discussion answer (step 2). The
+    /// transport must not let step 2's per-token `replacementChunk`s (a
+    /// full-replace signal) erase step 1's text — every emitted replacement
+    /// during/after step 2 must still carry step 1's text as a prefix, and the
+    /// terminal replacement must join both steps' text with "\n\n".
+    func testDiscussionTransportPreservesPreToolTextAcrossStreamingSteps() async throws {
+        let fixture = makeFixture(apiKey: "test-key")
+        let provider = ScriptedStreamingNovelDiscussionProvider()
+        let executor = RecordingNovelSearchExecutor()
+        let transport = NovelLiveModelAdapter.discussionSearchTransport(
+            using: provider,
+            executors: { ["search_web": executor] }
+        )
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in
+                XCTFail("Discussion search must use the tool transport.")
+                return nil
+            },
+            discussionTransport: transport
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        let events = await Self.collect(try await adapter.start(makeRequest(
+            model: resolved,
+            purpose: .discussion
+        )))
+
+        let replacements: [String] = events.compactMap {
+            if case let .textReplacement(text) = $0 { return text }
+            return nil
+        }
+        XCTAssertFalse(replacements.isEmpty)
+        for replacement in replacements {
+            XCTAssertTrue(
+                replacement.hasPrefix(ScriptedStreamingNovelDiscussionProvider.step1Text),
+                "step 2 streaming must not drop step 1's pre-tool text, got: \(replacement)"
+            )
+        }
+
+        let expectedFinal = [
+            ScriptedStreamingNovelDiscussionProvider.step1Text,
+            ScriptedStreamingNovelDiscussionProvider.step2Text,
+        ].joined(separator: "\n\n")
+        XCTAssertEqual(replacements.last, expectedFinal)
+        XCTAssertEqual(events.last, .completed)
+        XCTAssertEqual(executor.calls, ["search_web"])
+    }
+
     func testDiscussionWithoutEnabledSearchStillAdvertisesAskUser() async throws {
         let fixture = makeFixture(apiKey: "test-key")
         let captured = LockedBox<NovelLiveTransportRequest?>(nil)
@@ -823,6 +873,111 @@ private final class ScriptedNovelDiscussionProvider: IOSAgentTextProvider, @unch
     }
 
     private func chunk(parts: [UIMessagePart]) -> MessageChunk {
+        let message = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: parts,
+            annotations: [],
+            createdAt: Kotlinx_datetimeLocalDateTime(
+                year: 2026,
+                month: 7,
+                day: 14,
+                hour: 0,
+                minute: 0,
+                second: 0,
+                nanosecond: 0
+            ),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        return MessageChunk(
+            id: UUID().uuidString,
+            model: "novel-live",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: nil,
+                message: message,
+                finishReason: "stop"
+            )],
+            usage: nil
+        )
+    }
+}
+
+/// Streaming variant of `ScriptedNovelDiscussionProvider`: step 1 streams
+/// visible text before its tool call, step 2 streams its final answer token
+/// by token. Used to prove the engine's per-step `onAssistantText` callbacks
+/// don't lose earlier steps' text across the tool-loop boundary.
+private final class ScriptedStreamingNovelDiscussionProvider: IOSAgentTextProvider, IOSAgentStreamingProvider, @unchecked Sendable {
+    static let step1Text = "我先搜索一下相关设定。"
+    static let step2Text = "根据检索结果，建议先核对史料再调整人物动机。"
+
+    private let state = LockedBox(0)
+
+    func generateText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams
+    ) async throws -> MessageChunk {
+        XCTFail("Streaming test double must not fall back to non-streaming generateText.")
+        return MessageChunk(id: "unused", model: "novel-live", choices: [], usage: nil)
+    }
+
+    func streamText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onChunk: @escaping @Sendable (MessageChunk) -> Void,
+        onComplete: @escaping @Sendable () -> Void,
+        onError: @escaping @Sendable (KotlinThrowable) -> Void
+    ) -> Kotlinx_coroutines_coreJob? {
+        var currentCall = 0
+        state.mutate { calls in
+            calls += 1
+            currentCall = calls
+        }
+
+        if currentCall == 1 {
+            onChunk(Self.finalChunk(parts: [
+                UIMessagePart.Text(text: Self.step1Text, metadata: nil),
+                UIMessagePart.Tool(
+                    toolCallId: "novel-search-1",
+                    toolName: "search_web",
+                    input: #"{"query":"唐代凌烟阁功臣名单"}"#,
+                    output: [],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                ),
+            ]))
+        } else {
+            onChunk(Self.deltaChunk("根据"))
+            onChunk(Self.deltaChunk("检索结果，"))
+            onChunk(Self.finalChunk(parts: [
+                UIMessagePart.Text(text: Self.step2Text, metadata: nil),
+            ]))
+        }
+        onComplete()
+        return nil
+    }
+
+    private static func deltaChunk(_ text: String) -> MessageChunk {
+        MessageChunk(
+            id: UUID().uuidString,
+            model: "novel-live",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: UIMessage.companion.assistant(prompt: text),
+                message: nil,
+                finishReason: nil
+            )],
+            usage: nil
+        )
+    }
+
+    private static func finalChunk(parts: [UIMessagePart]) -> MessageChunk {
         let message = UIMessage(
             id: KotlinUuid.companion.random(),
             role: MessageRole.assistant,

@@ -59,6 +59,13 @@ struct ParagraphView: UIViewRepresentable {
     if !contentsUnchanged || view.lineSpacing != lineSpacing {
       let shouldAnimate = view.window != nil && config.shouldAnimateText // only animate when visible
       view.setParagraphContents(contents, lineSpacing: lineSpacing, animatedByWord: shouldAnimate)
+      // Vendored fix (AmberAgent): sizeThatFits runs BEFORE updateUIView in the
+      // same layout pass, so it measures the old UITextView content and caches
+      // the wrong height.  Clear the cache here so the next sizeThatFits (triggered
+      // by invalidateIntrinsicContentSize inside setParagraphContents) recalculates
+      // with the correct text.  Without this, the stale height persists until the
+      // next streaming delta, causing VStack rows to overlap.
+      context.coordinator.sizeCache.removeAll()
     }
     view.setTextContextMenu(config.textContextMenu)
     view.setMarkdownController(markdownController)
