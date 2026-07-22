@@ -22,34 +22,35 @@ private struct NovelSessionRunDraft: Equatable, Sendable {
     let inputBudgetTokens: Int
 }
 
+/// Absolute presentation target for one streaming run identity.
+///
+/// Deltas and replacements update `targetContent`; the UI only advances through
+/// `NovelSessionPresentationPacer` so provider bursts do not dump multi-line
+/// height steps into the sizeChanges-anchored list in a single flush.
 struct NovelSessionPresentationBuffer {
     let runID: NovelRunID
     let messageID: NovelMessageID
     let bindingToken: UUID
-    private var replacement: String?
-    private var appendedText = ""
+    private(set) var targetContent: String
 
     init(
         runID: NovelRunID,
         messageID: NovelMessageID,
-        bindingToken: UUID
+        bindingToken: UUID,
+        baseContent: String = ""
     ) {
         self.runID = runID
         self.messageID = messageID
         self.bindingToken = bindingToken
+        self.targetContent = baseContent
     }
 
     mutating func append(_ text: String) {
-        appendedText += text
+        targetContent += text
     }
 
     mutating func replace(with text: String) {
-        replacement = text
-        appendedText.removeAll(keepingCapacity: true)
-    }
-
-    func mergedContent(displayedContent: String) -> String {
-        (replacement ?? displayedContent) + appendedText
+        targetContent = text
     }
 
     func matches(
@@ -60,6 +61,45 @@ struct NovelSessionPresentationBuffer {
         self.runID == runID &&
             self.messageID == messageID &&
             self.bindingToken == bindingToken
+    }
+}
+
+/// Pure presentation drain for novel streaming.
+///
+/// Mirrors Chat's bounded-per-tick reveal, but advances adaptively with backlog
+/// so long chapters do not accumulate multi-second UI lag under a fixed 12-char
+/// ceiling. Terminal paths still snap to the authoritative full text.
+enum NovelSessionPresentationPacer {
+    /// Soft floor: roughly one CJK phone-width line per tick when backlog is light.
+    static let minimumTextAdvance = 12
+    /// Hard ceiling per 48ms tick: drains large backlog in a few seconds, not tens.
+    static let maximumTextAdvance = 64
+    /// Prefer clearing the *current* backlog within this many ticks when possible.
+    static let preferredDrainTicks = 16
+
+    struct Step: Equatable {
+        let content: String
+        let isCaughtUp: Bool
+    }
+
+    static func textAdvance(backlogCount: Int) -> Int {
+        guard backlogCount > 0 else { return 0 }
+        let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
+        return min(maximumTextAdvance, max(minimumTextAdvance, adaptive))
+    }
+
+    static func step(displayedContent: String, targetContent: String) -> Step {
+        if displayedContent == targetContent {
+            return Step(content: targetContent, isCaughtUp: true)
+        }
+        // Replacement / divergence: publish the authoritative target in one frame.
+        guard targetContent.hasPrefix(displayedContent) else {
+            return Step(content: targetContent, isCaughtUp: true)
+        }
+        let backlog = targetContent.count - displayedContent.count
+        let advance = textAdvance(backlogCount: backlog)
+        let next = String(targetContent.prefix(displayedContent.count + advance))
+        return Step(content: next, isCaughtUp: next == targetContent)
     }
 }
 
@@ -1488,7 +1528,8 @@ private extension NovelSessionViewModel {
         presentationBuffer = NovelSessionPresentationBuffer(
             runID: tail.runID,
             messageID: tail.messageID,
-            bindingToken: token
+            bindingToken: token,
+            baseContent: tail.content
         )
     }
 
@@ -1532,10 +1573,24 @@ private extension NovelSessionViewModel {
             cancelPendingPresentation()
             return
         }
-        presentationBuffer = nil
-        let content = buffer.mergedContent(displayedContent: current.content)
-        guard content != current.content || current.phase != .streaming else { return }
-        updateTail(content: content, phase: .streaming)
+        let step = NovelSessionPresentationPacer.step(
+            displayedContent: current.content,
+            targetContent: buffer.targetContent
+        )
+        if step.content != current.content || current.phase != .streaming {
+            updateTail(content: step.content, phase: .streaming)
+        }
+        if step.isCaughtUp {
+            // Buffer target fully revealed; drop so the next delta starts a fresh base.
+            presentationBuffer = nil
+        } else {
+            // Keep absolute target and keep draining on the 48ms clock.
+            schedulePresentationFlush(
+                runID: runID,
+                messageID: messageID,
+                token: token
+            )
+        }
     }
 
     func publishQuickStartStreamingPhaseIfNeeded(
@@ -1570,7 +1625,8 @@ private extension NovelSessionViewModel {
                messageID: current.messageID,
                bindingToken: token
            ) {
-            bufferedContent = buffer.mergedContent(displayedContent: current.content)
+            // Terminal snaps to the full target — no paced lag on complete/error/cancel.
+            bufferedContent = buffer.targetContent
         } else {
             bufferedContent = nil
         }

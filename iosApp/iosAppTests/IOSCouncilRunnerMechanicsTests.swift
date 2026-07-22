@@ -405,6 +405,17 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             cancellation.contains("measuredGrowthFollowTask = nil"),
             "Cancellation must leave ownership with the in-flight task until its defer runs."
         )
+        // Pin owns live growth alone; no residual scrollTo dual-write under the pin.
+        XCTAssertTrue(source.contains("let sizeChangesPinOwnsGrowth = followGeneration && !isNativeScrollDriverDesired"))
+        XCTAssertTrue(source.contains("if shouldFollowViewportShrink {"))
+        XCTAssertTrue(
+            source.contains("} else if shouldFollowMeasuredGrowth,\n                      !sizeChangesPinOwnsGrowth || isNativeScrollDriverActive {"),
+            "Measured growth must not schedule a chase/snap while the sizeChanges pin owns follow."
+        )
+        XCTAssertFalse(
+            source.contains("} else if sizeChangesPinOwnsGrowth {\n                    scrollToTranscriptBottom()"),
+            "Residual snap under the pin causes continuous jump/flicker."
+        )
     }
 
     func testDefaultSeatDescriptorsIncludeHostRiskOpponent() {

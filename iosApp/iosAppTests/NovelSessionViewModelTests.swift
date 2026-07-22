@@ -301,18 +301,43 @@ final class NovelSessionViewModelTests: XCTestCase {
 
         let didStart = await harness.session.send(text: "生成这一整章")
         XCTAssertTrue(didStart)
-        let sawLongTail = await eventually { harness.session.transientTail?.content == longBody }
+        // Presentation is paced: a ~10k-char provider burst drains over many 48ms ticks.
+        // First prove the tail is monotonic and mid-drain (prefix only), then wait for catch-up.
+        let sawPacedPrefix = await eventually {
+            guard let content = harness.session.transientTail?.content else { return false }
+            return !content.isEmpty
+                && content.count < longBody.count
+                && longBody.hasPrefix(content)
+        }
+        XCTAssertTrue(
+            sawPacedPrefix,
+            "Long-chapter burst must publish a paced prefix before the full body."
+        )
+        let sawLongTail = await eventually(timeout: 15) {
+            harness.session.transientTail?.content == longBody
+        }
         XCTAssertTrue(sawLongTail)
         XCTAssertFalse(harness.workspace.canMutate)
         let runID = try XCTUnwrap(harness.session.activeRunID)
         let firstRevision = try XCTUnwrap(harness.session.transientTail?.renderRevision)
         XCTAssertEqual(harness.session.durableMessages.count, 1)
         XCTAssertEqual(harness.session.transientTail?.kind, .proseCandidate)
+        // Multi-line burst must take more than one paced publication to fully reveal.
+        XCTAssertGreaterThan(
+            firstRevision,
+            1,
+            "Long-chapter backlog should surface through multiple presentation ticks."
+        )
 
         await harness.adapter.resume(runID: runID)
-        let didFinish = await eventually { !harness.session.isRunning }
+        let expectedFinal = longBody + "结尾。"
+        let didFinish = await eventually(timeout: 15) {
+            !harness.session.isRunning
+                && harness.session.transientTail == nil
+                && harness.session.availableProseCandidates.first?.content == expectedFinal
+        }
         XCTAssertTrue(didFinish)
-        XCTAssertEqual(harness.session.availableProseCandidates.first?.content, longBody + "结尾。")
+        XCTAssertEqual(harness.session.availableProseCandidates.first?.content, expectedFinal)
         XCTAssertNil(harness.session.transientTail)
         XCTAssertTrue(harness.workspace.canMutate)
         XCTAssertGreaterThan(firstRevision, 0)

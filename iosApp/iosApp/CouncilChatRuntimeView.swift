@@ -404,7 +404,15 @@ struct CouncilChatRuntimeView: View {
                 userDragging: userDragging,
                 alreadyAtBottom: current.isAtBottom
             )
-            if shouldFollowMeasuredGrowth || shouldFollowViewportShrink {
+            // sizeChanges pin owns live height growth alone. A residual scrollTo
+            // snap fights the pin and produces continuous jump/flicker — same
+            // anti-pattern as dual 0.08s chase. Viewport shrink / native driver
+            // still need an explicit write.
+            let sizeChangesPinOwnsGrowth = followGeneration && !isNativeScrollDriverDesired
+            if shouldFollowViewportShrink {
+                scheduleMeasuredGrowthFollowToBottom()
+            } else if shouldFollowMeasuredGrowth,
+                      !sizeChangesPinOwnsGrowth || isNativeScrollDriverActive {
                 scheduleMeasuredGrowthFollowToBottom()
             }
         }

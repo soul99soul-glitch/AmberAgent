@@ -475,6 +475,24 @@ final class ChatViewportPolicyTests: XCTestCase {
         XCTAssertTrue(source.contains("runtime.userScrollActive = false"))
         XCTAssertTrue(source.contains("ChatSwiftUIMeasuredGrowthFollowPolicy.shouldFollow("))
         XCTAssertTrue(source.contains("followMeasuredStreamGrowthToBottom()"))
+        // sizeChanges pin is the sole growth writer; no residual scrollTo dual-write.
+        XCTAssertTrue(source.contains("let sizeChangesPinOwnsGrowth = followGeneration"))
+        XCTAssertTrue(source.contains("} else if shouldFollowMeasuredGrowth, !sizeChangesPinOwnsGrowth {"))
+        XCTAssertFalse(
+            source.contains("scrollToBottomIfScrollable(disableAnimations: true)"),
+            "Residual snap dual-write under the sizeChanges pin causes continuous jump/flicker."
+        )
+        XCTAssertTrue(
+            source.contains(
+                "if sizeChangesPinOwnsGrowth, event == .assistantStreamDelta {\n                    continue"
+            ),
+            "Every stream delta must not schedule a second scrollTo under the sizeChanges pin."
+        )
+        XCTAssertTrue(
+            source.contains(
+                "animateMeasuredGrowth: shouldFollowMeasuredGrowth\n                    && !shouldReanchorExplicitBottomLayout\n                    && !sizeChangesPinOwnsGrowth"
+            )
+        )
         guard let growthFollowStart = source.range(of: "private func followMeasuredStreamGrowthToBottom()"),
               let growthFollowEnd = source.range(
                 of: "private func scrollToBottomAnchor(",
@@ -486,11 +504,6 @@ final class ChatViewportPolicyTests: XCTestCase {
         XCTAssertTrue(growthFollowBody.contains("await Task.yield()"))
         XCTAssertTrue(growthFollowBody.contains("withAnimation(.linear(duration: 0.08))"))
         XCTAssertTrue(growthFollowBody.contains("displaySetting.showBottomFollowAnimation"))
-        XCTAssertTrue(
-            source.contains(
-                "animateMeasuredGrowth: shouldFollowMeasuredGrowth && !shouldReanchorExplicitBottomLayout"
-            )
-        )
         guard let handlerStart = source.range(of: "private func handleSignal("),
               let deltaStart = source.range(
                 of: "case .assistantStreamDelta:",

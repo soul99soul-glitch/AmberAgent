@@ -1631,6 +1631,10 @@ struct ChatSwiftUIMessageList: View {
                 current: geometry,
                 state: next
             )
+            // Clean-list sizeChanges pin (gated by followGeneration) is the SOLE
+            // writer for stream height growth. A residual scrollTo snap fights the
+            // pin mid-layout and produces continuous jump/flicker; never dual-write.
+            let sizeChangesPinOwnsGrowth = followGeneration
             let shouldReanchorExplicitBottomLayout = ChatSwiftUIExplicitBottomLayoutPolicy.shouldReanchor(
                 forceActive: explicitBottomForcesLiveTail,
                 explicitBottomAnimationActive: runtime.explicitBottomAnimationActive,
@@ -1657,7 +1661,11 @@ struct ChatSwiftUIMessageList: View {
                 commands,
                 state: next,
                 event: signal.event,
-                animateMeasuredGrowth: shouldFollowMeasuredGrowth && !shouldReanchorExplicitBottomLayout
+                // Animated measured-growth chase only when the pin is off.
+                animateMeasuredGrowth: shouldFollowMeasuredGrowth
+                    && !shouldReanchorExplicitBottomLayout
+                    && !sizeChangesPinOwnsGrowth,
+                sizeChangesPinOwnsGrowth: sizeChangesPinOwnsGrowth
             )
             if didObserveMeasuredGrowth, runtime.generationEndSettleTask != nil {
                 runtime.generationEndSettleLastGrowthAt = Date()
@@ -1666,7 +1674,7 @@ struct ChatSwiftUIMessageList: View {
                 if !didIssueFollow {
                     scrollToBottomIfScrollable()
                 }
-            } else if shouldFollowMeasuredGrowth {
+            } else if shouldFollowMeasuredGrowth, !sizeChangesPinOwnsGrowth {
                 if !didIssueFollow {
                     followMeasuredStreamGrowthToBottom()
                 }
@@ -2420,7 +2428,8 @@ struct ChatSwiftUIMessageList: View {
         _ commands: [ChatViewportScrollCommand],
         state: ChatViewportState,
         event: ChatEvent,
-        animateMeasuredGrowth: Bool
+        animateMeasuredGrowth: Bool,
+        sizeChangesPinOwnsGrowth: Bool = false
     ) -> Bool {
         guard !commands.isEmpty else { return false }
         var didIssueFollow = false
@@ -2432,6 +2441,11 @@ struct ChatSwiftUIMessageList: View {
                 scheduleConversationBottomAnchor()
             case let .followBottom(animated, _, _):
                 guard !state.followPaused, !state.userDragging else { continue }
+                // sizeChanges pin absorbs stream height growth; a second scrollTo on
+                // every delta fights the pin and produces continuous jump/flicker.
+                if sizeChangesPinOwnsGrowth, event == .assistantStreamDelta {
+                    continue
+                }
                 guard ChatSwiftUIBottomWritePolicy.canIssueImmediateWrite(
                     explicitBottomAnimationActive: runtime.explicitBottomAnimationActive
                 ) else {

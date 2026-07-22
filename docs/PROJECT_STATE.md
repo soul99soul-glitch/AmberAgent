@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-21
+Last updated: 2026-07-22
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -21,6 +21,12 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-22 streaming growth single-writer and novel presentation pacing
+
+- 标准 Chat 与模型议会在 `.sizeChanges` 底锚持有流式高度增长时，不再对同一 assistant delta / measured growth 额外发 `scrollTo`；键盘等 viewport shrink 与原生 driver 持有路径继续使用显式写入，避免底锚和追赶命令双写造成连续跳动或闪烁。
+- 小说流式展示缓冲改为保存单一权威 `targetContent`，新增 48ms 自适应 presentation pacer：轻积压每拍至少 12 字符，大积压最多 64 字符并以约 16 拍为软排空目标；append 保持前缀单调推进，replacement 分叉立即采用权威文本，complete/error/cancel 仍直接收口到完整终态，不让展示积压延迟持久化结果。
+- iPhone 17 Pro / iOS 26.5 Simulator 上，`ChatViewportPolicyTests`、`IOSCouncilRunnerMechanicsTests`、`NovelSessionReplayTests`、`NovelSessionViewModelTests` 与强制 `ChatStreamReplayTests` 合跑为 190 passed、1 skipped、0 failed（`Test-iosApp-2026.07.22_22-08-43-+0800.xcresult`）；`git diff --check` 通过。首次沙箱内执行因 CoreSimulator/缓存权限未进入测试，首次沙箱外执行被第三方 `EquatableMacros` 信任门取消，使用 `-skipMacroValidation` 后同一门禁通过。真实 provider 下的 CJK 长章节奏与真机 120Hz 滚动手感仍待人工验证。
 
 ### 2026-07-21 novel whole-chapter streaming anchor stabilization
 

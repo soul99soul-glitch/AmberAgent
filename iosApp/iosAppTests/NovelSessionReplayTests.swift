@@ -10,14 +10,15 @@ final class NovelSessionReplayTests: XCTestCase {
         var buffer = NovelSessionPresentationBuffer(
             runID: runID,
             messageID: messageID,
-            bindingToken: bindingToken
+            bindingToken: bindingToken,
+            baseContent: "已显示"
         )
 
         buffer.append("旧前缀")
         buffer.replace(with: "完整替换")
         buffer.append("与后续")
 
-        XCTAssertEqual(buffer.mergedContent(displayedContent: "已显示"), "完整替换与后续")
+        XCTAssertEqual(buffer.targetContent, "完整替换与后续")
         XCTAssertTrue(buffer.matches(
             runID: runID,
             messageID: messageID,
@@ -28,6 +29,78 @@ final class NovelSessionReplayTests: XCTestCase {
             messageID: messageID,
             bindingToken: bindingToken
         ))
+    }
+
+    func testPresentationPacerSplitsLightBacklogIntoBoundedSteps() {
+        let target = "已显示" + String(repeating: "字", count: 36)
+        var displayed = "已显示"
+        var steps = 0
+        var intermediateAdvances: [Int] = []
+
+        while displayed != target {
+            let step = NovelSessionPresentationPacer.step(
+                displayedContent: displayed,
+                targetContent: target
+            )
+            let advanced = step.content.count - displayed.count
+            intermediateAdvances.append(advanced)
+            displayed = step.content
+            steps += 1
+            XCTAssertLessThanOrEqual(
+                advanced,
+                NovelSessionPresentationPacer.maximumTextAdvance
+            )
+            XCTAssertGreaterThan(advanced, 0)
+            if steps > 20 {
+                return XCTFail("Pacer failed to catch up within expected ticks.")
+            }
+        }
+
+        XCTAssertGreaterThan(steps, 1, "A multi-line backlog must not publish in one frame.")
+        XCTAssertEqual(
+            intermediateAdvances.dropLast().allSatisfy {
+                $0 >= NovelSessionPresentationPacer.minimumTextAdvance
+            },
+            true
+        )
+        XCTAssertEqual(displayed, target)
+    }
+
+    func testPresentationPacerAcceleratesWithLargeBacklogButStaysCapped() {
+        let largeBacklog = 2_000
+        XCTAssertEqual(
+            NovelSessionPresentationPacer.textAdvance(backlogCount: 8),
+            NovelSessionPresentationPacer.minimumTextAdvance
+        )
+        XCTAssertEqual(
+            NovelSessionPresentationPacer.textAdvance(backlogCount: largeBacklog),
+            NovelSessionPresentationPacer.maximumTextAdvance
+        )
+
+        let target = String(repeating: "章", count: largeBacklog)
+        let first = NovelSessionPresentationPacer.step(
+            displayedContent: "",
+            targetContent: target
+        )
+        XCTAssertEqual(first.content.count, NovelSessionPresentationPacer.maximumTextAdvance)
+        XCTAssertFalse(first.isCaughtUp)
+
+        // Drain-window adaptive: backlog of preferredDrainTicks * minAdvance stays at floor.
+        let light = NovelSessionPresentationPacer.preferredDrainTicks
+            * NovelSessionPresentationPacer.minimumTextAdvance
+        XCTAssertEqual(
+            NovelSessionPresentationPacer.textAdvance(backlogCount: light),
+            NovelSessionPresentationPacer.minimumTextAdvance
+        )
+    }
+
+    func testPresentationPacerSnapsOnNonPrefixReplacement() {
+        let step = NovelSessionPresentationPacer.step(
+            displayedContent: "应被替换的旧文",
+            targetContent: "最终前缀与结尾"
+        )
+        XCTAssertEqual(step.content, "最终前缀与结尾")
+        XCTAssertTrue(step.isCaughtUp)
     }
 
     func testDragResumeUsesSharedNearBottomThreshold() {
