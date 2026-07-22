@@ -130,11 +130,20 @@ struct ChatActivityIslandView: View {
 
     private var activeContent: some View {
         HStack(spacing: 9) {
-            ChatActivityIslandGlyph(
-                systemImage: state.systemImage,
-                tint: state.tint.color,
-                isActive: state.isActive
-            )
+            if let orb = orbState {
+                ZStack {
+                    Circle()
+                        .fill(state.tint.color.opacity(0.10))
+                    ThinkingOrbView(state: orb, size: 24, preset: .small)
+                }
+                .frame(width: 24, height: 24)
+            } else {
+                ChatActivityIslandGlyph(
+                    systemImage: state.systemImage,
+                    tint: state.tint.color,
+                    isActive: state.isActive
+                )
+            }
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(state.title)
@@ -155,6 +164,17 @@ struct ChatActivityIslandView: View {
             Spacer(minLength: 0)
         }
         .contentTransition(.opacity)
+    }
+
+    /// Maps activity kinds to orb animation states. Tool/image keep their
+    /// SF Symbol glyphs since they carry specific semantic meaning.
+    private var orbState: OrbState? {
+        switch state.kind {
+        case .waiting: .listening
+        case .thinking: .working
+        case .generating: .composing
+        case .tool, .image, .title: nil
+        }
     }
 }
 

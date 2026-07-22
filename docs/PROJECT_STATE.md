@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -21,6 +21,29 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-23 watchOS review-chain closure
+
+- 按 review 的 P0/P1 做最小闭环，不扩第二套状态机：前台补齐 `presentStreamError`、图片完成、工具完成回 generating 的 Watch 发布；后台 `IOSChatBackgroundGenerationCoordinator` 的 running/completed/failed/cancelled 与 Live Activity 对称推送 `WatchTaskCoordinator`。
+- cancel 竞态收口：`cancelGeneration` 不再先 `clear()` 成 idle；`cancel()` 同步 publish `.cancelled`，再异步 end Live Activity / 落盘。
+- 审批回包：手表 approve/deny 改为 await 既有 `approvePending*` / `denyPending*`，等 resume 路径发布新 snapshot 后再回结果。
+- openOnPhone focus 按 decision/phase 选择 `confirmation|result|task`；不可达时不再假发 `transferUserInfo` requestSnapshot，只保留本地/applicationContext；decode 校验 `protocolVersion`。
+- `xcodebuild -target AmberWatchApp -sdk watchsimulator` 修复后再次 **BUILD SUCCEEDED**。标准 Chat 完整 `ask_user` 生产节点仍未接线（`publishAskUser` 无调用方），属产品缺口而非本轮过度补齐。`iosApp` scheme 测试仍受本机 watchOS platform support 限制。
+
+### 2026-07-22 watchOS companion task console V1-V3 scaffold
+
+- 新增 watchOS companion 主线：`iosApp/SharedWatch` 定义 `WatchTaskSnapshot` / decision / action 契约与 `WatchConnectivity` 编解码；iPhone 侧 `WatchTaskCoordinator` 是唯一权威投影与动作落地入口，Watch 只渲染快照并回传意图。
+- iPhone 生成生命周期已接入：`startLiveActivity`、工具执行、审批暂停、完成/失败/取消都会推送手表快照；完成态附带 assistant 短总结（截断到 280 字）。审批节点支持 memory/search/workspace/webmount/mcp/council/ish 的允许/拒绝，并复用既有 `approvePending*` / `denyPending*`。
+- Watch App（`iosApp/WatchApp`）提供状态台、审批卡、Ask User 选项、语音/短文本回答入口、取消与“在 iPhone 打开”。`openOnPhone` 通过 `Notification.Name.amberWatchOpenTask` 复用既有 `AgentActivityDeepLink` 会话跳转。
+- XcodeGen 已生成 `AmberWatchApp` target 并 embed 进 `iosApp` / `iosAppExperimentalGPL`。`xcodebuild -target AmberWatchApp -sdk watchsimulator` 已 **BUILD SUCCEEDED**（Swift 6 / arm64+x86_64）。Xcode scheme destination 仍提示 host 未完整安装 watchOS 26.5 platform support，因此 `iosApp` scheme 的 destination 构建/模拟器联调会受阻；`WatchTaskSnapshotTests` 与 iPhone 主 App 全量编译待 platform 组件齐全后复验。
+
+### 2026-07-22 thinking-orb activity island integration
+
+- 将 Jakub Antalik 的 `thinking-orbs`（MIT）六态点阵动画引擎 1:1 移植为纯函数 Swift 模块 `ThinkingOrbEngine.swift`（CoreGraphics，无 UI 依赖），渲染层 `ThinkingOrbView.swift` 使用 UIKit `CADisplayLink` + `CGContext` 手绘，避开 SwiftUI 永动动画的 ViewGraph 60fps CPU 陷阱。
+- 顶部活动岛 `ChatActivityIslandView` 的 `waiting`/`thinking`/`generating` 三种活跃状态 glyph 替换为 orb 动画（分别映射 `listening`/`working`/`composing` 形态）；`tool`/`image` 保留 SF Symbol 语义图标。
+- 经三路并行 review（逻辑闭环 / 性能资源 / 移植保真度）后修复全部 P0 与 P1：`CADisplayLink` 加 weak proxy 断 retain cycle；`configure()` 修正 dark/paused 变更检测死代码；`orbResolvePreset` 裸强解包改 `guard ... fatalError`；`orbPaint` 每帧 per-dot 三次堆分配换零分配 `setFillColor(red:green:blue:alpha:)` 并改 `inout` 原地排序；displayLink 加 `preferredFrameRateRange(24...30)` 与 `isHidden`/`alpha` 暂停门控。移植数学逐行比对零 P0 偏差。
+- `ThinkingOrbEngineTests` 扩到 8 条：在原 5 条基础上新增 dark/light ink inversion 像素断言、`.small` 预设最小密度 guard、reduceMotion 静态帧非空白断言；`collectDots` 重命名为 `assertRenderDeterministic`。review 修复前 5 条全绿，修复后 8 条需在 Xcode 内复跑确认（命令行 `-scheme iosApp` 因本机缺 watchOS 26.5 SDK 被 xcodebuild 拦在 watch target，与本轮代码无关）。
+- `swiftc -typecheck`（Swift 6 strict concurrency）零错误零警告；真机视觉手感待安装后人工验证。
 
 ### 2026-07-22 streaming growth single-writer and novel presentation pacing
 
