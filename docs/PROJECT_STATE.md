@@ -22,13 +22,41 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
+### 2026-07-23 three-surface streaming audit: 6-item precise fixes
+
+- 对标准 Chat / 模型议会 / 小说创作三处流式做审计(向上滚动、长文性能、抖动/闪烁),复核后锁定 6 个真问题并以红→绿测试逐项修复;未触碰任务无关的未提交改动。
+- P1-1 议会归档:`CouncilChatRuntimeView` 跑中 checkpoint 由逐事件主线程同步写盘改为 300ms debounce + 主线程外 latest-wins 串行写泵;`CouncilArchiveWriteGeneration` 代际门让同步终态写盘作废在途的陈旧延迟写;终态路径(进后台/恢复中断/取消/checkpoint/开归档/run 结束)先 flush 或取消 debounce。红测:旧实现单 run 23 次主线程同步写,新实现 2 次。
+- P1-2 小说完成闪烁(A+B'):A — `MessageBubbleView` 完成态解析立即执行(非动画 config 走立即解析分支),identity 缓存 64→256、renderable 缓存 12→24,完成段落重挂载/LOD 翻转时命中缓存得 `suppressesInitialFade=true`,消除整屏闪烁;B' — `NovelSessionViewModel.retireTerminalTransientTail` 在完成时立即清 `terminalAwaitingRefresh`(输入区解锁),把 transient tail 退役延后到与 `terminalQuietDelay`(0.4s)对齐的静窗(避免 durable 正文接管瞬间整屏「跳一下」),静窗内开新 run 或切 binding 取消退役任务。测试注入 0 走立即退役快路径,保留旧「完成即清空」契约;两条判别测试旧实现转红、修复转绿。
+- P1-3 Chat 投影瘦身:`ChatTimelinePlanner.build` 新增 `includeRenderTokens`——只有 native mirror diff 消费 renderToken,SwiftUI clean list / collection 路径传 false,跳过尾行每 chunk 的 O(文本长度) token 扫描;`messageId` 由 `String(describing:)`(~25µs/次)改为直接访问器 `toHexDashString()`(8-4-4-4-12 格式等价由 canary 锁定)。
+- P1-4 vendor fade:`ParagraphUIView` 全量替换时先 `activeAnimations.removeAll()` 再追加新尾 fade,防止旧 range 把错误透明度套到新文本的无关字符上(vendor 局部规则:外科修改 + `// Vendored fix (AmberAgent):` 注解 + `private(set)` 测试缝,默认行为不变)。
+- P1-5 表格流式止血:表格尾块发布档位 <12K 保持原档,≥12K utf16 降到 0.22s,减少整表布局频率;抽成可测 static + `ChatStreamingMarkdownThrottleTestSupport` seam。
+- P2-15 Reduce Motion:回底动画(`ChatCollectionMessageList`)与消息 part 插入动画(`MessageBubbleView`)读取 `\.accessibilityReduceMotion`,减弱动态时降级为无动画。
+- 验证:iPhone 17 Pro / iOS 26.5 Simulator 上每项均先旧实现复现红再转绿。8 套件合跑(Novel VM/Replay、ChatMessageProjection、Council archive/runner、ChatStreamReplay、ChatSwiftUIStreamReplay、ThinkingOrbEngine)为 269 passed;`ChatSwiftUIStreamReplayTests` 2 条贴底跟随用例在高并发负载下偶发超时(889pt 未跟随),隔离重跑通过且在同代码的上一次合跑亦通过,判定为负载敏感 flake,未改阈值。vendor `SwiftStreamingMarkdown` 全套 82 passed / 0 failed。
+- 两个既有测试文件做最小编译修复以让测试 bundle 可编译(非本轮产品改动):`WatchTaskSnapshotTests` 补 `import Shared` + `@MainActor`;`ThinkingOrbEngineTests.testReduceMotionStaticFrame` 补 `@MainActor`(OrbCanvasView.configure 为 MainActor 隔离)。后者使 `testDarkLightInkInversion` 首次可运行并暴露其既有过度断言:`.working`(orbits)画面由 ~480 条 white=0.72 亮墨 ghost 轨迹主导,dark 镜像(g=1-w)合法把 dark 均值压到 light 之下;ink inversion 真契约(两主题亮度不同)仍成立,只是朴素方向断言不适用于亮墨主导模式,已按证据修正(产品代码 ThinkingOrbEngine 未改)。
+- 既有 flake 稳定化:`testWholeChapterBurstCoalescesUIPublicationsWithoutChangingDurableFinalText` 原只等 `!isRunning`,而 isRunning 在终态 presentation 即转假、早于 durable 落盘,负载下偶发把用户消息读成 durable 末条;改为等 durable 末条真正落盘再断言(与本文件 prose 用例一致),未放宽断言,修复后 5/5。同文件其余 13 处 `eventually { !isRunning }` 有同一潜在竞态,非本轮范围,仅记录。
+- 残余缺口:真实 provider、真机 120Hz 长流手感与议会/小说完成闪烁仍需装机人工复验;Fix 1 debounce 的状态读取与写泵入队理论上存在微秒级竞态窗口(终态 flush 由代际门保护);`make lint` 因本机未装 swiftlint 无法执行;`MemoryToolApprovalCard.swift:848` 文末空行是既有未提交改动,本轮未触碰。
+
+### 2026-07-23 ask_user P1/P2 precise closure
+
+- 最小修复，不扩第二状态机：`finishPendingAskUserAnswer` 先校验 `currentRunId` 再 clear pending，避免竞态“清卡不写 tool output”。
+- Watch 回包：`submitWatchUserAnswer` / `answerPendingAskUser` 改为 `Bool` 成功语义；只有 finish+resume 真正接住后才 accepted；失败 rejected，不再本地先清 decision。
+- 产品对齐：Watch 选项扩到 schema 上限 6，并加 `skip`（复用 `.deny` style）对应 iPhone 跳过 / denied JSON。
+- 验证：`xcodebuild -target AmberWatchApp -sdk watchsimulator` **BUILD SUCCEEDED**。
+
+### 2026-07-23 standard Chat ask_user first-class pending + watch answer path
+
+- 标准 Chat 把 `ask_user` 接成与 tool approval 同型的一等 pending 节点：`ChatToolRuntime` 识别/暂停，`ChatGenerationCoordinator` 持有权威 pending，`ChatViewModel.pendingAskUser` 只是 UI 镜像，Watch 只渲染 snapshot 并回传意图。
+- 工具声明：`makeTextGenerationParams()` 无条件挂载 `ToolKt.createAskUserToolDeclaration()`；iPhone composer 增加 `ChatAskUserCard`（选项/短文本/跳过）；Watch 选项与语音走 `submitWatchUserAnswer` → `answerPendingAskUser` → `finishAskUserAnswer` → `resumeAfterApproval`，不会新开用户轮。
+- review 后最小修复：后台 `backgroundToolExecutors` 登记 `ask_user` 为 `.denied("后台生成期间需要回到 App 回答问题。")`，避免 no-executor error-fill 续跑；`cancel()` 对 unresolved tool 写 `User cancelled` output，防止后续再次拾起；`autoGenerateResponses == false` 的 answer 分支补 `publishCompleted` + end Live Activity；`openOnPhone` 对 askUser/voiceReply 使用 `focus=confirmation`。
+- 验证：`xcodebuild -target AmberWatchApp -sdk watchsimulator` 再次编译。`iosApp` scheme / 全量 iOS 构建仍受本机 MarkdownView/Markdown 依赖解析与 watchOS platform support 限制，未作为本切片产品失败。
+
 ### 2026-07-23 watchOS review-chain closure
 
 - 按 review 的 P0/P1 做最小闭环，不扩第二套状态机：前台补齐 `presentStreamError`、图片完成、工具完成回 generating 的 Watch 发布；后台 `IOSChatBackgroundGenerationCoordinator` 的 running/completed/failed/cancelled 与 Live Activity 对称推送 `WatchTaskCoordinator`。
 - cancel 竞态收口：`cancelGeneration` 不再先 `clear()` 成 idle；`cancel()` 同步 publish `.cancelled`，再异步 end Live Activity / 落盘。
 - 审批回包：手表 approve/deny 改为 await 既有 `approvePending*` / `denyPending*`，等 resume 路径发布新 snapshot 后再回结果。
 - openOnPhone focus 按 decision/phase 选择 `confirmation|result|task`；不可达时不再假发 `transferUserInfo` requestSnapshot，只保留本地/applicationContext；decode 校验 `protocolVersion`。
-- `xcodebuild -target AmberWatchApp -sdk watchsimulator` 修复后再次 **BUILD SUCCEEDED**。标准 Chat 完整 `ask_user` 生产节点仍未接线（`publishAskUser` 无调用方），属产品缺口而非本轮过度补齐。`iosApp` scheme 测试仍受本机 watchOS platform support 限制。
+- `xcodebuild -target AmberWatchApp -sdk watchsimulator` 修复后再次 **BUILD SUCCEEDED**。标准 Chat `ask_user` 生产节点已在后续切片接线；`iosApp` scheme 测试仍受本机 watchOS platform support 限制。
 
 ### 2026-07-22 watchOS companion task console V1-V3 scaffold
 
