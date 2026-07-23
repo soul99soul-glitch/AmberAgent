@@ -137,6 +137,18 @@ struct AppShell: View {
         .onChange(of: scenePhase) { _, phase in
             handleScenePhaseChange(phase)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .amberWatchOpenTask)) { note in
+            guard let runId = note.userInfo?["runId"] as? String,
+                  let conversationId = note.userInfo?["conversationId"] as? String else { return }
+            let focusRaw = note.userInfo?["focus"] as? String ?? "task"
+            let focus = AgentActivityDeepLink.Focus(rawValue: focusRaw) ?? .task
+            pendingAgentActivityTarget = AgentActivityDeepLink.Target(
+                runId: runId,
+                conversationId: conversationId,
+                focus: focus
+            )
+            Task { await openPendingAgentActivityIfReady() }
+        }
         .task {
             // 启动时引导会话存储：加载历史摘要，选最近一条或新建。
             // run recovery 不是幂等操作；在任务的第一个 await 前占位，避免 .task
@@ -157,6 +169,7 @@ struct AppShell: View {
             await conversationStore.bootstrap()
             didBootstrapConversations = true
             sharedSettings.repairCurrentChatModelIfNeeded(settingsStore)
+            WatchTaskCoordinator.shared.attach(chatViewModel: chatViewModel)
             await openPendingAgentActivityIfReady()
         }
         .onOpenURL { url in

@@ -83,6 +83,14 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
     var title: String { "执行 MCP 工具" }
 }
 
+struct ChatAskUserRequest: Identifiable, Equatable {
+    let id: String
+    let question: String
+    let options: [String]
+
+    var title: String { "需要你的回答" }
+}
+
 struct CouncilToolApprovalRequest: Identifiable, Equatable {
     let id: String
     let objectivePreview: String
@@ -333,6 +341,35 @@ enum ChatToolApprovalRequestBuilder {
             objectivePreview: ChatToolCallParsing.truncatedSearchTarget(objective),
             maxSeats: args?["max_seats"] as? Int,
             reason: reason
+        )
+    }
+
+    static func askUser(
+        for toolCall: UIMessagePart.Tool
+    ) -> ChatAskUserRequest? {
+        guard toolCall.toolName == "ask_user" else { return nil }
+        let args = ChatToolCallParsing.jsonObject(toolCall.input) ?? [:]
+        let question = (args["question"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let options = (ChatToolCallParsing.stringArray(args["options"]) ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        // Deduplicate while preserving order.
+        var seen = Set<String>()
+        let uniqueOptions = options.filter { seen.insert($0).inserted }
+        let resolvedQuestion: String
+        if let question, !question.isEmpty {
+            resolvedQuestion = question
+        } else {
+            let fallback = toolCall.input.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !fallback.isEmpty else { return nil }
+            resolvedQuestion = fallback
+        }
+        let clippedOptions = Array(uniqueOptions.prefix(6))
+        return ChatAskUserRequest(
+            id: ChatToolCallParsing.requestId(for: toolCall),
+            question: resolvedQuestion,
+            options: clippedOptions
         )
     }
 }

@@ -958,6 +958,19 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if let request = viewModel.pendingAskUser {
+                ChatAskUserCard(
+                    request: request,
+                    onAnswer: { answer in
+                        viewModel.answerPendingAskUser(answer)
+                    },
+                    onSkip: {
+                        viewModel.skipPendingAskUser()
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if !viewModel.pendingImages.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -1277,7 +1290,8 @@ struct ChatView: View {
             viewModel.pendingWorkspaceApproval != nil ||
             viewModel.pendingIshHandoffApproval != nil ||
             viewModel.pendingMcpApproval != nil ||
-            viewModel.pendingCouncilApproval != nil
+            viewModel.pendingCouncilApproval != nil ||
+            viewModel.pendingAskUser != nil
     }
 
     private var showsComposerMeta: Bool {

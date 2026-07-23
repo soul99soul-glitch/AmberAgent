@@ -38,6 +38,7 @@ enum ChatPendingToolKind {
     case memory
     case image
     case advanced
+    case askUser
 }
 
 struct ChatPendingToolCall {
@@ -53,6 +54,7 @@ enum ChatToolApprovalPrompt {
     case ish(IshHandoffToolApprovalRequest)
     case mcp(McpToolApprovalRequest)
     case council(CouncilToolApprovalRequest)
+    case askUser(ChatAskUserRequest)
 
     var toolTitle: String {
         switch self {
@@ -70,6 +72,8 @@ enum ChatToolApprovalPrompt {
             "MCP 工具"
         case .council:
             "模型议会"
+        case .askUser:
+            "需要你的回答"
         }
     }
 
@@ -85,9 +89,7 @@ enum ChatToolApprovalPrompt {
             .document
         case .ish:
             .command
-        case .mcp:
-            .workflow
-        case .council:
+        case .mcp, .council, .askUser:
             .workflow
         }
     }
@@ -252,6 +254,13 @@ final class ChatToolRuntime {
             .denied("模型委员会运行时间较长且依赖前台房间界面，请回到 App 内执行。")
         }
 
+        // ask_user is a foreground HITL node. Background cannot present the card or
+        // Watch decision, so deny with an explicit return-to-app reason instead of
+        // leaving the tool unregistered (engine would otherwise error-fill and continue).
+        executors["ask_user"] = IOSClosureToolExecutor { _, _, _ in
+            .denied("后台生成期间需要回到 App 回答问题。")
+        }
+
         executors["mcp_call"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
             guard let self else { return .failed("Chat runtime is unavailable.") }
             // High-risk gate mirrors the foreground path (executeAdvancedToolCall):
@@ -295,6 +304,9 @@ final class ChatToolRuntime {
         if let toolCall = pendingImageToolCall(in: messages) {
             return ChatPendingToolCall(kind: .image, toolCall: toolCall)
         }
+        if let toolCall = pendingAskUserToolCall(in: messages) {
+            return ChatPendingToolCall(kind: .askUser, toolCall: toolCall)
+        }
         if let toolCall = pendingAdvancedToolCall(in: messages) {
             return ChatPendingToolCall(kind: .advanced, toolCall: toolCall)
         }
@@ -322,6 +334,8 @@ final class ChatToolRuntime {
             return executeMemoryToolCall(context)
         case .image:
             return await executeImageToolCall(context)
+        case .askUser:
+            return executeAskUserToolCall(context)
         case .advanced:
             return await executeAdvancedToolCall(context)
         }
@@ -566,6 +580,36 @@ final class ChatToolRuntime {
         )
     }
 
+    func finishAskUserAnswer(
+        pending: ChatPendingToolApproval,
+        answer: String
+    ) -> [UIMessage] {
+        let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        let payload: [String: Any]
+        if trimmed.isEmpty {
+            payload = [
+                "denied": true,
+                "reason": "User skipped ask_user."
+            ]
+        } else {
+            payload = ["answer": trimmed]
+        }
+        let outputText: String
+        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            outputText = text
+        } else if trimmed.isEmpty {
+            outputText = #"{"denied":true,"reason":"User skipped ask_user."}"#
+        } else {
+            outputText = #"{"answer":"\#(trimmed)"}"#
+        }
+        return messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: outputText,
+            in: pending.baseMessages
+        )
+    }
+
     func messagesByFinishingToolCall(
         _ targetToolCall: UIMessagePart.Tool,
         outputText: String,
@@ -701,6 +745,27 @@ final class ChatToolRuntime {
         let providerId = provider.id.description()
         guard IOSCodexAuthStore.load(providerId: providerId) != nil else { return .notSignedIn }
         return .signedIn(providerId: providerId)
+    }
+
+    private func pendingAskUserToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+        for message in messages.reversed() where message.role == MessageRole.assistant {
+            if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
+                .first(where: { $0.toolName == "ask_user" && $0.output.isEmpty }) {
+                return toolCall
+            }
+        }
+        return nil
+    }
+
+    private func executeAskUserToolCall(_ pending: ChatPendingToolApproval) -> ChatToolRuntimeResult {
+        if let request = ChatToolApprovalRequestBuilder.askUser(for: pending.toolCall) {
+            return .waitingForApproval(.askUser(request))
+        }
+        return .completed(messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: #"{"error":"ask_user requires a non-empty question."}"#,
+            in: pending.baseMessages
+        ))
     }
 
     private func pendingAdvancedToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {

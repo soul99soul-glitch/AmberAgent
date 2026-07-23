@@ -103,6 +103,7 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let names = Set(viewModel.currentToolDeclarationNames())
         XCTAssertTrue(names.contains("subagent_dispatch"))
         XCTAssertTrue(names.contains("model_council_run"))
+        XCTAssertTrue(names.contains("ask_user"))
         if IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty {
             XCTAssertTrue(names.contains("ish_handoff"))
         } else {

@@ -314,6 +314,7 @@ struct ChatGenerationBindings {
     let setPendingIshHandoffApproval: (IshHandoffToolApprovalRequest?) -> Void
     let setPendingMcpApproval: (McpToolApprovalRequest?) -> Void
     let setPendingCouncilApproval: (CouncilToolApprovalRequest?) -> Void
+    let setPendingAskUser: (ChatAskUserRequest?) -> Void
     let setContextCompactState: (ChatContextCompactState) -> Void
     let persistMessages: (KotlinUuid?) -> Void
     let capturePersistMessagesBaseline: (KotlinUuid?) -> IOSConversationWriteBaseline?
@@ -372,6 +373,7 @@ final class ChatGenerationCoordinator {
     private var pendingIshHandoffToolApproval: ChatPendingToolApproval?
     private var pendingMcpToolApproval: ChatPendingToolApproval?
     private var pendingCouncilToolApproval: ChatPendingToolApproval?
+    private var pendingAskUserToolApproval: ChatPendingToolApproval?
     private var backgroundHandoff: IOSChatBackgroundHandoff?
     private weak var pendingBackgroundConversationStore: IOSConversationStore?
     private var foregroundToolExecutionTask: Task<ChatToolRuntimeResult, Never>?
@@ -398,7 +400,8 @@ final class ChatGenerationCoordinator {
             pendingWorkspaceToolApproval != nil ||
             pendingIshHandoffToolApproval != nil ||
             pendingMcpToolApproval != nil ||
-            pendingCouncilToolApproval != nil
+            pendingCouncilToolApproval != nil ||
+            pendingAskUserToolApproval != nil
     }
 
     init(
@@ -568,13 +571,29 @@ final class ChatGenerationCoordinator {
             self.bindings.setMessages(resumed)
             self.bindings.bumpMessageRevision(.toolResultAppended)
             let failureReason = ChatToolOutputFormatter.imageFailureReason(in: resumed, matching: toolCall)
+            let conversationHex = conversationId?.toHexDashString()
             await self.bindings.recordRun(
                 runId,
                 startedAt,
                 failureReason == nil ? "completed" : "failed",
                 inputDigest,
-                conversationId?.toHexDashString()
+                conversationHex
             )
+            if failureReason == nil {
+                WatchTaskCoordinator.shared.publishCompleted(
+                    runId: runId,
+                    conversationId: conversationHex,
+                    summary: Self.watchSummary(from: resumed),
+                    kind: .imageGeneration
+                )
+            } else {
+                WatchTaskCoordinator.shared.publish(
+                    runId: runId,
+                    conversationId: conversationHex,
+                    presentation: .failed(),
+                    summary: WatchTaskText.clipped(failureReason, maxLength: 200)
+                )
+            }
             await self.dependencies.liveActivityController.end(
                 runId: runId,
                 presentation: failureReason == nil ? .completed(toolTitle: "图片生成") : .failed()
@@ -599,11 +618,17 @@ final class ChatGenerationCoordinator {
         streamEventSink?.finish()
         drainPendingStreamChunksIntoAccumulator()
         let pendingStreamSnapshotAtCancellation = latestPendingStreamSnapshot()
-        let messagesAtCancellation = pendingStreamSnapshotAtCancellation ?? bindings.getMessages()
-        let writeBaselineAtCancellation = bindings.capturePersistMessagesBaseline(conversationId)
-        if let pendingStreamSnapshotAtCancellation {
-            bindings.setMessages(pendingStreamSnapshotAtCancellation)
+        var messagesAtCancellation = pendingStreamSnapshotAtCancellation ?? bindings.getMessages()
+        // Cancel must close empty tool outputs (including ask_user). Otherwise a later
+        // complete/resume path can re-pick the same unresolved tool as a fresh pending node.
+        if toolRuntime.hasUnresolvedToolCall(in: messagesAtCancellation) {
+            messagesAtCancellation = toolRuntime.messagesByFailingPendingToolCalls(
+                in: messagesAtCancellation,
+                outputText: #"{"denied":true,"reason":"User cancelled."}"#
+            )
         }
+        let writeBaselineAtCancellation = bindings.capturePersistMessagesBaseline(conversationId)
+        bindings.setMessages(messagesAtCancellation)
         cancelStreamEventConsumer()
         cancelForegroundToolExecutions()
         cancelPendingStreamSnapshotPublish()
@@ -612,6 +637,13 @@ final class ChatGenerationCoordinator {
         if let runId {
             ChatStreamRecorder.shared.record(runId: runId, snapshot: messagesAtCancellation)
             ChatStreamRecorder.shared.finish(runId: runId)
+            // Publish cancelled immediately so Watch does not briefly fall to idle.
+            WatchTaskCoordinator.shared.publish(
+                runId: runId,
+                conversationId: conversationId?.toHexDashString(),
+                presentation: .cancelled(),
+                summary: nil
+            )
         }
         currentRunId = nil
         currentStartedAt = nil
@@ -1232,7 +1264,14 @@ final class ChatGenerationCoordinator {
         var updated = bindings.getMessages()
         updated.append(errMsg)
         bindings.setMessages(updated)
-        await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationId?.toHexDashString())
+        let conversationHex = conversationId?.toHexDashString()
+        await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationHex)
+        WatchTaskCoordinator.shared.publish(
+            runId: runId,
+            conversationId: conversationHex,
+            presentation: .failed(),
+            summary: WatchTaskText.clipped(userFacingMessage, maxLength: 200)
+        )
         await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
         bindings.persistMessages(conversationId)
         finishStreaming(terminalEvent: .generationFailed)
@@ -1299,7 +1338,14 @@ final class ChatGenerationCoordinator {
             bindings.bumpMessageRevision(.toolResultAppended)
         }
 
-        await bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationId?.toHexDashString())
+        let conversationHex = conversationId?.toHexDashString()
+        let summary = Self.watchSummary(from: finalSnapshot)
+        await bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationHex)
+        WatchTaskCoordinator.shared.publishCompleted(
+            runId: runId,
+            conversationId: conversationHex,
+            summary: summary
+        )
         await dependencies.liveActivityController.end(
             runId: runId,
             presentation: .completed()
@@ -1323,7 +1369,14 @@ final class ChatGenerationCoordinator {
         )
         bindings.setMessages(finalSnapshot)
         bindings.bumpMessageRevision(.toolResultAppended)
-        await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationId?.toHexDashString())
+        let conversationHex = conversationId?.toHexDashString()
+        await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationHex)
+        WatchTaskCoordinator.shared.publish(
+            runId: runId,
+            conversationId: conversationHex,
+            presentation: .failed(),
+            summary: WatchTaskText.clipped(failureText, maxLength: 200)
+        )
         await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
         bindings.persistMessagesSnapshot(finalSnapshot, conversationId, writeBaseline)
         finishStreaming(terminalEvent: .generationFailed)
@@ -1349,9 +1402,17 @@ final class ChatGenerationCoordinator {
             conversationId: conversationId,
             baseMessages: baseMessages
         )
+        let toolPresentation = AgentActivityPresentation.runningTool(
+            toolName: pendingToolCall.toolCall.toolName
+        )
+        WatchTaskCoordinator.shared.publish(
+            runId: runId,
+            conversationId: conversationId?.toHexDashString(),
+            presentation: toolPresentation
+        )
         await dependencies.liveActivityController.update(
             runId: runId,
-            presentation: .runningTool(toolName: pendingToolCall.toolCall.toolName),
+            presentation: toolPresentation,
             force: true
         )
         // Refresh the handoff snapshot right before the (potentially long) tool
@@ -1383,9 +1444,17 @@ final class ChatGenerationCoordinator {
         case .completed(let resumedMessages):
             bindings.setMessages(resumedMessages)
             bindings.bumpMessageRevision(.toolResultAppended)
+            let generating = AgentActivityPresentation.generatingResponse(
+                modelName: params.model.modelId
+            )
+            WatchTaskCoordinator.shared.publish(
+                runId: runId,
+                conversationId: conversationId?.toHexDashString(),
+                presentation: generating
+            )
             await dependencies.liveActivityController.update(
                 runId: runId,
-                presentation: .generatingResponse(modelName: params.model.modelId),
+                presentation: generating,
                 force: true
             )
             await prepareAndStartStreaming(
@@ -1429,10 +1498,32 @@ final class ChatGenerationCoordinator {
         case .council(let request):
             pendingCouncilToolApproval = pending
             bindings.setPendingCouncilApproval(request)
+        case .askUser(let request):
+            pendingAskUserToolApproval = pending
+            bindings.setPendingAskUser(request)
+            WatchTaskCoordinator.shared.publishAskUser(
+                runId: pending.runId,
+                conversationId: pending.conversationId?.toHexDashString(),
+                request: WatchAskUserRequest(
+                    id: request.id,
+                    question: request.question,
+                    options: request.options
+                )
+            )
         }
         bindings.setMessages(pending.baseMessages)
         bindings.bumpMessageRevision(.awaitingToolApproval)
         bindings.setIsLoading(false)
+        if case .askUser = prompt {
+            // Watch already received the ask-user decision above.
+        } else {
+            let conversationHex = pending.conversationId?.toHexDashString()
+            WatchTaskCoordinator.shared.publishWaitingApproval(
+                runId: pending.runId,
+                conversationId: conversationHex,
+                prompt: prompt
+            )
+        }
         Task { @MainActor [dependencies] in
             await dependencies.liveActivityController.update(
                 runId: pending.runId,
@@ -1553,12 +1644,46 @@ final class ChatGenerationCoordinator {
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
+    @discardableResult
+    func answerPendingAskUser(_ answer: String) -> Bool {
+        finishPendingAskUserAnswer(answer: answer)
+    }
+
+    @discardableResult
+    private func finishPendingAskUserAnswer(answer: String) -> Bool {
+        guard let pending = pendingAskUserToolApproval else { return false }
+        // Validate ownership before clearing UI/pending. Otherwise a racing cancel or
+        // run replacement can drop the card without writing tool output.
+        guard currentRunId == pending.runId else { return false }
+        clearPendingAskUser()
+        let resumedMessages = toolRuntime.finishAskUserAnswer(
+            pending: pending,
+            answer: answer
+        )
+        bindings.setMessages(resumedMessages)
+        bindings.bumpMessageRevision(.toolResultAppended)
+        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        return true
+    }
+
     private func resumeAfterApproval(
         pending: ChatPendingToolApproval,
         resumedMessages: [UIMessage]
     ) {
         guard currentRunId == pending.runId else { return }
         guard dependencies.autoGenerateResponses else {
+            let conversationHex = pending.conversationId?.toHexDashString()
+            WatchTaskCoordinator.shared.publishCompleted(
+                runId: pending.runId,
+                conversationId: conversationHex,
+                summary: nil
+            )
+            Task { @MainActor [dependencies] in
+                await dependencies.liveActivityController.end(
+                    runId: pending.runId,
+                    presentation: .completed()
+                )
+            }
             bindings.persistMessages(pending.conversationId)
             finishStreaming(terminalEvent: .generationCompleted)
             return
@@ -1704,6 +1829,7 @@ final class ChatGenerationCoordinator {
         clearPendingIshHandoffApproval()
         clearPendingMcpApproval()
         clearPendingCouncilApproval()
+        clearPendingAskUser()
     }
 
     private func clearPendingMemoryApproval() {
@@ -1739,6 +1865,11 @@ final class ChatGenerationCoordinator {
     private func clearPendingCouncilApproval() {
         pendingCouncilToolApproval = nil
         bindings.setPendingCouncilApproval(nil)
+    }
+
+    private func clearPendingAskUser() {
+        pendingAskUserToolApproval = nil
+        bindings.setPendingAskUser(nil)
     }
 
     private static func toolCalls(in chunk: MessageChunk) -> [UIMessagePart.Tool] {
@@ -1872,4 +2003,18 @@ final class ChatGenerationCoordinator {
         )
     }
 #endif
+}
+
+
+extension ChatGenerationCoordinator {
+    fileprivate static func watchSummary(from messages: [UIMessage]) -> String? {
+        guard let lastAssistant = messages.last(where: { $0.role == MessageRole.assistant }) else {
+            return nil
+        }
+        let text = lastAssistant.parts
+            .compactMap { ($0 as? UIMessagePart.Text)?.text }
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return WatchTaskText.clipped(text, maxLength: 280)
+    }
 }

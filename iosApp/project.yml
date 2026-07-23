@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: app.amber.ios
   deploymentTarget:
     iOS: "26.0"
+    watchOS: "11.0"
   xcodeVersion: "17.0"
   generateEmptyDirectories: true
 
@@ -10,6 +11,7 @@ settings:
   base:
     SWIFT_VERSION: "6.1"
     IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    WATCHOS_DEPLOYMENT_TARGET: "11.0"
 
 configs:
   Debug: debug
@@ -40,6 +42,7 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+      - path: SharedWatch
       # Deep Read editorial reader fonts — reference the already-tracked Android
       # font assets (no duplicate binary in the repo); bundled as app resources.
       - path: ../app/src/main/res/font/noto_serif_sc.otf
@@ -142,6 +145,8 @@ targets:
       - package: ChatLayout
         product: ChatLayout
       - target: AmberAgentActivityWidget
+      - target: AmberWatchApp
+        embed: true
     scheme:
       gatherCoverageData: false
       testTargets:
@@ -227,6 +232,7 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+      - path: SharedWatch
       - path: ../app/src/main/res/font/noto_serif_sc.otf
         buildPhase: resources
       - path: ../app/src/main/res/font/jetbrains_mono.ttf
@@ -334,5 +340,32 @@ targets:
       - package: ish-arm64-pkg
         product: IshEmbed
       - target: AmberAgentActivityWidgetExperimentalGPL
+      - target: AmberWatchApp
+        embed: true
+    scheme:
+      gatherCoverageData: false
+
+
+  AmberWatchApp:
+    type: application
+    platform: watchOS
+    sources:
+      - path: WatchApp
+      - path: SharedWatch/WatchTaskModels.swift
+      - path: SharedWatch/WatchConnectivityBridge.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.watchkitapp
+        INFOPLIST_FILE: WatchApp/Info.plist
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "4"
+        SDKROOT: watchos
+        SKIP_INSTALL: "YES"
+        GENERATE_INFOPLIST_FILE: "NO"
+        WATCHOS_DEPLOYMENT_TARGET: "11.0"
+        SUPPORTED_PLATFORMS:
+          - watchos
+          - watchsimulator
     scheme:
       gatherCoverageData: false

@@ -102,6 +102,7 @@ final class ChatViewModel {
     var pendingIshHandoffApproval: IshHandoffToolApprovalRequest?
     var pendingMcpApproval: McpToolApprovalRequest?
     var pendingCouncilApproval: CouncilToolApprovalRequest?
+    var pendingAskUser: ChatAskUserRequest?
     var configurationError: String?
     var contextCompactState: ChatContextCompactState = .idle
     private var pendingVisionFailures: [String: String] = [:]
@@ -434,6 +435,9 @@ final class ChatViewModel {
                 setPendingCouncilApproval: { [weak self] request in
                     self?.pendingCouncilApproval = request
                 },
+                setPendingAskUser: { [weak self] request in
+                    self?.pendingAskUser = request
+                },
                 setContextCompactState: { [weak self] state in
                     withAnimation(.easeOut(duration: 0.22)) {
                         self?.contextCompactState = state
@@ -595,7 +599,8 @@ final class ChatViewModel {
               pendingWorkspaceApproval == nil,
               pendingIshHandoffApproval == nil,
               pendingMcpApproval == nil,
-              pendingCouncilApproval == nil else { return }
+              pendingCouncilApproval == nil,
+              pendingAskUser == nil else { return }
 
         if autoGenerateResponses, let configurationIssue {
             configurationError = configurationIssue.message
@@ -877,7 +882,8 @@ final class ChatViewModel {
               pendingWebMountApproval == nil, pendingWorkspaceApproval == nil,
               pendingIshHandoffApproval == nil,
               pendingMcpApproval == nil,
-              pendingCouncilApproval == nil else { return }
+              pendingCouncilApproval == nil,
+              pendingAskUser == nil else { return }
         guard let last = messages.last, last.role == MessageRole.assistant,
               !last.toText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
@@ -1350,7 +1356,73 @@ final class ChatViewModel {
         }
     }
 
+    @discardableResult
+    func answerPendingAskUser(_ answer: String) -> Bool {
+        generationCoordinator.answerPendingAskUser(answer)
+    }
+
+    @discardableResult
+    func skipPendingAskUser() -> Bool {
+        generationCoordinator.answerPendingAskUser("")
+    }
+
+    func approveAnyPendingToolFromWatch() async {
+        if pendingMemoryApproval != nil {
+            approvePendingMemoryTool()
+        } else if pendingSearchApproval != nil {
+            await generationCoordinator.approvePendingSearchTool()
+        } else if pendingWebMountApproval != nil {
+            await generationCoordinator.approvePendingWebMountTool()
+        } else if pendingWorkspaceApproval != nil {
+            await generationCoordinator.approvePendingWorkspaceTool()
+        } else if pendingIshHandoffApproval != nil {
+            await generationCoordinator.approvePendingIshHandoffTool()
+        } else if pendingMcpApproval != nil {
+            await generationCoordinator.approvePendingMcpTool()
+        } else if pendingCouncilApproval != nil {
+            await generationCoordinator.approvePendingCouncilTool()
+        }
+    }
+
+    func denyAnyPendingToolFromWatch() async {
+        if pendingMemoryApproval != nil {
+            denyPendingMemoryTool()
+        } else if pendingSearchApproval != nil {
+            await generationCoordinator.denyPendingSearchTool()
+        } else if pendingWebMountApproval != nil {
+            await generationCoordinator.denyPendingWebMountTool()
+        } else if pendingWorkspaceApproval != nil {
+            await generationCoordinator.denyPendingWorkspaceTool()
+        } else if pendingIshHandoffApproval != nil {
+            await generationCoordinator.denyPendingIshHandoffTool()
+        } else if pendingMcpApproval != nil {
+            await generationCoordinator.denyPendingMcpTool()
+        } else if pendingCouncilApproval != nil {
+            await generationCoordinator.denyPendingCouncilTool()
+        }
+    }
+
+    @discardableResult
+    func submitWatchUserAnswer(runId: String, text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // First-class ask_user pending node resumes the current tool, not a new user turn.
+        // Empty text is an explicit skip (denied tool output), matching iPhone skip.
+        if pendingAskUser != nil, canOpenActivityConfirmation(runId: runId) {
+            return answerPendingAskUser(trimmed)
+        }
+        guard !trimmed.isEmpty else { return false }
+        // Tool approvals must use allow/deny, not free text.
+        if canOpenActivityConfirmation(runId: runId) {
+            return false
+        }
+        guard !isGenerationActive else { return false }
+        inputText = trimmed
+        sendMessage()
+        return true
+    }
+
     func cancelGeneration() {
+        // cancel() itself publishes the cancelled watch snapshot; do not clear first.
         generationCoordinator.cancel()
     }
 
@@ -1782,10 +1854,16 @@ final class ChatViewModel {
         conversationId: KotlinUuid?,
         presentation: AgentActivityPresentation
     ) {
+        let conversationHex = conversationId?.toHexDashString()
+        WatchTaskCoordinator.shared.publish(
+            runId: runId,
+            conversationId: conversationHex,
+            presentation: presentation
+        )
         guard liveActivityPreferenceEnabled else { return }
         liveActivityController.start(
             runId: runId,
-            conversationId: conversationId?.toHexDashString(),
+            conversationId: conversationHex,
             presentation: presentation
         )
     }
@@ -1982,6 +2060,8 @@ final class ChatViewModel {
         if isSlice3ToolEnabled("model_council_run") {
             toolDeclarations.append(ToolKt.createModelCouncilRunToolDeclaration())
         }
+        // Standard chat can pause for a focused user decision, same tool surface as novel discussion.
+        toolDeclarations.append(ToolKt.createAskUserToolDeclaration())
         // Real params: temperature/topP from Assistant, maxTokens from
         // resolveSessionDefaults (Assistant → group default), reasoningLevel
         // resolved, custom headers/bodies merged. Mirrors GenerationHandler.

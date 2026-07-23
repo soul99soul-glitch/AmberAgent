@@ -349,6 +349,11 @@ final class IOSChatBackgroundGenerationCoordinator {
                     runId: job.runId,
                     conversationId: job.conversationId.toHexDashString()
                 )
+                WatchTaskCoordinator.shared.publish(
+                    runId: job.runId,
+                    conversationId: job.conversationId.toHexDashString(),
+                    presentation: .cancelled()
+                )
                 await job.liveActivityController.end(
                     runId: job.runId,
                     presentation: .cancelled()
@@ -483,11 +488,17 @@ final class IOSChatBackgroundGenerationCoordinator {
             return
         }
 
+        let runningPresentation = job.mode == .singleToolOnly
+            ? AgentActivityPresentation.runningTool(toolName: "generate_image")
+            : AgentActivityPresentation.generatingResponse(modelName: requestParams.model.modelId)
+        WatchTaskCoordinator.shared.publish(
+            runId: job.runId,
+            conversationId: job.conversationId.toHexDashString(),
+            presentation: runningPresentation
+        )
         await job.liveActivityController.update(
             runId: job.runId,
-            presentation: job.mode == .singleToolOnly
-                ? .runningTool(toolName: "generate_image")
-                : .generatingResponse(modelName: requestParams.model.modelId),
+            presentation: runningPresentation,
             force: true
         )
 
@@ -610,6 +621,19 @@ final class IOSChatBackgroundGenerationCoordinator {
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
+        if succeeded {
+            WatchTaskCoordinator.shared.publishCompleted(
+                runId: job.runId,
+                conversationId: job.conversationId.toHexDashString(),
+                summary: nil
+            )
+        } else {
+            WatchTaskCoordinator.shared.publish(
+                runId: job.runId,
+                conversationId: job.conversationId.toHexDashString(),
+                presentation: .failed()
+            )
+        }
         await job.liveActivityController.end(
             runId: job.runId,
             presentation: succeeded ? .completed() : .failed()
@@ -679,6 +703,11 @@ final class IOSChatBackgroundGenerationCoordinator {
                     inputDigest: job.inputDigest,
                     conversationId: job.conversationId
                 )
+                WatchTaskCoordinator.shared.publish(
+                    runId: job.runId,
+                    conversationId: job.conversationId.toHexDashString(),
+                    presentation: .failed()
+                )
                 await job.liveActivityController.end(runId: job.runId, presentation: .failed())
             }
             return
@@ -698,6 +727,11 @@ final class IOSChatBackgroundGenerationCoordinator {
             status: "failed",
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
+        )
+        WatchTaskCoordinator.shared.publish(
+            runId: job.runId,
+            conversationId: job.conversationId.toHexDashString(),
+            presentation: .failed()
         )
         await job.liveActivityController.end(runId: job.runId, presentation: .failed())
         if runState.claimSystemTaskCompletion() {
@@ -735,6 +769,11 @@ final class IOSChatBackgroundGenerationCoordinator {
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
+        WatchTaskCoordinator.shared.publish(
+            runId: job.runId,
+            conversationId: job.conversationId.toHexDashString(),
+            presentation: .failed()
+        )
         await job.liveActivityController.end(runId: job.runId, presentation: .failed())
     }
 
@@ -755,6 +794,19 @@ final class IOSChatBackgroundGenerationCoordinator {
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
+        if succeeded {
+            WatchTaskCoordinator.shared.publishCompleted(
+                runId: job.runId,
+                conversationId: job.conversationId.toHexDashString(),
+                summary: nil
+            )
+        } else {
+            WatchTaskCoordinator.shared.publish(
+                runId: job.runId,
+                conversationId: job.conversationId.toHexDashString(),
+                presentation: .failed()
+            )
+        }
         await job.liveActivityController.end(
             runId: job.runId,
             presentation: succeeded ? .completed() : .failed()
@@ -774,6 +826,11 @@ final class IOSChatBackgroundGenerationCoordinator {
             status: "failed",
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
+        )
+        WatchTaskCoordinator.shared.publish(
+            runId: job.runId,
+            conversationId: job.conversationId.toHexDashString(),
+            presentation: .failed()
         )
         await job.liveActivityController.end(runId: job.runId, presentation: .failed())
         if runState.claimSystemTaskCompletion() {
