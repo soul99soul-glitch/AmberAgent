@@ -48,8 +48,9 @@ public struct RenderableDocument: Equatable, Sendable {
   /// paragraph renderable per blank-line-separated chunk, so its measured height
   /// tracks the parsed document's blockSpacing-based layout instead of rendering
   /// every blank line as a full text line. Default keeps the single-paragraph
-  /// behavior unchanged. Chunk ids derive from `id` plus the chunk index, which
-  /// stays stable for append-only text updates.
+  /// behavior unchanged. Chunk ids are the chunk's own index (see the
+  /// `Vendored fix (AmberAgent)` note below for why `id` isn't part of them),
+  /// which stays stable for append-only text updates.
   public init(
     plainText: String,
     id: String,
@@ -83,8 +84,24 @@ public struct RenderableDocument: Equatable, Sendable {
         chunks.append(currentLines.joined(separator: "\n"))
       }
       if chunks.count > 1 {
+        // Vendored fix (AmberAgent): use the bare chunk index as the paragraph
+        // id instead of "\(id)-\(index)". A parsed top-level `Markdown.Paragraph`
+        // gets its id from `Markup.id` (Markup+ID.swift), which is an
+        // indexInParent path with no separator for top-level document
+        // children — i.e. plain "0", "1", "2", … For any caller-supplied `id`
+        // (this app always passes "0"), the dashed placeholder ids ("0-0",
+        // "0-1", …) can never intersect that namespace, so the moment the
+        // async parse for the same text lands, `BlockView`'s
+        // `ForEach(renderables)` (keyed on this `id`) sees every chunk as a
+        // brand-new identity and tears down/rebuilds the whole already-settled
+        // prefix instead of updating it in place. Dropping the `id` prefix
+        // makes placeholder chunk ids coincide with the real parsed ids for
+        // the common flat-paragraph case, so the handoff is a content update,
+        // not an identity change. This only affects the
+        // `splittingParagraphsOnBlankLines` path (opt-in, AmberAgent's only
+        // caller); the default single-paragraph behavior below is unchanged.
         self.init(renderables: chunks.enumerated().map { index, chunk in
-          .paragraph(id: "\(id)-\(index)", content: NSMutableAttributedString(string: chunk, attributes: attributes))
+          .paragraph(id: "\(index)", content: NSMutableAttributedString(string: chunk, attributes: attributes))
         })
         return
       }

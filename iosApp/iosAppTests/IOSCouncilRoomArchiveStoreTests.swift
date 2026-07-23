@@ -126,6 +126,69 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         XCTAssertEqual(store.load(taskId: "b")?.taskId, "b")
     }
 
+    // MARK: - Deferred (off-main) write pump
+
+    func testDeferredWritesCoalesceToLatestSnapshot() async throws {
+        // 同一 MainActor 回合内连续两次 saveDeferred:写入泵尚未启动,第二份直接覆盖
+        // 第一份(latest-wins),最终只落盘一次且是最新快照。
+        let store = tempStore()
+        let v1 = sampleRoom(taskId: "run-coalesce")
+        let v2 = CouncilPersistedRoom(
+            taskId: "run-coalesce",
+            objective: "更新后的议题",
+            modeRaw: v1.modeRaw,
+            statusRaw: v1.statusRaw,
+            failedSpeakerIds: v1.failedSpeakerIds,
+            participants: v1.participants,
+            messages: v1.messages,
+            updatedAtMs: v1.updatedAtMs + 1000
+        )
+        store.saveDeferred(v1)
+        store.saveDeferred(v2)
+
+        await store.flushDeferred()
+
+        XCTAssertEqual(store.completedWriteCount, 1, "两次 saveDeferred 应合并成一次离主线程写入")
+        XCTAssertEqual(store.load(taskId: "run-coalesce")?.objective, "更新后的议题", "应落盘最新快照")
+    }
+
+    func testSyncSaveInvalidatesStaleDeferredWrite() async throws {
+        // 延迟快照入队后、落盘前若发生同步 save(终态检查点),代数闸必须让这份过时
+        // 延迟写跳过,避免旧快照覆盖终态最新事实。
+        let store = tempStore()
+        let stale = sampleRoom(taskId: "run-gate")
+        let fresh = CouncilPersistedRoom(
+            taskId: "run-gate",
+            objective: "终态最新",
+            modeRaw: stale.modeRaw,
+            statusRaw: "就绪",
+            failedSpeakerIds: stale.failedSpeakerIds,
+            participants: stale.participants,
+            messages: stale.messages,
+            updatedAtMs: stale.updatedAtMs + 5000
+        )
+        store.saveDeferred(stale)
+        store.save(fresh)
+
+        await store.flushDeferred()
+
+        XCTAssertEqual(store.load(taskId: "run-gate")?.objective, "终态最新", "同步终态写必须是最终事实")
+        XCTAssertEqual(store.completedWriteCount, 1, "过时的延迟写应被代数闸跳过,只有同步写落盘")
+    }
+
+    func testFlushDeferredMakesDeferredWriteVisibleToLoad() async throws {
+        // 「写后立即 load」的检查点(openArchive 的 reload)依赖 flushDeferred 排空在途
+        // 写入,保证 load 看到延迟写的最新快照。
+        let store = tempStore()
+        let room = sampleRoom(taskId: "run-flush")
+        store.saveDeferred(room)
+
+        await store.flushDeferred()
+
+        XCTAssertEqual(store.load(taskId: "run-flush")?.taskId, "run-flush", "flush 之后延迟写必须对 load 可见")
+        XCTAssertEqual(store.completedWriteCount, 1)
+    }
+
     // MARK: - DTO restore fidelity (the "Color encoding" concern)
 
     func testMessageDTOPreservesColorHexKindAndStatus() {

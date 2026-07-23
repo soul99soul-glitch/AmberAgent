@@ -1329,6 +1329,10 @@ final class CouncilChatViewModel {
     @ObservationIgnored private var pendingObjective = ""
     @ObservationIgnored private var lastRunObjective = ""
     @ObservationIgnored private var lastResearchAllowed = false
+    /// 中段检查点防抖:roster/append/消息完结等事件密集到达时,只在最后一次之后
+    /// 300ms 合并成一次离主线程写入,避免每条消息都触发 encode+write。终态检查点
+    /// (结束/取消/切后台/恢复)不走防抖,直接同步写以保证 load-after-save 顺序。
+    @ObservationIgnored private var archiveDebounceTask: Task<Void, Never>?
 
     private var roomStateOverride: String?
     private var activeSpeakerId: String?
@@ -1384,12 +1388,18 @@ final class CouncilChatViewModel {
     func runtimeDidDisappear() {
         isRuntimeAttached = false
         skipAskUser()
+        // 离开议会界面时做一次离主线程检查点,让「最近讨论」尽快看到当前进度;
+        // 先取消防抖,避免它在切走后再次触发写入。
+        cancelScheduledArchive()
+        archiveCurrentRoom(deferred: true)
     }
 
     func runtimeWillEnterBackground() {
         isApplicationActive = false
         skipAskUser()
         persistTranscript()
+        // 切后台是终止路径:取消防抖并同步落盘,同步写会 bump 代数使在途延迟写失效。
+        cancelScheduledArchive()
         archiveCurrentRoom()
     }
 
@@ -1450,6 +1460,9 @@ final class CouncilChatViewModel {
 
     func recoverInterruptedTasks(_ taskIds: [String]) {
         guard let currentTaskId, taskIds.contains(currentTaskId) else { return }
+        // 恢复即终止路径:先取消防抖,尾部再同步写一份「已中断」快照( bump 代数使
+        // 任何在途延迟写失效),保证 load 之后看到的是恢复后的最新事实。
+        cancelScheduledArchive()
         if let room = archiveStore.load(taskId: currentTaskId) {
             currentObjective = room.objective
             lastRunObjective = room.objective
@@ -1573,6 +1586,8 @@ final class CouncilChatViewModel {
     }
 
     func cancelDiscussion() {
+        // 用户主动停止也是终止路径:取消防抖,尾部同步写会 bump 代数使在途延迟写失效。
+        cancelScheduledArchive()
         stopActiveDiscussion()
         finishStreamingMessages(as: .failed)
         activeSpeakerId = nil
@@ -1612,6 +1627,9 @@ final class CouncilChatViewModel {
 
     /// 从「最近讨论」重开一场历史议会,把归档快照还原成只读对话。
     func openArchive(taskId: String) {
+        // 切换到只读重放前,先取消防抖,避免它在 currentTaskId 切换后再次触发写入;
+        // stopAndCheckpoint 会对仍在进行的讨论做一次同步检查点。
+        cancelScheduledArchive()
         guard var room = archiveStore.load(taskId: taskId) else { return }
         stopAndCheckpointActiveDiscussion()
         if let checkpointedRoom = archiveStore.load(taskId: taskId) {
@@ -1642,9 +1660,34 @@ final class CouncilChatViewModel {
 
     /// 把当前房间快照按 taskId 归档(供「最近讨论」重开)。在名册/新消息/消息完结/结束等
     /// 检查点调用;不在 per-token 的 updateMessage 上调用,避免每个 token 写一次文件。
-    private func archiveCurrentRoom() {
+    /// - Parameter deferred: true 走离主线程的延迟写入泵(中段检查点);false 同步落盘
+    ///   (终态检查点),同步写会 bump 代数,使在途的旧延迟写自动失效。
+    private func archiveCurrentRoom(deferred: Bool = false) {
         guard !isReplay, let taskId = currentTaskId, !messages.isEmpty else { return }
-        archiveStore.save(persistedRoom(taskId: taskId))
+        let room = persistedRoom(taskId: taskId)
+        if deferred {
+            archiveStore.saveDeferred(room)
+        } else {
+            archiveStore.save(room)
+        }
+    }
+
+    /// 中段检查点防抖:事件密集到达时只在最后一次之后 300ms 合并成一次延迟写入。
+    /// 已有一个防抖任务在等待时直接复用(latest-wins 由 store 的 pendingRoom 保证)。
+    private func scheduleArchive() {
+        guard !isReplay, currentTaskId != nil, !messages.isEmpty else { return }
+        guard archiveDebounceTask == nil else { return }
+        archiveDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            self?.archiveDebounceTask = nil
+            self?.archiveCurrentRoom(deferred: true)
+        }
+    }
+
+    private func cancelScheduledArchive() {
+        archiveDebounceTask?.cancel()
+        archiveDebounceTask = nil
     }
 
     func restartLastDiscussion() {
@@ -1742,6 +1785,10 @@ final class CouncilChatViewModel {
         roomStateOverride = summary.status == .completed ? "就绪" : summary.status.title
         updateDetail(status: roomStateOverride ?? "就绪")
         persistTranscript()
+        // 终态:取消防抖 → 排空在途延迟写 → 同步落最终快照。同步写严格最后,
+        // 保证「写后立即 load」看到完成态,也不会被旧延迟写覆盖。
+        cancelScheduledArchive()
+        await archiveStore.flushDeferred()
         archiveCurrentRoom()
     }
 
@@ -1843,15 +1890,16 @@ final class CouncilChatViewModel {
             failedSpeakerIds = failedIds
             invitedSpeakerIds = Set(speakers.filter { !$0.isHost }.map(\.id))
             updateDetail(status: roomStateOverride ?? selectedMode.runningState)
-            archiveCurrentRoom()
+            scheduleArchive()
         case .append(let event):
             appendMessage(event)
-            archiveCurrentRoom()
+            scheduleArchive()
         case .updateMessage(let id, let body, let status):
             let mapped = CouncilMessageStatus(status)
             updateMessage(id, body: body, status: mapped)
             // 仅在席位发言完结/失败时归档,流式中途(speaking)不写,避免逐 token 落盘。
-            if mapped != .speaking { archiveCurrentRoom() }
+            // 中段完结走防抖合并,密集发言时不会每条都触发一次离主线程写入。
+            if mapped != .speaking { scheduleArchive() }
         case .askUser:
             // 实际的暂停/恢复由 onAskUser 回调驱动，这里不做额外处理。
             break
@@ -1972,6 +2020,8 @@ final class CouncilChatViewModel {
     }
 
     private func stopAndCheckpointActiveDiscussion() {
+        // 取消即终止路径:无论是否要 checkpoint 都先取消防抖,避免切走后再次写入。
+        cancelScheduledArchive()
         let shouldCheckpoint = activeDiscussionID != nil || isRunning
         stopActiveDiscussion()
         guard shouldCheckpoint else { return }
@@ -2568,6 +2618,18 @@ final class CouncilRoomArchiveStore {
     private let decoder = JSONDecoder()
     private let fileManager: FileManager
 
+    /// 测试缝:累计成功写入次数(同步 + 延迟)。
+    private(set) var completedWriteCount = 0
+
+    /// 延迟写入的最新快照与串行泵:saveDeferred 只保留最新快照(latest-wins),
+    /// 后台泵写完上一份再写最新一份,encode+write 不占主线程。
+    private var pendingRoom: CouncilPersistedRoom?
+    private var pendingGeneration: UInt64 = 0
+    private var writePump: Task<Void, Never>?
+    /// 同步 save 时 bump;延迟写入落盘前校验它,期间发生过同步写就说明这份
+    /// 延迟快照已过时(终态同步写才是最新事实),跳过落盘避免旧快照覆盖新状态。
+    private let syncWriteGeneration = CouncilArchiveWriteGeneration()
+
     init(baseDirectory: URL? = nil, fileManager: FileManager = .default) {
         self.fileManager = fileManager
         let base = baseDirectory
@@ -2577,12 +2639,81 @@ final class CouncilRoomArchiveStore {
     }
 
     func save(_ room: CouncilPersistedRoom) {
+        syncWriteGeneration.bump()
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try encoder.encode(room)
             try data.write(to: fileURL(for: room.taskId), options: .atomic)
+            completedWriteCount += 1
         } catch {
             // 归档失败不应打断议会;静默吞掉(下个检查点会再试)。
+        }
+    }
+
+    /// 延迟写入:中段检查点经 ViewModel 防抖合并后调用;encode+write 在后台线程,
+    /// 同一时刻只保留最新快照。终态检查点继续用同步 save() 保证 load-after-save 顺序。
+    func saveDeferred(_ room: CouncilPersistedRoom) {
+        pendingRoom = room
+        pendingGeneration = syncWriteGeneration.value
+        guard writePump == nil else { return }
+        let gate = syncWriteGeneration
+        writePump = Task { [weak self] in
+            while let next = self?.takePendingWrite() {
+                let written = await Self.writeRoom(
+                    next.room,
+                    to: next.url,
+                    gate: gate,
+                    takenGeneration: next.generation
+                )
+                if written {
+                    self?.noteDeferredWriteCompleted()
+                }
+            }
+            self?.clearWritePump()
+        }
+    }
+
+    /// 等待写入泵排空(在途那份与 pending 的最新一份)。「写后立即 load」的检查点
+    /// (openArchive 的 reload)在 load 之前先调用,保证看到最新快照。
+    func flushDeferred() async {
+        while let pump = writePump {
+            await pump.value
+        }
+    }
+
+    private func takePendingWrite() -> (room: CouncilPersistedRoom, url: URL, generation: UInt64)? {
+        guard let room = pendingRoom else { return nil }
+        pendingRoom = nil
+        return (room, fileURL(for: room.taskId), pendingGeneration)
+    }
+
+    private func noteDeferredWriteCompleted() {
+        completedWriteCount += 1
+    }
+
+    private func clearWritePump() {
+        writePump = nil
+    }
+
+    private nonisolated static func writeRoom(
+        _ room: CouncilPersistedRoom,
+        to url: URL,
+        gate: CouncilArchiveWriteGeneration,
+        takenGeneration: UInt64
+    ) async -> Bool {
+        // 入队到落盘之间若发生过同步 save(终态检查点),这份延迟快照已过时:跳过。
+        guard gate.value == takenGeneration else { return false }
+        do {
+            let data = try JSONEncoder().encode(room)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            // 归档失败不应打断议会;静默吞掉(下个检查点会再试)。
+            return false
         }
     }
 
@@ -2636,6 +2767,27 @@ final class CouncilRoomArchiveStore {
     private func fileURL(for taskId: String) -> URL {
         let safe = taskId.replacingOccurrences(of: "/", with: "_")
         return directory.appendingPathComponent("\(safe).json", isDirectory: false)
+    }
+}
+
+/// 同步写入代数闸:延迟写入泵在后台线程落盘前读取它,与入队时记下的代数比对。
+/// 期间只要发生过一次同步 save(终态检查点),代数就变了,这份延迟快照即被判为
+/// 过时并跳过 —— 保证「终态同步写」永远是最新事实,不会被在途的旧延迟写覆盖。
+/// `@unchecked Sendable` + NSLock:它要跨 MainActor 与后台写入任务共享,自身用锁串行化。
+final class CouncilArchiveWriteGeneration: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation: UInt64 = 0
+
+    func bump() {
+        lock.lock()
+        generation &+= 1
+        lock.unlock()
+    }
+
+    var value: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return generation
     }
 }
 

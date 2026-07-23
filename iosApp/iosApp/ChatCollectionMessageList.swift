@@ -1683,8 +1683,12 @@ struct ChatSwiftUIMessageList: View {
                       ChatSwiftUIBottomWritePolicy.canIssueImmediateWrite(
                         explicitBottomAnimationActive: runtime.explicitBottomAnimationActive
                       ) {
-                withAnimation(.easeOut(duration: 0.22)) {
-                    scrollToBottomAnchor(disableAnimations: false)
+                if reduceMotion {
+                    scrollToBottomAnchor()
+                } else {
+                    withAnimation(.easeOut(duration: 0.22)) {
+                        scrollToBottomAnchor(disableAnimations: false)
+                    }
                 }
             }
         }
@@ -1742,7 +1746,9 @@ struct ChatSwiftUIMessageList: View {
                 messages: messages,
                 event: signal.event,
                 streamedMessageIDs: streamedMessageIDs,
-                includePendingAssistant: (isGenerationActive || isLoading) && messages.last?.role == MessageRole.user
+                includePendingAssistant: (isGenerationActive || isLoading) && messages.last?.role == MessageRole.user,
+                // SwiftUI 列表路径不消费 renderToken,跳过逐行 token 计算。
+                includeRenderTokens: false
             )
         }
     }
@@ -4275,7 +4281,9 @@ private enum ChatListSnapshotBuilder {
                 messages: messages,
                 event: signal.event,
                 streamedMessageIDs: streamedMessageIDs,
-                includePendingAssistant: includePendingAssistant
+                includePendingAssistant: includePendingAssistant,
+                // collection 路径只取 rowModel,不消费 renderToken。
+                includeRenderTokens: false
             )
             rows = timelinePlan.entries.compactMap { entry in
                 guard case let .message(messageEntry) = entry else { return nil }

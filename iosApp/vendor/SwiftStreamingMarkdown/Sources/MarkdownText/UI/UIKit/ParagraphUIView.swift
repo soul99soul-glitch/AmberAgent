@@ -30,7 +30,9 @@ class ParagraphUIView: UITextView {
 
   private(set) var paragraphContents: NSMutableAttributedString = NSMutableAttributedString()
   private(set) var lineSpacing: CGFloat?
-  private var activeAnimations: [FadeAnimationData] = []
+  // `private(set)` (rather than fully private) so the vendored regression tests
+  // can assert that stale word fades never survive a full content replacement.
+  private(set) var activeAnimations: [FadeAnimationData] = []
   private var fadeAnimationDisplayLink: CADisplayLink?
   private var cachedSize: CachedParagraphUIViewSize?
 
@@ -213,6 +215,11 @@ class ParagraphUIView: UITextView {
 
     // Stop display link update before updating the attributed string
     tearDownDisplayLink()
+    // Vendored fix (AmberAgent): a full replacement invalidates every in-flight
+    // word fade — their ranges address the previous text. Drop them before any
+    // fades for the newly appended tail are added below; otherwise the stale
+    // ranges apply wrong alphas to unrelated characters in the replacement.
+    activeAnimations.removeAll()
     invalidateCachedSize()
     attributedText = finalString
 

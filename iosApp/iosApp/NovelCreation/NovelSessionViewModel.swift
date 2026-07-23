@@ -197,11 +197,20 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var projectionCache: NovelSessionProjectionCacheEntry?
     @ObservationIgnored private var presentationBuffer: NovelSessionPresentationBuffer?
     @ObservationIgnored private var presentationFlushTask: Task<Void, Never>?
+    /// 终态 tail 的延迟退役任务:完成后保留 tail 一个静窗再清空,避免完成瞬间整屏一跳。
+    @ObservationIgnored private var terminalTailRetirementTask: Task<Void, Never>?
+    /// 终态 tail 退役前的静窗时长,默认与底部跟随的 terminalQuietDelay 对齐(滚动落定
+    /// 与 tail 退役同步)。测试可注入 0 走立即退役的快路径,保持旧的「完成即清空」契约。
+    @ObservationIgnored private let terminalQuietDelay: TimeInterval
 
     private static let presentationFlushDelayNanos: UInt64 = 48_000_000
 
-    init(workspace: NovelCreationViewModel) {
+    init(
+        workspace: NovelCreationViewModel,
+        terminalQuietDelay: TimeInterval = NovelSessionBottomFollowPolicy.terminalQuietDelay
+    ) {
         self.workspace = workspace
+        self.terminalQuietDelay = terminalQuietDelay
         guard let project = workspace.projectSnapshot,
               let branch = workspace.branchSnapshot,
               workspace.selectedProjectID == project.project.id,
@@ -433,6 +442,9 @@ final class NovelSessionViewModel {
         let didChange = binding != next
         if didChange {
             detachConsumer()
+            // 切 binding 即作废旧 token:顺带取消可能仍在静窗里等待的 tail 退役任务。
+            terminalTailRetirementTask?.cancel()
+            terminalTailRetirementTask = nil
             bindingToken = UUID()
             binding = next
             transientTail = nil
@@ -1212,7 +1224,7 @@ private extension NovelSessionViewModel {
             lastRetryRunID = nil
             currentRunDraft = nil
             let refreshed = await refreshDurable(binding: binding, token: token)
-            if refreshed { clearTransientTail() }
+            if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .interrupted(let snapshot):
             publishTerminalPresentation(
                 runID: runID,
@@ -1225,7 +1237,7 @@ private extension NovelSessionViewModel {
             lastRetryRunID = runID
             currentRunDraft = nil
             let refreshed = await refreshDurable(binding: binding, token: token)
-            if refreshed { clearTransientTail() }
+            if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .failed(let failure):
             publishTerminalPresentation(
                 runID: runID,
@@ -1240,7 +1252,7 @@ private extension NovelSessionViewModel {
             lastRetryRunID = failure.isRetryable ? runID : nil
             currentRunDraft = nil
             let refreshed = await refreshDurable(binding: binding, token: token)
-            if refreshed { clearTransientTail() }
+            if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .persistenceBlocked(let failure):
             publishTerminalPresentation(
                 runID: runID,
@@ -1377,7 +1389,7 @@ private extension NovelSessionViewModel {
             if terminalAwaitingRefresh,
                let tail = transientTail,
                workspace.projectSnapshot?.activeRuns.first(where: { $0.id == tail.runID })?.status != .running {
-                clearTransientTail()
+                retireTerminalTransientTail(runID: tail.runID, token: token)
             } else if terminalAwaitingRefresh,
                       transientTail == nil,
                       workspace.branchSnapshot?.branch.activeRunID == nil {
@@ -1649,6 +1661,9 @@ private extension NovelSessionViewModel {
         startingUserContent: String? = nil,
         phase: NovelSessionTransientTailPhase
     ) {
+        // 新 run 开始:取消上一场可能仍在静窗里等待的 tail 退役任务。
+        terminalTailRetirementTask?.cancel()
+        terminalTailRetirementTask = nil
         cancelPendingPresentation()
         transientRunRecord = run
         transientTail = NovelSessionTransientTail(
@@ -1686,10 +1701,37 @@ private extension NovelSessionViewModel {
     }
 
     func clearTransientTail() {
+        terminalTailRetirementTask?.cancel()
+        terminalTailRetirementTask = nil
         cancelPendingPresentation()
         transientTail = nil
         transientRunRecord = nil
         terminalAwaitingRefresh = false
+    }
+
+    /// 终态(完成/中断/失败)且 durable 刷新成功后的 tail 退役:不立即清空,而是保留到
+    /// 静窗(与底部跟随 terminalQuietDelay 对齐)过去再退役,避免生成完成、durable 正文
+    /// 接管的一瞬间 tail 突然消失导致整屏「跳一下」的闪烁。输入区立即解锁
+    /// (terminalAwaitingRefresh=false)——tail 的终态 phase 本身仍把 isRunning 置假,
+    /// 不会误判为还在生成。静窗内若开新 run(installTail)或切 binding,退役任务会被取消。
+    private func retireTerminalTransientTail(runID: NovelRunID, token: UUID) {
+        terminalAwaitingRefresh = false
+        terminalTailRetirementTask?.cancel()
+        guard terminalQuietDelay > 0 else {
+            // 零静窗(测试快路径):立即退役,保持旧的「完成即清空」契约。
+            if bindingToken == token, transientTail?.runID == runID {
+                clearTransientTail()
+            }
+            return
+        }
+        let delayNanos = UInt64(terminalQuietDelay * 1_000_000_000)
+        terminalTailRetirementTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delayNanos)
+            guard !Task.isCancelled, let self,
+                  self.bindingToken == token,
+                  self.transientTail?.runID == runID else { return }
+            self.clearTransientTail()
+        }
     }
 
     func isActiveTailPhase(_ phase: NovelSessionTransientTailPhase?) -> Bool {

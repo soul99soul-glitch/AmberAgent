@@ -32,11 +32,17 @@ struct ParagraphView: UIViewRepresentable {
     view.setTextContextMenu(config.textContextMenu)
     view.setMarkdownController(markdownController)
 
-    if ParagraphInitialFadePolicy.shouldAnimate(
+    let willFade = ParagraphInitialFadePolicy.shouldAnimate(
       configShouldAnimateText: config.shouldAnimateText,
       animateInitialText: animateInitialText,
       suppressesInitialFade: suppressesInitialFade
-    ) {
+    )
+    // Vendored fix (AmberAgent): test-only observation hook, nil in production.
+    // Lets integration tests detect a `makeUIView` re-fade of already-displayed
+    // text (block retyping/splitting) without pumping a live UIKit animation
+    // runloop to read back `view.alpha`.
+    ParagraphInitialFadePolicy.testFadeObserver?(contents.string, willFade)
+    if willFade {
       view.alpha = 0
       UIView.animate(withDuration: ParagraphUIView.animationDuration) {
         view.alpha = 1
@@ -116,6 +122,9 @@ struct ParagraphView: UIViewRepresentable {
 }
 
 enum ParagraphInitialFadePolicy {
+  // Vendored fix (AmberAgent): test-only hook, see `ParagraphView.makeUIView`.
+  static var testFadeObserver: ((_ contents: String, _ willFade: Bool) -> Void)?
+
   static func shouldAnimate(
     configShouldAnimateText: Bool,
     animateInitialText: Bool,

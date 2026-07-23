@@ -413,7 +413,13 @@ final class MarkdownTextTests: XCTestCase {
       splittingParagraphsOnBlankLines: true
     )
     XCTAssertEqual(split.renderables.count, 3)
-    let expected = [("0-0", "第一段"), ("0-1", "第二段"), ("0-2", "第三段")]
+    // Vendored fix (AmberAgent): chunk ids are the bare chunk index, not
+    // "\(id)-\(index)" — see the id-generation comment in
+    // RenderableDocument.swift for why (placeholder chunk ids must coincide
+    // with the parsed top-level `Markup.id` namespace, which has no `id`
+    // prefix, so a first-parse handoff updates paragraphs in place instead of
+    // replacing every one of them).
+    let expected = [("0", "第一段"), ("1", "第二段"), ("2", "第三段")]
     for (index, expectation) in expected.enumerated() {
       guard case let .paragraph(id, content) = split.renderables[index] else {
         return XCTFail("Expected paragraph chunk at index \(index)")

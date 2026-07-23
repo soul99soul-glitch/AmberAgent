@@ -258,6 +258,60 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(request.purpose, .discussion)
     }
 
+    func testTerminalTailLingersUnlockedThroughQuietWindowThenRetires() async throws {
+        // B' 的核心状态:完成后输入区立即解锁(terminalAwaitingRefresh 立刻清除),但
+        // transient tail 在静窗内保留,避免 durable 正文接管瞬间整屏「跳一下」。旧实现
+        // 「解锁」与「tail 还在」不能共存(清 tail 与解锁错时),完成瞬间会闪烁。
+        let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
+            .replacement("完成的讨论建议"),
+            .complete,
+        ])], terminalQuietDelay: 0.3)
+        harness.session.mode = .discussPlan
+
+        let didStart = await harness.session.send(text: "下一步该怎么规划？")
+        XCTAssertTrue(didStart)
+        let didFinish = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(didFinish)
+
+        let lingerUnlocked = await eventually {
+            harness.session.canSend && harness.session.transientTail != nil
+        }
+        XCTAssertTrue(lingerUnlocked, "静窗内 tail 应保留,同时输入区已解锁")
+
+        // 静窗(0.3s)过后 tail 退役清空。
+        let didRetire = await eventually(timeout: 2) { harness.session.transientTail == nil }
+        XCTAssertTrue(didRetire, "静窗过后终态 tail 应退役清空")
+    }
+
+    func testNewRunWithinQuietWindowCancelsPreviousTailRetirement() async throws {
+        // 静窗内开新 run:installTail 应取消上一场的退役任务,新 run 的 tail 不被上一场
+        // 退役任务误清,且整条链路能正确跑到第二场完成。
+        let harness = try await makeHarness(scripts: [
+            NovelModelScript(steps: [.replacement("第一场完成"), .complete]),
+            NovelModelScript(steps: [.replacement("第二场完成"), .complete]),
+        ], terminalQuietDelay: 0.4)
+        harness.session.mode = .discussPlan
+
+        _ = await harness.session.send(text: "第一场")
+        let firstDone = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(firstDone)
+
+        // 静窗内输入区已解锁,可立即开第二场。
+        let secondStarted = await eventually { harness.session.canSend }
+        XCTAssertTrue(secondStarted, "静窗内输入区应解锁,允许立即开新 run")
+        // 判别点:B' 延迟退役下,解锁时第一场的 tail 仍在静窗里保留(unlocked+tail 共存);
+        // 旧「完成即清空」实现解锁时 tail 已被清空,此断言会红。
+        XCTAssertNotNil(harness.session.transientTail, "第一场 tail 应在静窗内保留,而非立即退役")
+        _ = await harness.session.send(text: "第二场")
+        let secondDone = await eventually(timeout: 3) { !harness.session.isRunning }
+        XCTAssertTrue(secondDone)
+
+        // 第二场结果正确落盘;tail 最终由第二场自己的静窗退役,而非被第一场任务提前清掉。
+        let retired = await eventually(timeout: 3) { harness.session.transientTail == nil }
+        XCTAssertTrue(retired)
+        XCTAssertEqual(harness.session.durableMessages.last?.content, "第二场完成")
+    }
+
     func testAskUserAnswerStartsTheNextDiscussionTurn() async throws {
         let prompt = NovelAskUserPrompt(
             question: "他此刻更害怕失去谁？",
@@ -372,7 +426,13 @@ final class NovelSessionViewModelTests: XCTestCase {
 
         let runID = try XCTUnwrap(harness.session.activeRunID)
         await harness.adapter.resume(runID: runID)
-        let didFinish = await eventually { !harness.session.isRunning }
+        // isRunning 在终态 presentation(terminalAwaitingRefresh 置位)即转假,早于 durable
+        // 刷新落盘;只等 !isRunning 会撞上「run 已结束但 assistant 消息尚未落盘」的竞态
+        // (此刻 durableMessages.last 暂时还是用户那条)。等到 durable 末条真正落盘再断言——
+        // 与本文件 prose 用例的 durable 等待一致,放宽容忍窗口但不放宽断言本身。
+        let didFinish = await eventually(timeout: 5) {
+            !harness.session.isRunning && harness.session.durableMessages.last?.content == expected
+        }
         XCTAssertTrue(didFinish)
         XCTAssertEqual(harness.session.durableMessages.last?.content, expected)
     }
@@ -2330,7 +2390,8 @@ private extension NovelSessionViewModelTests {
         scripts: [NovelModelScript],
         resolutionFailure: NovelModelFailure? = nil,
         usesSnapshotGate: Bool = false,
-        usesAttachGate: Bool = false
+        usesAttachGate: Bool = false,
+        terminalQuietDelay: TimeInterval = 0
     ) async throws -> Harness {
         let document = try document ?? NovelTestFixtures.document()
         let repository = repository ?? InMemoryNovelProjectRepository()
@@ -2368,7 +2429,9 @@ private extension NovelSessionViewModelTests {
         }
         let workspace = NovelCreationViewModel(creation: creation)
         await workspace.loadProjects(selecting: document.project.id)
-        let session = NovelSessionViewModel(workspace: workspace)
+        // 默认 0 静窗 = 完成即退役的快路径,保持既有用例的「完成即清空 tail」契约;
+        // 验证延迟退役的新用例显式注入 >0 的静窗。
+        let session = NovelSessionViewModel(workspace: workspace, terminalQuietDelay: terminalQuietDelay)
         await session.bindToCurrentSelection()
         return Harness(
             repository: repository,

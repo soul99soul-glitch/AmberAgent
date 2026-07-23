@@ -174,6 +174,23 @@ final class ChatMessageProjectionTests: XCTestCase {
         )
     }
 
+    func testTableStreamingThrottleTiersOnlySlowDownHugeTables() {
+        // <12K 档位保持历史值;超大表格(≥12K utf16)降频,减少整表布局卡顿(P1-5 止血)。
+        let live = ChatStreamingMarkdownThrottleTestSupport.liveParseInterval
+        XCTAssertEqual(live(800, true), 0.12)
+        XCTAssertEqual(live(3_000, true), 0.20)
+        XCTAssertEqual(live(10_000, true), 0.32)
+        XCTAssertEqual(live(24_000, true), 0.5)
+        XCTAssertEqual(live(24_000, false), 0, "普通文本不在此加独立定时门")
+
+        let publish = ChatStreamingMarkdownThrottleTestSupport.blockPublishInterval
+        XCTAssertEqual(publish(800, true), 0.09)
+        XCTAssertEqual(publish(3_000, true), 0.12)
+        XCTAssertEqual(publish(10_000, true), 0.16)
+        XCTAssertEqual(publish(24_000, true), 0.22)
+        XCTAssertEqual(publish(24_000, false), 0)
+    }
+
     func testStreamingMarkdownConfigCacheKeyTracksPaperAndAccent() throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let source = try String(
@@ -489,6 +506,30 @@ final class ChatMessageProjectionTests: XCTestCase {
         )
         XCTAssertFalse(
             ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: completedText, animate: false)
+        )
+    }
+
+    func testIdentityCacheRetainsEnoughCompletedParagraphsToSuppressRemountFade() {
+        ChatStableStreamingMarkdownCacheTestSupport.reset()
+        // 长篇(小说/长对话)可有上百个段落 block。完成态重挂载/回滚时,只要 identity
+        // 缓存还持有该段落的 renderable,resolution 就返回 suppressesInitialFade=true,
+        // 不再重新淡入。旧上限 64 会让靠前的段落被后续解析挤出 → 完成瞬间整屏重新淡入
+        // (闪烁);提到 256 后,第 0 段在缓存了 100 段之后必须仍可解析。
+        let paragraphCount = 100
+        for index in 0..<paragraphCount {
+            ChatStableStreamingMarkdownCacheTestSupport.storeIdentity(
+                identity: "block-\(index)",
+                text: "paragraph \(index)",
+                animate: false
+            )
+        }
+        XCTAssertTrue(
+            ChatStableStreamingMarkdownCacheTestSupport.hasCachedIdentity(
+                identity: "block-0",
+                text: "paragraph 0",
+                animate: false
+            ),
+            "identity 缓存应至少容纳 100 个完成段落,否则已完成段落被挤出,完成/回滚时重新淡入闪烁。"
         )
     }
 
@@ -814,6 +855,45 @@ final class ChatMessageProjectionTests: XCTestCase {
         let longerPlan = ChatTimelinePlanner.build(messages: [longer], event: .assistantStreamDelta)
 
         XCTAssertNotEqual(shortPlan.latestRenderToken, longerPlan.latestRenderToken)
+    }
+
+    func testMessageIdKeepsDescriptionFormatViaCheapAccessor() {
+        // messageId 改用 toHexDashString() 直接访问器;app 内另有少量
+        // String(describing: message.id) 站点(MessageBubbleView 身份串、
+        // context compaction),两种写法必须逐字等价,否则 ForEach 身份会串线。
+        let message = UIMessage.companion.assistant(prompt: "格式 canary")
+
+        XCTAssertEqual(message.id.toHexDashString(), String(describing: message.id))
+        XCTAssertEqual(ChatMessageProjector.messageId(for: message), String(describing: message.id))
+    }
+
+    func testTimelinePlanCanSkipRenderTokensForNonNativePaths() {
+        let assistant = UIMessage.companion.assistant(prompt: "正在生成")
+
+        let skipped = ChatTimelinePlanner.build(
+            messages: [assistant],
+            event: .assistantStreamDelta,
+            includeRenderTokens: false
+        )
+        let skippedEntries = skipped.entries.compactMap { entry -> ChatTimelineMessageEntry? in
+            guard case let .message(messageEntry) = entry else { return nil }
+            return messageEntry
+        }
+        XCTAssertFalse(skippedEntries.isEmpty)
+        XCTAssertTrue(skippedEntries.allSatisfy { $0.renderToken.isEmpty })
+        XCTAssertTrue(skipped.latestRenderToken.isEmpty)
+
+        // 默认路径(native mirror diff 消费 token)必须保留非空 token。
+        let withTokens = ChatTimelinePlanner.build(
+            messages: [assistant],
+            event: .assistantStreamDelta
+        )
+        let tokenEntries = withTokens.entries.compactMap { entry -> ChatTimelineMessageEntry? in
+            guard case let .message(messageEntry) = entry else { return nil }
+            return messageEntry
+        }
+        XCTAssertTrue(tokenEntries.allSatisfy { !$0.renderToken.isEmpty })
+        XCTAssertFalse(withTokens.latestRenderToken.isEmpty)
     }
 
     func testNativeTimelineProjectionMirrorsTimelinePlanIdentityAndDecorations() {

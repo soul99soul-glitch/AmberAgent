@@ -118,6 +118,38 @@ final class ChatStreamingPerfBaselineTests: XCTestCase {
         XCTAssertGreaterThan(entryCount, 60)
     }
 
+    /// 嫌疑 2 修复对账:SwiftUI/collection 路径传 `includeRenderTokens: false` 后,
+    /// 尾行 32KB 文本不再每个 delta 被 renderToken 扫一遍。与上面同夹具,
+    /// 两条 [PERF] 行可直接对账;荒谬上限防极端回归。
+    func testPerf_timelinePlannerBuild_longSession_skipsRenderTokens() {
+        let tail = Self.longMarkdown(targetUTF16: 32_000)
+        var messages: [UIMessage] = []
+        for turn in 0..<30 {
+            messages.append(UIMessage.companion.user(prompt: "问题 \(turn):请继续展开上一节的机制细节。"))
+            messages.append(UIMessage.companion.assistant(prompt: "回答 \(turn):这一段是普通长度的历史回复,包含若干句子成本可忽略。"))
+        }
+        messages.append(UIMessage.companion.assistant(prompt: tail))
+
+        let iterations = 200
+        var entryCount = 0
+        let start = Self.mainThreadCPUNanos()
+        for _ in 0..<iterations {
+            let plan = ChatTimelinePlanner.build(
+                messages: messages,
+                event: .assistantStreamDelta,
+                streamedMessageIDs: [],
+                includePendingAssistant: false,
+                includeRenderTokens: false
+            )
+            entryCount = plan.entries.count
+        }
+        let elapsed = Self.mainThreadCPUNanos() - start
+        report("timelinePlannerBuild.skipTokens(61msgs+32KBtail)", iterations: iterations, totalNanos: elapsed)
+        XCTAssertGreaterThan(entryCount, 60)
+        // 荒谬上限:跳过 token 计算后,每次 build 主线程 CPU 不应超过 1ms。
+        XCTAssertLessThan(elapsed, UInt64(iterations) * 1_000_000)
+    }
+
     /// 嫌疑 3:`ChatStableStreamingMarkdownController.renderable(for:)` 每次 body
     /// 求值对全文做缓存键 Hasher + 最多 12 次 hasPrefix。用 DEBUG TestSupport
     /// 探针近似(同一条静态缓存查询路径)。

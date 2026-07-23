@@ -757,11 +757,16 @@ enum ChatTimelinePlanner {
     static let bottomAnchorID = ChatLayout.bottomAnchorID
     static let pendingAssistantID = "timeline-pending-assistant"
 
+    /// `includeRenderTokens` 控制是否计算逐行 renderToken。只有 native mirror diff
+    /// 消费 token(ChatMessageProjection 内 nativeEntry 与 diff 两处);SwiftUI clean
+    /// list 与 collection 路径从不读取,传 false 跳过尾行每个 chunk 都要 O(文本长度)
+    /// 扫一遍的 token 计算。
     static func build(
         messages: [UIMessage],
         event: ChatEvent,
         streamedMessageIDs: Set<String> = [],
-        includePendingAssistant: Bool = false
+        includePendingAssistant: Bool = false,
+        includeRenderTokens: Bool = true
     ) -> ChatTimelinePlan {
         let rows = ChatMessageProjector.rows(
             messages: messages,
@@ -781,7 +786,7 @@ enum ChatTimelinePlanner {
                     hasEverStreamed: row.hasEverStreamed,
                     canAnimateInsertion: row.canAnimateInsertion,
                     renderer: rendererKind(for: row),
-                    renderToken: renderToken(for: row)
+                    renderToken: includeRenderTokens ? renderToken(for: row) : ""
                 )
             )
         }
@@ -793,7 +798,9 @@ enum ChatTimelinePlanner {
 
         return ChatTimelinePlan(
             entries: entries,
-            latestRenderToken: latestRenderToken(rows: rows, includePendingAssistant: includePendingAssistant)
+            latestRenderToken: includeRenderTokens
+                ? latestRenderToken(rows: rows, includePendingAssistant: includePendingAssistant)
+                : ""
         )
     }
 
@@ -843,7 +850,10 @@ enum ChatTimelinePlanner {
 
 enum ChatMessageProjector {
     static func messageId(for message: UIMessage) -> String {
-        String(describing: message.id)
+        // String(describing:) 走桥接 description 路径(单次 ~25µs,逐行×每 delta);
+        // toHexDashString() 是直接访问器,产出同样的 8-4-4-4-12 字符串
+        // (格式等价由 ChatMessageProjectionTests 的 canary 锁定)。
+        message.id.toHexDashString()
     }
 
     static func rows(

@@ -52,6 +52,7 @@ struct MessageBubbleView: View {
     var reasoningLevelLabel: String? = nil
 
     @Environment(IOSWorkspaceStore.self) private var workspaceStore
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var workspaceSaveAlert: WorkspaceSaveAlert?
     @State private var toolDetailTarget: ToolDetailTarget?
 
@@ -318,7 +319,7 @@ struct MessageBubbleView: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.28), value: message.parts.map(Self.partAnimationKey).joined(separator: "|"))
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: message.parts.map(Self.partAnimationKey).joined(separator: "|"))
         .sheet(item: $toolDetailTarget) { target in
             ChatToolDetailSheet(
                 tool: target.tool,
@@ -983,16 +984,27 @@ private final class ChatStreamingMarkdownBlockController: ObservableObject {
     /// 解析已有 single-flight/latest-wins 背压。表格尾块仍保留低频发布，避免
     /// 每个表格 token 都让整张表进入布局；半截行由 block parser 隐藏。
     private func publishInterval(for text: String) -> TimeInterval {
-        guard let tail = blocks.last,
-              case .table = tail.kind else { return 0 }
-        let length = text.utf16.count
+        var isTableTail = false
+        if let tail = blocks.last, case .table = tail.kind {
+            isTableTail = true
+        }
+        return Self.publishInterval(utf16Length: text.utf16.count, isTableTail: isTableTail)
+    }
+
+    /// 表格尾块发布档位(P1-5 止血):<12K 保持原档位,超大表格(≥12K utf16)
+    /// 降到 0.22s,减少整表布局频率。
+    static func publishInterval(utf16Length length: Int, isTableTail: Bool) -> TimeInterval {
+        guard isTableTail else { return 0 }
         if length < 1_200 {
             return 0.09
         }
         if length < 4_000 {
             return 0.12
         }
-        return 0.16
+        if length < 12_000 {
+            return 0.16
+        }
+        return 0.22
     }
 
     func scheduleParse(text: String, includeTrailingPartialTableRow: Bool) {
@@ -1842,10 +1854,14 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
 
     private static var renderableCache: [RenderableCacheKey: SwiftStreamingMarkdown.RenderableDocument] = [:]
     private static var renderableCacheOrder: [RenderableCacheKey] = []
-    private static let renderableCacheLimit = 12
+    private static let renderableCacheLimit = 24
     private static var identityCache: [IdentityCacheKey: IdentityCacheEntry] = [:]
     private static var identityCacheOrder: [IdentityCacheKey] = []
-    private static let identityCacheLimit = 64
+    // 长篇(小说/长对话)可有上百个段落 block。完成态重挂载/LOD 翻转时,只要 identity
+    // 缓存还持有该段落的 renderable,resolution 就返回 suppressesInitialFade=true,不再
+    // 重新淡入(闪烁)。64 会让靠前的段落在后续解析中被挤出 → 完成时重新淡入;提到 256
+    // 让整篇已完成段落基本都能命中,消除完成瞬间的整屏闪烁。
+    private static let identityCacheLimit = 256
 
     @Published private(set) var revision = 0
     private var renderedText: String?
@@ -1983,20 +1999,30 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
     }
 
     private func liveParseInterval(for text: String) -> TimeInterval {
-        let length = text.utf16.count
-        if ChatStreamingMarkdownBlockParser.startsWithTable(in: text) {
-            if length < 1_200 {
-                return 0.12
-            }
-            if length < 4_000 {
-                return 0.20
-            }
-            return 0.32
-        }
+        Self.liveParseInterval(
+            utf16Length: text.utf16.count,
+            isTable: ChatStreamingMarkdownBlockParser.startsWithTable(in: text)
+        )
+    }
+
+    /// 表格越大发布越慢,降低整表布局产生 79ms 级主线程卡顿的频率(P1-5 止血)。
+    /// 根因(增量表格布局)在 vendor 侧,这里只是频域降频;<12K 档位保持原值,
+    /// 只给超大表格新增 0.5s 档。
+    static func liveParseInterval(utf16Length length: Int, isTable: Bool) -> TimeInterval {
         // 普通文本已经经过 coordinator 的 48ms snapshot gate。这里不能再加
         // 独立定时门：两个窗口错相时会把可见高度更新合并到约 132ms，表现为
         // 累计数行后整段上跳。解析仍由 single-flight/latest-wins 自然背压。
-        return 0
+        guard isTable else { return 0 }
+        if length < 1_200 {
+            return 0.12
+        }
+        if length < 4_000 {
+            return 0.20
+        }
+        if length < 12_000 {
+            return 0.32
+        }
+        return 0.5
     }
 
     private func parseNow(
@@ -2197,6 +2223,31 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
     ) -> Bool {
         cachedRenderable(for: text, config: config) != nil
     }
+
+    static func storeIdentityRenderableForTesting(
+        identity: String,
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) {
+        storeIdentityRenderable(
+            SwiftStreamingMarkdown.RenderableDocument(plainText: text, config: config),
+            for: identity,
+            text: text,
+            signature: renderSignature(for: config)
+        )
+    }
+
+    static func hasCachedIdentityRenderableForTesting(
+        identity: String,
+        text: String,
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) -> Bool {
+        cachedIdentityRenderable(
+            for: identity,
+            text: text,
+            signature: renderSignature(for: config)
+        ) != nil
+    }
 #endif
 }
 
@@ -2219,6 +2270,33 @@ enum ChatStableStreamingMarkdownCacheTestSupport {
             text: text,
             config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: animate)
         )
+    }
+
+    static func storeIdentity(identity: String, text: String, animate: Bool) {
+        ChatStableStreamingMarkdownController.storeIdentityRenderableForTesting(
+            identity: identity,
+            text: text,
+            config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: animate)
+        )
+    }
+
+    static func hasCachedIdentity(identity: String, text: String, animate: Bool) -> Bool {
+        ChatStableStreamingMarkdownController.hasCachedIdentityRenderableForTesting(
+            identity: identity,
+            text: text,
+            config: SwiftStreamingMarkdown.MarkdownRenderConfig.default.withShouldAnimateText(value: animate)
+        )
+    }
+}
+
+@MainActor
+enum ChatStreamingMarkdownThrottleTestSupport {
+    static func liveParseInterval(utf16Length: Int, isTable: Bool) -> TimeInterval {
+        ChatStableStreamingMarkdownController.liveParseInterval(utf16Length: utf16Length, isTable: isTable)
+    }
+
+    static func blockPublishInterval(utf16Length: Int, isTableTail: Bool) -> TimeInterval {
+        ChatStreamingMarkdownBlockController.publishInterval(utf16Length: utf16Length, isTableTail: isTableTail)
     }
 }
 

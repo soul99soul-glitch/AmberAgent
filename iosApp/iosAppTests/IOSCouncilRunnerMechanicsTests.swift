@@ -1168,6 +1168,43 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertFalse(harness.viewModel.messages.contains { $0.body == "第一场用户议题" })
     }
 
+    func testMidRunCheckpointsDebounceToOffMainThreadWrites() async throws {
+        // 旧实现:roster/append/消息完结每个事件都在主线程同步 save(≈11 次 encode+write)。
+        // 新实现:中段事件经 300ms 防抖合并成离主线程延迟写,终态一次同步写收口。
+        // ScriptedCouncilStreamer 无 pacing,事件密集到达 → 防抖在终态被取消前不会单独触发,
+        // 因此写入次数应远低于事件数(这里断言 ≤5,旧实现约 11 会红)。
+        let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success("工程发言"),
+            .success("风险发言"),
+            .success("主持总结")
+        ]))
+
+        harness.viewModel.inputText = "归档防抖议题"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertFalse(harness.viewModel.isRunning)
+
+        let taskID = try XCTUnwrap(
+            harness.taskStore.recent(kind: .modelCouncil, limit: 1).first?.id
+        )
+        let archive = try XCTUnwrap(harness.archiveStore.load(taskId: taskID))
+        XCTAssertTrue(
+            archive.messages.contains { $0.body == "主持总结" },
+            "终态同步写必须把完成态落盘,load-after-save 要看到最新事实。"
+        )
+        XCTAssertGreaterThanOrEqual(
+            harness.archiveStore.completedWriteCount, 2,
+            "至少应有 taskStarted 与终态两次同步写。"
+        )
+        XCTAssertLessThanOrEqual(
+            harness.archiveStore.completedWriteCount, 5,
+            "中段检查点应防抖合并,不能每条消息都在主线程同步落盘。"
+        )
+    }
+
     func testViewModelDoesNotResearchWhenWebSearchIsDisabled() async throws {
         let researcher = RecordingCouncilResearcher()
         let harness = try makeViewModelHarness(

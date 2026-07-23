@@ -96,10 +96,17 @@ final class ThinkingOrbEngineTests: XCTestCase {
             )
             // Dark mode should have higher average luminance (bright dots on
             // transparent bg) than light mode (dark dots on transparent bg).
-            XCTAssertGreaterThan(
-                darkStats.avgLuminance, lightStats.avgLuminance,
-                "\(state) dark avg luminance (\(darkStats.avgLuminance)) should exceed light (\(lightStats.avgLuminance))"
-            )
+            // Exception: `.working` (orbits) 的画面由 ~480 条 ghost 轨迹主导,其
+            // white=0.72(纸上是亮墨)。orbPaint 的镜像是对的(dark 时 g=1-w),这些
+            // ghost 在 dark 下变成 0.28 的暗墨,在像素均值里压过 36 颗真正反转的粒子,
+            // 合法地把 dark 均值压到 light 之下。上面的「亮度必须不同」(ink inversion
+            // 真契约)对它仍然成立;只是这条朴素的方向断言不适用于亮墨主导的模式。
+            if state != .working {
+                XCTAssertGreaterThan(
+                    darkStats.avgLuminance, lightStats.avgLuminance,
+                    "\(state) dark avg luminance (\(darkStats.avgLuminance)) should exceed light (\(lightStats.avgLuminance))"
+                )
+            }
         }
     }
 
@@ -125,6 +132,8 @@ final class ThinkingOrbEngineTests: XCTestCase {
 
     // MARK: - ReduceMotion static frame
 
+    // OrbCanvasView.configure 是 MainActor 隔离的。
+    @MainActor
     func testReduceMotionStaticFrame() {
         let view = OrbCanvasView()
         view.frame = CGRect(x: 0, y: 0, width: 24, height: 24)
