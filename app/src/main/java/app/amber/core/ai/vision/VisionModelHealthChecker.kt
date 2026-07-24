@@ -6,6 +6,7 @@ import app.amber.ai.provider.ProviderManager
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import kotlinx.coroutines.CancellationException
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
@@ -64,6 +65,7 @@ object VisionModelHealthChecker {
         }.fold(
             onSuccess = { VisionModelHealth(VisionModelHealthKind.AVAILABLE, "可用") },
             onFailure = {
+                if (it is CancellationException) throw it
                 VisionModelHealth(VisionModelHealthKind.FAILED, "不可用：${it.message ?: "检测失败"}")
             },
         )

@@ -19,6 +19,7 @@ private data class ParagraphProperties(
 
 object DocxParser {
     private const val DEFAULT_MAX_CHARS = 512_000
+    private const val MAX_XML_BYTES = 32L * 1024 * 1024
 
     fun parse(file: File, maxChars: Int = DEFAULT_MAX_CHARS): String {
         return try {
@@ -27,7 +28,7 @@ object DocxParser {
                     var entry = zipStream.nextEntry
                     while (entry != null) {
                         if (entry.name == "word/document.xml") {
-                            return parseDocumentXml(zipStream, maxChars)
+                            return parseDocumentXml(BoundedInputStream(zipStream, MAX_XML_BYTES), maxChars)
                         }
                         entry = zipStream.nextEntry
                     }

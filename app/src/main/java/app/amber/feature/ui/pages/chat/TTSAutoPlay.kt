@@ -18,6 +18,9 @@ fun TTSAutoPlay(vm: ChatVM, setting: Settings, conversation: Conversation) {
     val updatedSetting by rememberUpdatedState(setting)
     LaunchedEffect(Unit) {
         vm.generationDoneFlow.collect { conversationId ->
+            // generationDoneFlow 是 ChatService 全局流：后台其它会话完成时
+            // 不能朗读前台会话的旧消息
+            if (conversationId != currentConversation.id) return@collect
             if (updatedSetting.displaySetting.autoPlayTTSAfterGeneration) {
                 val lastMessage = currentConversation.currentMessages.lastOrNull()
                 if (lastMessage != null && lastMessage.role == MessageRole.ASSISTANT) {

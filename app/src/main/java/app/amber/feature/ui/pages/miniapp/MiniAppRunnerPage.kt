@@ -230,6 +230,7 @@ private fun MiniAppWebView(
 ) {
     val context = LocalContext.current
     val navController = LocalNavController.current
+    val scope = rememberCoroutineScope()
     val appSettings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
     val miniAppSetting = appSettings.agentRuntime.miniApp
     val json = remember { Json { ignoreUnknownKeys = true } }
@@ -343,7 +344,7 @@ private fun MiniAppWebView(
                         toast = { message -> Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show() },
                         clipboardCopy = { text -> ctx.writeClipboardText(text) },
                         updateBoardSummary = { summary ->
-                            runBlocking { repository.updateBoardSummary(app.id, summary) }
+                            scope.launch { repository.updateBoardSummary(app.id, summary) }
                         },
                         launchApp = { targetAppId ->
                             navController.navigate(Screen.MiniAppRunner(targetAppId))

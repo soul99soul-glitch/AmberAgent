@@ -43,7 +43,7 @@ data class SynaraConnection(
 
     fun validationError(): String? {
         val h = host.trim()
-        if (h.isEmpty()) return "请填写 Mac 的局域网 IP 或主机名"
+        if (h.isEmpty()) return "请填写 Mac 的局域网 IP"
         if (port !in 1..65535) return "端口无效"
         if (token.isBlank()) return "请填写 Auth Token（桌面进程 SYNARA_AUTH_TOKEN）"
         if (!useHttps && !isAllowedCleartextHost(h)) {

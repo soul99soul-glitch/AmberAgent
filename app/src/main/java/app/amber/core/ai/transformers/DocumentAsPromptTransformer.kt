@@ -24,7 +24,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                     parts = message.parts.toMutableList().apply {
                         val documents = filterIsInstance<UIMessagePart.Document>()
                         if (documents.isNotEmpty()) {
-                            documents.forEach { document ->
+                            documents.reversed().forEach { document ->
                                 val content = readDocumentContent(document)
                                 val prompt = """
                   ## user sent a file: ${document.fileName}

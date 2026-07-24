@@ -16,6 +16,8 @@ import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_SEATS
 import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
 import app.amber.feature.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import app.amber.core.agent.utils.JsonInstant
+import java.net.Inet6Address
+import java.net.InetAddress
 import java.util.Locale
 
 val EXTERNAL_CLI_COUNCIL_RUNNER_TYPES: Set<String> = setOf(
@@ -199,6 +201,30 @@ fun String?.isPrivateNetworkTarget(): Boolean {
             (a == 100 && b in 64..127)
     }
     return false
+}
+
+fun String?.resolvesToPrivateNetworkTarget(): Boolean {
+    if (isPrivateNetworkTarget()) return true
+    if (this.isNullOrBlank()) return false
+    val host = runCatching { java.net.URI(trim()).host }.getOrNull() ?: return false
+    return runCatching { InetAddress.getAllByName(host).any(InetAddress::isPrivateNetworkAddress) }
+        .getOrDefault(false)
+}
+
+fun InetAddress.isPrivateNetworkAddress(): Boolean {
+    if (isAnyLocalAddress || isLoopbackAddress || isLinkLocalAddress || isSiteLocalAddress) return true
+    val raw = address
+    if (this is Inet6Address) {
+        return raw.isNotEmpty() && (raw[0].toInt() and 0xFE) == 0xFC
+    }
+    if (raw.size != 4) return false
+    val a = raw[0].toInt() and 0xFF
+    val b = raw[1].toInt() and 0xFF
+    return a == 0 || a == 127 || a == 10 ||
+        (a == 192 && b == 168) ||
+        (a == 172 && b in 16..31) ||
+        (a == 169 && b == 254) ||
+        (a == 100 && b in 64..127)
 }
 
 fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {

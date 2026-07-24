@@ -56,6 +56,7 @@ class ConversationSession(
     val isInUse: Boolean get() = refCount.get() > 0 || isGenerating || pendingUserMessages.value.isNotEmpty()
 
     // 空闲检查任务
+    @Volatile
     private var idleCheckJob: Job? = null
 
     fun acquire(): Int = refCount.incrementAndGet().also {
@@ -88,6 +89,7 @@ class ConversationSession(
         }
     }
 
+    @Synchronized
     fun setJob(job: Job?) {
         _generationJob.value?.cancel()
         _generationJob.value = job

@@ -6,6 +6,10 @@ package app.amber.tts.controller
 class TextChunker(
     private val maxChunkLength: Int = 150
 ) {
+    init {
+        require(maxChunkLength > 0) { "maxChunkLength must be positive" }
+    }
+
     fun split(text: String): List<TtsChunk> {
         if (text.isBlank()) return emptyList()
 
@@ -19,6 +23,7 @@ class TextChunker(
                     .asSequence()
                     .map { it.trim() }
                     .filter { it.isNotEmpty() }
+                    .flatMap { it.chunked(maxChunkLength) }
                     .fold(mutableListOf<StringBuilder>()) { acc, seg ->
                         if (acc.isEmpty() || acc.last().length + seg.length > maxChunkLength) {
                             acc.add(StringBuilder(seg))
@@ -42,4 +47,3 @@ data class TtsChunk(
     val index: Int,
     val text: String
 )
-

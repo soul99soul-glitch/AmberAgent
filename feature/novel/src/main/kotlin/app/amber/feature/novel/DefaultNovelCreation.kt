@@ -6,6 +6,7 @@ import app.amber.feature.novel.domain.NovelCollectionReducer
 import app.amber.feature.novel.domain.NovelCreateProjectCommand
 import app.amber.feature.novel.domain.NovelError
 import app.amber.feature.novel.domain.NovelGenerationReducer
+import app.amber.feature.novel.domain.NovelDocumentValidator
 import app.amber.feature.novel.domain.NovelGenerationStartArtifacts
 import app.amber.feature.novel.domain.NovelInternalRunRequest
 import app.amber.feature.novel.domain.NovelManualEditReducer
@@ -109,17 +110,17 @@ class DefaultNovelCreation(
                 NovelSnapshot.Projects(items)
             }
             is NovelQuery.Project -> {
-                val loaded = repository.loadProject(query.projectId)
+                val loaded = loadProjectRecoveringOrphanedRuns(query.projectId)
                 NovelSnapshot.Project(loaded.document, loaded.access, loaded.primaryFailure)
             }
             is NovelQuery.BranchMarkdown -> {
-                val loaded = repository.loadProject(query.projectId)
+                val loaded = loadProjectRecoveringOrphanedRuns(query.projectId)
                 assertNotBusy(loaded)
                 val md = NovelPackageCodec.exportMarkdown(loaded.document, query.branchId)
                 NovelSnapshot.Markdown("${loaded.document.project.name}.md", md)
             }
             is NovelQuery.ProjectPackage -> {
-                val loaded = repository.loadProject(query.projectId)
+                val loaded = loadProjectRecoveringOrphanedRuns(query.projectId)
                 assertNotBusy(loaded)
                 val envelope = NovelPackageCodec.encode(loaded.document)
                 val bytes = NovelPackageCodec.let {
@@ -498,6 +499,44 @@ class DefaultNovelCreation(
         if (doc.activeRuns.any { it.status == NovelRunStatus.Running } || doc.pendingOperations.isNotEmpty()) {
             throw NovelError.ProjectBusy(doc.project.id)
         }
+    }
+
+    private suspend fun loadProjectRecoveringOrphanedRuns(projectId: NovelProjectId): NovelLoadedProject {
+        val loaded = repository.loadProject(projectId)
+        val orphanedRuns = loaded.document.activeRuns.filter { run ->
+            run.status == NovelRunStatus.Running && !liveRuns.containsKey(run.id.rawValue)
+        }
+        if (orphanedRuns.isEmpty()) return loaded
+
+        val sidecars = recoveryStore?.listForProject(projectId).orEmpty()
+        var recovered = loaded.document
+        orphanedRuns.forEach { run ->
+            val sidecar = sidecars.asSequence()
+                .filter { candidate ->
+                    candidate.runID == run.id &&
+                        candidate.branchID == run.branchID &&
+                        candidate.sessionID == run.sessionID &&
+                        candidate.messageID == run.messageID &&
+                        candidate.baseProjectRevision <= recovered.project.revision
+                }
+                .filter { candidate ->
+                    runCatching { NovelDocumentValidator.validateRecovery(candidate) }.isSuccess
+                }
+                .maxByOrNull { it.sequence }
+            val partial = sidecar?.partialContent ?: run.partialContent
+            recovered = NovelGenerationReducer.interrupt(
+                run.id,
+                NovelRunInterruptionReason.Recovery,
+                partial,
+                recovered,
+            ).first
+        }
+        val committed = repository.commitProject(
+            recovered,
+            expectedRevision = loaded.document.project.revision,
+        )
+        orphanedRuns.forEach { recoveryStore?.delete(projectId, it.id) }
+        return committed
     }
 
     private suspend fun createProject(intent: NovelIntent.CreateProject): NovelOutcome {

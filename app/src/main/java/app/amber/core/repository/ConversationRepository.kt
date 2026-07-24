@@ -1,6 +1,7 @@
 package app.amber.core.repository
 
 import android.database.sqlite.SQLiteBlobTooBigException
+import android.util.Log
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
@@ -136,7 +137,7 @@ class ConversationRepository(
     ): ConversationPageResult {
         val pagingSource = conversationDAO.searchConversationsOfAssistantPaging(
             assistantId = assistantId.toString(),
-            searchText = titleKeyword
+            searchText = escapeLikePattern(titleKeyword)
         )
         return try {
             when (
@@ -165,7 +166,7 @@ class ConversationRepository(
 
     fun searchConversations(titleKeyword: String): Flow<List<Conversation>> {
         return conversationDAO
-            .searchConversations(titleKeyword)
+            .searchConversations(escapeLikePattern(titleKeyword))
             .map { flow ->
                 flow.map { entity ->
                     conversationEntityToConversation(entity, emptyList())
@@ -179,7 +180,7 @@ class ConversationRepository(
             initialLoadSize = INITIAL_LOAD_SIZE,
             enablePlaceholders = false
         ),
-        pagingSourceFactory = { conversationDAO.searchConversationsPaging(titleKeyword) }
+        pagingSourceFactory = { conversationDAO.searchConversationsPaging(escapeLikePattern(titleKeyword)) }
     ).flow.map { pagingData ->
         pagingData.map { entity ->
             conversationSummaryToConversation(entity)
@@ -188,7 +189,7 @@ class ConversationRepository(
 
     fun searchConversationsOfAssistant(assistantId: Uuid, titleKeyword: String): Flow<List<Conversation>> {
         return conversationDAO
-            .searchConversationsOfAssistant(assistantId.toString(), titleKeyword)
+            .searchConversationsOfAssistant(assistantId.toString(), escapeLikePattern(titleKeyword))
             .map { flow ->
                 flow.map { entity ->
                     conversationEntityToConversation(entity, emptyList())
@@ -206,7 +207,7 @@ class ConversationRepository(
             pagingSourceFactory = {
                 conversationDAO.searchConversationsOfAssistantPaging(
                     assistantId.toString(),
-                    titleKeyword
+                    escapeLikePattern(titleKeyword)
                 )
             }
         ).flow.map { pagingData ->
@@ -238,10 +239,14 @@ class ConversationRepository(
             limit = safeLimit,
             offset = offset,
         )
+        // Use actual node_index instead of row offset to handle gaps correctly
+        val oldestIndex = if (nodes.isNotEmpty()) {
+            messageNodeDAO.getNodeIndexAtOffset(entity.id, offset) ?: offset
+        } else offset
         return ConversationWindow(
             conversation = conversationEntityToConversation(entity, nodes),
             totalNodeCount = total,
-            oldestLoadedIndex = offset,
+            oldestLoadedIndex = oldestIndex,
         )
     }
 
@@ -311,12 +316,14 @@ class ConversationRepository(
 
     suspend fun insertConversation(conversation: Conversation) {
         database.withTransaction {
-            conversationDAO.insert(
+            val inserted = conversationDAO.insert(
                 conversationToConversationEntity(conversation)
             )
+            if (inserted == -1L) return@withTransaction
             saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+            // FTS 与会话写入同一事务，避免"已入库但搜不到"的崩溃窗口
+            messageFtsManager.indexConversationInTransaction(conversation)
         }
-        messageFtsManager.indexConversation(conversation)
     }
 
     suspend fun updateConversation(conversation: Conversation) {
@@ -327,8 +334,8 @@ class ConversationRepository(
             // 删除旧的节点，插入新的节点
             messageNodeDAO.deleteByConversation(conversation.id.toString())
             saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+            messageFtsManager.indexConversationInTransaction(conversation)
         }
-        messageFtsManager.indexConversation(conversation)
     }
 
     suspend fun upsertConversationWindow(
@@ -339,7 +346,7 @@ class ConversationRepository(
         val conversationId = conversation.id.toString()
         val startIndex = firstNodeIndex.coerceAtLeast(0)
         val endIndex = startIndex + conversation.messageNodes.size - 1
-        val overwrittenNodeIds = database.withTransaction {
+        database.withTransaction {
             conversationDAO.update(
                 conversationToConversationEntity(conversation)
             )
@@ -364,13 +371,12 @@ class ConversationRepository(
                 nodes = conversation.messageNodes,
                 firstNodeIndex = startIndex,
             )
-            oldNodeIds
-        }
-        if (indexFts) {
-            if (overwrittenNodeIds.isNotEmpty()) {
-                messageFtsManager.deleteNodeIds(overwrittenNodeIds)
+            if (indexFts) {
+                if (oldNodeIds.isNotEmpty()) {
+                    messageFtsManager.deleteNodeIdsInTransaction(oldNodeIds)
+                }
+                messageFtsManager.indexConversationNodesInTransaction(conversation)
             }
-            messageFtsManager.indexConversationNodes(conversation)
         }
     }
 
@@ -380,21 +386,15 @@ class ConversationRepository(
         chatSuggestions: List<String>? = null,
         updateAt: Instant = Instant.now(),
     ) {
-        val entity = conversationDAO.getConversationById(conversationId.toString()) ?: return
-        val updatedTitle = title ?: entity.title
-        conversationDAO.update(
-            entity.copy(
-                title = updatedTitle,
-                chatSuggestions = chatSuggestions?.let { JsonInstant.encodeToString(it) }
-                    ?: entity.chatSuggestions,
-                updateAt = updateAt.toEpochMilli(),
-            )
-        )
-        messageFtsManager.updateConversationMetadata(
-            conversationId = conversationId.toString(),
-            title = updatedTitle,
-            updateAt = updateAt,
-        )
+        val id = conversationId.toString()
+        database.withTransaction {
+            val currentTitle = title ?: conversationDAO.getConversationById(id)?.title ?: return@withTransaction
+            title?.let { conversationDAO.updateTitle(id, it, updateAt.toEpochMilli()) }
+            chatSuggestions?.let {
+                conversationDAO.updateChatSuggestions(id, JsonInstant.encodeToString(it), updateAt.toEpochMilli())
+            }
+            messageFtsManager.updateConversationMetadataInTransaction(id, currentTitle, updateAt)
+        }
     }
 
     suspend fun deleteConversation(conversation: Conversation, deferCleanup: Boolean = false) {
@@ -404,8 +404,8 @@ class ConversationRepository(
         } else {
             conversation
         }
-        messageFtsManager.deleteConversation(conversation.id.toString())
         database.withTransaction {
+            messageFtsManager.deleteConversationInTransaction(conversation.id.toString())
             // message_node 会通过 CASCADE 自动删除
             conversationDAO.delete(
                 conversationToConversationEntity(conversation)
@@ -495,11 +495,13 @@ class ConversationRepository(
     }
 
     suspend fun togglePinStatus(conversationId: Uuid) {
-        conversationDAO.updatePinStatus(
-            id = conversationId.toString(),
-            isPinned = !(getConversationById(conversationId)?.isPinned ?: false)
-        )
+        // 原子 SQL 翻转：不加载整条会话，也无读-改-写竞态
+        conversationDAO.togglePinStatus(conversationId.toString())
     }
+
+    /** Escape LIKE wildcards so user input like "100%" matches literally. */
+    private fun escapeLikePattern(input: String): String =
+        input.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     private fun conversationSummaryToConversation(entity: LightConversationEntity): Conversation {
         return Conversation(
@@ -554,9 +556,21 @@ class ConversationRepository(
                 val page = try {
                     messageNodeDAO.getNodesOfConversationPaged(conversationId, currentLimit, currentOffset)
                 } catch (e: SQLiteBlobTooBigException) {
-                    e.printStackTrace()
-                    currentOffset += currentLimit
-                    continue
+                    if (currentLimit > 1) {
+                        // Retry with limit=1 to isolate the oversized row
+                        val single = try {
+                            messageNodeDAO.getNodesOfConversationPaged(conversationId, 1, currentOffset)
+                        } catch (_: SQLiteBlobTooBigException) {
+                            Log.w("ConversationRepo", "Skipping oversized node at offset $currentOffset")
+                            currentOffset += 1
+                            continue
+                        }
+                        single
+                    } else {
+                        Log.w("ConversationRepo", "Skipping oversized node at offset $currentOffset")
+                        currentOffset += 1
+                        continue
+                    }
                 }
                 if (page.isEmpty()) break
                 page.forEach { entity ->

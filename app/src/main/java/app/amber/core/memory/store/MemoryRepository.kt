@@ -2,6 +2,8 @@ package app.amber.core.memory.store
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import androidx.room.withTransaction
+import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.dao.MemoryCandidateDAO
 import app.amber.agent.data.db.dao.MemoryDAO
 import app.amber.agent.data.db.dao.MemoryEventDAO
@@ -22,6 +24,8 @@ open class MemoryRepository(
     private val memoryDAO: MemoryDAO,
     private val candidateDAO: MemoryCandidateDAO,
     private val eventDAO: MemoryEventDAO,
+    // 生产路径经 DI 恒为非 null；默认 null 仅兼容构造纯 Fake DAO 的单元测试
+    private val appDatabase: AppDatabase? = null,
 ) {
     companion object {
         const val GLOBAL_MEMORY_ID = "__global__"
@@ -176,19 +180,25 @@ open class MemoryRepository(
     }
 
     suspend fun acceptCandidate(id: String): MemoryRecord {
-        val candidate = candidateDAO.getCandidateById(id)?.toCandidate()
-            ?: error("Memory candidate #$id not found")
-        val record = addMemory(
-            scope = candidate.scope,
-            kind = candidate.kind,
-            content = candidate.content,
-            sourceConversationId = candidate.sourceConversationId,
-            sourceMessageIds = candidate.sourceMessageIds,
-            expiresAt = candidate.expiresAt,
-            confidence = candidate.confidence,
-        )
-        updateCandidate(candidate.copy(status = MemoryCandidateStatus.ACCEPTED))
-        return record
+        val db = requireNotNull(appDatabase) { "acceptCandidate requires AppDatabase" }
+        return db.withTransaction {
+            val candidate = candidateDAO.getCandidateById(id)?.toCandidate()
+                ?: error("Memory candidate #$id not found")
+            check(candidate.status == MemoryCandidateStatus.PENDING) {
+                "Memory candidate #$id is already ${candidate.status.wireName}"
+            }
+            val record = addMemory(
+                scope = candidate.scope,
+                kind = candidate.kind,
+                content = candidate.content,
+                sourceConversationId = candidate.sourceConversationId,
+                sourceMessageIds = candidate.sourceMessageIds,
+                expiresAt = candidate.expiresAt,
+                confidence = candidate.confidence,
+            )
+            updateCandidate(candidate.copy(status = MemoryCandidateStatus.ACCEPTED))
+            record
+        }
     }
 
     fun getRecentEventsFlow(limit: Int = 100): Flow<List<MemoryEvent>> =

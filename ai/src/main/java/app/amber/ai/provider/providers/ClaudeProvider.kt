@@ -169,6 +169,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
 
         Log.i(TAG, "streamText: model=${params.model.modelId}, messages=${messages.size}, stream=true")
 
+        val terminationGuard = StreamTerminationGuard(StreamProtocol.CLAUDE)
         val listener = object : EventSourceListener() {
             override fun onEvent(
                 eventSource: EventSource,
@@ -177,7 +178,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 data: String
             ) {
                 try {
-                    handleStreamEvent(id, type, data)
+                    handleStreamEvent(eventSource, id, type, data)
                 } catch (error: OutOfMemoryError) {
                     Log.e(TAG, "Claude stream exhausted app heap; canceling stream")
                     eventSource.cancel()
@@ -190,10 +191,12 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             private fun handleStreamEvent(
+                eventSource: EventSource,
                 id: String?,
                 type: String?,
                 data: String
             ) {
+                terminationGuard.observe(type, data)
                 logStreamEvent(type, data)
                 if (data == "[DONE]") return
 
@@ -250,7 +253,10 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     usage = tokenUsage
                 )
                 // 阻塞式发送形成背压, 避免 buffer 满时静默丢 token
-                trySendBlocking(messageChunk)
+                if (trySendBlocking(messageChunk).isFailure) {
+                    eventSource.cancel()
+                    return
+                }
             }
 
             override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
@@ -268,12 +274,14 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                 } catch (e: Throwable) {
                     Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                 } finally {
-                    close(exception)
+                    // 非 2xx 且 body 为空/非 JSON 时 t 为 null；必须合成异常,
+                    // 否则 close(null) 会让 flow 以零 chunk "正常完成", 上层把失败当成功
+                    close(exception ?: Exception("HTTP ${response?.code ?: "unknown"}"))
                 }
             }
 
             override fun onClosed(eventSource: EventSource) {
-                close()
+                close(terminationGuard.cleanEofCause())
             }
         }
 

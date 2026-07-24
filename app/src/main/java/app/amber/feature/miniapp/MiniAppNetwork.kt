@@ -124,6 +124,14 @@ class MiniAppHttpClient(
     }
 
     suspend fun fetchImage(rawUrl: String): MiniAppImageResult = withContext(Dispatchers.IO) {
+        fetchImageBlocking(rawUrl)
+    }
+
+    /**
+     * Synchronous image fetch for use from WebView's shouldInterceptRequest (which is
+     * inherently blocking). Avoids the runBlocking + withContext(IO) double thread-hop.
+     */
+    fun fetchImageBlocking(rawUrl: String): MiniAppImageResult {
         val request = Request.Builder()
             .url(urlGuard.check(rawUrl))
             .header("Accept", "image/avif,image/webp,image/png,image/jpeg,image/svg+xml,image/*;q=0.8")
@@ -137,7 +145,7 @@ class MiniAppHttpClient(
                 throw MiniAppValidationException("URL did not return an image")
             }
             val bytes = it.body?.byteStream()?.use { input -> input.readCapped(MAX_IMAGE_BYTES) } ?: ByteArray(0)
-            MiniAppImageResult(bytes = bytes, contentType = contentType.ifBlank { "image/png" })
+            return MiniAppImageResult(bytes = bytes, contentType = contentType.ifBlank { "image/png" })
         }
     }
 

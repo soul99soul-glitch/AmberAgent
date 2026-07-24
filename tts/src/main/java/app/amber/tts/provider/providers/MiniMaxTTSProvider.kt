@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
@@ -22,28 +23,57 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "MiniMaxTTSProvider"
+private val miniMaxJson = Json {
+    ignoreUnknownKeys = true
+    encodeDefaults = true
+}
 
 @Serializable
 private data class MiniMaxResponseData(
-    val audio: String,
-    val status: Int,
-    val ced: String
+    val audio: String = "",
+    val status: Int = 0,
+    val ced: String = "",
 )
 
 @Serializable
 private data class MiniMaxResponse(
-    val data: MiniMaxResponseData
+    val data: MiniMaxResponseData? = null,
+    @SerialName("base_resp") val baseResponse: MiniMaxBaseResponse? = null,
 )
+
+@Serializable
+private data class MiniMaxBaseResponse(
+    @SerialName("status_code") val statusCode: Int = 0,
+    @SerialName("status_msg") val statusMessage: String = "",
+)
+
+internal data class MiniMaxAudioFrame(
+    val bytes: ByteArray,
+    val status: Int,
+    val ced: String,
+)
+
+internal fun decodeMiniMaxAudioFrame(payload: String): MiniMaxAudioFrame? {
+    // SSE keep-alives/non-data frames are not provider failures. Preserve the
+    // old skip behavior for malformed frames, but surface a decoded business error.
+    val response = runCatching { miniMaxJson.decodeFromString<MiniMaxResponse>(payload) }
+        .getOrNull() ?: return null
+    response.baseResponse?.takeIf { it.statusCode != 0 }?.let { error ->
+        throw IllegalStateException("MiniMax TTS error ${error.statusCode}: ${error.statusMessage}")
+    }
+    val data = response.data ?: return null
+    if (data.audio.isBlank()) return null
+    return MiniMaxAudioFrame(
+        bytes = hexStringToBytes(data.audio),
+        status = data.status,
+        ced = data.ced,
+    )
+}
 
 class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
     private val httpClient = OkHttpClient.Builder()
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
-
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
 
     override fun generateSpeech(
         context: Context,
@@ -71,7 +101,7 @@ class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
             .url("${providerSetting.baseUrl}/t2a_v2")
             .addHeader("Authorization", "Bearer ${providerSetting.apiKey}")
             .addHeader("Content-Type", "application/json")
-            .post(json.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
+            .post(miniMaxJson.encodeToString(requestBody).toRequestBody("application/json".toMediaType()))
             .build()
 
         var hasEmittedAudio = false
@@ -80,31 +110,23 @@ class MiniMaxTTSProvider : TTSProvider<TTSProviderSetting.MiniMax> {
             when (it) {
                 is SseEvent.Open -> Log.i(TAG, "SSE connection opened")
                 is SseEvent.Event -> {
-                    try {
-                        val data = json.decodeFromString<MiniMaxResponse>(it.data)
-
-                        // Convert hex string to bytes
-                        val audioBytes = hexStringToBytes(data.data.audio)
-
-                        emit(
-                            AudioChunk(
-                                data = audioBytes,
-                                format = AudioFormat.MP3, // MiniMax returns MP3 format
-                                sampleRate = 32000, // Default sample rate from MiniMax
-                                isLast = false, // Will be set to true on last chunk
-                                metadata = mapOf(
-                                    "provider" to "minimax",
-                                    "model" to providerSetting.model,
-                                    "voice" to providerSetting.voiceId,
-                                    "status" to data.data.status.toString(),
-                                    "ced" to data.data.ced
-                                )
+                    val frame = decodeMiniMaxAudioFrame(it.data) ?: return@collect
+                    emit(
+                        AudioChunk(
+                            data = frame.bytes,
+                            format = AudioFormat.MP3,
+                            sampleRate = 32000,
+                            isLast = false,
+                            metadata = mapOf(
+                                "provider" to "minimax",
+                                "model" to providerSetting.model,
+                                "voice" to providerSetting.voiceId,
+                                "status" to frame.status.toString(),
+                                "ced" to frame.ced,
                             )
                         )
-                        hasEmittedAudio = true
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to process audio chunk", e)
-                    }
+                    )
+                    hasEmittedAudio = true
                 }
 
                 is SseEvent.Closed -> {

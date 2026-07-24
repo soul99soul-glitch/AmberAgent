@@ -3,7 +3,11 @@
     "allow": [
       "Bash(./gradlew:*)",
       "Bash(find:*)",
-      "Bash(uv run --directory locale-tui src/main.py:*)"
+      "Bash(uv run --directory locale-tui src/main.py:*)",
+      "Bash(git submodule *)",
+      "Bash(git check-ignore *)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(git -C /Users/arquiel/Downloads/AI/amberagent status --porcelain=v1 --ignored)"
     ],
     "deny": []
   },

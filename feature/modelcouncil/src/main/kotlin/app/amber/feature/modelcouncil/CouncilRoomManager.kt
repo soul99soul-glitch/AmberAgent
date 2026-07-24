@@ -2,6 +2,7 @@ package app.amber.feature.modelcouncil
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -2283,28 +2284,27 @@ class CouncilRoomManager(
      * already closing, no job is launched.
      */
     private suspend fun launchGuestJob(conversationId: Uuid, block: suspend () -> Unit): Job? {
-        val shouldLaunch = jobsLock.withLock { conversationId !in closingConversationIds }
-        if (!shouldLaunch) return null
-
-        val job = appScope.launch {
-            val added = jobsLock.withLock {
-                if (conversationId in closingConversationIds) {
-                    false
-                } else {
-                    generationJobs.getOrPut(conversationId) { mutableListOf() }.add(coroutineContext[Job]!!)
-                    true
-                }
-            }
-            if (!added) return@launch
-
+        lateinit var job: Job
+        job = appScope.launch(start = CoroutineStart.LAZY) {
             try {
                 block()
             } finally {
                 jobsLock.withLock {
-                    generationJobs[conversationId]?.remove(coroutineContext[Job]!!)
+                    generationJobs[conversationId]?.remove(job)
                 }
             }
         }
+        val registered = jobsLock.withLock {
+            if (conversationId in closingConversationIds) false else {
+                generationJobs.getOrPut(conversationId) { mutableListOf() }.add(job)
+                true
+            }
+        }
+        if (!registered) {
+            job.cancel()
+            return null
+        }
+        job.start()
         return job
     }
 
@@ -2313,28 +2313,27 @@ class CouncilRoomManager(
      * registers itself synchronously and respects the closing gate.
      */
     private suspend fun launchSynthesisJob(conversationId: Uuid, block: suspend () -> Unit): Job? {
-        val shouldLaunch = jobsLock.withLock { conversationId !in closingConversationIds }
-        if (!shouldLaunch) return null
-
-        val job = appScope.launch {
-            val added = jobsLock.withLock {
-                if (conversationId in closingConversationIds) {
-                    false
-                } else {
-                    synthesisJobs[conversationId] = coroutineContext[Job]!!
-                    true
-                }
-            }
-            if (!added) return@launch
-
+        lateinit var job: Job
+        job = appScope.launch(start = CoroutineStart.LAZY) {
             try {
                 block()
             } finally {
                 jobsLock.withLock {
-                    synthesisJobs.remove(conversationId)
+                    if (synthesisJobs[conversationId] === job) synthesisJobs.remove(conversationId)
                 }
             }
         }
+        val registered = jobsLock.withLock {
+            if (conversationId in closingConversationIds) false else {
+                synthesisJobs[conversationId] = job
+                true
+            }
+        }
+        if (!registered) {
+            job.cancel()
+            return null
+        }
+        job.start()
         return job
     }
 

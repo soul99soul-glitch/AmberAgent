@@ -41,7 +41,7 @@ data class Conversation(
      */
     val currentMessages
         get(): List<UIMessage> {
-            return messageNodes.map { node -> node.messages[node.selectIndex] }
+            return messageNodes.mapNotNull { node -> node.messages.getOrNull(node.selectIndex) }
         }
 
     fun getMessageNodeByMessage(message: UIMessage): MessageNode? {

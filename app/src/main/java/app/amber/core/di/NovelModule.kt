@@ -13,6 +13,7 @@ import app.amber.feature.ui.pages.novel.NovelProjectUiSession
 import app.amber.feature.ui.pages.novel.NovelProjectsViewModel
 import app.amber.feature.ui.pages.novel.NovelSettingsViewModel
 import app.amber.feature.ui.pages.novel.NovelWorkspaceViewModel
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -28,7 +29,9 @@ import org.koin.dsl.module
  */
 val novelModule = module {
     single(named("novelAppScope")) {
-        CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e ->
+            android.util.Log.e("NovelScope", "Uncaught exception", e)
+        })
     }
 
     single<NovelProjectPersisting> {

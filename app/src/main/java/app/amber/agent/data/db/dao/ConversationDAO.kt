@@ -4,6 +4,7 @@ import androidx.paging.PagingSource
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
@@ -36,16 +37,16 @@ interface ConversationDAO {
     @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt FROM conversationentity ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
     suspend fun getRecentConversationSummaries(limit: Int): List<LightConversationEntity>
 
-    @Query("SELECT * FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC")
+    @Query("SELECT * FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ESCAPE '\\' ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversations(searchText: String): Flow<List<ConversationEntity>>
 
-    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC")
+    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ESCAPE '\\' ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversationsPaging(searchText: String): PagingSource<Int, LightConversationEntity>
 
-    @Query("SELECT * FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC")
+    @Query("SELECT * FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ESCAPE '\\' ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversationsOfAssistant(assistantId: String, searchText: String): Flow<List<ConversationEntity>>
 
-    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ORDER BY is_pinned DESC, update_at DESC")
+    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ESCAPE '\\' ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversationsOfAssistantPaging(assistantId: String, searchText: String): PagingSource<Int, LightConversationEntity>
 
     @Query("SELECT * FROM conversationentity WHERE id = :id")
@@ -63,11 +64,17 @@ interface ConversationDAO {
     @Query("SELECT EXISTS(SELECT 1 FROM conversationentity WHERE id = :id)")
     suspend fun existsById(id: String): Boolean
 
-    @Insert
-    suspend fun insert(conversation: ConversationEntity)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insert(conversation: ConversationEntity): Long
 
     @Update
     suspend fun update(conversation: ConversationEntity)
+
+    @Query("UPDATE conversationentity SET title = :title, update_at = :updatedAt WHERE id = :id")
+    suspend fun updateTitle(id: String, title: String, updatedAt: Long)
+
+    @Query("UPDATE conversationentity SET suggestions = :chatSuggestions, update_at = :updatedAt WHERE id = :id")
+    suspend fun updateChatSuggestions(id: String, chatSuggestions: String, updatedAt: Long)
 
     @Delete
     suspend fun delete(conversation: ConversationEntity)
@@ -86,6 +93,10 @@ interface ConversationDAO {
 
     @Query("UPDATE conversationentity SET is_pinned = :isPinned WHERE id = :id")
     suspend fun updatePinStatus(id: String, isPinned: Boolean)
+
+    /** 原子翻转置顶位：避免为翻转一个布尔加载整条会话 + 读-改-写竞态。 */
+    @Query("UPDATE conversationentity SET is_pinned = NOT is_pinned WHERE id = :id")
+    suspend fun togglePinStatus(id: String)
 
     /**
      * Lightweight update of just the council_state column. Avoids rewriting the

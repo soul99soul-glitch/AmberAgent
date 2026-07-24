@@ -83,11 +83,13 @@ class NativePathPrefs(
 
     val flow: StateFlow<NativePathPrefsData> = MutableStateFlow(NativePathPrefsData()).also { state ->
         scope.launch {
-            runCatching {
+            try {
                 rawFlow.collect { state.value = it }
-            }.onFailure {
-                it.printStackTrace()
-                Log.e("NativePathPrefs", "Error while collecting flow: ${it.message}", it)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Log.e("NativePathPrefs", "Error while collecting flow: ${e.message}", e)
                 Runtime.getRuntime().halt(1)
             }
         }

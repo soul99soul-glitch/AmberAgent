@@ -4,6 +4,8 @@ import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -89,12 +91,18 @@ class SettingsAggregator(
 
     val settingsFlow: StateFlow<Settings> get() = _settingsFlow
 
+    private val writeMutex = Mutex()
+
     /**
      * Atomic write — single [dataStore.edit] block writing all 55 keys.
      * Mirrors the pre-M1.1.8e SettingsStore.update line 485-557 byte-for-byte so character
      * test can prove behavioural equivalence.
      */
-    suspend fun update(settings: Settings) {
+    suspend fun update(settings: Settings) = writeMutex.withLock {
+        writeSettings(settings)
+    }
+
+    private suspend fun writeSettings(settings: Settings) {
         if (settings.init) {
             Log.w(TAG, "Cannot update dummy settings")
             return
@@ -180,10 +188,12 @@ class SettingsAggregator(
     }
 
     suspend fun update(fn: (Settings) -> Settings) {
-        update(fn(settingsFlow.value))
+        writeMutex.withLock {
+            writeSettings(fn(settingsFlow.value))
+        }
     }
 
-    suspend fun updateLaunchCount(launchCount: Int) {
+    suspend fun updateLaunchCount(launchCount: Int) = writeMutex.withLock {
         dataStore.edit { p ->
             p[PreferencesKeys.LAUNCH_COUNT] = launchCount
         }
@@ -193,7 +203,7 @@ class SettingsAggregator(
         }
     }
 
-    suspend fun updateAssistant(assistantId: Uuid) {
+    suspend fun updateAssistant(assistantId: Uuid) = writeMutex.withLock {
         dataStore.edit { p ->
             p[PreferencesKeys.SELECT_ASSISTANT] = assistantId.toString()
         }

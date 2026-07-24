@@ -68,8 +68,13 @@ class WorkspaceTools(
         execute = { input ->
             trackWorkspaceTool("file_read", "读取文件", input) {
                 val path = input.requiredString("path")
-                val content = workspaceManager.readText(path)
-                listOf(UIMessagePart.Text(buildFileReadJson(path, content, input.int("max_chars")).toString()))
+                val requestedMaxChars = input.int("max_chars")
+                val read = workspaceManager.readTextCapped(path, normalizeFileReadMaxChars(requestedMaxChars))
+                listOf(
+                    UIMessagePart.Text(
+                        buildFileReadJson(path, read.content, requestedMaxChars, read.truncated).toString()
+                    )
+                )
             }
         }
     )
@@ -275,12 +280,13 @@ internal fun buildFileReadJson(
     path: String,
     content: String,
     requestedMaxChars: Int?,
+    truncatedOverride: Boolean? = null,
 ) = buildJsonObject {
     val maxChars = normalizeFileReadMaxChars(requestedMaxChars)
-    val truncated = content.length > maxChars
+    val truncated = truncatedOverride ?: (content.length > maxChars)
     put("path", path)
-    put("content", if (truncated) content.take(maxChars) else content)
-    put("total_size_chars", content.length)
+    put("content", content.take(maxChars))
+    put("total_size_chars", if (truncated) maxChars + 1 else content.length)
     put("truncated", truncated)
     put("max_chars", maxChars)
 }

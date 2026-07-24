@@ -28,6 +28,14 @@ class MessageFtsManager(private val database: AppDatabase) {
     private val db get() = database.openHelper.writableDatabase
 
     suspend fun indexConversation(conversation: Conversation) = withContext(Dispatchers.IO) {
+        indexConversationInTransaction(conversation)
+    }
+
+    /**
+     * 不切换 dispatcher 的版本：可在 Room `withTransaction` 块内直接调用，
+     * 使 FTS 写入与会话写入同属一个事务，避免崩溃窗口导致索引漂移。
+     */
+    fun indexConversationInTransaction(conversation: Conversation) {
         val conversationId = conversation.id.toString()
         db.execSQL("DELETE FROM message_fts WHERE conversation_id = ?", arrayOf(conversationId))
         insertNodes(
@@ -39,6 +47,11 @@ class MessageFtsManager(private val database: AppDatabase) {
     }
 
     suspend fun indexConversationNodes(conversation: Conversation) = withContext(Dispatchers.IO) {
+        indexConversationNodesInTransaction(conversation)
+    }
+
+    /** 见 [indexConversationInTransaction]。 */
+    fun indexConversationNodesInTransaction(conversation: Conversation) {
         val conversationId = conversation.id.toString()
         conversation.messageNodes.forEach { node ->
             db.execSQL("DELETE FROM message_fts WHERE node_id = ?", arrayOf(node.id.toString()))
@@ -52,6 +65,11 @@ class MessageFtsManager(private val database: AppDatabase) {
     }
 
     suspend fun deleteNodeIds(nodeIds: Collection<String>) = withContext(Dispatchers.IO) {
+        deleteNodeIdsInTransaction(nodeIds)
+    }
+
+    /** 见 [indexConversationInTransaction]。 */
+    fun deleteNodeIdsInTransaction(nodeIds: Collection<String>) {
         nodeIds.asSequence()
             .filter { it.isNotBlank() }
             .distinct()
@@ -66,6 +84,10 @@ class MessageFtsManager(private val database: AppDatabase) {
     }
 
     suspend fun updateConversationMetadata(conversationId: String, title: String, updateAt: Instant) = withContext(Dispatchers.IO) {
+        updateConversationMetadataInTransaction(conversationId, title, updateAt)
+    }
+
+    fun updateConversationMetadataInTransaction(conversationId: String, title: String, updateAt: Instant) {
         db.execSQL(
             "UPDATE message_fts SET title = ?, update_at = ? WHERE conversation_id = ?",
             arrayOf(title, updateAt.toEpochMilli().toString(), conversationId)
@@ -73,6 +95,10 @@ class MessageFtsManager(private val database: AppDatabase) {
     }
 
     suspend fun deleteConversation(conversationId: String) = withContext(Dispatchers.IO) {
+        deleteConversationInTransaction(conversationId)
+    }
+
+    fun deleteConversationInTransaction(conversationId: String) {
         db.execSQL("DELETE FROM message_fts WHERE conversation_id = ?", arrayOf(conversationId))
     }
 
@@ -147,8 +173,9 @@ class MessageFtsManager(private val database: AppDatabase) {
 
     suspend fun search(keyword: String): List<MessageSearchResult> = withContext(Dispatchers.IO) {
         val results = mutableListOf<MessageSearchResult>()
-        val cursor = db.query(
-            """
+        val cursor = try {
+            db.query(
+                """
             SELECT message_fts.node_id, message_fts.message_id, message_fts.conversation_id,
                    c.assistant_id, message_fts.title, message_fts.update_at,
                    simple_snippet(message_fts, 0, '[', ']', '...', 30) AS snippet
@@ -158,8 +185,12 @@ class MessageFtsManager(private val database: AppDatabase) {
             ORDER BY rank, message_fts.update_at DESC
             LIMIT 50
             """.trimIndent(),
-            arrayOf(keyword)
-        )
+                arrayOf(keyword)
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "FTS query failed for keyword '$keyword': ${e.message}")
+            return@withContext emptyList()
+        }
         Log.i(TAG, "search: $keyword")
         cursor.use {
             while (it.moveToNext()) {

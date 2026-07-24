@@ -33,6 +33,7 @@ import app.amber.core.files.FilesManager
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.util.UUID
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -179,9 +180,19 @@ class SyncArchiveManager(
             summaries += SyncDatasetSummary("secrets", recordCount = if (mode == SyncMode.FULL) 1 else 0)
 
             val db = database.openHelper.writableDatabase
-            SYNC_TABLES.forEach { table ->
-                val rowCount = writeTableEntry(zip, db, table)
-                summaries += SyncDatasetSummary("table:$table", recordCount = rowCount)
+            // Keep every exported table on one SQLite read snapshot. File roots
+            // are external resources and intentionally remain outside this DB
+            // transaction; the current ownership graph has no shared writer lock
+            // that could make DB + files one atomic snapshot.
+            db.beginTransactionNonExclusive()
+            try {
+                SYNC_TABLES.forEach { table ->
+                    val rowCount = writeTableEntry(zip, db, table)
+                    summaries += SyncDatasetSummary("table:$table", recordCount = rowCount)
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
             }
 
             val fileSummary = writeFileTrees(zip)
@@ -232,30 +243,36 @@ class SyncArchiveManager(
         return File.createTempFile("amber-$prefix-", suffix, dir)
     }
 
+    private fun tempSyncDirectory(prefix: String): File =
+        tempSyncFile(prefix, ".tmp").apply {
+            check(delete() && mkdirs()) { "Unable to create sync staging directory" }
+        }.canonicalFile
+
     private suspend fun restorePayload(
         payloadFile: File,
         manifest: SyncManifest,
         request: SyncRestoreRequest,
     ) {
+        recoverInterruptedFileRestore()
         val scope = request.scope
         var settingsJson: String? = null
         var secretsJson: String? = null
-        val tableRows = linkedMapOf<String, MutableList<JsonObject>>()
-        val stagedFilesRoot = File(context.cacheDir, "sync-restore-stage").canonicalFile
-        stagedFilesRoot.deleteRecursively()
-        stagedFilesRoot.mkdirs()
+        val stagedTableFiles = linkedMapOf<String, File>()
+        val stagedRestoreRoot = tempSyncDirectory("restore-stage")
+        val stagedTablesRoot = File(stagedRestoreRoot, "tables").canonicalFile.apply { mkdirs() }
+        val stagedFilesRoot = File(stagedRestoreRoot, "files").canonicalFile.apply { mkdirs() }
         var restoredFileCount = 0
         var restoredFileBytes = 0L
+        var restoredTableBytes = 0L
 
         // CONFIG_ONLY skips both DB-table extraction and file-tree
         // extraction — we only care about the settings entry. Reading the
         // entries unconditionally would burn I/O on archives that contain
         // multi-GB chat_images / upload dirs we're not going to use.
         val skipBulkPayload = scope == RestoreScope.CONFIG_ONLY
-        // Same I/O optimization for the preserve toggles: when the user opted
-        // to keep their local chat_images / images, don't even bother staging
-        // the bytes from the archive — they'd be wiped by the outer finally
-        // block anyway.
+        // Same I/O optimization for the preserve toggles: don't stage roots
+        // that the restore contract leaves local.
+        val skipUpload = scope == RestoreScope.EVERYTHING && request.preserveConversations
         val skipChatImages = scope == RestoreScope.EVERYTHING && request.preserveGenMedia
         val skipImages = scope == RestoreScope.EVERYTHING && request.preserveGenMedia
         val preserveConversationTables =
@@ -283,12 +300,21 @@ class SyncArchiveManager(
                             entry.name.startsWith("tables/") &&
                             entry.name.endsWith(".jsonl") -> {
                             val table = entry.name.removePrefix("tables/").removeSuffix(".jsonl")
-                            val rows = tableRows.getOrPut(table) { mutableListOf() }
-                            zip.readBytesWithinLimit(MAX_TABLE_ENTRY_BYTES, entry.name)
-                                .decodeToString()
-                                .lineSequence()
-                                .filter { it.isNotBlank() }
-                                .forEach { rows += json.parseToJsonElement(it).jsonObject }
+                            val target = File(stagedTablesRoot, "$table.jsonl").canonicalFile
+                            require(target.path.startsWith(stagedTablesRoot.path + File.separator)) {
+                                "Invalid table path in sync archive: $table"
+                            }
+                            val append = target.exists() && target.length() > 0
+                            target.parentFile?.mkdirs()
+                            FileOutputStream(target, true).buffered().use { output ->
+                                if (append) output.write('\n'.code)
+                                val remaining = MAX_STAGED_TABLE_BYTES - restoredTableBytes
+                                require(remaining > 0) {
+                                    "Sync archive tables exceed $MAX_STAGED_TABLE_BYTES bytes"
+                                }
+                                restoredTableBytes += zip.copyToWithinLimit(output, remaining, entry.name)
+                            }
+                            stagedTableFiles[table] = target
                         }
 
                         !skipBulkPayload && entry.name.startsWith("files/") -> {
@@ -299,9 +325,14 @@ class SyncArchiveManager(
                             // closeEntry() (at the bottom of the outer loop)
                             // skips past any unread payload of the current
                             // entry before advancing.
+                            val isUpload = relativePath.startsWith(FileFolders.UPLOAD + "/")
                             val isChatImages = relativePath.startsWith(FileFolders.CHAT_IMAGES + "/")
                             val isImages = relativePath.startsWith(FileFolders.IMAGES + "/")
-                            if ((skipChatImages && isChatImages) || (skipImages && isImages)) {
+                            if (
+                                (skipUpload && isUpload) ||
+                                (skipChatImages && isChatImages) ||
+                                (skipImages && isImages)
+                            ) {
                                 // intentionally drop — local files of this root stay.
                             } else {
                                 require(restoredFileCount < MAX_PAYLOAD_FILE_COUNT) {
@@ -368,16 +399,24 @@ class SyncArchiveManager(
                         if (preserveGenMediaTables) addAll(GEN_MEDIA_TABLES)
                     }
                     val filteredTableRows = if (skippedTables.isEmpty()) {
-                        tableRows
+                        stagedTableFiles
                     } else {
-                        tableRows.filterKeys { it !in skippedTables }
+                        stagedTableFiles.filterKeys { it !in skippedTables }
                     }
                     val skippedFileRoots = buildSet {
+                        if (skipUpload) add(FileFolders.UPLOAD)
                         if (skipChatImages) add(FileFolders.CHAT_IMAGES)
                         if (skipImages) add(FileFolders.IMAGES)
                     }
-                    restoreTables(filteredTableRows, skippedTables) {
-                        replaceFileTreesFromStage(stagedFilesRoot, skippedFileRoots)
+                    val fileJournal = prepareFileTreeRestore(stagedFilesRoot, skippedFileRoots)
+                    try {
+                        restoreTables(filteredTableRows, skippedTables, fileJournal.token)
+                        fileJournal.commit()
+                    } catch (error: Throwable) {
+                        runCatching { fileJournal.rollback() }
+                            .exceptionOrNull()
+                            ?.let(error::addSuppressed)
+                        throw error
                     }
                 }
                 RestoreScope.CONFIG_ONLY -> {
@@ -387,7 +426,7 @@ class SyncArchiveManager(
                 }
             }
         } finally {
-            stagedFilesRoot.deleteRecursively()
+            stagedRestoreRoot.deleteRecursively()
         }
         if (scope == RestoreScope.EVERYTHING) {
             // Secrets (WebMount + Codex OAuth tokens) are session-bound.
@@ -426,9 +465,9 @@ class SyncArchiveManager(
     }
 
     private fun restoreTables(
-        rowsByTable: Map<String, List<JsonObject>>,
+        rowsByTable: Map<String, File>,
         preservedTables: Set<String> = emptySet(),
-        afterTablesRestored: () -> Unit,
+        restoreToken: String? = null,
     ) {
         val db = database.openHelper.writableDatabase
         db.execSQL("PRAGMA foreign_keys=OFF")
@@ -443,11 +482,13 @@ class SyncArchiveManager(
             }
             SYNC_TABLES.forEach { table ->
                 if (table in preservedTables) return@forEach
-                rowsByTable[table].orEmpty().forEach { row ->
-                    db.insert(table, SQLiteDatabase.CONFLICT_REPLACE, row.toContentValues(table))
+                rowsByTable[table]?.bufferedReader()?.useLines { lines ->
+                    lines.filter { it.isNotBlank() }.forEach { line ->
+                        val row = json.parseToJsonElement(line).jsonObject
+                        db.insert(table, SQLiteDatabase.CONFLICT_REPLACE, row.toContentValues(table))
+                    }
                 }
             }
-            afterTablesRestored()
             runCatching {
                 val resetTables = SYNC_TABLES.filterNot { it in preservedTables }
                 if (resetTables.isNotEmpty()) {
@@ -455,6 +496,7 @@ class SyncArchiveManager(
                     db.execSQL("DELETE FROM sqlite_sequence WHERE name IN ($names)")
                 }
             }
+            restoreToken?.let { writeDatabaseRestoreMarker(db, it) }
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -517,21 +559,44 @@ class SyncArchiveManager(
         }
     }
 
-    private fun replaceFileTreesFromStage(
+    private fun prepareFileTreeRestore(
         stageRoot: File,
         preservedRoots: Set<String> = emptySet(),
-    ) {
+    ): FileTreeRestoreJournal {
         val filesDir = context.filesDir.canonicalFile
-        val backupRoot = File(context.cacheDir, "sync-restore-backup").canonicalFile
-        backupRoot.deleteRecursively()
-        backupRoot.mkdirs()
-        try {
-            SYNC_FILE_ROOTS.forEach { relativeRoot ->
-                if (relativeRoot in preservedRoots) return@forEach
-                val target = File(filesDir, relativeRoot).canonicalFile
+        val replacedRoots = SYNC_FILE_ROOTS.filterNot { it in preservedRoots }
+        val targets = replacedRoots.associateWith { relativeRoot ->
+            File(filesDir, relativeRoot).canonicalFile.also { target ->
                 require(target.path.startsWith(filesDir.path + File.separator)) {
                     "Invalid sync file root: $relativeRoot"
                 }
+            }
+        }
+        val stagedRoots = stageRoot.listFiles().orEmpty().associateBy { staged ->
+            staged.name.also { relativeRoot ->
+                require(relativeRoot in SYNC_FILE_ROOTS) {
+                    "Invalid staged sync root: $relativeRoot"
+                }
+            }
+        }
+        val journalRoot = File(context.cacheDir, FILE_RESTORE_JOURNAL_DIR).canonicalFile
+        val backupRoot = File(journalRoot, "backup").canonicalFile
+        val restoreToken = UUID.randomUUID().toString()
+        journalRoot.deleteRecursively()
+        backupRoot.mkdirs()
+        writeJournalText(File(journalRoot, FILE_RESTORE_ROOTS), replacedRoots.joinToString("\n"))
+        writeJournalText(File(journalRoot, FILE_RESTORE_TOKEN), restoreToken)
+        writeJournalText(File(journalRoot, FILE_RESTORE_STATE), FILE_RESTORE_PENDING)
+        val journal = FileTreeRestoreJournal(
+            filesDir = filesDir,
+            journalRoot = journalRoot,
+            backupRoot = backupRoot,
+            replacedRoots = replacedRoots,
+            token = restoreToken,
+        )
+        try {
+            replacedRoots.forEach { relativeRoot ->
+                val target = targets.getValue(relativeRoot)
                 if (target.exists()) {
                     val backup = File(backupRoot, relativeRoot).canonicalFile
                     backup.parentFile?.mkdirs()
@@ -541,27 +606,107 @@ class SyncArchiveManager(
                     }
                 }
             }
-            stageRoot.listFiles().orEmpty().forEach { staged ->
-                val relativeRoot = staged.name
-                require(relativeRoot in SYNC_FILE_ROOTS) {
-                    "Invalid staged sync root: $relativeRoot"
-                }
-                if (relativeRoot in preservedRoots) return@forEach
-                staged.copyRecursively(File(filesDir, relativeRoot), overwrite = true)
+            replacedRoots.forEach { relativeRoot ->
+                stagedRoots[relativeRoot]?.copyRecursively(
+                    target = File(filesDir, relativeRoot),
+                    overwrite = true,
+                )
             }
-            backupRoot.deleteRecursively()
+            writeJournalText(File(journalRoot, FILE_RESTORE_STATE), FILE_RESTORE_FILES_REPLACED)
+            return journal
         } catch (error: Throwable) {
-            SYNC_FILE_ROOTS.forEach { relativeRoot ->
-                if (relativeRoot in preservedRoots) return@forEach
+            runCatching { journal.rollback() }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
+        }
+    }
+
+    private fun recoverInterruptedFileRestore() {
+        val journalRoot = File(context.cacheDir, FILE_RESTORE_JOURNAL_DIR).canonicalFile
+        if (!journalRoot.exists()) return
+        val token = File(journalRoot, FILE_RESTORE_TOKEN).takeIf { it.isFile }?.readText()
+        if (token != null && readDatabaseRestoreMarker() == token) {
+            check(journalRoot.deleteRecursively()) { "Unable to clean completed restore journal" }
+            clearDatabaseRestoreMarker(token)
+            return
+        }
+        val roots = File(journalRoot, FILE_RESTORE_ROOTS)
+            .takeIf { it.isFile }
+            ?.readLines()
+            .orEmpty()
+            .filter { it in SYNC_FILE_ROOTS }
+        FileTreeRestoreJournal(
+            filesDir = context.filesDir.canonicalFile,
+            journalRoot = journalRoot,
+            backupRoot = File(journalRoot, "backup").canonicalFile,
+            replacedRoots = roots,
+            token = token.orEmpty(),
+        ).rollback()
+    }
+
+    private fun writeDatabaseRestoreMarker(db: androidx.sqlite.db.SupportSQLiteDatabase, token: String) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS $RESTORE_MARKER_TABLE " +
+                "(id INTEGER PRIMARY KEY CHECK (id = 1), token TEXT NOT NULL)"
+        )
+        db.execSQL(
+            "INSERT OR REPLACE INTO $RESTORE_MARKER_TABLE(id, token) VALUES (1, ?)",
+            arrayOf(token),
+        )
+    }
+
+    private fun readDatabaseRestoreMarker(): String? {
+        val db = database.openHelper.writableDatabase
+        val exists = db.query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            arrayOf(RESTORE_MARKER_TABLE),
+        ).use { it.moveToFirst() }
+        if (!exists) return null
+        return db.query("SELECT token FROM $RESTORE_MARKER_TABLE WHERE id = 1").use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }
+
+    private fun clearDatabaseRestoreMarker(token: String) {
+        runCatching {
+            database.openHelper.writableDatabase.execSQL(
+                "DELETE FROM $RESTORE_MARKER_TABLE WHERE id = 1 AND token = ?",
+                arrayOf(token),
+            )
+        }
+    }
+
+    private fun writeJournalText(file: File, value: String) {
+        file.parentFile?.mkdirs()
+        FileOutputStream(file).use { output ->
+            output.write(value.toByteArray())
+            output.fd.sync()
+        }
+    }
+
+    private inner class FileTreeRestoreJournal(
+        private val filesDir: File,
+        private val journalRoot: File,
+        private val backupRoot: File,
+        private val replacedRoots: List<String>,
+        val token: String,
+    ) {
+        fun commit() {
+            if (journalRoot.deleteRecursively()) {
+                clearDatabaseRestoreMarker(token)
+            }
+        }
+
+        fun rollback() {
+            replacedRoots.forEach { relativeRoot ->
                 File(filesDir, relativeRoot).deleteRecursively()
             }
             backupRoot.listFiles().orEmpty().forEach { backup ->
-                if (backup.name in preservedRoots) return@forEach
+                if (backup.name !in replacedRoots) return@forEach
                 backup.copyRecursively(File(filesDir, backup.name), overwrite = true)
             }
-            throw error
-        } finally {
-            backupRoot.deleteRecursively()
+            journalRoot.deleteRecursively()
         }
     }
 
@@ -718,15 +863,22 @@ class SyncArchiveManager(
     companion object {
         private const val MAX_MANIFEST_ENTRY_BYTES = 1024 * 1024
         private const val MAX_CONFIG_ENTRY_BYTES = 8 * 1024 * 1024
-        private const val MAX_TABLE_ENTRY_BYTES = 64 * 1024 * 1024
         private const val MAX_PAYLOAD_ENTRY_BYTES = 1024L * 1024 * 1024
         private const val MAX_PAYLOAD_FILE_ENTRY_BYTES = 512L * 1024 * 1024
         private const val MAX_PAYLOAD_FILES_TOTAL_BYTES = 1024L * 1024 * 1024
         private const val MAX_PAYLOAD_FILE_COUNT = 20_000
+        private const val MAX_STAGED_TABLE_BYTES = 4L * 1024 * 1024 * 1024
         private const val PAYLOAD_MANIFEST_ENTRY = "payload_manifest.json"
         private const val SETTINGS_ENTRY = "settings.json"
         private const val SECRETS_ENTRY = "secrets.json"
         private const val AMBER_FILE_PREFIX = "amber-file://"
+        private const val FILE_RESTORE_JOURNAL_DIR = "sync-restore-file-journal"
+        private const val FILE_RESTORE_STATE = "state"
+        private const val FILE_RESTORE_ROOTS = "roots"
+        private const val FILE_RESTORE_TOKEN = "token"
+        private const val FILE_RESTORE_PENDING = "pending"
+        private const val FILE_RESTORE_FILES_REPLACED = "files_replaced"
+        private const val RESTORE_MARKER_TABLE = "amber_sync_restore_marker"
 
         // Pre-compressed/lossy formats: DEFLATE has no headroom and just burns CPU.
         // Listed by extension so the check stays cheap and stable across content
@@ -750,6 +902,9 @@ class SyncArchiveManager(
             "message_day_stat",
             "conversation_compact",
             "conversation_context_event",
+            // Upload rows and their files are one logical attachment graph.
+            // Preserving only messages would leave file:// references broken.
+            "managed_files",
         )
 
         // Subset of SYNC_TABLES tied to image-generation gallery state.

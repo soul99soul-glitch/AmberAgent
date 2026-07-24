@@ -1,10 +1,16 @@
 package app.amber.ai.provider.providers
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.MessageRole
+import app.amber.ai.core.Tool
+import app.amber.ai.provider.BuiltInTools
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.ImageEncodingException
@@ -348,6 +354,45 @@ class GoogleProviderMessageTest {
 
         val textPart = parts.find { it.jsonObject.containsKey("text") }?.jsonObject
         assertEquals("Hello, how are you?", textPart?.get("text")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `request keeps function tools when model also enables built in tools`() {
+        val body = provider.buildCompletionRequestBody(
+            messages = listOf(UIMessage.user("hello")),
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "gemini-test",
+                    abilities = listOf(ModelAbility.TOOL),
+                    tools = setOf(BuiltInTools.Search),
+                ),
+                tools = listOf(
+                    Tool(
+                        name = "local_tool",
+                        description = "Local test tool",
+                        execute = { emptyList() },
+                    )
+                ),
+            ),
+            isCodeAssistOAuth = false,
+        )
+
+        val tools = body["tools"]!!.jsonArray.map { it.jsonObject }
+        assertTrue(tools.any { it.containsKey("functionDeclarations") })
+        assertTrue(tools.any { it.containsKey("googleSearch") })
+    }
+
+    @Test
+    fun `non streaming inline image includes its data URI prefix`() {
+        val part = Json.parseToJsonElement(
+            """
+            {"inlineData": {"mimeType": "image/webp", "data": "QUJD"}}
+            """.trimIndent()
+        ).jsonObject
+
+        val image = provider.parseMessagePart(part) as UIMessagePart.Image
+
+        assertEquals("data:image/webp;base64,QUJD", image.url)
     }
 
     @Test

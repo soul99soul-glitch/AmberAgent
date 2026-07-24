@@ -34,6 +34,8 @@ import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.PartGroup
+import app.amber.ai.provider.providers.StreamProtocol
+import app.amber.ai.provider.providers.StreamTerminationGuard
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.MessageChunk
@@ -41,6 +43,7 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
+import app.amber.ai.ui.asStreamImage
 import app.amber.ai.ui.withStreamArgsReplace
 import app.amber.ai.util.HttpException
 import app.amber.ai.util.KeyRoulette
@@ -165,6 +168,7 @@ class ResponseAPI(
 
         Log.i(TAG, "streamText: model=${params.model.modelId}")
 
+        val terminationGuard = StreamTerminationGuard(StreamProtocol.OPENAI_RESPONSES)
         val listener = object : EventSourceListener() {
             override fun onEvent(
                 eventSource: EventSource,
@@ -172,9 +176,10 @@ class ResponseAPI(
                 type: String?,
                 data: String
             ) {
+                terminationGuard.observe(type, data)
                 val payloads = normalizeOpenAIStreamDataLines(data)
                 if (payloads.isEmpty() && data.contains("[DONE]")) {
-                    close()
+                    close(terminationGuard.cleanEofCause())
                     return
                 }
                 Log.d(TAG, "onEvent: id=$id type=$type chars=${data.length}")
@@ -223,12 +228,14 @@ class ResponseAPI(
                 } catch (e: Throwable) {
                     Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                 } finally {
-                    close(exception)
+                    // 非 2xx 且 body 为空/非 JSON 时 t 为 null；必须合成异常,
+                    // 否则 close(null) 会让 flow 以零 chunk "正常完成", 上层把失败当成功
+                    close(exception ?: Exception("HTTP ${response?.code ?: "unknown"}"))
                 }
             }
 
             override fun onClosed(eventSource: EventSource) {
-                close()
+                close(terminationGuard.cleanEofCause())
             }
         }
 
@@ -264,53 +271,61 @@ class ResponseAPI(
 
         Log.i(TAG, "streamCodexText: model=${params.model.modelId}")
 
-        var response = client.newCall(request).await()
-        if (response.code == 401) {
-            response.close()
-            val retryRequest = request.newBuilder()
-                .header("Authorization", "Bearer ${bearerResolver(providerSetting, true)}")
-                .build()
-            response = client.newCall(retryRequest).await()
-        }
-        if (!response.isSuccessful) {
-            throw Exception("Failed to get response: ${response.code} ${response.body.stringSafe()}")
-        }
-
-        response.use { activeResponse ->
-            val source = activeResponse.body.source()
-            var eventType: String? = null
-            val dataLines = mutableListOf<String>()
-
-            fun drainEvent(): MessageChunk? {
-                if (dataLines.isEmpty()) return null
-                val data = dataLines.joinToString("\n")
-                dataLines.clear()
-                if (data == "[DONE]") return null
-                val eventJson = Json.parseToJsonElement(data).jsonObjectOrNull ?: return null
-                return parseResponseDelta(eventJson)
+        withCancellableCall {
+            var response = awaitResponse(client.newCall(request))
+            if (response.code == 401) {
+                response.close()
+                val retryRequest = request.newBuilder()
+                    .header("Authorization", "Bearer ${bearerResolver(providerSetting, true)}")
+                    .build()
+                response = awaitResponse(client.newCall(retryRequest))
+            }
+            if (!response.isSuccessful) {
+                throw Exception("Failed to get response: ${response.code} ${response.body.stringSafe()}")
             }
 
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                when {
-                    line.isEmpty() -> {
-                        drainEvent()?.let { emit(it) }
-                        if (eventType == "response.completed" || eventType == "response.incomplete") {
-                            return@use
+            response.use { activeResponse ->
+                val source = activeResponse.body.source()
+                val terminationGuard = StreamTerminationGuard(StreamProtocol.OPENAI_RESPONSES)
+                var eventType: String? = null
+                val dataLines = mutableListOf<String>()
+
+                fun drainEvent(): MessageChunk? {
+                    if (dataLines.isEmpty()) return null
+                    val data = dataLines.joinToString("\n")
+                    dataLines.clear()
+                    terminationGuard.observe(eventType, data)
+                    if (data == "[DONE]") {
+                        terminationGuard.cleanEofCause()?.let { throw it }
+                        return null
+                    }
+                    val eventJson = Json.parseToJsonElement(data).jsonObjectOrNull ?: return null
+                    return parseResponseDelta(eventJson)
+                }
+
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    when {
+                        line.isEmpty() -> {
+                            drainEvent()?.let { emit(it) }
+                            if (eventType == "response.completed" || eventType == "response.incomplete") {
+                                return@use
+                            }
+                            eventType = null
                         }
-                        eventType = null
-                    }
 
-                    line.startsWith("event:") -> {
-                        eventType = line.removePrefix("event:").trim()
-                    }
+                        line.startsWith("event:") -> {
+                            eventType = line.removePrefix("event:").trim()
+                        }
 
-                    line.startsWith("data:") -> {
-                        dataLines += line.removePrefix("data:").trimStart()
+                        line.startsWith("data:") -> {
+                            dataLines += line.removePrefix("data:").trimStart()
+                        }
                     }
                 }
+                drainEvent()?.let { emit(it) }
+                terminationGuard.cleanEofCause()?.let { throw it }
             }
-            drainEvent()?.let { emit(it) }
         }
     }.flowOn(Dispatchers.IO)
 
@@ -921,6 +936,8 @@ class ResponseAPI(
             val type = output["type"]?.jsonPrimitiveOrNull?.content ?: return@forEach
             when (type) {
                 "reasoning" -> {
+                    val reasoningId = output["id"]?.jsonPrimitiveOrNull?.content
+                    val encryptedContent = output["encrypted_content"]?.jsonPrimitiveOrNull?.content
                     val summary = output["summary"]?.jsonArrayOrNull.orEmpty()
                     summary.mapNotNull { it.jsonObjectOrNull }.forEach { part ->
                         val partType = part["type"]?.jsonPrimitiveOrNull?.content ?: return@forEach
@@ -931,7 +948,11 @@ class ResponseAPI(
                                     UIMessagePart.Reasoning(
                                         reasoning = text,
                                         createdAt = Clock.System.now(),
-                                        finishedAt = Clock.System.now()
+                                        finishedAt = Clock.System.now(),
+                                        metadata = buildJsonObject {
+                                            encryptedContent?.let { put("encrypted_content", it) }
+                                            reasoningId?.let { put("reasoning_id", it) }
+                                        }.takeIf { it.isNotEmpty() }
                                     )
                                 )
                             }
@@ -1011,7 +1032,7 @@ class ResponseAPI(
                                             output["id"]?.jsonPrimitiveOrNull?.content ?: ""
                                         )
                                     }
-                                )
+                                ).asStreamImage()
                             )
                         }
                 }

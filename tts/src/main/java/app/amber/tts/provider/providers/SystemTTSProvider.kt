@@ -20,6 +20,10 @@ import kotlin.coroutines.resumeWithException
 
 private const val TAG = "SystemTTSProvider"
 
+internal fun deleteSystemTtsTempFile(file: File?) {
+    if (file != null) runCatching { file.delete() }
+}
+
 class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
     override fun generateSpeech(
         context: Context,
@@ -28,6 +32,7 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
     ): Flow<AudioChunk> = flow {
         val audioData = suspendCancellableCoroutine<ByteArray> { continuation ->
             var tts: TextToSpeech? = null
+            var audioFile: File? = null
             val listener = TextToSpeech.OnInitListener { status ->
                 if (status == TextToSpeech.SUCCESS) {
                     val ttsInstance = tts
@@ -54,7 +59,8 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
 
                 // Create temporary file for audio output using temp directory like AmberAgentApp
                 val tempDir = context.appTempFolder
-                val audioFile = File(tempDir, "tts_${System.currentTimeMillis()}.wav")
+                val outputFile = File(tempDir, "tts_${System.currentTimeMillis()}.wav")
+                audioFile = outputFile
 
                 val utteranceId = UUID.randomUUID().toString()
 
@@ -65,9 +71,8 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
 
                     override fun onDone(utteranceId: String?) {
                         try {
-                            if (audioFile.exists()) {
-                                val audioData = audioFile.readBytes()
-                                audioFile.delete()
+                            if (outputFile.exists()) {
+                                val audioData = outputFile.readBytes()
 
                                 if (continuation.isActive) continuation.resume(audioData)
                             } else {
@@ -78,13 +83,14 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
                         } catch (e: Exception) {
                             if (continuation.isActive) continuation.resumeWithException(e)
                         } finally {
+                            deleteSystemTtsTempFile(outputFile)
                             ttsInstance.shutdown()
                         }
                     }
 
                     override fun onError(utteranceId: String?) {
                         Log.e(TAG, "onError: TTS synthesis failed!")
-                        audioFile.delete()
+                        deleteSystemTtsTempFile(outputFile)
                         if (continuation.isActive) continuation.resumeWithException(
                             Exception("TTS synthesis failed")
                         )
@@ -95,11 +101,12 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
                 val result = ttsInstance.synthesizeToFile(
                     request.text,
                     null,
-                    audioFile,
+                    outputFile,
                     utteranceId
                 )
 
                 if (result != TextToSpeech.SUCCESS) {
+                    deleteSystemTtsTempFile(outputFile)
                     if (continuation.isActive) continuation.resumeWithException(
                         Exception("Failed to start TTS synthesis")
                     )
@@ -116,6 +123,7 @@ class SystemTTSProvider : TTSProvider<TTSProviderSetting.SystemTTS> {
         tts = TextToSpeech(context, listener)
 
         continuation.invokeOnCancellation {
+            deleteSystemTtsTempFile(audioFile)
             tts?.shutdown()
             tts = null
         }

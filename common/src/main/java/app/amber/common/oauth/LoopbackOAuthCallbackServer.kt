@@ -11,6 +11,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URLDecoder
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 
 /**
@@ -65,6 +66,7 @@ data class OAuthCallbackResult(
  */
 class LoopbackOAuthCallbackServer(
     val port: Int = DEFAULT_PORT,
+    private val acceptedSocketReadTimeoutMillis: Int = DEFAULT_ACCEPTED_SOCKET_READ_TIMEOUT_MILLIS,
 ) : Closeable {
     private val serverSocket: ServerSocket = try {
         ServerSocket(port, /* backlog */ 1, InetAddress.getByName("127.0.0.1"))
@@ -90,7 +92,11 @@ class LoopbackOAuthCallbackServer(
         // with cancellation. Without this, a coroutine cancel (timeout, user aborts)
         // would leave accept() blocking indefinitely on a daemon thread.
         suspendCancellableCoroutine { cont ->
-            cont.invokeOnCancellation { close() }
+            val activeClient = AtomicReference<Socket?>()
+            cont.invokeOnCancellation {
+                close()
+                runCatching { activeClient.getAndSet(null)?.close() }
+            }
             try {
                 // Browsers often pre-fetch favicon.ico / send HEAD probes before they
                 // actually navigate to the OAuth redirect. If the first accept burns on
@@ -100,7 +106,16 @@ class LoopbackOAuthCallbackServer(
                 // 404, close, and accept the next one.
                 while (true) {
                     val client = serverSocket.accept()
-                    val handled = client.use { handleConnection(it) }
+                    activeClient.set(client)
+                    if (!cont.isActive) {
+                        client.close()
+                        return@suspendCancellableCoroutine
+                    }
+                    val handled = client.use {
+                        it.soTimeout = acceptedSocketReadTimeoutMillis
+                        handleConnection(it)
+                    }
+                    activeClient.compareAndSet(client, null)
                     if (handled.isCallbackPath) {
                         if (cont.isActive) {
                             cont.resume(handled.callback)
@@ -268,6 +283,7 @@ class LoopbackOAuthCallbackServer(
 
     companion object {
         private const val TAG = "LoopbackOAuthServer"
+        private const val DEFAULT_ACCEPTED_SOCKET_READ_TIMEOUT_MILLIS = 10_000
         const val DEFAULT_PORT = 53682
         const val DEFAULT_REDIRECT_URI = "http://127.0.0.1:$DEFAULT_PORT/callback"
 

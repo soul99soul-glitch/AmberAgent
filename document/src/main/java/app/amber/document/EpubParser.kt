@@ -14,6 +14,8 @@ private data class ManifestItem(
 
 object EpubParser {
     private const val DEFAULT_MAX_CHARS = 512_000
+    private const val MAX_ENTRY_BYTES = 8L * 1024 * 1024
+    private const val MAX_SPINE_ENTRIES = 2_000
 
     fun parse(file: File, maxChars: Int = DEFAULT_MAX_CHARS): String {
         return try {
@@ -24,16 +26,20 @@ object EpubParser {
 
                 val opfEntry = zip.getEntry(opfPath)
                     ?: return "Unable to read OPF file in EPUB"
-                val (manifest, spine) = zip.getInputStream(opfEntry).use { parseOpf(it) }
+                val (manifest, spine) = zip.getInputStream(opfEntry).use {
+                    parseOpf(BoundedInputStream(it, MAX_ENTRY_BYTES))
+                }
 
                 val result = StringBuilder()
-                for (itemId in spine) {
+                for (itemId in spine.take(MAX_SPINE_ENTRIES)) {
                     val item = manifest[itemId] ?: continue
                     if (!item.mediaType.contains("html")) continue
 
                     val itemPath = if (opfDir.isEmpty()) item.href else "$opfDir/${item.href}"
                     val entry = zip.getEntry(itemPath) ?: continue
-                    val content = zip.getInputStream(entry).use { parseXhtml(it) }
+                    val content = zip.getInputStream(entry).use {
+                        parseXhtml(BoundedInputStream(it, MAX_ENTRY_BYTES))
+                    }
                     if (content.isNotBlank()) {
                         result.append(content)
                         result.append("\n\n")

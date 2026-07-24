@@ -389,7 +389,7 @@ class ResponseAPIMessageTest {
                   "type": "image_generation_call",
                   "id": "ig_1",
                   "status": "completed",
-                  "result": "data:image/png;base64,QUJD"
+                  "result": "QUJD"
                 },
                 {
                   "type": "message",

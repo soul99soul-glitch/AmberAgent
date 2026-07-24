@@ -34,6 +34,8 @@ import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.PartGroup
+import app.amber.ai.provider.providers.StreamProtocol
+import app.amber.ai.provider.providers.StreamTerminationGuard
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.MessageChunk
@@ -189,6 +191,7 @@ class ChatCompletionsAPI(
         // just for debugging response body
         // println(client.newCall(request).await().body?.string())
 
+        val terminationGuard = StreamTerminationGuard(StreamProtocol.OPENAI_CHAT)
         val listener = object : EventSourceListener() {
             override fun onEvent(
                 eventSource: EventSource,
@@ -196,6 +199,7 @@ class ChatCompletionsAPI(
                 type: String?,
                 data: String
             ) {
+                terminationGuard.observe(type, data)
                 val payloads = normalizeOpenAIStreamDataLines(data)
                 if (payloads.isEmpty() && data.contains("[DONE]")) {
                     close()
@@ -218,9 +222,12 @@ class ChatCompletionsAPI(
                         val choiceList = buildList {
                             if (choices.isNotEmpty()) {
                                 val choice = choices[0].jsonObject
+                                // 兼容网关收尾 chunk：只有 finish_reason 没有 delta 键，
+                                // 或 "delta": null（JsonNull 走 ?.jsonObject 会直接抛）——
+                                // 收尾 chunk 不应把整条流炸死，按空 delta 处理
                                 val message =
-                                    choice["delta"]?.jsonObject ?: choice["message"]?.jsonObject
-                                    ?: throw Exception("delta/message is null")
+                                    (choice["delta"] as? JsonObject) ?: (choice["message"] as? JsonObject)
+                                    ?: JsonObject(emptyMap())
                                 val finishReason =
                                     choice["finish_reason"]?.jsonPrimitive?.contentOrNull
                                         ?: "unknown"
@@ -273,12 +280,14 @@ class ChatCompletionsAPI(
                     // body 解析失败时保留原始网络异常, 不要用 parse 异常覆盖根因
                     Log.w(TAG, "onFailure: failed to parse response body chars=${bodyRaw?.length ?: 0}", e)
                 } finally {
-                    close(exception)
+                    // 非 2xx 且 body 为空/非 JSON 时 t 为 null；必须合成异常,
+                    // 否则 close(null) 会让 flow 以零 chunk "正常完成", 上层把失败当成功
+                    close(exception ?: Exception("HTTP ${response?.code ?: "unknown"}"))
                 }
             }
 
             override fun onClosed(eventSource: EventSource) {
-                close()
+                close(terminationGuard.cleanEofCause())
             }
         }
 
@@ -771,7 +780,7 @@ class ChatCompletionsAPI(
                 }
                 toolCalls.forEach { toolCalls ->
                     val type = toolCalls.jsonObject["type"]?.jsonPrimitive?.contentOrNull
-                    if (!type.isNullOrEmpty() && type != "function") error("tool call type not supported: $type")
+                    if (!type.isNullOrEmpty() && type != "function") return@forEach
                     val toolCallIndex = toolCalls.jsonObject["index"]?.jsonPrimitive?.intOrNull
                     val toolCallId = toolCalls.jsonObject["id"]?.jsonPrimitive?.contentOrNull
                     val toolName =
@@ -798,8 +807,14 @@ class ChatCompletionsAPI(
                     val type = imageObject["type"]?.jsonPrimitive?.contentOrNull ?: return@forEach
                     if (type != "image_url") return@forEach
                     val url = imageObject["image_url"]?.jsonObjectOrNull?.get("url")?.jsonPrimitive?.contentOrNull ?: return@forEach
-                    require(url.startsWith("data:image")) { "Only data uri is supported" }
-                    add(UIMessagePart.Image(url.substringAfter("data:image/png;base64,")))
+                    // 保留完整 data URI（含真实 mime：jpeg/webp 不能硬套 png 前缀）；
+                    // 托管 http(s) URL 同样保留——下游合并/落盘逻辑两种形态都支持，
+                    // require 抛错会把整条流炸死
+                    if (url.startsWith("data:") || url.startsWith("http")) {
+                        add(UIMessagePart.Image(url))
+                    } else {
+                        Log.w(TAG, "parseMessage: unsupported image url scheme, skipped")
+                    }
                 }
             },
             annotations = parseAnnotations(
@@ -811,9 +826,11 @@ class ChatCompletionsAPI(
     }
 
     private fun parseAnnotations(jsonArray: JsonArray): List<UIMessageAnnotation> {
-        return jsonArray.map { element ->
+        // 未知 annotation 类型（file_citation 等）跳过即可——
+        // 引用元数据永远不该让整条流失败
+        return jsonArray.mapNotNull { element ->
             val type =
-                element.jsonObject["type"]?.jsonPrimitive?.contentOrNull ?: error("type is null")
+                element.jsonObject["type"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
             when (type) {
                 "url_citation" -> {
                     UIMessageAnnotation.UrlCitation(
@@ -824,7 +841,10 @@ class ChatCompletionsAPI(
                     )
                 }
 
-                else -> error("unknown annotation type: $type")
+                else -> {
+                    Log.d(TAG, "parseAnnotations: skipping unknown annotation type: $type")
+                    null
+                }
             }
         }
     }

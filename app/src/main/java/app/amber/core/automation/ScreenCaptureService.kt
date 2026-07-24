@@ -20,6 +20,7 @@ import android.util.Log
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,7 +40,9 @@ private const val TAG = "ScreenCaptureService"
 
 class ScreenCaptureService : Service() {
     private val captureManager: ScreenCaptureManager by inject()
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, e ->
+        Log.e(TAG, "Uncaught exception in serviceScope", e)
+    })
     private val mainHandler = Handler(Looper.getMainLooper())
     private var captureSession: ActiveCaptureSession? = null
     private val idleStopRunnable = Runnable {
@@ -54,6 +57,8 @@ class ScreenCaptureService : Service() {
         when (intent?.action) {
             ACTION_START_SESSION_CAPTURE -> {
                 startForegroundCompat()
+                val requestId = intent.getStringExtra(ScreenCaptureManager.EXTRA_REQUEST_ID)
+                    ?: return START_NOT_STICKY.also { stopSelf(startId) }
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 val resultData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
@@ -62,20 +67,22 @@ class ScreenCaptureService : Service() {
                     intent.getParcelableExtra(EXTRA_RESULT_DATA)
                 }
                 if (resultCode == 0 || resultData == null) {
-                    captureManager.fail(IllegalArgumentException("Missing MediaProjection result data"))
+                    captureManager.fail(requestId, IllegalArgumentException("Missing MediaProjection result data"))
                     stopSelf(startId)
                     return START_NOT_STICKY
                 }
                 serviceScope.launch {
-                    captureFromNewSession(resultCode, resultData, startId)
+                    captureFromNewSession(requestId, resultCode, resultData, startId)
                 }
                 return START_NOT_STICKY
             }
 
             ACTION_CAPTURE_EXISTING -> {
                 startForegroundCompat()
+                val requestId = intent.getStringExtra(ScreenCaptureManager.EXTRA_REQUEST_ID)
+                    ?: return START_NOT_STICKY.also { stopSelf(startId) }
                 serviceScope.launch {
-                    captureFromExistingSession(startId)
+                    captureFromExistingSession(requestId, startId)
                 }
                 return START_NOT_STICKY
             }
@@ -130,34 +137,34 @@ class ScreenCaptureService : Service() {
         .setOnlyAlertOnce(true)
         .build()
 
-    private suspend fun captureFromNewSession(resultCode: Int, resultData: Intent, startId: Int) {
+    private suspend fun captureFromNewSession(requestId: String, resultCode: Int, resultData: Intent, startId: Int) {
         runCatching {
             val session = ensureCaptureSession(resultCode, resultData)
             captureOnce(session)
         }.onSuccess { result ->
-            captureManager.complete(result)
+            captureManager.complete(requestId, result)
             scheduleIdleStop()
         }.onFailure { error ->
             Log.e(TAG, "screen capture failed", error)
-            captureManager.fail(error)
+            captureManager.fail(requestId, error)
             releaseCaptureSession(stopProjection = true)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf(startId)
         }
     }
 
-    private suspend fun captureFromExistingSession(startId: Int) {
+    private suspend fun captureFromExistingSession(requestId: String, startId: Int) {
         runCatching {
             val session = captureSession
                 ?: error("No active screen capture session. Please approve screen capture again.")
             captureOnce(session)
         }.onSuccess { result ->
-            captureManager.complete(result)
+            captureManager.complete(requestId, result)
             scheduleIdleStop()
         }.onFailure { error ->
             Log.e(TAG, "screen capture failed", error)
             captureManager.markSessionActive(false)
-            captureManager.fail(error)
+            captureManager.fail(requestId, error)
             releaseCaptureSession(stopProjection = true)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf(startId)

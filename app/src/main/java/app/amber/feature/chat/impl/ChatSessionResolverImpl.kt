@@ -21,6 +21,7 @@ import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
 import app.amber.core.service.ChatService
+import kotlinx.coroutines.CancellationException
 import kotlin.uuid.Uuid
 
 class ChatSessionResolverImpl(
@@ -31,7 +32,7 @@ class ChatSessionResolverImpl(
     private val chatService: ChatService,
 ) : ChatSessionResolver {
 
-    override fun resolve(input: ChatTurnInput): ChatSession {
+    override suspend fun resolve(input: ChatTurnInput): ChatSession {
         val conversationId = Uuid.parse(input.conversationId.value)
         val settings = settingsStore.settingsFlow.value
         val model = settings.getCurrentChatModel()
@@ -55,7 +56,11 @@ class ChatSessionResolverImpl(
         )
 
         val memories = if (settings.agentRuntime.enableCoreMemory) {
-            runCatching { kotlinx.coroutines.runBlocking { memoryRepository.getGlobalMemories() } }.getOrNull()
+            // resolve 已是挂起函数：直接挂起读取，不再 runBlocking 阻塞 runner 线程
+            runCatching { memoryRepository.getGlobalMemories() }.getOrElse {
+                if (it is CancellationException) throw it
+                emptyList()
+            }
         } else {
             emptyList()
         }

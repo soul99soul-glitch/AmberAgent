@@ -9,6 +9,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 
 data class ScreenCaptureResult(
     val file: File,
@@ -21,8 +23,12 @@ data class ScreenCaptureResult(
 class ScreenCaptureManager(private val context: Context) {
     private val mutex = Mutex()
 
-    @Volatile
-    private var pendingCapture: CompletableDeferred<ScreenCaptureResult>? = null
+    private data class PendingCapture(
+        val requestId: String,
+        val deferred: CompletableDeferred<ScreenCaptureResult>,
+    )
+
+    private val pendingCapture = AtomicReference<PendingCapture?>(null)
 
     @Volatile
     private var sessionActive: Boolean = false
@@ -32,43 +38,49 @@ class ScreenCaptureManager(private val context: Context) {
         private set
 
     suspend fun capture(timeoutMillis: Long = DEFAULT_TIMEOUT_MS): ScreenCaptureResult {
-        val deferred = mutex.withLock {
-            check(pendingCapture == null) { "Screen capture is already in progress" }
-            CompletableDeferred<ScreenCaptureResult>().also { pending ->
-                pendingCapture = pending
+        val pending = PendingCapture(UUID.randomUUID().toString(), CompletableDeferred())
+        try {
+            mutex.withLock {
+                check(pendingCapture.get() == null) { "Screen capture is already in progress" }
+                check(pendingCapture.compareAndSet(null, pending)) { "Screen capture is already in progress" }
                 if (sessionActive) {
                     ContextCompat.startForegroundService(
                         context,
                         Intent(context, ScreenCaptureService::class.java)
                             .setAction(ScreenCaptureService.ACTION_CAPTURE_EXISTING)
+                            .putExtra(EXTRA_REQUEST_ID, pending.requestId)
                     )
                 } else {
                     context.startActivity(
                         Intent(context, ScreenCapturePermissionActivity::class.java)
+                            .putExtra(EXTRA_REQUEST_ID, pending.requestId)
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
+                        )
                 }
             }
+        } catch (error: Throwable) {
+            pendingCapture.compareAndSet(pending, null)
+            throw error
         }
         return try {
-            withTimeout(timeoutMillis) { deferred.await() }
+            withTimeout(timeoutMillis) { pending.deferred.await() }
         } catch (error: Throwable) {
-            mutex.withLock {
-                if (pendingCapture === deferred) pendingCapture = null
-            }
+            pendingCapture.compareAndSet(pending, null)
             throw error
         }
     }
 
-    internal fun complete(result: ScreenCaptureResult) {
+    internal fun complete(requestId: String, result: ScreenCaptureResult) {
+        val pending = pendingCapture.get() ?: return
+        if (pending.requestId != requestId || !pendingCapture.compareAndSet(pending, null)) return
         lastResult = result
-        pendingCapture?.complete(result)
-        pendingCapture = null
+        pending.deferred.complete(result)
     }
 
-    internal fun fail(error: Throwable) {
-        pendingCapture?.completeExceptionally(error)
-        pendingCapture = null
+    internal fun fail(requestId: String, error: Throwable) {
+        val pending = pendingCapture.get() ?: return
+        if (pending.requestId != requestId || !pendingCapture.compareAndSet(pending, null)) return
+        pending.deferred.completeExceptionally(error)
     }
 
     internal fun markSessionActive(active: Boolean) {
@@ -86,6 +98,7 @@ class ScreenCaptureManager(private val context: Context) {
     }
 
     companion object {
+        const val EXTRA_REQUEST_ID = "screen_capture_request_id"
         private const val DEFAULT_TIMEOUT_MS = 60_000L
     }
 }

@@ -18,6 +18,37 @@ internal fun Json.encodeSettingsForBackup(settings: Settings): String {
     return maskBackupSecrets(element).toString()
 }
 
+/**
+ * Restore: merge local secrets back into a decoded backup Settings so that
+ * masked fields ("__MASKED_BY_AMBERAGENT_BACKUP__") recover the device's real
+ * credentials instead of persisting the literal mask string.
+ */
+internal fun Json.restoreBackupSecrets(exported: Settings, local: Settings): Settings {
+    val exportedEl = parseToJsonElement(encodeToString(exported))
+    val localEl = parseToJsonElement(encodeToString(local))
+    val merged = mergeMaskedSecrets(exportedEl, localEl)
+    return decodeFromString(merged.toString())
+}
+
+private fun mergeMaskedSecrets(exported: JsonElement, local: JsonElement?): JsonElement = when {
+    exported is JsonPrimitive && exported.contentOrNull == BACKUP_SECRET_MASK ->
+        local ?: JsonPrimitive("")
+
+    exported is JsonObject -> JsonObject(
+        exported.mapValues { (key, value) ->
+            mergeMaskedSecrets(value, (local as? JsonObject)?.get(key))
+        }
+    )
+
+    exported is JsonArray -> JsonArray(
+        exported.mapIndexed { index, value ->
+            mergeMaskedSecrets(value, (local as? JsonArray)?.getOrNull(index))
+        }
+    )
+
+    else -> exported
+}
+
 internal fun maskBackupSecrets(element: JsonElement): JsonElement = when (element) {
     is JsonObject -> JsonObject(
         element.mapValues { (key, value) ->

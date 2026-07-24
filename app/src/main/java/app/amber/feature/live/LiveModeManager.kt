@@ -42,7 +42,7 @@ class LiveModeManager(
     private var loopJob: Job? = null
     private var eventJob: Job? = null
     private var analysisJob: Job? = null
-    private var analysisGeneration = 0L
+    private val analysisGeneration = java.util.concurrent.atomic.AtomicLong(0L)
     private var engine: LiveEngine? = null
     private var pendingSnapshot: LiveScreenSnapshot? = null
     private var focusInstruction: String = ""
@@ -319,7 +319,7 @@ class LiveModeManager(
             liveActionLabel(focusInstruction)
         }
 
-        val generation = ++analysisGeneration
+        val generation = analysisGeneration.incrementAndGet()
         engine.onAnalysisStarted(now)
         analysisJob?.cancel()
         analysisJob = appScope.launch(Dispatchers.IO) {
@@ -352,7 +352,7 @@ class LiveModeManager(
                     screenshotUri = screenshotUri,
                 )
                 withContext(Dispatchers.Main.immediate) {
-                    if (generation == analysisGeneration) {
+                    if (generation == analysisGeneration.get()) {
                         engine.onAnalysisSucceeded(snapshot.stableHash)
                         _state.update {
                             it.copy(

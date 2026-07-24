@@ -2,6 +2,7 @@ package app.amber.feature.modelcouncil
 
 import android.content.Context
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -133,13 +134,7 @@ class ModelCouncilManager(
         perSeatFlows[SYNTHESIZER_SEAT_KEY] = MutableStateFlow("")
         seatLiveTextFlows[runId] = perSeatFlows
         capLiveTextFlows()
-        agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
-            cancel(runId)
-            true
-        })
-        appendEvent(runtimeRun, "started", runToPayload(run))
-
-        runtimeRun.job = appScope.launch(Dispatchers.IO) {
+        val job = appScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             val result = try {
                 withTimeoutOrNull(settings.effectiveCouncilTotalTimeoutMs(councilSetting, task)) {
                     executeCouncil(
@@ -156,6 +151,13 @@ class ModelCouncilManager(
             }
             finish(runId, result.first, result.second)
         }
+        runtimeRun.job = job
+        agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
+            cancel(runId)
+            true
+        })
+        appendEvent(runtimeRun, "started", runToPayload(run))
+        job.start()
         runToPayload(run)
     }
 

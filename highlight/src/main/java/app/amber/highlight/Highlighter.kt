@@ -113,7 +113,8 @@ class Highlighter(ctx: Context) {
         }
 
     fun destroy() {
-        context.destroy()
+        executor.submit { context.destroy() }.get()
+        executor.shutdown()
     }
 }
 

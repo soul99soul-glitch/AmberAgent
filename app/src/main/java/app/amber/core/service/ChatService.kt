@@ -30,10 +30,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
@@ -268,7 +268,7 @@ class ChatService(
     }
 
     // 生成完成流
-    private val _generationDoneFlow = MutableSharedFlow<Uuid>()
+    private val _generationDoneFlow = MutableSharedFlow<Uuid>(extraBufferCapacity = 16)
     val generationDoneFlow: SharedFlow<Uuid> = _generationDoneFlow.asSharedFlow()
 
     // 前台状态管理
@@ -353,6 +353,8 @@ class ChatService(
         }
         if (sessions.remove(conversationId, session)) {
             timelineLoadMutexes.remove(conversationId)
+            pendingMessagePersistRevisions.remove(conversationId)
+            pendingMessagePersistLocks.remove(conversationId)
             session.cleanup()
             _sessionsVersion.value++
             Log.i(TAG, "removeSession: $conversationId (remaining: ${sessions.size})")
@@ -443,8 +445,7 @@ class ChatService(
     }
 
     fun getProcessingStatusFlow(conversationId: Uuid): StateFlow<String?> {
-        val session = sessions[conversationId] ?: return MutableStateFlow(null)
-        return session.processingStatus
+        return getOrCreateSession(conversationId).processingStatus
     }
 
     fun getPendingUserMessagesFlow(conversationId: Uuid): StateFlow<List<PendingUserMessage>> {
@@ -762,7 +763,8 @@ class ChatService(
 
                 val userNode = appendUserMessage(conversationId, dispatchMessage)
                 if (!dispatchMessage.answer) {
-                    _generationDoneFlow.emit(conversationId)
+                    // 仅追加、未触发生成：不能 emit generationDoneFlow，
+                    // 否则 TTSAutoPlay 会把上一条 AI 回复再朗读一遍
                     return@launch
                 }
 
@@ -1009,8 +1011,9 @@ class ChatService(
             appendUserMessage(conversationId, dispatchMessage)
             if (dispatchMessage.answer) {
                 handleMessageComplete(conversationId)
+                // 仅在真的跑了生成时通知"生成完成"（TTSAutoPlay 依赖此语义）
+                _generationDoneFlow.emit(conversationId)
             }
-            _generationDoneFlow.emit(conversationId)
 
             val conversation = getConversationFlow(conversationId).value
             if (conversation.hasPendingOrUnexecutedTools()) {
@@ -1024,13 +1027,21 @@ class ChatService(
         conversationId: Uuid,
         messages: List<PendingUserMessage>,
     ) {
-        runBlocking(Dispatchers.IO) {
+        // revision 必须与快照在同一时刻（调用点）捕获：协程内写前校验，
+        // 过期快照不得覆盖 channel 消费者已落盘的更新状态（否则已取消的
+        // 排队消息会在重启后复活并被自动发送）。
+        val revision = pendingMessagePersistRevision(conversationId).incrementAndGet()
+        appScope.launch(pendingMessagePersistDispatcher) {
             pendingMessagePersistLock(conversationId).withLock {
-                pendingMessagePersistRevision(conversationId).incrementAndGet()
-                pendingMessageStore.persistBlocking(conversationId, messages)
+                if (revision == pendingMessagePersistRevision(conversationId).get()) {
+                    pendingMessageStore.persistBlocking(conversationId, messages)
+                }
             }
         }
     }
+
+    private val pendingMessagePersistDispatcher =
+        Dispatchers.IO.limitedParallelism(1)
 
     private fun pendingMessagePersistRevision(conversationId: Uuid): AtomicLong =
         pendingMessagePersistRevisions.computeIfAbsent(conversationId) { AtomicLong(0L) }
@@ -1045,17 +1056,36 @@ class ChatService(
         persistPendingMessagesDurably(conversationId, session.pendingUserMessages.value)
     }
 
-    private fun ConversationSession.dequeueNextPendingUserMessageDurably(
+    /**
+     * 挂起直到落盘完成。dispatch 前的出队路径必须用它而不是异步版：
+     * 否则进程在"出队后、写盘前"死亡时磁盘仍含已派发消息，重启后重复发送。
+     */
+    private suspend fun persistCurrentPendingMessagesNow(
+        conversationId: Uuid,
+        session: ConversationSession,
+    ) {
+        val messages = session.pendingUserMessages.value
+        val revision = pendingMessagePersistRevision(conversationId).incrementAndGet()
+        withContext(pendingMessagePersistDispatcher) {
+            pendingMessagePersistLock(conversationId).withLock {
+                if (revision == pendingMessagePersistRevision(conversationId).get()) {
+                    pendingMessageStore.persistBlocking(conversationId, messages)
+                }
+            }
+        }
+    }
+
+    private suspend fun ConversationSession.dequeueNextPendingUserMessageDurably(
         conversationId: Uuid,
     ): PendingUserMessage? {
         val message = dequeueNextPendingUserMessage()
         if (message != null) {
-            persistCurrentPendingMessagesDurably(conversationId, this)
+            persistCurrentPendingMessagesNow(conversationId, this)
         }
         return message
     }
 
-    private fun ConversationSession.preparePendingMessageForDispatch(
+    private suspend fun ConversationSession.preparePendingMessageForDispatch(
         conversationId: Uuid,
         message: PendingUserMessage,
     ): PendingUserMessage {
@@ -1063,7 +1093,7 @@ class ChatService(
             message.isCollectable -> {
                 val collected = dequeueLeadingCollectableMessages()
                 if (collected.isNotEmpty()) {
-                    persistCurrentPendingMessagesDurably(conversationId, this)
+                    persistCurrentPendingMessagesNow(conversationId, this)
                 }
                 buildCollectedPendingUserMessage(listOf(message) + collected)
             }
@@ -1082,9 +1112,13 @@ class ChatService(
         regenerateAssistantMsg: Boolean = true
     ) {
         val session = getOrCreateSession(conversationId)
-        session.getJob()?.cancel()
+        val oldJob = session.getJob()
+        oldJob?.cancel()
 
         val job = appScope.launch {
+            // Wait for the cancelled generation's onCompletion to finish writing,
+            // so it doesn't race with our state mutations below.
+            oldJob?.let { runCatching { it.join() } }
             try {
                 val conversation = ensureFullConversationLoaded(conversationId)
 
@@ -1343,7 +1377,9 @@ class ChatService(
                 processingStatus = session.processingStatus,
                 messages = conversation.currentMessages.let {
                     if (messageRange != null) {
-                        it.subList(messageRange.start, messageRange.endInclusive + 1)
+                        val end = (messageRange.endInclusive + 1).coerceAtMost(it.size)
+                        val start = messageRange.start.coerceAtMost(end)
+                        it.subList(start, end)
                     } else {
                         it
                     }
@@ -1604,7 +1640,7 @@ class ChatService(
                 // Remove messages that still have unresolved tool approvals.
                 return@mapIndexed node.copy(
                     messages = node.messages.filter { it.id != node.currentMessage.id },
-                    selectIndex = node.selectIndex - 1
+                    selectIndex = (node.selectIndex - 1).coerceAtLeast(0)
                 )
             }
             node

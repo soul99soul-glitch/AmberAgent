@@ -1,6 +1,8 @@
 package app.amber.ai.ui
 
 import app.amber.ai.core.MessageRole
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -181,6 +183,22 @@ class MessageStreamAccumulatorTest {
         assertEquals(listOf(citationA, citationB), assistant.annotations)
     }
 
+    @Test
+    fun `adjacent streamed images merge by stable call id`() {
+        val accumulator = MessageStreamAccumulator(
+            initialMessages = listOf(UIMessage.user("go"))
+        )
+
+        accumulator.append(chunk(image("image_a", "AAA")))
+        accumulator.append(chunk(image("image_b", "BBB")))
+        accumulator.append(chunk(image("image_a", "CCC")))
+
+        val images = accumulator.snapshot().last().parts.filterIsInstance<UIMessagePart.Image>()
+        assertEquals(2, images.size)
+        assertEquals("data:image/png;base64,AAACCC", images[0].url)
+        assertEquals("data:image/png;base64,BBB", images[1].url)
+    }
+
     private fun tool(
         id: String,
         name: String,
@@ -206,6 +224,11 @@ class MessageStreamAccumulatorTest {
                 finishReason = null,
             )
         )
+    )
+
+    private fun image(callId: String, data: String) = UIMessagePart.Image(
+        url = data,
+        metadata = buildJsonObject { put("openai_image_call_id", callId) },
     )
 
     private fun chunk(vararg parts: UIMessagePart): MessageChunk = MessageChunk(

@@ -304,8 +304,11 @@ class WebViewPool(
 
     // -------------------------------------------------------------- closer
 
-    /** Sync close, used from finalize/release paths. */
+    /** Sync close, used from finalize/release paths. Must NOT be called from main thread. */
     fun shutdownBlocking(reason: String = "pool shutdown") {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            "shutdownBlocking must not be called from main thread (deadlock with Dispatchers.Main)"
+        }
         runBlocking { destroyAll(reason) }
     }
 

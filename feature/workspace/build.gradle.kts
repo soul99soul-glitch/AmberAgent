@@ -25,4 +25,5 @@ kotlin {
 dependencies {
     api(libs.kotlinx.coroutines.core)
     implementation("androidx.documentfile:documentfile:1.0.1")
+    testImplementation(libs.junit)
 }

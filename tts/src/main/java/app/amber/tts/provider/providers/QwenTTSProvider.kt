@@ -1,10 +1,13 @@
 package app.amber.tts.provider.providers
 
 import android.content.Context
-import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import app.amber.tts.model.AudioChunk
 import app.amber.tts.model.AudioFormat
 import app.amber.tts.model.TTSRequest
@@ -48,16 +51,12 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = httpClient.newCall(httpRequest).execute()
-
-        if (!response.isSuccessful) {
-            Log.e(TAG, "Qwen TTS request failed: ${response.code} ${response.message}")
-            throw Exception("Qwen TTS request failed: ${response.code} ${response.message}")
-        }
-
-        val reader = response.body.byteStream().bufferedReader()
-
-        try {
+        httpClient.newCall(httpRequest).awaitAndUseCancellable { response ->
+            if (!response.isSuccessful) {
+                Log.e(TAG, "Qwen TTS request failed: ${response.code} ${response.message}")
+                throw Exception("Qwen TTS request failed: ${response.code} ${response.message}")
+            }
+            val reader = response.body.byteStream().bufferedReader()
             var currentData = StringBuilder()
 
             reader.lineSequence().forEach { line ->
@@ -67,7 +66,7 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
                     }
 
                     line.isEmpty() && currentData.isNotEmpty() -> {
-                        val result = parseSSEData(currentData.toString())
+                        val result = parseQwenSseData(currentData.toString())
                         if (result != null) {
                             val (audioData, isLast) = result
                             emit(
@@ -91,29 +90,22 @@ class QwenTTSProvider : TTSProvider<TTSProviderSetting.Qwen> {
                     }
                 }
             }
-        } finally {
-            reader.close()
         }
     }
 
-    private fun parseSSEData(data: String): Pair<ByteArray, Boolean>? {
-        return try {
-            val json = JSONObject(data)
-            val output = json.optJSONObject("output") ?: return null
-            val audio = output.optJSONObject("audio") ?: return null
-            val audioBase64 = audio.optString("data", "")
-            val finishReason = output.optString("finish_reason", "")
+}
 
-            if (audioBase64.isNotEmpty()) {
-                val audioData = Base64.decode(audioBase64, Base64.DEFAULT)
-                val isLast = finishReason == "stop"
-                Pair(audioData, isLast)
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse SSE data: $data", e)
-            null
-        }
+internal fun parseQwenSseData(data: String): Pair<ByteArray, Boolean>? {
+    val json = runCatching { Json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return null
+    val code = json["code"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    if (code.isNotBlank()) {
+        val message = json["message"]?.jsonPrimitive?.contentOrNull ?: "unknown error"
+        throw IllegalStateException("Qwen TTS error $code: $message")
     }
+    val output = json["output"]?.jsonObject ?: return null
+    val audio = output["audio"]?.jsonObject ?: return null
+    val audioBase64 = audio["data"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    val finishReason = output["finish_reason"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    if (audioBase64.isEmpty()) return null
+    return java.util.Base64.getDecoder().decode(audioBase64) to (finishReason == "stop")
 }

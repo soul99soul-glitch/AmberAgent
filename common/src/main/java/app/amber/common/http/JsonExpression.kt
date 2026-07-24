@@ -111,7 +111,13 @@ private class Lexer(private val src: String) {
             '-' -> { i++; return Token(TokenType.MINUS, "-", start) }
             '*' -> { i++; return Token(TokenType.STAR, "*", start) }
             '/' -> { i++; return Token(TokenType.SLASH, "/", start) }
-            'x', 'X' -> { i++; return Token(TokenType.STAR, c.toString(), start) }
+            'x', 'X' -> {
+                if (isMultiplicationAlias(start)) {
+                    i++
+                    return Token(TokenType.STAR, c.toString(), start)
+                }
+                return identToken()
+            }
             '"' -> return stringToken()
         }
 
@@ -174,6 +180,14 @@ private class Lexer(private val src: String) {
     }
 
     private fun peek(): Char? = if (i + 1 < src.length) src[i + 1] else null
+
+    private fun isMultiplicationAlias(position: Int): Boolean {
+        val left = src.substring(0, position).lastOrNull { !it.isWhitespace() }
+        val right = src.substring(position + 1).firstOrNull { !it.isWhitespace() }
+        val canEndOperand = left?.let { it.isLetterOrDigit() || it == '_' || it == ']' || it == ')' } == true
+        val canStartOperand = right?.let { it.isLetterOrDigit() || it == '_' || it == '(' || it == '"' } == true
+        return canEndOperand && canStartOperand
+    }
 
     private fun isIdentStart(c: Char) = c == '_' || c.isLetter()
     private fun isIdentPart(c: Char) = c == '_' || c.isLetterOrDigit()
@@ -369,7 +383,7 @@ private class Evaluator(private val root: JsonObject) {
         return when (elem) {
             is JsonPrimitive -> {
                 if (elem.isString) Value.Str(elem.content)
-                else elem.doubleOrNull()?.let { Value.Num("%.2f".format(it).toDouble()) } ?: Value.Str(elem.content)
+                else elem.doubleOrNull()?.let(Value::Num) ?: Value.Str(elem.content)
             }
             is JsonObject, is JsonArray -> Value.Str(elem.toString())
             else -> Value.Str(elem.toString())

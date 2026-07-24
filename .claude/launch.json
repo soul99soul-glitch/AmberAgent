@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "synara-bridge",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["/Users/arquiel/Downloads/AI/amberagent/scripts/synara-lan-bridge.py"],
+      "port": 3773
+    },
+    {
       "name": "amber-proto",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8753", "--directory", "/Users/arquiel/Downloads/AI/amberagent/ui-graphite/docs/cloud-design/amberagent/project"],

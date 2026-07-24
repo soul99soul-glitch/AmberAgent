@@ -5,7 +5,11 @@ import java.io.File
 
 object PdfParser {
     fun parserPdf(file: File, maxChars: Int = Int.MAX_VALUE): String {
-        val document = PDFDocument.openDocument(file.absolutePath).asPDF()
+        val document = try {
+            PDFDocument.openDocument(file.absolutePath).asPDF()
+        } catch (e: Exception) {
+            return "Error parsing PDF file: ${e.message}"
+        }
         try {
             val pages = document.countPages()
             val result = StringBuilder()

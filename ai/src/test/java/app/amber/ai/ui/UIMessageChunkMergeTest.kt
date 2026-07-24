@@ -75,6 +75,19 @@ class UIMessageChunkMergeTest {
     }
 
     @Test
+    fun `adjacent streamed images merge by stable call id`() {
+        var message = emptyAssistant()
+        message += chunk(image("image_a", "AAA"))
+        message += chunk(image("image_b", "BBB"))
+        message += chunk(image("image_a", "CCC"))
+
+        val images = message.parts.filterIsInstance<UIMessagePart.Image>()
+        assertEquals(2, images.size)
+        assertEquals("data:image/png;base64,AAACCC", images[0].url)
+        assertEquals("data:image/png;base64,BBB", images[1].url)
+    }
+
+    @Test
     fun `replace tool delta overrides accumulated args instead of appending`() {
         var message = emptyAssistant()
         message += chunk(tool(id = "call_1", name = "search", input = "{\"q\""))
@@ -200,6 +213,11 @@ class UIMessageChunkMergeTest {
                 finishReason = null,
             )
         )
+    )
+
+    private fun image(callId: String, data: String) = UIMessagePart.Image(
+        url = data,
+        metadata = buildJsonObject { put("openai_image_call_id", callId) },
     )
 
     private fun annotatedChunk(vararg annotations: UIMessageAnnotation): MessageChunk = MessageChunk(

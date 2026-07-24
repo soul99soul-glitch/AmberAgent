@@ -52,10 +52,12 @@ import app.amber.ai.util.configureReferHeaders
 import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
+import app.amber.ai.util.parseErrorDetail
 import app.amber.ai.util.removeElements
 import app.amber.ai.util.stringSafe
 import app.amber.ai.util.toHeaders
 import app.amber.common.http.await
+import app.amber.common.http.jsonArrayOrNull
 import app.amber.common.http.jsonPrimitiveOrNull
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -174,20 +176,27 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
                     // 忽略非chat/embedding模型
                     val supportedGenerationMethods =
-                        modelObject["supportedGenerationMethods"]!!.jsonArray
-                            .map { method -> method.jsonPrimitive.content }
+                        modelObject["supportedGenerationMethods"]?.jsonArrayOrNull
+                            ?.map { method -> method.jsonPrimitive.content }
+                            ?: return@mapNotNull null
                     if ("generateContent" !in supportedGenerationMethods && "embedContent" !in supportedGenerationMethods) {
                         return@mapNotNull null
                     }
 
+                    val name = modelObject["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                    val displayName = modelObject["displayName"]?.jsonPrimitive?.contentOrNull ?: name.substringAfter("/")
+
                     Model(
-                        modelId = modelObject["name"]!!.jsonPrimitive.content.substringAfter("/"),
-                        displayName = modelObject["displayName"]!!.jsonPrimitive.content,
+                        modelId = name.substringAfter("/"),
+                        displayName = displayName,
                         type = if ("generateContent" in supportedGenerationMethods) ModelType.CHAT else ModelType.EMBEDDING,
                     )
                 }
             } else {
-                emptyList()
+                // 401/403（key 错误）等失败必须抛出让设置页显示"鉴权失败"，
+                // 而不是静默返回空列表；同时读关 body 让连接归还连接池
+                val errorBody = response.body?.string().orEmpty()
+                throw Exception("List models failed: HTTP ${response.code} ${errorBody.take(300)}")
             }
         }
 
@@ -364,10 +373,18 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     // Detect by inner `response` presence so both wire formats reuse the
                     // rest of the parser unchanged.
                     val jsonData = rawJson["response"]?.jsonObject ?: rawJson
+                    // 流中途错误事件（cloudcode-pa 429 MODEL_CAPACITY_EXHAUSTED 等）：
+                    // HTTP 200 已建立后以 {"error":...} 数据事件收尾，不处理会被
+                    // 当成正常结束——空回复入库、无报错、不重试
+                    jsonData["error"]?.let { errorElement ->
+                        close(errorElement.parseErrorDetail())
+                        return
+                    }
                     val reason =
                         jsonData["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitiveOrNull?.contentOrNull
                     if (reason != null) {
                         close(RuntimeException("Prompt feedback: $reason"))
+                        return
                     }
                     val candidates = jsonData["candidates"]?.jsonArray ?: return
                     if (candidates.isEmpty()) return
@@ -403,7 +420,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     )
 
                     // 阻塞式发送形成背压, 避免 buffer 满时静默丢 token
-                    trySendBlocking(messageChunk)
+                    if (trySendBlocking(messageChunk).isFailure) {
+                        eventSource.cancel()
+                        return
+                    }
                 } catch (e: Exception) {
                     // malformed event 不能只打日志吞掉: 否则表现为 silent empty assistant
                     // 或流卡死, 用户看不到任何错误
@@ -421,14 +441,14 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 var exception = t
 
                 t?.printStackTrace()
-                println("[onFailure] 发生错误: ${t?.message}")
+                Log.w(TAG, "onFailure: ${t?.message}")
 
                 try {
                     if (t == null && response != null) {
                         val bodyStr = response.body.stringSafe()
                         if (!bodyStr.isNullOrEmpty()) {
                             val bodyElement = json.parseToJsonElement(bodyStr)
-                            println(bodyElement)
+                            Log.d(TAG, "onFailure body: $bodyElement")
                             if (bodyElement is JsonObject) {
                                 exception = Exception(
                                     bodyElement["error"]?.jsonObject?.get("message")?.jsonPrimitive?.content
@@ -448,7 +468,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             }
 
             override fun onClosed(eventSource: EventSource) {
-                println("[onClosed] 连接已关闭")
+                Log.d(TAG, "onClosed")
                 close()
             }
         }
@@ -457,12 +477,12 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 .newEventSource(request, listener)
 
         awaitClose {
-            println("[awaitClose] 关闭eventSource")
+            Log.d(TAG, "awaitClose: cancel eventSource")
             eventSource.cancel()
         }
     }
 
-    private fun buildCompletionRequestBody(
+    internal fun buildCompletionRequestBody(
         messages: List<UIMessage>,
         params: TextGenerationParams,
         isCodeAssistOAuth: Boolean,
@@ -541,39 +561,35 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             buildContents(messages)
         )
 
-        // Tools
-        if (params.tools.isNotEmpty() && params.model.abilities.contains(ModelAbility.TOOL)) {
+        val hasFunctionTools = params.tools.isNotEmpty() && params.model.abilities.contains(ModelAbility.TOOL)
+        if (hasFunctionTools || params.model.tools.isNotEmpty()) {
             put("tools", buildJsonArray {
-                add(buildJsonObject {
-                    put("functionDeclarations", buildJsonArray {
-                        params.tools.forEach { tool ->
-                            add(buildJsonObject {
-                                put("name", JsonPrimitive(tool.name))
-                                put("description", JsonPrimitive(tool.description))
-                                put(
-                                    key = "parameters",
-                                    element = json.encodeToJsonElement(tool.parameters())
-                                        .removeElements(
-                                            listOf(
-                                                "const",
-                                                "exclusiveMaximum",
-                                                "exclusiveMinimum",
-                                                "format",
-                                                "additionalProperties",
-                                                "enum",
+                if (hasFunctionTools) {
+                    add(buildJsonObject {
+                        put("functionDeclarations", buildJsonArray {
+                            params.tools.forEach { tool ->
+                                add(buildJsonObject {
+                                    put("name", JsonPrimitive(tool.name))
+                                    put("description", JsonPrimitive(tool.description))
+                                    put(
+                                        key = "parameters",
+                                        element = json.encodeToJsonElement(tool.parameters())
+                                            .removeElements(
+                                                listOf(
+                                                    "const",
+                                                    "exclusiveMaximum",
+                                                    "exclusiveMinimum",
+                                                    "format",
+                                                    "additionalProperties",
+                                                    "enum",
+                                                )
                                             )
-                                        )
-                                )
-                            })
-                        }
+                                    )
+                                })
+                            }
+                        })
                     })
-                })
-            })
-        }
-        // Model BuiltIn Tools
-        // 目前不能和工具调用兼容
-        if (params.model.tools.isNotEmpty()) {
-            put("tools", buildJsonArray {
+                }
                 params.model.tools.forEach { builtInTool ->
                     when (builtInTool) {
                         BuiltInTools.Search -> {
@@ -647,7 +663,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         } ?: emptyList()
 
         val groundingMetadata = message["groundingMetadata"]?.jsonObject
-        Log.i(TAG, "parseMessage: $groundingMetadata")
+        Log.d(TAG, "parseMessage: $groundingMetadata")
         val annotations = parseSearchGroundingMetadata(groundingMetadata)
 
         return UIMessage(
@@ -669,11 +685,11 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                 url = uri
             )
         }
-        Log.i(TAG, "parseSearchGroundingMetadata: $chunks")
+        Log.d(TAG, "parseSearchGroundingMetadata: $chunks")
         return chunks
     }
 
-    private fun parseMessagePart(jsonObject: JsonObject): UIMessagePart {
+    internal fun parseMessagePart(jsonObject: JsonObject): UIMessagePart {
         return when {
             jsonObject.containsKey("text") -> {
                 val thought = jsonObject["thought"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -692,7 +708,10 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     input = json.encodeToString(jsonObject["functionCall"]!!.jsonObject["args"]),
                     output = emptyList(),
                     metadata = buildJsonObject {
-                        put("thoughtSignature", jsonObject["thoughtSignature"]?.jsonPrimitive?.contentOrNull)
+                        // 缺省时不能写 JsonNull——回传请求体时 protojson 严格校验会 400
+                        jsonObject["thoughtSignature"]?.jsonPrimitive?.contentOrNull?.let {
+                            put("thoughtSignature", it)
+                        }
                     }
                 )
             }
@@ -715,9 +734,9 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     )
                 }
                 UIMessagePart.Image(
-                    url = data,
+                    url = "data:$mime;base64,$data",
                     metadata = buildJsonObject {
-                        put("thoughtSignature", thoughtSignature)
+                        thoughtSignature?.let { put("thoughtSignature", it) }
                     }
                 )
             }
@@ -840,7 +859,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
             put("name", toolName)
             put("args", inputAsJson())
         })
-        metadata?.get("thoughtSignature")?.let {
+        // 历史数据里可能存着 JsonNull（旧版缺省时写入的），只回传真实字符串
+        metadata?.get("thoughtSignature")?.jsonPrimitive?.contentOrNull?.let {
             put("thoughtSignature", it)
         }
     }

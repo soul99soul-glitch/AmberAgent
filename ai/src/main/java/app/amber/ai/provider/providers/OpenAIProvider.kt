@@ -32,6 +32,7 @@ import app.amber.ai.provider.providers.openai.OPENAI_CODEX_CLIENT_VERSION
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexOAuthClient
 import app.amber.ai.provider.providers.openai.ResponseAPI
+import app.amber.ai.provider.providers.openai.withCancellableCall
 import app.amber.ai.provider.providers.openai.addOpenAICodexBackendHeaders
 import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.ImageAspectRatio
@@ -590,56 +591,64 @@ class OpenAIProvider(
                 .build()
         }
 
-        var response = client.newCall(buildRequest(resolveBearerToken(providerSetting, false))).await()
-        if (response.code == 401) {
-            response.close()
-            val retryToken = resolveBearerToken(providerSetting, forceRefresh = true)
-            response = client.newCall(buildRequest(retryToken)).await()
-        }
-        if (!response.isSuccessful) {
-            error("Codex image generation failed: ${response.code} ${response.body?.string()}")
-        }
+        return withCancellableCall {
+            var response = awaitResponse(client.newCall(buildRequest(resolveBearerToken(providerSetting, false))))
+            if (response.code == 401) {
+                response.close()
+                val retryToken = resolveBearerToken(providerSetting, forceRefresh = true)
+                response = awaitResponse(client.newCall(buildRequest(retryToken)))
+            }
+            if (!response.isSuccessful) {
+                error("Codex image generation failed: ${response.code} ${response.body?.string()}")
+            }
 
-        response.use { activeResponse ->
-            val source = activeResponse.body.source()
-            var eventType: String? = null
-            val dataLines = mutableListOf<String>()
-            var captured: ImageGenerationItem? = null
+            response.use { activeResponse ->
+                val source = activeResponse.body.source()
+                val terminationGuard = StreamTerminationGuard(StreamProtocol.OPENAI_RESPONSES)
+                var eventType: String? = null
+                val dataLines = mutableListOf<String>()
+                var captured: ImageGenerationItem? = null
 
-            fun drainEvent() {
-                if (dataLines.isEmpty()) return
-                val data = dataLines.joinToString("\n").also { dataLines.clear() }
-                if (data == "[DONE]") return
-                val eventJson = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return
-                if (eventType == "response.output_item.done") {
-                    val item = eventJson["item"]?.jsonObject ?: return
-                    if (item["type"]?.jsonPrimitive?.contentOrNull == "image_generation_call") {
-                        val result = item["result"]?.jsonPrimitive?.contentOrNull
-                        if (!result.isNullOrBlank() && captured == null) {
-                            captured = ImageGenerationItem(data = result, mimeType = "image/png")
+                fun drainEvent() {
+                    if (dataLines.isEmpty()) return
+                    val data = dataLines.joinToString("\n").also { dataLines.clear() }
+                    terminationGuard.observe(eventType, data)
+                    if (data == "[DONE]") {
+                        terminationGuard.cleanEofCause()?.let { throw it }
+                        return
+                    }
+                    val eventJson = runCatching { json.parseToJsonElement(data).jsonObject }.getOrNull() ?: return
+                    if (eventType == "response.output_item.done") {
+                        val item = eventJson["item"]?.jsonObject ?: return
+                        if (item["type"]?.jsonPrimitive?.contentOrNull == "image_generation_call") {
+                            val result = item["result"]?.jsonPrimitive?.contentOrNull
+                            if (!result.isNullOrBlank() && captured == null) {
+                                captured = ImageGenerationItem(data = result, mimeType = "image/png")
+                            }
                         }
                     }
                 }
-            }
 
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-                when {
-                    line.isEmpty() -> {
-                        drainEvent()
-                        if (eventType == "response.completed") break
-                        eventType = null
-                    }
-                    line.startsWith("event:") -> {
-                        eventType = line.removePrefix("event:").trim()
-                    }
-                    line.startsWith("data:") -> {
-                        dataLines += line.removePrefix("data:").trimStart()
+                while (!source.exhausted()) {
+                    val line = source.readUtf8Line() ?: break
+                    when {
+                        line.isEmpty() -> {
+                            drainEvent()
+                            if (eventType == "response.completed") break
+                            eventType = null
+                        }
+                        line.startsWith("event:") -> {
+                            eventType = line.removePrefix("event:").trim()
+                        }
+                        line.startsWith("data:") -> {
+                            dataLines += line.removePrefix("data:").trimStart()
+                        }
                     }
                 }
+                drainEvent()
+                terminationGuard.cleanEofCause()?.let { throw it }
+                captured
             }
-            drainEvent()
-            return captured
         }
     }
 
@@ -683,7 +692,11 @@ class OpenAIProvider(
         // no recovery path. Falling back to the bundled defaults guarantees the user can
         // always pick something.
         return runCatching { fetchCodexModelsOrThrow(providerSetting) }
-            .getOrElse { defaultCodexOAuthModels() }
+            .getOrElse {
+                // CancellationException 不是"获取失败"——取消必须继续传播
+                if (it is CancellationException) throw it
+                defaultCodexOAuthModels()
+            }
     }
 
     private suspend fun fetchCodexModelsOrThrow(providerSetting: ProviderSetting.OpenAI): List<Model> {

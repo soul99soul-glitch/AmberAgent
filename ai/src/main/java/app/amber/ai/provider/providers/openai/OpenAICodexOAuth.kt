@@ -105,7 +105,15 @@ class OpenAICodexOAuthClient(
     private val client: OkHttpClient,
     private val authStore: OpenAICodexAuthStore,
 ) {
-    private val refreshMutex = Mutex()
+    // 进程级刷新锁：provider / ChatInput / 设置页各自实例化 client，
+    // 但共享同一份存储的 refresh_token —— 并发刷新会触发 Auth0 rotation
+    // reuse 检测（invalid_grant 把已登录用户踢出），必须跨实例互斥
+    private fun refreshMutex(providerId: Uuid): Mutex =
+        refreshMutexes.getOrPut(providerId.toString()) { Mutex() }
+
+    private companion object {
+        val refreshMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    }
 
     fun getCached(providerId: Uuid): OpenAICodexAuthTokens? = authStore.get(providerId)
 
@@ -209,7 +217,7 @@ class OpenAICodexOAuthClient(
         return parseUsageStatus(body)
     }
 
-    suspend fun refresh(providerId: Uuid): OpenAICodexAuthTokens = refreshMutex.withLock {
+    suspend fun refresh(providerId: Uuid): OpenAICodexAuthTokens = refreshMutex(providerId).withLock {
         val current = authStore.get(providerId)
             ?: error("Codex OAuth is not signed in. Open the OpenAI provider settings and sign in first.")
 

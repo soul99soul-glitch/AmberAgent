@@ -27,6 +27,8 @@ import app.amber.document.PdfParser
 import app.amber.document.PptxParser
 import app.amber.document.nativebridge.OfficeNativeSwitch
 import app.amber.feature.runtime.AgentToolActivityStore
+import app.amber.feature.tools.resolvesToPrivateNetworkTarget
+import app.amber.feature.tools.isPrivateNetworkTarget
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.feature.workspace.WorkspacePaths
 import java.io.ByteArrayInputStream
@@ -434,6 +436,9 @@ class WorkspaceArtifactTools(
         val method = (input.string("method") ?: "GET").uppercase(Locale.ROOT)
         require(method in setOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD")) { "Unsupported HTTP method: $method" }
         requireHttpUrl(url)
+        if (!url.isPrivateNetworkTarget() && url.resolvesToPrivateNetworkTarget()) {
+            error("URL resolves to a private network target; request the private target explicitly for approval")
+        }
         val timeout = input.limit("timeout_ms", default = 20_000, max = 120_000)
         val connection = openConnection(url, method, timeout)
         input.jsonObject["headers"]?.jsonObject?.forEach { (name, value) ->
@@ -462,7 +467,8 @@ class WorkspaceArtifactTools(
             requestMethod = method
             connectTimeout = timeoutMs
             readTimeout = timeoutMs
-            instanceFollowRedirects = true
+            // Redirect destinations need their own policy evaluation.
+            instanceFollowRedirects = false
             setRequestProperty("User-Agent", "AmberAgent/0.8")
         }
 
@@ -548,18 +554,32 @@ class WorkspaceArtifactTools(
 
     private suspend fun createZip(sources: List<String>): ByteArray {
         val output = ByteArrayOutputStream()
+        var entryCount = 0
+        var sourceBytes = 0L
         ZipOutputStream(output).use { zip ->
-            sources.forEach { source ->
+            suspend fun addFile(path: String) {
+                require(entryCount < MAX_ARCHIVE_CREATE_ENTRIES) { "Archive contains too many entries" }
+                val remaining = (MAX_ARCHIVE_CREATE_SOURCE_BYTES - sourceBytes).coerceAtLeast(0L)
+                require(remaining > 0L) { "Archive source data exceeds the size limit" }
+                val bytes = workspaceManager.readBytesCapped(path, remaining.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                sourceBytes += bytes.size
+                entryCount++
+                addZipEntry(zip, path, bytes)
+                require(output.size() <= MAX_ARCHIVE_CREATE_OUTPUT_BYTES) { "Archive output exceeds the size limit" }
+            }
+
+            suspend fun addSource(source: String) {
                 val entries = runCatching { workspaceManager.list(source) }.getOrNull()
                 if (entries == null) {
-                    val normalized = WorkspacePaths.normalize(source)
-                    addZipEntry(zip, normalized, workspaceManager.readBytes(normalized))
+                    addFile(WorkspacePaths.normalize(source))
                 } else {
-                    entries.forEach { entry ->
-                        if (!entry.directory) addZipEntry(zip, entry.path, workspaceManager.readBytes(entry.path))
+                    for (entry in entries) {
+                        if (entry.directory) addSource(entry.path) else addFile(entry.path)
                     }
                 }
             }
+
+            for (source in sources) addSource(source)
         }
         return output.toByteArray()
     }
@@ -856,6 +876,9 @@ class WorkspaceArtifactTools(
         private const val MAX_DOWNLOAD_BYTES = 128 * 1024 * 1024
         private const val MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
         private const val MAX_ARCHIVE_ENTRY_BYTES = 64 * 1024 * 1024
+        private const val MAX_ARCHIVE_CREATE_ENTRIES = 1_000
+        private const val MAX_ARCHIVE_CREATE_SOURCE_BYTES = 64L * 1024 * 1024
+        private const val MAX_ARCHIVE_CREATE_OUTPUT_BYTES = 72 * 1024 * 1024
         private const val MAX_IMAGE_BYTES = 64 * 1024 * 1024
         private const val MAX_WORKSPACE_TEMP_FILE_BYTES = 64 * 1024 * 1024
     }

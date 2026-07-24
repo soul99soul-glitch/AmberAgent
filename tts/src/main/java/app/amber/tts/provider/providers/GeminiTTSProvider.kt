@@ -93,13 +93,12 @@ class GeminiTTSProvider : TTSProvider<TTSProviderSetting.Gemini> {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = httpClient.newCall(httpRequest).execute()
-
-        if (!response.isSuccessful) {
-            throw Exception("Gemini TTS request failed: ${response.code} ${response.message}")
+        val responseJson = httpClient.newCall(httpRequest).awaitAndUseCancellable { response ->
+            if (!response.isSuccessful) {
+                throw Exception("Gemini TTS request failed: ${response.code} ${response.message}")
+            }
+            response.body.string()
         }
-
-        val responseJson = response.body.string()
         val geminiResponse = json.decodeFromString<GeminiTTSResponse>(responseJson)
 
         if (geminiResponse.candidates.isEmpty() ||

@@ -26,4 +26,5 @@ dependencies {
     api(project(":feature:modelcouncil:api"))
     api(project(":feature:subagent:api"))
     api(libs.kotlinx.serialization.json)
+    testImplementation(libs.junit)
 }

@@ -5,12 +5,15 @@ import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.BufferedReader
 import java.io.File
 import java.nio.file.Files
 
@@ -205,26 +208,49 @@ class WorkspaceManager(private val context: Context) {
             require(query.isNotBlank()) { "query is required" }
             val start = requireDocument(relativePath)
             val results = mutableListOf<SearchResult>()
-            fun visit(file: DocumentFile, path: String) {
-                if (results.size >= maxResults) return
+            var visitedFiles = 0
+            var scannedChars = 0L
+            suspend fun visit(file: DocumentFile, path: String) {
+                currentCoroutineContext().ensureActive()
+                if (results.size >= maxResults || visitedFiles >= SEARCH_MAX_FILES || scannedChars >= SEARCH_MAX_TOTAL_CHARS) return
                 if (file.isDirectory) {
-                    file.listFiles().forEach { child ->
+                    for (child in file.listFiles()) {
                         visit(child, joinPath(path, child.name.orEmpty()))
+                        if (results.size >= maxResults || visitedFiles >= SEARCH_MAX_FILES || scannedChars >= SEARCH_MAX_TOTAL_CHARS) break
                     }
                     return
                 }
-                val text = runCatching {
-                    context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { it.readText() }
-                }.getOrNull() ?: return
-                val line = text.lineSequence().withIndex().firstOrNull { it.value.contains(query, ignoreCase = true) }
-                    ?: return
-                results.add(
-                    SearchResult(
-                        path = path,
-                        lineNumber = line.index + 1,
-                        preview = line.value.take(240)
-                    )
-                )
+                visitedFiles++
+                runCatching {
+                    context.contentResolver.openInputStream(file.uri)?.bufferedReader()?.use { reader ->
+                        var fileChars = 0L
+                        var lineNumber = 0
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val remaining = minOf(
+                                SEARCH_MAX_CHARS_PER_FILE - fileChars,
+                                SEARCH_MAX_TOTAL_CHARS - scannedChars,
+                            ).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                            if (remaining <= 0) break
+                            val boundedLine = reader.readLineWithinLimit(remaining) ?: break
+                            val line = boundedLine.text
+                            lineNumber++
+                            val consumed = boundedLine.consumedChars.toLong()
+                            fileChars += consumed
+                            scannedChars += consumed
+                            if (line.contains(query, ignoreCase = true)) {
+                                results.add(SearchResult(path, lineNumber, line.take(240)))
+                                break
+                            }
+                            if (!boundedLine.terminated ||
+                                fileChars >= SEARCH_MAX_CHARS_PER_FILE ||
+                                scannedChars >= SEARCH_MAX_TOTAL_CHARS
+                            ) break
+                        }
+                    }
+                }.onFailure { error ->
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                }
             }
             visit(start, normalizePath(relativePath))
             results
@@ -584,6 +610,9 @@ class WorkspaceManager(private val context: Context) {
 
     companion object {
         private const val KEY_TREE_URI = "tree_uri"
+        private const val SEARCH_MAX_FILES = 1_000
+        private const val SEARCH_MAX_CHARS_PER_FILE = 1_000_000L
+        private const val SEARCH_MAX_TOTAL_CHARS = 8_000_000L
     }
 }
 
@@ -606,6 +635,30 @@ data class WorkspaceTextRead(
     val content: String,
     val truncated: Boolean,
 )
+
+internal data class BoundedLine(
+    val text: String,
+    val consumedChars: Int,
+    val terminated: Boolean,
+)
+
+internal fun BufferedReader.readLineWithinLimit(maxChars: Int): BoundedLine? {
+    require(maxChars > 0) { "maxChars must be positive" }
+    val text = StringBuilder(minOf(maxChars, DEFAULT_BUFFER_SIZE))
+    var consumed = 0
+    while (consumed < maxChars) {
+        val value = read()
+        if (value < 0) {
+            return if (consumed == 0) null else BoundedLine(text.toString(), consumed, terminated = true)
+        }
+        consumed++
+        if (value == '\n'.code) {
+            return BoundedLine(text.toString().trimEnd('\r'), consumed, terminated = true)
+        }
+        text.append(value.toChar())
+    }
+    return BoundedLine(text.toString(), consumed, terminated = false)
+}
 
 data class EditResult(
     val path: String,

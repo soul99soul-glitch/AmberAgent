@@ -45,13 +45,12 @@ class OpenAITTSProvider : TTSProvider<TTSProviderSetting.OpenAI> {
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = httpClient.newCall(httpRequest).execute()
-
-        if (!response.isSuccessful) {
-            throw Exception("TTS request failed: ${response.code} ${response.message}")
+        val audioData = httpClient.newCall(httpRequest).awaitAndUseCancellable { response ->
+            if (!response.isSuccessful) {
+                throw Exception("TTS request failed: ${response.code} ${response.message}")
+            }
+            response.body.bytes()
         }
-
-        val audioData = response.body.bytes()
 
         emit(
             AudioChunk(

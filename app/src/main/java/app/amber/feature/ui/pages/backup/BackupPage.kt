@@ -1,5 +1,7 @@
 package app.amber.feature.ui.pages.backup
 
+import app.amber.feature.ui.pages.backup.components.BackupDialog
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -71,8 +73,8 @@ private enum class GoogleSyncAction {
     Download,
 }
 
-private val BackupStatusDateFormat by lazy {
-    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+private val BackupStatusDateFormat = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue() = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
 }
 
 /**
@@ -88,7 +90,7 @@ private fun formatBackupStatus(syncSettings: SyncSettings): String {
         syncSettings.lastLocalExportAt,
     )
     val parts = mutableListOf<String>()
-    if (latestAt > 0L) parts += BackupStatusDateFormat.format(Date(latestAt))
+    if (latestAt > 0L) parts += BackupStatusDateFormat.get()!!.format(Date(latestAt))
     parts += syncSettings.lastBackupVersionName
     if (syncSettings.lastBackupDeviceLabel.isNotBlank()) {
         parts += syncSettings.lastBackupDeviceLabel
@@ -455,18 +457,10 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     }
 
     if (showRestoreSuccessDialog) {
-        AlertDialog(
-            onDismissRequest = { showRestoreSuccessDialog = false },
-            title = { Text("恢复完成") },
-            text = {
-                Text("数据已经覆盖到这台设备。建议重新打开应用以确保所有界面读取到最新数据。")
-            },
-            confirmButton = {
-                Button(onClick = { showRestoreSuccessDialog = false }) {
-                    Text("我知道了")
-                }
-            },
-        )
+        // 整量恢复替换了全部表和文件，但内存会话与 Room Flow 不会自动失效——
+        // 必须强制重启进程，否则旧内存状态会被重新写回新库造成数据混合。
+        // （BackupDialog 仅一个确认按钮，点击后 exitProcess(0)）
+        BackupDialog()
     }
 
     cloudConflict?.let { conflict ->
@@ -576,7 +570,7 @@ private fun CloudSnapshotPickerDialog(
 
 private fun formatCloudSnapshotTitle(snapshot: GoogleDriveFile): String {
     val createdAt = snapshot.backupCreatedAt?.let {
-        BackupStatusDateFormat.format(Date(it))
+        BackupStatusDateFormat.get()!!.format(Date(it))
     } ?: snapshot.modifiedTime?.take(16)?.replace('T', ' ') ?: "未知时间"
     val version = snapshot.backupVersionName.ifBlank { "未知版本" }
     return "$createdAt · $version"

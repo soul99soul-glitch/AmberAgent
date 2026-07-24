@@ -15,7 +15,8 @@ import app.amber.feature.board.hotlist.HotTopicSource
 import app.amber.feature.board.hotlist.presentationTitle
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.feature.tools.isPrivateNetworkTarget
+import app.amber.feature.tools.isPrivateNetworkAddress
+import app.amber.feature.tools.resolvesToPrivateNetworkTarget
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchResult
 import app.amber.search.SearchService
@@ -40,6 +41,17 @@ class DeepReadSourcePrefetcher(
     private val hotListRepository: HotListRepository,
     private val client: OkHttpClient,
 ) {
+    private val guardedDirectFetchClient = client.newBuilder()
+        .addNetworkInterceptor { chain ->
+            val runtime = settingsStore.settingsFlow.value.agentRuntime
+            val privateAllowed = runtime.autoApproveAllToolCalls && runtime.autoApproveHighRiskToolCalls
+            val routeAddress = chain.connection()?.route()?.socketAddress?.address
+            if (routeAddress?.isPrivateNetworkAddress() == true && !privateAllowed) {
+                error("Deep Read background fetch refused a private network redirect")
+            }
+            chain.proceed(chain.request())
+        }
+        .build()
 
     private data class CacheEntry(
         val sources: List<DeepReadSource>,
@@ -341,7 +353,7 @@ class DeepReadSourcePrefetcher(
      * same gate that lets http_request reach private hosts unattended.
      */
     private fun urlAllowedForBackgroundFetch(url: String): Boolean {
-        if (!url.isPrivateNetworkTarget()) return true
+        if (!url.resolvesToPrivateNetworkTarget()) return true
         val runtime = settingsStore.settingsFlow.value.agentRuntime
         return runtime.autoApproveAllToolCalls && runtime.autoApproveHighRiskToolCalls
     }
@@ -354,7 +366,7 @@ class DeepReadSourcePrefetcher(
                 .header("User-Agent", DESKTOP_USER_AGENT)
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .build()
-            client.newCall(request).execute().use { response ->
+            guardedDirectFetchClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withTimeoutOrNull emptyList()
                 response.body.charStream().use { reader ->
                     val buffer = CharArray(OG_IMAGE_HTML_CHAR_LIMIT)
@@ -372,7 +384,7 @@ class DeepReadSourcePrefetcher(
             .header("User-Agent", DESKTOP_USER_AGENT)
             .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
             .build()
-        client.newCall(request).execute().use { response ->
+        guardedDirectFetchClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return@withContext null
             val body = response.peekBody(DIRECT_FETCH_MAX_BYTES).string()
             body.extractReadableText(sourceUrl = url).takeIf { it.length >= MIN_SOURCE_CHARS }?.take(SOURCE_EXCERPT_LIMIT)

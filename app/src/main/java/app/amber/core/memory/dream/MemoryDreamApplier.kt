@@ -8,15 +8,19 @@ import app.amber.core.memory.model.MemoryScope
 import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class MemoryDreamApplier(
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
 ) {
-    suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan {
+    private val applyMutex = Mutex()
+
+    suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan = applyMutex.withLock {
         val records = memoryRepository.getAllRecords().associateBy { it.id }
         val applicablePlan = plan.onlyApplicableToManagedMemories(records)
-        if (!applicablePlan.hasChanges) return applicablePlan
+        if (!applicablePlan.hasChanges) return@withLock applicablePlan
 
         applicablePlan.mergeSuggestions.forEach { suggestion ->
             val target = records[suggestion.targetMemoryId] ?: return@forEach
@@ -72,20 +76,26 @@ class MemoryDreamApplier(
         applicablePlan.supersedeSuggestions.forEach { suggestion ->
             val oldRecords = suggestion.oldMemoryIds.mapNotNull { records[it] }
             if (oldRecords.isEmpty()) return@forEach
-            val newRecord = memoryRepository.addMemory(
+            val supersededIds = oldRecords.map { it.id }.distinct()
+            val newRecord = records.values.firstOrNull { existing ->
+                !existing.archived &&
+                    existing.supersedesIds.toSet() == supersededIds.toSet() &&
+                    existing.content == suggestion.newContent
+            } ?: memoryRepository.addMemory(
                 scope = suggestion.scope,
                 kind = suggestion.kind,
                 content = suggestion.newContent,
                 sourceConversationId = oldRecords.firstNotNullOfOrNull { it.sourceConversationId },
                 sourceMessageIds = oldRecords.flatMap { it.sourceMessageIds }.distinct(),
-                supersedesIds = oldRecords.map { it.id }.distinct(),
+                supersedesIds = supersededIds,
                 confidence = suggestion.confidence,
-            )
-            eventLogger.log(
-                type = MemoryEventType.MEMORY_CREATED,
-                memoryId = newRecord.id,
-                message = "Superseded memories: ${oldRecords.joinToString(",") { it.id.toString() }}.",
-            )
+            ).also { created ->
+                eventLogger.log(
+                    type = MemoryEventType.MEMORY_CREATED,
+                    memoryId = created.id,
+                    message = "Superseded memories: ${oldRecords.joinToString(",") { it.id.toString() }}.",
+                )
+            }
             oldRecords.forEach { oldRecord ->
                 memoryRepository.upsertRecord(oldRecord.copy(archived = true))
                 eventLogger.log(
@@ -106,7 +116,7 @@ class MemoryDreamApplier(
             type = MemoryEventType.DREAM_APPLIED,
             message = applicablePlan.summaryText("Applied dream diff"),
         )
-        return applicablePlan
+        applicablePlan
     }
 
     private fun MemoryDreamPlan.onlyApplicableToManagedMemories(

@@ -2,6 +2,7 @@ package app.amber.feature.ui.pages.novel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import app.amber.feature.novel.NovelCreation
 import app.amber.feature.novel.NovelIntent
 import app.amber.feature.novel.NovelQuery
@@ -53,6 +54,8 @@ class NovelProjectsViewModel(
                     loading = false,
                     projects = novelCreation.projectList.value,
                 )
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 _state.value = _state.value.copy(
                     loading = false,
@@ -76,6 +79,8 @@ class NovelProjectsViewModel(
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
                 novelCreation.perform(NovelIntent.RenameProject(projectId, name))
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 _state.value = _state.value.copy(errorMessage = error.message)
             } finally {
@@ -89,6 +94,8 @@ class NovelProjectsViewModel(
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
                 novelCreation.perform(NovelIntent.DeleteProject(projectId))
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 _state.value = _state.value.copy(errorMessage = error.message)
             } finally {
@@ -111,6 +118,8 @@ class NovelProjectsViewModel(
                 if (outcome is NovelOutcome.ProjectImported) {
                     _openProjectId.tryEmit(outcome.projectID.rawValue)
                 }
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 val msg = error.message.orEmpty()
                 if (replaceProjectId == null && msg.contains("already exists", ignoreCase = true)) {
@@ -134,6 +143,8 @@ class NovelProjectsViewModel(
                 is NovelSnapshot.PackageBytes -> snap.fileName to snap.bytes
                 else -> null
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             _state.value = _state.value.copy(errorMessage = error.message)
             null
@@ -146,6 +157,8 @@ class NovelProjectsViewModel(
                 is NovelSnapshot.Markdown -> snap.fileName to snap.content
                 else -> null
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             _state.value = _state.value.copy(errorMessage = error.message)
             null
@@ -170,6 +183,8 @@ class NovelProjectsViewModel(
                 if (outcome is NovelOutcome.ProjectCreated) {
                     _openProjectId.tryEmit(outcome.projectID.rawValue)
                 }
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Exception) {
                 _state.value = _state.value.copy(errorMessage = error.message)
             } finally {

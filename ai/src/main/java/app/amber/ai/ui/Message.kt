@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -72,19 +73,27 @@ data class UIMessage(
                     }
 
                     is UIMessagePart.Image -> {
-                        val lastPart = acc.lastOrNull()
-                        if (lastPart is UIMessagePart.Image) {
-                            // Append to the last Image part (for streaming base64)
-                            acc.dropLast(1) + lastPart.copy(
-                                url = lastPart.url + deltaPart.url,
-                                metadata = deltaPart.metadata ?: lastPart.metadata
-                            )
+                        val target = deltaPart.findImageMergeTarget(
+                            acc.filterIsInstance<UIMessagePart.Image>()
+                        )?.takeIf {
+                            // 无 identity 的图只允许并入"本 delta 之前"就存在的图
+                            // （承接上一 chunk 的流式分片）；同一 delta 里刚创建的
+                            // 无 identity 图是另一张完整图，拼接会把多图响应毁掉
+                            deltaPart.streamIdentity() != null || parts.any { orig -> orig === it }
+                        }
+                        if (target != null) {
+                            acc.map { part ->
+                                if (part === target) {
+                                    target.copy(
+                                        url = target.url + deltaPart.streamImageData(),
+                                        metadata = deltaPart.metadata ?: target.metadata,
+                                    )
+                                } else {
+                                    part
+                                }
+                            }
                         } else {
-                            // Create new Image part
-                            acc + UIMessagePart.Image(
-                                url = "data:image/png;base64,${deltaPart.url}",
-                                metadata = deltaPart.metadata,
-                            )
+                            acc + deltaPart.asStreamImage()
                         }
                     }
 
@@ -245,7 +254,13 @@ fun List<UIMessage>.handleMessageChunk(chunk: MessageChunk, model: Model? = null
         val last = this.last()
         return this.dropLast(1) + last.copy(usage = last.usage.merge(usage))
     }
-    val message = choice.delta ?: choice.message ?: return this
+    val message = choice.delta ?: choice.message
+    if (message == null) {
+        // 结束 chunk 可能只有 finishReason + usage，不能把 usage 丢掉
+        val usage = chunk.usage ?: return this
+        val last = this.last()
+        return this.dropLast(1) + last.copy(usage = last.usage.merge(usage))
+    }
     if (this.last().role != message.role) {
         return this + (UIMessage(modelId = model?.id, role = message.role, parts = emptyList()) + chunk)
     } else {
@@ -484,6 +499,28 @@ sealed class UIMessagePart {
         }
     }
 }
+
+private const val OPENAI_IMAGE_CALL_ID_METADATA_KEY = "openai_image_call_id"
+
+internal fun UIMessagePart.Image.streamIdentity(): String? =
+    metadata?.get(OPENAI_IMAGE_CALL_ID_METADATA_KEY)?.jsonPrimitive?.contentOrNull
+
+internal fun UIMessagePart.Image.findImageMergeTarget(
+    images: List<UIMessagePart.Image>,
+): UIMessagePart.Image? {
+    val identity = streamIdentity()
+    return if (identity != null) {
+        images.lastOrNull { it.streamIdentity() == identity }
+    } else {
+        images.lastOrNull()?.takeIf { it.streamIdentity() == null }
+    }
+}
+
+internal fun UIMessagePart.Image.streamImageData(): String =
+    if (url.startsWith("data:")) url.substringAfter(',', missingDelimiterValue = "") else url
+
+internal fun UIMessagePart.Image.asStreamImage(): UIMessagePart.Image =
+    if (url.startsWith("data:")) this else copy(url = "data:image/png;base64,$url")
 
 // public: UI 层用它做 tool 卡片的稳定 Compose key (toolCallId 为空时的回退)
 fun UIMessagePart.Tool.streamToolIndex(): Int? =

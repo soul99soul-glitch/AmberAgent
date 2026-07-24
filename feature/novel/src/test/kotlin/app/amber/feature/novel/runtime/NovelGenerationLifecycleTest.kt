@@ -13,7 +13,13 @@ import app.amber.feature.novel.model.NovelOutcome
 import app.amber.feature.novel.model.NovelProjectCreationMode
 import app.amber.feature.novel.model.NovelChapterId
 import app.amber.feature.novel.model.NovelCandidateStatus
+import app.amber.feature.novel.model.NovelRunInterruptionReason
+import app.amber.feature.novel.model.NovelRunStatus
 import app.amber.feature.novel.persistence.NovelFileProjectRepository
+import app.amber.feature.novel.persistence.NovelRecoveryStore
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -134,5 +140,58 @@ class NovelGenerationLifecycleTest {
                 (it.origin as app.amber.feature.novel.model.NovelSettingProposalOrigin.QuickStart)
                     .suggestedKind is app.amber.feature.novel.model.NovelMaterialKind.Character
         })
+    }
+
+    @Test
+    fun processRestart_recoversPersistedRunningRun() = runBlocking {
+        val root = temp.newFolder("novel-restart")
+        val repo = NovelFileProjectRepository(root)
+        val firstScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val hangingModel = object : NovelModelRunning {
+            override suspend fun resolveModel(policy: app.amber.feature.novel.model.NovelProjectModelPolicy) =
+                NovelResolvedModel(
+                    providerID = "scripted-provider",
+                    ownerProviderID = "scripted-provider",
+                    modelID = "scripted-model",
+                    wireModelID = "scripted-model",
+                    displayName = "Scripted",
+                    contextWindowTokens = 128_000,
+                )
+
+            override fun start(request: NovelModelRequest) = flow {
+                emit(NovelModelEvent.TextDelta("recoverable partial"))
+                awaitCancellation()
+            }
+
+            override fun cancel(runId: app.amber.feature.novel.model.NovelRunId) = Unit
+        }
+        val first = DefaultNovelCreation(repo, hangingModel, firstScope, NovelRecoveryStore(root))
+        val created = first.perform(
+            NovelIntent.CreateProject("Restart", NovelProjectCreationMode.Blank),
+        ) as NovelOutcome.ProjectCreated
+        val run = first.start(
+            NovelRunRequest(
+                projectId = created.projectID,
+                branchId = created.branchID,
+                userText = "Write",
+                mode = NovelSessionModeRequest.WriteProse,
+                kind = NovelRunKindRequest.Prose,
+            ),
+        )
+        run.events.filterIsInstance<NovelRunEvent.Delta>().first()
+        firstScope.cancel()
+
+        val restarted = DefaultNovelCreation(
+            repo,
+            ScriptedNovelModelAdapter(),
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            NovelRecoveryStore(root),
+        )
+        val snapshot = restarted.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project
+        val recovered = snapshot.document.activeRuns.single()
+
+        assertEquals(NovelRunStatus.Interrupted, recovered.status)
+        assertEquals(NovelRunInterruptionReason.Recovery, recovered.interruptionReason)
+        assertEquals("recoverable partial", recovered.partialContent)
     }
 }

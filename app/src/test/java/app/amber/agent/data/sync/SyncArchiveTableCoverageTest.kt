@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,11 +32,33 @@ class SyncArchiveTableCoverageTest {
         assertTrue("message_day_stat" in SyncArchiveManager.CONVERSATION_TABLES)
     }
 
+    @Test
+    fun restoreStagesTableEntriesInsteadOfRetainingAllJsonRows() {
+        val source = listOf(
+            File("app/src/main/java/app/amber/core/sync/core/SyncArchiveManager.kt"),
+            File("src/main/java/app/amber/core/sync/core/SyncArchiveManager.kt"),
+        ).first { it.isFile }.readText()
+
+        assertTrue(source.contains("val stagedTableFiles = linkedMapOf<String, File>()"))
+        assertFalse(source.contains("linkedMapOf<String, MutableList<JsonObject>>()"))
+    }
+
+    @Test
+    fun exportReadsAllDatabaseTablesFromOneSnapshot() {
+        val source = listOf(
+            File("app/src/main/java/app/amber/core/sync/core/SyncArchiveManager.kt"),
+            File("src/main/java/app/amber/core/sync/core/SyncArchiveManager.kt"),
+        ).first { it.isFile }.readText()
+
+        assertTrue(source.contains("db.beginTransactionNonExclusive()"))
+        assertTrue(source.contains("db.setTransactionSuccessful()"))
+    }
+
     private fun appDatabaseSchemaTables(): List<String> {
         val schema = listOf(
-            File("schemas/app.amber.agent.data.db.AppDatabase/4.json"),
-            File("app/schemas/app.amber.agent.data.db.AppDatabase/4.json"),
-        ).firstOrNull { it.exists() } ?: error("AppDatabase schema 4.json not found")
+            File("schemas/app.amber.agent.data.db.AppDatabase/8.json"),
+            File("app/schemas/app.amber.agent.data.db.AppDatabase/8.json"),
+        ).firstOrNull { it.exists() } ?: error("AppDatabase schema 8.json not found")
 
         val root = Json.parseToJsonElement(schema.readText()).jsonObject
         return root.getValue("database")

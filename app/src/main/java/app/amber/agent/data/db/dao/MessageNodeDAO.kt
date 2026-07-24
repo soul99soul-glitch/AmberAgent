@@ -44,6 +44,9 @@ interface MessageNodeDAO {
         nodeId: String
     ): Int?
 
+    @Query("SELECT node_index FROM message_node WHERE conversation_id = :conversationId ORDER BY node_index ASC LIMIT 1 OFFSET :offset")
+    suspend fun getNodeIndexAtOffset(conversationId: String, offset: Int): Int?
+
     @Query(
         "SELECT id FROM message_node WHERE conversation_id = :conversationId " +
             "AND node_index BETWEEN :startIndex AND :endIndex"

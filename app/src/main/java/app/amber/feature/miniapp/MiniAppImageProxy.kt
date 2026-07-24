@@ -8,7 +8,7 @@ class MiniAppImageProxy(
 ) {
     fun load(url: String): WebResourceResponse {
         return runCatching {
-            val image = kotlinx.coroutines.runBlocking { httpClient.fetchImage(url) }
+            val image = httpClient.fetchImageBlocking(url)
             WebResourceResponse(
                 image.contentType,
                 "utf-8",

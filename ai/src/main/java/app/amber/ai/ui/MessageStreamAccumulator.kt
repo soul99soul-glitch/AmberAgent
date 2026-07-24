@@ -38,7 +38,14 @@ class MessageStreamAccumulator(
             }
             return
         }
-        val delta = choice.delta ?: choice.message ?: return
+        val delta = choice.delta ?: choice.message ?: run {
+            // 结束 chunk 可能只有 finishReason + usage（如 Gemini MAX_TOKENS
+            // 无 content）——提前 return 前不能把 usage 丢掉
+            chunk.usage?.let { usage ->
+                active.usage = active.usage.merge(usage)
+            }
+            return
+        }
 
         if (active.role != delta.role) {
             prefix += active.snapshot()
@@ -80,10 +87,12 @@ class MessageStreamAccumulator(
             val deltaHasReasoningContent = delta.parts.any { it.isReasoningContentDelta() }
             val deltaClosesReasoning = delta.parts.any { it.isReasoningCloseDelta() }
 
+            val imagesBeforeDelta = parts.filterIsInstance<MutablePart.Image>()
+
             delta.parts.forEach { deltaPart ->
                 when (deltaPart) {
                     is UIMessagePart.Text -> appendText(deltaPart)
-                    is UIMessagePart.Image -> appendImage(deltaPart)
+                    is UIMessagePart.Image -> appendImage(deltaPart, imagesBeforeDelta)
                     is UIMessagePart.Reasoning -> appendReasoning(deltaPart)
                     is UIMessagePart.Tool -> appendTool(deltaPart)
                     else -> println("delta part append not supported: $deltaPart")
@@ -127,15 +136,28 @@ class MessageStreamAccumulator(
             }
         }
 
-        private fun appendImage(deltaPart: UIMessagePart.Image) {
-            val lastPart = parts.lastOrNull()
-            if (lastPart is MutablePart.Image) {
-                lastPart.url.append(deltaPart.url)
-                lastPart.metadata = deltaPart.metadata ?: lastPart.metadata
+        private fun appendImage(
+            deltaPart: UIMessagePart.Image,
+            imagesBeforeDelta: List<MutablePart.Image>,
+        ) {
+            val imageParts = parts.filterIsInstance<MutablePart.Image>()
+            val identity = deltaPart.streamIdentity()
+            val target = if (identity != null) {
+                imageParts.lastOrNull { it.streamIdentity() == identity }
             } else {
+                // 无 identity 的图只允许并入"本 delta 之前"就存在的图
+                // （承接上一 chunk 的流式分片）；同一 delta 里刚创建的
+                // 无 identity 图是另一张完整图，拼接会把多图响应毁掉
+                imagesBeforeDelta.lastOrNull { it.streamIdentity() == null }
+            }
+            if (target != null) {
+                target.url.append(deltaPart.streamImageData())
+                target.metadata = deltaPart.metadata ?: target.metadata
+            } else {
+                val image = deltaPart.asStreamImage()
                 parts += MutablePart.Image(
-                    url = StringBuilder("data:image/png;base64,${deltaPart.url}"),
-                    metadata = deltaPart.metadata
+                    url = StringBuilder(image.url),
+                    metadata = image.metadata,
                 )
             }
         }
@@ -200,10 +222,14 @@ private sealed interface MutablePart {
         val url: StringBuilder,
         var metadata: JsonObject?,
     ) : MutablePart {
-        override fun snapshot(): UIMessagePart = UIMessagePart.Image(
+        fun snapshotImage(): UIMessagePart.Image = UIMessagePart.Image(
             url = url.toString(),
             metadata = metadata,
         )
+
+        fun streamIdentity(): String? = snapshotImage().streamIdentity()
+
+        override fun snapshot(): UIMessagePart = snapshotImage()
     }
 
     data class Reasoning(

@@ -15,6 +15,10 @@ class ScreenCapturePermissionActivity : ComponentActivity() {
     private val capturePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        val requestId = intent.getStringExtra(ScreenCaptureManager.EXTRA_REQUEST_ID) ?: run {
+            finish()
+            return@registerForActivityResult
+        }
         val data = result.data
         if (result.resultCode == Activity.RESULT_OK && data != null) {
             ContextCompat.startForegroundService(
@@ -23,10 +27,11 @@ class ScreenCapturePermissionActivity : ComponentActivity() {
                     action = ScreenCaptureService.ACTION_START_SESSION_CAPTURE
                     putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
                     putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
+                    putExtra(ScreenCaptureManager.EXTRA_REQUEST_ID, requestId)
                 }
             )
         } else {
-            captureManager.fail(IllegalStateException("Screen capture permission denied"))
+            captureManager.fail(requestId, IllegalStateException("Screen capture permission denied"))
         }
         finish()
     }

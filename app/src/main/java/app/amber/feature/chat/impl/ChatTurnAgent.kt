@@ -38,7 +38,6 @@ class ChatTurnAgent(
         )
 
         var lastMessages: List<UIMessage> = emptyList()
-        var toolCallCount = 0
         val checkpointCoalescer = StreamCheckpointCoalescer()
 
         try {
@@ -134,7 +133,7 @@ class ChatTurnAgent(
             producedInNode = input.messageNodeId,
             inputTokens = assistantMsg?.usage?.promptTokens ?: 0,
             outputTokens = assistantMsg?.usage?.completionTokens ?: 0,
-            toolCallsCount = toolCallCount,
+            toolCallsCount = lastMessages.sumOf { msg -> msg.parts.count { it is app.amber.ai.ui.UIMessagePart.Tool } },
         )
     }
 }
@@ -180,7 +179,7 @@ private fun mergeMessages(
 }
 
 interface ChatSessionResolver {
-    fun resolve(input: ChatTurnInput): ChatSession
+    suspend fun resolve(input: ChatTurnInput): ChatSession
 }
 
 data class ChatSession(

@@ -124,7 +124,8 @@ private fun SynaraAndroidWebView(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
                 // chrome://inspect — verify SPA / WS without leaving Amber.
-                WebView.setWebContentsDebuggingEnabled(true)
+                // 仅限 debug 包：release 下开启会让页面 URL 里的 ?token= 经 adb 可见。
+                WebView.setWebContentsDebuggingEnabled(app.amber.agent.BuildConfig.DEBUG)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
@@ -132,7 +133,11 @@ private fun SynaraAndroidWebView(
                 settings.displayZoomControls = false
                 settings.useWideViewPort = true
                 settings.loadWithOverviewMode = true
-                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                settings.mixedContentMode = if (connection.useHttps) {
+                    WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                } else {
+                    WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                }
                 settings.mediaPlaybackRequiresUserGesture = false
                 // Stay browser-like, not Electron (Synara probes "; wv" in UA).
                 settings.userAgentString = settings.userAgentString

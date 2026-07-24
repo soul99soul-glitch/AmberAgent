@@ -139,7 +139,14 @@ class GoogleGeminiOAuthClient(
     private val httpClient: OkHttpClient,
     private val authStore: GoogleGeminiAuthStore,
 ) {
-    private val refreshMutex = Mutex()
+    // 进程级刷新锁：DI 单例与 GoogleProvider 各自实例化 client，
+    // 共享同一份存储的 refresh_token，刷新必须跨实例互斥
+    private fun refreshMutex(providerId: Uuid): Mutex =
+        refreshMutexes.getOrPut(providerId.toString()) { Mutex() }
+
+    private companion object {
+        val refreshMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    }
 
     /**
      * Run the full authorization-code + PKCE flow in the foreground:
@@ -191,7 +198,7 @@ class GoogleGeminiOAuthClient(
         }
     }
 
-    suspend fun refresh(providerId: Uuid): GoogleGeminiAuthTokens = refreshMutex.withLock {
+    suspend fun refresh(providerId: Uuid): GoogleGeminiAuthTokens = refreshMutex(providerId).withLock {
         val current = authStore.get(providerId)
             ?: error("没有可用的 Google OAuth token，请重新登录。")
         val refreshToken = current.refreshToken
@@ -207,11 +214,12 @@ class GoogleGeminiOAuthClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("Google OAuth refresh 失败：HTTP ${response.code} ${text.take(300)}")
+            error("Google OAuth refresh 失败：HTTP ${response.code}")
         }
         val parsed = json.parseToJsonElement(text).jsonObject
         val accessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull
-            ?: error("Google OAuth refresh 响应缺少 access_token: ${text.take(300)}")
+            // 不回贴原始响应——schema 漂移时响应体可能仍含 refresh_token/id_token
+            ?: error("Google OAuth refresh 响应缺少 access_token")
         val expiresIn = parsed["expires_in"]?.jsonPrimitive?.longOrNull
             ?: (FALLBACK_TOKEN_LIFETIME_MS / 1000)
         // Google may rotate refresh_token; preserve old one if not rotated.
@@ -239,7 +247,11 @@ class GoogleGeminiOAuthClient(
             return current.accessToken
         }
         return runCatching { refresh(providerId).accessToken }
-            .onFailure { Log.w(TAG, "Refresh failed for provider $providerId", it) }
+            .onFailure {
+                // CancellationException 不是刷新失败——取消必须继续传播
+                if (it is kotlinx.coroutines.CancellationException) throw it
+                Log.w(TAG, "Refresh failed for provider $providerId", it)
+            }
             .getOrNull()
     }
 
@@ -455,10 +467,11 @@ class GoogleGeminiOAuthClient(
             .header("x-activity-request-id", Uuid.random().toString())
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        Log.i(TAG, "cloudcode-pa $method request: $body")
+        // 不在 release 日志中输出 body（含账号元数据）
+        Log.i(TAG, "cloudcode-pa $method request")
         val response = httpClient.newCall(request).await()
         val text = response.body?.string().orEmpty()
-        Log.i(TAG, "cloudcode-pa $method response (${response.code}): ${text.take(2000)}")
+        Log.i(TAG, "cloudcode-pa $method response (${response.code})")
         if (!response.isSuccessful) {
             error("cloudcode-pa $method 失败：HTTP ${response.code} ${text.take(300)}")
         }
@@ -536,11 +549,12 @@ class GoogleGeminiOAuthClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("Google OAuth token 交换失败：HTTP ${response.code} ${text.take(300)}")
+            error("Google OAuth token 交换失败：HTTP ${response.code}")
         }
         val parsed = json.parseToJsonElement(text).jsonObject
         val accessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull
-            ?: error("Google OAuth 响应缺少 access_token: ${text.take(300)}")
+            // 不回贴原始响应——schema 漂移时响应体可能仍含 refresh_token/id_token
+            ?: error("Google OAuth 响应缺少 access_token")
         val refreshToken = parsed["refresh_token"]?.jsonPrimitive?.contentOrNull
         val expiresIn = parsed["expires_in"]?.jsonPrimitive?.longOrNull
             ?: (FALLBACK_TOKEN_LIFETIME_MS / 1000)

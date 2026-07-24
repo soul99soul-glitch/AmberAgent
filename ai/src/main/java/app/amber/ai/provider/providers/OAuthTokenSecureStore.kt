@@ -29,7 +29,12 @@ internal class OAuthTokenSecureStore(
     fun get(key: String): String? {
         val raw = prefs.getString(key, null) ?: return null
         decodeStoredSecretOrNull(raw)?.let { stored ->
-            return decryptOrNull(stored) ?: error("Unable to decrypt stored OAuth token")
+            // 换机/云恢复后 Keystore 密钥不存在，旧密文永远解不开——
+            // 清掉并按未登录处理（走重新授权），而不是每次读取都崩溃
+            return decryptOrNull(stored) ?: run {
+                remove(key)
+                null
+            }
         }
         put(key, raw)
         return raw
@@ -46,7 +51,8 @@ internal class OAuthTokenSecureStore(
     fun exportPlainValues(): Map<String, String> = prefs.all.mapNotNull { (key, value) ->
         val raw = value as? String ?: return@mapNotNull null
         val stored = decodeStoredSecretOrNull(raw)
-        key to if (stored == null) raw else decryptOrNull(stored) ?: error("Unable to decrypt stored OAuth token")
+        // 解不开的条目（他设备密文）跳过，不能让一条坏记录炸掉整个同步导出
+        if (stored == null) key to raw else decryptOrNull(stored)?.let { key to it }
     }.toMap()
 
     fun replacePlainValues(values: Map<String, String>) {

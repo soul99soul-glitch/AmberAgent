@@ -3,6 +3,7 @@ package app.amber.core.repository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -211,23 +212,29 @@ class CouncilRoomRepository(
             persistJob?.cancel()
             persistJob = scope.launch(Dispatchers.IO) {
                 delay(PERSIST_DEBOUNCE_MS)
-                flushNow(dao)
+                val currentJob = currentCoroutineContext()[Job]
+                if (persistJob === currentJob) {
+                    persistJob = null
+                }
+                persistCurrent(dao)
             }
         }
 
         suspend fun flushNow(dao: ConversationDAO) {
             persistJob?.cancel()
             persistJob = null
+            persistCurrent(dao)
+        }
+
+        private suspend fun persistCurrent(dao: ConversationDAO) {
             val current = flow.value ?: return
             val json = runCatching { JsonInstant.encodeToString(CouncilRoom.serializer(), current) }
                 .getOrNull() ?: return
-            runCatching {
-                dao.updateCouncilState(
-                    id = current.conversationId.toString(),
-                    councilState = json,
-                    updatedAt = current.updatedAtMs,
-                )
-            }
+            dao.updateCouncilState(
+                id = current.conversationId.toString(),
+                councilState = json,
+                updatedAt = current.updatedAtMs,
+            )
         }
     }
 

@@ -173,7 +173,7 @@ class SettingsProviderRescue(
     private fun Settings.configRecoveryScore(): Int =
         providerRecoveryScore() +
             searchRecoveryScore() +
-            if (!displaySetting.looksLikeDefaultIdentity()) 80 else 0 +
+            (if (!displaySetting.looksLikeDefaultIdentity()) 80 else 0) +
             assistants.size * 5 +
             quickMessages.size * 3 +
             mcpServers.size * 5 +

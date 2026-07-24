@@ -124,14 +124,32 @@ internal fun replaceDatabaseFilesFromTemp(
 
     appDatabase.close()
     dbFile.parentFile?.mkdirs()
-    targets.forEach { (_, target) ->
+
+    // Rename existing files aside (atomic on same filesystem) so a crash mid-copy
+    // doesn't leave a half-deleted database.
+    val backups = targets.mapNotNull { (_, target) ->
         if (target.exists()) {
-            check(target.delete()) { "Failed to remove old database file: ${target.name}" }
-        }
+            val backup = File(target.parentFile, "${target.name}.bak")
+            if (backup.exists()) backup.delete()
+            check(target.renameTo(backup)) { "Failed to back up database file: ${target.name}" }
+            backup
+        } else null
     }
-    targets.forEach { (source, target) ->
-        if (source.exists()) {
-            source.copyTo(target, overwrite = true)
+
+    try {
+        targets.forEach { (source, target) ->
+            if (source.exists()) {
+                source.copyTo(target, overwrite = true)
+            }
         }
+        // Success — remove backups
+        backups.forEach { it.delete() }
+    } catch (e: Exception) {
+        // Restore originals from backups
+        backups.forEach { backup ->
+            val original = File(backup.parentFile, backup.nameWithoutExtension)
+            if (!original.exists()) backup.renameTo(original)
+        }
+        throw e
     }
 }

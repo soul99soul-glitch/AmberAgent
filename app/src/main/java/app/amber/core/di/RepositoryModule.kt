@@ -21,7 +21,7 @@ val repositoryModule = module {
     }
 
     single {
-        MemoryRepository(get(), get(), get())
+        MemoryRepository(get(), get(), get(), get())
     }
 
     single<app.amber.core.memory.store.MemoryRepository> {

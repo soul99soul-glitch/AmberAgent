@@ -3,6 +3,8 @@ package app.amber.feature.ui.pages.synara
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -14,7 +16,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import org.json.JSONObject
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import java.util.concurrent.TimeUnit
 
 data class SynaraUiState(
@@ -77,7 +84,7 @@ class SynaraVM(
         }
         viewModelScope.launch {
             _ui.update { it.copy(checking = true, lastCheckMessage = null, lastCheckOk = null) }
-            val result = withContext(Dispatchers.IO) { probeHealth(draft) }
+            val result = withContext(Dispatchers.IO) { probeConnection(draft) }
             _ui.update {
                 it.copy(
                     checking = false,
@@ -91,7 +98,7 @@ class SynaraVM(
         }
     }
 
-    private fun probeHealth(connection: SynaraConnection): Result<String> {
+    private suspend fun probeConnection(connection: SynaraConnection): Result<String> {
         return runCatching {
             val healthRequest = Request.Builder()
                 .url(connection.healthUrl())
@@ -107,7 +114,28 @@ class SynaraVM(
             if (!status.equals("ok", ignoreCase = true)) {
                 error("health 未就绪（status=${status.ifBlank { "empty" }}）")
             }
-            "健康检查通过（status=ok） · ${connection.httpBaseUrl()}"
+            probeAuthenticatedWebSocket(connection)
+            "健康检查和 Auth Token 验证通过 · ${connection.httpBaseUrl()}"
+        }
+    }
+
+    private suspend fun probeAuthenticatedWebSocket(connection: SynaraConnection) = withTimeout(5_000L) {
+        suspendCancellableCoroutine { continuation ->
+            lateinit var socket: WebSocket
+            socket = client.newWebSocket(
+                Request.Builder().url(connection.wsBootstrapUrl()).build(),
+                object : WebSocketListener() {
+                    override fun onOpen(webSocket: WebSocket, response: Response) {
+                        if (continuation.isActive) continuation.resume(Unit)
+                        webSocket.close(1000, "connection test complete")
+                    }
+
+                    override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+                        if (continuation.isActive) continuation.resumeWithException(error)
+                    }
+                },
+            )
+            continuation.invokeOnCancellation { socket.cancel() }
         }
     }
 }

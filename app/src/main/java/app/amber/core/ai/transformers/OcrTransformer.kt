@@ -2,6 +2,7 @@ package app.amber.core.ai.transformers
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.serializer
@@ -122,9 +123,11 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                 ),
             )
         }.getOrElse {
+            if (it is CancellationException) throw it
             throw VisualRecognitionException("视觉识别模型调用失败：${it.message}", it)
         }
-        val content = result.choices[0].message?.toText()?.trim().orEmpty()
+        // choices 可能为空（内容过滤等），直接 [0] 会 IOOBE
+        val content = result.choices.firstOrNull()?.message?.toText()?.trim().orEmpty()
         if (content.isBlank()) {
             throw VisualRecognitionException("视觉识别模型没有返回可用内容")
         }

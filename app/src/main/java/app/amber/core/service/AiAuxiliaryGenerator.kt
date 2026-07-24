@@ -1,6 +1,7 @@
 package app.amber.core.service
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.ProviderManager
@@ -73,6 +74,7 @@ class AiAuxiliaryGenerator(
                 updateAt = updatedConversation.updateAt,
             )
         }.onFailure {
+            if (it is CancellationException) throw it
             it.printStackTrace()
             conversationAccess.addError(it, conversationId, title = context.getString(R.string.error_title_generate_title))
         }
@@ -129,6 +131,7 @@ class AiAuxiliaryGenerator(
                 updateAt = updatedConversation.updateAt,
             )
         }.onFailure {
+            if (it is CancellationException) throw it
             it.printStackTrace()
         }
     }

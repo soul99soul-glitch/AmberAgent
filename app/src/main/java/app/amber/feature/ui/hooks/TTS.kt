@@ -12,6 +12,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import app.amber.tts.model.PlaybackState
@@ -123,7 +125,7 @@ private class CustomTtsStateImpl(
     private val ttsManager by inject<TTSManager>()
     private val controller by lazy { app.amber.tts.controller.TtsController(context, ttsManager) }
 
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var currentJob: Job? = null
 
     override val isAvailable: StateFlow<Boolean> get() = controller.isAvailable
@@ -170,6 +172,8 @@ private class CustomTtsStateImpl(
 
     override fun cleanup() {
         controller.dispose()
+        currentJob?.cancel()
         currentJob = null
+        scope.cancel()
     }
 }

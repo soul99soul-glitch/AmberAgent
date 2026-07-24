@@ -129,6 +129,8 @@ class S3Sync(
 
             // Backup database files
             if (config.items.contains(S3Config.BackupItem.DATABASE)) {
+                // Flush WAL into main DB so the copy is consistent without -wal/-shm
+                appDatabase.openHelper.writableDatabase.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
                 val dbFile = context.getDatabasePath("amber_agent")
                 if (dbFile.exists()) {
                     addFileToZip(zipOut, dbFile, "amber_agent.db")
@@ -150,11 +152,12 @@ class S3Sync(
                 val uploadFolder = File(context.filesDir, FileFolders.UPLOAD)
                 if (uploadFolder.exists() && uploadFolder.isDirectory) {
                     Log.i(TAG, "prepareBackupFile: Backing up files from ${uploadFolder.absolutePath}")
-                    uploadFolder.listFiles()?.forEach { file ->
-                        if (file.isFile) {
-                            addFileToZip(zipOut, file, "${FileFolders.UPLOAD}/${file.name}")
-                        }
-                    }
+                    addDirectoryToZip(
+                        zipOut = zipOut,
+                        rootDir = uploadFolder,
+                        currentDir = uploadFolder,
+                        entryPrefix = "${FileFolders.UPLOAD}/"
+                    )
                 } else {
                     Log.w(TAG, "prepareBackupFile: Upload folder does not exist or is not a directory")
                 }
@@ -298,7 +301,8 @@ class S3Sync(
                 Log.i(TAG, "restoreFromBackupFile: Database restored; app restart is required")
             }
             stagedSettings?.let { settings ->
-                settingsStore.update(settings)
+                val merged = json.restoreBackupSecrets(settings, settingsStore.settingsFlow.value)
+                settingsStore.update(merged)
                 Log.i(TAG, "restoreFromBackupFile: Settings restored successfully")
             }
         } finally {

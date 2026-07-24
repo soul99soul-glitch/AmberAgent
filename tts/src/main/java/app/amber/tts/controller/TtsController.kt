@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -23,8 +24,22 @@ import app.amber.tts.model.TTSResponse
 import app.amber.tts.provider.TTSManager
 import app.amber.tts.provider.TTSProviderSetting
 import java.util.UUID
+import java.util.concurrent.ConcurrentMap
 
 private const val TAG = "TtsController"
+
+internal suspend fun <K, V> ConcurrentMap<K, Deferred<V>>.awaitAndRemove(
+    key: K,
+    deferred: Deferred<V>,
+): V = try {
+    deferred.await()
+} finally {
+    remove(key, deferred)
+}
+
+internal suspend fun awaitUnpaused(isPaused: () -> Boolean) {
+    while (isPaused()) delay(80)
+}
 
 /**
  * TTS 控制器（重构版）
@@ -128,7 +143,7 @@ class TtsController(
             allChunks.addAll(remapped)
             queue.addAll(remapped)
         }
-        _totalChunks.update { queue.size }
+        _totalChunks.update { allChunks.size }
         _error.update { null }
 
         _playbackState.update {
@@ -189,7 +204,6 @@ class TtsController(
     fun skipNext() {
         if (queue.isNotEmpty()) {
             queue.poll()
-            _totalChunks.update { queue.size }
         }
     }
 
@@ -239,7 +253,6 @@ class TtsController(
 
                     // 更新状态（1-based）
                     _currentChunk.update { processedCount + 1 }
-                    _totalChunks.update { queue.size + 1 }
                     _playbackState.update {
                         it.copy(
                             currentChunkIndex = _currentChunk.value,
@@ -261,6 +274,7 @@ class TtsController(
                     }
 
                     // 播放
+                    awaitUnpaused { isPaused }
                     try {
                         audio.play(response)
                     } catch (e: Exception) {
@@ -301,11 +315,7 @@ class TtsController(
         val deferred = cache.computeIfAbsent(chunk.id) {
             scope.async(Dispatchers.IO) { synthesizer.synthesize(provider, chunk) }
         }
-        return try {
-            deferred.await()
-        } finally {
-            // 可按需保留缓存（此处保留，便于重播/重试）
-        }
+        return cache.awaitAndRemove(chunk.id, deferred)
     }
     // endregion
 }
