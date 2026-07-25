@@ -82,6 +82,10 @@ struct ParagraphView: UIViewRepresentable {
     guard let width = proposal.width, width > 0, width.isFinite else {
       return nil
     }
+    // Vendored fix (AmberAgent): test-only observation hook, see the enum below.
+    #if DEBUG
+    ParagraphViewSizeThatFitsTestHook.recordCall()
+    #endif
 
     // Check if content or lineSpacing changed - if so, clear the cache
     // Vendored fix (AmberAgent): identity-first short circuit, see updateUIView.
@@ -98,6 +102,9 @@ struct ParagraphView: UIViewRepresentable {
 
     // Check if we have a cached size for this width
     if let cachedSize = context.coordinator.sizeCache[cacheKey] {
+      #if DEBUG
+      ParagraphViewSizeThatFitsTestHook.recordCacheHit()
+      #endif
       return cachedSize
     }
 
@@ -141,3 +148,34 @@ extension ParagraphView: Equatable {
       && lhs.lineSpacing == rhs.lineSpacing
   }
 }
+
+#if DEBUG
+/// Test-only observation hook for `ParagraphView.sizeThatFits`: how many times
+/// SwiftUI's layout engine actually invokes this representable's measurement
+/// entry point per publish, and how many of those hit `Coordinator.sizeCache`
+/// vs. fall through to a real `UITextView.sizeThatFits` call. Compiled out of
+/// Release builds entirely (guarded by `#if DEBUG`, matching the existing
+/// `ParagraphUIViewAppendPathTestHook` pattern in `UIKit/ParagraphUIView.swift`).
+/// Not read by any production code path — added solely so `xcodebuild test`
+/// targets can distinguish "SwiftUI walked every paragraph but measurement was
+/// cached" from "every paragraph was re-measured" without guessing from
+/// external side effects (2026-07-25 prefix-reuse-cost experiment).
+@MainActor
+enum ParagraphViewSizeThatFitsTestHook {
+  static var callCount = 0
+  static var cacheHitCount = 0
+
+  static func reset() {
+    callCount = 0
+    cacheHitCount = 0
+  }
+
+  static func recordCall() {
+    callCount += 1
+  }
+
+  static func recordCacheHit() {
+    cacheHitCount += 1
+  }
+}
+#endif

@@ -1155,6 +1155,109 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(validated.stateSummary, baseState.summary)
     }
 
+    /// Exercises the *full* production entry point (`validateManualChunkOutput`,
+    /// not `sanitizedManualRebuild` or `sanitizedCollectionDelta` in isolation).
+    /// Before the anchor/verbatim unification, this was the confirmed real-world
+    /// bug: `sanitizedManualRebuild` already tolerated paraphrased evidence with a
+    /// long anchor and kept the fact, but the very next step,
+    /// `validateStateFacts` -> `validateEvidence`, re-checked the *same*
+    /// already-filtered evidence with a stricter, literal-substring-only rule and
+    /// threw `NovelError.invalidInput`, turning "one paraphrased fact silently
+    /// dropped" into "the entire chunk hard-fails". This test must be RED before
+    /// the unification (throws `invalidInput`) and GREEN after (succeeds, keeps
+    /// the paraphrased fact) — that transition is the actual proof the
+    /// production bug is fixed, not just the lower-level sanitization functions.
+    func testManualChunkOutputAcceptsParaphrasedEvidenceAnchoredInManuscriptThroughFullChain() throws {
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let baseState = try XCTUnwrap(document.stateSnapshots.first)
+        let manuscript = "赵匡胤低头看着杯子里微微泛着褐色的茶水，把那句没有说出口的话重新咽了回去。" +
+            "窗外的雪不知何时停了，只余下满城的寂静。"
+        // Same leading clause verbatim (a 20-character anchor, well above the
+        // 8-character floor and the 40% ratio floor of this 29-character
+        // string), but the tail is reworded instead of quoted.
+        let paraphrased = "赵匡胤低头看着杯子里微微泛着褐色的茶水，咽回了没说出口的话"
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "赵匡胤欲言又止。",
+            branchOutline: "赵匡胤欲言又止。",
+            events: [NovelStateEventV1(
+                id: "event-paraphrased",
+                kind: "dialogue",
+                summary: "赵匡胤把话咽了回去。",
+                entityReferences: ["赵匡胤"],
+                evidence: paraphrased
+            )],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: ["赵匡胤"],
+            settingProposals: []
+        )
+
+        let validated = try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: manuscript,
+            accumulated: nil,
+            baseState: baseState,
+            branchID: branch.id,
+            in: document
+        )
+
+        XCTAssertEqual(validated.events.map(\.id), ["event-paraphrased"])
+    }
+
+    /// Companion to the acceptance test above: proves the full production entry
+    /// point still rejects evidence that shares no meaningful anchor with the
+    /// manuscript (i.e. is effectively fabricated), so the anchor relaxation did
+    /// not weaken anti-fabrication protection. Because a single-fact rebuild that
+    /// gets fully discarded trips `requireEvidenceNotAllDiscarded`, this must
+    /// throw the retryable `state_facts_evidence_unmatched` failure exactly as it
+    /// did before the unification.
+    func testManualChunkOutputStillRejectsFabricatedEvidenceThroughFullChain() throws {
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let baseState = try XCTUnwrap(document.stateSnapshots.first)
+        let manuscript = "赵匡胤低头看着杯子里微微泛着褐色的茶水，把那句没有说出口的话重新咽了回去。" +
+            "窗外的雪不知何时停了，只余下满城的寂静。"
+        // Shares only the 3-character name "赵匡胤" with the manuscript; the
+        // longest common contiguous run is 3 characters, well under the
+        // 8-character floor.
+        let fabricated = "赵匡胤怒吼一声，拔出腰间长剑直取城楼上的敌将首级，鲜血溅满了城墙。"
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "赵匡胤拔剑迎敌。",
+            branchOutline: "赵匡胤拔剑迎敌。",
+            events: [NovelStateEventV1(
+                id: "event-fabricated",
+                kind: "combat",
+                summary: "赵匡胤拔剑杀敌。",
+                entityReferences: ["赵匡胤"],
+                evidence: fabricated
+            )],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: ["赵匡胤"],
+            settingProposals: []
+        )
+
+        XCTAssertThrowsError(try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: manuscript,
+            accumulated: nil,
+            baseState: baseState,
+            branchID: branch.id,
+            in: document
+        )) { error in
+            guard let failure = error as? NovelStructuredModelExecutionFailure else {
+                return XCTFail("Expected a structured-output evidence failure, got \(error)")
+            }
+            XCTAssertEqual(failure.failure.code, "state_facts_evidence_unmatched")
+            XCTAssertTrue(failure.failure.isRetryable)
+        }
+    }
+
 }
 
 private extension NovelFactTransactionLifecycleTests {

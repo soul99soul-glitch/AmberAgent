@@ -176,6 +176,9 @@ class ParagraphUIView: UITextView {
        usesTextKit1,
        self.lineSpacing == lineSpacing,
        let appendedRange = paragraphContents.appendedTailRange(toBecome: newContents) {
+      #if DEBUG
+      ParagraphUIViewAppendPathTestHook.recordHit()
+      #endif
       self.paragraphContents = newContents
       let suffix = NSMutableAttributedString(
         attributedString: newContents.attributedSubstring(from: appendedRange)
@@ -197,6 +200,20 @@ class ParagraphUIView: UITextView {
       appendFadeAnimations(in: appendedRange)
       return
     }
+
+    #if DEBUG
+    if !animatedByWord {
+      ParagraphUIViewAppendPathTestHook.recordMiss("notAnimatedByWord")
+    } else if !usesTextKit1 {
+      ParagraphUIViewAppendPathTestHook.recordMiss("textKit2")
+    } else if self.lineSpacing != lineSpacing {
+      ParagraphUIViewAppendPathTestHook.recordMiss("lineSpacingChanged")
+    } else {
+      ParagraphUIViewAppendPathTestHook.recordMiss(
+        paragraphContents.appendedTailRangeMissReasonForTesting(toBecome: newContents)
+      )
+    }
+    #endif
 
     self.paragraphContents = newContents
     self.lineSpacing = lineSpacing
@@ -526,6 +543,70 @@ extension ParagraphUIView: UITextViewDelegate {
     }
   }
 }
+
+#if DEBUG
+/// Test-only observation hook for `ParagraphUIView.setParagraphContents`'s append
+/// fast-path (incremental `textStorage.append`) vs the full-`attributedText`-replacement
+/// fallback. Compiled out of Release builds entirely (guarded by `#if DEBUG`, matching
+/// the existing pattern in `TableView.swift`/`DocumentView.swift`/`CodeBlockView.swift`
+/// in this package), so it carries zero production overhead and never runs in a
+/// distributed build. Not read by any production code path — added solely so
+/// `xcodebuild test` targets can measure the fast-path hit rate without guessing at it
+/// from external side effects (2026-07-25 length-scan perf audit).
+@MainActor
+enum ParagraphUIViewAppendPathTestHook {
+  static var appendHitCount = 0
+  static var fallbackMissCount = 0
+  static var missReasonCounts: [String: Int] = [:]
+
+  static func reset() {
+    appendHitCount = 0
+    fallbackMissCount = 0
+    missReasonCounts = [:]
+  }
+
+  static func recordHit() {
+    appendHitCount += 1
+  }
+
+  static func recordMiss(_ reason: String) {
+    fallbackMissCount += 1
+    missReasonCounts[reason, default: 0] += 1
+  }
+}
+
+extension NSAttributedString {
+  /// Test-only diagnostic mirror of `appendedTailRange(toBecome:)` that classifies
+  /// *why* an append fast-path attempt didn't qualify, instead of just returning nil.
+  /// Duplicates the same checks read-only; never called from any production path, and
+  /// compiled out of Release builds along with the rest of this `#if DEBUG` block.
+  func appendedTailRangeMissReasonForTesting(toBecome other: NSAttributedString) -> String {
+    let prefixLength = length
+    guard prefixLength > 0 else { return "previousEmpty" }
+    guard other.length > prefixLength else { return "notExtending" }
+    let comparison = (other.string as NSString).compare(
+      string,
+      options: .literal,
+      range: NSRange(location: 0, length: prefixLength)
+    )
+    guard comparison == .orderedSame else { return "prefixMismatch" }
+
+    var index = 0
+    while index < prefixLength {
+      var selfRange = NSRange()
+      var otherRange = NSRange()
+      let selfAttributes = attributes(at: index, effectiveRange: &selfRange)
+      let otherAttributes = other.attributes(at: index, effectiveRange: &otherRange)
+      guard (selfAttributes as NSDictionary).isEqual(to: otherAttributes) else {
+        return "attributesChanged"
+      }
+      index = min(selfRange.location + selfRange.length, otherRange.location + otherRange.length)
+    }
+    // Should be unreachable: the real `appendedTailRange` would have matched too.
+    return "unexpectedMatch"
+  }
+}
+#endif
 
 fileprivate extension NSMutableAttributedString {
   func setLineSpacing(_ lineSpacing: CGFloat) {

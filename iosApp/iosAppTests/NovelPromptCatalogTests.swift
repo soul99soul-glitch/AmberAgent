@@ -11,7 +11,7 @@ final class NovelPromptCatalogTests: XCTestCase {
 
         XCTAssertEqual(
             sha256(snapshot),
-            "a28dbdb16a7e2431f54626e6ee8e43faccc6d3ba6f919a4a383c5c3fab032998"
+            "5b0c6c132cb11cc811b713ce831f7e5f7179240267062d6ac2eed772e0a4d15e"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -137,9 +137,112 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertTrue(drift.contains("event|chronology|relationship|motivation|secret|outcome"))
         XCTAssertTrue(drift.contains("fail closed"))
 
+        // The evidence field must be described as a literal, character-for-character
+        // manuscript excerpt, not a loose paraphrase, in both fact-extraction contracts.
+        XCTAssertTrue(
+            state.contains("EXACT verbatim substring copied character-for-character"),
+            "State delta Prompt does not demand verbatim evidence"
+        )
+        XCTAssertTrue(
+            rebuild.contains("EXACT verbatim substring copied character-for-character"),
+            "State rebuild Prompt does not demand verbatim evidence"
+        )
+        for prompt in [state, rebuild] {
+            XCTAssertTrue(prompt.contains("Evidence integrity is mandatory"))
+            XCTAssertTrue(prompt.contains("verbatim"))
+            XCTAssertTrue(prompt.contains("Never paraphrase"))
+            XCTAssertTrue(prompt.contains("omit that"))
+            XCTAssertTrue(prompt.contains("Forbidden"))
+            XCTAssertTrue(prompt.contains("discarded by the"))
+        }
+
         XCTAssertNoThrow(try NovelStructuredOutputDecoder.decodeStateDelta(from: stateDeltaExample))
         XCTAssertNoThrow(try NovelStructuredOutputDecoder.decodeStateRebuild(from: stateRebuildExample))
         XCTAssertNoThrow(try NovelStructuredOutputDecoder.decodePolishDrift(from: polishDriftExample))
+    }
+
+    /// Ties the manualSyncV1 prompt's "verbatim substring" evidence requirement to
+    /// NovelFactOutputValidation's actual evidence-matching behavior, so the prompt's
+    /// promise and the validator's enforcement cannot silently drift apart.
+    ///
+    /// Contract update (2026-07): the judging criterion changed from "is the evidence
+    /// character-for-character identical to the manuscript" to "is the evidence anchored
+    /// in real manuscript text" (see `NovelFactOutputValidation.evidenceAnchorRange`).
+    /// Verbatim-only matching was found to reject genuine LLM output for a reason that
+    /// never actually protected against fabrication: model output is inherently a little
+    /// lossy on exact transcription (whitespace, punctuation, minor rewording), and a
+    /// literal-substring check was never a proof that the *fact* was true anyway — it
+    /// only proved the *quoted fragment* existed verbatim somewhere in the manuscript.
+    /// Demanding exact transcription was therefore all cost (legitimate facts silently
+    /// dropped, or the whole batch hard-failing once other call sites layered a stricter
+    /// re-check on top) for little anti-fabrication benefit. The new anchor rule keeps
+    /// that benefit — evidence sharing only a few incidental characters (a name, a
+    /// function word) with the manuscript is still rejected — while tolerating the
+    /// paraphrase/rewording the prompt's "verbatim" wording cannot realistically prevent.
+    ///
+    /// This test therefore asserts the two-way split the new contract makes: (1) a
+    /// reworded evidence string that still anchors on a long, high-coverage literal run of
+    /// the manuscript must survive, and (2) a reworded evidence string that shares only
+    /// a couple of incidental characters with the manuscript (i.e. is effectively
+    /// fabricated) must still be discarded. The literal/verbatim case remains covered as
+    /// the fast-path regression check.
+    func testEvidenceContractAlignsWithVerbatimValidationBehavior() throws {
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let baseState = try XCTUnwrap(document.stateSnapshots.first)
+        let manuscript = "夜里下起了小雨，阿云站在屋檐下，看着雨水顺着瓦片一滴一滴地滑落。"
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "阿云在雨夜里等待。",
+            branchOutline: "阿云在雨夜里等待。",
+            events: [
+                NovelStateEventV1(
+                    id: "event-verbatim",
+                    kind: "fact",
+                    summary: "阿云站在屋檐下看雨。",
+                    entityReferences: [],
+                    evidence: "阿云站在屋檐下，看着雨水顺着瓦片一滴一滴地滑落。"
+                ),
+                NovelStateEventV1(
+                    id: "event-paraphrase-anchored",
+                    kind: "fact",
+                    summary: "阿云看着雨心情渐渐平静。",
+                    entityReferences: [],
+                    // Reworded tail, but shares a 16-character verbatim run with the
+                    // manuscript (well above the 8-character floor and the 40% coverage
+                    // floor of this 26-character string) — must now survive.
+                    evidence: "阿云站在屋檐下，看着雨水顺着瓦片，心里渐渐平静下来。"
+                ),
+                NovelStateEventV1(
+                    id: "event-paraphrase-unanchored",
+                    kind: "fact",
+                    summary: "阿云转身走进屋内。",
+                    entityReferences: [],
+                    // Shares only the 2-character name "阿云" with the manuscript — no
+                    // anchor of any meaningful length — must still be discarded.
+                    evidence: "阿云转身走进屋内，心情十分平静。"
+                ),
+            ],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: [],
+            settingProposals: []
+        )
+
+        let validated = try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: manuscript,
+            accumulated: nil,
+            baseState: baseState,
+            branchID: branch.id,
+            in: document
+        )
+
+        XCTAssertEqual(
+            validated.events.map(\.id),
+            ["event-verbatim", "event-paraphrase-anchored"]
+        )
     }
 
     private func sha256(_ text: String) -> String {

@@ -114,7 +114,7 @@ enum NovelPromptCatalog {
         case .stateDeltaV1:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.state-delta.v1",
+                version: "novel.state-delta.v2",
                 systemText: """
                 Extract only story-state changes caused by the newly collected manuscript.
                 Do not infer unsupported facts. Project-setting changes must be proposals, never direct mutations.
@@ -123,6 +123,8 @@ enum NovelPromptCatalog {
                 the supplied base state. branchOutlinePatch is null when unchanged; otherwise it is the complete
                 replacement branch outline, not a fragment.
 
+                \(evidenceIntegrityConstraint)
+
                 \(stateDeltaJSONContract)
                 """
             )
@@ -130,7 +132,7 @@ enum NovelPromptCatalog {
         case .manualSyncV1:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.manual-sync.v2",
+                version: "novel.manual-sync.v3",
                 systemText: """
                 Rebuild derived branch state from a deterministic ordered manuscript chunk. The compact projected
                 state is authoritative for all prior completed chunks. stateSummary, branchOutline, and
@@ -139,6 +141,8 @@ enum NovelPromptCatalog {
                 facts whose evidence occurs in the current manuscript chunk; never repeat prior-chunk facts.
                 Removed or rewritten manuscript facts must not survive merely because they existed in older
                 derived state. Do not modify shared project settings.
+
+                \(evidenceIntegrityConstraint)
 
                 \(stateRebuildJSONContract)
                 """
@@ -313,6 +317,20 @@ enum NovelPromptCatalog {
 }
 
 private extension NovelPromptCatalog {
+    static let evidenceIntegrityConstraint = """
+        Evidence integrity is mandatory. Every "evidence" value must be copied verbatim, character-for-character,
+        from a single contiguous span of the current manuscript chunk. Never paraphrase, summarize, translate,
+        abbreviate, reorder words, add or remove punctuation, insert an ellipsis, or splice together
+        non-contiguous fragments. If no exact quotable span in the manuscript chunk supports a fact, omit that
+        fact entirely instead of writing an approximate or reworded evidence string.
+        Correct: manuscript chunk contains "the door creaked open at midnight" ->
+        evidence:"the door creaked open at midnight" (identical substring).
+        Forbidden: manuscript chunk contains "the door creaked open at midnight" ->
+        evidence:"someone opened the door late at night" (paraphrase, not a verbatim substring).
+        Any evidence value that is not a literal substring of the manuscript chunk is discarded by the
+        downstream system, and the fact it supports is silently dropped and never recorded.
+        """
+
     static let stateDeltaJSONContract = """
         Output contract: NovelStateDeltaV1, schemaVersion 1.
         Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
@@ -333,24 +351,24 @@ private extension NovelPromptCatalog {
         Array item shapes:
         events: {
           "id":"stable-id", "kind":"non-empty string", "summary":"non-empty string",
-          "entityReferences":["entity name"], "evidence":"non-empty manuscript evidence"
+          "entityReferences":["entity name"], "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         characterChanges: {
           "id":"stable-id", "characterName":"non-empty string", "attribute":"non-empty string",
-          "value":"non-empty string", "evidence":"non-empty manuscript evidence"
+          "value":"non-empty string", "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         relationshipChanges: {
           "id":"stable-id", "sourceEntity":"non-empty string", "targetEntity":"different non-empty string",
           "relationship":"non-empty string", "state":"non-empty string",
-          "evidence":"non-empty manuscript evidence"
+          "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         foreshadowingChanges: {
           "id":"stable-id", "thread":"non-empty string", "status":"introduced|advanced|resolved|reopened",
-          "summary":"non-empty string", "evidence":"non-empty manuscript evidence"
+          "summary":"non-empty string", "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         settingProposals: {
           "id":"stable-id", "title":"non-empty string", "content":"non-empty string",
-          "evidence":"non-empty manuscript evidence"
+          "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         branchOutlinePatch is either null or a non-empty string. All IDs are unique across every object array,
         contain no whitespace, and are at most 128 characters. Entity-name arrays contain unique non-empty strings.
@@ -375,24 +393,24 @@ private extension NovelPromptCatalog {
         Array item shapes:
         events: {
           "id":"stable-id", "kind":"non-empty string", "summary":"non-empty string",
-          "entityReferences":["entity name"], "evidence":"non-empty manuscript evidence"
+          "entityReferences":["entity name"], "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         characterStates: {
           "id":"stable-id", "characterName":"non-empty string", "attribute":"non-empty string",
-          "value":"non-empty string", "evidence":"non-empty manuscript evidence"
+          "value":"non-empty string", "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         relationships: {
           "id":"stable-id", "sourceEntity":"non-empty string", "targetEntity":"different non-empty string",
           "relationship":"non-empty string", "state":"non-empty string",
-          "evidence":"non-empty manuscript evidence"
+          "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         foreshadowing: {
           "id":"stable-id", "thread":"non-empty string", "status":"introduced|advanced|resolved|reopened",
-          "summary":"non-empty string", "evidence":"non-empty manuscript evidence"
+          "summary":"non-empty string", "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         settingProposals: {
           "id":"stable-id", "title":"non-empty string", "content":"non-empty string",
-          "evidence":"non-empty manuscript evidence"
+          "evidence":"EXACT verbatim substring copied character-for-character from the manuscript chunk"
         }
         All IDs are unique across every object array, contain no whitespace, and are at most 128 characters.
         Entity-name arrays contain unique non-empty strings.

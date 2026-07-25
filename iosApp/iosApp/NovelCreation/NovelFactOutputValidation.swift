@@ -126,15 +126,21 @@ extension NovelFactTransactionReducer {
         baseState: NovelStateSnapshotRecord,
         document: NovelProjectDocumentV1
     ) throws -> NovelStateDeltaV1 {
-        let events = value.events.filter { evidenceMatches($0.evidence, in: evidenceSource) }
+        // Normalized once and reused across every filter below, instead of
+        // each `evidenceMatches` call re-normalizing the same (potentially
+        // multi-thousand-character) manuscript from scratch per fact.
+        let normalizedEvidenceSource = normalizeEvidenceWhitespace(evidenceSource)
+        let events = value.events.filter {
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
+        }
         let characterChanges = value.characterChanges.filter {
-            evidenceMatches($0.evidence, in: evidenceSource)
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
         }
         let relationshipChanges = value.relationshipChanges.filter {
-            evidenceMatches($0.evidence, in: evidenceSource)
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
         }
         let foreshadowingChanges = value.foreshadowingChanges.filter {
-            evidenceMatches($0.evidence, in: evidenceSource)
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
         }
         let hasEvidenceBackedFacts = !events.isEmpty ||
             !characterChanges.isEmpty ||
@@ -149,7 +155,7 @@ extension NovelFactTransactionReducer {
             hasEvidenceBackedFacts: hasEvidenceBackedFacts
         )
         let settingProposals = value.settingProposals.filter {
-            evidenceMatches($0.evidence, in: evidenceSource)
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
         }
 
         let referenced = events.flatMap(\.entityReferences) +
@@ -221,18 +227,24 @@ extension NovelFactTransactionReducer {
         baseState: NovelStateSnapshotRecord,
         document: NovelProjectDocumentV1
     ) throws -> NovelStateRebuildV1 {
-        let events = value.events.filter { evidenceMatches($0.evidence, in: evidenceSource) }
+        // Normalized once and reused across every filter below, instead of
+        // each `evidenceMatches` call re-normalizing the same (potentially
+        // multi-thousand-character) manuscript from scratch per fact.
+        let normalizedEvidenceSource = normalizeEvidenceWhitespace(evidenceSource)
+        let events = value.events.filter {
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
+        }
         let characterStates = value.characterStates.filter {
-            evidenceMatches($0.evidence, in: evidenceSource)
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
         }
         let relationships = value.relationships.filter {
-            evidenceMatches($0.evidence, in: evidenceSource)
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
         }
         let foreshadowing = value.foreshadowing.filter {
-            evidenceMatches($0.evidence, in: evidenceSource)
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
         }
         let settingProposals = value.settingProposals.filter {
-            evidenceMatches($0.evidence, in: evidenceSource)
+            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
         }
         let hasEvidenceBackedFacts = !events.isEmpty ||
             !characterStates.isEmpty ||
@@ -445,9 +457,7 @@ extension NovelFactTransactionReducer {
     ) throws {
         let source = normalizeEvidenceWhitespace(manuscript)
         for item in evidence {
-            let normalized = normalizeEvidenceWhitespace(item)
-            guard !normalized.isEmpty,
-                  source.contains(normalized) else {
+            guard evidenceAnchorRange(item, in: source) != nil else {
                 throw NovelError.invalidInput(
                     "A derived fact contains evidence outside the authoritative manuscript."
                 )
@@ -455,10 +465,160 @@ extension NovelFactTransactionReducer {
         }
     }
 
-    private static func evidenceMatches(_ evidence: String, in manuscript: String) -> Bool {
-        let source = normalizeEvidenceWhitespace(manuscript)
-        let normalized = normalizeEvidenceWhitespace(evidence)
-        return !normalized.isEmpty && source.contains(normalized)
+    /// Minimum length, in grapheme clusters (`Character`, not UTF-16 code
+    /// units — so CJK/emoji are counted correctly), of a literal run shared
+    /// between `evidence` and the manuscript before a paraphrased/summarized
+    /// `evidence` string can be accepted via the anchor path below. A bare
+    /// 2-3 character Chinese person name (or a handful of common function
+    /// words) is not enough on its own to prove the model actually looked at
+    /// real text — 8 contiguous characters is long enough that reproducing
+    /// it verbatim is a strong signal the model quoted or closely
+    /// paraphrased around genuine manuscript text rather than inventing it.
+    private static let minimumAnchorLength = 8
+
+    /// Minimum fraction of `evidence`'s own length that the longest shared
+    /// literal run must cover. This guards against "mostly fabricated"
+    /// evidence that smuggles in one short real phrase merely to clear
+    /// `minimumAnchorLength` — e.g. an 80-character invented sentence that
+    /// happens to contain one genuine 8-character fragment. 40% keeps the
+    /// check tolerant of genuine paraphrase/summarization (the case this
+    /// anchor path exists to unblock) while still rejecting evidence that is
+    /// predominantly invented.
+    private static let minimumAnchorRatio = 0.4
+
+    /// Single owner of "is `evidence` anchored in the manuscript". Every
+    /// call site that must decide whether a model-supplied evidence string
+    /// corresponds to real manuscript text — filtering out unmatched facts
+    /// (`evidenceMatches`), rejecting a request outright
+    /// (`validateEvidence`), or ordering facts by where their evidence
+    /// occurs (`chronologicalDrafts`) — goes through this function, so the
+    /// three call sites can never drift into disagreeing about what counts
+    /// as a match. (They previously did: two independent literal-substring
+    /// checks plus one that additionally tolerated paraphrase, which let a
+    /// fact survive filtering only to be rejected moments later by a
+    /// stricter re-check over the very data that had already passed.)
+    ///
+    /// Matching tries a literal substring first — the fast path, identical
+    /// to the original pre-anchor behavior and zero regression risk for the
+    /// overwhelming majority of evidence, which quotes the manuscript
+    /// verbatim — and only falls back to a paraphrase-tolerant anchor match
+    /// (see `anchorRange`) when the literal check fails.
+    ///
+    /// Returns the matched range within `normalizedManuscript` (rather than
+    /// a bare `Bool`) so `chronologicalDrafts` can order facts by where
+    /// their evidence sits in the manuscript without re-searching; callers
+    /// that only need a yes/no can simply compare the result against `nil`.
+    ///
+    /// `normalizedManuscript` must already be the output of
+    /// `normalizeEvidenceWhitespace` — this function never re-normalizes
+    /// it, so a caller checking many evidence strings against one
+    /// manuscript can normalize the manuscript once and reuse it across
+    /// every call instead of paying that cost per evidence item. `evidence`
+    /// itself is normalized here, since it is expected to be short relative
+    /// to the manuscript.
+    private static func evidenceAnchorRange(
+        _ evidence: String,
+        in normalizedManuscript: String
+    ) -> Range<String.Index>? {
+        let normalizedEvidence = normalizeEvidenceWhitespace(evidence)
+        guard !normalizedEvidence.isEmpty else { return nil }
+        if let literalRange = normalizedManuscript.range(of: normalizedEvidence) {
+            return literalRange
+        }
+        return anchorRange(for: normalizedEvidence, in: normalizedManuscript)
+    }
+
+    private static func evidenceMatches(
+        _ evidence: String,
+        inNormalizedManuscript normalizedManuscript: String
+    ) -> Bool {
+        evidenceAnchorRange(evidence, in: normalizedManuscript) != nil
+    }
+
+    /// Paraphrase-tolerant fallback used by `evidenceAnchorRange` once the
+    /// literal substring check has already failed: answers whether
+    /// `evidence` (already normalized) shares a contiguous run of
+    /// characters with `manuscript` (already normalized) that is both at
+    /// least `minimumAnchorLength` characters long and covers at least
+    /// `minimumAnchorRatio` of `evidence`'s own length. Both are lower
+    /// bounds on the same quantity (the longest common contiguous run), so
+    /// they collapse into a single required `threshold` — no need to
+    /// separately track the exact longest-common-substring length.
+    ///
+    /// If `evidence` is shorter than `minimumAnchorLength`, `threshold`
+    /// exceeds `evidence`'s own length, which makes this path unsatisfiable
+    /// by construction: a short evidence string can only pass via the
+    /// literal fast path in `evidenceAnchorRange`. This is intentional —
+    /// short evidence is exactly the case where paraphrase tolerance is
+    /// least needed and most exploitable.
+    private static func anchorRange(
+        for evidence: String,
+        in manuscript: String
+    ) -> Range<String.Index>? {
+        let evidenceCharacters = Array(evidence)
+        let manuscriptCharacters = Array(manuscript)
+        let threshold = max(
+            minimumAnchorLength,
+            Int((Double(evidenceCharacters.count) * minimumAnchorRatio).rounded(.up))
+        )
+        return manuscriptWindowRange(
+            ofLength: threshold,
+            from: evidenceCharacters,
+            in: manuscriptCharacters,
+            manuscript: manuscript
+        )
+    }
+
+    /// Finds the range, within `manuscript`, of a contiguous run of exactly
+    /// `length` characters that also occurs somewhere in
+    /// `evidenceCharacters` — or `nil` if no such run exists. This only
+    /// needs to answer an existence question ("does an anchor of at least
+    /// `length` characters exist, and if so where?"), not compute the exact
+    /// longest-common-substring length — so it avoids an O(manuscriptCount
+    /// * evidenceCount) dynamic-programming table (which would also cost
+    /// O(manuscriptCount * evidenceCount) memory).
+    ///
+    /// Algorithm: hash every `length`-character window of the manuscript
+    /// into a `[String: Int]` map from window text to its starting offset —
+    /// O(manuscriptCount) windows, each costing O(length) to
+    /// materialize/hash — then probe every `length`-character window of the
+    /// evidence against that map — O(evidenceCount) windows, same
+    /// per-window cost. Total time is O((manuscriptCount + evidenceCount) *
+    /// length). Because `length` is always bounded by
+    /// `evidenceCharacters.count` (never by the manuscript's length) and
+    /// evidence is expected to be a short quoted excerpt while the
+    /// manuscript can be a multi-thousand-character chapter chunk, this
+    /// stays cheap even for long manuscripts — the cost scales with the
+    /// short side, not the long one.
+    private static func manuscriptWindowRange(
+        ofLength length: Int,
+        from evidenceCharacters: [Character],
+        in manuscriptCharacters: [Character],
+        manuscript: String
+    ) -> Range<String.Index>? {
+        guard length > 0,
+              length <= evidenceCharacters.count,
+              length <= manuscriptCharacters.count else {
+            return nil
+        }
+        var manuscriptWindowOffsets: [String: Int] = [:]
+        manuscriptWindowOffsets.reserveCapacity(manuscriptCharacters.count - length + 1)
+        for start in 0...(manuscriptCharacters.count - length) {
+            let end = start + length
+            let window = String(manuscriptCharacters[start..<end])
+            if manuscriptWindowOffsets[window] == nil {
+                manuscriptWindowOffsets[window] = start
+            }
+        }
+        for start in 0...(evidenceCharacters.count - length) {
+            let end = start + length
+            let window = String(evidenceCharacters[start..<end])
+            guard let manuscriptStart = manuscriptWindowOffsets[window] else { continue }
+            let lowerBound = manuscript.index(manuscript.startIndex, offsetBy: manuscriptStart)
+            let upperBound = manuscript.index(lowerBound, offsetBy: length)
+            return lowerBound..<upperBound
+        }
+        return nil
     }
 
     private static func sanitizedUnresolvedEntityNames(
@@ -642,9 +802,7 @@ extension NovelFactTransactionReducer {
     ) throws -> [StoryEventDraft] {
         let normalizedSource = normalizeEvidenceWhitespace(evidenceSource)
         return try drafts.enumerated().map { stableOrder, draft in
-            let evidence = normalizeEvidenceWhitespace(draft.evidence)
-            guard !evidence.isEmpty,
-                  let range = normalizedSource.range(of: evidence) else {
+            guard let range = evidenceAnchorRange(draft.evidence, in: normalizedSource) else {
                 throw NovelError.invalidInput(
                     "A story event cannot be ordered outside the authoritative manuscript."
                 )

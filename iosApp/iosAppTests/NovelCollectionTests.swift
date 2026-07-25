@@ -577,6 +577,86 @@ final class NovelCollectionTests: XCTestCase {
         XCTAssertTrue(committed.pendingOperations.isEmpty)
     }
 
+    /// Exercises the *full* chapter-collection production entry point
+    /// (`finalizeCollection`, which chains `sanitizedCollectionDelta` into
+    /// `validateStateFacts` internally — see
+    /// `NovelFactTransactions.swift:457-470`) with paraphrased evidence that
+    /// anchors on a long, high-coverage literal run of the manuscript. This
+    /// is the collection-path counterpart to
+    /// `NovelFactTransactionLifecycleTests
+    /// .testManualChunkOutputAcceptsParaphrasedEvidenceAnchoredInManuscriptThroughFullChain`:
+    /// before the evidence-matching unification, `sanitizedCollectionDelta`
+    /// already tolerated this paraphrase, but the immediately following
+    /// `validateStateFacts` call re-checked the same fact with a stricter
+    /// literal-only rule and threw `NovelError.invalidInput`, so the whole
+    /// collection would hard-fail instead of committing the paraphrased fact.
+    func testCollectionAcceptsParaphrasedEvidenceAnchoredInManuscript() throws {
+        let manuscript = "Mara opened the sealed door and stepped into the darkness beyond it."
+        let document = try documentWithCandidate(manuscript)
+        let command = collectCommand(document: document)
+        let prepared = try NovelFactTransactionReducer.prepareCollection(
+            command,
+            payloadSHA256: command.canonicalPayloadSHA256(),
+            in: document,
+            now: now
+        )
+        // Reworded tail, but shares a 32-character verbatim prefix with the
+        // manuscript (well above the 8-character floor and the 40% ratio
+        // floor of this 65-character string).
+        let paraphrased = "Mara opened the sealed door and walked into the dark room beyond."
+        let delta = singleEventDelta(evidence: paraphrased)
+
+        let committed = try NovelFactTransactionReducer.finalizeCollection(
+            pendingID: command.pendingID,
+            delta: delta,
+            artifacts: try NovelTestFixtures.factTransactionArtifacts(
+                document: prepared.document,
+                pendingID: command.pendingID
+            ),
+            in: prepared.document,
+            now: now.addingTimeInterval(1)
+        ).document
+
+        XCTAssertEqual(committed.events.map(\.summary), [paraphrased])
+    }
+
+    /// Companion to the acceptance test above: proves the full
+    /// chapter-collection entry point still rejects evidence with no
+    /// meaningful anchor in the manuscript, so the anchor relaxation did not
+    /// weaken anti-fabrication protection on this path either.
+    func testCollectionStillRejectsFabricatedEvidenceWithNoAnchor() throws {
+        let manuscript = "Mara opened the sealed door and stepped into the darkness beyond it."
+        let document = try documentWithCandidate(manuscript)
+        let command = collectCommand(document: document)
+        let prepared = try NovelFactTransactionReducer.prepareCollection(
+            command,
+            payloadSHA256: command.canonicalPayloadSHA256(),
+            in: document,
+            now: now
+        )
+        // Shares no meaningful contiguous run with the manuscript beyond a
+        // handful of incidental characters — effectively fabricated.
+        let fabricated = "Ivo stormed the castle gates and vanquished twelve guards before dawn."
+        let delta = singleEventDelta(evidence: fabricated)
+
+        XCTAssertThrowsError(try NovelFactTransactionReducer.finalizeCollection(
+            pendingID: command.pendingID,
+            delta: delta,
+            artifacts: try NovelTestFixtures.factTransactionArtifacts(
+                document: prepared.document,
+                pendingID: command.pendingID
+            ),
+            in: prepared.document,
+            now: now.addingTimeInterval(1)
+        )) { error in
+            guard let failure = error as? NovelStructuredModelExecutionFailure else {
+                return XCTFail("Expected a structured-output evidence failure, got \(error)")
+            }
+            XCTAssertEqual(failure.failure.code, "state_facts_evidence_unmatched")
+            XCTAssertTrue(failure.failure.isRetryable)
+        }
+    }
+
     func testPendingCollectionSurvivesFileRepositoryRestart() async throws {
         let document = try documentWithCandidate("Mara crossed the threshold.")
         let command = collectCommand(document: document)
