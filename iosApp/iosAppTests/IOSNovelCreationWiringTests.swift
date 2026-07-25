@@ -568,25 +568,60 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("!viewModel.isBusy"))
     }
 
-    func testQuickStartRegenerationEntryIsGatedToQuickStartProjectsWithGuidanceInput() throws {
-        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+    func testQuickStartRegenerationEntryIsReachableFromTheLiveCompendiumView() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
         let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
 
-        let sectionStart = try XCTUnwrap(materials.range(of: "private var quickStartRegenerationSection"))
-        let sectionEnd = try XCTUnwrap(materials.range(
-            of: "private func materialsSection",
-            range: sectionStart.upperBound..<materials.endIndex
+        // 链条第一环: 设定页 .compendium 分支必须路由到 NovelCompendiumView(活视图),
+        // 而不是死代码文件 NovelMaterialsView。
+        let compendiumCase = try XCTUnwrap(workspace.range(of: "case .compendium:"))
+        let compendiumCaseEnd = try XCTUnwrap(workspace.range(
+            of: "\n        }",
+            range: compendiumCase.upperBound..<workspace.endIndex
         ))
-        let section = materials[sectionStart.lowerBound..<sectionEnd.lowerBound]
+        let compendiumRouting = workspace[compendiumCase.lowerBound..<compendiumCaseEnd.lowerBound]
+        XCTAssertTrue(compendiumRouting.contains("NovelCompendiumView("))
+
+        // 链条第二环: 入口本体活在 NovelCompendiumView.swift 里,不是 NovelMaterialsView.swift。
+        let sectionStart = try XCTUnwrap(compendium.range(of: "private var quickStartRegenerationSection"))
+        let sectionEnd = try XCTUnwrap(compendium.range(
+            of: "private var otherMaterials",
+            range: sectionStart.upperBound..<compendium.endIndex
+        ))
+        let section = compendium[sectionStart.lowerBound..<sectionEnd.lowerBound]
         XCTAssertTrue(section.contains("viewModel.projectSnapshot?.project.creationMode == .quickStart"))
         XCTAssertTrue(section.contains("重新生成设定建议"))
         XCTAssertTrue(section.contains("!viewModel.canMutate || viewModel.branchSnapshot?.branch.activeRunID != nil"))
 
-        XCTAssertTrue(materials.contains("struct NovelQuickStartRegenerationSheet"))
-        XCTAssertTrue(materials.contains("await viewModel.startQuickStartSuggestions(guidance: guidance)"))
-        XCTAssertTrue(materials.contains("TextEditor(text: $guidance)"))
+        // 链条第三环: 入口实际挂载到「更多」子分段(NovelCompendiumMoreView)的 List 内,
+        // 是常驻 Section,不依赖 proposals 是否为空。
+        let moreViewStart = try XCTUnwrap(compendium.range(of: "private struct NovelCompendiumMoreView"))
+        let moreViewEnd = try XCTUnwrap(compendium.range(
+            of: "\nstruct NovelQuickStartRegenerationSheet",
+            range: moreViewStart.upperBound..<compendium.endIndex
+        ))
+        let moreView = compendium[moreViewStart.lowerBound..<moreViewEnd.lowerBound]
+        XCTAssertTrue(moreView.contains("quickStartRegenerationSection"))
+        XCTAssertTrue(moreView.contains("isPresentingQuickStartRegeneration"))
+        XCTAssertTrue(moreView.contains("NovelQuickStartRegenerationSheet(viewModel: viewModel)"))
+
+        XCTAssertTrue(compendium.contains("struct NovelQuickStartRegenerationSheet"))
+        XCTAssertTrue(compendium.contains("await viewModel.startQuickStartSuggestions(guidance: guidance)"))
+        XCTAssertTrue(compendium.contains("TextEditor(text: $guidance)"))
 
         XCTAssertTrue(viewModel.contains("func startQuickStartSuggestions(guidance: String? = nil) async -> NovelRunID?"))
+    }
+
+    func testDeadNovelMaterialsViewNoLongerCarriesTheQuickStartRegenerationEntry() throws {
+        // 反向断言: 上一轮误放进死代码文件的入口已完全清理,防止将来又在
+        // 不可达的 NovelMaterialsView 里重新长出一份重复入口。
+        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+
+        XCTAssertTrue(materials.contains("该视图当前无生产调用点(设定页实际使用 NovelCompendiumView)"))
+        XCTAssertFalse(materials.contains("quickStartRegenerationSection"))
+        XCTAssertFalse(materials.contains("isPresentingQuickStartRegeneration"))
+        XCTAssertFalse(materials.contains("struct NovelQuickStartRegenerationSheet"))
     }
 
     private func source(_ relativePath: String) throws -> String {

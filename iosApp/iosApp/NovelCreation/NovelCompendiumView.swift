@@ -288,6 +288,7 @@ private struct NovelCompendiumMoreView: View {
     let onAcceptProposal: (NovelSettingProposalRecord) -> Void
 
     @State private var pendingDelete: NovelCompendiumMaterialDeleteCandidate?
+    @State private var isPresentingQuickStartRegeneration = false
 
     var body: some View {
         List {
@@ -336,6 +337,7 @@ private struct NovelCompendiumMoreView: View {
                 .disabled(!viewModel.canMutate)
             }
 
+            quickStartRegenerationSection
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
@@ -350,6 +352,26 @@ private struct NovelCompendiumMoreView: View {
                 },
                 secondaryButton: .cancel()
             )
+        }
+        .sheet(isPresented: $isPresentingQuickStartRegeneration) {
+            NovelQuickStartRegenerationSheet(viewModel: viewModel)
+        }
+    }
+
+    @ViewBuilder
+    private var quickStartRegenerationSection: some View {
+        if viewModel.projectSnapshot?.project.creationMode == .quickStart {
+            Section {
+                Button {
+                    isPresentingQuickStartRegeneration = true
+                } label: {
+                    Label("重新生成设定建议", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(!viewModel.canMutate || viewModel.branchSnapshot?.branch.activeRunID != nil)
+            } footer: {
+                Text("会基于「快速开始」的原始题材重新生成一批设定建议，可选填调整方向。")
+            }
         }
     }
 
@@ -367,6 +389,55 @@ private struct NovelCompendiumMoreView: View {
         viewModel.branchSnapshot?.activeSettingProposals.filter {
             NovelSettingProposalRoute(kind: $0.suggestedMaterialKind) == .more
         } ?? []
+    }
+}
+
+struct NovelQuickStartRegenerationSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let viewModel: NovelCreationViewModel
+    @State private var guidance = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextEditor(text: $guidance)
+                        .frame(minHeight: 160)
+                } header: {
+                    Text("调整方向（可选）")
+                } footer: {
+                    Text("题材和核心创意不会改变，只是把这段说明并入本次生成请求，让模型知道应该往哪个方向调整。留空则按原方式重新生成。")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(AmberTheme.background)
+            .navigationTitle("重新生成设定建议")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("开始") { start() }
+                        .disabled(viewModel.isPerforming)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func start() {
+        Task { @MainActor in
+            viewModel.clearError()
+            // startQuickStartSuggestions 的守卫(正在执行/已有活跃 run/需重载)
+            // 会静默返回 nil。此时不能关闭 sheet——否则用户以为已经开始生成,
+            // 实际什么都没发生。留在原地让用户可以重试。
+            let runID = await viewModel.startQuickStartSuggestions(guidance: guidance)
+            guard viewModel.errorMessage == nil, runID != nil else { return }
+            dismiss()
+        }
     }
 }
 
