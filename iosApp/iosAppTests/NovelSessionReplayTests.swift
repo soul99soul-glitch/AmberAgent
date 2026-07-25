@@ -735,6 +735,7 @@ final class NovelSessionReplayTests: XCTestCase {
 
         XCTAssertEqual(projected.rows[0].committedChange?.stateSummary, state.summary)
         XCTAssertEqual(projected.rows[0].committedChange?.eventSummaries ?? [], [event.summary])
+        XCTAssertEqual(projected.rows[0].committedChange?.branchSyncStatus, .synchronized)
         XCTAssertTrue(projected.rows[0].actions.contains(
             NovelSessionRowActionAvailability(
                 action: .forkFromCheckpoint(checkpoint.id),
@@ -760,6 +761,7 @@ final class NovelSessionReplayTests: XCTestCase {
                 blocker: nil
             )
         ))
+        XCTAssertEqual(atHead.rows[0].committedChange?.branchSyncStatus, .synchronized)
 
         headBranch.syncStatus = .needsSync
         let needsSync = NovelSessionPresentation.project(makeInput(
@@ -778,6 +780,10 @@ final class NovelSessionReplayTests: XCTestCase {
             })?.blocker,
             .branchNeedsSync
         )
+        // The branch's live syncStatus is a branch-level fact shared by every committed
+        // row (see NovelSessionCommittedChangeSummary.branchSyncStatus doc comment) — it
+        // is not a per-row history stamp, so it flips for this already-committed row too.
+        XCTAssertEqual(needsSync.rows[0].committedChange?.branchSyncStatus, .needsSync)
     }
 
     func testQuickStartMessageLinksToItsUnresolvedSettingProposals() throws {

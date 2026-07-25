@@ -163,6 +163,15 @@ struct NovelSessionBubble: View {
                 Text(blocker.displayName)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.accentAmber)
+            } else if committedChange?.branchSyncStatus == .synchronized {
+                // committedChange is only non-nil for a committed row, so this never
+                // renders on discussion/plain-message rows. See branchSyncStatus's doc
+                // comment in NovelSessionPresentation.swift for why this is a
+                // branch-level fact (shared by every committed row) rather than a
+                // per-row history stamp.
+                Label("剧情状态已同步", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.accentGreen)
             }
         }
         .padding(.top, 2)

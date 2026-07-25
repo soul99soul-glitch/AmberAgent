@@ -659,6 +659,34 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("!viewModel.isBusy"))
     }
 
+    /// 用户反馈:已收录正文行的操作区(撤销收录/从这里 Fork 那一片)在同步成功后
+    /// 什么标识都不留——「剧情状态同步未完成」只是按钮禁用原因,消失后原地空白。
+    /// 断言接线:同一 actionBar 位置,synchronized 时补一条常驻成功标识;
+    /// needsSync 时既有的 blocker 提示文案原样保留,零回归。
+    func testCommittedRowActionBarShowsPersistentSyncSuccessIndicatorAlongsideForkAndUndo() throws {
+        let bubble = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
+        let presentation = try source("iosApp/NovelCreation/NovelSessionPresentation.swift")
+
+        // 既有的「同步未完成」按钮禁用提示保持原样,零回归。
+        XCTAssertTrue(bubble.contains("case .branchNeedsSync: \"剧情状态同步未完成\""))
+
+        let actionBarStart = try XCTUnwrap(bubble.range(of: "private var actionBar: some View"))
+        let actionBarEnd = try XCTUnwrap(bubble.range(
+            of: "\n    @ViewBuilder",
+            range: actionBarStart.upperBound..<bubble.endIndex
+        ))
+        let actionBarBody = bubble[actionBarStart.lowerBound..<actionBarEnd.lowerBound]
+        XCTAssertTrue(actionBarBody.contains("actions.compactMap(\\.blocker).first"))
+        XCTAssertTrue(actionBarBody.contains("committedChange?.branchSyncStatus == .synchronized"))
+        XCTAssertTrue(actionBarBody.contains("剧情状态已同步"))
+
+        // 投影层承载持久化的分支同步事实,而不是渲染层自造状态。
+        XCTAssertTrue(presentation.contains("let branchSyncStatus: NovelBranchSyncStatus"))
+        XCTAssertTrue(presentation.contains(
+            "branchSyncStatus: input.branch.syncStatus"
+        ))
+    }
+
     func testQuickStartRegenerationEntryIsReachableFromTheLiveCompendiumView() throws {
         let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
         let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")

@@ -189,6 +189,24 @@ struct NovelSessionCommittedChangeSummary: Equatable, Sendable {
     let stateSnapshotID: NovelStateSnapshotID
     let stateSummary: String
     let eventSummaries: [String]
+    /// Whether the branch's plot state is currently synchronized, as of the last projection.
+    ///
+    /// This is `branch.syncStatus` — a **branch-level**, persisted fact — not a per-row
+    /// history entry. Every committed row on the branch shares this same value: if the
+    /// user later commits more chapters and the branch drops back to `.needsSync`, a row
+    /// that previously showed "synchronized" will flip back to showing nothing (or the
+    /// existing "needs sync" notice) the next time it's projected, even though this exact
+    /// row's own content hasn't changed. That is semantically correct (the branch really
+    /// did go stale again), but it is not a durable "this paragraph was synced at time T"
+    /// stamp.
+    ///
+    /// A true per-paragraph sync stamp is not derivable: a manual sync's input is *all*
+    /// backlog chapters since the last sync (aggregated, not scoped to one message — see
+    /// `NovelFactTransactions.manualSync`), the resulting checkpoint's
+    /// `sourceCandidateID` is `nil` (it cannot be traced back to any one candidate/message),
+    /// and the pending manual-sync operation record is deleted on success. There is nothing
+    /// left to hang a per-segment "synced" fact off of after the fact.
+    let branchSyncStatus: NovelBranchSyncStatus
 }
 
 struct NovelAskUserPresentation: Equatable, Sendable {
@@ -855,7 +873,11 @@ private extension NovelSessionPresentation {
         let changeSummary: NovelSessionCommittedChangeSummary?
         if let candidate {
             presentedCandidate = candidatePresentation(for: candidate, index: index)
-            changeSummary = committedChange(for: candidate, index: index)
+            changeSummary = committedChange(
+                for: candidate,
+                index: index,
+                branchSyncStatus: input.branch.syncStatus
+            )
         } else {
             presentedCandidate = nil
             changeSummary = nil
@@ -1060,7 +1082,8 @@ private extension NovelSessionPresentation {
 
     static func committedChange(
         for candidate: NovelCandidateRecord,
-        index: NovelSessionProjectionIndex
+        index: NovelSessionProjectionIndex,
+        branchSyncStatus: NovelBranchSyncStatus
     ) -> NovelSessionCommittedChangeSummary? {
         guard let checkpointID = candidate.collectedCheckpointID,
               let checkpoint = index.collectedCheckpointByKey[NovelSessionCollectedCheckpointKey(
@@ -1086,7 +1109,8 @@ private extension NovelSessionPresentation {
             checkpointID: checkpoint.id,
             stateSnapshotID: state.id,
             stateSummary: state.summary,
-            eventSummaries: eventSummaries
+            eventSummaries: eventSummaries,
+            branchSyncStatus: branchSyncStatus
         )
     }
 
@@ -1522,7 +1546,8 @@ private extension NovelSessionPresentation {
                 "\($0.polishTransactionStatus?.rawValue ?? "-")"
         } ?? "none"
         let committedToken = committedChange.map {
-            "\($0.checkpointID):\($0.stateSnapshotID):\($0.eventSummaries.count)"
+            "\($0.checkpointID):\($0.stateSnapshotID):\($0.eventSummaries.count):" +
+                "\($0.branchSyncStatus.rawValue)"
         } ?? "none"
         let askUserToken = askUser.map { presentation in
             "ask:\(presentation.prompt.question):" +

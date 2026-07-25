@@ -2307,7 +2307,13 @@ final class NovelSessionViewModelTests: XCTestCase {
             return document?.branches[0].syncStatus == .synchronized
         }
         XCTAssertTrue(syncCompleted)
-        XCTAssertNil(harness.workspace.stateSyncActivity)
+        // 「仓库文档已 synchronized」不等于「内存 activity 已清理」:两者之间隔着
+        // perform() 的 reload 阶段若干个 await(清理在函数级 defer 里)。直接断言
+        // 会在合跑负载下偶发失败(实测 5 次复现 2 次,单跑必绿),但这是**测试判据
+        // 太急**,不是产品竞态——同一用例前面的抢占断言(activity 不被踩)始终稳定。
+        // 故把最终断言也包进 eventually,而不是放宽它。
+        let activityCleared = await eventually { harness.workspace.stateSyncActivity == nil }
+        XCTAssertTrue(activityCleared, "同步终态后 stateSyncActivity 应被清理")
     }
 
     func testFailedAutomaticManualSyncPersistsOneRetryableFailureWithoutSpinning() async throws {
