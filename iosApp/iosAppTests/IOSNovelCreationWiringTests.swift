@@ -456,15 +456,24 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             "@AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true"
         ))
         XCTAssertTrue(session.contains("followEnabled: followGeneration"))
-        XCTAssertTrue(session.contains(
+        // 2026-07-26 撤锚更正:`.defaultScrollAnchor(.bottom, for: .sizeChanges)` 曾
+        // 被当作流式底部锚点的唯一所有者,但真机录屏坐实生产 ParagraphUIView 的异步
+        // 增量 TextKit 布局路径下它不能同步吸收增长(−390px 结构性跳变)。生产已撤锚,
+        // 增长所有权交回 measured-geometry 回调,不得回归 sizeChanges 双写。
+        // 判据只看**真实挂载**,不看注释:撤锚的依据(真机 −390px 实测、Chat 893pt
+        // 先例、旧探针口径为何无效)写在源码注释里是有价值的历史记录,不能因为
+        // 测试用裸 contains 匹配就把它删掉——那是让证据迁就判据。
+        let uncommented = session
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { line -> Substring in
+                guard let commentStart = line.range(of: "//") else { return line }
+                return line[line.startIndex..<commentStart.lowerBound]
+            }
+            .joined(separator: "\n")
+        XCTAssertFalse(uncommented.contains(
             ".defaultScrollAnchor(.bottom, for: .sizeChanges)"
         ))
-        // sizeChanges 底锚是流式底部锚点的唯一所有者,必须按「跟随生成」开关
-        // 与原生滚动驱动门控:关闭跟随时不得自动跟随,native driver 持有容器
-        // 时两个写入者不能同时写同一偏移。
-        XCTAssertTrue(session.contains(
-            "enabled: followGeneration && !isNativeScrollDriverDesired"
-        ))
+        XCTAssertFalse(uncommented.contains("NovelSessionSizeChangesPinModifier"))
         XCTAssertFalse(session.contains("withAnimation(.linear(duration: 0.08))"))
         let bindingTaskEnd = try XCTUnwrap(session.range(
             of: ".onChange(of: listSignal)",
@@ -473,6 +482,88 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         let bindingTask = String(session[bindingTaskStart.lowerBound..<bindingTaskEnd.lowerBound])
         XCTAssertFalse(bindingTask.contains("dispatchFollowEvent"))
         XCTAssertFalse(session.contains("private var listModel:"))
+    }
+
+    /// 2026-07-26 撤锚更正的成败关键(见 PROJECT_STATE 2026-07-21 记录的 53pt
+    /// 「先欠账、再用 0.08s 动画追回」回归归因):恢复 measured-geometry 写者后,
+    /// `.followBottom(animated: false)` 必须走无动画路径,不能被
+    /// `startExplicitBottomAnimation()` 的 0.2s easeOut 包住——那个动画只保留给
+    /// `animated: true`(用户主动点击「回到底部」的 `.explicitBottomRequested`)。
+    func testFollowBottomCommandRoutesUnanimatedCasesAwayFromExplicitAnimation() throws {
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        guard let commandStart = session.range(of: "private func executeFollowCommand("),
+              let commandEnd = session.range(
+                of: "private func startExplicitBottomAnimation()",
+                range: commandStart.upperBound..<session.endIndex
+              ) else {
+            return XCTFail("Expected executeFollowCommand body")
+        }
+        let commandBody = String(session[commandStart.lowerBound..<commandEnd.lowerBound])
+
+        XCTAssertTrue(commandBody.contains("case .followBottom(let animated):"))
+
+        // 用逐行去缩进比较,避免测试文件自身的多行字符串缩进和生产代码缩进
+        // 不一致导致假阴性——这里只关心语句顺序与结构,不关心具体缩进层级。
+        func normalizedLines(_ text: String) -> [String] {
+            text.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        let normalizedCommandBody = normalizedLines(commandBody)
+        let expectedUnanimatedRouting = normalizedLines(
+            """
+            if animated {
+            startExplicitBottomAnimation()
+            } else if explicitBottomAnimationTask != nil {
+            explicitBottomFollowPending = true
+            } else {
+            performLiveBottomFollow()
+            }
+            """
+        )
+        var matchedUnanimatedRouting = false
+        if normalizedCommandBody.count >= expectedUnanimatedRouting.count {
+            for startIndex in 0...(normalizedCommandBody.count - expectedUnanimatedRouting.count) {
+                let slice = Array(normalizedCommandBody[startIndex..<(startIndex + expectedUnanimatedRouting.count)])
+                if slice == expectedUnanimatedRouting {
+                    matchedUnanimatedRouting = true
+                    break
+                }
+            }
+        }
+        XCTAssertTrue(
+            matchedUnanimatedRouting,
+            "animated:false 必须走 performLiveBottomFollow(),不能与 animated:true 共用 startExplicitBottomAnimation()"
+        )
+
+        guard let performStart = session.range(of: "private func performLiveBottomFollow()"),
+              let performEnd = session.range(
+                of: "private func scrollToBottomWithoutAnimation()",
+                range: performStart.upperBound..<session.endIndex
+              ) else {
+            return XCTFail("Expected performLiveBottomFollow body")
+        }
+        let performBody = String(session[performStart.lowerBound..<performEnd.lowerBound])
+        XCTAssertFalse(
+            performBody.contains("withAnimation"),
+            "measured-growth 跟随的执行路径不得再包一层动画,否则 53pt 老毛病会复发"
+        )
+
+        guard let scrollWithoutAnimationStart = session.range(
+            of: "private func scrollToBottomWithoutAnimation()"
+        ),
+        let scrollWithoutAnimationEnd = session.range(
+            of: "private var isNativeScrollDriverDesired:",
+            range: scrollWithoutAnimationStart.upperBound..<session.endIndex
+        ) else {
+            return XCTFail("Expected scrollToBottomWithoutAnimation body")
+        }
+        let scrollWithoutAnimationBody = String(
+            session[scrollWithoutAnimationStart.lowerBound..<scrollWithoutAnimationEnd.lowerBound]
+        )
+        XCTAssertTrue(scrollWithoutAnimationBody.contains("transaction.animation = nil"))
+        XCTAssertFalse(scrollWithoutAnimationBody.contains("withAnimation"))
     }
 
     func testColdProjectPushDefersRecoverySyncAndBoundsHistoryWork() throws {

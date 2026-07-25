@@ -1650,11 +1650,22 @@ enum NovelSessionBottomFollowPolicy {
             }
             switch next.mode {
             case .followingBottom:
-                // The ScrollView's size-change anchor absorbs live growth in the layout
-                // transaction. A second scroll command recreates the visible bottom debt.
-                break
+                // 2026-07-26 撤锚更正:`.sizeChanges` 底锚已被真机录屏(15fps 逐帧对齐,
+                // 连续三次 −391/−398/−385px 结构性跳变)推翻——它在生产的
+                // ParagraphUIView 异步增量 TextKit 布局路径下并不能同步吸收增长
+                // (合成的 Color.frame(height:) 单次布局 pass 测不到这条路径,见
+                // NovelSessionBottomDebtProbeTests 顶部注释)。measured-geometry 回调
+                // 重新成为流式跟随底部的唯一写者;命令必须是 animated:false——
+                // 执行侧 NovelSessionView.scrollToBottomWithoutAnimation() 用
+                // Transaction(animation: nil) 显式禁用动画,不经过
+                // startExplicitBottomAnimation() 的 0.2s easeOut。这正是
+                // PROJECT_STATE 2026-07-21 记录的「先欠账、再用 0.08s 动画追回」
+                // 53pt 回归不能复发的关键:那次回归的病根不是「measured growth 驱动
+                // 跟随」本身,而是「给语义为瞬时到位的自动跟随包了动画」。
+                commands.append(.followBottom(animated: false))
             case .settlingTerminal:
                 next.mode = .followingBottom
+                commands.append(.followBottom(animated: false))
             case .awaitingInitialRows, .browsingHistory:
                 break
             }

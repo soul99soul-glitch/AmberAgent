@@ -314,14 +314,17 @@ struct NovelSessionView: View {
         }
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
-        // 流式底部锚点的唯一所有者:sizeChanges 底锚在布局事务内同步吸收
-        // 高度增长与收缩(逐帧零欠账,见 NovelSessionBottomAnchorProbeTests)。
-        // 必须门控:关闭「跟随生成」时不得替用户自动跟随;原生滚动驱动
-        // 持有容器时由 driver 经自有 layout-metrics 通道跟随,两个写入者
-        // 不能同时写同一偏移。
-        .modifier(NovelSessionSizeChangesPinModifier(
-            enabled: followGeneration && !isNativeScrollDriverDesired
-        ))
+        // 2026-07-26 撤锚:`.defaultScrollAnchor(.bottom, for: .sizeChanges)` 曾被当作
+        // 流式底部锚点的唯一所有者,依据是 NovelSessionBottomAnchorProbeTests 的「逐帧
+        // 零欠账」——但那套探针用 Color.frame(height:) 代理流式气泡,只覆盖 SwiftUI
+        // 单次干净布局 pass,从未测过生产 ChatAssistantMarkdownView → vendor
+        // ParagraphUIView(UITextView 增量 TextKit 布局 + 异步 invalidateIntrinsicContentSize)
+        // 的真实异步增量路径。真机录屏(15fps 逐帧对齐)在小说「写整章」实测到连续
+        // 三次 −391/−398/−385px 的结构性跳变,与标准 Chat 撤锚前实测的 893pt 底部
+        // 欠账同源(见 ChatCollectionMessageList.swift:1510 附近注释)。现在撤掉这枚
+        // 锚,把增长所有权交回下方 onScrollGeometryChange 的 measured-geometry 回调
+        // (唯一写者,经 NovelSessionBottomFollowPolicy.reduce 的 .measuredStreamGrowth
+        // 分支发出无动画的 .followBottom(animated: false))。
         .defaultScrollAnchor(.top, for: .alignment)
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
@@ -1239,20 +1242,6 @@ struct NovelSessionView: View {
     }
 
     private static let bottomAnchorID = "novel-session-bottom-anchor"
-}
-
-/// 按语义开关与滚动所有权切换 `.sizeChanges` 底锚。行锚定位置(用户上滑
-/// 浏览历史)不会被它拽走(探针已实证),所以不需要再按跟随模式动态开关。
-private struct NovelSessionSizeChangesPinModifier: ViewModifier {
-    let enabled: Bool
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content.defaultScrollAnchor(.bottom, for: .sizeChanges)
-        } else {
-            content
-        }
-    }
 }
 
 private struct NovelPendingCommittedUndo {

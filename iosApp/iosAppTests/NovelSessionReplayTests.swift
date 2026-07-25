@@ -412,14 +412,28 @@ final class NovelSessionReplayTests: XCTestCase {
                     event: .explicitBottomRequested
                 ).state
             }
+            let wasBrowsingHistory = follow.mode == .browsingHistory
             let transition = NovelSessionBottomFollowPolicy.reduce(
                 state: follow,
                 event: .measuredStreamGrowth(isAtBottom: false)
             )
-            XCTAssertFalse(transition.commands.contains { command in
-                if case .followBottom = command { return true }
-                return false
-            })
+            if wasBrowsingHistory {
+                // 「respects history pause」的真正契约:用户上滑浏览历史时,
+                // 测得的流式增长不得把视口拽回底部。
+                XCTAssertFalse(transition.commands.contains { command in
+                    if case .followBottom = command { return true }
+                    return false
+                })
+            } else {
+                // 2026-07-26 撤锚更正:sizeChanges 底锚不再是流式增长的写者
+                // (真机录屏实测 -390px 结构性跳变,详见 NovelSessionView.swift
+                // 撤锚注释)。measured-geometry 回调重新成为跟随底部的唯一写者,
+                // 命令必须是 animated:false——执行侧 scrollToBottomWithoutAnimation()
+                // 用 Transaction(animation: nil) 禁用动画,不经过 startExplicitBottomAnimation()
+                // 的 0.2s easeOut,这正是 PROJECT_STATE 2026-07-21 记录的「先欠账
+                // 0.08s 动画追回」53pt 回归不复发的关键。
+                XCTAssertTrue(transition.commands.contains(.followBottom(animated: false)))
+            }
             follow = transition.state
         }
 
@@ -1243,6 +1257,42 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertEqual(failedRow.actions, [
             .init(action: .retryGeneration(run.id), blocker: nil)
         ])
+    }
+
+    /// 2026-07-26 撤锚更正的核心锁:`.sizeChanges` 底锚被真机录屏(−390px 结构性
+    /// 跳变)推翻后,measured-geometry 回调重新成为流式跟随底部的唯一写者。这条
+    /// canary 锁住两件事,任何一件被破坏都会让 PROJECT_STATE 2026-07-21 记录的
+    /// 53pt「先欠账、再用 0.08s 动画追回」回归复发:
+    /// 1. `.followingBottom` / `.settlingTerminal`(收口为 `.followingBottom`)下的
+    ///    `.measuredStreamGrowth` 必须发出 `.followBottom` 命令(不能再是 no-op);
+    /// 2. 该命令必须显式 `animated: false`——执行侧
+    ///    `NovelSessionView.scrollToBottomWithoutAnimation()` 用
+    ///    `Transaction(animation: nil)` 禁用动画,不经过
+    ///    `startExplicitBottomAnimation()` 的 0.2s easeOut(那个动画只保留给
+    ///    `.explicitBottomRequested` 这类用户主动点击回底的语义,两者不可混淆)。
+    func testMeasuredStreamGrowthWhileFollowingRestoresUnanimatedFollowWriter() {
+        let followingTransition = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(mode: .followingBottom),
+            event: .measuredStreamGrowth(isAtBottom: false)
+        )
+        XCTAssertEqual(followingTransition.state.mode, .followingBottom)
+        XCTAssertEqual(followingTransition.commands, [.followBottom(animated: false)])
+
+        let settlingTransition = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(mode: .settlingTerminal(token: 7)),
+            event: .measuredStreamGrowth(isAtBottom: false)
+        )
+        XCTAssertEqual(settlingTransition.state.mode, .followingBottom)
+        XCTAssertEqual(settlingTransition.commands, [.followBottom(animated: false)])
+
+        // 浏览历史时仍然必须保持静默:这条负向断言防止「恢复写者」的改动
+        // 误伤既有「不拽用户回底」契约。
+        let browsingTransition = NovelSessionBottomFollowPolicy.reduce(
+            state: NovelSessionBottomFollowState(mode: .browsingHistory),
+            event: .measuredStreamGrowth(isAtBottom: false)
+        )
+        XCTAssertEqual(browsingTransition.state.mode, .browsingHistory)
+        XCTAssertTrue(browsingTransition.commands.isEmpty)
     }
 
     func testBottomFollowIgnoresStaleQuietTimerAndNeverPullsHistory() {

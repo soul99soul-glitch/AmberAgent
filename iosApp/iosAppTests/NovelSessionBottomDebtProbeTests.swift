@@ -28,17 +28,34 @@ import QuartzCore
 ///   `testLongProseViewportFollowStaysLineSizedAtTwentyFourKB` 完全同构，数值可以
 ///   直接对比。
 ///
-/// 为什么不接线 `NovelSessionView` 的 `onScrollGeometryChange` → `dispatchFollowEvent`：
+/// 为什么当初不接线 `NovelSessionView` 的 `onScrollGeometryChange` → `dispatchFollowEvent`：
 /// 已用 `git blame` 核实，`NovelSessionBottomFollowPolicy.reduce`
 /// （`NovelSessionPresentation.swift`）在 `.followingBottom` 模式下对
-/// `.measuredStreamGrowth`（活跃流式尾行的增长事件）是显式 no-op —— commit
+/// `.measuredStreamGrowth`（活跃流式尾行的增长事件）曾经是显式 no-op —— commit
 /// `d8eda9f5b`「fix(ios): stabilize novel streaming bottom anchor」把这里原本的
 /// `commands.append(.followBottom(animated: false))` 改成了 `break`，注释明写
 /// 「The ScrollView's size-change anchor absorbs live growth in the layout
 /// transaction. A second scroll command recreates the visible bottom debt.」。
-/// 也就是说，在当前生产代码里，`.sizeChanges` 在真实流式阶段本来就是**唯一**在
-/// 工作的写者；这个探针不接线 follow policy 反而更贴近生产当前的真实执行路径，
-/// 而不是漏测了什么。
+/// 当时的结论是：在生产代码里，`.sizeChanges` 在真实流式阶段本来就是**唯一**在
+/// 工作的写者；这个探针不接线 follow policy 更贴近生产当时的真实执行路径。
+///
+/// ### 2026-07-26 状态更新（重要更正，勿再据此判定锚安全）
+/// 上面这个结论已被真机录屏推翻：小说「写整章」流式生成时,15fps 录屏 + 行亮度
+/// 剖面实测到连续三次约 −391/−398/−385px 的**结构性跳变**（残差 10-16，远高于
+/// 正常 1-3），证明 `.sizeChanges` 在生产的完整投影管线 + 上千段落负载下**不是**
+/// 可靠的唯一写者。本探针虽然用了真实 `NovelSessionBubble` / `ParagraphUIView`
+/// 渲染（不是 `Color.frame(height:)` 占位），但仍是精简 harness——裸 ScrollView +
+/// 20 条历史行 + 单个尾行，没有完整 `NovelSessionView.transcript` 投影管线，也没有
+/// 上千段落负载，没有复现真机的失败条件。**不要再用这个探针的绿色作为「锚在生产下
+/// 安全」的依据。**
+///
+/// 生产已撤掉 `.sizeChanges` 锚（`NovelSessionView.swift` 不再挂载），
+/// `NovelSessionBottomFollowPolicy.reduce` 的 `.followingBottom` 分支恢复为
+/// `commands.append(.followBottom(animated: false))`，measured-geometry 回调
+/// 重新成为唯一写者。本文件下面的 harness 仍保留独立挂载
+/// `.defaultScrollAnchor(.bottom, for: .sizeChanges)` 不代表生产现状，只作为
+/// 「sizeChanges 在真实 TextKit 增量布局路径下欠账表现」这一独立事实的记录保留；
+/// 其 72pt 门槛断言与 Chat 同构可比，不需要因本次撤锚而改动。
 @MainActor
 final class NovelSessionBottomDebtProbeTests: XCTestCase {
 
