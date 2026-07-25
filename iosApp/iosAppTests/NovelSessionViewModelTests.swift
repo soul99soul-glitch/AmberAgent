@@ -2163,6 +2163,153 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(persisted.branches[0].syncStatus, .synchronized)
     }
 
+    /// The session view model's `retryPending` is the entry point the "重试" button in
+    /// `NovelSessionView` actually calls (not `workspace.retryPending`). It must publish the
+    /// same durable `stateSyncActivity` progress as the already-wired workspace-level retry.
+    func testSessionRetryPendingPublishesStateSyncActivityForManualSync() async throws {
+        let fixture = try persistedManualSync(status: .retryable)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [
+                .delta(validRebuildJSON),
+                .pause,
+                .complete,
+            ])]
+        )
+        let chapters = try NovelFactTransactionReducer.decodeManualPayload(
+            try XCTUnwrap(fixture.document.pendingOperations.first?.selectedText)
+        )
+        let expectedCharacterCount = NovelFactTransactionReducer
+            .manualRebuildManuscript(chapters)
+            .count
+
+        let retryTask = Task { @MainActor in
+            await harness.session.retryPending(fixture.pendingID)
+        }
+
+        let progressPublished = await eventually(timeout: 3) {
+            guard let activity = harness.workspace.stateSyncActivity else { return false }
+            return activity.phase == .analyzing &&
+                activity.pendingID == fixture.pendingID &&
+                activity.completedCharacters == 0 &&
+                activity.totalCharacters == expectedCharacterCount &&
+                activity.completionFraction == 0 &&
+                activity.requestStartedAt != nil
+        }
+        XCTAssertTrue(progressPublished)
+
+        let requests = await harness.adapter.requests
+        let request = try XCTUnwrap(requests.first)
+        await harness.adapter.resume(runID: request.runID)
+        await retryTask.value
+
+        XCTAssertNil(harness.workspace.stateSyncActivity)
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertTrue(persisted.pendingOperations.isEmpty)
+        XCTAssertEqual(persisted.branches[0].syncStatus, .synchronized)
+    }
+
+    /// `retryPending` is a generic retry entry point: pending operations can also be the
+    /// `.collection` kind (legacy collection recovery), which never runs a state-sync model
+    /// call. Retrying one of those must not publish a `stateSyncActivity`.
+    func testSessionRetryPendingDoesNotPublishStateSyncActivityForNonManualSyncKind() async throws {
+        let fixture = try documentWithChapter()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.complete])]
+        )
+        let branch = try XCTUnwrap(harness.workspace.branchSnapshot?.branch)
+        let collectionPendingID = NovelPendingOperationID()
+        let collectionPending = NovelPendingOperationRecord(
+            id: collectionPendingID,
+            kind: .collection,
+            status: .retryable,
+            branchID: branch.id,
+            operationID: NovelOperationID(),
+            payloadSHA256: "0000000000000000000000000000000000000000000000000000000000000",
+            baseCheckpointID: branch.headCheckpointID,
+            baseHeadRevision: branch.headRevision,
+            candidateID: nil,
+            collectionTarget: nil,
+            selectedText: "A collected paragraph awaiting legacy extraction.",
+            proposedChapterVersion: nil,
+            createdAt: Date(timeIntervalSince1970: 1_700_800_100),
+            lastError: "上一次收集提取失败"
+        )
+        var seededDocument = try await harness.repository.loadProject(id: harness.projectID).document
+        seededDocument.pendingOperations.append(collectionPending)
+        harness.workspace.projectSnapshot = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: seededDocument,
+            access: .readWrite
+        ))
+
+        await harness.session.retryPending(collectionPendingID)
+
+        XCTAssertNil(harness.workspace.stateSyncActivity)
+        // Give any (incorrectly) started polling task a chance to publish before asserting again.
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertNil(harness.workspace.stateSyncActivity)
+    }
+
+    /// Automatic background sync may already be publishing progress when the user taps retry.
+    /// The single-owner mechanism (`stateSyncActivityOwnerID` gated behind `operationOwnerID`)
+    /// must reject the concurrent manual retry rather than let it reset or clear the activity
+    /// that automatic sync owns.
+    func testConcurrentSessionRetryDoesNotStompAutomaticStateSyncOwnership() async throws {
+        let fixture = try documentWithChapter()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [
+                .delta(validRebuildJSON),
+                .pause,
+                .complete,
+            ])]
+        )
+
+        let saved = await harness.workspace.saveManualRewrite(
+            chapterID: fixture.chapterID,
+            title: "第一章",
+            content: "Mara opened the archive."
+        )
+        XCTAssertTrue(saved)
+
+        let progressPublished = await eventually(timeout: 3) {
+            harness.workspace.stateSyncActivity?.requestStartedAt != nil
+        }
+        XCTAssertTrue(progressPublished)
+        let activityBeforeRetryTap = try XCTUnwrap(harness.workspace.stateSyncActivity)
+        let pendingID = activityBeforeRetryTap.pendingID
+
+        // `workspace.projectSnapshot` only reloads once the in-flight automatic sync's
+        // `perform(_:)` call returns, so it does not yet contain the pending that automatic
+        // sync already committed. Bring it up to date with the live persisted document so the
+        // manual retry's own guards can see the pending and actually reach
+        // `acquireSessionOperation`, exercising the real ownership mutex rather than an
+        // unrelated stale-snapshot guard.
+        let liveDocument = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertTrue(liveDocument.pendingOperations.contains { $0.id == pendingID })
+        harness.workspace.projectSnapshot = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: liveDocument,
+            access: .readWrite
+        ))
+
+        // The automatic sync still owns the in-flight operation, so this concurrent manual
+        // retry must be rejected by `acquireSessionOperation` and must not touch the activity.
+        await harness.session.retryPending(pendingID)
+
+        XCTAssertEqual(harness.workspace.stateSyncActivity, activityBeforeRetryTap)
+
+        let requests = await harness.adapter.requests
+        let request = try XCTUnwrap(requests.first)
+        await harness.adapter.resume(runID: request.runID)
+        let syncCompleted = await eventually {
+            let document = try? await harness.repository.loadProject(id: harness.projectID).document
+            return document?.branches[0].syncStatus == .synchronized
+        }
+        XCTAssertTrue(syncCompleted)
+        XCTAssertNil(harness.workspace.stateSyncActivity)
+    }
+
     func testFailedAutomaticManualSyncPersistsOneRetryableFailureWithoutSpinning() async throws {
         let fixture = try persistedManualSync(status: .pending)
         let failure = NovelModelFailure(

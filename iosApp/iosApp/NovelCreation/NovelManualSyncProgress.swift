@@ -300,6 +300,45 @@ enum NovelManualSyncProgressReducer {
         return next
     }
 
+    /// Discards durable manual-sync progress so the next `commitChunk` call starts over at
+    /// chunk 0 under a newly resolved model. This is the sole legitimate way to null out
+    /// `manualSyncProgress`; every other reducer treats it as append-only (see
+    /// `NovelManualSyncProgressValidator.validateTransition`). Callers must only invoke this
+    /// when the resolved state-sync model policy has actually changed from the one locked
+    /// into the existing progress, so different models' chunks are never mixed into one
+    /// `accumulatedRebuild` — a fresh restart re-derives chunk 0 from scratch under the new
+    /// model instead of continuing the old accumulation.
+    static func resetProgress(
+        pendingID: NovelPendingOperationID,
+        in document: NovelProjectDocumentV1,
+        now: Date = Date()
+    ) throws -> NovelProjectDocumentV1 {
+        guard let pendingIndex = document.pendingOperations.firstIndex(where: {
+            $0.id == pendingID && $0.kind == .manualSync
+        }) else {
+            throw NovelError.invalidInput("The pending manual synchronization is unavailable.")
+        }
+        let pending = document.pendingOperations[pendingIndex]
+        guard pending.manualSyncProgress != nil else {
+            return document
+        }
+        guard let branch = document.branches.first(where: { $0.id == pending.branchID }),
+              branch.headCheckpointID == pending.baseCheckpointID,
+              branch.headRevision == pending.baseHeadRevision,
+              branch.workingRevision == pending.baseWorkingRevision,
+              branch.syncStatus == .needsSync,
+              branch.activeRunID == nil else {
+            throw NovelError.invalidInput("The pending manual synchronization is stale.")
+        }
+
+        var next = document
+        next.pendingOperations[pendingIndex].manualSyncProgress = nil
+        next.project.revision += 1
+        next.project.updatedAt = now
+        try NovelDocumentValidator.validateTransition(from: document, to: next)
+        return next
+    }
+
     static func commitChunk(
         pendingID: NovelPendingOperationID,
         selection: NovelManualSyncChunkSelection,
@@ -806,9 +845,16 @@ enum NovelManualSyncProgressValidator {
         issues: inout [String]
     ) {
         guard current.manualSyncProgress != updated.manualSyncProgress else { return }
-        guard current.kind == .manualSync,
-              let nextProgress = updated.manualSyncProgress else {
+        guard current.kind == .manualSync else {
             issues.append("A pending operation rewrote or removed manual-sync progress.")
+            return
+        }
+        guard let nextProgress = updated.manualSyncProgress else {
+            // The only legitimate way to null out existing progress is
+            // `NovelManualSyncProgressReducer.resetProgress`, which discards progress locked
+            // to a stale model so the next chunk restarts at index 0 under the newly
+            // resolved one. There is nothing else to structurally check here: the
+            // subsequent `commitChunk` call is what re-validates everything from scratch.
             return
         }
         if let currentProgress = current.manualSyncProgress {

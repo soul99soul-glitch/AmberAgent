@@ -1057,7 +1057,29 @@ final class NovelCreationViewModel {
     }
 
     func performSessionAction(_ action: NovelAction) async throws -> NovelOutcome {
-        try await creation.perform(action)
+        // Session-driven actions (e.g. explicit "retry") reach here without going
+        // through the private `perform(_:)` wiring, so this call is the only place
+        // left to publish `stateSyncActivity` for them. Reuse the exact same
+        // start/stop helpers and key them off the operation owner that the caller
+        // (NovelSessionViewModel.beginAction) already acquired, so ownership stays
+        // single-writer and consistent with the automatic-sync path.
+        let stateSyncContext = stateSyncContext(for: action)
+        let activityOwnerID = stateSyncContext != nil ? operationOwnerID : nil
+        if let stateSyncContext, let activityOwnerID {
+            startStateSyncActivity(
+                ownerID: activityOwnerID,
+                projectID: action.projectID,
+                branchID: stateSyncContext.branchID,
+                pendingID: stateSyncContext.pendingID,
+                attemptOperationID: stateSyncContext.attemptOperationID
+            )
+        }
+        defer {
+            if stateSyncContext != nil, let activityOwnerID {
+                stopStateSyncActivity(ownerID: activityOwnerID)
+            }
+        }
+        return try await creation.perform(action)
     }
 
     func distillDiscussionArchive(

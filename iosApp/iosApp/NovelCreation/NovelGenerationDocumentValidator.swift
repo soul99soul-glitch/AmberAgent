@@ -473,7 +473,15 @@ enum NovelGenerationDocumentValidator {
             }
             if let firstChunkIndex = attempt.firstChunkIndex,
                let firstDispatched = receiptLinks.compactMap(\.chunkIndex).min(),
-               firstDispatched != firstChunkIndex {
+               firstDispatched != firstChunkIndex,
+               // A model-policy-change reset (`NovelManualSyncProgressReducer.resetProgress`)
+               // can discard progress *after* this same attempt was already durably reserved
+               // to continue from `firstChunkIndex`, so its receipts legitimately restart at
+               // chunk 0 instead. `firstChunkIndex` is immutable once recorded (fact attempts
+               // are append-only), so this is the only way that reconciliation can show up
+               // here. Any other mismatch (dispatching from some other unexpected index) is
+               // still rejected.
+               firstDispatched != 0 {
                 issues.append("A fact progress-attempt request does not begin at its reservation.")
             }
             if let operation = appliedAttempt {
@@ -840,13 +848,23 @@ enum NovelGenerationDocumentValidator {
                 issues.append("Manual-sync request receipt has no chunk index.")
                 return
             }
-            let progress = pending.manualSyncProgress
-            let isCompletedChunk = progress?.completedChunks.contains(where: {
-                $0.index == chunkIndex
-            }) == true
-            let isCurrentChunk = chunkIndex == (progress?.nextChunkIndex ?? 0)
-            if !isCompletedChunk && !isCurrentChunk {
-                issues.append("Manual-sync request receipt is outside durable progress.")
+            // When `manualSyncProgress` is nil, this is either a genuinely fresh pending
+            // (never attempted) or one whose progress a legitimate model-policy-change reset
+            // just discarded (`NovelManualSyncProgressReducer.resetProgress`). A reset cannot
+            // retroactively delete the stale chunk-N request receipt an abandoned attempt
+            // sequence already reserved (receipts are append-only), so there is no single
+            // "expected next chunk" to check against in that state — tolerate any chunk index
+            // here; `hasAttemptEvidence` below still requires durable reservation evidence, so
+            // this cannot admit a fabricated receipt. With progress present, the strict
+            // completed-or-current check remains unchanged.
+            if let progress = pending.manualSyncProgress {
+                let isCompletedChunk = progress.completedChunks.contains(where: {
+                    $0.index == chunkIndex
+                })
+                let isCurrentChunk = chunkIndex == progress.nextChunkIndex
+                if !isCompletedChunk && !isCurrentChunk {
+                    issues.append("Manual-sync request receipt is outside durable progress.")
+                }
             }
         }
         let hasAttemptEvidence = link.attemptOperationID == link.ownerOperationID

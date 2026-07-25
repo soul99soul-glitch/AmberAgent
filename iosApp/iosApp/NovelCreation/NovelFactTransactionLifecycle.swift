@@ -357,8 +357,39 @@ private extension DefaultNovelCreation {
 
                 let preparation: NovelStructuredModelPreparation
                 if let progress = currentPending.manualSyncProgress {
-                    preparation = progress.preparation
-                    lockedPreparation = preparation
+                    // 只比较策略（`NovelProjectModelPolicy`,纯内存、无网络/配置查找),不比较完整
+                    // preparation:`executor.prepare` 可能触发实际的模型解析成本,只有确认策略
+                    // 变化后才值得付出这个成本。策略未变时沿用锁定进度,是零回归的原有行为。
+                    let stateSyncPolicy = modelPolicy(for: .stateSync, in: currentDocument)
+                    if stateSyncPolicy == progress.modelPolicy {
+                        preparation = progress.preparation
+                        lockedPreparation = preparation
+                    } else {
+                        // 用户改了「剧情同步模型」：丢弃锁定在旧模型上的进度,不与旧分块混合,
+                        // 用新策略重新 prepare 后从第 0 块重新开始。跨模型不混合分块的不变量仍由
+                        // commitChunk 里 `existingProgress.preparation == preparation` 的守卫保证——
+                        // 这里只是让"没有旧进度可比对"的重新开始成为可能。
+                        let freshPreparation = try await executor.prepare(
+                            modelPolicy: stateSyncPolicy,
+                            taskKind: .stateRebuild,
+                            requestedInputBudgetTokens: NovelStructuredModelExecutor
+                                .maximumInternalInputBudgetTokens
+                        )
+                        let reloadedForReset = try await reloadFactDocument(projectID: projectID)
+                        try validatePendingGuard(currentPending, in: reloadedForReset.document)
+                        let resetDocument = try NovelManualSyncProgressReducer.resetProgress(
+                            pendingID: pendingID,
+                            in: reloadedForReset.document,
+                            now: now()
+                        )
+                        currentDocument = try await commitFactDocument(
+                            resetDocument,
+                            replacing: reloadedForReset
+                        ).document
+                        lockedPreparation = freshPreparation
+                        try Task.checkCancellation()
+                        continue
+                    }
                 } else if let lockedPreparation {
                     preparation = lockedPreparation
                 } else {

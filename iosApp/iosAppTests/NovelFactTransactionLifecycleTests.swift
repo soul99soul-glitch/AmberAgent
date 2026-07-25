@@ -764,6 +764,210 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertNoThrow(try NovelDocumentValidator.validate(final))
     }
 
+    // MARK: - State-sync model policy changes mid-flight (reset, not mixing)
+
+    /// Core repro: chunk 0 commits and locks manual-sync progress to model A. Before the
+    /// retry, the user changes the *state-sync* model policy (here: the app-wide default a
+    /// project on `.global` resolves through — the actual trigger in production, since
+    /// `NovelProjectConfigurationReducer.setModelPolicy` already blocks changing a project's
+    /// own *fixed* override while a manual-sync progress is outstanding). Before the fix,
+    /// the retry kept reusing model A's locked `preparation` forever, so the "剧情同步模型"
+    /// setting never took effect. This must be RED on the old code (asserting model B was
+    /// actually used and progress restarted at chunk 0) and GREEN after the reset fix.
+    func testManualSyncResetsAndUsesNewlyConfiguredModelAfterPolicyChangesBetweenRetries() async throws {
+        let scenario = try preparedLongManualSync()
+        let repository = InMemoryNovelProjectRepository()
+        _ = try await repository.createProject(scenario.pendingDocument)
+
+        let modelA = NovelResolvedModel(
+            providerID: "model-a-provider",
+            ownerProviderID: "model-a-provider",
+            modelID: "model-a-model",
+            wireModelID: "model-a-wire",
+            displayName: "Model A",
+            contextWindowTokens: 12_000
+        )
+        let policyA: NovelProjectModelPolicy = .fixed(
+            providerID: "model-a-provider",
+            modelID: "model-a-model"
+        )
+        let firstAdapter = ScriptedNovelModelAdapter(
+            resolvedModel: modelA,
+            scripts: [
+                NovelModelScript(steps: [.delta(validChunkRebuildJSON()), .complete]),
+                NovelModelScript(steps: [.fail(NovelModelFailure(
+                    code: "chunk_failure",
+                    message: "Retry the next chunk.",
+                    isRetryable: true
+                ))])
+            ]
+        )
+        let firstCreation = DefaultNovelCreation(
+            repository: repository,
+            modelRunner: firstAdapter,
+            defaultModelPolicy: { _ in policyA }
+        )
+        let firstAttempt = retryCommand(
+            document: scenario.pendingDocument,
+            pendingID: scenario.command.pendingID
+        )
+        do {
+            _ = try await firstCreation.perform(.retryPending(firstAttempt))
+            XCTFail("Expected the second chunk to fail so progress durably locks to model A")
+        } catch let failure as NovelStructuredModelExecutionFailure {
+            XCTAssertEqual(failure.failure.code, "chunk_failure")
+        }
+
+        let locked = try await repository.loadProject(id: scenario.command.projectID).document
+        let lockedProgress = try XCTUnwrap(locked.pendingOperations.first?.manualSyncProgress)
+        XCTAssertEqual(lockedProgress.completedChunks.count, 1)
+        XCTAssertEqual(lockedProgress.modelPolicy, policyA)
+
+        // 用户此时把「剧情同步模型」改成了 B。
+        let modelB = NovelResolvedModel(
+            providerID: "model-b-provider",
+            ownerProviderID: "model-b-provider",
+            modelID: "model-b-model",
+            wireModelID: "model-b-wire",
+            displayName: "Model B",
+            contextWindowTokens: 12_000
+        )
+        let policyB: NovelProjectModelPolicy = .fixed(
+            providerID: "model-b-provider",
+            modelID: "model-b-model"
+        )
+        let secondAdapter = ScriptedNovelModelAdapter(
+            resolvedModel: modelB,
+            scripts: Array(repeating: NovelModelScript(steps: [
+                .delta(validChunkRebuildJSON()), .complete
+            ]), count: 40)
+        )
+        let secondCreation = DefaultNovelCreation(
+            repository: repository,
+            modelRunner: secondAdapter,
+            defaultModelPolicy: { _ in policyB }
+        )
+        let retry = retryCommand(document: locked, pendingID: scenario.command.pendingID)
+
+        guard case .manualSyncCommitted = try await secondCreation.perform(.retryPending(retry)) else {
+            return XCTFail("Expected the reset progress to finish under the newly configured model")
+        }
+
+        // 只重新 prepare 了一次（策略比较是廉价的，重新 prepare 只在检测到变化时发生一次；
+        // 之后每块都沿用同一个 lockedPreparation，而不是每块都重新解析模型）。
+        let resolvedPolicies = await secondAdapter.resolvedPolicies
+        XCTAssertEqual(resolvedPolicies, [policyB])
+
+        let final = try await repository.loadProject(id: scenario.command.projectID).document
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+        let manualLinks: [NovelFactReceiptLink] = final.injectionReceipts.compactMap { receipt in
+            guard let link = receipt.factTransaction, link.kind == .manualRebuild else { return nil }
+            return link
+        }
+        let manualChunkIndices = manualLinks.compactMap(\.chunkIndex)
+        // chunk 0 出现两次：一次是被丢弃的模型 A 分块（历史证据，不会被删除），
+        // 一次是重置后模型 B 真正重新做出的第 0 块 —— 不是"继续"模型 A 的第 1 块。
+        XCTAssertEqual(manualChunkIndices.filter { $0 == 0 }.count, 2)
+        let modelBReceipts = final.injectionReceipts.filter { $0.providerID == "model-b-provider" }
+        XCTAssertFalse(modelBReceipts.isEmpty)
+        XCTAssertTrue(modelBReceipts.contains { $0.factTransaction?.chunkIndex == 0 })
+        // 跨模型不混合：最终写入的 accumulatedRebuild 完全来自模型 B 的分块序列，不是
+        // 模型 A 已完成的第 0 块拼接模型 B 剩余分块的产物。
+        let modelAReceiptIDs = Set(final.injectionReceipts.filter {
+            $0.providerID == "model-a-provider"
+        }.map(\.id))
+        let modelBReceiptIDs = Set(modelBReceipts.map(\.id))
+        XCTAssertTrue(modelAReceiptIDs.isDisjoint(with: modelBReceiptIDs))
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(final))
+    }
+
+    /// Companion regression: when the resolved state-sync policy has *not* changed between
+    /// retries, progress must keep resuming exactly as before (no reset, no re-resolving,
+    /// no duplicated chunk 0) — proving the reset path does not fire on ordinary retries.
+    func testManualSyncKeepsLockedProgressWhenStateSyncPolicyIsUnchangedAcrossRetries() async throws {
+        let scenario = try preparedLongManualSync()
+        let repository = InMemoryNovelProjectRepository()
+        _ = try await repository.createProject(scenario.pendingDocument)
+
+        let lockedModel = NovelResolvedModel(
+            providerID: "same-provider",
+            ownerProviderID: "same-provider",
+            modelID: "same-model",
+            wireModelID: "same-wire",
+            displayName: "Same Model",
+            contextWindowTokens: 12_000
+        )
+        let policy: NovelProjectModelPolicy = .fixed(
+            providerID: "same-provider",
+            modelID: "same-model"
+        )
+        let firstAdapter = ScriptedNovelModelAdapter(
+            resolvedModel: lockedModel,
+            scripts: [
+                NovelModelScript(steps: [.delta(validChunkRebuildJSON()), .complete]),
+                NovelModelScript(steps: [.fail(NovelModelFailure(
+                    code: "chunk_failure",
+                    message: "Retry the next chunk.",
+                    isRetryable: true
+                ))])
+            ]
+        )
+        let firstCreation = DefaultNovelCreation(
+            repository: repository,
+            modelRunner: firstAdapter,
+            defaultModelPolicy: { _ in policy }
+        )
+        let firstAttempt = retryCommand(
+            document: scenario.pendingDocument,
+            pendingID: scenario.command.pendingID
+        )
+        do {
+            _ = try await firstCreation.perform(.retryPending(firstAttempt))
+            XCTFail("Expected the second chunk to fail so progress durably locks in place")
+        } catch let failure as NovelStructuredModelExecutionFailure {
+            XCTAssertEqual(failure.failure.code, "chunk_failure")
+        }
+
+        let locked = try await repository.loadProject(id: scenario.command.projectID).document
+        XCTAssertEqual(locked.pendingOperations.first?.manualSyncProgress?.completedChunks.count, 1)
+
+        let continuationAdapter = ScriptedNovelModelAdapter(
+            resolvedModel: lockedModel,
+            resolutionFailure: NovelModelFailure(
+                code: "resolver_should_not_run",
+                message: "Unchanged policy must not re-resolve or reset.",
+                isRetryable: false
+            ),
+            scripts: Array(repeating: NovelModelScript(steps: [
+                .delta(validChunkRebuildJSON()), .complete
+            ]), count: 40)
+        )
+        let secondCreation = DefaultNovelCreation(
+            repository: repository,
+            modelRunner: continuationAdapter,
+            defaultModelPolicy: { _ in policy }
+        )
+        let retry = retryCommand(document: locked, pendingID: scenario.command.pendingID)
+
+        guard case .manualSyncCommitted = try await secondCreation.perform(.retryPending(retry)) else {
+            return XCTFail("Expected the unchanged-policy retry to resume and finish without resetting")
+        }
+
+        let resolvedPolicies = await continuationAdapter.resolvedPolicies
+        XCTAssertTrue(resolvedPolicies.isEmpty)
+
+        let final = try await repository.loadProject(id: scenario.command.projectID).document
+        let manualChunkIndices = final.injectionReceipts.compactMap {
+            $0.factTransaction?.chunkIndex
+        }
+        // A failed-then-retried chunk (chunk 1, mid-sequence) legitimately reserves two
+        // request receipts at the same index, so the *set* of indices must span 0...max
+        // without gaps — chunk 0 itself must stay singular (no reset happened).
+        XCTAssertEqual(Set(manualChunkIndices).sorted(), Array(0...manualChunkIndices.max()!))
+        XCTAssertEqual(manualChunkIndices.filter { $0 == 0 }.count, 1)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(final))
+    }
+
     func testCancellationAfterChunkCommitStopsBeforeNextProviderAndResumes() async throws {
         let scenario = try preparedLongManualSync()
         let repository = FactObservingRepository()
