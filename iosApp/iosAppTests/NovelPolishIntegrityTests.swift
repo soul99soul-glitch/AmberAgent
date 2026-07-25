@@ -114,6 +114,42 @@ final class NovelPolishIntegrityTests: NovelPolishTestCase {
         _ = try? await adoption.value
     }
 
+    // 2026-07-25 fact receipt Prompt version regression: `acceptedVersions` must also cover
+    // the polish-drift receipt path, not just the state-delta/manual-sync ones. Only one
+    // version has ever shipped for this kind, so this locks in that the set-based judgement
+    // still accepts the current version (the collection-based check does not silently pass
+    // everything).
+    func testPolishDriftInjectionReceiptAcceptsItsCurrentPromptVersion() async throws {
+        let harness = try await makeHarness(remainingScripts: [
+            NovelModelScript(steps: [.pause]),
+        ])
+        let candidateID = try await generatePolish(in: harness)
+        let baseline = try await document(in: harness)
+        let command = adoptionCommand(document: baseline, candidateID: candidateID)
+        let adoption = Task {
+            try await harness.creation.perform(.adoptPolishCandidate(command))
+        }
+        let reachedDriftRequest = await waitForRequestCount(2, adapter: harness.adapter)
+        XCTAssertTrue(reachedDriftRequest)
+        let pending = try await document(in: harness)
+        let attempt = try XCTUnwrap(pending.polishAttempts.first)
+        let receipt = try XCTUnwrap(pending.injectionReceipts.first {
+            $0.id == attempt.injectionReceiptID
+        })
+
+        XCTAssertEqual(receipt.promptVersion, NovelPromptCatalog.template(for: .polishDriftV1).version)
+        XCTAssertTrue(
+            NovelPromptCatalog.acceptedVersions(for: .polishDriftV1).contains(receipt.promptVersion)
+        )
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(pending))
+
+        let requests = await harness.adapter.requests
+        if let request = requests.last {
+            await harness.adapter.resume(runID: request.runID)
+        }
+        _ = try? await adoption.value
+    }
+
     func testTerminalPolishMustAssessLatestAttemptAndCannotLeaveItUnassessed() async throws {
         let harness = try await makeHarness(remainingScripts: [
             NovelModelScript(steps: [.delta("not-json"), .complete]),

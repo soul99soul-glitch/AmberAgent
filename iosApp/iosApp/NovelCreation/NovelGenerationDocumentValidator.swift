@@ -259,9 +259,11 @@ enum NovelGenerationDocumentValidator {
                 let expectedPrompt: NovelPromptKind = factTransaction.kind == .stateDelta
                     ? .stateDeltaV1
                     : .manualSyncV1
-                if receipt.promptVersion != NovelPromptCatalog.template(
-                    for: expectedPrompt
-                ).version {
+                // 必须按「历史上发布过的版本集合」判定,不能拿当前模板版本做等值比较:
+                // receipt 是不可变的历史记录,等值比较会让任何一次提示词版本推进把所有
+                // 老项目判成损坏(2026-07-25 真机事故,见 acceptedVersions 注释)。
+                if !NovelPromptCatalog.acceptedVersions(for: expectedPrompt)
+                    .contains(receipt.promptVersion) {
                     issues.append("Injection receipt \(receipt.id) has the wrong fact Prompt version.")
                 }
                 validateFactReceiptLink(

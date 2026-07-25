@@ -98,7 +98,10 @@ enum NovelPolishDocumentValidator {
                 generation.injectionReceiptID != injection.id ||
                 injection.factTransaction != nil ||
                 generation.factTransaction != nil ||
-                injection.promptVersion != NovelPromptCatalog.template(for: .polishDriftV1).version ||
+                // 同 NovelGenerationDocumentValidator:按历史版本集合判定,避免将来
+                // 推进 polish-drift 版本时把老项目判成损坏(2026-07-25 事故的同类地雷)。
+                !NovelPromptCatalog.acceptedVersions(for: .polishDriftV1)
+                    .contains(injection.promptVersion) ||
                 generation.promptVersion != injection.promptVersion {
                 issues.append("Polish attempt request receipts disagree.")
             }

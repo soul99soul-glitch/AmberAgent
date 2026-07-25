@@ -1,0 +1,140 @@
+{
+  "runId": "70005a6d",
+  "agent": "reviewer",
+  "task": "[Read from: /Users/arquiel/Downloads/AI/amberagent-ios/plan.md, /Users/arquiel/Downloads/AI/amberagent-ios/progress.md]\n\n你在复核一份针对 iOS 仓库 /Users/arquiel/Downloads/AI/amberagent-ios 的独立审计报告。只做只读核对,禁止修改任何文件。注意:docs/PROJECT_STATE.md 记录了多轮 Chat 修复,部分条目可能已过时(例如凭据删除 generic 条目残留已在 2026-07-25 修复、ChatStreamPresentationPacer 已上线)。你必须以当前工作区代码为准逐条取证。\n\n对下面每一条,给出判定:确认成立 / 已修复(过时) / 部分成立 / 不成立,并附当前代码证据(文件:行号 + 关键代码摘录,一两行即可)。\n\n条目10: 发送资格在 UI 和 VM 之间漂移:VM 支持纯图片消息,但 UI 要求文本非空,纯图片永远无法发送;OCR 进行中按钮显示可发送,点击后 VM 静默 return。证据: iosApp/iosApp/ChatView.swift:1223, iosApp/iosApp/ChatViewModel.swift:589\n\n条目11: PhotosPicker 异步图片处理没有 conversationId/request token/取消检查,加载期间切换或新建会话,图片会追加到当前 VM(串会话)。证据: iosApp/iosApp/ChatView.swift:465, iosApp/iosApp/ChatViewModel.swift:1232\n\n条目12: OCR 成功结果在切会话后静默丢失:成功路径要求当前仍是原会话否则直接 return,原会话只留下用户图片,没有回复/错误/重试入口。证据: iosApp/iosApp/ChatViewModel.swift:709\n\n条目18: 默认 Chat 长文流式存在负载敏感跳变:真实 ChatSwiftUIMessageList 回放 16 条中 2 条失败,连续长段落单次高度跳 61pt>40pt;24KB bottom debt 79.96pt>72pt。证据: iosApp/iosAppTests/ChatSwiftUIStreamReplayTests.swift:910。同时检查 PROJECT_STATE 里 07-24 记录的 \"修复前 893pt → 修复后 23.3→21.3→6.7pt 通过 ≤72pt 门禁\" 是否与该条目矛盾(即 79.96pt 是否为新失败或不同测试)。\n\n条目19: 超过 50 行的用户消息永久截断,注释称折叠但无展开按钮/状态。证据: iosApp/iosApp/ChatMessageListSupport.swift:76\n\n条目20: 自动标题可能覆盖人工重命名:首轮标题 Task 返回后无条件 rename,无 baseline/CAS。证据: iosApp/iosApp/ChatViewModel.swift:947\n\n条目21: 聊天建议存在同会话旧任务逆序覆盖:只有 conversationId 和\"当前未生成\"检查,无 generation token;输出未去重,UI 以字符串自身为 identity。证据: iosApp/iosApp/ChatViewModel.swift:965\n\n条目22: pending approval/Grok/不可 handoff 时切换会话静默无响应:prepareForConversationChange 返回 false,所有 UI 调用方直接 return,无原因提示。证据: iosApp/iosApp/PlaceholderViews.swift:1002\n\n条目23: 照片编码和历史 data URL 解码在 MainActor:高像素图片同步位图绘制/JPEG/Base64/UIImage 解码。证据: iosApp/iosApp/ChatView.swift:465, iosApp/iosApp/ChatMiscViews.swift:519\n\n最后简要评价这批条目的修复建议方向是否合理(一两句/条)。",
+  "exitCode": 0,
+  "usage": {
+    "input": 35838,
+    "output": 12755,
+    "cacheRead": 580864,
+    "cacheWrite": 0,
+    "cost": 0.4730982,
+    "turns": 33
+  },
+  "model": "kimi-coding/k3:high",
+  "attemptedModels": [
+    "kimi-coding/k3:high"
+  ],
+  "modelAttempts": [
+    {
+      "model": "kimi-coding/k3:high",
+      "success": true,
+      "exitCode": 0,
+      "usage": {
+        "input": 35838,
+        "output": 12755,
+        "cacheRead": 580864,
+        "cacheWrite": 0,
+        "cost": 0.4730982,
+        "turns": 33
+      }
+    }
+  ],
+  "durationMs": 731852,
+  "toolCount": 40,
+  "acceptance": {
+    "status": "attested",
+    "explicit": false,
+    "effectiveAcceptance": {
+      "level": "attested",
+      "explicit": false,
+      "inferredReason": [
+        "read-only/reviewer-style agent"
+      ],
+      "criteria": [
+        {
+          "id": "criterion-1",
+          "must": "Return concrete findings with file paths and severity when applicable",
+          "evidence": [
+            "review-findings",
+            "residual-risks"
+          ],
+          "severity": "required"
+        }
+      ],
+      "evidence": [
+        "review-findings",
+        "residual-risks"
+      ],
+      "verify": [],
+      "stopRules": []
+    },
+    "inferredReason": [
+      "read-only/reviewer-style agent"
+    ],
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "must": "Return concrete findings with file paths and severity when applicable",
+        "evidence": [
+          "review-findings",
+          "residual-risks"
+        ],
+        "severity": "required"
+      }
+    ],
+    "runtimeChecks": [],
+    "verifyRuns": [],
+    "childReport": {
+      "criteriaSatisfied": [
+        {
+          "id": "criterion-1",
+          "status": "satisfied",
+          "evidence": "9 条审计条目逐条取证并给出判定与严重度:10(P1)/11(P2)/12(P2)/18(P1,实测复现)/19(P3)/20(P3)/21(P3)/22(P2)/23(P2),每条附 file:line 证据"
+        }
+      ],
+      "changedFiles": [],
+      "testsAddedOrUpdated": [],
+      "commandsRun": [
+        {
+          "command": "xcodebuild test -only-testing:iosAppTests/ChatSwiftUIStreamReplayTests/testLongProseViewportFollowStaysLineSizedAtTwentyFourKB",
+          "result": "failed",
+          "summary": "单测失败:content growth 58.45>40,bottom debt 316.9pt>72pt — 实测确认条目18"
+        },
+        {
+          "command": "xcodebuild test -only-testing:iosAppTests/ChatSwiftUIStreamReplayTests (run 2)",
+          "result": "failed",
+          "summary": "16 条中 3 条失败:24KB debt 462.7pt、ContinuousProse debt 154.2pt、StreamingFollow 回跳 108pt"
+        },
+        {
+          "command": "xcodebuild test -only-testing:iosAppTests/ChatSwiftUIStreamReplayTests (run 3)",
+          "result": "failed",
+          "summary": "Executed 16 tests, 1 failure — 同代码三次结果 2/3/1 失败,确认负载敏感抖动"
+        },
+        {
+          "command": "git status --short --branch",
+          "result": "passed",
+          "summary": "分支 ahead 3;仅 3 个既有未暂存 NovelCreation 改动与未跟踪 .pi-subagents/,无本次新改动"
+        }
+      ],
+      "validationOutput": [
+        "ChatView.swift:1227 sendEnabled 要求文本非空且不看 pendingImages/isRecognizingImages;ChatViewModel.swift:589 sendMessage 允许纯图片、OCR 中静默 return",
+        "ChatView.swift:465 PhotosPicker Task 无 conversationId/token/取消检查;ChatViewModel.swift:280 discard 路径不清 pendingImages",
+        "ChatViewModel.swift:726-729 OCR 成功路径非当前会话静默 return,无 pendingVisionFailures 补偿(失败路径 755-766 有)",
+        "ChatSwiftUIStreamReplayTests.swift:908-923/1041-1045 门禁(≤40/≤64/≤72pt)存在;实测 bottom debt 154-463pt 超限,负载敏感",
+        "ChatMessageListSupport.swift:93-95 .lineLimit(50) 无展开状态;ChatViewModel.swift:961 标题无条件 rename;965-987 建议无 generation token 且未去重;ChatGenerationCoordinator.swift:779-797 五种静默拒绝,5 个 UI 调用点全部 guard/return;Swift 6.1 模式下 ChatImageEncoder.encode 与 MessageBubbleView decodeDataURL 均在 MainActor"
+      ],
+      "residualRisks": [
+        "条目18 回放测试负载敏感:同一工作区三次全类运行失败数为 3/3→含1、仅1,审计的具体数值(79.96pt/61pt)只是单一样本,门禁任何时刻都可能红",
+        "条目11/12/20/21 均为窄窗口竞争,无法在单元测试环境确定性复现,只做了代码路径取证",
+        "条目23 的 MainActor 归属基于 Swift 6.1 语言模式语义推断(project.yml SWIFT_VERSION 6.1),未做 Time Profiler 实测主线程耗时"
+      ],
+      "noStagedFiles": true,
+      "diffSummary": "只读复核,未修改任何文件;工作区既有 NovelCreation 未暂存改动为既有工作,与本次无关",
+      "reviewFindings": [
+        "P1: ChatView.swift:1227 vs ChatViewModel.swift:589 - 发送资格 UI/VM 漂移,纯图片永远无法发送,OCR 中点击静默无效(条目10 确认)",
+        "P1: ChatSwiftUIStreamReplayTests.swift:919/1043 - 贴底 bottom debt 门禁实测超限(154-463pt>72pt),负载敏感,07-24 的 6.7pt 通过只是幸运样本(条目18 确认)",
+        "P2: ChatView.swift:465 - PhotosPicker 异步加载无会话 token/取消检查,pendingImages 可串会话(条目11 确认)",
+        "P2: ChatViewModel.swift:726 - OCR 成功结果切会话后静默丢弃,无回复/错误/重试入口(条目12 确认)",
+        "P2: PlaceholderViews.swift:818/1004/1401 等 5 处 - prepareForConversationChange false 时静默无响应无原因提示(条目22 确认)",
+        "P2: ChatMiscViews.swift:525 与 MessageBubbleView.swift:2907 - 图片编码/base64 解码在 MainActor 同步执行(条目23 确认)",
+        "P3: ChatMessageListSupport.swift:94 - 50 行硬截断无展开入口(条目19 确认)",
+        "P3: ChatViewModel.swift:961 - 自动标题无 baseline/CAS 可覆盖人工重命名(条目20 确认)",
+        "P3: ChatViewModel.swift:980 + ChatView.swift:1066 - 建议无 generation token 可逆序覆盖,输出未去重且以字符串为 identity(条目21 确认)"
+      ],
+      "manualNotes": "plan.md/progress.md 在仓库根不存在(ENOENT),任务文本已自含全部条目,不影响复核。9 条审计条目无一过时,全部在当前工作区确认成立;条目12 报告的证据行(709)略偏,实际丢弃点在 726-729。条目18 我做了决定性验证:三次实测全类回放,确认门禁当前不稳定通过,与 PROJECT_STATE.md:54 自己记录的负载敏感失败一致,不构成与 07-24 通过记录的逻辑矛盾。"
+    }
+  },
+  "transcriptPath": "/Users/arquiel/Downloads/AI/amberagent-ios/.pi-subagents/artifacts/70005a6d_reviewer_2_transcript.jsonl",
+  "timestamp": 1784990353865
+}

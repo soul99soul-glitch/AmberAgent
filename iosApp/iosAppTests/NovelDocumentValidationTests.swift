@@ -438,6 +438,98 @@ final class NovelDocumentValidationTests: XCTestCase {
         assertInvalid(document, containing: "reuse a request run ID")
     }
 
+    // MARK: - 2026-07-25 fact receipt Prompt version regression
+    //
+    // Root cause: the receipt records which Prompt version a past request actually used
+    // (an immutable historical fact). Comparing it against the *current* template version
+    // instead of the set of every version ever shipped judges every already-persisted
+    // project as corrupted the moment the template version advances. These guard the fix
+    // in `NovelPromptCatalog.acceptedVersions` and the two validators that consume it.
+
+    func testFactInjectionReceiptAcceptsHistoricalStateDeltaPromptVersion() throws {
+        let (document, injectionIndex, generationIndex) =
+            try documentWithReservedStateDeltaFactReceipt()
+        var mutated = document
+        let historicalVersion = "novel.state-delta.v1"
+        mutated.injectionReceipts[injectionIndex] = try receiptChangingPromptVersion(
+            mutated.injectionReceipts[injectionIndex],
+            to: historicalVersion
+        )
+        mutated.generationReceipts[generationIndex] = try receiptChangingPromptVersion(
+            mutated.generationReceipts[generationIndex],
+            to: historicalVersion
+        )
+
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(mutated))
+    }
+
+    func testFactInjectionReceiptRejectsNeverPublishedPromptVersion() throws {
+        let (document, injectionIndex, generationIndex) =
+            try documentWithReservedStateDeltaFactReceipt()
+        var mutated = document
+        let garbageVersion = "novel.state-delta.v99"
+        mutated.injectionReceipts[injectionIndex] = try receiptChangingPromptVersion(
+            mutated.injectionReceipts[injectionIndex],
+            to: garbageVersion
+        )
+        mutated.generationReceipts[generationIndex] = try receiptChangingPromptVersion(
+            mutated.generationReceipts[generationIndex],
+            to: garbageVersion
+        )
+
+        assertInvalid(mutated, containing: "wrong fact Prompt version")
+    }
+
+    func testAcceptedPromptVersionsAlwaysIncludeTheCurrentTemplateVersion() {
+        for kind in NovelPromptKind.allCases {
+            let current = NovelPromptCatalog.template(for: kind).version
+            XCTAssertTrue(
+                NovelPromptCatalog.acceptedVersions(for: kind).contains(current),
+                "acceptedVersions(for: \(kind)) must contain its current template version \(current)"
+            )
+        }
+    }
+
+    private func documentWithReservedStateDeltaFactReceipt() throws -> (
+        document: NovelProjectDocumentV1,
+        injectionIndex: Int,
+        generationIndex: Int
+    ) {
+        let base = try documentWithPendingCollection()
+        let pendingID = try XCTUnwrap(base.pendingOperations.first?.id)
+        let artifacts = try NovelTestFixtures.factTransactionArtifacts(
+            document: base,
+            pendingID: pendingID
+        )
+        let reserved = try NovelFactRequestReceiptReducer.reserve(
+            artifacts,
+            pendingID: pendingID,
+            in: base
+        )
+        let injectionIndex = try XCTUnwrap(reserved.injectionReceipts.firstIndex {
+            $0.id == artifacts.injectionReceipt.id
+        })
+        let generationIndex = try XCTUnwrap(reserved.generationReceipts.firstIndex {
+            $0.id == artifacts.generationReceipt.id
+        })
+        return (reserved, injectionIndex, generationIndex)
+    }
+
+    private func receiptChangingPromptVersion<T: Codable>(
+        _ receipt: T,
+        to promptVersion: String
+    ) throws -> T {
+        let data = try JSONEncoder().encode(receipt)
+        var object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        object["promptVersion"] = promptVersion
+        return try JSONDecoder().decode(
+            T.self,
+            from: JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        )
+    }
+
     func testPendingCollectionPayloadCannotBeRewrittenAcrossTransition() throws {
         let current = try documentWithPendingCollection()
         var next = current

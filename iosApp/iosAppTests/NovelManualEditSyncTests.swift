@@ -80,18 +80,28 @@ final class NovelManualEditSyncTests: XCTestCase {
             settingProposals: []
         )
 
-        let sanitized = try NovelFactTransactionReducer.validateManualChunkOutput(
-            rebuild,
-            evidenceSource: "Mara opened the archive.",
-            accumulated: projected,
-            baseState: baseState,
-            branchID: document.branches[0].id,
-            in: document
-        )
-
-        XCTAssertTrue(sanitized.events.isEmpty)
-        XCTAssertEqual(sanitized.stateSummary, projected.stateSummary)
-        XCTAssertEqual(sanitized.branchOutline, projected.branchOutline)
+        // 2026-07-25 契约变更(按证据逐条裁决,非放宽):原契约是「证据全部对不上时
+        // 静默丢弃、保留投影状态、照常返回」。真机取证表明该行为会让同步显示成功、
+        // 实际一条事实都没写入,用户毫不知情(见 NovelFactOutputValidation 中
+        // requireEvidenceNotAllDiscarded 的注释)。现改为:模型**给了**事实但全部
+        // 无据 → 抛可重试失败;模型本来就没提取到事实(原始即为空)仍正常返回。
+        // 本用例正属前者,故断言从「静默返回投影状态」改为「抛出可重试失败」。
+        XCTAssertThrowsError(
+            try NovelFactTransactionReducer.validateManualChunkOutput(
+                rebuild,
+                evidenceSource: "Mara opened the archive.",
+                accumulated: projected,
+                baseState: baseState,
+                branchID: document.branches[0].id,
+                in: document
+            )
+        ) { error in
+            guard let failure = error as? NovelStructuredModelExecutionFailure else {
+                return XCTFail("Expected a structured execution failure, got \(error)")
+            }
+            XCTAssertEqual(failure.failure.code, "state_facts_evidence_unmatched")
+            XCTAssertTrue(failure.failure.isRetryable)
+        }
     }
 
     func testDirectManualSyncFinalizeRejectsDerivedStateWithoutReliableFacts() throws {
@@ -810,6 +820,110 @@ final class NovelManualEditSyncTests: XCTestCase {
             }
             XCTAssertTrue(label.contains("pending operation"))
         }
+    }
+
+    // 2026-07-25 fact receipt Prompt version regression: a manual-sync fact injection
+    // receipt records the Prompt version *at request time*, an immutable historical fact.
+    // See NovelPromptCatalog.acceptedVersions for the full incident context.
+    func testFactInjectionReceiptAcceptsHistoricalManualSyncPromptVersion() throws {
+        let document = try documentWithPendingManualSync()
+        let pending = try XCTUnwrap(document.pendingOperations.first { $0.kind == .manualSync })
+        // NovelTestFixtures.factTransactionArtifacts always builds a manual-sync fact link
+        // with chunkIndex nil, which only validates once the owning operation is applied.
+        // A still-pending manual-sync receipt (this test's scenario) must carry chunkIndex 0
+        // (the first/only chunk) to satisfy NovelGenerationDocumentValidator's pending-branch
+        // check, so this constructs the receipts directly instead of reusing that fixture.
+        let input = try NovelFactTransactionReducer.manualRebuildInput(
+            pendingID: pending.id,
+            in: document
+        )
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: pending.branchID,
+                promptKind: .manualSyncV1,
+                userText: input.manuscript,
+                stateSnapshotIDOverride: input.baseStateSnapshot.id,
+                sessionCursorLimit: input.sessionCursor,
+                includeUnsynchronizedStateWarning: false
+            )
+        )
+        let runID = NovelRunID()
+        let link = NovelFactReceiptLink(
+            pendingID: pending.id,
+            ownerOperationID: pending.operationID,
+            attemptOperationID: pending.operationID,
+            attemptPayloadSHA256: pending.payloadSHA256,
+            kind: .manualRebuild,
+            chunkIndex: 0
+        )
+        let injection = NovelInjectionReceiptRecord(
+            id: NovelReceiptID(),
+            runID: runID,
+            projectID: document.project.id,
+            branchID: pending.branchID,
+            plan: plan,
+            overrides: .none,
+            providerID: "fact-test-provider",
+            modelID: "fact-test-model",
+            parameters: [:],
+            factTransaction: link,
+            createdAt: now
+        )
+        let generation = NovelGenerationReceiptRecord(
+            id: NovelReceiptID(),
+            runID: runID,
+            providerID: injection.providerID,
+            modelID: injection.modelID,
+            promptVersion: injection.promptVersion,
+            injectionReceiptID: injection.id,
+            parameters: [:],
+            requestSHA256: NovelTestFixtures.hashA,
+            createdAt: now,
+            factTransaction: link
+        )
+        let artifacts = NovelFactTransactionReceiptArtifacts(
+            injectionReceipt: injection,
+            generationReceipt: generation
+        )
+        let reserved = try NovelFactRequestReceiptReducer.reserve(
+            artifacts,
+            pendingID: pending.id,
+            in: document
+        )
+        let injectionIndex = try XCTUnwrap(reserved.injectionReceipts.firstIndex {
+            $0.id == artifacts.injectionReceipt.id
+        })
+        let generationIndex = try XCTUnwrap(reserved.generationReceipts.firstIndex {
+            $0.id == artifacts.generationReceipt.id
+        })
+        var mutated = reserved
+        let historicalVersion = "novel.manual-sync.v2"
+        mutated.injectionReceipts[injectionIndex] = try receiptChangingPromptVersion(
+            mutated.injectionReceipts[injectionIndex],
+            to: historicalVersion
+        )
+        mutated.generationReceipts[generationIndex] = try receiptChangingPromptVersion(
+            mutated.generationReceipts[generationIndex],
+            to: historicalVersion
+        )
+
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(mutated))
+    }
+
+    private func receiptChangingPromptVersion<T: Codable>(
+        _ receipt: T,
+        to promptVersion: String
+    ) throws -> T {
+        let data = try JSONEncoder().encode(receipt)
+        var object = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        object["promptVersion"] = promptVersion
+        return try JSONDecoder().decode(
+            T.self,
+            from: JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        )
     }
 }
 

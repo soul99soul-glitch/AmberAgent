@@ -21,6 +21,37 @@ struct NovelPromptTemplate: Codable, Equatable, Sendable {
 enum NovelPromptCatalog {
     static let polishCompletionSentinel = "<AMBER_NOVEL_POLISH_COMPLETE>"
 
+    /// 曾随包发布过的模板版本(含当前版本)。文档校验必须接受这些历史值。
+    ///
+    /// receipt 记录的是「这次请求当时用了哪版提示词」,是不可变的历史事实。若校验拿
+    /// **当前**模板版本去比对历史 receipt,任何一次提示词版本推进都会把所有已落盘的
+    /// 老项目判成损坏、无法读取。
+    ///
+    /// 2026-07-25 真机事故:`state-delta v1→v2`、`manual-sync v2→v3` 的版本推进,
+    /// 导致用户三个项目在加载时全部报「wrong fact Prompt version」而打不开(数据本身
+    /// 完好,是校验误判)。历史版本从 git 历史穷举得出;今后新增版本时,**旧值必须
+    /// 保留在此**,不得只改当前版本。
+    static func acceptedVersions(for kind: NovelPromptKind) -> Set<String> {
+        var versions: Set<String> = [template(for: kind).version]
+        switch kind {
+        case .stateDeltaV1:
+            versions.insert("novel.state-delta.v1")
+        case .manualSyncV1:
+            versions.insert("novel.manual-sync.v2")
+        case .quickStart:
+            versions.formUnion(["novel.quick-start.v2", "novel.quick-start.v3"])
+        case .discussion:
+            versions.formUnion(["novel.discussion.v1", "novel.discussion.v2"])
+        case .proseContinuation:
+            versions.insert("novel.prose-continuation.v1")
+        case .proseWholeChapter:
+            versions.formUnion(["novel.prose-whole-chapter.v1", "novel.prose-whole-chapter.v2"])
+        case .discussionArchiveV1, .wholeChapterPolish, .polishDriftV1:
+            break
+        }
+        return versions
+    }
+
     static func template(for kind: NovelPromptKind) -> NovelPromptTemplate {
         switch kind {
         case .quickStart:
