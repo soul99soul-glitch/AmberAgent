@@ -71,7 +71,7 @@ struct ProviderDetailView: View {
                     }
                 },
                 persistModels: { models in
-                    _ = sharedSettings.updateProviderChatModels(providerId: providerId, models: models)
+                    _ = sharedSettings.mergeProviderChatModels(providerId: providerId, models: models)
                     _ = sharedSettings.upsertProviderImageModel(
                         providerId: providerId,
                         modelId: IOSCodexOAuthConstants.imageModelId,
@@ -694,8 +694,8 @@ struct ProviderDetailView: View {
             if reportsConnectionStatus { connectionStatus = .failure(message) }
             return
         }
-        guard !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            let message = ChatConfigurationIssue.missingAPIKey.message
+        guard hasConnectionCredential(provider) else {
+            let message = connectionCredentialIssue(provider).message
             fetchState = .failure(message)
             if reportsConnectionStatus { connectionStatus = .failure(message) }
             return
@@ -704,17 +704,46 @@ struct ProviderDetailView: View {
         Task { @MainActor in
             do {
                 let models: [Model]
-                if let openAI = provider as? ProviderSetting.OpenAI {
-                    models = try await OpenAIKmpProvider().listModels(providerSetting: openAI)
+                let successMessage: String?
+                if IOSCodexProviderResolver.isCodexProvider(provider),
+                   let openAI = provider as? ProviderSetting.OpenAI {
+                    let discovered = try await IOSCodexOAuthClient(
+                        providerId: IOSCodexProviderResolver.providerKey(openAI)
+                    ).fetchCodexModelsOrThrow()
+                    models = discovered.map { item in
+                        Model(
+                            modelId: item.modelId,
+                            displayName: item.displayName,
+                            id: KotlinUuid.companion.random(),
+                            type: ModelType.chat,
+                            customHeaders: [],
+                            customBodies: [],
+                            inputModalities: [],
+                            outputModalities: [],
+                            abilities: [],
+                            tools: Set<BuiltInTools>(),
+                            contextWindowTokens: nil,
+                            providerOverwrite: nil
+                        )
+                    }
+                    successMessage = nil
+                } else if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
+                    models = provider.models.filter { $0.type == ModelType.chat }
+                    successMessage = "Grok Web 登录凭据已就绪；服务器可用性会在发送消息时验证。"
+                } else if let openAI = provider as? ProviderSetting.OpenAI {
+                    models = try await OpenAIKmpProvider().listModelsOrThrow(providerSetting: openAI)
+                    successMessage = nil
                 } else if let claude = provider as? ProviderSetting.Claude {
-                    models = try await ClaudeKmpProvider().listModels(providerSetting: claude)
+                    models = try await ClaudeKmpProvider().listModelsOrThrow(providerSetting: claude)
+                    successMessage = nil
                 } else {
                     models = []
+                    successMessage = nil
                 }
                 availableModels = models
-                let message = models.isEmpty
+                let message = successMessage ?? (models.isEmpty
                     ? "连接成功，但服务商没有返回可列出的模型。可手动添加 Model ID。"
-                    : "连接成功，服务商返回 \(models.count) 个模型。"
+                    : "连接成功，服务商返回 \(models.count) 个模型。")
                 fetchState = .success(message)
                 if reportsConnectionStatus { connectionStatus = .success(message) }
             } catch {
@@ -796,8 +825,8 @@ struct ProviderDetailView: View {
             connectionStatus = .failure(ChatConfigurationIssue.unsupportedProvider.message)
             return
         }
-        guard apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else {
-            connectionStatus = .failure(ChatConfigurationIssue.missingAPIKey.message)
+        guard hasConnectionCredential(provider) else {
+            connectionStatus = .failure(connectionCredentialIssue(provider).message)
             return
         }
         guard isValidHTTPBaseURL(baseURL(of: provider)) else {
@@ -828,6 +857,22 @@ struct ProviderDetailView: View {
         if let claude = provider as? ProviderSetting.Claude { return claude.apiKey }
         if let google = provider as? ProviderSetting.Google { return google.apiKey }
         return ""
+    }
+
+    private func hasConnectionCredential(_ provider: ProviderSetting) -> Bool {
+        if IOSCodexProviderResolver.isCodexProvider(provider) {
+            return IOSCodexProviderResolver.isSignedIn(provider)
+        }
+        if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
+            return IOSGrokWebProviderResolver.isSignedIn(provider)
+        }
+        return !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func connectionCredentialIssue(_ provider: ProviderSetting) -> ChatConfigurationIssue {
+        if IOSCodexProviderResolver.isCodexProvider(provider) { return .codexNotSignedIn }
+        if IOSGrokWebProviderResolver.isGrokWebProvider(provider) { return .grokNotSignedIn }
+        return .missingAPIKey
     }
 
     private func baseURL(of provider: ProviderSetting) -> String {

@@ -38,8 +38,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.FlowCollector
-import kotlinx.coroutines.flow.transform
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -88,21 +87,29 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
     // the process (SIGABRT) on iOS instead of bridging to Swift. Swallow failures
     // and return an empty list so callers degrade gracefully.
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> {
-        return runCatching {
-            val response = httpClient.get("${providerSetting.baseUrl}/models") {
-                header("x-api-key", providerSetting.apiKey)
-                header("anthropic-version", ANTHROPIC_VERSION)
-            }
-            if (!response.status.isSuccess()) return@runCatching emptyList()
-            val bodyJson = json.parseToJsonElement(response.bodyAsText()).jsonObject
-            val data = bodyJson["data"]?.jsonArray ?: return@runCatching emptyList()
-            data.mapNotNull { modelJson ->
-                val modelObj = modelJson.jsonObject
-                val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                val displayName = modelObj["display_name"]?.jsonPrimitive?.contentOrNull ?: id
-                Model(modelId = id, displayName = displayName)
-            }
-        }.getOrDefault(emptyList())
+        return runCatching { listModelsOrThrow(providerSetting) }.getOrDefault(emptyList())
+    }
+
+    /** Swift-facing model listing for explicit connection tests. */
+    @Throws(Throwable::class)
+    suspend fun listModelsOrThrow(providerSetting: ProviderSetting.Claude): List<Model> {
+        val response = httpClient.get("${providerSetting.baseUrl}/models") {
+            header("x-api-key", providerSetting.apiKey)
+            header("anthropic-version", ANTHROPIC_VERSION)
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            throw Exception("Claude model listing failed: ${response.status.value} ${body.take(1200)}")
+        }
+        val bodyJson = json.parseToJsonElement(body).jsonObject
+        val data = bodyJson["data"]?.jsonArray
+            ?: throw Exception("Claude model listing response is missing data")
+        return data.mapNotNull { modelJson ->
+            val modelObj = modelJson.jsonObject
+            val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            val displayName = modelObj["display_name"]?.jsonPrimitive?.contentOrNull ?: id
+            Model(modelId = id, displayName = displayName)
+        }
     }
 
     override suspend fun generateImage(
@@ -166,7 +173,7 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
         val apiKey = providerSetting.apiKey
         val baseUrl = providerSetting.baseUrl
 
-        return sseClient.sseFlow("$baseUrl/messages") {
+        val events = sseClient.sseFlow("$baseUrl/messages") {
             method = HttpMethod.Post
             contentType(ContentType.Application.Json)
             params.customHeaders.filter { it.name.isNotBlank() }.forEach {
@@ -178,12 +185,20 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
                 header(name, value)
             }
             setBody(json.encodeToString(requestBody))
-        }.transform { event ->
-            when (event) {
-                is SseEvent.Open -> Unit
-                is SseEvent.Event -> handleStreamEvent(event.id, event.type, event.data)
-                is SseEvent.Closed -> Unit
-                is SseEvent.Failure -> throw parseFailureException(event)
+        }
+        return flow {
+            val terminal = ClaudeStreamTerminalState()
+            events.collect { event ->
+                when (event) {
+                    is SseEvent.Open -> Unit
+                    is SseEvent.Event -> {
+                        terminal.observe(event.type, event.data)
+                        parseStreamEvent(event.id, event.type, event.data)?.let { emit(it) }
+                    }
+
+                    is SseEvent.Closed -> terminal.requireCompleted()
+                    is SseEvent.Failure -> throw parseFailureException(event)
+                }
             }
         }
     }
@@ -244,15 +259,15 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
         return throwable ?: Exception("SSE connection failed")
     }
 
-    private suspend fun FlowCollector<MessageChunk>.handleStreamEvent(
+    internal fun parseStreamEvent(
         id: String?,
         type: String?,
         data: String,
-    ) {
-        if (data == "[DONE]") return
+    ): MessageChunk? {
+        if (data == "[DONE]") return null
         val dataJson = json.parseToJsonElement(data).jsonObject
         when (type) {
-            "message_stop" -> return
+            "message_stop" -> return null
             "error" -> {
                 val error = dataJson["error"]?.parseErrorDetail()
                 throw error ?: Exception("Stream error event: $data")
@@ -270,9 +285,11 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
             }
         })
         val tokenUsage = parseTokenUsage(dataJson)
-        if (deltaMessage.parts.isEmpty() && tokenUsage == null) return
+        val finishReason = dataJson["delta"]?.jsonObject
+            ?.get("stop_reason")?.jsonPrimitive?.contentOrNull
+        if (deltaMessage.parts.isEmpty() && tokenUsage == null && finishReason == null) return null
 
-        val messageChunk = MessageChunk(
+        return MessageChunk(
             id = id ?: "",
             model = "",
             choices = listOf(
@@ -280,12 +297,11 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
                     index = 0,
                     delta = deltaMessage,
                     message = null,
-                    finishReason = null,
+                    finishReason = finishReason,
                 ),
             ),
             usage = tokenUsage,
         )
-        emit(messageChunk)
     }
 
     private fun configureReferHeaders(

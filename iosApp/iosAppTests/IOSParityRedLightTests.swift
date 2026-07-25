@@ -808,6 +808,58 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    // MARK: - secure_store (redactor classification + path collision — discovery round 6)
+
+    /// RED for P0 (discovery round 6). GREEN target: P2.
+    /// Cell: *.secure_store (header classification gap).
+    ///
+    /// `isSensitiveHeaderName` only matched a narrow exact list
+    /// (authorization/x-api-key/cookie/…), so a credential header named
+    /// `Access-Token` / `Token` / `Secret` (or a customBody keyed `token`) was NOT
+    /// masked and leaked into the persisted Settings JSON and backups. Classification
+    /// must cover the same sensitive markers as `isSensitiveKey`, matching by
+    /// substring so prefixed forms (X-Access-Token, Api-Token) are covered too.
+    func test_customHeaderNamedAccessToken_encode_containsNoCredential() {
+        let secret = "tokhdr-SECRET-\(UUID().uuidString)"
+        let json = """
+        {"providers":[{"id":"p1","customHeaders":[{"first":"Access-Token","second":"\(secret)"}]}]}
+        """
+        let redacted = IOSCredentialRedactor.redact(json)
+        XCTAssertFalse(
+            redacted.contains(secret),
+            "A credential header named Access-Token must be masked (isSensitiveHeaderName was too narrow)."
+        )
+    }
+
+    /// RED for P0 (discovery round 6). GREEN target: P2.
+    /// Cell: *.secure_store (side-table path collision).
+    ///
+    /// The Keychain side-table ref for an array item used only its name/identity (no
+    /// index), so two custom headers sharing the same sensitive name (e.g. two
+    /// `X-Api-Key`) collapsed onto ONE path: redact stored the second over the first
+    /// (credential A lost) and rehydrate filled BOTH fields with credential B
+    /// (cross-contamination). The path must include the array index so same-named
+    /// items keep distinct refs.
+    func test_twoSameNamedSensitiveHeaders_keepDistinctValuesAcrossRoundTrip() {
+        let secretA = "hdr-A-\(UUID().uuidString)"
+        let secretB = "hdr-B-\(UUID().uuidString)"
+        let json = """
+        {"providers":[{"id":"p1","models":[{"id":"m1","customHeaders":[\
+        {"first":"X-Api-Key","second":"\(secretA)"},\
+        {"first":"X-Api-Key","second":"\(secretB)"}\
+        ]}]}]}
+        """
+        var sideTable: [String: String] = [:]
+        let redacted = IOSCredentialRedactor.redact(json) { path, value in sideTable[path] = value }
+        // Both distinct secrets must be masked out of the persisted JSON...
+        XCTAssertFalse(redacted.contains(secretA))
+        XCTAssertFalse(redacted.contains(secretB))
+        // ...and each must rehydrate to its OWN field (not collide onto one path).
+        let rehydrated = IOSCredentialRedactor.rehydrate(redacted) { path in sideTable[path] }
+        XCTAssertTrue(rehydrated.contains(secretA), "first same-named header's distinct value must survive the round-trip")
+        XCTAssertTrue(rehydrated.contains(secretB), "second same-named header's distinct value must survive the round-trip")
+    }
+
     // MARK: - secure_store binding (subagent_standalone / subagent_chat / council)
 
     /// GREEN (P4 binding). Cell: subagent_standalone.secure_store.
@@ -968,6 +1020,150 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    /// 根因守护:`IOSCredentialRedactor.arrayItemPath` 用 `[<identity>#<index>]`
+    /// 标识数组项(索引后缀是为了让两个同名 header 不塌到同一条 side-table 路径),
+    /// 因此按稳定 ID 反查 generic 凭据路径时必须匹配到 `#` 为止。
+    /// 曾经用 `"[\(id)]"` 匹配——对真实路径恒为 false,`genericCredentialRefs`
+    /// 永远返回空,provider/model/TTS 删除时 generic side-table 条目全部残留。
+    func test_credentialPathsIdentifyArrayItemsWithIndexSuffix() {
+        let defaults = UserDefaults(suiteName: "redlight-path-format-\(UUID().uuidString)")!
+        let store = IOSSharedSettingsStore(userDefaults: defaults)
+        let provider = makeOpenAIProvider(apiKey: "sk-path-format-\(UUID().uuidString)")
+        store.addProvider(provider)
+        let providerId = provider.id.description() as String
+
+        let paths = IOSCredentialRedactor.activeCredentialPaths(
+            in: IosSettingsJsonBridge.shared.encode(settings: store.snapshot)
+        ).filter { $0.contains(providerId) }
+        print("[CRED-PATH] \(paths.sorted().joined(separator: " | "))")
+
+        XCTAssertFalse(paths.isEmpty)
+        XCTAssertTrue(
+            paths.allSatisfy { $0.contains("[\(providerId)#") },
+            "数组项路径必须是 [<id>#<index>] 形态;按稳定 ID 反查的一方要匹配到 # 为止"
+        )
+        XCTAssertFalse(
+            paths.contains { $0.contains("[\(providerId)]") },
+            "不存在无索引后缀的 [<id>] 形态——按该形态匹配等于永远匹配不到"
+        )
+    }
+
+    func test_removeProviderDeletesTypedAndGenericCredentialRefs() {
+        let secret = "sk-delete-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: "redlight-delete-provider-\(UUID().uuidString)")!
+        let store = IOSSharedSettingsStore(userDefaults: defaults)
+        let provider = makeOpenAIProvider(apiKey: secret)
+        store.addProvider(provider)
+        let providerId = provider.id.description() as String
+        let paths = IOSCredentialRedactor.activeCredentialPaths(
+            in: IosSettingsJsonBridge.shared.encode(settings: store.snapshot)
+        ).filter { $0.contains(providerId) }
+
+        XCTAssertEqual(
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.providerApiKey(providerId: providerId)),
+            secret
+        )
+        XCTAssertFalse(paths.isEmpty)
+        XCTAssertTrue(paths.allSatisfy {
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath($0)) != nil
+        })
+
+        XCTAssertTrue(store.removeProvider(providerId: providerId))
+
+        XCTAssertNil(IOSCredentialSideTable.load(key: IOSCredentialSideTable.providerApiKey(providerId: providerId)))
+        XCTAssertTrue(paths.allSatisfy {
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath($0)) == nil
+        })
+    }
+
+    func test_removeCustomModelReusesProviderCredentialCleanup() throws {
+        let secret = "custom-model-delete-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: "redlight-delete-custom-model-\(UUID().uuidString)")!
+        let store = IOSSharedSettingsStore(userDefaults: defaults)
+        store.addCustomModel(
+            name: "Legacy Custom",
+            modelId: "legacy-custom-\(UUID().uuidString)",
+            providerName: "Legacy Provider"
+        )
+        let index = store.savedCustomModels.count - 1
+        let providerId = try XCTUnwrap(store.savedCustomModels[index]["providerId"])
+        _ = store.updateProviderApiKey(providerId: providerId, apiKey: secret)
+        let paths = IOSCredentialRedactor.activeCredentialPaths(
+            in: IosSettingsJsonBridge.shared.encode(settings: store.snapshot)
+        ).filter { $0.contains(providerId) }
+
+        XCTAssertEqual(
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.providerApiKey(providerId: providerId)),
+            secret
+        )
+        XCTAssertFalse(paths.isEmpty)
+
+        store.removeCustomModel(at: index)
+
+        XCTAssertFalse(store.snapshot.providers.contains { $0.id.description() == providerId })
+        XCTAssertNil(IOSCredentialSideTable.load(key: IOSCredentialSideTable.providerApiKey(providerId: providerId)))
+        XCTAssertTrue(paths.allSatisfy {
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath($0)) == nil
+        })
+    }
+
+    func test_removeModelDeletesOnlyItsGenericCredentialRefs() throws {
+        let secret = "model-delete-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: "redlight-delete-model-\(UUID().uuidString)")!
+        let store = IOSSharedSettingsStore(userDefaults: defaults)
+        let provider = makeOpenAIProvider(apiKey: "")
+        store.addProvider(provider)
+        let providerId = provider.id.description() as String
+        let modelId = "private-model-\(UUID().uuidString)"
+        let updated = try XCTUnwrap(store.upsertProviderChatModel(
+            providerId: providerId,
+            modelUuid: nil,
+            modelId: modelId,
+            displayName: "Private",
+            contextWindowTokens: nil,
+            modelType: .chat,
+            headers: [("Authorization", "Bearer \(secret)")]
+        ))
+        let model = try XCTUnwrap(updated.models.first { $0.modelId == modelId })
+        let modelUuid = model.id.description()
+        let paths = IOSCredentialRedactor.activeCredentialPaths(
+            in: IosSettingsJsonBridge.shared.encode(settings: store.snapshot)
+        ).filter { $0.contains(modelUuid) }
+
+        XCTAssertFalse(paths.isEmpty)
+        XCTAssertTrue(paths.allSatisfy {
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath($0)) != nil
+        })
+
+        _ = store.removeProviderChatModel(providerId: providerId, modelUuid: modelUuid)
+
+        XCTAssertTrue(paths.allSatisfy {
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath($0)) == nil
+        })
+    }
+
+    func test_removeTtsProviderDeletesItsGenericCredentialRefs() throws {
+        let secret = "tts-delete-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: "redlight-delete-tts-\(UUID().uuidString)")!
+        let store = IOSSharedSettingsStore(userDefaults: defaults)
+        store.addTtsEngine(name: "Delete TTS", engineType: "openai", apiKey: secret, model: "tts-1")
+        let ttsId = try XCTUnwrap(store.savedTtsEngines.last?["ttsId"])
+        let paths = IOSCredentialRedactor.activeCredentialPaths(
+            in: IosSettingsJsonBridge.shared.encode(settings: store.snapshot)
+        ).filter { $0.contains(ttsId) }
+
+        XCTAssertFalse(paths.isEmpty)
+        XCTAssertTrue(paths.allSatisfy {
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath($0)) != nil
+        })
+
+        store.removeTtsEngine(at: store.savedTtsEngines.count - 1)
+
+        XCTAssertTrue(paths.allSatisfy {
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath($0)) == nil
+        })
+    }
+
     func test_providerApiKey_plaintextMigrationRedactsDefaultsImmediately() {
         let secret = "sk-migrate-SECRET-\(UUID().uuidString)"
         let namespace = "redlight-migrate-\(UUID().uuidString)"
@@ -1101,11 +1297,12 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertFalse(state.reserveTerminal())
     }
 
-    func testBackgroundCancellationCanPreemptReservedTerminalUntilItIsFinalized() {
+    func testBackgroundCancellationCannotPreemptCompletionAfterSavingStarts() {
         let savingState = IOSChatBackgroundRunState()
         XCTAssertTrue(savingState.reserveTerminal())
-        XCTAssertTrue(savingState.cancelAndReserveTerminal())
-        XCTAssertFalse(savingState.finalizeTerminal())
+        XCTAssertFalse(savingState.cancelAndReserveTerminal())
+        XCTAssertTrue(savingState.finalizeTerminal())
+        XCTAssertTrue(savingState.terminalWasFinalized(by: .completion))
 
         let committedState = IOSChatBackgroundRunState()
         XCTAssertTrue(committedState.reserveTerminal())
@@ -1179,7 +1376,106 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertTrue(messages[2].toText().contains("network"))
     }
 
-    func testBackgroundCoordinatorDoesNotReportSuccessOrClearPayloadAfterSaveFailure() throws {
+    func testBackgroundSuccessBuildsWatchSummaryFromLastAssistantText() {
+        let messages = [
+            UIMessage.companion.user(prompt: "question"),
+            UIMessage.companion.assistant(prompt: "first answer"),
+            UIMessage.companion.assistant(prompt: String(repeating: "最终摘要", count: 80))
+        ]
+
+        let summary = IOSChatBackgroundGenerationCoordinator.backgroundSummaryForTesting(messages: messages)
+
+        XCTAssertNotNil(summary)
+        XCTAssertTrue(summary?.hasPrefix("最终摘要") == true)
+        XCTAssertLessThanOrEqual(summary?.count ?? 0, 281)
+    }
+
+    func testBackgroundResumeRehydratesRuntimeHeadersFromCurrentSettingsModelAndAssistant() throws {
+        let modelId = KotlinUuid.companion.random()
+        let configuredModel = Model(
+            modelId: "runtime-model",
+            displayName: "Runtime Model",
+            id: modelId,
+            type: ModelType.chat,
+            customHeaders: [CustomHeader(name: "X-Model-Token", value: "current-model-secret")],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let provider = ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "Runtime Provider",
+            models: [configuredModel],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "current-provider-secret",
+            baseUrl: "https://example.com",
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+        let persistedModel = Model(
+            modelId: "runtime-model",
+            displayName: "Runtime Model",
+            id: modelId,
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let persistedParams = TextGenerationParams(
+            model: persistedModel,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: ReasoningLevel.off,
+            customHeaders: [],
+            customBody: []
+        )
+
+        let resumed = try XCTUnwrap(
+            IOSChatBackgroundGenerationCoordinator.rehydratedParamsForTesting(
+                persistedParams: persistedParams,
+                providerSetting: provider,
+                assistantHeaders: [CustomHeader(name: "X-Assistant-Token", value: "current-assistant-secret")],
+                assistantBodies: []
+            )
+        )
+
+        XCTAssertEqual(
+            Set(resumed.customHeaders.map(\.value)),
+            Set(["current-assistant-secret", "current-model-secret"])
+        )
+        XCTAssertEqual(
+            resumed.model.customHeaders.map(\.value),
+            ["current-model-secret"]
+        )
+        XCTAssertNil(
+            IOSChatBackgroundGenerationCoordinator.rehydratedParamsForTesting(
+                persistedParams: persistedParams,
+                providerSetting: makeOpenAIProvider(),
+                assistantHeaders: [CustomHeader(name: "X-Assistant-Token", value: "other-secret")],
+                assistantBodies: []
+            ),
+            "A resumed job must not borrow a same-named model from a different provider."
+        )
+    }
+
+    func testBackgroundCoordinatorDeletesPayloadAfterTerminalSaveFailureWithoutRetryOwner() throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let source = try String(
             contentsOf: testDirectory
@@ -1190,7 +1486,7 @@ final class IOSParityRedLightTests: XCTestCase {
         guard let saveResult = source.range(of: "let didSave: Bool"),
               let saveGuard = source.range(of: "guard didSave else", range: saveResult.upperBound..<source.endIndex),
               let completedRecord = source.range(of: "await recordRun(", range: saveGuard.upperBound..<source.endIndex),
-              let retainedFailureStart = source.range(of: "private func completeAsFailureWithoutClearingPayload"),
+              let retainedFailureStart = source.range(of: "private func completeAsFailureAfterSaveFailure"),
               let retainedFailureEnd = source.range(
                 of: "private func job(for requestId:",
                 range: retainedFailureStart.upperBound..<source.endIndex
@@ -1204,12 +1500,13 @@ final class IOSParityRedLightTests: XCTestCase {
         ]
         XCTAssertTrue(
             retainedFailureBody.contains(
-                "finish(requestId: backgroundTask.identifier, removePayload: false)"
+                "finish(requestId: backgroundTask.identifier)"
             ),
-            "A failed system task must release durable/active ownership without deleting its diagnostic payload."
+            "A terminal save failure without a retry owner must release ownership and delete its payload."
         )
         XCTAssertFalse(
-            retainedFailureBody.contains("removePayload(requestId: backgroundTask.identifier)")
+            retainedFailureBody.contains("removePayload: false"),
+            "A payload cannot outlive its task-map owner without a retry path or cleanup policy."
         )
     }
 
@@ -1366,12 +1663,146 @@ final class IOSParityRedLightTests: XCTestCase {
         }
 
         XCTAssertGreaterThan(publishedSuffixes.count, 1, "A multi-line provider burst must not reach layout in one frame.")
+        // 这段 burst 的积压很小(26 字),自适应推进落在下限档,所以每拍仍是
+        // `minimumTextAdvance`。断言从 `maximumTextAdvance` 改到下限常量:
+        // 推进量不再是固定预算,而是「下限 ≤ 推进 ≤ 上限」的自适应值。
         XCTAssertTrue(
-            publishedSuffixes.dropLast().allSatisfy { $0.count.isMultiple(of: ChatStreamPresentationPacer.maximumTextAdvance) },
+            publishedSuffixes.dropLast().allSatisfy { $0.count.isMultiple(of: ChatStreamPresentationPacer.minimumTextAdvance) },
             "Each intermediate frame should advance by the bounded presentation budget."
         )
         XCTAssertTrue(caughtUp)
         XCTAssertEqual(current.last?.toText(), targetAssistant.toText(), "Pacing must eventually publish the authoritative full text.")
+    }
+
+    /// 长回复的积压必须在有界拍数内追平,而不是恒定 12 字符/拍。
+    ///
+    /// 固定预算下,4000 字的回复要 334 拍 × 48ms ≈ 16 秒才显示完;模型通常
+    /// 早已结束,而 `drainStreamPresentation` 在终态后仍按同一节奏逐拍追平,
+    /// 期间 `isLoading` 保持 true——用户看着"停止"按钮等一段已经生成完的文本。
+    /// 小说创作侧的 `NovelSessionPresentationPacer` 已按积压自适应,标准 Chat
+    /// 必须同构。
+    ///
+    /// 实测拍数:自适应 88 拍(≈4.2s),固定 12 字符 334 拍(≈16.0s)。阈值取 150,
+    /// 两侧余量充足。
+    func testForegroundPresentationPacerDrainsLongReplyWithinBoundedTicks() {
+        let user = UIMessage.companion.user(prompt: "question")
+        let assistant = UIMessage.companion.assistant(prompt: "已显示")
+        let targetAssistant = UIMessage(
+            id: assistant.id,
+            role: assistant.role,
+            parts: [UIMessagePart.Text(text: "已显示" + String(repeating: "长", count: 4000), metadata: nil)],
+            annotations: assistant.annotations,
+            createdAt: assistant.createdAt,
+            finishedAt: nil,
+            modelId: assistant.modelId,
+            usage: assistant.usage,
+            translation: assistant.translation
+        )
+        let target = [user, targetAssistant]
+
+        var current = [user, assistant]
+        var ticks = 0
+        var caughtUp = false
+        var firstAdvance = 0
+        while !caughtUp, ticks < 1_000 {
+            let before = current.last?.toText().count ?? 0
+            let step = ChatStreamPresentationPacer.step(current: current, target: target)
+            current = step.snapshot
+            caughtUp = step.isCaughtUp
+            if ticks == 0 {
+                firstAdvance = (current.last?.toText().count ?? 0) - before
+            }
+            ticks += 1
+        }
+
+        XCTAssertTrue(caughtUp, "Pacing must converge on the authoritative text.")
+        XCTAssertEqual(current.last?.toText(), targetAssistant.toText())
+        XCTAssertGreaterThan(
+            firstAdvance,
+            ChatStreamPresentationPacer.minimumTextAdvance,
+            "大积压的第一拍必须超过下限预算,否则长回复会以恒定速率持续落后于模型"
+        )
+        XCTAssertLessThanOrEqual(
+            ticks,
+            150,
+            "4000 字积压必须在约 150 拍(≈7s)内追平;固定 12 字符/拍需要 334 拍(≈16s)"
+        )
+    }
+
+    /// 命中模型输出上限(finish_reason = length / max_tokens)必须被当成截断收尾,
+    /// 而不是静默按 `completed` 交付。
+    ///
+    /// 供应商侧确实把 finishReason 透传到了 Swift(`OpenAIKmpProvider` 会在末尾
+    /// chunk 上带出),`IOSAgentToolEngine` 也读了它;唯独前台 ChatGenerationCoordinator
+    /// 从不读——于是半截答案在 UI 上和完整答案毫无区别,run 也记成 completed。
+    /// 判定必须先于工具分支:截断点可能落在 tool_calls 的参数 JSON 中途,那串
+    /// 残缺 JSON 不能当成可执行的工具调用。
+    func testForegroundCompletionTreatsOutputLimitAsTruncationBeforeToolDispatch() throws {
+        func chunk(finishReason: String?) -> MessageChunk {
+            MessageChunk(
+                id: "chunk",
+                model: "test-model",
+                choices: [UIMessageChoice(
+                    index: 0,
+                    delta: UIMessage.companion.assistant(prompt: "部分正文"),
+                    message: nil,
+                    finishReason: finishReason
+                )],
+                usage: nil
+            )
+        }
+
+        XCTAssertTrue(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: "length")))
+        XCTAssertTrue(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: "max_tokens")))
+        XCTAssertTrue(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: "max_output_tokens")))
+        XCTAssertTrue(
+            ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: "LENGTH")),
+            "finish_reason 的大小写由网关决定,判定必须大小写无关。"
+        )
+        XCTAssertFalse(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: "stop")))
+        XCTAssertFalse(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: "tool_calls")))
+        XCTAssertFalse(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: nil)))
+
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let source = try String(
+            contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        guard let consumerStart = source.range(of: "case .chunk(let chunk):"),
+              let consumerEnd = source.range(of: "case .complete:", range: consumerStart.upperBound..<source.endIndex) else {
+            return XCTFail("Expected the foreground event consumer to have chunk/complete branches")
+        }
+        XCTAssertTrue(
+            source[consumerStart.upperBound..<consumerEnd.lowerBound].contains("reachedOutputLimit(chunk)"),
+            "累加器只保留 delta/message/usage,不透传 finishReason,所以必须在消费 chunk 的当下记录上限命中。"
+        )
+
+        guard let completionStart = source.range(of: "private func handleCompletedStream("),
+              let limitBranch = source.range(of: "if hitOutputLimit {", range: completionStart.upperBound..<source.endIndex),
+              let toolBranch = source.range(of: "toolRuntime.nextPendingToolCall(in: snapshot)", range: completionStart.upperBound..<source.endIndex) else {
+            return XCTFail("Expected handleCompletedStream to branch on the output limit")
+        }
+        XCTAssertLessThan(
+            limitBranch.lowerBound,
+            toolBranch.lowerBound,
+            "截断判定必须先于待执行工具调用的分派,否则残缺的 tool_calls JSON 会被当成可执行调用。"
+        )
+
+        guard let truncatedStart = source.range(of: "private func completeTruncatedStream("),
+              let truncatedEnd = source.range(of: "static func outputLimitNotice()", range: truncatedStart.upperBound..<source.endIndex) else {
+            return XCTFail("Expected a dedicated truncated-completion path")
+        }
+        let truncatedBody = source[truncatedStart.lowerBound..<truncatedEnd.lowerBound]
+        XCTAssertTrue(
+            truncatedBody.contains("\"truncated\""),
+            "截断的 run 必须记为 truncated,记成 completed 会让用户把半截答案当完整答案。"
+        )
+        XCTAssertTrue(
+            truncatedBody.contains("Self.outputLimitNotice()"),
+            "已生成的正文要保留,并追加一条可见提示告知回复不完整。"
+        )
     }
 
     func testForegroundStreamEventSinkRetainsQueuedChunksUntilClaimed() {

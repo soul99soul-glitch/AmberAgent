@@ -1427,6 +1427,14 @@ final class ChatViewModel {
     }
 
     @discardableResult
+    func cancelGeneration(runId: String) -> Bool {
+        if generationCoordinator.cancel(runId: runId) {
+            return true
+        }
+        return IOSChatBackgroundGenerationCoordinator.shared.cancelJob(runId: runId)
+    }
+
+    @discardableResult
     func handoffGenerationToBackgroundIfNeeded() -> Bool {
         generationCoordinator.handoffCurrentGenerationToBackground(conversationStore: conversationStore)
     }

@@ -22,12 +22,16 @@ enum WatchTaskSnapshotBuilder {
         let detail = presentation.stage.title
         let metricText = presentation.metric.shortText
         let clippedSummary = WatchTaskText.clipped(summary, maxLength: 280)
+        var visibleDecision = decision
+        if conversationId == nil {
+            visibleDecision?.options.removeAll { $0.style == .openOnPhone }
+        }
 
         var actions: [WatchAction] = []
         if conversationId != nil {
             actions.append(.openOnPhone)
         }
-        if let decision {
+        if let decision = visibleDecision {
             switch decision.type {
             case .approval:
                 actions.append(contentsOf: [.approve, .deny])
@@ -56,7 +60,7 @@ enum WatchTaskSnapshotBuilder {
             detail: WatchTaskText.singleLine(detail, maxLength: 80),
             summary: clippedSummary,
             metricText: metricText,
-            decision: decision,
+            decision: visibleDecision,
             actions: actions,
             updatedAt: now,
             isStale: false

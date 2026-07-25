@@ -183,6 +183,9 @@ extension DefaultNovelCreation {
 }
 
 private extension DefaultNovelCreation {
+    /// 注意：本函数当前无生产调用点（死代码）。它是「收录后只跑一次 .stateDelta」的
+    /// 轻量路径，而状态同步实际走的是 executeManualSyncTransaction（多块 .stateRebuild
+    /// 串行）。接线它属于行为变更，需单独设计与验证，此处只做标记、不删除、不改语义。
     func executeCollectionTransaction(
         projectID: NovelProjectID,
         pendingID: NovelPendingOperationID,
@@ -441,9 +444,12 @@ private extension DefaultNovelCreation {
                     replacing: beforeRequest
                 ).document
                 try Task.checkCancellation()
+                // 用「连续无输出」超时而非绝对墙钟：结构化状态同步是长生成任务，
+                // 模型积极流式输出时也可能超过 factRequestTimeout；与讨论归档/议会主持人
+                // 综合保持同一超时语义，任意有效增量都会刷新计时，只在真正卡死时才判超时。
                 let execution = try await executor.executePrepared(
                     invocation,
-                    timeout: factRequestTimeout
+                    noOutputTimeout: factRequestTimeout
                 )
                 guard case .stateRebuild(let rebuild) = execution.output else {
                     throw NovelError.invalidInput(

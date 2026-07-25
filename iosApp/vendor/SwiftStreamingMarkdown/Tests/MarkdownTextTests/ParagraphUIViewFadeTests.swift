@@ -16,8 +16,8 @@ import UIKit
 @Suite("ParagraphUIView Fade Animation Tests")
 struct ParagraphUIViewFadeTests {
 
-  @Test("Full content replacement drops stale word fades")
-  func fullReplacementDropsStaleWordFades() {
+  @Test("Full content replacement fades from the actual changed suffix")
+  func fullReplacementFadesFromActualChangedSuffix() {
     // A default UITextView uses TextKit 2, so every publish takes the
     // full-replacement path (the TextKit 1 append fast path is unavailable).
     let view = ParagraphUIView(frame: .zero)
@@ -25,14 +25,28 @@ struct ParagraphUIViewFadeTests {
     view.setParagraphContents(NSMutableAttributedString(string: "hello world"), animatedByWord: true)
     #expect(!view.activeAnimations.isEmpty, "Word fades should start for the initial contents")
 
-    let oldLength = view.attributedText.length
     // Not a prefix extension of "hello world", so this replaces the whole text.
     view.setParagraphContents(NSMutableAttributedString(string: "hello brave new world"), animatedByWord: true)
 
     #expect(!view.activeAnimations.isEmpty, "The newly appended tail should still fade in")
+    let changedSuffixStart = ("hello " as NSString).length
     #expect(
-      view.activeAnimations.allSatisfy { $0.range.location >= oldLength },
-      "Fades from the replaced contents must not survive a full replacement"
+      view.activeAnimations.map(\.range.location).min() == changedSuffixStart,
+      "A replacement must fade from its real common-prefix boundary, not the old string length"
+    )
+  }
+
+  @Test("Pending placeholder replacement fades the whole first answer")
+  func pendingPlaceholderReplacementFadesWholeFirstAnswer() {
+    let view = ParagraphUIView(frame: .zero)
+    view.setParagraphContents(NSMutableAttributedString(string: "思考中..."), animatedByWord: true)
+
+    view.setParagraphContents(NSMutableAttributedString(string: "真实回答"), animatedByWord: true)
+
+    #expect(!view.activeAnimations.isEmpty)
+    #expect(
+      view.activeAnimations.map(\.range.location).min() == 0,
+      "A non-overlapping first answer must fade from its first glyph"
     )
   }
 

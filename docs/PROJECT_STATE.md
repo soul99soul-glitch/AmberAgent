@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -21,6 +21,37 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-25 流式展示节奏与 Responses 终态三项定点修复
+
+- 三项均按红→绿验证,每项先在未修复状态复现失败再翻绿:
+  - **Chat 流式分帧自适应**(`ChatStreamPresentationPacer`)。原为固定 12 字符/拍 × 48ms = 恒定 250 字符/秒,模型更快时积压持续累积,且 `drainStreamPresentation` 在流式终态后仍按同一节奏逐拍追平——4000 字回复实测需 334 拍(≈16s)才显示完,期间 `isLoading` 保持 true。改为与 `NovelSessionPresentationPacer` 同构的积压自适应(下限 12 / 上限 64 / 目标 16 拍清空当前积压),同一 fixture 降到 88 拍(≈4.2s),首拍 12→64。原 burst 测试的断言常量由 `maximumTextAdvance` 改到 `minimumTextAdvance`(常量语义从"固定预算"变为"下限"),改后仍绿。
+  - **OpenAI Responses 上限截断不再报错**(`OpenAIKmpProvider` / `SseEvent`)。`response.incomplete` + `incomplete_details.reason == "max_output_tokens"` 是协议正常终态,原实现无条件抛 `IllegalStateException`,会在一段成功的长回复后追加红色错误气泡并把 run 记成 failed。现改为放行并转成 `finishReason="length"`(与 Claude `stop_reason="max_tokens"` 对称,交给既有的 `reachedOutputLimit` / `outputLimitFailure`);其余 incomplete 原因(内容过滤等)继续抛。同时把 `response.incomplete` 纳入 `OpenAIStreamTerminalState` 的终态集合,否则正常截断会在连接关闭时再被误报成"流在终态前断开"。
+  - **思考面板可见性判断零分配**(`ChatReasoningCard.hasVisibleText`)。`hasBodyText` 经 `showsBody` 在一次 body 求值中被求值约 10 次,原实现 `trimmingCharacters(in:).isEmpty` 的成本取决于首字符:非空白时 Foundation 走零拷贝快路径,而正文以空白/换行开头(模型 thinking 常见)时会真的分配全文副本。1M 字符 × 50 次实测 26.69ms → 0.30ms。
+  - **凭据删除的 generic 条目残留**(`IOSSharedSettingsStore.genericCredentialRefs`)。`IOSCredentialRedactor.arrayItemPath` 把数组项标成 `[<identity>#<index>]`(索引后缀防止同名项塌到同一路径),而按稳定 ID 反查的一侧写的是 `"[\(stableId)]"`,对真实路径恒为 false ——`genericCredentialRefs` 永远返回空,provider/model/TTS 删除时 typed ref 被清而 generic side-table 条目**全部残留**。运行时取证:`root.providers[bf5082ca-…-acccaa93e9e6#9].apiKey`。改为匹配到 `#` 为止,并新增 `test_credentialPathsIdentifyArrayItemsWithIndexSuffix` 锁定两处的路径格式约定(同时断言不存在无后缀的 `[<id>]` 形态)。这修复了本轮随改动一起加入、但从未通过过的 4 条 `test_remove*CredentialRefs`。
+- 验证:iPhone 17 Pro 模拟器上 `ChatStreamReplayTests` + `ChatMessageProjectionTests` + 新增 `ChatReasoningCardTests` 合跑 **106 passed / 0 failed**;`IOSParityRedLightTests` 全套 **52 passed / 1 failed**(唯一失败是下方记录的既有 canary);`:ai-provider-openai:jvmTest` 与 `:ai-provider-claude:jvmTest` 全套 `BUILD SUCCESSFUL`。真实 provider 的长回复观感、真机 120Hz 追平手感、真机 Keychain 删除仍未验证。
+- 本轮只改这四处,未动 vendor `ParagraphUIView`、Council/Novel 的 `.sizeChanges` 底锚,以及其余 review 项。
+
+### 2026-07-24 evidence-backed bug review remediation
+
+- 二次复核后的修复继续沿既有 owner 收口，没有新增轮询或第二套状态机：SubAgent 的 Codex 流式请求先走现有 OAuth/headers resolver，Grok Web 走现有原生会话；MiniApp AI 复用当前 provider/model。会话备份恢复不再直接覆盖 `conversations/`，而是把完整 JSON 批量交给 `JsonConversationStorage` 在同一 mutex 内先校验、覆盖同 ID 并重建 index；`index.json` 不再被当成会话文档导入。
+- 后台/Watch 的真实终态缺口已闭环：保存已被 completion 占有时 cancel 不再反抢；action 失败/超时按 requestId 解除 sending；nil conversation 不再假报 open-phone 成功；后台完成携带 assistant 摘要，无 retry owner 的失败 payload 会删除，冷恢复仅从原 provider 当前模型重建已剥离 secret 的 params，并投影 reconnecting。Provider/model/TTS/MCP 删除只在明确删除入口按稳定 ID 清理对应 Keychain ref；普通 settings 更新不做全树差集删除。
+- 安全边界现在拒绝 alternate IP、DNS 解析为私网及重定向转私网，`scrape_web`/MiniApp fetch 在流式接收阶段分别硬限 512/256 KiB，MiniApp 请求体限 64 KiB。该 URLSession 方案是请求前解析与逐跳复检，不是连接级 DNS pinning，仍有解析到连接之间的标准 rebinding 窗口；要彻底关闭需替换为可绑定已验证地址且保留 TLS hostname 的 transport，本轮没有为此引入自写 HTTP 栈。
+- 当前验证：`:core:conversation-storage:jvmTest :shared:jvmTest` `BUILD SUCCESSFUL`；Search+MiniApp 37 条、凭据删除 5 条、Backup+Settings+MCP 36 条、Watch/background 29 条、`IOSAgentToolEngineTests` 全套及公开 conversation import 定点均通过；AmberWatchApp target 构建通过，`git diff --check` 通过。真实 provider、真机 WatchConnectivity、后台系统调度和 DNS rebinding 对抗环境仍未验证。
+- 对复核后确认的真实问题做了局部修复，没有处理仅靠源码猜测的 Watch 多任务仲裁、Claude `trySend`、Keychain 删除竞态、部署 warning、文件行数和源码字符串 canary 等假阳性/风险项。Watch decision 现在绑定精确 `decisionId/type`，取消只承认对应前台或后台 run，切换 run 会清掉旧 summary/decision。
+- OpenAI/Responses/Claude 流式只有收到协议终态才完成，异常 EOF、Responses failed/incomplete 与 Claude `stop_reason` 都诚实收口。Codex 登录/刷新不再改写 endpoint、模型 UUID/metadata 或私有模型；模型列表和连接测试区分真实错误，Codex/Grok 使用各自登录态。Deep Read 与 MiniApp AI 复用当前 provider/model，不再伪造 OpenAI。
+- 同步备份恢复会同时恢复 conversations 并重新 bootstrap；不可读会话导出改为明确失败，本地损坏包不再阻塞其余列表。凭据 side-table 扩到 WebDAV/S3/TTS/自定义 header/body，未能 rehydrate 的 mask 不再进入运行时；带 Basic 凭据的 WebDAV 拒绝 HTTP，MiniApp HTML 注入禁网 CSP。Conversation index 会发现并修复中断写留下的孤儿文件。
+- SubAgent 把 provider failure、调用方取消、真实秒级超时和轮次耗尽分别落到诚实终态；Council 工具返回实际动态席位与失败席位。Council 归档写失败成为 store/ViewModel 可观察告警但不打断正文；相关测试夹具改用真实测试 key，不再依赖把 credential mask 当 API key 的旧漏洞。
+- 默认 Chat 24KB canary 在同一 iPhone 17 Pro / iOS 26.5 Simulator 上修复前稳定累积约 `893pt` bottom debt；撤销无效的 `.sizeChanges` 唯一写者假设、交回现有 measured-geometry owner 后，采样为 `23.3 → 21.3 → 6.7pt` 并通过 `≤72pt` 门禁。最终 Swift 受影响组合门禁为 148 passed、0 failed；`ai-provider-openai`、`ai-provider-claude`、`shared`、`core:conversation-storage` 四个 JVM 模块在单 worker、关闭 incremental cache 后 `BUILD SUCCESSFUL`。命令行显式传 `-sdk iphonesimulator` 会把 Swift 宏错误编成 simulator 可执行文件，验证命令必须只用 `-destination`；真实 provider、Watch 真机连接与 120Hz 视觉仍未验证。
+
+### 2026-07-23 three-surface streaming follow-up closure
+
+- 对上一轮 Chat / 模型议会 / 小说创作流式审查重新按生产调用链核对后，只修复有证据的缺口：议会阶段占位文案不再进入增量 Markdown（包括失败和冷恢复），`followPaused` 只控制自动滚动、不再冻结或触发行级 Markdown 重渲染；vendor 全量替换按真实公共前缀确定淡入范围，append 快路径未改。
+- 小说 projection cache 不再因每个 `renderRevision` 重排、重建索引和重算 durable rows；content-only tick 只更新 transient row。terminal tail 在静窗内继续遮住同 ID durable row，静窗结束后再无换 ID 接管；新 run 启动失败会恢复上一条 terminal tail 的退役任务，避免永久停在“正在保存”且遮住 durable actions。当前单行更新仍会因 Swift Array COW 扫描/复制 rows，是否继续拆 immutable history/tail 需由真机大历史基准驱动，本轮未扩第二套存储结构。
+- 议会归档同步终态写与延迟写的“代数检查 + atomic replace”现共享一个临界区，关闭旧延迟快照在检查后反超终态写的 TOCTOU 窗口；归档任务和注释按真实语义统一为 throttle。同步 save 极端情况下会等待一个正在提交的后台 atomic write，尚待真机慢盘取证。
+- 原审查把标准 Chat 的 live-render `true` 直接判成 LOD 失效不成立：默认 SwiftUI 路径已有行可见性、`updatesSuspended` 和 digest 等值门控，且现有测试明确禁止用“离底距离”冻结仍可见的超长尾行；因此没有为 Chat 新增第二套可见性状态或改生产代码。其余缺少生产证据/属于产品差异的条目也未扩大修复。
+- 红→绿判别覆盖 vendor replacement fade、议会占位/跟随、小说 content-only projection、terminal quiet-window 接管、新 run 失败恢复退役和归档提交顺序。最终 vendor `SwiftStreamingMarkdown` 为 94 passed、0 failed；iPhone 17 Pro / iOS 26.5 Simulator 上 Council runner/archive、Novel ViewModel/replay/presentation 与强制 `ChatStreamReplayTests` 合跑为 193 passed、1 skipped、0 failed（`Test-iosApp-2026.07.23_23-21-35-+0800.xcresult`），`git diff --check` 通过。
+- 额外默认 Chat 长文回放中，`testLongProseViewportFollowStaysLineSizedAtTwentyFourKB` 本轮隔离两次仍报告约 893pt bottom debt；与本文件先前记录的同测试约 889pt 负载敏感失败一致，本轮没有修改 Chat 生产滚动代码，未把它冒充本补丁回归或通过。真实 provider、真机 120Hz 长流、terminal row 从 eager 区回到 history 区的重挂载视觉仍待人工验证。
 
 ### 2026-07-23 three-surface streaming audit: 6-item precise fixes
 
@@ -810,6 +841,10 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 Do not prioritize C7 multi-tool batching unless the user explicitly changes direction.
 
 ## Known Open Items
+
+- `testForegroundStreamingChunksDoNotSnapshotBeforeThrottledFlush` 仍红,且是**既有**失败:它是源码字符串 canary,期望 `cancel()` 里出现 `setMessages(pendingStreamSnapshotAtCancellation)`,而 HEAD 起该处已是 `setMessages(messagesAtCancellation)`(引入 `messagesByFailingPendingToolCalls` 时改的),canary 未跟着更新。要么按新变量名更新 canary,要么改成行为断言——源码字符串 canary 会随无关重命名假红。
+- 本机没有系统 JDK,Gradle 需显式指定:`JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew ...`。首次跑 `:ai-core:compileKotlinJvm` 可能因增量缓存报 `MessageStreamAccumulator.kt` 类型不匹配,重跑即过。
+- `.sizeChanges` 底锚的所有权在三个表面不一致:标准 Chat 默认路径已改为 measured-geometry 唯一驱动并移除 pin,而 Council(`sizeChangesPinOwnsGrowth` 门掉 measured growth)、Novel(`followingBottom` 分支显式 `break`)与 Chat 的 native 实验路径仍依赖 pin。支撑 Novel 这一选择的 `NovelSessionBottomAnchorProbeTests` 用的是显式高度的 `Color` 块,不是真实 `ParagraphUIView` 的 UIKit 增量布局,未覆盖 Chat 上观测到 bottom debt 的条件。动手前应先把探针换成真实长 Markdown 取证。
 
 - 小说项目选择仍有两个非阻塞 P2 边界：缺少“被 busy guard 拒绝的跨项目选择不会取消已挂起 branch intent”的直接 canary；同项目 `selectProject` 当前可在任意 `isPerforming` 期间刷新并改变 selection token，若与普通 mutation 并发，可能跳过其终态 reload。现有 branch preflight race test 有意依赖同项目刷新，不能粗暴改成 busy 时全部禁止，需另行收窄契约。
 - 小说 48ms 展示缓冲已通过 burst/replacement/FIFO 门禁，但 transient tail 经 flush 后继续保留 `granularity` 目前只有代码链路证据，缺一条直接行为断言；不影响当前组合态构建与装机结论。

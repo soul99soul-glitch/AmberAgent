@@ -60,7 +60,14 @@ class MessageStreamAccumulator(
             active = MutableMessage.from(replacement)
             return
         }
+        // append() 已把本 chunk 的 usage merge 进当前 active;整体替换前必须把它带过去。
+        // 否则 append 顶部 "usage already merged above" 的承诺会失效——merge 的目标
+        // 正是这里即将丢弃的对象。role 不同时旧 active 已进 prefix,usage 随之保留。
+        val carriedUsage = active.usage
         active = MutableMessage.from(replacement.copy(id = active.snapshot().id))
+        // merge 的语义是「other 的非零字段覆盖 receiver」,所以累积值作 receiver、
+        // replacement 自带的 usage 作 other:最终消息若带权威用量就优先,否则沿用累积值。
+        active.usage = active.usage?.let { carriedUsage.merge(it) } ?: carriedUsage
     }
 
     private class MutableMessage(

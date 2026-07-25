@@ -44,6 +44,31 @@ final class IOSMcpConfigStoreTests: XCTestCase {
         XCTAssertEqual(store.servers, [.sse(name: "search", url: "https://example.com/sse")])
     }
 
+    func testRemoveDeletesOnlyRemovedServerCredentialRefs() {
+        let store = IOSMcpConfigStore(userDefaults: isolatedDefaults())
+        let docsKey = IOSCredentialSideTable.mcpHeader(serverName: "docs", headerName: "Authorization")
+        let searchKey = IOSCredentialSideTable.mcpHeader(serverName: "search", headerName: "X-API-Key")
+        store.add(.streamableHTTP(
+            name: "docs",
+            url: "https://example.com/mcp",
+            headers: ["Authorization": "Bearer docs-secret"]
+        ))
+        store.add(.sse(
+            name: "search",
+            url: "https://example.com/sse",
+            headers: ["X-API-Key": "search-secret"]
+        ))
+
+        XCTAssertEqual(IOSCredentialSideTable.load(key: docsKey), "Bearer docs-secret")
+        XCTAssertEqual(IOSCredentialSideTable.load(key: searchKey), "search-secret")
+
+        store.remove(named: "docs")
+
+        XCTAssertNil(IOSCredentialSideTable.load(key: docsKey))
+        XCTAssertEqual(IOSCredentialSideTable.load(key: searchKey), "search-secret")
+        IOSCredentialSideTable.delete(key: searchKey)
+    }
+
     func testSetEnabledPersistsServerToggle() {
         let defaults = isolatedDefaults()
         let store = IOSMcpConfigStore(userDefaults: defaults)

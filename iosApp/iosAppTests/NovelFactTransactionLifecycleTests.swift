@@ -108,6 +108,143 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(policies, [.fixed(providerID: "sync-provider", modelID: "sync-model")])
     }
 
+    func testManualSyncSurvivesSlowButContinuousOutputPastTheAbsoluteFactTimeout() async throws {
+        // 状态同步用「连续无输出」超时而非绝对墙钟：本用例的 provider 持续吐出增量，
+        // 总耗时超过 factRequestTimeout，但任意相邻两次增量的间隔都远小于它。
+        // 旧的绝对超时会在 300ms 到点无条件杀死请求；新语义应因持续有输出而成功。
+        let fixture = try candidateDocument()
+        let rebuild = """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "Mara entered the archive and heard the bell.",
+          "branchOutline": "Mara investigates the archive.",
+          "events": [{
+            "id": "event-rebuilt-archive",
+            "kind": "discovery",
+            "summary": "Mara entered the archive.",
+            "entityReferences": ["Mara"],
+            "evidence": "Mara opened the archive."
+          }, {
+            "id": "event-bell",
+            "kind": "discovery",
+            "summary": "The bell rang.",
+            "entityReferences": ["Mara"],
+            "evidence": "The bell rang twice."
+          }],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
+          "unresolvedEntityNames": ["Mara"],
+          "settingProposals": []
+        }
+        """
+        let quarter = rebuild.count / 4
+        let first = rebuild.index(rebuild.startIndex, offsetBy: quarter)
+        let second = rebuild.index(rebuild.startIndex, offsetBy: quarter * 2)
+        let third = rebuild.index(rebuild.startIndex, offsetBy: quarter * 3)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [
+                .delta(String(rebuild[..<first])),
+                .pause,
+                .delta(String(rebuild[first..<second])),
+                .pause,
+                .delta(String(rebuild[second..<third])),
+                .pause,
+                .delta(String(rebuild[third...])),
+                .complete,
+            ])],
+            factRequestTimeout: 0.3
+        )
+        let collect = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        _ = try await harness.creation.perform(.collectCandidate(collect))
+        let collected = try await harness.repository.document(collect.projectID)
+        let branch = collected.branches[0]
+        let sync = NovelSyncManualEditsCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: collected.project.revision,
+                expectedConfigRevision: collected.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: collected.project.id,
+            branchID: branch.id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+
+        let syncTask = Task {
+            try await harness.creation.perform(.syncManualEdits(sync))
+        }
+        let requestStarted = await eventually {
+            await harness.adapter.requests.count == 1
+        }
+        XCTAssertTrue(requestStarted)
+        let requests = await harness.adapter.requests
+        let runID = try XCTUnwrap(requests.first).runID
+
+        for _ in 0..<3 {
+            try await Task.sleep(nanoseconds: 150_000_000)
+            await harness.adapter.resume(runID: runID)
+        }
+
+        guard case .manualSyncCommitted = try await syncTask.value else {
+            return XCTFail("Expected slow-but-continuous output to still complete synchronization")
+        }
+        let final = try await harness.repository.document(collect.projectID)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        XCTAssertEqual(final.stateSnapshots.last?.summary, "Mara entered the archive and heard the bell.")
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+    }
+
+    func testManualSyncStillTimesOutWhenProviderProducesNoOutputAtAll() async throws {
+        // 对照组：provider 完全静默挂起，证明超时保护没有被削弱——
+        // 只是从「绝对墙钟」换成「连续无输出」，静默场景依然会在 noOutputTimeout 后失败。
+        let fixture = try candidateDocument()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.pause])],
+            factRequestTimeout: 0.15
+        )
+        let collect = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        _ = try await harness.creation.perform(.collectCandidate(collect))
+        let collected = try await harness.repository.document(collect.projectID)
+        let branch = collected.branches[0]
+        let sync = NovelSyncManualEditsCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: collected.project.revision,
+                expectedConfigRevision: collected.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: collected.project.id,
+            branchID: branch.id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+
+        do {
+            _ = try await harness.creation.perform(.syncManualEdits(sync))
+            XCTFail("Expected a completely silent provider to still time out")
+        } catch {
+            // Expected: the no-output timeout still fires when there is no output at all.
+        }
+
+        let durable = try await harness.repository.document(collect.projectID)
+        XCTAssertEqual(durable.pendingOperations.first?.status, .retryable)
+        XCTAssertEqual(durable.branches[0].syncStatus, .needsSync)
+    }
+
     func testProjectedManualStateSizeDoesNotGrowWithAccumulatedFactArrays() throws {
         let baseState = try XCTUnwrap(NovelTestFixtures.document().stateSnapshots.first)
         func rebuild(eventCount: Int) -> NovelStateRebuildV1 {
@@ -839,6 +976,185 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         }.map(\.kind), [.syncManualEdits, .retryPending])
         XCTAssertNoThrow(try NovelDocumentValidator.validate(final))
     }
+
+    // MARK: - Evidence typographic-variant normalization / silent-discard safety net
+
+    func testCollectionSanitizationKeepsFactWhosePrintingVariantEvidenceMatches() throws {
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let baseState = try XCTUnwrap(document.stateSnapshots.first)
+        // Manuscript uses CJK bracket quotes; the model's evidence uses a
+        // straight double quote for the same span. Only the printing style
+        // differs, so the fact must survive sanitization rather than being
+        // silently discarded.
+        let manuscript = "「The archive is safe,」 Mara whispered."
+        let delta = NovelStateDeltaV1(
+            schemaVersion: 1,
+            stateSummary: "Mara reassures herself about the archive.",
+            events: [NovelStateEventV1(
+                id: "event-archive-safe",
+                kind: "dialogue",
+                summary: "Mara says the archive is safe.",
+                entityReferences: ["Mara"],
+                evidence: "\"The archive is safe,\" Mara whispered."
+            )],
+            characterChanges: [],
+            relationshipChanges: [],
+            foreshadowingChanges: [],
+            unresolvedEntityNames: ["Mara"],
+            branchOutlinePatch: "Mara reassures herself.",
+            settingProposals: []
+        )
+
+        let sanitized = try NovelFactTransactionReducer.sanitizedCollectionDelta(
+            in: delta,
+            evidenceSource: manuscript,
+            branch: branch,
+            baseState: baseState,
+            document: document
+        )
+
+        XCTAssertEqual(sanitized.events.map(\.id), ["event-archive-safe"])
+        XCTAssertEqual(sanitized.stateSummary, "Mara reassures herself about the archive.")
+        XCTAssertEqual(sanitized.branchOutlinePatch, "Mara reassures herself.")
+    }
+
+    func testManualChunkOutputDropsFabricatedFactWhileKeepingAnEvidenceBackedOne() throws {
+        // Mixes one real fact (whose evidence matches, modulo printing
+        // style) with one fabricated fact (whose evidence appears nowhere
+        // in the manuscript, even after normalization). Because at least
+        // one fact survives, this is NOT the "all discarded" failure case —
+        // it must succeed while still silently dropping only the fabricated
+        // fact, proving normalization did not let invented content pass.
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let baseState = try XCTUnwrap(document.stateSnapshots.first)
+        let manuscript = "“Mara waited quietly by the door.”"
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "Mara waits by the door.",
+            branchOutline: "Mara waits by the door.",
+            events: [
+                NovelStateEventV1(
+                    id: "event-real",
+                    kind: "fact",
+                    summary: "Mara waited by the door.",
+                    entityReferences: [],
+                    evidence: "\"Mara waited quietly by the door.\""
+                ),
+                NovelStateEventV1(
+                    id: "event-fabricated",
+                    kind: "fabrication",
+                    summary: "A dragon roared.",
+                    entityReferences: [],
+                    evidence: "A dragon roared in the tower."
+                ),
+            ],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: [],
+            settingProposals: []
+        )
+
+        let validated = try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: manuscript,
+            accumulated: nil,
+            baseState: baseState,
+            branchID: branch.id,
+            in: document
+        )
+
+        XCTAssertEqual(validated.events.map(\.id), ["event-real"])
+    }
+
+    func testManualChunkOutputThrowsRetryableFailureWhenAllEvidenceIsDiscarded() throws {
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let baseState = try XCTUnwrap(document.stateSnapshots.first)
+        let manuscript = "Mara waited quietly by the door."
+        // Same shape as the fabrication case above but framed as the "全丢"
+        // scenario the task calls out: the model returned facts, all of
+        // them fail evidence matching, and the old behavior was to commit a
+        // silent no-op instead of failing loudly and retryably.
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: "Mara left the archive forever.",
+            branchOutline: "Mara left the archive forever.",
+            events: [NovelStateEventV1(
+                id: "event-unmatched",
+                kind: "fact",
+                summary: "Mara left.",
+                entityReferences: [],
+                evidence: "Mara left the archive forever."
+            )],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: [],
+            settingProposals: []
+        )
+
+        XCTAssertThrowsError(try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: manuscript,
+            accumulated: nil,
+            baseState: baseState,
+            branchID: branch.id,
+            in: document
+        )) { error in
+            guard let failure = error as? NovelStructuredModelExecutionFailure else {
+                return XCTFail("Expected a structured-output evidence failure, got \(error)")
+            }
+            XCTAssertEqual(failure.failure.code, "state_facts_evidence_unmatched")
+            XCTAssertTrue(failure.failure.isRetryable)
+        }
+    }
+
+    func testManualChunkOutputStillSucceedsWhenModelLegitimatelyExtractsNoFacts() throws {
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let fixtureBaseState = try XCTUnwrap(document.stateSnapshots.first)
+        let baseState = NovelStateSnapshotRecord(
+            id: fixtureBaseState.id,
+            eventIDs: fixtureBaseState.eventIDs,
+            summary: "Mara already investigated the archive.",
+            branchOutline: "Mara continues investigating the archive.",
+            unresolvedEntityNames: fixtureBaseState.unresolvedEntityNames,
+            createdAt: fixtureBaseState.createdAt,
+            settingProposalIDs: fixtureBaseState.settingProposalIDs
+        )
+        let manuscript = "Mara waited quietly by the door."
+        // The model extracted zero facts (a legitimate "nothing new this
+        // chapter" result). This must keep succeeding — the failure path is
+        // only for "had facts, all got discarded", not "had none to begin
+        // with".
+        let rebuild = NovelStateRebuildV1(
+            schemaVersion: 1,
+            stateSummary: baseState.summary,
+            branchOutline: baseState.branchOutline,
+            events: [],
+            characterStates: [],
+            relationships: [],
+            foreshadowing: [],
+            unresolvedEntityNames: [],
+            settingProposals: []
+        )
+
+        let validated = try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: manuscript,
+            accumulated: nil,
+            baseState: baseState,
+            branchID: branch.id,
+            in: document
+        )
+
+        XCTAssertTrue(validated.events.isEmpty)
+        XCTAssertEqual(validated.stateSummary, baseState.summary)
+    }
+
 }
 
 private extension NovelFactTransactionLifecycleTests {

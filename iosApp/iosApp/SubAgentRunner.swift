@@ -204,6 +204,7 @@ final class SubAgentRunner {
         baseParams: TextGenerationParams? = nil,
         parentToolExecutors: [String: any IOSToolExecutor],
         toolCallId: String = "",
+        timeoutSeconds: TimeInterval? = nil,
         provider: any IOSAgentTextProvider = OpenAIKmpProviderAdapter()
     ) async -> String {
         let role = IOSSubAgentRoleCatalog.resolve(roleId: roleId)
@@ -316,17 +317,46 @@ final class SubAgentRunner {
         // feed the engine's accumulating assistant text into it.
         let liveModel = await MainActor.run { SubAgentLiveModel() }
         await MainActor.run { SubAgentLiveRegistry.shared.register(toolCallId: toolCallId, liveModel) }
-        let result = await engine.run(
+        let execution = await runEngine(
+            engine,
             providerSetting: providerSetting,
             messages: messages,
             params: params,
-            onAssistantText: { text in
-                Task { @MainActor in liveModel.ingest(text) }
-            }
+            timeoutSeconds: timeoutSeconds ?? TimeInterval(role.timeoutSeconds),
+            liveModel: liveModel
         )
         await MainActor.run { liveModel.finish() }
 
-        let displayText = result.messages
+        let result: IOSAgentToolEngineResult?
+        let mappedStatus: IOSAdvancedTaskStatus
+        let terminalError: String?
+        switch execution {
+        case .result(let value):
+            result = value
+            if value.wasCancelled {
+                mappedStatus = .cancelled
+                terminalError = nil
+            } else if let providerFailure = value.providerFailureMessage {
+                mappedStatus = .failed
+                terminalError = providerFailure
+            } else if value.hitStepLimit {
+                mappedStatus = .failed
+                terminalError = "SubAgent reached its maximum turn budget."
+            } else {
+                mappedStatus = .completed
+                terminalError = nil
+            }
+        case .timedOut:
+            result = nil
+            mappedStatus = .timedOut
+            terminalError = "SubAgent timed out after \(timeoutSeconds ?? TimeInterval(role.timeoutSeconds)) seconds."
+        case .cancelled:
+            result = nil
+            mappedStatus = .cancelled
+            terminalError = nil
+        }
+
+        let displayText = (result?.messages ?? [])
             .filter { $0.role == MessageRole.assistant }
             .flatMap { $0.parts }
             .compactMap { $0 as? UIMessagePart.Text }
@@ -334,7 +364,11 @@ final class SubAgentRunner {
             .joined(separator: "\n")
 
         let summary: String
-        if let report = reportCapture.captured {
+        if let terminalError {
+            summary = terminalError
+        } else if mappedStatus == .cancelled {
+            summary = "SubAgent was cancelled."
+        } else if let report = reportCapture.captured {
             summary = report
         } else {
             // No structured report captured — fall back to the visible transcript
@@ -344,18 +378,19 @@ final class SubAgentRunner {
                 : String(displayText.prefix(role.outputBudgetChars))
         }
 
-        let mappedStatus: IOSAdvancedTaskStatus = result.hitStepLimit ? .timedOut : .completed
         lastTask = taskStore.updateTask(
             id: task.id,
             status: mappedStatus,
             resultSummary: String(summary.prefix(1_000)),
-            logTail: "role=\(role.id)\ntools=\(tools.joined(separator: ", "))\nsteps=\(result.stepsExecuted)\nreport_captured=\(reportCapture.captured != nil)",
+            logTail: "role=\(role.id)\ntools=\(tools.joined(separator: ", "))\nsteps=\(result?.stepsExecuted ?? 0)\nreport_captured=\(reportCapture.captured != nil)",
+            error: terminalError ?? "",
             retryable: mappedStatus != .completed,
             cancelCapability: false,
             metadata: [
-                "steps_executed": "\(result.stepsExecuted)",
+                "steps_executed": "\(result?.stepsExecuted ?? 0)",
                 "report_captured": "\(reportCapture.captured != nil)",
-                "hit_step_limit": "\(result.hitStepLimit)"
+                "hit_step_limit": "\(result?.hitStepLimit ?? false)",
+                "was_cancelled": "\(result?.wasCancelled ?? (mappedStatus == .cancelled))"
             ]
         )
         lastRunResult = summary
@@ -368,10 +403,64 @@ final class SubAgentRunner {
             "status": mappedStatus.rawValue,
             "tool_scope": tools,
             "engine": true,
-            "steps_executed": result.stepsExecuted,
+            "steps_executed": result?.stepsExecuted ?? 0,
             "report_captured": reportCapture.captured != nil,
             "summary": String(summary.prefix(2_000))
         ])
+    }
+
+    private enum EngineExecution {
+        case result(IOSAgentToolEngineResult)
+        case timedOut
+        case cancelled
+    }
+
+    private func runEngine(
+        _ engine: IOSAgentToolEngine,
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        timeoutSeconds: TimeInterval,
+        liveModel: SubAgentLiveModel
+    ) async -> EngineExecution {
+        let timeoutState = SubAgentTimeoutState()
+        let input = SubAgentEngineInput(
+            engine: engine,
+            providerSetting: providerSetting,
+            messages: messages,
+            params: params
+        )
+        let runTask = Task { @MainActor in
+            await input.engine.run(
+                providerSetting: input.providerSetting,
+                messages: input.messages,
+                params: input.params,
+                onAssistantText: { text in
+                    Task { @MainActor in liveModel.ingest(text) }
+                }
+            )
+        }
+        let timeoutTask = Task { @MainActor in
+            do {
+                let nanoseconds = UInt64(max(0.001, timeoutSeconds) * 1_000_000_000)
+                try await Task.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+            timeoutState.didTimeout = true
+            runTask.cancel()
+        }
+        return await withTaskCancellationHandler {
+            let result = await runTask.value
+            timeoutTask.cancel()
+            if timeoutState.didTimeout {
+                return .timedOut
+            }
+            return result.wasCancelled ? .cancelled : .result(result)
+        } onCancel: {
+            runTask.cancel()
+            timeoutTask.cancel()
+        }
     }
 
     /// The KMP `subagent_report` tool name as visible in Swift.
@@ -571,6 +660,33 @@ final class SubAgentRunner {
 
     static func json(_ object: [String: Any]) -> String {
         subAgentJSON(object)
+    }
+}
+
+@MainActor
+private final class SubAgentTimeoutState {
+    var didTimeout = false
+}
+
+/// KMP message/config objects are immutable for one engine invocation but are
+/// not imported as Swift `Sendable`. The child task owns this box for the run;
+/// no field is read again by the parent while the engine is executing.
+private final class SubAgentEngineInput: @unchecked Sendable {
+    let engine: IOSAgentToolEngine
+    let providerSetting: ProviderSetting
+    let messages: [UIMessage]
+    let params: TextGenerationParams
+
+    init(
+        engine: IOSAgentToolEngine,
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams
+    ) {
+        self.engine = engine
+        self.providerSetting = providerSetting
+        self.messages = messages
+        self.params = params
     }
 }
 

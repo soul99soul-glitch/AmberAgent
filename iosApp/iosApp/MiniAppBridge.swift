@@ -12,6 +12,7 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
     private let sessionId: String
     private let runtime: IOSMiniAppBridgeRuntime
     private weak var webView: WKWebView?
+    private var isClosed = false
 
     init(runtime: IOSMiniAppBridgeRuntime, sessionId: String = UUID().uuidString) {
         self.sessionId = sessionId
@@ -27,12 +28,16 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
     }
 
     func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        webView = nil
         runtime.close()
     }
 
     /// WKScriptMessageHandler entry — called when the web page invokes
     /// `window.webkit.messageHandlers.amberNative.postMessage(...)`.
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard !isClosed else { return }
         guard let raw = message.body as? String else { return }
         Task { @MainActor in
             await self.handle(raw, webView: message.webView ?? self.webView)
@@ -54,6 +59,7 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
         }
         let params = request["params"] as? [String: Any] ?? [:]
         let result = await runtime.dispatch(method: method, params: params)
+        guard !isClosed else { return }
         sendResponse(webView: webView, id: id, result: result)
     }
 

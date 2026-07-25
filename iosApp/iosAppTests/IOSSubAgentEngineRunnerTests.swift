@@ -79,6 +79,31 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
         }
     }
 
+    final class FailingProvider: IOSAgentTextProvider, @unchecked Sendable {
+        func generateText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams
+        ) async throws -> MessageChunk {
+            throw NSError(
+                domain: "IOSSubAgentEngineRunnerTests",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "provider unavailable"]
+            )
+        }
+    }
+
+    final class SuspendedProvider: IOSAgentTextProvider, @unchecked Sendable {
+        func generateText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams
+        ) async throws -> MessageChunk {
+            try await Task.sleep(nanoseconds: 5_000_000_000)
+            throw CancellationError()
+        }
+    }
+
     private func makeMessage(role: MessageRole, parts: [UIMessagePart]) -> UIMessage {
         let now = Kotlinx_datetimeLocalDateTime(year: 2026, month: 6, day: 20, hour: 0, minute: 0, second: 0, nanosecond: 0)
         return UIMessage(
@@ -326,5 +351,72 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
         XCTAssertEqual(provider.seenMaxTokens, 321)
         XCTAssertTrue(provider.seenCustomHeaderNames.contains("X-Parent"))
         XCTAssertTrue(provider.seenToolNames.contains("subagent_report"))
+    }
+
+    func testRunViaEnginePersistsProviderFailureInsteadOfCompletion() async throws {
+        let store = IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-provider-failure-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        )
+        let runner = SubAgentRunner(taskStore: store)
+
+        let output = await runner.runViaEngine(
+            objective: "Fail honestly",
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            provider: FailingProvider()
+        )
+
+        let task = try XCTUnwrap(store.recent(kind: .subAgent, limit: 1).first)
+        XCTAssertEqual(task.status, .failed)
+        XCTAssertEqual(task.error, "provider unavailable")
+        XCTAssertTrue(output.contains("\"ok\":false"))
+    }
+
+    func testRunViaEnginePersistsCallerCancellationInsteadOfCompletion() async throws {
+        let store = IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-cancelled-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        )
+        let runner = SubAgentRunner(taskStore: store)
+        let run = Task {
+            await runner.runViaEngine(
+                objective: "Cancel honestly",
+                providerSetting: makeProviderSetting(),
+                modelId: "test-model",
+                parentToolExecutors: [:],
+                provider: SuspendedProvider()
+            )
+        }
+
+        await Task.yield()
+        run.cancel()
+        let output = await run.value
+
+        let task = try XCTUnwrap(store.recent(kind: .subAgent, limit: 1).first)
+        XCTAssertEqual(task.status, .cancelled)
+        XCTAssertTrue(output.contains("\"status\":\"cancelled\""))
+    }
+
+    func testRunViaEngineEnforcesRoleTimeoutInsteadOfReportingCompletion() async throws {
+        let store = IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-timeout-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        )
+        let runner = SubAgentRunner(taskStore: store)
+
+        let output = await runner.runViaEngine(
+            objective: "Timeout honestly",
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            timeoutSeconds: 0.01,
+            provider: SuspendedProvider()
+        )
+
+        let task = try XCTUnwrap(store.recent(kind: .subAgent, limit: 1).first)
+        XCTAssertEqual(task.status, .timedOut)
+        XCTAssertTrue(output.contains("\"status\":\"timed_out\""))
     }
 }

@@ -17,8 +17,7 @@ struct MiniAppRunnerView: View {
     @State private var bridgeLog: [String] = []
     @State private var didInitialLoad = false
     @State private var didMarkRun = false
-    @State private var pendingHostConfirmation: MiniAppHostConfirmation?
-    @State private var pendingHostContinuation: CheckedContinuation<Bool, Never>?
+    @StateObject private var hostConfirmationOwner = MiniAppHostConfirmationOwner()
 
     init(appId: String, settingsStore: SettingsStore? = nil, sharedSettings: IOSSharedSettingsStore? = nil) {
         self.appId = appId
@@ -76,7 +75,14 @@ struct MiniAppRunnerView: View {
         .task(id: appId) {
             loadApp(markRun: true)
         }
-        .alert(item: $pendingHostConfirmation) { confirmation in
+        .alert(item: Binding(
+            get: { hostConfirmationOwner.pendingConfirmation },
+            set: { confirmation in
+                if confirmation == nil {
+                    _ = hostConfirmationOwner.resolve(allow: false)
+                }
+            }
+        )) { confirmation in
             Alert(
                 title: Text(confirmation.title),
                 message: Text(confirmation.message),
@@ -87,6 +93,9 @@ struct MiniAppRunnerView: View {
                     resolveHostConfirmation(allow: false)
                 }
             )
+        }
+        .onDisappear {
+            _ = hostConfirmationOwner.close()
         }
     }
 
@@ -223,7 +232,6 @@ struct MiniAppRunnerView: View {
                     appId: app.id,
                     repository: repository,
                     policy: bridgePolicy,
-                    apiKeyProvider: { settingsStore?.currentApiKey ?? "" },
                     aiGenerateHandler: miniAppAIGenerateHandler,
                     hostHandler: miniAppHostHandler,
                     onValidationError: { runnerError = $0 },
@@ -418,51 +426,25 @@ struct MiniAppRunnerView: View {
     }
 
     private var miniAppAIGenerateHandler: IOSMiniAppBridgeRuntime.AIGenerateHandler? {
-        guard let settingsStore else { return nil }
+        guard let sharedSettings else { return nil }
         return { request in
-            try await Self.runMiniAppAI(request: request, settingsStore: settingsStore)
+            try await Self.runMiniAppAI(request: request, sharedSettings: sharedSettings)
         }
     }
 
     private static func runMiniAppAI(
         request: IOSMiniAppAIGenerateRequest,
-        settingsStore: SettingsStore
+        sharedSettings: IOSSharedSettingsStore
     ) async throws -> IOSMiniAppJSONValue {
-        let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !apiKey.isEmpty else {
-            throw MiniAppRunnerAIError.denied("Amber.ai is not available because no API key is configured.")
+        guard let model = sharedSettings.snapshot.getCurrentChatModel(),
+              let providerSetting = ChatProviderConfiguration.provider(
+                for: model,
+                providers: sharedSettings.snapshot.providers
+              ),
+              ChatProviderConfiguration.issue(for: model, provider: providerSetting) == nil else {
+            throw MiniAppRunnerAIError.denied("Amber.ai is not available because no usable chat provider is configured.")
         }
-        let modelId = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? "gpt-4o"
-        let providerSetting = ProviderSetting.OpenAI(
-            id: KotlinUuid.companion.random(),
-            enabled: true,
-            name: "MiniApp AI",
-            models: [],
-            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-            builtIn: false,
-            descriptionText: nil,
-            shortDescriptionText: nil,
-            apiKey: apiKey,
-            baseUrl: settingsStore.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? "https://api.openai.com/v1",
-            chatCompletionsPath: "/chat/completions",
-            useResponseApi: false,
-            authMode: OpenAIAuthMode.apiKey,
-            brand: OpenAIBrand.generic
-        )
-        let model = Model(
-            modelId: modelId,
-            displayName: modelId,
-            id: KotlinUuid.companion.random(),
-            type: ModelType.chat,
-            customHeaders: [],
-            customBodies: [],
-            inputModalities: [],
-            outputModalities: [],
-            abilities: [],
-            tools: Set<BuiltInTools>(),
-            contextWindowTokens: nil,
-            providerOverwrite: nil
-        )
+        let modelId = model.modelId
         let maxTokens = max(64, min(4_096, request.maxOutputChars / 4 + 64))
         let params = TextGenerationParams(
             model: model,
@@ -484,7 +466,7 @@ struct MiniAppRunnerView: View {
         }
         messages.append(UIMessage.companion.user(prompt: request.prompt))
 
-        let chunk = try await OpenAIKmpProvider().generateText(
+        let chunk = try await OpenAIKmpProviderAdapter().generateText(
             providerSetting: providerSetting,
             messages: messages,
             params: params
@@ -518,23 +500,14 @@ struct MiniAppRunnerView: View {
     }
 
     private func requestHostConfirmation(_ request: IOSMiniAppHostRequest) async throws -> Bool {
-        guard pendingHostContinuation == nil else {
-            throw MiniAppRunnerHostError.denied("Another MiniApp host request is waiting for confirmation.")
-        }
-        return await withCheckedContinuation { continuation in
-            pendingHostContinuation = continuation
-            pendingHostConfirmation = MiniAppHostConfirmation(
-                appTitle: app?.title ?? "MiniApp",
-                request: request
-            )
-        }
+        try await hostConfirmationOwner.request(
+            appTitle: app?.title ?? "MiniApp",
+            request: request
+        )
     }
 
     private func resolveHostConfirmation(allow: Bool) {
-        let continuation = pendingHostContinuation
-        pendingHostContinuation = nil
-        pendingHostConfirmation = nil
-        continuation?.resume(returning: allow)
+        _ = hostConfirmationOwner.resolve(allow: allow)
     }
 
     private func handleConfirmedHostRequest(_ request: IOSMiniAppHostRequest) throws -> IOSMiniAppJSONValue {
@@ -706,7 +679,7 @@ struct MiniAppRunnerView: View {
     }
 }
 
-private struct MiniAppHostConfirmation: Identifiable {
+struct MiniAppHostConfirmation: Identifiable {
     let id = UUID()
     let appTitle: String
     let request: IOSMiniAppHostRequest
@@ -734,6 +707,38 @@ private struct MiniAppHostConfirmation: Identifiable {
     }
 }
 
+@MainActor
+final class MiniAppHostConfirmationOwner: ObservableObject {
+    @Published private(set) var pendingConfirmation: MiniAppHostConfirmation?
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    var hasPendingRequest: Bool { continuation != nil }
+
+    func request(appTitle: String, request: IOSMiniAppHostRequest) async throws -> Bool {
+        guard continuation == nil else {
+            throw MiniAppRunnerHostError.denied("Another MiniApp host request is waiting for confirmation.")
+        }
+        return await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            pendingConfirmation = MiniAppHostConfirmation(appTitle: appTitle, request: request)
+        }
+    }
+
+    @discardableResult
+    func resolve(allow: Bool) -> Bool {
+        guard let continuation else { return false }
+        self.continuation = nil
+        pendingConfirmation = nil
+        continuation.resume(returning: allow)
+        return true
+    }
+
+    @discardableResult
+    func close() -> Bool {
+        resolve(allow: false)
+    }
+}
+
 private enum MiniAppRunnerAIError: LocalizedError {
     case denied(String)
 
@@ -743,7 +748,7 @@ private enum MiniAppRunnerAIError: LocalizedError {
     }
 }
 
-private enum MiniAppRunnerHostError: LocalizedError {
+enum MiniAppRunnerHostError: LocalizedError {
     case denied(String)
 
     var errorDescription: String? {

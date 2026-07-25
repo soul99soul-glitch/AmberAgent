@@ -10,6 +10,10 @@ import XCTest
 /// Deep Read integration tests.
 final class IOSAgentToolEngineTests: XCTestCase {
 
+    private enum GrokStubError: Error {
+        case invoked
+    }
+
     // MARK: - Fixtures
 
     private func makeProviderSetting() -> ProviderSetting.OpenAI {
@@ -26,6 +30,25 @@ final class IOSAgentToolEngineTests: XCTestCase {
             shortDescriptionText: nil,
             apiKey: "sk-test",
             baseUrl: "https://example.test",
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+    }
+
+    private func makeGrokProviderSetting() -> ProviderSetting.OpenAI {
+        ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "Grok Web",
+            models: [],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "",
+            baseUrl: IOSGrokWebConstants.webBaseUrl,
             chatCompletionsPath: "/chat/completions",
             useResponseApi: false,
             authMode: OpenAIAuthMode.apiKey,
@@ -229,6 +252,95 @@ final class IOSAgentToolEngineTests: XCTestCase {
                 onComplete()
             }
             return nil
+        }
+    }
+
+    final class PreparingStreamingProvider: IOSAgentTextProvider, IOSAgentStreamingProvider, @unchecked Sendable {
+        private(set) var streamedAPIKey: String?
+
+        func prepareRequest(
+            providerSetting: ProviderSetting,
+            params: TextGenerationParams
+        ) async throws -> (ProviderSetting, TextGenerationParams) {
+            guard let openAI = providerSetting as? ProviderSetting.OpenAI else {
+                return (providerSetting, params)
+            }
+            return (
+                ProviderSetting.OpenAI(
+                    id: openAI.id,
+                    enabled: openAI.enabled,
+                    name: openAI.name,
+                    models: openAI.models,
+                    balanceOption: openAI.balanceOption,
+                    builtIn: openAI.builtIn,
+                    descriptionText: openAI.descriptionText,
+                    shortDescriptionText: openAI.shortDescriptionText,
+                    apiKey: "prepared-token",
+                    baseUrl: openAI.baseUrl,
+                    chatCompletionsPath: openAI.chatCompletionsPath,
+                    useResponseApi: openAI.useResponseApi,
+                    authMode: openAI.authMode,
+                    brand: openAI.brand
+                ),
+                params
+            )
+        }
+
+        func generateText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams
+        ) async throws -> MessageChunk {
+            Self.chunk(text: "fallback")
+        }
+
+        func streamText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams,
+            onChunk: @escaping @Sendable (MessageChunk) -> Void,
+            onComplete: @escaping @Sendable () -> Void,
+            onError: @escaping @Sendable (KotlinThrowable) -> Void
+        ) -> Kotlinx_coroutines_coreJob? {
+            streamedAPIKey = (providerSetting as? ProviderSetting.OpenAI)?.apiKey
+            onChunk(Self.chunk(text: "streamed"))
+            onComplete()
+            return nil
+        }
+
+        private static func chunk(text: String) -> MessageChunk {
+            let message = UIMessage(
+                id: KotlinUuid.companion.random(),
+                role: MessageRole.assistant,
+                parts: [UIMessagePart.Text(text: text, metadata: nil)],
+                annotations: [],
+                createdAt: Kotlinx_datetimeLocalDateTime(
+                    year: 2026,
+                    month: 6,
+                    day: 19,
+                    hour: 0,
+                    minute: 0,
+                    second: 0,
+                    nanosecond: 0
+                ),
+                finishedAt: nil,
+                modelId: nil,
+                usage: nil,
+                translation: nil
+            )
+            return MessageChunk(
+                id: "chunk-\(UUID().uuidString)",
+                model: "test-model",
+                choices: [
+                    UIMessageChoice(
+                        index: 0,
+                        delta: nil,
+                        message: message,
+                        finishReason: "stop"
+                    ),
+                ],
+                usage: nil
+            )
         }
     }
 
@@ -606,7 +718,47 @@ final class IOSAgentToolEngineTests: XCTestCase {
         await Task.yield()
         task.cancel()
         await fulfillment(of: [finished], timeout: 0.15)
-        _ = await task.value
+        let result = await task.value
+        XCTAssertTrue(result.wasCancelled)
+    }
+
+    func testStreamingRequestPreparationRunsBeforeDispatch() async {
+        let provider = PreparingStreamingProvider()
+        let engine = IOSAgentToolEngine(provider: provider, executors: [:])
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("ask")],
+            params: makeParams(tools: [])
+        )
+
+        XCTAssertEqual(provider.streamedAPIKey, "prepared-token")
+        XCTAssertEqual(result.messages.last?.toText(), "streamed")
+    }
+
+    func testGrokWebRouteDoesNotEnterKMPStreamingDispatch() {
+        let adapter = OpenAIKmpProviderAdapter()
+
+        XCTAssertFalse(adapter.supportsStreaming(providerSetting: makeGrokProviderSetting()))
+    }
+
+    func testGrokWebGenerationUsesNativeGenerator() async {
+        let adapter = OpenAIKmpProviderAdapter { _, _, _ in
+            throw GrokStubError.invoked
+        }
+
+        do {
+            _ = try await adapter.generateText(
+                providerSetting: makeGrokProviderSetting(),
+                messages: [userMessage("ask")],
+                params: makeParams(tools: [])
+            )
+            XCTFail("Expected the native Grok generator to be invoked")
+        } catch GrokStubError.invoked {
+            // Expected: Grok must not fall through to the OpenAI KMP adapter.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
     }
 
     // MARK: - Background handoff parity: pre-existing empty-output tools

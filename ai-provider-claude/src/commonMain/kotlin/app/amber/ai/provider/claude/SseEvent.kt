@@ -28,6 +28,23 @@ sealed class SseEvent {
     data class Failure(val throwable: Throwable?) : SseEvent()
 }
 
+/** Per-collection completion marker for the Anthropic event sequence. */
+internal class ClaudeStreamTerminalState {
+    private var completed = false
+
+    fun observe(type: String?, data: String) {
+        if (type == "message_stop" || data.trim() == "[DONE]") {
+            completed = true
+        }
+    }
+
+    fun requireCompleted() {
+        if (!completed) {
+            throw IllegalStateException("Claude stream ended before message_stop")
+        }
+    }
+}
+
 /**
  * Wraps Ktor's SSE client into a reactive [Flow] of [SseEvent].
  *
@@ -37,11 +54,15 @@ fun HttpClient.sseFlow(
     url: String,
     block: HttpRequestBuilder.() -> Unit = {},
 ): Flow<SseEvent> = callbackFlow {
-    trySend(SseEvent.Open)
+    // 全部用挂起 send 而非 trySend:trySend 在缓冲满时静默丢弃事件,下游慢一拍
+    // 就会丢掉 content_block_delta,而 Claude 的流是纯增量——丢一个 delta 等于
+    // 正文缺一段,且 message_stop 仍会到达,于是残缺答案被当成功交付。
+    // 与 `:ai-provider-openai` 的 sseFlow 逐行同构(含 catch 分支)。
+    send(SseEvent.Open)
     try {
         this@sseFlow.sse(urlString = url, request = block) {
             incoming.collect { serverSentEvent ->
-                trySend(
+                send(
                     SseEvent.Event(
                         id = serverSentEvent.id,
                         type = serverSentEvent.event,
@@ -53,11 +74,11 @@ fun HttpClient.sseFlow(
     } catch (e: CancellationException) {
         throw e
     } catch (e: Exception) {
-        trySend(SseEvent.Failure(e))
+        send(SseEvent.Failure(e))
         close()
         return@callbackFlow
     }
-    trySend(SseEvent.Closed)
+    send(SseEvent.Closed)
     close()
     awaitClose { }
 }

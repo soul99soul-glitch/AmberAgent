@@ -288,25 +288,32 @@ actor IOSCodexOAuthClient {
     /// retry). Never throws — falls back to the bundled defaults on any failure.
     /// Mirrors Android `listCodexModels`.
     func fetchCodexModels() async -> [(modelId: String, displayName: String)] {
-        guard let token = try? await getValidAccessToken() else {
-            return Self.fallbackModels
+        (try? await fetchCodexModelsOrThrow()) ?? Self.fallbackModels
+    }
+
+    /// Strict variant used only by the explicit “test connection” action.
+    func fetchCodexModelsOrThrow() async throws -> [(modelId: String, displayName: String)] {
+        let token = try await getValidAccessToken()
+        var attempt = try await modelsRequest(bearer: token)
+        if attempt.status == 401 {
+            let retry = try await getValidAccessToken(forceRefresh: true)
+            attempt = try await modelsRequest(bearer: retry)
         }
-        var attempt = await modelsRequest(bearer: token)
-        if attempt?.status == 401, let retry = try? await getValidAccessToken(forceRefresh: true) {
-            attempt = await modelsRequest(bearer: retry)
-        }
-        guard let attempt, attempt.status.isHTTPSuccess else {
-            return Self.fallbackModels
+        guard attempt.status.isHTTPSuccess else {
+            throw IOSCodexOAuthError(message: "Codex 模型请求失败：HTTP \(attempt.status)")
         }
         let ids = Self.parseModelIds(attempt.data)
             .filter { !$0.localizedCaseInsensitiveContains("review") }
-        return ids.isEmpty ? Self.fallbackModels : ids.map { (modelId: $0, displayName: $0) }
+        guard !ids.isEmpty else {
+            throw IOSCodexOAuthError(message: "Codex 模型响应为空或格式无效。")
+        }
+        return ids.map { (modelId: $0, displayName: $0) }
     }
 
-    private func modelsRequest(bearer: String) async -> (data: Data, status: Int)? {
+    private func modelsRequest(bearer: String) async throws -> (data: Data, status: Int) {
         guard let url = URL(string: IOSCodexOAuthConstants.codexBackendBaseUrl
             + "/models?client_version=" + IOSCodexOAuthConstants.clientVersion) else {
-            return nil
+            throw IOSCodexOAuthError(message: "Codex 模型地址无效。")
         }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
@@ -315,7 +322,7 @@ actor IOSCodexOAuthClient {
         if let accountId = IOSCodexAuthStore.load(providerId: providerId)?.accountId, !accountId.isEmpty {
             request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
         }
-        guard let (data, response) = try? await session.data(for: request) else { return nil }
+        let (data, response) = try await session.data(for: request)
         return (data, (response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 

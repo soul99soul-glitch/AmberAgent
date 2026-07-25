@@ -118,28 +118,29 @@ struct IOSSyncBackup {
         ])
     }
 
-    static func `import`(data: Data, passphrase: String?) throws -> (settings: Settings, preview: IOSSyncPreview) {
-        let decoded = try decodeArchive(data: data, passphrase: passphrase, fileName: nil)
-        return (decoded.settings, decoded.preview)
+    static func `import`(data: Data, passphrase: String?) throws -> IOSSyncImportResult {
+        try decodeArchive(data: data, passphrase: passphrase, fileName: nil)
     }
 
     /// Bundles every `{id}.json` conversation file in the given directory into a
     /// zip for inclusion in the backup payload. Returns nil if the directory
     /// is missing or empty (the caller then exports settings-only, honestly).
-    static func conversationsZip(fromDirectory directoryURL: URL) -> Data? {
+    static func conversationsZip(fromDirectory directoryURL: URL) throws -> Data? {
         let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil) else {
-            return nil
+        guard fm.fileExists(atPath: directoryURL.path) else { return nil }
+        let entries = try fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
+        let jsonFiles = entries.filter {
+            $0.pathExtension.lowercased() == "json"
+                && $0.lastPathComponent.lowercased() != "index.json"
         }
-        let jsonFiles = entries.filter { $0.pathExtension.lowercased() == "json" }
         guard !jsonFiles.isEmpty else { return nil }
-        var zipEntries: [IOSStoredZipArchive.Entry] = []
-        for file in jsonFiles {
-            guard let data = try? Data(contentsOf: file) else { continue }
-            zipEntries.append(.init(name: file.lastPathComponent, data: data))
+        let zipEntries = try jsonFiles.map { file in
+            IOSStoredZipArchive.Entry(
+                name: file.lastPathComponent,
+                data: try Data(contentsOf: file)
+            )
         }
-        guard !zipEntries.isEmpty else { return nil }
-        return try? IOSStoredZipArchive.write(entries: zipEntries)
+        return try IOSStoredZipArchive.write(entries: zipEntries)
     }
 
     /// Extracts a conversations bundle (from a restored backup) into the given
@@ -159,6 +160,25 @@ struct IOSSyncBackup {
             written += 1
         }
         return written
+    }
+
+    /// Reads full Conversation JSON documents from a restored bundle without
+    /// writing around JsonConversationStorage's mutex/index ownership.
+    static func conversationDocuments(zipData: Data) throws -> [String] {
+        let entries = try IOSStoredZipArchive.read(data: zipData)
+        return try entries
+            .filter { name, _ in
+                let component = (name as NSString).lastPathComponent
+                return (component as NSString).pathExtension.lowercased() == "json"
+                    && component.lowercased() != "index.json"
+            }
+            .sorted { $0.key < $1.key }
+            .map { name, data in
+                guard let document = String(data: data, encoding: .utf8) else {
+                    throw IOSSyncBackupError.invalidArchive("会话文件不是 UTF-8：\(name)")
+                }
+                return document
+            }
     }
 
     static func restorePreview(data: Data, passphrase: String?, fileName: String? = nil) throws -> IOSSyncPreview {
@@ -190,7 +210,7 @@ struct IOSSyncBackup {
         data: Data,
         passphrase: String?,
         fileName: String?
-    ) throws -> (settings: Settings, preview: IOSSyncPreview) {
+    ) throws -> IOSSyncImportResult {
         let manifestPreview = try inspectManifest(data: data, fileName: fileName)
         let archiveEntries = try IOSStoredZipArchive.read(data: data)
         let manifest = manifestPreview.manifest
@@ -220,7 +240,11 @@ struct IOSSyncBackup {
             sizeBytes: Int64(data.count),
             datasets: payloadManifest.datasets
         )
-        return (settings, preview)
+        return IOSSyncImportResult(
+            settings: settings,
+            preview: preview,
+            conversationsZip: payloadEntries[conversationsEntry]
+        )
     }
 
     private static func normalizedPassphrase(_ passphrase: String?, protected: Bool = false) throws -> String {
@@ -274,6 +298,12 @@ struct IOSSyncBackup {
             throw IOSSyncBackupError.unsupportedCrypto("Unsupported cipher: \(manifest.cipher.name)")
         }
     }
+}
+
+struct IOSSyncImportResult {
+    let settings: Settings
+    let preview: IOSSyncPreview
+    let conversationsZip: Data?
 }
 
 struct IOSSyncPreview: Equatable, Sendable {
@@ -574,9 +604,9 @@ struct IOSLocalFolderSyncProvider: IOSRemoteSyncProvider {
             includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
             options: [.skipsHiddenFiles]
         )
-        return try urls
+        return urls
             .filter { $0.pathExtension == IOSSyncBackup.fileExtension }
-            .map(snapshot(from:))
+            .compactMap { try? snapshot(from: $0) }
             .sorted { lhs, rhs in
                 if lhs.createdAt == rhs.createdAt {
                     return lhs.modifiedAt > rhs.modifiedAt
@@ -777,6 +807,10 @@ struct IOSWebDAVSyncProvider: IOSRemoteSyncProvider {
     func makeRequest(method: String, fileName: String? = nil, headers: [String: String] = [:]) throws -> URLRequest {
         guard let url = buildURL(fileName: fileName) else {
             throw IOSSyncBackupError.providerNotConfigured("WebDAV URL 未配置")
+        }
+        if (!config.username.isEmpty || !config.password.isEmpty),
+           url.scheme?.lowercased() != "https" {
+            throw IOSSyncBackupError.providerNotConfigured("WebDAV Basic 认证只允许使用 HTTPS")
         }
         var request = URLRequest(url: url)
         request.httpMethod = method

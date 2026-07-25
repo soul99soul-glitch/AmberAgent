@@ -235,12 +235,19 @@ class ParagraphUIView: UITextView {
 
     invalidateIntrinsicContentSize()
 
-    let newContentLength = attributedText.length - oldAttributedString.length
+    // Vendored fix (AmberAgent): a non-append replacement can keep a real text
+    // prefix while changing everything after it. The old-length heuristic skipped
+    // changed leading glyphs (and skipped all fades when the replacement was
+    // shorter). Fade the actual changed suffix instead.
+    let commonPrefixLength = oldAttributedString.string
+      .commonPrefix(with: attributedText.string, options: .literal)
+      .utf16.count
+    let changedContentLength = attributedText.length - commonPrefixLength
 
     if animatedByWord,
-       newContentLength > 0 {
+       changedContentLength > 0 {
       appendFadeAnimations(
-        in: NSRange(location: oldAttributedString.length, length: newContentLength)
+        in: NSRange(location: commonPrefixLength, length: changedContentLength)
       )
     } else {
       // If no animation needed anymore, clean up all existings animations if any.

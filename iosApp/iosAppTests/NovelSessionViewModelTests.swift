@@ -265,7 +265,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
             .replacement("完成的讨论建议"),
             .complete,
-        ])], terminalQuietDelay: 0.3)
+        ])], terminalQuietDelay: 1.0)
         harness.session.mode = .discussPlan
 
         let didStart = await harness.session.send(text: "下一步该怎么规划？")
@@ -278,8 +278,19 @@ final class NovelSessionViewModelTests: XCTestCase {
         }
         XCTAssertTrue(lingerUnlocked, "静窗内 tail 应保留,同时输入区已解锁")
 
-        // 静窗(0.3s)过后 tail 退役清空。
-        let didRetire = await eventually(timeout: 2) { harness.session.transientTail == nil }
+        let tailID = try XCTUnwrap(harness.session.transientTail?.messageID)
+        let quietWindowModel = try XCTUnwrap(harness.session.projectedListModel(
+            project: try XCTUnwrap(harness.workspace.projectSnapshot),
+            branch: try XCTUnwrap(harness.workspace.branchSnapshot)
+        ))
+        XCTAssertEqual(
+            quietWindowModel.rows.first(where: { $0.id == tailID })?.transientPhase,
+            .terminalAwaitingRefresh,
+            "Durable refresh must not bypass the quiet window and replace the visible tail immediately."
+        )
+
+        // 静窗过后 tail 退役清空。
+        let didRetire = await eventually(timeout: 3) { harness.session.transientTail == nil }
         XCTAssertTrue(didRetire, "静窗过后终态 tail 应退役清空")
     }
 
@@ -310,6 +321,35 @@ final class NovelSessionViewModelTests: XCTestCase {
         let retired = await eventually(timeout: 3) { harness.session.transientTail == nil }
         XCTAssertTrue(retired)
         XCTAssertEqual(harness.session.durableMessages.last?.content, "第二场完成")
+    }
+
+    func testFailedStartWithinQuietWindowRestoresPreviousTailRetirement() async throws {
+        let repository = NovelSessionFailingRepository()
+        let harness = try await makeHarness(
+            repository: repository,
+            scripts: [NovelModelScript(steps: [.replacement("第一场完成"), .complete])],
+            terminalQuietDelay: 0.2
+        )
+        harness.session.mode = .discussPlan
+
+        let firstStarted = await harness.session.send(text: "第一场")
+        XCTAssertTrue(firstStarted)
+        let firstFinished = await eventually {
+            !harness.session.isRunning && harness.session.canSend
+        }
+        XCTAssertTrue(firstFinished)
+        let firstTailID = try XCTUnwrap(harness.session.transientTail?.messageID)
+
+        await repository.failNextCommits(1)
+        let secondStarted = await harness.session.send(text: "启动会失败的第二场")
+        XCTAssertFalse(secondStarted)
+        XCTAssertEqual(harness.session.transientTail?.messageID, firstTailID)
+
+        let retired = await eventually(timeout: 2) { harness.session.transientTail == nil }
+        XCTAssertTrue(
+            retired,
+            "Restoring the old tail must also restore its cancelled quiet-window retirement task."
+        )
     }
 
     func testAskUserAnswerStartsTheNextDiscussionTurn() async throws {
@@ -435,6 +475,46 @@ final class NovelSessionViewModelTests: XCTestCase {
         }
         XCTAssertTrue(didFinish)
         XCTAssertEqual(harness.session.durableMessages.last?.content, expected)
+    }
+
+    func testStreamingTailRevisionReusesDurableProjection() async throws {
+        let longBody = String(repeating: "长章投影。", count: 2_000)
+        let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
+            .delta(longBody),
+            .pause,
+        ])])
+        harness.session.mode = .writeProse
+        harness.session.granularity = .wholeChapter
+
+        let didStart = await harness.session.send(text: "验证投影缓存")
+        XCTAssertTrue(didStart)
+        let sawFirstPacedFrame = await eventually {
+            guard let tail = harness.session.transientTail else { return false }
+            return !tail.content.isEmpty && tail.content.count < longBody.count
+        }
+        XCTAssertTrue(sawFirstPacedFrame)
+
+        let project = try XCTUnwrap(harness.workspace.projectSnapshot)
+        let branch = try XCTUnwrap(harness.workspace.branchSnapshot)
+        let firstRevision = try XCTUnwrap(harness.session.transientTail?.renderRevision)
+        _ = try XCTUnwrap(harness.session.projectedListModel(project: project, branch: branch))
+        let fullBuildsAfterFirstFrame = harness.session.fullProjectionBuildCountForTesting
+
+        let advanced = await eventually {
+            (harness.session.transientTail?.renderRevision ?? 0) > firstRevision
+        }
+        XCTAssertTrue(advanced)
+        let updated = try XCTUnwrap(
+            harness.session.projectedListModel(project: project, branch: branch)
+        )
+
+        XCTAssertEqual(
+            harness.session.fullProjectionBuildCountForTesting,
+            fullBuildsAfterFirstFrame,
+            "A content-only tail revision must update one row without rebuilding every durable row."
+        )
+        XCTAssertEqual(updated.rows.last?.content, harness.session.transientTail?.content)
+        await harness.session.stop()
     }
 
     func testBufferedReplacementSupersedesUnpublishedDeltasAndKeepsFollowingText() async throws {

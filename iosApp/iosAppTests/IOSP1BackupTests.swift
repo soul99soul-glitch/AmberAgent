@@ -17,7 +17,7 @@ final class IOSP1BackupTests: XCTestCase {
     func testConversationsZipReturnsNilForEmptyDirectory() throws {
         let dir = try makeTempDir("EmptyConv")
         defer { try? FileManager.default.removeItem(at: dir) }
-        XCTAssertNil(IOSSyncBackup.conversationsZip(fromDirectory: dir))
+        XCTAssertNil(try IOSSyncBackup.conversationsZip(fromDirectory: dir))
     }
 
     func testConversationsZipBundlesJsonFiles() throws {
@@ -25,6 +25,7 @@ final class IOSP1BackupTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         try "{\"id\":\"a\"}".data(using: .utf8)!.write(to: dir.appendingPathComponent("a.json"))
         try "{\"id\":\"b\"}".data(using: .utf8)!.write(to: dir.appendingPathComponent("b.json"))
+        try "[]".data(using: .utf8)!.write(to: dir.appendingPathComponent("index.json"))
         // A non-json file must be excluded.
         try "ignore".data(using: .utf8)!.write(to: dir.appendingPathComponent("notes.txt"))
 
@@ -37,7 +38,11 @@ final class IOSP1BackupTests: XCTestCase {
         XCTAssertEqual(written, 2)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("a.json").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("b.json").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.appendingPathComponent("index.json").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.appendingPathComponent("notes.txt").path))
+
+        let documents = try IOSSyncBackup.conversationDocuments(zipData: zip)
+        XCTAssertEqual(Set(documents), ["{\"id\":\"a\"}", "{\"id\":\"b\"}"])
     }
 
     func testRestoreConversationsRoundTripsIntoDirectory() throws {

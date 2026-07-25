@@ -43,6 +43,32 @@ final class IOSConversationStoreTests: XCTestCase {
         )
     }
 
+    func testImportConversationDocumentsUsesStorageOwnedBatchImport() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreImport-\(UUID().uuidString)")
+        let sourceDirectory = root.appendingPathComponent("source")
+        let destinationDirectory = root.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = IOSConversationStore(baseDirectory: sourceDirectory)
+        await source.bootstrap()
+        await source.saveCurrent(messages: [UIMessage.companion.user(prompt: "restored message")])
+        let sourceId = try XCTUnwrap(source.currentConversation?.id)
+        let documentURL = sourceDirectory.appendingPathComponent("\(sourceId).json")
+        let document = try String(contentsOf: documentURL, encoding: .utf8)
+
+        let destination = IOSConversationStore(baseDirectory: destinationDirectory)
+        await destination.bootstrap()
+        let importedCount = try await destination.importConversationDocuments([document])
+
+        XCTAssertEqual(importedCount, 1)
+        XCTAssertTrue(destination.summaries.contains { $0.id == sourceId })
+        await destination.selectConversation(id: sourceId)
+        XCTAssertEqual(destination.currentMessages.map { $0.toText() }, ["restored message"])
+    }
+
     func testStartNewConversationReusesCurrentEmptyConversation() async throws {
         let baseDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("IOSConversationStoreReuseCurrentEmpty-")

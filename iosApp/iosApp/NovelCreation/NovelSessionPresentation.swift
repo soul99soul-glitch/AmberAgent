@@ -375,6 +375,9 @@ enum NovelSessionPresentation {
             return lhs.id.description < rhs.id.description
         }
         let durableIDs = Set(messages.map(\.id))
+        let visibleTail = input.transientTail.flatMap { tail in
+            tail.branchID == input.branch.id && tail.sessionID == input.session.id ? tail : nil
+        }
         let missingInterruptedRuns = input.runs
             .filter { run in
                 run.branchID == input.branch.id &&
@@ -391,7 +394,7 @@ enum NovelSessionPresentation {
         var projectedInterruptedRunIDs: Set<NovelRunID> = []
         var rows: [NovelSessionRowModel] = []
         rows.reserveCapacity(messages.count + missingInterruptedRuns.count + 2)
-        for message in messages {
+        for message in messages where message.id != visibleTail?.messageID {
             rows.append(durableRow(message: message, input: input, index: index))
             for run in interruptedRunsByUserMessage[message.id] ?? [] {
                 rows.append(interruptedWithoutOutputRow(
@@ -414,10 +417,7 @@ enum NovelSessionPresentation {
         rows = foldingArchivedDiscussionRows(rows, input: input)
         var activeTailID: NovelMessageID?
 
-        if let tail = input.transientTail,
-           tail.branchID == input.branch.id,
-           tail.sessionID == input.session.id,
-           !durableIDs.contains(tail.messageID) {
+        if let tail = visibleTail {
             if let startingUserContent = tail.startingUserContent,
                !durableIDs.contains(tail.userMessageID) {
                 rows.append(startingUserRow(
@@ -439,6 +439,58 @@ enum NovelSessionPresentation {
             sessionID: input.session.id,
             rows: rows,
             activeTailID: activeTailID
+        )
+    }
+
+    /// A paced stream changes only the transient row's content/revision. Reuse the
+    /// already-projected durable rows instead of sorting/indexing the whole session
+    /// again at ~21 Hz.
+    static func updatingTransientTail(
+        in model: NovelSessionListModel,
+        with tail: NovelSessionTransientTail
+    ) -> NovelSessionListModel? {
+        guard model.activeTailID == tail.messageID,
+              let rowIndex = model.rows.firstIndex(where: { $0.id == tail.messageID }) else {
+            return nil
+        }
+        let current = model.rows[rowIndex]
+        guard current.runID == tail.runID,
+              current.transientPhase == tail.phase else { return nil }
+
+        var rows = model.rows
+        rows[rowIndex] = NovelSessionRowModel(
+            id: current.id,
+            sequence: current.sequence,
+            role: current.role,
+            mode: current.mode,
+            granularity: current.granularity,
+            kind: current.kind,
+            content: presentedContent(for: tail),
+            createdAt: current.createdAt,
+            runID: current.runID,
+            runStatus: current.runStatus,
+            candidate: current.candidate,
+            committedChange: current.committedChange,
+            askUser: current.askUser,
+            archive: current.archive,
+            transientPhase: current.transientPhase,
+            actions: current.actions,
+            digest: digest(
+                messageID: tail.messageID,
+                transientRevision: tail.renderRevision,
+                transientPhase: tail.phase,
+                runStatus: current.runStatus,
+                granularity: current.granularity,
+                candidate: current.candidate,
+                committedChange: current.committedChange,
+                askUser: current.askUser,
+                actions: current.actions
+            )
+        )
+        return NovelSessionListModel(
+            sessionID: model.sessionID,
+            rows: rows,
+            activeTailID: model.activeTailID
         )
     }
 }
@@ -918,15 +970,6 @@ private extension NovelSessionPresentation {
         case .waitingForFirstToken, .streaming, .terminalAwaitingRefresh, .persistenceBlocked:
             tail.kind
         }
-        let presentedContent: String
-        switch tail.phase {
-        case .failed(let failure) where tail.content.isEmpty:
-            presentedContent = NovelPresentation.failureMessage(failure)
-        case .persistenceBlocked(let failure) where tail.content.isEmpty:
-            presentedContent = NovelPresentation.failureMessage(failure)
-        default:
-            presentedContent = tail.content
-        }
         return NovelSessionRowModel(
             id: tail.messageID,
             sequence: sequence,
@@ -934,7 +977,7 @@ private extension NovelSessionPresentation {
             mode: tail.mode,
             granularity: tail.granularity,
             kind: presentedKind,
-            content: presentedContent,
+            content: presentedContent(for: tail),
             createdAt: tail.startedAt,
             runID: tail.runID,
             runStatus: transientRunStatus(for: tail.phase),
@@ -956,6 +999,17 @@ private extension NovelSessionPresentation {
                 actions: actions
             )
         )
+    }
+
+    static func presentedContent(for tail: NovelSessionTransientTail) -> String {
+        switch tail.phase {
+        case .failed(let failure) where tail.content.isEmpty:
+            NovelPresentation.failureMessage(failure)
+        case .persistenceBlocked(let failure) where tail.content.isEmpty:
+            NovelPresentation.failureMessage(failure)
+        default:
+            tail.content
+        }
     }
 
     static func presentedCandidate(

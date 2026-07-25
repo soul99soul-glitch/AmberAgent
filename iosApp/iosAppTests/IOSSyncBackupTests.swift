@@ -3,6 +3,23 @@ import XCTest
 import Shared
 
 final class IOSSyncBackupTests: XCTestCase {
+    func testTtsCredentialRehydratesWithoutLeavingMaskInRuntime() throws {
+        let suiteName = "IOSSyncBackupTTS-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let secret = "tts-secret-\(UUID().uuidString)"
+        let store = IOSSharedSettingsStore(userDefaults: defaults)
+        store.addTtsEngine(name: "Private TTS", engineType: "openai", apiKey: secret, model: "tts-1")
+
+        let reloaded = IOSSharedSettingsStore(userDefaults: defaults)
+        let provider = try XCTUnwrap(
+            reloaded.snapshot.ttsProviders.last as? TTSProviderSetting.OpenAI
+        )
+
+        XCTAssertEqual(provider.apiKey, secret)
+        XCTAssertNotEqual(provider.apiKey, IOSCredentialRedactor.mask)
+    }
+
     func testExportCreatesAndroidShapedEncryptedArchiveAndRoundTripsSettings() throws {
         let settings = IosSettingsDefaults.shared.defaultSeededSettings()
 
@@ -105,6 +122,38 @@ final class IOSSyncBackupTests: XCTestCase {
         XCTAssertEqual(IosSettingsJsonBridge.shared.encode(settings: store.snapshot), mutatedJson)
     }
 
+    func testImportCarriesConversationBundleThroughToRestore() throws {
+        let source = temporaryDirectory().appendingPathComponent("conversation-source", isDirectory: true)
+        let target = temporaryDirectory().appendingPathComponent("conversation-target", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: source)
+            try? FileManager.default.removeItem(at: target)
+        }
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        let conversation = Data(#"{"id":"conversation-1"}"#.utf8)
+        try conversation.write(to: source.appendingPathComponent("conversation-1.json"))
+        let conversationsZip = try XCTUnwrap(
+            IOSSyncBackup.conversationsZip(fromDirectory: source)
+        )
+        let archive = try IOSSyncBackup.export(
+            settings: IosSettingsDefaults.shared.defaultSeededSettings(),
+            passphrase: "restore-conversations",
+            conversationsZip: conversationsZip
+        )
+
+        let imported = try IOSSyncBackup.import(data: archive, passphrase: "restore-conversations")
+        let restoredCount = try IOSSyncBackup.restoreConversations(
+            zipData: try XCTUnwrap(imported.conversationsZip),
+            intoDirectory: target
+        )
+
+        XCTAssertEqual(restoredCount, 1)
+        XCTAssertEqual(
+            try Data(contentsOf: target.appendingPathComponent("conversation-1.json")),
+            conversation
+        )
+    }
+
     func testRestoreApplyWritesSharedSettingsAndRemoteStatus() throws {
         let suiteName = "IOSSyncBackupApply-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -165,6 +214,41 @@ final class IOSSyncBackupTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty)
     }
 
+    func testLocalFolderListingSkipsOneCorruptBackup() async throws {
+        let folder = temporaryDirectory().appendingPathComponent("local-corrupt", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let settings = IosSettingsDefaults.shared.defaultSeededSettings()
+        let archive = try IOSSyncBackup.export(settings: settings, passphrase: "local")
+        let preview = try IOSSyncBackup.inspectManifest(data: archive)
+        let provider = IOSLocalFolderSyncProvider(folderURL: folder)
+        _ = try await provider.uploadSnapshot(
+            data: archive,
+            fileName: "valid.amberbackup",
+            manifest: preview.manifest
+        )
+        try Data("not a backup".utf8).write(
+            to: folder.appendingPathComponent("broken.amberbackup")
+        )
+
+        let listed = try await provider.listSnapshots()
+
+        XCTAssertEqual(listed.map(\.fileName), ["valid.amberbackup"])
+    }
+
+    func testConversationExportFailsInsteadOfSilentlySkippingUnreadableJSON() throws {
+        let folder = temporaryDirectory().appendingPathComponent("conversation-export", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: folder.appendingPathComponent("valid.json"))
+        try FileManager.default.createDirectory(
+            at: folder.appendingPathComponent("unreadable.json", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+
+        XCTAssertThrowsError(try IOSSyncBackup.conversationsZip(fromDirectory: folder))
+    }
+
     func testWebDAVProviderBuildsPropfindPutGetDeleteRequestsWithMockTransport() async throws {
         let settings = IosSettingsDefaults.shared.defaultSeededSettings()
         let archive = try IOSSyncBackup.export(settings: settings, passphrase: "webdav")
@@ -211,6 +295,20 @@ final class IOSSyncBackupTests: XCTestCase {
         )
         XCTAssertTrue(transport.requests[3].url?.absoluteString.contains("Amber%20Agent/sync/remote.amberbackup") == true)
         XCTAssertEqual(transport.bodies[3], archive)
+    }
+
+    func testWebDAVRejectsBasicCredentialsOverPlainHTTP() {
+        let provider = IOSWebDAVSyncProvider(
+            config: IOSWebDAVConfig(
+                baseURL: "http://example.com/dav",
+                path: "AmberAgent",
+                username: "user",
+                password: "secret"
+            ),
+            transport: MockWebDAVTransport(responses: [])
+        )
+
+        XCTAssertThrowsError(try provider.makeRequest(method: "PROPFIND"))
     }
 
     func testConflictDetectionFlagsRemoteRevisionMismatch() throws {

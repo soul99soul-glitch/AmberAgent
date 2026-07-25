@@ -15,7 +15,10 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * Represents events in an SSE connection.
@@ -96,6 +99,65 @@ internal class OpenAISseLineParser {
         }
         return payload == "[DONE]" ||
             runCatching { json.parseToJsonElement(payload) is JsonObject }.getOrDefault(false)
+    }
+}
+
+internal enum class OpenAIStreamKind {
+    CHAT_COMPLETIONS,
+    RESPONSES,
+}
+
+/** Per-collection protocol completion check. It deliberately has no global state. */
+internal class OpenAIStreamTerminalState(
+    private val kind: OpenAIStreamKind,
+) {
+    private companion object {
+        val json = Json { ignoreUnknownKeys = true }
+    }
+
+    private var completed = false
+
+    fun observe(data: String) {
+        data.lineSequence()
+            .map { it.trim().withoutSseDataPrefix() }
+            .filter { it.isNotBlank() }
+            .forEach { payload ->
+                if (payload == "[DONE]") {
+                    completed = true
+                    return@forEach
+                }
+                val objectPayload = runCatching { json.parseToJsonElement(payload) as? JsonObject }
+                    .getOrNull() ?: return@forEach
+                completed = completed || when (kind) {
+                    OpenAIStreamKind.CHAT_COMPLETIONS ->
+                        (objectPayload["choices"] as? JsonArray).orEmpty().any { choice ->
+                            val choiceObject = choice as? JsonObject ?: return@any false
+                            (choiceObject["finish_reason"] as? JsonPrimitive)?.contentOrNull != null
+                        }
+
+                    // `response.incomplete` 同样是协议终态(输出写满上限 / 内容过滤),
+                    // 只是内容未写完。把它排除在终态之外,会让一次正常的上限截断在
+                    // 连接关闭时再被误报成"流在终态前断开"。
+                    OpenAIStreamKind.RESPONSES -> {
+                        val eventType = (objectPayload["type"] as? JsonPrimitive)?.contentOrNull
+                        eventType == "response.completed" || eventType == "response.incomplete"
+                    }
+                }
+            }
+    }
+
+    fun requireCompleted() {
+        if (!completed) {
+            throw IllegalStateException("OpenAI ${kind.name.lowercase()} stream ended before a terminal event")
+        }
+    }
+
+    private fun String.withoutSseDataPrefix(): String {
+        var value = this
+        while (value.startsWith("data:")) {
+            value = value.removePrefix("data:").trimStart()
+        }
+        return value
     }
 }
 

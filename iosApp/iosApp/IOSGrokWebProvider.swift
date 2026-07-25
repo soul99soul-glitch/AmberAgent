@@ -543,17 +543,44 @@ struct IOSGrokWebClient {
         options: IOSGrokWebRequestOptions = .chat,
         onChunk: @escaping (MessageChunk) -> Void
     ) async throws {
+        try await streamTokens(
+            prompt: prompt(from: messages),
+            modelId: params.model.modelId,
+            options: options
+        ) { token in
+            onChunk(Self.textDeltaChunk(token: token, model: params.model))
+        }
+    }
+
+    func generateText(
+        prompt: String,
+        modelId: String,
+        options: IOSGrokWebRequestOptions = .chat
+    ) async throws -> String {
+        var output = ""
+        try await streamTokens(prompt: prompt, modelId: modelId, options: options) { token in
+            output += token
+        }
+        return output
+    }
+
+    private func streamTokens(
+        prompt: String,
+        modelId: String,
+        options: IOSGrokWebRequestOptions,
+        onToken: @escaping (String) -> Void
+    ) async throws {
         guard let auth = IOSGrokWebAuthStore.load(providerId: providerId),
               auth.isInvalidated != true,
               IOSGrokWebCookieValidator.hasSSOCookie(in: auth.cookieHeader) else {
             throw IOSGrokWebError.notSignedIn
         }
         let transport = IOSGrokWebBrowserTransport()
-        let wireModel = try IOSGrokWebModelResolver.resolve(params.model.modelId)
+        let wireModel = try IOSGrokWebModelResolver.resolve(modelId)
         do {
             try await transport.stream(
                 payload: IOSGrokWebPayloadBuilder.makePayload(
-                    prompt: prompt(from: messages),
+                    prompt: prompt,
                     wireModel: wireModel,
                     options: options
                 ),
@@ -565,7 +592,7 @@ struct IOSGrokWebClient {
                     throw IOSGrokWebError.browser(message)
                 }
                 if let token = frame.token {
-                    onChunk(Self.textDeltaChunk(token: token, model: params.model))
+                    onToken(token)
                 }
                 return frame.isFinished
             }

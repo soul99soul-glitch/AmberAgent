@@ -21,10 +21,10 @@ final class WatchTaskViewModel: ObservableObject {
         bridge.configure()
         bridge.onSnapshotUpdated = { [weak self] snapshot in
             self?.snapshot = snapshot
-            self?.isSending = false
         }
         bridge.onActionResult = { [weak self] result in
-            guard let self else { return }
+            guard let self, result.requestId == self.lastRequestId else { return }
+            self.lastRequestId = nil
             self.isSending = false
             if let snapshot = result.snapshot {
                 self.snapshot = snapshot

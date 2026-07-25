@@ -88,7 +88,7 @@ final class IOSMiniAppBridgeRuntime {
 
     private let repository: IOSMiniAppRepository
     private let policy: IOSMiniAppBridgePolicy
-    private let apiKeyProvider: () -> String
+    private let fetchTransport: any IOSSearchHTTPTransport
     private let aiGenerateHandler: AIGenerateHandler?
     private let hostHandler: HostHandler?
     private let toastHandler: (String) -> Void
@@ -96,12 +96,14 @@ final class IOSMiniAppBridgeRuntime {
     private let themeProvider: () -> IOSMiniAppThemePayload
     private var eventEmitter: EventEmitter?
     private var eventSubscriptionIds = Set<String>()
+    private var inFlightTasks: [UUID: Task<IOSMiniAppBridgeDispatchResult, Never>] = [:]
+    private var isClosed = false
 
     init(
         appId: String,
         repository: IOSMiniAppRepository? = nil,
         policy: IOSMiniAppBridgePolicy = IOSMiniAppBridgePolicy(),
-        apiKeyProvider: @escaping () -> String = { "" },
+        fetchTransport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport(),
         aiGenerateHandler: AIGenerateHandler? = nil,
         hostHandler: HostHandler? = nil,
         toastHandler: @escaping (String) -> Void = { _ in },
@@ -120,7 +122,7 @@ final class IOSMiniAppBridgeRuntime {
         self.appId = appId
         self.repository = repository ?? IOSMiniAppRepository.shared
         self.policy = policy
-        self.apiKeyProvider = apiKeyProvider
+        self.fetchTransport = fetchTransport
         self.aiGenerateHandler = aiGenerateHandler
         self.hostHandler = hostHandler
         self.toastHandler = toastHandler
@@ -134,7 +136,27 @@ final class IOSMiniAppBridgeRuntime {
     }
 
     func dispatch(method: String, params: [String: Any]) async -> IOSMiniAppBridgeDispatchResult {
+        guard !isClosed else { return .failure("MiniApp bridge is closed.") }
+        let id = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else {
+                return IOSMiniAppBridgeDispatchResult.failure("MiniApp bridge is closed.")
+            }
+            return await self.dispatchOpen(method: method, params: params)
+        }
+        inFlightTasks[id] = task
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        inFlightTasks.removeValue(forKey: id)
+        return result
+    }
+
+    private func dispatchOpen(method: String, params: [String: Any]) async -> IOSMiniAppBridgeDispatchResult {
         do {
+            try Task.checkCancellation()
             guard policy.miniAppEnabled else {
                 throw BridgeError.denied("MiniApp runtime is disabled in settings.")
             }
@@ -259,10 +281,6 @@ final class IOSMiniAppBridgeRuntime {
             case "ai.generate":
                 try require(.aiGenerate, method: method)
                 let request = try aiGenerateRequest(params)
-                let key = apiKeyProvider().trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !key.isEmpty else {
-                    throw BridgeError.denied("Amber.ai is not available because no API key is configured.")
-                }
                 guard let aiGenerateHandler else {
                     throw BridgeError.denied("Amber.ai is not available in this MiniApp runner.")
                 }
@@ -300,12 +318,19 @@ final class IOSMiniAppBridgeRuntime {
             default:
                 throw BridgeError.denied("Unknown MiniApp bridge method: \(method)")
             }
+        } catch is CancellationError {
+            return .failure("MiniApp bridge request was cancelled.")
         } catch {
             return .failure((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
     }
 
     func close() {
+        guard !isClosed else { return }
+        isClosed = true
+        let tasks = Array(inFlightTasks.values)
+        inFlightTasks.removeAll()
+        tasks.forEach { $0.cancel() }
         for id in eventSubscriptionIds {
             IOSMiniAppEventBus.unsubscribe(id)
         }
@@ -408,16 +433,30 @@ final class IOSMiniAppBridgeRuntime {
             }
         }
         if let body = params["body"] as? String {
-            request.httpBody = Data(body.utf8)
+            let data = Data(body.utf8)
+            guard data.count <= 64 * 1_024 else {
+                throw BridgeError.denied("Amber.fetch request body is too large.")
+            }
+            request.httpBody = data
         }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard data.count <= 256 * 1024 else { throw BridgeError.denied("Amber.fetch response is too large.") }
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let response: HTTPURLResponse
+        let data: Data
+        do {
+            (response, data) = try await fetchTransport.sendPublic(
+                request,
+                maximumResponseBytes: 256 * 1_024
+            )
+        } catch IOSSearchExecutorError.responseTooLarge {
+            throw BridgeError.denied("Amber.fetch response is too large.")
+        } catch {
+            throw BridgeError.denied(error.localizedDescription)
+        }
+        let status = response.statusCode
         let text = String(decoding: data, as: UTF8.self)
         return .object([
             "status": .number(Double(status)),
             "ok": .bool((200...299).contains(status)),
-            "url": .string(url.absoluteString),
+            "url": .string(response.url?.absoluteString ?? url.absoluteString),
             "text": .string(text),
         ])
     }

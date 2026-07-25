@@ -91,8 +91,21 @@ struct ChatReasoningCard: View {
         self.autoCloseThinking = autoCloseThinking
         // Streaming reasoning should be visible: it reassures the user that the agent is working.
         // The body gets a fixed live height below, so visibility does not fight chat scrolling.
-        let hasInitialBodyText = !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasInitialBodyText = Self.hasVisibleText(bodyText)
         self._isExpanded = State(initialValue: hasInitialBodyText && (isThinking ? true : !autoCloseThinking))
+    }
+
+    /// 推理正文是否含可见字符。
+    ///
+    /// 不用 `trimmingCharacters(in:).isEmpty`:它的成本取决于首字符是否为空白。
+    /// 首字符非空白时 Foundation 走零拷贝快路径(1M 字符实测 ~2µs);一旦正文以
+    /// 空白或换行开头(模型 thinking 很常见),它会真的分配一份全文副本——同规模
+    /// 实测 ~90µs/次。而 `hasBodyText` 经 `showsBody` 在一次 body 求值中被求值
+    /// 约 10 次(圆角/chevron/高度/mask/animation 等处各一次),流式期间每 48ms
+    /// 一轮,叠加后接近 0.9ms,是 120Hz 单帧预算(8.3ms)的一成以上。
+    /// `contains` 在首个非空白字符处返回,与首字符形态无关,恒为亚微秒。
+    static func hasVisibleText(_ text: String) -> Bool {
+        text.contains { !$0.isWhitespace }
     }
 
     private var levelSuffix: String {
@@ -101,7 +114,7 @@ struct ChatReasoningCard: View {
     }
 
     private var hasBodyText: Bool {
-        !bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        Self.hasVisibleText(bodyText)
     }
 
     private var showsBody: Bool {
@@ -249,7 +262,7 @@ struct ChatReasoningCard: View {
         .animation(.easeInOut(duration: 0.28), value: showsBody)
         .onChange(of: bodyText) { _, newValue in
             guard isThinking, !userToggled else { return }
-            if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if Self.hasVisibleText(newValue) {
                 withAnimation(.easeInOut(duration: 0.28)) { isExpanded = true }
             }
         }

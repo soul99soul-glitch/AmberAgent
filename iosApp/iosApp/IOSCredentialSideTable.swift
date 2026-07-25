@@ -82,4 +82,10 @@ enum IOSCredentialSideTable {
     static func mcpHeader(serverName: String, headerName: String) -> String {
         "mcp.\(serverName).header.\(headerName)"
     }
+
+    /// Generic Settings-JSON credential ref for credential classes that do not
+    /// have a Swift/KMP typed mutation (TTS, WebDAV/S3, model/assistant headers).
+    static func settingsPath(_ path: String) -> String {
+        "settings.\(path)"
+    }
 }

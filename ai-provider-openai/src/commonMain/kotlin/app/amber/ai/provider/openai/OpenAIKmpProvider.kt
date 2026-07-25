@@ -42,7 +42,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.transform
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -72,6 +72,10 @@ import kotlin.uuid.Uuid
  * Ktor Darwin engine. Host-specific sampling/reasoning quirks are intentionally
  * omitted — this is a baseline OpenAI-compatible implementation.
  */
+/// Responses API 的 `incomplete_details.reason`:输出写满了调用方设定的上限。
+/// 这是正常终态而非失败,见 `throwIfResponsesTerminalFailure`。
+private const val RESPONSES_OUTPUT_CAP_REASON = "max_output_tokens"
+
 class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -86,20 +90,28 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     // providers, whose apiKey is empty (the bearer is the OAuth token, injected only
     // for chat requests), so a `/models` call here always 401s.
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> {
-        return runCatching {
-            val url = "${providerSetting.baseUrl}/models"
-            val response = httpClient.get(url) {
-                header("Authorization", "Bearer ${providerSetting.apiKey}")
-            }
-            if (!response.status.isSuccess()) return@runCatching emptyList()
-            val bodyJson = json.parseToJsonElement(response.bodyAsText()).jsonObject
-            val data = bodyJson["data"]?.arr() ?: return@runCatching emptyList()
-            data.mapNotNull { modelJson ->
-                val modelObj = modelJson.obj() ?: return@mapNotNull null
-                val id = modelObj.str("id") ?: return@mapNotNull null
-                Model(modelId = id, displayName = id)
-            }
-        }.getOrDefault(emptyList())
+        return runCatching { listModelsOrThrow(providerSetting) }.getOrDefault(emptyList())
+    }
+
+    /** Swift-facing model listing for explicit connection tests. */
+    @Throws(Throwable::class)
+    suspend fun listModelsOrThrow(providerSetting: ProviderSetting.OpenAI): List<Model> {
+        val url = "${providerSetting.baseUrl}/models"
+        val response = httpClient.get(url) {
+            header("Authorization", "Bearer ${providerSetting.apiKey}")
+        }
+        val body = response.bodyAsText()
+        if (!response.status.isSuccess()) {
+            throw Exception("OpenAI model listing failed: ${response.status.value} ${body.take(1200)}")
+        }
+        val bodyJson = json.parseToJsonElement(body).jsonObject
+        val data = bodyJson["data"]?.arr()
+            ?: throw Exception("OpenAI model listing response is missing data")
+        return data.mapNotNull { modelJson ->
+            val modelObj = modelJson.obj() ?: return@mapNotNull null
+            val id = modelObj.str("id") ?: return@mapNotNull null
+            Model(modelId = id, displayName = id)
+        }
     }
 
     // @Throws is REQUIRED for the Swift-facing suspend boundary: without it, a
@@ -160,17 +172,25 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         }
         val requestBody = buildChatCompletionRequest(providerSetting, messages, params, stream = true)
         val url = "${providerSetting.baseUrl}${providerSetting.chatCompletionsPath}"
-        return sseClient.sseFlow(url) {
+        val events = sseClient.sseFlow(url) {
             method = HttpMethod.Post
             contentType(ContentType.Application.Json)
             configureAuth(providerSetting, params)
             setBody(json.encodeToString(requestBody))
-        }.transform { event ->
-            when (event) {
-                is SseEvent.Event -> parseChatCompletionStreamData(event.data).forEach { emit(it) }
+        }
+        return flow {
+            val terminal = OpenAIStreamTerminalState(OpenAIStreamKind.CHAT_COMPLETIONS)
+            events.collect { event ->
+                when (event) {
+                    is SseEvent.Event -> {
+                        terminal.observe(event.data)
+                        parseChatCompletionStreamData(event.data).forEach { emit(it) }
+                    }
 
-                is SseEvent.Failure -> throw event.throwable ?: Exception("Stream failed")
-                is SseEvent.Open, is SseEvent.Closed -> Unit
+                    is SseEvent.Failure -> throw event.throwable ?: Exception("Stream failed")
+                    is SseEvent.Closed -> terminal.requireCompleted()
+                    is SseEvent.Open -> Unit
+                }
             }
         }
     }
@@ -645,19 +665,27 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         val streamAssistantId = Uuid.random()
         val requestBody = buildResponsesRequestBody(providerSetting, messages, params, stream = true)
         val url = "${providerSetting.baseUrl}/responses"
-        return sseClient.sseFlow(url) {
+        val events = sseClient.sseFlow(url) {
             method = HttpMethod.Post
             contentType(ContentType.Application.Json)
             header("Authorization", "Bearer ${providerSetting.apiKey}")
             params.customHeaders.filter { it.name.isNotBlank() }.forEach { header(it.name, it.value) }
             setBody(json.encodeToString(requestBody))
-        }.transform { event ->
-            when (event) {
-                is SseEvent.Event -> parseResponsesStreamData(event.data)
-                    .forEach { emit(it.normalizeResponseStreamAssistant(streamAssistantId)) }
+        }
+        return flow {
+            val terminal = OpenAIStreamTerminalState(OpenAIStreamKind.RESPONSES)
+            events.collect { event ->
+                when (event) {
+                    is SseEvent.Event -> {
+                        terminal.observe(event.data)
+                        parseResponsesStreamData(event.data)
+                            .forEach { emit(it.normalizeResponseStreamAssistant(streamAssistantId)) }
+                    }
 
-                is SseEvent.Failure -> throw event.throwable ?: Exception("Stream failed")
-                is SseEvent.Open, is SseEvent.Closed -> Unit
+                    is SseEvent.Failure -> throw event.throwable ?: Exception("Stream failed")
+                    is SseEvent.Closed -> terminal.requireCompleted()
+                    is SseEvent.Open -> Unit
+                }
             }
         }
     }
@@ -667,8 +695,36 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             val obj = runCatching { json.parseToJsonElement(payload) as? JsonObject }
                 .getOrNull() ?: return@mapNotNull null
             obj["error"]?.let { throw it.parseErrorDetail() }
+            obj.throwIfResponsesTerminalFailure()
             parseResponseDelta(obj)
         }
+
+    private fun JsonObject.throwIfResponsesTerminalFailure() {
+        val response = this["response"]?.obj()
+        when (str("type")) {
+            "response.incomplete" -> {
+                val reason = response?.get("incomplete_details")?.obj()?.str("reason")
+                // 写满 max_output_tokens 是协议正常终态,不是错误:已生成的内容
+                // 完整可用,只是被调用方设定的上限截断。把它当异常抛,会让一段
+                // 成功的长回复后面追加一条红色错误气泡并把本 run 记成 failed。
+                // 这里放行,由 parseResponseDelta 转成 finishReason="length",与
+                // Claude 的 stop_reason="max_tokens" 对称,交给下游既有的输出
+                // 上限提示(reachedOutputLimit / outputLimitFailure)。
+                if (reason == RESPONSES_OUTPUT_CAP_REASON) return
+                throw IllegalStateException(
+                    "OpenAI Responses stream incomplete: " +
+                        (reason ?: response?.str("status") ?: "unknown reason")
+                )
+            }
+
+            "response.failed" -> {
+                val detail = response?.get("error")?.parseErrorDetail()?.message
+                    ?: response?.str("status")
+                    ?: "unknown error"
+                throw IllegalStateException("OpenAI Responses stream failed: $detail")
+            }
+        }
+    }
 
     private fun MessageChunk.normalizeResponseStreamAssistant(streamAssistantId: Uuid): MessageChunk = copy(
         choices = choices.map { choice ->
@@ -1113,6 +1169,25 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
                     model = "",
                     choices = emptyList(),
                     usage = null,
+                )
+            }
+
+            // 只有输出上限截断能走到这里:其余 incomplete 原因已在
+            // throwIfResponsesTerminalFailure 抛出。空 parts 的 delta + finishReason
+            // 与 Claude message_delta 的 stop_reason 形态一致,累加器不改内容,
+            // 下游据此给出"达到输出上限"的提示而不是错误气泡。
+            "response.incomplete" -> {
+                return MessageChunk(
+                    id = jsonObject["response"]?.obj()?.str("id") ?: "",
+                    model = "",
+                    choices = listOf(
+                        UIMessageChoice(
+                            index = 0,
+                            delta = UIMessage(role = MessageRole.ASSISTANT, parts = emptyList()),
+                            message = null,
+                            finishReason = "length",
+                        ),
+                    ),
                 )
             }
         }

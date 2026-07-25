@@ -12,8 +12,46 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class OpenAIKmpProviderResponsesStreamTest {
+    /// 写满 `max_output_tokens` 是协议正常终态,不是错误:已生成的内容完整可用,
+    /// 只是被用户设定的上限截断。把它当异常抛会让用户在一段成功的长回复后面
+    /// 看到一条红色错误气泡,并把这一 run 记成 failed。与 Claude 的
+    /// `stop_reason="max_tokens"`(走 finishReason,不抛)对称。
+    @Test
+    fun incompleteFromOutputCapIsTerminalTruncationNotAnError() {
+        val chunks = OpenAIKmpProvider().parseResponsesStreamData(
+            """{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}"""
+        )
+
+        assertEquals("length", chunks.single().choices.single().finishReason)
+    }
+
+    /// 其余 incomplete 原因(内容过滤等)仍然是真实失败,必须继续抛出。
+    @Test
+    fun incompleteFromOtherReasonsStillSurfacesTheProviderReason() {
+        val error = assertFailsWith<IllegalStateException> {
+            OpenAIKmpProvider().parseResponsesStreamData(
+                """{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}}"""
+            )
+        }
+
+        assertTrue(error.message.orEmpty().contains("content_filter"))
+    }
+
+    @Test
+    fun failedResponseSurfacesTheProviderMessage() {
+        val error = assertFailsWith<IllegalStateException> {
+            OpenAIKmpProvider().parseResponsesStreamData(
+                """{"type":"response.failed","response":{"status":"failed","error":{"message":"upstream unavailable"}}}"""
+            )
+        }
+
+        assertTrue(error.message.orEmpty().contains("upstream unavailable"))
+    }
+
     @Test
     fun functionCallArgumentsDoneCarriesCallIdAndName() {
         val chunk = OpenAIKmpProvider().parseResponseDelta(

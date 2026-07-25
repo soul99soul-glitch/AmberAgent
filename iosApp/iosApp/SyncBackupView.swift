@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct SyncBackupView: View {
     let sharedSettings: IOSSharedSettingsStore
+    let conversationStore: IOSConversationStore
 
     @Environment(\.dismiss) private var dismiss
 
@@ -26,8 +27,9 @@ struct SyncBackupView: View {
     @State private var webDAVUsername = ""
     @State private var webDAVPassword = ""
 
-    init(sharedSettings: IOSSharedSettingsStore) {
+    init(sharedSettings: IOSSharedSettingsStore, conversationStore: IOSConversationStore) {
         self.sharedSettings = sharedSettings
+        self.conversationStore = conversationStore
         self._remoteStatus = State(initialValue: sharedSettings.remoteSyncStatus)
     }
 
@@ -458,7 +460,7 @@ struct SyncBackupView: View {
 
                         HStack(spacing: 10) {
                             Button {
-                                applyPendingRestore()
+                                Task { await applyPendingRestore() }
                             } label: {
                                 Label("应用恢复", systemImage: "checkmark.circle")
                                     .frame(maxWidth: .infinity)
@@ -489,7 +491,9 @@ struct SyncBackupView: View {
             // same path IOSConversationStore uses by default).
             let conversationsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("conversations")
-            let conversationsZip = conversationsDir.flatMap { IOSSyncBackup.conversationsZip(fromDirectory: $0) }
+            let conversationsZip = try conversationsDir.flatMap {
+                try IOSSyncBackup.conversationsZip(fromDirectory: $0)
+            }
             let data = try IOSSyncBackup.export(
                 settings: sharedSettings.snapshot,
                 passphrase: passphrase,
@@ -547,7 +551,9 @@ struct SyncBackupView: View {
 
             let conversationsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
                 .appendingPathComponent("conversations")
-            let conversationsZip = conversationsDir.flatMap { IOSSyncBackup.conversationsZip(fromDirectory: $0) }
+            let conversationsZip = try conversationsDir.flatMap {
+                try IOSSyncBackup.conversationsZip(fromDirectory: $0)
+            }
             let data = try IOSSyncBackup.export(
                 settings: sharedSettings.snapshot,
                 passphrase: passphrase,
@@ -593,10 +599,16 @@ struct SyncBackupView: View {
         }
     }
 
-    private func applyPendingRestore() {
+    @MainActor
+    private func applyPendingRestore() async {
         guard let pendingRestore else { return }
         do {
             let result = try IOSSyncBackup.import(data: pendingRestore.data, passphrase: passphrase)
+            var restoredConversationCount = 0
+            if let conversationsZip = result.conversationsZip {
+                let documents = try IOSSyncBackup.conversationDocuments(zipData: conversationsZip)
+                restoredConversationCount = try await conversationStore.importConversationDocuments(documents)
+            }
             sharedSettings.restoreSnapshot(result.settings)
             if let snapshot = pendingRestore.snapshot {
                 sharedSettings.recordRemoteDownload(snapshot: snapshot, preview: result.preview)
@@ -605,7 +617,10 @@ struct SyncBackupView: View {
             }
             refreshRemoteStatus()
             self.pendingRestore = nil
-            alert = .success("已应用备份恢复：\(result.preview.manifest.appVersionName)")
+            let conversationNote = restoredConversationCount > 0
+                ? "，恢复 \(restoredConversationCount) 个对话"
+                : ""
+            alert = .success("已应用备份恢复：\(result.preview.manifest.appVersionName)\(conversationNote)")
         } catch {
             sharedSettings.recordRemoteSyncError(error)
             refreshRemoteStatus()

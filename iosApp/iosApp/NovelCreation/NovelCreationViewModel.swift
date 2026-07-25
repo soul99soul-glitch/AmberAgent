@@ -210,6 +210,10 @@ final class NovelCreationViewModel {
         }) {
             return .generating(runID: running.id)
         }
+        // 注意：这里用未过滤的 settingProposals 判空，与卡片列表用的
+        // activeSettingProposals（过滤掉 isResolved）不一致——用户全部
+        // 接受/拒绝后仍会走到 idle 而非 failed。这是已知行为，不在本次
+        // 改动范围内；「重新生成设定建议」入口走显式按钮，不依赖本状态机。
         if projectSnapshot.settingProposals.isEmpty {
             return .failed(message: "尚未生成创作建议，可以重新生成。")
         }
@@ -443,7 +447,7 @@ final class NovelCreationViewModel {
     }
 
     @discardableResult
-    func startQuickStartSuggestions() async -> NovelRunID? {
+    func startQuickStartSuggestions(guidance: String? = nil) async -> NovelRunID? {
         guard !isPerforming,
               !requiresReload,
               let project = projectSnapshot,
@@ -451,6 +455,13 @@ final class NovelCreationViewModel {
               project.project.creationMode == .quickStart,
               branch.branch.activeRunID == nil else { return nil }
         let projectID = project.project.id
+        let trimmedGuidance = guidance?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let userText: String
+        if let trimmedGuidance, !trimmedGuidance.isEmpty {
+            userText = "请生成一组可确认的世界观、人物、总剧情大纲和写作要求建议。\n\n用户对上一版建议不满意，要求按以下方向调整重新生成：\n\(trimmedGuidance)"
+        } else {
+            userText = "请生成一组可确认的世界观、人物、总剧情大纲和写作要求建议。"
+        }
         let request = NovelRunRequest(
             id: NovelRunID(),
             operationID: NovelOperationID(),
@@ -459,7 +470,7 @@ final class NovelCreationViewModel {
             kind: .quickStart,
             mode: .discussPlan,
             granularity: nil,
-            userText: "请生成一组可确认的世界观、人物、总剧情大纲和写作要求建议。",
+            userText: userText,
             userMessageID: NovelMessageID(),
             assistantMessageID: NovelMessageID(),
             candidateID: nil,

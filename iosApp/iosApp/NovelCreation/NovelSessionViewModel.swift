@@ -109,7 +109,6 @@ private struct NovelSessionProjectionTailKey: Equatable {
     let runID: NovelRunID
     let startingUserContent: String?
     let messageID: NovelMessageID
-    let renderRevision: UInt64
     let phase: NovelSessionTransientTailPhase
 }
 
@@ -155,7 +154,6 @@ private struct NovelSessionProjectionCacheKey: Equatable {
                 runID: $0.runID,
                 startingUserContent: $0.startingUserContent,
                 messageID: $0.messageID,
-                renderRevision: $0.renderRevision,
                 phase: $0.phase
             )
         }
@@ -195,6 +193,9 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var cancelledStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var sessionActionOwnerID: UUID?
     @ObservationIgnored private var projectionCache: NovelSessionProjectionCacheEntry?
+#if DEBUG
+    @ObservationIgnored private(set) var fullProjectionBuildCountForTesting = 0
+#endif
     @ObservationIgnored private var presentationBuffer: NovelSessionPresentationBuffer?
     @ObservationIgnored private var presentationFlushTask: Task<Void, Never>?
     /// 终态 tail 的延迟退役任务:完成后保留 tail 一个静窗再清空,避免完成瞬间整屏一跳。
@@ -307,9 +308,19 @@ final class NovelSessionViewModel {
             expandedArchiveIDs: expandedArchiveIDs,
             transientTail: transientTail
         )
-        if projectionCache?.key == key {
-            return projectionCache?.model
+        if let cached = projectionCache, cached.key == key {
+            guard let tail = transientTail else { return cached.model }
+            if let updated = NovelSessionPresentation.updatingTransientTail(
+                in: cached.model,
+                with: tail
+            ) {
+                projectionCache = NovelSessionProjectionCacheEntry(key: key, model: updated)
+                return updated
+            }
         }
+        #if DEBUG
+        fullProjectionBuildCountForTesting += 1
+        #endif
         let model = NovelSessionPresentation.project(NovelSessionProjectionInput(
             project: project,
             branch: branch,
@@ -1164,6 +1175,14 @@ private extension NovelSessionViewModel {
             transientTail = previousTail
             transientRunRecord = previousRunRecord
             terminalAwaitingRefresh = previousTerminalAwaitingRefresh
+            if let previousTail,
+               !previousTerminalAwaitingRefresh,
+               !isActiveTailPhase(previousTail.phase) {
+                // installTail cancels the old quiet-window task. If the new run
+                // fails before it starts, restore that terminal tail's retirement
+                // as well as its visible state so it can still hand off to durable.
+                retireTerminalTransientTail(runID: previousTail.runID, token: bindingToken)
+            }
             if cancelledStartRunIDs.contains(request.id) {
                 operationErrorMessage = nil
             } else {

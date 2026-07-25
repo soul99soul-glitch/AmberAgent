@@ -147,9 +147,7 @@ final class IOSChatBackgroundRunState: @unchecked Sendable {
     func cancelAndReserveTerminal() -> Bool {
         let task: Task<IOSAgentToolEngineResult, Never>?
         lock.lock()
-        guard terminalOwner != .expiration,
-              terminalOwner != .cancellation,
-              !terminalFinalized else {
+        guard terminalOwner == nil, !terminalFinalized else {
             lock.unlock()
             return false
         }
@@ -249,6 +247,14 @@ final class IOSChatBackgroundGenerationCoordinator {
         Set(activeJobs.values.map(\.runId))
     }
 
+    var reconnectingWatchProjection: WatchTaskReconnectProjection? {
+        guard let job = activeJobs.values.first else { return nil }
+        return WatchTaskReconnectProjection(
+            runId: job.runId,
+            conversationId: job.conversationId.toHexDashString()
+        )
+    }
+
     func configure(
         conversationStore: IOSConversationStore? = nil,
         toolRuntime: ChatToolRuntime? = nil,
@@ -327,39 +333,53 @@ final class IOSChatBackgroundGenerationCoordinator {
     func cancelJobs(conversationId: KotlinUuid) {
         let matchingJobs = jobs(conversationId: conversationId)
         for (requestId, job) in matchingJobs {
-            if let runState = activeRunStates[requestId] {
-                guard runState.cancelAndReserveTerminal(),
-                      runState.finalizeTerminal(as: .cancellation),
-                      runState.claimSystemTaskCompletion() else {
-                    continue
-                }
-            }
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: requestId)
-            activeBackgroundTasks[requestId]?.setTaskCompleted(success: false)
-            finish(runId: job.runId, requestId: requestId)
-            Task { @MainActor in
-                await self.recordRun(
-                    job.runId,
-                    startedAt: job.startedAt,
-                    status: "interrupted",
-                    inputDigest: job.inputDigest,
-                    conversationId: job.conversationId
-                )
-                _ = job.liveActivityController.adoptExistingActivity(
-                    runId: job.runId,
-                    conversationId: job.conversationId.toHexDashString()
-                )
-                WatchTaskCoordinator.shared.publish(
-                    runId: job.runId,
-                    conversationId: job.conversationId.toHexDashString(),
-                    presentation: .cancelled()
-                )
-                await job.liveActivityController.end(
-                    runId: job.runId,
-                    presentation: .cancelled()
-                )
+            _ = cancelJob(requestId: requestId, job: job)
+        }
+    }
+
+    @discardableResult
+    func cancelJob(runId: String) -> Bool {
+        guard let match = activeJobs.first(where: { $0.value.runId == runId }) else {
+            return false
+        }
+        return cancelJob(requestId: match.key, job: match.value)
+    }
+
+    @discardableResult
+    private func cancelJob(requestId: String, job: IOSChatBackgroundRuntimeJob) -> Bool {
+        if let runState = activeRunStates[requestId] {
+            guard runState.cancelAndReserveTerminal(),
+                  runState.finalizeTerminal(as: .cancellation),
+                  runState.claimSystemTaskCompletion() else {
+                return false
             }
         }
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: requestId)
+        activeBackgroundTasks[requestId]?.setTaskCompleted(success: false)
+        finish(runId: job.runId, requestId: requestId)
+        Task { @MainActor in
+            await self.recordRun(
+                job.runId,
+                startedAt: job.startedAt,
+                status: "interrupted",
+                inputDigest: job.inputDigest,
+                conversationId: job.conversationId
+            )
+            _ = job.liveActivityController.adoptExistingActivity(
+                runId: job.runId,
+                conversationId: job.conversationId.toHexDashString()
+            )
+            WatchTaskCoordinator.shared.publish(
+                runId: job.runId,
+                conversationId: job.conversationId.toHexDashString(),
+                presentation: .cancelled()
+            )
+            await job.liveActivityController.end(
+                runId: job.runId,
+                presentation: .cancelled()
+            )
+        }
+        return true
     }
 
     private func register(requestId: String) -> Bool {
@@ -446,7 +466,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                 guard runState.terminalWasFinalized(by: .completion) else { return }
                 Task { @MainActor in
                     guard runState.claimSystemTaskCompletion() else { return }
-                    self.finish(requestId: backgroundTask.identifier, removePayload: false)
+                    self.finish(requestId: backgroundTask.identifier)
                     backgroundTask.setTaskCompleted(success: false)
                 }
                 return
@@ -454,7 +474,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             guard runState.finalizeTerminal(as: .expiration) else { return }
             Task { @MainActor in
                 guard runState.claimSystemTaskCompletion() else { return }
-                self.finish(requestId: backgroundTask.identifier, removePayload: false)
+                self.finish(requestId: backgroundTask.identifier)
                 backgroundTask.setTaskCompleted(success: false)
                 switch claim {
                 case .persistFailure:
@@ -577,6 +597,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         let singleToolFailureReason = job.mode == .singleToolOnly
             ? ChatToolOutputFormatter.imageFailureReason(in: finalMessages)
             : nil
+        let watchSummary = Self.backgroundSummary(from: finalMessages)
 
         let didSave: Bool
         switch job.mode {
@@ -599,14 +620,15 @@ final class IOSChatBackgroundGenerationCoordinator {
                     job: job,
                     requestId: backgroundTask.identifier,
                     didSave: didSave,
-                    singleToolFailureReason: singleToolFailureReason
+                    singleToolFailureReason: singleToolFailureReason,
+                    summary: watchSummary
                 )
             }
             return
         }
         guard didSave else {
             backgroundTask.updateTitle("Amber 后台生成", subtitle: "保存结果失败")
-            await completeAsFailureWithoutClearingPayload(
+            await completeAsFailureAfterSaveFailure(
                 job: job,
                 backgroundTask: backgroundTask,
                 runState: runState
@@ -625,7 +647,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             WatchTaskCoordinator.shared.publishCompleted(
                 runId: job.runId,
                 conversationId: job.conversationId.toHexDashString(),
-                summary: nil
+                summary: watchSummary
             )
         } else {
             WatchTaskCoordinator.shared.publish(
@@ -714,7 +736,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         guard didSave else {
             backgroundTask.updateTitle("Amber 后台生成", subtitle: "无法保存失败状态")
-            await completeAsFailureWithoutClearingPayload(
+            await completeAsFailureAfterSaveFailure(
                 job: job,
                 backgroundTask: backgroundTask,
                 runState: runState
@@ -781,7 +803,8 @@ final class IOSChatBackgroundGenerationCoordinator {
         job: IOSChatBackgroundRuntimeJob,
         requestId: String,
         didSave: Bool,
-        singleToolFailureReason: String?
+        singleToolFailureReason: String?,
+        summary: String?
     ) async {
         let succeeded = didSave && singleToolFailureReason == nil
         if didSave {
@@ -798,7 +821,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             WatchTaskCoordinator.shared.publishCompleted(
                 runId: job.runId,
                 conversationId: job.conversationId.toHexDashString(),
-                summary: nil
+                summary: summary
             )
         } else {
             WatchTaskCoordinator.shared.publish(
@@ -813,13 +836,12 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
     }
 
-    private func completeAsFailureWithoutClearingPayload(
+    private func completeAsFailureAfterSaveFailure(
         job: IOSChatBackgroundRuntimeJob,
         backgroundTask: BGContinuedProcessingTask,
         runState: IOSChatBackgroundRunState
     ) async {
-        // 保存失败先收口 run / Activity，再释放系统任务；payload 只保留失败现场，
-        // 释放后不再具有冷启动 hydrate / Live Activity restore 资格。
+        // 当前没有持久化 payload 的 retry owner；终态失败必须同步删除，避免孤儿文件。
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
@@ -834,7 +856,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
         await job.liveActivityController.end(runId: job.runId, presentation: .failed())
         if runState.claimSystemTaskCompletion() {
-            finish(requestId: backgroundTask.identifier, removePayload: false)
+            finish(requestId: backgroundTask.identifier)
             backgroundTask.setTaskCompleted(success: false)
         }
     }
@@ -889,6 +911,16 @@ final class IOSChatBackgroundGenerationCoordinator {
                 NSLog("[AmberChatBG] Missing background provider \(payload.providerId) for \(requestId)")
                 return nil
             }
+            guard let dependencies,
+                  let params = Self.rehydratedParams(
+                    persistedParams: payload.params,
+                    providerSetting: providerSetting,
+                    assistantHeaders: dependencies.sharedSettings.snapshot.getCurrentAssistant().customHeaders,
+                    assistantBodies: dependencies.sharedSettings.snapshot.getCurrentAssistant().customBodies
+                  ) else {
+                NSLog("[AmberChatBG] Missing current background model for \(requestId)")
+                return nil
+            }
             return IOSChatBackgroundHandoff(
                 runId: payload.runId,
                 startedAt: payload.startedAt,
@@ -896,7 +928,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                 conversationId: payload.conversationId,
                 providerId: payload.providerId,
                 providerSetting: providerSetting,
-                params: payload.params,
+                params: params,
                 uploadMessages: payload.uploadMessages,
                 displayMessages: payload.displayMessages,
                 mode: IOSChatBackgroundHandoffMode(rawValue: payload.mode) ?? .continueModel
@@ -1007,6 +1039,58 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
     }
 
+    private static func backgroundSummary(from messages: [UIMessage]) -> String? {
+        guard let lastAssistant = messages.last(where: { $0.role == MessageRole.assistant }) else {
+            return nil
+        }
+        let text = lastAssistant.parts
+            .compactMap { ($0 as? UIMessagePart.Text)?.text }
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return WatchTaskText.clipped(text, maxLength: 280)
+    }
+
+    private static func rehydratedParams(
+        persistedParams: TextGenerationParams,
+        providerSetting: ProviderSetting,
+        assistantHeaders: [CustomHeader],
+        assistantBodies: [CustomBody]
+    ) -> TextGenerationParams? {
+        let persistedModel = persistedParams.model
+        let configuredModel = providerSetting.models.first { candidate in
+            candidate.id == persistedModel.id
+                || (candidate.type == persistedModel.type && candidate.modelId == persistedModel.modelId)
+        }
+        guard let configuredModel else { return nil }
+
+        let runtimeHeaders = assistantHeaders + configuredModel.customHeaders
+        let runtimeBodies = assistantBodies + configuredModel.customBodies
+        let runtimeModel = Model(
+            modelId: configuredModel.modelId,
+            displayName: configuredModel.displayName,
+            id: configuredModel.id,
+            type: configuredModel.type,
+            customHeaders: configuredModel.customHeaders,
+            customBodies: configuredModel.customBodies,
+            inputModalities: configuredModel.inputModalities,
+            outputModalities: configuredModel.outputModalities,
+            abilities: configuredModel.abilities,
+            tools: configuredModel.tools,
+            contextWindowTokens: configuredModel.contextWindowTokens,
+            providerOverwrite: configuredModel.providerOverwrite
+        )
+        return TextGenerationParams(
+            model: runtimeModel,
+            temperature: persistedParams.temperature,
+            topP: persistedParams.topP,
+            maxTokens: persistedParams.maxTokens,
+            tools: persistedParams.tools,
+            reasoningLevel: persistedParams.reasoningLevel,
+            customHeaders: runtimeHeaders,
+            customBody: runtimeBodies
+        )
+    }
+
     private static func failedMessages(
         displayMessages: [UIMessage],
         preservedGeneratedSuffix: [UIMessage] = [],
@@ -1026,6 +1110,24 @@ final class IOSChatBackgroundGenerationCoordinator {
     }
 
 #if DEBUG
+    static func rehydratedParamsForTesting(
+        persistedParams: TextGenerationParams,
+        providerSetting: ProviderSetting,
+        assistantHeaders: [CustomHeader],
+        assistantBodies: [CustomBody]
+    ) -> TextGenerationParams? {
+        rehydratedParams(
+            persistedParams: persistedParams,
+            providerSetting: providerSetting,
+            assistantHeaders: assistantHeaders,
+            assistantBodies: assistantBodies
+        )
+    }
+
+    static func backgroundSummaryForTesting(messages: [UIMessage]) -> String? {
+        backgroundSummary(from: messages)
+    }
+
     static func failedMessagesForTesting(
         displayMessages: [UIMessage],
         preservedGeneratedSuffix: [UIMessage] = [],

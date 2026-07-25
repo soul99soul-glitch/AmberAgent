@@ -3033,6 +3033,7 @@ enum IOSDeepReadTemplateDraftGenerator {
         }
     }
 
+    @MainActor
     static func generateDraft(
         name: String,
         brief: String,

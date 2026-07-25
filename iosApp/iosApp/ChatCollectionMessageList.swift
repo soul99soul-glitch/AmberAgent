@@ -1507,10 +1507,8 @@ struct ChatSwiftUIMessageList: View {
         // iOS 18 scrollPosition + defaultScrollAnchor。动态消息行不登记为 scroll
         // targets；底部跟随只写物理 edge，避免动态行高度变化时重复解析目标。
         // initialOffset 负责长会话初始入场;alignment 负责内容不足一屏时自然顶排。
-        // sizeChanges 底锚在同一布局事务内同步吸收流式高度增长(与小说创作统一);
-        // 探针已实证行锚定位置不会被拽走,所以不需要按 followMode 动态开关。
-        // 门控:关闭「跟随生成」时不得替用户自动跟随。
-        .modifier(ChatSizeChangesPinModifier(enabled: followGeneration))
+        // 流式增长由下方真实 geometry 回调唯一驱动。`.sizeChanges` 在长 UIKit
+        // 文本段落的增量布局路径不会维持底锚，却会让回调误判已有别的写者。
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
@@ -1631,10 +1629,6 @@ struct ChatSwiftUIMessageList: View {
                 current: geometry,
                 state: next
             )
-            // Clean-list sizeChanges pin (gated by followGeneration) is the SOLE
-            // writer for stream height growth. A residual scrollTo snap fights the
-            // pin mid-layout and produces continuous jump/flicker; never dual-write.
-            let sizeChangesPinOwnsGrowth = followGeneration
             let shouldReanchorExplicitBottomLayout = ChatSwiftUIExplicitBottomLayoutPolicy.shouldReanchor(
                 forceActive: explicitBottomForcesLiveTail,
                 explicitBottomAnimationActive: runtime.explicitBottomAnimationActive,
@@ -1661,11 +1655,9 @@ struct ChatSwiftUIMessageList: View {
                 commands,
                 state: next,
                 event: signal.event,
-                // Animated measured-growth chase only when the pin is off.
+                // Measured growth is the sole live-height writer.
                 animateMeasuredGrowth: shouldFollowMeasuredGrowth
                     && !shouldReanchorExplicitBottomLayout
-                    && !sizeChangesPinOwnsGrowth,
-                sizeChangesPinOwnsGrowth: sizeChangesPinOwnsGrowth
             )
             if didObserveMeasuredGrowth, runtime.generationEndSettleTask != nil {
                 runtime.generationEndSettleLastGrowthAt = Date()
@@ -1674,7 +1666,7 @@ struct ChatSwiftUIMessageList: View {
                 if !didIssueFollow {
                     scrollToBottomIfScrollable()
                 }
-            } else if shouldFollowMeasuredGrowth, !sizeChangesPinOwnsGrowth {
+            } else if shouldFollowMeasuredGrowth {
                 if !didIssueFollow {
                     followMeasuredStreamGrowthToBottom()
                 }
@@ -2434,8 +2426,7 @@ struct ChatSwiftUIMessageList: View {
         _ commands: [ChatViewportScrollCommand],
         state: ChatViewportState,
         event: ChatEvent,
-        animateMeasuredGrowth: Bool,
-        sizeChangesPinOwnsGrowth: Bool = false
+        animateMeasuredGrowth: Bool
     ) -> Bool {
         guard !commands.isEmpty else { return false }
         var didIssueFollow = false
@@ -2447,11 +2438,6 @@ struct ChatSwiftUIMessageList: View {
                 scheduleConversationBottomAnchor()
             case let .followBottom(animated, _, _):
                 guard !state.followPaused, !state.userDragging else { continue }
-                // sizeChanges pin absorbs stream height growth; a second scrollTo on
-                // every delta fights the pin and produces continuous jump/flicker.
-                if sizeChangesPinOwnsGrowth, event == .assistantStreamDelta {
-                    continue
-                }
                 guard ChatSwiftUIBottomWritePolicy.canIssueImmediateWrite(
                     explicitBottomAnimationActive: runtime.explicitBottomAnimationActive
                 ) else {

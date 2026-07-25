@@ -491,7 +491,11 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("NovelSessionHistoryWindowPolicy.initialLimit"))
         XCTAssertTrue(session.contains("visibleHistoricalRows"))
         XCTAssertTrue(session.contains("更早的创作记录"))
-        XCTAssertTrue(sessionViewModel.contains("projectionCache?.key == key"))
+        // 2026-07-25 按证据更新:投影缓存命中判据由 `projectionCache?.key == key`
+        // 重构为 `if let cached = projectionCache, cached.key == key`(多了流式尾行
+        // 快路径)。两者的命中语义完全相同——仍然只在 key 匹配时复用缓存,否则走
+        // 完整重建。本 canary 守护的契约未变,只是字面量过时,故更新字面量而非放宽断言。
+        XCTAssertTrue(sessionViewModel.contains("cached.key == key"))
         XCTAssertTrue(sessionViewModel.contains("func projectedListModel("))
     }
 
@@ -562,6 +566,27 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(bubble.contains("committedChangeView("))
         XCTAssertTrue(session.contains("pending.lastError"))
         XCTAssertTrue(session.contains("!viewModel.isBusy"))
+    }
+
+    func testQuickStartRegenerationEntryIsGatedToQuickStartProjectsWithGuidanceInput() throws {
+        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+        let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
+
+        let sectionStart = try XCTUnwrap(materials.range(of: "private var quickStartRegenerationSection"))
+        let sectionEnd = try XCTUnwrap(materials.range(
+            of: "private func materialsSection",
+            range: sectionStart.upperBound..<materials.endIndex
+        ))
+        let section = materials[sectionStart.lowerBound..<sectionEnd.lowerBound]
+        XCTAssertTrue(section.contains("viewModel.projectSnapshot?.project.creationMode == .quickStart"))
+        XCTAssertTrue(section.contains("重新生成设定建议"))
+        XCTAssertTrue(section.contains("!viewModel.canMutate || viewModel.branchSnapshot?.branch.activeRunID != nil"))
+
+        XCTAssertTrue(materials.contains("struct NovelQuickStartRegenerationSheet"))
+        XCTAssertTrue(materials.contains("await viewModel.startQuickStartSuggestions(guidance: guidance)"))
+        XCTAssertTrue(materials.contains("TextEditor(text: $guidance)"))
+
+        XCTAssertTrue(viewModel.contains("func startQuickStartSuggestions(guidance: String? = nil) async -> NovelRunID?"))
     }
 
     private func source(_ relativePath: String) throws -> String {

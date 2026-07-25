@@ -111,6 +111,7 @@ struct AppShell: View {
                     settingsStore: settingsStore,
                     providerRegistry: providerRegistry,
                     sharedSettings: sharedSettings,
+                    conversationStore: conversationStore,
                     mcpConfigStore: mcpConfigStore,
                     permissionStore: permissionStore,
                     documentStore: documentAccessStore,
@@ -169,7 +170,10 @@ struct AppShell: View {
             await conversationStore.bootstrap()
             didBootstrapConversations = true
             sharedSettings.repairCurrentChatModelIfNeeded(settingsStore)
-            WatchTaskCoordinator.shared.attach(chatViewModel: chatViewModel)
+            WatchTaskCoordinator.shared.attach(
+                chatViewModel: chatViewModel,
+                reconnecting: IOSChatBackgroundGenerationCoordinator.shared.reconnectingWatchProjection
+            )
             await openPendingAgentActivityIfReady()
         }
         .onOpenURL { url in
@@ -447,6 +451,7 @@ private extension View {
         settingsStore: SettingsStore,
         providerRegistry: ProviderRegistryStore,
         sharedSettings: IOSSharedSettingsStore,
+        conversationStore: IOSConversationStore,
         mcpConfigStore: IOSMcpConfigStore,
         permissionStore: IOSPermissionStore,
         documentStore: DocumentAccessStore,
@@ -487,7 +492,10 @@ private extension View {
             case .conversationStorage:
                 ConversationStorageView(sharedSettings: sharedSettings)
             case .syncBackup:
-                SyncBackupView(sharedSettings: sharedSettings)
+                SyncBackupView(
+                    sharedSettings: sharedSettings,
+                    conversationStore: conversationStore
+                )
             case .capabilities:
                 ToolPermissionsView(
                     permissionStore: permissionStore,

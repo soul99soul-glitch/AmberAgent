@@ -475,22 +475,17 @@ final class ChatViewportPolicyTests: XCTestCase {
         XCTAssertTrue(source.contains("runtime.userScrollActive = false"))
         XCTAssertTrue(source.contains("ChatSwiftUIMeasuredGrowthFollowPolicy.shouldFollow("))
         XCTAssertTrue(source.contains("followMeasuredStreamGrowthToBottom()"))
-        // sizeChanges pin is the sole growth writer; no residual scrollTo dual-write.
-        XCTAssertTrue(source.contains("let sizeChangesPinOwnsGrowth = followGeneration"))
-        XCTAssertTrue(source.contains("} else if shouldFollowMeasuredGrowth, !sizeChangesPinOwnsGrowth {"))
+        // The real geometry callback is the sole growth writer. SwiftUI's
+        // sizeChanges anchor does not pin long UIKit-backed paragraphs.
+        XCTAssertFalse(source.contains(".modifier(ChatSizeChangesPinModifier(enabled: followGeneration))"))
+        XCTAssertTrue(source.contains("} else if shouldFollowMeasuredGrowth {"))
         XCTAssertFalse(
             source.contains("scrollToBottomIfScrollable(disableAnimations: true)"),
             "Residual snap dual-write under the sizeChanges pin causes continuous jump/flicker."
         )
         XCTAssertTrue(
             source.contains(
-                "if sizeChangesPinOwnsGrowth, event == .assistantStreamDelta {\n                    continue"
-            ),
-            "Every stream delta must not schedule a second scrollTo under the sizeChanges pin."
-        )
-        XCTAssertTrue(
-            source.contains(
-                "animateMeasuredGrowth: shouldFollowMeasuredGrowth\n                    && !shouldReanchorExplicitBottomLayout\n                    && !sizeChangesPinOwnsGrowth"
+                "animateMeasuredGrowth: shouldFollowMeasuredGrowth\n                    && !shouldReanchorExplicitBottomLayout"
             )
         )
         guard let growthFollowStart = source.range(of: "private func followMeasuredStreamGrowthToBottom()"),

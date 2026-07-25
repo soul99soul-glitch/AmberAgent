@@ -420,6 +420,7 @@ struct IOSCouncilRoomRunSummary: Equatable {
     let finalTopic: String
     let finalAnswer: String
     let failureReason: String?
+    let seatNames: [String]
     let failedSeats: [String]
     let transcript: String
 }
@@ -962,6 +963,7 @@ final class IOSCouncilRoomRunner {
                 finalTopic: "",
                 finalAnswer: "",
                 failureReason: message,
+                seatNames: [],
                 failedSeats: [],
                 transcript: ""
             )
@@ -988,6 +990,7 @@ final class IOSCouncilRoomRunner {
                 finalTopic: "",
                 finalAnswer: "",
                 failureReason: message,
+                seatNames: [],
                 failedSeats: [],
                 transcript: message
             )
@@ -1372,6 +1375,7 @@ final class IOSCouncilRoomRunner {
                 finalTopic: finalTopic,
                 finalAnswer: summary,
                 failureReason: nil,
+                seatNames: activeSeats.map(\.name),
                 failedSeats: failedNames,
                 transcript: finalTranscript
             )
@@ -1408,7 +1412,8 @@ final class IOSCouncilRoomRunner {
                 finalTopic: "",
                 finalAnswer: "",
                 failureReason: message,
-                failedSeats: [],
+                seatNames: activeSeats.map(\.name),
+                failedSeats: activeSeats.filter { failedSeatIds.contains($0.id) }.map(\.name),
                 transcript: clippedTranscript(transcript, budget: 24_000)
             )
         }
@@ -1930,8 +1935,6 @@ final class CouncilRunner {
             roomSettings.limits.outputBudgetCharacters = outputBudgetChars
         }
         roomSettings = roomSettings.normalized(currentModelId: currentModelId)
-        let actualSeats = roomSettings.defaultSeats(currentModelId: currentModelId)
-
         isRunning = true
         defer { isRunning = false }
 
@@ -1951,7 +1954,7 @@ final class CouncilRunner {
         let outcome = await roomRunner.run(request: request)
         lastTask = taskStore.tasks.first { $0.id == outcome.taskId }
         let runSummary = outcome.status == .completed
-            ? "模型议会已完成，席位：\(actualSeats.map(\.name).joined(separator: ", "))。"
+            ? "模型议会已完成，席位：\(outcome.seatNames.joined(separator: ", "))。"
             : "模型议会未完成：\(outcome.status.title)。"
         lastRunResult = "\(runSummary) taskId: \(outcome.taskId)，provider: \(providerSetting.name)。"
         var result: [String: Any] = [
@@ -1961,7 +1964,9 @@ final class CouncilRunner {
             "run_id": outcome.taskId,
             "status": outcome.status.rawValue,
             "mode": IOSCouncilRoomRunMode.freeChat.rawValue,
-            "seat_count": actualSeats.count,
+            "seat_count": outcome.seatNames.count,
+            "seats": outcome.seatNames,
+            "failed_seats": outcome.failedSeats,
             "budget_chars": roomSettings.limits.outputBudgetCharacters,
             "summary": lastRunResult
         ]

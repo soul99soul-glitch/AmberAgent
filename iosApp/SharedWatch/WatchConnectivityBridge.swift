@@ -90,11 +90,19 @@ final class WatchConnectivityBridge: NSObject {
     private weak var actionHandler: WatchTaskActionHandling?
     private var lastPushedSnapshot: WatchTaskSnapshot?
     private var isActivated = false
+    private let actionTimeoutNanoseconds: UInt64
+    private var actionTimeoutTasks: [String: Task<Void, Never>] = [:]
 
     var onSnapshotUpdated: ((WatchTaskSnapshot) -> Void)?
     var onActionResult: ((WatchTaskActionResult) -> Void)?
 
-    private override init() {
+    override init() {
+        actionTimeoutNanoseconds = 12_000_000_000
+        super.init()
+    }
+
+    init(actionTimeoutNanoseconds: UInt64) {
+        self.actionTimeoutNanoseconds = actionTimeoutNanoseconds
         super.init()
     }
 
@@ -164,8 +172,12 @@ final class WatchConnectivityBridge: NSObject {
     }
 
     func sendAction(_ request: WatchTaskActionRequest) {
-        guard let transport, transport.isSupported else { return }
+        guard let transport, transport.isSupported else {
+            reportActionFailure(request, message: "无法连接 iPhone，请稍后重试")
+            return
+        }
         activateIfNeeded()
+        scheduleActionTimeout(for: request)
         do {
             let message = try WatchTaskCodec.actionMessage(for: request)
             if transport.isReachable {
@@ -174,15 +186,42 @@ final class WatchConnectivityBridge: NSObject {
                     Task { @MainActor in
                         self?.apply(envelope)
                     }
-                }, errorHandler: { _ in
+                }, errorHandler: { [weak self] _ in
                     _ = transport.transferUserInfo(message)
+                    Task { @MainActor in
+                        self?.reportActionFailure(request, message: "发送到 iPhone 失败，请稍后重试")
+                    }
                 })
             } else {
                 _ = transport.transferUserInfo(message)
             }
         } catch {
-            // Watch will keep the last known snapshot and show failure text in UI.
+            reportActionFailure(request, message: "发送到 iPhone 失败，请稍后重试")
         }
+    }
+
+    private func scheduleActionTimeout(for request: WatchTaskActionRequest) {
+        actionTimeoutTasks[request.requestId]?.cancel()
+        actionTimeoutTasks[request.requestId] = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: self?.actionTimeoutNanoseconds ?? 0)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.reportActionFailure(request, message: "iPhone 响应超时，请重试")
+        }
+    }
+
+    private func reportActionFailure(_ request: WatchTaskActionRequest, message: String) {
+        actionTimeoutTasks.removeValue(forKey: request.requestId)?.cancel()
+        onActionResult?(WatchTaskActionResult(
+            requestId: request.requestId,
+            runId: request.runId,
+            accepted: false,
+            message: message,
+            snapshot: latestSnapshot
+        ))
     }
 
     fileprivate func apply(_ envelope: WatchInboundEnvelope) {
@@ -205,6 +244,7 @@ final class WatchConnectivityBridge: NSObject {
             }
             #endif
         case .actionResult(let result):
+            actionTimeoutTasks.removeValue(forKey: result.requestId)?.cancel()
             if let snapshot = result.snapshot {
                 latestSnapshot = snapshot
                 onSnapshotUpdated?(snapshot)

@@ -77,6 +77,13 @@ public protocol IOSAgentTextProvider: Sendable {
 /// (e.g. test doubles) fall back to a blocking `generateText` with no live
 /// tokens, and the engine loop behaves identically.
 public protocol IOSAgentStreamingProvider: Sendable {
+    func prepareRequest(
+        providerSetting: ProviderSetting,
+        params: TextGenerationParams
+    ) async throws -> (ProviderSetting, TextGenerationParams)
+
+    func supportsStreaming(providerSetting: ProviderSetting) -> Bool
+
     func streamText(
         providerSetting: ProviderSetting,
         messages: [UIMessage],
@@ -87,12 +94,30 @@ public protocol IOSAgentStreamingProvider: Sendable {
     ) -> Kotlinx_coroutines_coreJob?
 }
 
+public extension IOSAgentStreamingProvider {
+    func prepareRequest(
+        providerSetting: ProviderSetting,
+        params: TextGenerationParams
+    ) async throws -> (ProviderSetting, TextGenerationParams) {
+        (providerSetting, params)
+    }
+
+    func supportsStreaming(providerSetting: ProviderSetting) -> Bool { true }
+}
+
 /// Wraps the real KMP providers behind `IOSAgentTextProvider`. Routes to
 /// `OpenAIKmpProvider` or `ClaudeKmpProvider` based on the provider's sealed
 /// type, so sub-agents/councils can run on either protocol.
 public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingProvider {
+    typealias GrokGenerator = @Sendable (
+        ProviderSetting.OpenAI,
+        [UIMessage],
+        TextGenerationParams
+    ) async throws -> MessageChunk
+
     private let openAIProvider: OpenAIKmpProvider
     private let claudeProvider: ClaudeKmpProvider
+    private let grokGenerator: GrokGenerator
 
     public init(
         openAIProvider: OpenAIKmpProvider = OpenAIKmpProvider(),
@@ -100,6 +125,23 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingP
     ) {
         self.openAIProvider = openAIProvider
         self.claudeProvider = claudeProvider
+        self.grokGenerator = { provider, messages, params in
+            try await Self.generateGrokText(
+                providerSetting: provider,
+                messages: messages,
+                params: params
+            )
+        }
+    }
+
+    init(
+        openAIProvider: OpenAIKmpProvider = OpenAIKmpProvider(),
+        claudeProvider: ClaudeKmpProvider = ClaudeKmpProvider(),
+        grokGenerator: @escaping GrokGenerator
+    ) {
+        self.openAIProvider = openAIProvider
+        self.claudeProvider = claudeProvider
+        self.grokGenerator = grokGenerator
     }
 
     public func generateText(
@@ -107,17 +149,50 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingP
         messages: [UIMessage],
         params: TextGenerationParams
     ) async throws -> MessageChunk {
-        if let openAI = providerSetting as? ProviderSetting.OpenAI {
-            return try await openAIProvider.generateText(providerSetting: openAI, messages: messages, params: params)
+        if let openAI = providerSetting as? ProviderSetting.OpenAI,
+           IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI) {
+            return try await grokGenerator(openAI, messages, params)
         }
-        if let claude = providerSetting as? ProviderSetting.Claude {
-            return try await claudeProvider.generateText(providerSetting: claude, messages: messages, params: params)
+        let resolvedProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
+        let resolvedParams = IOSCodexProviderResolver.augmentParamsForCodex(
+            params,
+            provider: providerSetting
+        )
+        if let openAI = resolvedProvider as? ProviderSetting.OpenAI {
+            return try await openAIProvider.generateText(
+                providerSetting: openAI,
+                messages: messages,
+                params: resolvedParams
+            )
+        }
+        if let claude = resolvedProvider as? ProviderSetting.Claude {
+            return try await claudeProvider.generateText(
+                providerSetting: claude,
+                messages: messages,
+                params: resolvedParams
+            )
         }
         throw NSError(
             domain: "AmberAgent.AgentToolEngine",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "当前服务商类型暂不支持子代理"]
         )
+    }
+
+    public func prepareRequest(
+        providerSetting: ProviderSetting,
+        params: TextGenerationParams
+    ) async throws -> (ProviderSetting, TextGenerationParams) {
+        let resolvedProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
+        let resolvedParams = IOSCodexProviderResolver.augmentParamsForCodex(
+            params,
+            provider: providerSetting
+        )
+        return (resolvedProvider, resolvedParams)
+    }
+
+    public func supportsStreaming(providerSetting: ProviderSetting) -> Bool {
+        !IOSGrokWebProviderResolver.isGrokWebProvider(providerSetting)
     }
 
     public func streamText(
@@ -143,6 +218,50 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingP
         onError(KotlinThrowable(message: "当前服务商类型暂不支持子代理"))
         return nil
     }
+
+    private static func generateGrokText(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: [UIMessage],
+        params: TextGenerationParams
+    ) async throws -> MessageChunk {
+        let prompt = messages.compactMap { message -> String? in
+            let text = message.parts.compactMap { part in
+                (part as? UIMessagePart.Text)?.text
+            }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return "[\(String(describing: message.role).lowercased())]\n\(text)"
+        }
+        .joined(separator: "\n\n")
+        let text = try await IOSGrokWebClient(
+            providerId: IOSGrokWebProviderResolver.providerKey(providerSetting)
+        ).generateText(prompt: prompt, modelId: params.model.modelId)
+        let message = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(text: text, metadata: nil)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: params.model.id,
+            usage: nil,
+            translation: nil
+        )
+        return MessageChunk(
+            id: "",
+            model: params.model.modelId,
+            choices: [
+                UIMessageChoice(
+                    index: 0,
+                    delta: nil,
+                    message: message,
+                    finishReason: "stop"
+                ),
+            ],
+            usage: nil
+        )
+    }
 }
 
 /// The final state of an engine run.
@@ -162,19 +281,23 @@ public struct IOSAgentToolEngineResult: Sendable {
     /// can map this to their normal failure terminal instead of parsing the
     /// compatibility transcript message appended below.
     public let providerFailureMessage: String?
+    /// Whether the caller cancelled the run while the provider was in flight.
+    public let wasCancelled: Bool
 
     public init(
         messages: [UIMessage],
         stepsExecuted: Int,
         pendingApproval: IOSPendingToolApproval?,
         hitStepLimit: Bool,
-        providerFailureMessage: String? = nil
+        providerFailureMessage: String? = nil,
+        wasCancelled: Bool = false
     ) {
         self.messages = messages
         self.stepsExecuted = stepsExecuted
         self.pendingApproval = pendingApproval
         self.hitStepLimit = hitStepLimit
         self.providerFailureMessage = providerFailureMessage
+        self.wasCancelled = wasCancelled
     }
 }
 
@@ -361,6 +484,17 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         guard let streaming = provider as? IOSAgentStreamingProvider else {
             return try await provider.generateText(providerSetting: providerSetting, messages: messages, params: params)
         }
+        let (requestProvider, requestParams) = try await streaming.prepareRequest(
+            providerSetting: providerSetting,
+            params: params
+        )
+        guard streaming.supportsStreaming(providerSetting: requestProvider) else {
+            return try await provider.generateText(
+                providerSetting: providerSetting,
+                messages: messages,
+                params: params
+            )
+        }
         // Seed with a single NON-assistant placeholder so the streamed turn
         // forms exactly one fresh assistant message (returned as `.last`),
         // instead of merging into `messages`' trailing assistant turn — which on
@@ -391,9 +525,9 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     return
                 }
                 let job = streaming.streamText(
-                    providerSetting: providerSetting,
+                    providerSetting: requestProvider,
                     messages: messages,
-                    params: params,
+                    params: requestParams,
                     onChunk: { chunk in
                         state.accumulator.append(chunk: chunk)
                         if let text = state.appendAssistantTextDelta(from: chunk) {
@@ -487,7 +621,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     messages: working,
                     stepsExecuted: steps,
                     pendingApproval: nil,
-                    hitStepLimit: false
+                    hitStepLimit: false,
+                    wasCancelled: true
                 )
             } catch {
                 // A provider failure ends the loop. Surface the assistant

@@ -9,11 +9,11 @@ import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.coerceToReasoningOptions
-import app.amber.ai.provider.fixedBaseUrl
 import app.amber.ai.provider.reasoningOptions
 import app.amber.core.model.reasoningLevelForModel
 import app.amber.core.model.withChatModelReasoningMemory
 import app.amber.core.model.withReasoningLevelForModel
+import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
@@ -135,22 +135,33 @@ object IosSettingsMutations {
             .firstOrNull { it.type == ModelType.CHAT }
             ?.id
 
-        val needsReplacement = settings.chatModelId in removedModelIds ||
-            settings.assistants.any { it.chatModelId in removedModelIds }
+        // The replacementModelId!! force-unwrap below only guards the top-level
+        // chatModelId. Assistant references are nulled out (Assistant.chatModelId
+        // is nullable) and need no replacement, so they must NOT abort the removal
+        // — otherwise removing a provider whose model is referenced only by an
+        // assistant silently no-ops when no other CHAT model remains.
+        val needsReplacement = settings.chatModelId in removedModelIds
         if (needsReplacement && replacementModelId == null) return settings
 
         return settings.copy(
             providers = remaining,
             chatModelId = if (settings.chatModelId in removedModelIds) replacementModelId!! else settings.chatModelId,
+            titleModelId = settings.titleModelId.clearedIfRemoved(removedModelIds),
+            suggestionModelId = settings.suggestionModelId.clearedIfRemoved(removedModelIds),
+            ocrModelId = settings.ocrModelId.clearedIfRemoved(removedModelIds),
+            compressModelId = settings.compressModelId.clearedIfRemoved(removedModelIds),
+            imageGenerationModelId = settings.imageGenerationModelId.clearedIfRemoved(removedModelIds),
             assistants = settings.assistants.map { assistant ->
-                if (assistant.chatModelId in removedModelIds) {
-                    assistant.copy(chatModelId = replacementModelId)
-                } else {
-                    assistant
-                }
+                assistant.copy(
+                    chatModelId = assistant.chatModelId.takeUnless { it in removedModelIds },
+                    imageGenerationModelId = assistant.imageGenerationModelId.takeUnless { it in removedModelIds },
+                )
             },
         )
     }
+
+    private fun kotlin.uuid.Uuid.clearedIfRemoved(removedModelIds: Set<kotlin.uuid.Uuid>): kotlin.uuid.Uuid =
+        if (this in removedModelIds) DEFAULT_AUTO_MODEL_ID else this
 
     /**
      * Switch a provider between the OpenAI-compatible and Anthropic-compatible
@@ -236,10 +247,9 @@ object IosSettingsMutations {
     }
 
     /**
-     * Sets the OpenAI auth mode for provider [providerId]. Switching to
-     * CODEX_OAUTH pins the codex backend baseUrl and enables the Responses API
-     * (iOS resolves the OAuth bearer at request time); other modes keep the
-     * existing baseUrl/useResponseApi. No-op for non-OpenAI providers.
+     * Sets only the persisted auth mode for provider [providerId]. Request-time
+     * Codex endpoint/Responses overrides belong to IOSCodexProviderResolver, so
+     * login/logout never destroys the user's API-key endpoint configuration.
      */
     @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
     fun setOpenAIAuthMode(
@@ -253,11 +263,7 @@ object IosSettingsMutations {
                 if (provider.id != parsed || provider !is ProviderSetting.OpenAI) {
                     provider
                 } else {
-                    provider.copy(
-                        authMode = authMode,
-                        baseUrl = authMode.fixedBaseUrl() ?: provider.baseUrl,
-                        useResponseApi = if (authMode == OpenAIAuthMode.CODEX_OAUTH) true else provider.useResponseApi,
-                    )
+                    provider.copy(authMode = authMode)
                 }
             }
         )
@@ -365,6 +371,53 @@ object IosSettingsMutations {
             }
         }
         return settings.copy(providers = providers)
+    }
+
+    /**
+     * Merge a discovered chat-model list into one provider. Existing models are
+     * updated in place by wire model id, preserving UUID and user metadata;
+     * models absent from discovery are retained.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun mergeProviderChatModels(
+        settings: Settings,
+        providerId: String,
+        modelIds: List<Pair<String, String>>,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val discovered = modelIds
+            .filter { it.first.isNotBlank() }
+            .distinctBy { it.first }
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed) return@map provider
+
+                val namesByModelId = discovered.toMap()
+                val existingChatIds = provider.models
+                    .asSequence()
+                    .filter { it.type == ModelType.CHAT }
+                    .mapTo(mutableSetOf()) { it.modelId }
+                val updatedExisting = provider.models.map { model ->
+                    val displayName = namesByModelId[model.modelId]
+                    if (model.type == ModelType.CHAT && displayName != null) {
+                        model.copy(displayName = displayName.ifBlank { model.modelId })
+                    } else {
+                        model
+                    }
+                }
+                val appended = discovered
+                    .filterNot { (modelId, _) -> modelId in existingChatIds }
+                    .map { (modelId, displayName) ->
+                        Model(
+                            modelId = modelId,
+                            displayName = displayName.ifBlank { modelId },
+                            id = kotlin.uuid.Uuid.random(),
+                            type = ModelType.CHAT,
+                        )
+                    }
+                provider.copyProvider(models = updatedExisting + appended)
+            }
+        )
     }
 
     /**

@@ -140,6 +140,14 @@ extension NovelFactTransactionReducer {
             !characterChanges.isEmpty ||
             !relationshipChanges.isEmpty ||
             !foreshadowingChanges.isEmpty
+        let rawHasFacts = !value.events.isEmpty ||
+            !value.characterChanges.isEmpty ||
+            !value.relationshipChanges.isEmpty ||
+            !value.foreshadowingChanges.isEmpty
+        try requireEvidenceNotAllDiscarded(
+            rawHasFacts: rawHasFacts,
+            hasEvidenceBackedFacts: hasEvidenceBackedFacts
+        )
         let settingProposals = value.settingProposals.filter {
             evidenceMatches($0.evidence, in: evidenceSource)
         }
@@ -230,6 +238,14 @@ extension NovelFactTransactionReducer {
             !characterStates.isEmpty ||
             !relationships.isEmpty ||
             !foreshadowing.isEmpty
+        let rawHasFacts = !value.events.isEmpty ||
+            !value.characterStates.isEmpty ||
+            !value.relationships.isEmpty ||
+            !value.foreshadowing.isEmpty
+        try requireEvidenceNotAllDiscarded(
+            rawHasFacts: rawHasFacts,
+            hasEvidenceBackedFacts: hasEvidenceBackedFacts
+        )
         let referenced = events.flatMap(\.entityReferences) +
             characterStates.map(\.characterName) +
             relationships.flatMap { [$0.sourceEntity, $0.targetEntity] }
@@ -648,12 +664,55 @@ extension NovelFactTransactionReducer {
         }
     }
 
+    /// Judges whether a structured-output evidence check discarded every
+    /// fact it was given: the model returned at least one fact
+    /// (`rawHasFacts`), but none of them survived evidence matching
+    /// (`!hasEvidenceBackedFacts`). A model that legitimately extracted no
+    /// facts at all (`!rawHasFacts`) is not a failure — that is a valid
+    /// "nothing changed this chapter" result and must keep committing.
+    private static func requireEvidenceNotAllDiscarded(
+        rawHasFacts: Bool,
+        hasEvidenceBackedFacts: Bool
+    ) throws {
+        guard rawHasFacts && !hasEvidenceBackedFacts else { return }
+        throw NovelStructuredModelExecutionFailure(
+            code: "state_facts_evidence_unmatched",
+            message: "模型给出的证据文字与正文对不上，本次状态同步未写入任何内容，请重试。",
+            isRetryable: true
+        )
+    }
+
     private static func normalizeEvidenceWhitespace(_ value: String) -> String {
-        value
+        normalizePrintingVariants(value)
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
+    }
+
+    /// Normalizes typographic variants that a model commonly introduces when
+    /// transcribing evidence (curly vs. straight quotes, fullwidth vs.
+    /// halfwidth punctuation/digits/letters, ellipsis runs, and dash
+    /// variants) so semantically identical text is not rejected as
+    /// fabricated evidence. This is a pure character-level substitution
+    /// applied identically to both the manuscript and the evidence — it
+    /// never folds CJK script variants (e.g. simplified/traditional) and
+    /// never performs fuzzy matching, so it cannot let fabricated content
+    /// pass as authoritative evidence.
+    private static func normalizePrintingVariants(_ value: String) -> String {
+        let widthNormalized = value.folding(options: [.widthInsensitive], locale: nil)
+        let ellipsisNormalized = widthNormalized.replacingOccurrences(
+            of: "[\u{2026}]+|\\.{2,}",
+            with: "\u{2026}",
+            options: .regularExpression
+        )
+        let quoteAndDash: [Character: Character] = [
+            "\u{201C}": "\"", "\u{201D}": "\"", "\u{2018}": "\"", "\u{2019}": "\"",
+            "\u{300C}": "\"", "\u{300D}": "\"", "\u{300E}": "\"", "\u{300F}": "\"",
+            "'": "\"",
+            "\u{2014}": "-", "\u{2013}": "-", "\u{2010}": "-", "\u{2212}": "-",
+        ]
+        return String(ellipsisNormalized.map { quoteAndDash[$0] ?? $0 })
     }
 
     private static func deterministicUUID(

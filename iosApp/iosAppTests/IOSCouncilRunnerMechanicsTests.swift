@@ -319,26 +319,56 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         ))
     }
 
-    func testLiveRenderingEnabledFreezesOnlyTheSpeakingRowWhileReadingHistory() {
-        // The row the user is actively reading (history, followPaused=true) must
-        // never be told to freeze — only the live speaking row underneath them
-        // should stop re-parsing/re-animating at full 48ms cadence.
-        XCTAssertFalse(CouncilTranscriptFollowPolicy.liveRenderingEnabled(
-            isSpeakingRow: true,
-            followPaused: true
-        ), "Speaking row must freeze while the user is reading scrollback.")
-        XCTAssertTrue(CouncilTranscriptFollowPolicy.liveRenderingEnabled(
-            isSpeakingRow: true,
-            followPaused: false
-        ), "Speaking row renders live while the user is following the bottom.")
-        XCTAssertTrue(CouncilTranscriptFollowPolicy.liveRenderingEnabled(
-            isSpeakingRow: false,
-            followPaused: true
-        ), "History rows must never be frozen, even while the user pauses following.")
-        XCTAssertTrue(CouncilTranscriptFollowPolicy.liveRenderingEnabled(
-            isSpeakingRow: false,
-            followPaused: false
-        ))
+    func testFollowPauseDoesNotFreezeCouncilMarkdown() {
+        // `followPaused` only owns automatic scrolling. Council has one bounded,
+        // sequential speaking row, so pausing follow must not visibly freeze that
+        // row while it is still on screen.
+        XCTAssertTrue(
+            CouncilTranscriptFollowPolicy.liveRenderingEnabled,
+            "A scroll-follow signal is not proof that the speaking row is offscreen."
+        )
+    }
+
+    func testCouncilPendingLabelsStayOutOfMarkdownBody() {
+        for placeholder in ["思考中...", "调研和完善议题中...", "点评中...", "总结中..."] {
+            let speaking = CouncilChatMessage(
+                kind: .host,
+                author: "主持人",
+                body: placeholder,
+                systemImage: "crown",
+                tint: .red,
+                subtitle: nil,
+                status: .speaking
+            )
+
+            XCTAssertNil(
+                speaking.streamingMarkdownBody,
+                "Pending UI copy must not become the old prefix of the first model output."
+            )
+
+            let interrupted = CouncilChatMessage(
+                kind: .host,
+                author: "主持人",
+                body: placeholder,
+                systemImage: "crown",
+                tint: .red,
+                subtitle: nil,
+                status: .failed
+            )
+            XCTAssertNil(interrupted.streamingMarkdownBody)
+            XCTAssertEqual(interrupted.displayBody, "未生成内容")
+        }
+
+        let output = CouncilChatMessage(
+            kind: .guest,
+            author: "议员",
+            body: "真实模型输出",
+            systemImage: "person",
+            tint: .blue,
+            subtitle: nil,
+            status: .speaking
+        )
+        XCTAssertEqual(output.streamingMarkdownBody, "真实模型输出")
     }
 
     func testCouncilUserDragResumesFollowWithinNearBottomThreshold() {
@@ -647,6 +677,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
 
         XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(outcome.seatNames, ["工程", "风险"])
         XCTAssertEqual(outcome.failedSeats, [])
         XCTAssertEqual(outcome.finalAnswer, "主持总结：先做当前服务商内多模型 Room。")
         XCTAssertNil(outcome.failureReason)
@@ -752,6 +783,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
 
         XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(outcome.seatNames, ["工程", "风险"])
         XCTAssertEqual(outcome.failedSeats, ["风险"])
         XCTAssertEqual(streamer.callCount, 4)
         XCTAssertTrue(outcome.transcript.contains("风险席位缺席"))
@@ -1040,7 +1072,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: defaults)
         let provider = IosSettingsMutations.shared.buildOpenAIProvider(
             name: "Council Test Provider",
-            apiKey: IOSCredentialRedactor.mask,
+            apiKey: "test-key",
             baseUrl: "https://example.com/v1",
             modelName: "Council Test Model",
             modelId: "gpt-main"
@@ -1168,10 +1200,10 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertFalse(harness.viewModel.messages.contains { $0.body == "第一场用户议题" })
     }
 
-    func testMidRunCheckpointsDebounceToOffMainThreadWrites() async throws {
+    func testMidRunCheckpointsThrottleToOffMainThreadWrites() async throws {
         // 旧实现:roster/append/消息完结每个事件都在主线程同步 save(≈11 次 encode+write)。
-        // 新实现:中段事件经 300ms 防抖合并成离主线程延迟写,终态一次同步写收口。
-        // ScriptedCouncilStreamer 无 pacing,事件密集到达 → 防抖在终态被取消前不会单独触发,
+        // 新实现:中段事件经 300ms 节流合并成离主线程延迟写,终态一次同步写收口。
+        // ScriptedCouncilStreamer 无 pacing,事件密集到达 → 节流任务在终态前不会单独触发,
         // 因此写入次数应远低于事件数(这里断言 ≤5,旧实现约 11 会红)。
         let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([
             .success("最终议题"),
@@ -1180,7 +1212,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             .success("主持总结")
         ]))
 
-        harness.viewModel.inputText = "归档防抖议题"
+        harness.viewModel.inputText = "归档节流议题"
         harness.viewModel.send()
         for _ in 0..<200 where harness.viewModel.isRunning {
             try await Task.sleep(nanoseconds: 5_000_000)
@@ -1606,7 +1638,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: defaults)
         let provider = IosSettingsMutations.shared.buildOpenAIProvider(
             name: "Council Test Provider",
-            apiKey: IOSCredentialRedactor.mask,
+            apiKey: "test-key",
             baseUrl: "https://example.com/v1",
             modelName: "Council Test Model",
             modelId: "gpt-main"

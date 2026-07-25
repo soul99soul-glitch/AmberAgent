@@ -21,15 +21,21 @@ final class IOSMcpConfigStore {
     }
 
     func add(_ server: IOSMcpServerConfig) {
+        let replaced = servers.filter { $0.name == server.name }
         servers.removeAll { $0.name == server.name }
+        replaced.forEach(Self.deleteCredentialRefs)
         servers.append(server)
         persist()
     }
 
     func upsert(_ server: IOSMcpServerConfig, replacing originalName: String? = nil) {
+        let replaced = servers.filter { existing in
+            existing.name == server.name || (originalName != nil && existing.name == originalName)
+        }
         servers.removeAll { existing in
             existing.name == server.name || (originalName != nil && existing.name == originalName)
         }
+        replaced.forEach(Self.deleteCredentialRefs)
         servers.append(server)
         persist()
     }
@@ -44,7 +50,9 @@ final class IOSMcpConfigStore {
     }
 
     func remove(named name: String) {
+        let removed = servers.filter { $0.name == name }
         servers.removeAll { $0.name == name }
+        removed.forEach(Self.deleteCredentialRefs)
         persist()
     }
 
@@ -129,6 +137,14 @@ final class IOSMcpConfigStore {
                 config = .sse(name: n, url: u, headers: headers, enabled: e, tools: t)
             }
             return config
+        }
+    }
+
+    private static func deleteCredentialRefs(for server: IOSMcpServerConfig) {
+        for name in server.headers.keys where IOSCredentialRedactor.isHeaderSensitive(name) {
+            IOSCredentialSideTable.delete(
+                key: IOSCredentialSideTable.mcpHeader(serverName: server.name, headerName: name)
+            )
         }
     }
 }

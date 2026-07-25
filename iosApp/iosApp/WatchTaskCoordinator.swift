@@ -5,6 +5,11 @@ extension Notification.Name {
     static let amberWatchOpenTask = Notification.Name("app.amber.ios.watch.openTask")
 }
 
+struct WatchTaskReconnectProjection: Equatable, Sendable {
+    let runId: String
+    let conversationId: String
+}
+
 /// Owns the current watch-facing task snapshot and translates Watch intents
 /// into ChatViewModel / ChatGenerationCoordinator actions.
 @MainActor
@@ -20,16 +25,27 @@ final class WatchTaskCoordinator: WatchTaskActionHandling {
     private var currentSummary: String?
     private var pendingAskUser: WatchAskUserRequest?
 
-    private init(bridge: WatchConnectivityBridge = .shared) {
+    init(bridge: WatchConnectivityBridge = .shared) {
         self.bridge = bridge
     }
 
-    func attach(chatViewModel: ChatViewModel) {
+    func attach(
+        chatViewModel: ChatViewModel,
+        reconnecting: WatchTaskReconnectProjection? = nil
+    ) {
         self.chatViewModel = chatViewModel
         bridge.configure(actionHandler: self)
         bridge.activateIfNeeded()
         if currentPresentation == nil {
-            bridge.clear()
+            if let reconnecting {
+                publish(
+                    runId: reconnecting.runId,
+                    conversationId: reconnecting.conversationId,
+                    presentation: .reconnecting(kind: .response)
+                )
+            } else {
+                bridge.clear()
+            }
         } else {
             republish()
         }
@@ -42,6 +58,11 @@ final class WatchTaskCoordinator: WatchTaskActionHandling {
         summary: String? = nil,
         decision: WatchDecision? = nil
     ) {
+        if currentRunId != runId {
+            currentSummary = nil
+            currentDecision = nil
+            pendingAskUser = nil
+        }
         currentRunId = runId
         currentConversationId = conversationId
         currentPresentation = presentation
@@ -133,28 +154,28 @@ final class WatchTaskCoordinator: WatchTaskActionHandling {
         case .refresh:
             return accepted(request, message: nil)
         case .openOnPhone:
-            if let conversationId = request.conversationId ?? currentConversationId,
-               !conversationId.isEmpty {
-                let focus: String
-                if currentDecision?.type == .approval
-                    || currentDecision?.type == .askUser
-                    || currentDecision?.type == .voiceReply {
-                    focus = "confirmation"
-                } else if currentPresentation?.phase == .completed {
-                    focus = "result"
-                } else {
-                    focus = "task"
-                }
-                NotificationCenter.default.post(
-                    name: .amberWatchOpenTask,
-                    object: nil,
-                    userInfo: [
-                        "runId": request.runId,
-                        "conversationId": conversationId,
-                        "focus": focus
-                    ]
-                )
+            guard let conversationId = currentConversationId, !conversationId.isEmpty else {
+                return rejected(request, "当前任务没有可打开的会话")
             }
+            let focus: String
+            if currentDecision?.type == .approval
+                || currentDecision?.type == .askUser
+                || currentDecision?.type == .voiceReply {
+                focus = "confirmation"
+            } else if currentPresentation?.phase == .completed {
+                focus = "result"
+            } else {
+                focus = "task"
+            }
+            NotificationCenter.default.post(
+                name: .amberWatchOpenTask,
+                object: nil,
+                userInfo: [
+                    "runId": request.runId,
+                    "conversationId": conversationId,
+                    "focus": focus
+                ]
+            )
             return accepted(request, message: "已在 iPhone 打开任务")
         case .cancel:
             guard let chatViewModel,
@@ -162,8 +183,11 @@ final class WatchTaskCoordinator: WatchTaskActionHandling {
                   request.runId == runId else {
                 return rejected(request, "当前没有可取消的任务")
             }
-            // cancelGeneration publishes cancelled snapshot; do not clear to idle first.
-            chatViewModel.cancelGeneration()
+            // The run may already belong to the background coordinator. Only
+            // report success after the current foreground/background owner accepts it.
+            guard chatViewModel.cancelGeneration(runId: runId) else {
+                return rejected(request, "当前任务已经结束或不再由 iPhone 执行")
+            }
             return accepted(request, message: "已取消")
         case .approve, .deny:
             return await handleApproval(request)
@@ -173,6 +197,11 @@ final class WatchTaskCoordinator: WatchTaskActionHandling {
     }
 
     private func handleApproval(_ request: WatchTaskActionRequest) async -> WatchTaskActionResult {
+        guard let decision = currentDecision,
+              decision.type == .approval,
+              request.decisionId == decision.id else {
+            return rejected(request, "这个确认步骤已失效")
+        }
         guard let chatViewModel else {
             return rejected(request, "iPhone 聊天状态不可用")
         }
@@ -208,6 +237,11 @@ final class WatchTaskCoordinator: WatchTaskActionHandling {
     }
 
     private func handleAskUser(_ request: WatchTaskActionRequest) async -> WatchTaskActionResult {
+        guard let decision = currentDecision,
+              decision.type == .askUser || decision.type == .voiceReply,
+              request.decisionId == decision.id else {
+            return rejected(request, "这个确认步骤已失效")
+        }
         guard let chatViewModel else {
             return rejected(request, "iPhone 聊天状态不可用")
         }

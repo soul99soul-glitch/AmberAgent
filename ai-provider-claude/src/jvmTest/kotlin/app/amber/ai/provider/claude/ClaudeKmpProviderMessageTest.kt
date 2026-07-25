@@ -21,6 +21,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -43,6 +44,28 @@ class ClaudeKmpProviderMessageTest {
         displayName = "Claude Sonnet 4.5",
         abilities = listOf(ModelAbility.REASONING, ModelAbility.TOOL),
     )
+
+    @Test
+    fun `message delta preserves stop reason`() {
+        val chunk = provider.parseStreamEvent(
+            id = "msg_1",
+            type = "message_delta",
+            data = """{"delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":32}}""",
+        )
+
+        assertEquals("max_tokens", chunk!!.choices.single().finishReason)
+    }
+
+    @Test
+    fun `stream rejects eof without a terminal signal`() {
+        val terminal = ClaudeStreamTerminalState()
+        terminal.observe(
+            type = "content_block_delta",
+            data = """{"delta":{"type":"text_delta","text":"partial"}}""",
+        )
+
+        assertFailsWith<IllegalStateException> { terminal.requireCompleted() }
+    }
 
     @Test
     fun `buildMessageRequest sets model, max_tokens, stream, and messages`() {

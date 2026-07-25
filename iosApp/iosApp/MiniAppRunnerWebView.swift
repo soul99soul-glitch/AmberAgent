@@ -1,6 +1,30 @@
 import SwiftUI
 @preconcurrency import WebKit
 
+enum IOSMiniAppHTMLSandbox {
+    private static let policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; media-src data: blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+
+    static func enforceBridgeOnlyNetwork(_ html: String) -> String {
+        let meta = #"<meta http-equiv="Content-Security-Policy" content="\#(policy)">"#
+        let options: NSString.CompareOptions = [.caseInsensitive, .regularExpression]
+        let fullRange = NSRange(location: 0, length: (html as NSString).length)
+        let headRange = (html as NSString).range(of: #"<head\b[^>]*>"#, options: options, range: fullRange)
+        if headRange.location != NSNotFound {
+            let insertion = headRange.location + headRange.length
+            return (html as NSString).replacingCharacters(in: NSRange(location: insertion, length: 0), with: meta)
+        }
+        let htmlRange = (html as NSString).range(of: #"<html\b[^>]*>"#, options: options, range: fullRange)
+        if htmlRange.location != NSNotFound {
+            let insertion = htmlRange.location + htmlRange.length
+            return (html as NSString).replacingCharacters(
+                in: NSRange(location: insertion, length: 0),
+                with: "<head>\(meta)</head>"
+            )
+        }
+        return "<head>\(meta)</head>\(html)"
+    }
+}
+
 /// [MiniApp MVP] WKWebView runner that loads generated MiniApp HTML with the
 /// AmberNative bridge injected.
 ///
@@ -19,7 +43,6 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
     let appId: String
     let repository: IOSMiniAppRepository
     let policy: IOSMiniAppBridgePolicy
-    let apiKeyProvider: () -> String
     let aiGenerateHandler: IOSMiniAppBridgeRuntime.AIGenerateHandler?
     let hostHandler: IOSMiniAppBridgeRuntime.HostHandler?
     let onValidationError: (String) -> Void
@@ -52,7 +75,6 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
             appId: appId,
             repository: repository,
             policy: policy,
-            apiKeyProvider: apiKeyProvider,
             aiGenerateHandler: aiGenerateHandler,
             hostHandler: hostHandler,
             toastHandler: onToast
@@ -193,7 +215,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         bridge.attach(webView: webView)
         // Inject the validated HTML. baseURL nil = origin "null" (sandboxed).
-        webView.loadHTMLString(html, baseURL: nil)
+        webView.loadHTMLString(IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(html), baseURL: nil)
         return webView
     }
 
@@ -202,6 +224,13 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
         if let bridge = context.coordinator.bridge {
             context.coordinator.onBridgeLog(bridge.log)
         }
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.stopLoading()
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "amberNative")
+        webView.navigationDelegate = nil
+        coordinator.close()
     }
 
     private func makePlaceholderWebView(message: String) -> WKWebView {
@@ -217,6 +246,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
         let onBridgeLog: ([String]) -> Void
         let onBlockedNavigation: (URL) -> Void
         var bridge: MiniAppBridge?
+        private var isClosed = false
 
         init(
             onValidationError: @escaping (String) -> Void,
@@ -226,6 +256,13 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
             self.onValidationError = onValidationError
             self.onBridgeLog = onBridgeLog
             self.onBlockedNavigation = onBlockedNavigation
+        }
+
+        func close() {
+            guard !isClosed else { return }
+            isClosed = true
+            bridge?.close()
+            bridge = nil
         }
 
         func webView(

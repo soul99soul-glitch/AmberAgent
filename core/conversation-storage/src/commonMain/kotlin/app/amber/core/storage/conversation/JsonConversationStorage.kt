@@ -53,9 +53,13 @@ class JsonConversationStorage(
             // index.json is a derived cache. A delete can remove the conversation
             // file before an index write fails, so never surface entries without
             // a backing file and repair that stale cache opportunistically.
-            val existing = cached.filter { conversationFile(it.id).exists() }
-            if (existing.size != cached.size) runCatching { writeIndex(existing) }
-            return@withLock orderSummaries(existing)
+            val repaired = readConversationFileSummaries()
+            if (repaired.size != cached.size ||
+                repaired.associateBy { it.id } != cached.associateBy { it.id }
+            ) {
+                runCatching { writeIndex(repaired) }
+            }
+            return@withLock orderSummaries(repaired)
         }
         // index 损坏或缺失：从 {id}.json 扫描重建。
         val rebuilt = rebuildIndex()
@@ -91,16 +95,37 @@ class JsonConversationStorage(
     }
 
     private fun saveConversationReplacingAllFieldsLocked(conversationToSave: Conversation) {
-        val text = runCatching {
-            JsonInstant.encodeToString(conversationToSave)
-        }.getOrElse {
-            throw ConversationStorageException(
-                "Failed to encode conversation ${conversationToSave.id} for storage",
-                it,
-            )
-        }
+        val text = encodeConversation(conversationToSave)
         conversationFile(conversationToSave.id).writeText(text)
         upsertIndex(conversationToSave.toSummary())
+    }
+
+    @Throws(Throwable::class)
+    override suspend fun importConversations(serializedConversations: List<String>) = operationMutex.withLock {
+        ensureBaseDir()
+        val validated = serializedConversations.mapIndexed { index, text ->
+            val conversation = runCatching {
+                JsonInstant.decodeFromString<Conversation>(text)
+            }.getOrElse {
+                throw ConversationStorageException("Failed to decode conversation import at index $index", it)
+            }
+            conversation to encodeConversation(conversation)
+        }
+
+        validated.forEach { (conversation, text) ->
+            conversationFile(conversation.id).writeText(text)
+        }
+        rebuildIndex()
+        Unit
+    }
+
+    private fun encodeConversation(conversation: Conversation): String = runCatching {
+        JsonInstant.encodeToString(conversation)
+    }.getOrElse {
+        throw ConversationStorageException(
+            "Failed to encode conversation ${conversation.id} for storage",
+            it,
+        )
     }
 
     private fun mergeMessageWriteWithExistingMetadata(incoming: Conversation): Conversation {
@@ -176,16 +201,20 @@ class JsonConversationStorage(
      * 用于 index 损坏/首次迁移恢复。会顺带把重建结果落盘，避免下次再扫。
      */
     private suspend fun rebuildIndex(): List<ConversationSummary> {
+        val summaries = readConversationFileSummaries()
+        if (summaries.isNotEmpty()) writeIndex(summaries)
+        return summaries
+    }
+
+    private fun readConversationFileSummaries(): List<ConversationSummary> {
         val files = baseDir.listFilesByExtension("json")
             .filterNot { it.path.endsWith(INDEX_FILENAME) }
-        val summaries = files.mapNotNull { file ->
+        return files.mapNotNull { file ->
             val text = file.readText() ?: return@mapNotNull null
             runCatching {
                 JsonInstant.decodeFromString<Conversation>(text)
             }.getOrNull()?.toSummary()
         }
-        if (summaries.isNotEmpty()) writeIndex(summaries)
-        return summaries
     }
 
     // ---- 排序：置顶优先，再按 updateAt 倒序 ----

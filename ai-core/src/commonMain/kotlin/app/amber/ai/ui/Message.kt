@@ -156,10 +156,13 @@ data class UIMessage(
                         }
                     }
 
-                    else -> {
-                        println("delta part append not supported: $deltaPart")
-                        acc
-                    }
+                    // 无流式合并语义的多模态 part 原样追加,而不是丢弃。
+                    // 与 MessageStreamAccumulator.append 保持同一处置:那边曾经
+                    // 也是 `else -> println(...)`,是一条静默丢数据的路径。
+                    is UIMessagePart.Video -> acc + deltaPart
+                    is UIMessagePart.Audio -> acc + deltaPart
+                    is UIMessagePart.Document -> acc + deltaPart
+                    is UIMessagePart.MiniApp -> acc + deltaPart
                 }
             }
             // Handle Reasoning End

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 @preconcurrency import Shared
 
 struct IOSSearchRequest: Equatable {
@@ -51,10 +52,30 @@ struct IOSSearchExecution: Equatable {
 @MainActor
 protocol IOSSearchHTTPTransport {
     func send(_ request: URLRequest) async throws -> (HTTPURLResponse, Data)
+    func sendPublic(_ request: URLRequest, maximumResponseBytes: Int) async throws -> (HTTPURLResponse, Data)
+}
+
+extension IOSSearchHTTPTransport {
+    func sendPublic(_ request: URLRequest, maximumResponseBytes: Int) async throws -> (HTTPURLResponse, Data) {
+        let (response, data) = try await send(request)
+        guard data.count <= maximumResponseBytes else {
+            throw IOSSearchExecutorError.responseTooLarge(maximumResponseBytes)
+        }
+        return (response, data)
+    }
 }
 
 struct IOSURLSessionSearchHTTPTransport: IOSSearchHTTPTransport {
-    var session: URLSession = .shared
+    var session: URLSession
+    var resolveHost: @Sendable (String) throws -> [String]
+
+    init(
+        session: URLSession = .shared,
+        resolveHost: @escaping @Sendable (String) throws -> [String] = IOSSearchExecutor.resolveIPAddresses
+    ) {
+        self.session = session
+        self.resolveHost = resolveHost
+    }
 
     func send(_ request: URLRequest) async throws -> (HTTPURLResponse, Data) {
         let (data, response) = try await session.data(for: request)
@@ -62,6 +83,175 @@ struct IOSURLSessionSearchHTTPTransport: IOSSearchHTTPTransport {
             throw IOSSearchExecutorError.invalidHTTPResponse
         }
         return (httpResponse, data)
+    }
+
+    func sendPublic(_ request: URLRequest, maximumResponseBytes: Int) async throws -> (HTTPURLResponse, Data) {
+        guard let url = request.url else { throw IOSSearchExecutorError.invalidURL }
+        let validated = try IOSSearchExecutor.allowedPublicHTTPURL(from: url.absoluteString)
+        guard let host = validated.host else { throw IOSSearchExecutorError.invalidURL }
+        let resolver = resolveHost
+        let addresses = try await Task.detached(priority: .userInitiated) {
+            try resolver(host)
+        }.value
+        guard !addresses.isEmpty, addresses.allSatisfy(IOSSearchExecutor.publicHostAllowed) else {
+            throw IOSSearchExecutorError.disallowedURL("host resolves to a non-public address")
+        }
+        let loader = IOSBoundedPublicURLSessionLoader(
+            configuration: session.configuration,
+            maximumResponseBytes: maximumResponseBytes,
+            requiresHTTPS: validated.scheme?.lowercased() == "https",
+            resolveHost: resolveHost
+        )
+        return try await loader.load(request)
+    }
+}
+
+private final class IOSBoundedPublicURLSessionLoader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let configuration: URLSessionConfiguration
+    private let maximumResponseBytes: Int
+    private let requiresHTTPS: Bool
+    private let resolveHost: @Sendable (String) throws -> [String]
+    private let lock = NSLock()
+
+    private var continuation: CheckedContinuation<(HTTPURLResponse, Data), Error>?
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+    private var response: HTTPURLResponse?
+    private var data = Data()
+    private var cancellationRequested = false
+
+    init(
+        configuration: URLSessionConfiguration,
+        maximumResponseBytes: Int,
+        requiresHTTPS: Bool,
+        resolveHost: @escaping @Sendable (String) throws -> [String]
+    ) {
+        self.configuration = configuration
+        self.maximumResponseBytes = maximumResponseBytes
+        self.requiresHTTPS = requiresHTTPS
+        self.resolveHost = resolveHost
+    }
+
+    func load(_ request: URLRequest) async throws -> (HTTPURLResponse, Data) {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                if cancellationRequested || Task.isCancelled {
+                    cancellationRequested = true
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                self.continuation = continuation
+                let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+                let task = session.dataTask(with: request)
+                self.session = session
+                self.task = task
+                lock.unlock()
+                task.resume()
+            }
+        } onCancel: {
+            cancel()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let http = response as? HTTPURLResponse else {
+            completionHandler(.cancel)
+            finish(.failure(IOSSearchExecutorError.invalidHTTPResponse))
+            return
+        }
+        if response.expectedContentLength > Int64(maximumResponseBytes) {
+            completionHandler(.cancel)
+            finish(.failure(IOSSearchExecutorError.responseTooLarge(maximumResponseBytes)))
+            return
+        }
+        self.response = http
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard data.count <= maximumResponseBytes - self.data.count else {
+            dataTask.cancel()
+            finish(.failure(IOSSearchExecutorError.responseTooLarge(maximumResponseBytes)))
+            return
+        }
+        self.data.append(data)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        do {
+            guard let url = request.url else { throw IOSSearchExecutorError.invalidURL }
+            let validated = try IOSSearchExecutor.allowedPublicHTTPURL(from: url.absoluteString)
+            if requiresHTTPS, validated.scheme?.lowercased() != "https" {
+                throw IOSSearchExecutorError.disallowedURL("HTTPS redirects may not downgrade to HTTP")
+            }
+            guard let host = validated.host else { throw IOSSearchExecutorError.invalidURL }
+            let addresses = try resolveHost(host)
+            guard !addresses.isEmpty, addresses.allSatisfy(IOSSearchExecutor.publicHostAllowed) else {
+                throw IOSSearchExecutorError.disallowedURL("host resolves to a non-public address")
+            }
+            completionHandler(request)
+        } catch {
+            completionHandler(nil)
+            finish(.failure(error))
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            finish(.failure(error))
+            return
+        }
+        guard let response else {
+            finish(.failure(IOSSearchExecutorError.invalidHTTPResponse))
+            return
+        }
+        finish(.success((response, data)))
+    }
+
+    private func finish(_ result: Result<(HTTPURLResponse, Data), Error>) {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        let session = self.session
+        self.session = nil
+        self.task = nil
+        lock.unlock()
+
+        switch result {
+        case .success:
+            session?.finishTasksAndInvalidate()
+        case .failure:
+            session?.invalidateAndCancel()
+        }
+        continuation.resume(with: result)
+    }
+
+    private func cancel() {
+        lock.lock()
+        cancellationRequested = true
+        let task = self.task
+        let hasContinuation = continuation != nil
+        lock.unlock()
+        task?.cancel()
+        if hasContinuation {
+            finish(.failure(CancellationError()))
+        }
     }
 }
 
@@ -77,6 +267,7 @@ enum IOSSearchExecutorError: LocalizedError, Equatable {
     case invalidHTTPResponse
     case httpStatus(String, Int)
     case emptyResponse(String)
+    case responseTooLarge(Int)
 
     var errorDescription: String? {
         switch self {
@@ -102,6 +293,8 @@ enum IOSSearchExecutorError: LocalizedError, Equatable {
             return "\(provider) failed with HTTP status \(status)."
         case .emptyResponse(let provider):
             return "\(provider) returned no parseable content."
+        case .responseTooLarge(let limit):
+            return "Response exceeds the \(limit)-byte limit."
         }
     }
 }
@@ -714,7 +907,10 @@ struct IOSSearchExecutor {
         urlRequest.setValue("text/html,text/plain,application/xhtml+xml,application/json;q=0.8,*/*;q=0.3", forHTTPHeaderField: "Accept")
         urlRequest.timeoutInterval = 10
 
-        let (response, data) = try await transport.send(urlRequest)
+        let (response, data) = try await transport.sendPublic(
+            urlRequest,
+            maximumResponseBytes: 512 * 1_024
+        )
         guard (200...299).contains(response.statusCode) else {
             throw IOSSearchExecutorError.httpStatus("scrape_web", response.statusCode)
         }
@@ -1045,22 +1241,75 @@ struct IOSSearchExecutor {
         return url
     }
 
-    private static func publicHostAllowed(_ host: String) -> Bool {
+    static func publicHostAllowed(_ host: String) -> Bool {
         let lower = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: ".[]"))
         if lower == "localhost" || lower == "0.0.0.0" || lower.hasSuffix(".local") {
             return false
         }
-        if lower == "::1" || lower.hasPrefix("fe80:") || lower.hasPrefix("fc") || lower.hasPrefix("fd") {
-            return false
+        var ipv4 = in_addr()
+        if inet_aton(lower, &ipv4) == 1 {
+            return publicIPv4Allowed(UInt32(bigEndian: ipv4.s_addr))
         }
-        let parts = lower.split(separator: ".").compactMap { Int($0) }
-        if parts.count == 4 {
-            if parts[0] == 10 || parts[0] == 127 || parts[0] == 0 { return false }
-            if parts[0] == 169 && parts[1] == 254 { return false }
-            if parts[0] == 172 && (16...31).contains(parts[1]) { return false }
-            if parts[0] == 192 && parts[1] == 168 { return false }
+        var ipv6 = in6_addr()
+        if inet_pton(AF_INET6, lower, &ipv6) == 1 {
+            let bytes = withUnsafeBytes(of: &ipv6) { Array($0) }
+            if bytes.prefix(10).allSatisfy({ $0 == 0 }), bytes[10] == 0xff, bytes[11] == 0xff {
+                let mapped = bytes[12...15].reduce(UInt32.zero) { ($0 << 8) | UInt32($1) }
+                return publicIPv4Allowed(mapped)
+            }
+            // Only globally routable IPv6 unicast addresses are allowed. This
+            // rejects unspecified/loopback, link-local, unique-local, multicast,
+            // documentation, and transition-space addresses.
+            return (bytes[0] & 0xe0) == 0x20 && !(bytes[0...3] == [0x20, 0x01, 0x0d, 0xb8])
         }
         return true
+    }
+
+    private static func publicIPv4Allowed(_ address: UInt32) -> Bool {
+        let first = Int((address >> 24) & 0xff)
+        let second = Int((address >> 16) & 0xff)
+        let third = Int((address >> 8) & 0xff)
+        if first == 0 || first == 10 || first == 127 { return false }
+        if first == 100 && (64...127).contains(second) { return false }
+        if first == 169 && second == 254 { return false }
+        if first == 172 && (16...31).contains(second) { return false }
+        if first == 192 && second == 168 { return false }
+        if first == 192 && second == 0 && (third == 0 || third == 2) { return false }
+        if first == 198 && (second == 18 || second == 19) { return false }
+        if first == 198 && second == 51 && third == 100 { return false }
+        if first == 203 && second == 0 && third == 113 { return false }
+        return first < 224
+    }
+
+    static func resolveIPAddresses(_ host: String) throws -> [String] {
+        var result: UnsafeMutablePointer<addrinfo>?
+        let status = getaddrinfo(host, nil, nil, &result)
+        guard status == 0, let first = result else {
+            throw IOSSearchExecutorError.disallowedURL("host could not be resolved")
+        }
+        defer { freeaddrinfo(first) }
+
+        var addresses: [String] = []
+        var cursor: UnsafeMutablePointer<addrinfo>? = first
+        while let info = cursor?.pointee {
+            if info.ai_family == AF_INET || info.ai_family == AF_INET6,
+               let address = info.ai_addr {
+                var buffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                if getnameinfo(
+                    address,
+                    info.ai_addrlen,
+                    &buffer,
+                    socklen_t(buffer.count),
+                    nil,
+                    0,
+                    NI_NUMERICHOST
+                ) == 0 {
+                    addresses.append(String(cString: buffer))
+                }
+            }
+            cursor = info.ai_next
+        }
+        return Array(Set(addresses))
     }
 
     private static func contentTypeAllowedForScrape(_ contentType: String) -> Bool {

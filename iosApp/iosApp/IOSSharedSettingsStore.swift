@@ -150,6 +150,14 @@ final class IOSSharedSettingsStore {
         // now (so the next persist redacts it), then keep it in memory.
         let migratedProviderPlaintext = Self.rehydrateProviderApiKeys(into: &self.snapshot)
         let migratedSearchPlaintext = Self.rehydrateSearchServiceApiKeys(into: &self.snapshot)
+        let hydratedJson = IOSCredentialRedactor.rehydrate(
+            IosSettingsJsonBridge.shared.encode(settings: self.snapshot)
+        ) { path in
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath(path))
+        }
+        if let hydrated = try? Self.decodeSettings(hydratedJson) {
+            self.snapshot = hydrated
+        }
         // iOS identity: introduce as "Amber" and don't claim to run on Android.
         // Applied on every load (idempotent) so persisted snapshots are rebranded too.
         self.snapshot = IosSettingsMutations.shared.rebrandAmberIdentity(settings: self.snapshot)
@@ -243,12 +251,23 @@ final class IOSSharedSettingsStore {
     }
 
     func restoreSnapshot(_ settings: Settings) {
-        snapshot = settings
+        var runtimeSettings = settings
+        _ = Self.rehydrateProviderApiKeys(into: &runtimeSettings)
+        _ = Self.rehydrateSearchServiceApiKeys(into: &runtimeSettings)
+        let runtimeJson = IOSCredentialRedactor.rehydrate(
+            IosSettingsJsonBridge.shared.encode(settings: runtimeSettings)
+        ) { path in
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.settingsPath(path))
+        }
+        if let decoded = try? Self.decodeSettings(runtimeJson) {
+            runtimeSettings = decoded
+        }
+        snapshot = runtimeSettings
         // Scheme B: store real credentials in the Keychain side-table BEFORE
         // redacting, so they survive restart (load rehydrates from here). Covers
         // provider apiKey + model customHeaders (Authorization-like). iOS-only;
         // the shared ProviderSetting is not modified.
-        for provider in settings.providers {
+        for provider in runtimeSettings.providers {
             let providerId = provider.id.description() as String
             let apiKey = Self.apiKey(of: provider)
             // Guard against the redaction mask (parity with the search loop below):
@@ -259,7 +278,7 @@ final class IOSSharedSettingsStore {
                 IOSCredentialSideTable.store(key: IOSCredentialSideTable.providerApiKey(providerId: providerId), value: apiKey)
             }
         }
-        for service in settings.searchServices {
+        for service in runtimeSettings.searchServices {
             let serviceId = service.id.description()
             let apiKey = Self.searchApiKey(of: service)
             if !apiKey.isEmpty, apiKey != IOSCredentialRedactor.mask {
@@ -275,8 +294,13 @@ final class IOSSharedSettingsStore {
         // values; the UserDefaults form is credential-free). (parity with
         // Android BackupSettingsRedactor.) See IOSCredentialRedactor.
         let redactedJson = IOSCredentialRedactor.redact(
-            IosSettingsJsonBridge.shared.encode(settings: settings)
-        )
+            IosSettingsJsonBridge.shared.encode(settings: runtimeSettings)
+        ) { path, value in
+            IOSCredentialSideTable.store(
+                key: IOSCredentialSideTable.settingsPath(path),
+                value: value
+            )
+        }
         defaults.set(redactedJson, forKey: fullSettingsJsonKey)
         revision &+= 1
     }
@@ -491,12 +515,12 @@ final class IOSSharedSettingsStore {
     func removeCustomModel(at index: Int) {
         var models = savedCustomModels
         guard index >= 0 && index < models.count else { return }
-        let removed = models.remove(at: index)
-        savedCustomModels = models
-        if let providerId = removed["providerId"] {
-            let merged = IosSettingsMutations.shared.removeProvider(settings: snapshot, id: providerId)
-            restoreSnapshot(merged)
+        let removed = models[index]
+        if let providerId = removed["providerId"], removeProvider(providerId: providerId) {
+            return
         }
+        models.remove(at: index)
+        savedCustomModels = models
     }
 
     // MARK: - Provider (Settings.providers) write-back
@@ -580,6 +604,22 @@ final class IOSSharedSettingsStore {
         return merged.providers.first { ($0.id.description() as String) == providerId }
     }
 
+    /// Merge discovered chat models without deleting private/manual models or
+    /// replacing existing model UUIDs and metadata.
+    @discardableResult
+    func mergeProviderChatModels(providerId: String, models: [(modelId: String, displayName: String)]) -> ProviderSetting? {
+        let pairs = models.map {
+            KotlinPair(first: $0.modelId as NSString, second: $0.displayName as NSString)
+        }
+        let merged = IosSettingsMutations.shared.mergeProviderChatModels(
+            settings: snapshot,
+            providerId: providerId,
+            modelIds: pairs
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
     /// Upserts the synthetic codex IMAGE model on a provider (replaces the entry
     /// with the same modelId, preserves the rest). Persists to snapshot.
     @discardableResult
@@ -637,11 +677,23 @@ final class IOSSharedSettingsStore {
 
     @discardableResult
     func removeProviderChatModel(providerId: String, modelUuid: String) -> ProviderSetting? {
+        let modelExisted = snapshot.providers
+            .first { ($0.id.description() as String) == providerId }?
+            .models
+            .contains { $0.id.description() == modelUuid } == true
+        let genericCredentialRefs = genericCredentialRefs(stableId: modelUuid)
         let merged = IosSettingsMutations.shared.removeProviderChatModel(
             settings: snapshot,
             providerId: providerId,
             modelUuid: modelUuid
         )
+        let modelWasRemoved = merged.providers
+            .first { ($0.id.description() as String) == providerId }?
+            .models
+            .contains { $0.id.description() == modelUuid } == false
+        if modelExisted, modelWasRemoved {
+            genericCredentialRefs.forEach { IOSCredentialSideTable.delete(key: $0) }
+        }
         restoreSnapshot(merged)
         return merged.providers.first { ($0.id.description() as String) == providerId }
     }
@@ -716,12 +768,14 @@ final class IOSSharedSettingsStore {
     func removeProvider(providerId: String) -> Bool {
         guard canRemoveProvider(providerId: providerId) else { return false }
 
+        let genericCredentialRefs = genericCredentialRefs(stableId: providerId)
         let merged = IosSettingsMutations.shared.removeProvider(settings: snapshot, id: providerId)
         guard !merged.providers.contains(where: { $0.id.description() == providerId }) else {
             return false
         }
 
         IOSCredentialSideTable.delete(key: IOSCredentialSideTable.providerApiKey(providerId: providerId))
+        genericCredentialRefs.forEach { IOSCredentialSideTable.delete(key: $0) }
         savedCustomModels.removeAll { $0["providerId"] == providerId }
         restoreSnapshot(merged)
         return true
@@ -1003,7 +1057,11 @@ final class IOSSharedSettingsStore {
         let removed = engines.remove(at: index)
         savedTtsEngines = engines
         if let ttsId = removed["ttsId"] {
+            let genericCredentialRefs = genericCredentialRefs(stableId: ttsId)
             let merged = IosSettingsMutations.shared.removeTtsProvider(settings: snapshot, id: ttsId)
+            if !merged.ttsProviders.contains(where: { $0.id.description() == ttsId }) {
+                genericCredentialRefs.forEach { IOSCredentialSideTable.delete(key: $0) }
+            }
             restoreSnapshot(merged)
         }
     }
@@ -1027,6 +1085,18 @@ final class IOSSharedSettingsStore {
 
     private func ttsIdString(from provider: TTSProviderSetting) -> String {
         provider.id.description()
+    }
+
+    private func genericCredentialRefs(stableId: String) -> [String] {
+        // `IOSCredentialRedactor.arrayItemPath` 把数组项标成 `[<identity>#<index>]`
+        // ——索引后缀是为了让两个同名项(例如两个都叫 X-Api-Key 的 header)不塌到
+        // 同一条 side-table 路径。因此按稳定 ID 反查必须匹配到 `#` 为止:用
+        // `"[\(stableId)]"` 对真实路径恒为 false,generic 条目会在删除后全部残留。
+        let itemMarker = "[\(stableId)#"
+        let json = IosSettingsJsonBridge.shared.encode(settings: snapshot)
+        return IOSCredentialRedactor.activeCredentialPaths(in: json)
+            .filter { $0.contains(itemMarker) }
+            .map(IOSCredentialSideTable.settingsPath)
     }
 
     var savedSubAgentOverrides: [[String: String]] {

@@ -4,8 +4,11 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.provider.CustomBody
+import app.amber.ai.provider.CustomHeader
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -25,8 +28,12 @@ class IosChatBackgroundPayloadJsonBridgeTest {
             model = Model(
                 modelId = "gpt-test",
                 displayName = "GPT Test",
+                customHeaders = listOf(CustomHeader("X-Model-Token", "model-header-secret")),
+                customBodies = listOf(CustomBody("model_token", JsonPrimitive("model-body-secret"))),
                 providerOverwrite = ProviderSetting.Claude(apiKey = "claude-overwrite-secret"),
             ),
+            customHeaders = listOf(CustomHeader("Authorization", "Bearer params-header-secret")),
+            customBody = listOf(CustomBody("access_token", JsonPrimitive("params-body-secret"))),
         )
 
         val json = IosChatBackgroundPayloadJsonBridge.encode(
@@ -42,6 +49,15 @@ class IosChatBackgroundPayloadJsonBridgeTest {
 
         assertFalse(json.contains("sk-persisted-secret"))
         assertFalse(json.contains("claude-overwrite-secret"))
-        assertEquals(provider.id.toString(), IosChatBackgroundPayloadJsonBridge.decode(json).providerId)
+        assertFalse(json.contains("model-header-secret"))
+        assertFalse(json.contains("model-body-secret"))
+        assertFalse(json.contains("params-header-secret"))
+        assertFalse(json.contains("params-body-secret"))
+        val decoded = IosChatBackgroundPayloadJsonBridge.decode(json)
+        assertEquals(provider.id.toString(), decoded.providerId)
+        assertEquals(emptyList(), decoded.params.model.customHeaders)
+        assertEquals(emptyList(), decoded.params.model.customBodies)
+        assertEquals(emptyList(), decoded.params.customHeaders)
+        assertEquals(emptyList(), decoded.params.customBody)
     }
 }

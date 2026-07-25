@@ -44,7 +44,7 @@ object IosChatBackgroundPayloadJsonBridge {
             inputDigest = inputDigest,
             conversationId = conversationId,
             providerId = providerSetting.id.toString(),
-            params = params.withoutProviderOverwrite(),
+            params = params.withoutSecrets(),
             uploadMessages = uploadMessages,
             displayMessages = displayMessages,
             mode = mode,
@@ -53,7 +53,13 @@ object IosChatBackgroundPayloadJsonBridge {
 
     fun decode(json: String): IosChatBackgroundPayload = JsonInstant.decodeFromString(json)
 
-    private fun TextGenerationParams.withoutProviderOverwrite(): TextGenerationParams {
-        return if (model.providerOverwrite == null) this else copy(model = model.copy(providerOverwrite = null))
-    }
+    private fun TextGenerationParams.withoutSecrets(): TextGenerationParams = copy(
+        model = model.copy(
+            customHeaders = emptyList(),
+            customBodies = emptyList(),
+            providerOverwrite = null,
+        ),
+        customHeaders = emptyList(),
+        customBody = emptyList(),
+    )
 }

@@ -319,18 +319,35 @@ final class NovelSessionReplayTests: XCTestCase {
             runID: run.id
         )
         session.messages.append(terminal)
+        let terminalTail = tail.updating(
+            content: terminal.content,
+            renderRevision: 2,
+            phase: .terminalAwaitingRefresh
+        )
+        let settling = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            session: session,
+            runs: [terminalRun(run)],
+            tail: terminalTail
+        ))
+
+        XCTAssertEqual(settling.rows.map(\.id), [user.id, terminal.id])
+        XCTAssertEqual(settling.activeTailID, terminal.id)
+        XCTAssertTrue(settling.rows[1].isTransient)
+        XCTAssertEqual(settling.rows[1].transientPhase, .terminalAwaitingRefresh)
+        XCTAssertEqual(settling.rows[1].content, terminal.content)
+        XCTAssertNotEqual(streaming.rows[1].digest, settling.rows[1].digest)
+
         let durable = NovelSessionPresentation.project(makeInput(
             fixture: fixture,
             session: session,
             runs: [terminalRun(run)],
-            tail: tail
+            tail: nil
         ))
-
         XCTAssertEqual(durable.rows.map(\.id), [user.id, terminal.id])
         XCTAssertNil(durable.activeTailID)
         XCTAssertFalse(durable.rows[1].isTransient)
         XCTAssertEqual(durable.rows[1].content, terminal.content)
-        XCTAssertNotEqual(streaming.rows[1].digest, durable.rows[1].digest)
     }
 
     func testWholeChapterStreamOnlyInvalidatesTailAndRespectsHistoryPause() throws {

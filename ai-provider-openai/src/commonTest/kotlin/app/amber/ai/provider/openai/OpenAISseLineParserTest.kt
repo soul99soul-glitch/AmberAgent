@@ -3,9 +3,39 @@ package app.amber.ai.provider.openai
 import app.amber.ai.ui.UIMessagePart
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 class OpenAISseLineParserTest {
+    @Test
+    fun chatStreamRejectsEofWithoutAnyTerminalSignal() {
+        val terminal = OpenAIStreamTerminalState(OpenAIStreamKind.CHAT_COMPLETIONS)
+        terminal.observe("""{"choices":[{"delta":{"content":"partial"}}]}""")
+
+        assertFailsWith<IllegalStateException> { terminal.requireCompleted() }
+    }
+
+    @Test
+    fun responsesStreamAcceptsCompletedEvent() {
+        val terminal = OpenAIStreamTerminalState(OpenAIStreamKind.RESPONSES)
+        terminal.observe("""{"type":"response.completed","response":{"status":"completed"}}""")
+
+        terminal.requireCompleted()
+    }
+
+    /// `response.incomplete` 同样是协议终态(输出写满上限/内容过滤),只是内容
+    /// 未写完。把它排除在终态之外会让一次正常的截断在 EOF 处再被报成
+    /// "stream ended before a terminal event"。
+    @Test
+    fun responsesStreamAcceptsIncompleteAsTerminalEvent() {
+        val terminal = OpenAIStreamTerminalState(OpenAIStreamKind.RESPONSES)
+        terminal.observe(
+            """{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}"""
+        )
+
+        terminal.requireCompleted()
+    }
+
     @Test
     fun emitsStandaloneJsonDataLineWithoutWaitingForBlankSeparator() {
         val parser = OpenAISseLineParser()

@@ -175,6 +175,9 @@ private final class ChatStreamAccumulatorSession {
     let accumulator: MessageStreamAccumulator
     let eventSink: ChatStreamEventSink
     var detectedToolCallIds = Set<String>()
+    /// 本轮是否有 chunk 报告了输出上限 finish_reason。累加器只保留 delta/message/usage,
+    /// 不透传 finishReason,所以必须在消费 chunk 的当下记录下来。
+    var hitOutputLimit = false
 
     init(accumulator: MessageStreamAccumulator, eventSink: ChatStreamEventSink) {
         self.accumulator = accumulator
@@ -188,9 +191,47 @@ struct ChatStreamPresentationStep {
 }
 
 enum ChatStreamPresentationPacer {
-    /// Keeps one UI publication below a typical phone-width prose line while
-    /// retaining the existing 48ms publication clock.
-    static let maximumTextAdvance = 12
+    /// 轻积压时的下限:一拍推进约一行手机宽度的中文,保留既有 48ms 发布时钟。
+    static let minimumTextAdvance = 12
+    /// 每拍硬上限:让大积压在几秒内清空,而不是几十秒。
+    static let maximumTextAdvance = 64
+    /// 尽量在这么多拍内清空*当前*积压。
+    static let preferredDrainTicks = 16
+
+    /// 按积压自适应的每拍推进量。
+    ///
+    /// 固定 12 字符/拍意味着显示速率恒为 250 字符/秒。模型快于这个速率时
+    /// 积压会持续累积,且 `drainStreamPresentation` 在流式终态后仍按同一节奏
+    /// 逐拍追平——4000 字的回复要 334 拍(≈16s)才显示完,期间 `isLoading`
+    /// 保持 true,用户看着"停止"按钮等一段早已生成完的文本。
+    /// 与 `NovelSessionPresentationPacer` 同构。
+    static func textAdvance(backlogCount: Int) -> Int {
+        guard backlogCount > 0 else { return 0 }
+        let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
+        return min(maximumTextAdvance, max(minimumTextAdvance, adaptive))
+    }
+
+    /// 本轮所有 text part 的未显示字符总量,用来定这一拍的推进预算。
+    /// 只比长度、不做前缀校验:前缀不匹配的情况由 `step` 的主循环兜底
+    /// (直接发布权威全文),此处至多把预算算大一拍,不影响正确性。
+    private static func pendingTextBacklog(
+        currentParts: [UIMessagePart],
+        targetParts: [UIMessagePart]
+    ) -> Int {
+        var backlog = 0
+        for (index, targetPart) in targetParts.enumerated() {
+            guard let targetText = targetPart as? UIMessagePart.Text else { continue }
+            let currentCount: Int
+            if index < currentParts.count,
+               let currentText = currentParts[index] as? UIMessagePart.Text {
+                currentCount = currentText.text.count
+            } else {
+                currentCount = 0
+            }
+            backlog += max(0, targetText.text.count - currentCount)
+        }
+        return backlog
+    }
 
     static func step(current: [UIMessage], target: [UIMessage]) -> ChatStreamPresentationStep {
         guard let targetAssistant = target.last,
@@ -224,7 +265,12 @@ enum ChatStreamPresentationPacer {
             return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
         }
 
-        var remainingBudget = maximumTextAdvance
+        var remainingBudget = textAdvance(
+            backlogCount: pendingTextBacklog(
+                currentParts: currentParts,
+                targetParts: targetAssistant.parts
+            )
+        )
         var caughtUp = true
         var pacedParts: [UIMessagePart] = []
         pacedParts.reserveCapacity(targetAssistant.parts.count)
@@ -606,6 +652,20 @@ final class ChatGenerationCoordinator {
     }
 
     func cancel() {
+        _ = cancel(runId: nil)
+    }
+
+    @discardableResult
+    func cancel(runId expectedRunId: String) -> Bool {
+        cancel(runId: Optional(expectedRunId))
+    }
+
+    @discardableResult
+    private func cancel(runId expectedRunId: String?) -> Bool {
+        guard let activeRunId = currentRunId,
+              expectedRunId == nil || expectedRunId == activeRunId else {
+            return false
+        }
         let runId = currentRunId
         let startedAt = currentStartedAt
         let digest = currentInputDigest
@@ -659,7 +719,7 @@ final class ChatGenerationCoordinator {
             bindings.bumpMessageRevision(.generationCancelled)
         }
 
-        guard let runId, let startedAt, let digest else { return }
+        guard let runId, let startedAt, let digest else { return true }
         Task { @MainActor [dependencies, bindings] in
             await dependencies.liveActivityController.end(
                 runId: runId,
@@ -668,6 +728,7 @@ final class ChatGenerationCoordinator {
             await bindings.recordRun(runId, startedAt, "interrupted", digest, conversationId?.toHexDashString())
             bindings.persistMessagesSnapshot(messagesAtCancellation, conversationId, writeBaselineAtCancellation)
         }
+        return true
     }
 
     /// (Re)snapshots the background handoff payload. Called at every point a run
@@ -1065,6 +1126,9 @@ final class ChatGenerationCoordinator {
                 switch event.payload {
                 case .chunk(let chunk):
                     accumulator.append(chunk: chunk)
+                    if Self.reachedOutputLimit(chunk) {
+                        streamSession.hitOutputLimit = true
+                    }
                     let toolCalls = Self.toolCalls(in: chunk)
                         .filter { toolCall in
                             let key = chatToolCallKey(toolCall)
@@ -1095,7 +1159,8 @@ final class ChatGenerationCoordinator {
                         runId: runId,
                         startedAt: startedAt,
                         inputDigest: inputDigest,
-                        conversationId: conversationId
+                        conversationId: conversationId,
+                        hitOutputLimit: streamSession.hitOutputLimit
                     )
                     return
                 case .error(let error):
@@ -1284,11 +1349,27 @@ final class ChatGenerationCoordinator {
         runId: String,
         startedAt: Int64,
         inputDigest: String,
-        conversationId: KotlinUuid?
+        conversationId: KotlinUuid?,
+        hitOutputLimit: Bool = false
     ) async {
         guard currentRunId == runId else { return }
         bindings.setMessages(snapshot)
         bindings.bumpMessageRevision(.assistantStreamClosed)
+
+        // 输出上限截断:正文有效但不完整。必须先于工具分支返回——截断点可能
+        // 落在 tool_calls 参数中途,那串残缺 JSON 不能当成可执行的工具调用。
+        // 与 IOSAgentToolEngine.run 的判定顺序一致(reachedOutputLimit 先于
+        // pendingToolCalls)。静默记 completed 会让用户把半截答案当完整答案。
+        if hitOutputLimit {
+            await completeTruncatedStream(
+                snapshot: snapshot,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return
+        }
 
         if let pendingToolCall = toolRuntime.nextPendingToolCall(in: snapshot) {
             guard currentToolResumeCount < maxToolResumeCount else {
@@ -1352,6 +1433,59 @@ final class ChatGenerationCoordinator {
         )
         bindings.persistMessages(conversationId)
         finishStreaming(terminalEvent: .generationCompleted)
+    }
+
+    /// 达到 max_tokens 的收尾:保留已生成正文,追加一条可见提示,并把 run 记为
+    /// `truncated` 而不是 `completed`。
+    private func completeTruncatedStream(
+        snapshot: [UIMessage],
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?
+    ) async {
+        var finalSnapshot = snapshot
+        finalSnapshot.append(Self.outputLimitNotice())
+        bindings.setMessages(finalSnapshot)
+        bindings.bumpMessageRevision(.toolResultAppended)
+
+        let conversationHex = conversationId?.toHexDashString()
+        await bindings.recordRun(runId, startedAt, "truncated", inputDigest, conversationHex)
+        WatchTaskCoordinator.shared.publishCompleted(
+            runId: runId,
+            conversationId: conversationHex,
+            summary: Self.watchSummary(from: finalSnapshot)
+        )
+        await dependencies.liveActivityController.end(
+            runId: runId,
+            presentation: .completed()
+        )
+        bindings.persistMessages(conversationId)
+        finishStreaming(terminalEvent: .generationCompleted)
+    }
+
+    static func outputLimitNotice() -> UIMessage {
+        UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(
+                text: "⚠️ 回复已达到模型输出上限，上面的内容并不完整。可以让我「继续」，或在助手设置里调高最大输出长度后重试。",
+                metadata: nil
+            )],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
+    /// finish_reason 表示模型被输出预算截断(而非自然停止)。
+    /// 判据与 `IOSAgentToolEngine.reachedOutputLimit` 保持同一份语义。
+    static func reachedOutputLimit(_ chunk: MessageChunk) -> Bool {
+        let reasons = Set(chunk.choices.compactMap { $0.finishReason?.lowercased() })
+        return !reasons.isDisjoint(with: ["length", "max_tokens", "max_output_tokens"])
     }
 
     private func failPendingToolCalls(

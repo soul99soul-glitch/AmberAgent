@@ -765,40 +765,20 @@ private struct BoardTemplateWorkbenchSheet: View {
 
     private func generateDraft() async {
         guard !isGenerating else { return }
-        let apiKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !apiKey.isEmpty else {
-            setError("没有配置 API Key，无法生成模板草稿。")
-            return
-        }
-        let modelId = resolvedModelId()
-        guard !modelId.isEmpty else {
-            setError("没有可用聊天模型，无法生成模板草稿。")
+        guard let resolved = sharedSettings.resolveBoardDeepReadModel(
+            boardModelId: sharedSettings.todayBoard.boardModelId
+        ) else {
+            setError("没有可用的聊天服务商和模型，无法生成模板草稿。")
             return
         }
         isGenerating = true
         defer { isGenerating = false }
-        let providerSetting = ProviderSetting.OpenAI(
-            id: KotlinUuid.companion.random(),
-            enabled: true,
-            name: "DeepReadTemplate",
-            models: [],
-            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-            builtIn: false,
-            descriptionText: nil,
-            shortDescriptionText: nil,
-            apiKey: settingsStore.apiKey,
-            baseUrl: settingsStore.baseUrl,
-            chatCompletionsPath: "/chat/completions",
-            useResponseApi: false,
-            authMode: OpenAIAuthMode.apiKey,
-            brand: OpenAIBrand.generic
-        )
         do {
             let draft = try await IOSDeepReadTemplateDraftGenerator.generateDraft(
                 name: name,
                 brief: brief,
-                providerSetting: providerSetting,
-                modelId: modelId
+                providerSetting: resolved.provider,
+                modelId: resolved.modelId
             )
             name = draft.name
             description = draft.description

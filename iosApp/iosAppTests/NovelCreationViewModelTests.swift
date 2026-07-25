@@ -468,6 +468,63 @@ final class NovelCreationViewModelTests: XCTestCase {
         }
     }
 
+    func testQuickStartCanBeRegeneratedWithGuidanceAfterAllProposalsAreRejected() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "provider",
+                ownerProviderID: "provider",
+                modelID: "model",
+                wireModelID: "model-wire",
+                displayName: "Model",
+                contextWindowTokens: 32_000
+            ),
+            scripts: [
+                NovelModelScript(steps: [.delta(quickStartSuggestionsJSON), .complete]),
+                NovelModelScript(steps: [.delta(quickStartSuggestionsJSON), .complete])
+            ]
+        )
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        )
+        let createdID = await viewModel.createProject(
+            name: "雾海列车",
+            mode: .quickStart,
+            genre: "奇幻悬疑",
+            coreIdea: "一列火车只在失去记忆的人面前出现。"
+        )
+        let projectID = try XCTUnwrap(createdID)
+        for _ in 0..<100 where viewModel.projectSnapshot?.settingProposals.count != 4 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(viewModel.projectSnapshot?.settingProposals.count, 4)
+
+        // 模拟用户全部拒绝：逐一 reject，卡片列表应清空。
+        let firstRoundProposals = viewModel.projectSnapshot?.settingProposals ?? []
+        for proposal in firstRoundProposals {
+            await viewModel.resolveProposal(proposal.id, resolution: .reject)
+        }
+        XCTAssertEqual(viewModel.branchSnapshot?.activeSettingProposals.count, 0)
+
+        let secondStartedRunID = await viewModel.startQuickStartSuggestions(guidance: "主角别那么悲惨")
+        let secondRunID = try XCTUnwrap(secondStartedRunID)
+
+        for _ in 0..<100 where (viewModel.projectSnapshot?.settingProposals.count ?? 0) <= firstRoundProposals.count {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(viewModel.projectSnapshot?.settingProposals.count, 8)
+
+        let requests = await adapter.requests
+        let regenerationRequest = try XCTUnwrap(requests.last { $0.runID == secondRunID })
+        let regenerationText = regenerationRequest.messages.map(\.content).joined(separator: "\n")
+        XCTAssertTrue(
+            regenerationText.contains("主角别那么悲惨"),
+            "The regeneration run must carry the user's guidance in its request text."
+        )
+        XCTAssertNil(viewModel.errorMessage)
+        _ = projectID
+    }
+
     func testReplaceImportUsesPreviewRevisionAndRestoresPackage() async throws {
         let repository = InMemoryNovelProjectRepository()
         let source = try NovelTestFixtures.document()

@@ -12,6 +12,16 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         tempDirs.removeAll()
     }
 
+    func testRunnerCSPBlocksDirectBrowserNetworkAndKeepsInlineAppCode() {
+        let html = "<!doctype html><html><head></head><body><script>fetch('https://example.com')</script></body></html>"
+
+        let sandboxed = IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(html)
+
+        XCTAssertTrue(sandboxed.contains("connect-src 'none'"))
+        XCTAssertTrue(sandboxed.contains("script-src 'unsafe-inline'"))
+        XCTAssertTrue(sandboxed.contains("Content-Security-Policy"))
+    }
+
     func testAppInfoWorksWithoutGrant() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: []))
@@ -75,31 +85,29 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         XCTAssertEqual(result.errorMessage, "URL is not allowed: local, loopback, link-local, and private hosts are blocked")
     }
 
-    func testAIGenerateChecksPolicyKeyThenCallsHandler() async throws {
+    func testAIGenerateLetsConfiguredProviderHandlerOwnAuthentication() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: ["ai.generate"]))
         try repo.setGrant(appId: app.id, permission: "ai.generate", decision: .allow)
         var callCount = 0
-        let noKeyRuntime = IOSMiniAppBridgeRuntime(
+        let noLegacyKeyRuntime = IOSMiniAppBridgeRuntime(
             appId: app.id,
             repository: repo,
             policy: IOSMiniAppBridgePolicy(aiEnabled: true),
-            apiKeyProvider: { "" },
             aiGenerateHandler: { _ in
                 callCount += 1
-                return .object(["text": .string("should not run")])
+                return .object(["text": .string("provider-owned auth")])
             }
         )
 
-        let noKey = await noKeyRuntime.dispatch(method: "ai.generate", params: ["prompt": "hi"])
-        XCTAssertEqual(noKey.errorMessage, "Amber.ai is not available because no API key is configured.")
-        XCTAssertEqual(callCount, 0)
+        let noLegacyKey = await noLegacyKeyRuntime.dispatch(method: "ai.generate", params: ["prompt": "hi"])
+        XCTAssertEqual(noLegacyKey, .success(.object(["text": .string("provider-owned auth")])))
+        XCTAssertEqual(callCount, 1)
 
         let disabledRuntime = IOSMiniAppBridgeRuntime(
             appId: app.id,
             repository: repo,
             policy: IOSMiniAppBridgePolicy(aiEnabled: false),
-            apiKeyProvider: { "sk-test" },
             aiGenerateHandler: { _ in
                 callCount += 1
                 return .object(["text": .string("should not run")])
@@ -108,14 +116,13 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
 
         let disabled = await disabledRuntime.dispatch(method: "ai.generate", params: ["prompt": "hi"])
         XCTAssertEqual(disabled.errorMessage, "Permission 'ai.generate' is disabled in MiniApp settings.")
-        XCTAssertEqual(callCount, 0)
+        XCTAssertEqual(callCount, 1)
 
         var captured: IOSMiniAppAIGenerateRequest?
         let runtime = IOSMiniAppBridgeRuntime(
             appId: app.id,
             repository: repo,
             policy: IOSMiniAppBridgePolicy(aiEnabled: true),
-            apiKeyProvider: { "sk-test" },
             aiGenerateHandler: { request in
                 captured = request
                 callCount += 1
@@ -143,12 +150,37 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
                 "model": .string("mock-model"),
             ]))
         )
-        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(callCount, 2)
         XCTAssertEqual(captured?.prompt.count, 16_000)
         XCTAssertEqual(captured?.system.count, 2_000)
         XCTAssertEqual(captured?.maxOutputChars, 16_000)
         XCTAssertEqual(captured?.temperature, 2)
         XCTAssertEqual(repo.auditLogs(appId: app.id).first?.method, "ai.generate")
+    }
+
+    func testFetchRejectsOversizedRequestBodyBeforeStartingTransport() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: ["network"]))
+        try repo.setGrant(appId: app.id, permission: "network", decision: .allow)
+        let transport = MiniAppFetchTransport()
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(networkEnabled: true),
+            fetchTransport: transport
+        )
+
+        let result = await runtime.dispatch(
+            method: "fetch",
+            params: [
+                "url": "https://example.com/upload",
+                "method": "POST",
+                "body": String(repeating: "x", count: 64 * 1_024 + 1),
+            ]
+        )
+
+        XCTAssertEqual(result.errorMessage, "Amber.fetch request body is too large.")
+        XCTAssertTrue(transport.requests.isEmpty)
     }
 
     func testHostMethodsCheckPolicyHandlerThenAudit() async throws {
@@ -246,6 +278,57 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         XCTAssertTrue(methods.contains("host.createArtifact"))
     }
 
+    func testHostConfirmationCloseRejectsPendingContinuationExactlyOnce() async throws {
+        let owner = MiniAppHostConfirmationOwner()
+        let request = IOSMiniAppHostRequest.getConversationContext(.init(maxChars: 1_000))
+        let resultTask = Task { @MainActor in
+            try await owner.request(appTitle: "Close Test", request: request)
+        }
+        while !owner.hasPendingRequest {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(owner.close())
+        XCTAssertFalse(owner.close())
+        let allowed = try await resultTask.value
+        XCTAssertFalse(allowed)
+        XCTAssertFalse(owner.hasPendingRequest)
+        XCTAssertNil(owner.pendingConfirmation)
+    }
+
+    func testRuntimeCloseCancelsInFlightBridgeTaskExactlyOnce() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: ["ai.generate"]))
+        try repo.setGrant(appId: app.id, permission: "ai.generate", decision: .allow)
+        let started = expectation(description: "AI handler started")
+        let cancellationProbe = MiniAppCancellationProbe()
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(aiEnabled: true),
+            aiGenerateHandler: { _ in
+                started.fulfill()
+                return try await withTaskCancellationHandler {
+                    try await Task.sleep(nanoseconds: 10_000_000_000)
+                    return .object(["text": .string("late")])
+                } onCancel: {
+                    cancellationProbe.increment()
+                }
+            }
+        )
+        let dispatchTask = Task { @MainActor in
+            await runtime.dispatch(method: "ai.generate", params: ["prompt": "wait"])
+        }
+        await fulfillment(of: [started], timeout: 1)
+
+        runtime.close()
+        runtime.close()
+
+        let result = await dispatchTask.value
+        XCTAssertEqual(result.errorMessage, "MiniApp bridge request was cancelled.")
+        XCTAssertEqual(cancellationProbe.count, 1)
+    }
+
     func testSharedStoreRejectsCrossAppNamespace() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: ["sharedStore"]))
@@ -310,5 +393,36 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
             permissions: permissions,
             html: "<!DOCTYPE html><html><body><h1>Bridge</h1></body></html>"
         )
+    }
+}
+
+@MainActor
+private final class MiniAppFetchTransport: IOSSearchHTTPTransport {
+    private(set) var requests: [URLRequest] = []
+
+    func send(_ request: URLRequest) async throws -> (HTTPURLResponse, Data) {
+        requests.append(request)
+        return (
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/plain"]
+            )!,
+            Data("ok".utf8)
+        )
+    }
+}
+
+private final class MiniAppCancellationProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var count: Int {
+        lock.withLock { value }
+    }
+
+    func increment() {
+        lock.withLock { value += 1 }
     }
 }

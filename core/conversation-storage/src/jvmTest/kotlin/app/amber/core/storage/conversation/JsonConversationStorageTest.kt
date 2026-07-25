@@ -65,6 +65,56 @@ class JsonConversationStorageTest {
     }
 
     @Test
+    fun bulkImportValidatesTheWholeBatchBeforeWritingAnyConversation() = runTest {
+        val existingId = Uuid.parse("00000000-0000-0000-0000-000000000003")
+        val importId = Uuid.parse("00000000-0000-0000-0000-000000000004")
+        storage.saveConversation(sampleConversation(id = existingId, title = "existing"))
+        val validImport = JsonInstant.encodeToString(
+            sampleConversation(id = importId, title = "must not be written")
+        )
+
+        val failure = runCatching {
+            storage.importConversations(listOf(validImport, "{ broken"))
+        }.exceptionOrNull()
+
+        assertTrue(failure is ConversationStorageException)
+        assertNull(storage.loadConversation(importId))
+        assertEquals("existing", storage.loadConversation(existingId)?.title)
+        assertEquals(setOf(existingId), storage.listSummaries().mapTo(mutableSetOf()) { it.id })
+    }
+
+    @Test
+    fun bulkImportOverwritesMatchingEntriesAndPreservesTheRestOfTheDataset() = runTest {
+        val overwrittenId = Uuid.parse("00000000-0000-0000-0000-000000000005")
+        val preservedId = Uuid.parse("00000000-0000-0000-0000-000000000006")
+        storage.saveConversation(
+            sampleConversation(id = overwrittenId, title = "local title", userText = "local message")
+        )
+        storage.saveConversation(
+            sampleConversation(id = preservedId, title = "preserved", userText = "preserved message")
+        )
+        val backupConversation = sampleConversation(
+            id = overwrittenId,
+            title = "backup title",
+            userText = "backup message",
+            isPinned = true,
+        )
+
+        storage.importConversations(listOf(JsonInstant.encodeToString(backupConversation)))
+
+        val overwritten = storage.loadConversation(overwrittenId)
+        assertNotNull(overwritten)
+        assertEquals("backup title", overwritten.title)
+        assertEquals("backup message", overwritten.currentMessages.single().toText())
+        assertTrue(overwritten.isPinned)
+        assertEquals("preserved", storage.loadConversation(preservedId)?.title)
+        assertEquals(
+            setOf(overwrittenId, preservedId),
+            storage.listSummaries().mapTo(mutableSetOf()) { it.id },
+        )
+    }
+
+    @Test
     fun saveAppearsInSummariesWithDerivedFields() = runTest {
         val conv = sampleConversation(
             id = Uuid.parse("00000000-0000-0000-0000-000000000002"),
@@ -292,6 +342,60 @@ class JsonConversationStorageTest {
 
         assertTrue(storage.listSummaries().none { it.id == id })
         assertFalse(tempDir.child("index.json").readText()?.contains(id.toString()) == true)
+    }
+
+    @Test
+    fun validIndexRefreshesStaleSummaryForTheSameConversationId() = runTest {
+        val id = Uuid.parse("00000000-0000-0000-0000-000000000055")
+        storage.saveConversation(sampleConversation(id = id, title = "cached title"))
+        tempDir.child("${id}.json").writeText(
+            JsonInstant.encodeToString(sampleConversation(id = id, title = "disk title"))
+        )
+
+        val summaries = storage.listSummaries()
+        val persistedIndex = JsonInstant.decodeFromString<List<ConversationSummary>>(
+            tempDir.child("index.json").readText()!!
+        )
+
+        assertEquals("disk title", summaries.single().title)
+        assertEquals("disk title", persistedIndex.single().title)
+    }
+
+    @Test
+    fun validIndexDiscoversConversationFileLeftByInterruptedIndexWrite() = runTest {
+        val indexedId = Uuid.parse("00000000-0000-0000-0000-000000000053")
+        val orphanId = Uuid.parse("00000000-0000-0000-0000-000000000054")
+        storage.saveConversation(sampleConversation(id = indexedId, title = "indexed"))
+        tempDir.child("${orphanId}.json").writeText(
+            JsonInstant.encodeToString(sampleConversation(id = orphanId, title = "orphan"))
+        )
+
+        val summaries = storage.listSummaries()
+
+        assertEquals(setOf(indexedId, orphanId), summaries.mapTo(mutableSetOf()) { it.id })
+        assertTrue(tempDir.child("index.json").readText()?.contains(orphanId.toString()) == true)
+    }
+
+    @Test
+    fun validIndexPersistsRepairWhenStaleAndOrphanEntriesHaveEqualCounts() = runTest {
+        val retainedId = Uuid.parse("00000000-0000-0000-0000-000000000056")
+        val staleId = Uuid.parse("00000000-0000-0000-0000-000000000057")
+        val orphanId = Uuid.parse("00000000-0000-0000-0000-000000000058")
+        storage.saveConversation(sampleConversation(id = retainedId, title = "retained"))
+        storage.saveConversation(sampleConversation(id = staleId, title = "stale"))
+        assertTrue(tempDir.child("${staleId}.json").delete())
+        tempDir.child("${orphanId}.json").writeText(
+            JsonInstant.encodeToString(sampleConversation(id = orphanId, title = "orphan"))
+        )
+
+        assertEquals(
+            setOf(retainedId, orphanId),
+            storage.listSummaries().mapTo(mutableSetOf()) { it.id },
+        )
+        val persistedIndex = JsonInstant.decodeFromString<List<ConversationSummary>>(
+            tempDir.child("index.json").readText()!!
+        )
+        assertEquals(setOf(retainedId, orphanId), persistedIndex.mapTo(mutableSetOf()) { it.id })
     }
 
     @Test

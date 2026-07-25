@@ -197,6 +197,19 @@ final class IOSConversationStore {
         }
     }
 
+    /// Imports complete Conversation JSON documents through the storage owner.
+    /// The KMP implementation validates the whole batch before taking any write
+    /// and rebuilds index.json under the same operation mutex.
+    @discardableResult
+    func importConversationDocuments(_ documents: [String]) async throws -> Int {
+        guard !documents.isEmpty else { return 0 }
+        try await storage.importConversations(serializedConversations: documents)
+        deletedConversationIds.removeAll()
+        writeSequences.removeAll()
+        await bootstrap()
+        return documents.count
+    }
+
     // MARK: - CRUD
 
     /// 新建空会话：生成新 Conversation（assistantId = DEFAULT_ASSISTANT_ID），落盘，设为 current。

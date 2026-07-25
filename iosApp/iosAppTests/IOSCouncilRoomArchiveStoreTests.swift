@@ -61,6 +61,31 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         XCTAssertEqual(loaded, room, "save→load 必须无损还原整场议会快照")
     }
 
+    func testArchiveWriteFailureIsObservable() throws {
+        let baseFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("council-archive-blocker-\(UUID().uuidString)")
+        try Data("not a directory".utf8).write(to: baseFile)
+        defer { try? FileManager.default.removeItem(at: baseFile) }
+        let store = CouncilRoomArchiveStore(baseDirectory: baseFile)
+
+        XCTAssertFalse(store.save(sampleRoom(taskId: "blocked")))
+        XCTAssertNotNil(store.lastErrorDescription)
+    }
+
+    func testDeferredArchiveWriteFailureIsObservableAfterFlush() async throws {
+        let baseFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("council-archive-deferred-blocker-\(UUID().uuidString)")
+        try Data("not a directory".utf8).write(to: baseFile)
+        defer { try? FileManager.default.removeItem(at: baseFile) }
+        let store = CouncilRoomArchiveStore(baseDirectory: baseFile)
+
+        store.saveDeferred(sampleRoom(taskId: "blocked"))
+        await store.flushDeferred()
+
+        XCTAssertNotNil(store.lastErrorDescription)
+        XCTAssertEqual(store.completedWriteCount, 0)
+    }
+
     func testCurrentTranscriptRoundTripKeepsTaskAndTerminalState() throws {
         let defaults = isolatedDefaults()
         let room = sampleRoom(taskId: "run-current")
@@ -189,6 +214,36 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         XCTAssertEqual(store.completedWriteCount, 1)
     }
 
+    func testWriteGenerationKeepsSynchronousCommitAfterInFlightDeferredCommit() async throws {
+        let generation = CouncilArchiveWriteGeneration()
+        let deferredEntered = DispatchSemaphore(value: 0)
+        let releaseDeferred = DispatchSemaphore(value: 0)
+        let order = CouncilArchiveCommitOrder()
+
+        let deferred = Task.detached {
+            try generation.performDeferredWrite(ifCurrent: generation.value) {
+                deferredEntered.signal()
+                releaseDeferred.wait()
+                order.append("deferred")
+            }
+        }
+        XCTAssertEqual(deferredEntered.wait(timeout: .now() + 1), .success)
+
+        let synchronous = Task.detached {
+            try generation.performSynchronousWrite {
+                order.append("synchronous")
+            }
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertEqual(order.values, [], "The synchronous commit must wait rather than race the deferred atomic replace.")
+
+        releaseDeferred.signal()
+        let deferredCommitted = try await deferred.value
+        XCTAssertTrue(deferredCommitted)
+        try await synchronous.value
+        XCTAssertEqual(order.values, ["deferred", "synchronous"])
+    }
+
     // MARK: - DTO restore fidelity (the "Color encoding" concern)
 
     func testMessageDTOPreservesColorHexKindAndStatus() {
@@ -222,6 +277,13 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         )
         let restoredSpeaking = CouncilPersistedMessage(speakingMessage).restored()
         XCTAssertEqual(restoredSpeaking.status, .failed, "冷启动恢复的 speaking 行必须清洗为 failed,不能永远显示发言中")
+
+        let restoredPhaseLabel = CouncilPersistedMessage(CouncilChatMessage(
+            kind: .host, author: "主持人", body: "总结中...", systemImage: "crown",
+            tint: .red, subtitle: nil, status: .speaking
+        )).restored()
+        XCTAssertNil(restoredPhaseLabel.streamingMarkdownBody)
+        XCTAssertEqual(restoredPhaseLabel.displayBody, "未生成内容")
 
         let completedMessage = CouncilChatMessage(
             kind: .host, author: "主持人", body: "已完成", systemImage: "crown",
@@ -309,5 +371,22 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         vm.startFreshRoom()
         XCTAssertFalse(vm.isReplay, "开新议会应退出只读重放")
         XCTAssertNil(vm.activeReplayTaskId)
+    }
+}
+
+private final class CouncilArchiveCommitOrder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String] = []
+
+    var values: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ value: String) {
+        lock.lock()
+        storage.append(value)
+        lock.unlock()
     }
 }

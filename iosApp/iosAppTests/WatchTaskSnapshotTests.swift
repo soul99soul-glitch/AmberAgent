@@ -2,9 +2,188 @@ import XCTest
 import Shared
 @testable import iosApp
 
+private final class WatchTestTransport: WatchConnectivityTransporting {
+    var isSupported = true
+    var isPaired = true
+    var isWatchAppInstalled = true
+    var isReachable = true
+    var sendError: Error?
+
+    init(sendError: Error? = nil) {
+        self.sendError = sendError
+    }
+
+    func activate() {}
+    func updateApplicationContext(_ context: [String: Any]) throws {}
+    func transferUserInfo(_ userInfo: [String: Any]) -> String { "transfer" }
+    func sendMessage(
+        _ message: [String: Any],
+        replyHandler: (([String: Any]) -> Void)?,
+        errorHandler: ((Error) -> Void)?
+    ) {
+        if let sendError {
+            errorHandler?(sendError)
+        }
+    }
+}
+
 // @MainActor:部分用例直接构造 MainActor 隔离的 ViewModel/运行时依赖。
 @MainActor
 final class WatchTaskSnapshotTests: XCTestCase {
+    func testBridgeActionTimeoutReportsTheMatchingRequestId() async {
+        let bridge = WatchConnectivityBridge(actionTimeoutNanoseconds: 10_000_000)
+        bridge.configure(transport: WatchTestTransport())
+        let request = WatchTaskActionRequest(
+            requestId: "request-timeout",
+            runId: "run-timeout",
+            conversationId: "conversation-timeout",
+            decisionId: nil,
+            action: .cancel,
+            optionId: nil,
+            text: nil,
+            createdAt: Date()
+        )
+        let resultReceived = expectation(description: "action timeout")
+        bridge.onActionResult = { result in
+            XCTAssertEqual(result.requestId, request.requestId)
+            XCTAssertEqual(result.runId, request.runId)
+            XCTAssertFalse(result.accepted)
+            XCTAssertTrue(result.message?.contains("超时") == true)
+            resultReceived.fulfill()
+        }
+
+        bridge.sendAction(request)
+
+        await fulfillment(of: [resultReceived], timeout: 1)
+    }
+
+    func testBridgeActionSendFailureReportsTheMatchingRequestId() async {
+        let bridge = WatchConnectivityBridge(actionTimeoutNanoseconds: 1_000_000_000)
+        bridge.configure(transport: WatchTestTransport(sendError: NSError(
+            domain: "WatchTaskSnapshotTests",
+            code: 1
+        )))
+        let request = WatchTaskActionRequest(
+            requestId: "request-failure",
+            runId: "run-failure",
+            conversationId: "conversation-failure",
+            decisionId: nil,
+            action: .cancel,
+            optionId: nil,
+            text: nil,
+            createdAt: Date()
+        )
+        let resultReceived = expectation(description: "action failure")
+        bridge.onActionResult = { result in
+            XCTAssertEqual(result.requestId, request.requestId)
+            XCTAssertEqual(result.runId, request.runId)
+            XCTAssertFalse(result.accepted)
+            XCTAssertTrue(result.message?.contains("失败") == true)
+            resultReceived.fulfill()
+        }
+
+        bridge.sendAction(request)
+
+        await fulfillment(of: [resultReceived], timeout: 1)
+    }
+
+    func testCoordinatorRejectsDecisionFromEarlierNodeInSameRun() async {
+        let coordinator = WatchTaskCoordinator(bridge: WatchConnectivityBridge())
+        coordinator.publishAskUser(
+            runId: "run-1",
+            conversationId: "conversation-1",
+            request: WatchAskUserRequest(
+                id: "decision-b",
+                question: "第二个问题",
+                options: ["B1", "B2"]
+            )
+        )
+
+        let result = await coordinator.handleWatchAction(WatchTaskActionRequest(
+            requestId: "request-a",
+            runId: "run-1",
+            conversationId: "conversation-1",
+            decisionId: "decision-a",
+            action: .choose,
+            optionId: "choice-0",
+            text: nil,
+            createdAt: Date()
+        ))
+
+        XCTAssertFalse(result.accepted)
+        XCTAssertEqual(result.message, "这个确认步骤已失效")
+        XCTAssertEqual(coordinator.currentSnapshot().decision?.id, "decision-b")
+    }
+
+    func testCoordinatorClearsSummaryWhenANewRunStartsWithoutOne() {
+        let coordinator = WatchTaskCoordinator(bridge: WatchConnectivityBridge())
+        coordinator.publishCompleted(
+            runId: "run-a",
+            conversationId: "conversation-a",
+            summary: "A 的结果"
+        )
+
+        coordinator.publish(
+            runId: "run-b",
+            conversationId: "conversation-b",
+            presentation: .generatingResponse(modelName: "model-b")
+        )
+
+        let snapshot = coordinator.currentSnapshot()
+        XCTAssertEqual(snapshot.runId, "run-b")
+        XCTAssertNil(snapshot.summary)
+    }
+
+    func testCoordinatorDoesNotClaimCancellationWhenNoRunOwnerAcceptsIt() async {
+        let coordinator = WatchTaskCoordinator(bridge: WatchConnectivityBridge())
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        coordinator.attach(chatViewModel: viewModel)
+        coordinator.publish(
+            runId: "background-run-without-owner",
+            conversationId: "conversation-1",
+            presentation: .generatingResponse(modelName: "model")
+        )
+
+        let result = await coordinator.handleWatchAction(WatchTaskActionRequest(
+            requestId: "cancel-1",
+            runId: "background-run-without-owner",
+            conversationId: "conversation-1",
+            decisionId: nil,
+            action: .cancel,
+            optionId: nil,
+            text: nil,
+            createdAt: Date()
+        ))
+
+        XCTAssertFalse(result.accepted)
+        XCTAssertEqual(result.message, "当前任务已经结束或不再由 iPhone 执行")
+    }
+
+    func testAttachProjectsHydratedBackgroundRunAsReconnectingInsteadOfIdle() {
+        let coordinator = WatchTaskCoordinator(bridge: WatchConnectivityBridge())
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+
+        coordinator.attach(
+            chatViewModel: viewModel,
+            reconnecting: WatchTaskReconnectProjection(
+                runId: "hydrated-background-run",
+                conversationId: "hydrated-conversation"
+            )
+        )
+
+        let snapshot = coordinator.currentSnapshot()
+        XCTAssertEqual(snapshot.runId, "hydrated-background-run")
+        XCTAssertEqual(snapshot.conversationId, "hydrated-conversation")
+        XCTAssertEqual(snapshot.phase, AgentActivityPhase.reconnecting.rawValue)
+        XCTAssertNotEqual(snapshot.phase, "idle")
+    }
+
     func testCodecRoundTripKeepsDecisionAndSummary() throws {
         let decision = WatchDecision(
             id: "decision-1",
@@ -76,6 +255,49 @@ final class WatchTaskSnapshotTests: XCTestCase {
         XCTAssertLessThanOrEqual(snapshot.summary?.count ?? 0, 281)
         XCTAssertTrue(snapshot.actions.contains(.openOnPhone))
         XCTAssertFalse(snapshot.actions.contains(.approve))
+    }
+
+    func testDecisionWithoutConversationOffersNoOpenPhonePath() {
+        let snapshot = WatchTaskSnapshotBuilder.make(
+            runId: "run-no-conversation",
+            conversationId: nil,
+            presentation: .waitingForUser(kind: .workflow),
+            decision: WatchTaskSnapshotBuilder.askUserDecision(from: WatchAskUserRequest(
+                id: "ask-no-conversation",
+                question: "继续吗？",
+                options: ["继续"]
+            ))
+        )
+
+        XCTAssertFalse(snapshot.actions.contains(.openOnPhone))
+        XCTAssertFalse(snapshot.decision?.options.contains(where: { $0.style == .openOnPhone }) == true)
+    }
+
+    func testCoordinatorRejectsOpenPhoneWithoutConversation() async {
+        let coordinator = WatchTaskCoordinator(bridge: WatchConnectivityBridge())
+        coordinator.publishAskUser(
+            runId: "run-no-conversation",
+            conversationId: nil,
+            request: WatchAskUserRequest(
+                id: "ask-no-conversation",
+                question: "继续吗？",
+                options: ["继续"]
+            )
+        )
+
+        let result = await coordinator.handleWatchAction(WatchTaskActionRequest(
+            requestId: "open-no-conversation",
+            runId: "run-no-conversation",
+            conversationId: nil,
+            decisionId: "ask-no-conversation",
+            action: .openOnPhone,
+            optionId: "open-phone",
+            text: nil,
+            createdAt: Date()
+        ))
+
+        XCTAssertFalse(result.accepted)
+        XCTAssertEqual(result.message, "当前任务没有可打开的会话")
     }
 
     func testAskUserDecisionSupportsChoicesAndVoice() {

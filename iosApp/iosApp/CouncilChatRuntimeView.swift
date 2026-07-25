@@ -19,15 +19,10 @@ enum CouncilTranscriptFollowPolicy {
         distanceToBottom <= ChatLayout.nearBottomResumeThreshold
     }
 
-    /// While the user is reading scrollback (`followPaused`), a still-speaking row
-    /// keeps parsing/re-animating at full speed underneath them. Only the row the
-    /// user is *not* looking at (the live speaking one) should freeze; history rows
-    /// must never have live rendering toggled off, or MessageBubbleView's
-    /// `hasEverStreamed && liveRenderingEnabled` renderer-switch guard would swap
-    /// their renderer mid-read.
-    static func liveRenderingEnabled(isSpeakingRow: Bool, followPaused: Bool) -> Bool {
-        !isSpeakingRow || !followPaused
-    }
+    /// Council is bounded and serial: only one row speaks at a time. `followPaused`
+    /// owns scrolling only and does not prove that row is outside the viewport, so
+    /// it must not freeze visible Markdown or force a later catch-up replacement.
+    static let liveRenderingEnabled = true
 
     static func shouldFollowMeasuredGrowth(
         previousContentHeight: CGFloat,
@@ -111,6 +106,15 @@ struct CouncilChatRuntimeView: View {
 
             VStack(spacing: 0) {
                 header
+                if let archiveErrorMessage = viewModel.archiveErrorMessage {
+                    Label(archiveErrorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(AmberTheme.surface)
+                }
                 transcript
             }
         }
@@ -292,7 +296,6 @@ struct CouncilChatRuntimeView: View {
                 ForEach(viewModel.messages) { message in
                     CouncilMessageRow(
                         message: message,
-                        followPaused: followPaused,
                         onTapDetail: { viewModel.showCurrentDetail() },
                         onRestart: { viewModel.restart(withObjective: $0) }
                     )
@@ -687,9 +690,6 @@ private struct CouncilParticipantChip: View {
 
 private struct CouncilMessageRow: View, Equatable {
     let message: CouncilChatMessage
-    /// 用户是否暂停跟随(正在上滑读历史)。只影响仍在 `.speaking` 的行是否冻结渲染
-    /// ——历史行必须永远忽略这个值,否则会踩 MessageBubbleView 的 renderer-switch 保护。
-    let followPaused: Bool
     let onTapDetail: () -> Void
     /// 以指定议题重开议会(供用户气泡的「以此为题重开 / 编辑重开」)。
     let onRestart: (String) -> Void
@@ -699,15 +699,12 @@ private struct CouncilMessageRow: View, Equatable {
 
     // 只比较影响渲染的字段(闭包每次父刷新都新建但语义不变,忽略)。内部 @State
     // (editing/editDraft)变化不受此 == 影响,SwiftUI 仍会照常更新本行。
-    // followPaused 只在本行仍 speaking 时才参与比较:避免用户拖动滚动时让整份
-    // 已完成的历史行随之全部判定为「变化」而重渲染。
     nonisolated static func == (lhs: CouncilMessageRow, rhs: CouncilMessageRow) -> Bool {
         lhs.message.id == rhs.message.id
             && lhs.message.body == rhs.message.body
             && lhs.message.status == rhs.message.status
             && lhs.message.author == rhs.message.author
             && lhs.message.subtitle == rhs.message.subtitle
-            && (lhs.message.status != .speaking || lhs.followPaused == rhs.followPaused)
     }
 
     var body: some View {
@@ -837,16 +834,26 @@ private struct CouncilMessageRow: View, Equatable {
     private var bubble: some View {
         // host/guest 都由 runner 的累计流式文本产生。稳定 namespace + 明确的 live/ever
         // 标记让 Council 与标准 Chat 共用同一套增量 Markdown、完成态 renderer latch 和缓存。
-        ChatAssistantMarkdownView(
-            markdown: message.displayBody,
-            renderCacheNamespace: message.markdownRenderCacheNamespace,
-            isStreaming: message.isStreamingMarkdown,
-            hasEverStreamed: message.hasEverStreamedMarkdown,
-            liveRenderingEnabled: CouncilTranscriptFollowPolicy.liveRenderingEnabled(
-                isSpeakingRow: message.status == .speaking,
-                followPaused: followPaused
-            )
-        )
+        Group {
+            if let markdown = message.streamingMarkdownBody {
+                ChatAssistantMarkdownView(
+                    markdown: markdown,
+                    renderCacheNamespace: message.markdownRenderCacheNamespace,
+                    isStreaming: message.isStreamingMarkdown,
+                    hasEverStreamed: message.hasEverStreamedMarkdown,
+                    liveRenderingEnabled: CouncilTranscriptFollowPolicy.liveRenderingEnabled
+                )
+            } else {
+                HStack(spacing: 8) {
+                    Text(message.displayBody)
+                    if message.status == .speaking {
+                        TypingDots()
+                    }
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground2)
+            }
+        }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -1309,6 +1316,7 @@ final class CouncilChatViewModel {
     var pendingAskUser: IOSCouncilAskUserState?
     var participants: [CouncilParticipant] = []
     var failedSpeakerIds: Set<String> = []
+    var archiveErrorMessage: String?
     /// 只读重放:从「最近讨论」重开一场历史议会时为 true,隐藏输入条、不再归档/覆盖草稿。
     var isReplay = false
 
@@ -1329,10 +1337,10 @@ final class CouncilChatViewModel {
     @ObservationIgnored private var pendingObjective = ""
     @ObservationIgnored private var lastRunObjective = ""
     @ObservationIgnored private var lastResearchAllowed = false
-    /// 中段检查点防抖:roster/append/消息完结等事件密集到达时,只在最后一次之后
-    /// 300ms 合并成一次离主线程写入,避免每条消息都触发 encode+write。终态检查点
-    /// (结束/取消/切后台/恢复)不走防抖,直接同步写以保证 load-after-save 顺序。
-    @ObservationIgnored private var archiveDebounceTask: Task<Void, Never>?
+    /// 中段检查点节流:roster/append/消息完结等事件密集到达时,每个 300ms 窗口
+    /// 最多触发一次离主线程写入,避免每条消息都触发 encode+write。终态检查点
+    /// (结束/取消/切后台/恢复)不走节流,直接同步写以保证 load-after-save 顺序。
+    @ObservationIgnored private var archiveThrottleTask: Task<Void, Never>?
 
     private var roomStateOverride: String?
     private var activeSpeakerId: String?
@@ -1389,7 +1397,7 @@ final class CouncilChatViewModel {
         isRuntimeAttached = false
         skipAskUser()
         // 离开议会界面时做一次离主线程检查点,让「最近讨论」尽快看到当前进度;
-        // 先取消防抖,避免它在切走后再次触发写入。
+        // 先取消节流任务,避免它在切走后再次触发写入。
         cancelScheduledArchive()
         archiveCurrentRoom(deferred: true)
     }
@@ -1398,7 +1406,7 @@ final class CouncilChatViewModel {
         isApplicationActive = false
         skipAskUser()
         persistTranscript()
-        // 切后台是终止路径:取消防抖并同步落盘,同步写会 bump 代数使在途延迟写失效。
+        // 切后台是终止路径:取消节流任务并同步落盘,同步写会使在途延迟写失效。
         cancelScheduledArchive()
         archiveCurrentRoom()
     }
@@ -1460,7 +1468,7 @@ final class CouncilChatViewModel {
 
     func recoverInterruptedTasks(_ taskIds: [String]) {
         guard let currentTaskId, taskIds.contains(currentTaskId) else { return }
-        // 恢复即终止路径:先取消防抖,尾部再同步写一份「已中断」快照( bump 代数使
+        // 恢复即终止路径:先取消节流任务,尾部再同步写一份「已中断」快照( bump 代数使
         // 任何在途延迟写失效),保证 load 之后看到的是恢复后的最新事实。
         cancelScheduledArchive()
         if let room = archiveStore.load(taskId: currentTaskId) {
@@ -1586,7 +1594,7 @@ final class CouncilChatViewModel {
     }
 
     func cancelDiscussion() {
-        // 用户主动停止也是终止路径:取消防抖,尾部同步写会 bump 代数使在途延迟写失效。
+        // 用户主动停止也是终止路径:取消节流任务,尾部同步写会使在途延迟写失效。
         cancelScheduledArchive()
         stopActiveDiscussion()
         finishStreamingMessages(as: .failed)
@@ -1627,7 +1635,7 @@ final class CouncilChatViewModel {
 
     /// 从「最近讨论」重开一场历史议会,把归档快照还原成只读对话。
     func openArchive(taskId: String) {
-        // 切换到只读重放前,先取消防抖,避免它在 currentTaskId 切换后再次触发写入;
+        // 切换到只读重放前,先取消节流任务,避免它在 currentTaskId 切换后再次触发写入;
         // stopAndCheckpoint 会对仍在进行的讨论做一次同步检查点。
         cancelScheduledArchive()
         guard var room = archiveStore.load(taskId: taskId) else { return }
@@ -1668,26 +1676,28 @@ final class CouncilChatViewModel {
         if deferred {
             archiveStore.saveDeferred(room)
         } else {
-            archiveStore.save(room)
+            archiveErrorMessage = archiveStore.save(room)
+                ? nil
+                : "议会已完成，但归档失败：\(archiveStore.lastErrorDescription ?? "未知错误")"
         }
     }
 
-    /// 中段检查点防抖:事件密集到达时只在最后一次之后 300ms 合并成一次延迟写入。
-    /// 已有一个防抖任务在等待时直接复用(latest-wins 由 store 的 pendingRoom 保证)。
+    /// 中段检查点节流:事件密集到达时每个 300ms 窗口最多发起一次延迟写入。
+    /// 已有节流任务在等待时直接复用(latest-wins 由 store 的 pendingRoom 保证)。
     private func scheduleArchive() {
         guard !isReplay, currentTaskId != nil, !messages.isEmpty else { return }
-        guard archiveDebounceTask == nil else { return }
-        archiveDebounceTask = Task { @MainActor [weak self] in
+        guard archiveThrottleTask == nil else { return }
+        archiveThrottleTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            self?.archiveDebounceTask = nil
+            self?.archiveThrottleTask = nil
             self?.archiveCurrentRoom(deferred: true)
         }
     }
 
     private func cancelScheduledArchive() {
-        archiveDebounceTask?.cancel()
-        archiveDebounceTask = nil
+        archiveThrottleTask?.cancel()
+        archiveThrottleTask = nil
     }
 
     func restartLastDiscussion() {
@@ -1785,7 +1795,7 @@ final class CouncilChatViewModel {
         roomStateOverride = summary.status == .completed ? "就绪" : summary.status.title
         updateDetail(status: roomStateOverride ?? "就绪")
         persistTranscript()
-        // 终态:取消防抖 → 排空在途延迟写 → 同步落最终快照。同步写严格最后,
+        // 终态:取消节流任务 → 排空在途延迟写 → 同步落最终快照。同步写严格最后,
         // 保证「写后立即 load」看到完成态,也不会被旧延迟写覆盖。
         cancelScheduledArchive()
         await archiveStore.flushDeferred()
@@ -1898,7 +1908,7 @@ final class CouncilChatViewModel {
             let mapped = CouncilMessageStatus(status)
             updateMessage(id, body: body, status: mapped)
             // 仅在席位发言完结/失败时归档,流式中途(speaking)不写,避免逐 token 落盘。
-            // 中段完结走防抖合并,密集发言时不会每条都触发一次离主线程写入。
+            // 中段完结走节流合并,密集发言时不会每条都触发一次离主线程写入。
             if mapped != .speaking { scheduleArchive() }
         case .askUser:
             // 实际的暂停/恢复由 onAskUser 回调驱动，这里不做额外处理。
@@ -2020,7 +2030,7 @@ final class CouncilChatViewModel {
     }
 
     private func stopAndCheckpointActiveDiscussion() {
-        // 取消即终止路径:无论是否要 checkpoint 都先取消防抖,避免切走后再次写入。
+        // 取消即终止路径:无论是否要 checkpoint 都先取消节流任务,避免切走后再次写入。
         cancelScheduledArchive()
         let shouldCheckpoint = activeDiscussionID != nil || isRunning
         stopActiveDiscussion()
@@ -2308,6 +2318,10 @@ enum CouncilParticipantState: String {
 }
 
 struct CouncilChatMessage: Identifiable {
+    private static let pendingPhaseLabels: Set<String> = [
+        "思考中...", "调研和完善议题中...", "点评中...", "总结中...",
+    ]
+
     let id: UUID
     let kind: CouncilMessageKind
     let author: String
@@ -2338,10 +2352,25 @@ struct CouncilChatMessage: Identifiable {
     }
 
     var displayBody: String {
-        if status == .speaking && body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if status == .speaking && trimmed.isEmpty {
             return "思考中..."
         }
+        if Self.pendingPhaseLabels.contains(trimmed), status != .speaking {
+            return "未生成内容"
+        }
         return body
+    }
+
+    /// Runner phase labels are UI chrome, not generated Markdown. Keeping them
+    /// outside the incremental renderer makes the first model text an initial
+    /// document instead of a non-prefix replacement of "思考中..." / "总结中...".
+    var streamingMarkdownBody: String? {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if Self.pendingPhaseLabels.contains(trimmed) || (status == .speaking && trimmed.isEmpty) {
+            return nil
+        }
+        return displayBody
     }
 
     var usesStreamingMarkdown: Bool {
@@ -2620,6 +2649,7 @@ final class CouncilRoomArchiveStore {
 
     /// 测试缝:累计成功写入次数(同步 + 延迟)。
     private(set) var completedWriteCount = 0
+    private(set) var lastErrorDescription: String?
 
     /// 延迟写入的最新快照与串行泵:saveDeferred 只保留最新快照(latest-wins),
     /// 后台泵写完上一份再写最新一份,encode+write 不占主线程。
@@ -2638,19 +2668,24 @@ final class CouncilRoomArchiveStore {
         self.directory = base.appendingPathComponent("council", isDirectory: true)
     }
 
-    func save(_ room: CouncilPersistedRoom) {
-        syncWriteGeneration.bump()
+    @discardableResult
+    func save(_ room: CouncilPersistedRoom) -> Bool {
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             let data = try encoder.encode(room)
-            try data.write(to: fileURL(for: room.taskId), options: .atomic)
+            try syncWriteGeneration.performSynchronousWrite {
+                try data.write(to: fileURL(for: room.taskId), options: .atomic)
+            }
             completedWriteCount += 1
+            lastErrorDescription = nil
+            return true
         } catch {
-            // 归档失败不应打断议会;静默吞掉(下个检查点会再试)。
+            lastErrorDescription = error.localizedDescription
+            return false
         }
     }
 
-    /// 延迟写入:中段检查点经 ViewModel 防抖合并后调用;encode+write 在后台线程,
+    /// 延迟写入:中段检查点经 ViewModel 节流合并后调用;encode+write 在后台线程,
     /// 同一时刻只保留最新快照。终态检查点继续用同步 save() 保证 load-after-save 顺序。
     func saveDeferred(_ room: CouncilPersistedRoom) {
         pendingRoom = room
@@ -2659,14 +2694,16 @@ final class CouncilRoomArchiveStore {
         let gate = syncWriteGeneration
         writePump = Task { [weak self] in
             while let next = self?.takePendingWrite() {
-                let written = await Self.writeRoom(
+                let outcome = await Self.writeRoom(
                     next.room,
                     to: next.url,
                     gate: gate,
                     takenGeneration: next.generation
                 )
-                if written {
+                if outcome.written {
                     self?.noteDeferredWriteCompleted()
+                } else if let errorDescription = outcome.errorDescription {
+                    self?.noteDeferredWriteFailed(errorDescription)
                 }
             }
             self?.clearWritePump()
@@ -2689,6 +2726,11 @@ final class CouncilRoomArchiveStore {
 
     private func noteDeferredWriteCompleted() {
         completedWriteCount += 1
+        lastErrorDescription = nil
+    }
+
+    private func noteDeferredWriteFailed(_ errorDescription: String) {
+        lastErrorDescription = errorDescription
     }
 
     private func clearWritePump() {
@@ -2700,20 +2742,19 @@ final class CouncilRoomArchiveStore {
         to url: URL,
         gate: CouncilArchiveWriteGeneration,
         takenGeneration: UInt64
-    ) async -> Bool {
-        // 入队到落盘之间若发生过同步 save(终态检查点),这份延迟快照已过时:跳过。
-        guard gate.value == takenGeneration else { return false }
+    ) async -> CouncilArchiveWriteOutcome {
         do {
             let data = try JSONEncoder().encode(room)
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try data.write(to: url, options: .atomic)
-            return true
+            let written = try gate.performDeferredWrite(ifCurrent: takenGeneration) {
+                try data.write(to: url, options: .atomic)
+            }
+            return CouncilArchiveWriteOutcome(written: written, errorDescription: nil)
         } catch {
-            // 归档失败不应打断议会;静默吞掉(下个检查点会再试)。
-            return false
+            return CouncilArchiveWriteOutcome(written: false, errorDescription: error.localizedDescription)
         }
     }
 
@@ -2770,18 +2811,34 @@ final class CouncilRoomArchiveStore {
     }
 }
 
-/// 同步写入代数闸:延迟写入泵在后台线程落盘前读取它,与入队时记下的代数比对。
-/// 期间只要发生过一次同步 save(终态检查点),代数就变了,这份延迟快照即被判为
-/// 过时并跳过 —— 保证「终态同步写」永远是最新事实,不会被在途的旧延迟写覆盖。
+private struct CouncilArchiveWriteOutcome: Sendable {
+    let written: Bool
+    let errorDescription: String?
+}
+
+/// 同步写入代数闸:延迟提交的「代数检查 + atomic replace」和终态的「代数 bump +
+/// atomic replace」共享同一临界区。无论谁先进入,终态同步提交都不会被旧延迟快照覆盖。
 /// `@unchecked Sendable` + NSLock:它要跨 MainActor 与后台写入任务共享,自身用锁串行化。
 final class CouncilArchiveWriteGeneration: @unchecked Sendable {
     private let lock = NSLock()
     private var generation: UInt64 = 0
 
-    func bump() {
+    func performSynchronousWrite(_ write: () throws -> Void) throws {
         lock.lock()
+        defer { lock.unlock() }
         generation &+= 1
-        lock.unlock()
+        try write()
+    }
+
+    func performDeferredWrite(
+        ifCurrent expectedGeneration: UInt64,
+        _ write: () throws -> Void
+    ) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard generation == expectedGeneration else { return false }
+        try write()
+        return true
     }
 
     var value: UInt64 {

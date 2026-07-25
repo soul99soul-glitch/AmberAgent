@@ -334,6 +334,109 @@ final class IOSSearchExecutorTests: XCTestCase {
         }
     }
 
+    func testScrapeWebDeniesAlternateLoopbackAddressForms() {
+        for rawURL in [
+            "http://127.1/admin",
+            "http://2130706433/admin",
+            "http://[::ffff:127.0.0.1]/admin",
+        ] {
+            XCTAssertThrowsError(
+                try IOSSearchExecutor.allowedPublicHTTPURL(from: rawURL),
+                "Expected SSRF guard to reject \(rawURL)"
+            ) { error in
+                XCTAssertEqual(
+                    error as? IOSSearchExecutorError,
+                    .disallowedURL("local, loopback, link-local, and private hosts are blocked")
+                )
+            }
+        }
+    }
+
+    func testPublicTransportRejectsHostnameResolvingToPrivateAddress() async {
+        let transport = IOSURLSessionSearchHTTPTransport(
+            session: URLSession(configuration: .ephemeral),
+            resolveHost: { _ in ["10.0.0.8"] }
+        )
+        let request = URLRequest(url: URL(string: "https://public-name.example/page")!)
+
+        do {
+            _ = try await transport.sendPublic(request, maximumResponseBytes: 1_024)
+            XCTFail("Expected DNS-to-private SSRF guard to reject the request before transport")
+        } catch {
+            XCTAssertEqual(
+                error as? IOSSearchExecutorError,
+                .disallowedURL("host resolves to a non-public address")
+            )
+        }
+    }
+
+    func testPublicTransportRechecksEveryRedirectTarget() async {
+        RedirectingSearchURLProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [RedirectingSearchURLProtocol.self]
+        let transport = IOSURLSessionSearchHTTPTransport(
+            session: URLSession(configuration: configuration),
+            resolveHost: { host in
+                host == "internal.example" ? ["127.0.0.1"] : ["93.184.216.34"]
+            }
+        )
+        let request = URLRequest(url: URL(string: "https://public.example/start")!)
+
+        do {
+            _ = try await transport.sendPublic(request, maximumResponseBytes: 1_024)
+            XCTFail("Expected redirect to a DNS-private target to be blocked")
+        } catch {
+            XCTAssertEqual(
+                error as? IOSSearchExecutorError,
+                .disallowedURL("host resolves to a non-public address")
+            )
+        }
+        XCTAssertFalse(RedirectingSearchURLProtocol.requestedHosts.contains("internal.example"))
+    }
+
+    func testPublicTransportCancelsAsSoonAsStreamingBodyExceedsByteLimit() async {
+        OversizedSearchURLProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OversizedSearchURLProtocol.self]
+        let transport = IOSURLSessionSearchHTTPTransport(
+            session: URLSession(configuration: configuration),
+            resolveHost: { _ in ["93.184.216.34"] }
+        )
+        let request = URLRequest(url: URL(string: "https://public.example/large")!)
+
+        do {
+            _ = try await transport.sendPublic(request, maximumResponseBytes: 8)
+            XCTFail("Expected streaming response to stop at the hard byte cap")
+        } catch {
+            XCTAssertEqual(error as? IOSSearchExecutorError, .responseTooLarge(8))
+        }
+        XCTAssertGreaterThan(OversizedSearchURLProtocol.stopLoadingCount, 0)
+    }
+
+    func testPreCancelledPublicTransportNeverStartsURLLoading() async {
+        CountingSearchURLProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [CountingSearchURLProtocol.self]
+        let transport = IOSURLSessionSearchHTTPTransport(
+            session: URLSession(configuration: configuration),
+            resolveHost: { _ in ["93.184.216.34"] }
+        )
+        let request = URLRequest(url: URL(string: "https://public.example/cancelled")!)
+        let task = Task { @MainActor in
+            try await transport.sendPublic(request, maximumResponseBytes: 1_024)
+        }
+
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Expected the pre-cancelled request to throw CancellationError")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(CountingSearchURLProtocol.startLoadingCount, 0)
+    }
+
     func testScrapeWebRejectsInvalidURL() {
         XCTAssertThrowsError(try IOSSearchExecutor.scrapeRequest(from: #"{"url":"not a url"}"#)) { error in
             XCTAssertEqual(error as? IOSSearchExecutorError, .invalidURL)
@@ -533,4 +636,91 @@ private final class MockSearchTransport: IOSSearchHTTPTransport {
         )!
         return (http, response.body)
     }
+}
+
+private final class RedirectingSearchURLProtocol: URLProtocol {
+    nonisolated(unsafe) private(set) static var requestedHosts: [String] = []
+
+    static func reset() {
+        requestedHosts = []
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let host = request.url?.host ?? ""
+        Self.requestedHosts.append(host)
+        if host == "public.example" {
+            let redirect = URLRequest(url: URL(string: "https://internal.example/secret")!)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 302,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Location": redirect.url!.absoluteString]
+            )!
+            client?.urlProtocol(self, wasRedirectedTo: redirect, redirectResponse: response)
+            return
+        }
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/plain"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("secret".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class OversizedSearchURLProtocol: URLProtocol {
+    nonisolated(unsafe) private(set) static var stopLoadingCount = 0
+
+    static func reset() {
+        stopLoadingCount = 0
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/plain"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("123456".utf8))
+        client?.urlProtocol(self, didLoad: Data("789ABC".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {
+        Self.stopLoadingCount += 1
+    }
+}
+
+private final class CountingSearchURLProtocol: URLProtocol {
+    nonisolated(unsafe) private(set) static var startLoadingCount = 0
+
+    static func reset() {
+        startLoadingCount = 0
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.startLoadingCount += 1
+        client?.urlProtocol(self, didFailWithError: URLError(.cancelled))
+    }
+
+    override func stopLoading() {}
 }

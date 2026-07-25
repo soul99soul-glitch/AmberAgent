@@ -53,6 +53,13 @@ interface ConversationStorageInterface {
     @Throws(Throwable::class)
     suspend fun saveConversation(conversation: Conversation)
 
+    /**
+     * 批量导入完整 Conversation JSON。实现必须先校验整批 payload，再覆盖同 ID
+     * 会话并重建派生 index；不在导入批次中的已有会话保持不变。
+     */
+    @Throws(Throwable::class)
+    suspend fun importConversations(serializedConversations: List<String>)
+
     /** 删除 {id}.json，并从 index.json 移除对应条目。不存在则空操作。 */
     @Throws(Throwable::class)
     suspend fun deleteConversation(id: Uuid)
