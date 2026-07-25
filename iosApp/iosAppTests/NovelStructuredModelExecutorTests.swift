@@ -124,7 +124,11 @@ final class NovelStructuredModelExecutorTests: XCTestCase {
         XCTAssertEqual(execution.resolvedModel.providerID, "transport-provider")
         XCTAssertEqual(execution.resolvedModel.ownerProviderID, "owner-provider")
         XCTAssertEqual(execution.requestSHA256.count, 64)
-        XCTAssertEqual(execution.parameters["maxOutputTokens"], "4096")
+        // 2026-07-26 契约变更(用户明确裁决):不再给模型设输出硬上限——人为上限会被
+        // 推理 token 吃掉并触发「模型回复达到输出上限」的假失败。原断言锁的是 4096,
+        // 现改为断言**根本不发送该参数**。输入预算的「留位」由 taskKind 的
+        // outputReservationTokens 独立承担,是纯本地算术,不进 provider 参数。
+        XCTAssertNil(execution.parameters["maxOutputTokens"])
         XCTAssertEqual(execution.modelRequest.runID, runID)
     }
 
@@ -280,5 +284,56 @@ private extension NovelStructuredModelExecutorTests {
           "settingProposals": []
         }
         """
+    }
+
+    // MARK: - 输出上限 / 输入留位的职责分离(2026-07-26 真机故障守护)
+
+    /// 真机故障:状态同步报「模型回复达到输出上限」。根因是 `maxOutputTokens` 一个字段
+    /// 同时承担「发给 provider 的硬上限」与「输入预算的本地留位」两个职责,推理 token
+    /// 吃掉预算后结构化 JSON 未写完即撞线。现已拆分,本组测试锁住拆分后的契约。
+    func testNoStructuredTaskSendsAnOutputCapToTheProvider() {
+        for kind in NovelStructuredModelTaskKind.allCases {
+            XCTAssertNil(
+                kind.parameters.maxOutputTokens,
+                "\(kind) 不得给模型设输出硬上限——人为上限会造成假失败"
+            )
+        }
+    }
+
+    func testNoGenerationRunKindSendsAnOutputCapToTheProvider() {
+        // 生成侧同一契约:四类生成任务同样不得设硬上限。
+        for kind in [NovelRunKind.quickStart, .discussion, .prose, .polish] {
+            XCTAssertGreaterThan(
+                kind.outputReservationTokens,
+                0,
+                "\(kind) 必须有正的输入留位,否则输入可能吃满窗口、挤没输出空间"
+            )
+        }
+    }
+
+    /// 红线:留位是**纯本地算术**,绝不能出现在发往 provider 的参数里。
+    /// 这条防的是「把两个职责又合并回一个字段」——那等于故障原样复发。
+    func testOutputReservationNeverLeaksIntoProviderParameters() {
+        for kind in NovelStructuredModelTaskKind.allCases {
+            let evidence = kind.parameters.evidenceDictionary
+            XCTAssertNil(evidence["maxOutputTokens"], "\(kind) 泄漏了输出上限")
+            XCTAssertNil(evidence["outputReservationTokens"], "\(kind) 把本地留位发给了 provider")
+            XCTAssertFalse(
+                evidence.values.contains(String(kind.outputReservationTokens)),
+                "\(kind) 的留位数值出现在了 provider 参数里"
+            )
+        }
+    }
+
+    /// 留位必须仍在扣减输入预算(证明护栏没被拆掉,而不是简单地把上限删了了事)。
+    func testInputBudgetStillReservesRoomForOutput() {
+        for kind in NovelStructuredModelTaskKind.allCases {
+            XCTAssertGreaterThan(kind.outputReservationTokens, 0, "\(kind) 缺少输入留位")
+        }
+        XCTAssertGreaterThan(
+            NovelStructuredModelTaskKind.stateRebuild.outputReservationTokens,
+            NovelStructuredModelTaskKind.stateDelta.outputReservationTokens,
+            "整段状态重建的输出量级大于增量,留位应更大"
+        )
     }
 }

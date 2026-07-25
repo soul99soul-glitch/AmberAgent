@@ -1,6 +1,6 @@
 import Foundation
 
-enum NovelStructuredModelTaskKind: String, Codable, Equatable, Sendable {
+enum NovelStructuredModelTaskKind: String, Codable, Equatable, CaseIterable, Sendable {
     case stateDelta
     case stateRebuild
     case discussionArchive
@@ -150,7 +150,7 @@ struct NovelStructuredModelExecutor: Sendable {
             effectiveInputBudgetTokens: try effectiveInputBudget(
                 requestedInputBudgetTokens: requestedInputBudgetTokens,
                 model: model,
-                parameters: parameters
+                outputReservationTokens: taskKind.outputReservationTokens
             )
         )
     }
@@ -469,7 +469,7 @@ struct NovelStructuredModelExecutor: Sendable {
     private func effectiveInputBudget(
         requestedInputBudgetTokens: Int,
         model: NovelResolvedModel,
-        parameters: NovelModelParameters
+        outputReservationTokens: Int
     ) throws -> Int {
         guard requestedInputBudgetTokens > 0 else {
             throw NovelError.invalidInput("The structured model input budget must be positive.")
@@ -480,7 +480,11 @@ struct NovelStructuredModelExecutor: Sendable {
                 Self.unknownWindowFallbackInputBudgetTokens
             )
         }
-        let output = parameters.maxOutputTokens ?? 0
+        // 用**预留值**而非 `parameters.maxOutputTokens` 反推输入预算。
+        // 两者语义不同,过去共用一个字段是本轮故障的根源:
+        //   · 发给 provider 的 maxTokens = 硬上限,撞上即截断 → 已改为 nil(不截断模型);
+        //   · 这里需要的是「给输出留多少空间」,是纯本地算术,绝不发给 provider。
+        let output = outputReservationTokens
         let available = max(0, window - output - 1_024)
         guard available > 0 else {
             throw NovelError.injectionBudgetExceeded(
@@ -644,35 +648,36 @@ private extension NovelStructuredModelTask {
     }
 }
 
-private extension NovelStructuredModelTaskKind {
+extension NovelStructuredModelTaskKind {
+    /// 「给输出留多少上下文空间」——**纯本地算术,绝不发给 provider**。
+    ///
+    /// 2026-07-26 真机故障:该量此前与 `maxOutputTokens` 共用一个字段,于是"留位"同时
+    /// 变成了发给模型的硬上限,推理 token 吃掉预算后结构化 JSON 还没写完就撞线,报
+    /// 「模型回复达到输出上限」。现拆成两个独立概念:上限取消(见 `parameters`),
+    /// 留位保留在此,数值沿用原先按任务规模估的量级。
+    var outputReservationTokens: Int {
+        switch self {
+        case .stateRebuild: 8_192
+        case .stateDelta, .discussionArchive, .polishDrift: 4_096
+        }
+    }
+
     var parameters: NovelModelParameters {
         switch self {
-        case .stateDelta:
+        case .stateDelta, .stateRebuild, .discussionArchive:
             .init(
                 temperature: 0.1,
                 topP: 0.8,
-                maxOutputTokens: 4_096,
-                reasoningLevel: .automatic
-            )
-        case .stateRebuild:
-            .init(
-                temperature: 0.1,
-                topP: 0.8,
-                maxOutputTokens: 8_192,
-                reasoningLevel: .automatic
-            )
-        case .discussionArchive:
-            .init(
-                temperature: 0.1,
-                topP: 0.8,
-                maxOutputTokens: 4_096,
+                // 不给模型设硬上限(用户明确裁决):写多少由模型决定,不人为截断。
+                // 输入侧的留位由 `outputReservationTokens` 独立承担。
+                maxOutputTokens: nil,
                 reasoningLevel: .automatic
             )
         case .polishDrift:
             .init(
                 temperature: 0,
                 topP: 1,
-                maxOutputTokens: 4_096,
+                maxOutputTokens: nil,
                 reasoningLevel: .automatic
             )
         }

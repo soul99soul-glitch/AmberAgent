@@ -1520,7 +1520,7 @@ private extension DefaultNovelCreation {
         }
     }
 
-    /// 2026-07-25 用户明确裁决:四类生成任务一律不人为设置输出上限,思考等级一律 `.automatic`。
+    /// 2026-07-26 用户明确裁决:四类生成任务一律不人为设置输出上限,思考等级一律 `.automatic`。
     ///
     /// 原实现按任务分配 2K/4K/8K 上限并对 prose/polish 关闭思考。真机取证(deepseek-v4-pro,
     /// 推理模型)显示 quickStart 的 2048 上限会被思考 token 吃掉,结构化建议还没写完就
@@ -1586,7 +1586,11 @@ private extension DefaultNovelCreation {
         guard let window = model.contextWindowTokens else {
             return request.inputBudgetTokens
         }
-        let output = parameters.maxOutputTokens ?? 0
+        // 用**预留值**反推输入预算,而不是 `parameters.maxOutputTokens`。
+        // 2026-07-25 取消四类生成任务的硬上限时,该字段变为 nil,这里的留位随之
+        // 归零——输入预算可以吃到「窗口 − 1024」,反过来挤掉输出空间。那是当时
+        // 未察觉的连带损伤,此处补回:上限归上限(不发给模型),留位归留位(纯本地)。
+        let output = request.kind.outputReservationTokens
         let available = max(0, window - output - 1_024)
         guard available > 0 else {
             throw NovelError.injectionBudgetExceeded(

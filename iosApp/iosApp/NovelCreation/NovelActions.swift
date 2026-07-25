@@ -1089,6 +1089,19 @@ enum NovelRunKind: String, Codable, Sendable {
     case discussion
     case prose
     case polish
+
+    /// 「给输出留多少上下文空间」——**纯本地算术,绝不发给 provider**。
+    ///
+    /// 与 `NovelStructuredModelTaskKind.outputReservationTokens` 同一语义,分别服务于
+    /// 生成侧与结构化侧的输入预算反推。两处的**唯一**职责就是这个;发给模型的硬上限
+    /// 已一律取消(`maxOutputTokens: nil`),不要再把这两件事合并回一个字段——那正是
+    /// 2026-07-26「模型回复达到输出上限」故障的根源。
+    var outputReservationTokens: Int {
+        switch self {
+        case .prose, .polish: 8_192
+        case .quickStart, .discussion: 4_096
+        }
+    }
 }
 
 struct NovelRunRequest: Equatable, Sendable {
