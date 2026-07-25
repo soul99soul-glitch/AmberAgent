@@ -610,7 +610,27 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(compendium.contains("await viewModel.startQuickStartSuggestions(guidance: guidance)"))
         XCTAssertTrue(compendium.contains("TextEditor(text: $guidance)"))
 
-        XCTAssertTrue(viewModel.contains("func startQuickStartSuggestions(guidance: String? = nil) async -> NovelRunID?"))
+        // 2026-07-25 按证据更新:签名新增 `exactUserText`(见下方重试契约),原先锁整行
+        // 字面量的断言随之过时。改为断言构成契约的各个要素,避免再被无关的格式变化绊倒。
+        XCTAssertTrue(viewModel.contains("func startQuickStartSuggestions("))
+        XCTAssertTrue(viewModel.contains("guidance: String? = nil"))
+        XCTAssertTrue(viewModel.contains("exactUserText: String? = nil"))
+    }
+
+    /// 真机实测缺陷的守护:带「调整方向」的快速开始失败后点重试,曾退回默认文案、
+    /// 把用户填的调整方向静默丢掉(与 `isEligibleForExactRetry` 的精确重试契约相悖)。
+    /// 重试必须从持久化的 user 消息取回原文并原样重发。
+    func testQuickStartRetryReplaysTheOriginalUserTextInsteadOfDefaultCopy() throws {
+        let sessionViewModel = try source("iosApp/NovelCreation/NovelSessionViewModel.swift")
+
+        let retryRange = try XCTUnwrap(sessionViewModel.range(of: "if run.kind == .quickStart {"))
+        let retryBody = String(sessionViewModel[retryRange.lowerBound...].prefix(700))
+        XCTAssertTrue(retryBody.contains("$0.id == run.userMessageID"))
+        XCTAssertTrue(retryBody.contains("exactUserText: originalUserText"))
+        XCTAssertFalse(
+            retryBody.contains("startQuickStartSuggestions(),"),
+            "重试不得调用不带参数的版本——那会丢掉用户填写的调整方向"
+        )
     }
 
     func testDeadNovelMaterialsViewNoLongerCarriesTheQuickStartRegenerationEntry() throws {

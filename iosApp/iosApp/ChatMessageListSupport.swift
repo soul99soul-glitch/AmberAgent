@@ -142,6 +142,15 @@ struct ChatAssistantText<Content: View>: View {
 
 struct ChatAssistantPendingResponseView: View {
     @State private var startedAt = Date()
+    /// Overridable so callers with a richer phase model (e.g. Novel's quickStart streaming
+    /// disclosure) can distinguish "still waiting" from "already generating" without a
+    /// second bespoke placeholder view. Defaults to the original Chat/Council copy so every
+    /// existing call site keeps its exact prior text.
+    var label: (Int) -> String = ChatAssistantPendingResponseView.defaultLabel
+
+    nonisolated static func defaultLabel(elapsed: Int) -> String {
+        elapsed >= 2 ? "正在等待模型响应 \(elapsed) 秒" : "正在连接模型"
+    }
 
     var body: some View {
         ChatAssistantStack {
@@ -153,7 +162,7 @@ struct ChatAssistantPendingResponseView: View {
 
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     let elapsed = Int(max(0, context.date.timeIntervalSince(startedAt)))
-                    Text(elapsed >= 2 ? "正在等待模型响应 \(elapsed) 秒" : "正在连接模型")
+                    Text(label(elapsed))
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AmberTheme.foreground2)
                 }

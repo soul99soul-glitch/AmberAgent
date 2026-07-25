@@ -438,7 +438,10 @@ final class NovelSessionViewModelTests: XCTestCase {
         let requests = await harness.adapter.requests
         let request = try XCTUnwrap(requests.first)
         XCTAssertEqual(request.purpose, .prose)
-        XCTAssertEqual(request.parameters.maxOutputTokens, 8_192)
+        // 2026-07-25 契约变更(用户明确裁决):四类生成任务不再人为设置输出上限。
+        // 原断言锁的是整章 8_192,现改为断言「不设限」——人为上限会被推理模型的
+        // 思考 token 吃掉并触发假失败(见 NovelGenerationLifecycle.modelParameters 注释)。
+        XCTAssertNil(request.parameters.maxOutputTokens)
     }
 
     func testWholeChapterBurstCoalescesUIPublicationsWithoutChangingDurableFinalText() async throws {

@@ -40,6 +40,50 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
     }
 
+    func testPendingPresentationDistinguishesWaitingFromStreaming() {
+        let waitingEarly = NovelSessionPendingPresentation.label(
+            for: .waitingForFirstToken,
+            elapsed: 1
+        )
+        let waitingLate = NovelSessionPendingPresentation.label(
+            for: .waitingForFirstToken,
+            elapsed: 12
+        )
+        let streaming = NovelSessionPendingPresentation.label(
+            for: .streaming,
+            elapsed: 12
+        )
+
+        XCTAssertEqual(waitingEarly, "正在连接模型")
+        XCTAssertTrue(waitingLate.contains("12"))
+        XCTAssertNotEqual(
+            waitingLate,
+            streaming,
+            "waitingForFirstToken and streaming must render visibly different copy."
+        )
+        XCTAssertNotEqual(
+            waitingEarly,
+            streaming,
+            "waitingForFirstToken and streaming must render visibly different copy."
+        )
+    }
+
+    func testPendingPresentationFallsBackToDefaultCopyForNonQuickStartPhases() {
+        // Phases outside the quickStart streaming disclosure (or no phase at all) must keep
+        // rendering the exact same copy ChatAssistantPendingResponseView already used, so
+        // Chat/Council callers that never pass a phase see zero behavior change.
+        for elapsed in [0, 1, 2, 9] {
+            XCTAssertEqual(
+                NovelSessionPendingPresentation.label(for: nil, elapsed: elapsed),
+                ChatAssistantPendingResponseView.defaultLabel(elapsed: elapsed)
+            )
+            XCTAssertEqual(
+                NovelSessionPendingPresentation.label(for: .terminalAwaitingRefresh, elapsed: elapsed),
+                ChatAssistantPendingResponseView.defaultLabel(elapsed: elapsed)
+            )
+        }
+    }
+
     func testStateSyncOnlyShowsPercentageAfterDurableProgressExists() {
         let projectID = NovelProjectID()
         let branchID = NovelBranchID()

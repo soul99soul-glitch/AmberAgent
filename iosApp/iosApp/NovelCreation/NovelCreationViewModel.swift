@@ -446,8 +446,16 @@ final class NovelCreationViewModel {
         return projectID
     }
 
+    /// - Parameters:
+    ///   - guidance: 用户在「重新生成设定建议」里填的调整方向,会被并入请求正文。
+    ///   - exactUserText: 重试专用。`retryGeneration` 从失败 run 的**持久化** user 消息
+    ///     取回原文并原样重发,以满足 `isEligibleForExactRetry` 的「精确重试」契约。
+    ///     若不传,重试会退回默认文案、把用户填过的调整方向静默丢掉(真机实测过的缺陷)。
     @discardableResult
-    func startQuickStartSuggestions(guidance: String? = nil) async -> NovelRunID? {
+    func startQuickStartSuggestions(
+        guidance: String? = nil,
+        exactUserText: String? = nil
+    ) async -> NovelRunID? {
         guard !isPerforming,
               !requiresReload,
               let project = projectSnapshot,
@@ -457,7 +465,9 @@ final class NovelCreationViewModel {
         let projectID = project.project.id
         let trimmedGuidance = guidance?.trimmingCharacters(in: .whitespacesAndNewlines)
         let userText: String
-        if let trimmedGuidance, !trimmedGuidance.isEmpty {
+        if let exactUserText, !exactUserText.isEmpty {
+            userText = exactUserText
+        } else if let trimmedGuidance, !trimmedGuidance.isEmpty {
             userText = "请生成一组可确认的世界观、人物、总剧情大纲和写作要求建议。\n\n用户对上一版建议不满意，要求按以下方向调整重新生成：\n\(trimmedGuidance)"
         } else {
             userText = "请生成一组可确认的世界观、人物、总剧情大纲和写作要求建议。"

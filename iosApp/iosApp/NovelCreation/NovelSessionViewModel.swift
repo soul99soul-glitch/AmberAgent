@@ -660,8 +660,15 @@ final class NovelSessionViewModel {
                 ($0.status == .failed || $0.status == .interrupted)
         }), isEligibleForExactRetry(run) else { return false }
         if run.kind == .quickStart {
-            guard let retryRunID = await workspace.startQuickStartSuggestions(),
-                  retryRunID != runID else { return false }
+            // 精确重试:从持久化的 user 消息取回本次请求原文(含用户填写的调整方向)
+            // 原样重发。此前这里调的是无参版本,会退回默认文案、把调整方向静默丢掉,
+            // 与 isEligibleForExactRetry 的「精确」契约相悖。取不到就退回默认行为。
+            let originalUserText = workspace.branchSnapshot?.session.messages.first(where: {
+                $0.runID == run.id && $0.id == run.userMessageID && $0.role == .user
+            })?.content
+            guard let retryRunID = await workspace.startQuickStartSuggestions(
+                exactUserText: originalUserText
+            ), retryRunID != runID else { return false }
             operationErrorMessage = nil
             refreshErrorMessage = nil
             lastFailure = nil

@@ -42,7 +42,9 @@ struct NovelSessionBubble: View {
     @ViewBuilder
     private var assistantBubble: some View {
         if isStreaming && content.isEmpty {
-            ChatAssistantPendingResponseView()
+            ChatAssistantPendingResponseView(label: { elapsed in
+                NovelSessionPendingPresentation.label(for: transientPhase, elapsed: elapsed)
+            })
         } else {
             ChatAssistantStack {
                 ChatAgentName()

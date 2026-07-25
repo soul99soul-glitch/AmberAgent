@@ -1520,13 +1520,24 @@ private extension DefaultNovelCreation {
         }
     }
 
+    /// 2026-07-25 用户明确裁决:四类生成任务一律不人为设置输出上限,思考等级一律 `.automatic`。
+    ///
+    /// 原实现按任务分配 2K/4K/8K 上限并对 prose/polish 关闭思考。真机取证(deepseek-v4-pro,
+    /// 推理模型)显示 quickStart 的 2048 上限会被思考 token 吃掉,结构化建议还没写完就
+    /// 触发 `finishReason == "length"`,整轮以「模型回复达到输出上限」硬失败——人为上限
+    /// 制造了本不存在的失败。讨论模式早在 2026-07-17 就因同一原因改为 nil,其余三类被漏掉。
+    ///
+    /// 输入侧仍有独立护栏:`effectiveInputBudget` 用 `request.inputBudgetTokens` 封顶
+    /// (用户可在「写作上下文预算」里配置),因此取消输出上限不会让输入无限膨胀。
+    /// 已知边界:若用户把输入预算调到接近模型窗口上限,留给输出的空间会变小,模型可能
+    /// 仍由 provider 侧自然截断——该情形沿用既有 `reachedOutputLimit` 提示,不在此层兜底。
     func modelParameters(for request: NovelRunRequest) -> NovelModelParameters {
         switch request.kind {
         case .quickStart:
             NovelModelParameters(
                 temperature: 0.7,
                 topP: 0.95,
-                maxOutputTokens: 2_048,
+                maxOutputTokens: nil,
                 reasoningLevel: .automatic
             )
         case .discussion:
@@ -1540,15 +1551,15 @@ private extension DefaultNovelCreation {
             NovelModelParameters(
                 temperature: 0.85,
                 topP: 0.95,
-                maxOutputTokens: request.granularity == .wholeChapter ? 8_192 : 4_096,
-                reasoningLevel: .off
+                maxOutputTokens: nil,
+                reasoningLevel: .automatic
             )
         case .polish:
             NovelModelParameters(
                 temperature: 0.35,
                 topP: 0.9,
-                maxOutputTokens: 8_192,
-                reasoningLevel: .off
+                maxOutputTokens: nil,
+                reasoningLevel: .automatic
             )
         }
     }
