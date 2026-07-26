@@ -80,6 +80,7 @@
     <array>
         <string>$(PRODUCT_BUNDLE_IDENTIFIER).chat.*</string>
         <string>$(PRODUCT_BUNDLE_IDENTIFIER).deepread.*</string>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).keepalive.*</string>
     </array>
     <key>NSAppleMusicUsageDescription</key>
     <string>AmberAgent can request access to Apple Music and the media library when you choose to enable media capabilities.</string>

@@ -17,6 +17,50 @@ final class AgentActivityPresentationTests: XCTestCase {
         XCTAssertFalse(String(describing: presentation).contains("private-model-name"))
     }
 
+    func testResponseLifecycleStartsConnectingThenTracksReasoningAndText() {
+        XCTAssertEqual(AgentActivityResponseStagePolicy.initialStage, .preparing)
+        XCTAssertNil(AgentActivityResponseStagePolicy.updatedStage(
+            hasReasoningDelta: false,
+            hasTextDelta: false
+        ))
+        XCTAssertEqual(
+            AgentActivityResponseStagePolicy.updatedStage(
+                hasReasoningDelta: true,
+                hasTextDelta: false
+            ),
+            .thinking
+        )
+        XCTAssertEqual(
+            AgentActivityResponseStagePolicy.updatedStage(
+                hasReasoningDelta: true,
+                hasTextDelta: true
+            ),
+            .thinking,
+            "同一 delta 仍有 reasoning 内容时，应与 Chat 的 open reasoning 状态保持一致"
+        )
+    }
+
+    func testDisplayStageNormalizesPhaseOverridesForEverySystemSurface() {
+        XCTAssertEqual(
+            AgentActivityPresentation.response(stage: .thinking)
+                .displayStage(isStale: false),
+            .thinking
+        )
+        XCTAssertEqual(
+            AgentActivityPresentation.response(stage: .thinking)
+                .displayStage(isStale: true),
+            .stale
+        )
+        XCTAssertEqual(
+            AgentActivityPresentation.waitingForUser().displayStage(isStale: false),
+            .waitingForConfirmation
+        )
+        XCTAssertEqual(
+            AgentActivityPresentation.completed().displayStage(isStale: false),
+            .completed
+        )
+    }
+
     func testMeasurableWorkUsesOnlyRealNumeratorAndDenominator() throws {
         let presentation = AgentActivityPresentation.measurablePreview(
             kind: .document,

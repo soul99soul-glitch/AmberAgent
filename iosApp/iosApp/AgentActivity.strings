@@ -7,11 +7,12 @@
 "agent.activity.kind.command" = "Command task";
 "agent.activity.kind.workflow" = "Agent task";
 
-"agent.activity.stage.preparing" = "Preparing";
+"agent.activity.stage.preparing" = "Connecting";
+"agent.activity.stage.thinking" = "Thinking";
 "agent.activity.stage.searching" = "Searching";
 "agent.activity.stage.readingSources" = "Reading sources";
 "agent.activity.stage.readingWeb" = "Reading the web";
-"agent.activity.stage.generating" = "Generating";
+"agent.activity.stage.generating" = "Generating response";
 "agent.activity.stage.generatingImage" = "Generating images";
 "agent.activity.stage.organizing" = "Organizing results";
 "agent.activity.stage.readingDocument" = "Reading document";
@@ -24,7 +25,7 @@
 "agent.activity.stage.failed" = "Incomplete";
 "agent.activity.stage.cancelled" = "Stopped";
 
-"agent.activity.action.openTask" = "Open task";
+"agent.activity.action.openTask" = "Open conversation";
 "agent.activity.action.openConfirmation" = "Open confirmation";
 "agent.activity.action.viewResult" = "View result";
 
@@ -34,6 +35,18 @@
 "agent.activity.fact.completed" = "Done";
 "agent.activity.fact.failed" = "Incomplete";
 "agent.activity.fact.cancelled" = "Stopped";
+
+"agent.activity.compact.preparing" = "Connect";
+"agent.activity.compact.thinking" = "Think";
+"agent.activity.compact.searching" = "Search";
+"agent.activity.compact.readingSources" = "Read";
+"agent.activity.compact.readingWeb" = "Web";
+"agent.activity.compact.generating" = "Reply";
+"agent.activity.compact.generatingImage" = "Create";
+"agent.activity.compact.organizing" = "Organize";
+"agent.activity.compact.readingDocument" = "Document";
+"agent.activity.compact.updatingMemory" = "Memory";
+"agent.activity.compact.runningTool" = "Working";
 
 "agent.activity.metric.source.count" = "%ld sources";
 "agent.activity.metric.source.progress" = "%ld / %ld sources";

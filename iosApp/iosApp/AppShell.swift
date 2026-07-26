@@ -91,6 +91,8 @@ struct AppShell: View {
             initialValue: NovelWorkspaceLifecycleCoordinator()
         )
         self._novelCreationErrorMessage = State(initialValue: novelCreationErrorMessage)
+        // launch handler 必须在启动阶段注册完，晚了系统就没法把后台任务派回来。
+        BackgroundGenerationKeepAlive.shared.configure()
         IOSDeepReadBackgroundCoordinator.shared.configure(sharedSettings: sharedSettingsStore)
         IOSChatBackgroundGenerationCoordinator.shared.configure(
             conversationStore: conversationStore,
@@ -196,7 +198,8 @@ struct AppShell: View {
         switch phase {
         case .background:
             councilChatViewModel.runtimeWillEnterBackground()
-            _ = chatViewModel.handoffGenerationToBackgroundIfNeeded()
+            // 握着后台执行权就别交接，让正在跑的流自己跑完。
+            _ = chatViewModel.handoffGenerationToBackgroundIfNeeded(honorKeepAliveLease: true)
             guard let novelCreationViewModel else { return }
             novelLifecycleCoordinator.enterBackground(
                 waitForCompletion: {

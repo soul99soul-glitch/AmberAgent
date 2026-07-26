@@ -34,17 +34,17 @@ final class IOSNovelCreationWiringTests: XCTestCase {
     }
 
     func testBackgroundLeaseWaitsForExpirationBeforeInterrupting() async {
-        var expirationHandler: (@Sendable () -> Void)?
-        var endedTaskIDs: [UIBackgroundTaskIdentifier] = []
+        var expirationHandler: (() -> Void)?
+        var begunLeaseIds: [String] = []
+        var endedLeaseIds: [String] = []
         var interruptionCount = 0
-        let taskID = UIBackgroundTaskIdentifier(rawValue: 41)
         let completionGate = NovelWorkspaceLifecycleTestGate()
         let coordinator = NovelWorkspaceLifecycleCoordinator(
-            beginBackgroundTask: { _, handler in
-                expirationHandler = handler
-                return taskID
+            beginKeepAlive: { leaseId, onExpire in
+                begunLeaseIds.append(leaseId)
+                expirationHandler = onExpire
             },
-            endBackgroundTask: { endedTaskIDs.append($0) }
+            endKeepAlive: { endedLeaseIds.append($0) }
         )
 
         coordinator.enterBackground(
@@ -53,30 +53,32 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         )
 
         await Task.yield()
+        XCTAssertEqual(begunLeaseIds.count, 1)
         XCTAssertEqual(interruptionCount, 0)
-        XCTAssertTrue(endedTaskIDs.isEmpty)
+        XCTAssertTrue(endedLeaseIds.isEmpty)
 
         expirationHandler?()
-        let didEnd = await eventually { endedTaskIDs.count == 1 }
+        let didEnd = await eventually { endedLeaseIds.count == 1 }
         XCTAssertTrue(didEnd)
 
         XCTAssertEqual(interruptionCount, 1)
-        XCTAssertEqual(endedTaskIDs, [taskID])
+        // 还回去的必须是拿到手的那张租约，不能是另一轮的。
+        XCTAssertEqual(endedLeaseIds, begunLeaseIds)
         await completionGate.open()
     }
 
     func testExpirationEndsTaskAfterDurableInterruptionFinishes() async {
-        var expirationHandler: (@Sendable () -> Void)?
-        var endedTaskIDs: [UIBackgroundTaskIdentifier] = []
-        let taskID = UIBackgroundTaskIdentifier(rawValue: 42)
+        var expirationHandler: (() -> Void)?
+        var begunLeaseIds: [String] = []
+        var endedLeaseIds: [String] = []
         let gate = NovelWorkspaceLifecycleTestGate()
         let completionGate = NovelWorkspaceLifecycleTestGate()
         let coordinator = NovelWorkspaceLifecycleCoordinator(
-            beginBackgroundTask: { _, handler in
-                expirationHandler = handler
-                return taskID
+            beginKeepAlive: { leaseId, onExpire in
+                begunLeaseIds.append(leaseId)
+                expirationHandler = onExpire
             },
-            endBackgroundTask: { endedTaskIDs.append($0) }
+            endKeepAlive: { endedLeaseIds.append($0) }
         )
 
         coordinator.enterBackground(
@@ -86,23 +88,24 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         expirationHandler?()
         let didStartWaiting = await eventually { await gate.hasWaiter }
         XCTAssertTrue(didStartWaiting)
-        XCTAssertTrue(endedTaskIDs.isEmpty)
+        // 中断还没落盘完就把执行权还回去，等于自己掐断自己。
+        XCTAssertTrue(endedLeaseIds.isEmpty)
         await gate.open()
-        let didEnd = await eventually { endedTaskIDs.count == 1 }
+        let didEnd = await eventually { endedLeaseIds.count == 1 }
 
         XCTAssertTrue(didEnd)
-        XCTAssertEqual(endedTaskIDs, [taskID])
+        XCTAssertEqual(endedLeaseIds, begunLeaseIds)
         await completionGate.open()
     }
 
     func testReturningForegroundEndsLeaseWithoutInterruptingGeneration() async {
-        var endedTaskIDs: [UIBackgroundTaskIdentifier] = []
+        var begunLeaseIds: [String] = []
+        var endedLeaseIds: [String] = []
         var interruptionCount = 0
-        let taskID = UIBackgroundTaskIdentifier(rawValue: 43)
         let completionGate = NovelWorkspaceLifecycleTestGate()
         let coordinator = NovelWorkspaceLifecycleCoordinator(
-            beginBackgroundTask: { _, _ in taskID },
-            endBackgroundTask: { endedTaskIDs.append($0) }
+            beginKeepAlive: { leaseId, _ in begunLeaseIds.append(leaseId) },
+            endKeepAlive: { endedLeaseIds.append($0) }
         )
 
         coordinator.enterBackground(
@@ -111,9 +114,9 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         )
         coordinator.enterForeground()
 
-        let didEnd = await eventually { endedTaskIDs.count == 1 }
+        let didEnd = await eventually { endedLeaseIds.count == 1 }
         XCTAssertTrue(didEnd)
-        XCTAssertEqual(endedTaskIDs, [taskID])
+        XCTAssertEqual(endedLeaseIds, begunLeaseIds)
         XCTAssertEqual(interruptionCount, 0)
         await completionGate.open()
     }

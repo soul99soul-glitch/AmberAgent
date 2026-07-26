@@ -57,6 +57,7 @@ enum AgentActivityPhase: String, Codable, Hashable {
 
 enum AgentActivityStage: String, Codable, Hashable {
     case preparing
+    case thinking
     case searching
     case readingSources
     case readingWeb
@@ -199,10 +200,14 @@ extension AgentActivityPresentation {
     )
 
     static func generatingResponse(modelName _: String) -> AgentActivityPresentation {
+        response(stage: .generating)
+    }
+
+    static func response(stage: AgentActivityStage) -> AgentActivityPresentation {
         AgentActivityPresentation(
             kind: .response,
             phase: .running,
-            stage: .generating
+            stage: stage
         )
     }
 
@@ -369,6 +374,10 @@ extension AgentActivityPresentation {
         return phase
     }
 
+    func displayStage(isStale: Bool) -> AgentActivityStage {
+        displayPhase(isStale: isStale) == .stale ? .stale : stage
+    }
+
     private static func kind(forPublicToolTitle title: String) -> AgentActivityKind {
         switch title {
         case "网页搜索":
@@ -388,6 +397,19 @@ extension AgentActivityPresentation {
         default:
             .workflow
         }
+    }
+}
+
+enum AgentActivityResponseStagePolicy {
+    static let initialStage = AgentActivityStage.preparing
+
+    static func updatedStage(
+        hasReasoningDelta: Bool,
+        hasTextDelta: Bool
+    ) -> AgentActivityStage? {
+        if hasReasoningDelta { return .thinking }
+        if hasTextDelta { return .generating }
+        return nil
     }
 }
 
@@ -433,6 +455,27 @@ extension AgentActivityKind {
 extension AgentActivityStage {
     var title: String {
         AgentActivityCopy.text("agent.activity.stage.\(rawValue)")
+    }
+
+    var compactTitle: String {
+        switch self {
+        case .preparing, .thinking, .searching, .readingSources, .readingWeb,
+             .generating, .generatingImage, .organizing, .readingDocument,
+             .updatingMemory, .runningTool:
+            AgentActivityCopy.text("agent.activity.compact.\(rawValue)")
+        case .waitingForConfirmation:
+            AgentActivityCopy.text("agent.activity.fact.waiting")
+        case .reconnecting:
+            AgentActivityCopy.text("agent.activity.fact.reconnecting")
+        case .stale:
+            AgentActivityCopy.text("agent.activity.fact.stale")
+        case .completed:
+            AgentActivityCopy.text("agent.activity.fact.completed")
+        case .failed:
+            AgentActivityCopy.text("agent.activity.fact.failed")
+        case .cancelled:
+            AgentActivityCopy.text("agent.activity.fact.cancelled")
+        }
     }
 }
 
@@ -533,7 +576,7 @@ extension AgentActivityPresentation {
     }
 
     func accessibilitySummary(isStale: Bool) -> String {
-        [kind.title, priorityFact(isStale: isStale) ?? stage.title]
+        [kind.title, priorityFact(isStale: isStale) ?? displayStage(isStale: isStale).title]
             .joined(separator: ", ")
     }
 }

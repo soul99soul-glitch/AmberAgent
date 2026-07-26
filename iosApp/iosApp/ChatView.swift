@@ -366,7 +366,8 @@ struct ChatView: View {
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {
         if phase == .background {
-            _ = viewModel.handoffGenerationToBackgroundIfNeeded()
+            // 握着后台执行权就别交接，让正在跑的流自己跑完。
+            _ = viewModel.handoffGenerationToBackgroundIfNeeded(honorKeepAliveLease: true)
         }
     }
 
@@ -647,7 +648,7 @@ struct ChatView: View {
         if chatListSummary.awaitingFirstAssistantChunk {
             return ChatActivityIslandState.activity(
                 kind: .waiting,
-                title: "连接模型",
+                title: AgentActivityStage.preparing.title,
                 detail: viewModel.islandModelDisplayName,
                 systemImage: "sparkles",
                 tint: .amber
@@ -658,7 +659,7 @@ struct ChatView: View {
             if chatListSummary.lastAssistantHasOpenReasoning {
                 return ChatActivityIslandState.activity(
                     kind: .thinking,
-                    title: "思考中",
+                    title: AgentActivityStage.thinking.title,
                     detail: composerReasoningLabel,
                     systemImage: "brain.head.profile",
                     tint: .amber
@@ -666,7 +667,7 @@ struct ChatView: View {
             }
             return ChatActivityIslandState.activity(
                 kind: .generating,
-                title: "生成回复",
+                title: AgentActivityStage.generating.title,
                 detail: nil,
                 systemImage: "text.bubble",
                 tint: .accent

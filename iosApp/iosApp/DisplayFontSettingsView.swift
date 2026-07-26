@@ -9,6 +9,7 @@ struct DisplayFontSettingsView: View {
     @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
     @AppStorage(IOSDisplayPreferenceKeys.agentName) private var agentName = true
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @AppStorage(IOSDisplayPreferenceKeys.activityIslandEdgeGlow) private var activityIslandEdgeGlow = false
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown) private var streamingBlockMarkdown = true
@@ -43,6 +44,7 @@ struct DisplayFontSettingsView: View {
                     header
                     fontSection
                     messageSection
+                    activitySection
                     interactionSection
                 }
                 .padding(.bottom, 36)
@@ -134,6 +136,21 @@ struct DisplayFontSettingsView: View {
             AmberSectionLabel(text: "消息显示")
             AmberFormGroup {
                 DisplayToggleRow(title: "显示 Agent 名字", isOn: agentName) { agentName.toggle() }
+            }
+        }
+    }
+
+    private var activitySection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "活动状态")
+            AmberFormGroup {
+                DisplayToggleRow(
+                    title: "彩色边缘辉光",
+                    subtitle: "在顶部活动状态周围显示随状态变化的彩色边光。关闭后仍保留状态图形和文字动画。",
+                    isOn: activityIslandEdgeGlow
+                ) {
+                    activityIslandEdgeGlow.toggle()
+                }
             }
         }
     }

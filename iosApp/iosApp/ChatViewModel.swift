@@ -1451,8 +1451,11 @@ final class ChatViewModel {
     }
 
     @discardableResult
-    func handoffGenerationToBackgroundIfNeeded() -> Bool {
-        generationCoordinator.handoffCurrentGenerationToBackground(conversationStore: conversationStore)
+    func handoffGenerationToBackgroundIfNeeded(honorKeepAliveLease: Bool = false) -> Bool {
+        generationCoordinator.handoffCurrentGenerationToBackground(
+            conversationStore: conversationStore,
+            honorKeepAliveLease: honorKeepAliveLease
+        )
     }
 
     @discardableResult

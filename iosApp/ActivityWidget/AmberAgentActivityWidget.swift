@@ -35,29 +35,20 @@ struct AmberAgentActivityWidget: Widget {
                     .accessibilityHidden(true)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    AgentActivityPriorityFact(
+                    AgentActivityExpandedFact(
                         presentation: context.state.presentation,
                         startedAt: context.attributes.startedAt,
                         isStale: context.isStale
                     )
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(context.state.presentation.kind.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.62))
-                        Text(context.isStale
-                             ? AgentActivityCopy.text("agent.activity.fact.stale")
-                             : context.state.presentation.stage.title)
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    AgentActivityHeadline(
+                        presentation: context.state.presentation,
+                        isStale: context.isStale
+                    )
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    AgentActivityFooter(
+                    AgentActivityExpandedFooter(
                         attributes: context.attributes,
                         state: context.state,
                         isStale: context.isStale
@@ -71,9 +62,8 @@ struct AmberAgentActivityWidget: Widget {
                 )
                 .accessibilityHidden(true)
             } compactTrailing: {
-                AgentActivityPriorityFact(
+                AgentActivityCompactStatus(
                     presentation: context.state.presentation,
-                    startedAt: context.attributes.startedAt,
                     isStale: context.isStale
                 )
                 .accessibilityElement(children: .ignore)
@@ -105,7 +95,44 @@ struct AmberAgentActivityWidget: Widget {
     }
 }
 
-private struct AgentActivityPriorityFact: View {
+private struct AgentActivityCompactStatus: View {
+    let presentation: AgentActivityPresentation
+    let isStale: Bool
+
+    var body: some View {
+        Text(presentation.displayStage(isStale: isStale).compactTitle)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.9))
+            .lineLimit(1)
+            .minimumScaleFactor(0.72)
+            .frame(maxWidth: 56, alignment: .trailing)
+    }
+}
+
+private struct AgentActivityHeadline: View {
+    let presentation: AgentActivityPresentation
+    let isStale: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(presentation.displayStage(isStale: isStale).title)
+                .font(.headline)
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            if presentation.kind != .response {
+                Text(presentation.kind.title)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct AgentActivityExpandedFact: View {
     let presentation: AgentActivityPresentation
     let startedAt: Date
     let isStale: Bool
@@ -126,7 +153,7 @@ private struct AgentActivityPriorityFact: View {
     }
 }
 
-private struct AgentActivityFooter: View {
+private struct AgentActivityExpandedFooter: View {
     let attributes: AgentActivityAttributes
     let state: AgentActivityAttributes.ContentState
     let isStale: Bool
@@ -160,14 +187,10 @@ private struct AgentActivityFooter: View {
                 Spacer(minLength: 8)
 
                 if let action = state.presentation.action,
-                   let url = attributes.destinationURL(for: action) {
-                    Link(destination: url) {
-                        Label(action.title, systemImage: "arrow.up.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.amberAccent)
-                            .frame(minHeight: 44)
-                    }
-                    .accessibilityLabel(action.title)
+                   attributes.destinationURL(for: action) != nil {
+                    Label(action.title, systemImage: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.amberAccent)
                 }
             }
         }
@@ -180,10 +203,6 @@ private struct LockScreenAgentActivityView: View {
     let state: AgentActivityAttributes.ContentState
     let isStale: Bool
 
-    private var displayPhase: AgentActivityPhase {
-        state.presentation.displayPhase(isStale: isStale)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
@@ -194,65 +213,25 @@ private struct LockScreenAgentActivityView: View {
                 )
                 .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(state.presentation.kind.title)
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text(displayPhase == .stale
-                         ? AgentActivityCopy.text("agent.activity.fact.stale")
-                         : state.presentation.stage.title)
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(1)
-                }
+                AgentActivityHeadline(
+                    presentation: state.presentation,
+                    isStale: isStale
+                )
 
                 Spacer(minLength: 8)
 
-                AgentActivityPriorityFact(
+                AgentActivityExpandedFact(
                     presentation: state.presentation,
                     startedAt: attributes.startedAt,
                     isStale: isStale
                 )
             }
 
-            if displayPhase == .running,
-               let progress = state.presentation.progressFraction {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(displayPhase.widgetColor)
-            }
-
-            HStack(spacing: 10) {
-                Group {
-                    if displayPhase == .running,
-                       let detail = state.presentation.metric.detailText {
-                        HStack(spacing: 5) {
-                            Text(detail)
-                            Text("·")
-                                .accessibilityHidden(true)
-                            Text(state.updatedAt, style: .relative)
-                        }
-                    } else {
-                        Text(state.updatedAt, style: .relative)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.58))
-                .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                if let action = state.presentation.action,
-                   let url = attributes.destinationURL(for: action) {
-                    Link(destination: url) {
-                        Text(action.title)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color.amberAccent)
-                            .frame(minHeight: 44)
-                    }
-                    .accessibilityLabel(action.title)
-                }
-            }
+            AgentActivityExpandedFooter(
+                attributes: attributes,
+                state: state,
+                isStale: isStale
+            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

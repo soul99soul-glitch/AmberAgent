@@ -339,8 +339,14 @@ final class IOSChatBackgroundGenerationCoordinator {
             )
             return true
         } catch {
+            // 提交失败 = 这一轮没交出去，所有权仍在前台（调用方看到 false 就不会
+            // 清 currentRunId）。所以只回滚后台侧刚登记的东西，租约绝不能还——
+            // 还了前台这一轮就失去保活，等于白白退化。
             activeJobs.removeValue(forKey: requestId)
-            finish(runId: handoff.runId, requestId: requestId)
+            var map = taskMap()
+            map.removeValue(forKey: requestId)
+            UserDefaults.standard.set(map, forKey: taskMapKey)
+            removePayload(requestId: requestId)
             NSLog("[AmberChatBG] BGContinuedProcessingTask submit failed: \(error)")
             return false
         }
@@ -1338,11 +1344,16 @@ final class IOSChatBackgroundGenerationCoordinator {
             activeRunStates.removeValue(forKey: requestId)
             activeBackgroundTasks.removeValue(forKey: requestId)
             pendingResumeRequestIds.remove(requestId)
-            map.removeValue(forKey: requestId)
+            // 后台这一轮真正终结了，执行权才还回去。前台交接时不能还——
+            // 那会让刚接手的后台任务立刻失去进程。
+            if let ownedRunId = map.removeValue(forKey: requestId) {
+                BackgroundGenerationKeepAlive.shared.end(ownedRunId)
+            }
             if shouldRemovePayload {
                 removePayload(requestId: requestId)
             }
         } else if let runId {
+            BackgroundGenerationKeepAlive.shared.end(runId)
             let matching = map.filter { $0.value == runId }.map(\.key)
             for requestId in matching {
                 activeJobs.removeValue(forKey: requestId)

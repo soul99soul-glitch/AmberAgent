@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 @preconcurrency import Shared
+import UIKit
 
 func chatInputDigest(for text: String) -> String {
     let hash = SHA256.hash(data: Data(text.utf8))
@@ -413,6 +414,7 @@ final class ChatGenerationCoordinator {
     private var currentInputDigest: String?
     private var currentConversationIdForRun: KotlinUuid?
     private var currentToolResumeCount = 0
+    private var currentLiveActivityStage: AgentActivityStage?
     private let maxToolResumeCount = 4
     private var pendingStreamSnapshot: [UIMessage]?
     private var pendingStreamSnapshotProvider: (() -> [UIMessage])?
@@ -495,10 +497,31 @@ final class ChatGenerationCoordinator {
         currentToolResumeCount = 0
         backgroundHandoff = nil
         pendingBackgroundConversationStore = nil
+        let initialPresentation = AgentActivityPresentation.response(
+            stage: AgentActivityResponseStagePolicy.initialStage
+        )
+        currentLiveActivityStage = initialPresentation.stage
         bindings.startLiveActivity(
             runId,
             conversationId,
-            .generatingResponse(modelName: params.model.modelId)
+            initialPresentation
+        )
+        // 生成一开始就拿后台执行权，而不是等切后台再抢——那时进程已经在被挂起了。
+        // 执行权在手期间流自己跑，不做任何交接；只有系统把它收走才落到重跑那条路。
+        BackgroundGenerationKeepAlive.shared.begin(
+            runId,
+            title: "Amber 正在生成",
+            subtitle: params.model.displayName,
+            onExpire: { [weak self] in
+                guard let self, self.currentRunId == runId else { return }
+                // 只有「在后台失去执行权」才该交接。前台根本不需要执行权，流本来
+                // 就在正常跑；而用户从系统进度卡上把这一轮划掉同样会走到这里，
+                // 那时候去交接等于把他正看着的正文砍掉重跑一遍。
+                guard UIApplication.shared.applicationState != .active else { return }
+                _ = self.handoffCurrentGenerationToBackground(
+                    conversationStore: self.pendingBackgroundConversationStore
+                )
+            }
         )
 
         Task { @MainActor [weak self] in
@@ -576,10 +599,20 @@ final class ChatGenerationCoordinator {
         backgroundHandoff = nil
         pendingBackgroundConversationStore = nil
         bindings.setIsLoading(true)
+        let imagePresentation = AgentActivityPresentation.runningTool(toolName: "generate_image")
+        currentLiveActivityStage = imagePresentation.stage
         bindings.startLiveActivity(
             runId,
             conversationId,
-            .runningTool(toolName: "generate_image")
+            imagePresentation
+        )
+        // 生图也是流式生成的一部分，退后台同样要保住执行权。
+        // 这条路没有 backgroundHandoff（图是一次性 HTTP，没法接着跑），所以
+        // 执行权被收走时无处可交接，不给 onExpire——收口靠 finishStreaming。
+        BackgroundGenerationKeepAlive.shared.begin(
+            runId,
+            title: "Amber 正在生成图片",
+            subtitle: params?.model.displayName ?? "图片生成"
         )
 
         let toolCall = toolRuntime.userInitiatedImageToolCall(input: input)
@@ -710,6 +743,8 @@ final class ChatGenerationCoordinator {
         // 取消也是 run 的终结:与 finishStreaming/后台交接保持一致,关闭录制器,
         // 否则取消路径会泄漏文件句柄与 per-run 字典条目。
         if let runId {
+            // 用户取消是真终态，执行权立刻还回去。
+            BackgroundGenerationKeepAlive.shared.end(runId)
             ChatStreamRecorder.shared.record(runId: runId, snapshot: messagesAtCancellation)
             ChatStreamRecorder.shared.finish(runId: runId)
             // Publish cancelled immediately so Watch does not briefly fall to idle.
@@ -721,6 +756,7 @@ final class ChatGenerationCoordinator {
             )
         }
         currentRunId = nil
+        currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
         currentConversationIdForRun = nil
@@ -790,8 +826,26 @@ final class ChatGenerationCoordinator {
         return ChatRuntimeContextBuilder.coalescingSystemMessages(runtimeMessages)
     }
 
+    /// - Parameter honorKeepAliveLease: 只有「App 退到后台」这一种理由能认这道短路。
+    ///   换会话、执行权到期这些必须把前台流的归属让出去，认了就等于把生成掐死。
     @discardableResult
-    func handoffCurrentGenerationToBackground(conversationStore: IOSConversationStore?) -> Bool {
+    func handoffCurrentGenerationToBackground(
+        conversationStore: IOSConversationStore?,
+        honorKeepAliveLease: Bool = false
+    ) -> Bool {
+        // 后台执行权还在手上：流会自己跑完，砍掉它重跑是纯粹的浪费——
+        // 既烧一遍 token，又丢掉已经流出来的正文。只有执行权被系统收走
+        // （keepalive 的 onExpire）才需要真交接。
+        if honorKeepAliveLease,
+           let runId = currentRunId,
+           BackgroundGenerationKeepAlive.shared.holdsLease(runId) {
+            // 真交接推迟到执行权到期那一刻，那时调用方已经不在场了——
+            // 趁现在把 store 记下来，否则 onExpire 拿不到它，等于没兜底。
+            if let conversationStore {
+                pendingBackgroundConversationStore = conversationStore
+            }
+            return false
+        }
         guard !hasPendingToolApproval else { return false }
         // Once a foreground tool request is already in flight, keep that request
         // as the owner. BG handoff is not guaranteed to start immediately; if we
@@ -848,6 +902,7 @@ final class ChatGenerationCoordinator {
             ChatStreamRecorder.shared.finish(runId: runId)
         }
         currentRunId = nil
+        currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
         currentConversationIdForRun = nil
@@ -1112,7 +1167,11 @@ final class ChatGenerationCoordinator {
         )
         if let pendingStore = pendingBackgroundConversationStore {
             pendingBackgroundConversationStore = nil
-            if handoffCurrentGenerationToBackground(conversationStore: pendingStore) {
+            // 已经在后台了才会有 pendingStore。执行权还在就继续前台跑完。
+            if handoffCurrentGenerationToBackground(
+                conversationStore: pendingStore,
+                honorKeepAliveLease: true
+            ) {
                 return
             }
         }
@@ -1153,6 +1212,11 @@ final class ChatGenerationCoordinator {
                         }
                     if !toolCalls.isEmpty {
                         self.handleDetectedToolCalls(toolCalls, runId: runId)
+                    } else if let stage = Self.responseStage(in: chunk) {
+                        await self.updateResponseLiveActivityStageIfNeeded(
+                            stage,
+                            runId: runId
+                        )
                     }
                     self.scheduleStreamSnapshotPublish(
                         snapshotProvider: { accumulator.snapshot() },
@@ -1554,6 +1618,7 @@ final class ChatGenerationCoordinator {
         let toolPresentation = AgentActivityPresentation.runningTool(
             toolName: pendingToolCall.toolCall.toolName
         )
+        currentLiveActivityStage = toolPresentation.stage
         WatchTaskCoordinator.shared.publish(
             runId: runId,
             conversationId: conversationId?.toHexDashString(),
@@ -1593,9 +1658,10 @@ final class ChatGenerationCoordinator {
         case .completed(let resumedMessages):
             bindings.setMessages(resumedMessages)
             bindings.bumpMessageRevision(.toolResultAppended)
-            let generating = AgentActivityPresentation.generatingResponse(
-                modelName: params.model.modelId
+            let generating = AgentActivityPresentation.response(
+                stage: .generating
             )
+            currentLiveActivityStage = generating.stage
             WatchTaskCoordinator.shared.publish(
                 runId: runId,
                 conversationId: conversationId?.toHexDashString(),
@@ -1625,6 +1691,9 @@ final class ChatGenerationCoordinator {
         pending: ChatPendingToolApproval
     ) {
         guard currentRunId == pending.runId else { return }
+        // 等人点按钮不需要后台执行权——这一轮此刻不在算，在等人。握着只是白占
+        // 配额，还让系统进度卡一直显示「正在生成」。审批通过续跑时再拿回来。
+        BackgroundGenerationKeepAlive.shared.end(pending.runId)
         switch prompt {
         case .memory(let request):
             pendingMemoryToolApproval = pending
@@ -1663,6 +1732,7 @@ final class ChatGenerationCoordinator {
         bindings.setMessages(pending.baseMessages)
         bindings.bumpMessageRevision(.awaitingToolApproval)
         bindings.setIsLoading(false)
+        currentLiveActivityStage = .waitingForConfirmation
         if case .askUser = prompt {
             // Watch already received the ask-user decision above.
         } else {
@@ -1839,10 +1909,28 @@ final class ChatGenerationCoordinator {
         }
 
         bindings.setIsLoading(true)
+        // 重新拿执行权：审批往往横跨退后台，pauseForApproval 已经把租约还了。
+        // 手表端批准更是典型——批准时 App 就在后台，不拿回来这一轮就是裸奔的。
+        BackgroundGenerationKeepAlive.shared.begin(
+            pending.runId,
+            title: "Amber 正在生成",
+            subtitle: pending.params.model.displayName,
+            onExpire: { [weak self] in
+                guard let self, self.currentRunId == pending.runId else { return }
+                guard UIApplication.shared.applicationState != .active else { return }
+                _ = self.handoffCurrentGenerationToBackground(
+                    conversationStore: self.pendingBackgroundConversationStore
+                )
+            }
+        )
+        let generating = AgentActivityPresentation.response(
+            stage: .generating
+        )
+        currentLiveActivityStage = generating.stage
         bindings.startLiveActivity(
             pending.runId,
             pending.conversationId,
-            .generatingResponse(modelName: pending.params.model.modelId)
+            generating
         )
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1915,11 +2003,14 @@ final class ChatGenerationCoordinator {
         cancelPendingStreamSnapshotPublish()
         cancelStreamEventConsumer()
         if let runId = currentRunId {
+            // 前台把这一轮跑完了，执行权到此为止。
+            BackgroundGenerationKeepAlive.shared.end(runId)
             ChatStreamRecorder.shared.finish(runId: runId)
         }
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
         currentRunId = nil
+        currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
         currentConversationIdForRun = nil
@@ -2025,6 +2116,44 @@ final class ChatGenerationCoordinator {
         chunk.choices.flatMap { choice in
             (choice.delta ?? choice.message)?.parts.compactMap { $0 as? UIMessagePart.Tool } ?? []
         }
+    }
+
+    private static func responseStage(in chunk: MessageChunk) -> AgentActivityStage? {
+        let parts = chunk.choices.flatMap { choice in
+            (choice.delta ?? choice.message)?.parts ?? []
+        }
+        let hasTextDelta = parts.contains { part in
+            guard let text = part as? UIMessagePart.Text else { return false }
+            return !text.text.isEmpty
+        }
+        let hasReasoningDelta = parts.contains { part in
+            guard let reasoning = part as? UIMessagePart.Reasoning else { return false }
+            return !reasoning.reasoning.isEmpty
+        }
+        return AgentActivityResponseStagePolicy.updatedStage(
+            hasReasoningDelta: hasReasoningDelta,
+            hasTextDelta: hasTextDelta
+        )
+    }
+
+    private func updateResponseLiveActivityStageIfNeeded(
+        _ stage: AgentActivityStage,
+        runId: String
+    ) async {
+        guard currentRunId == runId,
+              currentLiveActivityStage != stage else { return }
+        currentLiveActivityStage = stage
+        let presentation = AgentActivityPresentation.response(stage: stage)
+        WatchTaskCoordinator.shared.publish(
+            runId: runId,
+            conversationId: currentConversationIdForRun?.toHexDashString(),
+            presentation: presentation
+        )
+        await dependencies.liveActivityController.update(
+            runId: runId,
+            presentation: presentation,
+            force: true
+        )
     }
 
     private func handleDetectedToolCalls(_ toolCalls: [UIMessagePart.Tool], runId: String) {

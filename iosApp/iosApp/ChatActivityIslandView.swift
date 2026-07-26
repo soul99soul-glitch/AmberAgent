@@ -301,6 +301,7 @@ enum ChatIslandPresentationReducer {
 struct ChatActivityIslandView: View {
     let presentation: ChatIslandPresentation
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage(IOSDisplayPreferenceKeys.activityIslandEdgeGlow) private var activityIslandEdgeGlow = false
 
     init(presentation: ChatIslandPresentation) {
         self.presentation = presentation
@@ -368,7 +369,8 @@ struct ChatActivityIslandView: View {
 
     @ViewBuilder
     private var glowUnderlay: some View {
-        if let spec = ChatActivityIslandMapping.glowSpec(
+        if activityIslandEdgeGlow,
+           let spec = ChatActivityIslandMapping.glowSpec(
             for: state,
             terminalHold: presentation.isTerminalHold
         ) {

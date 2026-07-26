@@ -260,6 +260,52 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(bubble.contains("cacheIdentity: renderCacheNamespace.map"))
     }
 
+    func testActivityIslandEdgeGlowIsOptionalAndDefaultsOff() throws {
+        let keys = try source("iosApp/PlaceholderViews.swift")
+        let settings = try source("iosApp/DisplayFontSettingsView.swift")
+        let activityIsland = try source("iosApp/ChatActivityIslandView.swift")
+        let storageDeclaration =
+            "@AppStorage(IOSDisplayPreferenceKeys.activityIslandEdgeGlow)" +
+            " private var activityIslandEdgeGlow = false"
+
+        XCTAssertTrue(
+            keys.contains(
+                "static let activityIslandEdgeGlow = \"app.amber.ios.display.activityIslandEdgeGlow\""
+            )
+        )
+        XCTAssertTrue(settings.contains(storageDeclaration))
+        XCTAssertTrue(settings.contains("彩色边缘辉光"))
+        XCTAssertTrue(settings.contains("activityIslandEdgeGlow.toggle()"))
+        XCTAssertTrue(activityIsland.contains(storageDeclaration))
+        XCTAssertTrue(activityIsland.contains("if activityIslandEdgeGlow,"))
+    }
+
+    func testSystemDynamicIslandUsesBoundedLiveStatusAndSharedChatStageCopy() throws {
+        let widget = try source("ActivityWidget/AmberAgentActivityWidget.swift")
+        let chat = try source("iosApp/ChatView.swift")
+        let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
+        let compactStart = try XCTUnwrap(widget.range(of: "} compactTrailing: {"))
+        let compactSuffix = String(widget[compactStart.lowerBound...])
+        let compactEnd = try XCTUnwrap(compactSuffix.range(of: "} minimal: {"))
+        let compactBlock = String(compactSuffix[..<compactEnd.lowerBound])
+
+        XCTAssertTrue(
+            widget.contains("Text(presentation.displayStage(isStale: isStale).compactTitle)")
+        )
+        XCTAssertFalse(compactBlock.contains("style: .timer"))
+        XCTAssertTrue(widget.contains("if presentation.kind != .response"))
+        XCTAssertTrue(chat.contains("title: AgentActivityStage.preparing.title"))
+        XCTAssertTrue(chat.contains("title: AgentActivityStage.thinking.title"))
+        XCTAssertTrue(chat.contains("title: AgentActivityStage.generating.title"))
+        XCTAssertEqual(
+            coordinator.components(
+                separatedBy: "AgentActivityResponseStagePolicy.initialStage"
+            ).count - 1,
+            1,
+            "工具或审批恢复后应继续「生成回复」，不应再冒充首次连接"
+        )
+    }
+
     func testGrokWebLoginIsWiredToProviderSettingsAndChatRuntime() throws {
         let detail = try source("iosApp/ProviderDetailView.swift")
         let configuration = try source("iosApp/ChatProviderConfiguration.swift")
