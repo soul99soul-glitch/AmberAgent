@@ -804,6 +804,12 @@ enum NovelGenerationDocumentValidator {
         case (.prose, .prose, .available),
              (.prose, .prose, .collected),
              (.prose, .prose, .superseded),
+             // 整章重新生成产出的候选 kind 就是 .prose(见 NovelGenerationReducer 的
+             // `run.kind == .polish ? .polish : .prose`),但这里此前只列了 .prose 与
+             // .polish 两族,于是任何 .regenerate 的 run 一完成就判文档非法、写盘失败。
+             (.regenerate, .prose, .available),
+             (.regenerate, .prose, .collected),
+             (.regenerate, .prose, .superseded),
              (.polish, .polish, .available),
              (.polish, .polish, .adopted),
              (.polish, .polish, .superseded):

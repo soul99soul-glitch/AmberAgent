@@ -1532,6 +1532,14 @@ enum NovelFactTransactionReducer {
         return introduction
     }
 
+    /// 重建基线必须满足一条不变量：它的 stateSnapshot 恰好是**为它自己那份 chapterSelections
+    /// 重建出来的**。只有 `.initial`(空选集空状态)和 `.manualSync`(状态由本次重建产出)满足。
+    ///
+    /// 其余 kind 都是把 `branch.currentStateSnapshotID` 原样继承下来的：`.collection`
+    /// 尤其危险,它的选集比快照多一章。一旦被选作基线,suffix 按选集算就会跳过那些
+    /// 「在选集里、但不在快照里」的章节 —— 它们既不在基线状态里,也不在待重抽的正文里,
+    /// 事实凭空蒸发。见 NovelChapterReplacementStateTests
+    /// .testReplacingChapterKeepsEarlierFactsWhenCollectionsSkippedSync。
     private static func latestCompatibleRebuildBase(
         atOrBefore checkpoint: NovelBranchCheckpointRecord,
         workingSelections: [NovelChapterSelection],
@@ -1543,7 +1551,8 @@ enum NovelFactTransactionReducer {
             guard visited.insert(candidate.id).inserted else {
                 throw NovelError.invalidInput("The checkpoint lineage contains a cycle.")
             }
-            if candidate.chapterSelections.count <= workingSelections.count,
+            if candidate.stateSnapshotDescribesOwnSelections,
+               candidate.chapterSelections.count <= workingSelections.count,
                zip(candidate.chapterSelections, workingSelections).allSatisfy({
                    $0.chapterID == $1.chapterID && $0.versionID == $1.versionID
                }) {
@@ -1704,5 +1713,21 @@ enum NovelFactTransactionReducer {
         to next: NovelProjectDocumentV1
     ) throws {
         try NovelDocumentValidator.validateTransition(from: current, to: next)
+    }
+}
+
+private extension NovelBranchCheckpointRecord {
+    /// 这个检查点的 stateSnapshot 是否恰好描述它自己那份 chapterSelections。
+    ///
+    /// `.initial` 是空选集配空状态;`.manualSync` 的快照由该次重建产出,覆盖
+    /// 「基线 + suffix」= 自身选集。其余 kind 都只是把分支当前快照原样带下来,
+    /// 快照落后于选集,不能用作重建基线。
+    var stateSnapshotDescribesOwnSelections: Bool {
+        switch kind {
+        case .initial, .manualSync:
+            true
+        case .collection, .discussionArchive, .polish, .restore:
+            false
+        }
     }
 }
