@@ -563,6 +563,8 @@ struct NativeChatTimelineView: View {
                 driverPausedForUser: isNativeScrollDriverActive && scrollDriver.isPausedForUser
             )
             let nextViewportState = rawViewportState
+            // [TEMP-DIAG] 常驻采样,异常自动 dump 前后窗口。
+            recordStreamAnomalySample(geometry: geometry, viewportState: nextViewportState, messages: messages)
             publishViewportState(nextViewportState)
             unfreezeVisibleLiveTailIfNeeded(messages: messages, viewportState: nextViewportState)
             resumeNativeBottomFollowFromGeometryIfNeeded(
@@ -811,6 +813,33 @@ struct NativeChatTimelineView: View {
         geometry.distanceToBottom <= max(ChatLayout.bottomStickThreshold, NativeTimelineScrollCore.resumeEpsilon)
     }
 
+    // [TEMP-DIAG] 采样一帧:同时记录「数据源字数」与「实际喂给渲染的字数」,
+    // 两者背离即证明尾部停在旧快照上。
+    private func recordStreamAnomalySample(
+        geometry: ChatSwiftUIScrollGeometry,
+        viewportState: ChatViewportState,
+        messages: [UIMessage]
+    ) {
+        func textLength(_ message: UIMessage) -> Int {
+            message.parts.reduce(0) { $0 + (($1 as? UIMessagePart.Text)?.text.count ?? 0) }
+        }
+        guard let lastAssistant = messages.last(where: { $0.role == MessageRole.assistant }) else { return }
+        let messageID = ChatMessageProjector.messageId(for: lastAssistant)
+        let sourceLength = textLength(lastAssistant)
+        let displayedLength = renderStateStore.existingLiveTailModel(messageID: messageID)
+            .map { textLength($0.message) } ?? sourceLength
+        ChatStreamAnomalyRecorder.record(
+            offsetY: geometry.contentHeight - geometry.distanceToBottom - geometry.visibleHeight,
+            contentHeight: geometry.contentHeight,
+            distanceToBottom: geometry.distanceToBottom,
+            farFromBottom: viewportState.liveRenderingFarFromBottom,
+            sourceLength: sourceLength,
+            displayedLength: displayedLength,
+            dragging: nativeUserScrollActive,
+            fallback: nativeScrollFallbackReason?.rawValue ?? "-"
+        )
+    }
+
     private func unfreezeVisibleLiveTailIfNeeded(messages: [UIMessage], viewportState: ChatViewportState) {
         guard !viewportState.liveRenderingFarFromBottom,
               let lastAssistantID = latestAssistantMessageID(messages: messages) else { return }
@@ -854,7 +883,12 @@ struct NativeChatTimelineView: View {
             row,
             isLiveRenderingFarFromBottom: viewportState.liveRenderingFarFromBottom
         )
-        guard renderState.liveRenderingEnabled else { return }
+        guard renderState.liveRenderingEnabled else {
+            // [TEMP-DIAG] 渲染侧把 farFromBottom 硬钉为 false 照常画缓存模型,
+            // 而这里停止喂新内容 —— 若这个计数在闪烁时飙升,即坐实判据不一致。
+            ChatStreamAnomalyRecorder.noteLiveTailUpdateSkipped()
+            return
+        }
         let liveTailModel = renderStateStore.liveTailModel(
             for: row,
             renderState: renderState,
@@ -4568,6 +4602,11 @@ final class ChatRenderStateStore {
         )
         liveTailModelsByMessageID[row.messageId] = model
         return model
+    }
+
+    // [TEMP-DIAG] 只读取已存在的尾部模型,不创建,避免诊断本身改变行为。
+    func existingLiveTailModel(messageID: String) -> ChatLiveTailModel? {
+        liveTailModelsByMessageID[messageID]
     }
 
     /// 行进入视口即解冻并丢弃冻结快照:可见的行必须显示真实内容,
