@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -21,6 +21,26 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-27 系统灵动岛收紧宽度、接入 Chat 实时状态
+
+- 真机桌面截图确认上一版修改重心错位：用户要改的是系统 Live Activity，而非只是 Chat 页内胶囊。compact 右侧在没有真实 metric 时退化为 `.timer`，动态计时文本让系统预留了过长宽度，且只显示「星核 + 时间」，没有任务状态。
+- compact 改为「20pt 星核 + 有界短状态」，用「连接中 / 思考中 / 回复中 / 检索中 / 待确认」等取代计时器；minimal 仍只保留星核。expanded/锁屏改为「状态主标题 + 工具任务次级类型 + 真实 metric/最后更新时间 + 打开对话」，普通回复不重复显示任务类型；移除内层 44pt 按钮占位，整个 Live Activity 仍由现有 `widgetURL` 打开对话。
+- 状态链共享 `AgentActivityStage` 文案：普通 Chat 首轮按「连接模型 → 思考中 → 生成回复」更新；同一 delta 仍含 reasoning 时保持思考态，工具完成/审批恢复后继续生成态，不再与 Chat 分叉。工具开始、等待确认、取消/完成仍更新或清理同一个 Live Activity 阶段。继续遵守隐私门禁，不在锁屏编码模型名、prompt 或回复内容。
+- review 后精准收紧：删除 expanded 计时器的 `fixedSize`、无法证明的「Amber 会继续在后台处理」、phase/stage 非 stale 终态的静默纠错；source canary 不再锁死私有 View 名和 56pt 数值，仅保留「compact 无 timer / 状态文案共享 / initialStage 只出现一次」行为契约；未新增协议、状态框架或 fallback。
+- 验证：定点 `AgentActivityPresentationTests` + 系统岛 wiring + 辉光默认关闭 + `ChatIslandPresentationTests` 合跑 **41 passed / 0 failed**（iPhone 17 Pro / iOS 26.5 Simulator，`Test-iosApp-2026.07.27_01-53-01-+0800.xcresult`）；强制 `ChatStreamReplayTests` **16 passed / 1 skipped / 0 failed**（`Test-iosApp-2026.07.27_01-56-45-+0800.xcresult`）；两个 ActivityWidget target 编译通过；`iosApp` 整体 scheme 在 arm64 Simulator 编译通过。系统实际 compact 宽度、长按 expanded 布局与后台更新频率仍需安装新包后真机复验，本轮未安装。
+
+### 2026-07-27 活动岛彩色边缘辉光改为可选且默认关闭
+
+- 真机截图确认彩色边光视觉权重过高；把它从活动岛必选壳层收敛为
+  「显示与字体 → 活动状态 → 彩色边缘辉光」可选项，默认关闭。
+- 偏好由单一 `IOSDisplayPreferenceKeys.activityIslandEdgeGlow` 持久化；设置页写入，
+  `ChatActivityIslandView` 用 `@AppStorage` 实时消费。关闭时 `IslandEdgeGlowView` 不进入视图树，
+  其 `CADisplayLink` 随移除失效；orb、状态文案、标题 glint、presentation reducer 与 Live Activity 均不变。
+- 先以 `IOSSettingsWiringTests.testActivityIslandEdgeGlowIsOptionalAndDefaultsOff` 复现 6 处接线缺失，
+  再落最小实现；`IOSSettingsWiringTests` + `ChatIslandPresentationTests` 合跑 **55 passed / 0 failed**
+  （iPhone 17 Pro / iOS 26.5 Simulator），`git diff --check` 通过。真机设置页位置、即时开关和关闭后的最终观感
+  仍待安装后目视复验。
 
 ### 2026-07-26 灵动岛重设计实施：核壳文三层落地（S1-S3 全部切片）
 
