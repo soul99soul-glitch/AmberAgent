@@ -569,4 +569,61 @@ private actor CountingNovelProjectRepository: NovelProjectPersisting {
     private func unexpectedCall() -> NovelError {
         .repositoryFailure("Repository must not be touched during package preflight.")
     }
+
+    /// 废弃的章不得进入成稿。此前只有生成上下文排除了它们,导出照单全收,
+    /// 用户表现为「明明废弃了，导出来还在」。导出此前零测试覆盖。
+    func testExportSkipsDiscardedChapters() throws {
+        var document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let branch = document.branches[0]
+
+        func addChapter(title: String, content: String, discarded: Bool) -> NovelChapterSelection {
+            let chapterID = NovelChapterID()
+            let versionID = NovelChapterVersionID()
+            document.chapters.append(NovelChapterRecord(
+                id: chapterID,
+                createdAt: document.project.updatedAt,
+                discardedAt: discarded ? document.project.updatedAt : nil
+            ))
+            document.chapterVersions.append(NovelChapterVersionRecord(
+                id: versionID,
+                chapterID: chapterID,
+                kind: .collected,
+                title: title,
+                content: content,
+                factCompatibilityID: UUID(),
+                sourceCandidateID: nil,
+                createdAt: document.project.updatedAt,
+                operationID: document.appliedOperations[0].operationID
+            ))
+            return NovelChapterSelection(chapterID: chapterID, versionID: versionID)
+        }
+
+        let kept = addChapter(title: "第一章", content: "保留的正文。", discarded: false)
+        let dropped = addChapter(title: "第二章", content: "废弃的正文。", discarded: true)
+        let selections = [kept, dropped]
+
+        let checkpointIndex = try XCTUnwrap(document.checkpoints.firstIndex {
+            $0.id == branch.headCheckpointID
+        })
+        let checkpoint = document.checkpoints[checkpointIndex]
+        document.checkpoints[checkpointIndex] = NovelBranchCheckpointRecord(
+            id: checkpoint.id,
+            kind: checkpoint.kind,
+            createdOnBranchID: checkpoint.createdOnBranchID,
+            parentCheckpointID: checkpoint.parentCheckpointID,
+            chapterSelections: selections,
+            stateSnapshotID: checkpoint.stateSnapshotID,
+            sessionCursor: checkpoint.sessionCursor,
+            branchOverrideRevisionIDs: checkpoint.branchOverrideRevisionIDs,
+            sourceCandidateID: checkpoint.sourceCandidateID,
+            baseHeadRevision: checkpoint.baseHeadRevision,
+            operationID: checkpoint.operationID,
+            createdAt: checkpoint.createdAt
+        )
+        document.branches[0].workingChapterSelections = selections
+
+        let exported = try NovelMarkdownExporter.export(document, branchID: branch.id)
+        XCTAssertTrue(exported.markdown.contains("保留的正文。"))
+        XCTAssertFalse(exported.markdown.contains("废弃的正文。"), "废弃的章不得进入成稿")
+    }
 }

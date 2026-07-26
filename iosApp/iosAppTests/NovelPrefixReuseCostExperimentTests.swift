@@ -112,6 +112,7 @@ final class NovelPrefixReuseCostExperimentTests: XCTestCase {
                         hasEverStreamed: true,
                         runStatus: nil,
                         candidateStatus: nil,
+                        isRegeneration: false,
                         polishTransactionStatus: nil,
                         committedChange: nil,
                         askUser: nil,

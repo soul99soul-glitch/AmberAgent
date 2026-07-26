@@ -110,6 +110,27 @@ struct NovelChapterReaderView: View {
                 Label(polishMenuTitle, systemImage: "wand.and.sparkles")
             }
             .disabled(polishBlockReason != nil)
+
+            Button {
+                startRegeneration()
+            } label: {
+                Label(regenerateMenuTitle, systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(polishBlockReason != nil)
+
+            Divider()
+
+            Button(role: isCurrentChapterDiscarded ? nil : .destructive) {
+                let target = !isCurrentChapterDiscarded
+                Task { @MainActor in
+                    await viewModel.setChapterDiscarded(target, chapterID: chapterID)
+                }
+            } label: {
+                Label(
+                    isCurrentChapterDiscarded ? "恢复本章" : "废弃本章",
+                    systemImage: isCurrentChapterDiscarded ? "arrow.uturn.backward" : "archivebox"
+                )
+            }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .semibold))
@@ -204,6 +225,14 @@ struct NovelChapterReaderView: View {
         return viewModel.projectSnapshot?.chapterVersions.first { $0.id == versionID }
     }
 
+    /// 废弃是可逆的标记,不删除任何记录:章节版本之间有事实兼容链,真删会断链。
+    /// 废弃后该章不再进入生成上下文(见 NovelInjectionPlanner)。
+    private var isCurrentChapterDiscarded: Bool {
+        viewModel.projectSnapshot?.chapters
+            .first { $0.id == chapterID }?
+            .discardedAt != nil
+    }
+
     private var chapterOrdinalTitle: String {
         guard currentIndex >= 0 else { return "正文" }
         return "第 \(currentIndex + 1) 章"
@@ -250,10 +279,31 @@ struct NovelChapterReaderView: View {
         return "整章润色（\(polishBlockReason)）"
     }
 
+    /// 与润色共用前置条件(只读/生成中/待同步/有未完成正文操作时都不能发起)。
+    private var regenerateMenuTitle: String {
+        guard let polishBlockReason else { return "整章重新生成" }
+        return "整章重新生成（\(polishBlockReason)）"
+    }
+
     private func moveChapter(by offset: Int) {
         let destination = currentIndex + offset
         guard chapterSelections.indices.contains(destination) else { return }
         chapterID = chapterSelections[destination].chapterID
+    }
+
+    /// 重新生成允许改剧情,所以走普通 prose run 而不是润色事务;产出的候选
+    /// 在收录面板里默认选中「替换本章」。
+    private func startRegeneration() {
+        guard polishBlockReason == nil else { return }
+        Task { @MainActor in
+            let started = await sessionViewModel.startWholeChapterRegeneration(chapterID: chapterID)
+            guard started else {
+                failureMessage = sessionViewModel.errorMessage ?? "重新生成没有开始，请稍后重试。"
+                return
+            }
+            dismiss()
+            onPolishStarted()
+        }
     }
 
     private func startPolish() {

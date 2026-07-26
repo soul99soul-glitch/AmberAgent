@@ -130,15 +130,20 @@ struct NovelSessionView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            composer(listModel: listModel)
-                .background {
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: ChatComposerHeightPreferenceKey.self,
-                            value: proxy.size.height
-                        )
-                    }
+            VStack(spacing: 0) {
+                if viewModel.isRunning, currentComposerIntent != .discuss {
+                    generationStatusStrip
                 }
+                composer(listModel: listModel)
+            }
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: ChatComposerHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            }
         }
         .onPreferenceChange(ChatComposerHeightPreferenceKey.self) { height in
             guard abs(composerBarHeight - height) > 0.5 else { return }
@@ -290,7 +295,7 @@ struct NovelSessionView: View {
 
                 Color.clear
                     .frame(height: viewModel.isRunning
-                        ? ChatLayout.followBottomGap
+                        ? Self.followBottomGap
                         : ChatLayout.bottomRestGap)
                     .id(Self.bottomAnchorID)
                     .allowsHitTesting(false)
@@ -389,6 +394,32 @@ struct NovelSessionView: View {
                 dispatchFollowEvent(event)
             }
         }
+        // [TEMP-DIAG] 独立诊断采样通道:单独一个 signal,不改上面那个的触发频率。
+        .onScrollGeometryChange(for: NovelDiagnosticGeometry.self) { geo in
+            NovelDiagnosticGeometry(
+                offsetY: geo.contentOffset.y,
+                contentHeight: geo.contentSize.height,
+                distanceToBottom: max(0, geo.contentSize.height - geo.visibleRect.maxY)
+            )
+        } action: { _, geometry in
+            ChatStreamAnomalyRecorder.record(
+                offsetY: geometry.offsetY,
+                contentHeight: geometry.contentHeight,
+                distanceToBottom: geometry.distanceToBottom,
+                farFromBottom: !latestNearBottom,
+                sourceLength: ChatStreamAnomalyRecorder.novelSourceLength,
+                displayedLength: ChatStreamAnomalyRecorder.novelDisplayedLength,
+                dragging: userDragging,
+                fallback: isNativeScrollDriverActive ? "driver" : "swiftui"
+            )
+        }
+    }
+
+    // [TEMP-DIAG] 诊断专用几何快照。
+    private struct NovelDiagnosticGeometry: Equatable {
+        let offsetY: CGFloat
+        let contentHeight: CGFloat
+        let distanceToBottom: CGFloat
     }
 
     private func transcriptRow(_ row: NovelSessionRowModel) -> some View {
@@ -404,6 +435,9 @@ struct NovelSessionView: View {
                     !viewModel.hasRefreshError &&
                     !workspace.requiresReload
             )
+            // [TEMP-DIAG] 数 LazyVStack 的物化行数,与 contentHeight 突变对账。
+            .onAppear { ChatStreamAnomalyRecorder.noteRowAppeared() }
+            .onDisappear { ChatStreamAnomalyRecorder.noteRowDisappeared() }
     }
 
     private func handleAskUserAnswer(
@@ -1003,12 +1037,15 @@ struct NovelSessionView: View {
             dispatchFollowEvent(.initialRowsPresented(hasRows: newValue.rowCount > 0))
             return
         }
-        if newValue.rowCount > oldValue.rowCount, !latestAtBottom {
-            historyWindowLimit = min(
-                newValue.rowCount,
-                historyWindowLimit + newValue.rowCount - oldValue.rowCount
-            )
-        }
+        // 无条件吸收:贴底与否不改变「已渲染的行不得中途被窗口踢出」这条不变量。
+        // 口径必须与 `startIndex` 一致——那里用的是 **historicalRows**。若用含活动
+        // run 的 rowCount,run 开始时活动行会被算进吸收量,startIndex 反而净下降
+        // (每轮 −activeRunRowCount),等于在视口上方插入旧历史。
+        historyWindowLimit = NovelSessionHistoryWindowPolicy.limitAfterRowsAppended(
+            currentLimit: historyWindowLimit,
+            previousRowCount: oldValue.rowCount - oldValue.activeRunRowCount,
+            currentRowCount: newValue.rowCount - newValue.activeRunRowCount
+        )
         if oldValue.activeTailID == nil, newValue.activeTailID != nil {
             dispatchFollowEvent(.streamStarted)
         } else if oldValue.activeTailID == newValue.activeTailID,
@@ -1242,6 +1279,42 @@ struct NovelSessionView: View {
     }
 
     private static let bottomAnchorID = "novel-session-bottom-anchor"
+
+    /// 生成时尾部停靠留白。小说独立于 `ChatLayout.followBottomGap`(96):
+    /// 那个常量同时是 `nearBottomResumeThreshold`,改它会一起动跟随判据。
+    /// 这里只降停靠留白,让流式尾部更贴近屏幕底部,不碰任何阈值。
+    private static let followBottomGap: CGFloat = 44
+
+    /// 文案必须区分「重写」与「续写/整章」:重新生成的候选默认收录方式是
+    /// **替换原章**,若沿用整章文案会显示「收录后成为新章」,与实际行为相反。
+    private var generationStatusText: String {
+        guard let kind = viewModel.activeRunKind else { return "正在生成" }
+        if kind == .regenerate { return "重写本章 · 收录后替换原文" }
+        return viewModel.activeRunGranularity == .wholeChapter
+            ? "完整章节 · 收录后成为新章"
+            : "正文片段 · 收录后进入本章"
+    }
+
+    private var generationStatusIcon: String {
+        viewModel.activeRunKind == .regenerate
+            ? "arrow.triangle.2.circlepath"
+            : "doc.text"
+    }
+
+    /// 生成中的候选状态条。原本挂在气泡里正文的正下方,正文每增长一次它就被
+    /// 重新布局并被跟随逻辑推动,肉眼就是小幅上下抖动;移到输入框上方后它的
+    /// 位置与正文增长解耦。只在生成中出现。
+    private var generationStatusStrip: some View {
+        // 粒度必须取**活动 run 的记录值**,不能取 composer 的当前设置:
+        // `start(_:)` 不回写 viewModel.granularity,重试一个失败的续写 run 时
+        // composer 可能已被改成「整章」,导致提示与实际收录目标相反。
+        Label(generationStatusText, systemImage: generationStatusIcon)
+        .font(.caption)
+        .foregroundStyle(AmberTheme.muted)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, ChatLayout.contentHorizontalInset)
+        .padding(.bottom, 6)
+    }
 }
 
 private struct NovelPendingCommittedUndo {
@@ -1313,6 +1386,8 @@ private struct NovelSessionRowView: View, Equatable {
                 hasEverStreamed: row.role == .assistant,
                 runStatus: row.runStatus,
                 candidateStatus: row.candidate?.status,
+                isRegeneration: row.candidate?.kind == .prose
+                    && row.candidate?.sourceChapterVersionID != nil,
                 polishTransactionStatus: row.candidate?.polishTransactionStatus,
                 committedChange: row.committedChange,
                 askUser: row.askUser,

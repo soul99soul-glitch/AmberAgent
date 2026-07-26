@@ -144,7 +144,7 @@ enum NovelCompatibilityLineageValidator {
                   let proposed = pending.proposedChapterVersion,
                   let target = pending.collectionTarget else { continue }
             switch target {
-            case .appendToChapter(let chapterID):
+            case .appendToChapter(let chapterID), .replaceChapter(let chapterID):
                 let expectedSource = document.checkpoints.first(where: {
                     $0.id == pending.baseCheckpointID
                 })?.chapterSelections.first(where: {

@@ -321,7 +321,16 @@ enum NovelMarkdownExporter {
             throw NovelError.checkpointNotFound(branch.headCheckpointID)
         }
 
-        let sections = try checkpoint.chapterSelections.enumerated().map { index, selection in
+        // 已废弃的章不进成稿:这正是「废弃」的用户语义。此前只有生成上下文
+        // 排除了它们(NovelInjectionPlanner),导出仍照单全收,表现为
+        // 「明明废弃了，导出来还在」。
+        let discarded = Set(
+            document.chapters.filter { $0.discardedAt != nil }.map(\.id)
+        )
+        let exportedSelections = checkpoint.chapterSelections.filter {
+            !discarded.contains($0.chapterID)
+        }
+        let sections = try exportedSelections.enumerated().map { index, selection in
             guard let version = document.chapterVersions.first(where: {
                 $0.id == selection.versionID && $0.chapterID == selection.chapterID
             }) else {
@@ -491,6 +500,14 @@ extension NovelOutcome {
                 branchID: branchID,
                 candidateID: candidateID,
                 transactionID: transactionID,
+                revision: revision
+            )
+        case .chapterDiscardStateChanged(_, let branchID, let chapterID, let isDiscarded, let revision):
+            return .chapterDiscardStateChanged(
+                projectID: projectID,
+                branchID: branchID,
+                chapterID: chapterID,
+                isDiscarded: isDiscarded,
                 revision: revision
             )
         case .chapterVersionRestored(_, let branchID, let checkpointID, let chapterVersionID, let revision):

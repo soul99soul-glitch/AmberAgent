@@ -594,7 +594,9 @@ enum NovelGenerationDocumentValidator {
             } else if outputMessage != nil {
                 issues.append("Interrupted run \(run.id) unexpectedly persisted an empty message.")
             }
-            if run.kind == .prose, !run.partialContent.isEmpty, let candidateID = run.candidateID {
+            if run.kind == .prose || run.kind == .regenerate,
+               !run.partialContent.isEmpty,
+               let candidateID = run.candidateID {
                 guard let candidate = document.candidates.first(where: {
                     $0.id == candidateID &&
                         $0.kind == .prose &&
@@ -604,7 +606,7 @@ enum NovelGenerationDocumentValidator {
                         $0.baseCheckpointID == run.baseCheckpointID &&
                         $0.baseHeadRevision == run.baseHeadRevision &&
                         $0.content == run.partialContent &&
-                        $0.sourceChapterVersionID == nil
+                        $0.sourceChapterVersionID == run.sourceChapterVersionID
                 }) else {
                     issues.append("Interrupted prose run \(run.id) has no matching candidate.")
                     return
@@ -702,6 +704,8 @@ enum NovelGenerationDocumentValidator {
             run.granularity == .continuation ? .proseContinuation : .proseWholeChapter
         case .polish:
             .wholeChapterPolish
+        case .regenerate:
+            .wholeChapterRegeneration
         }
     }
 
@@ -724,6 +728,14 @@ enum NovelGenerationDocumentValidator {
                 run.candidateID == nil ||
                 run.sourceChapterVersionID != nil {
                 issues.append("Run \(run.id) has an invalid prose shape.")
+            }
+        case .regenerate:
+            // 与 prose 的唯一差别:必须携带被重写章的版本 id。
+            if run.mode != .writeProse ||
+                run.granularity != .wholeChapter ||
+                run.candidateID == nil ||
+                run.sourceChapterVersionID == nil {
+                issues.append("Run \(run.id) has an invalid regeneration shape.")
             }
         case .polish:
             if run.mode != .writeProse ||
@@ -751,7 +763,7 @@ enum NovelGenerationDocumentValidator {
         }
         let expectedKind: NovelSessionMessageKind = switch run.kind {
         case .quickStart, .discussion: .discussion
-        case .prose: .proseCandidate
+        case .prose, .regenerate: .proseCandidate
         case .polish: .polishCandidate
         }
         let expectedContent: String

@@ -11,6 +11,9 @@ struct NovelSessionBubble: View {
     let hasEverStreamed: Bool
     let runStatus: NovelRunStatus?
     let candidateStatus: NovelCandidateStatus?
+    /// 该候选来自「整章重新生成」:收录后替换原章,而不是新开一章。
+    /// 判据是 prose 候选带着来源章版本(只有重写会带)。
+    let isRegeneration: Bool
     let polishTransactionStatus: NovelPolishTransactionStatus?
     let committedChange: NovelSessionCommittedChangeSummary?
     let askUser: NovelAskUserPresentation?
@@ -115,14 +118,19 @@ struct NovelSessionBubble: View {
                 if committedChange != nil {
                     Label("已收录为正式正文", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(AmberTheme.accentGreen)
-                } else {
+                } else if !isStreaming {
+                    // 生成中不在气泡里挂候选状态行:它跟在不断增长的正文下方,
+                    // 每次增长都要重新布局并被跟随逻辑推着走,表现为小幅上下抖动。
+                    // 生成期间改由输入框上方的常驻状态条承担(NovelSessionView)。
                     proseCandidateStatus
                 }
             case .polishCandidate:
                 if committedChange != nil {
                     Label("润色版已采用", systemImage: "checkmark.seal.fill")
                         .foregroundStyle(AmberTheme.accentGreen)
-                } else {
+                } else if !isStreaming {
+                    // 与正文候选同一理由:生成中状态行跟在增长的正文下方会被
+                    // 反复重新布局并被跟随逻辑推动,表现为小幅上下抖动。
                     polishCandidateStatus
                 }
             case .discussion, .userInput, .interruptedDraft, .error:
@@ -212,13 +220,14 @@ struct NovelSessionBubble: View {
     }
 
     private var proseCandidateLabel: String {
+        if isRegeneration { return "重写本章 · 收录后替换原文" }
         switch granularity {
         case .continuation:
-            "正文片段 · 收录后进入本章"
+            return "正文片段 · 收录后进入本章"
         case .wholeChapter:
-            "完整章节 · 收录后成为新章"
+            return "完整章节 · 收录后成为新章"
         case nil:
-            "正文候选 · 收录后才进入正式剧情"
+            return "正文候选 · 收录后才进入正式剧情"
         }
     }
 

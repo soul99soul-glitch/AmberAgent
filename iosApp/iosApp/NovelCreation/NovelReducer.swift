@@ -204,6 +204,28 @@ enum NovelReducer {
                 in: document,
                 now: now
             )
+        case .discardChapter(let command):
+            return try NovelChapterDiscardReducer.setDiscarded(
+                true,
+                chapterID: command.chapterID,
+                projectID: command.projectID,
+                branchID: command.branchID,
+                context: command.context,
+                payloadSHA256: payloadSHA256,
+                in: document,
+                now: now
+            )
+        case .restoreChapter(let command):
+            return try NovelChapterDiscardReducer.setDiscarded(
+                false,
+                chapterID: command.chapterID,
+                projectID: command.projectID,
+                branchID: command.branchID,
+                context: command.context,
+                payloadSHA256: payloadSHA256,
+                in: document,
+                now: now
+            )
         case .adoptPolishCandidate:
             throw NovelError.invalidInput(
                 "Polish adoption must be applied by the two-phase transaction lifecycle."
@@ -574,5 +596,55 @@ enum NovelReducer {
             guard seen.insert(key).inserted else { return nil }
             return normalized
         }
+    }
+}
+
+/// 章节废弃 / 恢复。只翻 `NovelChapterRecord.discardedAt` 这一个字段:
+/// 章节记录、章节版本、事实事务、剧情状态快照全部原样保留,所以
+/// `NovelCompatibilityLineageValidator` 校验的事实兼容链不受影响,恢复无损。
+/// 「不参与上下文/剧情状态」由读取侧过滤实现,而不是在这里删数据。
+enum NovelChapterDiscardReducer {
+    static func setDiscarded(
+        _ isDiscarded: Bool,
+        chapterID: NovelChapterID,
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        context: NovelMutationContext,
+        payloadSHA256: String,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        try NovelReducer.requireProjectRevision(context, document: document)
+        var next = document
+        guard let index = next.chapters.firstIndex(where: { $0.id == chapterID }) else {
+            throw NovelError.invalidInput("Chapter \(chapterID) does not exist.")
+        }
+        guard (next.chapters[index].discardedAt != nil) != isDiscarded else {
+            throw NovelError.invalidInput(
+                isDiscarded
+                    ? "Chapter \(chapterID) is already discarded."
+                    : "Chapter \(chapterID) is not discarded."
+            )
+        }
+        next.chapters[index].discardedAt = isDiscarded ? now : nil
+        next.project.revision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.chapterDiscardStateChanged(
+            projectID: projectID,
+            branchID: branchID,
+            chapterID: chapterID,
+            isDiscarded: isDiscarded,
+            revision: next.project.revision
+        )
+        NovelReducer.recordApplied(
+            context,
+            kind: isDiscarded ? .discardChapter : .restoreChapter,
+            payloadSHA256: payloadSHA256,
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validate(next)
+        return (next, outcome)
     }
 }

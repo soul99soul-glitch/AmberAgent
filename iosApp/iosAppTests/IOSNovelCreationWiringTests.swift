@@ -763,6 +763,44 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(materials.contains("struct NovelQuickStartRegenerationSheet"))
     }
 
+    func testWorkspaceSectionSwitchDefersHeavyMountAndCrossfades() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let appShell = try source("iosApp/AppShell.swift")
+
+        // 该工作区确实是生产路由(避免只断言死代码里的接线)。
+        XCTAssertTrue(appShell.contains("NovelProjectWorkspaceView("))
+
+        // 重内容挂载被门控在 mountedSection 上,且只在推迟一拍之后才置位。
+        XCTAssertTrue(workspace.contains("@State private var mountedSection: NovelWorkspaceSection?"))
+        XCTAssertTrue(workspace.contains("mountedSection == section ? section : nil"))
+        XCTAssertTrue(workspace.contains(".task(id: section)"))
+        XCTAssertTrue(workspace.contains("await Task.yield()"))
+        XCTAssertTrue(workspace.contains("mountedSection = section"))
+        // 未就绪时渲染的是占位而不是 sectionContent。
+        XCTAssertTrue(workspace.contains("sectionContent(mounted)"))
+        XCTAssertTrue(workspace.contains("private func sectionContent(_ section: NovelWorkspaceSection)"))
+        // 转场存在且受 reduceMotion 门控。
+        XCTAssertTrue(workspace.contains("@Environment(\\.accessibilityReduceMotion)"))
+        XCTAssertTrue(
+            workspace.contains(".animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: mounted)")
+        )
+    }
+
+    func testCompendiumSubsectionSwitchCrossfades() throws {
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+
+        // 设定页确实由 .compendium 路由到该视图。
+        XCTAssertTrue(workspace.contains("case .compendium:"))
+        XCTAssertTrue(workspace.contains("NovelCompendiumView("))
+
+        XCTAssertTrue(compendium.contains("@Environment(\\.accessibilityReduceMotion)"))
+        XCTAssertTrue(compendium.contains(".transition(.opacity)"))
+        XCTAssertTrue(
+            compendium.contains(".animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: selection)")
+        )
+    }
+
     private func source(_ relativePath: String) throws -> String {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         return try String(

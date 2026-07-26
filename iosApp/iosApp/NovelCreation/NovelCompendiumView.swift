@@ -7,12 +7,18 @@ struct NovelCompendiumView: View {
     let onEditMaterial: (NovelMaterialRecord?, NovelMaterialKind) -> Void
     let onAcceptProposal: (NovelSettingProposalRecord) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        content
-            .safeAreaInset(edge: .top, spacing: 0) {
-                categoryPicker
-            }
-            .background(AmberTheme.background)
+        ZStack {
+            content
+                .transition(.opacity)
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: selection)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            categoryPicker
+        }
+        .background(AmberTheme.background)
     }
 
     private var categoryPicker: some View {

@@ -216,6 +216,22 @@ struct NovelAbandonPolishTransactionCommand: Equatable, Sendable {
     let transactionID: NovelPendingOperationID
 }
 
+/// 标记废弃 / 恢复某一章。不删除任何记录:章节版本之间有事实兼容链,
+/// 真删会断链。废弃后该章不参与生成上下文与剧情状态推导。
+struct NovelDiscardChapterCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let chapterID: NovelChapterID
+}
+
+struct NovelRestoreChapterCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let chapterID: NovelChapterID
+}
+
 struct NovelRestoreChapterVersionCommand: Equatable, Sendable {
     let context: NovelMutationContext
     let projectID: NovelProjectID
@@ -336,6 +352,8 @@ enum NovelAction: Equatable, Sendable {
     case adoptPolishCandidate(NovelAdoptPolishCandidateCommand)
     case abandonPolishTransaction(NovelAbandonPolishTransactionCommand)
     case restoreChapterVersion(NovelRestoreChapterVersionCommand)
+    case discardChapter(NovelDiscardChapterCommand)
+    case restoreChapter(NovelRestoreChapterCommand)
     case cancelRun(NovelCancelRunCommand)
     case collectCandidate(NovelCollectCandidateCommand)
     case saveManualEdit(NovelSaveManualEditCommand)
@@ -365,6 +383,8 @@ enum NovelAction: Equatable, Sendable {
         case .adoptPolishCandidate(let command): command.projectID
         case .abandonPolishTransaction(let command): command.projectID
         case .restoreChapterVersion(let command): command.projectID
+        case .discardChapter(let command): command.projectID
+        case .restoreChapter(let command): command.projectID
         case .cancelRun(let command): command.projectID
         case .collectCandidate(let command): command.projectID
         case .saveManualEdit(let command): command.projectID
@@ -396,6 +416,8 @@ enum NovelAction: Equatable, Sendable {
         case .adoptPolishCandidate(let command): command.context
         case .abandonPolishTransaction(let command): command.context
         case .restoreChapterVersion(let command): command.context
+        case .discardChapter(let command): command.context
+        case .restoreChapter(let command): command.context
         case .cancelRun(let command): command.context
         case .collectCandidate(let command): command.context
         case .saveManualEdit(let command): command.context
@@ -427,6 +449,8 @@ enum NovelAction: Equatable, Sendable {
         case .adoptPolishCandidate: .adoptPolishCandidate
         case .abandonPolishTransaction: .abandonPolishTransaction
         case .restoreChapterVersion: .restoreChapterVersion
+        case .discardChapter: .discardChapter
+        case .restoreChapter: .restoreChapter
         case .cancelRun: .cancelRun
         case .collectCandidate: .collectCandidate
         case .saveManualEdit: .saveManualEdit
@@ -571,6 +595,18 @@ enum NovelAction: Equatable, Sendable {
                 candidateID: command.candidateID,
                 proposedChapterVersionID: command.proposedChapterVersionID,
                 checkpointID: command.checkpointID
+            ))
+        case .discardChapter(let command):
+            payload = .discardChapter(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                chapterID: command.chapterID
+            ))
+        case .restoreChapter(let command):
+            payload = .restoreChapter(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                chapterID: command.chapterID
             ))
         case .abandonPolishTransaction(let command):
             payload = .abandonPolishTransaction(.init(
@@ -810,6 +846,12 @@ private enum NovelCanonicalActionPayload: Codable {
         let transactionID: NovelPendingOperationID
     }
 
+    struct ChapterDiscardScope: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let chapterID: NovelChapterID
+    }
+
     struct RestoreChapterVersion: Codable {
         let projectID: NovelProjectID
         let branchID: NovelBranchID
@@ -898,6 +940,8 @@ private enum NovelCanonicalActionPayload: Codable {
     case adoptPolishCandidate(AdoptPolishCandidate)
     case abandonPolishTransaction(AbandonPolishTransaction)
     case restoreChapterVersion(RestoreChapterVersion)
+    case discardChapter(ChapterDiscardScope)
+    case restoreChapter(ChapterDiscardScope)
     case cancelRun(CancelRun)
     case collectCandidate(CollectCandidate)
     case saveManualEdit(SaveManualEdit)
@@ -1012,6 +1056,13 @@ enum NovelOutcome: Codable, Equatable, Sendable {
         transactionID: NovelPendingOperationID,
         revision: Int64
     )
+    case chapterDiscardStateChanged(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        chapterID: NovelChapterID,
+        isDiscarded: Bool,
+        revision: Int64
+    )
     case chapterVersionRestored(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
@@ -1089,6 +1140,10 @@ enum NovelRunKind: String, Codable, Sendable {
     case discussion
     case prose
     case polish
+    /// 整章重新生成。与 `.prose` 的区别是它**必须**携带被重写章节的版本 id
+    /// (`sourceChapterVersionID`),与 `.polish` 的区别是它**允许改变剧情事实**
+    /// ——不走润色的漂移闸,产出普通 prose 候选,由用户以 `.replaceChapter` 收录。
+    case regenerate
 
     /// 「给输出留多少上下文空间」——**纯本地算术,绝不发给 provider**。
     ///
@@ -1098,7 +1153,7 @@ enum NovelRunKind: String, Codable, Sendable {
     /// 2026-07-26「模型回复达到输出上限」故障的根源。
     var outputReservationTokens: Int {
         switch self {
-        case .prose, .polish: 8_192
+        case .prose, .polish, .regenerate: 8_192
         case .quickStart, .discussion: 4_096
         }
     }

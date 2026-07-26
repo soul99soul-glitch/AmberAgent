@@ -193,6 +193,10 @@ enum NovelPendingOperationStatus: String, Codable, Sendable {
 
 enum NovelCollectionTarget: Codable, Equatable, Sendable {
     case appendToChapter(NovelChapterID)
+    /// 整章重新生成:用候选内容**替换**该章正文,而不是追加到末尾。
+    /// 版本类型仍是 `.collected`,因此必须另起事实兼容链——这正是
+    /// 「允许改变剧情事实」的形式化表达(见 NovelCompatibilityLineageValidator)。
+    case replaceChapter(NovelChapterID)
     case createNextChapter(chapterID: NovelChapterID, title: String)
 }
 
@@ -501,6 +505,12 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
 struct NovelChapterRecord: Codable, Equatable, Sendable {
     let id: NovelChapterID
     let createdAt: Date
+    /// 非 nil 表示该章已被标记废弃:不参与生成上下文与剧情状态推导,但保留在
+    /// 存档里、可以恢复。用可选字段而不是真删,是因为章节版本之间有
+    /// `factCompatibilityID` 事实链(见 `NovelCompatibilityLineageValidator`),
+    /// 真删中间一章会断链并让后续章节的剧情状态失去依据。
+    /// 老存档缺这个键:合成 Codable 对可选属性走 decodeIfPresent,可平滑读入。
+    var discardedAt: Date?
 }
 
 struct NovelChapterVersionRecord: Codable, Equatable, Sendable {
@@ -936,6 +946,8 @@ enum NovelOperationKind: String, Codable, Sendable {
     case adoptPolishCandidate
     case abandonPolishTransaction
     case restoreChapterVersion
+    case discardChapter
+    case restoreChapter
     case startRun
     case cancelRun
     case collectCandidate

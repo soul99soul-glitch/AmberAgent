@@ -1163,11 +1163,11 @@ private extension NovelGenerationLifecycleTests {
         let branch = document.branches[0]
         let mode: NovelSessionMode = switch kind {
         case .quickStart, .discussion: .discussPlan
-        case .prose, .polish: .writeProse
+        case .prose, .polish, .regenerate: .writeProse
         }
         let candidateID: NovelCandidateID? = switch kind {
         case .quickStart, .discussion: nil
-        case .prose, .polish: NovelCandidateID()
+        case .prose, .polish, .regenerate: NovelCandidateID()
         }
         return NovelRunRequest(
             id: runID,

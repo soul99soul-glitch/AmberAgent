@@ -236,6 +236,8 @@ struct NovelCollectCandidateSheet: View {
 
     let paragraphs: [NovelParagraphRecord]
     let chapters: [NovelSessionChapterOption]
+    /// 非 nil 表示这个候选来自「整章重新生成」,可以替换该章。
+    let regenerationTarget: NovelSessionChapterOption?
     let onCompleted: @MainActor (NovelCollectionTarget) -> Void
     let onCollect: @MainActor (
         NovelParagraphSelection,
@@ -253,6 +255,7 @@ struct NovelCollectCandidateSheet: View {
     init(
         paragraphs: [NovelParagraphRecord],
         chapters: [NovelSessionChapterOption],
+        regenerationTarget: NovelSessionChapterOption? = nil,
         suggestedGranularity: NovelGenerationGranularity,
         onCompleted: @escaping @MainActor (NovelCollectionTarget) -> Void = { _ in },
         onCollect: @escaping @MainActor (
@@ -262,6 +265,7 @@ struct NovelCollectCandidateSheet: View {
     ) {
         self.paragraphs = paragraphs
         self.chapters = chapters
+        self.regenerationTarget = regenerationTarget
         self.onCompleted = onCompleted
         self.onCollect = onCollect
         let paragraphIDs = Set(paragraphs.map(\.id))
@@ -270,7 +274,8 @@ struct NovelCollectCandidateSheet: View {
         self._editedText = State(initialValue: candidateText)
         self._targetChoice = State(initialValue: NovelCollectionTargetChoice.initial(
             chapterCount: chapters.count,
-            granularity: suggestedGranularity
+            granularity: suggestedGranularity,
+            hasRegenerationTarget: regenerationTarget != nil
         ))
         let nextOrdinal = chapters.count + 1
         self._nextChapterTitle = State(initialValue: NovelPresentation.chapterDisplayTitle(
@@ -409,6 +414,10 @@ struct NovelCollectCandidateSheet: View {
         Section("章节位置") {
             if !chapters.isEmpty {
                 Picker("收录方式", selection: $targetChoice) {
+                    if let regenerationTarget {
+                        Text("替换\(regenerationTarget.displayTitle)")
+                            .tag(NovelCollectionTargetChoice.replaceChapter)
+                    }
                     Text(appendCurrentLabel).tag(NovelCollectionTargetChoice.appendCurrent)
                     Text("新开第 \(chapters.count + 1) 章")
                         .tag(NovelCollectionTargetChoice.createNext)
@@ -417,7 +426,13 @@ struct NovelCollectCandidateSheet: View {
                 .disabled(isSubmitting)
             }
 
-            if targetChoice == .appendCurrent, let chapter = chapters.last {
+            if targetChoice == .replaceChapter, let regenerationTarget {
+                LabeledContent("将替换", value: regenerationTarget.displayTitle)
+                Text("原版本会保留在该章的版本历史里。因为重写允许改变剧情，"
+                    + "回到旧版本需要在版本历史里用「以手工编辑恢复」，不能直接回滚。")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+            } else if targetChoice == .appendCurrent, let chapter = chapters.last {
                 LabeledContent("当前章节", value: chapter.displayTitle)
             } else {
                 TextField("章节标题", text: $nextChapterTitle)
@@ -437,6 +452,9 @@ struct NovelCollectCandidateSheet: View {
         }
         if targetChoice == .createNext {
             return !nextChapterTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if targetChoice == .replaceChapter {
+            return regenerationTarget != nil
         }
         return chapters.last != nil
     }
@@ -505,6 +523,9 @@ struct NovelCollectCandidateSheet: View {
         case .appendCurrent:
             guard let chapterID = chapters.last?.selection.chapterID else { return }
             target = .appendToChapter(chapterID)
+        case .replaceChapter:
+            guard let chapterID = regenerationTarget?.selection.chapterID else { return }
+            target = .replaceChapter(chapterID)
         case .createNext:
             target = .createNextChapter(
                 chapterID: NovelChapterID(),
@@ -529,11 +550,16 @@ struct NovelCollectCandidateSheet: View {
 enum NovelCollectionTargetChoice: String, Hashable {
     case appendCurrent
     case createNext
+    /// 「整章重新生成」专用:替换来源章节,而不是追加或新建。
+    case replaceChapter
 
     static func initial(
         chapterCount: Int,
-        granularity: NovelGenerationGranularity
+        granularity: NovelGenerationGranularity,
+        hasRegenerationTarget: Bool
     ) -> NovelCollectionTargetChoice {
+        // 重新生成的候选默认就是替换来源章——那是发起这次生成的本意。
+        if hasRegenerationTarget { return .replaceChapter }
         guard chapterCount > 0 else { return .createNext }
         return granularity == .wholeChapter ? .createNext : .appendCurrent
     }

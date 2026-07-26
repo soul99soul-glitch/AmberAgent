@@ -730,7 +730,7 @@ extension DefaultNovelCreation {
 
         let candidateID: NovelCandidateID?
         switch request.kind {
-        case .prose, .polish:
+        case .prose, .polish, .regenerate:
             candidateID = NovelCandidateID()
         case .quickStart, .discussion:
             candidateID = nil
@@ -1508,6 +1508,7 @@ private extension DefaultNovelCreation {
         case .prose:
             request.granularity == .continuation ? .proseContinuation : .proseWholeChapter
         case .polish: .wholeChapterPolish
+        case .regenerate: .wholeChapterRegeneration
         }
     }
 
@@ -1515,7 +1516,7 @@ private extension DefaultNovelCreation {
         switch request.kind {
         case .quickStart: .quickStart
         case .discussion: .discussion
-        case .prose: .prose
+        case .prose, .regenerate: .prose
         case .polish: .polish
         }
     }
@@ -1558,6 +1559,14 @@ private extension DefaultNovelCreation {
             NovelModelParameters(
                 temperature: 0.35,
                 topP: 0.9,
+                maxOutputTokens: nil,
+                reasoningLevel: .automatic
+            )
+        case .regenerate:
+            // 重写允许改剧情,创作自由度按正文生成给,而不是润色的 0.35。
+            NovelModelParameters(
+                temperature: 0.7,
+                topP: 0.95,
                 maxOutputTokens: nil,
                 reasoningLevel: .automatic
             )

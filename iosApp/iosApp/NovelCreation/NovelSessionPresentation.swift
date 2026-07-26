@@ -45,7 +45,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         granularity = run.granularity
         kind = switch run.kind {
         case .quickStart, .discussion: .discussion
-        case .prose: .proseCandidate
+        case .prose, .regenerate: .proseCandidate
         case .polish: .polishCandidate
         }
         self.content = content
@@ -292,6 +292,23 @@ enum NovelSessionHistoryWindowPolicy {
 
     static func expandedLimit(currentLimit: Int, totalCount: Int) -> Int {
         min(totalCount, max(0, currentLimit) + pageSize)
+    }
+
+    /// 追加新行时窗口必须吸收增量,否则 `startIndex` 前移会把**已经渲染过的**
+    /// 顶部行踢出窗口。那些行可能有几万 pt 高,一旦被踢,contentSize 当场收缩,
+    /// 而收缩发生在视口上方——没有任何锚点补偿(底锚已在 0eea3d38b 撤除),
+    /// 结果就是整列表大幅位移、视口里冒出本条回复更早的内容。
+    ///
+    /// 这里不区分「是否贴底」:贴底与否只影响用户看不看得见,不影响
+    /// 「已渲染的行不得中途消失」这条不变量。
+    static func limitAfterRowsAppended(
+        currentLimit: Int,
+        previousRowCount: Int,
+        currentRowCount: Int
+    ) -> Int {
+        let appended = max(0, currentRowCount - previousRowCount)
+        guard appended > 0 else { return currentLimit }
+        return min(currentRowCount, currentLimit + appended)
     }
 
     static func limitAfterArchiveExpansion(

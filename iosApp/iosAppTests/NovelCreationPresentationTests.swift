@@ -290,22 +290,43 @@ final class NovelCreationPresentationTests: XCTestCase {
 
     func testCollectionTargetDefaultsToNewChapterForWholeChapterCandidate() {
         XCTAssertEqual(
-            NovelCollectionTargetChoice.initial(chapterCount: 3, granularity: .wholeChapter),
+            NovelCollectionTargetChoice.initial(chapterCount: 3, granularity: .wholeChapter, hasRegenerationTarget: false),
             .createNext
         )
         XCTAssertEqual(
-            NovelCollectionTargetChoice.initial(chapterCount: 0, granularity: .wholeChapter),
+            NovelCollectionTargetChoice.initial(chapterCount: 0, granularity: .wholeChapter, hasRegenerationTarget: false),
             .createNext
+        )
+    }
+
+    /// 重新生成的候选默认就该替换来源章——那是发起这次生成的本意;
+    /// 这条优先级高于按粒度推断的默认值。
+    func testCollectionTargetDefaultsToReplaceForRegeneratedCandidate() {
+        XCTAssertEqual(
+            NovelCollectionTargetChoice.initial(
+                chapterCount: 3,
+                granularity: .wholeChapter,
+                hasRegenerationTarget: true
+            ),
+            .replaceChapter
+        )
+        XCTAssertEqual(
+            NovelCollectionTargetChoice.initial(
+                chapterCount: 3,
+                granularity: .continuation,
+                hasRegenerationTarget: true
+            ),
+            .replaceChapter
         )
     }
 
     func testCollectionTargetDefaultsToCurrentChapterForContinuationCandidate() {
         XCTAssertEqual(
-            NovelCollectionTargetChoice.initial(chapterCount: 3, granularity: .continuation),
+            NovelCollectionTargetChoice.initial(chapterCount: 3, granularity: .continuation, hasRegenerationTarget: false),
             .appendCurrent
         )
         XCTAssertEqual(
-            NovelCollectionTargetChoice.initial(chapterCount: 0, granularity: .continuation),
+            NovelCollectionTargetChoice.initial(chapterCount: 0, granularity: .continuation, hasRegenerationTarget: false),
             .createNext
         )
     }

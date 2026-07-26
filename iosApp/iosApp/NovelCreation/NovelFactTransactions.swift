@@ -154,7 +154,7 @@ enum NovelFactTransactionReducer {
         var chapterSelections = branch.workingChapterSelections
         var chapterToAdd: NovelChapterRecord?
         switch target {
-        case .appendToChapter(let chapterID):
+        case .appendToChapter(let chapterID), .replaceChapter(let chapterID):
             guard let index = chapterSelections.firstIndex(where: { $0.chapterID == chapterID }),
                   proposedVersion.chapterID == chapterID else {
                 throw NovelError.invalidInput("The collection append target is stale.")
@@ -335,6 +335,34 @@ enum NovelFactTransactionReducer {
                 createdAt: now,
                 operationID: command.context.operationID
             )
+        case .replaceChapter(let chapterID):
+            guard let selection = branch.workingChapterSelections.first(where: {
+                $0.chapterID == chapterID
+            }), let baseVersion = document.chapterVersions.first(where: {
+                $0.id == selection.versionID && $0.chapterID == chapterID
+            }) else {
+                throw NovelError.invalidInput("The replace target is not in the current manuscript.")
+            }
+            // 替换只能落到**这个候选自己重写的那一章**。此前该约束只存在于
+            // 收录面板,任何绕过 UI 的调用方都能拿一段无关正文整章覆盖。
+            guard let sourceVersionID = candidate.sourceChapterVersionID,
+                  document.chapterVersions.contains(where: {
+                      $0.id == sourceVersionID && $0.chapterID == chapterID
+                  }) else {
+                throw NovelError.invalidInput("The candidate did not rewrite this chapter.")
+            }
+            proposedVersion = NovelChapterVersionRecord(
+                id: command.proposedChapterVersionID,
+                chapterID: chapterID,
+                kind: .collected,
+                title: baseVersion.title,
+                content: selectedText,
+                factCompatibilityID: command.factCompatibilityID,
+                sourceChapterVersionID: baseVersion.id,
+                sourceCandidateID: candidate.id,
+                createdAt: now,
+                operationID: command.context.operationID
+            )
         case .createNextChapter(let chapterID, let title):
             let normalizedTitle = try normalizedRequired(title, field: "Chapter title")
             guard normalizedTitle == title else {
@@ -498,7 +526,7 @@ enum NovelFactTransactionReducer {
         var chapterSelections = branch.workingChapterSelections
         var chapterToAdd: NovelChapterRecord?
         switch target {
-        case .appendToChapter(let chapterID):
+        case .appendToChapter(let chapterID), .replaceChapter(let chapterID):
             guard let index = chapterSelections.firstIndex(where: { $0.chapterID == chapterID }),
                   proposedVersion.chapterID == chapterID else {
                 throw NovelError.invalidInput("The pending append target is stale.")

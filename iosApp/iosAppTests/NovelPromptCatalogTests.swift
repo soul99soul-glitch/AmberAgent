@@ -9,9 +9,12 @@ final class NovelPromptCatalogTests: XCTestCase {
             "\($0.kind.rawValue)\n\($0.version)\n\($0.systemText)"
         }.joined(separator: "\n---\n")
 
+        // 2026-07-26 显式更新:新增 `.wholeChapterRegeneration` 模板(整章重新生成,
+        // 允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
+        // 快照变化是这次新增的直接结果,不是既有提示词被改动。
         XCTAssertEqual(
             sha256(snapshot),
-            "5b0c6c132cb11cc811b713ce831f7e5f7179240267062d6ac2eed772e0a4d15e"
+            "a3c755b77d0960e104a4c2b405280f7a6c5914ffc8cb38374210b5493fc8db08"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }

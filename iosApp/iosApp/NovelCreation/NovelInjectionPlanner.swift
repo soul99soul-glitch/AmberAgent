@@ -700,7 +700,7 @@ enum NovelInjectionPlanner {
 private extension NovelPromptKind {
     var requiresSynchronizedBranch: Bool {
         switch self {
-        case .wholeChapterPolish:
+        case .wholeChapterPolish, .wholeChapterRegeneration:
             true
         case .quickStart, .discussion, .proseContinuation, .proseWholeChapter,
              .stateDeltaV1, .manualSyncV1, .discussionArchiveV1, .polishDriftV1:
@@ -710,7 +710,7 @@ private extension NovelPromptKind {
 
     var requiresIdleBranch: Bool {
         switch self {
-        case .proseContinuation, .proseWholeChapter, .wholeChapterPolish:
+        case .proseContinuation, .proseWholeChapter, .wholeChapterPolish, .wholeChapterRegeneration:
             true
         case .quickStart, .discussion, .stateDeltaV1, .manualSyncV1,
              .discussionArchiveV1, .polishDriftV1:
@@ -831,10 +831,12 @@ private extension NovelInjectionPlanner {
         branch: NovelBranchRecord,
         request: NovelInjectionPlanningRequest
     ) throws -> NovelInjectionSection? {
-        if request.promptKind == .wholeChapterPolish {
+        if request.promptKind == .wholeChapterPolish || request.promptKind == .wholeChapterRegeneration {
+            // 重新生成与润色一样,必须拿到**被改写章的完整正文**;区别只在允不允许
+            // 改剧情,那由提示词与采用路径决定,与注入无关。
             guard let sourceID = request.sourceChapterVersionID else {
                 throw NovelInjectionPlanningError.invalidInput(
-                    "Whole-chapter polish requires a source chapter version."
+                    "Whole-chapter rewrite requires a source chapter version."
                 )
             }
             guard branch.workingChapterSelections.contains(where: { $0.versionID == sourceID }) else {
@@ -858,7 +860,11 @@ private extension NovelInjectionPlanner {
                 request.promptKind == .proseWholeChapter else {
             return nil
         }
-        guard let selection = branch.workingChapterSelections.last else {
+        // 已废弃的章节不参与生成上下文:这正是「标记废弃」的功能所在。
+        // 注意取的是最后一个**未废弃**的选择,而不是简单的 last。
+        guard let selection = branch.workingChapterSelections.last(where: { selection in
+            document.chapters.first(where: { $0.id == selection.chapterID })?.discardedAt == nil
+        }) else {
             let isWholeChapter = request.promptKind == .proseWholeChapter
             let label = isWholeChapter ? "PREVIOUS CHAPTER TAIL" :
                 request.promptKind == .discussion ? "CURRENT MANUSCRIPT TAIL" : "CURRENT CHAPTER TAIL"

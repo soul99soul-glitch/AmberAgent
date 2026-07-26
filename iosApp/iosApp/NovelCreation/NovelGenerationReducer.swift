@@ -60,7 +60,7 @@ enum NovelGenerationReducer {
                 baseHeadRevision: run.baseHeadRevision,
                 status: .interrupted,
                 content: run.partialContent,
-                sourceChapterVersionID: nil,
+                sourceChapterVersionID: run.sourceChapterVersionID,
                 collectedCheckpointID: nil,
                 createdAt: message.createdAt
             ))
@@ -267,7 +267,7 @@ enum NovelGenerationReducer {
         case .discussion:
             messageKind = .discussion
             quickStartSuggestions = nil
-        case .prose:
+        case .prose, .regenerate:
             messageKind = .proseCandidate
             quickStartSuggestions = nil
         case .polish:
@@ -714,7 +714,10 @@ private extension NovelGenerationReducer {
                     baseHeadRevision: run.baseHeadRevision,
                     status: .interrupted,
                     content: partialContent,
-                    sourceChapterVersionID: nil,
+                    // 保留来源章版本:prose run 恒为 nil(行为不变),而 regenerate
+                    // 若在此清空,中断后收录面板就找不到替换目标,会静默翻成
+                    // 「新开一章」,在书尾造出与原章重复的正文。
+                    sourceChapterVersionID: run.sourceChapterVersionID,
                     collectedCheckpointID: nil,
                     createdAt: now
                 ))
@@ -812,6 +815,20 @@ private extension NovelGenerationReducer {
                   request.sourceChapterVersionID == nil,
                   request.askUserResponse == nil else {
                 throw NovelError.invalidInput("The prose run shape is invalid.")
+            }
+        case .regenerate:
+            guard branch.syncStatus == .synchronized else {
+                throw NovelError.invalidInput("The branch must be synchronized before rewriting a chapter.")
+            }
+            guard !document.pendingOperations.contains(where: { $0.branchID == branch.id }) else {
+                throw NovelError.invalidInput("Pending manuscript work must finish before rewriting a chapter.")
+            }
+            guard request.mode == .writeProse,
+                  request.granularity == .wholeChapter,
+                  request.candidateID != nil,
+                  request.sourceChapterVersionID != nil,
+                  request.askUserResponse == nil else {
+                throw NovelError.invalidInput("The regeneration run shape is invalid.")
             }
         case .polish:
             guard branch.syncStatus == .synchronized else {
@@ -967,6 +984,8 @@ private extension NovelGenerationReducer {
                 : .proseWholeChapter
         case .polish:
             .wholeChapterPolish
+        case .regenerate:
+            .wholeChapterRegeneration
         }
     }
 

@@ -66,16 +66,14 @@ struct NovelSessionPresentationBuffer {
 
 /// Pure presentation drain for novel streaming.
 ///
-/// Mirrors Chat's bounded-per-tick reveal, but advances adaptively with backlog
-/// so long chapters do not accumulate multi-second UI lag under a fixed 12-char
-/// ceiling. Terminal paths still snap to the authoritative full text.
+/// The per-tick advance policy is shared with Chat via
+/// `StreamPresentationPacingPolicy` — this type only adapts it to the novel
+/// session's single-String shape. Terminal paths still snap to the
+/// authoritative full text.
 enum NovelSessionPresentationPacer {
-    /// Soft floor: roughly one CJK phone-width line per tick when backlog is light.
-    static let minimumTextAdvance = 12
-    /// Hard ceiling per 48ms tick: drains large backlog in a few seconds, not tens.
-    static let maximumTextAdvance = 64
-    /// Prefer clearing the *current* backlog within this many ticks when possible.
-    static let preferredDrainTicks = 16
+    static var minimumTextAdvance: Int { StreamPresentationPacingPolicy.minimumTextAdvance }
+    static var maximumTextAdvance: Int { StreamPresentationPacingPolicy.maximumTextAdvance }
+    static var preferredDrainTicks: Int { StreamPresentationPacingPolicy.preferredDrainTicks }
 
     struct Step: Equatable {
         let content: String
@@ -83,9 +81,7 @@ enum NovelSessionPresentationPacer {
     }
 
     static func textAdvance(backlogCount: Int) -> Int {
-        guard backlogCount > 0 else { return 0 }
-        let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
-        return min(maximumTextAdvance, max(minimumTextAdvance, adaptive))
+        StreamPresentationPacingPolicy.textAdvance(backlogCount: backlogCount)
     }
 
     static func step(displayedContent: String, targetContent: String) -> Step {
@@ -923,6 +919,37 @@ final class NovelSessionViewModel {
         return await start(draft)
     }
 
+    /// 整章重新生成:与润色的区别是**允许改变剧情事实**,因此不走润色事务的
+    /// 漂移闸,而是产出普通 prose 候选,由用户确认后以 `.replaceChapter` 收录为
+    /// 该章新版本(版本类型 `.collected`,另起事实兼容链)。
+    func startWholeChapterRegeneration(chapterID: NovelChapterID) async -> Bool {
+        guard let source = currentChapterVersions.first(where: { $0.chapterID == chapterID }) else {
+            operationErrorMessage = "这一章还没有正式版本，无法重新生成。"
+            return false
+        }
+        let draft = NovelSessionRunDraft(
+            kind: .regenerate,
+            mode: .writeProse,
+            granularity: .wholeChapter,
+            userText: "请重写《\(source.title)》这一整章。允许调整剧情以消除与前后章节的矛盾或重复，"
+                + "但必须与其余章节保持一致。",
+            sourceChapterVersionID: source.id,
+            askUserResponse: nil,
+            injectionOverrides: .none,
+            inputBudgetTokens: 16_000
+        )
+        return await start(draft)
+    }
+
+    /// 候选若由「整章重新生成」产生,它会带着被重写章节的版本 id;收录面板据此
+    /// 提供「替换该章」。返回 nil 表示这是普通候选,只能追加或新建章节。
+    func regenerationTargetChapterID(for candidateID: NovelCandidateID) -> NovelChapterID? {
+        guard let candidate = candidate(id: candidateID),
+              candidate.kind == .prose,
+              let versionID = candidate.sourceChapterVersionID else { return nil }
+        return currentChapterVersions.first { $0.id == versionID }?.chapterID
+    }
+
     func adoptPolishCandidate(_ candidateID: NovelCandidateID) async {
         guard let project = workspace.projectSnapshot,
               let branch = workspace.branchSnapshot,
@@ -1018,6 +1045,13 @@ final class NovelSessionViewModel {
     }
 }
 
+extension NovelSessionViewModel {
+    /// 生成中状态条按**真实 run** 显示文案,而不是 composer 的当前设置:
+    /// `start(_:)` 不回写 mode/granularity,重试失败 run 时两者会分叉。
+    var activeRunKind: NovelRunKind? { activeRun?.kind }
+    var activeRunGranularity: NovelGenerationGranularity? { activeRun?.granularity }
+}
+
 private extension NovelSessionViewModel {
     var snapshotMatchesBinding: Bool {
         guard let binding,
@@ -1085,6 +1119,9 @@ private extension NovelSessionViewModel {
             return true
         case .prose:
             return !branchPendingOperations.contains(where: \.blocksProseGeneration)
+        case .regenerate:
+            // 要把被重写章的正文原样注入,所以必须已同步且没有未落地的正文操作。
+            return branch.syncStatus == .synchronized && branchPendingOperations.isEmpty
         case .polish:
             return branch.syncStatus == .synchronized && branchPendingOperations.isEmpty
         case .quickStart:
@@ -1104,7 +1141,7 @@ private extension NovelSessionViewModel {
         let previousTerminalAwaitingRefresh = terminalAwaitingRefresh
 
         let candidateID: NovelCandidateID? = switch draft.kind {
-        case .prose, .polish: NovelCandidateID()
+        case .prose, .polish, .regenerate: NovelCandidateID()
         case .quickStart, .discussion: nil
         }
         let request = NovelRunRequest(
@@ -1614,6 +1651,14 @@ private extension NovelSessionViewModel {
         let step = NovelSessionPresentationPacer.step(
             displayedContent: current.content,
             targetContent: buffer.targetContent
+        )
+        // [TEMP-DIAG] 取证「显示内容回退」:目标被整体替换后若不再以已显示内容
+        // 为前缀,pacer 会当场跳到新目标,内容可能变短 → 高度塌陷 → 列表位移。
+        ChatStreamAnomalyRecorder.noteNovelPresentation(
+            displayed: current.content.count,
+            target: buffer.targetContent.count,
+            next: step.content.count,
+            prefixHeld: buffer.targetContent.hasPrefix(current.content)
         )
         if step.content != current.content || current.phase != .streaming {
             updateTail(content: step.content, phase: .streaming)

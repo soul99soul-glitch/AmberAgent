@@ -9,6 +9,7 @@ enum NovelPromptKind: String, Codable, CaseIterable, Sendable {
     case manualSyncV1
     case discussionArchiveV1
     case wholeChapterPolish
+    case wholeChapterRegeneration
     case polishDriftV1
 }
 
@@ -46,6 +47,8 @@ enum NovelPromptCatalog {
             versions.insert("novel.prose-continuation.v1")
         case .proseWholeChapter:
             versions.formUnion(["novel.prose-whole-chapter.v1", "novel.prose-whole-chapter.v2"])
+        case .wholeChapterRegeneration:
+            versions.insert("novel.whole-chapter-regeneration.v1")
         case .discussionArchiveV1, .wholeChapterPolish, .polishDriftV1:
             break
         }
@@ -218,6 +221,21 @@ enum NovelPromptCatalog {
                 chapter as one response, then append a final line containing exactly
                 \(polishCompletionSentinel). Do not emit that sentinel anywhere else. It remains a draft candidate
                 until explicitly adopted.
+                """
+            )
+
+        case .wholeChapterRegeneration:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.whole-chapter-regeneration.v1",
+                systemText: """
+                Rewrite the supplied chapter completely. Unlike polishing, you MAY change story facts: events,
+                chronology, relationships, motivations, secrets, and outcomes are all open, so long as the result
+                reads as a coherent part of the same manuscript. Use the rewrite to remove contradictions,
+                repetition, or continuity errors between this chapter and the rest of the story. Keep the chapter's
+                role in the overall structure. Do not summarise, do not comment on the changes, and do not continue
+                past the end of this chapter. Return the complete rewritten chapter as one response. It remains a
+                draft candidate until the writer collects it.
                 """
             )
 

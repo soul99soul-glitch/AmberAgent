@@ -982,6 +982,35 @@ final class NovelCreationViewModel {
         )))
     }
 
+    /// 标记废弃 / 恢复整章。不删除任何记录,废弃后该章不再进入生成上下文。
+    func setChapterDiscarded(_ isDiscarded: Bool, chapterID: NovelChapterID) async {
+        guard let project = projectSnapshot,
+              let branch = branchSnapshot,
+              let chapter = project.chapters.first(where: { $0.id == chapterID }),
+              (chapter.discardedAt != nil) != isDiscarded else {
+            return
+        }
+        let context = mutationContext(
+            projectRevision: project.project.revision,
+            branchHeadRevision: branch.branch.headRevision
+        )
+        if isDiscarded {
+            _ = await perform(.discardChapter(NovelDiscardChapterCommand(
+                context: context,
+                projectID: project.project.id,
+                branchID: branch.branch.id,
+                chapterID: chapterID
+            )))
+        } else {
+            _ = await perform(.restoreChapter(NovelRestoreChapterCommand(
+                context: context,
+                projectID: project.project.id,
+                branchID: branch.branch.id,
+                chapterID: chapterID
+            )))
+        }
+    }
+
     func restoreChapterVersion(_ targetVersionID: NovelChapterVersionID) async {
         guard let project = projectSnapshot,
               let branch = branchSnapshot,

@@ -1195,6 +1195,23 @@ enum NovelDocumentValidator {
                         proposed.content != expectedContent {
                         issues.append("Pending operation \(pending.id) has an invalid appended chapter version.")
                     }
+                case .replaceChapter(let chapterID):
+                    // 重新生成:内容是候选正文本身,不做追加拼接;标题沿用原章。
+                    guard let checkpoint = document.checkpoints.first(where: {
+                        $0.id == pending.baseCheckpointID
+                    }), let selection = checkpoint.chapterSelections.first(where: {
+                        $0.chapterID == chapterID
+                    }), let baseVersion = document.chapterVersions.first(where: {
+                        $0.id == selection.versionID
+                    }) else {
+                        issues.append("Pending operation \(pending.id) has an invalid replace target.")
+                        continue
+                    }
+                    if proposed.chapterID != chapterID ||
+                        proposed.title != baseVersion.title ||
+                        proposed.content != pending.selectedText {
+                        issues.append("Pending operation \(pending.id) has an invalid replaced chapter version.")
+                    }
                 case .createNextChapter(let chapterID, let title):
                     if proposed.chapterID != chapterID ||
                         proposed.title != title ||
@@ -2305,6 +2322,7 @@ extension NovelOutcome {
         case .polishCandidateRejected(let projectID, _, _, _, _): projectID
         case .polishTransactionAbandoned(let projectID, _, _, _, _): projectID
         case .chapterVersionRestored(let projectID, _, _, _, _): projectID
+        case .chapterDiscardStateChanged(let projectID, _, _, _, _): projectID
         case .runStarted(let projectID, _, _, _, _): projectID
         case .runInterrupted(let projectID, _, _, _): projectID
         case .candidateCollected(let projectID, _, _, _, _, _): projectID
@@ -2326,6 +2344,7 @@ extension NovelOutcome {
              .branchHeadMoved(_, let branchID, _, _, _, _),
              .discussionArchived(_, let branchID, _, _, _, _, _),
              .candidateCloned(_, let branchID, _, _, _),
+             .chapterDiscardStateChanged(_, let branchID, _, _, _),
              .polishCandidateAdopted(_, let branchID, _, _, _, _),
              .polishCandidateRejected(_, let branchID, _, _, _),
              .polishTransactionAbandoned(_, let branchID, _, _, _),

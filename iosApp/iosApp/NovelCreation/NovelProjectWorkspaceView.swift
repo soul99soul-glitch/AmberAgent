@@ -4,6 +4,7 @@ import UIKit
 struct NovelProjectWorkspaceView: View {
     @Environment(RouterPath.self) private var router
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let viewModel: NovelCreationViewModel
     let sharedSettings: IOSSharedSettingsStore
@@ -11,6 +12,7 @@ struct NovelProjectWorkspaceView: View {
 
     @State private var sessionViewModel: NovelSessionViewModel
     @State private var section: NovelWorkspaceSection = .creation
+    @State private var mountedSection: NovelWorkspaceSection?
     @State private var compendiumSection: NovelCompendiumSection = .characters
     @State private var activeSheet: NovelWorkspaceSheet?
     @State private var chapterReaderRoute: NovelChapterReaderRoute?
@@ -222,8 +224,32 @@ struct NovelProjectWorkspaceView: View {
         }
     }
 
-    @ViewBuilder
+    // 切 Tab 时先只提交这个轻量占位,重内容推迟一拍再挂载:
+    // 点击当帧不做建视图的活,「点下去卡住」的观感由此消除。
     private var content: some View {
+        let mounted: NovelWorkspaceSection? = mountedSection == section ? section : nil
+        return ZStack {
+            if let mounted {
+                sectionContent(mounted)
+                    .transition(.opacity)
+            } else {
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: mounted)
+        .task(id: section) {
+            guard mountedSection != section else { return }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            mountedSection = section
+        }
+    }
+
+    @ViewBuilder
+    private func sectionContent(_ section: NovelWorkspaceSection) -> some View {
         switch section {
         case .creation:
             NovelSessionView(
@@ -313,10 +339,19 @@ struct NovelProjectWorkspaceView: View {
             NovelCollectCandidateSheet(
                 paragraphs: sessionViewModel.paragraphs(candidateID: candidateID),
                 chapters: chapterOptions,
+                regenerationTarget: sessionViewModel
+                    .regenerationTargetChapterID(for: candidateID)
+                    .flatMap { chapterID in
+                        chapterOptions.first { $0.selection.chapterID == chapterID }
+                    },
                 suggestedGranularity: sessionViewModel.collectionGranularity(
                     for: candidateID
                 ),
                 onCompleted: { target in
+                    // 「归档讨论」的语义是「这一章写完了」。替换已有章节是修订,
+                    // 不是新写一章,而且该章首次写成时多半已经归档过一次,
+                    // 再弹一次会在同一章下产生第二条归档记录。
+                    if case .replaceChapter = target { return }
                     guard sessionViewModel.collectionGranularity(for: candidateID) == .wholeChapter else {
                         return
                     }
@@ -457,8 +492,18 @@ struct NovelProjectWorkspaceView: View {
     }
 
     private var chapterOptions: [NovelSessionChapterOption] {
-        sessionViewModel.currentChapterVersions.enumerated().map { index, version in
-            NovelSessionChapterOption(
+        // 已废弃的章不参与收录:注入侧早已把它们排除出生成上下文
+        // (NovelInjectionPlanner 取「最后一个未废弃的选择」),收录侧若还列着它们,
+        // 就会出现「并入当前章」把新文并进一个已废弃章的情况。
+        // 序号仍按完整章节表算,过滤不会让后面的章改名。
+        let discarded = Set(
+            (viewModel.projectSnapshot?.chapters ?? [])
+                .filter { $0.discardedAt != nil }
+                .map(\.id)
+        )
+        return sessionViewModel.currentChapterVersions.enumerated().compactMap { index, version in
+            guard !discarded.contains(version.chapterID) else { return nil }
+            return NovelSessionChapterOption(
                 selection: NovelChapterSelection(
                     chapterID: version.chapterID,
                     versionID: version.id
@@ -472,6 +517,7 @@ struct NovelProjectWorkspaceView: View {
     private func chapterID(for target: NovelCollectionTarget) -> NovelChapterID {
         switch target {
         case .appendToChapter(let chapterID): chapterID
+        case .replaceChapter(let chapterID): chapterID
         case .createNextChapter(let chapterID, _): chapterID
         }
     }

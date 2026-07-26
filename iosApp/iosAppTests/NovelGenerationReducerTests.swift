@@ -835,10 +835,10 @@ private extension NovelGenerationReducerTests {
         let branch = document.branches[0]
         let mode: NovelSessionMode = switch kind {
         case .quickStart, .discussion: .discussPlan
-        case .prose, .polish: .writeProse
+        case .prose, .polish, .regenerate: .writeProse
         }
         let candidateID: NovelCandidateID? = switch kind {
-        case .prose, .polish: NovelCandidateID()
+        case .prose, .polish, .regenerate: NovelCandidateID()
         case .quickStart, .discussion: nil
         }
         return NovelRunRequest(
@@ -879,6 +879,8 @@ private extension NovelGenerationReducerTests {
             request.granularity == .continuation ? .proseContinuation : .proseWholeChapter
         case .polish:
             .wholeChapterPolish
+        case .regenerate:
+            .wholeChapterRegeneration
         }
         let budget = NovelInjectionBudget(
             maxEstimatedInputTokens: request.inputBudgetTokens,

@@ -1592,6 +1592,53 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertEqual(returned.commands, [.setBottomButton(false)])
     }
 
+    /// 不变量:会话进行中追加新行,已经渲染过的顶部行不得被窗口踢出。
+    /// 违反时 `startIndex` 前移,顶部长正文行(可达数万 pt)从 contentSize 里
+    /// 整体消失,而消失发生在视口上方且无锚点补偿 → 整列表大幅位移。
+    func testAppendingRowsNeverEvictsAlreadyRenderedTopRows() {
+        var limit = NovelSessionHistoryWindowPolicy.initialLimit
+        var rowCount = limit
+        let startIndexBefore = NovelSessionHistoryWindowPolicy.startIndex(
+            totalCount: rowCount,
+            limit: limit
+        )
+        // 连续追加 20 行(一次生成里 user/assistant/工具行很容易到这个量级)。
+        for _ in 0..<20 {
+            let previousRowCount = rowCount
+            rowCount += 1
+            limit = NovelSessionHistoryWindowPolicy.limitAfterRowsAppended(
+                currentLimit: limit,
+                previousRowCount: previousRowCount,
+                currentRowCount: rowCount
+            )
+            XCTAssertEqual(
+                NovelSessionHistoryWindowPolicy.startIndex(totalCount: rowCount, limit: limit),
+                startIndexBefore,
+                "追加第 \(rowCount) 行后窗口起点前移,已渲染的顶部行被踢出"
+            )
+        }
+    }
+
+    /// 视图侧不得再用「是否贴底」当作是否吸收新增行的条件:贴底只影响可见性,
+    /// 不影响这条不变量。带条件的旧写法正是位移的来源。
+    func testHistoryWindowAbsorbsAppendedRowsRegardlessOfBottomProximity() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/NovelCreation/NovelSessionView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            source.contains("NovelSessionHistoryWindowPolicy.limitAfterRowsAppended("),
+            "追加行的吸收必须走策略层,便于单测锁不变量"
+        )
+        XCTAssertFalse(
+            source.contains("newValue.rowCount > oldValue.rowCount, !latestAtBottom"),
+            "不得再用 !latestAtBottom 门控窗口吸收"
+        )
+    }
+
     func testCompletionRaisesHistoryWindowLimitOnlyForRowsThatBecameHistorical() {
         // 完成：run 的 2 行全部转入历史，窗口上限吸收 2 行，完成前可见的旧行保持可见。
         XCTAssertEqual(

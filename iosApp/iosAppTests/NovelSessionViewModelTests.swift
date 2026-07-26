@@ -2450,6 +2450,31 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(requests.count, 2)
     }
 
+    /// 端到端红线:这两条断言各自对应一个曾把整个功能做成死代码的缺陷。
+    /// (1) prose run 的形状校验禁止携带 sourceChapterVersionID → 发起必失败;
+    /// (2) .proseWholeChapter 的注入分支只取「最后一章的结尾」,被重写的那一章
+    ///     根本不进上下文 → 模型只能凭标题瞎编,再被默认选项收录去覆盖原章。
+    func testWholeChapterRegenerationStartsAndInjectsTheChapterBeingRewritten() async throws {
+        let fixture = try documentWithChapter()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.delta("重写后的正文。"), .complete])]
+        )
+
+        let started = await harness.session.startWholeChapterRegeneration(chapterID: fixture.chapterID)
+        XCTAssertTrue(started, "整章重新生成必须能真的发起")
+
+        let finished = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(finished)
+
+        let requests = await harness.adapter.requests
+        let prompt = try XCTUnwrap(requests.first).messages.map(\.content).joined(separator: "\n")
+        XCTAssertTrue(
+            prompt.contains("Mara crossed the hall. The gate stayed closed."),
+            "被重写章的完整正文必须进入上下文，否则模型只能凭标题瞎编"
+        )
+    }
+
     func testPolishRetryFailsClosedAfterSourceChapterChanges() async throws {
         let fixture = try documentWithChapter()
         let failure = NovelModelFailure(code: "retryable", message: "暂时失败", isRetryable: true)
