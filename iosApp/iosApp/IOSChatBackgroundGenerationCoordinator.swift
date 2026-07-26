@@ -239,9 +239,25 @@ final class IOSChatBackgroundGenerationCoordinator {
     private var activeJobs: [String: IOSChatBackgroundRuntimeJob] = [:]
     private var activeRunStates: [String: IOSChatBackgroundRunState] = [:]
     private var activeBackgroundTasks: [String: BGContinuedProcessingTask] = [:]
+    /// 已重投、但系统还没把任务启动起来的那些 requestId。
+    /// 恢复次数记的是「实际被系统到期打断了几次」，不是「回前台扫了几遍」——
+    /// 没有这道闸，用户切出去瞄一眼再回来两次就能把配额烧光。
+    private var pendingResumeRequestIds: Set<String> = []
     private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
 
     private init() {}
+
+    private var suspensionStore: IOSChatBackgroundSuspensionStore? {
+        guard let directory = try? jobsDirectory() else { return nil }
+        return IOSChatBackgroundSuspensionStore(directory: directory)
+    }
+
+    /// 生命周期快照里属于本协调器的那一段：只读内存态，不碰磁盘。
+    var lifecycleSnapshotDetail: String {
+        "bgTasks=\(activeBackgroundTasks.count)"
+            + " jobs=\(activeJobs.count)"
+            + " runStates=\(activeRunStates.count)"
+    }
 
     var restorableRunIds: Set<String> {
         Set(activeJobs.values.map(\.runId))
@@ -317,6 +333,10 @@ final class IOSChatBackgroundGenerationCoordinator {
 
         do {
             try BGTaskScheduler.shared.submit(request)
+            IOSBackgroundLifecycleLog.record(
+                "bgTaskSubmitted(run=\(handoff.runId.prefix(8)))",
+                detail: lifecycleSnapshotDetail
+            )
             return true
         } catch {
             activeJobs.removeValue(forKey: requestId)
@@ -450,6 +470,13 @@ final class IOSChatBackgroundGenerationCoordinator {
         let runState = IOSChatBackgroundRunState()
         activeRunStates[backgroundTask.identifier] = runState
         activeBackgroundTasks[backgroundTask.identifier] = backgroundTask
+        // 重投的任务已经真正跑起来了，闸放开：之后再到期就该重新计一次配额。
+        pendingResumeRequestIds.remove(backgroundTask.identifier)
+        let resumeAttempt = suspensionStore?.load(requestId: backgroundTask.identifier)?.resumeCount ?? 0
+        IOSBackgroundLifecycleLog.record(
+            "bgTaskStarted(run=\(job.runId.prefix(8)),resumeAttempt=\(resumeAttempt))",
+            detail: lifecycleSnapshotDetail
+        )
         let assistantTextSnapshot = IOSChatBackgroundAssistantTextSnapshot()
         let progress = backgroundTask.progress
         progress.totalUnitCount = 4
@@ -474,21 +501,28 @@ final class IOSChatBackgroundGenerationCoordinator {
             guard runState.finalizeTerminal(as: .expiration) else { return }
             Task { @MainActor in
                 guard runState.claimSystemTaskCompletion() else { return }
-                self.finish(requestId: backgroundTask.identifier)
-                backgroundTask.setTaskCompleted(success: false)
+                IOSBackgroundLifecycleLog.record(
+                    "bgTaskExpired(claim=\(claim))",
+                    detail: self.lifecycleSnapshotDetail
+                )
                 switch claim {
                 case .persistFailure:
-                    await self.persistExpirationFailure(
+                    // 系统到期 ≠ 生成失败：这一轮还没开始写会话，保留 payload 与
+                    // taskMap 转入可恢复的挂起态，回到前台自动重投一次把它跑完。
+                    self.releaseRuntimeState(requestId: backgroundTask.identifier)
+                    backgroundTask.setTaskCompleted(success: false)
+                    await self.suspendForResume(
                         job: job,
                         requestId: backgroundTask.identifier,
-                        rawMessage: "后台生成被系统中断，可回到 App 后重试。",
                         partialAssistantText: assistantTextSnapshot.text
                     )
                 case .terminateInFlightSave:
                     // 会话写入已经开始，无法原子取消；由保存结果决定最终呈现，避免双终态。
-                    break
+                    self.finish(requestId: backgroundTask.identifier)
+                    backgroundTask.setTaskCompleted(success: false)
                 case .rejected:
-                    break
+                    self.finish(requestId: backgroundTask.identifier)
+                    backgroundTask.setTaskCompleted(success: false)
                 }
             }
         }
@@ -764,6 +798,138 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
     }
 
+    /// 只释放本进程的运行时句柄，保留 payload / taskMap / activeJobs，
+    /// 让挂起的这一轮仍然算「本 App 拥有的可恢复任务」。
+    private func releaseRuntimeState(requestId: String) {
+        activeRunStates.removeValue(forKey: requestId)
+        activeBackgroundTasks.removeValue(forKey: requestId)
+    }
+
+    /// 系统到期后转入挂起态：留住 payload 与已流出的正文，把呈现改成「重连中」
+    /// 而不是失败，等回到前台再重投一次。
+    private func suspendForResume(
+        job: IOSChatBackgroundRuntimeJob,
+        requestId: String,
+        partialAssistantText: String
+    ) async {
+        let existing = suspensionStore?.load(requestId: requestId)
+        suspensionStore?.save(
+            IOSChatBackgroundSuspensionRecord(
+                requestId: requestId,
+                runId: job.runId,
+                partialAssistantText: partialAssistantText,
+                suspendedAt: Int64(Date().timeIntervalSince1970 * 1000),
+                resumeCount: existing?.resumeCount ?? 0
+            )
+        )
+        await recordRun(
+            job.runId,
+            startedAt: job.startedAt,
+            status: "interrupted",
+            inputDigest: job.inputDigest,
+            conversationId: job.conversationId,
+            interruptedReason: "background_expired"
+        )
+        let presentation = AgentActivityPresentation.reconnecting(
+            kind: job.mode == .singleToolOnly ? .imageGeneration : .response
+        )
+        WatchTaskCoordinator.shared.publish(
+            runId: job.runId,
+            conversationId: job.conversationId.toHexDashString(),
+            presentation: presentation
+        )
+        _ = job.liveActivityController.adoptExistingActivity(
+            runId: job.runId,
+            conversationId: job.conversationId.toHexDashString()
+        )
+        await job.liveActivityController.update(
+            runId: job.runId,
+            presentation: presentation,
+            force: true
+        )
+        IOSBackgroundLifecycleLog.record(
+            "suspendedForResume(run=\(job.runId.prefix(8)),partialChars=\(partialAssistantText.count))",
+            detail: lifecycleSnapshotDetail
+        )
+    }
+
+    /// 回到前台时调用：把被系统中断的后台生成重新投递一次。
+    /// 幂等——已经在飞的、payload 丢失的、超出恢复次数的分别跳过或就地了结。
+    func resumeSuspendedRunsIfNeeded() {
+        guard let store = suspensionStore else { return }
+        let records = store.allRecords()
+        guard !records.isEmpty else { return }
+        IOSBackgroundLifecycleLog.record(
+            "resumeSweep(pending=\(records.count))",
+            detail: lifecycleSnapshotDetail
+        )
+        for record in records {
+            resumeSuspendedRun(record, store: store)
+        }
+    }
+
+    private func resumeSuspendedRun(
+        _ record: IOSChatBackgroundSuspensionRecord,
+        store: IOSChatBackgroundSuspensionStore
+    ) {
+        // 已经有在飞的系统任务：这条记录属于上一轮，交给它自己走完终态。
+        guard activeBackgroundTasks[record.requestId] == nil else { return }
+        // 上一次重投还排在系统队列里没启动，别重复投、更别再扣一次配额。
+        guard !pendingResumeRequestIds.contains(record.requestId) else { return }
+        guard let job = job(for: record.requestId) else {
+            // payload 已不可用，恢复无从谈起，清掉记录避免留下孤儿文件。
+            store.remove(requestId: record.requestId)
+            finish(requestId: record.requestId)
+            return
+        }
+        guard record.canResume, register(requestId: record.requestId) else {
+            Task { @MainActor in await self.abandonSuspendedRun(record, job: job) }
+            return
+        }
+
+        let attempted = record.markingResumeAttempt()
+        store.save(attempted)
+
+        let request = BGContinuedProcessingTaskRequest(
+            identifier: record.requestId,
+            title: "Amber 后台生成",
+            subtitle: "继续未完成的生成"
+        )
+        request.strategy = .fail
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            pendingResumeRequestIds.insert(record.requestId)
+            IOSBackgroundLifecycleLog.record(
+                "resumeSubmitted(run=\(record.runId.prefix(8))"
+                    + ",attempt=\(attempted.resumeCount)/\(IOSChatBackgroundSuspensionRecord.maxResumeAttempts))",
+                detail: lifecycleSnapshotDetail
+            )
+        } catch {
+            NSLog("[AmberChatBG] Resume submit failed for \(record.requestId): \(error)")
+            Task { @MainActor in await self.abandonSuspendedRun(attempted, job: job) }
+        }
+    }
+
+    /// 不再自动恢复：把已经流出来的正文连同一条可重试提示落盘，交回给用户。
+    private func abandonSuspendedRun(
+        _ record: IOSChatBackgroundSuspensionRecord,
+        job: IOSChatBackgroundRuntimeJob
+    ) async {
+        pendingResumeRequestIds.remove(record.requestId)
+        suspensionStore?.remove(requestId: record.requestId)
+        await persistExpirationFailure(
+            job: job,
+            requestId: record.requestId,
+            rawMessage: "后台生成被系统中断，可回到 App 后重试。",
+            partialAssistantText: record.partialAssistantText
+        )
+        finish(requestId: record.requestId)
+        IOSBackgroundLifecycleLog.record(
+            "resumeAbandoned(run=\(record.runId.prefix(8)),attempts=\(record.resumeCount))",
+            detail: lifecycleSnapshotDetail
+        )
+    }
+
     private func persistExpirationFailure(
         job: IOSChatBackgroundRuntimeJob,
         requestId: String,
@@ -940,6 +1106,8 @@ final class IOSChatBackgroundGenerationCoordinator {
     }
 
     private func removePayload(requestId: String) {
+        // payload 与挂起记录是一对：payload 走了，挂起态就没有恢复目标，必须一起清。
+        suspensionStore?.remove(requestId: requestId)
         do {
             let url = payloadURL(for: requestId, in: try jobsDirectory())
             try? FileManager.default.removeItem(at: url)
@@ -957,11 +1125,9 @@ final class IOSChatBackgroundGenerationCoordinator {
     }
 
     private func payloadURL(for requestId: String, in directory: URL) -> URL {
-        let fileName = requestId
-            .map { character -> Character in
-                character.isLetter || character.isNumber || character == "." || character == "-" ? character : "-"
-            }
-        return directory.appendingPathComponent(String(fileName)).appendingPathExtension("json")
+        directory
+            .appendingPathComponent(IOSChatBackgroundJobFileNaming.sanitized(requestId))
+            .appendingPathExtension("json")
     }
 
     private func recordRun(
@@ -969,12 +1135,16 @@ final class IOSChatBackgroundGenerationCoordinator {
         startedAt: Int64,
         status: String,
         inputDigest: String,
-        conversationId: KotlinUuid
+        conversationId: KotlinUuid,
+        interruptedReason: String? = nil
     ) async {
         let dao = db.agentRuntimeDao()
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let finishedAtValue: KotlinLong? = status == "running" ? nil : KotlinLong(value: now)
-        let interruptedReason: String? = status == "interrupted" ? "user_cancelled" : nil
+        // 中断原因由调用方给出；历史调用点只有「用户取消」一种，保留为默认值。
+        let resolvedInterruptedReason: String? = status == "interrupted"
+            ? (interruptedReason ?? "user_cancelled")
+            : nil
         let run = AgentRunEntity(
             runId: runId,
             parentRunId: nil,
@@ -990,7 +1160,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             inputSchemaVersion: 1,
             startedAt: startedAt,
             finishedAt: finishedAtValue,
-            interruptedReason: interruptedReason
+            interruptedReason: resolvedInterruptedReason
         )
 
         do {
@@ -1167,6 +1337,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             activeJobs.removeValue(forKey: requestId)
             activeRunStates.removeValue(forKey: requestId)
             activeBackgroundTasks.removeValue(forKey: requestId)
+            pendingResumeRequestIds.remove(requestId)
             map.removeValue(forKey: requestId)
             if shouldRemovePayload {
                 removePayload(requestId: requestId)

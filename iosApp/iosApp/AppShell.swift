@@ -166,6 +166,9 @@ struct AppShell: View {
                 AgentLiveActivityController.shared.restoreExistingActivity(
                     ownedRunIds: backgroundRunIds
                 )
+                // 冷启动路径：scenePhase 的 .active 变化不保证会触发 onChange，
+                // 这里补一次。重投本身幂等，重复调用不会起两轮。
+                IOSChatBackgroundGenerationCoordinator.shared.resumeSuspendedRunsIfNeeded()
             }
             await conversationStore.bootstrap()
             didBootstrapConversations = true
@@ -186,6 +189,10 @@ struct AppShell: View {
     }
 
     private func handleScenePhaseChange(_ phase: ScenePhase) {
+        IOSBackgroundLifecycleLog.record(
+            "scenePhase=\(String(describing: phase))",
+            detail: IOSChatBackgroundGenerationCoordinator.shared.lifecycleSnapshotDetail
+        )
         switch phase {
         case .background:
             councilChatViewModel.runtimeWillEnterBackground()
@@ -202,6 +209,8 @@ struct AppShell: View {
         case .active:
             councilChatViewModel.runtimeDidBecomeActive()
             novelLifecycleCoordinator.enterForeground()
+            // 后台生成被系统到期打断的那一轮，回到前台自动重投一次跑完。
+            IOSChatBackgroundGenerationCoordinator.shared.resumeSuspendedRunsIfNeeded()
         case .inactive:
             break
         @unknown default:
