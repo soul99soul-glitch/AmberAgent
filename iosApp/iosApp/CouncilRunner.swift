@@ -400,6 +400,15 @@ enum IOSCouncilRoomEvent: Equatable {
     case askUser(question: String)
 }
 
+struct IOSCouncilRoomContinuation {
+    let taskId: String
+    let originalObjective: String
+    let finalTopic: String
+    let priorTranscript: String
+    let speakers: [IOSCouncilRoomSpeaker]
+    let nextRound: Int
+}
+
 struct IOSCouncilRoomRunRequest {
     let objective: String
     let mode: IOSCouncilRoomRunMode
@@ -412,6 +421,8 @@ struct IOSCouncilRoomRunRequest {
     let researchConsent: IOSCouncilResearchConsent
     /// 开:主持人按议题自由动态生成席位;关:只用 settings.seats 里已添加的席位。
     var dynamicSeatGeneration: Bool = false
+    /// 非 nil 时沿用同一议会任务、席位与既有转录，只追加一轮追问讨论。
+    var continuation: IOSCouncilRoomContinuation? = nil
 }
 
 struct IOSCouncilRoomRunSummary: Equatable {
@@ -921,10 +932,15 @@ final class IOSCouncilRoomRunner {
         // 当前 provider 实际支持的 chat 模型。席位模型不在其中（或为空/历史默认值如
         // "gpt-4o"）时回退到主持人正在用的当前模型，避免把不支持的 model 发给只认
         // 自家模型的 provider 导致 HTTP 400「Not supported model」。
-        let supportedModelIds = Set(request.providerSetting.models
-            .filter { $0.type == ModelType.chat }
-            .map { $0.modelId.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty })
+        var supportedChatModelIds: [String] = []
+        var seenSupportedModelIds = Set<String>()
+        for model in request.providerSetting.models {
+            guard model.type == ModelType.chat, model.providerOverwrite == nil else { continue }
+            let modelId = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !modelId.isEmpty, seenSupportedModelIds.insert(modelId).inserted else { continue }
+            supportedChatModelIds.append(modelId)
+        }
+        let supportedModelIds = Set(supportedChatModelIds)
         func resolveSeatModel(_ modelId: String) -> String {
             let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty || supportedModelIds.isEmpty || !supportedModelIds.contains(trimmed) {
@@ -932,19 +948,49 @@ final class IOSCouncilRoomRunner {
             }
             return trimmed
         }
-        let task = taskStore.startTask(
-            kind: .modelCouncil,
-            title: "\(request.mode.title) · \(objective.prefix(34))",
-            objective: objective,
-            toolScope: request.researchConsent == .allowed ? ["search_web", "scrape_web"] : [],
-            budgetSummary: "mode \(request.mode.rawValue) · max seats \(limits.maxSeats) · rounds \(limits.defaultRounds) · budget \(limits.outputBudgetCharacters) chars",
-            sourceToolName: "council_room",
-            metadata: [
+        let task: IOSAdvancedTaskRecord
+        if let continuation = request.continuation,
+           let existing = taskStore.tasks.first(where: { $0.id == continuation.taskId }) {
+            task = taskStore.updateTask(
+                id: existing.id,
+                status: .running,
+                resultSummary: "",
+                error: "",
+                retryable: false,
+                cancelCapability: true,
+                metadata: [
+                    "continuation_round": String(continuation.nextRound),
+                    "continuation_base_completed": "true"
+                ]
+            ) ?? existing
+        } else {
+            let continuation = request.continuation
+            let metadata = continuation.map {
+                [
+                    "room_mode": request.mode.rawValue,
+                    "host_model": settings.host.modelId,
+                    "research_consent": request.researchConsent.rawValue,
+                    "continuation_round": String($0.nextRound),
+                    "continuation_base_completed": "true"
+                ]
+            } ?? [
                 "room_mode": request.mode.rawValue,
                 "host_model": settings.host.modelId,
                 "research_consent": request.researchConsent.rawValue
             ]
-        )
+            task = taskStore.startTask(
+                id: continuation?.taskId,
+                kind: .modelCouncil,
+                title: "\(request.mode.title) · \((continuation?.originalObjective ?? objective).prefix(34))",
+                objective: continuation?.originalObjective ?? objective,
+                toolScope: continuation == nil && request.researchConsent == .allowed
+                    ? ["search_web", "scrape_web"]
+                    : [],
+                budgetSummary: "mode \(request.mode.rawValue) · max seats \(limits.maxSeats) · rounds \(limits.defaultRounds) · budget \(limits.outputBudgetCharacters) chars",
+                sourceToolName: "council_room",
+                metadata: metadata
+            )
+        }
         onEvent(.taskStarted(task.id))
 
         guard !objective.isEmpty else {
@@ -998,7 +1044,18 @@ final class IOSCouncilRoomRunner {
 
         recordResearchConsent(request.researchConsent, objective: objective, runId: task.id)
 
-        let host = IOSCouncilRoomSpeaker(
+        let continuedHost = request.continuation?.speakers.first(where: \.isHost)
+        let host = continuedHost.map { speaker in
+            IOSCouncilRoomSpeaker(
+                id: speaker.id,
+                name: speaker.name,
+                rolePrompt: speaker.rolePrompt,
+                modelId: resolveSeatModel(speaker.modelId),
+                reasoning: speaker.reasoning,
+                prompt: speaker.prompt,
+                isHost: true
+            )
+        } ?? IOSCouncilRoomSpeaker(
             id: "host",
             name: "主持人",
             rolePrompt: settings.host.prompt,
@@ -1008,21 +1065,37 @@ final class IOSCouncilRoomRunner {
             isHost: true
         )
         // 静态默认席位仅作为「主持人动态规划失败」时的兜底；模型一律走 resolveSeatModel。
-        var activeSeats = settings.defaultSeats(currentModelId: request.currentModelId).map { seat in
-            IOSCouncilRoomSpeaker(
-                id: seat.id,
-                name: seat.name,
-                rolePrompt: seat.rolePrompt,
-                modelId: resolveSeatModel(seat.modelId),
-                reasoning: seat.reasoning,
-                prompt: seat.prompt,
-                isHost: false
-            )
+        var activeSeats = if let continuation = request.continuation {
+            continuation.speakers.filter { !$0.isHost }.map { seat in
+                IOSCouncilRoomSpeaker(
+                    id: seat.id,
+                    name: seat.name,
+                    rolePrompt: seat.rolePrompt,
+                    modelId: resolveSeatModel(seat.modelId),
+                    reasoning: seat.reasoning,
+                    prompt: seat.prompt,
+                    isHost: false
+                )
+            }
+        } else {
+            settings.defaultSeats(currentModelId: request.currentModelId).map { seat in
+                IOSCouncilRoomSpeaker(
+                    id: seat.id,
+                    name: seat.name,
+                    rolePrompt: seat.rolePrompt,
+                    modelId: resolveSeatModel(seat.modelId),
+                    reasoning: seat.reasoning,
+                    prompt: seat.prompt,
+                    isHost: false
+                )
+            }
         }
         // 兜底注入内置默认席位,只在以下两种情况:动态生成开(这只是占位,稍后会被主持人
         // 动态规划替换);或用户一个席位都没配(否则会变成只有主持人的空议会)。动态关 + 用户
         // 已添加 ≥1 个席位时,尊重用户配置,不再塞入无关的默认人设(honor「只用已添加的席位」)。
-        if activeSeats.count < 2, request.dynamicSeatGeneration || activeSeats.isEmpty {
+        if activeSeats.count < 2,
+           request.continuation == nil,
+           request.dynamicSeatGeneration || activeSeats.isEmpty {
             activeSeats = Array(IOSCouncilRoomSettings.defaults(currentModelId: request.currentModelId)
                 .defaultSeats(currentModelId: request.currentModelId)
                 .prefix(limits.maxSeats)
@@ -1039,14 +1112,20 @@ final class IOSCouncilRoomRunner {
                 })
         }
 
-        var transcript: [String] = []
+        var transcript = request.continuation?.priorTranscript.trimmedNilIfBlank.map { [$0] } ?? []
         var failedSeatIds = Set<String>()
         onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
-        onEvent(.state("主持调研中"))
-        onEvent(.append(dividerMessage("主持调研")))
+        if request.continuation == nil {
+            onEvent(.state("主持调研中"))
+            onEvent(.append(dividerMessage("主持调研")))
+        } else {
+            onEvent(.state("追问讨论中"))
+        }
 
         let research: IOSCouncilResearchBundle
-        if request.researchConsent == .allowed {
+        if request.continuation != nil {
+            research = IOSCouncilResearchBundle(searches: [], scrapedPages: [], failures: [])
+        } else if request.researchConsent == .allowed {
             research = await researcher.research(
                 objective: objective,
                 settings: request.searchSettings,
@@ -1060,60 +1139,73 @@ final class IOSCouncilRoomRunner {
                 failures: request.researchConsent == .denied ? ["用户选择本轮不联网调研。"] : ["搜索未启用。"]
             )
         }
-        taskStore.appendLog(id: task.id, chunk: "research:\n\(research.summaryText)\n\n")
+        if request.continuation == nil {
+            taskStore.appendLog(id: task.id, chunk: "research:\n\(research.summaryText)\n\n")
+        } else {
+            transcript.append("[你 · 追问] \(objective)")
+            taskStore.appendLog(id: task.id, chunk: "[你 · 追问] \(objective)\n\n")
+        }
 
         do {
-            let topicMessageId = UUID()
-            onEvent(.append(IOSCouncilRoomMessageEvent(
-                id: topicMessageId,
-                kind: .host,
-                speakerId: host.id,
-                author: host.name,
-                body: "调研和完善议题中...",
-                subtitle: "主持 · \(host.modelId)",
-                status: .speaking
-            )))
-            onEvent(.roster([host] + activeSeats, activeSpeakerId: host.id, failedSpeakerIds: failedSeatIds))
-            let defaultSeatsForTopic = activeSeats
-            let finalTopic = try await streamWithTimeout(
-                runGeneration: currentRunGeneration,
-                seconds: limits.seatTimeoutSeconds,
-                timeoutLabel: "主持人议题整理"
-            ) { recordOutput in
-                try await self.stream(
-                    runGeneration: currentRunGeneration,
-                    speaker: host,
-                    systemPrompt: self.hostSystemPrompt(settings: settings),
-                    userPrompt: self.finalTopicPrompt(
-                        objective: objective,
-                        research: research,
-                        limits: limits,
-                        defaultSeats: defaultSeatsForTopic
-                    ),
-                    request: request,
-                    temperature: 0.35,
-                    onUpdate: { text in
-                        if !text.isEmpty { recordOutput() }
-                        onEvent(.updateMessage(id: topicMessageId, body: text.isEmpty ? "调研和完善议题中..." : text, status: .speaking))
-                    }
-                )
-            }
-            guard let finalTopic = finalTopic.trimmedNilIfBlank else {
-                onEvent(.updateMessage(
+            let finalTopic: String
+            if let continuation = request.continuation {
+                finalTopic = continuation.finalTopic.trimmedOr(continuation.originalObjective)
+            } else {
+                let topicMessageId = UUID()
+                onEvent(.append(IOSCouncilRoomMessageEvent(
                     id: topicMessageId,
-                    body: "主持人未返回议题。",
-                    status: .failed
-                ))
-                throw IOSCouncilRoomRunnerError.emptyOutput("最终议题")
+                    kind: .host,
+                    speakerId: host.id,
+                    author: host.name,
+                    body: "调研和完善议题中...",
+                    subtitle: "主持 · \(host.modelId)",
+                    status: .speaking
+                )))
+                onEvent(.roster([host] + activeSeats, activeSpeakerId: host.id, failedSpeakerIds: failedSeatIds))
+                let defaultSeatsForTopic = activeSeats
+                let generatedTopic = try await streamWithTimeout(
+                    runGeneration: currentRunGeneration,
+                    seconds: limits.seatTimeoutSeconds,
+                    timeoutLabel: "主持人议题整理"
+                ) { recordOutput in
+                    try await self.stream(
+                        runGeneration: currentRunGeneration,
+                        speaker: host,
+                        systemPrompt: self.hostSystemPrompt(settings: settings),
+                        userPrompt: self.finalTopicPrompt(
+                            objective: objective,
+                            research: research,
+                            limits: limits,
+                            defaultSeats: defaultSeatsForTopic
+                        ),
+                        request: request,
+                        temperature: 0.35,
+                        onUpdate: { text in
+                            if !text.isEmpty { recordOutput() }
+                            onEvent(.updateMessage(id: topicMessageId, body: text.isEmpty ? "调研和完善议题中..." : text, status: .speaking))
+                        }
+                    )
+                }
+                guard let generatedTopic = generatedTopic.trimmedNilIfBlank else {
+                    onEvent(.updateMessage(
+                        id: topicMessageId,
+                        body: "主持人未返回议题。",
+                        status: .failed
+                    ))
+                    throw IOSCouncilRoomRunnerError.emptyOutput("最终议题")
+                }
+                try checkCancelled(runGeneration: currentRunGeneration)
+                onEvent(.updateMessage(id: topicMessageId, body: generatedTopic, status: .completed))
+                transcript.append("[\(host.name)] \(generatedTopic)")
+                taskStore.appendLog(id: task.id, chunk: "[\(host.name)] \(generatedTopic)\n\n")
+                finalTopic = generatedTopic
             }
-            try checkCancelled(runGeneration: currentRunGeneration)
-            onEvent(.updateMessage(id: topicMessageId, body: finalTopic, status: .completed))
-            transcript.append("[\(host.name)] \(finalTopic)")
-            taskStore.appendLog(id: task.id, chunk: "[\(host.name)] \(finalTopic)\n\n")
 
             // 开关「动态席位生成」开 → 主持人按议题 + 调研单独输出一份严格 JSON 席位清单
             //（Android planned_seats 思路），贴合本议题;关 → 直接用用户已添加的席位,不自由发挥。
-            if request.dynamicSeatGeneration {
+            if request.continuation != nil {
+                onEvent(.append(dividerMessage("沿用本议会席位：\(activeSeats.map(\.name).joined(separator: "、"))")))
+            } else if request.dynamicSeatGeneration {
                 onEvent(.state("组建议员席位中"))
                 let seatPlanRaw = (try? await streamWithTimeout(
                     runGeneration: currentRunGeneration,
@@ -1138,24 +1230,49 @@ final class IOSCouncilRoomRunner {
                     )
                 }) ?? ""
                 try checkCancelled(runGeneration: currentRunGeneration)
-                let dynamicSeats = Self.plannedSeatsFromJSON(
+                let plannedSeats = Self.plannedSeatsFromJSON(
                     seatPlanRaw,
                     maxSeats: limits.maxSeats,
-                    modelId: host.modelId
+                    modelIds: Self.diverseSeatModelIds(
+                        supportedModelIds: supportedChatModelIds,
+                        hostModelId: host.modelId
+                    )
                 )
-                if dynamicSeats.count >= 2 { activeSeats = dynamicSeats }
+                if plannedSeats.count >= 2 {
+                    activeSeats = plannedSeats
+                }
+                let validation = try await validateDynamicSeatModels(
+                    activeSeats,
+                    hostModelId: host.modelId,
+                    request: request,
+                    runGeneration: currentRunGeneration,
+                    timeoutSeconds: min(15, limits.seatTimeoutSeconds)
+                )
+                activeSeats = validation.seats
+                if !validation.failures.isEmpty {
+                    let summary = validation.failures
+                        .map { "\($0.modelId)：\($0.reason)" }
+                        .joined(separator: "；")
+                    onEvent(.append(dividerMessage("模型联通检查已替换不可用模型：\(validation.failures.map(\.modelId).joined(separator: "、"))")))
+                    taskStore.appendLog(id: task.id, chunk: "dynamic model probe fallback: \(summary)\n\n")
+                }
                 onEvent(.append(dividerMessage("已组建 \(activeSeats.count) 位议员：\(activeSeats.map(\.name).joined(separator: "、"))")))
             } else {
                 onEvent(.append(dividerMessage("本轮议员（已添加席位）：\(activeSeats.map(\.name).joined(separator: "、"))")))
             }
             onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
-            onEvent(.append(dividerMessage(request.mode == .debate ? "辩论开始" : "自由群聊开始")))
+            if request.continuation == nil {
+                onEvent(.append(dividerMessage(request.mode == .debate ? "辩论开始" : "自由群聊开始")))
+            }
 
             // freeChat 用单轮（host 议题 + 各席位 + host 总结 = 一轮）；debate 用
             // defaultRounds（normalized 限制 1-5 轮）。parity 修复：避免 freeChat 重复
             // 跑席位导致消息翻倍。
-            let rounds = request.mode == .freeChat ? 1 : limits.defaultRounds
-            for round in 1...rounds {
+            let finalRound = request.continuation?.nextRound
+                ?? (request.mode == .freeChat ? 1 : limits.defaultRounds)
+            let roundNumbers = request.continuation.map { [max(2, $0.nextRound)] }
+                ?? Array(1...finalRound)
+            for round in roundNumbers {
                 try checkCancelled(runGeneration: currentRunGeneration)
                 onEvent(.append(dividerMessage("第 \(round) 轮")))
                 for seat in activeSeats where !failedSeatIds.contains(seat.id) {
@@ -1185,11 +1302,12 @@ final class IOSCouncilRoomRunner {
                                 speaker: seat,
                                 systemPrompt: self.seatSystemPrompt(seat: seat),
                                 userPrompt: self.seatPrompt(
-                                    objective: objective,
+                                    objective: request.continuation?.originalObjective ?? objective,
                                     finalTopic: finalTopic,
+                                    followUp: request.continuation == nil ? nil : objective,
                                     mode: request.mode,
                                     round: round,
-                                    rounds: rounds,
+                                    rounds: finalRound,
                                     transcript: transcriptSnapshot,
                                     budget: limits.outputBudgetCharacters
                                 ),
@@ -1230,7 +1348,7 @@ final class IOSCouncilRoomRunner {
 
                 // 主持人轮末点评：非最后一轮时，主持人对本轮发言做点评
                 // （指出矛盾 / 下轮重点），让下一轮有递进方向。
-                if round < rounds {
+                if round < finalRound {
                     try checkCancelled(runGeneration: currentRunGeneration)
                     onEvent(.state("主持人轮末点评"))
                     onEvent(.append(dividerMessage("主持人轮末点评")))
@@ -1258,9 +1376,9 @@ final class IOSCouncilRoomRunner {
                                 speaker: host,
                                 systemPrompt: self.hostSystemPrompt(settings: settings),
                                 userPrompt: Self.roundEndCommentaryPrompt(
-                                    objective: objective,
+                                    objective: request.continuation?.originalObjective ?? objective,
                                     round: round,
-                                    rounds: rounds,
+                                    rounds: finalRound,
                                     roundTranscript: roundTranscript
                                 ),
                                 request: request,
@@ -1326,8 +1444,9 @@ final class IOSCouncilRoomRunner {
                     speaker: host,
                     systemPrompt: self.hostSystemPrompt(settings: settings),
                     userPrompt: self.synthesisPrompt(
-                        objective: objective,
+                        objective: request.continuation?.originalObjective ?? objective,
                         finalTopic: finalTopic,
+                        followUp: request.continuation == nil ? nil : objective,
                         transcript: transcriptForSynthesis,
                         failedSeats: failedSeatsForSynthesis
                     ),
@@ -1391,6 +1510,7 @@ final class IOSCouncilRoomRunner {
             }
             let status: IOSAdvancedTaskStatus = isCancel ? .cancelled : (isTimeout ? .timedOut : .failed)
             let message = isCancel ? "模型议会已取消。" : error.localizedDescription
+            let isFailedContinuation = request.continuation != nil
             onEvent(.state(isCancel ? "已取消" : (isTimeout ? "已超时" : "失败")))
             onEvent(.append(systemMessage(
                 body: message,
@@ -1399,12 +1519,20 @@ final class IOSCouncilRoomRunner {
             )))
             _ = taskStore.updateTask(
                 id: task.id,
-                status: status,
-                resultSummary: message,
+                status: isFailedContinuation ? .completed : status,
+                resultSummary: isFailedContinuation
+                    ? "既有议会结论已保留，本轮追问未完成。"
+                    : message,
                 logTail: clippedTranscript(transcript, budget: 24_000),
-                error: isCancel ? "" : message,
-                retryable: true,
-                cancelCapability: false
+                error: isFailedContinuation || isCancel ? "" : message,
+                retryable: !isFailedContinuation,
+                cancelCapability: false,
+                metadata: request.continuation.map {
+                    [
+                        "continuation_round": String($0.nextRound),
+                        "continuation_status": status.rawValue
+                    ]
+                }
             )
             return IOSCouncilRoomRunSummary(
                 taskId: task.id,
@@ -1447,15 +1575,18 @@ final class IOSCouncilRoomRunner {
     }
 
     /// Parses the host's strict-JSON seat plan `{"seats":[{"name","lens"}]}` into
-    /// dynamic council speakers, all running on the host's working model. Tolerates
+    /// dynamic council speakers. Assigns the supplied supported models in order,
+    /// without repeating until the pool is exhausted. Tolerates
     /// ```json fences / surrounding prose (reuses the deep-read balanced-brace
     /// extractor). Returns [] when fewer than 2 usable seats parse, so the caller
     /// keeps the resolved default seats as a fallback.
     static func plannedSeatsFromJSON(
         _ text: String,
         maxSeats: Int,
-        modelId: String
+        modelIds: [String]
     ) -> [IOSCouncilRoomSpeaker] {
+        let usableModelIds = modelIds.compactMap(\.trimmedNilIfBlank)
+        guard !usableModelIds.isEmpty else { return [] }
         guard let json = IOSDeepReadDraftGenerator.extractJSONObject(text),
               let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -1474,7 +1605,7 @@ final class IOSCouncilRoomRunner {
                 id: "planned-\(Self.digest(name).prefix(8))",
                 name: name,
                 rolePrompt: lens.isEmpty ? "围绕议题提供独立、专业的视角。" : lens,
-                modelId: modelId,
+                modelId: usableModelIds[result.count % usableModelIds.count],
                 reasoning: .medium,
                 prompt: "",
                 isHost: false
@@ -1482,6 +1613,131 @@ final class IOSCouncilRoomRunner {
             if result.count >= maxSeats { break }
         }
         return result.count >= 2 ? result : []
+    }
+
+    /// Dynamic seats prefer models other than the host first. The host model stays
+    /// in the pool as a final fallback when there are more seats than alternatives.
+    static func diverseSeatModelIds(
+        supportedModelIds: [String],
+        hostModelId: String
+    ) -> [String] {
+        var seen = Set<String>()
+        let normalizedHost = hostModelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        var result = supportedModelIds.compactMap { raw -> String? in
+            let modelId = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !modelId.isEmpty, modelId != normalizedHost, seen.insert(modelId).inserted else { return nil }
+            return modelId
+        }
+        if !normalizedHost.isEmpty, seen.insert(normalizedHost).inserted {
+            result.append(normalizedHost)
+        }
+        return result
+    }
+
+    private func validateDynamicSeatModels(
+        _ seats: [IOSCouncilRoomSpeaker],
+        hostModelId: String,
+        request: IOSCouncilRoomRunRequest,
+        runGeneration: UInt64,
+        timeoutSeconds: Int
+    ) async throws -> (seats: [IOSCouncilRoomSpeaker], failures: [(modelId: String, reason: String)]) {
+        var seen = Set<String>()
+        let candidateModelIds = seats.compactMap { seat -> String? in
+            guard seat.modelId != hostModelId, seen.insert(seat.modelId).inserted else { return nil }
+            return seat.modelId
+        }
+        var reachableModelIds = Set([hostModelId])
+        var failures: [(modelId: String, reason: String)] = []
+        for modelId in candidateModelIds {
+            try checkCancelled(runGeneration: runGeneration)
+            let model = resolvedModel(modelId: modelId, request: request)
+            if let issue = ChatProviderConfiguration.issue(for: model, provider: request.providerSetting) {
+                failures.append((modelId, issue.message))
+                continue
+            }
+            do {
+                try await probeDynamicSeatModel(
+                    model,
+                    request: request,
+                    runGeneration: runGeneration,
+                    timeoutSeconds: timeoutSeconds
+                )
+                reachableModelIds.insert(modelId)
+            } catch {
+                try checkCancelled(runGeneration: runGeneration)
+                failures.append((modelId, error.localizedDescription))
+            }
+        }
+        guard !failures.isEmpty else { return (seats, []) }
+
+        let reachableAlternatives = candidateModelIds.filter { reachableModelIds.contains($0) }
+        let fallbackModelIds = [hostModelId] + reachableAlternatives
+        var fallbackIndex = 0
+        let repairedSeats = seats.map { seat in
+            guard !reachableModelIds.contains(seat.modelId) else { return seat }
+            let modelId = fallbackModelIds[fallbackIndex % fallbackModelIds.count]
+            fallbackIndex += 1
+            return IOSCouncilRoomSpeaker(
+                id: seat.id,
+                name: seat.name,
+                rolePrompt: seat.rolePrompt,
+                modelId: modelId,
+                reasoning: seat.reasoning,
+                prompt: seat.prompt,
+                isHost: false
+            )
+        }
+        return (repairedSeats, failures)
+    }
+
+    private func probeDynamicSeatModel(
+        _ model: Model,
+        request: IOSCouncilRoomRunRequest,
+        runGeneration: UInt64,
+        timeoutSeconds: Int
+    ) async throws {
+        let output = try await streamWithTimeout(
+            runGeneration: runGeneration,
+            seconds: timeoutSeconds,
+            timeoutLabel: "\(model.modelId) 联通测试"
+        ) { recordOutput in
+            try await self.performDynamicSeatProbe(
+                model,
+                request: request,
+                recordOutput: recordOutput
+            )
+        }
+        guard output.trimmedNilIfBlank != nil else {
+            throw IOSCouncilRoomRunnerError.emptyOutput("\(model.modelId) 联通测试")
+        }
+    }
+
+    private func performDynamicSeatProbe(
+        _ model: Model,
+        request: IOSCouncilRoomRunRequest,
+        recordOutput: @escaping @Sendable () -> Void
+    ) async throws -> String {
+        let matchingBaseParams = request.baseParams.flatMap { params in
+            params.model.modelId == model.modelId ? params : nil
+        }
+        let params = TextGenerationParams(
+            model: model,
+            temperature: KotlinFloat(value: 0),
+            topP: nil,
+            maxTokens: KotlinInt(value: 16),
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: matchingBaseParams?.customHeaders ?? model.customHeaders,
+            customBody: matchingBaseParams?.customBody ?? model.customBodies
+        )
+        return try await streamer.streamText(
+            providerSetting: request.providerSetting,
+            messages: [UIMessage.companion.user(prompt: "只回复 OK")],
+            params: params,
+            onUpdate: { text in
+                if !text.isEmpty { recordOutput() }
+            }
+        )
     }
 
     private func stream(
@@ -1678,18 +1934,30 @@ final class IOSCouncilRoomRunner {
     private func seatPrompt(
         objective: String,
         finalTopic: String,
+        followUp: String?,
         mode: IOSCouncilRoomRunMode,
         round: Int,
         rounds: Int,
         transcript: [String],
         budget: Int
     ) -> String {
-        """
+        let followUpSection = followUp.map {
+            """
+
+            用户本轮追问或补充：
+            \($0)
+            """
+        } ?? ""
+        let instruction = followUp == nil
+            ? "请从你的席位职责给出本轮发言。自由群聊要补充新角度；辩论模式要回应前文的核心判断、指出盲区或确认成立条件。"
+            : "请从你的席位职责直接回应本轮追问，并结合已有讨论给出新增判断。自由群聊要补充新角度；辩论模式要回应前文的核心判断、指出盲区或确认成立条件。"
+        return """
         原始议题：
         \(objective)
 
         主持人完善后的最终议题：
         \(finalTopic)
+        \(followUpSection)
 
         模式：\(mode.title)
         轮次：\(round)/\(rounds)
@@ -1697,22 +1965,34 @@ final class IOSCouncilRoomRunner {
         已有讨论：
         \(clippedTranscript(transcript, budget: max(2_000, budget / 2)))
 
-        请从你的席位职责给出本轮发言。自由群聊要补充新角度；辩论模式要回应前文的核心判断、指出盲区或确认成立条件。
+        \(instruction)
         """
     }
 
     private func synthesisPrompt(
         objective: String,
         finalTopic: String,
+        followUp: String?,
         transcript: [String],
         failedSeats: [String]
     ) -> String {
-        """
+        let followUpSection = followUp.map {
+            """
+
+            用户本轮追问或补充：
+            \($0)
+            """
+        } ?? ""
+        let instruction = followUp == nil
+            ? "请作为主持人给出结论：共识、分歧、风险、推荐决策和下一步。若有席位失败，明确说明结论的不确定性。"
+            : "请作为主持人优先回答本轮追问，再给出更新后的共识、分歧、风险、推荐决策和下一步。若有席位失败，明确说明结论的不确定性。"
+        return """
         原始议题：
         \(objective)
 
         最终议题：
         \(finalTopic)
+        \(followUpSection)
 
         议会讨论：
         \(clippedTranscript(transcript, budget: 12_000))
@@ -1720,7 +2000,7 @@ final class IOSCouncilRoomRunner {
         失败或缺席席位：
         \(failedSeats.isEmpty ? "无" : failedSeats.joined(separator: ", "))
 
-        请作为主持人给出结论：共识、分歧、风险、推荐决策和下一步。若有席位失败，明确说明结论的不确定性。
+        \(instruction)
         """
     }
 

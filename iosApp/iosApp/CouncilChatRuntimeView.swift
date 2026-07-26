@@ -235,7 +235,7 @@ struct CouncilChatRuntimeView: View {
     }
 
     private var header: some View {
-        AmberGlassGroup(spacing: 16) {
+        AmberGlassGroup(spacing: 0) {
             // ZStack:标题绝对居中(以屏幕为基准),不受左 1 颗 / 右 2 颗按钮数量差影响。
             // 之前用单 HStack + maxWidth:.infinity,标题只在「返回」和「历史」之间居中,
             // 整体偏左。改成居中标题 + 左右按钮叠加,标题真正居中。
@@ -600,7 +600,7 @@ struct CouncilChatRuntimeView: View {
 
     private var liveComposer: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            TextField("输入议题开始", text: $viewModel.inputText, axis: .vertical)
+            TextField(viewModel.composerPlaceholder, text: $viewModel.inputText, axis: .vertical)
                 .lineLimit(1...5)
                 .textFieldStyle(.plain)
                 .font(.body)
@@ -1333,6 +1333,7 @@ final class CouncilChatViewModel {
     @ObservationIgnored private var isRuntimeAttached = false
     @ObservationIgnored private var isApplicationActive = true
     @ObservationIgnored private var currentObjective = ""
+    @ObservationIgnored private var currentFinalTopic = ""
     @ObservationIgnored private var currentTaskId: String?
     @ObservationIgnored private var pendingObjective = ""
     @ObservationIgnored private var lastRunObjective = ""
@@ -1368,6 +1369,7 @@ final class CouncilChatViewModel {
         if let restoredRoom {
             currentTaskId = restoredRoom.taskId.trimmedNilIfBlank
             currentObjective = restoredRoom.objective
+            currentFinalTopic = restoredRoom.finalTopic ?? ""
             lastRunObjective = restoredRoom.objective
             selectedMode = CouncilDiscussionMode(rawValue: restoredRoom.modeRaw) ?? .freeChat
             participants = restoredRoom.participants.map { $0.restored() }
@@ -1419,6 +1421,12 @@ final class CouncilChatViewModel {
         !isRunning &&
             currentConfigurationIssue == nil &&
             !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var composerPlaceholder: String {
+        canContinueCurrentCouncil
+            ? "输入补充或追问，再讨论一轮"
+            : "输入议题开始"
     }
 
     /// 用户提交对主持人提问的回答，恢复议会。
@@ -1473,6 +1481,7 @@ final class CouncilChatViewModel {
         cancelScheduledArchive()
         if let room = archiveStore.load(taskId: currentTaskId) {
             currentObjective = room.objective
+            currentFinalTopic = room.finalTopic ?? ""
             lastRunObjective = room.objective
             selectedMode = CouncilDiscussionMode(rawValue: room.modeRaw) ?? selectedMode
             participants = room.participants.map { $0.restored() }
@@ -1563,13 +1572,16 @@ final class CouncilChatViewModel {
         let text = pendingObjective.trimmingCharacters(in: .whitespacesAndNewlines)
         pendingObjective = ""
         guard !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
-        if currentTaskId != nil || !messages.isEmpty {
+        let continuation = makeContinuationContext()
+        if continuation == nil, currentTaskId != nil || !messages.isEmpty {
             resetRoom()
         }
         inputText = ""
-        currentObjective = text
-        lastRunObjective = text
-        lastResearchAllowed = researchAllowed
+        if continuation == nil {
+            currentObjective = text
+            lastRunObjective = text
+            lastResearchAllowed = researchAllowed
+        }
         roomStateOverride = nil
         failedSpeakerIds.removeAll()
         appendMessage(
@@ -1578,7 +1590,7 @@ final class CouncilChatViewModel {
             body: text,
             systemImage: "person.fill",
             tint: AmberTheme.accent,
-            subtitle: nil
+            subtitle: continuation.map { "追问 · 第 \($0.nextRound) 轮" }
         )
 
         let discussionID = UUID()
@@ -1588,7 +1600,8 @@ final class CouncilChatViewModel {
             await self?.runDiscussion(
                 objective: text,
                 researchAllowed: researchAllowed,
-                discussionID: discussionID
+                discussionID: discussionID,
+                continuation: continuation
             )
         }
     }
@@ -1647,6 +1660,7 @@ final class CouncilChatViewModel {
         isReplay = true
         currentTaskId = taskId
         currentObjective = room.objective
+        currentFinalTopic = room.finalTopic ?? ""
         lastRunObjective = room.objective
         if let mode = CouncilDiscussionMode(rawValue: room.modeRaw) { selectedMode = mode }
         participants = room.participants.map { $0.restored() }
@@ -1722,13 +1736,14 @@ final class CouncilChatViewModel {
     private func runDiscussion(
         objective: String,
         researchAllowed: Bool,
-        discussionID: UUID
+        discussionID: UUID,
+        continuation: IOSCouncilRoomContinuation?
     ) async {
         guard activeDiscussionID == discussionID else { return }
         isRunning = true
         invitedSpeakerIds.removeAll()
         activeSheet = nil
-        appendDivider(selectedMode.openingDivider)
+        appendDivider(continuation.map { "追问 · 第 \($0.nextRound) 轮" } ?? selectedMode.openingDivider)
         roomSettingsStore.bootstrapLegacySeatsIfNeeded(
             sharedSettings.savedCouncilSeats,
             currentModelId: currentModelId
@@ -1763,8 +1778,9 @@ final class CouncilChatViewModel {
             currentModel: currentModel,
             providerSetting: providerSetting,
             searchSettings: sharedSettings.snapshot,
-            researchConsent: researchAllowed ? .allowed : .unavailable,
-            dynamicSeatGeneration: roomSettingsStore.dynamicSeatGeneration
+            researchConsent: continuation == nil && researchAllowed ? .allowed : .unavailable,
+            dynamicSeatGeneration: continuation == nil && roomSettingsStore.dynamicSeatGeneration,
+            continuation: continuation
         )
         let summary = await runner.run(request: request, onEvent: { [weak self] event in
             guard let self, self.activeDiscussionID == discussionID else { return }
@@ -1785,6 +1801,9 @@ final class CouncilChatViewModel {
         guard activeDiscussionID == discussionID else { return }
         if currentTaskId == nil {
             currentTaskId = summary.taskId
+        }
+        if let finalTopic = summary.finalTopic.trimmedNilIfBlank {
+            currentFinalTopic = finalTopic
         }
         finishStreamingMessages(as: summary.status == .completed ? .completed : .failed)
         activeSpeakerId = nil
@@ -1827,6 +1846,7 @@ final class CouncilChatViewModel {
         CouncilPersistedRoom(
             taskId: taskId,
             objective: currentObjective,
+            finalTopic: currentFinalTopic.trimmedNilIfBlank,
             modeRaw: selectedMode.rawValue,
             statusRaw: roomStateOverride ?? "",
             failedSpeakerIds: Array(failedSpeakerIds),
@@ -1942,6 +1962,50 @@ final class CouncilChatViewModel {
             .joined(separator: "\n\n")
     }
 
+    private func makeContinuationContext() -> IOSCouncilRoomContinuation? {
+        guard canContinueCurrentCouncil,
+              let taskId = currentTaskId,
+              let originalObjective = currentObjective.trimmedNilIfBlank,
+              !messages.isEmpty else { return nil }
+        let settings = roomSettingsStore.settings.normalized(currentModelId: currentModelId)
+        let seatSettings = Dictionary(uniqueKeysWithValues: settings.seats.map { ($0.id, $0) })
+        let speakers = participants.map { participant in
+            let configuredSeat = seatSettings[participant.id]
+            return IOSCouncilRoomSpeaker(
+                id: participant.id,
+                name: participant.isHost ? "主持人" : participant.displayName,
+                rolePrompt: participant.roleDescription,
+                modelId: modelId(for: participant),
+                reasoning: participant.isHost
+                    ? settings.host.reasoning
+                    : configuredSeat?.reasoning ?? .medium,
+                prompt: participant.isHost
+                    ? settings.host.prompt
+                    : configuredSeat?.prompt ?? "",
+                isHost: participant.isHost
+            )
+        }
+        guard speakers.contains(where: \.isHost), speakers.contains(where: { !$0.isHost }) else {
+            return nil
+        }
+        return IOSCouncilRoomContinuation(
+            taskId: taskId,
+            originalObjective: originalObjective,
+            finalTopic: currentFinalTopic.trimmedOr(originalObjective),
+            priorTranscript: roomTranscript(limit: 80),
+            speakers: speakers,
+            nextRound: discussionRound + 1
+        )
+    }
+
+    private var canContinueCurrentCouncil: Bool {
+        !isReplay
+            && (roomStateOverride == "就绪" || currentFinalTopic.trimmedNilIfBlank != nil)
+            && currentTaskId != nil
+            && currentObjective.trimmedNilIfBlank != nil
+            && !messages.isEmpty
+    }
+
     private func makeDetail(status: String) -> CouncilDiscussionDetail {
         CouncilDiscussionDetail(
             statusLine: "\(status) · \(selectedMode.title) · host \(hostDisplayName)",
@@ -2021,6 +2085,7 @@ final class CouncilChatViewModel {
         currentTaskId = nil
         roomStateOverride = nil
         currentObjective = ""
+        currentFinalTopic = ""
         // 重开 = 把画面清成真正空白(和首次进入议会一致:只剩「输入议题开始」占位),
         // 不再自动发一条「已重新开始」系统消息(画蛇添足)。
         messages = []
@@ -2627,6 +2692,7 @@ struct CouncilPersistedParticipant: Codable, Equatable {
 struct CouncilPersistedRoom: Codable, Equatable {
     let taskId: String
     let objective: String
+    var finalTopic: String? = nil
     let modeRaw: String
     let statusRaw: String
     let failedSpeakerIds: [String]
@@ -2795,6 +2861,7 @@ final class CouncilRoomArchiveStore {
             save(CouncilPersistedRoom(
                 taskId: room.taskId,
                 objective: room.objective,
+                finalTopic: room.finalTopic,
                 modeRaw: room.modeRaw,
                 statusRaw: IOSAdvancedTaskStatus.interrupted.title,
                 failedSpeakerIds: room.failedSpeakerIds,

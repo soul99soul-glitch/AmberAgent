@@ -42,6 +42,7 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         return CouncilPersistedRoom(
             taskId: taskId,
             objective: "是否上线该功能",
+            finalTopic: "在回滚成本可控的前提下，是否上线该功能",
             modeRaw: "debate",
             statusRaw: "就绪",
             failedSpeakerIds: ["timeout-seat"],
@@ -95,6 +96,7 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         let loaded = try XCTUnwrap(CouncilTranscriptStore.load(defaults: defaults))
         XCTAssertEqual(loaded.taskId, "run-current")
         XCTAssertEqual(loaded.objective, room.objective)
+        XCTAssertEqual(loaded.finalTopic, room.finalTopic)
         XCTAssertEqual(loaded.statusRaw, room.statusRaw)
         XCTAssertEqual(loaded.messages, room.messages)
     }

@@ -561,15 +561,33 @@ struct AmberGlassCircleButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: symbolSize, weight: .semibold))
-                .foregroundStyle(AmberTheme.foreground2)
-                .frame(width: size, height: size)
-                .contentShape(Circle())
-                .amberGlass(cornerRadius: size / 2)
+            ZStack {
+                circleGlass
+                Image(systemName: systemImage)
+                    .font(.system(size: symbolSize, weight: .semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+            }
+            .frame(width: size, height: size)
+            .contentShape(Circle())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.92, haptic: .lightImpact))
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    @ViewBuilder
+    private var circleGlass: some View {
+        if #available(iOS 26.0, *) {
+            Circle()
+                .fill(AmberTheme.glass.opacity(0.16))
+                .glassEffect(.regular.interactive(), in: Circle())
+        } else {
+            Circle()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Circle()
+                        .stroke(AmberTheme.border.opacity(0.28), lineWidth: 0.5)
+                }
+        }
     }
 }
 

@@ -268,6 +268,7 @@ final class IOSAdvancedTaskStore {
 
     @discardableResult
     func startTask(
+        id: String? = nil,
         kind: IOSAdvancedTaskKind,
         title: String,
         objective: String,
@@ -281,7 +282,7 @@ final class IOSAdvancedTaskStore {
         now: Date = Date()
     ) -> IOSAdvancedTaskRecord {
         let record = IOSAdvancedTaskRecord(
-            id: UUID().uuidString,
+            id: id ?? UUID().uuidString,
             kind: kind,
             title: Self.redacted(title),
             objective: Self.redacted(objective),
@@ -372,12 +373,18 @@ final class IOSAdvancedTaskStore {
 
         let idSet = Set(ids)
         for index in tasks.indices where idSet.contains(tasks[index].id) {
-            tasks[index].status = .interrupted
-            tasks[index].resultSummary = "模型议会因应用进程结束而中断。"
+            let wasContinuation = tasks[index].metadata["continuation_base_completed"] == "true"
+            tasks[index].status = wasContinuation ? .completed : .interrupted
+            tasks[index].resultSummary = wasContinuation
+                ? "既有议会结论已保留，追问因应用进程结束而中断。"
+                : "模型议会因应用进程结束而中断。"
             tasks[index].error = ""
             tasks[index].retryable = false
             tasks[index].cancelCapability = false
             tasks[index].metadata["interruption_reason"] = "process_terminated"
+            if wasContinuation {
+                tasks[index].metadata["continuation_status"] = IOSAdvancedTaskStatus.interrupted.rawValue
+            }
             tasks[index].updatedAt = now
         }
         persist()

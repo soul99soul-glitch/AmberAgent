@@ -603,7 +603,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertFalse(seat.isDefault)
     }
 
-    func testPlannedSeatsFromJSONParsesDynamicSeatsAllOnHostModel() {
+    func testPlannedSeatsFromJSONPrefersDistinctAvailableModels() {
         let planned = IOSCouncilRoomRunner.plannedSeatsFromJSON(
             """
             主持人输出：
@@ -612,12 +612,11 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             ```
             """,
             maxSeats: 4,
-            modelId: "gpt-main"
+            modelIds: ["gpt-alt-a", "gpt-alt-b", "gpt-main"]
         )
         XCTAssertEqual(planned.map(\.name), ["工程", "风险"])
         XCTAssertEqual(planned.map(\.rolePrompt), ["看实现复杂度", "看安全和失败模式"])
-        // 所有动态席位都跑在主持人的工作模型上（修复 gpt-4o Not supported 的根因）。
-        XCTAssertEqual(planned.map(\.modelId), ["gpt-main", "gpt-main"])
+        XCTAssertEqual(planned.map(\.modelId), ["gpt-alt-a", "gpt-alt-b"])
         XCTAssertFalse(planned.contains { $0.isHost })
     }
 
@@ -625,18 +624,109 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         // 少于 2 个有效席位 → 空（调用方保留已 resolve 的默认席位）
         XCTAssertTrue(IOSCouncilRoomRunner.plannedSeatsFromJSON(
             #"{"seats":[{"name":"只有一个","lens":"数量非法"}]}"#,
-            maxSeats: 4, modelId: "gpt-main"
+            maxSeats: 4, modelIds: ["gpt-main"]
         ).isEmpty)
         // 非 JSON 散文 → 空
         XCTAssertTrue(IOSCouncilRoomRunner.plannedSeatsFromJSON(
-            "主持人写了一堆散文，没有任何 JSON。", maxSeats: 4, modelId: "gpt-main"
+            "主持人写了一堆散文，没有任何 JSON。", maxSeats: 4, modelIds: ["gpt-main"]
         ).isEmpty)
         // 超过上限按 maxSeats 截断
         let capped = IOSCouncilRoomRunner.plannedSeatsFromJSON(
             #"{"seats":[{"name":"A","lens":"a"},{"name":"B","lens":"b"},{"name":"C","lens":"c"}]}"#,
-            maxSeats: 2, modelId: "gpt-main"
+            maxSeats: 2, modelIds: ["gpt-main"]
         )
         XCTAssertEqual(capped.map(\.name), ["A", "B"])
+    }
+
+    func testDynamicSeatsProbeAssignedModelsAndReplaceUnreachableOnes() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let models = ["gpt-main", "gpt-bad", "gpt-good"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        let streamer = ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success(#"{"seats":[{"name":"求证","lens":"核对证据"},{"name":"反方","lens":"寻找反例"}]}"#),
+            .failure(CouncilTestError.scriptedFailure),
+            .success("OK"),
+            .success("求证席发言"),
+            .success("反方席发言"),
+            .success("主持总结")
+        ])
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .unavailable,
+            providerSetting: provider,
+            currentModel: models[0]
+        )
+        request.dynamicSeatGeneration = true
+        var rosters: [[IOSCouncilRoomSpeaker]] = []
+
+        let outcome = await runner.run(request: request, onEvent: { event in
+            if case .roster(let speakers, _, _) = event {
+                rosters.append(speakers)
+            }
+        })
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertTrue(outcome.failedSeats.isEmpty)
+        XCTAssertEqual(streamer.receivedModels.prefix(4).map(\.modelId), [
+            "gpt-main", "gpt-main", "gpt-bad", "gpt-good"
+        ])
+        XCTAssertFalse(streamer.receivedModels.dropFirst(4).contains { $0.modelId == "gpt-bad" })
+        let finalSeats = try XCTUnwrap(rosters.last).filter { !$0.isHost }
+        XCTAssertEqual(finalSeats.count, 2)
+        XCTAssertFalse(finalSeats.contains { $0.modelId == "gpt-bad" })
+    }
+
+    func testDynamicSeatsDoNotMisrouteProviderOverwriteModelsThroughCurrentProvider() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let overrideProvider = makeCouncilProvider(models: [])
+        let models = [
+            makeCouncilModel("gpt-main"),
+            makeCouncilModel("gpt-overridden", providerOverwrite: overrideProvider),
+            makeCouncilModel("gpt-good")
+        ]
+        let provider = makeCouncilProvider(models: models)
+        let streamer = ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success(#"{"seats":[{"name":"求证","lens":"核对证据"},{"name":"反方","lens":"寻找反例"}]}"#),
+            .success("OK"),
+            .success("求证席发言"),
+            .success("反方席发言"),
+            .success("主持总结")
+        ])
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .unavailable,
+            providerSetting: provider,
+            currentModel: models[0]
+        )
+        request.dynamicSeatGeneration = true
+        var rosters: [[IOSCouncilRoomSpeaker]] = []
+
+        let outcome = await runner.run(request: request, onEvent: { event in
+            if case .roster(let speakers, _, _) = event {
+                rosters.append(speakers)
+            }
+        })
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertFalse(streamer.receivedModels.contains { $0.modelId == "gpt-overridden" })
+        XCTAssertEqual(
+            Set(try XCTUnwrap(rosters.last).filter { !$0.isHost }.map(\.modelId)),
+            Set(["gpt-good", "gpt-main"])
+        )
     }
 
     func testRoomRunnerFreeChatPersistsTaskApprovalAndOrderedMessages() async throws {
@@ -1162,42 +1252,173 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.messages.last(where: { $0.kind == .host })?.body, "主持总结")
     }
 
-    func testSecondSendStartsIsolatedCouncilRoomAndArchive() async throws {
-        let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([
+    func testSecondSendContinuesCurrentCouncilAsFollowUpRound() async throws {
+        let streamer = ScriptedCouncilStreamer([
             .success("第一场最终议题"),
             .success("第一场工程发言"),
             .success("第一场风险发言"),
             .success("第一场主持总结"),
-            .success("第二场最终议题"),
-            .success("第二场工程发言"),
-            .success("第二场风险发言"),
-            .success("第二场主持总结")
-        ]))
+            .success("第二轮工程发言"),
+            .success("第二轮风险发言"),
+            .success("第二轮主持总结"),
+            .success("不应发生的额外调用")
+        ])
+        let harness = try makeViewModelHarness(streamer: streamer)
 
         harness.viewModel.inputText = "第一场用户议题"
         harness.viewModel.send()
         for _ in 0..<200 where harness.viewModel.isRunning {
             try await Task.sleep(nanoseconds: 5_000_000)
         }
-        let firstTaskID = try XCTUnwrap(
+        let taskID = try XCTUnwrap(
             harness.taskStore.recent(kind: .modelCouncil, limit: 1).first?.id
         )
 
-        harness.viewModel.inputText = "第二场用户议题"
+        harness.viewModel.inputText = "补充：请重点解释证据不足的地方"
         harness.viewModel.send()
         for _ in 0..<200 where harness.viewModel.isRunning {
             try await Task.sleep(nanoseconds: 5_000_000)
         }
-        let taskIDs = harness.taskStore.recent(kind: .modelCouncil, limit: 2).map(\.id)
-        let secondTaskID = try XCTUnwrap(taskIDs.first { $0 != firstTaskID })
-        let firstArchive = try XCTUnwrap(harness.archiveStore.load(taskId: firstTaskID))
-        let secondArchive = try XCTUnwrap(harness.archiveStore.load(taskId: secondTaskID))
+        let tasks = harness.taskStore.recent(kind: .modelCouncil, limit: 2)
+        let archive = try XCTUnwrap(harness.archiveStore.load(taskId: taskID))
 
-        XCTAssertTrue(firstArchive.messages.contains { $0.body == "第一场用户议题" })
-        XCTAssertFalse(firstArchive.messages.contains { $0.body == "第二场用户议题" })
-        XCTAssertTrue(secondArchive.messages.contains { $0.body == "第二场用户议题" })
-        XCTAssertFalse(secondArchive.messages.contains { $0.body == "第一场用户议题" })
-        XCTAssertFalse(harness.viewModel.messages.contains { $0.body == "第一场用户议题" })
+        XCTAssertEqual(tasks.map(\.id), [taskID], "追问应继续同一议会任务，而不是另开议题。")
+        XCTAssertTrue(archive.messages.contains { $0.body == "第一场用户议题" })
+        XCTAssertTrue(archive.messages.contains { $0.body == "第一场主持总结" })
+        XCTAssertTrue(archive.messages.contains { $0.body == "补充：请重点解释证据不足的地方" })
+        XCTAssertTrue(archive.messages.contains { $0.body == "第二轮主持总结" })
+        XCTAssertEqual(harness.viewModel.discussionRound, 2)
+        XCTAssertEqual(harness.viewModel.messages.last(where: { $0.kind == .host })?.body, "第二轮主持总结")
+        let followUpPrompts = streamer.receivedUserPrompts.suffix(3)
+        XCTAssertEqual(followUpPrompts.count, 3)
+        XCTAssertTrue(followUpPrompts.allSatisfy { $0.contains("第一场主持总结") })
+        XCTAssertTrue(followUpPrompts.allSatisfy { $0.contains("补充：请重点解释证据不足的地方") })
+        XCTAssertTrue(followUpPrompts.allSatisfy { $0.contains("最终议题：\n第一场最终议题") })
+    }
+
+    func testFailedFollowUpKeepsCompletedCouncilEligibleForAnotherRound() async throws {
+        let streamer = ScriptedCouncilStreamer([
+            .success("首轮最终议题"),
+            .success("首轮工程发言"),
+            .success("首轮风险发言"),
+            .success("首轮主持总结"),
+            .success("失败轮工程发言"),
+            .success("失败轮风险发言"),
+            .failure(CouncilTestError.scriptedFailure),
+            .success("第三轮工程发言"),
+            .success("第三轮风险发言"),
+            .success("第三轮主持总结")
+        ])
+        let harness = try makeViewModelHarness(streamer: streamer)
+
+        harness.viewModel.inputText = "首轮议题"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let taskID = try XCTUnwrap(
+            harness.taskStore.recent(kind: .modelCouncil, limit: 1).first?.id
+        )
+
+        harness.viewModel.inputText = "第二轮追问"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertEqual(
+            harness.taskStore.tasks.first { $0.id == taskID }?.status,
+            .completed,
+            "失败的追加轮不能覆盖此前已经完成的议会终态。"
+        )
+        XCTAssertEqual(harness.viewModel.composerPlaceholder, "输入补充或追问，再讨论一轮")
+
+        harness.viewModel.inputText = "第三轮继续追问"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertEqual(harness.taskStore.recent(kind: .modelCouncil, limit: 2).map(\.id), [taskID])
+        XCTAssertEqual(harness.viewModel.discussionRound, 3)
+        XCTAssertEqual(harness.viewModel.messages.last(where: { $0.kind == .host })?.body, "第三轮主持总结")
+    }
+
+    func testFollowUpRestoresEvictedTaskWithTheSameIdentity() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let streamer = ScriptedCouncilStreamer([
+            .success("工程续轮发言"),
+            .success("风险续轮发言"),
+            .success("主持续轮总结")
+        ])
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .unavailable
+        )
+        request.continuation = IOSCouncilRoomContinuation(
+            taskId: "evicted-council-task",
+            originalObjective: "原始议题",
+            finalTopic: "主持完善后的最终议题",
+            priorTranscript: "[主持人] 既有总结",
+            speakers: [
+                IOSCouncilRoomSpeaker(
+                    id: "host",
+                    name: "主持人",
+                    rolePrompt: "主持与综合",
+                    modelId: "gpt-main",
+                    reasoning: .off,
+                    prompt: "",
+                    isHost: true
+                ),
+                IOSCouncilRoomSpeaker(
+                    id: "engineering",
+                    name: "工程",
+                    rolePrompt: "工程实现",
+                    modelId: "gpt-main",
+                    reasoning: .medium,
+                    prompt: "",
+                    isHost: false
+                ),
+                IOSCouncilRoomSpeaker(
+                    id: "risk",
+                    name: "风险",
+                    rolePrompt: "风险审计",
+                    modelId: "gpt-main",
+                    reasoning: .medium,
+                    prompt: "",
+                    isHost: false
+                )
+            ],
+            nextRound: 2
+        )
+
+        let outcome = await runner.run(request: request)
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(outcome.taskId, "evicted-council-task")
+        XCTAssertEqual(taskStore.tasks.map(\.id), ["evicted-council-task"])
+    }
+
+    func testCouncilTopBarCircleButtonsUseNativeCircleGlassWithoutMerging() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let sourceDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let sharedChrome = try String(
+            contentsOf: sourceDirectory.appendingPathComponent("PlaceholderViews.swift"),
+            encoding: .utf8
+        )
+        let council = try String(
+            contentsOf: sourceDirectory.appendingPathComponent("CouncilChatRuntimeView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(sharedChrome.contains(".glassEffect(.regular.interactive(), in: Circle())"))
+        XCTAssertTrue(council.contains("AmberGlassGroup(spacing: 0)"))
     }
 
     func testMidRunCheckpointsThrottleToOffMainThreadWrites() async throws {
@@ -1482,6 +1703,12 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             objective: "done"
         )
         _ = taskStore.updateTask(id: completedCouncil.id, status: .completed)
+        let runningContinuation = taskStore.startTask(
+            kind: .modelCouncil,
+            title: "running follow-up",
+            objective: "follow-up",
+            metadata: ["continuation_base_completed": "true"]
+        )
         let runningSubAgent = taskStore.startTask(
             kind: .subAgent,
             title: "running subagent",
@@ -1491,10 +1718,15 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         let interruptedIDs = taskStore.markInterruptedCouncilTasks()
         let secondPass = taskStore.markInterruptedCouncilTasks()
 
-        XCTAssertEqual(interruptedIDs, [runningCouncil.id])
+        XCTAssertEqual(Set(interruptedIDs), Set([runningCouncil.id, runningContinuation.id]))
         XCTAssertTrue(secondPass.isEmpty)
         XCTAssertEqual(taskStore.tasks.first { $0.id == runningCouncil.id }?.status, .interrupted)
         XCTAssertEqual(taskStore.tasks.first { $0.id == runningCouncil.id }?.metadata["interruption_reason"], "process_terminated")
+        XCTAssertEqual(taskStore.tasks.first { $0.id == runningContinuation.id }?.status, .completed)
+        XCTAssertEqual(
+            taskStore.tasks.first { $0.id == runningContinuation.id }?.metadata["continuation_status"],
+            IOSAdvancedTaskStatus.interrupted.rawValue
+        )
         XCTAssertEqual(taskStore.tasks.first { $0.id == completedCouncil.id }?.status, .completed)
         XCTAssertEqual(taskStore.tasks.first { $0.id == runningSubAgent.id }?.status, .running)
     }
@@ -1540,6 +1772,13 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
     }
 
     private func makeCouncilModel(_ modelId: String) -> Model {
+        makeCouncilModel(modelId, providerOverwrite: nil)
+    }
+
+    private func makeCouncilModel(
+        _ modelId: String,
+        providerOverwrite: ProviderSetting?
+    ) -> Model {
         Model(
             modelId: modelId,
             displayName: modelId,
@@ -1552,7 +1791,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             abilities: [ModelAbility.reasoning],
             tools: Set<BuiltInTools>(),
             contextWindowTokens: nil,
-            providerOverwrite: nil
+            providerOverwrite: providerOverwrite
         )
     }
 
@@ -1579,14 +1818,17 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         mode: IOSCouncilRoomRunMode = .freeChat,
         settings: IOSCouncilRoomSettings,
         apiKey: String = "test-key",
-        researchConsent: IOSCouncilResearchConsent = .unavailable
+        researchConsent: IOSCouncilResearchConsent = .unavailable,
+        providerSetting: ProviderSetting? = nil,
+        currentModel: Model? = nil
     ) -> IOSCouncilRoomRunRequest {
         IOSCouncilRoomRunRequest(
             objective: "完善 iOS 模型议会",
             mode: mode,
             settings: settings,
             currentModelId: "gpt-main",
-            providerSetting: IOSCouncilRoomRunner.makeProviderSetting(
+            currentModel: currentModel,
+            providerSetting: providerSetting ?? IOSCouncilRoomRunner.makeProviderSetting(
                 baseUrl: "https://example.com/v1",
                 apiKey: apiKey
             ),
@@ -1697,6 +1939,7 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
     private(set) var callCount = 0
     private(set) var cancelCount = 0
     private(set) var receivedModels: [Model] = []
+    private(set) var receivedUserPrompts: [String] = []
 
     init(_ outputs: [Result<String, Error>]) {
         self.outputs = outputs
@@ -1710,6 +1953,9 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
     ) async throws -> String {
         callCount += 1
         receivedModels.append(params.model)
+        receivedUserPrompts.append(
+            messages.last?.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined() ?? ""
+        )
         guard !outputs.isEmpty else { throw CouncilTestError.unexpectedCall }
         let next = outputs.removeFirst()
         switch next {
