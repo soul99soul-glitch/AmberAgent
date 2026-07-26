@@ -21,7 +21,7 @@
 "agent.activity.stage.reconnecting" = "正在重新连接";
 "agent.activity.stage.stale" = "状态已过期";
 "agent.activity.stage.completed" = "已完成";
-"agent.activity.stage.failed" = "需要处理";
+"agent.activity.stage.failed" = "未完成";
 "agent.activity.stage.cancelled" = "已停止";
 
 "agent.activity.action.openTask" = "打开任务";
@@ -32,7 +32,7 @@
 "agent.activity.fact.stale" = "状态已过期";
 "agent.activity.fact.reconnecting" = "正在重连";
 "agent.activity.fact.completed" = "已完成";
-"agent.activity.fact.failed" = "遇到问题";
+"agent.activity.fact.failed" = "未完成";
 "agent.activity.fact.cancelled" = "已停止";
 
 "agent.activity.metric.source.count" = "已查看 %ld 个来源";

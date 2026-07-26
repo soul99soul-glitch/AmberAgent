@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-24
+Last updated: 2026-07-26
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -21,6 +21,52 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-26 灵动岛重设计实施：核壳文三层落地（S1-S3 全部切片）
+
+- 按 `docs/ACTIVITY_ISLAND_REDESIGN_PLAN.md` 一口气完成 S1（壳+核）/S2（文）/S3（岛），随后双路 subagent review（逻辑闭环 + 调用链路）并精准修复确认项。
+- **核**：orb 六态全上岗（搜索工具→`.searching`、复杂工具→`.solving`、图片→`.shaping`），新增 `.awaitingUser` 态（八项 pending 聚合 `hasPendingUserGate`，orb 冻结 + amber 静态边光，「等待确认 / 回答问题·工具审批」）；SF Symbol 与 tint 底圈从岛上退役。
+- **壳**：新组件 `IslandEdgeGlowView`（UIKit CADisplayLink 24–30fps，与 orb 同 `CACurrentMediaTime` 时钟）；光谱三态（等待 8s/思考 14s/生成 20s+呼吸）、工具单 hue 常亮、失败静态红；衰减描边阶梯代替逐帧模糊；退役 3D 翻转/halo/SoftField，idle↔active 改几何连续 morph。
+- **文**：AI 三态标题生成微光（phaseAnimator 2.4s，reduceMotion/终态摘除）；文案表落地（等待连接副标题=模型 displayName，识别图片=「共 m 张」（m>1 时），词边界截断（≥60% 最后边界，尾部标点清理，无边界硬切））；工具失败 terminalHold 红边光 2s +「未完成」（`.tool` 与 `.image` 均匹配）。
+- **岛（Live Activity）**：compact/minimal glyph running 相位改 orb 静帧三帧 1.5s 轮换（引擎入两个 widget target，离线渲染缓存，系统限频退首帧）；`stage.failed`/`fact.failed` 中英对齐「未完成/Incomplete」。
+- **review 修复（精准，不扩）**：①调用链 P1——`ChatListSummarySnapshot ==` 纳入 `activeToolStep?.id`（id 稳定不含流式载荷），修复「视觉相同工具替换」时 terminalHold 断链；②闭环 P2——`.image` 类工具失败纳入 terminalHold（vision 识别路径 toolID=nil 不受影响）；③测试用例名不副实修正（补真正命中词边界的用例）；④两份文档与实现漂移处就地更新。
+- 验证：新定点 `ChatIslandPresentationTests` 26 条 + `ThinkingOrbEngineTests` 8 + `IOSSettingsWiringTests` 28（含两条既有 island canary）+ 强制 `ChatStreamReplayTests` 17 = **79 passed / 1 skipped / 0 failed**（iPhone 17 Pro / iOS 26.5 Simulator，`Test-iosApp-2026.07.26_22-11-08-+0800.xcresult`，隔离 derivedData 避开并发构建）；`iosAppExperimentalGPL` scheme 模拟器构建通过；`git diff --check` 干净；新符号无旧实现可红，按「断言先行」一次转绿（同 07-26 事件循环先例）。
+- 装机：22:23 真机 Debug 包（Team `89QRFX9548`，含全部工作区未提交改动）**BUILD SUCCEEDED** + `codesign --verify --deep --strict` 通过，已覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`；自动启动因设备锁定被拒（同 07-18 环境限制），需解锁后手动启动目测六态观感。
+- **既有基线非本轮回归**：`ChatSwiftUIStreamReplayTests` 两条贴底跟随用例（07-23/07-25 已记录的负载敏感项）在本机仍失败（debt 97–183pt 逐次不定），其测试路径直驱 `ChatSwiftUIMessageList`，不经过本轮任何改动文件；未放宽断言、未随本轮处理。
+- 残余缺口：辉光/glint/morph/静帧轮换只有代码与编译证据，模拟器与真机视觉未验证（含 Live Activity 更新频率与电量）；`.large` 主角时刻（计划可选项）未实施；pi-lens 对 ChatView/ChatViewModel/project.yml 的长度告警为既有基线，未随本轮扩大。
+
+### 2026-07-26 灵动岛重设计方案与实施计划（未动代码）
+
+- 产出 `docs/ACTIVITY_ISLAND_REDESIGN.md`（设计权威）与 `docs/ACTIVITY_ISLAND_REDESIGN_PLAN.md`（实施计划），零代码改动、零测试运行。
+- 设计：参照 iOS 27 Siri「药丸吃岛」与 Apple Intelligence 辉光/glint 语法（多源搜索合成，原文抓取被本机代理拦截），收敛为核（ThinkingOrb 六态全上岗）/壳（三层锥形辉光，转速即状态）/文（标题生成微光）三层各一个运动系统；退役 3D 翻转、halo、SoftField、岛上 SF Symbol；色彩分层纪律（orb 永为灰阶墨，颜色只属于边缘辉光）；克制文案表（去机制词，副标题只留可验证事实或 nil）。
+- 计划：S1 壳+核（新组件 `IslandEdgeGlowView` 走 UIKit CADisplayLink、orb 六态映射、`ChatIslandPresentation` settle reducer、morph 过渡）→ S2 文（glint + 文案表 + 词边界截断）→ S3 岛（Live Activity 对齐、静帧轮换、可选 awaitingUser）。门禁：三条既有 canary（岛宽度、glass 源断言、Orb 引擎 8 条）+ 强制 `ChatStreamReplayTests`；新增文件需重跑 `xcodegen`。
+- 下一步：待确认后从 S1 T1.1 红测试切入。
+
+### 2026-07-26 embedded iSH 运行内核修复：流式输出、真取消、超时强杀
+
+- 针对 `ISH-INTEGRATION-OPENMINIS-ANALYSIS.md` 指认的三条运行内核缺陷完成红→绿修复（用户未选定 P0-P3 全案，本轮只做最小可验证切片；供应链自主化/PTY 终端 UI/自建 rootfs/淘汰 ish_handoff 均未动）。
+- `IOSEmbeddedIshRuntime.run` 从 `runOneshot` 改为 `spawn()` + detached 阻塞读事件循环（0.2s 轮询，`ISH_ERR_TIMEOUT=-12` 为轮询节拍，与包自身 oneshot 循环同模式）；新增 `onOutput` 流式回调与 `IOSEmbeddedIshOutputChunk`；Swift Task 取消经 `withTaskCancellationHandler` → `session.terminate()`（SIGTERM→SIGKILL）落到 guest 进程；guest 侧 deadline 独立兜底，`IOSEmbeddedIshCommandResult` 形状不变，`ios_ish_execute` 工具执行器零改动。
+- `IOSTerminalRuntime` 新增 `IOSEmbeddedIshJobBackend` 注入缝（生产见证 `IOSEmbeddedIshRuntime.shared`）与 `experimentalRuntimesLinked` 实例属性（默认仍取 `IOSTerminalBuildPolicy`，生产门禁语义不变）；ish job 流式输出增量进入 `outputTail`；删除 `stopJob`/`waitJob` 的 ish 特判（旧行为只写"cannot be interrupted"文案放任跑完），统一为 cancel task → cancelled/timedOut，错误文案按 runtime 区分；ishExperimental 能力表 summary 更新为"流式输出+超时+立即取消，仍无 PTY/stdin"。
+- 顺带把 `startEmbeddedIshJob`/`embeddedIshOutput` 移入同文件 extension 分区（pi-lens type_body_length 越限修复，纯搬移）；`IOSEmbeddedIshRuntime` 拆出 `runSpawned`/`emit` 使函数体 ≤50 行。
+- **双路对抗性 review 后的二次修复**：
+  - P1-1（内存安全）：`onCancel→session.terminate()` 与读循环 `defer session.close()` 跨线程交错存在 C 层 UAF（`IshSession.currentRaw()` 锁内取裸指针、锁外解引用，close 锁外 free）。修复：新增 `IshSessionLifecycleBox` 用每-session NSLock 把 terminate/close 整体串行化（terminate 要么先于 close 落地、要么 close 后 no-op；C 侧 terminate 为非阻塞发帧，持锁安全），所有终止路径统一走 box。未改 vendor 包；后续 PTY 切片若引入 signal/write/resize 需复用同一 box 或推动上游修复。
+  - P1-2（测试缺口）：事件循环依赖抽成稳定层 `IOSEmbeddedIshSessionHooks`（read/terminate/close/isReadTimeout/describeFailure）+ `IOSEmbeddedIshSessionEvent`，`readSessionEvents`/`emit` 移出 GPL 宏改 internal；新增 `IOSEmbeddedIshEventLoopTests` 5 条覆盖正常退出/deadline 强杀/致命 read 错误/信号退出（143）/空 data 事件，并断言 close 恰好一次、terminate 调用次数。
+  - 调用链路 review 确认零断裂：`IOSEmbeddedIshRuntime.shared` 全部 2 个调用点、`IOSTerminalRuntime` 构造/.shared 全部 15 个使用点、静态门禁 9 个消费点逐一验证；KMP `ios_ish_execute` 声明与 ≤180s 上限自洽；Watch/审批链不经 job 状态机零影响。
+- 验证：新 job 测试 3 条先在保留旧语义的注入缝上实测全红（7 处断言失败）再转绿；事件循环 5 条为新缝纯覆盖（无行为红可打）；受影响套件（SSH runtime/profile、LocalToolExecutor、CapabilityRegistry、PermissionsStatus、GenerationParams、ish job/loop 两组新套件）合跑 **88 passed / 0 failed**（iPhone 17 Pro / iOS 26.5 Simulator，`Test-iosApp-2026.07.26_16-08-48-+0800.xcresult`）；`iosAppExperimentalGPL` scheme 模拟器 **BUILD SUCCEEDED**；`git diff --check` 与 pi-lens 诊断干净。
+- 残余缺口：guest 进程真实 terminate/streaming 仍只有编译证据+缝上契约，ExperimentalGPL 真机或模拟器跑 `ios_ish_execute`（echo + sleep 60 取消 + 超时）未验证；UAF 修复为构造性正确（锁串行化），未做对抗性线程压测；`String(decoding:)` 逐块有损解码在多字节 UTF-8 跨块边界可能出现 U+FFFD（cosmetic）；`ensureDefaultVM` 每次 run 都走一次 guest `ls`（P2 性能项，未动）；P0 供应链自主化（Lolendor 预编译包仍在）与 PTY 交互终端留待后续切片。
+
+### 2026-07-26 embedded iSH P2 定点修复轮（review 后续）
+
+- 对双路 review 的 P2 项逐项精准闭环，未扩大范围：
+  - **boot 路径**（P2-1）：`bootIfNeeded` 改 async + `bootTask` 在飞去重（并发首跑共享一次 rootfs 拷贝+内核引导，rootfs 准备改 static 不依赖 actor 状态，拷贝/引导移出协作线程）；boot 后 `Task.checkCancellation()` 早收口；`CancellationError` 显式映射为 "Embedded iSH command was cancelled."；`resolvedDefaultVM()` 缓存 VM（每次 run 省一次 guest `ls`，缓存生命周期与一次性 boot 一致）。
+  - **UTF-8 跨块**（P2-3b）：新增 `IOSEmbeddedIshUTF8StreamDecoder`（保留至多 3 字节不完整序列，腐败字节即时有损放行防 pending 无界），事件泵双流各持一个 decoder，`finish()` 流末冲刷；`readSessionEvents`/`emit`/`flushDecoders` 下沉为同文件 extension（actor 主体回到 350 行门禁内）。
+  - **stderr 预览标记**（P2-3a）：`IOSEmbeddedIshStreamMarks`（MainActor 串行化）在流式预览 stdout→stderr 转移处补一次性 `[stderr]` 标记，终态输出布局不变。
+  - **waitJob 调用方取消**（P2-4）：轮询循环检查 `Task.isCancelled` 提前返回当前快照，不改 job 状态（等待被取消≠job 被取消），SSH 同构受益。
+  - **工具取消诚实化**（reviewer2-note1）：executor 在 `Task.isCancelled && result.error == nil` 时报 `status: "cancelled"` + 取消文案；timeline 失败集合未加 `"cancelled"`——`ok: false` 已主导失败渲染，该行为冗余防御且触发 ChatToolTimelineView 既有 545 行 struct 越限告警，按最小改动回退。
+  - **文档**：`run` 注释补充 <1s 钳制与 128+signal 退出码约定；`-12` 常量注释改引 `include/ishembed.h` + host/ishembed.c（P1 轮已落）。
+  - KMP `ios_ish_execute` 描述未改：≤180s 上限与"不做交互式长会话"仍准确，reviewer 亦仅列可选。
+- 验证：**解码器算法独立运行时证据**——提取至 /tmp 以 swiftc 运行 22 项断言 ALL PASS（含逐字节 drip CJK、4 字节 emoji 跨三块、腐败输入 pending 无界、截断序列 flush 单 U+FFFD  maximal-subpart）；**GPL-only 路径独立 typecheck**——`swiftc -typecheck -D ENABLE_EXPERIMENTAL_TERMINAL_RUNTIMES`（真实 IshEmbed.swiftmodule + CIshEmbed 模块图，Swift 6 mode）exit 0；稳定层文件在模块编译中全部通过（错误仅出现在 Novel 文件）；pi-lens 9 文件无告警、`git diff --check` 通过。
+- **整包 XCTest 与 ExperimentalGPL 构建被并发工作阻塞**：另一活跃会话自 16:23 起批量修改 NovelCreation（至少 7 个文件），当前存在真实编译错——`NovelSessionBubble.swift:232`（多语句 getter 隐式返回不成立）与 `NovelSessionView.swift:1291-1299`（`activeRun` fileprivate、`.regenerate` 成员缺失，设计中途状态）。曾对其 getter 打一词 `return` 解锁验证，旋即暴露 4 个设计期错误，判断越界后**已回退该临时修复**，对方工作区恢复原样。其 16:09 前的脏树状态曾被 88 测试全绿证明自洽。待 Novel 树编译恢复后需补跑：本轮新增 14 条 XCTest（事件循环 7 + 解码器 6 + job stderr 标记 1 + waitJob 取消 1）与受影响套件、`iosAppExperimentalGPL` 构建。
 
 ### 2026-07-25 流式展示节奏与 Responses 终态三项定点修复
 

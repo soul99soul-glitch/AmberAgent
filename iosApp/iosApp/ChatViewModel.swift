@@ -105,6 +105,20 @@ final class ChatViewModel {
     var pendingAskUser: ChatAskUserRequest?
     var configurationError: String?
     var contextCompactState: ChatContextCompactState = .idle
+
+    /// 顶部活动岛「等待确认」聚合信号：与 sendMessage 的 pending 门禁集合保持一致。
+    var hasPendingUserGate: Bool {
+        pendingMemoryApproval != nil || pendingSearchApproval != nil ||
+            pendingWebMountApproval != nil || pendingWorkspaceApproval != nil ||
+            pendingIshHandoffApproval != nil || pendingMcpApproval != nil ||
+            pendingCouncilApproval != nil || pendingAskUser != nil
+    }
+
+    /// 顶部活动岛等待连接副标题（取不到则 nil，文案规则：宁缺毋滥）。
+    var islandModelDisplayName: String? { currentModel?.displayName }
+
+    /// 识别图片期间的总张数（>1 时才作为副标题事实展示）。
+    private(set) var visionRecognitionImageCount = 0
     private var pendingVisionFailures: [String: String] = [:]
     private static let visionRecognitionPendingMessage = "图片识别中，请稍候"
 
@@ -710,10 +724,12 @@ final class ChatViewModel {
         let (digest, conversationId, userMessageId) = appendUserMessage(text: text, images: images)
         guard autoGenerateResponses else { return }
         isRecognizingImages = true
+        visionRecognitionImageCount = images.count
         Task {
             let result = await performVisionRecognition(images: images)
             await MainActor.run {
                 isRecognizingImages = false
+                visionRecognitionImageCount = 0
                 clearVisionRecognitionPendingPrompt()
                 switch result {
                 case .failure(let error):

@@ -21,7 +21,7 @@
 "agent.activity.stage.reconnecting" = "Reconnecting";
 "agent.activity.stage.stale" = "Status expired";
 "agent.activity.stage.completed" = "Completed";
-"agent.activity.stage.failed" = "Needs attention";
+"agent.activity.stage.failed" = "Incomplete";
 "agent.activity.stage.cancelled" = "Stopped";
 
 "agent.activity.action.openTask" = "Open task";
@@ -32,7 +32,7 @@
 "agent.activity.fact.stale" = "Status expired";
 "agent.activity.fact.reconnecting" = "Reconnecting";
 "agent.activity.fact.completed" = "Done";
-"agent.activity.fact.failed" = "Issue";
+"agent.activity.fact.failed" = "Incomplete";
 "agent.activity.fact.cancelled" = "Stopped";
 
 "agent.activity.metric.source.count" = "%ld sources";

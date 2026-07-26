@@ -22,19 +22,24 @@ private struct ChatListSummarySnapshot: Equatable {
     var lastAssistantHasOpenReasoning = false
     var firstUserTitleSeed: String?
     var activeToolStep: ChatToolStepModel?
+    var failedToolStep: ChatToolStepModel?
 
     // 手写 == 是有意的:只比较顶部活动岛实际渲染的字段。activeToolStep 的 tool 载荷
-    // (流式 output)与 id 被刻意排除,否则子代理流式输出的每个 chunk 都会刷新 summary。
+    // (流式 output)被刻意排除,否则子代理流式输出的每个 chunk 都会刷新 summary;
+    // id 稳定不随 chunk 变化,纳入它以修正「视觉相同工具替换」时的 terminalHold 匹配。
+    // failedToolStep 只用于岛的失败终态匹配,比较其稳定 id 即可。
     // 若 ChatToolStepModel 新增会影响岛屿渲染的字段,必须同步加进这里的比较。
     static func == (lhs: ChatListSummarySnapshot, rhs: ChatListSummarySnapshot) -> Bool {
         lhs.hasMessages == rhs.hasMessages &&
             lhs.awaitingFirstAssistantChunk == rhs.awaitingFirstAssistantChunk &&
             lhs.lastAssistantHasOpenReasoning == rhs.lastAssistantHasOpenReasoning &&
             lhs.firstUserTitleSeed == rhs.firstUserTitleSeed &&
+            lhs.activeToolStep?.id == rhs.activeToolStep?.id &&
             lhs.activeToolStep?.title == rhs.activeToolStep?.title &&
             lhs.activeToolStep?.detail == rhs.activeToolStep?.detail &&
             lhs.activeToolStep?.state == rhs.activeToolStep?.state &&
-            lhs.activeToolStep?.systemImage == rhs.activeToolStep?.systemImage
+            lhs.activeToolStep?.systemImage == rhs.activeToolStep?.systemImage &&
+            lhs.failedToolStep?.id == rhs.failedToolStep?.id
     }
 }
 
@@ -123,6 +128,8 @@ struct ChatView: View {
     @State private var viewportState = ChatViewportState()
     @State private var scrollToBottomTrigger = 0
     @State private var scrollToBottomSource: NativeTimelineBottomIntentSource = .button
+    @State private var islandPresentation: ChatIslandPresentation?
+    @State private var islandHoldToken = 0
     @State private var composerInputHeight: CGFloat = 40
     @State private var composerBarHeight: CGFloat = 0
     @State private var composerInputController = ComposerInputController()
@@ -561,10 +568,12 @@ struct ChatView: View {
                 newChatToolbarButton
             }
 
-            ChatActivityIslandView(state: topIslandState)
+            ChatActivityIslandView(presentation: islandPresentation ?? .idle(topIslandState))
                 .padding(.horizontal, 74)
                 .frame(maxWidth: .infinity)
                 .allowsHitTesting(false)
+                .onAppear { syncIslandPresentation() }
+                .onChange(of: topIslandState) { _, _ in syncIslandPresentation() }
         }
     }
 
@@ -602,13 +611,25 @@ struct ChatView: View {
     }
 
     private var topIslandState: ChatActivityIslandState {
+        // 等待用户永远最先：审批/问答暂停时，岛同步停下来等。
+        if viewModel.hasPendingUserGate {
+            return ChatActivityIslandState.activity(
+                kind: .awaitingUser,
+                title: "等待确认",
+                detail: viewModel.pendingAskUser != nil ? "回答问题" : "工具审批",
+                systemImage: "checkmark.circle",
+                tint: .amber
+            )
+        }
+
         if let step = chatListSummary.activeToolStep {
             return ChatActivityIslandState.activity(
                 kind: step.systemImage == "photo.on.rectangle" ? .image : .tool,
                 title: compactIslandText(step.title, limit: 18),
-                detail: step.detail.map { compactIslandText($0, limit: 22) },
+                detail: step.detail.map { compactIslandText($0, limit: 20) },
                 systemImage: step.systemImage,
-                tint: islandTint(for: step)
+                tint: islandTint(for: step),
+                toolID: step.id
             )
         }
 
@@ -616,7 +637,8 @@ struct ChatView: View {
             return ChatActivityIslandState.activity(
                 kind: .image,
                 title: "识别图片",
-                detail: "整理图片上下文",
+                detail: viewModel.visionRecognitionImageCount > 1
+                    ? "共 \(viewModel.visionRecognitionImageCount) 张" : nil,
                 systemImage: "viewfinder",
                 tint: .cyan
             )
@@ -626,7 +648,7 @@ struct ChatView: View {
             return ChatActivityIslandState.activity(
                 kind: .waiting,
                 title: "连接模型",
-                detail: "等待首个响应",
+                detail: viewModel.islandModelDisplayName,
                 systemImage: "sparkles",
                 tint: .amber
             )
@@ -660,6 +682,7 @@ struct ChatView: View {
         next.hasMessages = !messages.isEmpty
         next.awaitingFirstAssistantChunk = isStreamingFollowActive && messages.last?.role == MessageRole.user
         next.activeToolStep = activeToolStepForIsland(messages: messages)
+        next.failedToolStep = failedToolStepForIsland(messages: messages)
         next.lastAssistantHasOpenReasoning = lastAssistantHasOpenReasoning(messages: messages)
         if resetTitleSeed || next.firstUserTitleSeed == nil {
             next.firstUserTitleSeed = messages.first(where: { $0.role == MessageRole.user })?
@@ -679,6 +702,46 @@ struct ChatView: View {
             }
         }
         return nil
+    }
+
+    /// 最近一个失败的工具（suffix(3) 窗口内）：输出含失败原因时才构造模型，
+    /// 仅供岛在 active→idle 边缘匹配 terminalHold，不参与渲染。
+    private func failedToolStepForIsland(messages: [UIMessage]) -> ChatToolStepModel? {
+        for message in messages.suffix(3).reversed() {
+            let tools = message.parts.compactMap { $0 as? UIMessagePart.Tool }
+            if let failed = tools.reversed().first(where: {
+                ChatToolOutputFormatter.failureReason(from: $0.output) != nil
+            }) {
+                return ChatToolStepModel(tool: failed)
+            }
+        }
+        return nil
+    }
+
+    /// 活动岛呈现的唯一入口：topIslandState 变化 → presentation（含 settle/terminalHold）。
+    private func syncIslandPresentation() {
+        let now = ProcessInfo.processInfo.systemUptime
+        let previous = islandPresentation ?? .idle(topIslandState)
+        let next = ChatIslandPresentationReducer.stateChanged(
+            prev: previous,
+            next: topIslandState,
+            failedToolID: chatListSummary.failedToolStep?.id,
+            now: now,
+            reduceMotion: reduceMotion
+        )
+        guard next != previous else { return }
+        islandPresentation = next
+        guard let deadline = next.holdDeadline else { return }
+        islandHoldToken &+= 1
+        let token = islandHoldToken
+        Task {
+            try? await Task.sleep(for: .seconds(max(0, deadline - now)))
+            guard !Task.isCancelled, token == islandHoldToken else { return }
+            islandPresentation = ChatIslandPresentationReducer.timeout(
+                prev: islandPresentation ?? .idle(topIslandState),
+                now: ProcessInfo.processInfo.systemUptime
+            )
+        }
     }
 
     private func lastAssistantHasOpenReasoning(messages: [UIMessage]) -> Bool {
@@ -704,11 +767,7 @@ struct ChatView: View {
     }
 
     private func compactIslandText(_ raw: String, limit: Int) -> String {
-        let compacted = raw
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard compacted.count > limit else { return compacted }
-        return String(compacted.prefix(limit))
+        ChatActivityIslandMapping.compactText(raw, limit: limit)
     }
 
     private func islandTint(for step: ChatToolStepModel) -> ChatActivityIslandTint {

@@ -286,11 +286,77 @@ private struct AgentActivityGlyph: View {
                     .rotationEffect(.degrees(-90))
             }
 
+            glyphContent
+        }
+        .frame(width: size, height: size)
+    }
+
+    /// 运行中复用 in-app 活动岛的星核语言（静帧轮换）；其余相位保留 SF Symbol。
+    @ViewBuilder
+    private var glyphContent: some View {
+        if displayPhase == .running {
+            AgentActivityOrbFrames(stage: presentation.stage, size: size * 0.85)
+        } else {
             Image(systemName: presentation.displaySymbolName(isStale: isStale))
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(displayPhase.widgetColor)
         }
-        .frame(width: size, height: size)
+    }
+}
+
+/// 系统岛是共享空间，不做光谱动画：仅以约 1.5s 步进轮换 3 帧静帧表示活跃。
+/// 引擎是纯函数，帧在首次使用时离线渲染并缓存；系统若限频则停在首帧，仍可读。
+private struct AgentActivityOrbFrames: View {
+    let stage: AgentActivityStage
+    let size: CGFloat
+
+    private var orbState: OrbState {
+        switch stage {
+        case .searching, .readingSources, .readingWeb, .readingDocument:
+            .searching
+        case .generatingImage:
+            .shaping
+        case .generating:
+            .composing
+        default:
+            .working
+        }
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1.5)) { context in
+            let frames = AgentActivityOrbFrameCache.frames(state: orbState, size: size)
+            let index = Int(context.date.timeIntervalSince1970 / 1.5) % frames.count
+            Image(uiImage: frames[index])
+                .resizable()
+                .frame(width: size, height: size)
+        }
+    }
+}
+
+@MainActor
+private enum AgentActivityOrbFrameCache {
+    private static var cache: [String: [UIImage]] = [:]
+
+    static func frames(state: OrbState, size: CGFloat) -> [UIImage] {
+        let key = "\(state.rawValue)-\(Int(size))"
+        if let cached = cache[key] { return cached }
+        let resolved = orbResolvePreset(state, .small)
+        // 与 ThinkingOrbView 同一时钟约定：t = 墙钟 × resolved.speed，三帧均布 0.7s 相位差。
+        let rendered = (0..<3).map { index in
+            render(resolved: resolved, size: size, time: Double(index) * 0.7 * resolved.speed)
+        }
+        cache[key] = rendered
+        return rendered
+    }
+
+    private static func render(resolved: OrbResolved, size: CGFloat, time: Double) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size), format: format)
+        return renderer.image { context in
+            orbDraw(resolved.mode, context.cgContext, size: Double(size), t: time, dark: true, opts: resolved.opts)
+        }
     }
 }
 

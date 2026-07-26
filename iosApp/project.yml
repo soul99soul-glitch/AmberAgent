@@ -191,6 +191,7 @@ targets:
     sources:
       - path: ActivityWidget
       - path: iosApp/AgentActivityModels.swift
+      - path: iosApp/ThinkingOrbEngine.swift
       - path: iosApp/AgentActivity.strings
         buildPhase: resources
       - path: iosApp/zh-Hans.lproj/AgentActivity.strings
@@ -212,6 +213,7 @@ targets:
     sources:
       - path: ActivityWidget
       - path: iosApp/AgentActivityModels.swift
+      - path: iosApp/ThinkingOrbEngine.swift
       - path: iosApp/AgentActivity.strings
         buildPhase: resources
       - path: iosApp/zh-Hans.lproj/AgentActivity.strings
@@ -344,7 +346,6 @@ targets:
         embed: true
     scheme:
       gatherCoverageData: false
-
 
   AmberWatchApp:
     type: application
