@@ -12,6 +12,7 @@ struct DisplayFontSettingsView: View {
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown) private var streamingBlockMarkdown = true
+    @AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks) private var coalescedTextBlocks = false
     @AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key) private var nativeTimelineStaticRender = false
     @AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key) private var nativeTimelineStreamingTail = false
     @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeTimelineScrollDriver = false
@@ -187,6 +188,14 @@ struct DisplayFontSettingsView: View {
                     if liyananStreamingMarkdown {
                         microsoftStreamingMarkdown = false
                     }
+                }
+                DisplayDivider()
+                DisplayToggleRow(
+                    title: "长文正文合并渲染（实验性）",
+                    subtitle: "把连续的纯正文段落合并成一个文本视图：长回复的视图数从「段落数」降到 1，减少每次刷新的重排开销与新段落淡入闪烁。含图片/引用标记的段落、列表、表格、代码块不参与合并。异常时关闭即可回到逐段渲染。",
+                    isOn: coalescedTextBlocks
+                ) {
+                    coalescedTextBlocks.toggle()
                 }
             }
         }

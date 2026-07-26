@@ -272,6 +272,7 @@ enum IOSDisplayPreferenceKeys {
     static let microsoftStreamingMarkdown = "app.amber.ios.display.microsoftStreamingMarkdown"
     static let liyananStreamingMarkdown = "app.amber.ios.display.liyananStreamingMarkdown"
     static let streamingBlockMarkdown = "app.amber.ios.display.streamingBlockMarkdown"
+    static let coalescedTextBlocks = "app.amber.ios.display.coalescedTextBlocks"
 }
 
 enum IOSChatFont: String, CaseIterable, Identifiable {

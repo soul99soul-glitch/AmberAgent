@@ -106,6 +106,49 @@ final class IOSSettingsWiringTests: XCTestCase {
         }
     }
 
+    /// 需求「三界面共享流式基础设施」的机制门禁。
+    ///
+    /// 正文渲染只能有一个入口 `ChatAssistantMarkdownView`：Chat / 议会 / 小说会话
+    /// 全部经由它，所以渲染层的改动（合并渲染、逐词淡入、缓存策略）落一次即三界面同享。
+    /// 若有人新开一条绕过它的渲染路径，这条会红。
+    func testAssistantProseRenderingIsSharedByEveryStreamingConversationSurface() throws {
+        let bubble = try source("iosApp/MessageBubbleView.swift")
+        let council = try source("iosApp/CouncilChatRuntimeView.swift")
+        let novel = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
+
+        XCTAssertTrue(bubble.contains("struct ChatAssistantMarkdownView"))
+        for surface in [council, novel] {
+            XCTAssertTrue(surface.contains("ChatAssistantMarkdownView("))
+            // 各界面必须带自己的缓存命名空间，避免 renderable 身份缓存跨界面串味。
+            XCTAssertTrue(surface.contains("renderCacheNamespace:"))
+        }
+        // 渲染 config 只允许在这一处构造；合并渲染开关也只在这里接入。
+        XCTAssertEqual(
+            bubble.components(separatedBy: ".withCoalescesAdjacentTextBlocks(").count - 1,
+            1,
+            "合并渲染开关必须只在共享的 streamingMarkdownConfig 里接入"
+        )
+    }
+
+    /// 呈现节奏（每拍推进多少字符）在 Chat 与小说之间必须是同一份策略，
+    /// 而不是两份「注释声称同构」的副本——改一边不会让另一边变红是历史事故来源。
+    func testChatAndNovelShareTheSameStreamPresentationPacingPolicy() {
+        for backlog in [0, 1, 11, 12, 13, 200, 1_024, 4_000, 100_000] {
+            XCTAssertEqual(
+                ChatStreamPresentationPacer.textAdvance(backlogCount: backlog),
+                NovelSessionPresentationPacer.textAdvance(backlogCount: backlog),
+                "backlog=\(backlog) 时两界面推进量必须一致"
+            )
+            XCTAssertEqual(
+                ChatStreamPresentationPacer.textAdvance(backlogCount: backlog),
+                StreamPresentationPacingPolicy.textAdvance(backlogCount: backlog)
+            )
+        }
+        XCTAssertEqual(StreamPresentationPacingPolicy.textAdvance(backlogCount: 0), 0)
+        XCTAssertEqual(StreamPresentationPacingPolicy.textAdvance(backlogCount: 1), 12, "轻积压落到下限")
+        XCTAssertEqual(StreamPresentationPacingPolicy.textAdvance(backlogCount: 100_000), 64, "大积压封顶")
+    }
+
     func testChatTopBarUsesStableControlDimensions() {
         XCTAssertEqual(ChatTopBarLayout.controlsHeight, 54)
         XCTAssertEqual(ChatTopBarLayout.toolbarButtonDiameter, 38)
@@ -184,6 +227,22 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(bubble.contains("ChatStableStreamingMarkdownView("))
         XCTAssertTrue(bubble.contains("microsoftStreamingMarkdown && shouldUseExperimentalMarkdownRenderer"))
         XCTAssertTrue(bubble.contains("liyananStreamingMarkdown && shouldUseExperimentalMarkdownRenderer"))
+    }
+
+    /// 合并渲染开关必须接到三界面共用的那一处 config 构造点（`streamingMarkdownConfig`），
+    /// 而不是某个界面私有的分支；并且必须默认关闭、能一键回滚。
+    func testCoalescedTextBlocksToggleIsWiredIntoTheSharedMarkdownConfig() throws {
+        let settings = try source("iosApp/DisplayFontSettingsView.swift")
+        let bubble = try source("iosApp/MessageBubbleView.swift")
+
+        XCTAssertTrue(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks) private var coalescedTextBlocks = false"))
+        XCTAssertTrue(settings.contains("coalescedTextBlocks.toggle()"))
+        XCTAssertTrue(settings.contains("长文正文合并渲染"))
+
+        XCTAssertTrue(bubble.contains("@AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks) private var coalescedTextBlocks = false"))
+        XCTAssertTrue(bubble.contains(".withCoalescesAdjacentTextBlocks(value: coalescedTextBlocks)"))
+        // config 记忆化的键必须带上这个开关，否则设置里改了、活着的 bubble 还用旧 config。
+        XCTAssertTrue(bubble.contains("coalescedTextBlocks: coalescedTextBlocks"))
     }
 
     func testStreamingBlockMarkdownToggleIsConsumedByTableBlockRenderer() throws {

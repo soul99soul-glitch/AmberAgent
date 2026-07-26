@@ -377,6 +377,38 @@ final class ChatStreamingPerfBaselineTests: XCTestCase {
         XCTAssertLessThan(table24, 200)
     }
 
+    /// 判据(比值 canary):同一纯散文夹具,逐段渲染 vs 合并渲染的主线程耗时比。
+    ///
+    /// 断言比值而不是绝对毫秒——绝对值随机器浮动,比值才是稳定门禁(2026-07-16)。
+    /// 合并把一条长回复的 ParagraphUIView 数量从「段落数」压到 1,预期比值 < 1;
+    /// 这里只拦「合并反而更慢」的方向性回归,真实收益看打印出来的比值。
+    func testPerf_coalescedTextBlocks_proseRatio() {
+        let key = IOSDisplayPreferenceKeys.coalescedTextBlocks
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous {
+                UserDefaults.standard.set(previous, forKey: key)
+            } else {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+
+        let fixture = Self.proseMarkdown(targetUTF16: 24_000)
+
+        UserDefaults.standard.set(false, forKey: key)
+        let perBlock = runStreamingHarness(label: "prose24KB-perBlock", base: fixture, deltas: 60)
+
+        UserDefaults.standard.set(true, forKey: key)
+        let coalesced = runStreamingHarness(label: "prose24KB-coalesced", base: fixture, deltas: 60)
+
+        let ratio = perBlock > 0 ? coalesced / perBlock : 1
+        print(String(
+            format: "[PERF] coalescedTextBlocks perBlock=%.1f coalesced=%.1f ratio=%.3f (ms/窗口)",
+            perBlock, coalesced, ratio
+        ))
+        XCTAssertLessThan(ratio, 1.15, "合并渲染不得比逐段渲染更慢")
+    }
+
     func testPerf_growingSingleTableRows() {
         var table = """
         | 序号 | 流式表格内容 | 状态 |

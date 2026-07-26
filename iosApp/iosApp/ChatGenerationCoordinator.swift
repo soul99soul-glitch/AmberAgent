@@ -190,7 +190,13 @@ struct ChatStreamPresentationStep {
     let isCaughtUp: Bool
 }
 
-enum ChatStreamPresentationPacer {
+/// 流式「呈现节奏」策略:每拍该推进多少字符。Chat 与小说创作共用同一份口径。
+///
+/// 此前 `ChatStreamPresentationPacer` 与 `NovelSessionPresentationPacer` 各持一份
+/// 逐字相同的常量与公式,注释里互相声明"同构"却没有机制保证——调一边不会让另一边
+/// 变红。真正共享的只有这段策略:两边的 `step` 吃的是不同的数据形状
+/// (Chat 是 `[UIMessage]` 的 part 列表,小说是单条 String),强行抽象反而更糟。
+enum StreamPresentationPacingPolicy {
     /// 轻积压时的下限:一拍推进约一行手机宽度的中文,保留既有 48ms 发布时钟。
     static let minimumTextAdvance = 12
     /// 每拍硬上限:让大积压在几秒内清空,而不是几十秒。
@@ -201,14 +207,23 @@ enum ChatStreamPresentationPacer {
     /// 按积压自适应的每拍推进量。
     ///
     /// 固定 12 字符/拍意味着显示速率恒为 250 字符/秒。模型快于这个速率时
-    /// 积压会持续累积,且 `drainStreamPresentation` 在流式终态后仍按同一节奏
-    /// 逐拍追平——4000 字的回复要 334 拍(≈16s)才显示完,期间 `isLoading`
-    /// 保持 true,用户看着"停止"按钮等一段早已生成完的文本。
-    /// 与 `NovelSessionPresentationPacer` 同构。
+    /// 积压会持续累积,且终态排空仍按同一节奏逐拍追平——4000 字的回复要 334 拍
+    /// (≈16s)才显示完,期间 `isLoading` 保持 true,用户看着"停止"按钮等一段
+    /// 早已生成完的文本。
     static func textAdvance(backlogCount: Int) -> Int {
         guard backlogCount > 0 else { return 0 }
         let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
         return min(maximumTextAdvance, max(minimumTextAdvance, adaptive))
+    }
+}
+
+enum ChatStreamPresentationPacer {
+    static var minimumTextAdvance: Int { StreamPresentationPacingPolicy.minimumTextAdvance }
+    static var maximumTextAdvance: Int { StreamPresentationPacingPolicy.maximumTextAdvance }
+    static var preferredDrainTicks: Int { StreamPresentationPacingPolicy.preferredDrainTicks }
+
+    static func textAdvance(backlogCount: Int) -> Int {
+        StreamPresentationPacingPolicy.textAdvance(backlogCount: backlogCount)
     }
 
     /// 本轮所有 text part 的未显示字符总量,用来定这一拍的推进预算。

@@ -430,6 +430,7 @@ struct ChatAssistantMarkdownView: View {
     @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
     @AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown) private var streamingBlockMarkdown = true
+    @AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks) private var coalescedTextBlocks = false
     @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
     @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
     /// per-view-instance 的「这个 bubble 曾经流式过」latch。它覆盖 completion 瞬间;
@@ -751,6 +752,12 @@ struct ChatAssistantMarkdownView: View {
             // 消除因内容可用宽度不同导致的折行行数差。
             .withUnorderedListBulletWidth(value: 15)
             .withCollapsesSoftBreaks(value: true)
+            // 相邻纯正文段落合并成一个文本视图：长回复的 ParagraphUIView 数量从
+            // 「段落数」降到 1,每次流式提交不再走 O(段落数) 的 SwiftUI 子树 diff,
+            // 新段落也不再是「新建视图 + 从 alpha 0 淡入」。合并块内的增长仍走
+            // ParagraphUIView 的 append 快路径(行距/段距烘进属性串,视图侧传 nil)。
+            // 这里是三个界面(Chat/议会/小说)共用的唯一 config 构造点。
+            .withCoalescesAdjacentTextBlocks(value: coalescedTextBlocks)
     }
 
     @ViewBuilder
@@ -765,7 +772,8 @@ struct ChatAssistantMarkdownView: View {
                 fontScale: boundedFontScale,
                 chatFont: chatFont,
                 themePaper: AmberThemeRuntime.shared.paper.rawValue,
-                themeAccentHex: AmberThemeRuntime.shared.accentHex
+                themeAccentHex: AmberThemeRuntime.shared.accentHex,
+                coalescedTextBlocks: coalescedTextBlocks
             ),
             build: { streamingMarkdownConfig(liveStreaming: liveStreaming) }
         )
@@ -1347,6 +1355,10 @@ private final class ChatStreamingDetectionBox {
         let chatFont: String
         let themePaper: String
         let themeAccentHex: UInt32
+        // 必须是无默认值的 `let`:其余字段都靠"漏传即编译失败"来保证任何新的
+        // config 构造点都会被迫接上。给默认值会让漏传的构造点静默复用别人的
+        // 缓存条目,同屏出现两种渲染策略且无红灯。
+        let coalescedTextBlocks: Bool
     }
 
     var table: ChatStreamingTableDetectionState
@@ -1631,7 +1643,8 @@ enum ChatStreamingMarkdownConfigCacheTestSupport {
                     fontScale: 1,
                     chatFont: IOSChatFont.default.rawValue,
                     themePaper: theme.paper,
-                    themeAccentHex: theme.accentHex
+                    themeAccentHex: theme.accentHex,
+                    coalescedTextBlocks: false
                 ),
                 build: {
                     buildCount += 1
