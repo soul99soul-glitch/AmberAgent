@@ -702,15 +702,20 @@ private extension NovelPromptKind {
         switch self {
         case .wholeChapterPolish, .wholeChapterRegeneration:
             true
+        // 矛盾检查只读正文逐字原文,不读分支状态摘要,所以不要求状态已同步 ——
+        // 否则「状态没同步」会挡住一次纯粹的正文自查。
         case .quickStart, .discussion, .proseContinuation, .proseWholeChapter,
-             .stateDeltaV1, .manualSyncV1, .discussionArchiveV1, .polishDriftV1:
+             .stateDeltaV1, .manualSyncV1, .discussionArchiveV1, .polishDriftV1,
+             .continuityAuditV1:
             false
         }
     }
 
     var requiresIdleBranch: Bool {
         switch self {
-        case .proseContinuation, .proseWholeChapter, .wholeChapterPolish, .wholeChapterRegeneration:
+        // 矛盾检查要求分支空闲:边生成边扫,正文会在扫描途中变化,报出来的位置对不上。
+        case .proseContinuation, .proseWholeChapter, .wholeChapterPolish, .wholeChapterRegeneration,
+             .continuityAuditV1:
             true
         case .quickStart, .discussion, .stateDeltaV1, .manualSyncV1,
              .discussionArchiveV1, .polishDriftV1:

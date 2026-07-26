@@ -9,12 +9,15 @@ final class NovelPromptCatalogTests: XCTestCase {
             "\($0.kind.rawValue)\n\($0.version)\n\($0.systemText)"
         }.joined(separator: "\n---\n")
 
-        // 2026-07-26 显式更新:新增 `.wholeChapterRegeneration` 模板(整章重新生成,
-        // 允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
-        // 快照变化是这次新增的直接结果,不是既有提示词被改动。
+        // 2026-07-26 显式更新(第二次):新增 `.continuityAuditV1` 模板(剧情矛盾检查,
+        // 只读正文找前后打架的地方,不改一个字)。`NovelPromptKind` 因此从 10 个 case
+        // 变成 11 个,快照必然变化;既有 10 条模板的正文一个字都没动。
+        //
+        // 2026-07-26 显式更新(第一次):新增 `.wholeChapterRegeneration` 模板(整章重新
+        // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
         XCTAssertEqual(
             sha256(snapshot),
-            "a3c755b77d0960e104a4c2b405280f7a6c5914ffc8cb38374210b5493fc8db08"
+            "c693b0915652ba7018fa66f926802f361e2c67bb6a0d8ce3f1f63d94968be4b4"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -86,6 +89,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         let rebuild = NovelPromptCatalog.template(for: .manualSyncV1).systemText
         let archive = NovelPromptCatalog.template(for: .discussionArchiveV1).systemText
         let drift = NovelPromptCatalog.template(for: .polishDriftV1).systemText
+        let continuity = NovelPromptCatalog.template(for: .continuityAuditV1).systemText
 
         for field in [
             "schemaVersion", "overview", "world", "characters", "masterOutline",
@@ -125,7 +129,24 @@ final class NovelPromptCatalogTests: XCTestCase {
         ] {
             XCTAssertTrue(drift.contains("\"\(field)\""), "Polish drift Prompt is missing \(field)")
         }
-        for prompt in [state, rebuild, drift] {
+        for field in [
+            "schemaVersion", "consistent", "issues", "category", "severity",
+            "chapterOrdinal", "chapterTitle", "evidence"
+        ] {
+            XCTAssertTrue(
+                continuity.contains("\"\(field)\""),
+                "Continuity audit Prompt is missing \(field)"
+            )
+        }
+        // 提示词里公布的类别白名单必须与解码器实际接受的枚举一致,否则模型按提示词
+        // 写出来的类别会在 StrictJSON 那一层被整份拒收。
+        for category in NovelContinuityIssueCategoryV1.allCases {
+            XCTAssertTrue(
+                continuity.contains(category.rawValue),
+                "Continuity audit Prompt does not publish category \(category.rawValue)"
+            )
+        }
+        for prompt in [state, rebuild, drift, continuity] {
             XCTAssertTrue(prompt.contains("Return exactly one raw JSON object"))
             XCTAssertTrue(prompt.contains("Do not use Markdown fences"))
             XCTAssertTrue(prompt.contains("Do not add unknown keys"))

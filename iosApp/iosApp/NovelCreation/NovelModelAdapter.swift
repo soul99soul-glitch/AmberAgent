@@ -21,6 +21,7 @@ enum NovelModelPurpose: String, Codable, CaseIterable, Sendable {
     case stateExtraction
     case stateRebuild
     case driftCheck
+    case continuityAudit
 }
 
 struct NovelModelMessage: Codable, Equatable, Sendable {

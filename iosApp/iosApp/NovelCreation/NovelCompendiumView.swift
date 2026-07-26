@@ -6,6 +6,7 @@ struct NovelCompendiumView: View {
 
     let onEditMaterial: (NovelMaterialRecord?, NovelMaterialKind) -> Void
     let onAcceptProposal: (NovelSettingProposalRecord) -> Void
+    let onOpenChapter: (NovelChapterSelection) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -55,7 +56,8 @@ struct NovelCompendiumView: View {
             NovelStoryCompendiumView(
                 viewModel: viewModel,
                 onEditMaterial: onEditMaterial,
-                onAcceptProposal: onAcceptProposal
+                onAcceptProposal: onAcceptProposal,
+                onOpenChapter: onOpenChapter
             )
         case .more:
             NovelCompendiumMoreView(
@@ -171,6 +173,7 @@ private struct NovelStoryCompendiumView: View {
     let viewModel: NovelCreationViewModel
     let onEditMaterial: (NovelMaterialRecord?, NovelMaterialKind) -> Void
     let onAcceptProposal: (NovelSettingProposalRecord) -> Void
+    let onOpenChapter: (NovelChapterSelection) -> Void
     @State private var pendingDelete: NovelCompendiumMaterialDeleteCandidate?
 
     var body: some View {
@@ -224,6 +227,11 @@ private struct NovelStoryCompendiumView: View {
                 }
                 .disabled(!viewModel.canMutate)
             }
+
+            NovelContinuityAuditSection(
+                viewModel: viewModel,
+                onOpenChapter: onOpenChapter
+            )
 
             if let snapshot = viewModel.branchSnapshot {
                 Section("当前分支走向") {

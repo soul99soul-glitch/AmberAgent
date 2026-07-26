@@ -801,6 +801,55 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         )
     }
 
+    /// 剧情矛盾检查的入口接线守护。上一轮的教训是「数据层全绿、界面上一次都点不到」,
+    /// 所以这里逐环锁住:工作区 → 设定页 → 剧情子页 → 检查区块 → ViewModel → 执行入口,
+    /// 并且跳章确实接到了阅读器路由上。
+    func testContinuityAuditEntryIsReachableFromTheLiveCompendiumView() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
+        let auditView = try source("iosApp/NovelCreation/NovelContinuityAuditView.swift")
+        let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
+
+        // 第一环:设定页路由到活视图,并把「跳章」接到阅读器路由上。
+        let compendiumCase = try XCTUnwrap(workspace.range(of: "case .compendium:"))
+        let compendiumCaseEnd = try XCTUnwrap(workspace.range(
+            of: "\n        }",
+            range: compendiumCase.upperBound..<workspace.endIndex
+        ))
+        let routing = workspace[compendiumCase.lowerBound..<compendiumCaseEnd.lowerBound]
+        XCTAssertTrue(routing.contains("NovelCompendiumView("))
+        XCTAssertTrue(routing.contains("onOpenChapter:"))
+        XCTAssertTrue(routing.contains("chapterReaderRoute = NovelChapterReaderRoute(selection: selection)"))
+
+        // 第二环:剧情子页常驻挂载检查区块,不依赖任何列表是否为空。
+        let storyStart = try XCTUnwrap(compendium.range(of: "private struct NovelStoryCompendiumView"))
+        let storyEnd = try XCTUnwrap(compendium.range(
+            of: "private struct NovelCompendiumMoreView",
+            range: storyStart.upperBound..<compendium.endIndex
+        ))
+        let story = compendium[storyStart.lowerBound..<storyEnd.lowerBound]
+        XCTAssertTrue(story.contains("NovelContinuityAuditSection("))
+        XCTAssertTrue(story.contains("onOpenChapter: onOpenChapter"))
+
+        // 第三环:区块确实调 ViewModel 的预估与扫描,并按 chapterID 取当前分支的版本跳章。
+        XCTAssertTrue(auditView.contains("await viewModel.planContinuityAudit()"))
+        // 2026-07-26 显式更新:发起入口从 `await viewModel.auditContinuity()` 改为
+        // `viewModel.startContinuityAudit()`——任务句柄必须留在 ViewModel 里,
+        // 否则「停止扫描」无从取消,执行入口里的 `Task.checkCancellation` 是死代码。
+        XCTAssertTrue(auditView.contains("viewModel.startContinuityAudit()"))
+        XCTAssertTrue(auditView.contains("viewModel.cancelContinuityAudit()"))
+        XCTAssertTrue(auditView.contains("viewModel.branchSnapshot?.branch.workingChapterSelections"))
+        // 丢弃的条目、失败的块、以及失败原因都必须显示出来,不许静默吞。
+        XCTAssertTrue(auditView.contains("report.droppedIssueCount"))
+        XCTAssertTrue(auditView.contains("report.failedChunkCount"))
+        XCTAssertTrue(auditView.contains("viewModel.continuityAuditFailure"))
+        XCTAssertTrue(auditView.contains("report.isStale(against: branch, discardedChapterIDs: discarded)"))
+
+        // 第四环:ViewModel 转发到真正的执行入口,而不是自己攒一份假结果。
+        XCTAssertTrue(viewModel.contains("try await creation.planContinuityAudit("))
+        XCTAssertTrue(viewModel.contains("try await creation.auditContinuity("))
+    }
+
     private func source(_ relativePath: String) throws -> String {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         return try String(

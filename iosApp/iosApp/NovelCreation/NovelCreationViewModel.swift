@@ -115,6 +115,23 @@ final class NovelCreationViewModel {
     var projectSnapshot: NovelProjectSnapshot?
     var branchSnapshot: NovelBranchSnapshot?
     var injectionPreview: NovelInjectionPreviewSnapshot?
+    /// 剧情矛盾检查的结果。**只活在内存里**:它是一份诊断报告,不是故事状态的一部分,
+    /// 退出项目或换分支就丢弃,需要重扫(见 `NovelContinuityAuditReport` 的说明)。
+    ///
+    /// 归属由**读取侧**判定,不靠「每个切换点手动清一次」——新建/导入项目、fork、
+    /// 删分支走的是 `reloadSelection` 而不是 `selectProject`/`selectBranch`,
+    /// 靠手动清必然漏,漏了就会把上一个项目的报告显示在当前项目的剧情页上。
+    var continuityAudit: NovelContinuityAuditReport? {
+        guard let report = continuityAuditReport,
+              report.projectID == selectedProjectID,
+              report.branchID == selectedBranchID else { return nil }
+        return report
+    }
+
+    private(set) var continuityAuditReport: NovelContinuityAuditReport?
+    private(set) var continuityAuditFailure: String?
+    private(set) var isAuditingContinuity = false
+    @ObservationIgnored private var continuityAuditTask: Task<Void, Never>?
     var isLoading = false
     private(set) var isPerforming = false
     private(set) var stateSyncActivity: NovelStateSyncActivity?
@@ -1334,6 +1351,79 @@ final class NovelCreationViewModel {
             report(error)
             return nil
         }
+    }
+
+    /// 发起前的预估:扫几章、切几块。块数就是这次要发多少个模型请求,给用户一个
+    /// 「这一趟要花多少」的交代。不消耗模型调用。
+    func planContinuityAudit() async -> NovelContinuityAuditPlan? {
+        guard let projectID = selectedProjectID, let branchID = selectedBranchID else {
+            return nil
+        }
+        let ownerID = UUID()
+        guard acquireOperation(ownerID: ownerID) else {
+            // 抢不到锁不能静默返回:用户看到的就是「点了没反应」。
+            continuityAuditFailure = "有别的操作正在进行，请稍后再试。"
+            return nil
+        }
+        defer { releaseOperation(ownerID: ownerID) }
+        do {
+            let plan = try await creation.planContinuityAudit(
+                projectID: projectID,
+                branchID: branchID
+            )
+            continuityAuditFailure = nil
+            errorMessage = nil
+            return plan
+        } catch {
+            continuityAuditFailure = errorDescription(error)
+            return nil
+        }
+    }
+
+    /// 界面用这个入口发起扫描:任务句柄留在 ViewModel 里,「停止扫描」才有东西可取消。
+    func startContinuityAudit() {
+        guard continuityAuditTask == nil else { return }
+        continuityAuditTask = Task { @MainActor [weak self] in
+            await self?.auditContinuity()
+            self?.continuityAuditTask = nil
+        }
+    }
+
+    func cancelContinuityAudit() {
+        continuityAuditTask?.cancel()
+    }
+
+    func auditContinuity() async {
+        guard let projectID = selectedProjectID, let branchID = selectedBranchID else { return }
+        let ownerID = UUID()
+        guard acquireOperation(ownerID: ownerID) else {
+            continuityAuditFailure = "有别的操作正在进行，请稍后再试。"
+            return
+        }
+        isAuditingContinuity = true
+        defer {
+            isAuditingContinuity = false
+            releaseOperation(ownerID: ownerID)
+        }
+        do {
+            let audit = try await creation.auditContinuity(
+                projectID: projectID,
+                branchID: branchID
+            )
+            continuityAuditReport = audit
+            continuityAuditFailure = nil
+            errorMessage = nil
+        } catch is CancellationError {
+            // 用户自己按的停止,不是故障,不必弹错误。
+            continuityAuditFailure = nil
+        } catch {
+            continuityAuditFailure = errorDescription(error)
+        }
+    }
+
+    func clearContinuityAudit() {
+        continuityAuditReport = nil
+        continuityAuditFailure = nil
     }
 
     func previewImport(_ data: Data) async -> NovelProjectImportPreview? {

@@ -1348,6 +1348,16 @@ protocol NovelCreation: Sendable {
         branchID: NovelBranchID,
         chapterID: NovelChapterID?
     ) async throws -> NovelDiscussionArchiveDraft
+    /// 发起前的预估:扫几章、切几块。块数等于这次要发多少个模型请求。
+    func planContinuityAudit(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelContinuityAuditPlan
+    /// 扫描全书正文,列出前后打架的地方。结果只在内存里,不写进项目文档。
+    func auditContinuity(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelContinuityAuditReport
 }
 
 extension NovelCreation {
@@ -1357,6 +1367,20 @@ extension NovelCreation {
         chapterID: NovelChapterID?
     ) async throws -> NovelDiscussionArchiveDraft {
         throw NovelError.invalidInput("This novel runtime cannot distill discussion archives.")
+    }
+
+    func planContinuityAudit(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelContinuityAuditPlan {
+        throw NovelError.invalidInput("This novel runtime cannot audit story continuity.")
+    }
+
+    func auditContinuity(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelContinuityAuditReport {
+        throw NovelError.invalidInput("This novel runtime cannot audit story continuity.")
     }
 
     func interruptRun(_ command: NovelCancelRunCommand) async throws {

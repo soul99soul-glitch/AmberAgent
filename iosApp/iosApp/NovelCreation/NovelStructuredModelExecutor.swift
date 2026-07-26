@@ -5,6 +5,7 @@ enum NovelStructuredModelTaskKind: String, Codable, Equatable, CaseIterable, Sen
     case stateRebuild
     case discussionArchive
     case polishDrift
+    case continuityAudit
 }
 
 enum NovelStructuredModelTask: Equatable, Sendable {
@@ -12,6 +13,9 @@ enum NovelStructuredModelTask: Equatable, Sendable {
     case stateRebuild(baseContext: String, manuscript: String)
     case discussionArchive(discussion: String)
     case polishDrift(sourceChapter: String, candidate: String)
+    /// 剧情矛盾检查。`priorFindings` 是前几块已报出的问题摘要,让后一块能与前文对照;
+    /// 首块传空串。`manuscript` 是本块正文,含 `# Chapter N: 标题` 标头。
+    case continuityAudit(priorFindings: String, manuscript: String)
 }
 
 struct NovelStructuredModelExecutionRequest: Equatable, Sendable {
@@ -25,6 +29,7 @@ enum NovelStructuredModelOutput: Equatable, Sendable {
     case stateRebuild(NovelStateRebuildV1)
     case discussionArchive(NovelDiscussionArchiveV1)
     case polishDrift(NovelPolishDriftV1)
+    case continuityAudit(NovelContinuityAuditV1)
 }
 
 struct NovelStructuredModelExecutionEvidence: Equatable, Sendable {
@@ -577,6 +582,7 @@ private extension NovelStructuredModelTask {
         case .stateRebuild: .stateRebuild
         case .discussionArchive: .discussionArchive
         case .polishDrift: .polishDrift
+        case .continuityAudit: .continuityAudit
         }
     }
 
@@ -586,6 +592,7 @@ private extension NovelStructuredModelTask {
         case .stateRebuild: .manualSyncV1
         case .discussionArchive: .discussionArchiveV1
         case .polishDrift: .polishDriftV1
+        case .continuityAudit: .continuityAuditV1
         }
     }
 
@@ -595,6 +602,7 @@ private extension NovelStructuredModelTask {
         case .stateRebuild: .stateRebuild
         case .discussionArchive: .stateExtraction
         case .polishDrift: .driftCheck
+        case .continuityAudit: .continuityAudit
         }
     }
 
@@ -627,6 +635,16 @@ private extension NovelStructuredModelTask {
                 sourceChapter: sourceChapter,
                 candidate: candidate
             )
+        case .continuityAudit(let priorFindings, let manuscript):
+            let system = priorFindings.isEmpty
+                ? prompt.systemText
+                : prompt.systemText + "\n\nISSUES ALREADY REPORTED FOR EARLIER CHAPTERS\n"
+                    + priorFindings
+                    + "\n\nDo not repeat an issue that already appears above."
+            return [
+                .init(role: .system, content: system),
+                .init(role: .user, content: "MANUSCRIPT UNDER AUDIT\n" + manuscript)
+            ]
         }
     }
 
@@ -644,6 +662,8 @@ private extension NovelStructuredModelTask {
             .discussionArchive(try NovelStructuredOutputDecoder.decodeDiscussionArchive(from: text))
         case .polishDrift:
             .polishDrift(try NovelStructuredOutputDecoder.decodePolishDrift(from: text))
+        case .continuityAudit:
+            .continuityAudit(try NovelStructuredOutputDecoder.decodeContinuityAudit(from: text))
         }
     }
 }
@@ -658,7 +678,7 @@ extension NovelStructuredModelTaskKind {
     var outputReservationTokens: Int {
         switch self {
         case .stateRebuild: 8_192
-        case .stateDelta, .discussionArchive, .polishDrift: 4_096
+        case .stateDelta, .discussionArchive, .polishDrift, .continuityAudit: 4_096
         }
     }
 
@@ -673,7 +693,7 @@ extension NovelStructuredModelTaskKind {
                 maxOutputTokens: nil,
                 reasoningLevel: .automatic
             )
-        case .polishDrift:
+        case .polishDrift, .continuityAudit:
             .init(
                 temperature: 0,
                 topP: 1,

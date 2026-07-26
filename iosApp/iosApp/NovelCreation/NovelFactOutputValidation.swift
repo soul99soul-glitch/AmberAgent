@@ -19,6 +19,21 @@ extension NovelFactTransactionReducer {
         let evidence: String
     }
 
+    /// 把一段正文预处理成可反复比对的证据源。调用方对同一段正文只需归一化一次,
+    /// 之后每条证据都拿这个结果去问 `isEvidenceAnchored`。
+    static func normalizedEvidenceSource(_ manuscript: String) -> String {
+        normalizeEvidenceWhitespace(manuscript)
+    }
+
+    /// 「这条证据是不是真出自这段正文」的对外入口。内部仍旧走 `evidenceMatches`
+    /// 这个唯一所有者(见其文档注释),不另开一套判据。
+    static func isEvidenceAnchored(
+        _ evidence: String,
+        inNormalizedSource source: String
+    ) -> Bool {
+        evidenceMatches(evidence, inNormalizedManuscript: source)
+    }
+
     static func validate(_ value: NovelStateDeltaV1) throws -> NovelStateDeltaV1 {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

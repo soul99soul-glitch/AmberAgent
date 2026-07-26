@@ -11,6 +11,7 @@ enum NovelPromptKind: String, Codable, CaseIterable, Sendable {
     case wholeChapterPolish
     case wholeChapterRegeneration
     case polishDriftV1
+    case continuityAuditV1
 }
 
 struct NovelPromptTemplate: Codable, Equatable, Sendable {
@@ -49,7 +50,7 @@ enum NovelPromptCatalog {
             versions.formUnion(["novel.prose-whole-chapter.v1", "novel.prose-whole-chapter.v2"])
         case .wholeChapterRegeneration:
             versions.insert("novel.whole-chapter-regeneration.v1")
-        case .discussionArchiveV1, .wholeChapterPolish, .polishDriftV1:
+        case .discussionArchiveV1, .wholeChapterPolish, .polishDriftV1, .continuityAuditV1:
             break
         }
         return versions
@@ -249,6 +250,26 @@ enum NovelPromptCatalog {
                 view, or ending changes. If evidence is ambiguous, fail closed by marking incompatible.
 
                 \(polishDriftJSONContract)
+                """
+            )
+
+        case .continuityAuditV1:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.continuity-audit.v1",
+                systemText: """
+                Audit the manuscript for internal story inconsistencies. Report only conflicts that the manuscript
+                itself proves; never speculate about material outside it and never rewrite the prose.
+                Look for: the same beat told twice as if new, facts that contradict each other, characters who
+                meet as strangers after they have already met, events out of chronological order, and conflicting
+                states such as who is alive, injured, or present in a scene.
+                Deliberate devices are not defects. A flashback, a dream, an unreliable narrator, a lie told by a
+                character, and a rumour later corrected are all consistent. Only report a conflict when the
+                manuscript presents both sides as true in its own voice. If you are unsure, omit the issue.
+
+                \(evidenceIntegrityConstraint)
+
+                \(continuityAuditJSONContract)
                 """
             )
         }
@@ -481,5 +502,29 @@ private extension NovelPromptCatalog {
         }
         If compatible is true, differences must be empty. If compatible is false, differences must contain at least
         one item. Difference IDs are unique, contain no whitespace, and are at most 128 characters.
+        """
+
+    static let continuityAuditJSONContract = """
+        Output contract: NovelContinuityAuditV1, schemaVersion 1.
+        Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
+        Every key shown below is required. Do not add unknown keys at any level.
+        Root shape:
+        {"schemaVersion":1,"consistent":true,"issues":[]}
+        issues item shape:
+        {
+          "id":"stable-id",
+          "category":"duplicatedPlot|contradiction|identityDrift|chronology|statusConflict|other",
+          "severity":"blocking|major|minor",
+          "summary":"non-empty string naming both sides of the conflict",
+          "references":[
+            {"chapterOrdinal":1,"chapterTitle":"non-empty string","evidence":"non-empty string"},
+            {"chapterOrdinal":3,"chapterTitle":"non-empty string","evidence":"non-empty string"}
+          ]
+        }
+        If consistent is true, issues must be empty. If consistent is false, issues must contain at least one item.
+        Issue IDs are unique, contain no whitespace, and are at most 128 characters.
+        Every issue must cite at least two references, because a contradiction always has two sides. Cite the
+        earliest passage first. chapterOrdinal is the number N from the "# Chapter N:" heading that precedes the
+        cited passage, counting from 1.
         """
 }

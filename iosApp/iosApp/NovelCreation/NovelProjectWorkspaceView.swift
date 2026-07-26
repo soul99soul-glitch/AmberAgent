@@ -282,6 +282,9 @@ struct NovelProjectWorkspaceView: View {
                 },
                 onAcceptProposal: { proposal in
                     activeSheet = .proposal(proposal)
+                },
+                onOpenChapter: { selection in
+                    chapterReaderRoute = NovelChapterReaderRoute(selection: selection)
                 }
             )
         }

@@ -155,6 +155,52 @@ struct NovelPolishDriftV1: Codable, Equatable, Sendable {
     let differences: [NovelPolishDifferenceV1]
 }
 
+enum NovelContinuityIssueCategoryV1: String, Codable, CaseIterable, Sendable {
+    /// 同一件事被写了两遍。
+    case duplicatedPlot
+    /// 前后事实互相矛盾。
+    case contradiction
+    /// 明明见过却写成初次见面（或反过来）。
+    case identityDrift
+    /// 时间线错乱。
+    case chronology
+    /// 生死、伤情、所在位置这类状态冲突。
+    case statusConflict
+    case other
+}
+
+enum NovelContinuityIssueSeverityV1: String, Codable, CaseIterable, Sendable {
+    case blocking
+    case major
+    case minor
+}
+
+/// 一条问题在正文里的落点。`chapterOrdinal` 是注入正文里 `# Chapter N` 的 N（从 1 起），
+/// 由执行入口映射回 `NovelChapterID` —— 模型不知道也不该知道内部 ID。
+struct NovelContinuityReferenceV1: Codable, Equatable, Sendable {
+    let chapterOrdinal: Int
+    let chapterTitle: String
+    let evidence: String
+}
+
+struct NovelContinuityIssueV1: Codable, Equatable, Sendable {
+    let id: String
+    let category: NovelContinuityIssueCategoryV1
+    let severity: NovelContinuityIssueSeverityV1
+    let summary: String
+    /// 至少两条 —— 矛盾天然是成对的，只给一处就无从对照。
+    let references: [NovelContinuityReferenceV1]
+}
+
+struct NovelContinuityAuditV1: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+    static let minimumReferenceCount = 2
+
+    let schemaVersion: Int
+    let consistent: Bool
+    let issues: [NovelContinuityIssueV1]
+}
+
 struct NovelDiscussionArchiveDecisionV1: Codable, Equatable, Sendable {
     let topic: String
     let decision: String
@@ -255,6 +301,21 @@ enum NovelStructuredOutputDecoder {
         let root = try StrictJSON.rootObject(from: data)
         try StrictJSON.validatePolishDrift(root.object)
         let value: NovelPolishDriftV1 = try decode(NovelPolishDriftV1.self, from: root.data)
+        try NovelStructuredOutputValidation.validate(value)
+        return value
+    }
+
+    static func decodeContinuityAudit(from text: String) throws -> NovelContinuityAuditV1 {
+        try decodeContinuityAudit(from: Data(text.utf8))
+    }
+
+    static func decodeContinuityAudit(from data: Data) throws -> NovelContinuityAuditV1 {
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validateContinuityAudit(root.object)
+        let value: NovelContinuityAuditV1 = try decode(
+            NovelContinuityAuditV1.self,
+            from: root.data
+        )
         try NovelStructuredOutputValidation.validate(value)
         return value
     }
@@ -436,6 +497,52 @@ private enum NovelStructuredOutputValidation {
                 .invalidValue,
                 path: "$.differences",
                 message: "An incompatible polish result must describe at least one difference."
+            )
+        }
+    }
+
+    static func validate(_ value: NovelContinuityAuditV1) throws {
+        try schemaVersion(
+            value.schemaVersion,
+            expected: NovelContinuityAuditV1.currentSchemaVersion
+        )
+        var identifiers: Set<String> = []
+        for (index, issue) in value.issues.enumerated() {
+            let base = "$.issues[\(index)]"
+            try identifier(issue.id, path: base + ".id", identifiers: &identifiers)
+            try required(issue.summary, path: base + ".summary")
+            guard issue.references.count >= NovelContinuityAuditV1.minimumReferenceCount else {
+                throw failure(
+                    .invalidValue,
+                    path: base + ".references",
+                    message: "A continuity issue must cite at least \(NovelContinuityAuditV1.minimumReferenceCount) passages."
+                )
+            }
+            for (referenceIndex, reference) in issue.references.enumerated() {
+                let referencePath = base + ".references[\(referenceIndex)]"
+                guard reference.chapterOrdinal >= 1 else {
+                    throw failure(
+                        .invalidValue,
+                        path: referencePath + ".chapterOrdinal",
+                        message: "Chapter ordinals start at 1."
+                    )
+                }
+                try required(reference.chapterTitle, path: referencePath + ".chapterTitle")
+                try required(reference.evidence, path: referencePath + ".evidence")
+            }
+        }
+        if value.consistent && !value.issues.isEmpty {
+            throw failure(
+                .invalidValue,
+                path: "$.issues",
+                message: "A consistent audit cannot report issues."
+            )
+        }
+        if !value.consistent && value.issues.isEmpty {
+            throw failure(
+                .invalidValue,
+                path: "$.issues",
+                message: "An inconsistent audit must describe at least one issue."
             )
         }
     }
@@ -852,6 +959,42 @@ private enum StrictJSON {
         }
     }
 
+    static func validateContinuityAudit(_ object: Object) throws {
+        try keys(object, path: "$", required: ["schemaVersion", "consistent", "issues"])
+        try schemaVersion(
+            object["schemaVersion"],
+            expected: NovelContinuityAuditV1.currentSchemaVersion
+        )
+        try boolean(object["consistent"], path: "$.consistent")
+        try objectArray(
+            object["issues"],
+            path: "$.issues",
+            requiredKeys: ["id", "category", "severity", "summary", "references"]
+        ) { item, path in
+            try string(item["id"], path: path + ".id")
+            try enumString(
+                item["category"],
+                path: path + ".category",
+                allowed: Set(NovelContinuityIssueCategoryV1.allCases.map(\.rawValue))
+            )
+            try enumString(
+                item["severity"],
+                path: path + ".severity",
+                allowed: Set(NovelContinuityIssueSeverityV1.allCases.map(\.rawValue))
+            )
+            try string(item["summary"], path: path + ".summary")
+            try objectArray(
+                item["references"],
+                path: path + ".references",
+                requiredKeys: ["chapterOrdinal", "chapterTitle", "evidence"]
+            ) { reference, referencePath in
+                try integer(reference["chapterOrdinal"], path: referencePath + ".chapterOrdinal")
+                try string(reference["chapterTitle"], path: referencePath + ".chapterTitle")
+                try string(reference["evidence"], path: referencePath + ".evidence")
+            }
+        }
+    }
+
     static func validateDiscussionArchive(_ object: Object) throws {
         try keys(object, path: "$", required: ["schemaVersion", "decisions", "summary"])
         try schemaVersion(
@@ -999,6 +1142,15 @@ private enum StrictJSON {
     private static func nullableString(_ value: Any?, path: String) throws {
         guard value is NSNull || value is String else {
             throw typeFailure(path: path, expected: "a string or null")
+        }
+    }
+
+    private static func integer(_ value: Any?, path: String) throws {
+        guard let number = value as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue.isFinite,
+              number.doubleValue.rounded() == number.doubleValue else {
+            throw typeFailure(path: path, expected: "an integer")
         }
     }
 
