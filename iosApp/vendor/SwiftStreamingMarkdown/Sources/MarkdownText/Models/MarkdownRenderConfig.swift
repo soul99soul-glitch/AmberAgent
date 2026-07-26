@@ -58,6 +58,12 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
   /// a space per CommonMark — or to nothing between CJK characters — instead
   /// of rendering as hard line breaks. Defaults to `false` (hard line breaks).
   public let collapsesSoftBreaks: Bool
+  /// Vendored addition (AmberAgent). When `true`, runs of adjacent
+  /// attachment-free paragraphs are merged into a single `.coalescedText`
+  /// renderable backed by one text view instead of one view per paragraph.
+  /// Defaults to `false`, which keeps upstream's one-view-per-block behavior.
+  /// See `RenderableDocument+Coalescing.swift`.
+  public let coalescesAdjacentTextBlocks: Bool
 
   /// Font and color style for a uniformly-styled run of markdown text.
   public struct MarkdownTextStyle: Hashable, Sendable {
@@ -292,7 +298,8 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
     headingLineSpacing: CGFloat? = nil,
     tableMaxColumnWidth: CGFloat = MarkdownRenderConfig.defaultTableMaxColumnWidth,
     unorderedListBulletWidth: CGFloat = MarkdownRenderConfig.defaultUnorderedListBulletWidth,
-    collapsesSoftBreaks: Bool = false
+    collapsesSoftBreaks: Bool = false,
+    coalescesAdjacentTextBlocks: Bool = false
   ) {
     self.shouldAnimateText = shouldAnimateText
     self.blockQuoteStyle = blockQuoteStyle
@@ -312,6 +319,7 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
     self.tableMaxColumnWidth = tableMaxColumnWidth
     self.unorderedListBulletWidth = unorderedListBulletWidth
     self.collapsesSoftBreaks = collapsesSoftBreaks
+    self.coalescesAdjacentTextBlocks = coalescesAdjacentTextBlocks
   }
 
   /// The default render config, equivalent to calling `init()` with no

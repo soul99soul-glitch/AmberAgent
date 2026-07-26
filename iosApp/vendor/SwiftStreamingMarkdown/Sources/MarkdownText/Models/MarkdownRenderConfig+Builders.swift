@@ -26,7 +26,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -50,7 +51,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -74,7 +76,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -98,7 +101,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -122,7 +126,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -146,7 +151,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -170,7 +176,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -195,7 +202,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -219,7 +227,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -243,7 +252,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -267,7 +277,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -291,7 +302,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -315,7 +327,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -339,7 +352,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: value,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -363,7 +377,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: value
+      collapsesSoftBreaks: value,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -387,7 +402,8 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: value,
       unorderedListBulletWidth: unorderedListBulletWidth,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
     )
   }
 
@@ -411,7 +427,34 @@ extension MarkdownRenderConfig {
       headingLineSpacing: headingLineSpacing,
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: value,
-      collapsesSoftBreaks: collapsesSoftBreaks
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+    )
+  }
+
+  /// Vendored addition (AmberAgent): returns a copy with
+  /// `coalescesAdjacentTextBlocks` replaced.
+  public func withCoalescesAdjacentTextBlocks(value: Bool) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: value
     )
   }
 }

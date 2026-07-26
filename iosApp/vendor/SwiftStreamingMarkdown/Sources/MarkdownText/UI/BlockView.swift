@@ -70,6 +70,26 @@ struct SingleBlockView: View {
             .onAppear { hasMountedText = true }
           Spacer()
         }
+      case .coalescedText(_, let contents):
+        // Vendored addition (AmberAgent): line spacing and block spacing are
+        // already baked into `contents`' paragraph styles, so `lineSpacing` must
+        // stay nil — passing a value here would make `setParagraphContents`
+        // overwrite the merged styles on the appended suffix and flatten the
+        // paragraph gaps. See RenderableDocument+Coalescing.swift.
+        let usesTextKit1 = shouldUseTextKit1(for: contents)
+        HStack(spacing: 0) {
+          ParagraphView(
+            contents: contents,
+            lineSpacing: nil,
+            usesTextKit1: usesTextKit1,
+            suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
+          )
+            .id(usesTextKit1)
+            .fixedSize(horizontal: false, vertical: true)
+            .transition(.opacity)
+            .onAppear { hasMountedText = true }
+          Spacer()
+        }
       case .latex(_, let latexString):
         ScrollView(.horizontal) {
           HStack(spacing: 0) {

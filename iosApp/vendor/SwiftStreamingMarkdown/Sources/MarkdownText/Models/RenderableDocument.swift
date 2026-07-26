@@ -30,7 +30,10 @@ public struct RenderableDocument: Equatable, Sendable {
   ///   - document: The parsed markdown tree.
   ///   - config: Styling and behavior used during conversion.
   public init(document: Document, config: MarkdownRenderConfig) async {
-    self.renderables = document.convert(with: config)
+    let converted = RenderableDocument(renderables: document.convert(with: config))
+    self = config.coalescesAdjacentTextBlocks
+      ? converted.coalescingAdjacentTextBlocks(config: config)
+      : converted
   }
 
   /// Construct a renderable wrapping a single plain-text paragraph styled
@@ -100,14 +103,29 @@ public struct RenderableDocument: Equatable, Sendable {
         // not an identity change. This only affects the
         // `splittingParagraphsOnBlankLines` path (opt-in, AmberAgent's only
         // caller); the default single-paragraph behavior below is unchanged.
-        self.init(renderables: chunks.enumerated().map { index, chunk in
-          .paragraph(id: "\(index)", content: NSMutableAttributedString(string: chunk, attributes: attributes))
-        })
+        self = Self.finalizing(
+          chunks.enumerated().map { index, chunk in
+            .paragraph(id: "\(index)", content: NSMutableAttributedString(string: chunk, attributes: attributes))
+          },
+          config: config
+        )
         return
       }
     }
     let content = NSMutableAttributedString(string: plainText, attributes: attributes)
-    self.init(renderables: [.paragraph(id: id, content: content)])
+    self = Self.finalizing([.paragraph(id: id, content: content)], config: config)
+  }
+
+  /// Vendored addition (AmberAgent): placeholder documents must go through the
+  /// same coalescing as parsed ones, or the placeholder→parsed handoff would flip
+  /// `.paragraph` to `.coalescedText` and re-fade already-displayed text.
+  private static func finalizing(
+    _ renderables: [MarkdownRenderable],
+    config: MarkdownRenderConfig
+  ) -> RenderableDocument {
+    let document = RenderableDocument(renderables: renderables)
+    guard config.coalescesAdjacentTextBlocks else { return document }
+    return document.coalescingAdjacentTextBlocks(config: config)
   }
 
   init(renderables: [MarkdownRenderable]) {
@@ -150,6 +168,8 @@ extension MarkdownRenderable {
   func extractAttributedStrings() -> [NSAttributedString] {
     switch self {
     case .paragraph(_, let str):
+      return [str]
+    case .coalescedText(_, let str):
       return [str]
     case .orderedList(_, let items):
       return items.flatMap { $0.attributedStrings() }

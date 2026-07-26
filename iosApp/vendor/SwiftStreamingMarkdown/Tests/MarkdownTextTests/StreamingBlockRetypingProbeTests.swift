@@ -63,6 +63,7 @@ final class StreamingBlockRetypingProbeTests: XCTestCase {
   private static func caseName(of renderable: MarkdownRenderable) -> String {
     switch renderable {
     case .paragraph: return "paragraph"
+    case .coalescedText: return "coalescedText"
     case .latex: return "latex"
     case .heading: return "heading"
     case .orderedList: return "orderedList"

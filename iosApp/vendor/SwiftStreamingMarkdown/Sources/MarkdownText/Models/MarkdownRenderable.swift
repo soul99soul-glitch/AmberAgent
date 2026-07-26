@@ -14,6 +14,17 @@ indirect enum MarkdownRenderable: Identifiable, Equatable, @unchecked Sendable {
   /// To be rendered as a paragraph
   case paragraph(id: String, content: NSMutableAttributedString)
 
+  /// Vendored addition (AmberAgent): a run of adjacent attachment-free paragraphs
+  /// pre-merged into a single attributed string, rendered by one `ParagraphView`
+  /// instead of one per paragraph. Block spacing lives in each paragraph's
+  /// `paragraphSpacingBefore` and line spacing is baked into the same
+  /// `NSParagraphStyle`, so the view is passed `lineSpacing: nil` and the
+  /// append-only fast path in `ParagraphUIView.setParagraphContents` stays live
+  /// across paragraph boundaries. Produced only when
+  /// `MarkdownRenderConfig.coalescesAdjacentTextBlocks` is on; see
+  /// `RenderableDocument+Coalescing.swift`.
+  case coalescedText(id: String, content: NSMutableAttributedString)
+
   /// To be rendered as LaTeX (Math formatting)
   case latex(id: String, content: String)
 
@@ -41,6 +52,7 @@ indirect enum MarkdownRenderable: Identifiable, Equatable, @unchecked Sendable {
   var id: String {
     switch self {
     case .paragraph(let id, _): return id
+    case .coalescedText(let id, _): return id
     case .latex(let id, _): return id
     case .heading(let id, _, _): return id
     case .orderedList(let id, _): return id
