@@ -1329,6 +1329,10 @@ final class CouncilChatViewModel {
     @ObservationIgnored private let transcriptDefaults: UserDefaults
     @ObservationIgnored private let archiveStore: CouncilRoomArchiveStore
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
+    /// 同一时刻只有一场议会，租约 id 固定即可。
+    private static let keepAliveLeaseId = "council"
+    /// 后台期间等讨论跑完、跑完就还执行权的那个任务。
+    @ObservationIgnored private var keepAliveReleaseTask: Task<Void, Never>?
     @ObservationIgnored private var activeDiscussionID: UUID?
     @ObservationIgnored private var isRuntimeAttached = false
     @ObservationIgnored private var isApplicationActive = true
@@ -1408,13 +1412,47 @@ final class CouncilChatViewModel {
         isApplicationActive = false
         skipAskUser()
         persistTranscript()
-        // 切后台是终止路径:取消节流任务并同步落盘,同步写会使在途延迟写失效。
+        // 落盘是终止路径:取消节流任务并同步落盘,同步写会使在途延迟写失效。
+        // 但讨论本身不再终止——下面拿后台执行权让它自己跑完。
         cancelScheduledArchive()
         archiveCurrentRoom()
+        beginBackgroundKeepAliveIfRunning()
     }
 
     func runtimeDidBecomeActive() {
         isApplicationActive = true
+        // 回到前台就不需要后台执行权了；讨论没跑完也不影响，前台本来就能跑。
+        endBackgroundKeepAlive()
+    }
+
+    /// 讨论还在跑就拿后台执行权，跑完自动还回去。
+    /// 议会没有「后台重跑」那一路，执行权被系统收走时只能做一次检查点。
+    private func beginBackgroundKeepAliveIfRunning() {
+        guard isRunning, let discussionTask else { return }
+        keepAliveReleaseTask?.cancel()
+        BackgroundGenerationKeepAlive.shared.begin(
+            Self.keepAliveLeaseId,
+            title: "Amber 议会讨论中",
+            subtitle: currentObjective.isEmpty ? "模型议会" : currentObjective,
+            onExpire: { [weak self] in
+                self?.persistTranscript()
+                self?.archiveCurrentRoom()
+            }
+        )
+        keepAliveReleaseTask = Task { @MainActor [weak self] in
+            await discussionTask.value
+            // `Task<_, Never>.value` 不理会「等待方被取消」，所以上一轮遗留的
+            // 这个任务照样会醒过来。醒来时租约可能已经属于新一轮讨论了——
+            // 没这道 guard，旧任务会把新一轮的执行权还掉，新讨论在后台静默断流。
+            guard !Task.isCancelled else { return }
+            self?.endBackgroundKeepAlive()
+        }
+    }
+
+    private func endBackgroundKeepAlive() {
+        keepAliveReleaseTask?.cancel()
+        keepAliveReleaseTask = nil
+        BackgroundGenerationKeepAlive.shared.end(Self.keepAliveLeaseId)
     }
 
     var canSend: Bool {
