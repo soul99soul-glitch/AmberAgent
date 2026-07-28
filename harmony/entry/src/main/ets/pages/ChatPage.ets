@@ -10,6 +10,7 @@ import {
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
   nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt, deleteMessage, editMessage,
+  forkConversation,
   runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
 } from '@amber/chat-domain';
 import {
@@ -69,6 +70,7 @@ struct MessageRow {
   onRegenerate: () => void = (): void => {};
   onDelete: () => void = (): void => {};
   onEdit: () => void = (): void => {};
+  onFork: () => void = (): void => {};
 
   build() {
     Column() {
@@ -115,6 +117,9 @@ struct MessageRow {
                 if (this.selectIndex < this.branchCount - 1) this.onSwitch(this.selectIndex + 1);
               })
           }
+          Text('分叉').fontSize(11).fontColor(INK3)
+            .margin({ right: 12 })
+            .onClick((): void => this.onFork())
           if (this.message.role === 'user') {
             Text('编辑').fontSize(11).fontColor(INK3)
               .margin({ right: 12 })
@@ -313,6 +318,17 @@ struct ChatPage {
       });
   }
 
+  // 会话分叉(D-033):复制 0..目标节点为新会话并跳转
+  private forkAt(row: MsgRow): void {
+    if (this.conversation === null || this.sending) return;
+    const fork: Conversation = forkConversation(this.conversation, row.message.id);
+    getChatRepository().save(fork).then((): void => {
+      const params: Record<string, string> = {};
+      params['conversationId'] = fork.id;
+      router.pushUrl({ url: 'pages/ChatPage', params: params });
+    });
+  }
+
   // 编辑消息(D-031):填入输入框进入编辑态;发送时走「编辑并重发」
   private startEditMessage(row: MsgRow): void {
     if (this.conversation === null || this.sending) return;
@@ -455,6 +471,7 @@ struct ChatPage {
               onRegenerate: (): void => this.regenerate(row.nodeId),
               onDelete: (): void => this.confirmDeleteMessage(row),
               onEdit: (): void => this.startEditMessage(row),
+              onFork: (): void => this.forkAt(row),
             })
           }
         }, (row: MsgRow): string => row.nodeId)

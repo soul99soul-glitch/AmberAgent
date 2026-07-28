@@ -318,3 +318,12 @@
   - rememberedReasoningLevelsByModelId(30 字段之一,模型已移植)Android 端未见写入点(grep 无引用)→ 不实现写路径,字段保留线格式兼容。
   - 聊页内快捷切换(Android 无此入口,助手级而已)→ 不做,避免超 Android 语义。
 - **可逆性**:纯 UI 增项;默认 auto 行为不变。
+
+## D-033（L0，2026-07-28）会话 fork：forkConversationAtMessage 等价 + 文件复制/compact 复制裁剪
+
+- **背景**：Android 消息菜单 fork(ChatService.kt:2088-2127)是分支探索核心;鸿蒙分支切换/regenerate 已备,fork 成自然下一步。
+- **决定**：
+  - **chat-domain fork.ts(TDD 3 测试,忠实)**:复制 0..targetIndex(含)节点;**node id 全部换新、message id 保留**(Android 同);新会话 id 新、assistantId 相同、**title 默认空**(Android Conversation() 默认参数,自动命名下轮补);未命中抛错(NoSuchElement 语义)。
+  - **裁剪**:copyWithForkedFileUrl(file: 协议文件复制)= P1(鸿蒙多模态输入未落地,无文件类 part 来源,恒等处理);copyValidCompacts(ContextEngine = P1)。
+  - **UI**:所有消息行加「分叉」→ 保存新会话 → 跳转新 ChatPage 实例(conversationId 参数)。
+- **可逆性**:fork 产生独立新会话,原会话零影响。
