@@ -280,3 +280,12 @@
   - **入口**:ChatAssistantsPage 行内「对话」→ 带 assistantId 直开新会话。
   - 会话列表按助手分组/过滤 = P1(Android 有助手维度隔离视图)。
 - **可逆性**:resolveChatRuntime 参数可选,旧调用零影响。
+
+## D-029（L0，2026-07-28）消息删除：节点级语义忠实 + 长按确认 + 生成中屏蔽
+
+- **背景**：ChatService.buildConversationAfterMessageDelete(ChatService.kt:2182-2208) 是消息管理核心;鸿蒙此前无消息删除。
+- **决定**：
+  - **chat-domain delete_message.ts(TDD 5 测试,逐分支忠实)**:目标 message 从 node 移除;node 空 → 整节点移除;否则 selectIndex 夹到 lastIndex;failIfMissing 默认 true → 抛错(对齐 NoSuchElementException),false → 原样返回(UI 路径用 false,对齐 Android deleteMessage(message) 重载)。invalidateCompacts 无对应物(ContextEngine = P1,PARITY_DEBT 已记)。
+  - **UI**:MessageRow 长按 → AlertDialog 确认(明示不可恢复)→ 删除当前分支消息 + 持久化;**sending 中不提供入口**(对齐 ChatVM 生成中禁删语义)。
+  - 删除是用户主动发起且经确认,L0 用户数据操作。
+- **可逆性**:纯新增;节点模型不变。

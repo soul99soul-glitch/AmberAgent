@@ -68,6 +68,7 @@ export type {
 } from './chat/chat_turn.ts';
 export { createMemoryConversationStore, runChatTurn } from './chat/chat_turn.ts';
 export { selectMessageBranch, runRegenerateAt } from './chat/regenerate.ts';
+export { deleteMessage } from './chat/delete_message.ts';
 export { DEFAULT_TITLE_PROMPT, buildTitlePrompt, runAutoTitle } from './chat/auto_title.ts';
 export { DEFAULT_SUGGESTION_PROMPT, buildSuggestionPrompt, runSuggestion } from './chat/suggestion.ts';
 export type { SuggestionDeps } from './chat/suggestion.ts';

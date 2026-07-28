@@ -9,7 +9,7 @@ import {
   currentMessages, makeConversation, newId, runChatTurn,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
-  nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt,
+  nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt, deleteMessage,
   runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
 } from '@amber/chat-domain';
 import {
@@ -67,6 +67,7 @@ struct MessageRow {
   @Prop isLastAssistant: boolean = false;
   onSwitch: (idx: number) => void = (_idx: number): void => {};
   onRegenerate: () => void = (): void => {};
+  onDelete: () => void = (): void => {};
 
   build() {
     Column() {
@@ -123,6 +124,10 @@ struct MessageRow {
     .width('100%')
     .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
     .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+    .gesture(
+      LongPressGesture()
+        .onAction((): void => this.onDelete())
+    )
   }
 }
 
@@ -299,6 +304,31 @@ struct ChatPage {
       });
   }
 
+  // 删除消息(D-029):长按 → 确认弹窗;生成中不提供入口(Android 同语义:
+  // ChatVM.showDeleteBlockedWhileGeneratingError)
+  private confirmDeleteMessage(row: MsgRow): void {
+    if (this.conversation === null || this.sending) return;
+    AlertDialog.show({
+      title: '删除消息',
+      message: '该消息将被删除,且不可恢复。',
+      primaryButton: {
+        value: '取消',
+        action: (): void => {},
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: '#B43A3A',
+        action: (): void => {
+          if (this.conversation === null) return;
+          const updated: Conversation = deleteMessage(this.conversation, row.message.id, false);
+          this.conversation = updated;
+          this.rows = buildRows(updated);
+          getChatRepository().save(updated);
+        },
+      },
+    });
+  }
+
   private send(): void {
     const text: string = this.inputText.trim();
     if (text.length === 0 || this.sending || this.conversation === null) return;
@@ -380,6 +410,7 @@ struct ChatPage {
               isLastAssistant: row.isLastAssistant,
               onSwitch: (idx: number): void => this.switchBranch(row.nodeId, idx),
               onRegenerate: (): void => this.regenerate(row.nodeId),
+              onDelete: (): void => this.confirmDeleteMessage(row),
             })
           }
         }, (row: MsgRow): string => row.nodeId)
