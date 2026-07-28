@@ -7,7 +7,7 @@
 meta:
   updated: 2026-07-28
   branch: harmony-preview
-  head: 7a19ee06b
+  head: 015d5dc1d
 
 phase:
   current: "Phase 0 → Phase 1 过渡"
@@ -29,7 +29,7 @@ build_and_test:
   单元测试: "cd harmony/deepread && npm test; cd harmony/chat && npm test  # node+tsx,无需设备"
   类型检查: "cd harmony/deepread 类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)"类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)" npx tsc --noEmit; cd harmony/chat 类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)"类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)" npx tsc --noEmit  # 双 HAR(D-010/D-014)"
   构建: "cd harmony && hvigorw assembleHar --mode module -p product=default && hvigorw assembleHap --mode module -p product=default  # 双绿门(D-014)"
-  最近验证: "2026-07-28 deepread 603 + chat 344 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL"
+  最近验证: "2026-07-28 deepread 603 + chat 364 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL"
   fixture校验: "node scripts/harmony-inventory/validate-harmony-fixtures.mjs"
   契约校验: "node scripts/harmony-inventory/check-source-contracts.mjs"
 
@@ -37,7 +37,7 @@ codebase:
   harmony工程:
     entry: "HAP — UIAbility + 12 页面(+Assistants,D-019/D-020/D-023/D-027) + platform_impl 真实 adapter + ChatKvStore/ChatRdbRepository(D-021)"
     deepread: "HAR — 纯 ArkTS 领域层,零 SDK 依赖: agent/council/novel/domain/platform/research"
-    chat: "HAR(@amber/chat-domain)— 模型/accumulator/OpenAI provider(fixture 8/8)/transformer+chat_turn(D-012)/持久化(D-013)/请求侧纯逻辑(D-014)/API 组装层(D-015)/Assistant 全量模型+wire(D-016)/ProviderSetting 持久化 3 变体+Model 全量(D-017)/regenerate+分支切换(D-024)/自动命名(D-025)/会话建议(D-026)/消息删除(D-029)/user 节点 regenerate(D-030)/消息编辑(D-031)/会话 fork(D-033)/手动改名(D-034)/停止生成(D-035/D-036 全路径)/多模态图片输入(D-038)/助手参数组闭环(D-039)/answer=false 发送路径(D-051)/队列持久化(D-052)/非流式输出(D-040)/regenerate 流式预览(D-041)/建议长按直发(D-042)/Claude+Google 请求构建(D-044/D-045);设备端 adapter 待 G-C"
+    chat: "HAR(@amber/chat-domain)— 模型/accumulator/OpenAI provider(fixture 8/8)/transformer+chat_turn(D-012)/持久化(D-013)/请求侧纯逻辑(D-014)/API 组装层(D-015)/Assistant 全量模型+wire(D-016)/ProviderSetting 持久化 3 变体+Model 全量(D-017)/regenerate+分支切换(D-024)/自动命名(D-025)/会话建议(D-026)/消息删除(D-029)/user 节点 regenerate(D-030)/消息编辑(D-031)/会话 fork(D-033)/手动改名(D-034)/停止生成(D-035/D-036 全路径)/多模态图片输入(D-038)/助手参数组闭环(D-039)/answer=false 发送路径(D-051)/队列持久化(D-052)/reasoning 卡片(D-053)/非流式输出(D-040)/regenerate 流式预览(D-041)/建议长按直发(D-042)/Claude+Google 请求构建(D-044/D-045);设备端 adapter 待 G-C"
     复用说明: "platform 层 Port(HttpClient/Storage/Database/FileStore/Notifier)即 Chat MVP 所需同一批接口"
   android源码: "只读基准,禁止修改"
 
@@ -61,6 +61,6 @@ next_slices:                      # 按优先级,取最高未阻塞项
     内容: "DECISION_PACKET_001 人工确认(9 项决策)"
 
 parity_baseline:
-  单元测试总数: 947               # deepread 603 + chat 344
+  单元测试总数: 967               # deepread 603 + chat 364
   已知行为偏差: 9                # 详见 PARITY_DEBT.md PD-001..008(+1 条 Android 内部不一致待核实)
-  决策记录: "DECISION_LOG.md D-001..D-052"
+  决策记录: "DECISION_LOG.md D-001..D-053"
