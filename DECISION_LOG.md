@@ -308,3 +308,13 @@
   - **UI 组合偏差(显式选择)**:Android 两步(编辑→再点 regenerate);鸿蒙「编辑并重发」一步 = editMessage + 持久化 + runRegenerateAt(user 节点截断续跑,D-030 路径)。用户意图等价且少一次往返;旧分支完整保留,行为可回退到两步(直接点「重新生成」不编辑)。
   - **编辑态 UI**:user 行「编辑」→ 内容填入输入框(placeholder 提示重发),「取消编辑」退出;发送键复用。
 - **可逆性**:domain 纯新增;UI 编辑态不改变 send 主路径。
+
+## D-032（L0，2026-07-28）推理力度编辑：assistant.reasoningLevel 7 档 chips(助手级,忠实 Android 归属)
+
+- **背景**：reasoningLevel 7 档表与 per-host 请求矩阵早已移植(D-014/D-018),resolveSessionDefaults 已消费 assistant.reasoningLevel;缺编辑入口。
+- **决定**：
+  - **归属忠实**:Android ReasoningButton 在助手设置页写 `assistant.reasoningLevel`(AssistantBasicPage.kt:477-482)——鸿蒙同:ChatAssistantsPage 编辑器加 7 档 chips(自动/关闭/低/中/高/超高/最大,序与 ReasoningLevel.entries 一致),经 patchAssistant 持久化到 assistants blob。
+  - **生效链**:resolveChatRuntime → resolveSessionDefaults(assistant) → params.reasoningLevel → buildChatCompletionRequest per-host 矩阵(已被 chat 测试锁定),无需新接线。
+  - rememberedReasoningLevelsByModelId(30 字段之一,模型已移植)Android 端未见写入点(grep 无引用)→ 不实现写路径,字段保留线格式兼容。
+  - 聊页内快捷切换(Android 无此入口,助手级而已)→ 不做,避免超 Android 语义。
+- **可逆性**:纯 UI 增项;默认 auto 行为不变。

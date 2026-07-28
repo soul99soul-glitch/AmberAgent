@@ -2,9 +2,13 @@
 // 编辑面:name/systemPrompt/temperature/contextMessageSize;其余 26 字段保留原值
 // (替换 by id 回写整个 blob,与 Provider 设置页同构)。全量编辑器 = P1。
 import { router } from '@kit.ArkUI';
-import type { Assistant } from '@amber/chat-domain';
+import type { Assistant, ReasoningLevel } from '@amber/chat-domain';
 import { loadAssistants, saveAssistants, makeAssistant, patchAssistant } from '@amber/chat-domain';
 import { getChatKvStore, getChatAssistants } from '../di/AppContainer.ets';
+
+// 推理力度 7 档(provider_model.ts REASONING_LEVEL_TABLE,与 Android ReasoningLevel.entries 同序)
+const REASONING_LEVELS: ReasoningLevel[] = ['auto', 'off', 'low', 'medium', 'high', 'xhigh', 'max'];
+const REASONING_LABELS: string[] = ['自动', '关闭', '低', '中', '高', '超高', '最大'];
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -25,6 +29,7 @@ struct ChatAssistantsPage {
   @State editSystemPrompt: string = '';
   @State editTemperature: string = '';
   @State editContextSize: string = '';
+  @State editReasoning: ReasoningLevel = 'auto';
   @State showEditor: boolean = false;
 
   aboutToAppear(): void {
@@ -44,6 +49,7 @@ struct ChatAssistantsPage {
     this.editSystemPrompt = a.systemPrompt;
     this.editTemperature = a.temperature !== null ? String(a.temperature) : '';
     this.editContextSize = a.contextMessageSize > 0 ? String(a.contextMessageSize) : '';
+    this.editReasoning = a.reasoningLevel;
     this.showEditor = true;
   }
 
@@ -53,6 +59,7 @@ struct ChatAssistantsPage {
     this.editSystemPrompt = '';
     this.editTemperature = '';
     this.editContextSize = '';
+    this.editReasoning = 'auto';
     this.showEditor = true;
   }
 
@@ -87,6 +94,7 @@ struct ChatAssistantsPage {
             systemPrompt: this.editSystemPrompt,
             temperature: this.parseFloatOrNull(this.editTemperature),
             contextMessageSize: this.parseIntOrZero(this.editContextSize),
+            reasoningLevel: this.editReasoning,
           });
         });
       } else {
@@ -95,6 +103,7 @@ struct ChatAssistantsPage {
           systemPrompt: this.editSystemPrompt,
           temperature: this.parseFloatOrNull(this.editTemperature),
           contextMessageSize: this.parseIntOrZero(this.editContextSize),
+          reasoningLevel: this.editReasoning,
         })];
       }
       saveAssistants(getChatKvStore(), next).then((): void => {
@@ -172,8 +181,24 @@ struct ChatAssistantsPage {
             .onChange((v: string): void => { this.editTemperature = v; })
           TextInput({ text: this.editContextSize, placeholder: '上下文消息数(可空,如 20)' })
             .fontSize(14).height(40).backgroundColor(SURFACE)
-            .margin({ bottom: 16 })
+            .margin({ bottom: 8 })
             .onChange((v: string): void => { this.editContextSize = v; })
+          // 推理力度 7 档选择(D-032)
+          Text('推理力度')
+            .fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 6 })
+          Flex({ wrap: FlexWrap.Wrap }) {
+            ForEach(REASONING_LEVELS, (level: ReasoningLevel, i: number): void => {
+              Text(REASONING_LABELS[i])
+                .fontSize(13)
+                .fontColor(this.editReasoning === level ? Color.White : INK2)
+                .backgroundColor(this.editReasoning === level ? ACCENT : SURFACE)
+                .borderRadius(12)
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .margin({ right: 8, bottom: 8 })
+                .onClick((): void => { this.editReasoning = level; })
+            }, (level: ReasoningLevel): string => level)
+          }
+          .width('100%').margin({ bottom: 8 })
           Row() {
             Text('取消')
               .fontSize(14).fontColor(INK3)
