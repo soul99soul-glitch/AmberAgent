@@ -299,3 +299,12 @@
   - **regenerateAssistantMsg=false 分支**(仅保存不生成)= 冷门路径,裁 P1(UI 无入口)。
   - **UI**:user 消息行也显示「重新生成」(任意 user 消息可截断重跑,语义良定义);D-024 P1 裁剪项清零。
 - **可逆性**:两路径共享流式骨架;assistant 路径行为经既有 8 测试锁定无回归。
+
+## D-031（L0，2026-07-28）消息编辑：分支追加语义忠实 + UI 组合「编辑并重发」一步化
+
+- **背景**：ChatService.editMessage(ChatService.kt:2054-2086);Android 为编辑(新分支)+ 用户再触发 regenerate 两步。
+- **决定**：
+  - **chat-domain edit_message.ts(TDD 5 测试,逐分支忠实)**:空/全空白 parts → 原样返回(isEmptyInputMessage 等价);目标 node 追加新消息(role=node.role,新 id)为新分支,selectIndex 指向新分支,旧分支保留;未知 messageId → 原样返回(edited=false,不抛错)。
+  - **UI 组合偏差(显式选择)**:Android 两步(编辑→再点 regenerate);鸿蒙「编辑并重发」一步 = editMessage + 持久化 + runRegenerateAt(user 节点截断续跑,D-030 路径)。用户意图等价且少一次往返;旧分支完整保留,行为可回退到两步(直接点「重新生成」不编辑)。
+  - **编辑态 UI**:user 行「编辑」→ 内容填入输入框(placeholder 提示重发),「取消编辑」退出;发送键复用。
+- **可逆性**:domain 纯新增;UI 编辑态不改变 send 主路径。

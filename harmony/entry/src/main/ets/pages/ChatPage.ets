@@ -9,7 +9,7 @@ import {
   currentMessages, makeConversation, newId, runChatTurn,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
-  nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt, deleteMessage,
+  nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt, deleteMessage, editMessage,
   runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
 } from '@amber/chat-domain';
 import {
@@ -68,6 +68,7 @@ struct MessageRow {
   onSwitch: (idx: number) => void = (_idx: number): void => {};
   onRegenerate: () => void = (): void => {};
   onDelete: () => void = (): void => {};
+  onEdit: () => void = (): void => {};
 
   build() {
     Column() {
@@ -114,6 +115,11 @@ struct MessageRow {
                 if (this.selectIndex < this.branchCount - 1) this.onSwitch(this.selectIndex + 1);
               })
           }
+          if (this.message.role === 'user') {
+            Text('编辑').fontSize(11).fontColor(INK3)
+              .margin({ right: 12 })
+              .onClick((): void => this.onEdit())
+          }
           if (this.isLastAssistant || this.message.role === 'user') {
             Text('重新生成').fontSize(11).fontColor(ACCENT)
               .onClick((): void => this.onRegenerate())
@@ -148,6 +154,8 @@ struct ChatPage {
   @State errorMsg: string = '';
   @State title: string = '新对话';
   @State modelLabel: string = '';
+  @State editingNodeId: string = '';
+  @State editingMessageId: string = '';
   private conversation: Conversation | null = null;
   private scroller: Scroller = new Scroller();
 
@@ -305,6 +313,35 @@ struct ChatPage {
       });
   }
 
+  // 编辑消息(D-031):填入输入框进入编辑态;发送时走「编辑并重发」
+  private startEditMessage(row: MsgRow): void {
+    if (this.conversation === null || this.sending) return;
+    this.editingNodeId = row.nodeId;
+    this.editingMessageId = row.message.id;
+    this.inputText = toText(row.message);
+  }
+
+  private cancelEdit(): void {
+    this.editingNodeId = '';
+    this.editingMessageId = '';
+    this.inputText = '';
+  }
+
+  // 编辑并重发:editMessage(新分支)→ 持久化 → runRegenerateAt(user 节点截断续跑)
+  private sendEdit(text: string): void {
+    if (this.conversation === null) return;
+    const conv: Conversation = this.conversation;
+    const nodeId: string = this.editingNodeId;
+    const updated: Conversation = editMessage(conv, this.editingMessageId, makeUserMessage(text).parts);
+    this.conversation = updated;
+    this.rows = buildRows(updated);
+    this.editingNodeId = '';
+    this.editingMessageId = '';
+    getChatRepository().save(updated).then((): void => {
+      this.regenerate(nodeId);
+    });
+  }
+
   // 删除消息(D-029):长按 → 确认弹窗;生成中不提供入口(Android 同语义:
   // ChatVM.showDeleteBlockedWhileGeneratingError)
   private confirmDeleteMessage(row: MsgRow): void {
@@ -333,6 +370,11 @@ struct ChatPage {
   private send(): void {
     const text: string = this.inputText.trim();
     if (text.length === 0 || this.sending || this.conversation === null) return;
+    // 编辑态:走「编辑并重发」
+    if (this.editingNodeId.length > 0) {
+      this.sendEdit(text);
+      return;
+    }
     this.sending = true;
     this.errorMsg = '';
     const conv: Conversation = this.conversation;
@@ -412,6 +454,7 @@ struct ChatPage {
               onSwitch: (idx: number): void => this.switchBranch(row.nodeId, idx),
               onRegenerate: (): void => this.regenerate(row.nodeId),
               onDelete: (): void => this.confirmDeleteMessage(row),
+              onEdit: (): void => this.startEditMessage(row),
             })
           }
         }, (row: MsgRow): string => row.nodeId)
@@ -461,7 +504,14 @@ struct ChatPage {
       }
 
       Row() {
-        TextInput({ text: this.inputText, placeholder: '输入消息…' })
+        if (this.editingNodeId.length > 0) {
+          Text('取消编辑')
+            .fontSize(12).fontColor(INK3)
+            .padding({ right: 10 })
+            .onClick((): void => this.cancelEdit())
+        }
+        TextInput({ text: this.inputText,
+          placeholder: this.editingNodeId.length > 0 ? '编辑消息,发送将重发…' : '输入消息…' })
           .layoutWeight(1)
           .fontSize(15)
           .padding(10)
