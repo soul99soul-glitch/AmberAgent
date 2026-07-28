@@ -1,0 +1,11 @@
+{
+  "module": {
+    "name": "chat",
+    "type": "har",
+    "deviceTypes": [
+      "phone",
+      "tablet"
+    ],
+    "installationFree": false
+  }
+}

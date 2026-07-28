@@ -1,5 +1,5 @@
 cap_id,capability,android_anchor,category,disposition,harmony_status,harmony_target_or_notes
-C-001,Chat 对话主链路(多轮流式取消重试),feature/chat;feature/ui/components/ai/ChatInput.kt,P0,keep,in_progress,"deepread HAR 已验证 SSE/accumulator 模式;Chat 专属 UIMessage/accumulator 待迁(S-CHAT-MVP-SCAFFOLD)"
+C-001,Chat 对话主链路(多轮流式取消重试),feature/chat;feature/ui/components/ai/ChatInput.kt,P0,keep,in_progress,"chat-domain HAR 已建:UIMessage/MessageNode/Conversation 模型 37 测试绿;accumulator 切片2进行中"
 C-002,LLM Provider 框架(ProviderManager/ProviderSetting),ai/provider;ai/provider/ProviderSetting.kt,P0,keep,contract_ready,"协议矩阵完成(STREAMING_PROTOCOL_MATRIX.csv);OpenAI-compatible 先行"
 C-003,OpenAI Chat Completions 流式,ai/.../openai/ChatCompletionsAPI.kt,P0,keep,contract_ready,"fixtures 已备;设备 spike 待 G-C"
 C-004,OpenAI Responses 流式,ai/.../openai/ResponseAPI.kt,P1,keep,contract_ready,"Reconciler 纯逻辑可搬"
@@ -9,8 +9,8 @@ C-007,Codex OAuth provider,ai/.../OpenAICodexOAuth.kt,P1,keep,contract_ready,"�
 C-008,Gemini OAuth / Code Assist,ai/.../GoogleGeminiOAuth.kt,P1,degrade,not_started,"OAuth 重定向平台相关需重实现"
 C-009,Vertex AI Service Account,ai/.../vertex/ServiceAccountTokenProvider.kt,P2,defer,not_started,"RS256 JWT 签名需 HUKS 验证"
 C-010,Assistant 配置体系(~30字段),core/model/Assistant.kt;feature/ui AssistantPicker,P1,keep,not_started,"整体 JSON 存 Preferences(DATA_SCHEMA J04)"
-C-011,Conversation/MessageNode 树(分支),core/model/Conversation.kt;message_node 表,P0,keep,contract_ready,"schema 预留分支字段;MVP 可线性列表+分支字段"
-C-012,UIMessage + chunk merge,ai/ui/Message.kt;MessageStreamAccumulator.kt,P0,keep,contract_ready,"merge 规则矩阵完成(STREAMING_SEMANTICS_MATRIX.csv)"
+C-011,Conversation/MessageNode 树(分支),core/model/Conversation.kt;message_node 表,P0,keep,in_progress,"schema 预留分支字段;MVP 可线性列表+分支字段"
+C-012,UIMessage + chunk merge,ai/ui/Message.kt;MessageStreamAccumulator.kt,P0,keep,in_progress,"merge 规则矩阵完成(STREAMING_SEMANTICS_MATRIX.csv)"
 C-013,Transformer 管线(模板/think/regex/document/OCR),app/.../data/ai/transformers,P1,keep,partial,"fixtures 已备(H0-11);纯逻辑先行,OCR/图片后置"
 C-014,会话持久化(Room→RDB),app/agent/data/db;core/agent-store-room,P0,keep,in_progress,"deepread RDB adapter 已落地(RdbRepository);Chat schema 待建"
 C-015,设置持久化(DataStore→Preferences),core/settings;core/app-infra/PreferencesKeys.kt,P0,keep,in_progress,"deepread PreferencesStorage 已落地;52 键分组已审计"

@@ -59,3 +59,19 @@
 - **理由**：`settings.gradle.kts` 仅有 plugin resolutionStrategy 的坐标映射；app/core/feature/ai 源码中**零引用**（无 entity、无依赖、无 import）。Android 存储基准实为 Room（core:agent-store-room）+ DataStore（core:settings）。
 - **影响**：DATA_SCHEMA_MATRIX 以 Room/DataStore 为唯一审计对象。
 - **可逆性**：若后续发现隐藏使用（如动态加载），重开。
+
+## D-008（L1，2026-07-28）Chat 核心领域层独立 HAR：`harmony/chat`（@amber/chat-domain）
+
+- **背景**：Chat MVP 主线需要完整版 UIMessage/MessageNode/Conversation；deepread HAR 内的 `agent/message.ts` 是 Deep Read 功能子集（仅 text/image/reasoning/tool，无 metadata/annotations/usage）。
+- **决定**：新建 `harmony/chat/` HAR 承载 Chat 核心领域层。deepread 子集暂不动，待 Chat 层稳定后评估统一（登记为技术债候选，不阻塞）。
+- **理由**：职责分层（core vs feature）；避免 deepread 子集被动膨胀；tsx 单测 + hvigor 编译双验证模式已验证有效。
+- **关键实现决策**：
+  - JSON 鉴别器字段名用 `type`（kotlinx 默认 classDiscriminator，`ai/util/Json.kt` 未覆盖）—— persisted blob 与 Android 线格式 1:1。
+  - sealed class → discriminated union interface + 工厂函数（ArkTS 友好，同 deepread 模式）。
+  - 时间戳统一 ISO 8601 UTC 带 `Z`（Android UIMessage.createdAt 为 LocalDateTime 无时区）→ 偏差记 PD-004。
+  - uuid/时间通过 globalThis 探测 + 注入模式（D-002 同款），领域层不依赖 `@kit`。
+- **可逆性**：可逆（模块内聚，未被 entry 依赖前可整体调整）。
+
+## D-009（L0，2026-07-28）limitContext 级联语义以 Android 算法为准
+
+- 测试初稿假设"已执行 tool 起点只前扩一级"，实际 Android 算法会**级联**（已执行结果→tool call→user 消息，直至 0 号位）。实现与测试均以 Android 生产语义为准修正。无代码偏差。

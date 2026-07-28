@@ -57,6 +57,18 @@
           ]
         }
       ]
+    },
+    {
+      "name": "chat",
+      "srcPath": "./chat",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
     }
   ]
 }

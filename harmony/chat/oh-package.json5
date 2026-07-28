@@ -1,0 +1,8 @@
+{
+  "name": "@amber/chat-domain",
+  "version": "0.0.1",
+  "description": "Chat core domain layer (pure ArkTS)",
+  "main": "src/main/ets/index.ts",
+  "license": "Apache-2.0",
+  "dependencies": {}
+}
