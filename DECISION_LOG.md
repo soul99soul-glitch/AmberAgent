@@ -445,3 +445,14 @@
   - **google_chat_api.ts**:buildUrl 三形态(vertex/service account→**抛错**(P1,非静默));api key:vertex→key query 参数,否则 x-goog-api-key 头;streamGenerateContent?alt=sse;**OAuth 模式命中即抛错**(v1internal 包装 = P1);malformed event 吞掉即抛(Android :407-412 注释语义)。
   - **裁剪登记**:BuiltInTools(googleSearch/urlContext)— 鸿蒙 ChatModel 无 tools 字段(P1);Vertex service account / Code Assist OAuth = P1;keyRoulette 已由 PD-008 覆盖;entry 接线未做(provider 编辑面 P1,与 Claude 同)。
 - **可逆性**:纯增模块;三 provider 协议层齐备(openai/claude/google),entry 接线可独立推进。
+
+## D-046（L0，2026-07-28）provider 运行时接线：三变体统一解析与分发(entry 面)
+
+- **背景**：D-044/D-045 完成 Claude/Google 协议层,但 entry 运行时仍 openai-only —— resolveChatProviderChoice 与 ChatModelPickerPage 均过滤 `p.type === 'openai'`,三协议层空转。
+- **决定**：
+  - **AppContainer.ets**:`ChatProviderChoice.provider` 泛化为 `ProviderSetting` 联合;用户选择(D-023 优先消费持久化选择)与 D-019 回退(首个 hasUsableAuth + 非空 models)语义不变,仅去类型过滤;`resolveChatRuntime` 按 `chosen.type` 分发 —— openai→既有 createOpenAIChatApi + openAIAuthHeaders(adapter 注 auth);claude→createClaudeChatApi(x-api-key/anthropic-version 由 api 层从 setting.apiKey 注入);google→createGoogleChatApi(x-goog-api-key/key query 由 api 层注入)。未落地传输模式(codex_oauth token store/Gemini Code Assist OAuth/Vertex service account)沿用 api 层显式抛错(非静默,D-044/D-045 登记延续)。
+  - **EntryImageEncoder.ets**:新增 `encodeImageDetailed` —— FileEncoder.kt:68-102 `encodeBase64(withPrefix=false)` 忠实移植(data: 剥头提取 mime/file:// 读文件 + mime 猜测 + 无前缀 base64)。**http(s) 偏差(登记 PD-009)**:Android 把 URL 原样当 base64 返回(mime 兜底 image/png)—— 对 Claude inline base64 source/Google inlineData 是垃圾数据,属 Android 已知缺陷,宪章禁止照搬,鸿蒙显式抛错;聊天选图链路(picker→data: URL 物化)不产出 http(s) part,不受影响。
+  - **ChatModelPickerPage.ets**:去 openai-only 过滤,行内副标题显示「provider 名 · 类型」;点选/持久化/选中态逻辑不变。
+  - **provider 设置编辑 UI 仍 openai-only**:google/claude 变体仅在其数据已存在于 KV(如后续编辑面落地或导入)时被运行时消费;编辑 UI = P1(登记于 M3 gap audit)。
+  - 三 createXxxChatApi 均返回结构 `OpenAIChatApi`(streamText/generateText),`ChatRuntime.api` 类型无需变更;streamOutput=false 非流式路径(D-040)对三 provider 自动生效。
+- **可逆性**:openai 路径行为逐行不变(同构代码搬入 else 分支);choice/picker 仅放宽过滤,既有 openai 选择与回退结果不受影响。

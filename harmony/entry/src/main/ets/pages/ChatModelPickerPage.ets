@@ -1,6 +1,7 @@
-// ChatModelPickerPage — Provider/模型选择器(D-023)
-// 列出 hasUsableAuth 且非空 models 的 openai 变体及其模型;点选持久化到
-// Preferences(chat_selected_provider_id/model_id),resolveChatRuntime 优先消费。
+// ChatModelPickerPage — Provider/模型选择器(D-023;D-046 起三变体)
+// 列出 hasUsableAuth 且非空 models 的 provider(openai/google/claude)及其模型;
+// 点选持久化到 Preferences(chat_selected_provider_id/model_id),
+// resolveChatRuntime 优先消费。
 import { router } from '@kit.ArkUI';
 import { loadProviders, hasUsableAuth } from '@amber/chat-domain';
 import {
@@ -18,6 +19,7 @@ const ACCENT: string = '#B8623A';
 interface ModelRow {
   providerId: string;
   providerName: string;
+  providerType: string;
   modelId: string;
   selected: boolean;
 }
@@ -37,11 +39,13 @@ struct ChatModelPickerPage {
       const usable: ModelRow[] = [];
       if (providers !== null) {
         for (const p of providers) {
-          if (p.type === 'openai' && p.models.length > 0 && hasUsableAuth(p)) {
+          // D-046:不再限定 openai;google/claude 变体 auth 可用即可选
+          if (p.models.length > 0 && hasUsableAuth(p)) {
             for (const m of p.models) {
               usable.push({
                 providerId: p.id,
                 providerName: p.name,
+                providerType: p.type,
                 modelId: m.modelId,
                 selected: false,
               });
@@ -92,7 +96,7 @@ struct ChatModelPickerPage {
                 Column() {
                   Text(row.modelId)
                     .fontSize(15).fontColor(INK)
-                  Text(row.providerName)
+                  Text(`${row.providerName} · ${row.providerType}`)
                     .fontSize(11).fontColor(INK3).margin({ top: 4 })
                 }
                 .alignItems(HorizontalAlign.Start).layoutWeight(1)

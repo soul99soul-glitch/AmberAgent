@@ -29,16 +29,18 @@ import { createNovelModelAdapter } from '../platform_impl/NovelModelAdapter.ets'
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
-  ProviderSettingOpenAIVariant, ProviderModel,
+  ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle,
+  ProviderModel,
 } from '@amber/chat-domain';
 import {
   loadAssistants, loadProviders, makeAssistant,
-  makeProviderSettingOpenAI, createOpenAIChatApi, hasUsableAuth, openAIAuthHeaders,
+  makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
+  hasUsableAuth, openAIAuthHeaders,
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
 } from '@amber/chat-domain';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
 import { createChatRdbRepository } from '../platform_impl/ChatRdbRepository.ets';
-import { encodeImageForChat } from '../platform_impl/EntryImageEncoder.ets';
+import { encodeImageForChat, encodeImageDetailed } from '../platform_impl/EntryImageEncoder.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
@@ -247,18 +249,19 @@ export interface ChatRuntime {
 }
 
 interface ChatProviderChoice {
-  provider: ProviderSettingOpenAIVariant;
+  // D-046:三变体(openai/google/claude)统一解析;api 层均为结构 OpenAIChatApi
+  provider: ProviderSetting;
   model: ProviderModel;
 }
 
 const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | null> => {
   const providers = await loadProviders(getChatKvStore());
   if (providers === null) return null;
-  // 用户选择优先(D-023)
+  // 用户选择优先(D-023;D-046 起不再限定 openai 变体)
   const selection = await getChatModelSelection();
   if (selection !== null) {
     for (const p of providers) {
-      if (p.type === 'openai' && p.id === selection.providerId && hasUsableAuth(p)) {
+      if (p.id === selection.providerId && hasUsableAuth(p)) {
         for (const m of p.models) {
           if (m.modelId === selection.modelId) {
             return { provider: p, model: m };
@@ -267,9 +270,9 @@ const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | null> =
       }
     }
   }
-  // 回退 D-019 策略:第一个 hasUsableAuth 且非空 models 的 openai variant + 首模型
+  // 回退 D-019 策略:第一个 hasUsableAuth 且非空 models 的变体(任意类型)+ 首模型
   for (const p of providers) {
-    if (p.type === 'openai' && p.models.length > 0 && hasUsableAuth(p)) {
+    if (p.models.length > 0 && hasUsableAuth(p)) {
       return { provider: p, model: p.models[0] };
     }
   }
@@ -286,7 +289,7 @@ export const describeChatModel = async (): Promise<string> => {
 export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRuntime | null> => {
   const choice = await resolveChatProviderChoice();
   if (choice === null) return null;
-  const chosen: ProviderSettingOpenAIVariant = choice.provider;
+  const chosen: ProviderSetting = choice.provider;
   const model = choice.model;
   // 助手解析(D-028):会话绑定 assistantId 优先,未命中/未传 → 首个(D-019 延续)
   const assistants: Assistant[] = await getChatAssistants();
@@ -308,22 +311,45 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
     maxTokens: sessionDefaults.maxTokens,
     reasoningLevel: sessionDefaults.reasoningLevel,
   });
-  const token: string = chosen.apiKey;
-  const api = createOpenAIChatApi({
-    http: getAppContainer().httpClient,
-    setting: makeProviderSettingOpenAI({
-      id: chosen.id,
-      enabled: chosen.enabled,
-      name: chosen.name,
-      baseUrl: chosen.baseUrl,
-      chatCompletionsPath: chosen.chatCompletionsPath,
-      useResponseApi: chosen.useResponseApi,
-      authMode: chosen.authMode,
-      brand: chosen.brand,
-    }),
-    headers: (): Record<string, string> => openAIAuthHeaders(chosen.authMode, chosen.baseUrl, token),
-    // D-038:图片编码(data:/http(s): 直通,file:// 读文件编码;失败即抛)
-    encodeImage: encodeImageForChat,
-  });
+  // D-046:按变体类型分发到对应 api 组装层(均返回结构 OpenAIChatApi)。
+  // auth header 归属:openai 由 adapter(openAIAuthHeaders);claude/google 由各自
+  // api 层从 setting.apiKey 注入(x-api-key / x-goog-api-key)。
+  // 未落地传输模式(OAuth/Vertex service account)在 api 层显式抛错(非静默)。
+  let api: OpenAIChatApi;
+  if (chosen.type === 'claude') {
+    const claudeSetting: ProviderSettingClaude = chosen as ProviderSettingClaude;
+    api = createClaudeChatApi({
+      http: getAppContainer().httpClient,
+      setting: claudeSetting,
+      encodeImage: encodeImageDetailed,
+    });
+  } else if (chosen.type === 'google') {
+    const googleSetting: ProviderSettingGoogle = chosen as ProviderSettingGoogle;
+    api = createGoogleChatApi({
+      http: getAppContainer().httpClient,
+      setting: googleSetting,
+      encodeImage: encodeImageDetailed,
+    });
+  } else {
+    const openaiSetting: ProviderSettingOpenAIVariant = chosen as ProviderSettingOpenAIVariant;
+    const token: string = openaiSetting.apiKey;
+    api = createOpenAIChatApi({
+      http: getAppContainer().httpClient,
+      setting: makeProviderSettingOpenAI({
+        id: openaiSetting.id,
+        enabled: openaiSetting.enabled,
+        name: openaiSetting.name,
+        baseUrl: openaiSetting.baseUrl,
+        chatCompletionsPath: openaiSetting.chatCompletionsPath,
+        useResponseApi: openaiSetting.useResponseApi,
+        authMode: openaiSetting.authMode,
+        brand: openaiSetting.brand,
+      }),
+      headers: (): Record<string, string> =>
+        openAIAuthHeaders(openaiSetting.authMode, openaiSetting.baseUrl, token),
+      // D-038:图片编码(data:/http(s): 直通,file:// 读文件编码;失败即抛)
+      encodeImage: encodeImageForChat,
+    });
+  }
   return { api, assistant, params, contextMessageSize: sessionDefaults.contextMessageSize };
 };

@@ -50,7 +50,7 @@
 | FOLLOWUP 发送排队 | ChatService.kt:505 clearPendingUserMessages；ChatPage.kt:827 | D-042 登记；排队 UI + 生成中注入 |
 | ContextEngine + compact（上下文压缩） | ChatService invalidateCompacts / copyValidCompacts | regenerate 窗口化 merge 偏差残余 |
 | 图片压缩 + file:// 私有目录存储 | FileEncoder.kt compressAndEncode | PD-007；PixelMap 管线 |
-| ~~Google 请求构建~~ **已完成(D-045)** | ai/ GoogleProvider.kt(949 行) | Claude(D-044)/Google(D-045)均完成;残余:BuiltInTools/Vertex service account/Code Assist OAuth = P1 |
+| ~~Google 请求构建~~ **已完成(D-045)** | ai/ GoogleProvider.kt(949 行) | Claude(D-044)/Google(D-045)均完成;**entry 运行时接线已完成(D-046)**;残余:BuiltInTools/Vertex service account/Code Assist OAuth/google-claude 变体设置编辑 UI = P1 |
 | 动态 system prompt blocks（time/date/lorebook/mode 注入） | Assistant.kt modeInjectionIds/lorebookIds | 依赖 lorebook/mode 存储 |
 | customHeaders/customBodies 编辑 UI | AssistantBasicPage | 模型/wire 已备（D-016） |
 | memory（全局/助手级） | AssistantVM.kt:89-94 getMemories | 依赖 memory 存储设计 |
@@ -60,5 +60,5 @@
 
 M3（Chat MVP）source-only 阶段 **完成**，进入设备验证等待态（G-C blocked_by_human）。
 source-only 可做的 chat 主线功能面已基本穷尽；后续 source-only 切片转向：
-P1 清单中无设备依赖的纯逻辑项（FOLLOWUP 排队、Google/Claude 请求构建、
-customHeaders/customBodies 编辑）与 deepread/novel/council 域的剩余差距。
+P1 清单中无设备依赖的纯逻辑项（FOLLOWUP 排队、~~Google/Claude 请求构建~~ **已完成 D-044/D-045/D-046**、
+customHeaders/customBodies 编辑、google/claude 变体设置编辑 UI）与 deepread/novel/council 域的剩余差距。

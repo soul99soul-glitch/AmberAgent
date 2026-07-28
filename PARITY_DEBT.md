@@ -13,6 +13,7 @@
 | PD-006 | 2026-07-28 | chat 生成错误恢复 | GenerationHandler：runProviderCallWithRetry + vision fallback + 工具执行/审批 + 生成守卫 | chat_turn 骨架：provider 抛错直接传播，仅保留 user 消息快照 | 错误恢复语义缺失（第三档等价优先级） | source-only 阶段裁剪；retry/审批/工具循环依赖设备端能力 | M3 设备端阶段补齐 retry policy + 错误 UI 语义 | open |
 | PD-007 | 2026-07-28 | chat 多模态图片 | FileEncoder.kt:68-103：file:// 统一 compressAndEncode 压缩后 base64；选图复制到应用私有目录存 file:// 引用 | EntryImageEncoder 原样编码不压缩；选图即刻物化 data: URL 直接存消息体 | ① 大图消息体/请求体显著大于 Android；② 消息体携带完整图片数据而非文件引用（会话 JSON 体积增大，RDB 无字段限制但同步/导出体积不同） | source-only 阶段裁剪：压缩依赖设备端 PixelMap 管线；data: URL 避免 picker 临时授权过期 | M3 设备端阶段：PixelMap 压缩 spike + file:// 私有目录存储评估 | open |
 | PD-008 | 2026-07-28 | chat provider 密钥 | KeyRoulette：一 provider 多 apiKey 轮换选择（OpenAI/Claude/Google 共用） | 鸿蒙 ProviderSetting 单 apiKey 直用（D-044 Claude headers 直取 setting.apiKey） | 多 key 轮换能力缺失（功能缺失，非行为偏差） | source-only 阶段裁剪：KV 模型仅存单 key；轮换 UI/存储未设计 | provider 编辑面落地时评估（P1） | open |
+| PD-009 | 2026-07-28 | chat 多模态图片 | FileEncoder.kt:94-97：http(s) URL 原样当 base64 返回（mime 兜底 image/png） | encodeImageDetailed 命中 http(s) 直接抛错（D-046） | Android 对 Claude inline base64 source / Google inlineData 会产出垃圾数据（Android 已知缺陷）；鸿蒙不照搬，显式失败 | 宪章禁止照搬 Android 已知问题；聊天选图链路物化 data: URL，不产出 http(s) part | 若需支持远程图片 URL，落地下载→编码管线（P1） | open |
 
 ## 待 Android 侧核实的疑似偏差
 
