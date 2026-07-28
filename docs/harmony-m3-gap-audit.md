@@ -47,7 +47,7 @@
 |---|---|---|
 | 生成错误恢复（retry/vision fallback） | GenerationHandler.kt runProviderCallWithRetry | PD-006；M3 设备端阶段补 |
 | 工具执行 + 审批循环 | GenerationHandler.kt:281+ toolDispatcher | PD-006；依赖工具定义落地 |
-| FOLLOWUP 发送排队 | ChatService.kt:505 clearPendingUserMessages；ChatPage.kt:827 | D-042 登记；排队 UI + 生成中注入 |
+| ~~FOLLOWUP 发送排队~~ **已完成(D-048)** | ChatService.kt:687-867；ConversationSession.kt:110-232 | 队列纯逻辑+chips UI+循环派发完成;残余:持久化(PendingMessageStore)/STEER 进行中注入/answer=false = P1 |
 | ContextEngine + compact（上下文压缩） | ChatService invalidateCompacts / copyValidCompacts | regenerate 窗口化 merge 偏差残余 |
 | 图片压缩 + file:// 私有目录存储 | FileEncoder.kt compressAndEncode | PD-007；PixelMap 管线 |
 | ~~Google 请求构建~~ **已完成(D-045)** | ai/ GoogleProvider.kt(949 行) | Claude(D-044)/Google(D-045)均完成;**entry 运行时接线已完成(D-046)**;entry 运行时接线(D-046)与三变体设置编辑 UI(D-047)均完成;残余:BuiltInTools/Vertex service account/Code Assist OAuth 传输/authMode-brand 编辑面 = P1 |
@@ -60,5 +60,5 @@
 
 M3（Chat MVP）source-only 阶段 **完成**，进入设备验证等待态（G-C blocked_by_human）。
 source-only 可做的 chat 主线功能面已基本穷尽；后续 source-only 切片转向：
-P1 清单中无设备依赖的纯逻辑项（FOLLOWUP 排队、~~Google/Claude 请求构建~~ **已完成 D-044/D-045/D-046**、
+P1 清单中无设备依赖的纯逻辑项（~~FOLLOWUP 排队~~ **已完成 D-048**、~~Google/Claude 请求构建~~ **已完成 D-044/D-045/D-046**、
 customHeaders/customBodies 编辑、~~google/claude 变体设置编辑 UI~~ **已完成 D-047**）与 deepread/novel/council 域的剩余差距。

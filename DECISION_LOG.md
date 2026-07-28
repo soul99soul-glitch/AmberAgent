@@ -466,3 +466,12 @@
   - **保存合并语义**:表单未覆盖字段(authMode/brand/balanceOption)从选中快照原样保留,不被默认值覆盖。
   - **裁剪登记**:authMode 选择不呈现(openai 固定 api_key — codex_oauth token store P1;google 固定 api_key — Code Assist OAuth 传输 P1,api 层显式抛错,避免用户配置出必败 provider);brand 编辑/余额区/service account JSON 导入按钮 = P1;编辑中切换选中丢弃未保存修改(MVP 草稿语义)。
 - **可逆性**:纯 entry 页面重写;KV 线格式未变(D-017 三变体序列化既有);旧单 openai 数据载入后字段完全等价。
+
+## D-048（L0，2026-07-28）FOLLOWUP 发送排队：队列纯逻辑 + 循环派发 + chips UI
+
+- **背景**：D-042 登记项 —— 生成中用户再发送被 sending 拦截(Android 走 PendingUserMessage 队列,ChatService.sendMessage:687-732 生成中入队/launchPendingMessageLoop:801-867 循环派发)。
+- **决定**：
+  - **chat/pending_queue.ts(TDD 26 测试锁定,919 总数)**：PendingUserMessage.kt 全量忠实移植 —— MAX_PENDING_USER_MESSAGES=20;mode 三值(wire 保大写 FOLLOWUP/STEER/COLLECT 与 Android 序列化一致);isCollectable(COLLECT+全文本);asFollowup(已 FOLLOWUP 引用原样);previewText(text/图片/视频/音频/文件占位,\n 拼接 trim,maxChars 截断 trimEnd+'...',else 分支 JSON.stringify — Kotlin data class toString 无对应,登记);buildCollectedPendingUserMessage(空抛错/单条 asFollowup/多条合并 — 模板逐字「下面是用户在上一轮运行时连续排队补充的消息，请按顺序处理：」+「\nQueued #n:\n」,id 以 + 连,answer any,createdAtMs min);队列操作纯函数不可变版(ConversationSession.kt:110-232):enqueue(满拒原引用/STEER 插 STEER 前缀后)/dequeueNext/dequeueSteer 前缀/dequeueLeadingCollectable 前缀/cancel(未命中原引用)/move(offset clamp [0,lastIndex],原地 false)/convertSteerToFollowup;preparePendingMessageForDispatch(ChatService.kt:1057-1073:collectable 头合并后续 leading collectable,STEER→asFollowup,否则原样)。
+  - **ChatPage.ets 接线**:send() 生成中 → enqueuePendingParts(FOLLOWUP,answer=true;满 20 错误文案逐字「消息队列已满，请先等待或取消一些排队消息。」),清空输入与待发图;派发重构为 sendParts(parts)(单文本 part 退化 string 与既有路径一致);.then/.catch 末尾 drainPendingQueue(出队 → prepare → sendParts;**失败也继续**,Android 循环逐条 catch → addError 后 dequeue 续行);停止按钮路径自然覆盖(abort → catch → drain,Android stopGeneration:2419-2454 同语义 — STEER 降级为 no-op 因鸿蒙队列不产 STEER);建议长按生成中 → 入队(D-042 登记项消除);排队 chips UI(「排队中」+ preview + ✕ 取消,横滑,Android ChatListIndicators pending 区语义);编辑态生成中发送 → 入队并退出编辑态(登记偏差:Android 无此交互组合)。
+  - **裁剪登记**:队列持久化(Android PendingMessageStore 进程杀恢复)→ 内存态(P1);STEER 进行中注入(生成中流内插队,依赖 GenerationHandler 注入点)= P1;answer=false(只记录不回答)发送路径 = P1(enqueue 恒 answer=true);工具阻塞跳出(hasPendingOrUnexecutedTools)→ 鸿蒙无工具执行,循环无条件排空;regenerate 完成不 drain(Android 同 — 循环仅 initialize/send/stop 触发)。
+- **可逆性**:纯增模块 + send 路径重构;未生成中发送行为逐行不变(同构代码搬入 sendParts);测试 893 → 919。

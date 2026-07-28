@@ -8,7 +8,10 @@
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import type { Conversation, UIMessage, UIMessagePart, Assistant, TransformerContext } from '@amber/chat-domain';
+import type {
+  Conversation, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
+  PendingUserMessage, DequeueNextResult,
+} from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, runChatTurn,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
@@ -17,6 +20,8 @@ import {
   forkConversation, patchConversation,
   runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
   applyVisualTransformersStreamingTail,
+  makePendingUserMessage, enqueuePendingUserMessage, dequeueNextPendingUserMessage,
+  cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -163,6 +168,12 @@ interface RuntimeHolder {
   rt: ChatRuntime | null;
 }
 
+// D-048:排队消息 chip 视图模型
+interface PendingChipRow {
+  id: string;
+  preview: string;
+}
+
 @Entry
 @Component
 struct ChatPage {
@@ -183,6 +194,9 @@ struct ChatPage {
   // D-041:regenerate 流式预览(目标节点行下渲染;完成后清空)
   @State regenTail: UIMessage | null = null;
   @State regenNodeId: string = '';
+  // D-048:发送排队(FOLLOWUP;内存态 — Android PendingMessageStore 持久化裁 P1)
+  @State pendingRows: PendingChipRow[] = [];
+  private pendingQueue: PendingUserMessage[] = [];
   private conversation: Conversation | null = null;
   private abortController: EntryAbortController | null = null;
   private scroller: Scroller = new Scroller();
@@ -473,16 +487,51 @@ struct ChatPage {
     });
   }
 
+  // ===== D-048 发送排队(Android ChatService.sendMessage:687-732 / launchPendingMessageLoop:801-867) =====
+
+  private syncPendingRows(): void {
+    this.pendingRows = this.pendingQueue.map(
+      (m: PendingUserMessage): PendingChipRow => ({ id: m.id, preview: pendingPreviewText(m) }));
+  }
+
+  // 生成中发送 → FOLLOWUP 入队;满 20 拒绝(Android 文案逐字)
+  private enqueuePendingParts(parts: UIMessagePart[]): void {
+    const msg: PendingUserMessage = makePendingUserMessage({
+      parts, answer: true, mode: 'FOLLOWUP',
+    });
+    const r = enqueuePendingUserMessage(this.pendingQueue, msg);
+    if (!r.accepted) {
+      this.errorMsg = '消息队列已满，请先等待或取消一些排队消息。';
+      return;
+    }
+    this.pendingQueue = r.messages;
+    this.syncPendingRows();
+  }
+
+  private cancelPendingById(id: string): void {
+    const r = cancelPendingUserMessage(this.pendingQueue, id);
+    if (r.changed) {
+      this.pendingQueue = r.messages;
+      this.syncPendingRows();
+    }
+  }
+
+  // 生成完成(成功/失败/中断)后出队下一条继续派发(Android 循环逐条 catch 后继续)
+  private drainPendingQueue(): void {
+    if (this.sending || this.conversation === null) return;
+    const dq: DequeueNextResult = dequeueNextPendingUserMessage(this.pendingQueue);
+    if (dq.next === null) return;
+    const prep = preparePendingMessageForDispatch(dq.rest, dq.next);
+    this.pendingQueue = prep.rest;
+    this.syncPendingRows();
+    this.sendParts(prep.dispatch.parts);
+  }
+
   private send(): void {
     const text: string = this.inputText.trim();
     const hasImages: boolean = this.pendingImages.length > 0;
     // D-038:文本可空但图片不可空;两者皆空才拦截(isEmptyInput 对齐 Android)
-    if ((text.length === 0 && !hasImages) || this.sending || this.conversation === null) return;
-    // 编辑态:走「编辑并重发」(编辑态不携带待发图片,对齐 Android 编辑仅文本)
-    if (this.editingNodeId.length > 0) {
-      this.sendEdit(text);
-      return;
-    }
+    if ((text.length === 0 && !hasImages) || this.conversation === null) return;
     // 组装输入 parts:文本 + 图片(data: URL)
     const inputParts: UIMessagePart[] = [];
     if (text.length > 0) {
@@ -491,7 +540,30 @@ struct ChatPage {
     for (const url of this.pendingImages) {
       inputParts.push({ type: 'image', url, metadata: null });
     }
-    const userInput: string | UIMessagePart[] = hasImages ? inputParts : text;
+    // D-048:生成中 → FOLLOWUP 入队(编辑态同 — 编辑重发需等当前生成结束;
+    //   入队即退出编辑态,排队消息按新消息派发,登记偏差:Android 无编辑态排队交互)
+    if (this.sending) {
+      this.enqueuePendingParts(inputParts);
+      this.inputText = '';
+      this.pendingImages = [];
+      if (this.editingNodeId.length > 0) this.cancelEdit();
+      return;
+    }
+    // 编辑态:走「编辑并重发」(编辑态不携带待发图片,对齐 Android 编辑仅文本)
+    if (this.editingNodeId.length > 0) {
+      this.sendEdit(text);
+      return;
+    }
+    this.sendParts(inputParts);
+  }
+
+  private sendParts(inputParts: UIMessagePart[]): void {
+    if (this.conversation === null) return;
+    // 单文本 part → 退化为 string(与既有 send 路径行为一致)
+    let userInput: string | UIMessagePart[] = inputParts;
+    if (inputParts.length === 1 && inputParts[0].type === 'text') {
+      userInput = (inputParts[0] as UIMessagePartText).text;
+    }
     this.sending = true;
     this.errorMsg = '';
     this.abortController = new EntryAbortController();
@@ -534,6 +606,8 @@ struct ChatPage {
           this.maybeAutoTitle(out, holder.rt);
           this.maybeSuggestions(out, holder.rt);
         }
+        // D-048:出队下一条(Android 循环:成功 → dequeueNext)
+        this.drainPendingQueue();
       })
       .catch((e: Error): void => {
         this.errorMsg = e.message;
@@ -549,6 +623,8 @@ struct ChatPage {
             this.rows = buildRows(saved);
             this.suggestions = saved.chatSuggestions;
           }
+          // D-048:失败也继续出队(Android 循环逐条 catch → addError 后继续)
+          this.drainPendingQueue();
         });
       });
   }
@@ -645,12 +721,15 @@ struct ChatPage {
                 .borderRadius(12)
                 .margin({ right: 8 })
                 // Android ChatPage.kt:812-830:点击 = 填入输入框;
-                //   长按 = 直接发送(D-042)
+                //   长按 = 直接发送(D-042);生成中 → FOLLOWUP 入队(D-048)
                 .onClick((): void => { this.inputText = s; })
                 .gesture(
                   LongPressGesture()
                     .onAction((): void => {
-                      if (this.sending) return; // Android FOLLOWUP 排队裁 P1(登记)
+                      if (this.sending) {
+                        this.enqueuePendingParts([{ type: 'text', text: s, metadata: null }]);
+                        return;
+                      }
                       this.inputText = s;
                       this.send();
                     })
@@ -663,6 +742,39 @@ struct ChatPage {
         .scrollBar(BarState.Off)
         .width('100%')
         .margin({ bottom: 4 })
+      }
+
+      // D-048:排队消息 chips(Android ChatListIndicators pending 区,可逐条取消)
+      if (this.pendingRows.length > 0) {
+        Scroll() {
+          Row() {
+            Text('排队中')
+              .fontSize(11).fontColor(INK3)
+              .margin({ right: 8 })
+            ForEach(this.pendingRows, (row: PendingChipRow): void => {
+              Row() {
+                Text(row.preview)
+                  .fontSize(12).fontColor(INK2)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .constraintSize({ maxWidth: 180 })
+                Text('✕')
+                  .fontSize(11).fontColor(INK3)
+                  .padding({ left: 6 })
+                  .onClick((): void => this.cancelPendingById(row.id))
+              }
+              .padding({ left: 10, right: 8, top: 5, bottom: 5 })
+              .backgroundColor(SURFACE2)
+              .borderRadius(12)
+              .margin({ right: 8 })
+            }, (row: PendingChipRow): string => row.id)
+          }
+          .padding({ left: 16, right: 16 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .margin({ bottom: 6 })
       }
 
       // D-038:待发图片预览(可移除)

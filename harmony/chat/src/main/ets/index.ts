@@ -78,6 +78,21 @@ export type { SuggestionDeps } from './chat/suggestion.ts';
 export type { AutoTitleDeps } from './chat/auto_title.ts';
 export type { RegenerateDeps } from './chat/regenerate.ts';
 
+// ===== 发送排队(D-048,PendingUserMessage.kt / ConversationSession.kt:110-232) =====
+export type {
+  PendingUserMessageMode, PendingUserMessage, PendingUserMessageOpts,
+  EnqueueResult, DequeueNextResult, DequeueManyResult, ChangedList, DispatchPreparation,
+} from './chat/pending_queue.ts';
+export {
+  MAX_PENDING_USER_MESSAGES,
+  makePendingUserMessage, isCollectablePending, pendingAsFollowup,
+  pendingPreviewText, buildCollectedPendingUserMessage,
+  enqueuePendingUserMessage, dequeueNextPendingUserMessage,
+  dequeueSteerPendingUserMessages, dequeueLeadingCollectableMessages,
+  cancelPendingUserMessage, movePendingUserMessage, convertSteerToFollowup,
+  preparePendingMessageForDispatch,
+} from './chat/pending_queue.ts';
+
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,
   serializeMessageList, parseMessageList,
