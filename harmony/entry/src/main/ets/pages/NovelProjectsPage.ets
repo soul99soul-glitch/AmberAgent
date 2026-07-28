@@ -1,0 +1,195 @@
+// NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区
+import { router } from '@kit.ArkUI';
+import { getNovelCreation } from '../di/AppContainer.ets';
+import type { NovelProject } from '@amber/deepread-domain';
+
+const BG: string = '#F4F2EC';
+const SURFACE: string = '#FAF9F5';
+const SURFACE2: string = '#EFECE4';
+const INK: string = '#1B1A17';
+const INK2: string = '#57544C';
+const INK3: string = '#8F8B80';
+const INK4: string = '#B6B1A4';
+const LINE: string = '#E4E0D6';
+const ACCENT: string = '#B8623A';
+
+@Entry
+@Component
+struct NovelProjectsPage {
+  @State projects: NovelProject[] = [];
+  @State loading: boolean = true;
+  @State nameDialogOpen: boolean = false;
+  @State editingId: string = '';   // '' = 新建
+  @State nameInput: string = '';
+  @State confirmDeleteId: string = '';
+  @State errorMsg: string = '';
+
+  async aboutToAppear(): Promise<void> {
+    await this.loadProjects();
+  }
+
+  async loadProjects(): Promise<void> {
+    this.loading = true;
+    this.projects = await getNovelCreation().listProjects();
+    this.loading = false;
+  }
+
+  openNew(): void {
+    this.editingId = '';
+    this.nameInput = '';
+    this.nameDialogOpen = true;
+  }
+
+  openRename(p: NovelProject): void {
+    this.editingId = p.id;
+    this.nameInput = p.name;
+    this.nameDialogOpen = true;
+  }
+
+  async submitName(): Promise<void> {
+    const name: string = this.nameInput.trim();
+    if (name.length === 0) {
+      this.errorMsg = '请输入名称';
+      return;
+    }
+    try {
+      if (this.editingId.length === 0) {
+        const created: NovelProject = await getNovelCreation().create(name);
+        this.nameDialogOpen = false;
+        this.openWorkspace(created.id);
+      } else {
+        await getNovelCreation().rename(this.editingId, name);
+        this.nameDialogOpen = false;
+        await this.loadProjects();
+      }
+      this.errorMsg = '';
+    } catch (e) {
+      this.errorMsg = String(e);
+    }
+  }
+
+  async confirmDelete(): Promise<void> {
+    if (this.confirmDeleteId.length === 0) return;
+    await getNovelCreation().delete(this.confirmDeleteId);
+    this.confirmDeleteId = '';
+    await this.loadProjects();
+  }
+
+  openWorkspace(projectId: string): void {
+    const params: Record<string, string> = { 'projectId': projectId };
+    router.pushUrl({ url: 'pages/NovelWorkspacePage', params: params });
+  }
+
+  build(): void {
+    Stack() {
+      Column() {
+        // 顶栏
+        Row() {
+          Text('←').fontSize(18).fontColor(INK3).onClick(() => { router.back(); })
+          Text('小说创作').fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+            .fontFamily('serif').margin({ left: 12 })
+          Blank()
+          Text('新建').fontSize(13).fontColor(ACCENT)
+            .onClick(() => { this.openNew(); })
+        }
+        .width('100%').height(56).padding({ left: 24, right: 24 })
+        .backgroundColor(BG)
+
+        if (this.loading) {
+          Column() {
+            LoadingProgress().width(36).height(36).color(ACCENT)
+            Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 12 })
+          }
+          .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else if (this.projects.length === 0) {
+          Column() {
+            Text('开始你的第一部小说').fontSize(18).fontWeight(FontWeight.Medium).fontColor(INK2)
+            Text('建好项目后，在聊天区告诉 Amber 你想写什么。')
+              .fontSize(13).fontColor(INK3).margin({ top: 8 })
+            Text('新建项目').fontSize(14).fontColor('#FFFFFF')
+              .padding({ left: 24, right: 24, top: 10, bottom: 10 }).borderRadius(20)
+              .backgroundColor(ACCENT).margin({ top: 24 })
+              .onClick(() => { this.openNew(); })
+          }
+          .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else {
+          List({ space: 0 }) {
+            ForEach(this.projects, (p: NovelProject) => {
+              ListItem() {
+                Row() {
+                  Column() {
+                    Text(p.name).fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+                      .fontFamily('serif').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(`${p.chapters.length} 章 · ${p.materials.length} 条资料 · ${p.messages.length} 条对话`)
+                      .fontSize(12).fontColor(INK3).margin({ top: 6 })
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  Text('重命名').fontSize(12).fontColor(INK3).margin({ right: 16 })
+                    .onClick(() => { this.openRename(p); })
+                  Text('删除').fontSize(12).fontColor('#E53935')
+                    .onClick(() => { this.confirmDeleteId = p.id; })
+                }
+                .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
+                .border({ width: 1, color: LINE }).margin({ bottom: 14 })
+                .onClick(() => { this.openWorkspace(p.id); })
+              }
+            }, (p: NovelProject) => p.id)
+          }
+          .width('100%').layoutWeight(1).padding({ left: 20, right: 20, top: 8 })
+        }
+      }
+      .width('100%').height('100%').backgroundColor(BG)
+      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+
+      // 名称对话框叠层
+      if (this.nameDialogOpen) {
+        Column() {
+          Column() {
+            Text(this.editingId.length === 0 ? '新建小说' : '重命名')
+              .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).margin({ bottom: 16 })
+            TextInput({ text: this.nameInput, placeholder: '例如：长夜来信' })
+              .height(46).fontSize(15).fontColor(INK).placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
+              .onChange((v: string) => { this.nameInput = v; })
+            if (this.errorMsg.length > 0) {
+              Text(this.errorMsg).fontSize(12).fontColor('#E53935').margin({ top: 10 })
+            }
+            Row() {
+              Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
+                .onClick(() => { this.nameDialogOpen = false; this.errorMsg = ''; })
+              Text('确定').fontSize(14).fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
+                .onClick(() => { this.submitName(); })
+            }
+            .width('100%').margin({ top: 20 })
+          }
+          .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+        }
+        .width('100%').height('100%').backgroundColor('rgba(0,0,0,0.35)')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => { this.nameDialogOpen = false; this.errorMsg = ''; })
+      }
+
+      // 删除确认叠层
+      if (this.confirmDeleteId.length > 0) {
+        Column() {
+          Column() {
+            Text('删除项目？').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).margin({ bottom: 12 })
+            Text('此操作不可撤销。').fontSize(13).fontColor(INK3)
+            Row() {
+              Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
+                .onClick(() => { this.confirmDeleteId = ''; })
+              Text('删除').fontSize(14).fontColor('#E53935').layoutWeight(1).textAlign(TextAlign.Center)
+                .onClick(() => { this.confirmDelete(); })
+            }
+            .width('100%').margin({ top: 20 })
+          }
+          .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+        }
+        .width('100%').height('100%').backgroundColor('rgba(0,0,0,0.35)')
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => { this.confirmDeleteId = ''; })
+      }
+    }
+    .width('100%').height('100%')
+  }
+}

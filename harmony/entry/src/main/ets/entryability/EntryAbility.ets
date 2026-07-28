@@ -6,6 +6,7 @@
 import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -41,9 +42,11 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
-    windowStage.loadContent('pages/Index', (err: Error) => {
-      if (err !== null && err !== undefined) {
+    windowStage.loadContent('pages/Index', (err: BusinessError) => {
+      if (err.code !== 0) {
         hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
+      } else {
+        hilog.info(DOMAIN, TAG, 'loadContent success');
       }
     });
   }

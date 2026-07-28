@@ -61,7 +61,7 @@ struct DeepReadHomePage {
   @State loadState: string = 'idle';
   @State errorMsg: string = '';
   @State lastUpdated: string = '';
-  @State useMock: boolean = true;
+  @State useMock: boolean = false;
   private newsNow: NewsNowProvider | null = null;
 
   aboutToAppear(): void {
@@ -79,25 +79,37 @@ struct DeepReadHomePage {
     this.loadState = 'loading';
     this.errorMsg = '';
     try {
+      hilog.info(DOMAIN, TAG, 'loadHotlist start');
       if (this.newsNow === null) {
         this.newsNow = createNewsNowProvider(getAppContainer().httpClient);
       }
       const all: SourceSection[] = await this.newsNow.fetchAllSources();
+      hilog.info(DOMAIN, TAG, 'fetchAllSources done: %{public}d sections', all.length);
       // 过滤禁用的源(设置页开关)
       const storage = getAppContainer().storage;
       const enabledSections: SourceSection[] = [];
-      for (const s of all) {
-        const enabled: string = await storage.get<string>('source_' + s.sourceId, 'true');
+      for (let i = 0; i < all.length; i++) {
+        const s: SourceSection = all[i];
+        let enabled: string = 'true';
+        try {
+          enabled = await storage.get<string>('source_' + s.sourceId, 'true');
+        } catch (_) {
+          // storage 异常时默认启用
+        }
         if (enabled === 'true' && s.items.length > 0) {
           enabledSections.push(s);
         }
       }
+      hilog.info(DOMAIN, TAG, 'enabledSections: %{public}d', enabledSections.length);
       this.sections = enabledSections;
       this.combined = this.newsNow.buildCombinedTopics(all);
+      hilog.info(DOMAIN, TAG, 'combined topics: %{public}d', this.combined.length);
       this.loadState = enabledSections.length > 0 ? 'loaded' : 'error';
       this.errorMsg = enabledSections.length === 0 ? '所有源抓取失败或全部禁用' : '';
       this.lastUpdated = new Date().toLocaleTimeString();
+      hilog.info(DOMAIN, TAG, 'loadState=%{public}s', this.loadState);
     } catch (e) {
+      hilog.error(DOMAIN, TAG, 'loadHotlist EXCEPTION: %{public}s', String(e).substring(0, 120));
       this.loadState = 'error';
       this.errorMsg = String(e).substring(0, 60);
     }
@@ -123,6 +135,10 @@ struct DeepReadHomePage {
           .fontSize(26).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif')
         Blank()
+        Text('议会').fontSize(13).fontColor(ACCENT).margin({ right: 20 })
+          .onClick(() => { router.pushUrl({ url: 'pages/CouncilPage' }); })
+        Text('小说').fontSize(13).fontColor(ACCENT).margin({ right: 20 })
+          .onClick(() => { router.pushUrl({ url: 'pages/NovelProjectsPage' }); })
         Text('刷新').fontSize(13).fontColor(INK3).margin({ right: 20 })
           .onClick(() => { this.loadHotlist(); })
         Text('设置').fontSize(13).fontColor(INK3)

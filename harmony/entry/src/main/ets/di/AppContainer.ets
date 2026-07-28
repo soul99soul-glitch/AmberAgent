@@ -8,9 +8,14 @@ import type {
   RunManagerDeps, AiClient, UIMessage, Tool,
   DeepReadOutput, DeepReadScheduler, HttpClient, Storage,
   DeepReadRepository, SearchProviderRegistry, Notifier,
-  SourcePrefetcher,
+  SourcePrefetcher, FileStore, ModelRegistry,
+  ModelCouncilTextRunner, ModelCouncilRuntimeSetting,
 } from '@amber/deepread-domain';
-import { run, makeEmptyDeepReadOutput, isInterruptedPhase, createSourcePrefetcher } from '@amber/deepread-domain';
+import {
+  run, makeEmptyDeepReadOutput, isInterruptedPhase, createSourcePrefetcher,
+  createStorageModelRegistry, createModelCouncilManager, ModelCouncilManager,
+  createNovelCreation, NovelCreation, createFileNovelRepository,
+} from '@amber/deepread-domain';
 // 真实平台实现 import
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
 import { createPreferencesStorage } from '../platform_impl/PreferencesStorage.ets';
@@ -18,6 +23,9 @@ import { createRdbRepository } from '../platform_impl/RdbRepository.ets';
 import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibleAiClient.ets';
 import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
 import { createNotificationNotifier } from '../platform_impl/NotificationNotifier.ets';
+import { createFileStore } from '../platform_impl/FileStore.ets';
+import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
+import { createNovelModelAdapter } from '../platform_impl/NovelModelAdapter.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0x0001;
@@ -85,6 +93,8 @@ interface Container {
   prefetcher: SourcePrefetcher;
   aiClient: AiClient;
   notifier: Notifier;
+  fileStore: FileStore;
+  modelRegistry: ModelRegistry;
 }
 
 let cached: Container | null = null;
@@ -97,7 +107,12 @@ const buildContainer = (): Container => {
   const prefetcher: SourcePrefetcher = createSourcePrefetcher(httpClient, searchRegistry);
   const aiClient: AiClient = createOpenAiCompatibleAiClient(httpClient, storage);
   const notifier: Notifier = createNotificationNotifier();
-  return { httpClient, storage, repository, searchRegistry, prefetcher, aiClient, notifier };
+  const fileStore: FileStore = createFileStore();
+  const modelRegistry: ModelRegistry = createStorageModelRegistry(storage);
+  return {
+    httpClient, storage, repository, searchRegistry, prefetcher, aiClient, notifier,
+    fileStore, modelRegistry,
+  };
 };
 
 export const getAppContainer = (): Container => {
@@ -111,3 +126,47 @@ export const getNotifier = (): Notifier => getAppContainer().notifier;
 export const getPrefetcher = (): SourcePrefetcher => getAppContainer().prefetcher;
 export const getAiClient = (): AiClient => getAppContainer().aiClient;
 export const getRepository = (): DeepReadRepository => getAppContainer().repository;
+export const getFileStore = (): FileStore => getAppContainer().fileStore;
+export const getModelRegistry = (): ModelRegistry => getAppContainer().modelRegistry;
+
+// ===== Model Council 装配 =====
+let councilRunner: ModelCouncilTextRunner | null = null;
+let councilManager: ModelCouncilManager | null = null;
+
+export const getCouncilRunner = (): ModelCouncilTextRunner => {
+  if (councilRunner === null) {
+    councilRunner = createModelCouncilRunner(getAppContainer().httpClient);
+  }
+  return councilRunner;
+};
+
+// 用当前模型库 + 给定设置创建(替换)共享 manager;CouncilPage 点击开始时调用,
+// 随后导航到 CouncilRunPage 通过 getCouncilManager() 共享同一实例。
+export const prepareCouncilManager = async (
+  setting: ModelCouncilRuntimeSetting,
+): Promise<ModelCouncilManager> => {
+  const pool = await getModelRegistry().list();
+  councilManager = createModelCouncilManager({
+    runner: getCouncilRunner(),
+    fileStore: getFileStore(),
+    modelPool: pool,
+    setting: setting,
+  });
+  return councilManager;
+};
+
+export const getCouncilManager = (): ModelCouncilManager | null => councilManager;
+
+// ===== Novel Creation 装配 =====
+let novelCreation: NovelCreation | null = null;
+
+export const getNovelCreation = (): NovelCreation => {
+  if (novelCreation === null) {
+    const c: Container = getAppContainer();
+    novelCreation = createNovelCreation({
+      repository: createFileNovelRepository(c.fileStore),
+      modelRunning: createNovelModelAdapter(c.httpClient, c.modelRegistry),
+    });
+  }
+  return novelCreation;
+};
