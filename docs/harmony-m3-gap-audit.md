@@ -54,7 +54,7 @@
 | ~~Google 请求构建~~ **已完成(D-045)** | ai/ GoogleProvider.kt(949 行) | Claude(D-044)/Google(D-045)均完成;**entry 运行时接线已完成(D-046)**;entry 运行时接线(D-046)与三变体设置编辑 UI(D-047)均完成;残余:BuiltInTools/Vertex service account/Code Assist OAuth 传输/authMode-brand 编辑面 = P1 |
 | 动态 system prompt blocks（time/date/lorebook/mode 注入） | Assistant.kt modeInjectionIds/lorebookIds | 依赖 lorebook/mode 存储 |
 | ~~customHeaders/customBodies 编辑 UI~~ **已完成(D-049)** | AssistantRequestPage.kt:78-95 + PropertyEditor.kt | 助手级编辑+运行时注入完成;model 级自定义参数编辑面 = P1(数据已被 mergeCustomParams 消费) |
-| ~~memory 召回+写路径+工具+抽取~~ **已完成(D-085a/b/c/d)** | memory/ 目录 19 文件之 12(recall/prompt/time/models/safety/store 读写/tools/extraction×2/telemetry/prompt×1) | 读路径+动态块+写路径纯函数+memory_* 四件+extraction 提示词/过滤/编排(五门逐字/去抖/配额/autoWrite 分流)+候选与事件 JSON 持久化+三处触发接线完成;偏差:worker 模型=chat 模型顶替(任务模型设置未移植,D-025 同类);残余:dream 子系统(6 文件)/导出导入(2 文件)/候选操作面/设置面 memory UI = P1 |
+| ~~memory 召回+写路径+工具+抽取~~ **已完成(D-085a/b/c/d)** | memory/ 目录 19 文件之 12(recall/prompt/time/models/safety/store 读写/tools/extraction×2/telemetry/prompt×1) | 读路径+动态块+写路径纯函数+memory_* 四件+extraction 提示词/过滤/编排(五门逐字/去抖/配额/autoWrite 分流)+候选与事件 JSON 持久化+三处触发接线完成;偏差:worker 模型=chat 模型顶替(任务模型设置未移植,D-025 同类);残余:dream 子系统(6 文件,D-085f)/候选操作面/设置面 memory UI(含导出导入触发)= P1;~~导出导入~~ 已完成(D-085e) |
 | ~~reasoning 折叠/展开交互~~ **已完成(D-053)** | ChatMessageReasoning.kt(452 行) + MarkdownUtils.kt:35-55 | 三态卡片+流式迁移+秒数头部+尾窗截断完成;残余:budgetLabel 后缀/title 右侧 duration/shimmer+Markdown 富渲染/100dp 滚动窗 = P1(Spike C 视觉) |
 
 ## 6. 结论

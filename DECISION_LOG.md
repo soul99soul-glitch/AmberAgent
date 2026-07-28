@@ -1046,3 +1046,24 @@ extraction(MemoryExtractor/CandidateFilter/Prompt)、dream 子系统、导出导
 
 ### 残余(已登记 P1)
 dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出导入(FrontmatterCodec/ImportExportManager)、候选接受/忽略操作面(acceptCandidate/updateCandidate)、事件查看 UI、任务模型设置面(modelId/followCompressModel → 消偏差)。
+
+## D-085e:记忆导出导入(Frontmatter 编解码 + ImportExportManager)
+
+**日期**: 2026-07-28
+**来源**: `core/memory/export/MemoryFrontmatterCodec.kt`(全文 78 行)、`MemoryImportExportManager.kt`(全文 116 行)、`MemoryRepository.kt:135-143`(upsertRecord)
+
+### 内容
+- **HAR `memory_frontmatter.ts`**:
+  - encode(:12-29)— 键序逐字(id/kind/scope/confidence/created_at/updated_at/expires_at?/source_conversation_id?/source_message_ids/supersedes_ids/pinned/archived);quote = `\\`/`\"` 转义;confidence Float 文本(整数 → 'N.0');formatTime = 本地时区 ISO_OFFSET_DATE_TIME(手工拼组件+偏移,毫秒非零才带 .SSS;timeMs≤0 → now)。
+  - decode(:31-59)— split('---', limit=3) 语义(第三段保留分隔符)、require ≥3(消息逐字)、行解析无冒号跳过/toMap 后值覆盖/值 trim('"') 首尾全去、parseInlineList(反转义顺序 `\"`→`"` 再 `\\`→`\` 全量)/parseIntList(-?\d+)、Instant.parse 失败抛错(Date.parse NaN → throw)、缺 created/updated → now、assistantId = bucketForScope(scope) 重导、confidence toFloatOrNull 严格整串校验 ?: 1。
+- **HAR `memory_import_export.ts`**:exportTo(:16-56)— resolveRoot 嵌套规则、六 kind × memories|archive mkdirs、逐记录 .mem.md、manifest.json(map<String,String> 键序 version/exported_at/count/active_count/archived_count/event_count 值全字符串;exported_at = Instant.now().toString() 毫秒零省略小数)、events ndjson(MemoryEvent serializer 声明序全字段);importFrom(:58-77)— resolveExistingRoot(manifest 在→本目录/嵌套存在→嵌套/否则原样)、memories|archive 遍历 *.mem.md → decode → 首个 scope+kind+normalize 匹配 → upsertRecord(沿用 id 或 0);fileName(:79-91 日期_id_slug.mem.md,slug 归一/take48/空→memory)。
+- **HAR `memory_write.ts`**:upsertMemoryRecord(:135-143 + toEntity:247-263)— id==0 insert(自增)/否则 update(updatedAt=now)/未命中 no-op(@Update 0 行,回传入参);实体映射(assistantId 空白→bucket、supersedes distinct、confidence 钳、createdAt≤0→now)。
+- **entry `MemoryStore.ets`**:getRecentEvents(created_at DESC LIMIT)、upsertRecord(串行队列)、MemoryExportFs 的 fileIo 实现(递归 mkdir/listFile 遍历)、getMemoryImportExportDeps。**UI 触发(picker 选目录)随设置面 memory UI 切片(P1 已登记)。**
+
+### 偏差登记
+- walkTopDown 目录遍历序 = FS 实现序(Android 为 OS 目录序)— 仅影响多文件处理顺序,不影响导入结果集。
+
+### 测试
++9(chat HAR 952→961):encode 键序/转义/Float 文本/可选行;decode 往返/缺分隔抛错/缺时间 now/非法 confidence/同键覆盖;fileName slug/48 截断/空→memory/resolveRoot;exportTo 目录/manifest 键序字符串值/ndjson 声明序/结果计数;importFrom 匹配沿用 id/全新 0/嵌套规则;upsertRecord 三路径+实体映射;事件 JSON null 显式。
+
+### 至此 memory/ 目录 19 文件完成 14;残余:dream 子系统 5 文件(Planner/Applier/Scheduler/Notifier/PlanStore + DreamGate 12 行)= D-085f(P1)。

@@ -133,3 +133,46 @@ export const memoriesOfAssistant = (
 ): AssistantMemory[] => records
   .filter((r: MemoryRecord): boolean => r.assistantId === assistantId)
   .map(memoryRecordToAssistantMemory);
+
+// upsertRecord(:135-143)+ toEntity(:247-263)映射 —
+//   id==0 → insert(回读所插);否则 update(updatedAt=now 覆盖);
+//   实体映射:assistantId 空白→bucketForScope、supersedesIds distinct、
+//   confidence coerce 0-1、createdAt ≤0 → now、updatedAt 恒 = now
+export const upsertMemoryRecord = (
+  records: MemoryRecord[], record: MemoryRecord, now: number,
+): MemoryWriteResult => {
+  const supersedes: number[] = [];
+  for (const id of record.supersedesIds) {
+    if (supersedes.indexOf(id) < 0) supersedes.push(id);
+  }
+  const mapped: MemoryRecord = makeMemoryRecord({
+    id: record.id,
+    content: record.content,
+    scope: record.scope,
+    kind: record.kind,
+    assistantId: record.assistantId.trim().length > 0
+      ? record.assistantId : memoryBucketForScope(record.scope),
+    sourceConversationId: record.sourceConversationId,
+    sourceMessageIds: record.sourceMessageIds,
+    supersedesIds: supersedes,
+    expiresAt: record.expiresAt,
+    confidence: Math.min(1, Math.max(0, record.confidence)),
+    pinned: record.pinned,
+    archived: record.archived,
+    createdAt: record.createdAt > 0 ? record.createdAt : now,
+    updatedAt: now,
+    lastUsedAt: record.lastUsedAt,
+  });
+  if (record.id === 0) {
+    const withId: MemoryRecord = { ...mapped, id: nextMemoryId(records) };
+    return { records: [...records, withId], record: withId };
+  }
+  const index: number = records.findIndex((r: MemoryRecord): boolean => r.id === record.id);
+  if (index < 0) {
+    // Room @Update 未命中 = 0 行(Android 随后 getMemoryById → null → 回传入参)
+    return { records, record: mapped };
+  }
+  const next: MemoryRecord[] = [...records];
+  next[index] = mapped;
+  return { records: next, record: mapped };
+};

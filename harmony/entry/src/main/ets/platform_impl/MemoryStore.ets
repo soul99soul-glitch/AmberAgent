@@ -6,11 +6,13 @@ import { Context } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import type {
   AssistantMemory, MemoryAddParams, MemoryCandidate, MemoryEvent, MemoryEventType,
-  MemoryReadRepository, MemoryRecord, MemoryScope, MemoryToolDeps, MemoryToolWriteRequest,
+  MemoryExportFs, MemoryImportExportDeps, MemoryReadRepository, MemoryRecord, MemoryScope,
+  MemoryToolDeps, MemoryToolWriteRequest,
 } from '@amber/chat-domain';
 import {
   appendMemoryRecord, deleteMemoryRecord, filterActiveMemoryRecords, memoriesOfAssistant,
   memoryRecordToAssistantMemory, touchMemoryRecords, updateMemoryRecordContent,
+  upsertMemoryRecord,
 } from '@amber/chat-domain';
 
 const MEMORY_FOLDER: string = 'memory';
@@ -212,4 +214,81 @@ export const getMemoryExtractionStoreOps = (): MemoryExtractionStoreOps => ({
   addEvent,
   countEventsSince,
   getAllActiveRecords,
+});
+
+// ===== D-085e:导出导入存储面 + FS 实现 =====
+
+// getRecentEvents(MemoryEventDAO :15-16)— created_at DESC LIMIT :limit
+const getRecentEvents = async (limit: number): Promise<MemoryEvent[]> => {
+  const all: MemoryEvent[] = await readJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE));
+  const sorted: MemoryEvent[] = [...all].sort((a: MemoryEvent, b: MemoryEvent): number =>
+    b.createdAt - a.createdAt);
+  return sorted.slice(0, limit);
+};
+
+// upsertRecord(MemoryRepository.kt:135-143)
+const upsertRecord = (record: MemoryRecord): Promise<MemoryRecord> =>
+  enqueueWrite(async (): Promise<MemoryRecord> => {
+    const all: MemoryRecord[] = await readAll();
+    const out = upsertMemoryRecord(all, record, Date.now());
+    await writeAll(out.records);
+    return out.record;
+  });
+
+// MemoryExportFs 的 fileIo 实现(任意目录 — 导出目标由调用方选,
+//   设置面 UI 移植后接 picker 路径)
+const walkFilesRec = async (dir: string, out: string[]): Promise<void> => {
+  let names: string[];
+  try {
+    names = await fileIo.listFile(dir);
+  } catch {
+    return; // 不存在/不可读 → 空(File.walkTopDown 对不存在目录产出空序列)
+  }
+  for (const name of names) {
+    const full: string = `${dir}/${name}`;
+    try {
+      const stat: fileIo.Stat = await fileIo.stat(full);
+      if (stat.isDirectory()) {
+        await walkFilesRec(full, out);
+      } else {
+        out.push(full);
+      }
+    } catch {
+      // 单点失败跳过
+    }
+  }
+};
+
+const entryMemoryExportFs: MemoryExportFs = {
+  mkdirs: async (path: string): Promise<void> => {
+    try {
+      await fileIo.mkdir(path, true);
+    } catch {
+      // 已存在
+    }
+  },
+  writeText: async (path: string, content: string): Promise<void> => {
+    const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
+    const file: fileIo.File = await fileIo.open(path, mode);
+    try {
+      await fileIo.write(file.fd, content);
+    } finally {
+      await fileIo.close(file);
+    }
+  },
+  readText: (path: string): Promise<string> => fileIo.readText(path),
+  exists: (path: string): Promise<boolean> => fileIo.access(path),
+  walkFiles: async (path: string): Promise<string[]> => {
+    const out: string[] = [];
+    await walkFilesRec(path, out);
+    return out;
+  },
+};
+
+// exportMemoriesTo/importMemoriesFrom 的 deps(UI 触发随设置面切片)
+export const getMemoryImportExportDeps = (): MemoryImportExportDeps => ({
+  fs: entryMemoryExportFs,
+  getAllRecords: readAll,
+  getRecentEvents,
+  upsertRecord,
 });

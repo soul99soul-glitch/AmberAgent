@@ -621,3 +621,17 @@ export type {
   MemoryExtractionDeps, MemoryWorkerGate, MemoryWorkerModelResolution,
   ParsedMemoryCandidate,
 } from './chat/memory_extractor.ts';
+
+// ===== D-085e:记忆导出导入(FrontmatterCodec + ImportExportManager) =====
+export {
+  decodeMemoryFrontmatter, encodeMemoryFrontmatter,
+} from './chat/memory_frontmatter.ts';
+export type { MemoryFrontmatterCodecDeps } from './chat/memory_frontmatter.ts';
+export {
+  exportMemoriesTo, importMemoriesFrom, memoryEventToJsonText,
+  memoryExportFileName, resolveMemoryExportRoot,
+} from './chat/memory_import_export.ts';
+export type {
+  MemoryExportFs, MemoryExportResult, MemoryImportExportDeps, MemoryImportResult,
+} from './chat/memory_import_export.ts';
+export { upsertMemoryRecord } from './chat/memory_write.ts';
