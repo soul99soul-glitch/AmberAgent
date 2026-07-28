@@ -1414,3 +1414,23 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 审计行「工具执行 + 审批循环」残余「ask_user 问题 UI」。
 - **未移植(P1 登记)**: 工具卡片完整视觉(ChainOfThought 折叠/图标/shimmer);ToolDenyReasonDialog(:428-461 拒绝理由输入,harmony 拒绝恒空理由 — 与 D-057 已登一致)。
 - **验证**: chat tsc 干净 + 1064 测试(+10)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-106 — 删除全部会话(History toolbar delete-all)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: HistoryPage.kt:88-107(toolbar Delete01 IconButton)/:155-178(AlertDialog)/HistoryVM.kt:55-60(deleteAllConversations)/ConversationRepository.kt:449-453(deleteConversationOfAssistant)/:400-417(deleteConversation 语义)/values-zh/strings.xml:307,309-312
+- **背景**: harmony ChatListPage(对应 Android HistoryPage)缺 toolbar 删除全部入口;单条删除撤销窗 D-096 已落地,批量路径缺失。
+- **决策**:
+  1. 入口:ChatListPage 头部 '删除全部'(DANGER 色,'删除全部' contentDescription zh 逐字)。
+  2. 确认:AlertDialog.show — title '删除全部对话'/message '确定要删除所有对话吗？此操作无法撤销。'/取消/删除(zh 逐字;:158-174)。
+  3. 执行:deleteAllConversations — repo.list() 全量 → 逐会话 getById(取 full 含 messageNodes)→ repo.delete → cleanupDeletedConversation(ManagedFileStore deleteChatFiles);串行链保证次序,完成后 refresh。无撤销窗(Android delete-all 同 — deferCleanup=false 立即清理)。
+  4. 弹窗形态:showDeleteAllDialog 态改命令式 AlertDialog.show(与 D-104 高风险确认同先例)。
+- **偏差/适配登记**:
+  - **域偏差**:Android 域 = 当前助手(settings.getCurrentAssistant().id,HistoryVM.kt:56);harmony 无当前助手设置(D-019 首助手解析),ChatListPage 列表即全域 → 删除范围 = 本页列出集(与页面可见域一致);
+  - FTS 删除(messageFtsManager)= 未移植(FTS 索引 P1 已登);
+  - favorites/chat_images 清理 = 未移植(D-096 已登);
+  - IconButton → 文本链接(本页头部既有惯例)。
+- **关闭**: 审计行「会话列表」delete-all 残余(P1 清单「delete-all 会话(History toolbar)」)。
+- **未移植(P1 登记)**: 无新增(FTS/favorites/chat_images 沿用已登项)。
+- **验证**: chat tsc 干净 + 1064 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

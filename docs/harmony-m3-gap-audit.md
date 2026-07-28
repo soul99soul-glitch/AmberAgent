@@ -10,7 +10,7 @@
 | 交付物（权威计划） | 状态 | 证据锚点 |
 |---|---|---|
 | Provider 设置 | ✅ source-only 完成（设备验证待 G-D） | D-019 设置页 + resolveChatProviderChoice；D-017 ProviderSetting 3 变体 + Model 全量；KV 持久化（ChatKvStore） |
-| 会话列表 | ✅ 完成 | D-022 ChatListPage：搜索（title LIKE）/置顶/删除（AlertDialog 确认）；RDB ORDER BY is_pinned DESC, update_at DESC |
+| 会话列表 | ✅ 完成 | D-022 ChatListPage：搜索（title LIKE）/置顶/删除；RDB ORDER BY is_pinned DESC, update_at DESC；D-096 滑动删除撤销窗；D-106 删除全部（toolbar + AlertDialog zh 逐字，域偏差：全域=本页列出集） |
 | 聊天页 | ✅ 完成 | ChatPage：节点行渲染（buildRows）+ 分支 ◀n/m▶（D-024）+ 编辑（D-031）+ 删除（D-029）+ fork（D-033）+ 手动改名（D-034）+ 建议 chips（D-026/D-042）+ 图片输入（D-038）+ 任务模型设置面(title/suggestion/compress/worker/daydream picker + 提示词模板全链,D-094) |
 | 流式回复 | ✅ source-only 完成（SSE 真机验证待 Spike A） | D-012 chat_turn + accumulator；D-035/D-036 停止生成全路径；D-040 非流式；D-041 regenerate 流式预览 |
 | 本地保存 | ✅ source-only 完成（设备验证待 Spike B） | D-021 ChatRdbRepository（relationalStore，schema 复用 chat-domain persistence.ts） |

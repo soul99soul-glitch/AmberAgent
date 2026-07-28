@@ -122,6 +122,49 @@ struct ChatListPage {
     }
   }
 
+  // ===== D-106:delete-all =====
+  // HistoryPage.kt:99-105 toolbar 删除全部入口 → :155-178 AlertDialog(title/
+  //   desc/删除/取消 zh 逐字)→ HistoryVM.kt:55-60 →
+  //   ConversationRepository.kt:449-453:逐会话 deleteConversation
+  //   (deferCleanup=false → FTS 删 + DB 删 + 立即 cleanup,无撤销窗)
+  // 域偏差登记:Android 域 = 当前助手(settings.getCurrentAssistant);harmony
+  //   无当前助手设置(D-019 首助手解析),本页列表即全域 → 删除全部列出会话
+  private deleteAllConversations(): void {
+    const repo = getChatRepository();
+    repo.list().then((all: ConversationSummary[]): void => {
+      let chain: Promise<void> = Promise.resolve();
+      for (const item of all) {
+        chain = chain.then((): Promise<void> =>
+          repo.getById(item.id).then((full: Conversation | null): Promise<void> => {
+            if (full === null) return Promise.resolve();
+            return repo.delete(item.id).then((): Promise<void> =>
+              cleanupDeletedConversation(full));
+          }));
+      }
+      chain.then((): void => this.refresh());
+    });
+  }
+
+  // HistoryPage.kt:155-178 — AlertDialog(title/desc/删除/取消 zh 逐字:
+  //   strings.xml:312/:311/:309/:307);确认 → deleteAllConversations
+  private showDeleteAllConfirm(): void {
+    AlertDialog.show({
+      title: '删除全部对话',
+      message: '确定要删除所有对话吗？此操作无法撤销。',
+      primaryButton: {
+        value: '取消',
+        action: (): void => {},
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: DANGER,
+        action: (): void => {
+          this.deleteAllConversations();
+        },
+      },
+    });
+  }
+
   @Builder
   swipeActions(item: ConversationSummary) {
     Row() {
@@ -159,6 +202,10 @@ struct ChatListPage {
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatSearchSettingsPage' }); })
         Text('权限').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatAgentPermissionsPage' }); })
+        // D-106:删除全部入口(HistoryPage.kt:99-105 Delete01 IconButton;
+        //   contentDescription '删除全部' zh 逐字)
+        Text('删除全部').fontSize(13).fontColor(DANGER).margin({ right: 16 })
+          .onClick((): void => { this.showDeleteAllConfirm(); })
         Text('+ 新对话')
           .fontSize(14).fontColor(ACCENT)
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
