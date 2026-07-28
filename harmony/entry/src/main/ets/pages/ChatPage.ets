@@ -644,7 +644,17 @@ struct ChatPage {
                 .backgroundColor(SURFACE)
                 .borderRadius(12)
                 .margin({ right: 8 })
+                // Android ChatPage.kt:812-830:点击 = 填入输入框;
+                //   长按 = 直接发送(D-042)
                 .onClick((): void => { this.inputText = s; })
+                .gesture(
+                  LongPressGesture()
+                    .onAction((): void => {
+                      if (this.sending) return; // Android FOLLOWUP 排队裁 P1(登记)
+                      this.inputText = s;
+                      this.send();
+                    })
+                )
             }, (s: string): string => s)
           }
           .padding({ left: 16, right: 16 })

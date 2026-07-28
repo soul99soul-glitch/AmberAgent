@@ -407,3 +407,12 @@
   - 非流式(D-040)regenerate:onUpdate 单次触发,预览即终态,无缝衔接。
   - PARITY_DEBT regenerate 分组"流式预览"条目标记消除。
 - **可逆性**:纯 UI 增项;领域层零改动(复用 D-030 onUpdate 端口)。
+
+## D-042（L0，2026-07-28）会话建议长按直发：Android 双交互对齐
+
+- **背景**：Android 建议 chip 双交互(ChatPage.kt:812-830):点击 = 填入输入框(setMessageText);长按 = 直接发送(editingMessage=null + handleMessageSend)。鸿蒙 D-026 仅落地点击填充。
+- **决定**：
+  - 建议 chip 加 LongPressGesture → 填入 + send();生成中不响应(见下)。
+  - **裁剪登记**:Android 长按直发走 queueMode=FOLLOWUP(生成中排队待发,ChatService.kt:505 clearPendingUserMessages 配套);鸿蒙发送排队机制整体裁 P1 → 生成中长按不响应(sending 拦截),登记进 M3 gap 审计。
+  - 长按时若有待发图片会一并发送(与鸿蒙输入模型一致;Android 长按仅发文本 parts——交互组合差异,影响面小,登记)。
+- **可逆性**:纯 UI 增项;点击行为不变。
