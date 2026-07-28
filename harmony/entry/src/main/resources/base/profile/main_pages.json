@@ -8,6 +8,7 @@
     "pages/NovelProjectsPage",
     "pages/NovelWorkspacePage",
     "pages/ChatListPage",
-    "pages/ChatPage"
+    "pages/ChatPage",
+    "pages/ChatProviderSettingsPage"
   ]
 }

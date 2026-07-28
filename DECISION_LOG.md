@@ -186,3 +186,13 @@
   - **错误路径**：runChatTurn 抛错 → errorMsg 展示 + 从仓库重取会话刷新（user 快照已持久化，对齐 D-012 错误语义）。
   - **UI 状态模式**：沿用 CouncilRunPage 惯用法（@State 原始/数组 + 容器单例 + router params Record 显式声明）；ArkTS 限制修法登记：imports 必须置顶、对象字面量需显式类型。
 - **可逆性**：页面/装配均为新增；memory→RDB 换 adapter 不改 UI。
+
+## D-020（L0，2026-07-28）Provider 设置页 MVP：单 OpenAI 变体编辑、模型逗号录入、P1 裁剪面
+
+- **背景**：设备端可用性关键路径——无 provider 配置则 ChatPage 只能报错。KV(Preferences)已是真实持久化，设置页即可用。
+- **决定**：
+  - **MVP 编辑面**：列表中第一个 `type=openai` 变体的 enabled/name/baseUrl/apiKey/chatCompletionsPath/models；其余变体原样保留（替换 by id 后回写整个 blob）。brand/authMode 固定 generic/api_key（UI 默认值），Google/Claude 编辑、多 provider 管理、模型能力(abilities/modalities)编辑裁 P1。
+  - **模型录入**：逗号分隔 modelId → `makeProviderModel({modelId, displayName: modelId})`；`resolveChatRuntime` 取首模型（D-019 策略）即刻生效。
+  - API Key 输入用 Password 型；**不落日志**（页面无任何日志输出，宪章）。
+  - ArkTS 限制修法登记：`enabled` 与 CustomComponent 基类属性冲突 → 状态字段命名避让（providerEnabled）。
+- **可逆性**：纯新增页面；P1 编辑器扩展不改变 KV 线格式。

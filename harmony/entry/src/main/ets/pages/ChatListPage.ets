@@ -44,6 +44,8 @@ struct ChatListPage {
         Text('对话')
           .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
         Blank()
+        Text('Provider').fontSize(13).fontColor(INK3).margin({ right: 16 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); })
         Text('+ 新对话')
           .fontSize(14).fontColor(ACCENT)
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
