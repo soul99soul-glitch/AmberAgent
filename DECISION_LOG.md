@@ -1200,3 +1200,16 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **偏差/适配登记**: 无新增(ratio/maxSummaryTokens 无 UI,Android 同——仅 JSON 持有,线格式兼容)。
 - **未移植(P1 登记)**: 记忆汇总卡/Overview-Recall 子页/导入导出 UI/toolbar 立即运行(workScheduler)。
 - **验证**: chat tsc 干净 + 1035 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-092 — 记忆开关(Recall)全链:五布尔 + memoryRecall.debug 写回 + 开关卡
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingAgentMemoryPage.kt:359-431(RecallSubpage 六 Switch)/values-zh/strings.xml:589-598/SettingAgentMemoryVM.kt:68-74(updateAgentRuntime)/PreferencesStore.kt:152-156(默认)
+- **背景**: enableCoreMemory/ShortTerm/LongTerm/RecentChatsReference/TimeReminder 与 memoryRecall.debug 的读侧与生成消费早已落地(D-072/D-077b/D-085b),但无写路径——用户不可改(隐性断链,D-091 同类)。
+- **决策**:
+  1. `AgentRuntimePrefs.ets`:RecallTogglePatch + updateRecallToggles(五布尔根字段直写;memoryRecallDebug 走嵌套 memoryRecall 对象,保留 maxItems/maxPromptChars——Page :420-424 嵌套 copy 语义;raw 读-改-写 D-089 策略)。
+  2. MemoryPage recallCard 六 Switch(zh strings 逐字;末项'选择性召回' supporting 动态插值'每轮最多 N 条、M 字符，不再全量注入。'逐字,Switch 绑 memoryRecall.debug——Android 该 Switch 即 debug 开关,忠实移植)置于 Soul 卡后(Android 子页序 Recall→Worker→Compaction)。
+- **偏差/适配登记**: 无新增(六 Switch 合并为单 handler + Record patch,语义逐条等价)。
+- **未移植(P1 登记)**: 记忆汇总卡/Overview 子页导航/导入导出 UI/toolbar 立即运行(workScheduler)/memoryRecall maxItems/maxPromptChars 编辑(Android 亦无 UI,仅 JSON 持有)。
+- **验证**: chat tsc 干净 + 1035 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

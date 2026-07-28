@@ -312,3 +312,51 @@ export const updateContextCompactionToggles = async (
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
 };
+
+// D-092:召回开关写回(Page :359-431 MemoryRecallSubpage 六 Switch →
+//   VM updateAgentRuntime;memoryRecall.debug 走嵌套 copy(:420-424))
+export interface RecallTogglePatch {
+  enableCoreMemory?: boolean;
+  enableShortTermMemory?: boolean;
+  enableLongTermMemory?: boolean;
+  enableRecentChatsReference?: boolean;
+  enableTimeReminder?: boolean;
+  memoryRecallDebug?: boolean;
+}
+
+export const updateRecallToggles = async (
+  kv: KeyValueStore, patch: RecallTogglePatch,
+): Promise<AgentRuntimeSnapshot> => {
+  const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
+  let root: AgentRuntimeJson = {};
+  if (raw !== null) {
+    try {
+      root = JSON.parse(raw) as AgentRuntimeJson;
+    } catch {
+      root = {};
+    }
+  }
+  if (patch.enableCoreMemory !== undefined) {
+    root.enableCoreMemory = patch.enableCoreMemory;
+  }
+  if (patch.enableShortTermMemory !== undefined) {
+    root.enableShortTermMemory = patch.enableShortTermMemory;
+  }
+  if (patch.enableLongTermMemory !== undefined) {
+    root.enableLongTermMemory = patch.enableLongTermMemory;
+  }
+  if (patch.enableRecentChatsReference !== undefined) {
+    root.enableRecentChatsReference = patch.enableRecentChatsReference;
+  }
+  if (patch.enableTimeReminder !== undefined) {
+    root.enableTimeReminder = patch.enableTimeReminder;
+  }
+  if (patch.memoryRecallDebug !== undefined) {
+    // memoryRecall 嵌套对象保留 maxItems/maxPromptChars(:420-424 copy 语义)
+    const recall: MemoryRecallJson = root.memoryRecall ?? {};
+    recall.debug = patch.memoryRecallDebug;
+    root.memoryRecall = recall;
+  }
+  await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
+  return loadAgentRuntimeSnapshot(kv);
+};

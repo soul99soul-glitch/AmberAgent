@@ -38,7 +38,7 @@ import { getMemoryDreamPlanStore, getMemoryLibraryOps } from '../platform_impl/M
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import {
   loadAgentRuntimeSnapshot, updateAgentSoulMarkdown, updateContextCompactionToggles,
-  updateMemoryWorkerToggles,
+  updateMemoryWorkerToggles, updateRecallToggles,
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
@@ -113,6 +113,18 @@ const TEXT_COMPACT_DEFAULTS: string =
   '默认：70% 预压缩，85% 强制压缩，保护最近 8 轮 / 16 条消息。';
 const TEXT_COMPACT_NOTIFY_TITLE: string = '仅提醒不压缩';
 const TEXT_COMPACT_NOTIFY_DESC: string = '只提示上下文压力，不自动写入摘要。';
+// 记忆开关(values-zh/strings.xml:589-598 逐字)
+const TEXT_RECALL_CORE_TITLE: string = '启用核心记忆';
+const TEXT_RECALL_CORE_DESC: string = '允许 AmberAgent 在不同会话之间保存和复用长期知识。';
+const TEXT_RECALL_SHORT_TITLE: string = '短期记忆';
+const TEXT_RECALL_SHORT_DESC: string = '保存近期任务或活跃项目的简短总结，帮助会话连续。';
+const TEXT_RECALL_LONG_TITLE: string = '长期记忆';
+const TEXT_RECALL_LONG_DESC: string = '保存稳定偏好、长期关注点、计划和事实信息。';
+const TEXT_RECALL_RECENT_TITLE: string = '参考最近会话';
+const TEXT_RECALL_RECENT_DESC: string = '允许 AmberAgent 参考最近会话标题，保持任务连续性。';
+const TEXT_RECALL_TIME_TITLE: string = '时间提醒';
+const TEXT_RECALL_TIME_DESC: string =
+  '当对话间隔较长时注入时间提醒，帮助 Agent 理解上下文变化。';
 
 @Entry
 @Component
@@ -143,6 +155,15 @@ struct MemoryPage {
   // 上下文管理(Page :528-568 CompactionSubpage;D-091)
   @State compactionEnabled: boolean = true;
   @State compactionNotifyOnly: boolean = false;
+  // 记忆开关(Page :359-431 RecallSubpage;D-092)
+  @State enableCoreMemory: boolean = true;
+  @State enableShortTermMemory: boolean = true;
+  @State enableLongTermMemory: boolean = true;
+  @State enableRecentChats: boolean = true;
+  @State enableTimeReminder: boolean = false;
+  @State recallDebug: boolean = false;
+  @State recallMaxItems: number = 12;
+  @State recallMaxPromptChars: number = 2000;
 
   aboutToAppear(): void {
     this.refresh();
@@ -166,6 +187,14 @@ struct MemoryPage {
         this.agentSoul = s.agentSoulMarkdown;
         this.compactionEnabled = s.contextCompaction.enabled;
         this.compactionNotifyOnly = s.contextCompaction.notifyOnly;
+        this.enableCoreMemory = s.enableCoreMemory;
+        this.enableShortTermMemory = s.enableShortTermMemory;
+        this.enableLongTermMemory = s.enableLongTermMemory;
+        this.enableRecentChats = s.enableRecentChatsReference;
+        this.enableTimeReminder = s.enableTimeReminder;
+        this.recallDebug = s.memoryRecall.debug;
+        this.recallMaxItems = s.memoryRecall.maxItems;
+        this.recallMaxPromptChars = s.memoryRecall.maxPromptChars;
       });
     const lib: MemoryLibraryOps = getMemoryLibraryOps();
     lib.listBucket(MEMORY_BUCKET_GLOBAL).then((l: AssistantMemory[]): void => {
@@ -321,6 +350,31 @@ struct MemoryPage {
         this.compactionNotifyOnly = s.contextCompaction.notifyOnly;
       })
       .catch((e: Error): void => logMemoryDreamOpFailure('toggleCompactionNotify', e));
+  }
+
+  // ===== D-092:记忆开关(Page :366-427 六 Switch)=====
+
+  private onRecallToggle(
+    key: string, v: boolean,
+  ): void {
+    // key ∈ core/short/long/recent/time/debug — patch 直拼(Page onCheckedChange 语义)
+    const patch: Record<string, boolean> = {};
+    if (key === 'core') patch['enableCoreMemory'] = v;
+    else if (key === 'short') patch['enableShortTermMemory'] = v;
+    else if (key === 'long') patch['enableLongTermMemory'] = v;
+    else if (key === 'recent') patch['enableRecentChatsReference'] = v;
+    else if (key === 'time') patch['enableTimeReminder'] = v;
+    else patch['memoryRecallDebug'] = v;
+    updateRecallToggles(getChatKvStore(), patch)
+      .then((s: AgentRuntimeSnapshot): void => {
+        this.enableCoreMemory = s.enableCoreMemory;
+        this.enableShortTermMemory = s.enableShortTermMemory;
+        this.enableLongTermMemory = s.enableLongTermMemory;
+        this.enableRecentChats = s.enableRecentChatsReference;
+        this.enableTimeReminder = s.enableTimeReminder;
+        this.recallDebug = s.memoryRecall.debug;
+      })
+      .catch((e: Error): void => logMemoryDreamOpFailure('toggleRecall', e));
   }
 
   // ===== D-089:记忆库 CRUD(VM :86-93 + Page :127-149/:254-269)=====
@@ -599,6 +653,30 @@ struct MemoryPage {
     .padding(16).backgroundColor(SURFACE).borderRadius(12)
   }
 
+  // ===== D-092:记忆开关卡(Page :359-431 RecallSubpage 六 Switch)=====
+
+  @Builder
+  recallCard() {
+    Column({ space: 14 }) {
+      this.switchItem(TEXT_RECALL_CORE_TITLE, TEXT_RECALL_CORE_DESC,
+        this.enableCoreMemory, (v: boolean): void => this.onRecallToggle('core', v))
+      this.switchItem(TEXT_RECALL_SHORT_TITLE, TEXT_RECALL_SHORT_DESC,
+        this.enableShortTermMemory, (v: boolean): void => this.onRecallToggle('short', v))
+      this.switchItem(TEXT_RECALL_LONG_TITLE, TEXT_RECALL_LONG_DESC,
+        this.enableLongTermMemory, (v: boolean): void => this.onRecallToggle('long', v))
+      this.switchItem(TEXT_RECALL_RECENT_TITLE, TEXT_RECALL_RECENT_DESC,
+        this.enableRecentChats, (v: boolean): void => this.onRecallToggle('recent', v))
+      this.switchItem(TEXT_RECALL_TIME_TITLE, TEXT_RECALL_TIME_DESC,
+        this.enableTimeReminder, (v: boolean): void => this.onRecallToggle('time', v))
+      // :414-427 选择性召回 — supporting 动态插值逐字,Switch 绑 memoryRecall.debug
+      this.switchItem('选择性召回',
+        `每轮最多 ${this.recallMaxItems} 条、${this.recallMaxPromptChars} 字符，不再全量注入。`,
+        this.recallDebug, (v: boolean): void => this.onRecallToggle('debug', v))
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+    .padding(16).backgroundColor(SURFACE).borderRadius(12)
+  }
+
   // ===== D-091:上下文管理卡(Page :528-568 CompactionSubpage)=====
 
   @Builder
@@ -800,6 +878,7 @@ struct MemoryPage {
           Scroll() {
             Column({ space: 16 }) {
               this.soulCard()
+              this.recallCard()
               this.workerToggleCard()
               this.compactionCard()
               this.dreamReviewCard()
