@@ -36,7 +36,7 @@ import {
   runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
   createTimeTool, makeUIMessage,
   createAskUserTool, createConversationContextTools, createConversationHistoryTools,
-  createToolRegistry,
+  createConversationQueueTools, createToolRegistry,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
 } from '@amber/chat-domain';
@@ -758,7 +758,8 @@ struct ChatPage {
   // ===== D-057 工具循环接线(GenerationHandler:161-391 调用面) =====
 
   // 工具循环选项:D-058 首批内置工具 = get_time_info + ask_user +
-  //   conversation_*(4) + session_*(4),经 ToolRegistry 包装层(ToolRegistry.kt
+  //   conversation_*(4) + session_*(4),D-059 追加 conversation_queue_*(2),
+  //   经 ToolRegistry 包装层(ToolRegistry.kt
   //   :31-161 — 派生 needsApproval/display_title 注入/output budget);
   //   autoApprove 默认 false(设置面 = P1,登记);每步 provider 工厂按步内
   //   工具定义重建 params(arkts-no-spread 逐字段,不用 rt.params 展开)
@@ -784,6 +785,26 @@ struct ChatPage {
         repository: getChatRepository(),
         currentConversationProvider: conversationProvider,
         grantStore: getSessionGrantStore(),
+      }),
+      // D-059:conversation_queue_* 工具对(ChatService.kt:2457-2544);
+      //   变更经既有页面路径(cancelPendingById/clear)— persist+审计与
+      //   ChatService:498-511 同语义(changed/count>0 才记录)
+      ...createConversationQueueTools({
+        pendingProvider: (): Promise<PendingUserMessage[]> => Promise.resolve(this.pendingQueue),
+        cancelOne: (messageId: string): Promise<void> => {
+          this.cancelPendingById(messageId);
+          return Promise.resolve();
+        },
+        clearAll: (): Promise<void> => {
+          const count: number = this.pendingQueue.length;
+          if (count > 0) {
+            this.pendingQueue = [];
+            this.syncPendingRows();
+            this.persistQueue();
+            this.auditQueueEvent('clear', '', `count=${count}`);
+          }
+          return Promise.resolve();
+        },
       }),
     ]);
     return {

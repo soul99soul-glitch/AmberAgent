@@ -601,3 +601,15 @@
   - **Entry 接线**:AppContainer **getSessionGrantStore()** 单例(签发方未移植,登记);ChatPage **buildToolLoop(rt, conv)** — 原始工具 [createTimeTool, createAskUserTool, ...createConversationContextTools(conversationProvider=() => this.conversation ?? conv(Android getConversationFlow().value 语义), compactStore=getCompactStore(), policy=makeCompactPolicy({keepRecentTurns:8})(与 buildPrepareContext 同口径), modelContextWindowTokens=rt.modelContextWindowTokens, compactEngineDeps={provider 复用聊天模型, store}), ...createConversationHistoryTools(repository=getChatRepository(), currentConversationProvider 同上, grantStore=getSessionGrantStore())] 经 createToolRegistry 包装;三调用点(sendParts×3/resumeToolLoop/regenerate)传 conv/blocker.conversation。
   - **偏差登记(沿用既有 + 新增)**:session_search FTS → 全量子串扫描(命中序 = summary 列表序,FTS 索引 = P1);countConversationNodes → getById 整载计数;node 分页 → 整载切分;ToolProfileFilter(assistant.toolProfile 字段未在鸿蒙模型)/scopedToConversation activityStore/tools_list/tool_policy_explain 自省工具 = P1 登记;compact 生命周期状态恒 'idle';ask_user 问题渲染 UI(ChatMessageAskUserStep)= P1(当前应答走纯文本 idle blocker,功能闭环)。
 - **可逆性**:全部为新模块 + buildToolLoop 内部扩展;registry 包装不改变 D-057 循环语义(tools() 输出形态与裸数组等价,flag 恒 false 时 schema 仅多 display_title 提示 — Android 同);1191 测试全绿(deepread 603 + chat 588),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-059（L0，2026-07-28）conversation_queue_* 工具对
+
+- **背景**：D-058 落地首批内置工具后,createRunTools(ChatService.kt:2231-2330)装配面中**无未移植子系统依赖**的下一组 = conversation_queue_status/cancel(:2457-2544)—— 数据源 pendingUserMessages 队列已全量移植(D-048/D-051/D-052)。其余组(search/skill/mcp/memory/agent_task/subagent/model_council)均依赖未移植管理器,维持 P1 登记。
+- **决定**：
+  - **chat/builtin_queue_tools.ts(TDD,10 测试)**:ChatService.kt:2457-2544 忠实 ——
+    - **conversation_queue_status**(:2458-2489):空 object schema;payload 键序 status/count/messages,条目键序 index/id/mode(mode.name.lowercase() → toLowerCase())/answer/created_at_ms/preview(pendingPreviewText 默认 180,PendingUserMessage.kt:53 同默认);只读。
+    - **conversation_queue_cancel**(:2490-2539):needsApproval=true;schema message_id/clear_all 描述逐字;clear_all = toBooleanStrictOrNull()==true(字符串 'true' 不算,测试锁定);require 文案逐字 'message_id is required unless clear_all=true';changed = clearAll ? 队列非空 : id 命中;**cancel/clear 无条件派发**(Android service 未命中 no-op,工具层仍调用);payload status(cancelled/not_found)/remaining(操作后重读队列长度)。
+    - **调用面 deps**:pendingProvider/cancelOne/clearAll 注入(Android 闭包直读写 session;鸿蒙由 ChatPage 承载持久化+审计)。
+  - **ChatPage 接线**:buildToolLoop 注册表追加 createConversationQueueTools —— pendingProvider = 页面 pendingQueue 快照;cancelOne 复用既有 cancelPendingById(changed 才 persist+审计 'cancel',ChatService:498-503 同语义);clearAll 新增页面路径(count>0 → 清空 + syncPendingRows + persistQueue + 审计 'clear' detail=count=N,:505-511 同语义)。
+  - **范围登记**:findToolName/hasPendingOrUnexecutedTools/toolOutputPreview(:2547-2570)为 ChatService 私有助手,非本工具组范围(hasPendingOrUnexecutedTools 等价物 conversationHasPendingOrUnexecutedTools 已于 D-057 存在)。
+- **可逆性**:新模块 + buildToolLoop 追加,零既有路径改动;1201 测试全绿(deepread 603 + chat 598),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
