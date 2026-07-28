@@ -444,3 +444,17 @@ export { searXNGService } from './search/searxng_service.ts';
 export { grokSearchService } from './search/grok_service.ts';
 export { firecrawlSearchService } from './search/firecrawl_service.ts';
 export { getSearchService } from './search/service_registry.ts';
+
+// ===== D-069:搜索聚合器 + 编排器(变体查询/内置源/webview 兜底) =====
+export type { SearchSettings, SearchExecutor, SearchSourceResult, AggregatorDeps } from './search/search_aggregator.ts';
+export {
+  enabledServices, buildServiceParams, canonicalizeUrl, normalizedTitle, searchAggregatorSearch,
+} from './search/search_aggregator.ts';
+export type {
+  OrchestratorSource, SourceSearchRequest, SourceSearchResult,
+  OrchestratorSearchExecutor, OrchestratorDeps,
+} from './search/search_orchestrator.ts';
+export {
+  buildSources, buildQueryVariants, orchestratorCanonicalizeUrl,
+  searchOrchestratorSearch, searchOrchestratorStatus, searchOrchestratorExplain,
+} from './search/search_orchestrator.ts';

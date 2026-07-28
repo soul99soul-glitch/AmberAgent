@@ -743,3 +743,14 @@
   - **service_registry.getSearchService**:17 类全分派,name 逐字(Bing/Zhipu/Tavily/Exa/SearXNG/LinkUp/Brave/Serper/SerpAPI/Metaso/Ollama/Perplexity/Firecrawl/Jina/Bocha/AmberAgent/Grok);**置于独立模块而非 companion**(避免 search_service ↔ provider 循环依赖,偏差登记)。
   - **TDD 10 测试**:topic 校验/图片挂首条;Bocha msg-null 'Unknown error';SearXNG Basic auth 与相对图片解析;Grok 引用去重过滤;Firecrawl bug 字面量;17 类分派 name 表。
 - **可逆性**:全新模块;1353 测试全绿(deepread 603 + chat 750),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-069（L0，2026-07-28）SearchAggregator + SearchOrchestrator 忠实移植
+
+- **背景**：搜索子系统编排层。SearchAggregator.kt(384 行)多源并行聚合 + SearchOrchestrator.kt(848 行)变体查询/内置源/状态解释/webview 兜底。
+- **决定**:
+  - **SearchSettings 子集接口**:Android 整 Settings 裁剪为 10 个搜索字段(enableWebSearch/searchCommonOptions/searchServices/searchEnabledServiceIds/五内置开关/webview 兜底开关);完整 Settings 面随 D-070 落地。
+  - **偏差登记**:LocalDate.now().toLocalString(true) 为 locale MEDIUM 格式,跨平台不可忠实 → deps.today 注入(默认 ISO 'YYYY-MM-DD');coroutineScope async → Promise.all;Uuid.take(6) → newId().substring(0,6);java.net.URI → 手写容错解析子集(空白字符抛错走回退,同 URISyntaxException 语义)。
+  - **aggregator 忠实点**:perServiceSize = floor((max+n-1)/n)+3 coerce 1..20;canonical 键非 blank 否则 titleKey(domain|normalizedTitle);dup +8/长文本胜/图片合并 cap5;排序 score→dup→rank;**图片预算按未预算 distinct 计 emitted**(Android 原版,:100-108);image_instruction 中文逐字;error take(500);选择器 trim 不滤空(aggregator 版)。
+  - **orchestrator 忠实点**:topic 五值/depth 三值/allow_webview toBooleanStrictOrNull;MAX_SOURCES 5/变体调用 cap 10(先全源 v0,再逐变体轮发);评分 60-5si-3vi-rank + hit*3 + freshness12(仅 news 且 timeRange!=any 且 publishedAt 非 blank);dup +12;**byKey+byTitle 双图**;canonical 黑名单多 yclid;**toEmit 图片预算修正版**(:124-138);status partial/ok/empty 状态机;webview_fallback 三引擎建议(google/ddg/bing,URLEncoder 形式编码);sanitizeError 正则替换全 occurrence;status()/explain() 全字段;apiKeyConfigured 分类型(bing_local/searxng → null);OrchestratorSource sealed → 判别联合(id/name/kind/builtin/priority/reason 逐字);preferred_sources ?: services 选择器(滤空)。
+  - **TDD 18 测试**(aggregator 9 + orchestrator 9):公式钉住(perServiceSize/perCallSize/评分 87/59/variant_count [3,3,2,2] cap10 行为);调试中发现测试误算三处(变体产生额外 dup、topic news 排除 wikipedia、recency 文本条件 :347)均以 Android 源为准修正测试。
+- **可逆性**:全新模块;1373 测试全绿(deepread 603 + chat 770),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
