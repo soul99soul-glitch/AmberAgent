@@ -32,11 +32,12 @@ import type {
   ProviderSettingOpenAIVariant,
 } from '@amber/chat-domain';
 import {
-  createMemoryConversationRepository, loadAssistants, loadProviders, makeAssistant,
+  loadAssistants, loadProviders, makeAssistant,
   makeProviderSettingOpenAI, createOpenAIChatApi, hasUsableAuth, openAIAuthHeaders,
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
 } from '@amber/chat-domain';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
+import { createChatRdbRepository } from '../platform_impl/ChatRdbRepository.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
@@ -181,10 +182,10 @@ export const getNovelCreation = (): NovelCreation => {
   return novelCreation;
 };
 
-// ===== Chat 装配(D-019) =====
-// 持久化:会话仓库当前用 chat-domain memory 实现(重启丢失,已登记;
-//   spike B 验证 RDB 后换 RDB adapter,schema 见 D-013)。
-//   assistants/providers 走 Preferences KV(真实持久化)。
+// ===== Chat 装配(D-019/D-021) =====
+// 持久化:会话仓库 = ChatRdbRepository(relationalStore 真实实现,D-013 schema;
+//   初始化失败自动回退 memory + hilog 警告,非静默)。assistants/providers 走
+//   Preferences KV(真实持久化)。
 // Provider 选择:第一个 hasUsableAuth 且非空 models 的 openai variant(选择器 UI = P1)。
 
 
@@ -199,8 +200,8 @@ export const getChatKvStore = (): KeyValueStore => {
 let chatRepo: ConversationRepository | null = null;
 export const getChatRepository = (): ConversationRepository => {
   if (chatRepo === null) {
-    // TODO(spike B): 换 RDB adapter(D-013 schema);memory 实现重启丢失,已登记 D-019
-    chatRepo = createMemoryConversationRepository();
+    // D-021:relationalStore 真实实现;init 失败内部回退 memory(hilog 警告,非静默)
+    chatRepo = createChatRdbRepository();
   }
   return chatRepo;
 };

@@ -196,3 +196,14 @@
   - API Key 输入用 Password 型；**不落日志**（页面无任何日志输出，宪章）。
   - ArkTS 限制修法登记：`enabled` 与 CustomComponent 基类属性冲突 → 状态字段命名避让（providerEnabled）。
 - **可逆性**：纯新增页面；P1 编辑器扩展不改变 KV 线格式。
+
+## D-021（L0，2026-07-28）会话仓库换真实 RDB：薄桥接层 + init 失败显式回退 memory
+
+- **背景**：D-019 过渡态用 memory 会话仓库(重启丢失)。G-C 设备未解锁,spike B 真机验证仍挂起,但 relationalStore API 形态稳定,源码层 adapter 不阻塞。
+- **决定**：
+  - **ChatRdbRepository.ets(entry/platform_impl)**:ConversationRepository 真实实现。schema + 行映射整体复用 chat-domain persistence.ts(D-013,node 测试已锁定);本层只做 relationalStore 桥接(getRdbStore/executeSql/insert ON_CONFLICT_REPLACE/RdbPredicates query/delete),零业务逻辑——spike B 若 API 形态不符只改这一个文件。
+  - **失败策略(非静默)**:init 抛错 → hilog.warn 记录错误(不含会话内容,宪章隐私条款) + 回退 memory 实现,行为与 D-019 过渡态一致。
+  - **级联语义**:Harmony RDB 外键默认不开启 → delete 显式先删 nodes 再删 conversation,语义对齐 FK CASCADE;save = conv upsert + nodes 整体替换(memory 实现同口径)。
+  - **排序/搜索口径**:ORDER BY is_pinned DESC, update_at DESC;title LIKE '%text%'(SQLite ASCII 大小写不敏感,对齐 Android DAO)。
+  - deepread 侧 RdbRepository(memory fallback)本切片不动——它是另一契约,随 spike B 一并处理。
+- **可逆性**:getChatRepository 一行换回 memory 即可回退;schema IF NOT EXISTS 幂等。
