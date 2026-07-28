@@ -649,3 +649,26 @@ export type {
   MemoryDreamPlannerDeps, MemoryDreamWorkerGate, MemoryMergeSuggestion,
   MemorySupersedeSuggestion,
 } from './chat/memory_dream.ts';
+
+// ===== D-085g:dream plan 持久化 + 运行编排(Coordinator/Scheduler/Worker) =====
+export {
+  createMemoryDreamPlanStore, decodeDreamPlanJson, encodeDreamPlanJson,
+  memoryDreamPlanSourceFromWireName, memoryDreamPlanStatusFromWireName,
+  persistedDreamPlanSummary,
+} from './chat/memory_dream_plan_store.ts';
+export type {
+  MemoryDreamPlanDaoPort, MemoryDreamPlanEntity, MemoryDreamPlanSource,
+  MemoryDreamPlanStatus, MemoryDreamPlanStore, PersistedMemoryDreamPlan,
+} from './chat/memory_dream_plan_store.ts';
+export {
+  computeDelayUntilNextNightWindowMs, dreamSyncShouldSchedule, localDayStart,
+  runMemoryDreamRun, runMemoryDreamWorkerOnce,
+  DREAM_EXTRA_OPEN_AGENT_MEMORY, DREAM_NOTIFICATION_ID, DREAM_NOTIFY_FAILED_BIGTEXT_TAKE,
+  DREAM_NOTIFY_FAILED_TEXT_TAKE, DREAM_NOTIFY_FAILED_TITLE, DREAM_NOTIFY_PENDING_TITLE,
+  DREAM_NOTIFY_RUNNING_TEXT, DREAM_NOTIFY_RUNNING_TITLE,
+  MEMORY_DREAM_MANUAL_RUN_NAME, MEMORY_DREAM_WORK_NAME,
+} from './chat/memory_dream_run.ts';
+export type {
+  MemoryDreamReviewNotifier, MemoryDreamRunCoordinatorDeps, MemoryDreamRunGate,
+  MemoryDreamRunOutcome, MemoryDreamWorkerRunDeps,
+} from './chat/memory_dream_run.ts';

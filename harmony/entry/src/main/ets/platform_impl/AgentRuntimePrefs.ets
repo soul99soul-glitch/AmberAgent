@@ -22,6 +22,12 @@ export interface MemoryWorkerGateSnapshot {
   // D-085f:MemoryModels.kt:144-145(dream 门;MemoryWorkerDreamGate 消费)
   dreamMaintenanceEnabled: boolean;
   dreamModelEnabled: boolean;
+  // D-085g:MemoryModels.kt:149-150,152
+  //   runOnlyOnCharging:Android 调度器同样忽略(SettingAgentMemoryPage.kt:514 注释),
+  //   仅为线格式忠实保留
+  runOnlyOnIdle: boolean;
+  runOnlyOnCharging: boolean;
+  dreamMaxDailyRuns: number;
 }
 
 export interface AgentRuntimeSnapshot {
@@ -50,6 +56,9 @@ interface MemoryWorkerJson {
   maxDailyRuns?: number;
   dreamMaintenanceEnabled?: boolean;
   dreamModelEnabled?: boolean;
+  runOnlyOnIdle?: boolean;
+  runOnlyOnCharging?: boolean;
+  dreamMaxDailyRuns?: number;
   // 旧 Daydream 开关别名(SettingsAggregator.kt:542-553 迁移:
   //   dreamModelEnabled ||= dreamEnabled,写回时 dreamEnabled=false)
   dreamEnabled?: boolean;
@@ -81,6 +90,7 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   memoryWorker: {
     enabled: true, extractionEnabled: true, maxDailyRuns: 8,
     dreamMaintenanceEnabled: true, dreamModelEnabled: false,
+    runOnlyOnIdle: true, runOnlyOnCharging: true, dreamMaxDailyRuns: 1,
   },
 });
 
@@ -104,6 +114,11 @@ const parseMemoryWorker = (raw: MemoryWorkerJson | undefined): MemoryWorkerGateS
   dreamMaintenanceEnabled: raw?.dreamMaintenanceEnabled !== false,
   // 默认 false(:145)+ 旧别名迁移(dreamEnabled=true → true)
   dreamModelEnabled: raw?.dreamModelEnabled === true || raw?.dreamEnabled === true,
+  // 默认 true(:149-150);仅显式 false 关
+  runOnlyOnIdle: raw?.runOnlyOnIdle !== false,
+  runOnlyOnCharging: raw?.runOnlyOnCharging !== false,
+  // 默认 1(:152);非 number → 默认
+  dreamMaxDailyRuns: typeof raw?.dreamMaxDailyRuns === 'number' ? raw.dreamMaxDailyRuns : 1,
 });
 
 // AgentPrefs.kt:47-51 — 缺失/解析失败 → 默认(enableTimeReminder=false)

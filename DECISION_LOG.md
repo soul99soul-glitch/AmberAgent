@@ -1084,3 +1084,20 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
   - JSON 解析失败文本 = JS SyntaxError(仅影响 runCatching 吞掉路径)。
 - **未移植(P1 登记)**: MemoryDreamPlanStore 持久化(PersistedMemoryDreamPlan+DAO)、MemoryDreamScheduler/Worker/Notifier/RunCoordinator(WorkManager/notification 平台调度)、手动触发 UI、ChatPage 触发接线。
 - **验证**: chat tsc 干净 + 991 测试(+30)/deepread tsc + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-085g — dream plan 持久化 + 运行编排(PlanStore/Coordinator/Scheduler 纯逻辑/Worker)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: MemoryDreamPlanStore.kt(143)/MemoryDreamPlanDAO.kt/MemoryDreamPlanEntity.kt/MemoryDreamRunCoordinator.kt(59)/MemoryDreamScheduler.kt(123,纯逻辑部分)/MemoryDreamWorker.kt(60)/MemoryDreamNotifier.kt(110,接口+文案常量)
+- **决策**:
+  1. `chat/memory_dream_plan_store.ts`: status/source 枚举 + 回退(未知→pending/manual);PersistedMemoryDreamPlan + summary getter;Entity 列形状;plan JSON 线格式(kotlinx encodeDefaults+explicitNulls,全字段声明序,mergedContent null 显式,枚举 wireName 字符串;解码缺省→声明默认,未知枚举值抛错——kotlinx 语义,不用 fromWireName 回退);DAO 端口(查询语义注释逐条)+ createMemoryDreamPlanStore(savePending/saveApplied 先无条件 dismissed 存量 pending,recordAutoRun 直插 dismissed/auto 不动存量,markApplied/markDismissed by id)。
+  2. `chat/memory_dream_run.ts`: RunGate(worker 门+dreamMaxDailyRuns);Outcome 四值;MemoryDreamReviewNotifier 接口 + 通知文案/ID 常量(8201,EXTRA_OPEN_AGENT_MEMORY,failed take120/take500);runMemoryDreamRun(门关→cancel+disabled;自动日限额 今日 auto 计数>=max(1,dreamMaxDailyRuns)→cancel+auto_daily_limit;notifyRunning→plan→空:自动 recordAutoRun/手动不记录+cancel+empty;有变更→savePending(manual/auto)+notifyPendingReview);localDayStart 本地时区;dreamSyncShouldSchedule;computeDelayUntilNextNightWindowMs(夜窗 00:00–06:00,窗内 0/skip→明日 00:00,窗外→明日 00:00);WORK_NAME/MANUAL_RUN_NAME;runMemoryDreamWorkerOnce(成功 success;失败→DREAM_FAILED take(500)+notifyFailed 原文+failure;finally 非手动且未停且门开→重排 runCatching 吞错)。
+  3. entry: prefs memoryWorker += runOnlyOnIdle/runOnlyOnCharging(默认 true)/dreamMaxDailyRuns(默认 1);MemoryStore memory_dream_plans.json + DAO JSON 等价(插入序数组,getPendingPlan=末条最大 createdAt pending)+ getMemoryDreamPlanStore + MemoryDreamNotifierImpl(hilog 输出,与 deepread NotificationNotifier 同策略,文案逐字)。
+- **偏差登记**:
+  - todayStart:ZoneId.systemDefault() → JS 本地时区等价(new Date setHours 0;语义一致);
+  - WorkManager 约束(CONNECTED+batteryNotLow+idle)/unique-work REPLACE/夜窗自重排 → 鸿蒙平台调度适配层未实现(P1,设备 G-C 验证;纯延迟计算与门决策已落地);
+  - runOnlyOnCharging:Android 调度器同样忽略(SettingAgentMemoryPage.kt:514 注释),仅为线格式忠实保留;
+  - 通知投递:notificationManager API 26 SDK 模块冲突(deepread 同 TODO),当前 hilog(文案逐字,非空实现);真实 publish/cancel 待 DevEco 验证。
+- **未移植(P1 登记)**: 鸿蒙 workScheduler 适配(夜窗调度环)/真实通知 publish/设置面手动触发 UI(runOnce)/pending plan 审查 UI(apply/dismiss 入口)。
+- **验证**: chat tsc 干净 + 1006 测试(+15)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

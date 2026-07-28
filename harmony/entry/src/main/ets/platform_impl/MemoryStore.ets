@@ -1,14 +1,25 @@
+import { hilog } from '@kit.PerformanceAnalysisKit';
 // MemoryStore — 记忆记录 JSON 文件存储(D-085b,读路径 + touch)
 // Android 基准:MemoryRepository.kt(Room)→ 本文件以 JSON 文件持久化;
 //   DAO 无 ORDER BY → 数组序即插入序;id 自增语义留待写路径切片(addMemory 等)。
 //   查询/更新语义纯函数在 HAR(filterActiveMemoryRecords/touchMemoryRecords)。
 import { Context } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
+import {
+  createMemoryDreamPlanStore, memoryDreamPlanSummaryText,
+  DREAM_NOTIFICATION_ID, DREAM_NOTIFY_FAILED_TITLE, DREAM_NOTIFY_PENDING_TITLE,
+  DREAM_NOTIFY_RUNNING_TEXT, DREAM_NOTIFY_RUNNING_TITLE,
+} from '@amber/chat-domain';
 import type {
   AssistantMemory, MemoryAddParams, MemoryCandidate, MemoryEvent, MemoryEventType,
   MemoryExportFs, MemoryImportExportDeps, MemoryReadRepository, MemoryRecord, MemoryScope,
   MemoryToolDeps, MemoryToolWriteRequest,
 } from '@amber/chat-domain';
+import type {
+  MemoryDreamPlan, MemoryDreamPlanDaoPort, MemoryDreamPlanEntity,
+  MemoryDreamPlanStore, MemoryDreamReviewNotifier,
+} from '@amber/chat-domain';
+
 import {
   appendMemoryRecord, deleteMemoryRecord, filterActiveMemoryRecords, memoriesOfAssistant,
   memoryRecordToAssistantMemory, touchMemoryRecords, updateMemoryRecordContent,
@@ -348,3 +359,133 @@ export const getMemoryDreamStoreOps = (): MemoryDreamStoreOps => ({
   updateCandidate,
   addEvent,
 });
+
+// ===== D-085g:dream plan JSON 持久化 + Store/Notifier =====
+
+const DOMAIN: number = 0x0001;
+const TAG: string = 'Chat.MemoryStore';
+
+const DREAM_PLANS_FILE: string = 'memory_dream_plans.json';
+
+// MemoryDreamPlanDAO 查询语义的 JSON 数组等价:
+//   getPendingPlan = status='pending' ORDER created_at DESC LIMIT 1
+//   countPlansSince = source 匹配 && created_at >= after
+//   updatePendingStatus = 全量 pending 行
+//   insert = REPLACE by id
+const dreamPlanDao: MemoryDreamPlanDaoPort = {
+  getPendingPlan: async (): Promise<MemoryDreamPlanEntity | null> => {
+    const all: MemoryDreamPlanEntity[] =
+      await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+    let best: MemoryDreamPlanEntity | null = null;
+    for (const row of all) {
+      if (row.status === 'pending' && (best === null || row.createdAt > best.createdAt)) {
+        best = row;
+      }
+    }
+    return best;
+  },
+  countPlansSince: async (source: string, createdAfter: number): Promise<number> => {
+    const all: MemoryDreamPlanEntity[] =
+      await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+    return all.filter((row: MemoryDreamPlanEntity): boolean =>
+      row.source === source && row.createdAt >= createdAfter).length;
+  },
+  updatePendingStatus: (status: string, dismissedAt: number): Promise<void> =>
+    enqueueWrite(async (): Promise<void> => {
+      const all: MemoryDreamPlanEntity[] =
+        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+      const next: MemoryDreamPlanEntity[] = all.map(
+        (row: MemoryDreamPlanEntity): MemoryDreamPlanEntity => {
+          if (row.status !== 'pending') return row;
+          return {
+            id: row.id, planJson: row.planJson, status, source: row.source,
+            mergeCount: row.mergeCount, promoteCount: row.promoteCount,
+            archiveCount: row.archiveCount, supersedeCount: row.supersedeCount,
+            ignoreCandidateCount: row.ignoreCandidateCount, createdAt: row.createdAt,
+            appliedAt: row.appliedAt, dismissedAt,
+          };
+        });
+      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
+    }),
+  markApplied: (id: string, appliedAt: number): Promise<void> =>
+    enqueueWrite(async (): Promise<void> => {
+      const all: MemoryDreamPlanEntity[] =
+        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+      const index: number = all.findIndex(
+        (row: MemoryDreamPlanEntity): boolean => row.id === id);
+      if (index < 0) return;
+      const row: MemoryDreamPlanEntity = all[index];
+      const updated: MemoryDreamPlanEntity = {
+        id: row.id, planJson: row.planJson, status: 'applied', source: row.source,
+        mergeCount: row.mergeCount, promoteCount: row.promoteCount,
+        archiveCount: row.archiveCount, supersedeCount: row.supersedeCount,
+        ignoreCandidateCount: row.ignoreCandidateCount, createdAt: row.createdAt,
+        appliedAt, dismissedAt: row.dismissedAt,
+      };
+      const next: MemoryDreamPlanEntity[] = [...all];
+      next[index] = updated;
+      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
+    }),
+  markDismissed: (id: string, dismissedAt: number): Promise<void> =>
+    enqueueWrite(async (): Promise<void> => {
+      const all: MemoryDreamPlanEntity[] =
+        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+      const index: number = all.findIndex(
+        (row: MemoryDreamPlanEntity): boolean => row.id === id);
+      if (index < 0) return;
+      const row: MemoryDreamPlanEntity = all[index];
+      const updated: MemoryDreamPlanEntity = {
+        id: row.id, planJson: row.planJson, status: 'dismissed', source: row.source,
+        mergeCount: row.mergeCount, promoteCount: row.promoteCount,
+        archiveCount: row.archiveCount, supersedeCount: row.supersedeCount,
+        ignoreCandidateCount: row.ignoreCandidateCount, createdAt: row.createdAt,
+        appliedAt: row.appliedAt, dismissedAt,
+      };
+      const next: MemoryDreamPlanEntity[] = [...all];
+      next[index] = updated;
+      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
+    }),
+  insert: (entity: MemoryDreamPlanEntity): Promise<void> =>
+    enqueueWrite(async (): Promise<void> => {
+      const all: MemoryDreamPlanEntity[] =
+        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+      const index: number = all.findIndex(
+        (row: MemoryDreamPlanEntity): boolean => row.id === entity.id);
+      const next: MemoryDreamPlanEntity[] = [...all];
+      if (index >= 0) next[index] = entity;
+      else next.push(entity);
+      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
+    }),
+};
+
+// runMemoryDreamRun / 设置面手动触发的存储面 deps
+export const getMemoryDreamPlanStore = (): MemoryDreamPlanStore =>
+  createMemoryDreamPlanStore(dreamPlanDao);
+
+// MemoryDreamReviewNotifier 真实适配:与 deepread NotificationNotifier 同策略 —
+//   notificationManager 在 API 26 SDK 有模块冲突(TODO 接真实通知),
+//   当前 hilog 输出(文案逐字,行为非空)。
+class MemoryDreamNotifierImpl implements MemoryDreamReviewNotifier {
+  notifyRunning(): void {
+    hilog.info(DOMAIN, TAG, '[dream notifyRunning] %{public}s / %{public}s',
+      DREAM_NOTIFY_RUNNING_TITLE, DREAM_NOTIFY_RUNNING_TEXT);
+  }
+
+  notifyPendingReview(plan: MemoryDreamPlan): void {
+    hilog.info(DOMAIN, TAG, '[dream notifyPendingReview] %{public}s / %{public}s',
+      DREAM_NOTIFY_PENDING_TITLE, memoryDreamPlanSummaryText(plan));
+  }
+
+  notifyFailed(message: string): void {
+    // contentText=take(120) / bigText=take(500)(MemoryDreamNotifier.kt:64-65)
+    hilog.warn(DOMAIN, TAG, '[dream notifyFailed] %{public}s / %{public}s',
+      DREAM_NOTIFY_FAILED_TITLE, message.slice(0, 120));
+  }
+
+  cancel(): void {
+    hilog.info(DOMAIN, TAG, '[dream cancel] id=%{public}d', DREAM_NOTIFICATION_ID);
+  }
+}
+
+export const createMemoryDreamNotifier = (): MemoryDreamReviewNotifier =>
+  new MemoryDreamNotifierImpl();
