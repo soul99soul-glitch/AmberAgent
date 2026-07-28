@@ -43,6 +43,7 @@ import {
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
   loadSearchPrefs, SearchSettings, createSearchTools,
+  createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -53,6 +54,9 @@ import { EntryAbortController } from '../platform_impl/EntryAbortController.ets'
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
+import {
+  AgentRuntimeSnapshot, defaultAgentRuntimeSnapshot, loadAgentRuntimeSnapshot, systemLanguage,
+} from '../platform_impl/AgentRuntimePrefs.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -378,10 +382,21 @@ struct ChatPage {
   // D-071b:OCR 种子(providers/ocr_model/ocr_prompt 快照,aboutToAppear 加载)
   private ocrSeed: OcrSeed | null = null;
 
-  // D-071b:input transformers 链 — [template, ocr](Android ChatService.kt:169-177
-  //   OcrTransformer 居链尾,忠实);seed 未就绪当轮不带 OCR(同 D-070 搜索工具门模式)
+  // D-072:agent_runtime 快照(transform 调用时读 = Android settingsFlow.value 语义)
+  private agentRuntime: AgentRuntimeSnapshot = defaultAgentRuntimeSnapshot();
+
+  // D-071b/D-072:input transformers 链 — [timeReminder, template, ocr]
+  //   (Android ChatService.kt:169-177:TimeReminderTransformer 居首,OcrTransformer
+  //   居尾,忠实);seed 未就绪当轮不带 OCR(同 D-070 搜索工具门模式)
   private buildInputTransformers(rt: ChatRuntime): MessageTransformer[] {
-    const list: MessageTransformer[] = [createTemplateTransformer()];
+    const list: MessageTransformer[] = [
+      createTimeReminderTransformer({
+        enabled: (): boolean => this.agentRuntime.enableTimeReminder,
+        formatDayOfWeek: (ms: number): string => dayOfWeekFullName(systemLanguage(), ms),
+        formatLocalDateTime: javaLocalDateTimeString,
+      }),
+      createTemplateTransformer(),
+    ];
     if (this.ocrSeed !== null) {
       list.push(createEntryOcrTransformer(this.ocrSeed, rt.modelSupportsImageInput));
     }
@@ -399,6 +414,10 @@ struct ChatPage {
     // D-071b:OCR 种子加载(providers/ocr_model/ocr_prompt 快照)
     loadOcrSeed(getChatKvStore()).then((seed: OcrSeed): void => {
       this.ocrSeed = seed;
+    });
+    // D-072:agent_runtime 快照加载(enableTimeReminder 等;缺失/损坏 → 默认 false)
+    loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
+      this.agentRuntime = snap;
     });
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';

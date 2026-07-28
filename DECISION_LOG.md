@@ -790,3 +790,15 @@
   - **HAR 忠实修正**:performImageRecognition user part 改全新 image part(metadata: null,:113-117 新建 Image(part.url) 不带 metadata)。
   - entry 侧 .ets 不入 npm test 覆盖率(沿用 D-070 等先例;HAR 侧 31 测试已锁语义)。
 - **可逆性**:1414 测试全绿(deepread 603 + chat 811),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。PD-006 残余再减:剩余 = 设置面 OCR UI/生成守卫(P1)。
+
+## D-072（L0，2026-07-28）TimeReminderTransformer + agent_runtime gate — input 链残余首片
+
+- **背景**：ChatService.kt:169-177 input transformer 链残余(TimeReminder/PromptInjection/MiniAppPrompt/Placeholder/DocumentAsPrompt 未移植)首片。Android 锚点：TimeReminderTransformer.kt(全文 77 行)、PreferencesStore.kt:156(enableTimeReminder 默认 false)、PreferencesKeys.kt:77('agent_runtime')、AgentPrefs.kt:47-51(decode 失败回默认)。
+- **决定**：
+  - **time_reminder_transformer(HAR)**:全文忠实 — gate enabled() 读取时机 = transform 调用时(settingsFlow.value 语义);i>0 且 gap **严格大于** 3600s → current 前注入 UIMessage.user;文案模板逐字('<time_reminder>Current time: DOW, TIME (GAP since last message)</time_reminder>');formatGap 三档 + Kotlin Long 除法向零截断(3600 整落 '1 h' 档,分支边界测试锁定)。
+  - **偏差(登记)**:createdAt UTC+Z ISO 串(PD-004 延续;Android LocalDateTime+系统时区,同 tz 双减对 gap 抵消,DST 跨界除外)→ Date.parse 直减,解析失败 NaN 比较恒 false → 不注入(安全退化);时区/locale 格式化注入 entry(HAR 纯逻辑);TextStyle.FULL dayOfWeek 全语言 → zh/en 二档(entry i18n.System.getSystemLanguage(),非 zh 落英文)。
+  - **格式化助手(HAR 可测)**:javaLocalDateTimeString — java.time LocalDateTime.toString() 规则(秒毫秒均 0 省略秒/毫秒 0 保 'ss'/否则 'ss.SSS' 毫秒恒 3 位);DAY_OF_WEEK_FULL_EN/ZH + dayOfWeekFullName。
+  - **AgentRuntimePrefs.ets(entry 渐进)**:'agent_runtime' 键逐字;缺失/JSON 解析失败 → enableTimeReminder=false(AgentPrefs.kt:47-51 语义);其余 agentRuntime 字段 = P1 延续登记;systemLanguage() helper(i18n,失败回 'en')。
+  - **ChatPage 链序**:[timeReminder, template, ocr] — TimeReminder 居首/Ocr 居尾(ChatService.kt:170,176 忠实);agentRuntime 快照 aboutToAppear 加载。
+  - **TDD 8 测试**:gate 关原引用/3600 整不注入+3601 注入(文案逐字+user 角色)/首消息不注入+多处注入/formatGap 三档边界+截断/NaN 安全退化/完整 transform/javaLocalDateTimeString 三档+补零/dayOfWeek zh/en。
+- **可逆性**:1422 测试全绿(deepread 603 + chat 819),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。input 链残余:PromptInjection/MiniAppPrompt/Placeholder/DocumentAsPrompt = P1。

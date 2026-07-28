@@ -477,3 +477,13 @@ export { createVisionCache } from './chat/vision_cache.ts';
 export type { VisionCache, VisionCacheFileStore } from './chat/vision_cache.ts';
 export { createOcrTransformer, performImageRecognition } from './chat/ocr_transformer.ts';
 export type { OcrTransformerDeps } from './chat/ocr_transformer.ts';
+
+// ===== D-072:时间提醒注入(TimeReminderTransformer.kt 全文) =====
+export {
+  TIME_GAP_THRESHOLD_SECONDS, applyTimeReminder, createTimeReminderTransformer,
+  formatGap, javaLocalDateTimeString, dayOfWeekFullName,
+  DAY_OF_WEEK_FULL_EN, DAY_OF_WEEK_FULL_ZH,
+} from './chat/time_reminder_transformer.ts';
+export type {
+  TimeReminderDeps, TimeReminderFormatters,
+} from './chat/time_reminder_transformer.ts';
