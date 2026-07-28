@@ -64,6 +64,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         let request = try XCTUnwrap(spy.submittedRequests.first)
         XCTAssertEqual(spy.submittedRequests.count, 1)
         XCTAssertEqual(request.identifier, keepAlive.identifier(for: "run-1"))
+        XCTAssertEqual(spy.registeredIdentifiers, [request.identifier])
         XCTAssertEqual(request.title, "Amber 正在生成")
         XCTAssertEqual(request.subtitle, "GPT")
         // .fail 会在系统忙时当场判死；排队才有第二次机会。
@@ -227,34 +228,42 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
         keepAlive.begin("run-1", title: "t", subtitle: "s")
 
+        // Continued Processing 的通配符只负责 Info.plist 放行；运行时注册必须
+        // 使用本轮具体 identifier。注册失败后若仍 submit，真机会抛 Objective-C
+        // exception，Swift do/catch 接不住并直接 SIGABRT。
+        XCTAssertEqual(spy.registeredIdentifiers, [keepAlive.identifier(for: "run-1")])
+        XCTAssertTrue(spy.submittedRequests.isEmpty)
         // 注册被拒只丢长窗口，短腿还在，不能连租约一起丢。
         XCTAssertTrue(keepAlive.holdsLease("run-1"))
         XCTAssertEqual(spy.begunNames.count, 1)
     }
 
-    func testLaunchHandlerRegistersOnceWithWildcardIdentifier() {
+    func testEachConcreteIdentifierRegistersBeforeSubmission() {
         let spy = SystemSpy()
         let keepAlive = spy.makeKeepAlive()
 
-        keepAlive.configure()
         keepAlive.begin("run-1", title: "t", subtitle: "s")
         keepAlive.end("run-1")
         keepAlive.begin("run-2", title: "t", subtitle: "s")
 
-        // 注册只做一次，且必须是通配 id——具体那一轮的 id 提交时才生成。
-        XCTAssertEqual(spy.registeredIdentifiers.count, 1)
-        XCTAssertEqual(spy.registeredIdentifiers.first?.hasSuffix(".keepalive.*"), true)
-        // 提交每轮都要做，否则第二轮拿不到长窗口。
-        XCTAssertEqual(spy.submittedRequests.count, 2)
+        let expectedIdentifiers = [
+            keepAlive.identifier(for: "run-1"),
+            keepAlive.identifier(for: "run-2")
+        ]
+        XCTAssertEqual(spy.registeredIdentifiers, expectedIdentifiers)
+        XCTAssertEqual(spy.submittedRequests.map { $0.identifier }, expectedIdentifiers)
     }
 
-    func testBeginRegistersLaunchHandlerEvenIfConfigureWasMissed() {
+    func testReusingLeaseIdentifierDoesNotRegisterHandlerTwice() {
         let spy = SystemSpy()
         let keepAlive = spy.makeKeepAlive()
 
         keepAlive.begin("run-1", title: "t", subtitle: "s")
+        keepAlive.end("run-1")
+        keepAlive.begin("run-1", title: "t", subtitle: "s")
 
-        XCTAssertEqual(spy.registeredIdentifiers.count, 1)
+        XCTAssertEqual(spy.registeredIdentifiers, [keepAlive.identifier(for: "run-1")])
+        XCTAssertEqual(spy.submittedRequests.count, 2)
     }
 
     // MARK: - 诊断

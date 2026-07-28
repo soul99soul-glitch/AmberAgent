@@ -846,6 +846,7 @@ private extension NovelLiveModelAdapter {
         case .invalidBaseURL: "configuration_invalid_base_url"
         case .missingModel: "configuration_missing_model"
         case .missingProvider: "configuration_missing_provider"
+        case .providerDisabled: "configuration_provider_disabled"
         case .unsupportedProvider: "configuration_unsupported_provider"
         case .codexNotSignedIn: "configuration_codex_not_signed_in"
         case .grokNotSignedIn: "configuration_grok_not_signed_in"

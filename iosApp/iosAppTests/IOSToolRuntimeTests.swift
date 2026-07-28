@@ -1,8 +1,39 @@
 import XCTest
+import Shared
 @testable import iosApp
 
 @MainActor
 final class IOSToolRuntimeTests: XCTestCase {
+    func testTerminalToolFailureOutputIsStructuredAndRecognized() throws {
+        let output = ChatToolOutputFormatter.toolFailureJSON(
+            toolName: "search_web",
+            reason: "The generation ended before this tool could run."
+        )
+
+        let data = try XCTUnwrap(output.data(using: .utf8))
+        let payload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(payload["ok"] as? Bool, false)
+        XCTAssertEqual(payload["tool"] as? String, "search_web")
+        XCTAssertEqual(
+            ChatToolOutputFormatter.failureReason(
+                from: [UIMessagePart.Text(text: output, metadata: nil)]
+            ),
+            "The generation ended before this tool could run."
+        )
+        let tool = UIMessagePart.Tool(
+            toolCallId: "terminal-failure",
+            toolName: "search_web",
+            input: #"{"query":"swift"}"#,
+            output: [UIMessagePart.Text(text: output, metadata: nil)],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        XCTAssertEqual(ChatToolStepModel(tool: tool).state, .failed)
+    }
+
     func testFileReadWithoutGrantNeedsUserAction() {
         let runtime = IOSToolRuntime(
             permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),

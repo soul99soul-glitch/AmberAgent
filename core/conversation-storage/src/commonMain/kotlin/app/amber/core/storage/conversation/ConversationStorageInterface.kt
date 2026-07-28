@@ -70,6 +70,10 @@ interface ConversationStorageInterface {
      */
     @Throws(Throwable::class)
     suspend fun updateMetadata(id: Uuid, title: String? = null, isPinned: Boolean? = null)
+
+    /** 仅当当前标题仍等于 [expectedTitle] 时更新标题；比较与写入必须处于同一锁内。 */
+    @Throws(Throwable::class)
+    suspend fun updateTitleIfCurrentTitleMatches(id: Uuid, title: String, expectedTitle: String): Boolean
 }
 
 /** 从完整 [Conversation] 派生摘要。供 save / index 重建复用。 */

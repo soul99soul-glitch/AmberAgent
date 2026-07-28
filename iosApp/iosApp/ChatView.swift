@@ -117,6 +117,8 @@ struct ChatView: View {
     @State private var isCameraPresented = false
     @State private var isPhotoPickerPresented = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
+    @State private var fileImporterConversationId: String?
+    @State private var photoPickerConversationId: String?
     @State private var isInputFocused = false
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
@@ -287,6 +289,10 @@ struct ChatView: View {
         .onChange(of: conversationStore.backgroundContentRevision) { _, _ in
             handleBackgroundContentLanded()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .amberChatBackgroundJobDidTerminate)) { notification in
+            guard let event = notification.object as? IOSChatBackgroundJobTerminalEvent else { return }
+            handleBackgroundJobTerminated(event)
+        }
         .onChange(of: viewModel.messageUpdateSignal) { _, signal in
             handleMessageUpdateSignal(signal)
         }
@@ -309,7 +315,7 @@ struct ChatView: View {
         // 绑定 store（@Environment 在 init 里不可用，故在 onAppear 注入）。
         viewModel.conversationStore = conversationStore
         viewportState = ChatViewportState()
-        if !viewModel.isGenerationActiveForCurrentConversation {
+        if !viewModel.isForegroundGenerationActiveForCurrentConversation {
             viewModel.reloadFromStore(reason: .initialLoad)
         }
         refreshChatListSummary(resetTitleSeed: true)
@@ -322,26 +328,32 @@ struct ChatView: View {
     }
 
     private func handleConversationSwitch() {
-        if viewModel.isGenerationActiveForCurrentConversation {
+        if viewModel.isForegroundGenerationActiveForCurrentConversation {
             refreshChatListSummary(resetTitleSeed: true)
             return
-        }
-        if viewModel.isGenerationActive, !viewModel.handoffGenerationToBackgroundIfNeeded() {
-            viewModel.cancelGeneration()
         }
         viewModel.reloadFromStore(reason: .conversationSwitch)
         refreshChatListSummary(resetTitleSeed: true)
     }
 
+    private func handleBackgroundJobTerminated(_ event: IOSChatBackgroundJobTerminalEvent) {
+        guard let currentConversationId = currentConversationIdString,
+              event.conversationId == currentConversationId else { return }
+        handleBackgroundContentLanded(forceReload: true)
+    }
+
     /// 后台生成/工具回填落盘后的定向上屏:三重门控,绝不打扰进行中的前台流式,
     /// 也绝不因别的会话的后台完成而重灌当前会话。
-    private func handleBackgroundContentLanded() {
+    private func handleBackgroundContentLanded(forceReload: Bool = false) {
         guard let currentId = conversationStore.currentConversation?.id else { return }
         let idString = String(describing: currentId)
-        guard conversationStore.pendingBackgroundContentConversationIds.contains(idString) else { return }
+        let hasPendingContent = conversationStore.pendingBackgroundContentConversationIds.contains(idString)
+        guard hasPendingContent || forceReload else { return }
         // 前台生成中不动 messages,也**不消费**——收尾事件会带着未消费的 pending 再进来。
         guard !viewModel.isGenerationActive, !viewModel.isLoading else { return }
-        conversationStore.consumeBackgroundContentNotification(for: idString)
+        if hasPendingContent {
+            conversationStore.consumeBackgroundContentNotification(for: idString)
+        }
         // .branchChange:语义=消息树被外部改写;affectsViewport=false 不发滚动命令;
         // 且会清 contentHashCache——后台工具回填正是「同 id 原地变更」路径,必须清。
         viewModel.reloadFromStore(reason: .branchChange)
@@ -419,6 +431,9 @@ struct ChatView: View {
     }
 
     private func handleSelectedFileImport(_ result: Result<[URL], Error>) {
+        let selectionConversationId = fileImporterConversationId
+        fileImporterConversationId = nil
+        guard selectionConversationId == currentConversationIdString else { return }
         guard let documentStore else {
             viewModel.selectedFileContextError = "文件选择器未连接。"
             return
@@ -440,7 +455,10 @@ struct ChatView: View {
                 } catch {
                     workspaceImportError = error.localizedDescription
                 }
-                await viewModel.attachSelectedFilePreviewToNextMessage()
+                guard selectionConversationId == currentConversationIdString else { return }
+                await viewModel.attachSelectedFilePreviewToNextMessage(
+                    expectedConversationId: selectionConversationId
+                )
                 if let workspaceImportError, viewModel.selectedFileContextError == nil {
                     viewModel.selectedFileContextError = "已附加到本条消息，但未保存到 Workspace：\(workspaceImportError)"
                 }
@@ -455,11 +473,22 @@ struct ChatView: View {
     // MARK: - Attachment panel actions
 
     private func presentFileImporter() {
+        let selectionConversationId = currentConversationIdString
         if documentStore != nil {
+            fileImporterConversationId = selectionConversationId
             isImportingSelectedFile = true
         } else {
-            Task { await viewModel.attachSelectedFilePreviewToNextMessage() }
+            Task {
+                await viewModel.attachSelectedFilePreviewToNextMessage(
+                    expectedConversationId: selectionConversationId
+                )
+            }
         }
+    }
+
+    private func presentPhotosPicker() {
+        photoPickerConversationId = currentConversationIdString
+        isPhotoPickerPresented = true
     }
 
     private func presentCamera() {
@@ -471,18 +500,43 @@ struct ChatView: View {
     }
 
     private func handlePhotoPickerSelection(_ items: [PhotosPickerItem]) {
+        let selectionConversationId = photoPickerConversationId
+        photoPickerConversationId = nil
         guard !items.isEmpty else { return }
         Task {
+            var failedImageCount = 0
             for item in items {
-                guard let data = try? await item.loadTransferable(type: Data.self),
-                      let image = UIImage(data: data),
-                      let encoded = ChatImageEncoder.encode(image) else { continue }
-                await MainActor.run {
-                    viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
+                let encoded: (dataUrl: String, previewData: Data)?
+                do {
+                    if let data = try await item.loadTransferable(type: Data.self),
+                       let image = UIImage(data: data) {
+                        encoded = ChatImageEncoder.encode(image)
+                    } else {
+                        encoded = nil
+                    }
+                } catch {
+                    encoded = nil
                 }
+                guard selectionConversationId == currentConversationIdString else {
+                    photoPickerItems = []
+                    return
+                }
+                guard let encoded else {
+                    failedImageCount += 1
+                    continue
+                }
+                viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
             }
-            await MainActor.run { photoPickerItems = [] }
+            photoPickerItems = []
+            guard selectionConversationId == currentConversationIdString else { return }
+            if failedImageCount > 0 {
+                viewModel.selectedFileContextError = "有 \(failedImageCount) 张图片处理失败。"
+            }
         }
+    }
+
+    private var currentConversationIdString: String? {
+        viewModel.currentConversationId.map { String(describing: $0) }
     }
 
     /// Camera path (already on the main thread): compress + encode and attach.
@@ -500,7 +554,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
             attachmentRow(title: "拍照", icon: "camera") { presentCamera() }
             attachmentDivider
-            attachmentRow(title: "照片", icon: "photo.on.rectangle") { isPhotoPickerPresented = true }
+            attachmentRow(title: "照片", icon: "photo.on.rectangle") { presentPhotosPicker() }
             attachmentDivider
             attachmentRow(title: "文件", icon: "doc") { presentFileImporter() }
         }
@@ -1050,6 +1104,8 @@ struct ChatView: View {
                                         .font(.system(size: 16))
                                         .foregroundStyle(.white, .black.opacity(0.45))
                                         .padding(3)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -1089,6 +1145,8 @@ struct ChatView: View {
                             viewModel.clearPendingSelectedFilePreview()
                         } label: {
                             Image(systemName: "xmark.circle.fill")
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -1165,6 +1223,8 @@ struct ChatView: View {
                                     .contentShape(Circle())
                                     .rotationEffect(.degrees(isAttachExpanded ? 45 : 0))
                                     .contentTransition(.symbolEffect(.replace.downUp))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.88, haptic: .lightImpact))
                             .disabled(
@@ -1208,12 +1268,16 @@ struct ChatView: View {
                         .composerDockGlass(cornerRadius: 27)
 
                         ComposerDockSendButton(
-                            isLoading: viewModel.isLoading,
+                            isLoading: isCurrentConversationRunActive || viewModel.isRecognizingImages,
                             sendEnabled: sendEnabled,
                             diameter: 54,
                             onSend: sendComposerMessage,
                             onStop: {
-                                viewModel.cancelGeneration()
+                                if viewModel.isRecognizingImages {
+                                    viewModel.cancelVisionRecognition()
+                                } else {
+                                    viewModel.cancelGeneration()
+                                }
                             }
                         )
                     }
@@ -1286,11 +1350,7 @@ struct ChatView: View {
 
     private func sendEnabled(for text: String) -> Bool {
         _ = sharedSettings.revision
-        return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !viewModel.isGenerationActive &&
-            !viewModel.isAttachingSelectedFile &&
-            !hasPendingToolApproval &&
-            configurationIssue == nil
+        return viewModel.composerSendBlockReason(for: text) == nil
     }
 
     private func sendComposerMessage() {
@@ -1338,6 +1398,8 @@ struct ChatView: View {
             "先登录 Codex"
         case .some(.grokNotSignedIn):
             "先登录 Grok"
+        case .some(.providerDisabled):
+            "先启用服务商"
         case .none:
             "发消息给 Amber..."
         }
@@ -1352,6 +1414,12 @@ struct ChatView: View {
             viewModel.pendingMcpApproval != nil ||
             viewModel.pendingCouncilApproval != nil ||
             viewModel.pendingAskUser != nil
+    }
+
+    private var isCurrentConversationRunActive: Bool {
+        viewModel.isGenerationActiveForCurrentConversation ||
+            hasPendingToolApproval ||
+            viewModel.isLoading
     }
 
     private var showsComposerMeta: Bool {
@@ -1472,7 +1540,8 @@ struct ChatView: View {
         case .some(.missingModel):
             openModelDefaults()
         case .some(.missingAPIKey), .some(.invalidBaseURL), .some(.missingProvider),
-             .some(.unsupportedProvider), .some(.codexNotSignedIn), .some(.grokNotSignedIn), .none:
+             .some(.unsupportedProvider), .some(.codexNotSignedIn), .some(.grokNotSignedIn),
+             .some(.providerDisabled), .none:
             router.navigate(to: .providers)
         }
     }

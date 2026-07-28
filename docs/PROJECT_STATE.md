@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-27
+Last updated: 2026-07-28
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -21,6 +21,22 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-28 Chat review 复核与状态闭环修复
+
+- 按默认生产路径 `ChatView -> ChatSwiftUIMessageList` 复核外部 review 后，只修复可由测试或真实持久化失败证明的问题：发送前统一校验 provider/model/base URL/API key/附件与 OCR 状态，`sendMessage()` 和 Watch 回传真实成功结果；前台、后台、审批、取消、会话切换和 terminal save 由各自 run/conversation owner 收口，不再让旧快照或后台 job 串入当前会话。标题与后台合并使用 compare-and-set，suggestion/OCR/PhotosPicker 结果绑定启动它们的会话。
+- 工具审批在释放 keepalive 前先落 durable pause snapshot，恢复异步工具时重新取得 keepalive；取消会解除 continuation，不再悬挂。provider 输出限制与 unresolved tool failure 变为结构化终态；本地 generation error 由 KMP `localGenerationErrorTextPart` 构造合法 `JsonObject`，修复了 Swift Dictionary metadata 导致的真实 conversation encode 失败，并且不会再上传给 provider。
+- UI 只补真实可达性与所有权缺口：当前后台/审批 run 可 Stop，后台 terminal 强制刷新解锁输入；data URL/多图 loading、tool detail identity、Markdown 开关与 URL policy、Reduce Motion、44pt target、Dynamic Type 和 disabled-provider 状态均有生产路径 canary。流式追底最终保留一个 measured-growth revision drain；无 content-type 分支、debt 阈值、offset 补偿或第二滚动状态机。
+- 最终验证：410 项功能/状态 suite（含 2 个既有 skip）通过；iPhone 17e 上表格 display-link、7.4KB prose、24KB prose 与结构 canary 同批通过。完整 411 项批次为 408 passed / 2 skipped / 1 fixture failed，唯一失败是共享 test host 中 `testLongProseMeasuredGrowthDoesNotPublishSeveralLinesAtOnce` 未制造任何高度（`totalGrowth=0`），该 fixture 在独立 runner 原样通过；未放宽断言。`git diff --check` 与本轮 32 个 Swift 文件语法解析通过。
+- Debug 真机包以命令行临时 Team `89QRFX9548` override 构建，未改工程签名配置；`codesign --verify --deep --strict` 通过，bundle `app.amber.ios` 1.0 (1)，主二进制 SHA-256 `25f0db830c921154a4340d6eb75f98fe90551dfaff600160f14f7a9a3db9f369`。02:40 已覆盖安装到 iPhone Air / iOS 27.0，设备端应用记录确认落盘；自动启动仅被锁屏拒绝，尚未把真机发送、真实 provider、WatchConnectivity 或 120Hz 手感记为通过。
+- 后续三路 subagent 对调用链与终态所有权再审后，精确收口外部 review 的 8 项：后台 handoff 不再重复执行工具；截断重生成不再把本地 output-limit notice 当候选且保存失败不报成功；审批/`ask_user` 可从 durable `awaiting_permission` 冷启动恢复；后台取消补齐 unresolved tool；Files/iCloud 与 Photos 结果绑定 picker 启动会话；标题改为存储层原子 CAS；标题/建议/OCR 合并 Assistant headers/body；OCR 可直接 Stop 且迟到结果不能串会话。移除了审查过程中暴露的未消费 revision ledger、伪 OCR test hook、重复 failure JSON wrapper，没有新增第二状态机或通用重试层。
+- 最终增量门禁：受影响 9 类 Swift suite 234/234；残余修正后的 4 类 suite 138/138；后台/恢复末轮 66/66；conversation-storage JVM 测试、KMP iOS 编译与无签名 generic iOS arm64 整包构建通过。默认 Chat 功能 replay 通过；`testPerfGrowingTableStreamingKeepsDisplayLinkResponsive` 当前独立复跑仍为 p95 `43.7803ms > 40ms`（另一次 `43.4206ms`），属于未触碰的流式表格性能缺口，未放宽阈值。本次八项最终包尚未装机：主 App provisioning profile 已于 2026-07-19 过期，Xcode 当前无 Team `89QRFX9548` 登录账号，iPhone Air 也显示 `unavailable`；此前 02:40 已安装的是本轮最终残余修正前的包。
+
+### 2026-07-27 Chat 发送 SIGABRT：Continued Processing 注册修复
+
+- 真机 iPhone Air / iOS 27.0 beta 在 22:39:54、22:40:07 连续产生同栈崩溃：`ComposerDockSendButton → ChatGenerationCoordinator.start → BackgroundGenerationKeepAlive.begin → BGTaskScheduler._handleSubmissionWithoutRegistrationForTaskRequest → SIGABRT`。真机控制台与带有效 `BGTaskSchedulerPermittedIdentifiers` 的 iOS 26.5 Simulator 均确认启动期注册 `app.amber.ios.keepalive.*` 返回 false；根因是把 Info.plist 的通配许可模式误当成运行时 handler identifier，随后仍提交具体 run identifier，Objective-C assertion 无法由 Swift `do/catch` 捕获。
+- 最小修复只落在执行权所有者：删除 `AppShell` 的启动期通配注册；每轮在 submit 前注册同一个具体 identifier，注册失败时不 submit、仍保留既有 UIKit 约 30 秒短保活；进程内记录已成功注册的具体 identifier，供议会固定 `council` lease 与 Chat 审批恢复复用，避免第二次注册被系统终止。未改 provider、消息、输入框、持久化或新增重试/状态机。
+- 红测试先同时命中「注册了通配符」与「注册失败仍 submit」两处断言，再转绿。`BackgroundGenerationKeepAliveTests` 16 条 + `IOSChatBackgroundSuspensionTests` 9 条在 iPhone 17 Pro / iOS 26.5 Simulator **25 passed / 0 failed**（`Test-iosApp-2026.07.27_23-14-28-+0800.xcresult`）；最新测试构建启动日志不再出现通配注册拒绝，`git diff --check` 通过。真机 Debug 包以 Team `89QRFX9548` 全新 DerivedData 构建，`codesign --verify --deep --strict` 通过，包内保留 `processing` 与 `app.amber.ios.keepalive.*`，23:26 覆盖安装到 iPhone Air 并成功启动；主进程 PID 19778 与 Activity Widget 持续存活，安装后未新增 `iosApp` 崩溃报告。模拟器真实发送因无 API Key 且 CuaDriver 在 provider 导航中丢失 Simulator 窗口未完成；设备端是否实际点击发送无法从外部独立确认，Continued Processing 的系统接管仍待一次可观察的真机生成验证。
 
 ### 2026-07-27 系统灵动岛收紧宽度、接入 Chat 实时状态
 

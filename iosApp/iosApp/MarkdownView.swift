@@ -622,12 +622,7 @@ struct AmberMarkdownView: View {
     }
 
     private func safeExternalURL(from raw: String) -> URL? {
-        guard let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else {
-            return nil
-        }
-        return url
+        ChatMarkdownOpenURLPolicy.url(from: raw)
     }
 
     /// Build a plain AttributedString by concatenating inline children.

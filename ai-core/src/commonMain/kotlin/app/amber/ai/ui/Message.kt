@@ -8,9 +8,11 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.TokenUsage
 import app.amber.ai.provider.Model
@@ -21,6 +23,25 @@ import kotlin.uuid.Uuid
 
 const val STREAM_TOOL_INDEX_METADATA_KEY = "stream_tool_index"
 const val RESPONSES_ITEM_ID_METADATA_KEY = "responses_item_id"
+const val LOCAL_GENERATION_ERROR_METADATA_KEY = "amber_local_kind"
+const val LOCAL_GENERATION_ERROR_METADATA_VALUE = "generation_error"
+const val LOCAL_OUTPUT_LIMIT_NOTICE_METADATA_VALUE = "output_limit_notice"
+
+fun localGenerationErrorTextPart(text: String): UIMessagePart.Text =
+    UIMessagePart.Text(
+        text = text,
+        metadata = buildJsonObject {
+            put(LOCAL_GENERATION_ERROR_METADATA_KEY, LOCAL_GENERATION_ERROR_METADATA_VALUE)
+        }
+    )
+
+fun localOutputLimitNoticeTextPart(text: String): UIMessagePart.Text =
+    UIMessagePart.Text(
+        text = text,
+        metadata = buildJsonObject {
+            put(LOCAL_GENERATION_ERROR_METADATA_KEY, LOCAL_OUTPUT_LIMIT_NOTICE_METADATA_VALUE)
+        }
+    )
 
 // 公共消息抽象, 具体的Provider实现会转换为API接口需要的DTO
 //

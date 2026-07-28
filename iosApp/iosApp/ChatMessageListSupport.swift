@@ -77,6 +77,7 @@ struct ChatUserBubble: View {
     let text: String
     @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
     @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
+    @ScaledMetric(relativeTo: .body) private var scaledBodyPointSize: CGFloat = 17
 
     private var boundedScale: Double {
         min(max(fontScale, 0.88), 1.25)
@@ -88,7 +89,7 @@ struct ChatUserBubble: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 17 * boundedScale, design: selectedFont.design))
+            .font(.system(size: scaledBodyPointSize * boundedScale, design: selectedFont.design))
             .foregroundStyle(.white)
             .lineSpacing(3 * boundedScale)
             // cell self-sizing 测量会传入受限的垂直 proposal,普通 Text 会按 proposal
@@ -117,6 +118,7 @@ struct ChatAssistantText<Content: View>: View {
     let content: Content
     @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
     @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
+    @ScaledMetric(relativeTo: .body) private var scaledBodyPointSize: CGFloat = 17
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -132,7 +134,7 @@ struct ChatAssistantText<Content: View>: View {
 
     var body: some View {
         content
-            .font(.system(size: 17 * boundedScale, design: selectedFont.design))
+            .font(.system(size: scaledBodyPointSize * boundedScale, design: selectedFont.design))
             .foregroundStyle(AmberTheme.foreground)
             .lineSpacing(4 * boundedScale)
             .fixedSize(horizontal: false, vertical: true)
@@ -265,17 +267,29 @@ struct ContextCompactTimelineMarker: View {
 }
 
 struct TypingDots: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { timeline in
-            HStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { index in
-                    Circle()
-                        .fill(AmberTheme.muted.opacity(dotOpacity(index: index, date: timeline.date)))
-                        .frame(width: 4, height: 4)
+        Group {
+            if reduceMotion {
+                dots(at: Date(timeIntervalSinceReferenceDate: 0))
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { timeline in
+                    dots(at: timeline.date)
                 }
             }
         }
         .frame(width: 20, height: 8)
+    }
+
+    private func dots(at date: Date) -> some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(AmberTheme.muted.opacity(reduceMotion ? 0.55 : dotOpacity(index: index, date: date)))
+                    .frame(width: 4, height: 4)
+            }
+        }
     }
 
     private func dotOpacity(index: Int, date: Date) -> Double {

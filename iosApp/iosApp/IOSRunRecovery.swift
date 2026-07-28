@@ -1,20 +1,55 @@
 import Foundation
 import Shared
 
-/// Startup recovery sweep for interrupted agent runs (truth_matrix `recover`
-/// column). On launch, any run left in a non-terminal state ("running" /
-/// "awaiting_permission") by a hard kill is reclassified to "interrupted" so the
-/// UI can surface it honestly (resume / re-show pending cards) instead of
-/// silently losing it. P5 scope; shipped as an independent module that can be
-/// disabled wholesale (spec rollback note).
-///
-/// This is the read+reclassify pass only. It does NOT auto-resume execution
-/// (resume decisions are surfaced to the user) and does NOT re-run tools
-/// (idempotency is handled by the checkpoint layer in P5 proper).
+struct IOSPendingApprovalRecoveryDescriptor: Equatable, Sendable {
+    let runId: String
+    let conversationId: String
+    let toolCallId: String
+}
+
+/// Startup recovery for interrupted agent runs. Pending approvals are identified
+/// by their durable tool owner and terminated explicitly; tools are never replayed.
 enum IOSRunRecovery {
-    /// Reclassifies all non-terminal runs to "interrupted". Call once at app
-    /// launch (after the database is available). Returns the count reclassified.
-    /// Reason is recorded for the UI to display.
+    static func recoverPendingApprovalDescriptors(
+        excludingRunIds: Set<String> = []
+    ) async -> [IOSPendingApprovalRecoveryDescriptor] {
+        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
+        let descriptors = await withCheckedContinuation {
+            (continuation: CheckedContinuation<[IOSPendingApprovalRecoveryDescriptor], Never>) in
+            dao.listAwaitingPermission { result, _ in
+                let descriptors = (result ?? []).compactMap { run -> IOSPendingApprovalRecoveryDescriptor? in
+                    guard !excludingRunIds.contains(run.runId),
+                          let conversationId = run.conversationId,
+                          let snapshotRef = run.inputSnapshotRef,
+                          snapshotRef.hasPrefix("tool_call:") else { return nil }
+                    let toolCallId = String(snapshotRef.dropFirst("tool_call:".count))
+                    guard !toolCallId.isEmpty else { return nil }
+                    return IOSPendingApprovalRecoveryDescriptor(
+                        runId: run.runId,
+                        conversationId: conversationId,
+                        toolCallId: toolCallId
+                    )
+                }
+                continuation.resume(returning: descriptors)
+            }
+        }
+        return descriptors
+    }
+
+    static func completePendingApprovalRecovery(
+        runId: String,
+        reason: String = "process_killed",
+        now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+    ) async {
+        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            dao.markInterrupted(runId: runId, reason: reason, now: now) { _ in
+                continuation.resume()
+            }
+        }
+    }
+
+    /// Reclassifies non-approval unfinished runs to "interrupted".
     @discardableResult
     static func recoverInterruptedRuns(
         excludingRunIds: Set<String> = [],

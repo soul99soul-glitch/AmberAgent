@@ -5,6 +5,118 @@ import WebKit
 
 @MainActor
 final class ChatViewModelSelectedFileContextTests: XCTestCase {
+    func testComposerAllowsImageOnlyDraft() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.pendingImages = [
+            ChatViewModel.PendingChatImage(
+                dataUrl: "data:image/png;base64,QUJD",
+                previewData: Data("preview".utf8)
+            )
+        ]
+
+        XCTAssertNil(viewModel.composerSendBlockReason(for: "   "))
+    }
+
+    func testComposerBlocksSendWhileVisionRecognitionIsRunning() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.inputText = "do not append yet"
+        viewModel.isRecognizingImages = true
+
+        XCTAssertEqual(viewModel.composerSendBlockReason(for: viewModel.inputText), .recognizingImages)
+
+        viewModel.sendMessage()
+
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertEqual(viewModel.inputText, "do not append yet")
+    }
+
+    func testOlderSuggestionRequestCannotOverwriteNewerResult() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        let older = viewModel.beginSuggestionRequestForTesting()
+        let newer = viewModel.beginSuggestionRequestForTesting()
+
+        viewModel.applySuggestionsForTesting(
+            ["stale suggestion"],
+            requestToken: older,
+            conversationId: nil
+        )
+        XCTAssertTrue(viewModel.chatSuggestions.isEmpty)
+
+        viewModel.applySuggestionsForTesting(
+            ["current suggestion"],
+            requestToken: newer,
+            conversationId: nil
+        )
+        XCTAssertEqual(viewModel.chatSuggestions, ["current suggestion"])
+    }
+
+    func testConversationChangeClearsUnsavedTextAndImages() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.inputText = "draft from previous conversation"
+        viewModel.pendingImages = [
+            ChatViewModel.PendingChatImage(
+                dataUrl: "data:image/png;base64,QUJD",
+                previewData: Data("preview".utf8)
+            )
+        ]
+
+        XCTAssertTrue(viewModel.prepareForConversationChange(to: nil))
+
+        XCTAssertTrue(viewModel.inputText.isEmpty)
+        XCTAssertTrue(viewModel.pendingImages.isEmpty)
+    }
+
+    func testStopCancelsRealVisionRecognitionAndRejectsLateResult() async throws {
+        let provider = BlockingVisionProvider()
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: visionFallbackSettings(),
+            autoGenerateResponses: true,
+            auxiliaryTextProvider: provider
+        )
+        viewModel.inputText = "read this image"
+        viewModel.addPendingImage(
+            dataUrl: "data:image/png;base64,QUJD",
+            previewData: Data("preview".utf8)
+        )
+
+        XCTAssertTrue(viewModel.sendMessage())
+        for _ in 0..<100 where !provider.hasStarted {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertTrue(provider.hasStarted)
+        XCTAssertTrue(viewModel.isRecognizingImages)
+
+        viewModel.cancelVisionRecognition()
+
+        XCTAssertTrue(provider.wasCancelled)
+        XCTAssertFalse(viewModel.isRecognizingImages)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertEqual(viewModel.selectedFileContextError, "图片识别已取消，请重新发送图片")
+        XCTAssertEqual(viewModel.messages.count, 1)
+        XCTAssertEqual(
+            viewModel.messages[0].parts.compactMap { ($0 as? UIMessagePart.Image)?.url },
+            ["data:image/png;base64,QUJD"]
+        )
+
+        provider.finish(text: "late OCR result")
+        try await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertEqual(viewModel.messages.count, 1)
+    }
+
     func testSendWithoutPendingPreviewKeepsUserTextPlain() {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -129,6 +241,31 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(prepared.filter { $0.role == MessageRole.user }.map { $0.toText() }, ["需要工具"])
     }
 
+    func testPreparedUploadExcludesLocalGenerationErrorBubble() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        let errorMessage = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [MessageKt.localGenerationErrorTextPart(text: "local provider failure")],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+
+        let prepared = viewModel.preparedUploadMessagesForTesting([
+            UIMessage.companion.user(prompt: "retry after failure"),
+            errorMessage,
+        ])
+
+        XCTAssertFalse(prepared.contains { $0.toText().contains("local provider failure") })
+    }
+
     func testBranchMutationsAreRejectedWhileVisionRecognitionIsPending() async throws {
         let baseDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ChatViewModelVisionRecognitionBranchGuard-")
@@ -196,7 +333,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         ))
     }
 
-    func testVisionRecognitionFailureIsIgnoredAfterConversationChanges() {
+    func testVisionRecognitionFailureIsIgnoredAfterConversationChanges() async {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             autoGenerateResponses: false
@@ -205,7 +342,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let userMessageId = ChatMessageProjector.messageId(for: userMessage)
         viewModel.messages = []
 
-        viewModel.applyVisionRecognitionFailureForTesting(
+        await viewModel.applyVisionRecognitionFailureForTesting(
             message: "OCR failed",
             conversationId: nil,
             userMessageId: userMessageId
@@ -235,7 +372,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         viewModel.conversationStore = store
         viewModel.reloadFromStore()
 
-        viewModel.applyVisionRecognitionFailureForTesting(
+        await viewModel.applyVisionRecognitionFailureForTesting(
             message: "OCR failed",
             conversationId: firstConversationId,
             userMessageId: userMessageId
@@ -245,7 +382,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         await store.selectConversation(id: firstConversationId)
         viewModel.reloadFromStore()
 
-        XCTAssertEqual(viewModel.selectedFileContextError, "OCR failed")
+        XCTAssertTrue(store.currentMessages.last?.toText().contains("OCR failed") == true)
     }
 
     func testVisionRecognitionSuccessClearsTransientPendingPrompt() {
@@ -310,6 +447,41 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertTrue(content.contains("状态：完整读取"))
         XCTAssertTrue(content.contains("Selected file body"))
         XCTAssertNil(viewModel.pendingSelectedFilePreview)
+    }
+
+    func testSelectedFileResultCannotAttachToAConversationOpenedAfterPickerPresentation() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatSelectedFileOwner-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let documentStore = DocumentAccessStore()
+        _ = documentStore.registerPickedFile(try makeTempFile(text: "Conversation A file"))
+        let executor = IOSLocalToolExecutor(
+            permissionStore: IOSPermissionStore(userDefaults: isolatedDefaults()),
+            documentStore: documentStore
+        )
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let pickerOwner = String(describing: try XCTUnwrap(store.currentConversation?.id))
+        await store.newConversation()
+
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            localToolExecutor: executor,
+            autoGenerateResponses: false
+        )
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+
+        await viewModel.attachSelectedFilePreviewToNextMessage(
+            expectedConversationId: pickerOwner
+        )
+
+        XCTAssertNil(viewModel.pendingSelectedFilePreview)
+        XCTAssertNil(viewModel.selectedFileContextError)
+        XCTAssertFalse(viewModel.isAttachingSelectedFile)
     }
 
     func testConversationChangeDiscardsSelectedFileContext() async throws {
@@ -1191,12 +1363,12 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(outputText, "tool disabled")
     }
 
-    func testPendingSearchApprovalKeepsCoordinatorActive() throws {
+    func testPendingSearchApprovalKeepsCoordinatorActive() async throws {
         let harness = makeGenerationCoordinatorHarness(
             transport: ChatSearchTransport(responses: [])
         )
 
-        harness.coordinator.installPendingSearchApprovalForTesting(
+        await harness.coordinator.installPendingSearchApprovalForTesting(
             pending: harness.pending,
             request: harness.request
         )
@@ -1204,23 +1376,142 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertTrue(harness.coordinator.isRunning)
         XCTAssertFalse(harness.state.isLoading)
         XCTAssertNotNil(harness.state.pendingSearchApproval)
+        XCTAssertEqual(harness.state.markedApprovalToolIds, ["search-approval-test"])
+        XCTAssertEqual(
+            harness.state.persistenceEvents,
+            ["capture-baseline", "mark-awaiting", "persist-snapshot"]
+        )
+    }
+
+    func testBackgroundCancellationClosesPendingToolWithoutLosingForegroundMessage() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BackgroundCancellationToolClosure-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let baseMessages = harness.state.messages
+        await store.saveCurrent(messages: baseMessages)
+        let foregroundMessage = UIMessage.companion.user(prompt: "foreground message")
+        await store.saveCurrent(messages: baseMessages + [foregroundMessage])
+
+        let cancelledMessages = harness.coordinator.failingPendingToolCallMessagesForTesting(
+            outputText: ChatToolOutputFormatter.toolFailureJSON(
+                toolName: "search_web",
+                reason: "User cancelled.",
+                denied: true
+            ),
+            in: baseMessages
+        )
+        let didSave = await store.saveBackgroundToolCompletion(
+            baseMessages: baseMessages,
+            completedMessages: cancelledMessages,
+            to: conversationId
+        )
+        XCTAssertTrue(didSave)
+
+        XCTAssertEqual(store.currentMessages.last?.toText(), "foreground message")
+        let tool = try XCTUnwrap(
+            store.currentMessages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        let payload = try jsonObject(
+            tool.output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+        )
+        XCTAssertEqual(payload["denied"] as? Bool, true)
+        XCTAssertEqual(payload["reason"] as? String, "User cancelled.")
+    }
+
+    func testRecoveredApprovalTerminatesOnlyTheRecordedConversationAndTool() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecoveredChatApproval-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        func messages(toolCallId: String) -> [UIMessage] {
+            let tool = UIMessagePart.Tool(
+                toolCallId: toolCallId,
+                toolName: "search_web",
+                input: #"{"query":"amber"}"#,
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            )
+            let seed = UIMessage.companion.assistant(prompt: "")
+            let assistant = UIMessage(
+                id: seed.id,
+                role: seed.role,
+                parts: [tool],
+                annotations: seed.annotations,
+                createdAt: seed.createdAt,
+                finishedAt: seed.finishedAt,
+                modelId: seed.modelId,
+                usage: seed.usage,
+                translation: seed.translation
+            )
+            return [UIMessage.companion.user(prompt: "search"), assistant]
+        }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let firstConversationId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: messages(toolCallId: "other-tool"))
+        await store.newConversation()
+        let targetConversationId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: messages(toolCallId: "target-tool"))
+
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        await viewModel.terminateRecoveredPendingApprovals([
+            IOSPendingApprovalRecoveryDescriptor(
+                runId: "recovered-run",
+                conversationId: String(describing: targetConversationId),
+                toolCallId: "target-tool"
+            )
+        ])
+
+        await store.selectConversation(id: firstConversationId)
+        let firstTool = try XCTUnwrap(
+            store.currentMessages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        XCTAssertTrue(firstTool.output.isEmpty)
+
+        await store.selectConversation(id: targetConversationId)
+        let targetTool = try XCTUnwrap(
+            store.currentMessages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        let output = targetTool.output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+        let payload = try jsonObject(output)
+        XCTAssertEqual(payload["cancelled"] as? Bool, true)
+        XCTAssertEqual(payload["reason"] as? String, "App restarted while waiting for confirmation.")
+        XCTAssertTrue(store.currentMessages.last?.toText().contains("App 重启") == true)
     }
 
     func testTerminalRevisionPublishesAfterCoordinatorBecomesInactive() async {
         let harness = makeGenerationCoordinatorHarness(
             transport: ChatSearchTransport(responses: [])
         )
-        harness.coordinator.installPendingSearchApprovalForTesting(
+        await harness.coordinator.installPendingSearchApprovalForTesting(
             pending: harness.pending,
             request: harness.request
         )
+        let terminalRevision = expectation(description: "terminal revision published")
         var wasRunningAtTerminal: Bool?
         harness.state.onBumpMessageRevision = { [weak coordinator = harness.coordinator] reason in
             guard reason == .generationCompleted else { return }
             wasRunningAtTerminal = coordinator?.isRunning
+            terminalRevision.fulfill()
         }
 
         await harness.coordinator.denyPendingSearchTool()
+        await fulfillment(of: [terminalRevision], timeout: 2)
 
         XCTAssertEqual(wasRunningAtTerminal, false)
         XCTAssertFalse(harness.coordinator.isRunning)
@@ -1234,7 +1525,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         </body></html>
         """))
         let harness = makeGenerationCoordinatorHarness(transport: transport)
-        harness.coordinator.installPendingSearchApprovalForTesting(
+        await harness.coordinator.installPendingSearchApprovalForTesting(
             pending: harness.pending,
             request: harness.request
         )
@@ -1252,7 +1543,13 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let finishedTool = try XCTUnwrap(
             harness.state.messages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
         )
-        XCTAssertTrue(finishedTool.output.isEmpty)
+        let outputText = finishedTool.output
+            .compactMap { ($0 as? UIMessagePart.Text)?.text }
+            .joined()
+        XCTAssertFalse(outputText.contains("Stale Result"))
+        let payload = try jsonObject(outputText)
+        XCTAssertEqual(payload["reason"] as? String, "User cancelled.")
+        XCTAssertEqual(payload["denied"] as? Bool, true)
         XCTAssertFalse(harness.coordinator.isRunning)
         XCTAssertFalse(harness.state.isLoading)
         XCTAssertNil(harness.state.pendingSearchApproval)
@@ -1262,7 +1559,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let harness = makeGenerationCoordinatorHarness(
             transport: ChatSearchTransport(responses: [])
         )
-        harness.coordinator.installPendingSearchApprovalForTesting(
+        await harness.coordinator.installPendingSearchApprovalForTesting(
             pending: harness.pending,
             request: harness.request
         )
@@ -1287,10 +1584,11 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         let harness = makeGenerationCoordinatorHarness(
             transport: ChatSearchTransport(responses: [])
         )
-        harness.coordinator.installPendingSearchApprovalForTesting(
+        await harness.coordinator.installPendingSearchApprovalForTesting(
             pending: harness.pending,
             request: harness.request
         )
+        harness.state.persistenceEvents.removeAll()
 
         harness.coordinator.cancel()
 
@@ -1298,7 +1596,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(
             harness.state.persistenceEvents,
-            ["capture-baseline", "record-run", "persist-snapshot"]
+            ["capture-baseline", "persist-snapshot", "record-run"]
         )
     }
 
@@ -1324,6 +1622,59 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             )
         )
         return store
+    }
+
+    private func visionFallbackSettings() -> IOSSharedSettingsStore {
+        let chatModel = Model(
+            modelId: "text-only-test-model",
+            displayName: "Text Only",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let visionModel = Model(
+            modelId: "vision-test-model",
+            displayName: "Vision",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let provider = ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "Vision Test Provider",
+            models: [chatModel, visionModel],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "test-key",
+            baseUrl: "https://example.com/v1",
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+        let settings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        _ = settings.addProvider(provider)
+        settings.setCurrentChatModelId(chatModel.id.description())
+        settings.setCurrentAssistantChatModelId(chatModel.id.description())
+        settings.setOcrModelId(visionModel.id.description())
+        return settings
     }
 
     private func makeTempFile(text: String) throws -> URL {
@@ -1455,6 +1806,48 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
     }
 }
 
+private final class BlockingVisionProvider: IOSAgentTextProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<MessageChunk, Error>?
+    private var started = false
+    private var cancelled = false
+
+    var hasStarted: Bool { lock.withLock { started } }
+    var wasCancelled: Bool { lock.withLock { cancelled } }
+
+    func generateText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams
+    ) async throws -> MessageChunk {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.withLock {
+                    started = true
+                    self.continuation = continuation
+                }
+            }
+        } onCancel: {
+            lock.withLock { cancelled = true }
+        }
+    }
+
+    func finish(text: String) {
+        let continuation = lock.withLock {
+            let continuation = self.continuation
+            self.continuation = nil
+            return continuation
+        }
+        let message = UIMessage.companion.assistant(prompt: text)
+        continuation?.resume(returning: MessageChunk(
+            id: "vision-test-chunk",
+            model: "vision-test-model",
+            choices: [UIMessageChoice(index: 0, delta: nil, message: message, finishReason: "stop")],
+            usage: nil
+        ))
+    }
+}
+
 private struct ChatGenerationCoordinatorHarness {
     let coordinator: ChatGenerationCoordinator
     let state: ChatGenerationBindingState
@@ -1471,6 +1864,7 @@ private final class ChatGenerationBindingState {
     var persistedCount = 0
     var persistedSnapshots: [[String]] = []
     var recordedRunStatuses: [String] = []
+    var markedApprovalToolIds: [String] = []
     var persistenceEvents: [String] = []
     var onRecordRun: (() -> Void)?
     var onBumpMessageRevision: ((ChatMessageUpdateReason) -> Void)?
@@ -1509,6 +1903,7 @@ private final class ChatGenerationBindingState {
             setContextCompactState: { _ in },
             persistMessages: { [weak self] _ in
                 self?.persistedCount += 1
+                return true
             },
             capturePersistMessagesBaseline: { [weak self] _ in
                 self?.persistenceEvents.append("capture-baseline")
@@ -1518,6 +1913,7 @@ private final class ChatGenerationBindingState {
                 self?.persistedCount += 1
                 self?.persistedSnapshots.append(messages.map { $0.toText() })
                 self?.persistenceEvents.append("persist-snapshot")
+                return true
             },
             recordRun: { [weak self] _, _, status, _, _ in
                 await MainActor.run {
@@ -1525,6 +1921,11 @@ private final class ChatGenerationBindingState {
                     self?.persistenceEvents.append("record-run")
                     self?.onRecordRun?()
                 }
+            },
+            markRunAwaitingPermission: { [weak self] _, toolCallId in
+                self?.markedApprovalToolIds.append(toolCallId)
+                self?.persistenceEvents.append("mark-awaiting")
+                return true
             },
             startLiveActivity: { _, _, _ in },
             saveMiniAppIfPresent: { _, _ in nil },

@@ -579,10 +579,11 @@ enum ChatToolOutputFormatter {
         }
     }
 
-    static func searchFailureJSON(
+    static func toolFailureJSON(
         toolName: String,
         reason: String,
-        denied: Bool = false
+        denied: Bool = false,
+        cancelled: Bool = false
     ) -> String {
         var payload: [String: Any] = [
             "ok": false,
@@ -593,22 +594,12 @@ enum ChatToolOutputFormatter {
             payload["denied"] = true
             payload["policy"] = "user_denied"
         }
+        if cancelled {
+            payload["cancelled"] = true
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
               let text = String(data: data, encoding: .utf8) else {
             return "\(toolName) failed: \(reason)"
-        }
-        return text
-    }
-
-    static func imageFailureJSON(reason: String) -> String {
-        let payload: [String: Any] = [
-            "ok": false,
-            "tool": "generate_image",
-            "reason": reason
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
-              let text = String(data: data, encoding: .utf8) else {
-            return "generate_image failed: \(reason)"
         }
         return text
     }

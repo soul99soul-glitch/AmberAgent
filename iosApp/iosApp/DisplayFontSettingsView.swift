@@ -237,10 +237,11 @@ private struct DisplayDivider: View {
 private struct FontPreviewCard: View {
     let font: IOSChatFont
     let scale: Double
+    @ScaledMetric(relativeTo: .body) private var scaledBodyPointSize: CGFloat = 16
 
     var body: some View {
         Text("凌晨四点钟，看到海棠花未眠。我常常这样，在无人的夜里独自醒着，想，若有人此刻也在想我，那就好了。")
-            .font(.system(size: 16 * scale, design: font.design))
+            .font(.system(size: scaledBodyPointSize * scale, design: font.design))
             .foregroundStyle(AmberTheme.foreground2)
             .lineSpacing(3 * scale)
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -41,7 +41,9 @@ final class BackgroundGenerationKeepAlive {
     private var leases: [String: Lease] = [:]
     /// 系统只认 task identifier，回调里要靠它反查是哪一轮租约。
     private var leaseIdsByIdentifier: [String: String] = [:]
-    private var didRegister = false
+    /// Continued Processing 每轮使用具体 identifier 注册；同一 run 在本进程内
+    /// 重投时复用既有 handler，避免系统判定为重复注册并终止 App。
+    private var registeredIdentifiers: Set<String> = []
 
     private let beginBackgroundTask: BeginBackgroundTask
     private let endBackgroundTask: EndBackgroundTask
@@ -86,36 +88,6 @@ final class BackgroundGenerationKeepAlive {
                 ? character
                 : "-"
         }.reduce(into: "") { $0.append($1) }
-    }
-
-    /// 必须在 App 启动阶段调用。BGTaskScheduler 要求 launch handler 在
-    /// `didFinishLaunchingWithOptions` 返回前注册完；等到生成开始才注册，
-    /// 系统就没法把任务派回来，长窗口那条腿等于不存在。
-    ///
-    /// 注册的是通配 id，具体那一轮的 id 提交时才生成——这是 Apple 对
-    /// BGContinuedProcessingTask 的用法。
-    func configure() {
-        guard !didRegister else { return }
-        didRegister = true
-
-        let registered = registerLaunchHandler(identifierPrefix + "*") { [weak self] task in
-            guard let task = task as? BGContinuedProcessingTask else {
-                task.setTaskCompleted(success: false)
-                return
-            }
-            Task { @MainActor in
-                guard let self,
-                      let leaseId = self.leaseIdsByIdentifier[task.identifier] else {
-                    // 没人认领：这一轮早结束了，直接收口，别留孤儿任务。
-                    task.setTaskCompleted(success: true)
-                    return
-                }
-                await self.adopt(task, leaseId: leaseId)
-            }
-        }
-        if !registered {
-            NSLog("[AmberKeepAlive] registration refused for \(identifierPrefix)*")
-        }
     }
 
     var activeLeaseIds: Set<String> { Set(leases.keys) }
@@ -179,9 +151,33 @@ final class BackgroundGenerationKeepAlive {
     // MARK: - 内部
 
     private func submitContinuedTask(_ leaseId: String, title: String, subtitle: String) {
-        configure()
         let taskIdentifier = identifier(for: leaseId)
         leaseIdsByIdentifier[taskIdentifier] = leaseId
+
+        if !registeredIdentifiers.contains(taskIdentifier) {
+            let registered = registerLaunchHandler(taskIdentifier) { [weak self] task in
+                guard let task = task as? BGContinuedProcessingTask else {
+                    task.setTaskCompleted(success: false)
+                    return
+                }
+                Task { @MainActor in
+                    guard let self,
+                          let leaseId = self.leaseIdsByIdentifier[task.identifier] else {
+                        // 没人认领：这一轮早结束了，直接收口，别留孤儿任务。
+                        task.setTaskCompleted(success: true)
+                        return
+                    }
+                    await self.adopt(task, leaseId: leaseId)
+                }
+            }
+            guard registered else {
+                // 未注册的 request 在真机会触发 Objective-C assertion；不能交给
+                // Swift do/catch。短窗口已经在 begin 中拿到，保留它即可。
+                NSLog("[AmberKeepAlive] registration refused for \(taskIdentifier)")
+                return
+            }
+            registeredIdentifiers.insert(taskIdentifier)
+        }
 
         let request = BGContinuedProcessingTaskRequest(
             identifier: taskIdentifier,

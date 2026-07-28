@@ -1168,7 +1168,6 @@ enum ChatSwiftUIStreamingTailRenderPolicy {
             visibility.messageID == messageID &&
             visibility.isVisible == false
     }
-
 }
 
 enum ChatSwiftUIExplicitBottomLiveTailPolicy {
@@ -1422,6 +1421,8 @@ private final class ChatSwiftUIListScrollRuntime {
     )
     var hasMeasuredScrollGeometry = false
     var streamFollowTask: Task<Void, Never>?
+    var measuredGrowthFollowTask: Task<Void, Never>?
+    var measuredGrowthRevision: UInt = 0
     var lastUserScrollActivityAt = Date.distantPast
     var conversationScrollTask: Task<Void, Never>?
     var conversationScrollToken = 0
@@ -2191,6 +2192,8 @@ struct ChatSwiftUIMessageList: View {
     private func cancelPendingStreamFollow() {
         runtime.streamFollowTask?.cancel()
         runtime.streamFollowTask = nil
+        runtime.measuredGrowthFollowTask?.cancel()
+        runtime.measuredGrowthFollowTask = nil
     }
 
     private func scrollToBottomIfScrollable(disableAnimations: Bool = true) {
@@ -2201,24 +2204,38 @@ struct ChatSwiftUIMessageList: View {
     }
 
     private func followMeasuredStreamGrowthToBottom() {
-        guard currentContentScrollable else { return }
-        guard !reduceMotion, displaySetting.showBottomFollowAnimation else {
-            scrollToBottomAnchor()
-            return
-        }
-        Task { @MainActor in
-            await Task.yield()
-            guard followGeneration,
-                  runtime.followMode == .followingBottom,
-                  !viewportState.followPaused,
-                  !viewportState.userDragging,
-                  !runtime.userScrollActive,
-                  !runtime.explicitBottomAnimationActive,
-                  currentContentScrollable else { return }
-            withAnimation(.linear(duration: 0.08)) {
-                scrollToBottomAnchor(disableAnimations: false)
+        guard followGeneration,
+              runtime.followMode == .followingBottom,
+              !viewportState.followPaused,
+              !viewportState.userDragging,
+              !runtime.userScrollActive,
+              !runtime.explicitBottomAnimationActive,
+              currentContentScrollable else { return }
+        runtime.measuredGrowthRevision &+= 1
+        guard runtime.measuredGrowthFollowTask == nil else { return }
+
+        let leadingRevision = runtime.measuredGrowthRevision
+        // Follow the first real geometry change immediately. TextKit can publish more
+        // changes in the same layout pass; one task drains only those newer revisions.
+        runtime.measuredGrowthFollowTask = Task { @MainActor in
+            defer { runtime.measuredGrowthFollowTask = nil }
+            var drainedRevision = leadingRevision
+            while !Task.isCancelled {
+                await Task.yield()
+                guard !Task.isCancelled,
+                      followGeneration,
+                      runtime.followMode == .followingBottom,
+                      !viewportState.followPaused,
+                      !viewportState.userDragging,
+                      !runtime.userScrollActive,
+                      !runtime.explicitBottomAnimationActive,
+                      currentContentScrollable else { return }
+                guard runtime.measuredGrowthRevision != drainedRevision else { return }
+                drainedRevision = runtime.measuredGrowthRevision
+                scrollToBottomAnchor()
             }
         }
+        scrollToBottomAnchor()
     }
 
     private func scrollToBottomAnchor(disableAnimations: Bool = true) {
@@ -2508,6 +2525,7 @@ struct ChatSwiftUIMessageList: View {
         )
         #endif
     }
+
 }
 
 private struct ChatSwiftUIViewportHeightKey: PreferenceKey {

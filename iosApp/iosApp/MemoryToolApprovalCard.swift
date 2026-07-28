@@ -61,6 +61,7 @@ struct MemoryToolApprovalCard: View {
                         .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("拒绝记忆写入")
 
                 Button(action: onApprove) {
@@ -72,6 +73,7 @@ struct MemoryToolApprovalCard: View {
                         .background(AmberTheme.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("批准记忆写入")
             }
         }
@@ -228,6 +230,7 @@ struct WebMountToolApprovalCard: View {
                         .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("拒绝 WebMount 前台动作")
 
                 Button(action: onApprove) {
@@ -239,6 +242,7 @@ struct WebMountToolApprovalCard: View {
                         .background(AmberTheme.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("批准 WebMount 前台动作")
             }
         }
@@ -332,6 +336,7 @@ struct SearchToolApprovalCard: View {
                         .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("拒绝网络搜索")
 
                 Button(action: onApprove) {
@@ -343,6 +348,7 @@ struct SearchToolApprovalCard: View {
                         .background(AmberTheme.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("批准网络搜索")
             }
         }
@@ -421,6 +427,7 @@ struct WorkspaceToolApprovalCard: View {
                         .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("拒绝 Workspace 工具")
 
                 Button(action: onApprove) {
@@ -432,6 +439,7 @@ struct WorkspaceToolApprovalCard: View {
                         .background(AmberTheme.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("批准 Workspace 工具")
             }
         }
@@ -510,6 +518,7 @@ struct McpToolApprovalCard: View {
                         .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("拒绝 MCP 工具")
 
                 Button(action: onApprove) {
@@ -521,6 +530,7 @@ struct McpToolApprovalCard: View {
                         .background(AmberTheme.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("批准 MCP 工具")
             }
         }
@@ -590,6 +600,7 @@ struct CouncilToolApprovalCard: View {
                         .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("拒绝模型议会")
 
                 Button(action: onApprove) {
@@ -601,6 +612,7 @@ struct CouncilToolApprovalCard: View {
                         .background(AmberTheme.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("批准模型议会")
             }
         }
@@ -679,6 +691,7 @@ struct IshHandoffToolApprovalCard: View {
                         .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("拒绝 iSH 工具")
 
                 Button(action: onApprove) {
@@ -690,6 +703,7 @@ struct IshHandoffToolApprovalCard: View {
                         .background(AmberTheme.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("批准 iSH 工具")
             }
         }
@@ -735,7 +749,6 @@ struct ChatAskUserCard: View {
             Text(request.question)
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.foreground2)
-                .lineLimit(6)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -775,6 +788,7 @@ struct ChatAskUserCard: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .chatApprovalHitTarget()
                     }
                 }
             }
@@ -809,6 +823,7 @@ struct ChatAskUserCard: View {
                         .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .accessibilityLabel("跳过提问")
 
                 Button {
@@ -822,6 +837,7 @@ struct ChatAskUserCard: View {
                         .background(AmberTheme.accent, in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .chatApprovalHitTarget()
                 .disabled(!canSubmit)
                 .opacity(canSubmit ? 1 : 0.55)
                 .accessibilityLabel("提交回答")
@@ -846,3 +862,9 @@ struct ChatAskUserCard: View {
     }
 }
 
+private extension View {
+    func chatApprovalHitTarget() -> some View {
+        frame(minHeight: 44)
+            .contentShape(Rectangle())
+    }
+}

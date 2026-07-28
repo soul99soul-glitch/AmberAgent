@@ -541,6 +541,58 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    func test_recovery_pendingApprovalCarriesExactToolOwnerBeforeInterruptingRun() async throws {
+        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
+        let runId = "pending-approval-recovery-\(UUID().uuidString)"
+        let conversationId = "conversation-\(UUID().uuidString)"
+        let toolCallId = "tool-\(UUID().uuidString)"
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let run = AgentRunEntity(
+            runId: runId,
+            parentRunId: nil,
+            agentDescriptorId: "chat",
+            agentVersion: "1",
+            conversationId: conversationId,
+            messageNodeId: nil,
+            producesMessageId: nil,
+            assistantId: nil,
+            status: "awaiting_permission",
+            inputDigest: "digest",
+            inputSnapshotRef: "tool_call:\(toolCallId)",
+            inputSchemaVersion: 1,
+            startedAt: now,
+            finishedAt: nil,
+            interruptedReason: nil
+        )
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            dao.insertRun(run: run) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        let descriptors = await IOSRunRecovery.recoverPendingApprovalDescriptors()
+        let descriptor = try XCTUnwrap(descriptors.first { $0.runId == runId })
+        XCTAssertEqual(descriptor.conversationId, conversationId)
+        XCTAssertEqual(descriptor.toolCallId, toolCallId)
+        let pendingStatus = await withCheckedContinuation {
+            (continuation: CheckedContinuation<String?, Never>) in
+            dao.getRun(id: runId) { result, _ in
+                continuation.resume(returning: result?.status)
+            }
+        }
+        XCTAssertEqual(pendingStatus, "awaiting_permission")
+
+        await IOSRunRecovery.completePendingApprovalRecovery(runId: runId, now: now)
+        let recoveredStatus = await withCheckedContinuation {
+            (continuation: CheckedContinuation<String?, Never>) in
+            dao.getRun(id: runId) { result, _ in
+                continuation.resume(returning: result?.status)
+            }
+        }
+        XCTAssertEqual(recoveredStatus, "interrupted")
+    }
+
     // MARK: - secure_store (search / TTS credential classes — discovery round 1)
 
     /// RED for P0 (discovery round 1). GREEN target: P2.
@@ -1557,8 +1609,10 @@ final class IOSParityRedLightTests: XCTestCase {
         }
         let cancelBody = source[cancelStart.lowerBound..<cancelEnd.lowerBound]
         XCTAssertTrue(
-            cancelBody.contains("bindings.setMessages(pendingStreamSnapshotAtCancellation)"),
-            "Cancel must publish the drain-complete active-stream snapshot before persisting it."
+            cancelBody.contains(
+                "var messagesAtCancellation = pendingStreamSnapshotAtCancellation ?? bindings.getMessages()"
+            ) && cancelBody.contains("bindings.setMessages(messagesAtCancellation)"),
+            "Cancel must publish the drain-complete active-stream snapshot, including terminal tool closure, before persisting it."
         )
         guard let completeStart = source.range(of: "case .complete:"),
               let errorStart = source.range(
@@ -1802,6 +1856,148 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertTrue(
             truncatedBody.contains("Self.outputLimitNotice()"),
             "已生成的正文要保留,并追加一条可见提示告知回复不完整。"
+        )
+    }
+
+    func testBackgroundCompletionUsesTypedEngineTerminalSignals() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/IOSChatBackgroundGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        guard let limitBranch = source.range(of: "result.hitOutputLimit"),
+              let providerFailureBranch = source.range(
+                of: "result.providerFailureMessage",
+                range: limitBranch.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Background completion must consume typed engine terminal fields")
+        }
+        XCTAssertLessThan(limitBranch.lowerBound, providerFailureBranch.lowerBound)
+        XCTAssertFalse(
+            source.contains("providerFailureMessage(in generatedSuffix:"),
+            "Background completion must not infer provider failure from localized transcript text"
+        )
+
+        guard let truncatedStart = source.range(of: "private func publishTruncatedTerminal("),
+              let truncatedEnd = source.range(
+                of: "private func fail(",
+                range: truncatedStart.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Expected a dedicated background truncated terminal")
+        }
+        let truncatedBody = source[truncatedStart.lowerBound..<truncatedEnd.lowerBound]
+        XCTAssertTrue(truncatedBody.contains("status: didSave ? \"truncated\" : \"failed\""))
+        XCTAssertTrue(
+            truncatedBody.contains("presentation: .failed()"),
+            "Watch and Live Activity must not present truncated output as an unqualified success"
+        )
+    }
+
+    func testApprovedAsyncToolsAcquireLeaseAndCancellationOwnershipBeforeExecution() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/ChatGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        guard let helperStart = source.range(of: "private func executeApprovedAsyncTool("),
+              let helperEnd = source.range(
+                of: "private func resumeAfterApproval(",
+                range: helperStart.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Expected one owner for approved async tool execution")
+        }
+        let helper = source[helperStart.lowerBound..<helperEnd.lowerBound]
+        guard let lease = helper.range(of: "beginKeepAlive(for: pending)"),
+              let taskOwner = helper.range(of: "foregroundToolExecutionTask = executionTask") else {
+            return XCTFail("Approved async tools must hold both keepalive and a cancellable task owner")
+        }
+        XCTAssertLessThan(lease.lowerBound, taskOwner.lowerBound)
+        XCTAssertTrue(helper.contains("guard allow else"), "Denied approvals must not acquire async execution ownership")
+        XCTAssertTrue(source.contains("private func beginKeepAlive(for pending:"))
+        XCTAssertTrue(source.contains("BackgroundGenerationKeepAlive.shared.begin("))
+
+        for functionName in [
+            "finishPendingSearchToolApproval",
+            "finishPendingWebMountToolApproval",
+            "finishPendingWorkspaceToolApproval",
+            "finishPendingIshHandoffToolApproval",
+            "finishPendingMcpToolApproval",
+            "finishPendingCouncilToolApproval"
+        ] {
+            guard let start = source.range(of: "private func \(functionName)("),
+                  let resume = source.range(
+                    of: "resumeAfterApproval(",
+                    range: start.upperBound..<source.endIndex
+                  ) else {
+                return XCTFail("Missing approved tool path \(functionName)")
+            }
+            XCTAssertTrue(
+                source[start.lowerBound..<resume.lowerBound].contains("executeApprovedAsyncTool("),
+                "\(functionName) must use the shared cancellable owner"
+            )
+        }
+    }
+
+    func testForegroundTerminalPersistencePrecedesExternalTerminalAndSuccessCallbackIsExplicit() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/ChatGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(source.contains("persistMessages: @MainActor (KotlinUuid?) async -> Bool"))
+        XCTAssertTrue(source.contains("generationSucceeded: @MainActor () -> Void"))
+
+        guard let completionStart = source.range(of: "private func handleCompletedStream("),
+              let completionEnd = source.range(
+                of: "private func completeTruncatedStream(",
+                range: completionStart.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Expected foreground completion boundary")
+        }
+        let completion = source[completionStart.lowerBound..<completionEnd.lowerBound]
+        guard let persist = completion.range(of: "await bindings.persistMessages("),
+              let publish = completion.range(of: "WatchTaskCoordinator.shared.publishCompleted("),
+              let finish = completion.range(of: "finishStreaming("),
+              let success = completion.range(of: "bindings.generationSucceeded()") else {
+            return XCTFail("Successful completion must persist, publish, finish, then notify auxiliary work")
+        }
+        XCTAssertLessThan(persist.lowerBound, publish.lowerBound)
+        XCTAssertLessThan(finish.lowerBound, success.lowerBound)
+
+        guard let pauseStart = source.range(of: "private func pauseForApproval("),
+              let pauseEnd = source.range(
+                of: "private func finishPendingMemoryToolApproval(",
+                range: pauseStart.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Expected approval pause boundary")
+        }
+        let pause = source[pauseStart.lowerBound..<pauseEnd.lowerBound]
+        guard let pausePersist = pause.range(of: "await bindings.persistMessagesSnapshot("),
+              let release = pause.range(of: "BackgroundGenerationKeepAlive.shared.end("),
+              let waiting = pause.range(of: "WatchTaskCoordinator.shared.publishWaitingApproval(") else {
+            return XCTFail("Approval pause must durably save before release and external waiting state")
+        }
+        XCTAssertLessThan(pausePersist.lowerBound, release.lowerBound)
+        XCTAssertLessThan(pausePersist.lowerBound, waiting.lowerBound)
+
+        guard let truncatedStart = source.range(of: "private func completeTruncatedStream("),
+              let truncatedEnd = source.range(
+                of: "static func outputLimitNotice()",
+                range: truncatedStart.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Expected truncated terminal boundary")
+        }
+        XCTAssertFalse(
+            source[truncatedStart.lowerBound..<truncatedEnd.lowerBound].contains("generationSucceeded")
         )
     }
 

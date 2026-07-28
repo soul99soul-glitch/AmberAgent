@@ -475,8 +475,9 @@ final class ChatViewportPolicyTests: XCTestCase {
         XCTAssertTrue(source.contains("runtime.userScrollActive = false"))
         XCTAssertTrue(source.contains("ChatSwiftUIMeasuredGrowthFollowPolicy.shouldFollow("))
         XCTAssertTrue(source.contains("followMeasuredStreamGrowthToBottom()"))
-        // The real geometry callback is the sole growth writer. SwiftUI's
-        // sizeChanges anchor does not pin long UIKit-backed paragraphs.
+        // The real geometry callback is the sole growth writer. Automatic stream
+        // following owns one coalesced task and drains only geometry revisions that
+        // arrived after its leading write.
         XCTAssertFalse(source.contains(".modifier(ChatSizeChangesPinModifier(enabled: followGeneration))"))
         XCTAssertTrue(source.contains("} else if shouldFollowMeasuredGrowth {"))
         XCTAssertFalse(
@@ -496,9 +497,17 @@ final class ChatViewportPolicyTests: XCTestCase {
             return XCTFail("Expected the measured-growth follow body")
         }
         let growthFollowBody = source[growthFollowStart.upperBound..<growthFollowEnd.lowerBound]
+        XCTAssertTrue(growthFollowBody.contains("runtime.followMode == .followingBottom"))
+        XCTAssertTrue(growthFollowBody.contains("!runtime.userScrollActive"))
+        XCTAssertTrue(growthFollowBody.contains("runtime.measuredGrowthRevision &+= 1"))
+        XCTAssertTrue(growthFollowBody.contains("guard runtime.measuredGrowthFollowTask == nil else { return }"))
+        XCTAssertTrue(growthFollowBody.contains("let leadingRevision = runtime.measuredGrowthRevision"))
+        XCTAssertTrue(growthFollowBody.contains("runtime.measuredGrowthFollowTask = Task"))
+        XCTAssertTrue(growthFollowBody.contains("while !Task.isCancelled"))
         XCTAssertTrue(growthFollowBody.contains("await Task.yield()"))
-        XCTAssertTrue(growthFollowBody.contains("withAnimation(.linear(duration: 0.08))"))
-        XCTAssertTrue(growthFollowBody.contains("displaySetting.showBottomFollowAnimation"))
+        XCTAssertTrue(growthFollowBody.contains("runtime.measuredGrowthRevision != drainedRevision"))
+        XCTAssertFalse(growthFollowBody.contains("ChatLayout.bottomStickThreshold"))
+        XCTAssertFalse(growthFollowBody.contains("withAnimation"))
         guard let handlerStart = source.range(of: "private func handleSignal("),
               let deltaStart = source.range(
                 of: "case .assistantStreamDelta:",

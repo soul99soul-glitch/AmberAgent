@@ -36,6 +36,19 @@ interface AgentRuntimeDao {
     @Query("SELECT * FROM agent_run WHERE status IN ('running', 'awaiting_permission')")
     suspend fun listUnfinished(): List<AgentRunEntity>
 
+    @Query("SELECT * FROM agent_run WHERE status = 'awaiting_permission'")
+    suspend fun listAwaitingPermission(): List<AgentRunEntity>
+
+    @Query(
+        """
+        UPDATE agent_run
+        SET status = 'awaiting_permission', input_snapshot_ref = :inputSnapshotRef,
+            finished_at = NULL, interrupted_reason = NULL
+        WHERE run_id = :runId
+        """,
+    )
+    suspend fun markAwaitingPermission(runId: String, inputSnapshotRef: String): Int
+
     @Query("SELECT * FROM agent_run WHERE message_node_id = :id ORDER BY started_at ASC")
     suspend fun listRunsForMessageNode(id: String): List<AgentRunEntity>
 

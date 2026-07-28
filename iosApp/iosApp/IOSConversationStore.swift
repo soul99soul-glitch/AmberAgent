@@ -488,16 +488,49 @@ final class IOSConversationStore {
 
     /// 重命名：partial update，不改 messages。
     func renameConversation(id: KotlinUuid, title: String) async {
+        _ = await updateConversationTitle(id: id, title: title, expectedCurrentTitle: nil)
+    }
+
+    /// 自动标题只能替换生成开始时看到的标题，避免迟到结果覆盖用户手工重命名。
+    @discardableResult
+    func renameConversation(
+        id: KotlinUuid,
+        title: String,
+        ifCurrentTitleMatches expectedTitle: String
+    ) async -> Bool {
+        await updateConversationTitle(
+            id: id,
+            title: title,
+            expectedCurrentTitle: expectedTitle
+        )
+    }
+
+    private func updateConversationTitle(
+        id: KotlinUuid,
+        title: String,
+        expectedCurrentTitle: String?
+    ) async -> Bool {
         do {
-            try await storage.updateMetadata(id: id, title: title, isPinned: nil)
+            if let expectedCurrentTitle {
+                let didUpdate = try await storage.updateTitleIfCurrentTitleMatches(
+                    id: id,
+                    title: title,
+                    expectedTitle: expectedCurrentTitle
+                ).boolValue
+                guard didUpdate else { return false }
+            } else {
+                try await storage.updateMetadata(id: id, title: title, isPinned: nil)
+            }
             advanceWriteSequence(for: id)
         } catch {
             publishIOError(operation: "重命名", detail: "\(id): \(error)")
+            return false
         }
         await refreshSummaries()
         if currentConversation?.id == id, let refreshed = try? await storage.loadConversation(id: id) {
             setCurrent(refreshed)
         }
+        return true
     }
 
     /// 置顶/取消置顶切换。
@@ -521,6 +554,19 @@ final class IOSConversationStore {
     /// 当前会话的 messages，供 ChatViewModel 在切换会话时灌入。
     var currentMessages: [UIMessage] {
         currentConversation?.currentMessages as? [UIMessage] ?? []
+    }
+
+    func messages(for id: KotlinUuid) async -> [UIMessage]? {
+        if currentConversation?.id == id {
+            return currentMessages
+        }
+        guard !isDeletedConversation(id) else { return nil }
+        do {
+            return try await storage.loadConversation(id: id)?.currentMessages as? [UIMessage]
+        } catch {
+            publishIOError(operation: "加载会话", detail: "\(id): \(error)")
+            return nil
+        }
     }
 
     func currentConversationDeepReadSource(maxMessages: Int = 12) throws -> IOSDeepReadSource {
@@ -868,7 +914,12 @@ final class IOSConversationStore {
     /// Append an assistant regeneration as a sibling variant of the original
     /// assistant node, select it, and drop stale nodes after that reply.
     @discardableResult
-    func appendVariantAndTruncateAfter(messageIndex: Int, message: UIMessage, conversationId: KotlinUuid) async -> Bool {
+    func appendVariantAndTruncateAfter(
+        messageIndex: Int,
+        message: UIMessage,
+        trailingMessages: [UIMessage] = [],
+        conversationId: KotlinUuid
+    ) async -> Bool {
         let conversation: Conversation?
         if currentConversation?.id == conversationId {
             conversation = currentConversation
@@ -895,6 +946,14 @@ final class IOSConversationStore {
             selectIndex: Int32(variants.count - 1),
             isFavorite: node.isFavorite
         )
+        nodes.append(contentsOf: trailingMessages.map { trailingMessage in
+            MessageNode(
+                id: KotlinUuid.companion.random(),
+                messages: [trailingMessage],
+                selectIndex: 0,
+                isFavorite: false
+            )
+        })
         let updated = conversationWithNodes(conversation, nodes: nodes)
         guard let persisted = await persist(updated) else { return false }
         if currentConversation?.id == conversationId {

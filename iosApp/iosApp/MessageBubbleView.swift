@@ -5,6 +5,14 @@ import MarkdownView
 import Photos
 
 enum ChatMarkdownOpenURLPolicy {
+    static func url(from raw: String) -> URL? {
+        guard let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              isAllowed(url) else {
+            return nil
+        }
+        return url
+    }
+
     static func isAllowed(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else {
             return false
@@ -14,6 +22,53 @@ enum ChatMarkdownOpenURLPolicy {
 
     static func result(for url: URL) -> OpenURLAction.Result {
         isAllowed(url) ? .systemAction : .discarded
+    }
+}
+
+enum ChatMarkdownRendererSelection: Equatable {
+    case liyanan
+    case microsoft
+    case block
+    case fade
+    case stable
+}
+
+enum ChatMarkdownRendererPolicy {
+    static func selection(
+        experimentalRenderingAllowed: Bool,
+        liyananEnabled: Bool,
+        microsoftEnabled: Bool,
+        blockRendererEnabled: Bool,
+        fadeRendererNeeded: Bool
+    ) -> ChatMarkdownRendererSelection {
+        if experimentalRenderingAllowed, liyananEnabled {
+            return .liyanan
+        }
+        if experimentalRenderingAllowed, microsoftEnabled {
+            return .microsoft
+        }
+        if blockRendererEnabled {
+            return .block
+        }
+        if fadeRendererNeeded {
+            return .fade
+        }
+        return .stable
+    }
+}
+
+enum ChatDataImageLoadState {
+    case loading
+    case success(UIImage)
+    case failure
+
+    static func resolve(urlString: String) -> ChatDataImageLoadState {
+        guard let comma = urlString.firstIndex(of: ","),
+              let data = Data(base64Encoded: String(urlString[urlString.index(after: comma)...])),
+              let image = UIImage(data: data) else {
+            return .failure
+        }
+        return .success(image)
     }
 }
 
@@ -321,10 +376,11 @@ struct MessageBubbleView: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: message.parts.map(Self.partAnimationKey).joined(separator: "|"))
         .sheet(item: $toolDetailTarget) { target in
+            let currentTool = toolPart(toolCallId: target.toolCallId) ?? target.initialTool
             ChatToolDetailSheet(
-                tool: target.tool,
-                live: target.tool.toolName.contains("subagent_dispatch")
-                    ? SubAgentLiveRegistry.shared.model(forToolCallId: target.tool.toolCallId)
+                tool: currentTool,
+                live: currentTool.toolName.contains("subagent_dispatch")
+                    ? SubAgentLiveRegistry.shared.model(forToolCallId: currentTool.toolCallId)
                     : nil
             )
         }
@@ -352,6 +408,12 @@ struct MessageBubbleView: View {
             guard let text = part as? UIMessagePart.Text, !text.text.isEmpty else { return count }
             return count + 1
         }
+    }
+
+    private func toolPart(toolCallId: String) -> UIMessagePart.Tool? {
+        message.parts.lazy
+            .compactMap { $0 as? UIMessagePart.Tool }
+            .first { $0.toolCallId == toolCallId }
     }
 
     private static func partAnimationKey(_ part: UIMessagePart) -> String {
@@ -433,6 +495,7 @@ struct ChatAssistantMarkdownView: View {
     @AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks) private var coalescedTextBlocks = false
     @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
     @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
+    @ScaledMetric(relativeTo: .body) private var scaledBodyPointSize: CGFloat = 17
     /// per-view-instance 的「这个 bubble 曾经流式过」latch。它覆盖 completion 瞬间;
     /// 回收后的完成态则由 projection 层的 hasEverStreamed + liveRenderingEnabled 明确驱动。
     @State private var hasUsedStreamingMarkdownRenderer = false
@@ -688,7 +751,7 @@ struct ChatAssistantMarkdownView: View {
         let accent = UIColor(AmberTheme.accent)
         let bodyFonts = ChatStreamingMarkdownTypography.bodyFonts(
             chatFont: IOSChatFont(rawValue: chatFont) ?? .default,
-            pointSize: 17 * scale
+            pointSize: scaledBodyPointSize * scale
         )
         let headingFonts = ChatStreamingMarkdownTypography.applyingChatFont(
             IOSChatFont(rawValue: chatFont) ?? .default,
@@ -770,6 +833,7 @@ struct ChatAssistantMarkdownView: View {
             for: ChatStreamingDetectionBox.MarkdownConfigKey(
                 liveStreaming: liveStreaming,
                 fontScale: boundedFontScale,
+                bodyPointSize: scaledBodyPointSize,
                 chatFont: chatFont,
                 themePaper: AmberThemeRuntime.shared.paper.rawValue,
                 themeAccentHex: AmberThemeRuntime.shared.accentHex,
@@ -777,7 +841,24 @@ struct ChatAssistantMarkdownView: View {
             ),
             build: { streamingMarkdownConfig(liveStreaming: liveStreaming) }
         )
-        if shouldUseBlockStreamingRenderer(liveStreaming: liveStreaming) {
+        switch ChatMarkdownRendererPolicy.selection(
+            experimentalRenderingAllowed: shouldUseExperimentalMarkdownRenderer(liveStreaming: liveStreaming),
+            liyananEnabled: liyananStreamingMarkdown,
+            microsoftEnabled: microsoftStreamingMarkdown,
+            blockRendererEnabled: shouldUseBlockStreamingRenderer(liveStreaming: liveStreaming),
+            fadeRendererNeeded: shouldUseFadeStreamingRenderer(liveStreaming: liveStreaming)
+        ) {
+        case .liyanan:
+            LiyananStreamingMarkdownContentView(content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .microsoft:
+            ChatStableStreamingMarkdownView(
+                text: content,
+                config: config,
+                cacheIdentity: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix):monolith" }
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case .block:
             ChatStreamingBlockMarkdownView(
                 text: content,
                 config: config,
@@ -785,24 +866,14 @@ struct ChatAssistantMarkdownView: View {
                 renderCacheNamespace: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix)" }
             )
             .frame(maxWidth: .infinity, alignment: .leading)
-        } else if shouldUseFadeStreamingRenderer(liveStreaming: liveStreaming) {
+        case .fade:
             ChatStableStreamingMarkdownView(
                 text: content,
                 config: config,
                 cacheIdentity: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix):monolith" }
             )
             .frame(maxWidth: .infinity, alignment: .leading)
-        } else if liyananStreamingMarkdown && shouldUseExperimentalMarkdownRenderer(liveStreaming: liveStreaming) {
-            LiyananStreamingMarkdownContentView(content: content)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else if microsoftStreamingMarkdown && shouldUseExperimentalMarkdownRenderer(liveStreaming: liveStreaming) {
-            ChatStableStreamingMarkdownView(
-                text: content,
-                config: config,
-                cacheIdentity: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix):monolith" }
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
+        case .stable:
             AmberMarkdownView(markdown: content, displaySetting: displaySetting)
         }
     }
@@ -1352,6 +1423,7 @@ private final class ChatStreamingDetectionBox {
     struct MarkdownConfigKey: Hashable {
         let liveStreaming: Bool
         let fontScale: Double
+        let bodyPointSize: CGFloat
         let chatFont: String
         let themePaper: String
         let themeAccentHex: UInt32
@@ -1641,6 +1713,7 @@ enum ChatStreamingMarkdownConfigCacheTestSupport {
                 for: ChatStreamingDetectionBox.MarkdownConfigKey(
                     liveStreaming: true,
                     fontScale: 1,
+                    bodyPointSize: 17,
                     chatFont: IOSChatFont.default.rawValue,
                     themePaper: theme.paper,
                     themeAccentHex: theme.accentHex,
@@ -1673,6 +1746,7 @@ private struct ChatStreamingMarkdownTableView: View {
 
     @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
     @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
+    @ScaledMetric(relativeTo: .body) private var scaledBodyPointSize: CGFloat = 17
 
     private var boundedScale: Double {
         min(max(fontScale, 0.88), 1.25)
@@ -1699,6 +1773,7 @@ private struct ChatStreamingMarkdownTableView: View {
                     isLastRow: table.rows.isEmpty,
                     columnWidth: columnWidth,
                     fontScale: boundedScale,
+                    bodyPointSize: scaledBodyPointSize,
                     chatFontRawValue: chatFont
                 )
                 .equatable()
@@ -1709,6 +1784,7 @@ private struct ChatStreamingMarkdownTableView: View {
                         isLastRow: index == table.rows.count - 1,
                         columnWidth: columnWidth,
                         fontScale: boundedScale,
+                        bodyPointSize: scaledBodyPointSize,
                         chatFontRawValue: chatFont
                     )
                     .equatable()
@@ -1741,6 +1817,7 @@ private struct ChatStreamingMarkdownTableRowView: View, Equatable {
     let isLastRow: Bool
     let columnWidth: CGFloat
     let fontScale: Double
+    let bodyPointSize: CGFloat
     let chatFontRawValue: String
 
     private var selectedFont: IOSChatFont {
@@ -1766,7 +1843,7 @@ private struct ChatStreamingMarkdownTableRowView: View, Equatable {
     private func tableCell(_ rawText: String, isHeader: Bool, isLastColumn: Bool) -> some View {
         Text(inlineDisplayText(rawText))
             .font(.system(
-                size: (isHeader ? 16 : 16.5) * fontScale,
+                size: bodyPointSize * (isHeader ? 16 / 17 : 16.5 / 17) * fontScale,
                 weight: isHeader ? .semibold : .regular,
                 design: selectedFont.design
             ))
@@ -2661,13 +2738,22 @@ private struct ChatGeneratedImageLoadingPlaceholder: View {
 
     @ViewBuilder
     private var placeholder: some View {
-        let card = ChatGeneratedImageDotPlaceholder(aspectRatio: display.aspectRatio)
         if display.requestedCount > 1 {
-            card.frame(maxWidth: display.multiCardWidth, alignment: .leading)
+            LazyVGrid(
+                columns: [GridItem(.flexible()), GridItem(.flexible())],
+                spacing: 8
+            ) {
+                ForEach(0..<display.requestedCount, id: \.self) { _ in
+                    ChatGeneratedImageDotPlaceholder(aspectRatio: display.aspectRatio)
+                }
+            }
+            .frame(maxWidth: display.multiCardWidth, alignment: .leading)
         } else if let maxWidth = display.singleCardMaxWidth {
-            card.frame(maxWidth: maxWidth, alignment: .leading)
+            ChatGeneratedImageDotPlaceholder(aspectRatio: display.aspectRatio)
+                .frame(maxWidth: maxWidth, alignment: .leading)
         } else {
-            card.frame(maxWidth: .infinity, alignment: .leading)
+            ChatGeneratedImageDotPlaceholder(aspectRatio: display.aspectRatio)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -2905,7 +2991,7 @@ private struct ChatGeneratedImageTile: View {
     var onModify: (String, String, String) -> Void = { _, _, _ in }
     @State private var saveState: ChatGeneratedImagePhotoSaveState = .idle
     @State private var saveAlert: ChatGeneratedImageSaveAlert?
-    @State private var decodedDataImage: UIImage?
+    @State private var dataImageState: ChatDataImageLoadState = .loading
     @State private var previewTarget: ChatGeneratedImagePreviewTarget?
     @State private var editTarget: ChatGeneratedImageEditTarget?
 
@@ -2915,27 +3001,24 @@ private struct ChatGeneratedImageTile: View {
         IOSImageGenerationRepository.resolvedImageURL(from: urlString)
     }
 
-    /// Decodes a `data:<mime>;base64,...` URL (used by chat image attachments) into a UIImage.
-    /// `AsyncImage` cannot load `data:` URLs, so these are decoded once and cached in state.
-    private static func decodeDataURL(_ string: String) -> UIImage? {
-        guard let comma = string.firstIndex(of: ",") else { return nil }
-        let base64 = String(string[string.index(after: comma)...])
-        guard let data = Data(base64Encoded: base64) else { return nil }
-        return UIImage(data: data)
-    }
-
     var body: some View {
         VStack(spacing: 6) {
             Group {
                 if isDataURL {
-                    if let decodedDataImage {
+                    switch dataImageState {
+                    case .success(let decodedDataImage):
                         Image(uiImage: decodedDataImage)
                             .resizable()
                             .scaledToFit()
                             .modifier(ChatGeneratedImageAppearModifier())
-                    } else {
+                    case .loading:
                         ProgressView()
                             .tint(AmberTheme.accent)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    case .failure:
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accentRed)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else {
@@ -2974,9 +3057,9 @@ private struct ChatGeneratedImageTile: View {
                     .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
             }
             .task(id: urlString) {
-                if isDataURL, decodedDataImage == nil {
-                    decodedDataImage = Self.decodeDataURL(urlString)
-                }
+                guard isDataURL else { return }
+                dataImageState = .loading
+                dataImageState = ChatDataImageLoadState.resolve(urlString: urlString)
             }
 
             if url != nil || isDataURL {
@@ -3213,7 +3296,7 @@ private struct ChatGeneratedImageEditTarget: Identifiable {
 private struct ChatGeneratedImagePreview: View {
     let urlString: String
     @Environment(\.dismiss) private var dismiss
-    @State private var decodedDataImage: UIImage?
+    @State private var dataImageState: ChatDataImageLoadState = .loading
     @State private var dragOffset: CGFloat = 0
 
     private var isDataURL: Bool { urlString.hasPrefix("data:") }
@@ -3262,21 +3345,27 @@ private struct ChatGeneratedImagePreview: View {
             .accessibilityLabel("关闭大图")
         }
         .task(id: urlString) {
-            guard isDataURL, decodedDataImage == nil else { return }
-            decodedDataImage = Self.decodeDataURL(urlString)
+            guard isDataURL else { return }
+            dataImageState = .loading
+            dataImageState = ChatDataImageLoadState.resolve(urlString: urlString)
         }
     }
 
     @ViewBuilder
     private var imageContent: some View {
         if isDataURL {
-            if let decodedDataImage {
+            switch dataImageState {
+            case .success(let decodedDataImage):
                 Image(uiImage: decodedDataImage)
                     .resizable()
                     .scaledToFit()
-            } else {
+            case .loading:
                 ProgressView()
                     .tint(.white)
+            case .failure:
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white)
             }
         } else if let url {
             AsyncImage(url: url) { phase in
@@ -3303,12 +3392,6 @@ private struct ChatGeneratedImagePreview: View {
         }
     }
 
-    private static func decodeDataURL(_ string: String) -> UIImage? {
-        guard let comma = string.firstIndex(of: ",") else { return nil }
-        let base64 = String(string[string.index(after: comma)...])
-        guard let data = Data(base64Encoded: base64) else { return nil }
-        return UIImage(data: data)
-    }
 }
 
 private struct ChatGeneratedImageEditSheet: View {
@@ -3384,7 +3467,7 @@ private struct ChatGeneratedImageEditSheet: View {
 /// hugs the picture (no transparent letterbox). Decodes `data:` base64 URLs.
 private struct ChatUserImageTile: View {
     let urlString: String
-    @State private var decoded: UIImage?
+    @State private var dataImageState: ChatDataImageLoadState = .loading
 
     private var isDataURL: Bool { urlString.hasPrefix("data:") }
     private var url: URL? { IOSImageGenerationRepository.resolvedImageURL(from: urlString) }
@@ -3395,29 +3478,34 @@ private struct ChatUserImageTile: View {
     var body: some View {
         imageView
             .task(id: urlString) {
-                guard isDataURL, decoded == nil,
-                      let comma = urlString.firstIndex(of: ","),
-                      let data = Data(base64Encoded: String(urlString[urlString.index(after: comma)...]))
-                else { return }
-                decoded = UIImage(data: data)
+                guard isDataURL else { return }
+                dataImageState = .loading
+                dataImageState = ChatDataImageLoadState.resolve(urlString: urlString)
             }
     }
 
     @ViewBuilder
     private var imageView: some View {
-        if let decoded {
+        if isDataURL {
+            switch dataImageState {
+            case .success(let decoded):
             // Fixed frame sized to the image's real aspect (fitted within max), so the
             // view bounds == the picture and the rounded clip hugs it — no letterbox.
-            let size = Self.fittedSize(decoded.size)
-            Image(uiImage: decoded)
-                .resizable()
-                .frame(width: size.width, height: size.height)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-                )
-        } else if !isDataURL, let url {
+                let size = Self.fittedSize(decoded.size)
+                Image(uiImage: decoded)
+                    .resizable()
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                    )
+            case .loading:
+                placeholder(failed: false)
+            case .failure:
+                placeholder(failed: true)
+            }
+        } else if let url {
             AsyncImage(url: url) { phase in
                 switch phase {
                 case .success(let image):
@@ -3431,7 +3519,7 @@ private struct ChatUserImageTile: View {
                 }
             }
         } else {
-            placeholder(failed: false)
+            placeholder(failed: true)
         }
     }
 
@@ -3539,6 +3627,8 @@ struct ChatConfigurationNoticeCard: View {
             "person.crop.circle"
         case .grokNotSignedIn:
             "bolt.circle"
+        case .providerDisabled:
+            "pause.circle"
         }
     }
 
@@ -3558,6 +3648,8 @@ struct ChatConfigurationNoticeCard: View {
             "person.crop.circle.fill"
         case .grokNotSignedIn:
             "bolt.circle.fill"
+        case .providerDisabled:
+            "pause.circle.fill"
         }
     }
 
@@ -3577,6 +3669,8 @@ struct ChatConfigurationNoticeCard: View {
             "登录 Codex"
         case .grokNotSignedIn:
             "登录 Grok"
+        case .providerDisabled:
+            "启用服务商"
         }
     }
 }

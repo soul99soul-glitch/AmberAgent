@@ -417,6 +417,7 @@ final class IOSAgentToolEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(result.providerFailureMessage, "upstream unavailable")
+        XCTAssertFalse(result.hitOutputLimit)
         XCTAssertTrue(result.messages.last?.toText().contains("[engine] provider error") == true)
     }
 
@@ -694,6 +695,7 @@ final class IOSAgentToolEngineTests: XCTestCase {
 
         XCTAssertEqual(recorder.snapshot, ["未写完"])
         XCTAssertEqual(result.providerFailureMessage, "模型回复达到输出上限，请重试。")
+        XCTAssertTrue(result.hitOutputLimit)
     }
 
     func testCancellingEngineTaskStopsWaitingForStreamingTerminal() async {

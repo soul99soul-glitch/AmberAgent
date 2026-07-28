@@ -90,6 +90,45 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertFalse(params.tools.isEmpty, "tool declarations must be populated")
     }
 
+    func testAuxiliaryGenerationParamsPreserveSelectedModelOverrides() {
+        let json = Kotlinx_serialization_jsonJson.companion
+        let model = Model(
+            modelId: "aux-model",
+            displayName: "Aux Model",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [CustomHeader(name: "X-Aux", value: "enabled")],
+            customBodies: [
+                CustomBody(
+                    key: "service_tier",
+                    value: json.parseToJsonElement(string: "\"priority\"")
+                )
+            ],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+
+        let params = ChatViewModel.auxiliaryTextGenerationParamsForTesting(
+            model: model,
+            assistantHeaders: [CustomHeader(name: "X-Assistant", value: "assistant")],
+            assistantBodies: [
+                CustomBody(
+                    key: "assistant_flag",
+                    value: json.parseToJsonElement(string: "true")
+                )
+            ]
+        )
+
+        XCTAssertEqual(params.customHeaders.map(\.name), ["X-Assistant", "X-Aux"])
+        XCTAssertEqual(params.customHeaders.map(\.value), ["assistant", "enabled"])
+        XCTAssertEqual(params.customBody.map(\.key), ["assistant_flag", "service_tier"])
+        XCTAssertEqual(params.customBody.map { $0.value.description }, ["true", "\"priority\""])
+    }
+
     /// The tool-declaration names must still include the expected core tools
     /// after the params refactor (regression guard).
     func testToolDeclarationsStillIncludeCoreTools() {

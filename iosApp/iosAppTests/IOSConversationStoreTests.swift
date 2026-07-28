@@ -731,6 +731,53 @@ final class IOSConversationStoreTests: XCTestCase {
         )
     }
 
+    func testGeneratedTitleDoesNotOverwriteAUserRename() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreGeneratedTitleCAS-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "initial generated seed")])
+        let generatedTitleBaseline = try XCTUnwrap(store.currentConversation?.title)
+
+        await store.renameConversation(id: conversationId, title: "用户手工标题")
+        let didRename = await store.renameConversation(
+            id: conversationId,
+            title: "迟到的自动标题",
+            ifCurrentTitleMatches: generatedTitleBaseline
+        )
+
+        XCTAssertFalse(didRename)
+        XCTAssertEqual(store.currentConversation?.title, "用户手工标题")
+    }
+
+    func testGeneratedTitleReplacesItsUnchangedBaseline() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreGeneratedTitleSuccess-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "initial generated seed")])
+        let generatedTitleBaseline = try XCTUnwrap(store.currentConversation?.title)
+
+        let didRename = await store.renameConversation(
+            id: conversationId,
+            title: "自动标题",
+            ifCurrentTitleMatches: generatedTitleBaseline
+        )
+
+        XCTAssertTrue(didRename)
+        XCTAssertEqual(store.currentConversation?.title, "自动标题")
+    }
+
     func testDeleteTombstonePreventsInFlightBackgroundCompletionFromResurrectingConversation() async throws {
         let baseDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("IOSConversationStoreDeleteTombstoneBackground-")
@@ -845,16 +892,22 @@ final class IOSConversationStoreTests: XCTestCase {
         let foregroundMessages = baseMessages + [UIMessage.companion.user(prompt: "new foreground message")]
         await store.save(messages: foregroundMessages, to: convId)
         allowPersist?.resume()
-        await completionTask.value
+        let didSave = await completionTask.value
 
+        XCTAssertTrue(didSave)
         XCTAssertEqual(
             store.currentMessages.map { $0.toText() },
-            ["background base", "new foreground message"],
-            "后台完成已进入延迟窗口后，前台新消息落盘应推进序列号并阻止旧后台快照覆盖"
+            [
+                "background base",
+                "new foreground message",
+                "后台生成已完成；当前会话期间已有新内容，以下是后台完成的结果。",
+                "late background result",
+            ],
+            "前台新消息落盘后，后台重试应保留前台内容并把生成结果显式合并，而不是用旧快照覆盖"
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             store.pendingBackgroundContentConversationIds.contains(String(describing: convId)),
-            "被序列号拒绝的后台旧快照不应产生后台内容通知"
+            "后台结果重试合并成功后应发布当前会话的后台内容通知"
         )
     }
 

@@ -164,6 +164,19 @@ class JsonConversationStorage(
         saveConversationReplacingAllFieldsLocked(updated)
     }
 
+    @Throws(Throwable::class)
+    override suspend fun updateTitleIfCurrentTitleMatches(
+        id: Uuid,
+        title: String,
+        expectedTitle: String,
+    ): Boolean = operationMutex.withLock {
+        val current = loadConversationUnlocked(id) ?: return@withLock false
+        if (current.title != expectedTitle) return@withLock false
+        beforeUpdateMetadataSaveForTesting?.invoke()
+        saveConversationReplacingAllFieldsLocked(current.copy(title = title))
+        true
+    }
+
     // ---- 内部：index 维护 ----
 
     private fun readIndex(): List<ConversationSummary>? {

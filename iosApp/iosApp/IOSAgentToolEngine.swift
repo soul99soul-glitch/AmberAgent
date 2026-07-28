@@ -281,6 +281,10 @@ public struct IOSAgentToolEngineResult: Sendable {
     /// can map this to their normal failure terminal instead of parsing the
     /// compatibility transcript message appended below.
     public let providerFailureMessage: String?
+    /// Whether the provider terminated because its output budget was exhausted.
+    /// This remains distinct from transport/provider failures even though both
+    /// keep `providerFailureMessage` for the existing user-facing message.
+    public let hitOutputLimit: Bool
     /// Whether the caller cancelled the run while the provider was in flight.
     public let wasCancelled: Bool
 
@@ -290,6 +294,7 @@ public struct IOSAgentToolEngineResult: Sendable {
         pendingApproval: IOSPendingToolApproval?,
         hitStepLimit: Bool,
         providerFailureMessage: String? = nil,
+        hitOutputLimit: Bool = false,
         wasCancelled: Bool = false
     ) {
         self.messages = messages
@@ -297,6 +302,7 @@ public struct IOSAgentToolEngineResult: Sendable {
         self.pendingApproval = pendingApproval
         self.hitStepLimit = hitStepLimit
         self.providerFailureMessage = providerFailureMessage
+        self.hitOutputLimit = hitOutputLimit
         self.wasCancelled = wasCancelled
     }
 }
@@ -655,7 +661,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     stepsExecuted: steps + 1,
                     pendingApproval: nil,
                     hitStepLimit: false,
-                    providerFailureMessage: "模型回复达到输出上限，请重试。"
+                    providerFailureMessage: "模型回复达到输出上限，请重试。",
+                    hitOutputLimit: true
                 )
             }
             let emittedTools = pendingToolCalls(in: rawAssistantMessage)

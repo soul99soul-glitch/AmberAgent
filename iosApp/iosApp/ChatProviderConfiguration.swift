@@ -33,6 +33,7 @@ enum ChatConfigurationIssue: Equatable {
     case invalidBaseURL
     case missingModel
     case missingProvider
+    case providerDisabled
     case unsupportedProvider
     case codexNotSignedIn
     case grokNotSignedIn
@@ -47,6 +48,8 @@ enum ChatConfigurationIssue: Equatable {
             "还没有选择模型"
         case .missingProvider:
             "还没有配置服务商"
+        case .providerDisabled:
+            "服务商已停用"
         case .unsupportedProvider:
             "当前服务商暂不支持聊天"
         case .codexNotSignedIn:
@@ -66,6 +69,8 @@ enum ChatConfigurationIssue: Equatable {
             "请选择当前服务商可用的聊天模型，或填写服务商文档中的 Model ID。"
         case .missingProvider:
             "请先在设置里添加一个服务商（并填写 API Key 与模型），再发送消息。"
+        case .providerDisabled:
+            "请先在服务商设置里启用当前服务商，再发送消息。"
         case .unsupportedProvider:
             "当前服务商类型的 iOS 聊天执行器尚未移植，请先切换到 OpenAI 兼容或 Anthropic 服务商。"
         case .codexNotSignedIn:
@@ -94,6 +99,7 @@ enum ChatProviderConfiguration {
 
     static func issue(for model: Model, provider: ProviderSetting?) -> ChatConfigurationIssue? {
         guard let provider else { return .missingProvider }
+        guard provider.enabled else { return .providerDisabled }
         guard supportsChatStreaming(provider) else { return .unsupportedProvider }
         // Codex OAuth providers carry no apiKey — the bearer is an OAuth token
         // resolved at request time. Gate on sign-in state instead of apiKey.

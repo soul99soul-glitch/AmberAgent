@@ -409,7 +409,7 @@ final class ChatToolRuntime {
 
         let resultText = allow
             ? await dispatchSearchToolCall(pending.toolCall)
-            : ChatToolOutputFormatter.searchFailureJSON(
+            : ChatToolOutputFormatter.toolFailureJSON(
                 toolName: pending.toolCall.toolName,
                 reason: "User denied network search.",
                 denied: true
@@ -632,6 +632,31 @@ final class ChatToolRuntime {
             resolvedMessages = messagesByFinishingToolCall(
                 toolCall,
                 outputText: outputText,
+                in: resolvedMessages
+            )
+        }
+
+        return resolvedMessages
+    }
+
+    func messagesByFailingPendingToolCalls(
+        in messages: [UIMessage],
+        failureReason: String,
+        denied: Bool = false
+    ) -> [UIMessage] {
+        var resolvedMessages = messages
+        var resolvedKeys = Set<String>()
+
+        while let toolCall = unresolvedToolCall(in: resolvedMessages) {
+            let key = chatToolCallKey(toolCall)
+            guard resolvedKeys.insert(key).inserted else { break }
+            resolvedMessages = messagesByFinishingToolCall(
+                toolCall,
+                outputText: ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: toolCall.toolName,
+                    reason: failureReason,
+                    denied: denied
+                ),
                 in: resolvedMessages
             )
         }
@@ -914,7 +939,7 @@ final class ChatToolRuntime {
 
     private func dispatchSearchToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
         guard sharedSettings.snapshot.enableWebSearch else {
-            return ChatToolOutputFormatter.searchFailureJSON(
+            return ChatToolOutputFormatter.toolFailureJSON(
                 toolName: toolCall.toolName,
                 reason: "Web search is disabled in settings."
             )
@@ -930,7 +955,7 @@ final class ChatToolRuntime {
                 transport: searchTransport
             )
         } catch {
-            return ChatToolOutputFormatter.searchFailureJSON(
+            return ChatToolOutputFormatter.toolFailureJSON(
                 toolName: toolCall.toolName,
                 reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             )
@@ -1136,7 +1161,10 @@ final class ChatToolRuntime {
                 return parts
             case .notSignedIn:
                 return [UIMessagePart.Text(
-                    text: ChatToolOutputFormatter.imageFailureJSON(reason: "请先在服务商设置里登录 Codex 后再生成或修改图片。"),
+                    text: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: "generate_image",
+                        reason: "请先在服务商设置里登录 Codex 后再生成或修改图片。"
+                    ),
                     metadata: nil
                 )]
             case .notSelected:
@@ -1144,14 +1172,20 @@ final class ChatToolRuntime {
             }
             guard let config = resolvedImageGenerationConfig() else {
                 return [UIMessagePart.Text(
-                    text: ChatToolOutputFormatter.imageFailureJSON(reason: "请先在「默认模型 → 辅助任务」里设置生图模型。"),
+                    text: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: "generate_image",
+                        reason: "请先在「默认模型 → 辅助任务」里设置生图模型。"
+                    ),
                     metadata: nil
                 )]
             }
             let request = try IOSImageGenerationRepository.shared.toolRequest(from: toolCall.input, modelId: config.modelId)
             if request.sourceImageURL != nil {
                 return [UIMessagePart.Text(
-                    text: ChatToolOutputFormatter.imageFailureJSON(reason: "当前图片修改只支持 Codex 生图。"),
+                    text: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: "generate_image",
+                        reason: "当前图片修改只支持 Codex 生图。"
+                    ),
                     metadata: nil
                 )]
             }
@@ -1171,7 +1205,10 @@ final class ChatToolRuntime {
         } catch {
             return [
                 UIMessagePart.Text(
-                    text: ChatToolOutputFormatter.imageFailureJSON(reason: error.localizedDescription),
+                    text: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: "generate_image",
+                        reason: error.localizedDescription
+                    ),
                     metadata: nil
                 )
             ]
@@ -1595,7 +1632,7 @@ final class ChatToolRuntime {
             metadata: nil
         )
         guard allow else {
-            return ChatToolOutputFormatter.searchFailureJSON(
+            return ChatToolOutputFormatter.toolFailureJSON(
                 toolName: toolName,
                 reason: "User denied network search.",
                 denied: true

@@ -91,8 +91,6 @@ struct AppShell: View {
             initialValue: NovelWorkspaceLifecycleCoordinator()
         )
         self._novelCreationErrorMessage = State(initialValue: novelCreationErrorMessage)
-        // launch handler 必须在启动阶段注册完，晚了系统就没法把后台任务派回来。
-        BackgroundGenerationKeepAlive.shared.configure()
         IOSDeepReadBackgroundCoordinator.shared.configure(sharedSettings: sharedSettingsStore)
         IOSChatBackgroundGenerationCoordinator.shared.configure(
             conversationStore: conversationStore,
@@ -156,14 +154,19 @@ struct AppShell: View {
             // 启动时引导会话存储：加载历史摘要，选最近一条或新建。
             // run recovery 不是幂等操作；在任务的第一个 await 前占位，避免 .task
             // 重启时把本进程正在运行的前台 run 改写为 interrupted。
+            var recoveredPendingApprovals: [IOSPendingApprovalRecoveryDescriptor] = []
             if !didRunStartupRecovery {
                 didRunStartupRecovery = true
                 let interruptedCouncilTaskIds = IOSAdvancedTaskStore.shared.markInterruptedCouncilTasks()
                 CouncilRoomArchiveStore.shared.markInterrupted(taskIds: interruptedCouncilTaskIds)
                 councilChatViewModel.recoverInterruptedTasks(interruptedCouncilTaskIds)
                 let backgroundRunIds = IOSChatBackgroundGenerationCoordinator.shared.restorableRunIds
-                _ = await IOSRunRecovery.recoverInterruptedRuns(
+                recoveredPendingApprovals = await IOSRunRecovery.recoverPendingApprovalDescriptors(
                     excludingRunIds: backgroundRunIds
+                )
+                let pendingApprovalRunIds = Set(recoveredPendingApprovals.map(\.runId))
+                _ = await IOSRunRecovery.recoverInterruptedRuns(
+                    excludingRunIds: backgroundRunIds.union(pendingApprovalRunIds)
                 )
                 AgentLiveActivityController.shared.restoreExistingActivity(
                     ownedRunIds: backgroundRunIds
@@ -173,6 +176,7 @@ struct AppShell: View {
                 IOSChatBackgroundGenerationCoordinator.shared.resumeSuspendedRunsIfNeeded()
             }
             await conversationStore.bootstrap()
+            await chatViewModel.terminateRecoveredPendingApprovals(recoveredPendingApprovals)
             didBootstrapConversations = true
             sharedSettings.repairCurrentChatModelIfNeeded(settingsStore)
             WatchTaskCoordinator.shared.attach(

@@ -7,6 +7,15 @@ import Shared
 @MainActor
 final class ChatMessageProjectionTests: XCTestCase {
 
+    private func source(_ relativePath: String) throws -> String {
+        let testsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let iosAppRoot = testsDir.deletingLastPathComponent()
+        return try String(
+            contentsOf: iosAppRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
     func testLiveTailModelPublishesAtMostOncePerSignalRevision() {
         let message = UIMessage(
             id: KotlinUuid.companion.random(),
@@ -151,6 +160,29 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertFalse(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "shortcuts://run-shortcut?name=bad"))))
         XCTAssertFalse(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "file:///private/var/mobile/Library/foo"))))
         XCTAssertFalse(ChatMarkdownOpenURLPolicy.isAllowed(try XCTUnwrap(URL(string: "javascript:alert(1)"))))
+    }
+
+    func testInvalidDataImageURLResolvesToFailure() {
+        guard case .failure = ChatDataImageLoadState.resolve(
+            urlString: "data:image/jpeg;base64,this-is-not-base64"
+        ) else {
+            return XCTFail("损坏的 data URL 必须结束 loading 并进入失败态")
+        }
+    }
+
+    func testGeneratedImageLoadingShowsOnePlaceholderPerRequestedImage() throws {
+        let bubble = try source("iosApp/MessageBubbleView.swift")
+
+        XCTAssertTrue(bubble.contains("ForEach(0..<display.requestedCount"))
+    }
+
+    func testToolDetailSelectionKeepsStableIdentityAndResolvesCurrentMessageOutput() throws {
+        let bubble = try source("iosApp/MessageBubbleView.swift")
+        let detail = try source("iosApp/ChatToolDetailSheet.swift")
+
+        XCTAssertTrue(detail.contains("let toolCallId: String"))
+        XCTAssertFalse(detail.contains("let id = UUID()"))
+        XCTAssertTrue(bubble.contains("toolPart(toolCallId: target.toolCallId)"))
     }
 
     func testNativeTimelineSessionIdentityChangesAcrossConversations() {

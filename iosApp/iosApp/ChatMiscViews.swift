@@ -549,6 +549,7 @@ enum ChatImageEncoder {
 /// the OCR-fallback vision model reads the image, with a breathing animation.
 struct VisionRecognitionIndicator: View {
     @State private var pulse = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack {
@@ -557,8 +558,8 @@ struct VisionRecognitionIndicator: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(AmberTheme.accent)
-                    .scaleEffect(pulse ? 1.18 : 0.86)
-                    .opacity(pulse ? 1.0 : 0.55)
+                    .scaleEffect(reduceMotion ? 1 : (pulse ? 1.18 : 0.86))
+                    .opacity(reduceMotion ? 1 : (pulse ? 1.0 : 0.55))
                 Text("视觉识别中…")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(AmberTheme.foreground2)
@@ -569,9 +570,20 @@ struct VisionRecognitionIndicator: View {
             .overlay(Capsule().stroke(AmberTheme.borderSoft, lineWidth: 1))
         }
         .onAppear {
-            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
+            startPulseIfNeeded()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            startPulseIfNeeded()
+        }
+    }
+
+    private func startPulseIfNeeded() {
+        guard !reduceMotion else {
+            pulse = false
+            return
+        }
+        withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+            pulse = true
         }
     }
 }

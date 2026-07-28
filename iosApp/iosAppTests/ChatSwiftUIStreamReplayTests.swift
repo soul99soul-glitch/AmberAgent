@@ -1037,9 +1037,8 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             40,
             "24KB 长文的绝大多数列表高度发布必须保持单行级：\(contentGrowthSteps)"
         )
-        // sizeChanges 底锚在同一布局事务内吸收高度增长,scroll offset 始终贴底,
-        // 不再产生逐行 offset advance。旧 measured-growth 动画的逐行跟随断言已不适用;
-        // 底部欠账由 maxBottomDebt 断言覆盖(sizeChanges 下应接近 0)。
+        // measured geometry callback 在同一布局事务内发出非动画语义底锚，offset
+        // advance 不保证逐帧可采样；跟随是否及时由 maxBottomDebt 直接覆盖。
         XCTAssertLessThanOrEqual(
             maxBottomDebt,
             72,

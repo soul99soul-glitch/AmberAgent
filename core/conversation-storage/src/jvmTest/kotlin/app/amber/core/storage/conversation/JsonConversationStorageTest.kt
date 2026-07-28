@@ -230,6 +230,24 @@ class JsonConversationStorageTest {
     }
 
     @Test
+    fun conditionalTitleUpdateDoesNotOverwriteNewerTitle() = runTest {
+        val id = Uuid.parse("00000000-0000-0000-0000-000000000044")
+        storage.saveConversation(
+            sampleConversation(id = id, title = "generated baseline")
+        )
+        storage.updateMetadata(id, title = "user title")
+
+        val didUpdate = storage.updateTitleIfCurrentTitleMatches(
+            id = id,
+            title = "late generated title",
+            expectedTitle = "generated baseline",
+        )
+
+        assertFalse(didUpdate)
+        assertEquals("user title", storage.loadConversation(id)?.title)
+    }
+
+    @Test
     fun saveConversationMessageWritePreservesExistingMetadataOwnerFields() = runTest {
         val id = Uuid.parse("00000000-0000-0000-0000-000000000043")
         storage.saveConversation(

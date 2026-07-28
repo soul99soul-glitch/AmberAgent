@@ -72,6 +72,15 @@ private struct PendingAssistantRegeneration {
     let generatedMessageIndex: Int
 }
 
+enum ChatComposerSendBlockReason: Equatable {
+    case emptyInput
+    case generationActive
+    case attachingSelectedFile
+    case recognizingImages
+    case pendingApproval
+    case configuration(ChatConfigurationIssue)
+}
+
 @MainActor
 @Observable
 final class ChatViewModel {
@@ -119,8 +128,10 @@ final class ChatViewModel {
 
     /// 识别图片期间的总张数（>1 时才作为副标题事实展示）。
     private(set) var visionRecognitionImageCount = 0
-    private var pendingVisionFailures: [String: String] = [:]
     private static let visionRecognitionPendingMessage = "图片识别中，请稍候"
+    @ObservationIgnored private var visionRecognitionTask: Task<Void, Never>?
+    private var visionRecognitionRequestId: UUID?
+    private var visionRecognitionConversationId: KotlinUuid?
 
     /// 持久化存储（由 AppShell 注入）。nil 时退化为纯内存模式（向后兼容旧调用方）。
     weak var conversationStore: IOSConversationStore?
@@ -210,6 +221,18 @@ final class ChatViewModel {
         return generationCoordinator.isRunning || hasActiveBackgroundGenerationForCurrentConversation
     }
 
+    var isForegroundGenerationActiveForCurrentConversation: Bool {
+        guard generationCoordinator.isRunning else { return false }
+        switch (currentConversationId, generationCoordinator.activeConversationId) {
+        case (nil, nil):
+            return true
+        case let (current?, active?):
+            return String(describing: current) == String(describing: active)
+        default:
+            return false
+        }
+    }
+
     var isGenerationActiveForCurrentConversation: Bool {
         guard let currentConversationId else { return false }
         if let activeConversationId = generationCoordinator.activeConversationId,
@@ -258,6 +281,7 @@ final class ChatViewModel {
             changesConversation = true
         }
         if changesConversation {
+            invalidateSuggestionRequest()
             discardSelectedFileContextForConversationChange()
         }
         return true
@@ -291,6 +315,9 @@ final class ChatViewModel {
     }
 
     private func discardSelectedFileContextForConversationChange() {
+        cancelVisionRecognitionForConversationChange()
+        inputText = ""
+        clearPendingImages()
         pendingSelectedFilePreview = nil
         selectedFileContextError = nil
         guard let requestId = attachRequestId else {
@@ -334,6 +361,20 @@ final class ChatViewModel {
         )
     }
 
+    /// One derived contract shared by the composer and the send action.
+    func composerSendBlockReason(for text: String) -> ChatComposerSendBlockReason? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !pendingImages.isEmpty else { return .emptyInput }
+        guard !isGenerationActive else { return .generationActive }
+        guard !isAttachingSelectedFile else { return .attachingSelectedFile }
+        guard !isRecognizingImages else { return .recognizingImages }
+        guard !hasPendingUserGate else { return .pendingApproval }
+        if autoGenerateResponses, let configurationIssue {
+            return .configuration(configurationIssue)
+        }
+        return nil
+    }
+
     // MARK: - Private
 
     private let settingsStore: SettingsStore
@@ -342,6 +383,7 @@ final class ChatViewModel {
     private let searchTransport: any IOSSearchHTTPTransport
     private let miniAppRepository: IOSMiniAppRepository
     private let autoGenerateResponses: Bool
+    private let auxiliaryTextProvider: any IOSAgentTextProvider
     private let liveActivityController: AgentLiveActivityController
     @ObservationIgnored private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
     @ObservationIgnored private lazy var mcpManager: IOSMcpManager = {
@@ -374,6 +416,8 @@ final class ChatViewModel {
     }
 
     private var pendingAssistantRegeneration: PendingAssistantRegeneration?
+    @ObservationIgnored private var suggestionRequestToken: UUID?
+    @ObservationIgnored private var suggestionGenerationTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -384,6 +428,7 @@ final class ChatViewModel {
         searchTransport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport(),
         miniAppRepository: IOSMiniAppRepository? = nil,
         autoGenerateResponses: Bool = true,
+        auxiliaryTextProvider: any IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
         liveActivityController: AgentLiveActivityController? = nil
     ) {
         self.settingsStore = settingsStore
@@ -392,6 +437,7 @@ final class ChatViewModel {
         self.searchTransport = searchTransport
         self.miniAppRepository = miniAppRepository ?? IOSMiniAppRepository.shared
         self.autoGenerateResponses = autoGenerateResponses
+        self.auxiliaryTextProvider = auxiliaryTextProvider
         self.liveActivityController = liveActivityController ?? .shared
     }
 
@@ -420,13 +466,7 @@ final class ChatViewModel {
                     self?.streamPresentationPacingEnabled ?? false
                 },
                 setIsLoading: { [weak self] isLoading in
-                    guard let self else { return }
-                    let wasLoading = self.isLoading
-                    self.isLoading = isLoading
-                    // 生成由「运行中」转为「空闲」即视为本轮完成 → 触发标题/建议辅助生成。
-                    if wasLoading && !isLoading {
-                        self.onGenerationCompleted()
-                    }
+                    self?.isLoading = isLoading
                 },
                 setPendingMemoryApproval: { [weak self] request in
                     self?.pendingMemoryApproval = request
@@ -458,7 +498,8 @@ final class ChatViewModel {
                     }
                 },
                 persistMessages: { [weak self] conversationId in
-                    self?.persistMessages(conversationId: conversationId)
+                    guard let self else { return false }
+                    return await self.persistMessages(conversationId: conversationId)
                 },
                 capturePersistMessagesBaseline: { [weak self] conversationId in
                     guard let store = self?.conversationStore,
@@ -468,7 +509,8 @@ final class ChatViewModel {
                     return store.writeBaseline(for: targetConversationId)
                 },
                 persistMessagesSnapshot: { [weak self] snapshot, conversationId, writeBaseline in
-                    self?.persistMessages(
+                    guard let self else { return false }
+                    return await self.persistMessages(
                         snapshot,
                         conversationId: conversationId,
                         writeBaseline: writeBaseline
@@ -481,6 +523,13 @@ final class ChatViewModel {
                         status: status,
                         inputDigest: inputDigest,
                         conversationId: conversationId
+                    )
+                },
+                markRunAwaitingPermission: { [weak self] runId, toolCallId in
+                    guard let self else { return false }
+                    return await self.markRunAwaitingPermission(
+                        runId: runId,
+                        toolCallId: toolCallId
                     )
                 },
                 startLiveActivity: { [weak self] runId, conversationId, presentation in
@@ -498,6 +547,9 @@ final class ChatViewModel {
                 },
                 userFacingGenerationError: { rawMessage, modelId in
                     ChatViewModel.userFacingGenerationError(rawMessage, modelId: modelId)
+                },
+                generationSucceeded: { [weak self] in
+                    self?.onGenerationCompleted()
                 }
             )
         )
@@ -517,48 +569,113 @@ final class ChatViewModel {
 
     func reloadFromStore(reason: ChatMessageUpdateReason = .initialLoad) {
         guard let store = conversationStore else { return }
+        invalidateSuggestionRequest()
         messages = store.currentMessages
         contextCompactState = .idle
         bumpMessageRevision(reason: reason)
         chatSuggestions = []
-        flushPendingVisionFailureIfNeeded()
+    }
+
+    func terminateRecoveredPendingApprovals(
+        _ descriptors: [IOSPendingApprovalRecoveryDescriptor]
+    ) async {
+        guard let conversationStore, !descriptors.isEmpty else { return }
+        let runtime = ChatToolRuntime(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettings,
+            localToolExecutor: localToolExecutor,
+            searchTransport: searchTransport,
+            mcpManager: mcpManager
+        )
+        var didUpdateCurrentConversation = false
+
+        for descriptor in descriptors {
+            guard let conversationId = conversationStore.summaries.first(where: {
+                $0.id.toHexDashString() == descriptor.conversationId
+            })?.id else {
+                await IOSRunRecovery.completePendingApprovalRecovery(runId: descriptor.runId)
+                continue
+            }
+            guard let storedMessages = await conversationStore.messages(for: conversationId) else {
+                continue
+            }
+            guard let pendingTool = storedMessages
+                .flatMap(\.parts)
+                .compactMap({ $0 as? UIMessagePart.Tool })
+                .first(where: {
+                    $0.toolCallId == descriptor.toolCallId && $0.output.isEmpty
+                }) else {
+                await IOSRunRecovery.completePendingApprovalRecovery(runId: descriptor.runId)
+                continue
+            }
+
+            let failure = ChatToolOutputFormatter.toolFailureJSON(
+                toolName: pendingTool.toolName,
+                reason: "App restarted while waiting for confirmation.",
+                cancelled: true
+            )
+            var recoveredMessages = runtime.messagesByFinishingToolCall(
+                pendingTool,
+                outputText: failure,
+                in: storedMessages
+            )
+            let noticeSeed = UIMessage.companion.assistant(prompt: "")
+            recoveredMessages.append(UIMessage(
+                id: noticeSeed.id,
+                role: noticeSeed.role,
+                parts: [MessageKt.localGenerationErrorTextPart(
+                    text: "待确认操作因 App 重启已终止，请重新生成。"
+                )],
+                annotations: noticeSeed.annotations,
+                createdAt: noticeSeed.createdAt,
+                finishedAt: noticeSeed.finishedAt,
+                modelId: noticeSeed.modelId,
+                usage: noticeSeed.usage,
+                translation: noticeSeed.translation
+            ))
+            guard await conversationStore.save(messages: recoveredMessages, to: conversationId) else {
+                continue
+            }
+            await IOSRunRecovery.completePendingApprovalRecovery(runId: descriptor.runId)
+            didUpdateCurrentConversation = didUpdateCurrentConversation || currentConversationId == conversationId
+        }
+
+        if didUpdateCurrentConversation {
+            reloadFromStore(reason: .branchChange)
+        }
     }
 
     /// 把当前 messages 落盘（节流：只在流式结束/取消/切换时调，不在每个 chunk 调）。
-    private func persistMessages(conversationId: KotlinUuid? = nil) {
-        guard let store = conversationStore else { return }
+    private func persistMessages(conversationId: KotlinUuid? = nil) async -> Bool {
+        guard let store = conversationStore else { return true }
         let snapshot = messages
         let targetConversationId = conversationId ?? store.currentConversation?.id
         let pendingRegeneration = pendingAssistantRegeneration
         let writeBaseline = targetConversationId.map { store.writeBaseline(for: $0) }
-        Task { @MainActor in
-            await persistMessagesSnapshot(
-                snapshot,
-                targetConversationId: targetConversationId,
-                pendingRegeneration: pendingRegeneration,
-                store: store,
-                writeBaseline: writeBaseline
-            )
-        }
+        return await persistMessagesSnapshot(
+            snapshot,
+            targetConversationId: targetConversationId,
+            pendingRegeneration: pendingRegeneration,
+            store: store,
+            writeBaseline: writeBaseline
+        )
     }
 
     private func persistMessages(
         _ snapshot: [UIMessage],
         conversationId: KotlinUuid? = nil,
         writeBaseline: IOSConversationWriteBaseline?
-    ) {
-        guard let store = conversationStore else { return }
+    ) async -> Bool {
+        guard let store = conversationStore else { return true }
         let targetConversationId = conversationId ?? store.currentConversation?.id
         let pendingRegeneration = pendingAssistantRegeneration
-        Task { @MainActor in
-            await persistMessagesSnapshot(
-                snapshot,
-                targetConversationId: targetConversationId,
-                pendingRegeneration: pendingRegeneration,
-                store: store,
-                writeBaseline: writeBaseline
-            )
-        }
+        return await persistMessagesSnapshot(
+            snapshot,
+            targetConversationId: targetConversationId,
+            pendingRegeneration: pendingRegeneration,
+            store: store,
+            writeBaseline: writeBaseline
+        )
     }
 
     private func persistMessagesSnapshot(
@@ -567,58 +684,84 @@ final class ChatViewModel {
         pendingRegeneration: PendingAssistantRegeneration?,
         store: IOSConversationStore,
         writeBaseline: IOSConversationWriteBaseline?
-    ) async {
+    ) async -> Bool {
         if let pendingRegeneration,
            let targetConversationId,
            String(describing: targetConversationId) == String(describing: pendingRegeneration.conversationId) {
-            if pendingRegeneration.generatedMessageIndex >= 0,
-               pendingRegeneration.generatedMessageIndex < snapshot.count {
-                let regenerated = snapshot[pendingRegeneration.generatedMessageIndex]
-                if regenerated.role == MessageRole.assistant {
-                    let saved = await store.appendVariantAndTruncateAfter(
-                        messageIndex: pendingRegeneration.targetMessageIndex,
-                        message: regenerated,
-                        conversationId: pendingRegeneration.conversationId
-                    )
-                    if saved {
-                        self.pendingAssistantRegeneration = nil
-                        self.messages = store.currentMessages
-                        self.bumpMessageRevision(reason: .branchChange)
-                        return
-                    }
+            let generatedSuffix: [UIMessage] = pendingRegeneration.generatedMessageIndex >= 0 &&
+                pendingRegeneration.generatedMessageIndex < snapshot.count
+                ? Array(snapshot[pendingRegeneration.generatedMessageIndex...])
+                : []
+
+            if let errorMessage = generatedSuffix.first(where: Self.isLocalGenerationError) {
+                self.pendingAssistantRegeneration = nil
+                let saved = await store.save(
+                    messages: store.currentMessages + [errorMessage],
+                    to: pendingRegeneration.conversationId,
+                    ifUnchangedSince: writeBaseline
+                )
+                if saved {
+                    self.messages = store.currentMessages
+                    self.bumpMessageRevision(reason: .branchChange)
                 }
+                return saved
+            }
+
+            if let regeneratedIndex = generatedSuffix.lastIndex(where: Self.isRegeneratedAnswerCandidate) {
+                let regenerated = generatedSuffix[regeneratedIndex]
+                let trailingMessages = Array(generatedSuffix.dropFirst(regeneratedIndex + 1))
+                let saved = await store.appendVariantAndTruncateAfter(
+                    messageIndex: pendingRegeneration.targetMessageIndex,
+                    message: regenerated,
+                    trailingMessages: trailingMessages,
+                    conversationId: pendingRegeneration.conversationId
+                )
+                if saved {
+                    self.pendingAssistantRegeneration = nil
+                    self.messages = store.currentMessages
+                    self.bumpMessageRevision(reason: .branchChange)
+                    return true
+                }
+                self.pendingAssistantRegeneration = nil
+                self.messages = store.currentMessages
+                self.bumpMessageRevision(reason: .branchChange)
+                return false
+            }
+            if let outputLimitNotice = generatedSuffix.last(where: Self.isOutputLimitNotice) {
+                let saved = await store.save(
+                    messages: store.currentMessages + [outputLimitNotice],
+                    to: pendingRegeneration.conversationId,
+                    ifUnchangedSince: writeBaseline
+                )
+                self.pendingAssistantRegeneration = nil
+                self.messages = store.currentMessages
+                self.bumpMessageRevision(reason: .branchChange)
+                return saved
             }
             self.pendingAssistantRegeneration = nil
             self.messages = store.currentMessages
             self.bumpMessageRevision(reason: .branchChange)
-            return
+            return false
         }
         if let targetConversationId {
-            await store.save(messages: snapshot, to: targetConversationId, ifUnchangedSince: writeBaseline)
-        } else {
-            await store.saveCurrent(messages: snapshot)
+            return await store.save(
+                messages: snapshot,
+                to: targetConversationId,
+                ifUnchangedSince: writeBaseline
+            )
         }
+        return true
     }
 
-    func sendMessage() {
+    @discardableResult
+    func sendMessage() -> Bool {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasImages = !pendingImages.isEmpty
-        guard (!text.isEmpty || hasImages),
-              !isGenerationActive,
-              !isAttachingSelectedFile,
-              !isRecognizingImages,
-              pendingMemoryApproval == nil,
-              pendingSearchApproval == nil,
-              pendingWebMountApproval == nil,
-              pendingWorkspaceApproval == nil,
-              pendingIshHandoffApproval == nil,
-              pendingMcpApproval == nil,
-              pendingCouncilApproval == nil,
-              pendingAskUser == nil else { return }
-
-        if autoGenerateResponses, let configurationIssue {
-            configurationError = configurationIssue.message
-            return
+        if let blockReason = composerSendBlockReason(for: text) {
+            if case .configuration(let issue) = blockReason {
+                configurationError = issue.message
+            }
+            return false
         }
         // 发图前先按模型视觉能力判断（对齐安卓 ImageAttachmentValidator）：
         // ready→直接发；fallback→先用视觉模型识别成文字再发；blocked→拦下提示，绝不静默丢弃。
@@ -626,17 +769,18 @@ final class ChatViewModel {
             switch imageAttachmentState {
             case .blocked(let reason):
                 selectedFileContextError = reason
-                return
+                return false
             case .fallback:
                 configurationError = nil
                 startVisionFallbackAndSend(text: text, images: pendingImages)
-                return
+                return true
             case .ready, .none:
                 break
             }
         }
         configurationError = nil
         sendUserMessage(text: text, images: pendingImages)
+        return true
     }
 
     func modifyGeneratedImage(sourceImageURL: String, prompt: String, aspectRatio: String) {
@@ -676,13 +820,16 @@ final class ChatViewModel {
             bumpMessageRevision(reason: .userAppend)
         }
         inputText = ""
+        invalidateSuggestionRequest()
         chatSuggestions = []
         pendingSelectedFilePreview = nil
         clearPendingImages()
         selectedFileContextError = nil
         let runConversationId = currentConversationId
         // 用户消息立即落盘：即使随后生成崩溃/被杀进程，用户输入也不会丢。
-        persistMessages(conversationId: runConversationId)
+        Task { @MainActor [weak self] in
+            _ = await self?.persistMessages(conversationId: runConversationId)
+        }
         return (digest, runConversationId, ChatMessageProjector.messageId(for: userMsg))
     }
 
@@ -723,31 +870,66 @@ final class ChatViewModel {
     private func startVisionFallbackAndSend(text: String, images: [PendingChatImage]) {
         let (digest, conversationId, userMessageId) = appendUserMessage(text: text, images: images)
         guard autoGenerateResponses else { return }
+        let requestId = UUID()
+        visionRecognitionRequestId = requestId
+        visionRecognitionConversationId = conversationId
         isRecognizingImages = true
         visionRecognitionImageCount = images.count
-        Task {
-            let result = await performVisionRecognition(images: images)
-            await MainActor.run {
-                isRecognizingImages = false
-                visionRecognitionImageCount = 0
-                clearVisionRecognitionPendingPrompt()
-                switch result {
-                case .failure(let error):
-                    applyVisionRecognitionFailure(
-                        message: error.message,
-                        conversationId: conversationId,
-                        userMessageId: userMessageId
-                    )
-                case .success(let texts):
-                    guard shouldApplyVisionRecognitionResult(
-                        conversationId: conversationId,
-                        userMessageId: userMessageId
-                    ) else { return }
-                    cacheVisionRecognitionTexts(texts)
-                    generateResponse(inputDigest: digest, conversationId: conversationId)
-                }
+        visionRecognitionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await self.performVisionRecognition(images: images)
+            guard self.visionRecognitionRequestId == requestId else { return }
+            self.clearVisionRecognitionOperation()
+            self.clearVisionRecognitionPendingPrompt()
+            switch result {
+            case .failure(let error):
+                await self.applyVisionRecognitionFailure(
+                    message: error.message,
+                    conversationId: conversationId,
+                    userMessageId: userMessageId
+                )
+            case .success(let texts):
+                guard self.shouldApplyVisionRecognitionResult(
+                    conversationId: conversationId,
+                    userMessageId: userMessageId
+                ) else { return }
+                self.cacheVisionRecognitionTexts(texts)
+                self.generateResponse(inputDigest: digest, conversationId: conversationId)
             }
         }
+    }
+
+    private func cancelVisionRecognitionForConversationChange() {
+        guard visionRecognitionRequestId != nil else { return }
+        let ownerConversationId = visionRecognitionConversationId
+        let ownerMessages = messages
+        visionRecognitionTask?.cancel()
+        clearVisionRecognitionOperation()
+        guard let ownerConversationId, let conversationStore else { return }
+        let notice = Self.visionRecognitionFailureMessage("图片识别已取消，请重新发送图片")
+        Task { @MainActor in
+            _ = await conversationStore.saveBackgroundCompletion(
+                baseMessages: ownerMessages,
+                completedMessages: ownerMessages + [notice],
+                to: ownerConversationId
+            )
+        }
+    }
+
+    func cancelVisionRecognition() {
+        guard visionRecognitionRequestId != nil else { return }
+        visionRecognitionTask?.cancel()
+        clearVisionRecognitionOperation()
+        clearVisionRecognitionPendingPrompt()
+        selectedFileContextError = "图片识别已取消，请重新发送图片"
+    }
+
+    private func clearVisionRecognitionOperation() {
+        visionRecognitionTask = nil
+        visionRecognitionRequestId = nil
+        visionRecognitionConversationId = nil
+        isRecognizingImages = false
+        visionRecognitionImageCount = 0
     }
 
     private func shouldApplyVisionRecognitionResult(
@@ -772,14 +954,20 @@ final class ChatViewModel {
         message: String,
         conversationId: KotlinUuid?,
         userMessageId: String
-    ) {
+    ) async {
         guard shouldApplyVisionRecognitionResult(conversationId: conversationId, userMessageId: userMessageId) else {
-            if !isCurrentConversation(conversationId) {
-                pendingVisionFailures[visionFailureKey(conversationId)] = message
+            if !isCurrentConversation(conversationId),
+               let conversationId,
+               let conversationStore,
+               var ownerMessages = await conversationStore.messages(for: conversationId),
+               ownerMessages.contains(where: {
+                   ChatMessageProjector.messageId(for: $0) == userMessageId
+               }) {
+                ownerMessages.append(Self.visionRecognitionFailureMessage(message))
+                _ = await conversationStore.save(messages: ownerMessages, to: conversationId)
             }
             return
         }
-        pendingVisionFailures.removeValue(forKey: visionFailureKey(conversationId))
         selectedFileContextError = message
     }
 
@@ -790,14 +978,19 @@ final class ChatViewModel {
         return currentConversationId == nil
     }
 
-    private func visionFailureKey(_ conversationId: KotlinUuid?) -> String {
-        conversationId.map { String(describing: $0) } ?? "__memory__"
-    }
-
-    private func flushPendingVisionFailureIfNeeded() {
-        let key = visionFailureKey(currentConversationId)
-        guard let message = pendingVisionFailures.removeValue(forKey: key) else { return }
-        selectedFileContextError = message
+    private static func visionRecognitionFailureMessage(_ text: String) -> UIMessage {
+        let seed = UIMessage.companion.assistant(prompt: "")
+        return UIMessage(
+            id: seed.id,
+            role: seed.role,
+            parts: [MessageKt.localGenerationErrorTextPart(text: text)],
+            annotations: seed.annotations,
+            createdAt: seed.createdAt,
+            finishedAt: seed.finishedAt,
+            modelId: seed.modelId,
+            usage: seed.usage,
+            translation: seed.translation
+        )
     }
 
     private func clearVisionRecognitionPendingPrompt() {
@@ -840,21 +1033,16 @@ final class ChatViewModel {
         guard let providerSetting = ChatProviderConfiguration.provider(
             for: visionModel,
             providers: snapshot.providers
-        ) else {
+        ), ChatProviderConfiguration.issue(for: visionModel, provider: providerSetting) == nil else {
             return .failure(VisionRecognitionError(message: "视觉识别模型的服务商不可用"))
         }
         let prompt = OcrPromptKt.resolveVisionRecognitionPrompt(prompt: snapshot.ocrPrompt)
-        let params = TextGenerationParams(
+        let assistant = snapshot.getCurrentAssistant()
+        let params = Self.makeAuxiliaryTextGenerationParams(
             model: visionModel,
-            temperature: nil,
-            topP: nil,
-            maxTokens: nil,
-            tools: [],
-            reasoningLevel: ReasoningLevel.off,
-            customHeaders: [],
-            customBody: []
+            assistantHeaders: assistant.customHeaders,
+            assistantBodies: assistant.customBodies
         )
-        let adapter = OpenAIKmpProviderAdapter()
         var results: [String: String] = [:]
         for image in images {
             if let cached = cachedVisionRecognitionText(for: image.dataUrl) {
@@ -866,7 +1054,7 @@ final class ChatViewModel {
                 makeImageOnlyUserMessage(dataUrl: image.dataUrl)
             ]
             do {
-                let chunk = try await adapter.generateText(
+                let chunk = try await auxiliaryTextProvider.generateText(
                     providerSetting: providerSetting,
                     messages: requestMessages,
                     params: params
@@ -934,22 +1122,19 @@ final class ChatViewModel {
 
     /// 用辅助模型跑一次单轮文本生成(OpenAIKmpProviderAdapter 内部按服务商类型分发 OpenAI/Claude)。
     private func runAuxModel(model: Model, prompt: String) async -> String? {
+        let snapshot = sharedSettings.snapshot
         guard let provider = ChatProviderConfiguration.provider(
             for: model,
-            providers: sharedSettings.snapshot.providers
-        ) else { return nil }
-        let params = TextGenerationParams(
+            providers: snapshot.providers
+        ), ChatProviderConfiguration.issue(for: model, provider: provider) == nil else { return nil }
+        let assistant = snapshot.getCurrentAssistant()
+        let params = Self.makeAuxiliaryTextGenerationParams(
             model: model,
-            temperature: nil,
-            topP: nil,
-            maxTokens: nil,
-            tools: [],
-            reasoningLevel: ReasoningLevel.off,
-            customHeaders: [],
-            customBody: []
+            assistantHeaders: assistant.customHeaders,
+            assistantBodies: assistant.customBodies
         )
         do {
-            let chunk = try await OpenAIKmpProviderAdapter().generateText(
+            let chunk = try await auxiliaryTextProvider.generateText(
                 providerSetting: provider,
                 messages: [UIMessage.companion.user(prompt: prompt)],
                 params: params
@@ -960,10 +1145,29 @@ final class ChatViewModel {
         }
     }
 
+    private static func makeAuxiliaryTextGenerationParams(
+        model: Model,
+        assistantHeaders: [CustomHeader],
+        assistantBodies: [CustomBody]
+    ) -> TextGenerationParams {
+        TextGenerationParams(
+            model: model,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: ReasoningLevel.off,
+            customHeaders: assistantHeaders + model.customHeaders,
+            customBody: assistantBodies + model.customBodies
+        )
+    }
+
     private func generateConversationTitle() {
         let snapshot = sharedSettings.snapshot
         guard let model = resolveAuxModel(snapshot.titleModelId),
-              let conversationId = currentConversationId else { return }
+              let conversationId = currentConversationId,
+              let conversationStore,
+              let expectedTitle = conversationStore.currentConversation?.title else { return }
         let content = auxConversationText(maxMessages: 4)
         guard !content.isEmpty else { return }
         let prompt = snapshot.titlePrompt
@@ -974,7 +1178,11 @@ final class ChatViewModel {
             guard let raw = await self.runAuxModel(model: model, prompt: prompt) else { return }
             let title = Self.sanitizeTitle(raw)
             guard !title.isEmpty else { return }
-            await self.conversationStore?.renameConversation(id: conversationId, title: title)
+            _ = await conversationStore.renameConversation(
+                id: conversationId,
+                title: title,
+                ifCurrentTitleMatches: expectedTitle
+            )
         }
     }
 
@@ -987,21 +1195,48 @@ final class ChatViewModel {
             .replacingOccurrences(of: "{locale}", with: auxLocaleName())
             .replacingOccurrences(of: "{content}", with: content)
         let conversationId = currentConversationId
-        Task { [weak self] in
+        let requestToken = beginSuggestionRequest()
+        suggestionGenerationTask = Task { [weak self] in
             guard let self else { return }
             guard let raw = await self.runAuxModel(model: model, prompt: prompt) else { return }
+            guard !Task.isCancelled else { return }
             let suggestions = raw
                 .split(separator: "\n")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .prefix(5)
-            await MainActor.run {
-                // 仅当仍是同一会话且未在生成中时才应用,避免覆盖到新一轮。
-                guard self.currentConversationId == conversationId, !self.isGenerationActive else { return }
-                withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
-                    self.chatSuggestions = Array(suggestions)
-                }
-            }
+            self.applySuggestions(
+                Array(suggestions),
+                requestToken: requestToken,
+                conversationId: conversationId
+            )
+        }
+    }
+
+    private func beginSuggestionRequest() -> UUID {
+        suggestionGenerationTask?.cancel()
+        let token = UUID()
+        suggestionRequestToken = token
+        return token
+    }
+
+    private func invalidateSuggestionRequest() {
+        suggestionGenerationTask?.cancel()
+        suggestionGenerationTask = nil
+        suggestionRequestToken = nil
+    }
+
+    private func applySuggestions(
+        _ suggestions: [String],
+        requestToken: UUID,
+        conversationId: KotlinUuid?
+    ) {
+        guard suggestionRequestToken == requestToken,
+              isCurrentConversation(conversationId),
+              !isGenerationActive else { return }
+        suggestionGenerationTask = nil
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+            chatSuggestions = suggestions
         }
     }
 
@@ -1091,7 +1326,10 @@ final class ChatViewModel {
     }
 #endif
 
-    func attachSelectedFilePreviewToNextMessage() async {
+    func attachSelectedFilePreviewToNextMessage(expectedConversationId: String? = nil) async {
+        guard expectedConversationId == nil || expectedConversationId == currentConversationId.map({
+            String(describing: $0)
+        }) else { return }
         guard !isAttachingSelectedFile else { return }
         guard let localToolExecutor else {
             selectedFileContextError = "Local iOS tool executor is unavailable."
@@ -1116,7 +1354,10 @@ final class ChatViewModel {
 
         let request = localToolExecutor.requestForCurrentSelectedFile(isUserInitiated: true)
         let output = await localToolExecutor.execute(request)
-        guard attachRequestId == requestId else { return }
+        guard attachRequestId == requestId,
+              expectedConversationId == nil || expectedConversationId == currentConversationId.map({
+                  String(describing: $0)
+              }) else { return }
         switch output {
         case .selectedFilePreview(let result):
             pendingSelectedFilePreview = result
@@ -1279,7 +1520,8 @@ final class ChatViewModel {
         // (capability metadata isn't reliably known for every model id), only requiring
         // that it resolves and has a usable provider.
         if let vision = snapshot.findModelById(uuid: snapshot.ocrModelId),
-           ChatProviderConfiguration.provider(for: vision, providers: snapshot.providers) != nil {
+           let provider = ChatProviderConfiguration.provider(for: vision, providers: snapshot.providers),
+           ChatProviderConfiguration.issue(for: vision, provider: provider) == nil {
             return .fallback
         }
         return .blocked("当前模型不支持图片，请先在「默认模型 → 辅助任务」配置视觉识别模型")
@@ -1433,13 +1675,19 @@ final class ChatViewModel {
         }
         guard !isGenerationActive else { return false }
         inputText = trimmed
-        sendMessage()
-        return true
+        return sendMessage()
     }
 
     func cancelGeneration() {
         // cancel() itself publishes the cancelled watch snapshot; do not clear first.
-        generationCoordinator.cancel()
+        if generationCoordinator.isRunning {
+            generationCoordinator.cancel()
+            return
+        }
+        guard let currentConversationId else { return }
+        _ = IOSChatBackgroundGenerationCoordinator.shared.cancelActiveJob(
+            conversationId: currentConversationId
+        )
     }
 
     @discardableResult
@@ -1549,7 +1797,7 @@ final class ChatViewModel {
             if let updated = store.currentConversation {
                 self.messages = updated.currentMessages
                 self.bumpMessageRevision(reason: .branchChange)
-                self.persistMessages(conversationId: currentConversationId)
+                _ = await self.persistMessages(conversationId: currentConversationId)
             }
             let digest = chatInputDigest(for: trimmed)
             generateResponse(inputDigest: digest, conversationId: currentConversationId)
@@ -1565,7 +1813,7 @@ final class ChatViewModel {
                 self.messages = updated.currentMessages
                 self.bumpMessageRevision(reason: .branchChange)
             }
-            self.persistMessages(conversationId: currentConversationId)
+            _ = await self.persistMessages(conversationId: currentConversationId)
         }
     }
 
@@ -1626,8 +1874,12 @@ final class ChatViewModel {
         message: String,
         conversationId: KotlinUuid?,
         userMessageId: String
-    ) {
-        applyVisionRecognitionFailure(message: message, conversationId: conversationId, userMessageId: userMessageId)
+    ) async {
+        await applyVisionRecognitionFailure(
+            message: message,
+            conversationId: conversationId,
+            userMessageId: userMessageId
+        )
     }
 
     func applyVisionRecognitionSuccessForTesting(
@@ -1672,13 +1924,38 @@ final class ChatViewModel {
     }
 
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
+        let uploadableMessages = messages.filter { !Self.isLocalGenerationError($0) }
         let withContext = ChatRuntimeContextBuilder(
             sharedSettings: sharedSettings,
             mcpTools: mcpManager.tools,
             miniAppRepository: miniAppRepository,
             miniAppRuntimeEnabled: isMiniAppRuntimeEnabled
-        ).injectingRuntimeContext(into: messages, coalesceSystemMessages: false)
+        ).injectingRuntimeContext(into: uploadableMessages, coalesceSystemMessages: false)
         return replacingImagesForNonVisionModel(withContext)
+    }
+
+    private static func isLocalGenerationError(_ message: UIMessage) -> Bool {
+        guard message.role == MessageRole.assistant else { return false }
+        return message.parts.contains { part in
+            guard let text = part as? UIMessagePart.Text else { return false }
+            return text.metadata?[MessageKt.LOCAL_GENERATION_ERROR_METADATA_KEY]?
+                .jsonPrimitiveOrNull?.content == MessageKt.LOCAL_GENERATION_ERROR_METADATA_VALUE
+        }
+    }
+
+    private static func isRegeneratedAnswerCandidate(_ message: UIMessage) -> Bool {
+        guard message.role == MessageRole.assistant,
+              !isLocalGenerationError(message),
+              !isOutputLimitNotice(message) else { return false }
+        return !message.toText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func isOutputLimitNotice(_ message: UIMessage) -> Bool {
+        message.parts.contains { part in
+            guard let text = part as? UIMessagePart.Text else { return false }
+            return text.metadata?[MessageKt.LOCAL_GENERATION_ERROR_METADATA_KEY]?
+                .jsonPrimitiveOrNull?.content == MessageKt.LOCAL_OUTPUT_LIMIT_NOTICE_METADATA_VALUE
+        }
     }
 
     /// The stored/displayed messages keep their image parts (so the user sees the photo in
@@ -1964,6 +2241,18 @@ final class ChatViewModel {
         }
     }
 
+    private func markRunAwaitingPermission(runId: String, toolCallId: String) async -> Bool {
+        let updated = await withCheckedContinuation { (continuation: CheckedContinuation<Int, Never>) in
+            db.agentRuntimeDao().markAwaitingPermission(
+                runId: runId,
+                inputSnapshotRef: "tool_call:\(toolCallId)"
+            ) { count, _ in
+                continuation.resume(returning: Int(count?.intValue ?? 0))
+            }
+        }
+        return updated == 1
+    }
+
     /// Resolve the provider for the current chat model, Android-style:
     ///   current chat model  ->  model.findProvider(settings.providers)
     /// The resolved ProviderSetting carries its own apiKey/baseUrl (the key now
@@ -1976,7 +2265,7 @@ final class ChatViewModel {
         guard let provider = ChatProviderConfiguration.provider(
             for: currentModel,
             providers: sharedSettings.snapshot.providers
-        ), ChatProviderConfiguration.supportsChatStreaming(provider) else { return nil }
+        ), ChatProviderConfiguration.issue(for: currentModel, provider: provider) == nil else { return nil }
         return provider
     }
 
@@ -2156,6 +2445,34 @@ final class ChatViewModel {
     }
 
     #if DEBUG
+    static func auxiliaryTextGenerationParamsForTesting(
+        model: Model,
+        assistantHeaders: [CustomHeader] = [],
+        assistantBodies: [CustomBody] = []
+    ) -> TextGenerationParams {
+        makeAuxiliaryTextGenerationParams(
+            model: model,
+            assistantHeaders: assistantHeaders,
+            assistantBodies: assistantBodies
+        )
+    }
+
+    func beginSuggestionRequestForTesting() -> UUID {
+        beginSuggestionRequest()
+    }
+
+    func applySuggestionsForTesting(
+        _ suggestions: [String],
+        requestToken: UUID,
+        conversationId: KotlinUuid?
+    ) {
+        applySuggestions(
+            suggestions,
+            requestToken: requestToken,
+            conversationId: conversationId
+        )
+    }
+
     /// Test accessor for the resolved generation params (reads real
     /// Assistant/Model values + resolveSessionDefaults).
     func textGenerationParamsForTesting() -> TextGenerationParams {
@@ -2167,8 +2484,8 @@ final class ChatViewModel {
         targetMessageIndex: Int,
         generatedMessageIndex: Int,
         snapshot: [UIMessage]
-    ) async {
-        guard let store = conversationStore else { return }
+    ) async -> Bool {
+        guard let store = conversationStore else { return false }
         let pending = PendingAssistantRegeneration(
             conversationId: conversationId,
             targetMessageIndex: targetMessageIndex,
@@ -2176,7 +2493,7 @@ final class ChatViewModel {
         )
         pendingAssistantRegeneration = pending
         messages = snapshot
-        await persistMessagesSnapshot(
+        return await persistMessagesSnapshot(
             snapshot,
             targetConversationId: conversationId,
             pendingRegeneration: pending,

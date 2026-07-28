@@ -59,6 +59,24 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
     }
 
+    func testChatComposerUsesTheViewModelSendGateAndKeepsStopForTheCurrentRun() throws {
+        let chat = try source("iosApp/ChatView.swift")
+
+        XCTAssertTrue(chat.contains("viewModel.composerSendBlockReason(for: text) == nil"))
+        XCTAssertTrue(chat.contains("isLoading: isCurrentConversationRunActive"))
+        XCTAssertTrue(chat.contains("viewModel.isGenerationActiveForCurrentConversation"))
+        XCTAssertTrue(chat.contains("viewModel.cancelGeneration()"))
+    }
+
+    func testPhotoPickerResultsStayOwnedByTheConversationThatStartedLoading() throws {
+        let chat = try source("iosApp/ChatView.swift")
+
+        XCTAssertTrue(chat.contains("let selectionConversationId = currentConversationIdString"))
+        XCTAssertTrue(chat.contains("guard selectionConversationId == currentConversationIdString"))
+        XCTAssertTrue(chat.contains("failedImageCount"))
+        XCTAssertTrue(chat.contains("张图片处理失败"))
+    }
+
     func testNativeTimelineRouteReadsSettingsToggleFlags() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let list = try source("iosApp/ChatCollectionMessageList.swift")
@@ -225,8 +243,81 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(bubble.contains("@AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown)"))
         XCTAssertTrue(bubble.contains("LiyananStreamingMarkdownContentView(content: content)"))
         XCTAssertTrue(bubble.contains("ChatStableStreamingMarkdownView("))
-        XCTAssertTrue(bubble.contains("microsoftStreamingMarkdown && shouldUseExperimentalMarkdownRenderer"))
-        XCTAssertTrue(bubble.contains("liyananStreamingMarkdown && shouldUseExperimentalMarkdownRenderer"))
+        XCTAssertTrue(bubble.contains("liyananEnabled: liyananStreamingMarkdown"))
+        XCTAssertTrue(bubble.contains("microsoftEnabled: microsoftStreamingMarkdown"))
+    }
+
+    func testExplicitStreamingMarkdownRendererSelectionTakesPrecedenceOverDefaults() {
+        XCTAssertEqual(
+            ChatMarkdownRendererPolicy.selection(
+                experimentalRenderingAllowed: true,
+                liyananEnabled: true,
+                microsoftEnabled: false,
+                blockRendererEnabled: true,
+                fadeRendererNeeded: true
+            ),
+            .liyanan
+        )
+        XCTAssertEqual(
+            ChatMarkdownRendererPolicy.selection(
+                experimentalRenderingAllowed: true,
+                liyananEnabled: false,
+                microsoftEnabled: true,
+                blockRendererEnabled: true,
+                fadeRendererNeeded: true
+            ),
+            .microsoft
+        )
+    }
+
+    func testStaticMarkdownUsesTheSharedExternalURLPolicy() throws {
+        let markdown = try source("iosApp/MarkdownView.swift")
+
+        XCTAssertTrue(markdown.contains("ChatMarkdownOpenURLPolicy.url(from: raw)"))
+        XCTAssertFalse(markdown.contains("scheme == \"http\" || scheme == \"https\""))
+        XCTAssertEqual(
+            ChatMarkdownOpenURLPolicy.url(from: "mailto:hello@example.com")?.absoluteString,
+            "mailto:hello@example.com"
+        )
+    }
+
+    func testChatAmbientAnimationsReadReduceMotionAtTheirOwningViews() throws {
+        let composer = try source("iosApp/ChatComposerViews.swift")
+        let messageSupport = try source("iosApp/ChatMessageListSupport.swift")
+        let misc = try source("iosApp/ChatMiscViews.swift")
+
+        XCTAssertTrue(composer.contains("struct ContextRingButton: View"))
+        XCTAssertTrue(composer.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
+        XCTAssertTrue(messageSupport.contains("struct TypingDots: View"))
+        XCTAssertTrue(messageSupport.contains("reduceMotion ? 0.55"))
+        XCTAssertTrue(misc.contains("struct VisionRecognitionIndicator: View"))
+        XCTAssertTrue(misc.contains("guard !reduceMotion else"))
+    }
+
+    func testChatApprovalAndAttachmentControlsHaveRealFortyFourPointHitLayout() throws {
+        let chat = try source("iosApp/ChatView.swift")
+        let approvals = try source("iosApp/MemoryToolApprovalCard.swift")
+
+        XCTAssertTrue(chat.contains(".frame(width: 44, height: 44)"))
+        XCTAssertGreaterThanOrEqual(
+            approvals.components(separatedBy: ".chatApprovalHitTarget()").count - 1,
+            16
+        )
+        XCTAssertTrue(approvals.contains("minHeight: 44"))
+        XCTAssertFalse(approvals.contains("Text(request.question)\n                .font(.footnote)\n                .foregroundStyle(AmberTheme.foreground2)\n                .lineLimit(6)"))
+    }
+
+    func testChatBodyTypographyCombinesDynamicTypeWithTheAppFontScale() throws {
+        let support = try source("iosApp/ChatMessageListSupport.swift")
+        let bubble = try source("iosApp/MessageBubbleView.swift")
+
+        XCTAssertGreaterThanOrEqual(
+            support.components(separatedBy: "@ScaledMetric(relativeTo: .body)").count - 1,
+            2
+        )
+        XCTAssertTrue(support.contains("scaledBodyPointSize * boundedScale"))
+        XCTAssertTrue(bubble.contains("@ScaledMetric(relativeTo: .body) private var scaledBodyPointSize: CGFloat = 17"))
+        XCTAssertTrue(bubble.contains("bodyPointSize: scaledBodyPointSize"))
     }
 
     /// 合并渲染开关必须接到三界面共用的那一处 config 构造点（`streamingMarkdownConfig`），
@@ -399,7 +490,8 @@ final class IOSSettingsWiringTests: XCTestCase {
         let approvalPath = coordinator[start.lowerBound..<end.lowerBound]
 
         XCTAssertTrue(approvalPath.contains("foregroundToolExecutionTask = executionTask"))
-        XCTAssertTrue(approvalPath.contains("clearForegroundToolExecution(matching: executionToken)"))
+        XCTAssertTrue(approvalPath.contains("completeApprovedToolExecution(result, matching: executionToken)"))
+        XCTAssertTrue(coordinator.contains("approvedToolContinuation?.resume(returning: nil)"))
     }
 
     func testCouncilSettingsExposeAnExplicitCurrentModelConnectivityProbe() throws {

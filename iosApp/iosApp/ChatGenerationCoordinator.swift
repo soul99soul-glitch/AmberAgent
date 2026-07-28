@@ -378,14 +378,16 @@ struct ChatGenerationBindings {
     let setPendingCouncilApproval: (CouncilToolApprovalRequest?) -> Void
     let setPendingAskUser: (ChatAskUserRequest?) -> Void
     let setContextCompactState: (ChatContextCompactState) -> Void
-    let persistMessages: (KotlinUuid?) -> Void
+    let persistMessages: @MainActor (KotlinUuid?) async -> Bool
     let capturePersistMessagesBaseline: (KotlinUuid?) -> IOSConversationWriteBaseline?
-    let persistMessagesSnapshot: ([UIMessage], KotlinUuid?, IOSConversationWriteBaseline?) -> Void
+    let persistMessagesSnapshot: @MainActor ([UIMessage], KotlinUuid?, IOSConversationWriteBaseline?) async -> Bool
     let recordRun: (String, Int64, String, String, String?) async -> Void
+    var markRunAwaitingPermission: @MainActor (String, String) async -> Bool = { _, _ in true }
     let startLiveActivity: (String, KotlinUuid?, AgentActivityPresentation) -> Void
     let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> UIMessage?
     let messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
     let userFacingGenerationError: (String, String?) -> String
+    var generationSucceeded: @MainActor () -> Void = {}
 }
 
 @MainActor
@@ -441,6 +443,7 @@ final class ChatGenerationCoordinator {
     private weak var pendingBackgroundConversationStore: IOSConversationStore?
     private var foregroundToolExecutionTask: Task<ChatToolRuntimeResult, Never>?
     private var foregroundToolExecutionToken: UUID?
+    private var foregroundApprovedToolContinuation: CheckedContinuation<ChatToolRuntimeResult?, Never>?
     private var foregroundImageToolExecutionTask: Task<[UIMessage], Never>?
     private var foregroundImageToolExecutionToken: UUID?
 
@@ -630,7 +633,9 @@ final class ChatGenerationCoordinator {
         ))
         bindings.setMessages(snapshot)
         bindings.bumpMessageRevision(.toolCallStarted)
-        bindings.persistMessages(conversationId)
+        Task { @MainActor [bindings] in
+            _ = await bindings.persistMessages(conversationId)
+        }
         if let conversationId, let providerSetting, let params {
             backgroundHandoff = IOSChatBackgroundHandoff(
                 runId: runId,
@@ -666,14 +671,16 @@ final class ChatGenerationCoordinator {
             self.bindings.bumpMessageRevision(.toolResultAppended)
             let failureReason = ChatToolOutputFormatter.imageFailureReason(in: resumed, matching: toolCall)
             let conversationHex = conversationId?.toHexDashString()
+            let didPersist = await self.bindings.persistMessages(conversationId)
+            let succeeded = failureReason == nil && didPersist
             await self.bindings.recordRun(
                 runId,
                 startedAt,
-                failureReason == nil ? "completed" : "failed",
+                succeeded ? "completed" : "failed",
                 inputDigest,
                 conversationHex
             )
-            if failureReason == nil {
+            if succeeded {
                 WatchTaskCoordinator.shared.publishCompleted(
                     runId: runId,
                     conversationId: conversationHex,
@@ -685,17 +692,22 @@ final class ChatGenerationCoordinator {
                     runId: runId,
                     conversationId: conversationHex,
                     presentation: .failed(),
-                    summary: WatchTaskText.clipped(failureReason, maxLength: 200)
+                    summary: WatchTaskText.clipped(
+                        failureReason ?? "图片已生成，但结果保存失败。",
+                        maxLength: 200
+                    )
                 )
             }
             await self.dependencies.liveActivityController.end(
                 runId: runId,
-                presentation: failureReason == nil ? .completed(toolTitle: "图片生成") : .failed()
+                presentation: succeeded ? .completed(toolTitle: "图片生成") : .failed()
             )
-            self.bindings.persistMessages(conversationId)
             self.finishStreaming(
-                terminalEvent: failureReason == nil ? .generationCompleted : .generationFailed
+                terminalEvent: succeeded ? .generationCompleted : .generationFailed
             )
+            if succeeded {
+                self.bindings.generationSucceeded()
+            }
         }
     }
 
@@ -732,7 +744,8 @@ final class ChatGenerationCoordinator {
         if toolRuntime.hasUnresolvedToolCall(in: messagesAtCancellation) {
             messagesAtCancellation = toolRuntime.messagesByFailingPendingToolCalls(
                 in: messagesAtCancellation,
-                outputText: #"{"denied":true,"reason":"User cancelled."}"#
+                failureReason: "User cancelled.",
+                denied: true
             )
         }
         let writeBaselineAtCancellation = bindings.capturePersistMessagesBaseline(conversationId)
@@ -743,17 +756,8 @@ final class ChatGenerationCoordinator {
         // 取消也是 run 的终结:与 finishStreaming/后台交接保持一致,关闭录制器,
         // 否则取消路径会泄漏文件句柄与 per-run 字典条目。
         if let runId {
-            // 用户取消是真终态，执行权立刻还回去。
-            BackgroundGenerationKeepAlive.shared.end(runId)
             ChatStreamRecorder.shared.record(runId: runId, snapshot: messagesAtCancellation)
             ChatStreamRecorder.shared.finish(runId: runId)
-            // Publish cancelled immediately so Watch does not briefly fall to idle.
-            WatchTaskCoordinator.shared.publish(
-                runId: runId,
-                conversationId: conversationId?.toHexDashString(),
-                presentation: .cancelled(),
-                summary: nil
-            )
         }
         currentRunId = nil
         currentLiveActivityStage = nil
@@ -770,14 +774,33 @@ final class ChatGenerationCoordinator {
             bindings.bumpMessageRevision(.generationCancelled)
         }
 
-        guard let runId, let startedAt, let digest else { return true }
+        guard let runId else { return true }
         Task { @MainActor [dependencies, bindings] in
+            let didPersist = await bindings.persistMessagesSnapshot(
+                messagesAtCancellation,
+                conversationId,
+                writeBaselineAtCancellation
+            )
+            if let startedAt, let digest {
+                await bindings.recordRun(
+                    runId,
+                    startedAt,
+                    didPersist ? "interrupted" : "failed",
+                    digest,
+                    conversationId?.toHexDashString()
+                )
+            }
+            WatchTaskCoordinator.shared.publish(
+                runId: runId,
+                conversationId: conversationId?.toHexDashString(),
+                presentation: didPersist ? .cancelled() : .failed(),
+                summary: didPersist ? nil : "已停止生成，但最终状态保存失败。"
+            )
             await dependencies.liveActivityController.end(
                 runId: runId,
-                presentation: .cancelled()
+                presentation: didPersist ? .cancelled() : .failed()
             )
-            await bindings.recordRun(runId, startedAt, "interrupted", digest, conversationId?.toHexDashString())
-            bindings.persistMessagesSnapshot(messagesAtCancellation, conversationId, writeBaselineAtCancellation)
+            BackgroundGenerationKeepAlive.shared.end(runId)
         }
         return true
     }
@@ -1397,7 +1420,7 @@ final class ChatGenerationCoordinator {
         let errMsg = UIMessage(
             id: KotlinUuid.companion.random(),
             role: MessageRole.assistant,
-            parts: [UIMessagePart.Text(text: userFacingMessage, metadata: nil)],
+            parts: [MessageKt.localGenerationErrorTextPart(text: userFacingMessage)],
             annotations: [],
             createdAt: chatNowLocalDateTime(),
             finishedAt: chatNowLocalDateTime(),
@@ -1406,9 +1429,16 @@ final class ChatGenerationCoordinator {
             translation: nil
         )
         var updated = bindings.getMessages()
+        if toolRuntime.hasUnresolvedToolCall(in: updated) {
+            updated = toolRuntime.messagesByFailingPendingToolCalls(
+                in: updated,
+                failureReason: "Generation failed before the tool call completed."
+            )
+        }
         updated.append(errMsg)
         bindings.setMessages(updated)
         let conversationHex = conversationId?.toHexDashString()
+        let didPersist = await bindings.persistMessages(conversationId)
         await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationHex)
         WatchTaskCoordinator.shared.publish(
             runId: runId,
@@ -1417,7 +1447,9 @@ final class ChatGenerationCoordinator {
             summary: WatchTaskText.clipped(userFacingMessage, maxLength: 200)
         )
         await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
-        bindings.persistMessages(conversationId)
+        if !didPersist {
+            print("[AmberChat] Failed to persist foreground error terminal run=\(runId)")
+        }
         finishStreaming(terminalEvent: .generationFailed)
     }
 
@@ -1500,18 +1532,36 @@ final class ChatGenerationCoordinator {
 
         let conversationHex = conversationId?.toHexDashString()
         let summary = Self.watchSummary(from: finalSnapshot)
-        await bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationHex)
-        WatchTaskCoordinator.shared.publishCompleted(
-            runId: runId,
-            conversationId: conversationHex,
-            summary: summary
+        let didPersist = await bindings.persistMessages(conversationId)
+        await bindings.recordRun(
+            runId,
+            startedAt,
+            didPersist ? "completed" : "failed",
+            inputDigest,
+            conversationHex
         )
+        if didPersist {
+            WatchTaskCoordinator.shared.publishCompleted(
+                runId: runId,
+                conversationId: conversationHex,
+                summary: summary
+            )
+        } else {
+            WatchTaskCoordinator.shared.publish(
+                runId: runId,
+                conversationId: conversationHex,
+                presentation: .failed(),
+                summary: "回复已生成，但最终结果保存失败。"
+            )
+        }
         await dependencies.liveActivityController.end(
             runId: runId,
-            presentation: .completed()
+            presentation: didPersist ? .completed() : .failed()
         )
-        bindings.persistMessages(conversationId)
-        finishStreaming(terminalEvent: .generationCompleted)
+        finishStreaming(terminalEvent: didPersist ? .generationCompleted : .generationFailed)
+        if didPersist {
+            bindings.generationSucceeded()
+        }
     }
 
     /// 达到 max_tokens 的收尾:保留已生成正文,追加一条可见提示,并把 run 记为
@@ -1524,32 +1574,44 @@ final class ChatGenerationCoordinator {
         conversationId: KotlinUuid?
     ) async {
         var finalSnapshot = snapshot
+        if toolRuntime.hasUnresolvedToolCall(in: finalSnapshot) {
+            finalSnapshot = toolRuntime.messagesByFailingPendingToolCalls(
+                in: finalSnapshot,
+                failureReason: "The model output ended before the tool call completed."
+            )
+        }
         finalSnapshot.append(Self.outputLimitNotice())
         bindings.setMessages(finalSnapshot)
         bindings.bumpMessageRevision(.toolResultAppended)
 
         let conversationHex = conversationId?.toHexDashString()
-        await bindings.recordRun(runId, startedAt, "truncated", inputDigest, conversationHex)
-        WatchTaskCoordinator.shared.publishCompleted(
+        let didPersist = await bindings.persistMessages(conversationId)
+        await bindings.recordRun(
+            runId,
+            startedAt,
+            didPersist ? "truncated" : "failed",
+            inputDigest,
+            conversationHex
+        )
+        WatchTaskCoordinator.shared.publish(
             runId: runId,
             conversationId: conversationHex,
+            presentation: .failed(),
             summary: Self.watchSummary(from: finalSnapshot)
         )
         await dependencies.liveActivityController.end(
             runId: runId,
-            presentation: .completed()
+            presentation: .failed()
         )
-        bindings.persistMessages(conversationId)
-        finishStreaming(terminalEvent: .generationCompleted)
+        finishStreaming(terminalEvent: didPersist ? .generationCompleted : .generationFailed)
     }
 
     static func outputLimitNotice() -> UIMessage {
         UIMessage(
             id: KotlinUuid.companion.random(),
             role: MessageRole.assistant,
-            parts: [UIMessagePart.Text(
-                text: "⚠️ 回复已达到模型输出上限，上面的内容并不完整。可以让我「继续」，或在助手设置里调高最大输出长度后重试。",
-                metadata: nil
+            parts: [MessageKt.localOutputLimitNoticeTextPart(
+                text: "⚠️ 回复已达到模型输出上限，上面的内容并不完整。可以让我「继续」，或在助手设置里调高最大输出长度后重试。"
             )],
             annotations: [],
             createdAt: chatNowLocalDateTime(),
@@ -1578,11 +1640,12 @@ final class ChatGenerationCoordinator {
         let writeBaseline = bindings.capturePersistMessagesBaseline(conversationId)
         let finalSnapshot = toolRuntime.messagesByFailingPendingToolCalls(
             in: snapshot,
-            outputText: failureText
+            failureReason: failureText
         )
         bindings.setMessages(finalSnapshot)
         bindings.bumpMessageRevision(.toolResultAppended)
         let conversationHex = conversationId?.toHexDashString()
+        let didPersist = await bindings.persistMessagesSnapshot(finalSnapshot, conversationId, writeBaseline)
         await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationHex)
         WatchTaskCoordinator.shared.publish(
             runId: runId,
@@ -1591,7 +1654,9 @@ final class ChatGenerationCoordinator {
             summary: WatchTaskText.clipped(failureText, maxLength: 200)
         )
         await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
-        bindings.persistMessagesSnapshot(finalSnapshot, conversationId, writeBaseline)
+        if !didPersist {
+            print("[AmberChat] Failed to persist unresolved-tool terminal run=\(runId)")
+        }
         finishStreaming(terminalEvent: .generationFailed)
     }
 
@@ -1658,6 +1723,17 @@ final class ChatGenerationCoordinator {
         case .completed(let resumedMessages):
             bindings.setMessages(resumedMessages)
             bindings.bumpMessageRevision(.toolResultAppended)
+            refreshBackgroundHandoff(
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                providerSetting: providerSetting,
+                backgroundProviderSetting: nil,
+                params: params,
+                uploadMessages: backgroundToolHandoffUploadMessages(from: resumedMessages),
+                displayMessages: resumedMessages
+            )
             let generating = AgentActivityPresentation.response(
                 stage: .generating
             )
@@ -1682,18 +1758,16 @@ final class ChatGenerationCoordinator {
                 uploadMessages: resumedMessages
             )
         case .waitingForApproval(let prompt):
-            pauseForApproval(prompt, pending: pending)
+            await pauseForApproval(prompt, pending: pending)
         }
     }
 
     private func pauseForApproval(
         _ prompt: ChatToolApprovalPrompt,
         pending: ChatPendingToolApproval
-    ) {
+    ) async {
         guard currentRunId == pending.runId else { return }
-        // 等人点按钮不需要后台执行权——这一轮此刻不在算，在等人。握着只是白占
-        // 配额，还让系统进度卡一直显示「正在生成」。审批通过续跑时再拿回来。
-        BackgroundGenerationKeepAlive.shared.end(pending.runId)
+        let writeBaseline = bindings.capturePersistMessagesBaseline(pending.conversationId)
         switch prompt {
         case .memory(let request):
             pendingMemoryToolApproval = pending
@@ -1719,6 +1793,51 @@ final class ChatGenerationCoordinator {
         case .askUser(let request):
             pendingAskUserToolApproval = pending
             bindings.setPendingAskUser(request)
+        }
+        bindings.setMessages(pending.baseMessages)
+        bindings.bumpMessageRevision(.awaitingToolApproval)
+        let didPersistApprovalOwner = await bindings.markRunAwaitingPermission(
+            pending.runId,
+            pending.toolCall.toolCallId
+        )
+        guard currentRunId == pending.runId else { return }
+        guard didPersistApprovalOwner else {
+            clearPendingApprovals()
+            await presentStreamError(
+                rawMessage: "无法保存待确认恢复信息，请重试。",
+                modelId: pending.params.model.modelId,
+                runId: pending.runId,
+                startedAt: pending.startedAt,
+                inputDigest: pending.inputDigest,
+                conversationId: pending.conversationId
+            )
+            return
+        }
+        let didPersist = await bindings.persistMessagesSnapshot(
+            pending.baseMessages,
+            pending.conversationId,
+            writeBaseline
+        )
+        guard currentRunId == pending.runId else { return }
+        guard didPersist else {
+            clearPendingApprovals()
+            await presentStreamError(
+                rawMessage: "无法保存待确认状态，请检查存储空间后重试。",
+                modelId: pending.params.model.modelId,
+                runId: pending.runId,
+                startedAt: pending.startedAt,
+                inputDigest: pending.inputDigest,
+                conversationId: pending.conversationId
+            )
+            return
+        }
+
+        // 等人点按钮不需要后台执行权——这一轮此刻不在算，在等人。必须等可见
+        // baseMessages 已经耐久保存后再还租约，避免挂起/杀进程后连待确认节点都丢失。
+        BackgroundGenerationKeepAlive.shared.end(pending.runId)
+        bindings.setIsLoading(false)
+        currentLiveActivityStage = .waitingForConfirmation
+        if case .askUser(let request) = prompt {
             WatchTaskCoordinator.shared.publishAskUser(
                 runId: pending.runId,
                 conversationId: pending.conversationId?.toHexDashString(),
@@ -1728,13 +1847,6 @@ final class ChatGenerationCoordinator {
                     options: request.options
                 )
             )
-        }
-        bindings.setMessages(pending.baseMessages)
-        bindings.bumpMessageRevision(.awaitingToolApproval)
-        bindings.setIsLoading(false)
-        currentLiveActivityStage = .waitingForConfirmation
-        if case .askUser = prompt {
-            // Watch already received the ask-user decision above.
         } else {
             let conversationHex = pending.conversationId?.toHexDashString()
             WatchTaskCoordinator.shared.publishWaitingApproval(
@@ -1743,13 +1855,11 @@ final class ChatGenerationCoordinator {
                 prompt: prompt
             )
         }
-        Task { @MainActor [dependencies] in
-            await dependencies.liveActivityController.update(
-                runId: pending.runId,
-                presentation: .waitingForUser(kind: prompt.activityKind),
-                force: true
-            )
-        }
+        await dependencies.liveActivityController.update(
+            runId: pending.runId,
+            presentation: .waitingForUser(kind: prompt.activityKind),
+            force: true
+        )
     }
 
     private func finishPendingMemoryToolApproval(writePolicy: IOSMemoryToolWritePolicy) {
@@ -1767,14 +1877,11 @@ final class ChatGenerationCoordinator {
 
     private func finishPendingSearchToolApproval(allow: Bool) async {
         guard let pending = pendingSearchToolApproval else { return }
+        guard currentRunId == pending.runId else { return }
         clearPendingSearchApproval()
-        guard currentRunId == pending.runId else { return }
-        bindings.setIsLoading(true)
-        let resumedMessages = await toolRuntime.finishSearchApproval(
-            pending: pending,
-            allow: allow
-        )
-        guard currentRunId == pending.runId else { return }
+        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+            await self.toolRuntime.finishSearchApproval(pending: pending, allow: allow)
+        }) else { return }
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1782,14 +1889,11 @@ final class ChatGenerationCoordinator {
 
     private func finishPendingWebMountToolApproval(allow: Bool) async {
         guard let pending = pendingWebMountToolApproval else { return }
+        guard currentRunId == pending.runId else { return }
         clearPendingWebMountApproval()
-        guard currentRunId == pending.runId else { return }
-        bindings.setIsLoading(true)
-        let resumedMessages = await toolRuntime.finishWebMountApproval(
-            pending: pending,
-            allow: allow
-        )
-        guard currentRunId == pending.runId else { return }
+        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+            await self.toolRuntime.finishWebMountApproval(pending: pending, allow: allow)
+        }) else { return }
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1797,14 +1901,11 @@ final class ChatGenerationCoordinator {
 
     private func finishPendingWorkspaceToolApproval(allow: Bool) async {
         guard let pending = pendingWorkspaceToolApproval else { return }
+        guard currentRunId == pending.runId else { return }
         clearPendingWorkspaceApproval()
-        guard currentRunId == pending.runId else { return }
-        bindings.setIsLoading(true)
-        let resumedMessages = await toolRuntime.finishWorkspaceApproval(
-            pending: pending,
-            allow: allow
-        )
-        guard currentRunId == pending.runId else { return }
+        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+            await self.toolRuntime.finishWorkspaceApproval(pending: pending, allow: allow)
+        }) else { return }
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1812,14 +1913,11 @@ final class ChatGenerationCoordinator {
 
     private func finishPendingIshHandoffToolApproval(allow: Bool) async {
         guard let pending = pendingIshHandoffToolApproval else { return }
+        guard currentRunId == pending.runId else { return }
         clearPendingIshHandoffApproval()
-        guard currentRunId == pending.runId else { return }
-        bindings.setIsLoading(true)
-        let resumedMessages = await toolRuntime.finishIshHandoffApproval(
-            pending: pending,
-            allow: allow
-        )
-        guard currentRunId == pending.runId else { return }
+        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+            await self.toolRuntime.finishIshHandoffApproval(pending: pending, allow: allow)
+        }) else { return }
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1827,14 +1925,11 @@ final class ChatGenerationCoordinator {
 
     private func finishPendingMcpToolApproval(allow: Bool) async {
         guard let pending = pendingMcpToolApproval else { return }
+        guard currentRunId == pending.runId else { return }
         clearPendingMcpApproval()
-        guard currentRunId == pending.runId else { return }
-        bindings.setIsLoading(true)
-        let resumedMessages = await toolRuntime.finishMcpApproval(
-            pending: pending,
-            allow: allow
-        )
-        guard currentRunId == pending.runId else { return }
+        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+            await self.toolRuntime.finishMcpApproval(pending: pending, allow: allow)
+        }) else { return }
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1842,22 +1937,11 @@ final class ChatGenerationCoordinator {
 
     private func finishPendingCouncilToolApproval(allow: Bool) async {
         guard let pending = pendingCouncilToolApproval else { return }
+        guard currentRunId == pending.runId else { return }
         clearPendingCouncilApproval()
-        guard currentRunId == pending.runId else { return }
-        bindings.setIsLoading(true)
-        let executionToken = UUID()
-        let executionTask: Task<ChatToolRuntimeResult, Never> = Task { @MainActor [toolRuntime] in
-            .completed(await toolRuntime.finishCouncilApproval(
-                pending: pending,
-                allow: allow
-            ))
-        }
-        foregroundToolExecutionToken = executionToken
-        foregroundToolExecutionTask = executionTask
-        let result = await executionTask.value
-        clearForegroundToolExecution(matching: executionToken)
-        guard currentRunId == pending.runId else { return }
-        guard case .completed(let resumedMessages) = result else { return }
+        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+            await self.toolRuntime.finishCouncilApproval(pending: pending, allow: allow)
+        }) else { return }
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1885,32 +1969,44 @@ final class ChatGenerationCoordinator {
         return true
     }
 
-    private func resumeAfterApproval(
+    private func executeApprovedAsyncTool(
         pending: ChatPendingToolApproval,
-        resumedMessages: [UIMessage]
-    ) {
-        guard currentRunId == pending.runId else { return }
-        guard dependencies.autoGenerateResponses else {
-            let conversationHex = pending.conversationId?.toHexDashString()
-            WatchTaskCoordinator.shared.publishCompleted(
-                runId: pending.runId,
-                conversationId: conversationHex,
-                summary: nil
-            )
-            Task { @MainActor [dependencies] in
-                await dependencies.liveActivityController.end(
-                    runId: pending.runId,
-                    presentation: .completed()
-                )
-            }
-            bindings.persistMessages(pending.conversationId)
-            finishStreaming(terminalEvent: .generationCompleted)
-            return
-        }
-
+        allow: Bool,
+        operation: @escaping @MainActor () async -> [UIMessage]
+    ) async -> [UIMessage]? {
+        guard allow else { return await operation() }
         bindings.setIsLoading(true)
-        // 重新拿执行权：审批往往横跨退后台，pauseForApproval 已经把租约还了。
-        // 手表端批准更是典型——批准时 App 就在后台，不拿回来这一轮就是裸奔的。
+        beginKeepAlive(for: pending)
+
+        let executionToken = UUID()
+        let result = await withCheckedContinuation { continuation in
+            foregroundApprovedToolContinuation = continuation
+            let executionTask: Task<ChatToolRuntimeResult, Never> = Task { @MainActor in
+                let result = ChatToolRuntimeResult.completed(await operation())
+                self.completeApprovedToolExecution(result, matching: executionToken)
+                return result
+            }
+            foregroundToolExecutionToken = executionToken
+            foregroundToolExecutionTask = executionTask
+        }
+        defer { clearForegroundToolExecution(matching: executionToken) }
+        guard currentRunId == pending.runId, let result else { return nil }
+        guard case .completed(let resumedMessages) = result else { return nil }
+        refreshBackgroundHandoff(
+            runId: pending.runId,
+            startedAt: pending.startedAt,
+            inputDigest: pending.inputDigest,
+            conversationId: pending.conversationId,
+            providerSetting: pending.providerSetting,
+            backgroundProviderSetting: nil,
+            params: pending.params,
+            uploadMessages: backgroundToolHandoffUploadMessages(from: resumedMessages),
+            displayMessages: resumedMessages
+        )
+        return resumedMessages
+    }
+
+    private func beginKeepAlive(for pending: ChatPendingToolApproval) {
         BackgroundGenerationKeepAlive.shared.begin(
             pending.runId,
             title: "Amber 正在生成",
@@ -1923,6 +2019,69 @@ final class ChatGenerationCoordinator {
                 )
             }
         )
+    }
+
+    private func resumeAfterApproval(
+        pending: ChatPendingToolApproval,
+        resumedMessages: [UIMessage]
+    ) {
+        guard currentRunId == pending.runId else { return }
+        guard dependencies.autoGenerateResponses else {
+            Task { @MainActor [weak self] in
+                guard let self, self.currentRunId == pending.runId else { return }
+                let didPersist = await self.bindings.persistMessages(pending.conversationId)
+                guard self.currentRunId == pending.runId else { return }
+                let conversationHex = pending.conversationId?.toHexDashString()
+                await self.bindings.recordRun(
+                    pending.runId,
+                    pending.startedAt,
+                    didPersist ? "completed" : "failed",
+                    pending.inputDigest,
+                    conversationHex
+                )
+                if didPersist {
+                    WatchTaskCoordinator.shared.publishCompleted(
+                        runId: pending.runId,
+                        conversationId: conversationHex,
+                        summary: nil
+                    )
+                } else {
+                    WatchTaskCoordinator.shared.publish(
+                        runId: pending.runId,
+                        conversationId: conversationHex,
+                        presentation: .failed(),
+                        summary: "工具结果已生成，但最终状态保存失败。"
+                    )
+                }
+                await self.dependencies.liveActivityController.end(
+                    runId: pending.runId,
+                    presentation: didPersist ? .completed() : .failed()
+                )
+                self.finishStreaming(
+                    terminalEvent: didPersist ? .generationCompleted : .generationFailed
+                )
+                if didPersist {
+                    self.bindings.generationSucceeded()
+                }
+            }
+            return
+        }
+
+        refreshBackgroundHandoff(
+            runId: pending.runId,
+            startedAt: pending.startedAt,
+            inputDigest: pending.inputDigest,
+            conversationId: pending.conversationId,
+            providerSetting: pending.providerSetting,
+            backgroundProviderSetting: nil,
+            params: pending.params,
+            uploadMessages: backgroundToolHandoffUploadMessages(from: resumedMessages),
+            displayMessages: resumedMessages
+        )
+        bindings.setIsLoading(true)
+        // 重新拿执行权：审批往往横跨退后台，pauseForApproval 已经把租约还了。
+        // 手表端批准更是典型——批准时 App 就在后台，不拿回来这一轮就是裸奔的。
+        beginKeepAlive(for: pending)
         let generating = AgentActivityPresentation.response(
             stage: .generating
         )
@@ -2037,6 +2196,9 @@ final class ChatGenerationCoordinator {
         foregroundToolExecutionTask?.cancel()
         foregroundToolExecutionTask = nil
         foregroundToolExecutionToken = nil
+        let approvedToolContinuation = foregroundApprovedToolContinuation
+        foregroundApprovedToolContinuation = nil
+        approvedToolContinuation?.resume(returning: nil)
         foregroundImageToolExecutionTask?.cancel()
         foregroundImageToolExecutionTask = nil
         foregroundImageToolExecutionToken = nil
@@ -2053,6 +2215,16 @@ final class ChatGenerationCoordinator {
         guard foregroundToolExecutionToken == token else { return }
         foregroundToolExecutionTask = nil
         foregroundToolExecutionToken = nil
+    }
+
+    private func completeApprovedToolExecution(
+        _ result: ChatToolRuntimeResult,
+        matching token: UUID
+    ) {
+        guard foregroundToolExecutionToken == token else { return }
+        let continuation = foregroundApprovedToolContinuation
+        foregroundApprovedToolContinuation = nil
+        continuation?.resume(returning: result)
     }
 
     private func clearForegroundImageToolExecution(matching token: UUID) {
@@ -2181,13 +2353,13 @@ final class ChatGenerationCoordinator {
     func installPendingSearchApprovalForTesting(
         pending: ChatPendingToolApproval,
         request: SearchToolApprovalRequest
-    ) {
+    ) async {
         streamJob = nil
         currentRunId = pending.runId
         currentStartedAt = pending.startedAt
         currentInputDigest = pending.inputDigest
         currentConversationIdForRun = pending.conversationId
-        pauseForApproval(.search(request), pending: pending)
+        await pauseForApproval(.search(request), pending: pending)
     }
 
     func backgroundToolHandoffUploadMessagesForTesting(_ baseMessages: [UIMessage]) -> [UIMessage] {

@@ -234,7 +234,7 @@ final class IOSConversationStoreBranchingTests: XCTestCase {
         viewModel.conversationStore = store
         viewModel.reloadFromStore()
 
-        await viewModel.persistPendingAssistantRegenerationForTesting(
+        _ = await viewModel.persistPendingAssistantRegenerationForTesting(
             conversationId: conversationId,
             targetMessageIndex: 1,
             generatedMessageIndex: 1,
@@ -243,5 +243,147 @@ final class IOSConversationStoreBranchingTests: XCTestCase {
 
         XCTAssertEqual(store.currentMessages.map { $0.toText() }, ["what is 2+2", "4"])
         XCTAssertEqual(viewModel.messages.map { $0.toText() }, ["what is 2+2", "4"])
+    }
+
+    func testPendingAssistantRegenerateErrorDoesNotBecomeVariant() async throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await seedUserAssistantPair(store)
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let errorMessage = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [MessageKt.localGenerationErrorTextPart(text: "regeneration failed")],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+
+        let didPersist = await viewModel.persistPendingAssistantRegenerationForTesting(
+            conversationId: conversationId,
+            targetMessageIndex: 1,
+            generatedMessageIndex: 1,
+            snapshot: [store.currentMessages[0], errorMessage]
+        )
+
+        XCTAssertTrue(didPersist, store.lastIOError?.message ?? "regeneration terminal write was rejected")
+        XCTAssertEqual(store.variantInfo(forMessageIndex: 1)?.variantCount, 1)
+        XCTAssertEqual(store.currentMessages.map { $0.toText() }, ["what is 2+2", "4", "regeneration failed"])
+        XCTAssertEqual(viewModel.messages.map { $0.toText() }, ["what is 2+2", "4", "regeneration failed"])
+    }
+
+    func testPendingAssistantRegenerateTruncationKeepsPartialAsVariantAndNoticeAfterIt() async throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await seedUserAssistantPair(store)
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+
+        let didPersist = await viewModel.persistPendingAssistantRegenerationForTesting(
+            conversationId: conversationId,
+            targetMessageIndex: 1,
+            generatedMessageIndex: 1,
+            snapshot: [
+                store.currentMessages[0],
+                UIMessage.companion.assistant(prompt: "partial regenerated answer"),
+                ChatGenerationCoordinator.outputLimitNotice(),
+            ]
+        )
+
+        XCTAssertTrue(didPersist)
+        XCTAssertEqual(store.variantInfo(forMessageIndex: 1)?.variantCount, 2)
+        XCTAssertEqual(
+            store.currentMessages.map { $0.toText() },
+            [
+                "what is 2+2",
+                "partial regenerated answer",
+                ChatGenerationCoordinator.outputLimitNotice().toText(),
+            ]
+        )
+    }
+
+    func testPendingAssistantRegenerateTruncationWithoutTextKeepsNoticeOutsideVariants() async throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await seedUserAssistantPair(store)
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+
+        let didPersist = await viewModel.persistPendingAssistantRegenerationForTesting(
+            conversationId: conversationId,
+            targetMessageIndex: 1,
+            generatedMessageIndex: 1,
+            snapshot: [
+                store.currentMessages[0],
+                ChatGenerationCoordinator.outputLimitNotice(),
+            ]
+        )
+
+        XCTAssertTrue(didPersist)
+        XCTAssertEqual(store.variantInfo(forMessageIndex: 1)?.variantCount, 1)
+        XCTAssertEqual(
+            store.currentMessages.map { $0.toText() },
+            ["what is 2+2", "4", ChatGenerationCoordinator.outputLimitNotice().toText()]
+        )
+    }
+
+    func testPendingAssistantRegenerateWithoutAnyAssistantOutputReportsFailure() async throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await seedUserAssistantPair(store)
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+
+        let didPersist = await viewModel.persistPendingAssistantRegenerationForTesting(
+            conversationId: conversationId,
+            targetMessageIndex: 1,
+            generatedMessageIndex: 1,
+            snapshot: [store.currentMessages[0]]
+        )
+
+        XCTAssertFalse(didPersist)
+        XCTAssertEqual(store.variantInfo(forMessageIndex: 1)?.variantCount, 1)
+        XCTAssertEqual(store.currentMessages.map { $0.toText() }, ["what is 2+2", "4"])
+    }
+
+    func testPendingAssistantRegenerateReportsPersistenceFailure() async throws {
+        let (store, dir) = try makeStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        await seedUserAssistantPair(store)
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.reloadFromStore()
+        store.beforePersistForTesting = { _ in
+            store.beforePersistForTesting = nil
+            await store.deleteConversation(id: conversationId)
+        }
+
+        let didPersist = await viewModel.persistPendingAssistantRegenerationForTesting(
+            conversationId: conversationId,
+            targetMessageIndex: 1,
+            generatedMessageIndex: 1,
+            snapshot: [
+                store.currentMessages[0],
+                UIMessage.companion.assistant(prompt: "new answer that cannot persist"),
+            ]
+        )
+
+        XCTAssertFalse(didPersist)
     }
 }

@@ -330,6 +330,7 @@ struct ContextRingButton: View {
     let compactState: ChatContextCompactState
     let action: () -> Void
     @State private var rotates = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: action) {
@@ -340,7 +341,7 @@ struct ContextRingButton: View {
                     Circle()
                         .trim(from: 0.05, to: 0.78)
                         .stroke(Color.blue, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .rotationEffect(.degrees(rotates ? 360 : 0))
+                        .rotationEffect(.degrees(reduceMotion ? 0 : (rotates ? 360 : 0)))
                     Image(systemName: "shippingbox")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(Color.blue)
@@ -361,14 +362,20 @@ struct ContextRingButton: View {
             .frame(width: 18, height: 18)
             .frame(width: 34, height: 34)
             .contentShape(Circle())
-            .animation(.easeOut(duration: 0.3), value: snapshot.contextFillFraction)
-            .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: rotates)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: snapshot.contextFillFraction)
+            .animation(
+                reduceMotion ? nil : .linear(duration: 1.0).repeatForever(autoreverses: false),
+                value: rotates
+            )
             .modifier(ComposerDockCircleGlass(tint: nil))
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .selection))
-        .onAppear { rotates = compactState.isActive }
+        .onAppear { rotates = compactState.isActive && !reduceMotion }
         .onChange(of: compactState.isActive) { _, active in
-            rotates = active
+            rotates = active && !reduceMotion
+        }
+        .onChange(of: reduceMotion) { _, shouldReduceMotion in
+            rotates = compactState.isActive && !shouldReduceMotion
         }
         .accessibilityLabel("上下文统计")
         .accessibilityValue(compactState.isActive ? "正在压缩上下文" : "\(snapshot.messageCount) 条消息，\(snapshot.totalTokens) tokens")

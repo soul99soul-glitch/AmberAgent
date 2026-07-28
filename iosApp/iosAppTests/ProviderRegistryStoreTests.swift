@@ -210,6 +210,24 @@ final class ProviderRegistryStoreTests: XCTestCase {
         XCTAssertTrue(viewModel.configurationError?.contains("API Key") == true)
     }
 
+    func testWatchAnswerReportsFailureWhenProviderConfigurationBlocksSend() {
+        let viewModel = ChatViewModel(
+            settingsStore: makeSettings(apiKey: "", modelId: "claude-sonnet-4-5"),
+            sharedSettings: makeSharedSettingsWithClaudeProvider(apiKey: ""),
+            autoGenerateResponses: true
+        )
+
+        let accepted = viewModel.submitWatchUserAnswer(
+            runId: "watch-run-without-approval",
+            text: "Hello from Watch"
+        )
+
+        XCTAssertFalse(accepted)
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertEqual(viewModel.inputText, "Hello from Watch")
+        XCTAssertEqual(viewModel.configurationIssue, .missingAPIKey)
+    }
+
     func testChatSendRequiresValidBaseURL() {
         // A Claude provider with an invalid baseUrl must surface .invalidBaseURL.
         let settings = makeSettings(baseUrl: "not a url", apiKey: "sk-test", modelId: "claude-sonnet-4-5")
@@ -225,7 +243,7 @@ final class ProviderRegistryStoreTests: XCTestCase {
 
         XCTAssertTrue(viewModel.messages.isEmpty)
         XCTAssertEqual(viewModel.configurationIssue, .invalidBaseURL)
-        XCTAssertTrue(viewModel.configurationError?.contains("API 地址") == true)
+        XCTAssertEqual(viewModel.configurationError, ChatConfigurationIssue.invalidBaseURL.message)
     }
 
     func testChatSendRequiresModelId() {
@@ -271,6 +289,35 @@ final class ProviderRegistryStoreTests: XCTestCase {
         )
 
         XCTAssertEqual(viewModel.configurationIssue, .missingAPIKey)
+    }
+
+    func testDisabledSharedProviderCannotSend() throws {
+        let settings = makeSettings(apiKey: "sk-legacy-test", modelId: "legacy-model")
+        let sharedSettings = makeSharedSettingsWithClaudeProvider(apiKey: "sk-ant-test")
+        let model = try XCTUnwrap(sharedSettings.snapshot.getCurrentChatModel())
+        let provider = try XCTUnwrap(ChatProviderConfiguration.provider(
+            for: model,
+            providers: sharedSettings.snapshot.providers
+        ))
+        _ = sharedSettings.updateProviderBasics(
+            providerId: provider.id.description(),
+            name: provider.name,
+            enabled: false
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: settings,
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: true
+        )
+        viewModel.inputText = "Hello"
+
+        XCTAssertEqual(viewModel.configurationIssue, .providerDisabled)
+
+        viewModel.sendMessage()
+
+        XCTAssertTrue(viewModel.messages.isEmpty)
+        XCTAssertEqual(viewModel.inputText, "Hello")
+        XCTAssertEqual(viewModel.configurationError, ChatConfigurationIssue.providerDisabled.message)
     }
 
     func testUnsupportedSharedProviderIsReportedBeforeSending() {

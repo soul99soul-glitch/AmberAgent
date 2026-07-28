@@ -3,8 +3,15 @@ import SwiftUI
 
 /// Identifiable wrapper so a tapped tool can drive `.sheet(item:)`.
 struct ToolDetailTarget: Identifiable {
-    let id = UUID()
-    let tool: UIMessagePart.Tool
+    let toolCallId: String
+    let initialTool: UIMessagePart.Tool
+
+    var id: String { toolCallId }
+
+    init(tool: UIMessagePart.Tool) {
+        self.toolCallId = tool.toolCallId
+        self.initialTool = tool
+    }
 }
 
 /// Detail sheet shown when a tool / subagent capsule is tapped. Mirrors the
