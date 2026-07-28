@@ -269,6 +269,9 @@ export interface ChatRuntime {
   contextMessageSize: number;
   // D-055:压缩规划用的模型上下文窗口(Android Model.contextWindowTokens,null → 引擎默认窗口)
   modelContextWindowTokens: number | null;
+  // D-071b:model.inputModalities.contains(Modality.IMAGE)(GenerationHandler.kt:431
+  //   canUseVisionFallback 前半 + OcrTransformer.kt:50 transform 门)
+  modelSupportsImageInput: boolean;
 }
 
 interface ChatProviderChoice {
@@ -396,5 +399,6 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
     api, assistant, params,
     contextMessageSize: sessionDefaults.contextMessageSize,
     modelContextWindowTokens: model.contextWindowTokens,
+    modelSupportsImageInput: model.inputModalities.includes('image'),
   };
 };

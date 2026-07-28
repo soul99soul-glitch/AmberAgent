@@ -26,11 +26,11 @@
 | System prompt | ✅ | assembleInternalMessages 前置（D-018）；动态块（time/date 等注入）= P1 |
 | 基础 transformers | ✅ | Template/ThinkTag/RegexOutput + 管线（D-012，visual/finish 双钩子） |
 | Reasoning 展示 | 🟡 部分 | reasoning part 渲染已备；折叠/展开交互 = P1 |
-| 错误恢复 | 🟡 偏差 open | PD-006：retry(D-050)+vision fallback HAR(D-071a)已落地;残余:entry OCR 接线(D-071b)/工具审批 |
+| 错误恢复 | 🟡 偏差 open | PD-006：retry(D-050)+vision fallback(D-071a/D-071b)已落地;残余:设置面 OCR UI/生成守卫 |
 
 ## 3. 已知偏差汇总（PARITY_DEBT.md 为准）
 
-- **open（7 条）**：PD-001 空 prefetch 降级（deepread，待 G1 确认）；PD-002 prefetch 预算 15s vs 36s；PD-003 targetSdk 定档；PD-004 时间戳 UTC+Z vs LocalDateTime；PD-005 JS RegExp vs Java Pattern；PD-006 生成错误恢复缺失（retry D-050 + vision fallback HAR D-071a 已完成，残余 entry OCR 接线 D-071b）；PD-007 图片不压缩 + data: URL 直存消息体。
+- **open（7 条）**：PD-001 空 prefetch 降级（deepread，待 G1 确认）；PD-002 prefetch 预算 15s vs 36s；PD-003 targetSdk 定档；PD-004 时间戳 UTC+Z vs LocalDateTime；PD-005 JS RegExp vs Java Pattern；PD-006 生成错误恢复缺失（retry D-050 + vision fallback D-071a/D-071b 已完成，残余设置面 OCR UI/生成守卫）；PD-007 图片不压缩 + data: URL 直存消息体。
 - **待 Android 侧核实（1 条）**：流式合并 reasoning finishedAt 两条路径内部不一致（非鸿蒙偏差，鸿蒙两条均按各自语义忠实）。
 - **已消除**：regenerate 流式预览（D-041）。
 
@@ -45,7 +45,7 @@
 
 | 项 | Android 锚点 | 依赖/说明 |
 |---|---|---|
-| ~~生成错误恢复（retry/vision fallback）~~ **retry 已完成(D-050);vision fallback HAR 已完成(D-071a)** | GenerationRetry.kt + GenerationHandler.kt:774-820/:425-470/:595-665/:822-823/:1122-1138 + OcrTransformer.kt + OcrPrompt.kt + LruCache.kt | classifier+循环+状态文案忠实;vision fallback 分类器/LruCache 64-3d/OcrTransformer 全文/三路径生成接线(chat_turn/regenerate/tool_loop)完成;残余:entry OCR 接线(ChatPrefs 键+视觉模型查找+ImageEncoder,= D-071b)/设置面 OCR UI/生成守卫 = P1(PD-006 更新) |
+| ~~生成错误恢复（retry/vision fallback）~~ **已完成(D-050 retry + D-071a/D-071b vision fallback)** | GenerationRetry.kt + GenerationHandler.kt:774-820/:425-470/:595-665/:822-823/:1122-1138 + OcrTransformer.kt + OcrPrompt.kt + LruCache.kt + ChatPrefs.kt:34-37,80-83 + FileEncoder.kt:97-99 | classifier+循环+状态文案忠实;分类器/LruCache 64-3d/OcrTransformer 全文/三路径生成接线 + entry OCR prefs/模型查找/generateText 三变体/ChatPage 注册/ImageEncodingError 包装完成;残余:设置面 OCR UI/生成守卫 = P1(PD-006 更新) |
 | 工具执行 + 审批循环（执行核心 + 循环集成+审批闭环 + **内置工具首批已完成(D-056/D-057/D-058)**） | Tool.kt + ToolRegistry.kt 策略 + PermissionDecisionResolver.kt + AgentToolDispatcher.kt + ToolInvocationHooks.kt + ToolFailure.kt + AgentLoopBudgetPrompt.kt + GenerationHandler.kt:161-391 + ChatService.kt:869-975/:1122-1190/:2326-2329/:2457-2544 + ToolRegistry.kt:31-161 + ToolsListTool.kt + ToolPolicyExplainTool.kt + ToolSearch.kt 全文(含 ToolExposureState:270-380) + SpeculativeToolRunner.kt + RunPlanUpdateTool.kt + ClipboardTool.kt + DeepReadOpenTool.kt + DeepReadOpenRequest.kt:13-107 + TimeTool.kt + AskUserTool.kt + ConversationContextTools.kt + ConversationHistoryTools.kt + SessionAccessGrantStore.kt + SessionHistoryModels.kt:6-27 + ConversationContextRepository.kt:85-170 | 模型/策略/权限链/调度/预算提示 + agentic 循环(同消息写回/预算 dynamic 块/steer 消费)+ 审批 UI+续跑+idle 阻塞+「继续」+ 分支再生工具化 + ToolRegistry 注册/包装层 + 首批内置工具(get_time_info/ask_user/conversation_*4/session_*4)端到端完成(D-058)+ conversation_queue_*2(D-059)+ 自省/发现三件 tools_list/tool_policy_explain/tool_search+isResidentTool(D-060)+ 本地三件 run_plan_update/clipboard_tool/deep_read_open(D-061)+ ToolExposureState 懒暴露+循环四接线(D-062)+ SpeculativeToolRunner 推测执行+流式观察点(D-063)+ /deepread 斜杠命令+发送路径拦截(D-064);残余:autoApprove 设置面/推测执行设置面(默认禁用,Android 同)/FTS 索引/ToolProfileFilter/grant 签发(history subagent)/LocalToolOption 门控/canSendWithoutChatModel 模型空值门/ask_user 问题 UI/工具卡片完整视觉 = P1 |
 | ~~FOLLOWUP 发送排队~~ **已完成(D-048)**；~~answer=false 发送路径~~ **已完成(D-051)**；~~队列持久化~~ **已完成(D-052)** | ChatService.kt:687-867；ConversationSession.kt:110-232；ChatInput.kt:272；PendingMessageStore.kt | 队列纯逻辑+chips UI+循环派发完成;长按发送=只记录不生成(STEER/FOLLOWUP 逐字忠实)+停止时 STEER→FOLLOWUP 完成;KV 持久化+进程死亡恢复(launchPendingMessageLoopIfNeeded 逐字)+审计 jsonl 完成;残余:STEER 进行中注入 = P1 |
 | ~~ContextEngine + compact（上下文压缩）~~ **已完成(D-054 纯逻辑 + D-055 引擎执行+集成)** | ConversationContextEngine.kt(806 行) + PreparedContextEditor.kt + CompressPrompt.kt + ChatService invalidateCompacts/copyValidCompacts | prepareContext 管线(编辑→规划→force/precompact→注入→fit)+compactConversation(质量重试+fallback)+四失效钩子+fork 复制+KV 存储完成;残余:compact 设置面/compress 任务模型/ContextUsageIndicator 环/repository search-expand = P1 |

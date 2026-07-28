@@ -61,9 +61,10 @@ export const performImageRecognition = async (
 
   let rawText: string | null;
   try {
+    // :111-117 — system(prompt) + user(全新 Image(part.url),metadata 不带)
     rawText = await deps.generateText(providerSetting, model, [
       makeUIMessage('system', [{ type: 'text', text: prompt, metadata: null }]),
-      makeUIMessage('user', [{ type: 'image', url: part.url, metadata: part.metadata }]),
+      makeUIMessage('user', [{ type: 'image', url: part.url, metadata: null }]),
     ]);
   } catch (e) {
     const cause: Error = e instanceof Error ? e : new Error(String(e));

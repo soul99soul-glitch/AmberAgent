@@ -777,3 +777,16 @@
   - **生成三路径接线**:ChatTurnDeps/RegenerateDeps 加 modelSupportsImageInput?(未提供 = 不兜底,等价模型无 IMAGE 模态);visionFallback 闭包(rebuildInternalMessages = applyInputTransformers(assembled, transformers, {...ctx, forceImageToText: true}),:613/:648 prepareInternalMessages(forceImageToText=true) 等价) — chat_turn generateAssistantOnce 第 5 参/regenerate 内联循环/tool_loop 逐步构建(assembled 每步不同)。
   - **TDD 31 测试**:分类器 7(ImageEncodingError 格式+直 true/9 关键词/cause 链+环/VisualRecognitionError cause/prompt 迁移/hashCode/hasImageParts)+ 兜底单元 5(首轮成功不重投/状态文案+force 重建/三不兜底路径/兜底错误传播)+ 集成 4(chatTurn 残全续写+forceFlags [undefined,true]+状态序列/模型不支持/错误不命中/regenerate 分支再生)+ 缓存 8(往返/持久化/64 逐出/accessOrder/3 天过期/preload+读失败/preload capacity/写失败吞咽)+ OCR 8(transform 门×3+状态/force 旁路/五错误链/调用面/override/缓存键)。
 - **可逆性**:1414 测试全绿(deepread 603 + chat 811),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。entry 侧 OCR 接线(ChatPrefs ocr_model/ocr_prompt 键+视觉模型查找+ImageEncoder 抛 ImageEncodingError)= D-071b;设置面 OCR 配置 UI = P1 登记。
+
+## D-071b（L0，2026-07-28）vision fallback entry 接线 — OCR prefs + 模型查找 + generateText + ChatPage 注册
+
+- **背景**：D-071a 的 entry 半片。Android 锚点：PreferencesKeys.kt:34-35、ChatPrefs.kt:34-37/80-83、PreferencesStore.kt:379-389(findModelById)/:500-517(findProvider)、OcrTransformer.kt:32-46(cache)/:107-120(generateText)、ChatService.kt:169-177(transformer 链序,OcrTransformer 居尾)、FileEncoder.kt:97-99(recoverCatching 统一包装)。
+- **决定**：
+  - **OcrSupport.ets(新)**:'ocr_model'/'ocr_prompt' 键名逐字;getOcrModelId — 缺失/非 UUID 形态(8-4-4-4-12 hex 校验,parseUuidOrNull 等价)均回 newId()(Uuid.random() 语义:不命中任何模型 → '请先配置视觉识别模型',设置面 UI = P1 登记);getOcrPrompt 默认 DEFAULT_OCR_PROMPT;vision_cache.json 文件名逐字(cacheDir,fileIo sync,读失败 → null/写失败吞咽);findModelByIdInProviders/findProviderOfModel 逐字(providerOverwrite 分支未移植 = P1 延续登记);buildVisionApi 三变体分发(auth-only 头,**不带** assistant 参数/customHeaders — TextGenerationParams(model) 仅模型,逐字);generateText → choices[0].message?.toText() ?? null。
+  - **偏差(登记)**:settingsFlow 实时读 → aboutToAppear 快照(loadOcrSeed;从设置页返回重触发,D-070 搜索 prefs 同模式);seed 未就绪当轮不带 OCR transformer(同搜索工具门)。
+  - **EntryImageEncoder**:encodeBase64 失败语义补齐 — encodeImageForChat/encodeImageDetailed 任意失败(非 ImageEncodingError)统一包 ImageEncodingError(url, cause)(:97-99 recoverCatching 逐字;arkts-no-any-unknown 禁 unknown 参数 → inline catch);readImageAsDataUrl(picker 物化)**不包**(Android 选图复制路径非 ImageEncodingException 语义)。
+  - **AppContainer**:ChatRuntime + modelSupportsImageInput(model.inputModalities.includes('image'),:431/:50 双消费点)。
+  - **ChatPage**:ocrSeed 字段 + aboutToAppear 加载;buildInputTransformers(rt) = [template, ocr](OcrTransformer 居链尾忠实);3 deps 站点(regenerate/resumeToolLoop/send)统一接入 + modelSupportsImageInput 门。
+  - **HAR 忠实修正**:performImageRecognition user part 改全新 image part(metadata: null,:113-117 新建 Image(part.url) 不带 metadata)。
+  - entry 侧 .ets 不入 npm test 覆盖率(沿用 D-070 等先例;HAR 侧 31 测试已锁语义)。
+- **可逆性**:1414 测试全绿(deepread 603 + chat 811),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。PD-006 残余再减:剩余 = 设置面 OCR UI/生成守卫(P1)。

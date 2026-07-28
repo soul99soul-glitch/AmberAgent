@@ -14,7 +14,7 @@ import type {
   CompactPolicy, CompactResult, PreparedContext,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
-  ToolRegistry, DeepReadOpenEvent,
+  ToolRegistry, DeepReadOpenEvent, MessageTransformer,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -52,6 +52,7 @@ import { readImageAsDataUrl } from '../platform_impl/EntryImageEncoder.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
+import { createEntryOcrTransformer, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -374,6 +375,18 @@ struct ChatPage {
   private conversation: Conversation | null = null;
   private abortController: EntryAbortController | null = null;
   private scroller: Scroller = new Scroller();
+  // D-071b:OCR 种子(providers/ocr_model/ocr_prompt 快照,aboutToAppear 加载)
+  private ocrSeed: OcrSeed | null = null;
+
+  // D-071b:input transformers 链 — [template, ocr](Android ChatService.kt:169-177
+  //   OcrTransformer 居链尾,忠实);seed 未就绪当轮不带 OCR(同 D-070 搜索工具门模式)
+  private buildInputTransformers(rt: ChatRuntime): MessageTransformer[] {
+    const list: MessageTransformer[] = [createTemplateTransformer()];
+    if (this.ocrSeed !== null) {
+      list.push(createEntryOcrTransformer(this.ocrSeed, rt.modelSupportsImageInput));
+    }
+    return list;
+  }
 
   aboutToAppear(): void {
     // 每次进入(含从选择器返回)刷新模型标签
@@ -382,6 +395,10 @@ struct ChatPage {
     ensureSearchSdk();
     loadSearchPrefs(getChatKvStore()).then((s: SearchSettings): void => {
       this.searchSettings = s;
+    });
+    // D-071b:OCR 种子加载(providers/ocr_model/ocr_prompt 快照)
+    loadOcrSeed(getChatKvStore()).then((seed: OcrSeed): void => {
+      this.ocrSeed = seed;
     });
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';
@@ -459,7 +476,9 @@ struct ChatPage {
         return this.invalidateConvCompacts(conv.id, 'message_regenerated')
           .then((): Promise<Conversation> => runRegenerateAtWithTools(conv, nodeId, {
           assistant: rt.assistant,
-          inputTransformers: [createTemplateTransformer()],
+          inputTransformers: this.buildInputTransformers(rt),
+          // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
+          modelSupportsImageInput: rt.modelSupportsImageInput,
           outputTransformers: [thinkTagTransformer, regexOutputTransformer],
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
@@ -921,7 +940,9 @@ struct ChatPage {
         }
         return runToolLoopContinuation(conv, {
           assistant: rt.assistant,
-          inputTransformers: [createTemplateTransformer()],
+          inputTransformers: this.buildInputTransformers(rt),
+          // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
+          modelSupportsImageInput: rt.modelSupportsImageInput,
           outputTransformers: [thinkTagTransformer, regexOutputTransformer],
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
@@ -1152,7 +1173,9 @@ struct ChatPage {
         }
         const deps: ChatTurnDeps = {
           assistant: rt.assistant,
-          inputTransformers: [createTemplateTransformer()],
+          inputTransformers: this.buildInputTransformers(rt),
+          // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
+          modelSupportsImageInput: rt.modelSupportsImageInput,
           outputTransformers: [thinkTagTransformer, regexOutputTransformer],
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
