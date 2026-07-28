@@ -5,8 +5,8 @@
 import { Context } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import type {
-  AssistantMemory, MemoryAddParams, MemoryReadRepository, MemoryRecord, MemoryScope,
-  MemoryToolDeps, MemoryToolWriteRequest,
+  AssistantMemory, MemoryAddParams, MemoryCandidate, MemoryEvent, MemoryEventType,
+  MemoryReadRepository, MemoryRecord, MemoryScope, MemoryToolDeps, MemoryToolWriteRequest,
 } from '@amber/chat-domain';
 import {
   appendMemoryRecord, deleteMemoryRecord, filterActiveMemoryRecords, memoriesOfAssistant,
@@ -15,27 +15,27 @@ import {
 
 const MEMORY_FOLDER: string = 'memory';
 const MEMORY_FILE: string = 'memory_records.json';
+const CANDIDATES_FILE: string = 'memory_candidates.json';
+const EVENTS_FILE: string = 'memory_events.json';
 
-const memoryFilePath = (): string => {
+const memoryPath = (name: string): string => {
   const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
-  return `${ctx.filesDir}/${MEMORY_FOLDER}/${MEMORY_FILE}`;
+  return `${ctx.filesDir}/${MEMORY_FOLDER}/${name}`;
 };
 
-const readAll = async (): Promise<MemoryRecord[]> => {
-  const path: string = memoryFilePath();
+const readJsonArray = async <T>(path: string): Promise<T[]> => {
   try {
     const ok: boolean = await fileIo.access(path);
     if (!ok) return []; // 文件不存在 → 空库(等价空表)
     const text: string = await fileIo.readText(path);
-    const parsed: MemoryRecord[] = JSON.parse(text) as MemoryRecord[];
+    const parsed: T[] = JSON.parse(text) as T[];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return []; // 损坏 → 空(不崩溃;写路径切片落地备份策略)
   }
 };
 
-const writeAll = async (records: MemoryRecord[]): Promise<void> => {
-  const path: string = memoryFilePath();
+const writeJsonArray = async <T>(path: string, items: T[]): Promise<void> => {
   const dir: string = path.substring(0, path.lastIndexOf('/'));
   try {
     await fileIo.mkdir(dir, true);
@@ -45,11 +45,16 @@ const writeAll = async (records: MemoryRecord[]): Promise<void> => {
   const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
   const file: fileIo.File = await fileIo.open(path, mode);
   try {
-    await fileIo.write(file.fd, JSON.stringify(records));
+    await fileIo.write(file.fd, JSON.stringify(items));
   } finally {
     await fileIo.close(file);
   }
 };
+
+const readAll = (): Promise<MemoryRecord[]> => readJsonArray<MemoryRecord>(memoryPath(MEMORY_FILE));
+
+const writeAll = (records: MemoryRecord[]): Promise<void> =>
+  writeJsonArray<MemoryRecord>(memoryPath(MEMORY_FILE), records);
 
 // 突变串行化(touch 与写路径互斥;泛型 — op 结果透传给调用方)
 let writeQueue: Promise<void> = Promise.resolve();
@@ -144,4 +149,67 @@ export const getMemoryToolDeps = (todayText: string): MemoryToolDeps => ({
   onUpdate: async (id: number, content: string): Promise<AssistantMemory> =>
     memoryRecordToAssistantMemory(await updateContent(id, content)),
   onDelete: (id: number): Promise<void> => deleteMemory(id),
+});
+
+// ===== D-085d:候选 + 遥测事件持久化 =====
+
+// addCandidate/addCandidates(MemoryRepository.kt:166-172)— 追加(insertAll)
+const addCandidate = (candidate: MemoryCandidate): Promise<void> =>
+  enqueueWrite(async (): Promise<void> => {
+    const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
+    await writeJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE), [...all, candidate]);
+  });
+
+const addCandidates = (candidates: MemoryCandidate[]): Promise<void> => {
+  if (candidates.length === 0) return Promise.resolve(); // insertAll(空)= no-op
+  return enqueueWrite(async (): Promise<void> => {
+    const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
+    await writeJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE), [...all, ...candidates]);
+  });
+};
+
+// addEvent(:203-205)— message take(2_000) 在 toEntity(:316),此处截断对齐
+const addEvent = (event: MemoryEvent): Promise<void> =>
+  enqueueWrite(async (): Promise<void> => {
+    const all: MemoryEvent[] = await readJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE));
+    const truncated: MemoryEvent = {
+      id: event.id, type: event.type, conversationId: event.conversationId,
+      memoryId: event.memoryId, candidateId: event.candidateId, modelId: event.modelId,
+      message: event.message.slice(0, 2000), durationMs: event.durationMs,
+      messageCount: event.messageCount, createdAt: event.createdAt,
+    };
+    await writeJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE), [...all, truncated]);
+  });
+
+// countEventsSince(MemoryEventDAO :21-22)— COUNT WHERE event_type = :t AND created_at >= :after
+const countEventsSince = async (type: MemoryEventType, createdAfter: number): Promise<number> => {
+  const all: MemoryEvent[] = await readJsonArray<MemoryEvent>(memoryPath(EVENTS_FILE));
+  return all.filter((e: MemoryEvent): boolean => e.type === type && e.createdAt >= createdAfter)
+    .length;
+};
+
+// getAllActiveRecords(MemoryRepository.kt:74-75)— archived=0 && (expires null||>now),插入序
+const getAllActiveRecords = async (now: number): Promise<MemoryRecord[]> => {
+  const all: MemoryRecord[] = await readAll();
+  return all.filter((r: MemoryRecord): boolean =>
+    !r.archived && (r.expiresAt === null || r.expiresAt > now));
+};
+
+// runMemoryExtraction 的存储面 deps(模型解析/generateText/locale 由 ChatPage 供给)
+export interface MemoryExtractionStoreOps {
+  addCandidates: (candidates: MemoryCandidate[]) => Promise<void>;
+  addCandidate: (candidate: MemoryCandidate) => Promise<void>;
+  addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
+  addEvent: (event: MemoryEvent) => Promise<void>;
+  countEventsSince: (type: MemoryEventType, createdAfter: number) => Promise<number>;
+  getAllActiveRecords: (now: number) => Promise<MemoryRecord[]>;
+}
+
+export const getMemoryExtractionStoreOps = (): MemoryExtractionStoreOps => ({
+  addCandidates,
+  addCandidate,
+  addMemory,
+  addEvent,
+  countEventsSince,
+  getAllActiveRecords,
 });

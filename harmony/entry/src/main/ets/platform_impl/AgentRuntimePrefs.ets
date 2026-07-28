@@ -11,6 +11,16 @@ import { DEFAULT_MEMORY_RECALL_SETTING } from '@amber/chat-domain';
 
 export const AGENT_RUNTIME_KEY: string = 'agent_runtime';
 
+// D-085d:MemoryWorkerSetting(MemoryModels.kt:136-154)抽取门子集 —
+//   enabled/extractionEnabled 默认 true,maxDailyRuns 默认 8;
+//   modelId/followCompressModel 等任务模型字段未移植(偏差同 D-025 title/suggestion:
+//   entry 以 chat 模型顶替);runOnlyOnIdle/Charging/dream* 属 dream/调度切片
+export interface MemoryWorkerGateSnapshot {
+  enabled: boolean;
+  extractionEnabled: boolean;
+  maxDailyRuns: number;
+}
+
 export interface AgentRuntimeSnapshot {
   enableTimeReminder: boolean;
   // D-077b:PreferencesStore.kt:155 默认 true(GenerationHandler.kt:736 消费)
@@ -21,12 +31,20 @@ export interface AgentRuntimeSnapshot {
   enableLongTermMemory: boolean;
   // D-085b:PreferencesStore.kt:174 默认 MemoryRecallSetting(){12,2000,false}
   memoryRecall: MemoryRecallSetting;
+  // D-085d:MemoryExtractor.kt:45,69 消费
+  memoryWorker: MemoryWorkerGateSnapshot;
 }
 
 interface MemoryRecallJson {
   maxItems?: number;
   maxPromptChars?: number;
   debug?: boolean;
+}
+
+interface MemoryWorkerJson {
+  enabled?: boolean;
+  extractionEnabled?: boolean;
+  maxDailyRuns?: number;
 }
 
 interface AgentRuntimeJson {
@@ -36,6 +54,7 @@ interface AgentRuntimeJson {
   enableShortTermMemory?: boolean;
   enableLongTermMemory?: boolean;
   memoryRecall?: MemoryRecallJson;
+  memoryWorker?: MemoryWorkerJson;
 }
 
 const defaultMemoryRecall = (): MemoryRecallSetting => ({
@@ -51,6 +70,7 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   enableShortTermMemory: true,
   enableLongTermMemory: true,
   memoryRecall: defaultMemoryRecall(),
+  memoryWorker: { enabled: true, extractionEnabled: true, maxDailyRuns: 8 },
 });
 
 const parseMemoryRecall = (raw: MemoryRecallJson | undefined): MemoryRecallSetting => {
@@ -62,6 +82,14 @@ const parseMemoryRecall = (raw: MemoryRecallJson | undefined): MemoryRecallSetti
     debug: raw.debug === true,
   };
 };
+
+const parseMemoryWorker = (raw: MemoryWorkerJson | undefined): MemoryWorkerGateSnapshot => ({
+  // 默认 true:仅显式 false 才关(MemoryModels.kt:137,143)
+  enabled: raw?.enabled !== false,
+  extractionEnabled: raw?.extractionEnabled !== false,
+  // 默认 8(:152);非 number → 默认
+  maxDailyRuns: typeof raw?.maxDailyRuns === 'number' ? raw.maxDailyRuns : 8,
+});
 
 // AgentPrefs.kt:47-51 — 缺失/解析失败 → 默认(enableTimeReminder=false)
 export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<AgentRuntimeSnapshot> => {
@@ -78,6 +106,7 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
       enableShortTermMemory: parsed.enableShortTermMemory !== false,
       enableLongTermMemory: parsed.enableLongTermMemory !== false,
       memoryRecall: parseMemoryRecall(parsed.memoryRecall),
+      memoryWorker: parseMemoryWorker(parsed.memoryWorker),
     };
   } catch {
     return defaultAgentRuntimeSnapshot();

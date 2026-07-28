@@ -606,3 +606,18 @@ export {
   MEMORY_BUCKET_GLOBAL, MEMORY_BUCKET_LONG_TERM, MEMORY_BUCKET_SHORT_TERM,
 } from './chat/memory_write.ts';
 export type { MemoryAddParams, MemoryWriteResult } from './chat/memory_write.ts';
+
+// ===== D-085d:记忆抽取(MemoryExtractionPrompt/CandidateFilter/MemoryExtractor) =====
+export { buildMemoryExtractionPrompt } from './chat/memory_extraction_prompt.ts';
+export { filterMemoryCandidates } from './chat/memory_candidate_filter.ts';
+export type { MemoryFilterResult } from './chat/memory_candidate_filter.ts';
+export {
+  autoWriteEventMessage, isDurableAutoWriteCandidate, parseMemoryCandidates,
+  resetMemoryExtractionDebounce, resolveCandidateExpiresAt, runMemoryExtraction,
+  shouldAutoWriteCandidate,
+  DURABLE_AUTO_WRITE_CONFIDENCE, SHORT_TERM_PROJECT_AUTO_WRITE_CONFIDENCE,
+} from './chat/memory_extractor.ts';
+export type {
+  MemoryExtractionDeps, MemoryWorkerGate, MemoryWorkerModelResolution,
+  ParsedMemoryCandidate,
+} from './chat/memory_extractor.ts';

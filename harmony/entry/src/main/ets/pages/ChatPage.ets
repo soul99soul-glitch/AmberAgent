@@ -49,6 +49,7 @@ import {
   createPromptInjectionTransformer, PromptInjection, Lorebook,
   RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, RecentChatItem, ConversationSummary,
   buildMemoryRecallPrompt, MemoryRecallRuntimeGate, createMemoryTools,
+  runMemoryExtraction, MemoryWorkerModelResolution,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -67,7 +68,9 @@ import { createEntryPlaceholderValues, loadUserNickname } from '../platform_impl
 import { createEntryDocumentReader } from '../platform_impl/DocumentSupport.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
 import { createEntryBase64ImageTransformer } from '../platform_impl/Base64ImageSupport.ets';
-import { getMemoryReadRepository, getMemoryToolDeps } from '../platform_impl/MemoryStore.ets';
+import {
+  getMemoryExtractionStoreOps, getMemoryReadRepository, getMemoryToolDeps,
+} from '../platform_impl/MemoryStore.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -608,6 +611,7 @@ struct ChatPage {
         this.scrollToBottom();
         if (holder.rt !== null) {
           this.maybeSuggestions(out, holder.rt);
+          this.maybeMemoryExtraction(out, holder.rt);
         }
       })
       .catch((e: Error): void => {
@@ -617,6 +621,43 @@ struct ChatPage {
         this.regenTail = null;
         this.regenNodeId = '';
       });
+  }
+
+  // D-085d:记忆抽取(ChatService.kt:1494-1499 — 生成完成且无 pending/未执行
+  //   工具时 appScope.launch 非阻塞抽取);门/去抖/配额/事件在 HAR 编排逐字;
+  //   偏差:worker 模型 = chat 模型(任务模型设置未移植,D-025 同类登记);
+  //   locale = systemLanguage()(Locale.getDefault().displayName 无直接等价)
+  private maybeMemoryExtraction(conv: Conversation, rt: ChatRuntime): void {
+    if (conversationHasPendingOrUnexecutedTools(conv)) return;
+    const ops = getMemoryExtractionStoreOps();
+    runMemoryExtraction(conv, {
+      worker: this.agentRuntime.memoryWorker,
+      locale: systemLanguage(),
+      resolveWorkerModel: async (): Promise<MemoryWorkerModelResolution> => {
+        const choice: ChatProviderChoice | null = await resolveChatProviderChoice();
+        return choice === null
+          ? { kind: 'no_model' }
+          : { kind: 'ok', modelId: choice.model.modelId };
+      },
+      generateText: (prompt: string): Promise<string> =>
+        rt.api.generateText(
+          [makeUserMessage(prompt)],
+          // TextGenerationParams(model = model) 默认参(MemoryExtractor.kt:121)
+          makeTextGenerationParams({ model: rt.params.model }),
+        ).then((chunk): string => {
+          const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
+          return msg !== null ? toText(msg) : '';
+        }),
+      getAllActiveRecords: ops.getAllActiveRecords,
+      addCandidates: ops.addCandidates,
+      addCandidate: ops.addCandidate,
+      addMemory: ops.addMemory,
+      addEvent: ops.addEvent,
+      countEventsSince: ops.countEventsSince,
+    }).catch((e: Error): void => {
+      // 编排体内错误已吞为 EXTRACTION_FAILED 事件;此处仅存储层故障 — 记录不打扰
+      hilog.error(0x0000, 'AmberChat', 'memory extraction failed: %{public}s', e.message);
+    });
   }
 
   // 自动命名(D-025):title 空白时非阻塞调用(对齐 Android 独立 launch);
@@ -1095,6 +1136,7 @@ struct ChatPage {
         if (holder.rt !== null) {
           this.maybeAutoTitle(out, holder.rt);
           this.maybeSuggestions(out, holder.rt);
+          this.maybeMemoryExtraction(out, holder.rt);
         }
         this.drainPendingQueue();
       })
@@ -1398,6 +1440,7 @@ struct ChatPage {
         if (holder.rt !== null) {
           this.maybeAutoTitle(out, holder.rt);
           this.maybeSuggestions(out, holder.rt);
+          this.maybeMemoryExtraction(out, holder.rt);
         }
         // D-048:出队下一条(Android 循环:成功 → dequeueNext)
         this.drainPendingQueue();

@@ -1019,3 +1019,30 @@ extraction(MemoryExtractor/CandidateFilter/Prompt)、dream 子系统、导出导
 
 ### 残余(已登记 P1)
 候选(addCandidate/acceptCandidate)/事件遥测(addEvent/countEventsSince)→ 随 extraction 切片(D-085d);upsertRecord → dream 切片;addMemory(assistantId,content) 两参变体与助手级桶展示 UI → 设置面切片。
+
+## D-085d:记忆抽取子系统(提示词/过滤器/编排)+ 候选与遥测事件持久化 + 触发接线
+
+**日期**: 2026-07-28
+**来源**: `core/memory/prompt/MemoryExtractionPrompt.kt`(全文)、`core/memory/extraction/MemoryCandidateFilter.kt`(全文)、`core/memory/extraction/MemoryExtractor.kt`(全文 292 行)、`core/memory/telemetry/MemoryEventLogger.kt`(全文)、`MemoryEventDAO.kt:21-22`/`MemoryCandidateDAO.kt`、`ChatService.kt:1494-1499`(触发)、`MemoryModels.kt:136-154`(MemoryWorkerSetting)
+
+### 内容
+- **HAR `memory_extraction_prompt.ts`**:build 逐字(消息块 message_id/role/text.take(4000) trimIndent;模板 Locale/JSON 骨架/Rules 九条/source ids/Conversation)。
+- **HAR `memory_candidate_filter.ts`**:filter 逐字 — normalize(lowercase+Unicode 字母数字+take200)、拒绝门(sensitive||tooWeak(trim<12||conf<0.45)||duplicate(既有||本批))、reason 拼接序(原 reason→sensitive→low_value→duplicate,'; ')、拒绝副本 status=filtered、接受副本 kind NOTE→PROJECT。
+- **HAR `memory_extractor.ts`**:
+  - parseMemoryCandidates(:195-235)— 围栏剥离+首尾花括号截取+take(5)+content 空白跳过+confidence ?:0.55+explicitScope/Kind 标志;**Kotlin getter 保真**:根非对象/candidates 非数组/项非对象 → 抛错(非跳过),由编排 catch → EXTRACTION_FAILED。
+  - resolveCandidateExpiresAt(:281-289)、shouldAutoWriteCandidate(:265-279,敏感短路→explicit 双门→0.72/0.85 阈值)、isDurableAutoWrite/autoWriteEventMessage(三分支逐字)。
+  - runMemoryExtraction(:43-182 编排逐字)— 门序列五连(消息逐字:'Memory worker disabled.'/'Debounced.'/'Daily memory worker limit reached.'/'No memory worker model available.'/'Memory worker model provider not found.')、120s 去抖(模块级 Map,reset 测试钩子)、todayStart=now-now%86400000(UTC 日界逐字)、maxDailyRuns coerce≥1、started 事件 → takeLast(16)+prompt+generateText → parse → filter(对全量 active)→ rejected addCandidates / accepted 逐个 autoWrite 分流(addMemory+MEMORY_CREATED|DURABLE_MEMORY_CREATED vs addCandidate+CANDIDATE_CREATED(message=reason))、失败 EXTRACTION_FAILED(message+durationMs+messageCount)。
+- **entry `MemoryStore.ets`**:IO 泛化 readJsonArray/writeJsonArray;候选(memory_candidates.json 追加,空 insertAll no-op)+ 事件(memory_events.json,message 截 2000 = toEntity:316)+ countEventsSince(event_type 匹配 && created_at >= after)+ getAllActiveRecords;getMemoryExtractionStoreOps 聚合。
+- **entry `AgentRuntimePrefs.ets`**:memoryWorker 门子集 {enabled:true, extractionEnabled:true, maxDailyRuns:8}(MemoryModels.kt:137,143,152;仅显式 false 关)。
+- **ChatPage**:maybeMemoryExtraction(conv, rt) — conversationHasPendingOrUnexecutedTools 门(:1494)+ 三处完成点接线(send/regenerate/继续);存储层故障 catch → hilog(不上浮)。
+
+### 偏差登记
+- **worker 模型解析**(:184-193,modelId/followCompressModel/compressModelId/chatModelId 任务模型链)→ chat 模型顶替(resolveChatProviderChoice;空 → no_model;no_provider 分支在鸿蒙不可达 — choice 捆绑 provider+model)。与 D-025 title/suggestion 同偏差类,任务模型设置面移植后闭合。
+- **locale**:Locale.getDefault().displayName('中文 (中国)')→ systemLanguage()('zh-Hans-CN' 形态,无 displayName 等价)。
+- **JSON 解析失败文本**:JS SyntaxError 消息(非 Kotlin 异常文本),仅入 EXTRACTION_FAILED 事件 message。
+
+### 测试
++17(chat HAR 935→952):prompt 逐字(模板/消息块/take4000)、filter 三门+reason 序+normalize 符号大小写+kind 归一、parse 围栏/截取/take5/默认/explicit/三类抛错/candidates 缺失空、autoWrite 门序与阈值与事件文案、expiresAt 优先级、编排七例(五门各消息/去抖/配额 coerce/全链路分流/失败事件/rejected 批量)。
+
+### 残余(已登记 P1)
+dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出导入(FrontmatterCodec/ImportExportManager)、候选接受/忽略操作面(acceptCandidate/updateCandidate)、事件查看 UI、任务模型设置面(modelId/followCompressModel → 消偏差)。
