@@ -1,0 +1,67 @@
+# AmberAgent 鸿蒙迁移 — 状态快照
+# 每次工作循环开始时重读本文件；循环结束时更新。
+# 治理体系:本文件(进度) + DECISION_LOG.md(决策) + PARITY_DEBT.md(等价偏差)
+#        + docs/harmony-capability-matrix.md(能力归属,仓库原生)
+#        + docs/harmony-inventory/(Android 源码审计,仓库原生)
+
+meta:
+  updated: 2026-07-28
+  branch: harmony-preview
+  head: 待提交(G-B 审计收口)
+
+phase:
+  current: "Phase 0 → Phase 1 过渡"
+  权威计划: docs/harmony-detailed-porting-plan.md   # M0–M7 里程碑以此为准
+  战略计划: docs/harmony-native-migration-plan.md   # S0–S5,回答为什么
+  milestone_status:
+    M0_工具链: "部分完成 — CLI 构建 verified(2026-07-16), hdc 无 device target"
+    M1_三个P0_spike: "未开始(等设备) — SSE/RDB/ArkUI 均无设备端 verified 结论"
+    M2_工程骨架: "完成 — entry HAP + deepread HAR,hvigor BUILD SUCCESSFUL"
+    M3_Chat_MVP: "未开始"
+
+gate0:
+  status: blocked                 # 唯一阻塞: hdc list targets 为空
+  build_verified: true            # node scripts/harmony-inventory/build-harmony-app.mjs
+  device_target: missing          # 需人工: DevEco Device Manager 下载模拟器镜像或接真机
+  解锁后第一件事: "跑 Spike A(SSE) → B(RDB/Preferences) → C(ArkUI+Markdown)"
+
+build_and_test:
+  单元测试: "cd harmony/deepread && npm test  # node+tsx,595 tests,无需设备"
+  构建: "node scripts/harmony-inventory/build-harmony-app.mjs"
+  最近验证: "2026-07-28 595 pass / BUILD SUCCESSFUL in 8s"
+  fixture校验: "node scripts/harmony-inventory/validate-harmony-fixtures.mjs"
+  契约校验: "node scripts/harmony-inventory/check-source-contracts.mjs"
+
+codebase:
+  harmony工程:
+    entry: "HAP — UIAbility + 7 页面(Index/DeepReadArticle/History/Council×2/Novel×2) + platform_impl 真实 adapter"
+    deepread: "HAR — 纯 ArkTS 领域层,零 SDK 依赖: agent/council/novel/domain/platform/research"
+    复用说明: "platform 层 Port(HttpClient/Storage/Database/FileStore/Notifier)即 Chat MVP 所需同一批接口"
+  android源码: "只读基准,禁止修改"
+
+active_goals:
+  G-A_工作树收口: done            # 2026-07-28,5 commits: 1f9f8ceeb..42fccdf8b
+  G-B_审计收口: done             # 2026-07-28,4 矩阵+DECISION_PACKET_001;source-only 退出条件全勾
+  G-C_设备解锁: blocked_by_human # 模拟器镜像下载或真机接入
+  G-D_真机P0_spike: pending(G-C)
+  G-E_Chat_MVP主线: pending(G-D)
+  G-F_P1能力面: pending(G-E)
+
+next_slices:                      # 按优先级,取最高未阻塞项
+  - id: S-DEVICE-UNBLOCK
+    状态: blocked_by_human
+    内容: "DevEco Device Manager 下载 API 26 模拟器镜像并启动,或接入真机"
+  - id: S-CHAT-MVP-SCAFFOLD
+    状态: source_only_ok
+    内容: "Chat 领域模型(UIMessage/MessageNode/Conversation)ArkTS 化 + accumulator + fixture 回放;STREAMING_SEMANTICS_MATRIX 为规格,可不等设备先行"
+  - id: S-SSE-EVENT-FIELD
+    状态: source_only_ok
+    内容: "SseAssembler 扩展 event: 字段(Claude/Responses 依赖,矩阵已标 gap)"
+  - id: S-G1-CONFIRM
+    状态: blocked_by_human
+    内容: "DECISION_PACKET_001 人工确认(9 项决策)"
+
+parity_baseline:
+  单元测试总数: 595
+  已知行为偏差: 2                # 详见 PARITY_DEBT.md PD-001/PD-002
+  决策记录: "DECISION_LOG.md D-001..D-005"

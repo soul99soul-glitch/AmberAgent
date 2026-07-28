@@ -1,0 +1,23 @@
+category,item,android_behavior,android_source_anchor,harmony_requirement,status
+sse_edge,多行 data:,okhttp reader 合并为一个字符串行间 \n 连接一次性回调;Codex 手写解析器 joinToString(\n);另有 normalizeOpenAIStreamDataLines 补丁:多行 data 先整体 parse JSON 失败才按行拆并剥离嵌套 data: 前缀滤掉 [DONE],SSE.kt(委托 ServerSentEventReader);ResponseAPI.kt:279-314;ChatCompletionsAPI.kt:72-98,SseAssembler 已实现基础多行合并;normalize 补丁待迁,partial
+sse_edge,CRLF/LF,okio 行读取均支持,SSE.kt,鸿蒙解析器必须同样容忍,committed
+sse_edge,事件间空行,事件分派点,SSE.kt;ResponseAPI.kt:279-314,SseAssembler 已实现,verified_by_unit_test
+sse_edge,[DONE] 标记,reader 无特殊处理作为普通 data 上抛由 provider 层判停;Codex 手写解析器自行判停,SSE.kt;ChatCompletionsAPI.kt:200;ResponseAPI.kt:176;ClaudeProvider.kt:198,SseAssembler 已置 done flag,verified_by_unit_test
+sse_edge,注释行(:开头),okhttp reader 忽略不回调;Codex 手写解析器静默丢弃,SSE.kt;ResponseAPI.kt:279-314,鸿蒙解析器应忽略不回调,committed
+sse_edge,event: 字段,作为 type 传给 onEvent(Claude/Responses 依赖;ChatCompletions/Gemini 忽略),SSE.kt,SseAssembler 当前仅 data-only 需扩展 event 字段以支持 Claude/Responses,gap
+sse_edge,id: 字段,仅透传无业务使用,SSE.kt,透传即可,committed
+sse_edge,retry: 字段,onRetryChange 明确忽略不自动重连,SSE.kt:114,同样忽略不自动重连,committed
+sse_edge,Content-Type 校验,必须 text/event-stream 否则 onFailure,SSE.kt:87-90,保留校验,committed
+sse_edge,整呼超时,onResponse 后取消 call timeout(长连接不被读超时杀死),SSE.kt:58,鸿蒙 fetchStream 需等价处理(长连接不设读超时),gap
+sse_edge,SSE.kt 零调用,SSEEventSource 封装当前无任何 provider 使用(全仓 grep 无引用),全仓 grep,鸿蒙以 Codex 手写行解析器为移植蓝本补齐标准行为,decided
+merge_rule,delta vs message 替换,delta==null&&message!=null→replaceActive 整体替换;Responses 由 Reconciler 预先把 final diff 成增量避免重置累积,MessageStreamAccumulator.kt:27-33;ResponseStreamReconciler.kt:14-32,110-161,accumulator 必须实现 replace 路径,committed
+merge_rule,role 变化封存,旧 active 封存进 prefix 开新 active,MessageStreamAccumulator.kt:36-45,同语义,committed
+merge_rule,Text append,append 到末尾 Text part;空 text 跳过;metadata 后者非空优先,MessageStreamAccumulator.kt:108-121,同语义,committed
+merge_rule,Image append,append base64 到末尾 Image part;新建自动加 data:image/png;base64 前缀,MessageStreamAccumulator.kt:123-134,同语义,committed
+merge_rule,Reasoning 关闭规则,已有未完成 reasoning 且本 chunk 无 reasoning 但有关闭型 part(finishedAt/非空 text/image/任意 tool)→给所有未完结 reasoning 打 finishedAt,MessageStreamAccumulator.kt:86-94,253-262,同语义;fixtures 标注 reasoning finishedAt 尚无 executable accumulator 待 Phase 1 补,gap
+merge_rule,Tool 合并目标,findToolMergeTarget:排除已执行 tool;非空 id 先按 id 失败按 streamToolIndex;blank id 只按 index;无 id 无 index 回退最后一个未执行 tool;blank+index 找不到→新建 part 不串线,Message.kt:533-549,同语义必须保留(并行 tool 不串线关键),committed
+merge_rule,Tool merge append/replace,默认 append(toolName/input 拼接后到的非空 id 采纳);带 stream_tool_args_replace metadata→replace 整体替换 input(空 input 不覆盖已累积);replace 标记随合并剥离不持久化,Message.kt:457-477,497-522,同语义;tool delta 合并 fixture 标注待 executable accumulator 验证,gap
+merge_rule,annotations,append+distinct 绝不整体替换,MessageStreamAccumulator.kt:96-99,同语义,committed
+merge_rule,usage,TokenUsage?.merge 累积合并,core/Usage.kt:13,同语义,committed
+merge_rule,snapshot 规整,coalesceStreamParts:合并相邻 Text丢弃空 reasoning(保留带 explicit 标记的空 reasoning 占位一个),MessageStreamAccumulator.kt:264-320,同语义,committed
+error_retry,参数被拒降级重试,OpenAIProvider 外层 withoutParamsRejectedByOpenAI:仅在未 emit 任何 chunk 时重试一次;CancellationException 永不重试,OpenAIProvider.kt:147-165,同语义,committed

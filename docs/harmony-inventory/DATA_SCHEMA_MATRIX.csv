@@ -1,0 +1,77 @@
+schema_id,name,kind,fields_or_keys,version,migration_notes,android_source_anchor,harmony_target,parity_notes
+T01,ConversationEntity,room_table,"id(PK),assistant_id,title,nodes(已废弃恒""[]""),create_at,update_at,suggestions(json),is_pinned,auto_approve_tools;索引×2",v5,v1基线;nodes列已迁为独立message_node表,db/entity/ConversationEntity.kt:8,RDB conversation,nodes列迁移时可丢弃
+T02,message_node,room_table,"id(PK),conversation_id(FK CASCADE),node_index,messages(json List<UIMessage>),select_index;索引×2",v5,v1基线;消息正文JSON blob存列,MessageNodeEntity.kt:9,RDB message_node,分支(alternatives)=messages数组+select_index非拆表;UIMessage JSON schema必须兼容
+T03,memoryentity,room_table,"id(PK auto),assistant_id,content,scope,kind,source_conversation_id?,source_message_ids_json,supersedes_ids_json,expires_at?,confidence,pinned,archived,created/updated/last_used_at",v5,M4_5加supersedes_ids_json,MemoryEntity.kt:7,RDB memory,表名是类名memoryentity无下划线
+T04,memory_candidate,room_table,"id(PK),content,scope,kind,source_conversation_id?,source_message_ids_json,expires_at?,confidence,reason,sensitive,status,created/updated_at",v5,v1基线,MemoryCandidateEntity.kt:7,RDB表,
+T05,memory_event,room_table,"id(PK),event_type,conversation_id?,memory_id?,candidate_id?,model_id?,message,duration_ms?,message_count?,created_at;索引×3",v5,v1基线,MemoryEventEntity.kt:8,RDB表,memory_id为Int对T03自增主键
+T06,memory_dream_plan,room_table,"id(PK),plan_json,status,source,merge/promote/archive/supersede/ignore_candidate_count,created_at,applied_at?,dismissed_at?;索引status/source/created_at",v5,M4_5加supersede_count,MemoryDreamPlanEntity.kt:8,RDB表,plan_json整计划JSON blob
+T07,GenMediaEntity,room_table,"id(PK auto),path,model_id,prompt,create_at",v5,v1基线,GenMediaEntity.kt:7,RDB表+文件,path指向filesDir
+T08,managed_files,room_table,"id(PK auto Long),folder,relative_path(unique),display_name,mime_type,size_bytes,created/updated_at",v5,v1基线,ManagedFileEntity.kt:8,RDB表+文件,元数据表实际文件在filesDir
+T09,favorites,room_table,"id(PK),type,ref_key(unique),ref_json,snapshot_json,meta_json?,created/updated_at",v5,v1基线,FavoriteEntity.kt:8,RDB表,3个JSON列
+T10,conversation_compact,room_table,"id(PK),conversation_id(FK CASCADE),summary,level,source_start/end_index,source_message_ids_json,token_estimate,created/updated_at,status",v5,v1基线,ConversationCompactEntity.kt:9,RDB表,上下文压缩摘要
+T11,conversation_context_event,room_table,"id(PK),conversation_id(FK CASCADE),event_type,summary_id?,message,created_at",v5,v1基线,ConversationContextEventEntity.kt:9,RDB表,
+T12,feishu_watched_doc,room_table,"id(PK),doc_url,doc_title,enabled,change_threshold,check_interval_min,last_checked/changed_at?,notify_enabled,created/updated_at",v5,已被doc_subscription取代(遗留表),FeishuWatchedDocEntity.kt:8,RDB表(或合并),与T16/T17功能重叠迁移可合并
+T13,feishu_doc_snapshot,room_table,"id(PK),watched_doc_id,plain_text,content_hash,heading_list_json,captured_at",v5,遗留,FeishuDocSnapshotEntity.kt:8,RDB表,存全文体积大
+T14,feishu_doc_change,room_table,"id(PK),watched_doc_id,from/to_snapshot_id,added/removed/effective_chars,changed_sections_json,diff_summary?,ai_analysis_json?,status,notified,created_at",v5,被doc_change_log取代,FeishuDocChangeEntity.kt:8,RDB表,
+T15,feishu_doc_dependency,room_table,"id(PK),upstream_url,downstream_url,upstream/downstream_label,relation_note,enabled,created/updated_at",v5,v1基线,FeishuDocDependencyEntity.kt:8,RDB表,
+T16,doc_subscription,room_table,"id(PK),doc_url,doc_token,doc_title,enabled,threshold,notify_enabled,last_content_hash,last_char_count,last_heading_list_json,last_checked/changed_at?,created/updated_at",v5,v1基线(T12替代设计),DocSubscriptionEntity.kt:18,RDB表,
+T17,doc_change_log,room_table,"id(PK),subscription_id,added/removed/effective_chars,changed_sections_json,summary,status(new→read→consumed),ai_analysis_json?,detected_at",v5,v1基线,DocChangeLogEntity.kt:16,RDB表,
+T18,board_signal,room_table,"id(PK),source_type,source_ref,title,content,content_hash,signal_time,metadata_json,processed,processed_at?,created_at;索引×5",v5,v1基线,BoardSignalEntity.kt:31,RDB表,采集器预聚合存储
+T19,board_item,room_table,"id(PK),title,source_type/ref/content,urgency,category,reason,suggestion,signal_time,status,completed/dismissed_at?,board_date,created_at",v5,v1基线,BoardItemEntity.kt:33,RDB表,
+T20,board_task,room_table,"id(PK),source_type+source_ref(unique),title,summary,state,risk_level,chip_text,display_board_date,created/updated_at,artifact_json?",v5,M1_2建表;M3_4加artifact_json;M2_3数据改写,BoardTaskEntity.kt:36,RDB表,id=sha256(sourceType|ref)前32位
+T21,board_task_event,room_table,"id(PK),task_id,type,message,metadata_json,ts;索引(task_id,ts),type,ts",v5,M1_2建表,BoardTaskEntity.kt:104,RDB表,
+T22,board_focus_rule,room_table,"id(PK),content,active,sort_order,created/updated_at",v5,v1基线,BoardFocusRuleEntity.kt:19,RDB表,
+T23,board_weight,room_table,"PK(source_type,keyword)复合,weight,dismiss_count_7d,last_action_at",v5,v1基线,BoardWeightEntity.kt:27,RDB表,复合主键;keyword=""""为整源哨兵
+T24,daily_review,room_table,"id(PK),board_date(unique),content(markdown累积),phase(noon/evening),generated_at,updated_at",v5,v1基线,DailyReviewEntity.kt:20,RDB表,
+T25,message_node_stat,room_table,"PK(node_id FK CASCADE),conversation_id,total_messages,prompt/completion/cached_tokens",v5,v1基线,MessageStatsEntity.kt:8,RDB表,TokenUsage有TypeConverter(AppDatabase.kt:410)
+T26,message_day_stat,room_table,"PK(node_id,day),count;FK CASCADE",v5,v1基线,MessageStatsEntity.kt:36,RDB表,复合主键
+T27,hot_list_cache,room_table,"provider_id(PK),provider_name,items_json,fetched_at,updated_at,last_error?",v5,v1基线,HotListEntities.kt:8,RDB表,
+T28,hot_topic_cache,room_table,"topic_id(PK),title,sources_json,source_count,best_rank,latest_fetched_at,updated_at",v5,v1基线,HotListEntities.kt:31,RDB表,
+T29,deep_read_cache,room_table,"topic_id(PK),title,output_json,created_at,expires_at,updated_at",v5,v1基线,HotListEntities.kt:57,RDB表,鸿蒙deepread HAR已有DEEP_READ_SCHEMA_SQL需对照
+T30,hot_list_source,room_table,"id(PK),display_name,source_type,url,enabled,field_mapping_json,sort_order,created/updated_at,last_success_at?",v5,v1基线,HotListEntities.kt:80,RDB表,
+T31,mini_app,room_table,"id(PK),title,description,htmlContent,sourceConversationId?,sourceMessageId?,iconEmoji?,category?,permissionsJson,pinned,runCount,boardSummary?,version,htmlHash?,createdAt,updatedAt",v5,v1基线,MiniAppEntity.kt:7,RDB表,camelCase列名(非snake_case)
+T32,mini_app_grant,room_table,"PK(appId,permission),decision,updatedAt",v5,v1基线,MiniAppEntity.kt:34,RDB表,复合主键
+T33,mini_app_version,room_table,"PK(appId,versionNumber),htmlContent,htmlHash,changeNote?,createdAt",v5,v1基线,MiniAppEntity.kt:48,RDB表,复合主键
+T34,mini_app_audit_log,room_table,"id(PK),appId,method,permission,summary,payloadHash,createdAt",v5,v1基线,MiniAppEntity.kt:65,RDB表,
+T35,mini_app_shared_data,room_table,"PK(namespace,key),value,lastWriterId,updatedAt",v5,v1基线,MiniAppEntity.kt:82,RDB表,复合主键等价KV store
+T36,opportunity,room_table,"id(PK),dedupe_key(unique),opportunity_type,source_type/ref,title,summary,evidence_json,score_json,confidence,status,suggested_actions_json,due_at?,trigger_at?,dispatched_task_id?,dismissed_reason?,mute_scope?,expires_at?,created/updated_at",v5,M2_3建表+board_task回填,OpportunityEntity.kt:36,RDB表,
+T37,reference_anchor,room_table,"id(PK),dedupe_key(unique),dependency_id,my_doc_ref,my_claim_text,upstream_doc_ref,upstream_hint,baseline_value,last_value?,evidence_json,score_json,match_confidence,status,confirmation_mode,last_checked_at?,created/updated_at",v5,M2_3建表,OpportunityEntity.kt:89,RDB表,
+T38,message_fts,fts5_virtual,"text,node_id,message_id,conversation_id,title,update_at;tokenize=simple(jieba中文分词libsimple扩展)",n/a,onOpen创建不走Room迁移,DataSourceModule.kt:147-160;fts/MessageFtsManager.kt,RDB无FTS等价→自建倒排或降级,高风险:jieba+自定义SQLite扩展鸿蒙不可用
+R01,agent_run,room_table(agent_runtime v1),"run_id(PK),parent_run_id?,agent_descriptor_id,agent_version,conversation_id?,message_node_id?,produces_message_id?,assistant_id?,status,input_digest,input_snapshot_ref?,input_schema_version,started/finished_at,interrupted_reason?;索引×5",v1,无历史迁移;schema json已导出,core/agent-store-room/Entities.kt:8,RDB表,status存小写字符串
+R02,agent_event,room_table(agent_runtime v1),"event_id(PK),run_id,parent_run_id?,seq,type,payload_type,payload(json),payload_schema_version,agent_descriptor_id,agent_version,is_final,ts;unique(run_id,seq)",v1,无,Entities.kt:37,RDB表,INSERT IGNORE+unique实现幂等追加
+R03,trace_span,room_table(agent_runtime v1),"span_id(PK),run_id,parent_span_id?,name,kind,status,started/ended_at,attributes_json;索引×4",v1,无,Entities.kt:61,RDB表,
+R04,permission_intent,room_table(agent_runtime v1),"intent_id(PK),run_id,kind,tool_id?,payload_digest,reason,channel,decision,created_at,decided_at?,decided_by?;索引×3",v1,无,Entities.kt:83,RDB表,
+P-VERSION,data_version,preferences_key,int,-,版本门控(seeded_*一键迁移),PreferencesKeys.kt:17,Preferences,
+P-UI,UI分组,preferences_key,"dynamic_color(bool),theme_id(str),display_setting(JSON~30字段),developer_mode(bool)",-,-,PreferencesKeys.kt:20-23,Preferences,display_setting整JSON
+P-MODEL,模型默认分组,preferences_key,"enable_web_search,favorite_models(JSON),chat/title/suggestion/image_generation/ocr/compress_model(Uuid),4×prompt(str),model_group_session_defaults(JSON)",-,-,PreferencesKeys.kt:26-38,Preferences,6个模型id默认Uuid.random()=未配置哨兵
+P-PROVIDER,provider配置,preferences_key,"providers(JSON List<ProviderSetting>含API key/baseUrl/models)",-,SettingsProviderRescue有损坏恢复,PreferencesKeys.kt:41;PreferencesStore.kt:88,加密KV/HUKS,含密钥应放加密存储
+P-ASSISTANT,助手分组,preferences_key,"select_assistant(Uuid),assistants(JSON List<Assistant>~30字段),assistant_tags(JSON)",-,Assistant不进Room整体JSON存DataStore,PreferencesKeys.kt:44-46;core/model/Assistant.kt:16,Preferences,大JSON注意Preferences大小限制
+P-SEARCH,搜索分组,preferences_key,"search_services(JSON),search_common(JSON),search_selected(int),search_enabled_service_ids(JSON),5×builtin bool,google_webview_fallback(bool)",-,-,PreferencesKeys.kt:49-58,Preferences,9键
+P-MCP,mcp_servers,preferences_key,JSON List<McpServerConfig>,-,-,PreferencesKeys.kt:61,Preferences,MCP协议鸿蒙无SDK需自研(plan§5.2硬缺口)
+P-BACKUP,webdav/s3/sync,preferences_key,"webdav_config(JSON含密码),s3_config(JSON),sync_settings(JSON),backup_reminder_config(JSON)",-,-,PreferencesKeys.kt:64/67/83/80,Preferences(密码加密),含凭据
+P-TTS,tts分组,preferences_key,"tts_providers(JSON),selected_tts_provider(Uuid)",-,-,PreferencesKeys.kt:70-71,Preferences,
+P-PROMPT,提示词分组,preferences_key,"mode_injections/lorebooks/quick_messages(JSON),agent_runtime(JSON AgentRuntimeSetting~20子设置)",-,-,PreferencesKeys.kt:74-77,Preferences,agent_runtime大嵌套JSON
+P-STATS,统计/一次性,preferences_key,"launch_count(int),sponsor_alert_dismissed_at(int),seeded_image_models_v1(bool),seeded_routing_quick_messages_v1(bool)",-,seeded_*防重复种子,PreferencesKeys.kt:86-103,Preferences,
+P-NATIVE,native path开关,preferences_key,"native_path_office/highlight/regex/markdown_html/markdown_ast/sync_crypto(bool),native_path_sampling_rate(float)",-,Rust JNI灰度开关,PreferencesKeys.kt:110-118,Preferences,鸿蒙无Rust JNI对应(NAPI待定)
+P-CRON,agent_cron_tasks,preferences_key(独立DataStore),tasks_json(str JSON),-,独立DataStore文件,AgentCronManager.kt:33,386,Preferences,
+S01,crash_handler,SharedPreferences,崩溃标记(bool/int),-,-,core/utils/CrashHandler.kt:8,Preferences,
+S02,amber_agent.preferences,SharedPreferences,UI hooks任意str/bool kv,-,-,feature/ui/hooks/SharedPreferences.kt:24,Preferences,动态key需盘点调用点
+S03,mini_app_storage,SharedPreferences,miniapp宿主KV,-,-,feature/miniapp/MiniAppStorage.kt:6,Preferences,
+S04,mini_app_ai_budget,SharedPreferences,AI预算计数,-,-,feature/miniapp/MiniAppV3Runtime.kt:63,Preferences,
+S05,webmount×2,SharedPreferences,webmount状态/用户站点注册表,-,-,WebMountManager.kt:48;UserSiteRegistry.kt:222,Preferences,
+S06,OAuth token stores,SharedPreferences(加密),OpenAI Codex/Google Gemini OAuth token,-,-,ai/util/OAuthTokenSecureStore.kt:20-23,加密Preferences/HUKS,高敏token必须加密
+J01,Conversation,json_blob,拆表:行存conversation表;messageNodes存message_node表;chatSuggestions为JSON列,-,-,core/model/Conversation.kt:18;ConversationRepository.kt:456-481,RDB+JSON列,
+J02,MessageNode分支,json_blob,"messages=JSON List<UIMessage>(kotlinx),selectIndex独立列;alternatives即数组其余元素",-,-,ConversationRepository.kt:563/602,RDB JSON列,UIMessage JSON schema兼容是迁移硬约束
+J03,UIMessage,json_blob,"@Serializable:id,role,parts(sealed:text/image/video/audio/document/mini_app/reasoning/tool),annotations,createdAt/finishedAt,modelId,usage,translation",-,-,ai/ui/Message.kt:37,366,JSON schema复用,sealed多态type字段(SerialName)需1:1保留
+J04,Assistant,json_blob,List<Assistant>整体JSON存DataStore assistants键(~30字段含regexes/lorebookIds/rememberedReasoningLevels),-,-,core/model/Assistant.kt:16,Preferences JSON,
+J05,Settings子对象,json_blob,DisplaySetting/AgentRuntimeSetting/ProviderSetting等kotlinx JSON存单键,-,ADR-0001§3冻结on-disk键名,core/settings/PreferencesStore.kt:66-245,Preferences JSON,
+F01,filesDir/upload,file,用户上传附件(FilesManager+ManagedFileEntity联动),-,-,core/files/FilesManager.kt:142,应用文件目录,
+F02,filesDir/chat_images/{convId},file,会话内生成图片,-,-,FilesManager.kt:344,文件目录,
+F03,filesDir/images,file,独立图片画廊,-,-,FilesManager.kt:330,文件目录,
+F04,filesDir/skills,file,技能包,-,-,core/files/SkillManager.kt:23,文件目录,
+F05,filesDir/fonts,file,slides字体,-,-,core/font/SlidesFontRepository.kt:102,文件目录,
+F06,filesDir/amberagent/artifacts/screenshots,file,截屏产物,-,-,core/automation/ScreenCaptureService.kt:306,文件目录,
+F07,cacheDir暂存,file,vision_cache.json/sync*/backup_*.zip,-,-,OcrTransformer.kt:36;core/sync,缓存目录,可丢
+V01,sqlite-vector,依赖声明未使用,toml声明但无implementation;源码无vec0引用,-,-,gradle/libs.versions.toml:66,183,不适用,可忽略;plan§5.2硬缺口判断需修正:实际未使用
+V02,sqlite-android(requery fork),SQLite引擎替换,AppDatabase经RequerySQLiteOpenHelperFactory加载libsimple扩展(jieba),-,-,app/build.gradle.kts:714;DataSourceModule.kt:162-174,RDB无自定义扩展加载,高风险:FTS分词方案需重设计
+X01,ObjectBox,确认未使用,仅settings.gradle.kts plugin坐标映射;零依赖零entity零import,-,-,settings.gradle.kts:16-17,不适用,预研关闭(D-007)

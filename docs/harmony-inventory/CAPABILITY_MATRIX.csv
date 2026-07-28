@@ -1,0 +1,57 @@
+cap_id,capability,android_anchor,category,disposition,harmony_status,harmony_target_or_notes
+C-001,Chat 对话主链路(多轮流式取消重试),feature/chat;feature/ui/components/ai/ChatInput.kt,P0,keep,in_progress,"deepread HAR 已验证 SSE/accumulator 模式;Chat 专属 UIMessage/accumulator 待迁(S-CHAT-MVP-SCAFFOLD)"
+C-002,LLM Provider 框架(ProviderManager/ProviderSetting),ai/provider;ai/provider/ProviderSetting.kt,P0,keep,contract_ready,"协议矩阵完成(STREAMING_PROTOCOL_MATRIX.csv);OpenAI-compatible 先行"
+C-003,OpenAI Chat Completions 流式,ai/.../openai/ChatCompletionsAPI.kt,P0,keep,contract_ready,"fixtures 已备;设备 spike 待 G-C"
+C-004,OpenAI Responses 流式,ai/.../openai/ResponseAPI.kt,P1,keep,contract_ready,"Reconciler 纯逻辑可搬"
+C-005,Claude provider,ai/.../ClaudeProvider.kt,P1,keep,contract_ready,"SSE event: 字段依赖→SseAssembler 需扩展(gap)"
+C-006,Gemini provider(ai/.../GoogleProvider.kt),ai/.../GoogleProvider.kt,P1,keep,contract_ready,"JSON-per-event;tool 流内发号逻辑随迁"
+C-007,Codex OAuth provider,ai/.../OpenAICodexOAuth.kt,P1,keep,contract_ready,"手写 SSE 解析器=移植蓝本;token store→HUKS"
+C-008,Gemini OAuth / Code Assist,ai/.../GoogleGeminiOAuth.kt,P1,degrade,not_started,"OAuth 重定向平台相关需重实现"
+C-009,Vertex AI Service Account,ai/.../vertex/ServiceAccountTokenProvider.kt,P2,defer,not_started,"RS256 JWT 签名需 HUKS 验证"
+C-010,Assistant 配置体系(~30字段),core/model/Assistant.kt;feature/ui AssistantPicker,P1,keep,not_started,"整体 JSON 存 Preferences(DATA_SCHEMA J04)"
+C-011,Conversation/MessageNode 树(分支),core/model/Conversation.kt;message_node 表,P0,keep,contract_ready,"schema 预留分支字段;MVP 可线性列表+分支字段"
+C-012,UIMessage + chunk merge,ai/ui/Message.kt;MessageStreamAccumulator.kt,P0,keep,contract_ready,"merge 规则矩阵完成(STREAMING_SEMANTICS_MATRIX.csv)"
+C-013,Transformer 管线(模板/think/regex/document/OCR),app/.../data/ai/transformers,P1,keep,partial,"fixtures 已备(H0-11);纯逻辑先行,OCR/图片后置"
+C-014,会话持久化(Room→RDB),app/agent/data/db;core/agent-store-room,P0,keep,in_progress,"deepread RDB adapter 已落地(RdbRepository);Chat schema 待建"
+C-015,设置持久化(DataStore→Preferences),core/settings;core/app-infra/PreferencesKeys.kt,P0,keep,in_progress,"deepread PreferencesStorage 已落地;52 键分组已审计"
+C-016,Markdown 渲染+代码高亮,native/markdown-parser;highlight 模块,P0,keep,not_started,"ArkTS fallback 先行,Rust NAPI 可选(H0-09/H0-10)"
+C-017,消息搜索 FTS(jieba 分词),fts/MessageFtsManager.kt;message_fts 表,P1,degrade,not_started,"RDB 无 FTS/自定义扩展→自建倒排或 LIKE 降级(DATA_SCHEMA T38/V02)"
+C-018,工具系统框架(ToolRegistry/PermissionBroker),core/agent-runtime;feature/tools,P1,keep,not_started,"ToolCall 数据结构先留,执行器默认禁用(plan§10.4)"
+C-019,安全工具子集(会话上下文/历史/文件),ConversationContextTools/ConversationHistoryTools/ExternalFileTools,P1,keep,not_started,
+C-020,搜索工具(Exa/Tavily/Zhipu/Bocha/Brave/SearXNG),search 模块;feature/ui 搜索设置,P1,keep,in_progress,"鸿蒙已迁 5+provider(SearchRegistry),领先计划"
+C-021,深度阅读(DeepRead),feature/deepread;board 热榜,P1,keep,in_progress,"鸿蒙主力切片:领域层 595 测试绿,文章页已接真实 aiClient"
+C-022,ModelCouncil(模型议会),feature/modelcouncil,P1,keep,in_progress,"鸿蒙 council/ 领域层+页面已落地(未设备验证)"
+C-023,小说创作(Novel),Android 无对应(鸿蒙新增),-,new,in_progress,"鸿蒙 novel/ 已落地;非 Android 对齐项"
+C-024,文档解析(PDF/DOCX/PPTX),document 模块;native/office-parsers;native/reader-extractor,P1,degrade,not_started,"Rust NAPI 或云解析 fallback(H0-13)"
+C-025,TTS(云 provider+播放),tts 模块;SystemTTSProvider.kt,P1,keep,not_started,"云 TTS 先行,系统 TTS 后置(H0-21)"
+C-026,图片附件/Coil 加载,ChatInput 附件;Coil,P1,degrade,not_started,"Coil 无对应→自建 @ohos.multimedia.image 缓存(plan§5.2 缺口)"
+C-027,OCR 图片输入,OcrTransformer;MLKit,P1,degrade,not_started,"云 OCR fallback(H0-23)"
+C-028,ArkWeb 网页预览/miniapp/live HTML,feature/webview;feature/miniapp;feature/live,P1,keep,not_started,"Web 组件+JS bridge(H0-19);miniapp 5 张表已审计"
+C-029,MCP 集成,feature/tools;mcp_servers 键;MCP Kotlin SDK,P1,blocked_by_platform,not_started,"ArkTS MCP SDK 不存在→协议层自研(plan§5.2 硬缺口;Phase 1 早期 spike)"
+C-030,Memory(记忆/embedding 检索),core/memory;memory* 5 张表,P1,degrade,not_started,"sqlite-vector 实际未使用(V01 修正);检索可 ArkTS 暴力或服务端"
+C-031,上下文压缩(compact),core/context;conversation_compact 表,P1,keep,not_started,
+C-032,今日看板(board 采集聚合),feature/board;board_* 8 张表,P2,degrade,not_started,"通知监听不可用→改数据源聚合(plan§4.2;H0-15=replace)"
+C-033,定时任务(cron),feature/cron;AgentCronManager;agent_cron_tasks,P2,degrade,not_started,"Background Tasks Kit 限制(H0-18)"
+C-034,Accessibility 手机自动化,core/automation;ScreenAutomationTools;AmberAccessibilityService,P2,defer,not_started,"P2 高风险;降级为用户确认式(H0-14)"
+C-035,通知监听,AmberNotificationListenerService;NotificationsAccessTools,P2,replace,not_started,"无三方监听 API→替换为分享/手动接入(H0-15)"
+C-036,本地终端/proot/external CLI,feature/terminal;TerminalRuntime;AlpineRuntimeInstaller,P2,replace,not_started,"沙箱禁止→远程/桌面/云 seat(H0-17)"
+C-037,屏幕截屏/MediaProjection,ScreenCaptureService;ScreenCapturePermissionActivity,P2,defer,not_started,H0-16
+C-038,系统工具(SMS/Phone/Contacts/Calendar),SystemAccessTools;feature/system,P2,defer,not_started,"逐项判定,不可用则下线(plan§4.3)"
+C-039,Workspace 工件,feature/workspace;WorkspaceArtifactTools,P1,keep,not_started,"文件型,FileStore Port 已有"
+C-040,飞书文档订阅/办公,FeishuOfficeTools;feishu_*/doc_* 6 张表,P2,keep,not_started,"HTTP API 型,平台无关性较好"
+C-041,iCloud Drive 集成,feature/icloud;ICloudDriveTools,P2,drop,not_started,"Android/iOS 特有,鸿蒙无对应→替代或下线"
+C-042,Subagent,feature/subagent,P2,keep,not_started,
+C-043,任务编排(feature/task),feature/task,P2,keep,not_started,
+C-044,历史记录页,feature/history,P1,keep,in_progress,"鸿蒙 HistoryPage 已是设置+模型库(语义偏移,注意命名)"
+C-045,webmount(用户站点挂载),feature/webmount;S05 键,P2,defer,not_started,
+C-046,快捷方式/分享入口,ShortcutHandlerActivity;C-022 剪贴板/Want,P1,keep,not_started,H0-22
+C-047,崩溃收集/分析(Firebase),app Firebase 配置;CrashHandler,P2,replace,not_started,"→华为 Crash Kit 或先无埋点;注意合规边界(plan§5.2)"
+C-048,数据备份导出/导入(WebDAV/S3),core/sync;P-BACKUP 键,P1,keep,not_started,"导出/导入路线优先(plan§7.2);sync-crypto 需字节兼容(H0-12)"
+C-049,后台长时生成,AgentCronWorker/BoardWorker/DeepReadWorker,P1,degrade,not_started,"WorkScheduler/受限长时任务(H0-18)"
+C-050,Rust native(tokenizer/highlight/office/json-expr等),native/ workspace,P1,degrade,not_started,"NAPI 待 Gate0 后验证;P0 全 ArkTS fallback(plan§12.4)"
+C-051,权限 reason i18n,AndroidManifest 权限+values-*/,P0,keep,not_started,"Phase 2 起硬约束:$r 资源化(plan§10.7)"
+C-052,安全存储(API key/OAuth token),AndroidX Security Crypto;OAuthTokenSecureStore,P0,keep,not_started,"HUKS/cryptoFramework(plan§5.2 有);开发态 Preferences 先行"
+C-053,扫码(MLKit barcode),MLKit barcode scanning,P2,degrade,not_started,"@kit.ScanKit 或 zxing 三方(plan§5.2)"
+C-054,Usage 统计/token 计量,core/usage;message_*_stat 表,P1,keep,not_started,
+C-055,技能包(skills),core/files/SkillManager.kt;filesDir/skills,P2,keep,not_started,
+C-056,幻灯片(slides 字体),core/font/SlidesFontRepository,P2,defer,not_started,
