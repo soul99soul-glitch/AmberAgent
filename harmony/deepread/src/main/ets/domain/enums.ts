@@ -112,7 +112,7 @@ export const DEEP_READ_HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 // Prefetch — 照搬 Android DeepReadSourcePrefetcher
 // PREFETCH_WALL_BUDGET_MS = Android SOURCE_COLLECTION_TIMEOUT_MS (DeepReadSourcePrefetcher.kt:688)
 // PREFETCH_LRU_TTL_MS / MAX_ENTRIES = Android CACHE_TTL_MS / CACHE_MAX_ENTRIES (DeepReadSourcePrefetcher.kt:719-720)
-export const PREFETCH_WALL_BUDGET_MS = 36_000;
+export const PREFETCH_WALL_BUDGET_MS = 15_000;
 export const PREFETCH_LRU_TTL_MS = 10 * 60 * 1_000;
 export const PREFETCH_LRU_MAX_ENTRIES = 16;
 // MAX_SOURCES = Android DeepReadSourcePrefetcher.MAX_SOURCES = 12 (区别于 SearchOrchestrator.MAX_SOURCES = 5)

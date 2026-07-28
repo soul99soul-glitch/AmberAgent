@@ -2,6 +2,7 @@
 // 对照 Android:点击热点 → 文章页触发 run() → 渲染真实 DeepReadOutput
 
 import { router } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   DeepReadOutput, DeepReadGenerationStage, ReadingLink,
   RunManagerDeps, UIMessage, AiClient, DeepReadSource,
@@ -13,6 +14,9 @@ import { getAppContainer, getNotifier, getPrefetcher } from '../di/AppContainer.
 import {
   BG, SURFACE, SURFACE2, INK, INK2, INK3, INK4, LINE, ACCENT, ACCENT_LIGHT,
 } from '../design/tokens.ets';
+
+const DOMAIN: number = 0x0001;
+const TAG: string = 'DeepRead.Article';
 
 interface ArticleParams {
   topicId: string;
@@ -35,9 +39,17 @@ struct DeepReadArticlePage {
   @State currentStage: string = '';
 
   async aboutToAppear(): Promise<void> {
-    const params: ArticleParams = router.getParams() as ArticleParams;
-    this.topicId = params.topicId;
-    this.title = params.title;
+    const rawParams: object = router.getParams() as object;
+    if (rawParams === null || rawParams === undefined) {
+      hilog.error(DOMAIN, TAG, 'aboutToAppear: router.getParams() is null');
+      this.errorMsg = '参数缺失';
+      this.running = false;
+      return;
+    }
+    const params: ArticleParams = rawParams as ArticleParams;
+    this.topicId = params.topicId ?? '';
+    this.title = params.title ?? '';
+    hilog.info(DOMAIN, TAG, 'aboutToAppear: topicId=%{public}s title=%{public}s', this.topicId, this.title);
     await this.generateArticle();
   }
 
@@ -49,7 +61,14 @@ struct DeepReadArticlePage {
     const notifier = getNotifier();
     await notifier.notifyRunning(this.topicId, this.title);
     try {
-      const mockAi: AiClient = new MockAiClient();
+      hilog.info(DOMAIN, TAG, 'generateArticle: start run()');
+      // 用 AppContainer 注入的 aiClient(自动读 settings 里配的 API Key + Base URL)
+      const container = getAppContainer();
+      const aiClient = container.aiClient;
+      const storage = container.storage;
+      const model = await storage.get<string>('ai_model', 'deepseek-chat');
+      const apiKey = await storage.get<string>('ai_api_key', '');
+      hilog.info(DOMAIN, TAG, 'AI config: model=%{public}s hasKey=%{public}s', model, String(apiKey.length > 0));
       const prefetcher = getPrefetcher();
       const deps: RunManagerDeps = {
         prefetcher: prefetcher,
@@ -57,12 +76,14 @@ struct DeepReadArticlePage {
           // 无 API key → 返回原 messages,走 fallbackPlan + writeFallbackSection
           return messages;
         },
-        aiClient: mockAi,
-        model: 'mock-model',
+        aiClient: aiClient,
+        model: model,
         playbookMarkdown: '',
         nowIso: (): string => '2026-06-25',
       };
       const result = await run(deps, this.topicId, this.title, { force: true, seedUrl: null });
+      hilog.info(DOMAIN, TAG, 'run() result: ok=%{public}s error=%{public}s',
+        String(result.ok), result.error ?? 'null');
       if (result.ok) {
         this.output = result.output;
         this.currentStage = '完成';
@@ -73,6 +94,7 @@ struct DeepReadArticlePage {
         await notifier.notifyFailed(this.topicId, this.title, result.error ?? '未知错误');
       }
     } catch (e) {
+      hilog.error(DOMAIN, TAG, 'generateArticle EXCEPTION: %{public}s', String(e).substring(0, 120));
       this.errorMsg = String(e).substring(0, 80);
       this.currentStage = '失败';
       await notifier.notifyFailed(this.topicId, this.title, String(e).substring(0, 60));

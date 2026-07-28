@@ -71,9 +71,9 @@ test('isInterruptedPhase: COLLECTING/PLANNING/WRITING → true; IDLE/COMPLETE �
   assert.equal(isInterruptedPhase({ ...makeEmptyDeepReadOutput(), generationPhase: 'COMPLETE' }), false);
 });
 
-// ===== createRunContext: 空 prefetch → hard fail (P1-9) =====
+// ===== createRunContext: 空 prefetch → 降级用标题构造 fallback source (非 hard fail) =====
 
-test('createRunContext: empty prefetch → ok=false with error message', async () => {
+test('createRunContext: empty prefetch → 降级 ok=true with fallback source', async () => {
   const emptyPrefetcher: SourcePrefetcher = {
     collect: async () => [],
     cacheSize: () => 0,
@@ -83,8 +83,8 @@ test('createRunContext: empty prefetch → ok=false with error message', async (
     model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',
   };
   const result = await createRunContext(deps, 't1', '标题', null, false);
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.ok(result.error.includes('没有抓到足够的来源'));
+  // 降级后应该 ok=true(用标题构造了 fallback source)
+  assert.equal(result.ok, true);
 });
 
 // ===== createRunContext: 有 sources → ok=true =====

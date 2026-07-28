@@ -12,7 +12,7 @@ import { createSectionWriterTools } from './section_writer_tools.ts';
 import { runStageSupervisorLoop } from './supervisor_loop.ts';
 import type { CollectRunFn } from './supervisor_loop.ts';
 import { tryFallbackAfterStageFailure } from './try_fallback.ts';
-import type { SourcePrefetcher, DeepReadSource } from '../research/source_prefetcher.ts';
+import type { SourcePrefetcher, DeepReadSource, SourceCredibility, SourceFreshness } from '../research/source_prefetcher.ts';
 import { buildEvidencePack } from '../research/evidence_pack.ts';
 import type { DeepReadEvidencePack, DeepReadArticlePlan } from '../research/evidence_pack.ts';
 import { generateArticlePlan } from '../research/article_plan.ts';
@@ -87,10 +87,26 @@ export const createRunContext = async (
   seedUrl: string | null,
   force: boolean,
 ): Promise<{ ok: true; context: RunContext } | { ok: false; error: string }> => {
-  // 1. prefetch(空 → hard fail, P1-9)
-  const prefetchedSources = await deps.prefetcher.collect(topicId, topicTitle, seedUrl, force);
+  // 1. prefetch(空/异常 → 用 topicTitle 构造降级 evidence,而非 hard fail)
+  let prefetchedSources: DeepReadSource[] = [];
+  try {
+    prefetchedSources = await deps.prefetcher.collect(topicId, topicTitle, seedUrl, force);
+  } catch (_e) {
+    // prefetch 超时或异常 → 降级
+  }
   if (prefetchedSources.length === 0) {
-    return { ok: false, error: '没有抓到足够的来源，无法生成深度阅读。请检查搜索源或稍后重试。' };
+    // 降级:搜索源全部失败时,用标题构造一个最小来源,让流程能走 fallbackPlan
+    prefetchedSources = [{
+      sourceId: 'fallback-title',
+      url: seedUrl ?? `topic://${topicId}`,
+      title: topicTitle,
+      source: 'fallback',
+      evidenceText: topicTitle,
+      credibility: 'medium' as SourceCredibility,
+      freshness: 'unknown' as SourceFreshness,
+      publishedAt: null,
+      imageCandidates: [],
+    }];
   }
 
   // 2. evidence pack

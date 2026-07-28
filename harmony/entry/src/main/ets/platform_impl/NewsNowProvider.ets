@@ -53,8 +53,9 @@ interface NewsNowApiItem {
 }
 
 interface NewsNowApiResponse {
-  code: number;
-  data: NewsNowApiItem[];
+  status: string;
+  id: string;
+  items: NewsNowApiItem[];
 }
 
 export class NewsNowProvider implements SearchProvider {
@@ -86,15 +87,20 @@ export class NewsNowProvider implements SearchProvider {
       const resp: HttpResponse = await this.http.fetch(req);
       if (resp.status !== 200) {
         result.error = `HTTP ${resp.status}`;
+        hilog.warn(DOMAIN, TAG, '%{public}s: HTTP %{public}d', preset.id, resp.status);
         return result;
       }
+      hilog.info(DOMAIN, TAG, '%{public}s: body len=%{public}d first100=%{public}s',
+        preset.id, resp.body.length, resp.body.substring(0, 100));
       const data: NewsNowApiResponse = JSON.parse(resp.body) as NewsNowApiResponse;
-      if (data.data === undefined || data.data === null) {
-        result.error = 'no data';
+      if (data.items === undefined || data.items === null) {
+        result.error = 'no items';
+        hilog.warn(DOMAIN, TAG, '%{public}s: no items field, status=%{public}s', preset.id, data.status);
         return result;
       }
-      for (let i = 0; i < data.data.length && i < 12; i++) {
-        const apiItem: NewsNowApiItem = data.data[i];
+      hilog.info(DOMAIN, TAG, '%{public}s: items array len=%{public}d', preset.id, data.items.length);
+      for (let i = 0; i < data.items.length && i < 12; i++) {
+        const apiItem: NewsNowApiItem = data.items[i];
         const heatVal: string = (apiItem.extra !== null && apiItem.extra !== undefined)
           ? (apiItem.extra['info'] ?? '')
           : '';
@@ -106,8 +112,10 @@ export class NewsNowProvider implements SearchProvider {
         };
         result.items.push(item);
       }
+      hilog.info(DOMAIN, TAG, '%{public}s: parsed items=%{public}d', preset.id, result.items.length);
     } catch (e) {
       result.error = String(e).substring(0, 60);
+      hilog.error(DOMAIN, TAG, '%{public}s: PARSE ERROR: %{public}s', preset.id, String(e).substring(0, 120));
     }
     return result;
   }

@@ -333,24 +333,22 @@ class MultiProviderRegistry implements SearchProviderRegistry {
   constructor(http: HttpClient, storage: Storage) {
     this.http = http;
     this.storage = storage;
-    // 免费源始终可用(NewsNow + DuckDuckGo + HackerNews + Jina)
+    // 初始只放国内可直连的源(NewsNow),避免国外源超时阻塞
     this.cachedEnabled = [
       createNewsNowProvider(http),
-      new DuckDuckGoProvider(http),
-      new HackerNewsProvider(http),
-      new JinaProvider(http),
     ];
-    // 加载需 key 的源
+    // 异步加载其他源(国外源 + 需 key 的源)
     this.loadKeyedProviders();
   }
 
   private async loadKeyedProviders(): Promise<void> {
     const providers: SearchProvider[] = [
       createNewsNowProvider(this.http),
-      new DuckDuckGoProvider(this.http),
-      new HackerNewsProvider(this.http),
-      new JinaProvider(this.http),
     ];
+    // 国外免费源(DuckDuckGo/HackerNews/Jina):国内可能超时,但仍加入(有超时保护)
+    providers.push(new DuckDuckGoProvider(this.http));
+    providers.push(new HackerNewsProvider(this.http));
+    providers.push(new JinaProvider(this.http));
     // Tavily
     const tavilyKey: string = await this.storage.get<string>('tavily_api_key', '');
     if (tavilyKey.length > 0) {
