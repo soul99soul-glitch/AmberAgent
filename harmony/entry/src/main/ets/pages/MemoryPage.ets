@@ -12,10 +12,10 @@
 //   SettingAgentMemoryPage.kt:127-149(编辑对话框:标题/label/保存/取消;
 //     id==0 → addMemory 否则 updateMemory)/:254-269(删除确认:confirm_delete)
 //   SettingAgentMemoryVM.kt:68-74(updateAgentRuntime)/:77-93(add/update/delete)
-// 裁剪(P1 登记):Overview 导航/Recall 开关页/Compaction 页/AgentSoul 卡/
-//   记忆汇总卡('Amber 对你的了解')/导入导出(目录选择器未落地)/toolbar
+// 裁剪(P1 登记):Overview 导航/toolbar
 //   '立即运行一次'(依附 workScheduler 调度环)/记忆库?'信息'图标视觉(以文字 '?' 代)。
 import { promptAction, router } from '@kit.ArkUI';
+import { Context } from '@kit.AbilityKit';
 import type {
   AssistantMemory, MemoryCandidate, MemoryDreamPlanOpResult, MemoryDreamApplyOpResult,
   MemoryEvent, MemoryIgnoreLowConfidenceResult, MemoryMergeSuggestion,
@@ -29,6 +29,7 @@ import {
   memoryDreamApplyFailureMessage, memoryDreamPlanFailureMessage,
   memoryDreamReviewSummaryText, memoryDreamPlanHasChanges,
   memoryLowConfidenceIgnoredMessage, planMemoryDreamOp,
+  exportMemoriesTo, importMemoriesFrom,
   LOW_CONFIDENCE_CANDIDATE_THRESHOLD,
   MEMORY_BUCKET_GLOBAL, MEMORY_BUCKET_LONG_TERM, MEMORY_BUCKET_SHORT_TERM,
   MEMORY_DREAM_APPLIED_MESSAGE, MEMORY_DREAM_APPLY_EMPTY_MESSAGE,
@@ -36,7 +37,8 @@ import {
   MEMORY_DREAM_PLAN_SAVED_MESSAGE, MEMORY_NO_LOW_CONFIDENCE_MESSAGE,
 } from '@amber/chat-domain';
 import type { MemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
-import { getMemoryDreamPlanStore, getMemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
+import { getMemoryDreamPlanStore, getMemoryImportExportDeps, getMemoryLibraryOps }
+  from '../platform_impl/MemoryStore.ets';
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import {
   loadAgentRuntimeSnapshot, updateAgentSoulMarkdown, updateContextCompactionToggles,
@@ -151,6 +153,9 @@ struct MemoryPage {
   // 事件(VM :62-64 getRecentEventsFlow(100))
   @State recentEvents: MemoryEvent[] = [];
   @State showEventsDialog: boolean = false;
+  // 导入导出(VM :207-237 exportMemories/importMemories;D-095)
+  @State showPortabilityDialog: boolean = false;
+  @State portabilityRunning: boolean = false;
   // 编辑/新增对话框(Page :127-149;id==0 → 新增核心记忆)
   @State editingMemory: AssistantMemory | null = null;
   @State editDraft: string = '';
@@ -224,6 +229,47 @@ struct MemoryPage {
 
   private toast(message: string): void {
     promptAction.showToast({ message, duration: 2500 });
+  }
+
+  // ===== D-095:导入导出(VM :207-237;Page :1166-1191 MemoryPortabilitySection)=====
+  // Android baseDir = getExternalFilesDir(null) ?: filesDir;鸿蒙 NEXT 沙箱无
+  //   外部应用目录等价物(需 picker,未落地)→ filesDir(Android 回退分支语义,登记)
+  private memoryFilesDir(): string {
+    const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+    return ctx.filesDir;
+  }
+
+  // VM :207-221 exportMemories — running 门;成功/失败消息逐字(全角冒号)
+  private onExportMemories(): void {
+    if (this.portabilityRunning) return;
+    this.portabilityRunning = true;
+    exportMemoriesTo(this.memoryFilesDir(), getMemoryImportExportDeps())
+      .then((result): void => {
+        this.toast(`已导出 ${result.memoryCount} 条记忆到 ${result.root}`);
+      })
+      .catch((e: Error): void => {
+        this.toast(`导出失败：${e.message}`);
+      })
+      .finally((): void => {
+        this.portabilityRunning = false;
+      });
+  }
+
+  // VM :223-237 importMemories — root = File(baseDir, "AmberAgentMemory")
+  private onImportMemories(): void {
+    if (this.portabilityRunning) return;
+    this.portabilityRunning = true;
+    importMemoriesFrom(`${this.memoryFilesDir()}/AmberAgentMemory`, getMemoryImportExportDeps())
+      .then((result): void => {
+        this.toast(`已导入 ${result.importedCount} 条记忆`);
+        this.refresh();
+      })
+      .catch((e: Error): void => {
+        this.toast(`导入失败：${e.message}`);
+      })
+      .finally((): void => {
+        this.portabilityRunning = false;
+      });
   }
 
   // VM :143-168 planDream — running 门;三态成功消息;失败消息(全角冒号)
@@ -804,13 +850,27 @@ struct MemoryPage {
     .width('100%').alignItems(HorizontalAlign.Start)
   }
 
-  // ===== D-089:维护工具(Page :1138-1154;导入导出 P1 — 目录选择器未落地)=====
+  // ===== D-089:维护工具(Page :1146-1163;导入导出行 D-095 落地)=====
 
   @Builder
   maintenanceCard() {
     Column({ space: 8 }) {
       Text('维护工具')
         .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
+      Row() {
+        Column({ space: 4 }) {
+          Text('导入导出').fontSize(14).fontColor(INK)
+          Text('Frontmatter 备份与恢复。')
+            .fontSize(12).fontColor(INK3)
+        }
+        .alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text('›').fontSize(16).fontColor(INK3)
+      }
+      .width('100%')
+      .padding(16).backgroundColor(SURFACE).borderRadius(12)
+      .onClick((): void => {
+        this.showPortabilityDialog = true;
+      })
       Row() {
         Column({ space: 4 }) {
           Text('事件日志').fontSize(14).fontColor(INK)
@@ -827,6 +887,64 @@ struct MemoryPage {
       })
     }
     .width('100%').alignItems(HorizontalAlign.Start)
+  }
+
+  // ===== D-095:导入导出对话框(Page :650-690 对话框 + :1166-1191 两行;running 门)=====
+
+  @Builder
+  portabilityOverlay() {
+    Column() {
+      Column({ space: 10 }) {
+        Text('导入导出')
+          .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+        Row() {
+          Column({ space: 4 }) {
+            Text('Frontmatter 导出').fontSize(14).fontColor(INK)
+            Text('导出到外部文件目录 AmberAgentMemory，包含 memories、archive、events 和 manifest。')
+              .fontSize(12).fontColor(INK3)
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Text('导出')
+            .fontSize(13)
+            .fontColor(this.portabilityRunning ? INK3 : ACCENT)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => this.onExportMemories())
+        }
+        .width('100%')
+        Row() {
+          Column({ space: 4 }) {
+            Text('Frontmatter 导入').fontSize(14).fontColor(INK)
+            Text('从 AmberAgentMemory 目录读取 .mem.md 文件并写回 Room 主存储。')
+              .fontSize(12).fontColor(INK3)
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Text('导入')
+            .fontSize(13)
+            .fontColor(this.portabilityRunning ? INK3 : ACCENT)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => this.onImportMemories())
+        }
+        .width('100%')
+        Row() {
+          Blank()
+          Text('确认')
+            .fontSize(13).fontColor(ACCENT)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => {
+              this.showPortabilityDialog = false;
+            })
+        }
+        .width('100%')
+      }
+      .width('86%')
+      .padding(16).backgroundColor(SURFACE).borderRadius(16)
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('#66000000')
+    .onClick((): void => {
+      this.showPortabilityDialog = false;
+    })
   }
 
   // ===== D-089:事件日志对话框(Page :1105-1135,take(6))=====
@@ -987,6 +1105,9 @@ struct MemoryPage {
       }
       if (this.showEventsDialog) {
         this.eventsOverlay()
+      }
+      if (this.showPortabilityDialog) {
+        this.portabilityOverlay()
       }
     }
     .width('100%').height('100%').backgroundColor(BG)

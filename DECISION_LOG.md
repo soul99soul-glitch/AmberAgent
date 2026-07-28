@@ -1241,3 +1241,17 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-087 P1「任务模型设置面 UI」;D-025/D-026 titlePrompt/suggestionPrompt 自定义偏差;compressPrompt 自定义(domain hook 已接线)。
 - **未移植(P1 登记)**: daydreamReasoningLevel(ModelPromptSheet reasoning 选择器)/OCR 设置面(ocr_model/ocr_prompt)/生图模型与生图提示词设置(imageGenerationModelId/ImagePromptInjectionSheet)/模型组默认规则面(modelGroupSessionDefaults)。
 - **验证**: chat tsc 干净 + 1040 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-095 — 记忆导入导出 UI(Frontmatter portability 对话框全链)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingAgentMemoryPage.kt:237-244(onExport/onImport 触发)/:650-690(导入导出对话框)/:1146-1163(MemoryMaintenanceSection)/:1166-1191(MemoryPortabilitySection)/SettingAgentMemoryVM.kt:207-237(exportMemories/importMemories)
+- **背景**: D-085e 已落地导出导入 domain(exportMemoriesTo/importMemoriesFrom)与 entry 存储面(getMemoryImportExportDeps + fileIo FS 实现),但无 UI 触发——端口不可达(隐性断链)。
+- **决策**:
+  1. MemoryPage maintenanceCard 增'导入导出'行(Page :1152-1156 序:导入导出 → 事件日志;supporting 'Frontmatter 备份与恢复。' 逐字)→ portabilityOverlay(:650-690 对话框等价;两行标题/supporting 逐字 :1173-1183;导出/导入按钮 enabled=!running,运行中灰色)。
+  2. 处理器:onExportMemories → exportMemoriesTo(filesDir, getMemoryImportExportDeps()),成功 toast '已导出 N 条记忆到 {root}'(:215 逐字)/失败 '导出失败：{message}'(:217,全角冒号);onImportMemories → importMemoriesFrom(`${filesDir}/AmberAgentMemory`, deps)(:243 File(baseDir, "AmberAgentMemory") 逐字),成功 '已导入 N 条记忆' + refresh/失败 '导入失败：{message}';双 running 门(VM _memoryTaskRunning)。
+- **偏差/适配登记**: baseDir = ctx.filesDir(Android getExternalFilesDir(null) ?: filesDir 的回退分支——鸿蒙 NEXT 沙箱无外部应用目录等价物,目录选择器 picker 未落地,P1 登记);导入成功额外 refresh 三桶(UI 一致性,Android 靠 Flow 观察自动刷新——观察 Flow P1 已登记,此为等价效果)。
+- **关闭**: D-088 P1「导出导入 UI」。
+- **未移植(P1 登记)**: 外部目录 picker 导出(DocumentViewPicker)/记忆观察 Flow→订阅。
+- **验证**: chat tsc 干净 + 1040 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
