@@ -14,6 +14,7 @@
     "pages/ChatAssistantsPage",
     "pages/MemoryPage",
     "pages/ChatTaskModelsPage",
-    "pages/ChatTaskModelPickerPage"
+    "pages/ChatTaskModelPickerPage",
+    "pages/ChatSearchSettingsPage"
   ]
 }

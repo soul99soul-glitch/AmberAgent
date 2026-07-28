@@ -1299,3 +1299,20 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: PD-006 残余「设置面 OCR UI」。
 - **未移植(P1 登记)**: VisionModelHealthChecker 探测/生成守卫(PD-006 其余残余)。
 - **验证**: chat tsc 干净 + 1046 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-099 — 搜索设置面 UI(enableWebSearch 键接线 + 服务 CRUD/排序/启用)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingSearchPage.kt(全文)/SettingSearchListCards.kt(:96-176 hero;:267-326 内置六行;:352-372 配置行;:551-620 通用选项+stepper;:726-778 推荐组合;:804-811 resolveSelectedSearchIndex)/SettingSearchServiceEditorSheet.kt(:46-152 结构;per-type 字段 :155-933)/ChatPrefs.kt:66/PreferencesKeys.kt:26/values-zh/strings.xml:1005-1037
+- **背景**: D-070 落地 SearchPrefs 持久化与工具接线,但搜索无设置面:enableWebSearch 主开关不可配(D-070 过渡偏差:harmony 硬默认 true,Android `== true` 缺失 false),六内置开关/服务 CRUD/排序/resultSize 均不可配(审计行 52 P1「搜索设置面 UI」)。
+- **决策**:
+  1. domain 键接线(TDD:red → green 1047):SEARCH_PREFS_KEYS += 'enable_web_search'(PreferencesKeys.kt:26);loadSearchPrefs 读 `=== 'true'`(== true 语义,区别于内置 `!= false`);saveSearchPrefs 逐字写 11 键;defaultSearchPrefs.enableWebSearch false——**关闭 D-070 硬默认 true 过渡偏差**。
+  2. ChatSearchSettingsPage:hero('Agent 网络搜索'+desc+主开关;enabledCount = 服务启用数+六内置 true 数,total = services+6,`${enabled}/${total} 个服务已启用 · 多源召回` 逐字)/内置免费源六行(zh 串逐字,Android 序 jina→duckduckgo→bing→wikipedia→hackernews→webview)/已配置行(rank+上移下移+开关+› 点击编辑)/通用选项 resultSize stepper(clamp 1..50)/推荐组合三行(逐字)。
+  3. 编辑器 overlay:标题'添加提供商'/'编辑',confirm'添加提供商'/'保存';类型选择 = makeSearchServiceOptions(type) 全新默认(新 id,primaryConstructor.callBy 等价);能力 tag 搜索/抓取(getSearchService().scrapingParameters != null);per-type 字段逐字(apiKey 15 类;depth 分段 tavily basic|advanced / linkup|amber_agent standard|deep;searxng 五字段;perplexity maxTokens/maxTokensPerPage toIntOrNull;jina searchUrl/scrapeUrl trim;bocha summary 开关;grok model/customUrl/systemPrompt;bing_local 无字段)。
+  4. CRUD 语义逐字:新增 confirm → prepend 服务 + enabledIds prepend distinct + selected=0;编辑 → id 定位(失败回 target.index)替换,曾启用 → enabledIds 换 id distinct;删除 → guard size<=1(按钮隐),resolveSelectedSearchIndex(selectedId takeUnless 删除项),enabledIds filterNot;move → 边界守卫 + 交换 + selectedId 重解析;服务开关 → distinct/filterNot。
+  5. updateSearchPrefs JSON 相等短路 → 所有 transform 经 cloneSearchSettings 深克隆(arkts-no-spread;不得原地改同一对象)。
+- **偏差/适配登记**: 拖拽排序 → 上移/下移 按钮(ArkUI 无现成拖拽列表;move 语义逐字;trailing '拖动调整优先级' → '调整优先级');ModalBottomSheet → 全屏 overlay(同 D-094 overlay 先例);StepperNumberField 直输 → 仅 −/＋ 按钮(clamp 保留);每 provider Description() composable 未移植(P1 既有登记);perplexity 输入解析 toIntOrNull → 整串正则+parseInt(语义等价)。
+- **关闭**: 审计行 52 P1「搜索设置面 UI」(服务 CRUD/开关部分);D-070 enableWebSearch 默认偏差。
+- **未移植(P1 登记)**: webview_search_open 工具(依附 WebView 面)/搜索服务 Description composables/拖拽排序手势。
+- **验证**: chat tsc 干净 + 1047 测试(+1 键接线)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

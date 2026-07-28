@@ -14,8 +14,9 @@ import {
 } from './search_service.ts';
 import type { SearchSettings } from './search_aggregator.ts';
 
-// PreferencesKeys.kt:49-58 冻结键字符串
+// PreferencesKeys.kt:49-58 冻结键字符串;D-099 += 'enable_web_search'(PreferencesKeys.kt:26)
 export const SEARCH_PREFS_KEYS = {
+  enableWebSearch: 'enable_web_search',
   searchServices: 'search_services',
   searchCommon: 'search_common',
   searchSelected: 'search_selected',
@@ -28,9 +29,11 @@ export const SEARCH_PREFS_KEYS = {
   googleWebViewFallback: 'search_google_webview_fallback_enabled',
 } as const;
 
-// SearchPrefsData(:22-33,默认逐字)
+// SearchPrefsData(:22-33,默认逐字);enableWebSearch 属 ChatPrefs(PreferencesKeys.kt:26)
+//   — ChatPrefs.kt:66 `p[ENABLE_WEB_SEARCH] == true` → 缺失默认 false
+//   (D-099 修正:D-070 硬默认 true 为过渡偏差,设置面落地同步关闭)
 export const defaultSearchPrefs = (): SearchSettings => ({
-  enableWebSearch: true, // enableWebSearch 属 ChatPrefs;此处默认 true(D-070 设置面登记)
+  enableWebSearch: false,
   searchCommonOptions: { resultSize: DEFAULT_SEARCH_COMMON_OPTIONS.resultSize },
   searchServices: [DEFAULT_SEARCH_SERVICE_OPTIONS],
   searchServiceSelected: 0,
@@ -87,7 +90,7 @@ const parseBoolNotFalse = (raw: string | null): boolean => raw !== 'false';
 export const loadSearchPrefs = async (store: KeyValueStore): Promise<SearchSettings> => {
   const [
     services, common, selected, ids,
-    ddg, bing, jina, wiki, hn, webview,
+    ddg, bing, jina, wiki, hn, webview, webSearch,
   ] = await Promise.all([
     store.get(SEARCH_PREFS_KEYS.searchServices),
     store.get(SEARCH_PREFS_KEYS.searchCommon),
@@ -99,11 +102,14 @@ export const loadSearchPrefs = async (store: KeyValueStore): Promise<SearchSetti
     store.get(SEARCH_PREFS_KEYS.builtinWikipedia),
     store.get(SEARCH_PREFS_KEYS.builtinHackerNews),
     store.get(SEARCH_PREFS_KEYS.googleWebViewFallback),
+    store.get(SEARCH_PREFS_KEYS.enableWebSearch),
   ]);
   const d: SearchSettings = defaultSearchPrefs();
   const selectedParsed: number = selected === null ? 0 : parseInt(selected, 10);
   return {
     ...d,
+    // ChatPrefs.kt:66 `== true` 语义:仅 'true' 串 → true;缺失/其他 → false
+    enableWebSearch: webSearch === 'true',
     searchServices: parseServices(services),
     searchCommonOptions: parseCommon(common),
     searchServiceSelected: Number.isNaN(selectedParsed) ? 0 : selectedParsed,
@@ -123,6 +129,7 @@ export const saveSearchPrefs = async (store: KeyValueStore, data: SearchSettings
     data.searchServices.map((o: SearchServiceOptions): JsonObject => searchServiceOptionsToJson(o)),
   );
   await Promise.all([
+    store.put(SEARCH_PREFS_KEYS.enableWebSearch, String(data.enableWebSearch)),
     store.put(SEARCH_PREFS_KEYS.searchServices, servicesJson),
     store.put(SEARCH_PREFS_KEYS.searchCommon, JSON.stringify({ resultSize: data.searchCommonOptions.resultSize })),
     store.put(SEARCH_PREFS_KEYS.searchSelected, String(data.searchServiceSelected)),

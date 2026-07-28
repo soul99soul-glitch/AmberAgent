@@ -83,7 +83,22 @@ test('prefs:update — next == current 短路不写;变化才写', async () => {
   await updateSearchPrefs(spy, (c) => c); // 恒等 → 短路
   assert.equal(puts, 0);
   await updateSearchPrefs(spy, (c) => ({ ...c, searchServiceSelected: 2 }));
-  assert.equal(puts, 10); // 十键全写(writeTo 逐字)
+  assert.equal(puts, 11); // 十一键全写(writeTo 逐字;D-099 += enable_web_search)
   const d = await loadSearchPrefs(store);
   assert.equal(d.searchServiceSelected, 2);
+});
+
+test('prefs:enable_web_search(D-099)— 缺失 → false(ChatPrefs.kt:66 == true 语义);往返', async () => {
+  const store = createMemoryKeyValueStore();
+  // 缺失 → false(Android 默认 OFF;修复 D-070 硬默认 true 偏差)
+  assert.equal((await loadSearchPrefs(store)).enableWebSearch, false);
+  const d = defaultSearchPrefs();
+  assert.equal(d.enableWebSearch, false);
+  d.enableWebSearch = true;
+  await saveSearchPrefs(store, d);
+  assert.equal(store.entries.get('enable_web_search'), 'true');
+  assert.equal((await loadSearchPrefs(store)).enableWebSearch, true);
+  // == true 语义:仅 'true' 串 → true;其他/缺失 → false(区别于 builtin 的 != false)
+  await store.put('enable_web_search', 'garbage');
+  assert.equal((await loadSearchPrefs(store)).enableWebSearch, false);
 });
