@@ -201,6 +201,10 @@ export const toolInputAsJson = (t: UIMessagePartTool): JsonObject => {
 export const toText = (msg: UIMessage): string =>
   msg.parts.map((p: UIMessagePart): string => (p.type === 'text' ? p.text : '')).join('\n');
 
+// reasoningPartText:拼接所有 reasoning parts(鸿蒙增补工具函数,Android 无对应;测试/UI 用)
+export const reasoningPartText = (msg: UIMessage): string =>
+  msg.parts.map((p: UIMessagePart): string => (p.type === 'reasoning' ? p.reasoning : '')).join('');
+
 // summaryAsText(Message.kt:155):[ROLE]: 前缀(大写枚举名)
 export const summaryAsText = (msg: UIMessage): string =>
   `[${msg.role.toUpperCase()}]: ${toText(msg)}`;

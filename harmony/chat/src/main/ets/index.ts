@@ -17,7 +17,7 @@ export type {
 export {
   makeUIMessage, makeSystemMessage, makeUserMessage, makeAssistantMessage,
   canResumeToolExecution, isToolExecuted, isToolPending, canToolResumeExecution,
-  toolInputAsJson, toText, summaryAsText, getTools, isValidToUpload,
+  toolInputAsJson, toText, reasoningPartText, summaryAsText, getTools, isValidToUpload,
   hasBase64Part, isEmptyInputMessage, isEmptyUIMessage,
 } from './chat/message.ts';
 
@@ -45,3 +45,27 @@ export {
   parseOpenAiErrorDetail, parseOpenAiStreamEventData, OpenAiStreamError,
 } from './chat/openai_parse.ts';
 export type { OpenAiStreamEventResult } from './chat/openai_parse.ts';
+
+export type { AssistantAffectScope, AssistantRegex, Assistant } from './chat/assistant.ts';
+export { makeAssistantRegex, makeAssistant } from './chat/assistant.ts';
+
+export type {
+  TransformerClock, TransformerContext,
+  MessageTransformer, OutputMessageTransformer, TailSafeOutputMessageTransformer,
+} from './chat/transformer_pipeline.ts';
+export {
+  defaultTransformerClock, clockOf, validateTransformerInvariants,
+  applyInputTransformers, applyVisualTransformers,
+  applyVisualTransformersStreamingTail, applyOnGenerationFinish,
+} from './chat/transformer_pipeline.ts';
+
+export type { TemplateVars } from './chat/transformers.ts';
+export {
+  applyTemplate, createTemplateTransformer,
+  thinkTagTransformer, regexOutputTransformer, replaceRegexes,
+} from './chat/transformers.ts';
+
+export type {
+  ChatStreamProvider, ConversationStore, MemoryConversationStore, ChatTurnDeps,
+} from './chat/chat_turn.ts';
+export { createMemoryConversationStore, runChatTurn } from './chat/chat_turn.ts';

@@ -89,3 +89,15 @@
   - 流式 error payload 抛 `OpenAiStreamError(message, payload)`：message 与 Android `HttpException`（ErrorParser.parseErrorDetail）逐字一致；`payload` 为增补的原始 error 对象（保留 `type` 等字段供诊断，Android 侧丢弃）。抛出信号语义不变，不记 PD。
 - **连带**：tsc 门经 paths 覆盖 deepread 源码后暴露 `novel/creation.ts` 3 处 TS2352（同类闭包收窄失效，`x as T` 强转不自洽）；按 holder 模式修复并加 null 检查抛错，运行时行为不变（原强转在异常路径上本就会返回 null）。
 
+## D-012（L0，2026-07-28）transformer/chat_turn 纯逻辑子集裁剪与 Port 化
+
+- **决定**（切片 4 范围内的一组 L0 裁剪，合并记录）：
+  - `TransformerContext` 只含 `assistant` + `clock`：Android 的 android.Context/Settings/Model/processingStatus 属 adapter 层关注点，不进纯逻辑层；clock 可注入（模板 {{time}}/{{date}}、think 关闭时间戳），默认本机时间。
+  - `TemplateTransformer` 模板直接取 `ctx.assistant.messageTemplate`（Android 经 settingsStore 按 assistant id 反查的等价扁平化）。
+  - `replaceRegexes` 去掉 Rust native 路由（Android 性能优化，纯 JVM 路径语义），统一 JS RegExp → 语法子集偏差记 PD-005。
+  - `ChatStreamProvider`/`ConversationStore` Port 化；chunk 用回调式（对齐 deepread `HttpClient.fetchStream` 风格，规避 AsyncIterable 在 ArkTS 的不确定性）。
+  - chat_turn 错误路径：provider 抛错直接传播；retry/vision fallback/工具执行/审批/生成守卫明确裁到 P1 → PD-006。
+  - `RegexOutputTransformer` 忠实保留 Android 的"只实现 visualTransform/visualTransformTail、onGenerationFinish 缺省恒等"行为（尽管看起来可疑，Android 即如此，不改）。
+- **可逆性**：全部为模块内裁剪，设备端阶段可逐层加回。
+
+

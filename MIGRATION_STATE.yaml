@@ -17,7 +17,7 @@ phase:
     M0_工具链: "部分完成 — CLI 构建 verified(2026-07-16), hdc 无 device target"
     M1_三个P0_spike: "未开始(等设备) — SSE/RDB/ArkUI 均无设备端 verified 结论"
     M2_工程骨架: "完成 — entry HAP + deepread HAR,hvigor BUILD SUCCESSFUL"
-    M3_Chat_MVP: "未开始"
+    M3_Chat_MVP: "source-only 阶段完成(2026-07-28,4 切片:模型/accumulator/OpenAI provider/chat_turn);设备端 UI+持久化 adapter 待 G-C"
 
 gate0:
   status: blocked                 # 唯一阻塞: hdc list targets 为空
@@ -29,7 +29,7 @@ build_and_test:
   单元测试: "cd harmony/deepread && npm test; cd harmony/chat && npm test  # node+tsx,无需设备"
   类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)"
   构建: "node scripts/harmony-inventory/build-harmony-app.mjs"
-  最近验证: "2026-07-28 deepread 603 + chat 95 pass / tsc clean / BUILD SUCCESSFUL in 6s"
+  最近验证: "2026-07-28 deepread 603 + chat 116 pass / tsc clean / BUILD SUCCESSFUL"
   fixture校验: "node scripts/harmony-inventory/validate-harmony-fixtures.mjs"
   契约校验: "node scripts/harmony-inventory/check-source-contracts.mjs"
 
@@ -37,7 +37,7 @@ codebase:
   harmony工程:
     entry: "HAP — UIAbility + 7 页面(Index/DeepReadArticle/History/Council×2/Novel×2) + platform_impl 真实 adapter"
     deepread: "HAR — 纯 ArkTS 领域层,零 SDK 依赖: agent/council/novel/domain/platform/research"
-    chat: "HAR(@amber/chat-domain)— Chat 核心领域层: 模型(切片1);streaming accumulator(切片2);OpenAI provider 纯逻辑 parseMessage/normalize/usage/error + fixture 回放 8/8(切片3,依赖 deepread-domain 复用 SseAssembler,D-011);agent-loop 待切片4"
+    chat: "HAR(@amber/chat-domain)— Chat 核心领域层 source-only 完成: 模型/accumulator/OpenAI provider(fixture 回放 8/8)/transformer 管线(template/thinkTag/regex)+chat_turn 骨架(Port 化 provider+store,D-012);设备端 adapter 待 G-C"
     复用说明: "platform 层 Port(HttpClient/Storage/Database/FileStore/Notifier)即 Chat MVP 所需同一批接口"
   android源码: "只读基准,禁止修改"
 
@@ -46,7 +46,7 @@ active_goals:
   G-B_审计收口: done             # 2026-07-28,4 矩阵+DECISION_PACKET_001;source-only 退出条件全勾
   G-C_设备解锁: blocked_by_human # 模拟器镜像下载或真机接入
   G-D_真机P0_spike: pending(G-C)
-  G-E_Chat_MVP主线: pending(G-D)
+  G-E_Chat_MVP主线: "source-only done(2026-07-28);设备端 pending(G-D)"
   G-F_P1能力面: pending(G-E)
 
 next_slices:                      # 按优先级,取最高未阻塞项
@@ -61,6 +61,6 @@ next_slices:                      # 按优先级,取最高未阻塞项
     内容: "DECISION_PACKET_001 人工确认(9 项决策)"
 
 parity_baseline:
-  单元测试总数: 698               # deepread 603 + chat 95
-  已知行为偏差: 4                # 详见 PARITY_DEBT.md PD-001..004(+1 条 Android 内部不一致待核实)
-  决策记录: "DECISION_LOG.md D-001..D-011"
+  单元测试总数: 719               # deepread 603 + chat 116
+  已知行为偏差: 6                # 详见 PARITY_DEBT.md PD-001..006(+1 条 Android 内部不一致待核实)
+  决策记录: "DECISION_LOG.md D-001..D-012"
