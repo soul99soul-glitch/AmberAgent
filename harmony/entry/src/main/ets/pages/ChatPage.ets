@@ -15,7 +15,7 @@ import type {
   CompactPolicy, CompactResult, PreparedContext,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
-  ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool,
+  ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -875,10 +875,17 @@ struct ChatPage {
       Promise.resolve(this.conversation ?? conv);
     // D-082:ToolProfileFilter(ChatService.kt:2302)— 先按 assistant.toolProfile
     //   过滤原始工具集,再建 registry;tool_search/自省对在过滤后追加(:2326-2329)
+    // D-083:LocalToolOption 门控(LocalTools.kt:105-124 + ChatService.kt:2237)—
+    //   time_info/ask_user/clipboard 按 assistant.localTools 勾选加入;
+    //   run_plan_update/deep_read_open 无门恒在(:182/:188);
+    //   其余 10 variant(javascript_engine/tts/workspace_files/terminal/
+    //   screen_automation/system_access/webview/icloud_drive/webmount/
+    //   webmount_eval)工具族未移植 → 门为空转(登记)
+    const localOpts: LocalToolOption[] = rt.assistant.localTools;
     const profiledTools: AgentTool[] =
       filterToolProfile([
-        createTimeTool(),
-        createAskUserTool(),
+        ...(localOpts.indexOf('time_info') >= 0 ? [createTimeTool()] : []),
+        ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
         ...createConversationContextTools({
           conversationProvider,
           compactStore: getCompactStore(),
@@ -919,7 +926,8 @@ struct ChatPage {
         //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
         //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)
         createRunPlanUpdateTool(),
-        createClipboardTool(createEntryClipboardPort()),
+        ...(localOpts.indexOf('clipboard') >= 0
+          ? [createClipboardTool(createEntryClipboardPort())] : []),
         createDeepReadOpenTool({
           bus: {
             hasCollectors: (): boolean => true,

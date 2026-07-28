@@ -935,3 +935,12 @@
   - **ChatPage.buildToolLoop 接线**:原始工具数组先 filterToolProfile(rt.assistant.toolProfile).tools 再 createToolRegistry;tool_search 传 rt.assistant.toolProfile;自省对在过滤后追加(Android :2326-2329 同序)。登记:Android 第二过滤点(:2324)针对 subagent/modelCouncil 增广工具 — 鸿蒙无此两族工具(未移植),单过滤点等价。
   - **Assistant.toolProfile 早已在模型层**(D-016,默认 'full' → 默认行为零变化);助手编辑面选择 UI = P1(交互档)。
 - **可逆性**:1485 测试全绿(deepread 603 + chat 882,+9),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit「ToolProfileFilter」残余消除(设置面 UI 除外)。
+
+## D-083（L0，2026-07-28）LocalToolOption 门控 — time_info/ask_user/clipboard 按助手勾选
+
+- **背景**：gap-audit 工具行残余。Android 锚点:LocalToolOption.kt(13 variant sealed,snake_case SerialName)、LocalTools.kt:105-200(getTools:勾选门控 10 variant + 无门恒在 permissionsStatus/runPlanUpdate(:182)/deepReadPlaybook/deepReadOpen(:188)/agentPromptConfig/cron;imageGen 条件)、ChatService.kt:2237(addAll(localTools.getTools(assistant.localTools, id)))。鸿蒙此前 time/ask_user/clipboard 三工具无条件入列 — 默认助手(localTools=['time_info'],Assistant.kt:41 忠实)在 Android 下只有 time 工具,鸿蒙多给两个,行为不忠实。
+- **决定**：
+  - **ChatPage.buildToolLoop**:localOpts = rt.assistant.localTools;time_info/ask_user/clipboard 三处改 indexOf 门控(顺序保持:time → ask_user → …→ clipboard,与 Android getTools 追加序一致);run_plan_update/deep_read_open 保持无门(:182/:188);conversation context/history/queue/search 非 local tools(ChatService 另处添加),保持无门。
+  - **空转登记**:其余 10 variant(javascript_engine/tts/workspace_files/terminal/screen_automation/system_access/webview/icloud_drive/webmount/webmount_eval)对应工具族未移植,门控为空转;移植各自工具族时按 LocalTools.kt:107-181 同序接入。
+  - **assistant.localTools 模型层早已在**(D-016,默认 ['time_info'] → 默认行为变化 = 对齐 Android:ask_user/clipboard 不再默认暴露);助手编辑面勾选 UI = P1(交互档,Android AssistantLocalToolPage.kt)。
+- **可逆性**:1485 测试全绿(deepread 603 + chat 882,纯 entry 接线无新增),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit「LocalToolOption 门控」残余消除(编辑面 UI 除外)。
