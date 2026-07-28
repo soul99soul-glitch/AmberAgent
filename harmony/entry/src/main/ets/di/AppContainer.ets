@@ -38,6 +38,7 @@ import {
 } from '@amber/chat-domain';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
 import { createChatRdbRepository } from '../platform_impl/ChatRdbRepository.ets';
+import { encodeImageForChat } from '../platform_impl/EntryImageEncoder.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
@@ -321,6 +322,8 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
       brand: chosen.brand,
     }),
     headers: (): Record<string, string> => openAIAuthHeaders(chosen.authMode, chosen.baseUrl, token),
+    // D-038:图片编码(data:/http(s): 直通,file:// 读文件编码;失败即抛)
+    encodeImage: encodeImageForChat,
   });
   return { api, assistant, params, contextMessageSize: sessionDefaults.contextMessageSize };
 };

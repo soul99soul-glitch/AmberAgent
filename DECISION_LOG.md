@@ -365,3 +365,15 @@
   - **删除(AssistantVM.kt:47-61 忠实)**:**级联删除该助手所有会话**(deleteConversationOfAssistant 等价:repo.list(assistantId) → 逐个 delete,显式级联 D-021);AlertDialog 明示「及其所有对话将被删除,且不可恢复」。memory/files 清理无对应物(未落地,PARITY 层面无需记——功能不存在而非偏差)。
   - 删除是用户主动发起且经确认的 L0 用户数据操作;级联范围在弹窗中明示(比 Android 的 ActionSheet 更显式,Android 弹窗未提示级联——此处**超出 Android 明示度**,符合宪章数据安全精神,登记为有意增强)。
 - **可逆性**:删除不可逆(用户确认);复制纯增量。
+
+## D-038（L0，2026-07-28）多模态图片输入：picker 物化 data: URL + 请求侧多模态
+
+- **背景**：Android 图片输入链路 = PhotoPicker → FileEncoder(data:/http(s): 直通,file:// 读+压缩+base64,FileEncoder.kt:68-103)→ UIMessage image part → OpenAI 请求侧 image_url;isEmptyInputMessage(Message.kt:255) 允许"仅图片无文本"。
+- **决定**：
+  - **runChatTurn 输入泛化(chat-domain,TDD 3 测试)**:`userInput: string | UIMessagePart[]`;`isEmptyInput` 判定(parts 全空或全空白文本 → no-op 返回原会话不持久化,对齐 Android isEmptyInputMessage)。
+  - **EntryImageEncoder(entry adapter)**:ImageEncoder Port 同步实现 — data:/http(s): 直通;file:// → fileIo 读 + util.Base64Helper → `data:{mime};base64,` 前缀(mime 按扩展名,png 兜底);其他 scheme 抛错(对齐 Android 编码失败即抛,D-014 missingEncoder 同口径)。
+  - **选图物化**:ChatPage 「图片」→ PhotoViewPicker(IMAGE_TYPE,≤3 张)→ 即刻 readImageAsDataUrl 物化为 data: URL 存入待发预览(可单张移除);发送时组装 text+image parts 传入 runChatTurn;失败/异常后 pendingImages 清空(图片已随 user 快照持久化,防重发重复)。读取失败逐张 hilog.warn + errorMsg(非静默)。
+  - **渲染**:MessageRow image part → `Image(p.url)`(ArkUI Image 支持 data: URL,真机验证列 Spike C 登记项)。
+  - **裁剪与偏差登记(PARITY_DEBT PD-007)**:① Android file:// 统一压缩(compressAndEncode)裁 P1,鸿蒙原样编码;② Android 选图复制到应用私有目录存 file:// 引用,鸿蒙 MVP 消息体直接存 data: URL(消息体变大,RDB 字段无大小限制,后续按存储体积评估)。
+  - 编辑态不携带图片(对齐 Android 编辑仅文本)。
+- **可逆性**:纯增项;无图片时发送路径与 D-035 前完全一致(string 输入)。

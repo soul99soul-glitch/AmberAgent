@@ -14,7 +14,8 @@
 import type { Conversation } from './conversation.ts';
 import { currentMessages, toMessageNode } from './conversation.ts';
 import { makeUserMessage } from './message.ts';
-import type { MessageChunk, UIMessage } from './message.ts';
+import type { MessageChunk, UIMessage, UIMessagePart } from './message.ts';
+import { makeUIMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
 import type { Assistant } from './assistant.ts';
 import { assembleInternalMessages } from './context_assembly.ts';
@@ -89,11 +90,23 @@ const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
   updateAt: nowIso(),
 });
 
+// isEmptyInputMessage 等价(D-038):全空文本 parts → no-op
+const isEmptyInput = (parts: UIMessagePart[]): boolean =>
+  parts.length === 0
+  || parts.every((p: UIMessagePart): boolean => p.type === 'text' && p.text.trim().length === 0);
+
+// userInput:string(纯文本)或 UIMessagePart[](多模态,D-038)
 export const runChatTurn = async (
-  conversation: Conversation, userInput: string, deps: ChatTurnDeps,
+  conversation: Conversation, userInput: string | UIMessagePart[], deps: ChatTurnDeps,
 ): Promise<Conversation> => {
+  const userParts: UIMessagePart[] = typeof userInput === 'string'
+    ? makeUserMessage(userInput).parts
+    : userInput;
+  if (isEmptyInput(userParts)) {
+    return conversation;
+  }
   // 1. user 消息入列 + 持久化(对齐 Android 先落 user 再生成)
-  let conv: Conversation = appendNode(conversation, makeUserMessage(userInput));
+  let conv: Conversation = appendNode(conversation, makeUIMessage('user', userParts));
   await deps.store.save(conv);
 
   const baseMessages: UIMessage[] = currentMessages(conv);

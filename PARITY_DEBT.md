@@ -11,6 +11,7 @@
 | PD-004 | 2026-07-28 | chat 时间戳线格式 | UIMessage.createdAt/finishedAt 为 LocalDateTime（无时区，如 `2026-07-28T10:00:00`） | chat-domain 统一 ISO 8601 UTC 带 `Z`（Instant 语义） | persisted JSON 中时间字符串格式不同；语义无歧义且更显式 | ArkTS 侧无时区 LocalDateTime 处理成本高；UTC+Z 更不易错 | 若需与 Android 导出包字节级对齐，做导入归一化 | open |
 | PD-005 | 2026-07-28 | chat assistant regex | AssistantRegexProcessor：Java Pattern 编译；非法规则跳过；Rust native 路由为性能优化 | chat-domain replaceRegexes 用 JS RegExp 解释同一批规则；无 native 路由 | 用户自定义规则中 Java-only 语法（\Q\E、possessive quantifier、部分 \p{}）在 Harmony 编译失败被跳过，Android 能生效 → 替换结果不同 | JS RegExp 是 ArkTS 唯一正则引擎；语法差异无法对齐 | 文档化支持的 regex 子集；或引入原生 regex 引擎 spike（G-D 阶段评估） | open |
 | PD-006 | 2026-07-28 | chat 生成错误恢复 | GenerationHandler：runProviderCallWithRetry + vision fallback + 工具执行/审批 + 生成守卫 | chat_turn 骨架：provider 抛错直接传播，仅保留 user 消息快照 | 错误恢复语义缺失（第三档等价优先级） | source-only 阶段裁剪；retry/审批/工具循环依赖设备端能力 | M3 设备端阶段补齐 retry policy + 错误 UI 语义 | open |
+| PD-007 | 2026-07-28 | chat 多模态图片 | FileEncoder.kt:68-103：file:// 统一 compressAndEncode 压缩后 base64；选图复制到应用私有目录存 file:// 引用 | EntryImageEncoder 原样编码不压缩；选图即刻物化 data: URL 直接存消息体 | ① 大图消息体/请求体显著大于 Android；② 消息体携带完整图片数据而非文件引用（会话 JSON 体积增大，RDB 无字段限制但同步/导出体积不同） | source-only 阶段裁剪：压缩依赖设备端 PixelMap 管线；data: URL 避免 picker 临时授权过期 | M3 设备端阶段：PixelMap 压缩 spike + file:// 私有目录存储评估 | open |
 
 ## 待 Android 侧核实的疑似偏差
 

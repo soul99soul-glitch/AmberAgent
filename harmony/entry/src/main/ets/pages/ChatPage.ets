@@ -2,8 +2,11 @@
 // 回路: runChatTurn(chat-domain) + OpenAIChatApi(RcpHttpClient)+ RDB 仓库(D-021)
 // D-024:assistant 分支 — ◀ n/m ▶ 切换(selectMessageBranch) + 末条「重新生成」
 //   (runRegenerateAt);regenerate 流式预览裁 MVP(spinner 代替,已登记)
+// D-038:图片输入 — PhotoViewPicker 选图 → readImageAsDataUrl 物化为 data: URL
+//   → UIMessagePart[] 发送(文本可空,图片不可空);渲染 Image(p.url)
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import type { Conversation, UIMessage, UIMessagePart, Assistant } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, runChatTurn,
@@ -16,6 +19,7 @@ import {
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
 } from '../di/AppContainer.ets';
+import { readImageAsDataUrl } from '../platform_impl/EntryImageEncoder.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 
 const BG: string = '#F4F2EC';
@@ -83,6 +87,14 @@ struct MessageRow {
             .fontSize(15).fontColor(INK)
             .padding(10)
             .backgroundColor(this.message.role === 'user' ? SURFACE2 : SURFACE)
+            .borderRadius(8)
+            .margin({ bottom: 4 })
+        } else if (p.type === 'image') {
+          // D-038:data: / http(s): / file:// 直渲(ArkUI Image 支持 data: URL;
+          //   真机验证见 Spike C 登记项)
+          Image(p.url)
+            .width(160)
+            .objectFit(ImageFit.Cover)
             .borderRadius(8)
             .margin({ bottom: 4 })
         } else if (p.type === 'reasoning') {
@@ -164,6 +176,8 @@ struct ChatPage {
   @State editingMessageId: string = '';
   @State editingTitle: boolean = false;
   @State titleInput: string = '';
+  // D-038:待发图片(data: URL 物化,发送后清空)
+  @State pendingImages: string[] = [];
   private conversation: Conversation | null = null;
   private abortController: EntryAbortController | null = null;
   private scroller: Scroller = new Scroller();
@@ -367,6 +381,39 @@ struct ChatPage {
     this.inputText = '';
   }
 
+  // 图片选择(D-038):PhotoViewPicker → 读为 data: URL → 待发预览;
+  //   读取失败逐张告警(非静默),Android 同语义(FileEncoder 失败即抛)
+  private pickImages(): void {
+    if (this.sending) return;
+    const options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
+    options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+    options.maxSelectNumber = 3;
+    const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
+    picker.select(options).then((result: photoAccessHelper.PhotoSelectResult): void => {
+      const uris: string[] = result.photoUris;
+      for (const uri of uris) {
+        // 同步读取(fileIo):失败逐张告警,不静默
+        try {
+          const dataUrl: string = readImageAsDataUrl(uri);
+          this.pendingImages = [...this.pendingImages, dataUrl];
+        } catch (e) {
+          const msg: string = (e as Error).message;
+          hilog.warn(0x0001, 'ChatPage', `图片读取失败: ${msg}`);
+          this.errorMsg = `图片读取失败: ${msg}`;
+        }
+      }
+    }).catch((e: Error): void => {
+      // 用户取消选择也会走 reject(cancel)— 仅记录,不算错误
+      hilog.info(0x0001, 'ChatPage', `图片选择结束: ${e.message}`);
+    });
+  }
+
+  private removePendingImage(index: number): void {
+    const next: string[] = [...this.pendingImages];
+    next.splice(index, 1);
+    this.pendingImages = next;
+  }
+
   // 编辑并重发:editMessage(新分支)→ 持久化 → runRegenerateAt(user 节点截断续跑)
   private sendEdit(text: string): void {
     if (this.conversation === null) return;
@@ -409,12 +456,23 @@ struct ChatPage {
 
   private send(): void {
     const text: string = this.inputText.trim();
-    if (text.length === 0 || this.sending || this.conversation === null) return;
-    // 编辑态:走「编辑并重发」
+    const hasImages: boolean = this.pendingImages.length > 0;
+    // D-038:文本可空但图片不可空;两者皆空才拦截(isEmptyInput 对齐 Android)
+    if ((text.length === 0 && !hasImages) || this.sending || this.conversation === null) return;
+    // 编辑态:走「编辑并重发」(编辑态不携带待发图片,对齐 Android 编辑仅文本)
     if (this.editingNodeId.length > 0) {
       this.sendEdit(text);
       return;
     }
+    // 组装输入 parts:文本 + 图片(data: URL)
+    const inputParts: UIMessagePart[] = [];
+    if (text.length > 0) {
+      inputParts.push({ type: 'text', text, metadata: null });
+    }
+    for (const url of this.pendingImages) {
+      inputParts.push({ type: 'image', url, metadata: null });
+    }
+    const userInput: string | UIMessagePart[] = hasImages ? inputParts : text;
     this.sending = true;
     this.errorMsg = '';
     this.abortController = new EntryAbortController();
@@ -429,7 +487,7 @@ struct ChatPage {
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型(providers 未持久化或无可用 auth)'));
         }
-        return runChatTurn(conv, text, {
+        return runChatTurn(conv, userInput, {
           assistant: rt.assistant,
           inputTransformers: [createTemplateTransformer()],
           outputTransformers: [thinkTagTransformer, regexOutputTransformer],
@@ -448,6 +506,7 @@ struct ChatPage {
         this.streamingTail = [];
         this.suggestions = out.chatSuggestions;
         this.inputText = '';
+        this.pendingImages = [];
         this.sending = false;
         this.abortController = null;
         this.scrollToBottom();
@@ -462,6 +521,8 @@ struct ChatPage {
         this.sending = false;
         this.abortController = null;
         this.streamingTail = [];
+        // 图片已随 user 快照持久化,清空避免重发时重复
+        this.pendingImages = [];
         // user 消息快照已持久化(chat_turn 语义),刷新显示
         getChatRepository().getById(conv.id).then((saved: Conversation | null): void => {
           if (saved !== null) {
@@ -569,6 +630,34 @@ struct ChatPage {
         .margin({ bottom: 4 })
       }
 
+      // D-038:待发图片预览(可移除)
+      if (this.pendingImages.length > 0) {
+        Scroll() {
+          Row() {
+            ForEach(this.pendingImages, (url: string, i: number): void => {
+              Stack() {
+                Image(url)
+                  .width(64).height(64)
+                  .objectFit(ImageFit.Cover)
+                  .borderRadius(8)
+                Text('✕')
+                  .fontSize(10).fontColor('#FFFFFF')
+                  .padding({ left: 4, right: 4, top: 1, bottom: 1 })
+                  .backgroundColor('#66000000')
+                  .borderRadius(8)
+                  .onClick((): void => { this.removePendingImage(i); })
+              }
+              .margin({ right: 8 })
+            }, (url: string): string => url)
+          }
+          .padding({ left: 16, right: 16 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .margin({ bottom: 6 })
+      }
+
       Row() {
         if (this.editingNodeId.length > 0) {
           Text('取消编辑')
@@ -576,6 +665,11 @@ struct ChatPage {
             .padding({ right: 10 })
             .onClick((): void => this.cancelEdit())
         }
+        // 图片选择(D-038)
+        Text('图片')
+          .fontSize(13).fontColor(this.sending ? INK3 : ACCENT)
+          .padding({ right: 10 })
+          .onClick((): void => this.pickImages())
         TextInput({ text: this.inputText,
           placeholder: this.editingNodeId.length > 0 ? '编辑消息,发送将重发…' : '输入消息…' })
           .layoutWeight(1)
