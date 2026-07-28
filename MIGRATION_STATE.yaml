@@ -7,7 +7,7 @@
 meta:
   updated: 2026-07-28
   branch: harmony-preview
-  head: b8b018e2e
+  head: 545e37c9c
 
 phase:
   current: "Phase 0 → Phase 1 过渡"
@@ -29,7 +29,7 @@ build_and_test:
   单元测试: "cd harmony/deepread && npm test; cd harmony/chat && npm test  # node+tsx,无需设备"
   类型检查: "cd harmony/deepread && npx tsc --noEmit; cd harmony/chat && npx tsc --noEmit  # 双 HAR,esbuild 不查类型,提交门之一(D-010/D-014)"
   构建: "cd harmony && hvigorw assembleHar --mode module -p product=default && hvigorw assembleHap --mode module -p product=default  # 双绿门(D-014)"
-  最近验证: "2026-07-28 deepread 603 + chat 833 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL"
+  最近验证: "2026-07-28 deepread 603 + chat 873 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL"
   fixture校验: "node scripts/harmony-inventory/validate-harmony-fixtures.mjs"
   契约校验: "node scripts/harmony-inventory/check-source-contracts.mjs"
 
