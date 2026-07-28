@@ -44,11 +44,12 @@ export const applyTemplate = (template: string, vars: TemplateVars): string => {
 
 // ===== TemplateTransformer =====
 // 注:Android 对每条消息 text part 套模板;此处对无 text part 的消息保持引用(内容等价)
+// D-016:Assistant.messageTemplate 恒为 string(默认 '{{ message }}'),
+// Android TemplateTransformer 总是套用(assistant 找到即 apply,默认模板恒等)——去掉 null-skip。
 
 export const createTemplateTransformer = (): MessageTransformer => ({
   transform(ctx: TransformerContext, messages: UIMessage[]): UIMessage[] {
-    const template: string | null = ctx.assistant.messageTemplate;
-    if (template === null) return messages;
+    const template: string = ctx.assistant.messageTemplate;
     const clock = clockOf(ctx);
     const time: string = clock.localTime();
     const date: string = clock.localDate();

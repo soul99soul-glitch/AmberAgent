@@ -1,15 +1,52 @@
-// Assistant 纯逻辑子集 — 只含 transformer 管线所需字段
-// Android 基准: core/model/Assistant.kt(messageTemplate/regexes)+ AssistantRegex
-// 完整 Assistant(温度/tools/memory 等)随 Chat MVP 后续切片引入。
+// Assistant 全量模型(纯数据层)
+//
+// Android 基准:
+//   core/model/.../Assistant.kt(30 字段,默认值逐字)+ AssistantRegex
+//   core/model/.../Avatar.kt / LocalToolOption.kt / MainAgentToolProfile.kt
+//
+// D-016:
+//   - messageTemplate 默认 '{{ message }}'(Android 原值;此前子集用 null,语义等价
+//     因为默认模板套用后恒等 — 见 transformers.ts TemplateTransformer)
+//   - 线格式(kotlinx JSON,DataStore 存储形态)见 assistant_serialize.ts
+//   - Uuid → string;Float → number;Set → array(保序)
 
 import { newId } from './ids.ts';
+import type { UIMessage } from './message.ts';
+import type { ReasoningLevel, CustomBody } from './provider_model.ts';
 
-// 对应 Android AssistantAffectScope(USER/ASSISTANT)
+// ===== Avatar(Avatar.kt sealed) =====
+
+export type Avatar =
+  | { type: 'dummy' }
+  | { type: 'emoji'; content: string }
+  | { type: 'image'; url: string };
+
+// ===== LocalToolOption(LocalToolOption.kt,13 variant,snake_case serial) =====
+
+export type LocalToolOption =
+  | 'javascript_engine' | 'time_info' | 'clipboard' | 'tts' | 'ask_user'
+  | 'workspace_files' | 'terminal' | 'screen_automation' | 'system_access'
+  | 'webview' | 'icloud_drive' | 'webmount' | 'webmount_eval';
+
+// ===== MainAgentToolProfile(MainAgentToolProfile.kt) =====
+
+export type MainAgentToolProfile =
+  | 'full' | 'minimal' | 'web_read' | 'workspace_read' | 'coding' | 'mobile_control';
+
+// ===== CustomHeader(Provider.kt:85) =====
+
+export interface CustomHeader {
+  name: string;
+  value: string;
+}
+
+// ===== AssistantRegex(Assistant.kt:125) =====
+
 export type AssistantAffectScope = 'user' | 'assistant';
 
-// 对应 Android AssistantRegex
 export interface AssistantRegex {
   id: string;
+  name: string;
   enabled: boolean;
   findRegex: string;
   replaceString: string;
@@ -19,23 +56,98 @@ export interface AssistantRegex {
 
 export const makeAssistantRegex = (opts: Partial<AssistantRegex> = {}): AssistantRegex => ({
   id: opts.id ?? newId(),
+  name: opts.name ?? '',
   enabled: opts.enabled ?? true,
   findRegex: opts.findRegex ?? '',
   replaceString: opts.replaceString ?? '',
-  affectingScope: opts.affectingScope ?? ['user', 'assistant'],
+  // Android 默认 emptySet();此前子集默认 ['user','assistant'] 偏离基准,D-016 校正
+  affectingScope: opts.affectingScope ?? [],
   visualOnly: opts.visualOnly ?? false,
 });
 
+// ===== Assistant(Assistant.kt:15-50,30 字段,声明序) =====
+
 export interface Assistant {
   id: string;
+  chatModelId: string | null;
+  imageGenerationModelId: string | null;
   name: string;
-  messageTemplate: string | null;   // Android: assistants[].messageTemplate
+  avatar: Avatar;
+  useAssistantAvatar: boolean;
+  tags: string[];
+  systemPrompt: string;
+  temperature: number | null;
+  topP: number | null;
+  contextMessageSize: number;
+  streamOutput: boolean;
+  enableMemory: boolean;
+  useGlobalMemory: boolean;
+  enableRecentChatsReference: boolean;
+  messageTemplate: string;
+  presetMessages: UIMessage[];
+  quickMessageIds: string[];
   regexes: AssistantRegex[];
+  reasoningLevel: ReasoningLevel;
+  maxTokens: number | null;
+  customHeaders: CustomHeader[];
+  customBodies: CustomBody[];
+  mcpServers: string[];
+  localTools: LocalToolOption[];
+  toolProfile: MainAgentToolProfile;
+  background: string | null;
+  backgroundOpacity: number;
+  modeInjectionIds: string[];
+  lorebookIds: string[];
+  enabledSkills: string[];
+  enableTimeReminder: boolean;
+  rememberedReasoningLevelsByModelId: Record<string, ReasoningLevel>;
 }
 
 export const makeAssistant = (opts: Partial<Assistant> = {}): Assistant => ({
   id: opts.id ?? newId(),
-  name: opts.name ?? 'assistant',
-  messageTemplate: opts.messageTemplate ?? null,
+  chatModelId: opts.chatModelId ?? null,
+  imageGenerationModelId: opts.imageGenerationModelId ?? null,
+  name: opts.name ?? '',
+  avatar: opts.avatar ?? { type: 'dummy' },
+  useAssistantAvatar: opts.useAssistantAvatar ?? false,
+  tags: opts.tags ?? [],
+  systemPrompt: opts.systemPrompt ?? '',
+  temperature: opts.temperature ?? null,
+  topP: opts.topP ?? null,
+  contextMessageSize: opts.contextMessageSize ?? 0,
+  streamOutput: opts.streamOutput ?? true,
+  enableMemory: opts.enableMemory ?? false,
+  useGlobalMemory: opts.useGlobalMemory ?? false,
+  enableRecentChatsReference: opts.enableRecentChatsReference ?? false,
+  messageTemplate: opts.messageTemplate ?? '{{ message }}',
+  presetMessages: opts.presetMessages ?? [],
+  quickMessageIds: opts.quickMessageIds ?? [],
   regexes: opts.regexes ?? [],
+  reasoningLevel: opts.reasoningLevel ?? 'auto',
+  maxTokens: opts.maxTokens ?? null,
+  customHeaders: opts.customHeaders ?? [],
+  customBodies: opts.customBodies ?? [],
+  mcpServers: opts.mcpServers ?? [],
+  localTools: opts.localTools ?? ['time_info'],
+  toolProfile: opts.toolProfile ?? 'full',
+  background: opts.background ?? null,
+  backgroundOpacity: opts.backgroundOpacity ?? 1,
+  modeInjectionIds: opts.modeInjectionIds ?? [],
+  lorebookIds: opts.lorebookIds ?? [],
+  enabledSkills: opts.enabledSkills ?? [],
+  enableTimeReminder: opts.enableTimeReminder ?? false,
+  rememberedReasoningLevelsByModelId: opts.rememberedReasoningLevelsByModelId ?? {},
 });
+
+// reasoningLevelForModel(Assistant.kt:52-62)
+export const reasoningLevelForModel = (
+  assistant: Assistant,
+  modelId: string | null,
+  defaultReasoningLevel: ReasoningLevel,
+): ReasoningLevel => {
+  const remembered = modelId !== null
+    ? assistant.rememberedReasoningLevelsByModelId[modelId]
+    : undefined;
+  if (remembered !== undefined) return remembered;
+  return assistant.reasoningLevel === 'auto' ? defaultReasoningLevel : assistant.reasoningLevel;
+};

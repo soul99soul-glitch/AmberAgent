@@ -136,3 +136,16 @@
   - `asChatStreamProvider(api, paramsFor)` 薄适配 chat_turn 的 ChatStreamProvider（params 按会话供给，不烘焙进 API）。
   - **门堵漏**：chat HAR 首个 import `@amber/deepread-domain` 的 main 源文件暴露 ohpm 链接缺失（node 侧走 tsconfig paths 从未暴露）；修复 = 模块内 `ohpm install`（file: 链接，oh_modules gitignored）。提交门补充：新引入跨 HAR import 后必须 `ohpm install` + `hvigorw clean` 全量重建双绿（本次 clean assembleHap 4.9s 验证）。
 - **可逆性**：组装层无 wire 格式决策；错误语义测试锁定。
+
+## D-016（L0，2026-07-28）Assistant 全量模型：DataStore JSON 线格式、默认模板口径校正、Float 字节级保真
+
+- **背景**：Android Assistant 不存 Room，存于 Settings DataStore 的 kotlinx JSON blob（core/settings PreferencesStore.kt:89）。持久化切片 = 全量模型 + 线格式 1:1 + KV Port。
+- **决定**：
+  - `Assistant` 扩为 30 字段全量模型（默认值逐字，Uuid→string/Set→array/Float→number）；嵌套 Avatar(sealed,FQN 鉴别名 `app.amber.core.model.Avatar.X`)/LocalToolOption(13 variant snake_case)/MainAgentToolProfile(6 值)/CustomHeader 一并迁移。
+  - **口径校正（子集→全量暴露的两处先前偏差）**：
+    1. `messageTemplate` 类型 `string | null`(默认 null)→ `string`(默认 `'{{ message }}'`，Android 原值）；`TemplateTransformer` 去掉 null-skip，**总是套用**（默认模板恒等，对齐 TemplateTransformer.kt:24-38）。
+    2. `AssistantRegex.affectingScope` 默认 `['user','assistant']` → `[]`（Android `emptySet()`）；regex 规则不显式给 scope 即不适用——集成/单元测试显式补 scope 锁定。
+  - **Float 字节级保真**：kotlinx `Float 1.0` → `"1.0"`，`JSON.stringify` → `"1"`；`serializeAssistant` 手工键序拼接 + `floatStr`(整数补 `.0`)，golden blob 测试锁定整条默认 Assistant 字节串。
+  - 存储 Port：`KeyValueStore{get/put/delete}` + memory 实现；`assistants` blob 键为我方 schema（Android 是整个 Settings blob 内嵌字段，设备端 adapter 定最终形态）；`loadAssistants` 无键 → `null`（对齐 DataStore 无值语义，默认值由调用方落）。
+  - 解析容忍：ignoreUnknownKeys（未知键忽略）、缺失字段取默认、缺 `id` 抛 `missing field 'id'`；`isLenient/allowTrailingComma` 同 serialize.ts 沿用 JSON.parse 严格解析（已有口径，不重复记 PD）。
+- **可逆性**：线格式 golden 锁定；后续 Android 导入工具按此 blob 直接读写。

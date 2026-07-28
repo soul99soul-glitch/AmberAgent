@@ -53,11 +53,12 @@ test('applyTemplate: 未知变量保留原文', () => {
 
 // ===== TemplateTransformer =====
 
-test('template: 无模板 → 原样返回(引用相等)', () => {
+test('template: 默认模板 "{{ message }}" → 套用后恒等(D-016:无 null-skip,忠实 Android)', () => {
   const t = createTemplateTransformer();
   const msgs = [makeUserMessage('hi')];
-  const out = t.transform!(ctx(makeAssistant({ messageTemplate: null })), msgs);
-  assert.equal(out, msgs);
+  const out = t.transform!(ctx(makeAssistant({})), msgs);
+  assert.notEqual(out, msgs, '总是套用(新数组)');
+  assert.equal(out[0].parts[0].type === 'text' ? out[0].parts[0].text : '', 'hi', '默认模板恒等');
 });
 
 test('template: 所有消息的 text part 都套模板,非 text part 不动', () => {
@@ -124,10 +125,11 @@ test('thinkTag visualTransformTail: 单消息版本', () => {
 test('regex: enabled+scope+visualOnly 过滤,顺序 fold 替换 text 与 reasoning', () => {
   const assistant = makeAssistant({
     regexes: [
-      makeAssistantRegex({ findRegex: 'a+', replaceString: 'b' }),                    // 适用
-      makeAssistantRegex({ findRegex: 'x', replaceString: 'y', enabled: false }),     // 禁用
-      makeAssistantRegex({ findRegex: 'b', replaceString: 'Z', visualOnly: true }),   // visual≠false 排除
+      makeAssistantRegex({ findRegex: 'a+', replaceString: 'b', affectingScope: ['assistant'] }), // 适用
+      makeAssistantRegex({ findRegex: 'x', replaceString: 'y', enabled: false, affectingScope: ['assistant'] }), // 禁用
+      makeAssistantRegex({ findRegex: 'b', replaceString: 'Z', visualOnly: true, affectingScope: ['assistant'] }), // visual≠false 排除
       makeAssistantRegex({ findRegex: 'b', replaceString: 'W', affectingScope: ['user'] }), // scope 不含
+      makeAssistantRegex({ findRegex: 'b', replaceString: 'V' }), // D-016:scope 默认 [](Android emptySet)→ 不适用
     ],
   });
   const msg = makeUIMessage('assistant', [
@@ -144,8 +146,8 @@ test('regex: enabled+scope+visualOnly 过滤,顺序 fold 替换 text 与 reasoni
 test('regex: 非法正则被跳过不影响其他规则;user 消息不动', () => {
   const assistant = makeAssistant({
     regexes: [
-      makeAssistantRegex({ findRegex: '([', replaceString: 'x' }),
-      makeAssistantRegex({ findRegex: 'b', replaceString: 'c' }),
+      makeAssistantRegex({ findRegex: '([', replaceString: 'x', affectingScope: ['assistant'] }),
+      makeAssistantRegex({ findRegex: 'b', replaceString: 'c', affectingScope: ['assistant'] }),
     ],
   });
   const user = makeUserMessage('b');

@@ -70,7 +70,7 @@ test('集成: 主回路端到端 — 模板入参/流式累积/visual 节流/终
     messageTemplate: '总结:{{message}}',
     // Android quirk(RegexOutputTransformer.kt:47,53):visualTransform 内硬编码 visual=false,
     // 即 visualTransform 命中的是 visualOnly=false 的规则;visualOnly=true 由渲染层另走(D-012 忠实保留)
-    regexes: [makeAssistantRegex({ findRegex: '坏', replaceString: '**' })],
+    regexes: [makeAssistantRegex({ findRegex: '坏', replaceString: '**', affectingScope: ['assistant'] })],
   });
   const store = createMemoryConversationStore();
   const updates: UIMessage[][] = [];

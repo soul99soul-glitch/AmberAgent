@@ -46,8 +46,6 @@ export {
 } from './chat/openai_parse.ts';
 export type { OpenAiStreamEventResult } from './chat/openai_parse.ts';
 
-export type { AssistantAffectScope, AssistantRegex, Assistant } from './chat/assistant.ts';
-export { makeAssistantRegex, makeAssistant } from './chat/assistant.ts';
 
 export type {
   TransformerClock, TransformerContext,
@@ -103,3 +101,20 @@ export type {
 
 export { createOpenAIChatApi, asChatStreamProvider } from './chat/openai_chat_api.ts';
 export type { OpenAIChatApiDeps, OpenAIChatApi, CallOpts } from './chat/openai_chat_api.ts';
+
+export {
+  makeAssistant, makeAssistantRegex, reasoningLevelForModel,
+} from './chat/assistant.ts';
+export type {
+  Assistant, AssistantRegex, AssistantAffectScope, Avatar,
+  LocalToolOption, MainAgentToolProfile, CustomHeader,
+} from './chat/assistant.ts';
+
+export {
+  serializeAssistant, parseAssistant, serializeAssistantList, parseAssistantList,
+} from './chat/assistant_serialize.ts';
+
+export {
+  createMemoryKeyValueStore, saveAssistants, loadAssistants, ASSISTANTS_KEY,
+} from './chat/kv_store.ts';
+export type { KeyValueStore, MemoryKeyValueStore } from './chat/kv_store.ts';
