@@ -1348,3 +1348,20 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 「动态 system prompt blocks」管理面(模式注入/世界书 CRUD 全链:存储 → 管理 UI → D-075 运行注入)。
 - **未移植(P1 登记)**: AssistantExtensionsPage 链接 UI(D-102)/quickMessages/skills 两 tab/注入导入导出 picker/拖拽手势。
 - **验证**: chat tsc 干净 + 1054 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-102 — 助手扩展链接面(模式注入/世界书挂接 assistant)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: AssistantExtensionsPage.kt(全文 218 行)/ExtensionContent.kt:35-91,168-194/values-zh/strings.xml:18-28,284-285/ChatInputAttachments.kt:126-131 + ChatInputState.kt:130-147(removePart/shouldDeleteFileOnRemove 核实)
+- **背景**: D-075(注入 domain+运行接线)+ D-100(写路径)+ D-101(管理 CRUD)已备,缺助手侧链接面——assistant.modeInjectionIds/lorebookIds 用户不可配,注入链对最终用户仍不可达。
+- **决策**:
+  1. ChatAssistantExtensionsPage(router params assistantId):顶部二 tab(模式注入/世界书);空态消息逐字 + '前往提示词管理' 按钮(→ ChatPromptsPage,D-101 已落地);非空 → 开关行(name 空 → '未命名'/'未命名Lorebook';lorebook desc 非空显示);onToggle 逐字:checked → ids + id(Set 语义去重),否则 ids - id → patchAssistant + saveAssistants 落库。
+  2. 入口:ChatAssistantsPage 行操作 '扩展'(对话/复制之间);main_pages.json 注册。
+  3. 核实登记两则:
+     - **composer removePart 清理 N/A**:Android shouldDeleteFileOnRemove 仅对 file: 前缀 pending 附件删文件;harmony composer pendingImages 恒为 data: URL(物化发生在发送时 Base64ImageToLocalFileTransformer),pending 态不存在 file:// 附件 → 该钩子在本架构下永假,按 N/A 登记(禁止移植为空转实现)。
+     - **DEFAULT_MODE_INJECTIONS vestigial**(D-100 已登,此处闭环):管理面无学习模式预置与 Android 当前读路径一致。
+- **偏差/适配登记**: 4 tab 中 quickMessages(存储未移植)/skills(SkillManager 未移植)两 tab 不移植 → 本页仅 2 tab;HorizontalPager+SecondaryTabRow → 顶部二 tab 行;Set<Uuid> ± id → string[] Set 语义。
+- **关闭**: 「动态 system prompt blocks」全链(存储 → 管理 CRUD → 助手挂接 → 运行注入 D-075)用户可达;审计行「动态 system prompt blocks」。
+- **未移植(P1 登记)**: quickMessages 子系统/skills 子系统(两 tab)/注入导入导出 picker。
+- **验证**: chat tsc 干净 + 1054 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

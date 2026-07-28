@@ -323,6 +323,14 @@ struct ChatAssistantsPage {
                       params['assistantId'] = a.id;
                       router.pushUrl({ url: 'pages/ChatPage', params: params });
                     })
+                  Text('扩展')
+                    .fontSize(12).fontColor(INK3)
+                    .margin({ right: 14 })
+                    .onClick((): void => {
+                      const params: Record<string, string> = {};
+                      params['assistantId'] = a.id;
+                      router.pushUrl({ url: 'pages/ChatAssistantExtensionsPage', params: params });
+                    })
                   Text('复制')
                     .fontSize(12).fontColor(INK3)
                     .margin({ right: 14 })
