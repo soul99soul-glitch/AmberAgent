@@ -15,6 +15,8 @@ struct NovelSessionBubble: View {
     /// 判据是 prose 候选带着来源章版本(只有重写会带)。
     let isRegeneration: Bool
     let polishTransactionStatus: NovelPolishTransactionStatus?
+    /// 该候选正在被采用（漂移检查模型调用中）。
+    let isAdoptingPolish: Bool
     let committedChange: NovelSessionCommittedChangeSummary?
     let askUser: NovelAskUserPresentation?
     let actions: [NovelSessionRowActionAvailability]
@@ -233,6 +235,20 @@ struct NovelSessionBubble: View {
 
     @ViewBuilder
     private var polishCandidateStatus: some View {
+        if isAdoptingPolish {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("正在检查剧情一致性…")
+            }
+            .font(.footnote)
+            .foregroundStyle(AmberTheme.muted)
+        } else {
+            polishTransactionStatusView
+        }
+    }
+
+    @ViewBuilder
+    private var polishTransactionStatusView: some View {
         switch polishTransactionStatus {
         case .incompatible:
             Label("检测到剧情漂移 · 不能按润色采用", systemImage: "exclamationmark.triangle.fill")

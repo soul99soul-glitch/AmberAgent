@@ -34,6 +34,7 @@ struct ProviderKeyEditView: View {
     @State private var keyInput: String = ""
     @State private var didSave: Bool = false
     @State private var didSetCurrent: Bool = false
+    @State private var confirmClearKey = false
 
     var body: some View {
         ZStack {
@@ -150,7 +151,7 @@ struct ProviderKeyEditView: View {
                 ProviderKeyEditDivider()
 
                 Button(role: .destructive) {
-                    delete(preset: preset)
+                    confirmClearKey = true
                 } label: {
                     Text(deleteButtonTitle)
                         .font(.body)
@@ -164,6 +165,16 @@ struct ProviderKeyEditView: View {
                 .opacity(canDelete ? 1 : 0.5)
                 .accessibilityLabel(deleteButtonTitle)
             }
+        }
+        .confirmationDialog(
+            "清除 API Key？",
+            isPresented: $confirmClearKey,
+            titleVisibility: .visible
+        ) {
+            Button("清除", role: .destructive) { delete(preset: preset) }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("清除后需要重新填写才能使用这个服务商。")
         }
     }
 

@@ -387,6 +387,8 @@ final class RouterPath {
     var presentedSheet: SheetDestination?
 
     func navigate(to route: Route) {
+        // 防止快速连点堆叠重复页面
+        guard path.last != route else { return }
         path.append(route)
     }
 

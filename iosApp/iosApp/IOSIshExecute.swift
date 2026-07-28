@@ -33,8 +33,11 @@ enum IOSEmbeddedIshExecuteExecutor {
                 command: command,
                 timeoutSeconds: request.timeoutSeconds
             )
+            let cancelled = Task.isCancelled && result.error == nil
             let status: String
-            if result.timedOut {
+            if cancelled {
+                status = "cancelled"
+            } else if result.timedOut {
                 status = "timed_out"
             } else if let exitCode = result.exitCode, exitCode == 0, result.error == nil {
                 status = "completed"
@@ -55,7 +58,7 @@ enum IOSEmbeddedIshExecuteExecutor {
                 "stderr_available": true,
                 "exit_code_available": result.exitCode != nil,
                 "timed_out": result.timedOut,
-                "error": result.error ?? ""
+                "error": cancelled ? "Embedded iSH command was cancelled." : result.error ?? ""
             ])
         } catch {
             return IOSWorkspaceStore.json([

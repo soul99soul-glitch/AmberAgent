@@ -1340,7 +1340,7 @@ final class NovelCreationViewModel {
             guard case .injectionPreview(let preview) = try await creation.snapshot(
                 .injectionPreview(request)
             ) else {
-                throw NovelError.invalidInput("The injection preview returned an unexpected snapshot.")
+                throw NovelError.invalidInput("注入预览返回了意外的快照，请重试。")
             }
             guard preview.projectID == selectedProjectID,
                   preview.branchID == selectedBranchID else { return nil }

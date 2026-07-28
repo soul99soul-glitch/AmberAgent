@@ -97,7 +97,7 @@ enum IOSTerminalRuntimeCapabilities {
             appStoreSafeByDefault: false,
             supportsExternalCLIByDefault: false,
             licenseClass: .gplReviewRequired,
-            summary: "Experimental embedded iSH oneshot runner for short bounded commands; no PTY, stdin, live session, or immediate cancellation yet."
+            summary: "Experimental embedded iSH runner for bounded commands; streams output, enforces its own timeout, and supports immediate cancellation. No PTY, stdin, or interactive sessions yet."
         )
     ]
 
@@ -508,6 +508,19 @@ protocol IOSSSHRuntimeBackendProtocol: Sendable {
     ) async throws -> IOSSSHCommandResult
 }
 
+/// Seam for embedded-iSH job execution. The production witness is
+/// `IOSEmbeddedIshRuntime.shared`; tests inject fakes so job orchestration
+/// (streaming, cancellation, timeout) is verifiable in the stable test
+/// bundle without linking the GPL runtime. Cancelling the task returned by
+/// the surrounding job must terminate the guest command.
+protocol IOSEmbeddedIshJobBackend: Sendable {
+    func runJob(
+        command: String,
+        timeoutSeconds: TimeInterval,
+        onOutput: @escaping @Sendable (IOSEmbeddedIshOutputChunk) -> Void
+    ) async -> IOSEmbeddedIshCommandResult
+}
+
 private final class IOSTerminalJobState {
     let id: String
     let runtime: IOSTerminalRuntimeKind
@@ -549,10 +562,18 @@ final class IOSTerminalRuntime {
     private static let outputTailLimit = 128 * 1024
 
     private let sshBackend: IOSSSHRuntimeBackendProtocol
+    private let embeddedIshBackend: IOSEmbeddedIshJobBackend
+    private let experimentalRuntimesLinked: Bool
     private var jobs: [String: IOSTerminalJobState] = [:]
 
-    init(sshBackend: IOSSSHRuntimeBackendProtocol) {
+    init(
+        sshBackend: IOSSSHRuntimeBackendProtocol,
+        embeddedIshBackend: IOSEmbeddedIshJobBackend = IOSEmbeddedIshRuntime.shared,
+        experimentalRuntimesLinked: Bool = IOSTerminalBuildPolicy.experimentalRuntimesLinked
+    ) {
         self.sshBackend = sshBackend
+        self.embeddedIshBackend = embeddedIshBackend
+        self.experimentalRuntimesLinked = experimentalRuntimesLinked
     }
 
     func testSSHConnection(profile: IOSSSHProfile, password: String) async throws -> IOSSSHConnectionProbeResult {
@@ -585,7 +606,7 @@ final class IOSTerminalRuntime {
     ) async -> IOSTerminalJobSnapshot {
         let now = Date()
         let capability = IOSTerminalRuntimeCapabilities.capability(for: runtime)
-        if capability.tier == .experimental && !IOSTerminalBuildPolicy.experimentalRuntimesLinked {
+        if capability.tier == .experimental && !experimentalRuntimesLinked {
             return failedSnapshot(
                 runtime: runtime,
                 command: command,
@@ -636,6 +657,9 @@ final class IOSTerminalRuntime {
     func waitJob(id: String, timeoutSeconds: TimeInterval = 60) async -> IOSTerminalJobSnapshot? {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while Date() < deadline {
+            // Caller cancellation stops the wait, not the job: hand back the
+            // current snapshot without mutating job state.
+            guard !Task.isCancelled else { return jobs[id]?.snapshot }
             guard let job = jobs[id] else { return nil }
             if job.status.isTerminal {
                 return job.snapshot
@@ -644,14 +668,9 @@ final class IOSTerminalRuntime {
         }
         guard let job = jobs[id] else { return nil }
         guard !job.status.isTerminal else { return job.snapshot }
-        if job.runtime == .ishExperimental {
-            job.error = "Embedded iSH commands cannot be interrupted by wait timeout; this job is still running until the command exits or its own timeout fires."
-            job.updatedAt = Date()
-            return job.snapshot
-        }
         job.task?.cancel()
         job.status = .timedOut
-        job.error = IOSSSHError.commandTimedOut.localizedDescription
+        job.error = Self.timeoutMessage(for: job.runtime)
         job.updatedAt = Date()
         return job.snapshot
     }
@@ -659,14 +678,9 @@ final class IOSTerminalRuntime {
     func stopJob(id: String) -> IOSTerminalJobSnapshot? {
         guard let job = jobs[id] else { return nil }
         guard !job.status.isTerminal else { return job.snapshot }
-        if job.runtime == .ishExperimental {
-            job.error = "Embedded iSH commands cannot be interrupted after launch; this job will finish when the command exits or its timeout fires."
-            job.updatedAt = Date()
-            return job.snapshot
-        }
         job.task?.cancel()
         job.status = .cancelled
-        job.error = IOSSSHError.commandCancelled.localizedDescription
+        job.error = Self.cancellationMessage(for: job.runtime)
         job.updatedAt = Date()
         return job.snapshot
     }
@@ -755,67 +769,6 @@ final class IOSTerminalRuntime {
         return job.snapshot
     }
 
-    private func startEmbeddedIshJob(
-        command: String,
-        now: Date,
-        timeoutSeconds: TimeInterval
-    ) -> IOSTerminalJobSnapshot {
-        switch IOSRemoteCommandPolicy.validate(command) {
-        case .success:
-            break
-        case .failure(let message):
-            return failedSnapshot(
-                runtime: .ishExperimental,
-                command: command,
-                now: now,
-                message: message
-            )
-        }
-
-        let job = IOSTerminalJobState(
-            id: UUID().uuidString,
-            runtime: .ishExperimental,
-            startedAt: now,
-            status: .running
-        )
-        jobs[job.id] = job
-
-        let jobId = job.id
-        job.task = Task {
-            let result = await IOSEmbeddedIshRuntime.shared.run(
-                command: command,
-                timeoutSeconds: timeoutSeconds
-            )
-            guard !Task.isCancelled else {
-                updateJob(
-                    id: jobId,
-                    status: .cancelled,
-                    exitCode: nil,
-                    output: nil,
-                    error: IOSSSHError.commandCancelled.localizedDescription
-                )
-                return
-            }
-            let output = Self.embeddedIshOutput(stdout: result.stdout, stderr: result.stderr)
-            let status: IOSTerminalJobStatus
-            if result.timedOut {
-                status = .timedOut
-            } else if result.exitCode == 0, result.error == nil {
-                status = .completed
-            } else {
-                status = .failed
-            }
-            updateJob(
-                id: jobId,
-                status: status,
-                exitCode: result.exitCode,
-                output: output,
-                error: result.error ?? (status == .failed ? "Embedded iSH command exited with \(result.exitCode ?? -1)." : nil)
-            )
-        }
-        return job.snapshot
-    }
-
     private func appendOutput(_ chunk: String, to id: String) {
         guard let job = jobs[id], !chunk.isEmpty else { return }
         guard !job.status.isTerminal else { return }
@@ -848,15 +801,22 @@ final class IOSTerminalRuntime {
         return String(decoding: suffix, as: UTF8.self)
     }
 
-    private static func embeddedIshOutput(stdout: String, stderr: String) -> String {
-        var parts: [String] = []
-        if !stdout.isEmpty {
-            parts.append(stdout)
+    private static func timeoutMessage(for runtime: IOSTerminalRuntimeKind) -> String {
+        switch runtime {
+        case .ishExperimental:
+            "Embedded iSH command timed out."
+        case .remoteSSH, .localIOSTools, .remoteMosh:
+            IOSSSHError.commandTimedOut.localizedDescription
         }
-        if !stderr.isEmpty {
-            parts.append("[stderr]\n\(stderr)")
+    }
+
+    private static func cancellationMessage(for runtime: IOSTerminalRuntimeKind) -> String {
+        switch runtime {
+        case .ishExperimental:
+            "Embedded iSH command was cancelled."
+        case .remoteSSH, .localIOSTools, .remoteMosh:
+            IOSSSHError.commandCancelled.localizedDescription
         }
-        return parts.joined(separator: stdout.hasSuffix("\n") ? "" : "\n")
     }
 
     private func runLocalTool(command: String, now: Date) -> IOSTerminalJobSnapshot {
@@ -918,5 +878,99 @@ final class IOSTerminalRuntime {
             updatedAt: Date(),
             error: message
         )
+    }
+}
+
+// MARK: - Embedded iSH job execution
+
+/// Tracks whether the streaming preview is currently inside an stderr run,
+/// so transitions into stderr get a one-time `[stderr]` marker mirroring the
+/// final output layout. MainActor-confined by usage.
+private final class IOSEmbeddedIshStreamMarks: @unchecked Sendable {
+    var lastChunkWasStderr = false
+}
+
+extension IOSTerminalRuntime {
+    private func startEmbeddedIshJob(
+        command: String,
+        now: Date,
+        timeoutSeconds: TimeInterval
+    ) -> IOSTerminalJobSnapshot {
+        switch IOSRemoteCommandPolicy.validate(command) {
+        case .success:
+            break
+        case .failure(let message):
+            return failedSnapshot(
+                runtime: .ishExperimental,
+                command: command,
+                now: now,
+                message: message
+            )
+        }
+
+        let job = IOSTerminalJobState(
+            id: UUID().uuidString,
+            runtime: .ishExperimental,
+            startedAt: now,
+            status: .running
+        )
+        jobs[job.id] = job
+
+        let jobId = job.id
+        let embeddedIshBackend = embeddedIshBackend
+        let streamMarks = IOSEmbeddedIshStreamMarks()
+        job.task = Task {
+            let result = await embeddedIshBackend.runJob(
+                command: command,
+                timeoutSeconds: timeoutSeconds,
+                onOutput: { chunk in
+                    Task { @MainActor in
+                        if chunk.isStderr, !streamMarks.lastChunkWasStderr {
+                            self.appendOutput("[stderr]\n", to: jobId)
+                        }
+                        streamMarks.lastChunkWasStderr = chunk.isStderr
+                        self.appendOutput(chunk.text, to: jobId)
+                    }
+                }
+            )
+            guard !Task.isCancelled else {
+                updateJob(
+                    id: jobId,
+                    status: .cancelled,
+                    exitCode: nil,
+                    output: nil,
+                    error: Self.cancellationMessage(for: .ishExperimental)
+                )
+                return
+            }
+            let output = Self.embeddedIshOutput(stdout: result.stdout, stderr: result.stderr)
+            let status: IOSTerminalJobStatus
+            if result.timedOut {
+                status = .timedOut
+            } else if result.exitCode == 0, result.error == nil {
+                status = .completed
+            } else {
+                status = .failed
+            }
+            updateJob(
+                id: jobId,
+                status: status,
+                exitCode: result.exitCode,
+                output: output,
+                error: result.error ?? (status == .failed ? "Embedded iSH command exited with \(result.exitCode ?? -1)." : nil)
+            )
+        }
+        return job.snapshot
+    }
+
+    private static func embeddedIshOutput(stdout: String, stderr: String) -> String {
+        var parts: [String] = []
+        if !stdout.isEmpty {
+            parts.append(stdout)
+        }
+        if !stderr.isEmpty {
+            parts.append("[stderr]\n\(stderr)")
+        }
+        return parts.joined(separator: stdout.hasSuffix("\n") ? "" : "\n")
     }
 }

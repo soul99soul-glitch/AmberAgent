@@ -211,6 +211,8 @@ final class NovelSessionViewModel {
     private(set) var transientTail: NovelSessionTransientTail?
     private(set) var sessionStartingRunID: NovelRunID?
     private(set) var isPerformingAction = false
+    /// 正在采用润色版的候选 ID：气泡据此显示加载指示器。
+    private(set) var adoptingPolishCandidateID: NovelCandidateID?
     private(set) var operationErrorMessage: String?
     private(set) var refreshErrorMessage: String?
     private(set) var lastFailure: NovelFailure?
@@ -1036,7 +1038,14 @@ final class NovelSessionViewModel {
             checkpointID: NovelCheckpointID(),
             expectedWorkingRevision: branch.branch.workingRevision
         )
+        adoptingPolishCandidateID = candidateID
+        defer { adoptingPolishCandidateID = nil }
         await applyPolishAdoption(command)
+        // 与 collectCandidate 对齐：采用后自动触发剧情同步。
+        workspace.scheduleAutomaticStateSync(
+            projectID: project.project.id,
+            branchID: branch.branch.id
+        )
     }
 
     func retryPolishTransaction(_ transactionID: NovelPendingOperationID) async {
@@ -1111,6 +1120,17 @@ final class NovelSessionViewModel {
     func clearBatchPolish() {
         guard batchPolishTask == nil else { return }
         batchPolishProgress = nil
+    }
+
+    /// 报告态下「重试失败章节」:只重跑失败和未处理的章,跳过已成功和漂移跳过的。
+    func retryFailedBatchPolish() {
+        guard batchPolishTask == nil,
+              let progress = batchPolishProgress else { return }
+        let retryIDs = progress.results
+            .filter { $0.outcome == .failed || $0.outcome == .cancelled }
+            .map(\.chapterID)
+        guard !retryIDs.isEmpty else { return }
+        startBatchPolish(chapterIDs: retryIDs)
     }
 
     private func runBatchPolish(chapterIDs: [NovelChapterID]) async {
@@ -1189,9 +1209,12 @@ final class NovelSessionViewModel {
         let started = await startWholeChapterPolish(chapterID: chapterID)
         isBatchStartingRun = false
         guard started else {
+#if DEBUG
+            print("[BatchPolish] start failed \(chapterID): \(batchPolishDiagnostic())")
+#endif
             return NovelBatchPolishChapterResult(
                 chapterID: chapterID, title: title, outcome: .failed,
-                message: "\(errorMessage ?? "润色没有开始,请稍后重试。") [\(batchPolishDiagnostic())]"
+                message: errorMessage ?? "润色没有开始,请稍后重试。"
             )
         }
         let candidateID: NovelCandidateID?
@@ -1209,9 +1232,12 @@ final class NovelSessionViewModel {
             )
         }
         guard let candidateID else {
+#if DEBUG
+            print("[BatchPolish] no candidate \(chapterID): \(batchPolishDiagnostic())")
+#endif
             return NovelBatchPolishChapterResult(
                 chapterID: chapterID, title: title, outcome: .failed,
-                message: "\(errorMessage ?? "润色没有产出候选。") [\(batchPolishDiagnostic())]"
+                message: errorMessage ?? "润色没有产出候选。"
             )
         }
         await adoptPolishCandidate(candidateID)
@@ -1274,6 +1300,11 @@ final class NovelSessionViewModel {
             let settled = activeRunID == nil && !isStarting
             if (settled && elapsed > batchPolishSettleGrace) ||
                 elapsed > batchPolishCandidateTimeout {
+                // 硬超时但 run 仍在跑：停掉它，否则后续章节全被 canStart 的
+                // !isRunning 门禁挡住，级联失败。
+                if activeRunID != nil {
+                    await stop(reason: .user)
+                }
                 return nil
             }
             try await Task.sleep(for: .milliseconds(300))

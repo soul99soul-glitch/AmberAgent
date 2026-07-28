@@ -243,6 +243,9 @@ struct NovelBatchPolishSheet: View {
             }
 
             Section {
+                if (progress?.failedCount ?? 0) + (progress?.cancelledCount ?? 0) > 0 {
+                    Button("重试失败章节") { sessionViewModel.retryFailedBatchPolish() }
+                }
                 Button("再润色一批") { sessionViewModel.clearBatchPolish() }
             }
         }

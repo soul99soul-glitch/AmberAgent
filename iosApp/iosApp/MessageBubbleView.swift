@@ -287,6 +287,7 @@ struct MessageBubbleView: View {
         }
         Button {
             UIPasteboard.general.string = message.toText()
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
         } label: {
             Label("复制", systemImage: "doc.on.doc")
         }

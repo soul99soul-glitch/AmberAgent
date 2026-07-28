@@ -54,29 +54,138 @@ final class DocumentAccessStoreTests: XCTestCase {
         XCTAssertTrue(reason.contains("file-context import limit"))
     }
 
-    func testTextPreviewIsCappedAndMarkedTruncated() async throws {
+    /// 2026-07-27 显式改写(原 `testTextPreviewIsCappedAndMarkedTruncated`):
+    /// 原断言锁的是「读到 64KB 就截断」这条**人为**上限。它既不来自模型上下文,也不
+    /// 来自内存安全(20MB 的可读上限另有守卫),纯粹是自己给自己设的墙——一份 27 万
+    /// 字节、约 9 万汉字的小说导出稿离任何模型的上下文都还很远,却被砍掉四分之三。
+    /// 上下文只会越来越长,这道墙是自废武功,故整条移除,断言随之反向。
+    func testLargeTextFileIsReadInFullInsteadOfBeingCappedAt64KB() async throws {
         let store = DocumentAccessStore()
-        let grant = store.registerPickedFile(try makeTempFile(size: store.maxPreviewBytes + 4096))
+        let body = String(repeating: "赵大踏进渡口的雾里，船工没有抬头。\n", count: 8_000)
+        let url = try makeTempFile(text: body, extension: "md")
+        let grant = store.registerPickedFile(url)
         let executor = makeExecutor(documentStore: store)
-        let request = IOSLocalToolExecutionRequest(
-            toolName: grant.toolName,
-            operation: grant.operation,
-            scopeDigest: grant.scopeDigest,
-            payloadDigest: grant.payloadDigest,
-            isUserInitiated: true
-        )
 
-        let result = await executor.execute(request)
+        let result = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: grant.toolName,
+                operation: grant.operation,
+                scopeDigest: grant.scopeDigest,
+                payloadDigest: grant.payloadDigest,
+                isUserInitiated: true
+            )
+        )
 
         guard case .selectedFilePreview(let readResult) = result else {
             return XCTFail("Expected success, got \(result)")
         }
-        XCTAssertLessThanOrEqual(readResult.bytesRead, store.maxPreviewBytes)
-        XCTAssertEqual(readResult.bytesRead, store.maxPreviewBytes)
-        XCTAssertTrue(readResult.isTruncated)
-        XCTAssertTrue(readResult.statusSummary.contains("截断"))
-        XCTAssertEqual(readResult.fileName, grant.fileName)
-        XCTAssertEqual(readResult.totalBytes, grant.fileSize)
+        XCTAssertGreaterThan(grant.fileSize, 64 * 1024)
+        XCTAssertEqual(readResult.bytesRead, Int(grant.fileSize))
+        XCTAssertFalse(readResult.isTruncated)
+        XCTAssertEqual(readResult.statusSummary, "完整读取")
+        // 首尾都在,中间没被砍掉。
+        XCTAssertTrue(readResult.preview.hasPrefix("赵大踏进渡口的雾里"))
+        XCTAssertTrue(readResult.preview.hasSuffix("船工没有抬头。"))
+    }
+
+    /// 真机症状:一份 27 万字节的中文 .md,读出来整篇是韩文与生僻字。
+    /// 根因是按**字节**砍到 65536,把一个汉字劈成两半 → UTF-8 解码失败 → 回退链的
+    /// 下一位是 UTF-16,而 UTF-16 对任意偶数长度字节几乎**永不失败**,于是整份文件
+    /// 被当成 UTF-16 读,两字节拼一个字符,全成乱码。
+    func testChineseTextIsNeverDecodedAsUTF16Garbage() async throws {
+        let store = DocumentAccessStore()
+        let body = String(repeating: "苏未晚把那封信烧了，灰烬落进河里。", count: 5_000)
+        let grant = store.registerPickedFile(try makeTempFile(text: body, extension: "md"))
+        let executor = makeExecutor(documentStore: store)
+
+        let result = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: grant.toolName,
+                operation: grant.operation,
+                scopeDigest: grant.scopeDigest,
+                payloadDigest: grant.payloadDigest,
+                isUserInitiated: true
+            )
+        )
+
+        guard case .selectedFilePreview(let readResult) = result else {
+            return XCTFail("Expected success, got \(result)")
+        }
+        XCTAssertTrue(readResult.preview.contains("苏未晚把那封信烧了"))
+        XCTAssertEqual(readResult.characterCount, body.count)
+        // 乱码的判据:韩文音节区。中文稿子里一个都不该出现。
+        XCTAssertNil(
+            readResult.preview.unicodeScalars.first { (0xAC00...0xD7A3).contains($0.value) },
+            "正文被当成 UTF-16 解码了"
+        )
+    }
+
+    /// 中文 Windows 导出的 txt 常见 GB18030。此前它同样走不通 UTF-8,
+    /// 于是也被 UTF-16 兜走,整篇乱码。
+    func testGB18030TextIsDecodedAsChinese() async throws {
+        let store = DocumentAccessStore()
+        let body = "赵大踏进渡口的雾里，船工没有抬头。"
+        let encoding = CFStringConvertEncodingToNSStringEncoding(
+            CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
+        )
+        let data = try XCTUnwrap((body as NSString).data(using: encoding))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("txt")
+        try data.write(to: url)
+        let grant = store.registerPickedFile(url)
+        let executor = makeExecutor(documentStore: store)
+
+        let result = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: grant.toolName,
+                operation: grant.operation,
+                scopeDigest: grant.scopeDigest,
+                payloadDigest: grant.payloadDigest,
+                isUserInitiated: true
+            )
+        )
+
+        guard case .selectedFilePreview(let readResult) = result else {
+            return XCTFail("Expected success, got \(result)")
+        }
+        XCTAssertTrue(readResult.preview.contains("赵大踏进渡口的雾里"))
+    }
+
+    /// 带 BOM 的 UTF-16 仍然要认得出来——把 UTF-16 从「万能兜底」里踢掉,
+    /// 不等于不再支持真正的 UTF-16 文件。
+    func testUTF16FileWithBOMIsStillDecoded() async throws {
+        let store = DocumentAccessStore()
+        let body = "赵大踏进渡口的雾里，船工没有抬头。"
+        let data = try XCTUnwrap(body.data(using: .utf16))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("txt")
+        try data.write(to: url)
+        let grant = store.registerPickedFile(url)
+        let executor = makeExecutor(documentStore: store)
+
+        let result = await executor.execute(
+            IOSLocalToolExecutionRequest(
+                toolName: grant.toolName,
+                operation: grant.operation,
+                scopeDigest: grant.scopeDigest,
+                payloadDigest: grant.payloadDigest,
+                isUserInitiated: true
+            )
+        )
+
+        guard case .selectedFilePreview(let readResult) = result else {
+            return XCTFail("Expected success, got \(result)")
+        }
+        XCTAssertTrue(readResult.preview.contains("赵大踏进渡口的雾里"))
+    }
+
+    /// 超过 20MB 的可读上限仍然拒收:那不是「人为的墙」,是内存安全——
+    /// 把几百 MB 文本读进一个 String 再塞进提示词会直接把 App 撑爆。
+    func testFilesLargerThanTheReadableLimitAreStillRejected() async throws {
+        let store = DocumentAccessStore()
+        XCTAssertEqual(store.maxReadableBytes, 20 * 1024 * 1024)
     }
 
     func testMarkdownTextFileExtractsReadableContext() async throws {

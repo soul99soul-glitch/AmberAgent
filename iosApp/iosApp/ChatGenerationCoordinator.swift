@@ -123,6 +123,8 @@ final class ChatStreamEventSink: @unchecked Sendable {
         let continuation = continuation
         self.continuation = nil
         isFinished = true
+        pendingEvents.removeAll()
+        pendingEventHead = 0
         lock.unlock()
         continuation?.finish()
     }
@@ -1523,6 +1525,24 @@ final class ChatGenerationCoordinator {
             return
         }
 
+        // 空回复检测：模型没有产出任何文本也没有工具调用时，给用户一个明确提示。
+        if Self.isEmptyAssistantResponse(snapshot) {
+            var emptySnapshot = snapshot
+            emptySnapshot.append(Self.emptyResponseNotice())
+            bindings.setMessages(emptySnapshot)
+            bindings.bumpMessageRevision(.toolResultAppended)
+            let conversationHex = conversationId?.toHexDashString()
+            await bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationHex)
+            WatchTaskCoordinator.shared.publishCompleted(
+                runId: runId, conversationId: conversationHex, summary: nil
+            )
+            await dependencies.liveActivityController.end(runId: runId, presentation: .completed())
+            _ = await bindings.persistMessages(conversationId)
+            finishStreaming(terminalEvent: .generationCompleted)
+            bindings.generationSucceeded()
+            return
+        }
+
         var finalSnapshot = snapshot
         if let miniAppNotice = bindings.saveMiniAppIfPresent(snapshot, conversationId) {
             finalSnapshot.append(miniAppNotice)
@@ -1612,6 +1632,34 @@ final class ChatGenerationCoordinator {
             role: MessageRole.assistant,
             parts: [MessageKt.localOutputLimitNoticeTextPart(
                 text: "⚠️ 回复已达到模型输出上限，上面的内容并不完整。可以让我「继续」，或在助手设置里调高最大输出长度后重试。"
+            )],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
+    /// 模型没有产出任何文本也没有工具调用。
+    static func isEmptyAssistantResponse(_ messages: [UIMessage]) -> Bool {
+        guard let last = messages.last, last.role == MessageRole.assistant else { return false }
+        return !last.parts.contains { part in
+            if let text = part as? UIMessagePart.Text {
+                return !text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            return part is UIMessagePart.Tool || part is UIMessagePart.Image
+        }
+    }
+
+    static func emptyResponseNotice() -> UIMessage {
+        UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(
+                text: "模型没有返回任何内容。这可能是服务商的临时问题——请重新发送，或换一个模型试试。",
+                metadata: nil
             )],
             annotations: [],
             createdAt: chatNowLocalDateTime(),
@@ -2329,6 +2377,7 @@ final class ChatGenerationCoordinator {
     }
 
     private func handleDetectedToolCalls(_ toolCalls: [UIMessagePart.Tool], runId: String) {
+#if DEBUG
         for toolCall in toolCalls where IOSSearchExecutor.supportedToolNames.contains(toolCall.toolName) {
             print("[ChatViewModel] Detected search tool call runId=\(runId) tool=\(toolCall.toolName) toolCallId=\(toolCall.toolCallId) inputDigest=\(chatInputDigest(for: toolCall.input))")
         }
@@ -2347,6 +2396,7 @@ final class ChatGenerationCoordinator {
         for toolCall in toolCalls where toolCall.toolName == "memory_tool" {
             print("[ChatViewModel] Detected memory_tool call runId=\(runId) toolCallId=\(toolCall.toolCallId)")
         }
+#endif
     }
 
 #if DEBUG

@@ -61,6 +61,13 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 - `IOSCouncilRunnerMechanicsTests.testTopBarCircleButtonsKeepGlyphsAboveNativeGlassAndTintTrailingActions` 在旧实现上 7 处断言实测全红，修复后定点绿测通过；`git diff --check` 通过。设备 Debug 包使用现有 Team `89QRFX9548` 的主 App/Activity Widget profiles 完成通用 iOS 构建并通过 `codesign --verify --deep --strict`。本机缺少新 Watch App profile 且 Xcode 账户凭据不可用，因此本次待装包未嵌入 Watch companion；本地生成工程已恢复原始 `project.yml` 的完整 Watch target。
 - 13:32 设备恢复 connected 后，已把验签包覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`；CoreDevice 返回新安装路径 `08DDAB0D-F01B-4F3B-9AC6-0992D2A98699/iosApp.app`，13:33 以 bundle id `app.amber.ios` 启动成功。以上证明本次包已安装并运行；首页与议会顶栏的最终颜色观感仍需设备目测。
 
+### 2026-07-27 模型议会圆形玻璃、动态模型预检与同题追问
+
+- 议会顶栏圆形按钮改用 `Circle().glassEffect(..., in: Circle())` 的原生圆形玻璃轮廓；顶栏 `GlassEffectContainer` 间距收口为 0，避免相隔 10pt 的历史/设置按钮被容器吸附融合成非圆轮廓。静态契约已锁定原生 Circle shape 与容器零融合间距。
+- 动态席位不再全部复制主持模型：从当前 provider 已配置的 chat 模型中去重，优先分配非主持模型，模型池耗尽后才轮转复用；带 `providerOverwrite` 的模型不进入这个单-provider 候选池，避免拿主持人的 endpoint/auth 误路由。正式发言前，对实际分配到的每个非主持模型做一次最小联通探测（temperature 0、reasoning off、最多 16 tokens、15 秒静默超时）；主持模型已通过议题整理/组席调用视为可用。探测失败的模型不会进入席位发言，而会改派到主持模型或已通过探测的候选模型，并在议会分隔提示与 task log 中记录替换。
+- 正常完成后的输入框改为「输入补充或追问，再讨论一轮」：追问沿用同一 task/archive、原始议题、主持人完善后的 `finalTopic`、既有席位和历史转录，只追加一轮席位发言与主持更新总结。追加轮失败、取消或进程中断只记录本轮终态，保留此前已完成议会并允许继续追问；首次议会的失败/取消仍不误续接。task 被 80 条保留上限淘汰时以原 taskId 恢复，不再静默换身份。
+- review 后四项定点修复均走红→绿，未加入跨-provider 调度、泛化重试或第二状态机。`IOSCouncilRunnerMechanicsTests` + `IOSCouncilRoomArchiveStoreTests` 在 iPhone 17 Pro Max / iOS 26.5 Simulator **70 passed / 0 failed**；覆盖 override 排除、坏模型替换、finalTopic 往返、失败续轮后的第三轮、进程中断与 task 身份恢复；`git diff --check` 通过。真实 provider 的模型可用性、探测延迟，以及真机两颗按钮的最终 Liquid Glass 视觉仍待外部复验。
+
 ### 2026-07-27 系统灵动岛收紧宽度、接入 Chat 实时状态
 
 - 真机桌面截图确认上一版修改重心错位：用户要改的是系统 Live Activity，而非只是 Chat 页内胶囊。compact 右侧在没有真实 metric 时退化为 `.timer`，动态计时文本让系统预留了过长宽度，且只显示「星核 + 时间」，没有任务状态。

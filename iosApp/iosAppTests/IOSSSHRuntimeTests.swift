@@ -203,6 +203,30 @@ final class IOSTerminalSSHRuntimeTests: XCTestCase {
         XCTAssertEqual(runtime.readJob(id: started.id)?.status, IOSTerminalJobStatus.timedOut.rawValue)
     }
 
+    func testWaitJobReturnsEarlyWhenCallerIsCancelled() async {
+        let runtime = IOSTerminalRuntime(
+            sshBackend: MockSSHBackend(delayNanoseconds: 5_000_000_000, ignoresCancellation: true)
+        )
+        let started = await runtime.startJob(
+            command: "sleep",
+            runtime: .remoteSSH,
+            experimentalEnabled: false,
+            sshProfile: trustedProfile(),
+            sshPassword: "secret"
+        )
+
+        let waiter = Task {
+            await runtime.waitJob(id: started.id, timeoutSeconds: 30)
+        }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        waiter.cancel()
+        let early = await waiter.value
+
+        XCTAssertEqual(early?.status, IOSTerminalJobStatus.running.rawValue)
+        XCTAssertEqual(runtime.readJob(id: started.id)?.status, IOSTerminalJobStatus.running.rawValue)
+        _ = runtime.stopJob(id: started.id)
+    }
+
     func testRemoteCommandPolicyRejectsDangerousCommands() {
         switch IOSRemoteCommandPolicy.validate("echo amber") {
         case .success(let command):

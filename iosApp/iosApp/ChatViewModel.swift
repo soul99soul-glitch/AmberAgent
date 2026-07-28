@@ -101,6 +101,10 @@ final class ChatViewModel {
     var reasoningLevel: ReasoningLevel = .off
     var messageRevision: Int = 0
     var messageUpdateSignal = ChatMessageUpdateSignal()
+    /// token 聚合只在结构性消息事件后重算；流式 delta 不改 usage，跳过 O(n) 扫描。
+    @ObservationIgnored private var tokenRevision: Int = 0
+    @ObservationIgnored private var cachedTokenSnapshot: ChatContextSnapshot?
+    @ObservationIgnored private var cachedTokenRevision: Int = -1
     /// UI presentation pacing is useful only while the live tail is being watched.
     /// The authoritative stream accumulator is independent from this flag.
     var streamPresentationPacingEnabled = true
@@ -143,26 +147,15 @@ final class ChatViewModel {
     }
 
     var contextSnapshot: ChatContextSnapshot {
-        // [Slice 5] Aggregate TokenUsage across all messages (each UIMessage
-        // carries usage: TokenUsage? set by the provider on completion).
-        var prompt = 0
-        var completion = 0
-        var cached = 0
-        var timedCompletionTokens = 0
-        var generationDuration = 0.0
-        // 最近一轮的占用(promptTokens 已含全部历史);遍历中后者覆盖前者,留下最后一条。
-        var latestContextTokens = 0
-        for message in messages {
-            guard let usage = message.usage else { continue }
-            prompt += Int(usage.promptTokens)
-            completion += Int(usage.completionTokens)
-            cached += Int(usage.cachedTokens)
-            latestContextTokens = Int(usage.promptTokens) + Int(usage.completionTokens)
-            if let duration = Self.durationSeconds(from: message.createdAt, to: message.finishedAt),
-               duration > 0 {
-                timedCompletionTokens += Int(usage.completionTokens)
-                generationDuration += duration
-            }
+        // O(n) token 聚合按 tokenRevision 缓存：流式 delta 不改 usage，跳过重算。
+        // 廉价字段（modelId、filePreview）每次 live 读取，不进缓存。
+        let cached: ChatContextSnapshot
+        if let hit = cachedTokenSnapshot, cachedTokenRevision == tokenRevision {
+            cached = hit
+        } else {
+            cached = Self.aggregateTokenSnapshot(messages)
+            cachedTokenSnapshot = cached
+            cachedTokenRevision = tokenRevision
         }
         return ChatContextSnapshot(
             messageCount: messages.count,
@@ -170,12 +163,47 @@ final class ChatViewModel {
             supportsReasoning: currentModelSupportsReasoning,
             pendingSelectedFileName: pendingSelectedFilePreview?.fileName,
             pendingSelectedFileBytesText: pendingSelectedFilePreview?.byteSummary,
+            promptTokens: cached.promptTokens,
+            completionTokens: cached.completionTokens,
+            totalTokens: cached.totalTokens,
+            cachedTokens: cached.cachedTokens,
+            tokensPerSecond: cached.tokensPerSecond,
+            contextWindowTokens: currentModel?.contextWindowTokens.map { Int(truncating: $0) },
+            currentContextTokens: cached.currentContextTokens
+        )
+    }
+
+    private static func aggregateTokenSnapshot(_ messages: [UIMessage]) -> ChatContextSnapshot {
+        var prompt = 0
+        var completion = 0
+        var cached = 0
+        var timedCompletionTokens = 0
+        var generationDuration = 0.0
+        var latestContextTokens = 0
+        for message in messages {
+            guard let usage = message.usage else { continue }
+            prompt += Int(usage.promptTokens)
+            completion += Int(usage.completionTokens)
+            cached += Int(usage.cachedTokens)
+            latestContextTokens = Int(usage.promptTokens) + Int(usage.completionTokens)
+            if let duration = durationSeconds(from: message.createdAt, to: message.finishedAt),
+               duration > 0 {
+                timedCompletionTokens += Int(usage.completionTokens)
+                generationDuration += duration
+            }
+        }
+        return ChatContextSnapshot(
+            messageCount: messages.count,
+            modelId: "",
+            supportsReasoning: false,
+            pendingSelectedFileName: nil,
+            pendingSelectedFileBytesText: nil,
             promptTokens: prompt,
             completionTokens: completion,
             totalTokens: prompt + completion,
             cachedTokens: cached,
             tokensPerSecond: generationDuration > 0 ? Double(timedCompletionTokens) / generationDuration : nil,
-            contextWindowTokens: currentModel?.contextWindowTokens.map { Int(truncating: $0) },
+            contextWindowTokens: nil,
             currentContextTokens: latestContextTokens
         )
     }
@@ -565,6 +593,13 @@ final class ChatViewModel {
     func bumpMessageRevision(reason: ChatMessageUpdateReason) {
         messageRevision &+= 1
         messageUpdateSignal = ChatMessageUpdateSignal(revision: messageRevision, reason: reason)
+        // token usage 只在结构性事件后变化；streamDelta/toolDelta 不改 usage。
+        switch reason {
+        case .streamDelta, .toolDelta:
+            break
+        default:
+            tokenRevision &+= 1
+        }
     }
 
     func reloadFromStore(reason: ChatMessageUpdateReason = .initialLoad) {
@@ -1110,7 +1145,7 @@ final class ChatViewModel {
             switch message.role {
             case MessageRole.user: role = "User"
             case MessageRole.assistant: role = "Assistant"
-            default: role = "System"
+            default: return nil
             }
             return "\(role): \(text)"
         }.joined(separator: "\n\n")
@@ -1657,6 +1692,8 @@ final class ChatViewModel {
             await generationCoordinator.denyPendingMcpTool()
         } else if pendingCouncilApproval != nil {
             await generationCoordinator.denyPendingCouncilTool()
+        } else if pendingAskUser != nil {
+            skipPendingAskUser()
         }
     }
 

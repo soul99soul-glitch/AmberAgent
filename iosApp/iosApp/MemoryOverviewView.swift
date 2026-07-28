@@ -11,6 +11,7 @@ struct MemoryOverviewView: View {
     @State private var query = ""
     @State private var scopeFilter: IOSMemoryScopeFilter = .all
     @State private var auditStore = IOSMemoryWriteAuditStore.shared
+    @State private var pendingDeleteRecord: MemoryRecord?
 
     private var filteredRecords: [MemoryRecord] {
         IOSMemoryLibrary.filteredRecords(records: records, query: query, scopeFilter: scopeFilter)
@@ -45,6 +46,24 @@ struct MemoryOverviewView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear(perform: refresh)
+        .confirmationDialog(
+            "删除这条记忆？",
+            isPresented: Binding(
+                get: { pendingDeleteRecord != nil },
+                set: { if !$0 { pendingDeleteRecord = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                if let record = pendingDeleteRecord {
+                    delete(record)
+                }
+                pendingDeleteRecord = nil
+            }
+            Button("取消", role: .cancel) { pendingDeleteRecord = nil }
+        } message: {
+            Text("删除后不可恢复。")
+        }
     }
 
     private var header: some View {
@@ -241,7 +260,7 @@ struct MemoryOverviewView: View {
                                 ))
                             },
                             onDelete: {
-                                delete(record)
+                                pendingDeleteRecord = record
                             }
                         )
 

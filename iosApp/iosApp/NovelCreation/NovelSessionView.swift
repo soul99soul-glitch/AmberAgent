@@ -425,6 +425,7 @@ struct NovelSessionView: View {
     private func transcriptRow(_ row: NovelSessionRowModel) -> some View {
         NovelSessionRowView(
             row: row,
+            adoptingPolishCandidateID: viewModel.adoptingPolishCandidateID,
             onAction: handleRowAction,
             onAnswerAskUser: handleAskUserAnswer,
             onToggleArchive: toggleArchive
@@ -611,14 +612,14 @@ struct NovelSessionView: View {
     ) -> String {
         guard let percent else {
             if activity.phase == .analyzing {
-                return "正在分析第 \(activity.completedChunks + 1) 段 · 已等待 \(elapsed) 秒 · 单段最长 60 秒"
+                return "正在分析第 \(activity.completedChunks + 1) 段 · 已等待 \(elapsed) 秒"
             }
             return "已等待 \(elapsed) 秒 · 正在准备请求"
         }
         let chunkDetail = activity.completedChunks > 0
             ? " · 已完成 \(activity.completedChunks) 段"
             : ""
-        return "正文已处理 \(percent)%\(chunkDetail) · 已等待 \(elapsed) 秒 · 单段最长 60 秒"
+        return "正文已处理 \(percent)%\(chunkDetail) · 已等待 \(elapsed) 秒"
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -1361,12 +1362,14 @@ private enum NovelSessionQuickStartRecovery {
 
 private struct NovelSessionRowView: View, Equatable {
     let row: NovelSessionRowModel
+    let adoptingPolishCandidateID: NovelCandidateID?
     let onAction: (NovelSessionRowAction) -> Void
     let onAnswerAskUser: (NovelMessageID, String) -> Void
     let onToggleArchive: (NovelDiscussionArchivePresentation) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.row.id == rhs.row.id && lhs.row.digest == rhs.row.digest
+        lhs.row.id == rhs.row.id && lhs.row.digest == rhs.row.digest &&
+            lhs.adoptingPolishCandidateID == rhs.adoptingPolishCandidateID
     }
 
     var body: some View {
@@ -1389,6 +1392,7 @@ private struct NovelSessionRowView: View, Equatable {
                 isRegeneration: row.candidate?.kind == .prose
                     && row.candidate?.sourceChapterVersionID != nil,
                 polishTransactionStatus: row.candidate?.polishTransactionStatus,
+                isAdoptingPolish: row.candidate?.id == adoptingPolishCandidateID,
                 committedChange: row.committedChange,
                 askUser: row.askUser,
                 actions: row.actions,

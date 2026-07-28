@@ -351,7 +351,7 @@ private extension DefaultNovelCreation {
         case .timedOut:
             let failure = NovelFailure(
                 code: "polish_assessment_timeout",
-                message: "The polish drift check timed out without a safe verdict.",
+                message: "润色漂移检查超时，未能在限定时间内得到安全结论。",
                 isRetryable: true
             )
             Task { [modelRunner] in

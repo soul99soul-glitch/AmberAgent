@@ -1030,7 +1030,7 @@ private extension DefaultNovelCreation {
             runID,
             failure: NovelFailure(
                 code: "stream_ended",
-                message: "The model stream ended without a terminal response.",
+                message: "模型流式响应异常结束，未收到完整回复。",
                 isRetryable: true
             )
         )

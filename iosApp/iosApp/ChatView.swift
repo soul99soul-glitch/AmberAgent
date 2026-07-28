@@ -126,7 +126,6 @@ struct ChatView: View {
     @AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key) private var nativeTimelineStaticRenderEnabled = false
     @AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key) private var nativeTimelineStreamingTailEnabled = false
     @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeTimelineScrollDriverEnabled = false
-    @State private var pasteHintShown = false
     @State private var viewportState = ChatViewportState()
     @State private var scrollToBottomTrigger = 0
     @State private var scrollToBottomSource: NativeTimelineBottomIntentSource = .button
@@ -138,6 +137,7 @@ struct ChatView: View {
     @State private var chatListSummary = ChatListSummarySnapshot()
     @State private var nativeTimelineMirror = NativeChatTimelineMirror()
     @State private var messageEditDraft: ChatMessageEditDraft?
+    @State private var pendingDeleteMessageId: String?
     @State private var isBackToolbarButtonPressed = false
     @State private var isNewChatToolbarButtonPressed = false
     @Environment(IOSConversationStore.self) private var conversationStore
@@ -277,6 +277,24 @@ struct ChatView: View {
                 message: Text(error.message),
                 dismissButton: .default(Text("好")) { conversationStore.clearUserVisibleError() }
             )
+        }
+        .confirmationDialog(
+            "删除这条消息？",
+            isPresented: Binding(
+                get: { pendingDeleteMessageId != nil },
+                set: { if !$0 { pendingDeleteMessageId = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                if let id = pendingDeleteMessageId {
+                    viewModel.deleteMessage(messageId: id)
+                }
+                pendingDeleteMessageId = nil
+            }
+            Button("取消", role: .cancel) { pendingDeleteMessageId = nil }
+        } message: {
+            Text("删除后不可恢复。")
         }
         .onAppear(perform: handleChatAppear)
         // 仅观察 store 的「切会话」修订号——它只在真正切到另一个会话时 +1，
@@ -1166,7 +1184,7 @@ struct ChatView: View {
                     .lineLimit(2)
             }
 
-            if let error = viewModel.configurationError, configurationIssue != nil {
+            if let error = viewModel.configurationError {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.accentAmber)
@@ -1253,14 +1271,6 @@ struct ChatView: View {
                                 }
                             }
                             .frame(minHeight: 40)
-                            .onChange(of: viewModel.inputText) { _, newText in
-                                let threshold = Int(sharedSettings.displaySetting.pasteLongTextThreshold)
-                                if sharedSettings.displaySetting.pasteLongTextAsFile,
-                                   newText.count > threshold,
-                                   !pasteHintShown {
-                                    pasteHintShown = true
-                                }
-                            }
                         }
                         .padding(.leading, 8)
                         .padding(.trailing, 18)
@@ -1512,7 +1522,7 @@ struct ChatView: View {
         case let .edit(messageId, newText):
             viewModel.editMessage(messageId: messageId, newText: newText)
         case let .delete(messageId):
-            viewModel.deleteMessage(messageId: messageId)
+            pendingDeleteMessageId = messageId
         case let .selectVariant(messageId, variantIndex):
             viewModel.selectVariant(messageId: messageId, variantIndex: variantIndex)
         case let .generativeWidget(prompt):

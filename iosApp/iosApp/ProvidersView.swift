@@ -334,6 +334,7 @@ struct ProviderAddView: View {
     @State private var modelName = ""
     @State private var modelId = ""
     @State private var alert: ProviderAddAlert?
+    @State private var pendingDetailProviderId: String?
 
     var body: some View {
         ZStack {
@@ -359,7 +360,15 @@ struct ProviderAddView: View {
             Alert(
                 title: Text(alert.title),
                 message: Text(alert.message),
-                dismissButton: .default(Text("知道了"))
+                dismissButton: .default(Text("知道了")) {
+                    if let providerId = pendingDetailProviderId {
+                        pendingDetailProviderId = nil
+                        dismiss()
+                        DispatchQueue.main.async {
+                            router.navigate(to: .providerDetail(id: providerId))
+                        }
+                    }
+                }
             )
         }
     }
@@ -547,12 +556,22 @@ struct ProviderAddView: View {
         // When a key was provided, set this provider's first chat model as the
         // current chat model (mirrors Android: choosing a model resolves to its
         // provider). This makes the new provider immediately usable for chat.
+        let hasChatModel: Bool
         if !trimmedKey.isEmpty,
            let chatModel = added.models.first(where: { $0.type == ModelType.chat }) {
             sharedSettings.setCurrentChatModelId(chatModel.id.description())
             sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+            hasChatModel = true
+        } else {
+            hasChatModel = added.models.contains { $0.type == ModelType.chat }
         }
         let providerId = added.id.description()
+        if !hasChatModel {
+            // 服务商已保存但没有聊天模型——提示用户，关闭后再跳到详情页添加。
+            pendingDetailProviderId = providerId
+            alert = .modelRequired
+            return
+        }
         dismiss()
         DispatchQueue.main.async {
             router.navigate(to: .providerDetail(id: providerId))
@@ -615,7 +634,7 @@ private enum ProviderAddAlert: Identifiable {
         case .activationFailed:
             "API Key 没有成功保存到本机钥匙串，当前聊天服务商未切换。请重新保存一次。"
         case .modelRequired:
-            "请至少填写一个模型 ID，例如 claude-sonnet-4-5 或 deepseek-chat。"
+            "服务商已保存，但还没有聊天模型。接下来请在服务商详情里自动获取或手动添加模型。"
         }
     }
 }

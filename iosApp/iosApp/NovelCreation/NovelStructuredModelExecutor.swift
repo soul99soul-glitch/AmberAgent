@@ -550,7 +550,7 @@ struct NovelStructuredModelExecutor: Sendable {
         guard terminal != nil else {
             throw NovelStructuredModelExecutionFailure(
                 code: "incomplete_model_stream",
-                message: "The model stream ended before completing its structured response.",
+                message: "模型流式响应在完成结构化输出前中断。",
                 isRetryable: true
             )
         }

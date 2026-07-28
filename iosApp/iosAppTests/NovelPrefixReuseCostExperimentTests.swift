@@ -114,6 +114,7 @@ final class NovelPrefixReuseCostExperimentTests: XCTestCase {
                         candidateStatus: nil,
                         isRegeneration: false,
                         polishTransactionStatus: nil,
+                        isAdoptingPolish: false,
                         committedChange: nil,
                         askUser: nil,
                         actions: [],

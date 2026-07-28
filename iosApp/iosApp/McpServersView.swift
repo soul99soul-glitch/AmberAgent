@@ -6,6 +6,7 @@ struct McpServersView: View {
     let configStore: IOSMcpConfigStore
     @State private var mcpManager: IOSMcpManager
     @State private var editingServer: IOSMcpServerConfig?
+    @State private var pendingDeleteServerName: String?
 
     @Environment(RouterPath.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -46,6 +47,25 @@ struct McpServersView: View {
             McpAddView(configStore: configStore, editingServer: server)
                 .presentationDetents([.fraction(0.82), .large])
                 .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog(
+            "删除 MCP 服务器？",
+            isPresented: Binding(
+                get: { pendingDeleteServerName != nil },
+                set: { if !$0 { pendingDeleteServerName = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除", role: .destructive) {
+                if let name = pendingDeleteServerName {
+                    configStore.remove(named: name)
+                    Task { await mcpManager.syncAll() }
+                }
+                pendingDeleteServerName = nil
+            }
+            Button("取消", role: .cancel) { pendingDeleteServerName = nil }
+        } message: {
+            Text("删除后需要重新添加才能使用。")
         }
     }
 
@@ -119,8 +139,7 @@ struct McpServersView: View {
                                 editingServer = server
                             },
                             onDelete: {
-                                configStore.remove(named: server.name)
-                                Task { await mcpManager.syncAll() }
+                                pendingDeleteServerName = server.name
                             }
                         )
 
