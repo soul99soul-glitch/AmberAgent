@@ -503,3 +503,16 @@ export {
 export type {
   DocumentFileHandle, DocumentReaderDeps,
 } from './chat/document_transformer.ts';
+
+// ===== D-075:提示词注入(PromptInjectionTransformer.kt 全文 + Assistant.kt:140-287) =====
+// (SYSTEM_PROMPT_CACHE_* 常量已在 context_assembly.ts 导出块,D-045)
+export {
+  applyInjections, cacheDisabledMetadata, collectInjections,
+  createMergedInjectionMessages, createPromptInjectionTransformer,
+  extractContextForMatching, findSafeInsertIndex, isTriggered,
+  makeLorebook, makeModeInjection, makeRegexInjection, transformMessages,
+} from './chat/prompt_injection_transformer.ts';
+export type {
+  InjectionPosition, InjectionRole, Lorebook, PromptInjection,
+  PromptInjectionDeps, RegexInjection,
+} from './chat/prompt_injection_transformer.ts';

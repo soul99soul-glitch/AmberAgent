@@ -45,6 +45,7 @@ import {
   loadSearchPrefs, SearchSettings, createSearchTools,
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
   createPlaceholderTransformer, createDocumentTransformer,
+  createPromptInjectionTransformer, PromptInjection, Lorebook,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -60,6 +61,7 @@ import {
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { createEntryPlaceholderValues, loadUserNickname } from '../platform_impl/PlaceholderSupport.ets';
 import { createEntryDocumentReader } from '../platform_impl/DocumentSupport.ets';
+import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -389,11 +391,15 @@ struct ChatPage {
   private agentRuntime: AgentRuntimeSnapshot = defaultAgentRuntimeSnapshot();
   // D-073:display_setting.userNickname 快照(placeholder nickname/user 取值)
   private userNickname: string = '';
+  // D-075:mode_injections/lorebooks 快照(transform 调用时读 = settingsFlow.value 语义)
+  private modeInjections: PromptInjection[] = [];
+  private lorebooks: Lorebook[] = [];
 
-  // D-071b/D-072/D-073/D-074:input transformers 链 —
-  //   [timeReminder, template, placeholder, document, ocr]
-  //   (Android ChatService.kt:169-177:TimeReminder 1/Placeholder 4/Document 5/Ocr 6,
-  //   相对序忠实;template 为 D-016 既有位);
+  // D-071b~D-075:input transformers 链 —
+  //   [timeReminder, promptInjection, template, placeholder, document, ocr]
+  //   (Android ChatService.kt:169-177:TimeReminder 1/PromptInjection 2/
+  //   Placeholder 4/Document 5/Ocr 6,相对序忠实;template 为 D-016 既有位;
+  //   MiniAppPrompt 3 依附 webmount 未移植,P1 已登记);
   //   seed 未就绪当轮不带 OCR(同 D-070 搜索工具门模式)
   private buildInputTransformers(rt: ChatRuntime): MessageTransformer[] {
     const list: MessageTransformer[] = [
@@ -401,6 +407,10 @@ struct ChatPage {
         enabled: (): boolean => this.agentRuntime.enableTimeReminder,
         formatDayOfWeek: (ms: number): string => dayOfWeekFullName(systemLanguage(), ms),
         formatLocalDateTime: javaLocalDateTimeString,
+      }),
+      createPromptInjectionTransformer({
+        modeInjections: (): PromptInjection[] => this.modeInjections,
+        lorebooks: (): Lorebook[] => this.lorebooks,
       }),
       createTemplateTransformer(),
       createPlaceholderTransformer(createEntryPlaceholderValues(
@@ -433,6 +443,13 @@ struct ChatPage {
     // D-073:display_setting.userNickname 快照(placeholder nickname/user)
     loadUserNickname(getChatKvStore()).then((nick: string): void => {
       this.userNickname = nick;
+    });
+    // D-075:mode_injections/lorebooks 快照(缺失/损坏 → [])
+    loadModeInjections(getChatKvStore()).then((list: PromptInjection[]): void => {
+      this.modeInjections = list;
+    });
+    loadLorebooks(getChatKvStore()).then((list: Lorebook[]): void => {
+      this.lorebooks = list;
     });
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';

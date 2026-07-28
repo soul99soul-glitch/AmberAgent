@@ -824,3 +824,15 @@
   - **ChatPage 链序**:[timeReminder, template, placeholder, document, ocr](Android 相对序 1<4<5<6 忠实)。
   - **TDD 7 测试**:常量+41 扩展集(含 '.hidden'/无点边界)/三错误文案+isFile=false/too large 字节数/四 mime 分发+未提供 parser+parser 抛错/readTextFile 上限+截断标记逐字/二进制占位逐字/prompt 模板 18 空格+首尾换行/transform add(0) 逆序+恒量 copy。
 - **可逆性**:1436 测试全绿(deepread 603 + chat 833),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。input 链残余:PromptInjection/MiniAppPrompt = P1(MiniApp 依附 webmount 未移植)。
+
+## D-075（L0，2026-07-28）PromptInjectionTransformer + ExtensionPrefs entry — input 链收官
+
+- **背景**：ChatService.kt:171 链位 2(MiniAppPrompt 3 依附 webmount 未移植,P1 延续)。Android 锚点:PromptInjectionTransformer.kt(全文 264 行)、Assistant.kt:140-287(InjectionPosition/PromptInjection/Lorebook/isTriggered/extractContextForMatching)、SystemPromptMarkers.kt:3-4、PreferencesKeys.kt:74-75、ExtensionPrefs.kt:82-87。
+- **决定**：
+  - **prompt_injection_transformer(HAR)**:全文忠实 — collectInjections(modeInjection 过滤 enabled&&关联序保持;lorebook 非 SYSTEM 消息 + 逐条 scanDepth takeLast 上下文 → isTriggered);transformMessages 空注入原引用返回,否则 priority 降序(stable)+ position 分组;applyInjections 四区段:BEFORE/AFTER 拼入 system parts(before 带 {'system_prompt_cache_control':'disabled'} metadata,after 无),无 system → 新建 system 消息插 0 且 after 加 '\n' 前缀(before 非空时,:168 quirk 钉住);TOP_OF_CHAT 首 user 前(无 user → 末尾);BOTTOM_OF_CHAT 末条前;AT_DEPTH 按 injectDepth 分组深度倒序,index=(size-depth.coerceAtLeast(1)).coerceIn(0,size);三处插入点全过 findSafeInsertIndex(USER→ASSISTANT 含 Tool 回退);createMergedInjectionMessages role 分组首见序合并,assistant→UIMessage.assistant else→user。
+  - **语义钉住**:Kotlin takeLast(0)=空(JS slice(-0)=全数组,特判)/takeLast(负)抛错消息逐字;isTriggered 短路序(enabled→constantActive→keywords 空);regex 构造/匹配异常 → 该 keyword false(:247-249);ignoreCase=JS /i 或双 lowercase contains;groupBy 首见序(JS Map)。
+  - **偏差(登记)**:ctx.settings.modeInjections/lorebooks → deps 注入(读取时机 = transform 调用时,settingsFlow.value 语义,测试锁定后改 deps 生效);Java Regex → JS RegExp(PD-005 延续);Uuid → string id(makeModeInjection/makeRegexInjection/makeLorebook 工厂 newId() 默认);cache 常量改由 context_assembly.ts(D-045)定义本模块 re-export 消费。
+  - **ExtensionPrefs.ets(entry)**:'mode_injections'/'lorebooks' 键逐字;decodeJsonOrNull 语义(缺失/解析失败 → []);JSON 逐字段 ?? 默认(kotlinx 缺字段走默认值等价)。
+  - **ChatPage 链序**:[timeReminder, promptInjection, template, placeholder, document, ocr](Android 相对序 1<2<4<5<6 忠实;MiniAppPrompt 3 P1 已登记);modeInjections/lorebooks 快照 aboutToAppear 加载。
+  - **TDD 14 测试**:isTriggered 短路/大小写/regex 异常/takeLast 0 与负/收集过滤+lorebook scanDepth+system 排除/findSafeInsertIndex 回退与 clamp/role 合并/system parts 顺序+metadata 逐字/无 system 新建+'\n' 前缀 quirk/TOP/BOTTOM/AT_DEPTH 索引/空注入原引用+priority 降序稳定/deps 延迟读取/cache 常量逐字。
+- **可逆性**:1450 测试全绿(deepread 603 + chat 847),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。**input 链 6 片全移植完成**(MiniAppPrompt 除外,P1 登记);entry 链相对序与 ChatService.kt:169-177 全对齐。
