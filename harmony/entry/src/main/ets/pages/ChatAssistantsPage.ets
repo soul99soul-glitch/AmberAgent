@@ -1,6 +1,10 @@
 // ChatAssistantsPage — 助手列表 + MVP 编辑(D-027)
-// 编辑面:name/systemPrompt/temperature/contextMessageSize;其余 26 字段保留原值
+// 编辑面(D-039 补齐参数组):name/systemPrompt/temperature/topP/maxTokens/
+// contextMessageSize/推理力度;其余 24 字段保留原值
 // (替换 by id 回写整个 blob,与 Provider 设置页同构)。全量编辑器 = P1。
+// 参数语义(Android AssistantBasicPage.kt 忠实):topP/maxTokens 可空,
+//   空白 = null(继承 provider 默认);maxTokens 必须 > 0,否则视为 null
+//   (AssistantBasicPage.kt:496-501 toIntOrNull()?.takeIf { it > 0 })
 import { router } from '@kit.ArkUI';
 import type { Assistant, ReasoningLevel } from '@amber/chat-domain';
 import {
@@ -30,6 +34,8 @@ struct ChatAssistantsPage {
   @State editName: string = '';
   @State editSystemPrompt: string = '';
   @State editTemperature: string = '';
+  @State editTopP: string = '';
+  @State editMaxTokens: string = '';
   @State editContextSize: string = '';
   @State editReasoning: ReasoningLevel = 'auto';
   @State showEditor: boolean = false;
@@ -50,6 +56,8 @@ struct ChatAssistantsPage {
     this.editName = a.name;
     this.editSystemPrompt = a.systemPrompt;
     this.editTemperature = a.temperature !== null ? String(a.temperature) : '';
+    this.editTopP = a.topP !== null ? String(a.topP) : '';
+    this.editMaxTokens = a.maxTokens !== null ? String(a.maxTokens) : '';
     this.editContextSize = a.contextMessageSize > 0 ? String(a.contextMessageSize) : '';
     this.editReasoning = a.reasoningLevel;
     this.showEditor = true;
@@ -60,6 +68,8 @@ struct ChatAssistantsPage {
     this.editName = '';
     this.editSystemPrompt = '';
     this.editTemperature = '';
+    this.editTopP = '';
+    this.editMaxTokens = '';
     this.editContextSize = '';
     this.editReasoning = 'auto';
     this.showEditor = true;
@@ -79,6 +89,15 @@ struct ChatAssistantsPage {
     return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0;
   }
 
+  // Android maxTokens 语义(AssistantBasicPage.kt:496-501):
+  //   空白 → null;解析失败或 ≤ 0 → null(而不是 0)
+  private parsePositiveIntOrNull(s: string): number | null {
+    const t: string = s.trim();
+    if (t.length === 0) return null;
+    const v: number = Number(t);
+    return Number.isFinite(v) && v > 0 ? Math.floor(v) : null;
+  }
+
   private save(): void {
     const name: string = this.editName.trim();
     if (name.length === 0) return;
@@ -95,6 +114,8 @@ struct ChatAssistantsPage {
             name,
             systemPrompt: this.editSystemPrompt,
             temperature: this.parseFloatOrNull(this.editTemperature),
+            topP: this.parseFloatOrNull(this.editTopP),
+            maxTokens: this.parsePositiveIntOrNull(this.editMaxTokens),
             contextMessageSize: this.parseIntOrZero(this.editContextSize),
             reasoningLevel: this.editReasoning,
           });
@@ -104,6 +125,8 @@ struct ChatAssistantsPage {
           name,
           systemPrompt: this.editSystemPrompt,
           temperature: this.parseFloatOrNull(this.editTemperature),
+          topP: this.parseFloatOrNull(this.editTopP),
+          maxTokens: this.parsePositiveIntOrNull(this.editMaxTokens),
           contextMessageSize: this.parseIntOrZero(this.editContextSize),
           reasoningLevel: this.editReasoning,
         })];
@@ -237,6 +260,14 @@ struct ChatAssistantsPage {
             .fontSize(14).height(40).backgroundColor(SURFACE)
             .margin({ bottom: 8 })
             .onChange((v: string): void => { this.editTemperature = v; })
+          TextInput({ text: this.editTopP, placeholder: 'top_p(可空,0-1)' })
+            .fontSize(14).height(40).backgroundColor(SURFACE)
+            .margin({ bottom: 8 })
+            .onChange((v: string): void => { this.editTopP = v; })
+          TextInput({ text: this.editMaxTokens, placeholder: '最大输出 tokens(可空,>0)' })
+            .fontSize(14).height(40).backgroundColor(SURFACE)
+            .margin({ bottom: 8 })
+            .onChange((v: string): void => { this.editMaxTokens = v; })
           TextInput({ text: this.editContextSize, placeholder: '上下文消息数(可空,如 20)' })
             .fontSize(14).height(40).backgroundColor(SURFACE)
             .margin({ bottom: 8 })

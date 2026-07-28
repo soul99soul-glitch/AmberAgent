@@ -377,3 +377,13 @@
   - **裁剪与偏差登记(PARITY_DEBT PD-007)**:① Android file:// 统一压缩(compressAndEncode)裁 P1,鸿蒙原样编码;② Android 选图复制到应用私有目录存 file:// 引用,鸿蒙 MVP 消息体直接存 data: URL(消息体变大,RDB 字段无大小限制,后续按存储体积评估)。
   - 编辑态不携带图片(对齐 Android 编辑仅文本)。
 - **可逆性**:纯增项;无图片时发送路径与 D-035 前完全一致(string 输入)。
+
+## D-039（L0，2026-07-28）助手编辑补齐 topP/maxTokens：参数组闭环
+
+- **背景**：助手编辑器(D-027)仅 4 字段,topP/maxTokens 虽已在模型/wire/请求侧全链路落地(D-016/D-014,openai_request.ts:389-393),但无写入入口 → 字段恒为默认 null。
+- **决定**：
+  - **编辑器新增 topP/maxTokens 文本输入**(与 temperature 同款 MVP 输入;Android 用 Switch+Slider 为视觉层,语义等价:空白 = null 继承 provider 默认)。
+  - **语义忠实**:maxTokens 按 Android AssistantBasicPage.kt:496-501 — 空白/非数/≤0 → null(parsePositiveIntOrNull);topP 按 parseFloatOrNull(空白 → null)。
+  - **链路核实(无新逻辑)**:mergeCustomParams(context_assembly.ts:105-110)取 assistant.topP;resolveSessionDefaults(:82-94)maxTokens 回退链 assistant → 组默认 → null;openai_request.ts:389-393 仅非 null 时写 temperature/top_p/max_tokens(MiMo 走 max_completion_tokens)。编辑即生效,无需 provider 侧改动。
+  - wire round-trip 已由 D-016 assistant_serialize 测试字节级锁定;参数合并/回退由 context_assembly.test.ts 锁定 → 本切片不新增领域测试(entry-only)。
+- **可逆性**:纯增项;不填时行为与 D-027 完全一致(全 null)。
