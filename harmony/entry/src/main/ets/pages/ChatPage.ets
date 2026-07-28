@@ -966,7 +966,17 @@ struct ChatPage {
 
   private buildPrepareContext(conv: Conversation, rt: ChatRuntime):
     (messages: UIMessage[]) => Promise<UIMessage[]> {
-    const policy: CompactPolicy = makeCompactPolicy({ keepRecentTurns: 8 });
+    // D-091:settings.agentRuntime.contextCompaction.toCompactPolicy()
+    //   (PreferencesStore.kt:247-255 字段直传;快照加载前 = Android 默认值)
+    const cc = this.agentRuntime.contextCompaction;
+    const policy: CompactPolicy = makeCompactPolicy({
+      enabled: cc.enabled,
+      notifyOnly: cc.notifyOnly,
+      precompactRatio: cc.precompactRatio,
+      forceRatio: cc.forceRatio,
+      keepRecentTurns: cc.keepRecentTurns,
+      maxSummaryTokens: cc.maxSummaryTokens,
+    });
     return (messages: UIMessage[]): Promise<UIMessage[]> => {
       const effConv: Conversation = conversationWithMessagesAsNodes(conv, messages);
       return prepareContext(effConv, policy, rt.modelContextWindowTokens,
@@ -1026,8 +1036,15 @@ struct ChatPage {
         ...createConversationContextTools({
           conversationProvider,
           compactStore: getCompactStore(),
-          // 与 buildPrepareContext 同口径(settings.agentRuntime.contextCompaction)
-          policy: makeCompactPolicy({ keepRecentTurns: 8 }),
+          // 与 buildPrepareContext 同口径(settings.agentRuntime.contextCompaction,D-091)
+          policy: makeCompactPolicy({
+            enabled: this.agentRuntime.contextCompaction.enabled,
+            notifyOnly: this.agentRuntime.contextCompaction.notifyOnly,
+            precompactRatio: this.agentRuntime.contextCompaction.precompactRatio,
+            forceRatio: this.agentRuntime.contextCompaction.forceRatio,
+            keepRecentTurns: this.agentRuntime.contextCompaction.keepRecentTurns,
+            maxSummaryTokens: this.agentRuntime.contextCompaction.maxSummaryTokens,
+          }),
           modelContextWindowTokens: rt.modelContextWindowTokens,
           compactEngineDeps: {
             provider: this.compressProvider(rt),

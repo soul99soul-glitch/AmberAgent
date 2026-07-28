@@ -1186,3 +1186,17 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **偏差/适配登记**: 编辑对话框 AlertDialog → 页内 overlay(D-089 同);保存失败 hilog.warn(Android 无反馈,非静默条款)。
 - **未移植(P1 登记)**: 记忆汇总卡('Amber 对你的了解'三组过滤器)/Overview-Recall-Compaction 子页/导入导出 UI(目录选择器)/toolbar 立即运行(workScheduler)。
 - **验证**: chat tsc 干净 + 1035 测试(+5)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-091 — contextCompaction 设置全链:prefs 六字段 + 生成 policy 接线 + Compaction 开关卡
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: PreferencesStore.kt:234-241(ContextCompactionSetting 六字段+默认)/:247-255(toCompactPolicy 直传)/SettingAgentMemoryPage.kt:528-568(CompactionSubpage 两 Switch)/values-zh/strings.xml:599-603
+- **背景**: 鸿蒙 compact 引擎(D-054/055)已就绪,但 policy 在两处生成点硬编码(enabled=true/notifyOnly=false/ratio 默认/keepRecentTurns=8)——恰好等于 Android 默认值故无行为偏差,但用户开关不可达(改了也不生效=隐性断链)。
+- **决策**:
+  1. `AgentRuntimePrefs.ets`:ContextCompactionSnapshot/Json 六字段 + 默认(true/false/0.70/0.85/8/2000,:235-240)+ parse(缺省/非数 → 各自默认;ratio 不钳制,Android 同)+ updateContextCompactionToggles(enabled/notifyOnly 写回,raw 读-改-写 D-089 策略)。
+  2. ChatPage 两处 policy(buildPrepareContext :969 自动路径 + createConversationContextTools :1030 工具路径)改自快照字段直传(toCompactPolicy :247-255 同口径);快照加载前 = Android 默认值,无窗口期偏差。
+  3. MemoryPage compactionCard(zh strings 逐字;首项 supporting = desc + '\n' + 默认行,对齐 Android 同 item 双 Text 拼接)置于 worker 开关卡后(Android 子页序 Worker→Compaction)。
+- **偏差/适配登记**: 无新增(ratio/maxSummaryTokens 无 UI,Android 同——仅 JSON 持有,线格式兼容)。
+- **未移植(P1 登记)**: 记忆汇总卡/Overview-Recall 子页/导入导出 UI/toolbar 立即运行(workScheduler)。
+- **验证**: chat tsc 干净 + 1035 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

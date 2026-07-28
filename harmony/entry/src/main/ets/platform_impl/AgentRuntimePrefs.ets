@@ -36,6 +36,17 @@ export interface MemoryWorkerGateSnapshot {
   daydreamFollowCompressModel: boolean;
 }
 
+// D-091:ContextCompactionSetting(PreferencesStore.kt:234-241)—
+//   toCompactPolicy(:247-255)字段直传
+export interface ContextCompactionSnapshot {
+  enabled: boolean;
+  notifyOnly: boolean;
+  precompactRatio: number;
+  forceRatio: number;
+  keepRecentTurns: number;
+  maxSummaryTokens: number;
+}
+
 export interface AgentRuntimeSnapshot {
   enableTimeReminder: boolean;
   // D-077b:PreferencesStore.kt:155 默认 true(GenerationHandler.kt:736 消费)
@@ -48,6 +59,8 @@ export interface AgentRuntimeSnapshot {
   memoryRecall: MemoryRecallSetting;
   // D-090:PreferencesStore.kt:157 默认 DEFAULT_AGENT_SOUL_MARKDOWN(:272-300)
   agentSoulMarkdown: string;
+  // D-091:PreferencesStore.kt:234-241 ContextCompactionSetting 默认六值
+  contextCompaction: ContextCompactionSnapshot;
   // D-085d:MemoryExtractor.kt:45,69 消费
   memoryWorker: MemoryWorkerGateSnapshot;
 }
@@ -76,8 +89,19 @@ interface MemoryWorkerJson {
   dreamEnabled?: boolean;
 }
 
+// D-091:ContextCompactionSetting(PreferencesStore.kt:234-241)六字段
+interface ContextCompactionJson {
+  enabled?: boolean;
+  notifyOnly?: boolean;
+  precompactRatio?: number;
+  forceRatio?: number;
+  keepRecentTurns?: number;
+  maxSummaryTokens?: number;
+}
+
 interface AgentRuntimeJson {
   agentSoulMarkdown?: string;
+  contextCompaction?: ContextCompactionJson;
   enableTimeReminder?: boolean;
   enableRecentChatsReference?: boolean;
   enableCoreMemory?: boolean;
@@ -101,6 +125,12 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   enableLongTermMemory: true,
   memoryRecall: defaultMemoryRecall(),
   agentSoulMarkdown: DEFAULT_AGENT_SOUL_MARKDOWN,
+  // :235-240 默认 true/false/0.70/0.85/8/2000
+  contextCompaction: {
+    enabled: true, notifyOnly: false,
+    precompactRatio: 0.70, forceRatio: 0.85,
+    keepRecentTurns: 8, maxSummaryTokens: 2000,
+  },
   memoryWorker: {
     enabled: true, extractionEnabled: true, maxDailyRuns: 8,
     dreamMaintenanceEnabled: true, dreamModelEnabled: false,
@@ -144,6 +174,19 @@ const parseMemoryWorker = (raw: MemoryWorkerJson | undefined): MemoryWorkerGateS
   daydreamFollowCompressModel: raw?.daydreamFollowCompressModel !== false,
 });
 
+// :234-241 — 字段缺失/非数 → 各自默认( kotlinx 缺省语义;ratio 不做范围钳制,
+//   Android 同样原样持有)
+const parseContextCompaction = (
+  raw: ContextCompactionJson | undefined,
+): ContextCompactionSnapshot => ({
+  enabled: raw?.enabled !== false,
+  notifyOnly: raw?.notifyOnly === true,
+  precompactRatio: typeof raw?.precompactRatio === 'number' ? raw.precompactRatio : 0.70,
+  forceRatio: typeof raw?.forceRatio === 'number' ? raw.forceRatio : 0.85,
+  keepRecentTurns: typeof raw?.keepRecentTurns === 'number' ? raw.keepRecentTurns : 8,
+  maxSummaryTokens: typeof raw?.maxSummaryTokens === 'number' ? raw.maxSummaryTokens : 2000,
+});
+
 // AgentPrefs.kt:47-51 — 缺失/解析失败 → 默认(enableTimeReminder=false)
 export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
@@ -162,6 +205,7 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
       // kotlinx 缺省→默认(:157);用户显式空串保留(空串 → 不注入,合法意图)
       agentSoulMarkdown: typeof parsed.agentSoulMarkdown === 'string'
         ? parsed.agentSoulMarkdown : DEFAULT_AGENT_SOUL_MARKDOWN,
+      contextCompaction: parseContextCompaction(parsed.contextCompaction),
       memoryWorker: parseMemoryWorker(parsed.memoryWorker),
     };
   } catch {
@@ -238,6 +282,33 @@ export const updateAgentSoulMarkdown = async (
     }
   }
   root.agentSoulMarkdown = value;
+  await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
+  return loadAgentRuntimeSnapshot(kv);
+};
+
+// D-091:contextCompaction 开关写回(Page :536-558 两 Switch →
+//   VM updateAgentRuntime { copy(contextCompaction = ...) })
+export interface ContextCompactionTogglePatch {
+  enabled?: boolean;
+  notifyOnly?: boolean;
+}
+
+export const updateContextCompactionToggles = async (
+  kv: KeyValueStore, patch: ContextCompactionTogglePatch,
+): Promise<AgentRuntimeSnapshot> => {
+  const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
+  let root: AgentRuntimeJson = {};
+  if (raw !== null) {
+    try {
+      root = JSON.parse(raw) as AgentRuntimeJson;
+    } catch {
+      root = {};
+    }
+  }
+  const compaction: ContextCompactionJson = root.contextCompaction ?? {};
+  if (patch.enabled !== undefined) compaction.enabled = patch.enabled;
+  if (patch.notifyOnly !== undefined) compaction.notifyOnly = patch.notifyOnly;
+  root.contextCompaction = compaction;
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
 };

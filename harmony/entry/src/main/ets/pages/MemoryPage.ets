@@ -37,7 +37,8 @@ import type { MemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
 import { getMemoryDreamPlanStore, getMemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import {
-  loadAgentRuntimeSnapshot, updateAgentSoulMarkdown, updateMemoryWorkerToggles,
+  loadAgentRuntimeSnapshot, updateAgentSoulMarkdown, updateContextCompactionToggles,
+  updateMemoryWorkerToggles,
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
@@ -105,6 +106,13 @@ const TEXT_SOUL_LABEL: string = '系统行为 Markdown';
 const TEXT_SOUL_EMPTY_PREVIEW: string = '还没有写入 agents.md 行为准则。';
 const TEXT_SOUL_EDIT_HINT: string = '点击编辑 agents.md';
 const TEXT_SOUL_EDIT_TITLE: string = '编辑 agents.md';
+// 上下文管理(values-zh/strings.xml:599-603 逐字)
+const TEXT_COMPACT_TITLE: string = '自动上下文压缩';
+const TEXT_COMPACT_DESC: string = '长对话接近模型窗口时，自动整理旧内容，不删除原文。';
+const TEXT_COMPACT_DEFAULTS: string =
+  '默认：70% 预压缩，85% 强制压缩，保护最近 8 轮 / 16 条消息。';
+const TEXT_COMPACT_NOTIFY_TITLE: string = '仅提醒不压缩';
+const TEXT_COMPACT_NOTIFY_DESC: string = '只提示上下文压力，不自动写入摘要。';
 
 @Entry
 @Component
@@ -132,6 +140,9 @@ struct MemoryPage {
   @State agentSoul: string = '';
   @State showSoulEditor: boolean = false;
   @State soulDraft: string = '';
+  // 上下文管理(Page :528-568 CompactionSubpage;D-091)
+  @State compactionEnabled: boolean = true;
+  @State compactionNotifyOnly: boolean = false;
 
   aboutToAppear(): void {
     this.refresh();
@@ -153,6 +164,8 @@ struct MemoryPage {
         this.dreamModelEnabled = s.memoryWorker.dreamModelEnabled;
         this.runOnlyOnIdle = s.memoryWorker.runOnlyOnIdle;
         this.agentSoul = s.agentSoulMarkdown;
+        this.compactionEnabled = s.contextCompaction.enabled;
+        this.compactionNotifyOnly = s.contextCompaction.notifyOnly;
       });
     const lib: MemoryLibraryOps = getMemoryLibraryOps();
     lib.listBucket(MEMORY_BUCKET_GLOBAL).then((l: AssistantMemory[]): void => {
@@ -290,6 +303,24 @@ struct MemoryPage {
         this.runOnlyOnIdle = s.memoryWorker.runOnlyOnIdle;
       })
       .catch((e: Error): void => logMemoryDreamOpFailure('toggleRunOnlyOnIdle', e));
+  }
+
+  // ===== D-091:上下文管理开关(Page :536-558 两 Switch)=====
+
+  private onToggleCompaction(v: boolean): void {
+    updateContextCompactionToggles(getChatKvStore(), { enabled: v })
+      .then((s: AgentRuntimeSnapshot): void => {
+        this.compactionEnabled = s.contextCompaction.enabled;
+      })
+      .catch((e: Error): void => logMemoryDreamOpFailure('toggleCompaction', e));
+  }
+
+  private onToggleCompactionNotify(v: boolean): void {
+    updateContextCompactionToggles(getChatKvStore(), { notifyOnly: v })
+      .then((s: AgentRuntimeSnapshot): void => {
+        this.compactionNotifyOnly = s.contextCompaction.notifyOnly;
+      })
+      .catch((e: Error): void => logMemoryDreamOpFailure('toggleCompactionNotify', e));
   }
 
   // ===== D-089:记忆库 CRUD(VM :86-93 + Page :127-149/:254-269)=====
@@ -568,8 +599,27 @@ struct MemoryPage {
     .padding(16).backgroundColor(SURFACE).borderRadius(12)
   }
 
-  // ===== D-089:记忆库三桶(Page :1183-1262 RecordsSection/:1264-1316 MemoryItem)=====
+  // ===== D-091:上下文管理卡(Page :528-568 CompactionSubpage)=====
 
+  @Builder
+  compactionCard() {
+    Column({ space: 14 }) {
+      this.switchItem(
+        TEXT_COMPACT_TITLE,
+        `${TEXT_COMPACT_DESC}\n${TEXT_COMPACT_DEFAULTS}`,
+        this.compactionEnabled,
+        (v: boolean): void => this.onToggleCompaction(v))
+      this.switchItem(
+        TEXT_COMPACT_NOTIFY_TITLE,
+        TEXT_COMPACT_NOTIFY_DESC,
+        this.compactionNotifyOnly,
+        (v: boolean): void => this.onToggleCompactionNotify(v))
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+    .padding(16).backgroundColor(SURFACE).borderRadius(12)
+  }
+
+  // ===== D-089:记忆库三桶(Page :1183-1262 RecordsSection/:1264-1316 MemoryItem)=====
   @Builder
   memoryItem(m: AssistantMemory) {
     Row({ space: 4 }) {
@@ -751,6 +801,7 @@ struct MemoryPage {
             Column({ space: 16 }) {
               this.soulCard()
               this.workerToggleCard()
+              this.compactionCard()
               this.dreamReviewCard()
 
               Column({ space: 8 }) {
