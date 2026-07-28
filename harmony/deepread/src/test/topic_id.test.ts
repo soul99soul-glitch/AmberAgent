@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { deriveTopicId, normalizeUrl, normalizeTitle } from '../main/ets/domain/topic_id_node.ts';
+import { deriveTopicId, normalizeUrl, normalizeTitle } from './topic_id_node.ts';
 
 test('URL input: hash of normalized URL, 32 hex chars', () => {
   const id = deriveTopicId({ url: 'https://example.com/news/123', title: 'ignored' });

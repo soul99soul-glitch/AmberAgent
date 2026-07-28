@@ -6,7 +6,7 @@
 
 // ===== Domain =====
 // ArkTS 安全:topic_id.ts 提供 createTopicIdWithRuntime(注入 runtime)+ normalizeUrlArkTs。
-// deriveTopicId 在 topic_id_node.ts(仅 node 测试,import 'crypto'),ArkTS 不引用。
+// deriveTopicId 在 src/test/topic_id_node.ts(仅 node 测试,import 'crypto'),ArkTS 不引用。
 export { createTopicIdWithRuntime, normalizeTitle, normalizeUrlArkTs } from './domain/topic_id.ts';
 export type { TopicIdRuntime } from './domain/topic_id.ts';
 export type { DeepReadOutput, TimelineEvent, CorePoint, ReadingLink, Perspective, Quote, DeepAnalysis, DeepReadImageAsset, DiagramNode, DiagramEdge, DeepReadDiagram, DeepReadSectionState } from './domain/models.ts';

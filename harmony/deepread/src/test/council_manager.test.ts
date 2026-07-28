@@ -88,7 +88,7 @@ test('cancel: hanging runner → cancelled', async () => {
       calls.push(req);
       return new Promise((_resolve, reject) => {
         if (req.signal !== null) {
-          req.signal.addEventListener('abort', () => { reject(new Error('aborted')); });
+          req.signal.addEventListener!('abort', () => { reject(new Error('aborted')); });
         }
       });
     },
@@ -214,7 +214,7 @@ test('regression: all seats timed_out → synthesize skipped, no garbage verdict
       calls.push(req);
       return new Promise((_resolve, reject) => {
         if (req.signal !== null) {
-          req.signal.addEventListener('abort', () => { reject(new Error('aborted')); });
+          req.signal.addEventListener!('abort', () => { reject(new Error('aborted')); });
         }
       });
     },

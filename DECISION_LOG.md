@@ -114,3 +114,14 @@
 
 
 
+
+## D-014（L0，2026-07-28）OpenAI 请求侧纯逻辑：Provider 模型裁剪、ImageEncoder Port、matcher 简化、node-only 文件出 ets 树
+
+- **背景**：Chat MVP 请求侧切片（基准 = ChatCompletionsAPI.kt buildChatCompletionRequest/buildMessages + ProviderSetting.OpenAI + Request.kt + ProviderMessageUtils.kt）。
+- **决定**：
+  - `ProviderSettingOpenAI`/`TextGenerationParams` **不含 apiKey/customHeaders**：secret 与传输 header 属 adapter 关注点，纯逻辑层只产出请求 body `JsonObject`；也避免密钥进入日志/测试快照（宪章：日志不落 token）。
+  - 图片 base64 编码为注入式 `ImageEncoder` Port（文件 IO 在 adapter）；**未注入或编码失败一律抛错**，忠实对齐 Android `encodeBase64().getOrThrow()` 与 "image encoding failure should fail" 语义——不放空、不吞错。
+  - **ModelRegistry token matcher 简化**：`OPENAI_O_MODELS`(^o$+^\d+$ 双 token)→ `/^o\d+(-|$)/`；`GPT_5` matcher 被 Android 自己的 `startsWith("gpt-5")` 完全覆盖，只保留后者 + `contains("codex")`。边界差异：如 `o1abc`（Android token 化不匹配→允许温度；简化正则同样允许）——已用测试锁定一致口径。
+  - per-host reasoning 矩阵 10 分支逐字迁移（含 SiliconFlow 26 模型名单 verbatim）；`mergeCustomBody` 深合并（同键 JsonObject 递归，否则替换，blank key 跳过）逐字迁移。
+  - **连带修复（提交门堵漏）**：`topic_id_node.ts`（import node 'crypto' + 全局 URL/URLSearchParams）从 `deepread/src/main/ets/domain/` 移至 `src/test/`——文件注释自称"仅 node 测试"，但 `assembleHar` 的 HarCompileArkTS 编译 ets 树全部文件，非引用图可达集；此前门只跑过 `assembleHap`（引用图编译）漏检。本切片起 hvigor 门 = `assembleHar`（全模块）+ `assembleHap` 双绿。另修 `council_manager.test.ts` 2 处存量 TS2722（可选方法 `addEventListener` 缺 `!` 断言，与 D-010 同类）。
+- **可逆性**：纯逻辑层字段增删不影响 wire 格式；matcher 简化仅影响温度/top_p 是否下发，测试锁定。

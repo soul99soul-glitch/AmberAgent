@@ -82,3 +82,21 @@ export {
 export type {
   ConversationRow, MessageNodeRow, ConversationSummary, ConversationRepository,
 } from './chat/persistence.ts';
+
+export {
+  makeChatModel, makeProviderSettingOpenAI, makeTextGenerationParams,
+  reasoningLevelIsEnabled, reasoningLevelEffort, reasoningLevelBudgetTokens,
+} from './chat/provider_model.ts';
+export type {
+  ModelAbility, Modality, ChatModel, ReasoningLevel,
+  OpenAIAuthMode, OpenAIBrand, ProviderSettingOpenAI,
+  ChatToolDefinition, CustomBody, TextGenerationParams,
+} from './chat/provider_model.ts';
+
+export {
+  hostOf, isMiMoProvider, shouldForceReasoningContentForToolCalls, isModelAllowTemperature,
+  groupPartsByToolBoundary, buildMessages, mergeCustomBody, buildChatCompletionRequest,
+} from './chat/openai_request.ts';
+export type {
+  ImageEncoder, PartGroup, BuildMessagesOpts, BuildChatCompletionRequestInput,
+} from './chat/openai_request.ts';

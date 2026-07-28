@@ -3,8 +3,8 @@
 // ArkTS 入口用 topic_id.ts 的 createTopicIdWithRuntime + arkts_shims 注入 runtime。
 
 import { createHash } from 'crypto';
-import { createTopicIdWithRuntime, normalizeUrlArkTs, normalizeTitle } from './topic_id.ts';
-import type { TopicIdRuntime } from './topic_id.ts';
+import { createTopicIdWithRuntime, normalizeUrlArkTs, normalizeTitle } from '../main/ets/domain/topic_id.ts';
+import type { TopicIdRuntime } from '../main/ets/domain/topic_id.ts';
 
 const TRACKING_PARAMS = new Set([
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
