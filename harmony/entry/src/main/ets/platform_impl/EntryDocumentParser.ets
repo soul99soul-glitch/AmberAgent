@@ -1,4 +1,4 @@
-// EntryDocumentParser — 文档解析 entry 适配(D-112/D-113)
+// EntryDocumentParser — 文档解析 entry 适配(D-112/D-113/D-114)
 // Android 基准:document 模块 DocxParser.kt/PptxParser.kt 平台子集
 //   - java.util.zip.ZipFile/ZipInputStream → zip_archive.ts(EOCD+中央目录序,
 //     D-113 起 CD 枚举序忠实;deflate = zlib.inflateInit2 raw 流注入)
@@ -12,7 +12,9 @@ import { zlib } from '@kit.BasicServicesKit';
 import type {
   DocumentFileHandle, XmlPullEvent, XmlPullPort, ZipEntryRecord, ZipEntryTextProvider,
 } from '@amber/chat-domain';
-import { parseDocxFromZip, parsePptxFromZip, readZipEntries, readZipEntryText } from '@amber/chat-domain';
+import {
+  parseDocxFromZip, parseEpubFromZip, parsePptxFromZip, readZipEntries, readZipEntryText,
+} from '@amber/chat-domain';
 
 // ===== XML pull 适配(ParseOptions 回调 → token 流) =====
 
@@ -35,10 +37,13 @@ class EntryXmlPull implements XmlPullPort {
   private idx: number = 0; // 初始 START_DOCUMENT(kxml2 同)
   private tokens: XmlToken[] = [];
 
-  constructor(xmlText: string) {
+  // nsAware:true = kxml2 namespace-aware(本地名);false = 保留限定名
+  //   (EpubParser.kt:104 parseXhtml namespaceAware=false 语义)
+  constructor(xmlText: string, nsAware: boolean = true) {
     const tokens: XmlToken[] = [
       { event: 'start_document', name: '', depth: 0, text: null, attrCount: 0, attrs: new Map() },
     ];
+    const tagName = (name: string): string => nsAware ? localName(name) : name;
     const buf: Uint8Array = util.TextEncoder.create('utf-8').encodeInto(xmlText);
     // 第一遍:事件 token 流(ParseInfo 自带 depth/attrCount)
     const tokenOptions: xml.ParseOptions = {
@@ -47,12 +52,12 @@ class EntryXmlPull implements XmlPullPort {
       tokenValueCallbackFunction: (eventType: xml.EventType, value: xml.ParseInfo): boolean => {
         if (eventType === xml.EventType.START_TAG) {
           tokens.push({
-            event: 'start_tag', name: localName(value.getName()), depth: value.getDepth(),
+            event: 'start_tag', name: tagName(value.getName()), depth: value.getDepth(),
             text: null, attrCount: value.getAttributeCount(), attrs: new Map(),
           });
         } else if (eventType === xml.EventType.END_TAG) {
           tokens.push({
-            event: 'end_tag', name: localName(value.getName()), depth: value.getDepth(),
+            event: 'end_tag', name: tagName(value.getName()), depth: value.getDepth(),
             text: null, attrCount: 0, attrs: new Map(),
           });
         } else if (eventType === xml.EventType.TEXT || eventType === xml.EventType.CDSECT) {
@@ -128,7 +133,10 @@ class EntryXmlPull implements XmlPullPort {
   }
 }
 
-export const createEntryXmlPull = (xmlText: string): XmlPullPort => new EntryXmlPull(xmlText);
+export const createEntryXmlPull = (xmlText: string): XmlPullPort => new EntryXmlPull(xmlText, true);
+
+// EpubParser.kt:104 — parseXhtml namespaceAware=false(保留限定名)
+export const createEntryXmlPullNoNs = (xmlText: string): XmlPullPort => new EntryXmlPull(xmlText, false);
 
 // ===== ZIP 读取(D-113 升级:中央目录序 + raw inflate,取代 D-112 整包解压) =====
 // Java ZipFile 语义:entries() = CD 枚举序;getInputStream(entry) = 单条目解压;
@@ -197,4 +205,11 @@ export const parseDocxEntry = async (handle: DocumentFileHandle): Promise<string
 export const parsePptxEntry = async (handle: DocumentFileHandle): Promise<string> => {
   const bytes: Uint8Array = readFileBytes(handle.absolutePath);
   return await parsePptxFromZip(bytes, inflateRawEntry, createEntryXmlPull);
+};
+
+// EpubParser.kt:16-46 parse(File) 平台段:container/opf/xhtml 三解析在域层;
+//   xhtml 用 no-ns 工厂(namespaceAware=false 逐字)
+export const parseEpubEntry = async (handle: DocumentFileHandle): Promise<string> => {
+  const bytes: Uint8Array = readFileBytes(handle.absolutePath);
+  return await parseEpubFromZip(bytes, inflateRawEntry, createEntryXmlPull, createEntryXmlPullNoNs);
 };

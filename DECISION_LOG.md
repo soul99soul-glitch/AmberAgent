@@ -1559,3 +1559,17 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-074 残余「parse*」之 PPTX 部分 + D-112 整包解压偏差。
 - **未移植(P1 登记)**: EpubParser(231 行,D-114 续);**PdfParser = MuPDF native 平台阻断**(spike 登记);OfficeNativeSwitch 维持不移植。
 - **验证**: chat tsc 干净 + 1118 测试(+16)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-114 — EpubParser 全文移植(document 模块解析器收尾;PDF 平台阻断定案)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: document/EpubParser.kt(231 行全文)
+- **背景**: Docx/Pptx 已落地(D-112/D-113);Epub 为纯 ZIP+XML 三解析(container/opf/xhtml),同 Port 复用即达。PdfParser 依赖 MuPDF(com.artifex.mupdf.fitz)Android native AAR,HarmonyOS 无等价物。
+- **决策**:
+  1. chat HAR epub_parser.ts(+11 测试):container rootfile full-path → opf(manifest 映射 + spine 序)→ xhtml markdown;三缺失文案逐字('Unable to find OPF file in EPUB'/'Unable to read OPF file in EPUB'/'No readable content found in EPUB file');opfDir join(mediaType !contains 'html'/manifest 未命中/条目缺失 → continue);xhtml **namespaceAware=false 语义**(标签保留限定名 → entry 双工厂 createEntryXmlPull/createEntryXmlPullNoNs);li 父栈顶 ol → 共享计数 'N. '(ul 不重置,Android 原样);文本 \n→' ' \r→' ' \s+→' ';**parser.next() try/catch → break 畸形容忍保留**;结果 \n{3,}→'\n\n' + trim;异常 → '' 静默。
+  2. entry:EntryXmlPull += nsAware 构造参(默认 true);parseEpubEntry 接线;DocumentSupport += parseEpub。
+- **偏差/适配登记**: 无新增(no-ns 工厂为语义忠实而非偏差)。
+- **关闭**: D-074 残余「parse*」全部可移植部分(DOCX/PPTX/EPUB)。
+- **未移植(P1 登记)**: **PdfParser = MuPDF native 平台阻断定案** — HarmonyOS 无 MuPDF AAR;纯 ArkTS PDF 文本提取(内容流 Tj/TJ 解析)为独立子系统,需独立 spike 评估投入/保真度;OfficeNativeSwitch 维持不移植。
+- **验证**: chat tsc 干净 + 1129 测试(+11)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

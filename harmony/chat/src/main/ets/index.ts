@@ -498,6 +498,11 @@ export { extractZipEntryData, readZipEntries, readZipEntryText } from './chat/zi
 export type { InflateRawPort, ZipEntryRecord } from './chat/zip_archive.ts';
 export { parsePptxFromZip, parsePptxNotesXml, parsePptxSlideXml } from './chat/pptx_parser.ts';
 
+// ===== D-114:EpubParser 全文 =====
+export {
+  parseEpubContainerXml, parseEpubFromZip, parseEpubOpfXml, parseEpubXhtml,
+} from './chat/epub_parser.ts';
+
 // ===== D-111:视觉健康探测 + 图片附件发送守卫 =====
 //   (VisionModelHealthChecker.kt / ImageAttachmentValidator.kt 全文)
 export {
