@@ -127,3 +127,68 @@ test('chunk containing only [DONE] without data prefix does not parse as done', 
   const events = a.feed(enc('[DONE]\n\n'));
   assert.equal(events.length, 0, 'bare [DONE] without data: prefix is ignored');
 });
+
+// ===== event:/id:/注释/retry 语义(对齐 STREAMING_SEMANTICS_MATRIX;Claude/Responses 依赖 event 字段) =====
+
+test('event: field is captured on SseEvent.event', () => {
+  const a = new SseAssembler();
+  const events = a.feed(enc('event: content_block_delta\ndata: {"type":"text_delta"}\n\n'));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, 'content_block_delta');
+  assert.equal(events[0].data, '{"type":"text_delta"}');
+});
+
+test('missing event: field leaves event undefined', () => {
+  const a = new SseAssembler();
+  const events = a.feed(enc('data: {"v":1}\n\n'));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, undefined);
+});
+
+test('id: field is passed through on SseEvent.id', () => {
+  const a = new SseAssembler();
+  const events = a.feed(enc('id: msg_42\nevent: message_start\ndata: {"id":"msg_42"}\n\n'));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].id, 'msg_42');
+  assert.equal(events[0].event, 'message_start');
+});
+
+test('comment lines (: prefix) are ignored, not dispatched', () => {
+  const a = new SseAssembler();
+  // 纯注释块(如 Claude ping 的 ":" 心跳)不应产生事件
+  const r1 = a.feed(enc(': heartbeat\n\n'));
+  assert.equal(r1.length, 0);
+  // 注释混在数据块中被忽略
+  const r2 = a.feed(enc(': comment\ndata: {"v":2}\n\n'));
+  assert.equal(r2.length, 1);
+  assert.equal(r2[0].data, '{"v":2}');
+});
+
+test('retry: field is ignored (no auto-reconnect)', () => {
+  const a = new SseAssembler();
+  const events = a.feed(enc('retry: 3000\ndata: {"v":3}\n\n'));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].data, '{"v":3}');
+});
+
+test('event-only block (no data:) is dropped', () => {
+  const a = new SseAssembler();
+  const events = a.feed(enc('event: ping\n\n'));
+  assert.equal(events.length, 0, 'block without data: produces no event');
+});
+
+test('[DONE] with event: field still marks done', () => {
+  const a = new SseAssembler();
+  const events = a.feed(enc('event: message_stop\ndata: [DONE]\n\n'));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].done, true);
+  assert.equal(events[0].event, 'message_stop');
+});
+
+test('multi-line data with event: field joins with newline', () => {
+  const a = new SseAssembler();
+  const events = a.feed(enc('event: response.output_text.delta\ndata: {"a":\ndata: 1}\n\n'));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, 'response.output_text.delta');
+  assert.equal(events[0].data, '{"a":\n1}');
+});

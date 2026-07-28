@@ -7,6 +7,10 @@
 export interface SseEvent {
   data: string;
   done: boolean;
+  // event: 字段(Claude content_block_*/Responses response.* 依赖;Chat Completions/Gemini 不用)
+  event?: string;
+  // id: 字段,仅透传(Android okhttp reader 同语义,无业务使用)
+  id?: string;
 }
 
 // 解码器类型:把 ArrayBuffer 转 UTF-8 字符串
@@ -76,10 +80,21 @@ export class SseAssembler {
 const parseSseBlock = (raw: string): SseEvent | null => {
   const lines = raw.split(/\r?\n/);
   const dataParts: string[] = [];
+  let eventName: string | undefined;
+  let eventId: string | undefined;
   for (const line of lines) {
+    if (line.startsWith(':')) {
+      // 注释行(含心跳 ": heartbeat"):忽略,不分派(对齐 okhttp reader / Codex 手写解析器)
+      continue;
+    }
     if (line.startsWith('data:')) {
       dataParts.push(line.slice(5).trimStart());
+    } else if (line.startsWith('event:')) {
+      eventName = line.slice(6).trimStart();
+    } else if (line.startsWith('id:')) {
+      eventId = line.slice(3).trimStart();
     }
+    // retry: 及其他未知字段:忽略,不自动重连(对齐 SSE.kt:114)
   }
   if (dataParts.length === 0) return null;
   const data = dataParts.join('\n');
@@ -89,9 +104,9 @@ const parseSseBlock = (raw: string): SseEvent | null => {
     stripped = stripped.slice(5).trimStart();
   }
   if (stripped === '[DONE]' || stripped === '[DONE]\n') {
-    return { data: '[DONE]', done: true };
+    return { data: '[DONE]', done: true, event: eventName, id: eventId };
   }
-  return { data: stripped, done: false };
+  return { data: stripped, done: false, event: eventName, id: eventId };
 };
 
 // 便利函数:把 RCP onReceiveDataBlock 回调适配成 SseEvent 流
