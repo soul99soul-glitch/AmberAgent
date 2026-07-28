@@ -1284,3 +1284,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: PD-007 附件移除清理接线(消息级)。
 - **未移植(P1 登记)**: composer removePart 清理(ChatInputAttachments.kt:126-131,依附输入附件移除 UI)/checkUserAvatarDelete(ChatVM.kt:213-221,依附头像设置面)/window 合并(mergeConversationWindowIntoFull,依附分页加载——harmony 恒全量,N/A)。
 - **验证**: chat tsc 干净 + 1046 测试(+3)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-098 — OCR 设置面(ocr_model/ocr_prompt 写路径 + 视觉识别行)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingModelPage.kt:511-553(DefaultOcrModelSetting)/ChatPrefs.kt:80,83,98,102/PreferencesKeys.kt:34-35/values-zh/strings.xml:913-915
+- **背景**: D-071b 落地 OCR 读侧与三路径生成接线,但 ocr_model/ocr_prompt 无写路径无 UI——视觉回退模型与提示词用户不可配(PD-006 残余「设置面 OCR UI」)。
+- **决策**:
+  1. OcrSupport.ets:saveOcrModelId/saveOcrPrompt(kv.put 直存,ChatPrefs writeTo 语义;OCR 行无 onClear——Android allowClear=false)。
+  2. ChatTaskModelPickerPage 增 task 'ocr':按 preferredInputModality=IMAGE 过滤(:533,inputModalities 含 'image' 才列出);当前选中 = getOcrModelId(未配置 = random uuid → 无选中行,:80 逐字);pick → saveOcrModelId。
+  3. ChatTaskModelsPage 增'视觉识别模型'卡(desc strings.xml:914 逐字;无清除按钮;未配置显示'未配置')+ 提示词 overlay 扩展:draft = resolveVisionRecognitionPrompt(ocrPrompt)(:543 逐字),vars '变量：图片数据：{images}'(:915 逐字),reset → DEFAULT_OCR_PROMPT(:547-549),保存 → saveOcrPrompt。
+- **偏差/适配登记**: VisionModelHealthChecker 健康探测(:517-525,desc '· {label}' 后缀)未移植——真实网络探测,依附设备档验证,P1 登记;未配置态显示'未配置'(Android ModelSelector 空标签,显示档)。
+- **关闭**: PD-006 残余「设置面 OCR UI」。
+- **未移植(P1 登记)**: VisionModelHealthChecker 探测/生成守卫(PD-006 其余残余)。
+- **验证**: chat tsc 干净 + 1046 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

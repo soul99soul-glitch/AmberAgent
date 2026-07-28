@@ -56,6 +56,16 @@ export const getOcrModelId = async (kv: KeyValueStore): Promise<string> => {
 export const getOcrPrompt = async (kv: KeyValueStore): Promise<string> =>
   (await kv.get(OCR_PROMPT_KEY)) ?? DEFAULT_OCR_PROMPT;
 
+// ===== D-098:写路径(SettingModelPage.kt:534-537 onSelect/:543-548 onPromptChange/onReset)=====
+// ChatPrefs.kt:98/:102 writeTo 直存语义;无 onClear(OCR 行 allowClear=false)
+export const saveOcrModelId = async (kv: KeyValueStore, uuid: string): Promise<void> => {
+  await kv.put(OCR_MODEL_KEY, uuid);
+};
+
+export const saveOcrPrompt = async (kv: KeyValueStore, value: string): Promise<void> => {
+  await kv.put(OCR_PROMPT_KEY, value);
+};
+
 // ===== vision_cache 单例(OcrTransformer.kt:32-46;store 异常吞咽) =====
 
 const visionCachePath = (): string => {

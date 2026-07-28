@@ -12,6 +12,7 @@ import { router } from '@kit.ArkUI';
 import {
   loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
+  DEFAULT_OCR_PROMPT, resolveVisionRecognitionPrompt,
 } from '@amber/chat-domain';
 import type { ProviderSetting, ProviderModel } from '@amber/chat-domain';
 import {
@@ -22,6 +23,9 @@ import {
   TASK_TITLE_PROMPT_KEY, TASK_SUGGESTION_PROMPT_KEY, TASK_COMPRESS_PROMPT_KEY,
 } from '../di/AppContainer.ets';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
+import {
+  getOcrModelId, getOcrPrompt, saveOcrPrompt,
+} from '../platform_impl/OcrSupport.ets';
 import {
   loadAgentRuntimeSnapshot, updateMemoryWorkerModels, AgentRuntimeSnapshot,
   MemoryWorkerModelPatch,
@@ -56,9 +60,12 @@ struct ChatTaskModelsPage {
     suggestionPrompt: DEFAULT_SUGGESTION_PROMPT,
     compressPrompt: DEFAULT_COMPRESS_PROMPT,
   };
-  // 提示词编辑 overlay('' = 关闭)
+  // 提示词编辑 overlay('' = 关闭;'ocr' = 视觉识别提示词,D-098)
   @State editingPrompt: string = '';
   @State promptDraft: string = '';
+  // D-098:OCR(ChatPrefs.kt:80,83 — 未配置 = random uuid;prompt 缺失 → DEFAULT)
+  @State ocrUuid: string = '';
+  @State ocrPromptRaw: string = DEFAULT_OCR_PROMPT;
 
   aboutToAppear(): void {
     this.refresh();
@@ -92,6 +99,9 @@ struct ChatTaskModelsPage {
     this.titleFallback = titleChoice !== null ? titleChoice.model.displayName : '';
     this.suggestionFallback = suggChoice !== null ? suggChoice.model.displayName : '';
     this.compressFallback = compChoice !== null ? compChoice.model.displayName : '';
+    // D-098:OCR 设置面读侧(D-071b 同函数)
+    this.ocrUuid = await getOcrModelId(kv);
+    this.ocrPromptRaw = await getOcrPrompt(kv);
     this.loaded = true;
   }
 
@@ -126,8 +136,11 @@ struct ChatTaskModelsPage {
   }
 
   private openPromptEditor(task: string): void {
+    // D-098:ocr 展示 resolveVisionRecognitionPrompt(settings.ocrPrompt)(:543 逐字)
     this.promptDraft = task === 'title' ? this.prompts.titlePrompt
-      : task === 'suggestion' ? this.prompts.suggestionPrompt : this.prompts.compressPrompt;
+      : task === 'suggestion' ? this.prompts.suggestionPrompt
+        : task === 'compress' ? this.prompts.compressPrompt
+          : resolveVisionRecognitionPrompt(this.ocrPromptRaw);
     this.editingPrompt = task;
   }
 
@@ -140,21 +153,33 @@ struct ChatTaskModelsPage {
   private promptDefault(): string {
     return this.editingPrompt === 'title' ? DEFAULT_TITLE_PROMPT
       : this.editingPrompt === 'suggestion' ? DEFAULT_SUGGESTION_PROMPT
-        : DEFAULT_COMPRESS_PROMPT;
+        : this.editingPrompt === 'compress' ? DEFAULT_COMPRESS_PROMPT
+          : DEFAULT_OCR_PROMPT;
   }
 
-  // ModelPromptSheet onPromptChange → updateSettings(:461-463/:500-502/:583-585)
+  // ModelPromptSheet onPromptChange → updateSettings(:461-463/:500-502/:583-585/:544-546)
   private savePrompt(): void {
+    if (this.editingPrompt === 'ocr') {
+      saveOcrPrompt(getChatKvStore(), this.promptDraft).then((): void => {
+        this.editingPrompt = '';
+        this.refresh();
+      });
+      return;
+    }
     saveTaskPrompt(this.promptKey(), this.promptDraft).then((): void => {
       this.editingPrompt = '';
       this.refresh();
     });
   }
 
-  // onReset → DEFAULT_*_PROMPT(:464-466/:503-505/:586-588)
+  // onReset → DEFAULT_*_PROMPT(:464-466/:503-505/:586-588/:547-549)
   private resetPrompt(): void {
     const def: string = this.promptDefault();
     this.promptDraft = def;
+    if (this.editingPrompt === 'ocr') {
+      saveOcrPrompt(getChatKvStore(), def).then((): void => { this.refresh(); });
+      return;
+    }
     saveTaskPrompt(this.promptKey(), def).then((): void => { this.refresh(); });
   }
 
@@ -216,7 +241,8 @@ struct ChatTaskModelsPage {
       Column() {
         Row() {
           Text(this.editingPrompt === 'title' ? '标题总结模型'
-            : this.editingPrompt === 'suggestion' ? '聊天建议模型' : '压缩模型')
+            : this.editingPrompt === 'suggestion' ? '聊天建议模型'
+              : this.editingPrompt === 'compress' ? '压缩模型' : '视觉识别模型')
             .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
           Blank()
           Text('重置为默认')
@@ -227,7 +253,9 @@ struct ChatTaskModelsPage {
 
         Text(this.editingPrompt === 'compress'
           ? '变量：{content}、{target_tokens}、{additional_context}'
-          : '变量: 对话内容: {content}, 语言: {locale}')
+          : this.editingPrompt === 'ocr'
+            ? '变量：图片数据：{images}'
+            : '变量: 对话内容: {content}, 语言: {locale}')
           .fontSize(11).fontColor(INK3).margin({ top: 8 })
 
         TextArea({ text: this.promptDraft })
@@ -321,6 +349,14 @@ struct ChatTaskModelsPage {
                   : '',
                 !(this.daydreamFollow && this.followsChat(this.daydreamUuid)), '恢复跟随压缩模型',
                 'daydream', false, true)
+
+              // 视觉识别模型(:511-553;D-098)— 无 allowClear;IMAGE 模态过滤在 picker;
+              //   健康探测(VisionModelHealthChecker)未移植(P1 登记) → desc 无健康后缀
+              this.taskCard('视觉识别模型',
+                '当前聊天模型不能直接读取图片时，用它理解图片内容',
+                this.selectedName(this.ocrUuid).length > 0 ? this.selectedName(this.ocrUuid) : '未配置',
+                '',
+                false, '', 'ocr', true, false)
             }
             .width('100%').padding({ bottom: 24 })
           }

@@ -15,6 +15,7 @@ import {
 import {
   loadAgentRuntimeSnapshot, updateMemoryWorkerModels, AgentRuntimeSnapshot,
 } from '../platform_impl/AgentRuntimePrefs.ets';
+import { getOcrModelId, saveOcrModelId } from '../platform_impl/OcrSupport.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -39,6 +40,7 @@ const TASK_TITLES: Record<string, string> = {
   'compress': '压缩模型',
   'worker': '记忆提取模型',
   'daydream': 'Daydream 模型',
+  'ocr': '视觉识别模型',
 };
 
 @Entry
@@ -62,6 +64,11 @@ struct ChatTaskModelPickerPage {
         for (const p of providers) {
           if (p.models.length > 0 && hasUsableAuth(p)) {
             for (const m of p.models) {
+              // D-098:ocr 任务按 preferredInputModality=IMAGE 过滤
+              //   (SettingModelPage.kt:533;无 image 输入模态的模型不可做视觉识别)
+              if (this.task === 'ocr' && m.inputModalities.indexOf('image') < 0) {
+                continue;
+              }
               usable.push({
                 providerName: p.name,
                 providerType: p.type,
@@ -88,6 +95,11 @@ struct ChatTaskModelPickerPage {
           markSelected(this.task === 'worker'
             ? snap.memoryWorker.modelId : snap.memoryWorker.daydreamModelId);
         });
+      } else if (this.task === 'ocr') {
+        // ChatPrefs.kt:80 — 未配置 = random uuid(必不命中 → 无选中行)
+        getOcrModelId(getChatKvStore()).then((uuid: string): void => {
+          markSelected(uuid);
+        });
       } else {
         loadTaskModelIds().then((ids: TaskModelIds): void => {
           const uuid: string = this.task === 'title' ? ids.titleModelId
@@ -109,6 +121,8 @@ struct ChatTaskModelPickerPage {
       updateMemoryWorkerModels(getChatKvStore(), {
         daydreamModelId: row.modelUuid, daydreamFollowCompressModel: false,
       }).then((): void => { done(); });
+    } else if (this.task === 'ocr') {
+      saveOcrModelId(getChatKvStore(), row.modelUuid).then((): void => { done(); });
     } else {
       const key: string = this.task === 'title' ? TASK_TITLE_MODEL_KEY
         : this.task === 'suggestion' ? TASK_SUGGESTION_MODEL_KEY : TASK_COMPRESS_MODEL_KEY;
