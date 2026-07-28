@@ -1365,3 +1365,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 「动态 system prompt blocks」全链(存储 → 管理 CRUD → 助手挂接 → 运行注入 D-075)用户可达;审计行「动态 system prompt blocks」。
 - **未移植(P1 登记)**: quickMessages 子系统/skills 子系统(两 tab)/注入导入导出 picker。
 - **验证**: chat tsc 干净 + 1054 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-103 — daydreamReasoningLevel 数据链(默认 HIGH → dream Planner generateText)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: MemoryModels.kt:142(MemoryWorkerSetting.daydreamReasoningLevel 默认 HIGH)/MemoryDreamPlanner.kt:94-97(TextGenerationParams 第二参)/Reasoning.kt:7-30(七值 SerialName 小写)
+- **背景**: D-085f/D-087 登记的残余:dream Planner 的 generateText 以最小参 model-only 调用,Android 第二参 reasoningLevel=worker.daydreamReasoningLevel 未移植。
+- **决策**:
+  1. AgentRuntimePrefs:MemoryWorkerGateSnapshot/MemoryWorkerJson += daydreamReasoningLevel;解析 = 合法七值('off'/'auto'/'low'/'medium'/'high'/'xhigh'/'max')原样,缺失/非法 → 'high'(:142 默认;kotlinx 非法枚举整体 rescue → AgentRuntimeSetting() 同样 HIGH,字段宽容等价);默认快照 += 'high'。
+  2. MemoryDreamOps.generateText:makeTextGenerationParams += reasoningLevel: worker.daydreamReasoningLevel(Planner.kt:95 逐字)。
+  3. 核实:Android 无设置 UI 暴露该字段(全仓仅 Planner.kt:95 消费)→ 仅数据链,无设置面;线格式经 updateMemoryWorkerModels RMW 自然透传(未知字段保留)。
+- **偏差/适配登记**: 无新增(字段宽容解析延续既有先例)。
+- **关闭**: D-087 登记「daydreamReasoningLevel 未移植」。
+- **未移植(P1 登记)**: 无(该字段链完整)。
+- **验证**: chat tsc 干净 + 1054 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

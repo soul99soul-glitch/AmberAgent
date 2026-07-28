@@ -6,7 +6,7 @@
 // 裁剪:其余 agentRuntime 字段(autoApproveAllToolCalls/推测执行/compact 等
 //   设置面)= P1 已登记,本文件仅承载 D-072 所需快照
 import { i18n } from '@kit.LocalizationKit';
-import type { KeyValueStore, MemoryRecallSetting } from '@amber/chat-domain';
+import type { KeyValueStore, MemoryRecallSetting, ReasoningLevel } from '@amber/chat-domain';
 import { DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
 import { DEFAULT_AGENT_SOUL_MARKDOWN, DEFAULT_MEMORY_RECALL_SETTING } from '@amber/chat-domain';
 
@@ -34,6 +34,8 @@ export interface MemoryWorkerGateSnapshot {
   followCompressModel: boolean;
   daydreamModelId: string;
   daydreamFollowCompressModel: boolean;
+  // D-103:MemoryModels.kt:142(默认 HIGH;Planner.kt:95 消费)
+  daydreamReasoningLevel: ReasoningLevel;
 }
 
 // D-091:ContextCompactionSetting(PreferencesStore.kt:234-241)—
@@ -84,6 +86,7 @@ interface MemoryWorkerJson {
   followCompressModel?: boolean;
   daydreamModelId?: string;
   daydreamFollowCompressModel?: boolean;
+  daydreamReasoningLevel?: string;
   // 旧 Daydream 开关别名(SettingsAggregator.kt:542-553 迁移:
   //   dreamModelEnabled ||= dreamEnabled,写回时 dreamEnabled=false)
   dreamEnabled?: boolean;
@@ -137,6 +140,7 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
     runOnlyOnIdle: true, runOnlyOnCharging: true, dreamMaxDailyRuns: 1,
     modelId: DEFAULT_AUTO_MODEL_ID, followCompressModel: true,
     daydreamModelId: DEFAULT_AUTO_MODEL_ID, daydreamFollowCompressModel: true,
+    daydreamReasoningLevel: 'high',
   },
 });
 
@@ -172,7 +176,21 @@ const parseMemoryWorker = (raw: MemoryWorkerJson | undefined): MemoryWorkerGateS
   daydreamModelId: typeof raw?.daydreamModelId === 'string' && raw.daydreamModelId.length > 0
     ? raw.daydreamModelId : DEFAULT_AUTO_MODEL_ID,
   daydreamFollowCompressModel: raw?.daydreamFollowCompressModel !== false,
+  // :142 默认 HIGH;非法值 → 默认(字段宽容先例;kotlinx 非法枚举整体 rescue
+  //   → AgentRuntimeSetting() 同样 HIGH,等价)
+  daydreamReasoningLevel: parseReasoningLevel(raw?.daydreamReasoningLevel),
 });
+
+const REASONING_LEVELS: ReasoningLevel[] = [
+  'off', 'auto', 'low', 'medium', 'high', 'xhigh', 'max',
+];
+
+const parseReasoningLevel = (raw: string | undefined): ReasoningLevel => {
+  if (raw !== undefined && REASONING_LEVELS.indexOf(raw as ReasoningLevel) >= 0) {
+    return raw as ReasoningLevel;
+  }
+  return 'high';
+};
 
 // :234-241 — 字段缺失/非数 → 各自默认( kotlinx 缺省语义;ratio 不做范围钳制,
 //   Android 同样原样持有)
@@ -275,6 +293,7 @@ export interface MemoryWorkerModelPatch {
   followCompressModel?: boolean;
   daydreamModelId?: string;
   daydreamFollowCompressModel?: boolean;
+  daydreamReasoningLevel?: string;
 }
 
 export const updateMemoryWorkerModels = async (

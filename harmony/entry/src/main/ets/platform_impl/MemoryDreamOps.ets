@@ -7,10 +7,10 @@
 //     五分支链 → D-087 task_model.daydreamModelCandidates 已移植)
 // 存储面 = MemoryStore.ets getMemoryDreamStoreOps/getMemoryDreamPlanStore;
 // 模型面 = AppContainer 任务模型链(daydreamModelCandidates → resolveTaskModelChain)。
-// 偏差(延续 D-087 登记):daydreamReasoningLevel 未移植 → generateText 最小参
-//   model-only(Android 第二参缺省 ReasoningLevel 默认值差异,P1 随设置面);
-//   resolveDaydreamModel 的 findProvider 失败支在 entry 不可达(choice 捆绑
-//   provider+model,choice null ⇔ Android 任一 ?: return null)。
+// 偏差(延续 D-087 登记):resolveDaydreamModel 的 findProvider 失败支在 entry
+//   不可达(choice 捆绑 provider+model,choice null ⇔ Android 任一 ?: return null)。
+// D-103:daydreamReasoningLevel 已接线(快照解析默认 HIGH;Android 无设置 UI,
+//   仅数据链)。
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   MemoryCandidate, MemoryCandidateOpsDeps, MemoryDaydreamModelResolution,
@@ -82,10 +82,13 @@ export const loadMemoryDreamPlanOpDeps = async (): Promise<MemoryDreamPlanOpDeps
       if (choice === null) throw new Error('no daydream model');
       const api: OpenAIChatApi = buildProviderApi(choice.provider, {});
       // TextGenerationParams(model, reasoningLevel=daydreamReasoningLevel)
-      //   (Planner.kt:94-97)— daydreamReasoningLevel 未移植(P1),最小参 model-only
+      //   (Planner.kt:94-97)— D-103 接线(MemoryModels.kt:142 默认 HIGH)
       const chunk: MessageChunk = await api.generateText(
         [makeUserMessage(prompt)],
-        makeTextGenerationParams({ model: toChatModel(choice.model) }),
+        makeTextGenerationParams({
+          model: toChatModel(choice.model),
+          reasoningLevel: worker.daydreamReasoningLevel,
+        }),
       );
       // :98 response.choices.firstOrNull()?.message?.toText().orEmpty()
       const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
