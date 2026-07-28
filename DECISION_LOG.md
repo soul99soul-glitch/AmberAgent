@@ -813,3 +813,14 @@
   - **ChatPage 链序**:[timeReminder, template, placeholder, ocr](Android 相对序忠实:TimeReminder 1 < Placeholder 4 < Ocr 6;template 为 D-016 既有位);userNickname 快照 aboutToAppear 加载。
   - **TDD 7 测试**:13 键序/双形态+大小写+全替换/$ 字面+链式顺序/blank 回退三键/全键映射/transform text 替换+非 text 不动+全量 copy/正则元字符安全。
 - **可逆性**:1429 测试全绿(deepread 603 + chat 826),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。input 链残余:PromptInjection/MiniAppPrompt/DocumentAsPrompt = P1。
+
+## D-074（L0，2026-07-28）DocumentAsPromptTransformer + DocumentReader entry — input 链第三片
+
+- **背景**：ChatService.kt:175 链位。Android 锚点：DocumentAsPromptTransformer.kt(全文 144 行)。
+- **决定**：
+  - **document_transformer(HAR)**:transform 全文忠实 — document parts 逐个 readDocumentContent → buildDocumentPrompt → add(0) 前插(逆序效果,测试锁定);恒量 copy 无短路。**prompt 模板 quirk 钉住**:trimMargin() 无 '|' → 18 空格缩进原样保留(cat -e 核实字节),空行 → ''(首 '\n' 起、尾 18 空格行 → '');readDocumentContent 错误文案逐字('[ERROR, invalid file uri/not found(含 isFile=false 同文案)/file too large to inline (N bytes)/failed to read file]');64MB/512K 常量;mime 四分发;文本截断标记逐字;二进制占位 appendLine 全文逐字(含尾换行);isLikelyTextFile text/* + 41 扩展名集(substringAfterLast 空串语义)。
+  - **DocumentReaderDeps Port**:statFile(非法 uri → null)/readTextFile(MAX+1 上限)/parsePdf/Docx/Pptx/Epub 可选 — **entry 刻意不提供**(document 模块未移植,P1 登记)→ HAR 抛错走 '[ERROR, failed to read file]'(与 Android 解析失败同文案路径);OfficeNativeSwitch 不移植。
+  - **DocumentSupport.ets(entry)**:非 file scheme → null(toUri().toFile() 抛错语义);fileIo.statSync 映射 exists/isFile(S_IFMT&S_IFREG)/size/path;stat 失败 → exists=false(File("") 语义);整读 + UTF-8 decode + substring 截断(bufferedReader 语义等价)。
+  - **ChatPage 链序**:[timeReminder, template, placeholder, document, ocr](Android 相对序 1<4<5<6 忠实)。
+  - **TDD 7 测试**:常量+41 扩展集(含 '.hidden'/无点边界)/三错误文案+isFile=false/too large 字节数/四 mime 分发+未提供 parser+parser 抛错/readTextFile 上限+截断标记逐字/二进制占位逐字/prompt 模板 18 空格+首尾换行/transform add(0) 逆序+恒量 copy。
+- **可逆性**:1436 测试全绿(deepread 603 + chat 833),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。input 链残余:PromptInjection/MiniAppPrompt = P1(MiniApp 依附 webmount 未移植)。

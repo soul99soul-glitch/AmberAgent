@@ -494,3 +494,12 @@ export {
   replacePlaceholders, resolvePlaceholderValue,
 } from './chat/placeholder_transformer.ts';
 export type { PlaceholderValues } from './chat/placeholder_transformer.ts';
+
+// ===== D-074:文档内联 prompt(DocumentAsPromptTransformer.kt 全文) =====
+export {
+  MAX_INLINE_FILE_BYTES, MAX_INLINE_TEXT_CHARS, buildDocumentPrompt,
+  createDocumentTransformer, isLikelyTextFile, readDocumentContent,
+} from './chat/document_transformer.ts';
+export type {
+  DocumentFileHandle, DocumentReaderDeps,
+} from './chat/document_transformer.ts';
