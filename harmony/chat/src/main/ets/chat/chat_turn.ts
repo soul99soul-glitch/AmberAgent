@@ -17,6 +17,7 @@ import { makeUserMessage } from './message.ts';
 import type { MessageChunk, UIMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
 import type { Assistant } from './assistant.ts';
+import { assembleInternalMessages } from './context_assembly.ts';
 import type {
   MessageTransformer, OutputMessageTransformer, TransformerContext,
 } from './transformer_pipeline.ts';
@@ -60,6 +61,9 @@ export interface ChatTurnDeps {
   outputTransformers: OutputMessageTransformer[];
   provider: ChatStreamProvider;
   store: ConversationStore;
+  // 上下文组装(D-018):agentSoul 静态块前缀;contextMessageSize 截断(0=不截断)
+  agentSoul?: string;
+  contextMessageSize?: number;
   // 流式 UI 刷新节流(Android STREAM_UI_FLUSH_INTERVAL_MS);0 = 每个 chunk 都刷新
   flushIntervalMs?: number;
   nowMs?: () => number;
@@ -82,8 +86,16 @@ export const runChatTurn = async (
   const baseMessages: UIMessage[] = currentMessages(conv);
   const ctx: TransformerContext = { assistant: deps.assistant };
 
-  // 2. input transforms(作用于发往 provider 的副本,不污染会话本体)
-  const internalMessages: UIMessage[] = applyInputTransformers(baseMessages, deps.inputTransformers, ctx);
+  // 2. 上下文组装(system 前置 + 截断,D-018)→ input transforms(次序对齐
+  //    GenerationHandler:434-446:先 [system]+preparedContext 再 transforms);
+  //    均作用于发往 provider 的副本,不污染会话本体
+  const assembled: UIMessage[] = assembleInternalMessages({
+    messages: baseMessages,
+    assistant: deps.assistant,
+    agentSoul: deps.agentSoul ?? '',
+    contextMessageSize: deps.contextMessageSize ?? 0,
+  });
+  const internalMessages: UIMessage[] = applyInputTransformers(assembled, deps.inputTransformers, ctx);
 
   // 3. provider 流式 → accumulator;节流 onUpdate 带 streamingTail visual
   const accumulator = new MessageStreamAccumulator(baseMessages);

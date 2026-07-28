@@ -29,7 +29,7 @@ build_and_test:
   单元测试: "cd harmony/deepread && npm test; cd harmony/chat && npm test  # node+tsx,无需设备"
   类型检查: "cd harmony/deepread 类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)"类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)" npx tsc --noEmit; cd harmony/chat 类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)"类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)" npx tsc --noEmit  # 双 HAR(D-010/D-014)"
   构建: "cd harmony && hvigorw assembleHar --mode module -p product=default && hvigorw assembleHap --mode module -p product=default  # 双绿门(D-014)"
-  最近验证: "2026-07-28 deepread 603 + chat 188 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL"
+  最近验证: "2026-07-28 deepread 603 + chat 189 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL"
   fixture校验: "node scripts/harmony-inventory/validate-harmony-fixtures.mjs"
   契约校验: "node scripts/harmony-inventory/check-source-contracts.mjs"
 
@@ -61,6 +61,6 @@ next_slices:                      # 按优先级,取最高未阻塞项
     内容: "DECISION_PACKET_001 人工确认(9 项决策)"
 
 parity_baseline:
-  单元测试总数: 791               # deepread 603 + chat 188
+  单元测试总数: 792               # deepread 603 + chat 189
   已知行为偏差: 6                # 详见 PARITY_DEBT.md PD-001..006(+1 条 Android 内部不一致待核实)
   决策记录: "DECISION_LOG.md D-001..D-018"

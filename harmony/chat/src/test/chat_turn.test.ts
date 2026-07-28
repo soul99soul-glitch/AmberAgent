@@ -22,10 +22,10 @@ import type { Assistant } from '../main/ets/chat/assistant.ts';
 import {
   createTemplateTransformer, thinkTagTransformer,
 } from '../main/ets/chat/transformers.ts';
-import { makeConversation, currentMessages } from '../main/ets/chat/conversation.ts';
+import { makeConversation, currentMessages, toMessageNode } from '../main/ets/chat/conversation.ts';
 import type { Conversation } from '../main/ets/chat/conversation.ts';
 import type { MessageChunk, UIMessage } from '../main/ets/chat/message.ts';
-import { toText, reasoningPartText } from '../main/ets/chat/message.ts';
+import { toText, reasoningPartText, makeUserMessage, makeAssistantMessage } from '../main/ets/chat/message.ts';
 
 const chunkOf = (text: string): MessageChunk => ({
   id: 'c', model: 'm',
@@ -148,4 +148,29 @@ test('chatTurn: provider 零 chunk → 不追加空 assistant 节点', async () 
   const store = createMemoryConversationStore();
   const out = await runChatTurn(conv, 'q', baseDeps(makeAssistant({}), provider, store));
   assert.equal(out.messageNodes.length, 1, '只有 user 节点');
+});
+
+test('chatTurn: 上下文组装 — system 前置 + 截断 + 模板在组装后套用(D-018 次序)', async () => {
+  const history = [makeUserMessage('m1'), makeAssistantMessage('a1'), makeUserMessage('m2')];
+  const conv: Conversation = makeConversation('conv1', history.map(toMessageNode), { title: 't' });
+  const provider = fakeProvider([[chunkOf('ok')]]);
+  const store = createMemoryConversationStore();
+  const assistant = makeAssistant({ systemPrompt: 'SP', messageTemplate: '包:{{message}}' });
+  const deps = {
+    ...baseDeps(assistant, provider, store),
+    inputTransformers: [createTemplateTransformer()],
+    contextMessageSize: 2,
+  };
+  const out = await runChatTurn(conv, 'm3', deps);
+
+  const seen = (provider as FakeProvider).seenMessages[0];
+  assert.equal(seen.length, 3, 'system + 截断后 2 条');
+  assert.equal(seen[0].role, 'system');
+  // TemplateTransformer 对每条消息的 text part 都套模板(TemplateTransformer.kt:26-39,含 system)
+  assert.equal(toText(seen[0]), '包:SP');
+  assert.equal(toText(seen[1]), '包:m2', '截断保留末尾 2 条([m2,m3]) + 模板套用(assemble→transform 次序)');
+  assert.equal(toText(seen[2]), '包:m3');
+  // 会话本体:无 system、无截断(3 历史 + user + assistant = 5 节点)
+  assert.equal(out.messageNodes.length, 5);
+  assert.equal(currentMessages(out)[0].role, 'user');
 });
