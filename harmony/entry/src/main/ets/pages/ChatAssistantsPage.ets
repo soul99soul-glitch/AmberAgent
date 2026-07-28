@@ -3,8 +3,10 @@
 // (替换 by id 回写整个 blob,与 Provider 设置页同构)。全量编辑器 = P1。
 import { router } from '@kit.ArkUI';
 import type { Assistant, ReasoningLevel } from '@amber/chat-domain';
-import { loadAssistants, saveAssistants, makeAssistant, patchAssistant } from '@amber/chat-domain';
-import { getChatKvStore, getChatAssistants } from '../di/AppContainer.ets';
+import {
+  loadAssistants, saveAssistants, makeAssistant, patchAssistant, newId,
+} from '@amber/chat-domain';
+import { getChatKvStore, getChatAssistants, getChatRepository } from '../di/AppContainer.ets';
 
 // 推理力度 7 档(provider_model.ts REASONING_LEVEL_TABLE,与 Android ReasoningLevel.entries 同序)
 const REASONING_LEVELS: ReasoningLevel[] = ['auto', 'off', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -113,6 +115,54 @@ struct ChatAssistantsPage {
     });
   }
 
+  // 复制(D-037):Android copyAssistant 语义 — 新 id + name " (Clone)" +
+  //   avatar image → dummy(其余保留)
+  private copyAssistant(a: Assistant): void {
+    const copied: Assistant = patchAssistant(a, {
+      id: newId(),
+      name: `${a.name} (Clone)`,
+      avatar: a.avatar.type === 'image' ? { type: 'dummy' } : a.avatar,
+    });
+    loadAssistants(getChatKvStore()).then((loaded: Assistant[] | null): void => {
+      const current: Assistant[] = loaded !== null && loaded.length > 0 ? loaded : this.items;
+      saveAssistants(getChatKvStore(), [...current, copied]).then((): void => this.refresh());
+    });
+  }
+
+  // 删除(D-037):级联删除该助手的所有会话(Android removeAssistant 语义:
+  //   deleteConversationOfAssistant);memory/files 清理无对应物(未落地,登记)
+  private confirmDelete(a: Assistant): void {
+    AlertDialog.show({
+      title: '删除助手',
+      message: `「${a.name.length > 0 ? a.name : '未命名助手'}」及其所有对话将被删除,且不可恢复。`,
+      primaryButton: {
+        value: '取消',
+        action: (): void => {},
+      },
+      secondaryButton: {
+        value: '删除',
+        fontColor: '#B43A3A',
+        action: (): void => {
+          loadAssistants(getChatKvStore()).then((loaded: Assistant[] | null): void => {
+            const current: Assistant[] = loaded !== null && loaded.length > 0 ? loaded : this.items;
+            const next: Assistant[] = current.filter((x: Assistant): boolean => x.id !== a.id);
+            saveAssistants(getChatKvStore(), next).then((): Promise<void> => {
+              // 级联删除该助手的会话
+              const repo = getChatRepository();
+              return repo.list(a.id).then((convs): Promise<void> => {
+                let chain: Promise<void> = Promise.resolve();
+                for (const c of convs) {
+                  chain = chain.then((): Promise<void> => repo.delete(c.id));
+                }
+                return chain;
+              });
+            }).then((): void => this.refresh());
+          });
+        },
+      },
+    });
+  }
+
   build() {
     Column() {
       Row() {
@@ -139,11 +189,19 @@ struct ChatAssistantsPage {
                     .layoutWeight(1)
                   Text('对话')
                     .fontSize(12).fontColor(ACCENT)
+                    .margin({ right: 14 })
                     .onClick((): void => {
                       const params: Record<string, string> = {};
                       params['assistantId'] = a.id;
                       router.pushUrl({ url: 'pages/ChatPage', params: params });
                     })
+                  Text('复制')
+                    .fontSize(12).fontColor(INK3)
+                    .margin({ right: 14 })
+                    .onClick((): void => this.copyAssistant(a))
+                  Text('删除')
+                    .fontSize(12).fontColor('#B43A3A')
+                    .onClick((): void => this.confirmDelete(a))
                 }
                 .width('100%')
                 if (a.systemPrompt.trim().length > 0) {

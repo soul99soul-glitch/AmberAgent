@@ -356,3 +356,12 @@
   - **UI**:regenerate 也创建 EntryAbortController 并传入;「停止」按钮对 send/regenerate 均生效(同一 this.sending/abortController 状态机)。
   - D-035 P1 项清零,停止生成语义全路径一致。
 - **可逆性**:abortSignal 可选;不传行为与 D-030 完全一致。
+
+## D-037（L0，2026-07-28）助手删除/复制：级联语义忠实 + 确认弹窗明示
+
+- **背景**：助手管理(D-027)缺删除/复制;Android AssistantVM 语义明确。
+- **决定**：
+  - **复制(AssistantVM.kt:73-84 忠实)**:新 id + name " (Clone)" + avatar image→dummy(其余保留),追加到列表末尾。
+  - **删除(AssistantVM.kt:47-61 忠实)**:**级联删除该助手所有会话**(deleteConversationOfAssistant 等价:repo.list(assistantId) → 逐个 delete,显式级联 D-021);AlertDialog 明示「及其所有对话将被删除,且不可恢复」。memory/files 清理无对应物(未落地,PARITY 层面无需记——功能不存在而非偏差)。
+  - 删除是用户主动发起且经确认的 L0 用户数据操作;级联范围在弹窗中明示(比 Android 的 ActionSheet 更显式,Android 弹窗未提示级联——此处**超出 Android 明示度**,符合宪章数据安全精神,登记为有意增强)。
+- **可逆性**:删除不可逆(用户确认);复制纯增量。
