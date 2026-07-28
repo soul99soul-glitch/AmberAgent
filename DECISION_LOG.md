@@ -1399,3 +1399,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 审计行「工具执行 + 审批循环」残余「autoApprove 设置面/推测执行设置面」。
 - **未移植(P1 登记)**: maxToolLoopSteps/harnessDebug/任务调度设置面(扩展页残余);系统权限子系统(Android-only)。
 - **验证**: chat tsc 干净 + 1054 测试/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-105 — ask_user 问题 UI(HITL 问答卡片)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: ChatMessageAskUserStep.kt:64-378(AskUserToolStep 全文)/values-zh/strings.xml:192,212/tool_approval.ts:76-92(answered verdict 已有)/AskUserTool.kt(needsApproval HITL)
+- **背景**: D-057 审批闭环 + D-058 ask_user 工具已落地,但问题 UI 登记为 P1「MVP 经 idle blocker 自由文本应答」——pending 态用户只见 批准/拒绝(对 ask_user 语义错误,Android 经 onToolAnswer 应答),选项/多选/分题结构不可达。
+- **决策**:
+  1. chat HAR ask_user_questions.ts(纯逻辑 + 10 测试):parseAskUserQuestions(:87-99 runCatching 全损语义——坏 JSON/元素非对象/options 非数组/非原始选项 → 整体 [];缺省 id/question 空串、options []、selection_type 'text');buildAskUserAnswerPayload(:331-345 {answers:{id: string|[...]}},键序 = questions 序,multi → 数组缺省 []、其余 → 字符串缺省 '');parseAskedAnswers(:74-84 失败/非对象 → null);askAnswerDisplayText(:246-253 数组 join ' · '/原始 → content/非原始与缺失 → 整段 answer);isAskUserSubmittable(:348-353)/hasAnyAskAnswer(:295-296)。
+  2. MessageRow 工具卡片分支:toolName === ask_user → 问题卡片(标题:单题 → 首题文案、多题 → '询问 N 个问题' zh 逐字;single/multi/text+options → chips(Flex wrap,选中 = accent 填充);text → chips + TextArea '在此输入回答…' 逐字;题间 hairline Divider;pending → 操作行 清空(任一已答时)+ 提交(accent pill,isAskUserSubmittable 使能,未使能灰态 + 点击守卫);answered → 'A' accent 标记 + askAnsweredText);其余工具保持 D-057 批准/拒绝(ask_user pending 不再显示 批准/拒绝 — 与 Android 一致,HITL 仅经应答)。
+  3. ChatPage:handleToolAnswer(toolCallId, answer) → verdict {kind:'answered', answer}(tool_approval.ts:80 逐字);与审批共用 applyToolVerdict(落库 → 无 pending 则 resumeToolLoop,ChatService.handleToolApproval:1122-1188 语义)。
+- **偏差/适配登记**: FlowRow → Flex wrap;Button/OutlinedTextField → Text/TextArea 扁平视觉(沿用本页既有 token);展开/折叠 ChainOfThought 容器未移植(常驻展开,与 harmony 工具卡片 MVP 一致);DotLoading/ shimmer 图标未移植;多选题选中集渲染序 = 点选序(Android Set 同无序语义)。
+- **关闭**: 审计行「工具执行 + 审批循环」残余「ask_user 问题 UI」。
+- **未移植(P1 登记)**: 工具卡片完整视觉(ChainOfThought 折叠/图标/shimmer);ToolDenyReasonDialog(:428-461 拒绝理由输入,harmony 拒绝恒空理由 — 与 D-057 已登一致)。
+- **验证**: chat tsc 干净 + 1064 测试(+10)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

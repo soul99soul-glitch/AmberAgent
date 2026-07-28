@@ -16,7 +16,7 @@ import type {
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
   ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
-  MessageChunk, OpenAIChatApi,
+  MessageChunk, OpenAIChatApi, AskUserQuestion, AskedAnswers,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -44,6 +44,9 @@ import {
   parseDeepReadSlashCommand,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
+  parseAskUserQuestions, buildAskUserAnswerPayload,
+  parseAskedAnswers, askAnswerDisplayText,
+  isAskUserSubmittable, hasAnyAskAnswer, ASK_USER_TOOL_NAME,
   loadSearchPrefs, SearchSettings, createSearchTools,
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
   createPlaceholderTransformer, createDocumentTransformer,
@@ -137,8 +140,13 @@ struct MessageRow {
   // D-057:工具审批回调(toolCallId 定位,ChatService.handleToolApproval)
   onApproveTool: (toolCallId: string) => void = (_id: string): void => {};
   onDenyTool: (toolCallId: string) => void = (_id: string): void => {};
+  // D-105:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)
+  onAnswerTool: (toolCallId: string, answer: string) => void = (_id: string, _a: string): void => {};
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
   @State reasoningStates: Record<number, string> = {};
+  // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
+  @State askAnswers: Record<string, string> = {};
+  @State askMultiAnswers: Record<string, string[]> = {};
   // D-053:本会话内见过流式(Android sawStreamingMessage:123 —
   //   流式结束后保持 Preview 不自动折叠)
   @State sawStream: boolean = false;
@@ -164,6 +172,77 @@ struct MessageRow {
     if (t.approvalState.type === 'denied') return '已拒绝';
     if (t.approvalState.type === 'answered') return '已应答';
     return '';
+  }
+
+  // ===== D-105:ask_user 问题卡片(ChatMessageAskUserStep.kt 子集) =====
+  // :87-99 解析(渲染期重算,题量小;解析失败 → [])
+  private askQuestionsOf(t: UIMessagePartTool): AskUserQuestion[] {
+    return parseAskUserQuestions(t.input);
+  }
+
+  // :106 首题文案;多题 → '询问 N 个问题'(zh strings.xml:192 逐字)
+  private askHeading(qs: AskUserQuestion[]): string {
+    if (qs.length <= 1) return qs.length > 0 ? qs[0].question : '...';
+    return `询问 ${qs.length} 个问题`;
+  }
+
+  private askAnswerAt(qid: string): string {
+    const v: string | undefined = this.askAnswers[qid];
+    return v !== undefined ? v : '';
+  }
+
+  private askMultiAt(qid: string): string[] {
+    const v: string[] | undefined = this.askMultiAnswers[qid];
+    return v !== undefined ? v : [];
+  }
+
+  // :174 单选/文本选项 chip 点选
+  private setAskAnswer(qid: string, value: string): void {
+    const copy: Record<string, string> = {};
+    const keys: string[] = Object.keys(this.askAnswers);
+    for (const k of keys) {
+      copy[k] = this.askAnswers[k];
+    }
+    copy[qid] = value;
+    this.askAnswers = copy;
+  }
+
+  // :191-196 多选 chip 切换(Set 增删语义)
+  private toggleAskMulti(qid: string, option: string): void {
+    const copy: Record<string, string[]> = {};
+    const keys: string[] = Object.keys(this.askMultiAnswers);
+    for (const k of keys) {
+      copy[k] = this.askMultiAnswers[k].slice();
+    }
+    const cur: string[] = copy[qid] !== undefined ? copy[qid] : [];
+    const idx: number = cur.indexOf(option);
+    if (idx >= 0) {
+      cur.splice(idx, 1);
+    } else {
+      cur.push(option);
+    }
+    copy[qid] = cur;
+    this.askMultiAnswers = copy;
+  }
+
+  // :307-309 清空
+  private clearAskDrafts(): void {
+    this.askAnswers = {};
+    this.askMultiAnswers = {};
+  }
+
+  // :330-347 提交(载荷逐字;使能判定 :348-353 由按钮侧调 isAskUserSubmittable)
+  private submitAskAnswers(t: UIMessagePartTool): void {
+    const qs: AskUserQuestion[] = this.askQuestionsOf(t);
+    this.onAnswerTool(t.toolCallId,
+      buildAskUserAnswerPayload(qs, this.askAnswers, this.askMultiAnswers));
+  }
+
+  // :246-253 已应答展示文本
+  private askAnsweredText(t: UIMessagePartTool, qid: string): string {
+    if (t.approvalState.type !== 'answered') return '';
+    const fallback: string = t.approvalState.answer;
+    return askAnswerDisplayText(parseAskedAnswers(fallback), qid, fallback);
   }
 
   // 初始 Collapsed(:88);流式开始 → Preview(:125-126,showThinkingContent
@@ -279,7 +358,122 @@ struct MessageRow {
                 .fontSize(10).fontColor(INK3)
             }
             .width('100%')
-            if ((p as UIMessagePartTool).approvalState.type === 'pending') {
+            if ((p as UIMessagePartTool).toolName === ASK_USER_TOOL_NAME) {
+              // ===== D-105:ask_user 问题卡片(ChatMessageAskUserStep.kt:127-374 子集) =====
+              //   标题:单题 → 首题文案;多题 → '询问 N 个问题'(zh 逐字)
+              Text(this.askHeading(this.askQuestionsOf(p as UIMessagePartTool)))
+                .fontSize(12).fontColor(ACCENT).fontWeight(FontWeight.Medium)
+                .width('100%').margin({ top: 4 })
+              ForEach(this.askQuestionsOf(p as UIMessagePartTool),
+                (q: AskUserQuestion, qi: number) => {
+                  Column() {
+                    if (qi > 0) {
+                      // :149-152 题间 hairline
+                      Divider().color(LINE).strokeWidth(1).margin({ top: 6, bottom: 2 })
+                    }
+                    Text(q.question)
+                      .fontSize(12).fontColor(INK)
+                      .width('100%').margin({ top: qi > 0 ? 0 : 4 })
+                    if ((p as UIMessagePartTool).approvalState.type === 'pending') {
+                      // :163-243 pending + onToolAnswer → 输入面
+                      if (q.options.length > 0) {
+                        // single/multi/text+options 均渲染选项 chips(FlowRow → Flex wrap)
+                        Flex({ wrap: FlexWrap.Wrap }) {
+                          ForEach(q.options, (opt: string) => {
+                            Text(opt)
+                              .fontSize(11)
+                              .fontColor(
+                                (q.selectionType === 'multi'
+                                  ? this.askMultiAt(q.id).indexOf(opt) >= 0
+                                  : this.askAnswerAt(q.id) === opt) ? '#FFFFFF' : INK2)
+                              .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+                              .margin({ right: 6, top: 4 })
+                              .borderRadius(999)
+                              .backgroundColor(
+                                (q.selectionType === 'multi'
+                                  ? this.askMultiAt(q.id).indexOf(opt) >= 0
+                                  : this.askAnswerAt(q.id) === opt) ? ACCENT : SURFACE2)
+                              .border({
+                                width: (q.selectionType === 'multi'
+                                  ? this.askMultiAt(q.id).indexOf(opt) >= 0
+                                  : this.askAnswerAt(q.id) === opt) ? 0 : 1,
+                                color: LINE,
+                              })
+                              .onClick((): void => {
+                                if (q.selectionType === 'multi') {
+                                  this.toggleAskMulti(q.id, opt);
+                                } else {
+                                  this.setAskAnswer(q.id, opt);
+                                }
+                              })
+                          }, (opt: string): string => opt)
+                        }
+                        .width('100%')
+                      }
+                      if (q.selectionType !== 'single' && q.selectionType !== 'multi') {
+                        // :219-241 text 类型 → 自由文本框('在此输入回答…' 逐字)
+                        TextArea({ placeholder: '在此输入回答…', text: this.askAnswerAt(q.id) })
+                          .width('100%').height(64).fontSize(12).fontColor(INK)
+                          .backgroundColor(SURFACE).borderRadius(10)
+                          .margin({ top: 6 })
+                          .onChange((v: string): void => {
+                            this.setAskAnswer(q.id, v);
+                          })
+                      }
+                    } else if ((p as UIMessagePartTool).approvalState.type === 'answered') {
+                      // :244-288 已应答 → 'A' 标记 + 展示文本
+                      Row() {
+                        Text('A')
+                          .fontSize(10).fontColor(ACCENT)
+                          .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                          .backgroundColor('#1FB8623A')
+                          .borderRadius(4)
+                        Text(this.askAnsweredText(p as UIMessagePartTool, q.id))
+                          .fontSize(12).fontColor(INK)
+                          .layoutWeight(1)
+                      }
+                      .width('100%')
+                      .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+                      .margin({ top: 4 })
+                      .backgroundColor(SURFACE2)
+                      .borderRadius(8)
+                      .border({ width: 1, color: LINE })
+                    }
+                  }
+                  .width('100%').alignItems(HorizontalAlign.Start)
+                },
+                (q: AskUserQuestion, qi: number): string => `${qi}:${q.id}`)
+              if ((p as UIMessagePartTool).approvalState.type === 'pending') {
+                // :293-374 操作行:清空(任一已答时)+ 提交(全部可答使能)
+                Row() {
+                  Blank()
+                  if (hasAnyAskAnswer(this.askAnswers, this.askMultiAnswers)) {
+                    Text('清空')
+                      .fontSize(11).fontColor(INK3)
+                      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                      .onClick((): void => {
+                        this.clearAskDrafts();
+                      })
+                  }
+                  Text('提交')
+                    .fontSize(12).fontWeight(FontWeight.Medium)
+                    .fontColor(isAskUserSubmittable(this.askQuestionsOf(p as UIMessagePartTool),
+                      this.askAnswers, this.askMultiAnswers) ? '#FFFFFF' : INK3)
+                    .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+                    .margin({ left: 8 })
+                    .borderRadius(999)
+                    .backgroundColor(isAskUserSubmittable(this.askQuestionsOf(p as UIMessagePartTool),
+                      this.askAnswers, this.askMultiAnswers) ? ACCENT : LINE)
+                    .onClick((): void => {
+                      if (isAskUserSubmittable(this.askQuestionsOf(p as UIMessagePartTool),
+                        this.askAnswers, this.askMultiAnswers)) {
+                        this.submitAskAnswers(p as UIMessagePartTool);
+                      }
+                    })
+                }
+                .width('100%').margin({ top: 8 })
+              }
+            } else if ((p as UIMessagePartTool).approvalState.type === 'pending') {
               Row() {
                 Text('批准')
                   .fontSize(12).fontColor(ACCENT)
@@ -1176,10 +1370,20 @@ struct ChatPage {
   // 工具审批(ChatService.kt:1122-1188):改写 approvalState → 持久化 →
   //   无 pending 残留 → 续跑生成(handleMessageComplete)
   private handleToolApproval(toolCallId: string, approved: boolean): void {
-    if (this.conversation === null || this.sending) return;
     const verdict: ToolApprovalVerdict = approved
       ? { kind: 'approved' }
       : { kind: 'denied', reason: '' };
+    this.applyToolVerdict(toolCallId, verdict);
+  }
+
+  // D-105:ask_user 应答(ChatService.handleToolApproval answer 分支,:1136-1140
+  //   answer 优先 → answered 态;落库 + 无 pending 则续跑,同审批路径)
+  private handleToolAnswer(toolCallId: string, answer: string): void {
+    this.applyToolVerdict(toolCallId, { kind: 'answered', answer });
+  }
+
+  private applyToolVerdict(toolCallId: string, verdict: ToolApprovalVerdict): void {
+    if (this.conversation === null || this.sending) return;
     const out: Conversation = applyToolApprovalToConversation(
       this.conversation, toolCallId, verdict);
     this.conversation = out;
@@ -1638,6 +1842,8 @@ struct ChatPage {
               onFork: (): void => this.forkAt(row),
               onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
               onDenyTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, false),
+              onAnswerTool: (toolCallId: string, answer: string): void =>
+                this.handleToolAnswer(toolCallId, answer),
             })
           }
           // D-041:regenerate 流式预览渲染在目标节点行下

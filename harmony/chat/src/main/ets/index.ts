@@ -223,6 +223,14 @@ export { createTimeTool } from './chat/builtin_time_tool.ts';
 export type { ToolMetadata, ToolRegistry } from './chat/tool_registry.ts';
 export { toToolMetadata, createToolRegistry } from './chat/tool_registry.ts';
 export { createAskUserTool } from './chat/builtin_ask_user_tool.ts';
+
+// ===== D-105:ask_user 问题解析/应答载荷(ChatMessageAskUserStep.kt) =====
+export {
+  parseAskUserQuestions, buildAskUserAnswerPayload,
+  parseAskedAnswers, askAnswerDisplayText,
+  isAskUserSubmittable, hasAnyAskAnswer,
+} from './chat/ask_user_questions.ts';
+export type { AskUserQuestion, AskedAnswers } from './chat/ask_user_questions.ts';
 export type { ConversationContextToolsDeps } from './chat/builtin_conversation_tools.ts';
 export { createConversationContextTools } from './chat/builtin_conversation_tools.ts';
 export type { ConversationHistoryToolsDeps } from './chat/builtin_session_tools.ts';
