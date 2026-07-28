@@ -358,13 +358,39 @@ struct IOSCouncilRoomSpeaker: Equatable, Identifiable {
     let name: String
     let rolePrompt: String
     let modelId: String
+    let providerId: String?
     let reasoning: IOSCouncilReasoningPreset
     let prompt: String
     let isHost: Bool
 
+    init(
+        id: String,
+        name: String,
+        rolePrompt: String,
+        modelId: String,
+        providerId: String? = nil,
+        reasoning: IOSCouncilReasoningPreset,
+        prompt: String,
+        isHost: Bool
+    ) {
+        self.id = id
+        self.name = name
+        self.rolePrompt = rolePrompt
+        self.modelId = modelId
+        self.providerId = providerId?.trimmedNilIfBlank
+        self.reasoning = reasoning
+        self.prompt = prompt
+        self.isHost = isHost
+    }
+
     var shortLens: String {
         rolePrompt.components(separatedBy: "，").first?.trimmedNilIfBlank ?? rolePrompt
     }
+}
+
+struct IOSCouncilModelRouteDescriptor: Equatable {
+    let providerId: String
+    let modelId: String
 }
 
 enum IOSCouncilRoomMessageKind: Equatable {
@@ -417,6 +443,7 @@ struct IOSCouncilRoomRunRequest {
     var currentModel: Model? = nil
     var baseParams: TextGenerationParams? = nil
     let providerSetting: ProviderSetting
+    var providerSettings: [ProviderSetting] = []
     let searchSettings: Settings?
     let researchConsent: IOSCouncilResearchConsent
     /// 开:主持人按议题自由动态生成席位;关:只用 settings.seats 里已添加的席位。
@@ -879,6 +906,18 @@ private final class IOSCouncilStreamHeartbeat: @unchecked Sendable {
     }
 }
 
+private struct IOSCouncilModelRoute {
+    let providerSetting: ProviderSetting
+    let model: Model
+
+    var descriptor: IOSCouncilModelRouteDescriptor {
+        IOSCouncilModelRouteDescriptor(
+            providerId: providerSetting.id.description(),
+            modelId: model.modelId
+        )
+    }
+}
+
 @MainActor
 final class IOSCouncilRoomRunner {
     private let streamer: any IOSCouncilTextStreaming
@@ -928,25 +967,14 @@ final class IOSCouncilRoomRunner {
         let objective = request.objective.trimmingCharacters(in: .whitespacesAndNewlines)
         let settings = request.settings.normalized(currentModelId: request.currentModelId)
         let limits = settings.limits.normalized()
-
-        // 当前 provider 实际支持的 chat 模型。席位模型不在其中（或为空/历史默认值如
-        // "gpt-4o"）时回退到主持人正在用的当前模型，避免把不支持的 model 发给只认
-        // 自家模型的 provider 导致 HTTP 400「Not supported model」。
-        var supportedChatModelIds: [String] = []
-        var seenSupportedModelIds = Set<String>()
-        for model in request.providerSetting.models {
-            guard model.type == ModelType.chat, model.providerOverwrite == nil else { continue }
-            let modelId = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !modelId.isEmpty, seenSupportedModelIds.insert(modelId).inserted else { continue }
-            supportedChatModelIds.append(modelId)
-        }
-        let supportedModelIds = Set(supportedChatModelIds)
-        func resolveSeatModel(_ modelId: String) -> String {
-            let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty || supportedModelIds.isEmpty || !supportedModelIds.contains(trimmed) {
-                return request.currentModelId
-            }
-            return trimmed
+        let availableRoutes = modelRoutes(for: request)
+        func resolveRoute(providerId: String?, modelId: String) -> IOSCouncilModelRoute {
+            resolvedRoute(
+                providerId: providerId,
+                modelId: modelId,
+                request: request,
+                routes: availableRoutes
+            )
         }
         let task: IOSAdvancedTaskRecord
         if let continuation = request.continuation,
@@ -1015,10 +1043,13 @@ final class IOSCouncilRoomRunner {
             )
         }
 
-        let validationModel = resolvedModel(modelId: request.currentModelId, request: request)
+        let currentRoute = resolveRoute(
+            providerId: request.providerSetting.id.description(),
+            modelId: request.currentModelId
+        )
         if let issue = ChatProviderConfiguration.issue(
-            for: validationModel,
-            provider: request.providerSetting
+            for: currentRoute.model,
+            provider: currentRoute.providerSetting
         ) {
             let message = issue.message
             onEvent(.append(systemMessage(body: message, subtitle: "配置阻塞", status: .failed)))
@@ -1045,12 +1076,17 @@ final class IOSCouncilRoomRunner {
         recordResearchConsent(request.researchConsent, objective: objective, runId: task.id)
 
         let continuedHost = request.continuation?.speakers.first(where: \.isHost)
+        let hostRoute = resolveRoute(
+            providerId: continuedHost?.providerId,
+            modelId: continuedHost?.modelId ?? settings.host.modelId
+        )
         let host = continuedHost.map { speaker in
             IOSCouncilRoomSpeaker(
                 id: speaker.id,
                 name: speaker.name,
                 rolePrompt: speaker.rolePrompt,
-                modelId: resolveSeatModel(speaker.modelId),
+                modelId: hostRoute.model.modelId,
+                providerId: hostRoute.providerSetting.id.description(),
                 reasoning: speaker.reasoning,
                 prompt: speaker.prompt,
                 isHost: true
@@ -1059,19 +1095,22 @@ final class IOSCouncilRoomRunner {
             id: "host",
             name: "主持人",
             rolePrompt: settings.host.prompt,
-            modelId: resolveSeatModel(settings.host.modelId),
+            modelId: hostRoute.model.modelId,
+            providerId: hostRoute.providerSetting.id.description(),
             reasoning: settings.host.reasoning,
             prompt: settings.host.prompt,
             isHost: true
         )
-        // 静态默认席位仅作为「主持人动态规划失败」时的兜底；模型一律走 resolveSeatModel。
+        // 静态默认席位仅作为「主持人动态规划失败」时的兜底。
         var activeSeats = if let continuation = request.continuation {
             continuation.speakers.filter { !$0.isHost }.map { seat in
-                IOSCouncilRoomSpeaker(
+                let route = resolveRoute(providerId: seat.providerId, modelId: seat.modelId)
+                return IOSCouncilRoomSpeaker(
                     id: seat.id,
                     name: seat.name,
                     rolePrompt: seat.rolePrompt,
-                    modelId: resolveSeatModel(seat.modelId),
+                    modelId: route.model.modelId,
+                    providerId: route.providerSetting.id.description(),
                     reasoning: seat.reasoning,
                     prompt: seat.prompt,
                     isHost: false
@@ -1079,11 +1118,13 @@ final class IOSCouncilRoomRunner {
             }
         } else {
             settings.defaultSeats(currentModelId: request.currentModelId).map { seat in
-                IOSCouncilRoomSpeaker(
+                let route = resolveRoute(providerId: nil, modelId: seat.modelId)
+                return IOSCouncilRoomSpeaker(
                     id: seat.id,
                     name: seat.name,
                     rolePrompt: seat.rolePrompt,
-                    modelId: resolveSeatModel(seat.modelId),
+                    modelId: route.model.modelId,
+                    providerId: route.providerSetting.id.description(),
                     reasoning: seat.reasoning,
                     prompt: seat.prompt,
                     isHost: false
@@ -1100,11 +1141,13 @@ final class IOSCouncilRoomRunner {
                 .defaultSeats(currentModelId: request.currentModelId)
                 .prefix(limits.maxSeats)
                 .map {
-                    IOSCouncilRoomSpeaker(
+                    let route = resolveRoute(providerId: nil, modelId: $0.modelId)
+                    return IOSCouncilRoomSpeaker(
                         id: $0.id,
                         name: $0.name,
                         rolePrompt: $0.rolePrompt,
-                        modelId: resolveSeatModel($0.modelId),
+                        modelId: route.model.modelId,
+                        providerId: route.providerSetting.id.description(),
                         reasoning: $0.reasoning,
                         prompt: $0.prompt,
                         isHost: false
@@ -1233,9 +1276,12 @@ final class IOSCouncilRoomRunner {
                 let plannedSeats = Self.plannedSeatsFromJSON(
                     seatPlanRaw,
                     maxSeats: limits.maxSeats,
-                    modelIds: Self.diverseSeatModelIds(
-                        supportedModelIds: supportedChatModelIds,
-                        hostModelId: host.modelId
+                    routes: Self.diverseSeatRoutes(
+                        routes: availableRoutes.map(\.descriptor),
+                        hostRoute: IOSCouncilModelRouteDescriptor(
+                            providerId: host.providerId ?? request.providerSetting.id.description(),
+                            modelId: host.modelId
+                        )
                     )
                 )
                 if plannedSeats.count >= 2 {
@@ -1243,7 +1289,10 @@ final class IOSCouncilRoomRunner {
                 }
                 let validation = try await validateDynamicSeatModels(
                     activeSeats,
-                    hostModelId: host.modelId,
+                    hostRoute: IOSCouncilModelRouteDescriptor(
+                        providerId: host.providerId ?? request.providerSetting.id.description(),
+                        modelId: host.modelId
+                    ),
                     request: request,
                     runGeneration: currentRunGeneration,
                     timeoutSeconds: min(15, limits.seatTimeoutSeconds)
@@ -1265,11 +1314,8 @@ final class IOSCouncilRoomRunner {
                 onEvent(.append(dividerMessage(request.mode == .debate ? "辩论开始" : "自由群聊开始")))
             }
 
-            // freeChat 用单轮（host 议题 + 各席位 + host 总结 = 一轮）；debate 用
-            // defaultRounds（normalized 限制 1-5 轮）。parity 修复：避免 freeChat 重复
-            // 跑席位导致消息翻倍。
-            let finalRound = request.continuation?.nextRound
-                ?? (request.mode == .freeChat ? 1 : limits.defaultRounds)
+            // 两种模式的新议会都使用默认轮数；追问只追加 continuation 指定的一轮。
+            let finalRound = request.continuation?.nextRound ?? limits.defaultRounds
             let roundNumbers = request.continuation.map { [max(2, $0.nextRound)] }
                 ?? Array(1...finalRound)
             for round in roundNumbers {
@@ -1583,10 +1629,14 @@ final class IOSCouncilRoomRunner {
     static func plannedSeatsFromJSON(
         _ text: String,
         maxSeats: Int,
-        modelIds: [String]
+        routes: [IOSCouncilModelRouteDescriptor]
     ) -> [IOSCouncilRoomSpeaker] {
-        let usableModelIds = modelIds.compactMap(\.trimmedNilIfBlank)
-        guard !usableModelIds.isEmpty else { return [] }
+        let usableRoutes = routes.compactMap { route -> IOSCouncilModelRouteDescriptor? in
+            guard let providerId = route.providerId.trimmedNilIfBlank,
+                  let modelId = route.modelId.trimmedNilIfBlank else { return nil }
+            return IOSCouncilModelRouteDescriptor(providerId: providerId, modelId: modelId)
+        }
+        guard !usableRoutes.isEmpty else { return [] }
         guard let json = IOSDeepReadDraftGenerator.extractJSONObject(text),
               let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -1601,11 +1651,13 @@ final class IOSCouncilRoomRunner {
             guard !name.isEmpty, seenNames.insert(name.lowercased()).inserted else { continue }
             let lensRaw = (entry["lens"] as? String) ?? (entry["role"] as? String) ?? (entry["prompt"] as? String) ?? ""
             let lens = lensRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let route = usableRoutes[result.count % usableRoutes.count]
             result.append(IOSCouncilRoomSpeaker(
                 id: "planned-\(Self.digest(name).prefix(8))",
                 name: name,
                 rolePrompt: lens.isEmpty ? "围绕议题提供独立、专业的视角。" : lens,
-                modelId: usableModelIds[result.count % usableModelIds.count],
+                modelId: route.modelId,
+                providerId: route.providerId,
                 reasoning: .medium,
                 prompt: "",
                 isHost: false
@@ -1615,73 +1667,105 @@ final class IOSCouncilRoomRunner {
         return result.count >= 2 ? result : []
     }
 
-    /// Dynamic seats prefer models other than the host first. The host model stays
-    /// in the pool as a final fallback when there are more seats than alternatives.
-    static func diverseSeatModelIds(
-        supportedModelIds: [String],
-        hostModelId: String
-    ) -> [String] {
-        var seen = Set<String>()
-        let normalizedHost = hostModelId.trimmingCharacters(in: .whitespacesAndNewlines)
-        var result = supportedModelIds.compactMap { raw -> String? in
-            let modelId = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !modelId.isEmpty, modelId != normalizedHost, seen.insert(modelId).inserted else { return nil }
-            return modelId
+    /// Dynamic seats prefer one model from each non-host provider before reusing
+    /// the host provider. The exact host route remains the last fallback.
+    static func diverseSeatRoutes(
+        routes: [IOSCouncilModelRouteDescriptor],
+        hostRoute: IOSCouncilModelRouteDescriptor
+    ) -> [IOSCouncilModelRouteDescriptor] {
+        var seenRoutes = Set<String>()
+        let normalized = routes.compactMap { route -> IOSCouncilModelRouteDescriptor? in
+            guard let providerId = route.providerId.trimmedNilIfBlank,
+                  let modelId = route.modelId.trimmedNilIfBlank else { return nil }
+            let normalized = IOSCouncilModelRouteDescriptor(providerId: providerId, modelId: modelId)
+            guard seenRoutes.insert(routeKey(normalized)).inserted else { return nil }
+            return normalized
         }
-        if !normalizedHost.isEmpty, seen.insert(normalizedHost).inserted {
-            result.append(normalizedHost)
+        let hostKey = routeKey(hostRoute)
+        let alternatives = normalized.filter { routeKey($0) != hostKey }
+
+        func providerDiverse(_ candidates: [IOSCouncilModelRouteDescriptor]) -> [IOSCouncilModelRouteDescriptor] {
+            var seenProviders = Set<String>()
+            var firstPerProvider: [IOSCouncilModelRouteDescriptor] = []
+            var remaining: [IOSCouncilModelRouteDescriptor] = []
+            for route in candidates {
+                if seenProviders.insert(route.providerId).inserted {
+                    firstPerProvider.append(route)
+                } else {
+                    remaining.append(route)
+                }
+            }
+            return firstPerProvider + remaining
+        }
+
+        var result = providerDiverse(alternatives.filter { $0.providerId != hostRoute.providerId })
+        result += providerDiverse(alternatives.filter { $0.providerId == hostRoute.providerId })
+        if !hostRoute.providerId.isEmpty,
+           !hostRoute.modelId.isEmpty,
+           !result.contains(where: { routeKey($0) == hostKey }) {
+            result.append(hostRoute)
         }
         return result
     }
 
     private func validateDynamicSeatModels(
         _ seats: [IOSCouncilRoomSpeaker],
-        hostModelId: String,
+        hostRoute: IOSCouncilModelRouteDescriptor,
         request: IOSCouncilRoomRunRequest,
         runGeneration: UInt64,
         timeoutSeconds: Int
     ) async throws -> (seats: [IOSCouncilRoomSpeaker], failures: [(modelId: String, reason: String)]) {
-        var seen = Set<String>()
-        let candidateModelIds = seats.compactMap { seat -> String? in
-            guard seat.modelId != hostModelId, seen.insert(seat.modelId).inserted else { return nil }
-            return seat.modelId
+        var seenRoutes = Set<String>()
+        let candidateRoutes = seats.compactMap { seat -> IOSCouncilModelRoute? in
+            let route = resolvedRoute(providerId: seat.providerId, modelId: seat.modelId, request: request)
+            let key = Self.routeKey(route.descriptor)
+            guard key != Self.routeKey(hostRoute), seenRoutes.insert(key).inserted else { return nil }
+            return route
         }
-        var reachableModelIds = Set([hostModelId])
+        var reachableRoutes = Set([Self.routeKey(hostRoute)])
         var failures: [(modelId: String, reason: String)] = []
-        for modelId in candidateModelIds {
+        for route in candidateRoutes {
             try checkCancelled(runGeneration: runGeneration)
-            let model = resolvedModel(modelId: modelId, request: request)
-            if let issue = ChatProviderConfiguration.issue(for: model, provider: request.providerSetting) {
-                failures.append((modelId, issue.message))
+            if let issue = ChatProviderConfiguration.issue(for: route.model, provider: route.providerSetting) {
+                failures.append((route.model.modelId, issue.message))
                 continue
             }
             do {
                 try await probeDynamicSeatModel(
-                    model,
+                    route,
                     request: request,
                     runGeneration: runGeneration,
                     timeoutSeconds: timeoutSeconds
                 )
-                reachableModelIds.insert(modelId)
+                reachableRoutes.insert(Self.routeKey(route.descriptor))
             } catch {
                 try checkCancelled(runGeneration: runGeneration)
-                failures.append((modelId, error.localizedDescription))
+                failures.append((route.model.modelId, error.localizedDescription))
             }
         }
         guard !failures.isEmpty else { return (seats, []) }
 
-        let reachableAlternatives = candidateModelIds.filter { reachableModelIds.contains($0) }
-        let fallbackModelIds = [hostModelId] + reachableAlternatives
+        let resolvedHostRoute = resolvedRoute(
+            providerId: hostRoute.providerId,
+            modelId: hostRoute.modelId,
+            request: request
+        )
+        let reachableAlternatives = candidateRoutes.filter {
+            reachableRoutes.contains(Self.routeKey($0.descriptor))
+        }
+        let fallbackRoutes = [resolvedHostRoute] + reachableAlternatives
         var fallbackIndex = 0
         let repairedSeats = seats.map { seat in
-            guard !reachableModelIds.contains(seat.modelId) else { return seat }
-            let modelId = fallbackModelIds[fallbackIndex % fallbackModelIds.count]
+            let route = resolvedRoute(providerId: seat.providerId, modelId: seat.modelId, request: request)
+            guard !reachableRoutes.contains(Self.routeKey(route.descriptor)) else { return seat }
+            let fallbackRoute = fallbackRoutes[fallbackIndex % fallbackRoutes.count]
             fallbackIndex += 1
             return IOSCouncilRoomSpeaker(
                 id: seat.id,
                 name: seat.name,
                 rolePrompt: seat.rolePrompt,
-                modelId: modelId,
+                modelId: fallbackRoute.model.modelId,
+                providerId: fallbackRoute.providerSetting.id.description(),
                 reasoning: seat.reasoning,
                 prompt: seat.prompt,
                 isHost: false
@@ -1691,7 +1775,7 @@ final class IOSCouncilRoomRunner {
     }
 
     private func probeDynamicSeatModel(
-        _ model: Model,
+        _ route: IOSCouncilModelRoute,
         request: IOSCouncilRoomRunRequest,
         runGeneration: UInt64,
         timeoutSeconds: Int
@@ -1699,39 +1783,41 @@ final class IOSCouncilRoomRunner {
         let output = try await streamWithTimeout(
             runGeneration: runGeneration,
             seconds: timeoutSeconds,
-            timeoutLabel: "\(model.modelId) 联通测试"
+            timeoutLabel: "\(route.model.modelId) 联通测试"
         ) { recordOutput in
             try await self.performDynamicSeatProbe(
-                model,
+                route,
                 request: request,
                 recordOutput: recordOutput
             )
         }
         guard output.trimmedNilIfBlank != nil else {
-            throw IOSCouncilRoomRunnerError.emptyOutput("\(model.modelId) 联通测试")
+            throw IOSCouncilRoomRunnerError.emptyOutput("\(route.model.modelId) 联通测试")
         }
     }
 
     private func performDynamicSeatProbe(
-        _ model: Model,
+        _ route: IOSCouncilModelRoute,
         request: IOSCouncilRoomRunRequest,
         recordOutput: @escaping @Sendable () -> Void
     ) async throws -> String {
         let matchingBaseParams = request.baseParams.flatMap { params in
-            params.model.modelId == model.modelId ? params : nil
+            params.model.modelId == route.model.modelId
+                && route.providerSetting.id.description() == request.providerSetting.id.description()
+                ? params : nil
         }
         let params = TextGenerationParams(
-            model: model,
+            model: route.model,
             temperature: KotlinFloat(value: 0),
             topP: nil,
             maxTokens: KotlinInt(value: 16),
             tools: [],
             reasoningLevel: .off,
-            customHeaders: matchingBaseParams?.customHeaders ?? model.customHeaders,
-            customBody: matchingBaseParams?.customBody ?? model.customBodies
+            customHeaders: matchingBaseParams?.customHeaders ?? route.model.customHeaders,
+            customBody: matchingBaseParams?.customBody ?? route.model.customBodies
         )
         return try await streamer.streamText(
-            providerSetting: request.providerSetting,
+            providerSetting: route.providerSetting,
             messages: [UIMessage.companion.user(prompt: "只回复 OK")],
             params: params,
             onUpdate: { text in
@@ -1750,8 +1836,13 @@ final class IOSCouncilRoomRunner {
         onUpdate: @escaping @MainActor (String) -> Void
     ) async throws -> String {
         try checkCancelled(runGeneration: runGeneration)
-        let params = makeTextGenerationParams(
+        let route = resolvedRoute(
+            providerId: speaker.providerId,
             modelId: speaker.modelId,
+            request: request
+        )
+        let params = makeTextGenerationParams(
+            route: route,
             reasoning: speaker.reasoning,
             temperature: temperature,
             outputBudgetCharacters: request.settings.limits.outputBudgetCharacters,
@@ -1762,7 +1853,7 @@ final class IOSCouncilRoomRunner {
             UIMessage.companion.user(prompt: userPrompt)
         ]
         let text = try await streamer.streamText(
-            providerSetting: request.providerSetting,
+            providerSetting: route.providerSetting,
             messages: messages,
             params: params,
             onUpdate: onUpdate
@@ -1811,16 +1902,18 @@ final class IOSCouncilRoomRunner {
     }
 
     private func makeTextGenerationParams(
-        modelId: String,
+        route: IOSCouncilModelRoute,
         reasoning: IOSCouncilReasoningPreset,
         temperature: Float,
         outputBudgetCharacters: Int,
         request: IOSCouncilRoomRunRequest
     ) -> TextGenerationParams {
-        let model = resolvedModel(modelId: modelId, request: request)
-        let abilities = model.abilities
+        let model = route.model
+        let abilities = route.model.abilities
         let matchingBaseParams = request.baseParams.flatMap { params in
-            params.model.modelId == modelId ? params : nil
+            params.model.modelId == model.modelId
+                && route.providerSetting.id.description() == request.providerSetting.id.description()
+                ? params : nil
         }
         let maxTokens = Int32(min(max(outputBudgetCharacters / 4, 512), 8_192))
         return TextGenerationParams(
@@ -1833,6 +1926,80 @@ final class IOSCouncilRoomRunner {
             customHeaders: matchingBaseParams?.customHeaders ?? model.customHeaders,
             customBody: matchingBaseParams?.customBody ?? model.customBodies
         )
+    }
+
+    private func modelRoutes(for request: IOSCouncilRoomRunRequest) -> [IOSCouncilModelRoute] {
+        var providers = request.providerSettings
+        let currentProviderId = request.providerSetting.id.description()
+        if !providers.contains(where: { $0.id.description() == currentProviderId }) {
+            providers.insert(request.providerSetting, at: 0)
+        }
+        if providers.isEmpty {
+            providers = [request.providerSetting]
+        }
+
+        var routes: [IOSCouncilModelRoute] = []
+        var seen = Set<String>()
+        if let currentModel = request.currentModel,
+           ChatProviderConfiguration.issue(for: currentModel, provider: request.providerSetting) == nil {
+            let route = IOSCouncilModelRoute(providerSetting: request.providerSetting, model: currentModel)
+            seen.insert(Self.routeKey(route.descriptor))
+            routes.append(route)
+        }
+        for configured in ChatProviderConfiguration.configuredChatModels(in: providers) {
+            for model in configured.models {
+                guard let provider = ChatProviderConfiguration.provider(for: model, providers: providers),
+                      provider.enabled,
+                      ChatProviderConfiguration.issue(for: model, provider: provider) == nil else { continue }
+                let route = IOSCouncilModelRoute(providerSetting: provider, model: model)
+                guard seen.insert(Self.routeKey(route.descriptor)).inserted else { continue }
+                routes.append(route)
+            }
+        }
+        return routes
+    }
+
+    private func resolvedRoute(
+        providerId: String?,
+        modelId: String,
+        request: IOSCouncilRoomRunRequest,
+        routes providedRoutes: [IOSCouncilModelRoute]? = nil
+    ) -> IOSCouncilModelRoute {
+        let routes = providedRoutes ?? modelRoutes(for: request)
+        let currentProviderId = request.providerSetting.id.description()
+        let normalizedModelId = modelId.trimmedNilIfBlank ?? request.currentModelId
+
+        if let providerId = providerId?.trimmedNilIfBlank {
+            if let exact = routes.first(where: {
+                $0.providerSetting.id.description() == providerId && $0.model.modelId == normalizedModelId
+            }) {
+                return exact
+            }
+        } else {
+            if let currentProviderMatch = routes.first(where: {
+                $0.providerSetting.id.description() == currentProviderId && $0.model.modelId == normalizedModelId
+            }) {
+                return currentProviderMatch
+            }
+            if let matchingModel = routes.first(where: { $0.model.modelId == normalizedModelId }) {
+                return matchingModel
+            }
+        }
+
+        if let currentRoute = routes.first(where: {
+            $0.providerSetting.id.description() == currentProviderId
+                && $0.model.modelId == request.currentModelId
+        }) {
+            return currentRoute
+        }
+        return IOSCouncilModelRoute(
+            providerSetting: request.providerSetting,
+            model: resolvedModel(modelId: request.currentModelId, request: request)
+        )
+    }
+
+    private static func routeKey(_ route: IOSCouncilModelRouteDescriptor) -> String {
+        "\(route.providerId)\n\(route.modelId)"
     }
 
     private func resolvedModel(
@@ -2226,6 +2393,7 @@ final class CouncilRunner {
             currentModel: currentModel,
             baseParams: baseParams,
             providerSetting: providerSetting,
+            providerSettings: [providerSetting],
             searchSettings: nil,
             researchConsent: .unavailable,
             dynamicSeatGeneration: seats.isEmpty ? roomSettingsStore.dynamicSeatGeneration : false

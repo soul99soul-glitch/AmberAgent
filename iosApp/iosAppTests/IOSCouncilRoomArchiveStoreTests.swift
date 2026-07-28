@@ -305,13 +305,14 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
             id: "design", handle: "Design", displayName: "设计师",
             roleDescription: "可用性视角", shortLens: "设计",
             systemImage: "paintbrush", tint: Color(red: 0.3, green: 0.7, blue: 0.4),
-            isHost: false, modelHint: "glm", modelId: "glm-4"
+            isHost: false, modelHint: "glm", modelId: "glm-4", providerId: "provider-glm"
         )
         let restored = CouncilPersistedParticipant(p).restored()
         XCTAssertEqual(restored.id, "design")
         XCTAssertEqual(restored.displayName, "设计师")
         XCTAssertEqual(restored.roleDescription, "可用性视角")
         XCTAssertEqual(restored.modelId, "glm-4")
+        XCTAssertEqual(restored.providerId, "provider-glm")
         XCTAssertFalse(restored.isHost)
     }
 

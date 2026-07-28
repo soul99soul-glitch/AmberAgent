@@ -188,7 +188,7 @@ struct CouncilSettingsView: View {
                         get: { roomSettingsStore.settings.limits.defaultRounds },
                         set: { roomSettingsStore.updateLimits(defaultRounds: $0) }
                     ),
-                    in: 1...6
+                    in: 1...5
                 )
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
@@ -217,7 +217,7 @@ struct CouncilSettingsView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
             }
-            CouncilFootnote(text: "辩论模式使用默认轮数；自由群聊固定一轮席位发言后由主持人总结。")
+            CouncilFootnote(text: "自由群聊与辩论都使用默认轮数；追问每次追加一轮。")
         }
     }
 

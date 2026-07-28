@@ -612,11 +612,16 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             ```
             """,
             maxSeats: 4,
-            modelIds: ["gpt-alt-a", "gpt-alt-b", "gpt-main"]
+            routes: [
+                IOSCouncilModelRouteDescriptor(providerId: "provider-a", modelId: "gpt-alt-a"),
+                IOSCouncilModelRouteDescriptor(providerId: "provider-b", modelId: "gpt-alt-b"),
+                IOSCouncilModelRouteDescriptor(providerId: "provider-main", modelId: "gpt-main")
+            ]
         )
         XCTAssertEqual(planned.map(\.name), ["工程", "风险"])
         XCTAssertEqual(planned.map(\.rolePrompt), ["看实现复杂度", "看安全和失败模式"])
         XCTAssertEqual(planned.map(\.modelId), ["gpt-alt-a", "gpt-alt-b"])
+        XCTAssertEqual(planned.map(\.providerId), ["provider-a", "provider-b"])
         XCTAssertFalse(planned.contains { $0.isHost })
     }
 
@@ -624,16 +629,20 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         // 少于 2 个有效席位 → 空（调用方保留已 resolve 的默认席位）
         XCTAssertTrue(IOSCouncilRoomRunner.plannedSeatsFromJSON(
             #"{"seats":[{"name":"只有一个","lens":"数量非法"}]}"#,
-            maxSeats: 4, modelIds: ["gpt-main"]
+            maxSeats: 4,
+            routes: [IOSCouncilModelRouteDescriptor(providerId: "provider-main", modelId: "gpt-main")]
         ).isEmpty)
         // 非 JSON 散文 → 空
         XCTAssertTrue(IOSCouncilRoomRunner.plannedSeatsFromJSON(
-            "主持人写了一堆散文，没有任何 JSON。", maxSeats: 4, modelIds: ["gpt-main"]
+            "主持人写了一堆散文，没有任何 JSON。",
+            maxSeats: 4,
+            routes: [IOSCouncilModelRouteDescriptor(providerId: "provider-main", modelId: "gpt-main")]
         ).isEmpty)
         // 超过上限按 maxSeats 截断
         let capped = IOSCouncilRoomRunner.plannedSeatsFromJSON(
             #"{"seats":[{"name":"A","lens":"a"},{"name":"B","lens":"b"},{"name":"C","lens":"c"}]}"#,
-            maxSeats: 2, modelIds: ["gpt-main"]
+            maxSeats: 2,
+            routes: [IOSCouncilModelRouteDescriptor(providerId: "provider-main", modelId: "gpt-main")]
         )
         XCTAssertEqual(capped.map(\.name), ["A", "B"])
     }
@@ -683,19 +692,19 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertFalse(finalSeats.contains { $0.modelId == "gpt-bad" })
     }
 
-    func testDynamicSeatsDoNotMisrouteProviderOverwriteModelsThroughCurrentProvider() async throws {
+    func testDynamicSeatsCarryAndUseCrossProviderRoutes() async throws {
         let defaults = isolatedDefaults()
         let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
-        let overrideProvider = makeCouncilProvider(models: [])
-        let models = [
-            makeCouncilModel("gpt-main"),
-            makeCouncilModel("gpt-overridden", providerOverwrite: overrideProvider),
-            makeCouncilModel("gpt-good")
-        ]
-        let provider = makeCouncilProvider(models: models)
+        let currentModels = [makeCouncilModel("gpt-main"), makeCouncilModel("gpt-host")]
+        let claudeModel = makeCouncilModel("claude-seat")
+        let grokModel = makeCouncilModel("grok-seat")
+        let currentProvider = makeCouncilProvider(name: "DeepSeek", models: currentModels)
+        let claudeProvider = makeCouncilProvider(name: "Anthropic", models: [claudeModel])
+        let grokProvider = makeCouncilProvider(name: "xAI", models: [grokModel])
         let streamer = ScriptedCouncilStreamer([
             .success("最终议题"),
             .success(#"{"seats":[{"name":"求证","lens":"核对证据"},{"name":"反方","lens":"寻找反例"}]}"#),
+            .success("OK"),
             .success("OK"),
             .success("求证席发言"),
             .success("反方席发言"),
@@ -709,8 +718,9 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         var request = roomRequest(
             settings: compactRoomSettings(defaultRounds: 1),
             researchConsent: .unavailable,
-            providerSetting: provider,
-            currentModel: models[0]
+            providerSetting: currentProvider,
+            providerSettings: [currentProvider, claudeProvider, grokProvider],
+            currentModel: currentModels[0]
         )
         request.dynamicSeatGeneration = true
         var rosters: [[IOSCouncilRoomSpeaker]] = []
@@ -722,11 +732,62 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         })
 
         XCTAssertEqual(outcome.status, .completed)
-        XCTAssertFalse(streamer.receivedModels.contains { $0.modelId == "gpt-overridden" })
+        XCTAssertEqual(streamer.receivedProviderNames, [
+            "DeepSeek", "DeepSeek", "Anthropic", "xAI", "Anthropic", "xAI", "DeepSeek"
+        ])
+        XCTAssertEqual(streamer.receivedModels.map(\.modelId), [
+            "gpt-host", "gpt-host", "claude-seat", "grok-seat", "claude-seat", "grok-seat", "gpt-host"
+        ])
+        let finalSeats = try XCTUnwrap(rosters.last).filter { !$0.isHost }
         XCTAssertEqual(
-            Set(try XCTUnwrap(rosters.last).filter { !$0.isHost }.map(\.modelId)),
-            Set(["gpt-good", "gpt-main"])
+            Set(finalSeats.map { "\($0.providerId ?? "")/\($0.modelId)" }),
+            Set([
+                "\(claudeProvider.id.description())/claude-seat",
+                "\(grokProvider.id.description())/grok-seat"
+            ])
         )
+    }
+
+    func testFreshFreeChatAndDebateUseConfiguredDefaultRounds() async {
+        for mode in [IOSCouncilRoomRunMode.freeChat, .debate] {
+            let streamer = ScriptedCouncilStreamer([
+                .success("最终议题"),
+                .success("工程第一轮"),
+                .success("风险第一轮"),
+                .success("主持点评"),
+                .success("工程第二轮"),
+                .success("风险第二轮"),
+                .success("主持总结")
+            ])
+            let runner = IOSCouncilRoomRunner(
+                streamer: streamer,
+                researcher: StaticCouncilResearcher(),
+                taskStore: IOSAdvancedTaskStore(userDefaults: isolatedDefaults(), storageKey: "tasks-\(mode.rawValue)")
+            )
+            var roundDividers: [String] = []
+            var seatMessageCount = 0
+
+            let outcome = await runner.run(
+                request: roomRequest(
+                    mode: mode,
+                    settings: compactRoomSettings(defaultRounds: 2),
+                    researchConsent: .unavailable
+                ),
+                onEvent: { event in
+                    guard case .append(let message) = event else { return }
+                    if message.kind == .divider, message.body.hasPrefix("第 ") {
+                        roundDividers.append(message.body)
+                    } else if message.kind == .seat {
+                        seatMessageCount += 1
+                    }
+                }
+            )
+
+            XCTAssertEqual(outcome.status, .completed, "mode=\(mode.rawValue)")
+            XCTAssertEqual(roundDividers, ["第 1 轮", "第 2 轮"], "mode=\(mode.rawValue)")
+            XCTAssertEqual(seatMessageCount, 4, "mode=\(mode.rawValue)")
+            XCTAssertEqual(streamer.callCount, 7, "mode=\(mode.rawValue)")
+        }
     }
 
     func testRoomRunnerFreeChatPersistsTaskApprovalAndOrderedMessages() async throws {
@@ -760,7 +821,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         let outcome = await runner.run(
             request: roomRequest(
                 mode: .freeChat,
-                settings: compactRoomSettings(),
+                settings: compactRoomSettings(defaultRounds: 1),
                 researchConsent: .allowed
             ),
             onEvent: { events.append($0) }
@@ -1405,7 +1466,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(taskStore.tasks.map(\.id), ["evicted-council-task"])
     }
 
-    func testCouncilTopBarCircleButtonsUseNativeCircleGlassWithoutMerging() throws {
+    func testTopBarCircleButtonsKeepGlyphsAboveNativeGlassAndTintTrailingActions() throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let sourceDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
         let sharedChrome = try String(
@@ -1417,8 +1478,37 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             encoding: .utf8
         )
 
-        XCTAssertTrue(sharedChrome.contains(".glassEffect(.regular.interactive(), in: Circle())"))
+        guard let buttonStart = sharedChrome.range(of: "struct AmberGlassCircleButton: View"),
+              let sectionStart = sharedChrome.range(
+                of: "struct AmberSectionLabel: View",
+                range: buttonStart.upperBound..<sharedChrome.endIndex
+              ) else {
+            return XCTFail("Expected the shared circle button source")
+        }
+        let buttonSource = String(sharedChrome[buttonStart.lowerBound..<sectionStart.lowerBound])
+        let compactSharedChrome = sharedChrome.filter { !$0.isWhitespace }
+        let compactCouncil = council.filter { !$0.isWhitespace }
+
+        XCTAssertTrue(buttonSource.contains("var tint: Color = AmberTheme.foreground2"))
+        XCTAssertTrue(buttonSource.contains(".foregroundStyle(tint)"))
+        XCTAssertTrue(buttonSource.contains(".glassEffect(.regular.interactive(), in: Circle())"))
+        XCTAssertFalse(
+            buttonSource.contains("private var circleGlass"),
+            "The glass effect must stay attached to the glyph label; a sibling glass layer washes the glyph out on device."
+        )
         XCTAssertTrue(council.contains("AmberGlassGroup(spacing: 0)"))
+        XCTAssertTrue(compactSharedChrome.contains(
+            "accessibilityLabel:\"设置\",size:40,symbolSize:17,tint:AmberTheme.accent"
+        ))
+        XCTAssertTrue(compactCouncil.contains(
+            "accessibilityLabel:\"历史议会\",size:44,symbolSize:18,tint:AmberTheme.accent"
+        ))
+        XCTAssertTrue(compactCouncil.contains(
+            "accessibilityLabel:\"议会设置\",size:44,symbolSize:18,tint:AmberTheme.accent"
+        ))
+        XCTAssertTrue(compactCouncil.contains(
+            "accessibilityLabel:\"返回\",size:44,symbolSize:20,tint:AmberTheme.foreground"
+        ))
     }
 
     func testMidRunCheckpointsThrottleToOffMainThreadWrites() async throws {
@@ -1795,11 +1885,14 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
     }
 
-    private func makeCouncilProvider(models: [Model]) -> ProviderSetting {
+    private func makeCouncilProvider(
+        name: String = "Council Test Provider",
+        models: [Model]
+    ) -> ProviderSetting {
         ProviderSetting.OpenAI(
             id: KotlinUuid.companion.random(),
             enabled: true,
-            name: "Council Test Provider",
+            name: name,
             models: models,
             balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
             builtIn: false,
@@ -1820,6 +1913,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         apiKey: String = "test-key",
         researchConsent: IOSCouncilResearchConsent = .unavailable,
         providerSetting: ProviderSetting? = nil,
+        providerSettings: [ProviderSetting] = [],
         currentModel: Model? = nil
     ) -> IOSCouncilRoomRunRequest {
         IOSCouncilRoomRunRequest(
@@ -1832,6 +1926,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
                 baseUrl: "https://example.com/v1",
                 apiKey: apiKey
             ),
+            providerSettings: providerSettings,
             searchSettings: nil,
             researchConsent: researchConsent
         )
@@ -1939,6 +2034,7 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
     private(set) var callCount = 0
     private(set) var cancelCount = 0
     private(set) var receivedModels: [Model] = []
+    private(set) var receivedProviderNames: [String] = []
     private(set) var receivedUserPrompts: [String] = []
 
     init(_ outputs: [Result<String, Error>]) {
@@ -1953,6 +2049,7 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
     ) async throws -> String {
         callCount += 1
         receivedModels.append(params.model)
+        receivedProviderNames.append(providerSetting.name)
         receivedUserPrompts.append(
             messages.last?.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined() ?? ""
         )

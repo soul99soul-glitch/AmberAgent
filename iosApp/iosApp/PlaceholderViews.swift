@@ -558,37 +558,39 @@ struct AmberGlassCircleButton: View {
     let accessibilityLabel: String
     var size: CGFloat = 44
     var symbolSize: CGFloat = 17
+    var tint: Color = AmberTheme.foreground2
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                circleGlass
-                Image(systemName: systemImage)
-                    .font(.system(size: symbolSize, weight: .semibold))
-                    .foregroundStyle(AmberTheme.foreground2)
-            }
-            .frame(width: size, height: size)
-            .contentShape(Circle())
+            styledLabel
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.92, haptic: .lightImpact))
         .accessibilityLabel(accessibilityLabel)
     }
 
     @ViewBuilder
-    private var circleGlass: some View {
+    private var styledLabel: some View {
         if #available(iOS 26.0, *) {
-            Circle()
-                .fill(AmberTheme.glass.opacity(0.16))
+            iconLabel
+                .background(AmberTheme.glass.opacity(0.16), in: Circle())
                 .glassEffect(.regular.interactive(), in: Circle())
         } else {
-            Circle()
-                .fill(.ultraThinMaterial)
+            iconLabel
+                .background(.ultraThinMaterial, in: Circle())
                 .overlay {
                     Circle()
                         .stroke(AmberTheme.border.opacity(0.28), lineWidth: 0.5)
                 }
         }
+    }
+
+    private var iconLabel: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: symbolSize, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: size, height: size)
+            .contentShape(Circle())
     }
 }
 
@@ -906,7 +908,13 @@ struct ConversationsView: View {
 
             AmberGlassGroup(spacing: 10) {
                 HStack(spacing: 10) {
-                    AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "设置", size: 40, symbolSize: 17) {
+                    AmberGlassCircleButton(
+                        systemImage: "gearshape",
+                        accessibilityLabel: "设置",
+                        size: 40,
+                        symbolSize: 17,
+                        tint: AmberTheme.accent
+                    ) {
                         router.navigate(to: .settings)
                     }
 

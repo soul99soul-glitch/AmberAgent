@@ -264,20 +264,38 @@ struct CouncilChatRuntimeView: View {
                 .accessibilityLabel("议会模式与席位")
 
                 HStack(spacing: 10) {
-                    AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
+                    AmberGlassCircleButton(
+                        systemImage: "chevron.left",
+                        accessibilityLabel: "返回",
+                        size: 44,
+                        symbolSize: 20,
+                        tint: AmberTheme.foreground
+                    ) {
                         dismiss()
                     }
 
                     Spacer(minLength: 0)
 
                     // 历史议会入口:列出「最近讨论」,点任意一场重开成只读对话。
-                    AmberGlassCircleButton(systemImage: "clock.arrow.circlepath", accessibilityLabel: "历史议会", size: 44, symbolSize: 18) {
+                    AmberGlassCircleButton(
+                        systemImage: "clock.arrow.circlepath",
+                        accessibilityLabel: "历史议会",
+                        size: 44,
+                        symbolSize: 18,
+                        tint: AmberTheme.accent
+                    ) {
                         viewModel.showHistory()
                     }
 
                     // 顶栏始终是设置入口;停止由输入框那颗发送/停止键负责(与 Chat 页一致),
                     // 不在顶栏再放一颗多余的停止键。
-                    AmberGlassCircleButton(systemImage: "gearshape", accessibilityLabel: "议会设置", size: 44, symbolSize: 18) {
+                    AmberGlassCircleButton(
+                        systemImage: "gearshape",
+                        accessibilityLabel: "议会设置",
+                        size: 44,
+                        symbolSize: 18,
+                        tint: AmberTheme.accent
+                    ) {
                         viewModel.showSettings()
                     }
                 }
@@ -1161,7 +1179,7 @@ private struct CouncilRoomSettingsSheet: View {
                             get: { roomSettingsStore.settings.limits.defaultRounds },
                             set: { roomSettingsStore.updateLimits(defaultRounds: $0) }
                         ),
-                        in: 1...6
+                        in: 1...5
                     )
                     .disabled(isReadOnly)
                     .padding(.horizontal, 14)
@@ -1815,6 +1833,7 @@ final class CouncilChatViewModel {
             currentModelId: currentModel.modelId,
             currentModel: currentModel,
             providerSetting: providerSetting,
+            providerSettings: sharedSettings.snapshot.providers,
             searchSettings: sharedSettings.snapshot,
             researchConsent: continuation == nil && researchAllowed ? .allowed : .unavailable,
             dynamicSeatGeneration: continuation == nil && roomSettingsStore.dynamicSeatGeneration,
@@ -2014,6 +2033,7 @@ final class CouncilChatViewModel {
                 name: participant.isHost ? "主持人" : participant.displayName,
                 rolePrompt: participant.roleDescription,
                 modelId: modelId(for: participant),
+                providerId: participant.providerId,
                 reasoning: participant.isHost
                     ? settings.host.reasoning
                     : configuredSeat?.reasoning ?? .medium,
@@ -2238,6 +2258,7 @@ struct CouncilParticipant: Identifiable {
     let isHost: Bool
     let modelHint: String
     let modelId: String?
+    let providerId: String?
 
     init(
         id: String,
@@ -2249,7 +2270,8 @@ struct CouncilParticipant: Identifiable {
         tint: Color,
         isHost: Bool,
         modelHint: String,
-        modelId: String? = nil
+        modelId: String? = nil,
+        providerId: String? = nil
     ) {
         self.id = id
         self.handle = handle
@@ -2261,6 +2283,7 @@ struct CouncilParticipant: Identifiable {
         self.isHost = isHost
         self.modelHint = modelHint
         self.modelId = modelId?.trimmedNilIfBlank
+        self.providerId = providerId?.trimmedNilIfBlank
     }
 
     init(speaker: IOSCouncilRoomSpeaker) {
@@ -2274,7 +2297,8 @@ struct CouncilParticipant: Identifiable {
             tint: speaker.isHost ? AmberTheme.accent : Self.tint(for: speaker.id),
             isHost: speaker.isHost,
             modelHint: speaker.modelId,
-            modelId: speaker.modelId
+            modelId: speaker.modelId,
+            providerId: speaker.providerId
         )
     }
 
@@ -2694,6 +2718,7 @@ struct CouncilPersistedParticipant: Codable, Equatable {
     let isHost: Bool
     let modelHint: String
     let modelId: String?
+    let providerId: String?
 
     init(_ participant: CouncilParticipant) {
         self.id = participant.id
@@ -2706,6 +2731,7 @@ struct CouncilPersistedParticipant: Codable, Equatable {
         self.isHost = participant.isHost
         self.modelHint = participant.modelHint
         self.modelId = participant.modelId
+        self.providerId = participant.providerId
     }
 
     func restored() -> CouncilParticipant {
@@ -2719,7 +2745,8 @@ struct CouncilPersistedParticipant: Codable, Equatable {
             tint: Color(councilHexString: tintHex),
             isHost: isHost,
             modelHint: modelHint,
-            modelId: modelId
+            modelId: modelId,
+            providerId: providerId
         )
     }
 }

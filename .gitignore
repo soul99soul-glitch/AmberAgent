@@ -51,3 +51,6 @@ docs/cloud-design/**/.thumbnail
 /amberagent-notion-data-backup-*.tgz
 .DS_Store
 .pi-subagents/
+
+# ZCode agent local state (session plans etc.) — never commit
+.zcode/
