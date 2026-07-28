@@ -29,7 +29,7 @@ build_and_test:
   单元测试: "cd harmony/deepread && npm test; cd harmony/chat && npm test  # node+tsx,无需设备"
   类型检查: "cd harmony/chat && npx tsc --noEmit  # esbuild 不查类型,提交门之一(D-010)"
   构建: "node scripts/harmony-inventory/build-harmony-app.mjs"
-  最近验证: "2026-07-28 deepread 603 + chat 69 pass / tsc clean / BUILD SUCCESSFUL in 8s"
+  最近验证: "2026-07-28 deepread 603 + chat 95 pass / tsc clean / BUILD SUCCESSFUL in 6s"
   fixture校验: "node scripts/harmony-inventory/validate-harmony-fixtures.mjs"
   契约校验: "node scripts/harmony-inventory/check-source-contracts.mjs"
 
@@ -37,7 +37,7 @@ codebase:
   harmony工程:
     entry: "HAP — UIAbility + 7 页面(Index/DeepReadArticle/History/Council×2/Novel×2) + platform_impl 真实 adapter"
     deepread: "HAR — 纯 ArkTS 领域层,零 SDK 依赖: agent/council/novel/domain/platform/research"
-    chat: "HAR(@amber/chat-domain)— Chat 核心领域层: UIMessage/MessageNode/Conversation/TokenUsage 模型(切片1);streaming accumulator 全 merge_rule(切片2,含 tool_merge/coalesce/角色封印/usage 合并,69 测试);provider/agent-loop 待切片3-4"
+    chat: "HAR(@amber/chat-domain)— Chat 核心领域层: 模型(切片1);streaming accumulator(切片2);OpenAI provider 纯逻辑 parseMessage/normalize/usage/error + fixture 回放 8/8(切片3,依赖 deepread-domain 复用 SseAssembler,D-011);agent-loop 待切片4"
     复用说明: "platform 层 Port(HttpClient/Storage/Database/FileStore/Notifier)即 Chat MVP 所需同一批接口"
   android源码: "只读基准,禁止修改"
 
@@ -61,6 +61,6 @@ next_slices:                      # 按优先级,取最高未阻塞项
     内容: "DECISION_PACKET_001 人工确认(9 项决策)"
 
 parity_baseline:
-  单元测试总数: 672               # deepread 603 + chat 69
+  单元测试总数: 698               # deepread 603 + chat 95
   已知行为偏差: 4                # 详见 PARITY_DEBT.md PD-001..004(+1 条 Android 内部不一致待核实)
-  决策记录: "DECISION_LOG.md D-001..D-010"
+  决策记录: "DECISION_LOG.md D-001..D-011"

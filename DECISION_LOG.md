@@ -81,3 +81,11 @@
 - **背景**：node+tsx 测试走 esbuild，只转译不做类型检查；切片 2 中 `coalesceStreamParts` 的 TS2698（闭包赋值使裸 let 控制流收窄失效）测试全绿但类型错误。
 - **决定**：chat HAR 提交门 = `npx tsc --noEmit` 干净 + `npm test` 绿 + hvigor BUILD SUCCESSFUL，三者缺一不提交。
 - **影响**：TS 严格性向 ArkTS 编译器行为靠拢，提前暴露 esbuild 漏掉的类型错误。
+
+## D-011（L0，2026-07-28）chat HAR 依赖 deepread-domain 复用 SseAssembler；OpenAiStreamError 增补 payload
+
+- **决定**：
+  - chat HAR 经 `file:../deepread` 依赖 `@amber/deepread-domain`，复用 SseAssembler/SseEvent（deepread index 补导出）；与 MIGRATION_STATE 记载的"platform 层 Port 同居 deepread HAR"结构一致。node 侧经 tsconfig paths 解析。
+  - 流式 error payload 抛 `OpenAiStreamError(message, payload)`：message 与 Android `HttpException`（ErrorParser.parseErrorDetail）逐字一致；`payload` 为增补的原始 error 对象（保留 `type` 等字段供诊断，Android 侧丢弃）。抛出信号语义不变，不记 PD。
+- **连带**：tsc 门经 paths 覆盖 deepread 源码后暴露 `novel/creation.ts` 3 处 TS2352（同类闭包收窄失效，`x as T` 强转不自洽）；按 holder 模式修复并加 null 检查抛错，运行时行为不变（原强转在异常路径上本就会返回 null）。
+

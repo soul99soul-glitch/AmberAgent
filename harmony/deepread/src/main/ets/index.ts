@@ -34,6 +34,8 @@ export { joinPath, createMemoryFileStore } from './platform/files.ts';
 export { parseOpenAiStreamEvent, createOpenAiTextStream } from './platform/openai_stream.ts';
 export type { OpenAiStreamDelta, OpenAiTextStreamSink } from './platform/openai_stream.ts';
 export type { DecodeChunk } from './platform/sse_assembler.ts';
+export { SseAssembler, createSseStreamHandler } from './platform/sse_assembler.ts';
+export type { SseEvent } from './platform/sse_assembler.ts';
 
 // ===== Agent / Research 入口 =====
 export { createSectionWriterTools } from './agent/section_writer_tools.ts';

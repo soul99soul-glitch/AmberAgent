@@ -148,13 +148,15 @@ export class NovelCreation {
   async saveChapter(
     projectId: string, chapterId: string | null, title: string, content: string,
   ): Promise<NovelChapter> {
-    let chapter: NovelChapter | null = null;
+    // holder 对象:闭包内赋值会使 TS 对裸 let 的控制流收窄失效(tsc TS2352)
+    const box: { value: NovelChapter | null } = { value: null };
     await this.repository.updateProject(projectId, p => {
       const m = saveChapter(p, chapterId, title, content, this.nowMs());
-      chapter = m.value;
+      box.value = m.value;
       return m.project;
     });
-    return chapter as NovelChapter;
+    if (box.value === null) throw new Error('saveChapter: 更新未返回章节');
+    return box.value;
   }
 
   deleteChapter(projectId: string, chapterId: string): Promise<NovelProject> {
@@ -165,13 +167,14 @@ export class NovelCreation {
     projectId: string, materialId: string | null, kind: NovelMaterialKind,
     title: string, content: string, enabled: boolean,
   ): Promise<NovelMaterial> {
-    let material: NovelMaterial | null = null;
+    const box: { value: NovelMaterial | null } = { value: null };
     await this.repository.updateProject(projectId, p => {
       const m = upsertMaterial(p, materialId, kind, title, content, enabled, this.nowMs());
-      material = m.value;
+      box.value = m.value;
       return m.project;
     });
-    return material as NovelMaterial;
+    if (box.value === null) throw new Error('upsertMaterial: 更新未返回素材');
+    return box.value;
   }
 
   deleteMaterial(projectId: string, materialId: string): Promise<NovelProject> {
@@ -183,13 +186,14 @@ export class NovelCreation {
   async collectMessage(
     projectId: string, messageId: string, target: NovelCollectionTarget,
   ): Promise<NovelCollectionResult> {
-    let chapter: NovelChapter | null = null;
+    const box: { value: NovelChapter | null } = { value: null };
     await this.repository.updateProject(projectId, p => {
       const m = collect(p, messageId, target, this.nowMs());
-      chapter = m.value;
+      box.value = m.value;
       return m.project;
     });
-    const ch: NovelChapter = chapter as NovelChapter;
+    if (box.value === null) throw new Error('collectMessage: 更新未返回章节');
+    const ch: NovelChapter = box.value;
     // 后台分析建议,失败不影响收录(UI 可稍后 reanalyze)
     void this.refreshMaterialSuggestions(projectId, ch.id).catch((): void => { /* 静默 */ });
     return { chapter: ch, suggestionCount: 0, suggestionWarning: null };

@@ -38,3 +38,10 @@ export {
 export {
   MessageStreamAccumulator, appendChunkToMessage, handleMessageChunk, coalesceStreamParts,
 } from './chat/stream_accumulator.ts';
+
+export { normalizeOpenAIStreamDataLines } from './chat/openai_normalize.ts';
+export {
+  parseChatCompletionMessage, parseOpenAiAnnotations, parseOpenAiTokenUsage,
+  parseOpenAiErrorDetail, parseOpenAiStreamEventData, OpenAiStreamError,
+} from './chat/openai_parse.ts';
+export type { OpenAiStreamEventResult } from './chat/openai_parse.ts';

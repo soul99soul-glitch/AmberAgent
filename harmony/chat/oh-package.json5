@@ -4,5 +4,7 @@
   "description": "Chat core domain layer (pure ArkTS)",
   "main": "src/main/ets/index.ts",
   "license": "Apache-2.0",
-  "dependencies": {}
+  "dependencies": {
+    "@amber/deepread-domain": "file:../deepread"
+  }
 }
