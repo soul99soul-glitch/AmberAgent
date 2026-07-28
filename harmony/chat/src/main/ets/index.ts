@@ -99,7 +99,7 @@ export type {
   ImageEncoder, PartGroup, BuildMessagesOpts, BuildChatCompletionRequestInput,
 } from './chat/openai_request.ts';
 
-export { createOpenAIChatApi, asChatStreamProvider } from './chat/openai_chat_api.ts';
+export { createOpenAIChatApi, asChatStreamProvider, openAIAuthHeaders } from './chat/openai_chat_api.ts';
 export type { OpenAIChatApiDeps, OpenAIChatApi, CallOpts } from './chat/openai_chat_api.ts';
 
 export {

@@ -187,3 +187,13 @@ test('asChatStreamProvider: 适配 chat_turn 的 ChatStreamProvider 接口', asy
   await provider.streamText([makeUserMessage('hi')], (c: MessageChunk): void => { chunks.push(c); });
   assert.equal(chunks.length, 2);
 });
+
+test('openAIAuthHeaders: mimo_coding_plan/token-plan 主机用 api-key,其余 Bearer(:545-557)', async () => {
+  const { openAIAuthHeaders } = await import('../main/ets/chat/openai_chat_api.ts');
+  assert.deepEqual(openAIAuthHeaders('api_key', 'https://api.openai.com/v1', 'T'),
+    { Authorization: 'Bearer T' });
+  assert.deepEqual(openAIAuthHeaders('mimo_coding_plan', 'https://token-plan-cn.xiaomimimo.com/v1', 'T'),
+    { 'api-key': 'T' });
+  assert.deepEqual(openAIAuthHeaders('api_key', 'https://token-plan-cn.xiaomimimo.com/v1', 'T'),
+    { 'api-key': 'T' }, 'token-plan-* xiaomimimo.com 主机即使 api_key 模式也用 api-key 头');
+});

@@ -6,6 +6,8 @@
     "pages/CouncilPage",
     "pages/CouncilRunPage",
     "pages/NovelProjectsPage",
-    "pages/NovelWorkspacePage"
+    "pages/NovelWorkspacePage",
+    "pages/ChatListPage",
+    "pages/ChatPage"
   ]
 }

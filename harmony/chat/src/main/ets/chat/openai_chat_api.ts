@@ -15,8 +15,8 @@ import type { SseEvent } from '@amber/deepread-domain';
 
 import type { MessageChunk, UIMessage, UIMessageChoice } from './message.ts';
 import type { JsonObject, JsonValue } from './json.ts';
-import type { ProviderSettingOpenAI, TextGenerationParams } from './provider_model.ts';
-import { buildChatCompletionRequest } from './openai_request.ts';
+import type { OpenAIAuthMode, ProviderSettingOpenAI, TextGenerationParams } from './provider_model.ts';
+import { buildChatCompletionRequest, hostOf } from './openai_request.ts';
 import type { ImageEncoder } from './openai_request.ts';
 import { normalizeOpenAIStreamDataLines } from './openai_normalize.ts';
 import {
@@ -169,3 +169,18 @@ export const asChatStreamProvider = (
   streamText: (messages: UIMessage[], onChunk: (chunk: MessageChunk) => void): Promise<void> =>
     api.streamText(messages, paramsFor(), onChunk),
 });
+
+// addOpenAICompatibleAuthHeader(ChatCompletionsAPI.kt:545-557)
+// mimo_coding_plan 或 token-plan-*.xiaomimimo.com → api-key 头;其余 Bearer
+export const openAIAuthHeaders = (
+  authMode: OpenAIAuthMode,
+  baseUrl: string,
+  token: string,
+): Record<string, string> => {
+  const host = hostOf(baseUrl);
+  if (authMode === 'mimo_coding_plan' ||
+    (host.startsWith('token-plan-') && host.endsWith('xiaomimimo.com'))) {
+    return { 'api-key': token };
+  }
+  return { Authorization: `Bearer ${token}` };
+};

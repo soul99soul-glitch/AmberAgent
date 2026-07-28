@@ -135,6 +135,8 @@ struct DeepReadHomePage {
           .fontSize(26).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif')
         Blank()
+        Text('对话').fontSize(13).fontColor(ACCENT).margin({ right: 20 })
+          .onClick(() => { router.pushUrl({ url: 'pages/ChatListPage' }); })
         Text('议会').fontSize(13).fontColor(ACCENT).margin({ right: 20 })
           .onClick(() => { router.pushUrl({ url: 'pages/CouncilPage' }); })
         Text('小说').fontSize(13).fontColor(ACCENT).margin({ right: 20 })

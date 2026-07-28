@@ -173,3 +173,16 @@
   - `toChatModel`：D-017 双模型映射落地；`provider_model.Modality` 补 `'audio'`（Android Modality 三值，请求侧只消费 image，类型拓宽无行为变化）。
   - **预设播种时机**：presetMessages 在**会话创建时**成初始节点（ChatService:567-572），非每轮注入；`seedConversationWithPresets` 只在空会话生效。
 - **可逆性**：全部为组装层纯函数；P1 加回 dynamic 块时 static 块语义不变。
+
+## D-019（L0，2026-07-28）Chat UI 首版（编译门）:容器装配、Provider 选择策略、memory 仓库过渡、auth 头纯逻辑
+
+- **背景**：M3 设备端交付物中可编译验证的部分（运行验证仍待 G-C）。chat HAR 全部纯逻辑已闭环，本切片接线 entry。
+- **决定**：
+  - **entry 依赖 @amber/chat-domain**（file:../chat + ohpm install，D-015 门）。
+  - **ChatKvStore adapter**：chat `KeyValueStore` 复用 deepread `Storage`（PreferencesStorage）实现——assistants/providers 真实持久化落 Preferences。
+  - **会话仓库过渡**：`createMemoryConversationRepository()`（chat-domain 自带 memory 实现，真实语义、非空实现）——**重启丢失，登记在案**；spike B 验证 RDB 后换 D-013 schema 的 RDB adapter。选择 memory 而非抢跑 RDB：RDB 建表/迁移未经设备验证，宪章禁止未验证的破坏性 schema 决策。
+  - **Provider 选择策略（MVP）**：第一个 `type=openai && models 非空 && hasUsableAuth` 的 provider + 其首个 model；选择器 UI 裁 P1。请求侧 setting 由 persisted variant 映射（secret 经 `openAIAuthHeaders(authMode, baseUrl, token)` 注入 headers，对齐 ChatCompletionsAPI.kt:545-557 的 api-key/Bearer 分流）。
+  - **新会话播种**：`seedConversationWithPresets`（D-018）在 ChatPage 无 conversationId 进入时生效；assistant 取 KV 首位，无配置 → 内置"默认助手"。
+  - **错误路径**：runChatTurn 抛错 → errorMsg 展示 + 从仓库重取会话刷新（user 快照已持久化，对齐 D-012 错误语义）。
+  - **UI 状态模式**：沿用 CouncilRunPage 惯用法（@State 原始/数组 + 容器单例 + router params Record 显式声明）；ArkTS 限制修法登记：imports 必须置顶、对象字面量需显式类型。
+- **可逆性**：页面/装配均为新增；memory→RDB 换 adapter 不改 UI。

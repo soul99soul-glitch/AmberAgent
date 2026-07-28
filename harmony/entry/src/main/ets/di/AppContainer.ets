@@ -27,6 +27,16 @@ import { createFileStore } from '../platform_impl/FileStore.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
 import { createNovelModelAdapter } from '../platform_impl/NovelModelAdapter.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import type {
+  ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
+  ProviderSettingOpenAIVariant,
+} from '@amber/chat-domain';
+import {
+  createMemoryConversationRepository, loadAssistants, loadProviders, makeAssistant,
+  makeProviderSettingOpenAI, createOpenAIChatApi, hasUsableAuth, openAIAuthHeaders,
+  makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
+} from '@amber/chat-domain';
+import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
@@ -169,4 +179,81 @@ export const getNovelCreation = (): NovelCreation => {
     });
   }
   return novelCreation;
+};
+
+// ===== Chat 装配(D-019) =====
+// 持久化:会话仓库当前用 chat-domain memory 实现(重启丢失,已登记;
+//   spike B 验证 RDB 后换 RDB adapter,schema 见 D-013)。
+//   assistants/providers 走 Preferences KV(真实持久化)。
+// Provider 选择:第一个 hasUsableAuth 且非空 models 的 openai variant(选择器 UI = P1)。
+
+
+let chatKv: KeyValueStore | null = null;
+export const getChatKvStore = (): KeyValueStore => {
+  if (chatKv === null) {
+    chatKv = createChatKvStore(getAppContainer().storage);
+  }
+  return chatKv;
+};
+
+let chatRepo: ConversationRepository | null = null;
+export const getChatRepository = (): ConversationRepository => {
+  if (chatRepo === null) {
+    // TODO(spike B): 换 RDB adapter(D-013 schema);memory 实现重启丢失,已登记 D-019
+    chatRepo = createMemoryConversationRepository();
+  }
+  return chatRepo;
+};
+
+export const getChatAssistants = async (): Promise<Assistant[]> => {
+  const loaded = await loadAssistants(getChatKvStore());
+  if (loaded !== null && loaded.length > 0) return loaded;
+  return [makeAssistant({ name: '默认助手' })];
+};
+
+export interface ChatRuntime {
+  api: OpenAIChatApi;
+  assistant: Assistant;
+  params: TextGenerationParams;
+  contextMessageSize: number;
+}
+
+export const resolveChatRuntime = async (): Promise<ChatRuntime | null> => {
+  const providers = await loadProviders(getChatKvStore());
+  if (providers === null) return null;
+  let chosen: ProviderSettingOpenAIVariant | null = null;
+  for (const p of providers) {
+    if (p.type === 'openai' && p.models.length > 0 && hasUsableAuth(p)) {
+      chosen = p;
+      break;
+    }
+  }
+  if (chosen === null) return null;
+  const assistant: Assistant = (await getChatAssistants())[0];
+  const model = chosen.models[0];
+  const sessionDefaults = resolveSessionDefaults(assistant, null, 'auto');
+  const merged = mergeCustomParams(assistant, model);
+  const params = makeTextGenerationParams({
+    model: toChatModel(model),
+    temperature: merged.temperature,
+    topP: merged.topP,
+    maxTokens: sessionDefaults.maxTokens,
+    reasoningLevel: sessionDefaults.reasoningLevel,
+  });
+  const token: string = chosen.apiKey;
+  const api = createOpenAIChatApi({
+    http: getAppContainer().httpClient,
+    setting: makeProviderSettingOpenAI({
+      id: chosen.id,
+      enabled: chosen.enabled,
+      name: chosen.name,
+      baseUrl: chosen.baseUrl,
+      chatCompletionsPath: chosen.chatCompletionsPath,
+      useResponseApi: chosen.useResponseApi,
+      authMode: chosen.authMode,
+      brand: chosen.brand,
+    }),
+    headers: (): Record<string, string> => openAIAuthHeaders(chosen!.authMode, chosen!.baseUrl, token),
+  });
+  return { api, assistant, params, contextMessageSize: sessionDefaults.contextMessageSize };
 };

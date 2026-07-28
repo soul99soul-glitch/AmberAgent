@@ -5,6 +5,7 @@
   "main": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@amber/deepread-domain": "file:../deepread"
+    "@amber/deepread-domain": "file:../deepread",
+    "@amber/chat-domain": "file:../chat"
   }
 }
