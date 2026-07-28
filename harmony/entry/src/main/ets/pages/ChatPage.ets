@@ -10,7 +10,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import type {
   Conversation, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
-  PendingUserMessage, DequeueNextResult,
+  PendingUserMessage, DequeueNextResult, UIMessagePartReasoning, ReasoningCardState,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, runChatTurn,
@@ -24,6 +24,8 @@ import {
   cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
   convertSteerToFollowup, runAppendUserMessage,
   persistPendingQueue, loadPendingQueue, recordPendingQueueEvent,
+  toDisplayReasoningText, extractThinkingTitle, reasoningDurationMs, formatThoughtSeconds,
+  reasoningCardStateExpanded, onReasoningExpandedChange,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -81,11 +83,71 @@ struct MessageRow {
   @Prop selectIndex: number = 0;
   @Prop isAssistant: boolean = false;
   @Prop isLastAssistant: boolean = false;
+  // D-053:本行是否属于活动流式尾部(reasoning loading 判定;
+  //   Android messageLoading 语义,流式尾/regen 预览传 true)
+  @Prop @Watch('onStreamingChange') streaming: boolean = false;
   onSwitch: (idx: number) => void = (_idx: number): void => {};
   onRegenerate: () => void = (): void => {};
   onDelete: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onFork: () => void = (): void => {};
+  // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
+  @State reasoningStates: Record<number, string> = {};
+  // D-053:本会话内见过流式(Android sawStreamingMessage:123 —
+  //   流式结束后保持 Preview 不自动折叠)
+  @State sawStream: boolean = false;
+
+  aboutToAppear(): void {
+    if (this.streaming) this.sawStream = true;
+  }
+
+  private onStreamingChange(_propName: string): void {
+    if (this.streaming) this.sawStream = true;
+  }
+
+  // loading = messageLoading && finishedAt == null(ChatMessageReasoning.kt:107)
+  private reasoningLoading(p: UIMessagePartReasoning): boolean {
+    return this.streaming && p.finishedAt === null;
+  }
+
+  // 初始 Collapsed(:88);流式开始 → Preview(:125-126,showThinkingContent
+  //   设置项鸿蒙未接,Android 默认 true);流式过 → 保持 Preview(:129-133)
+  private reasoningStateAt(idx: number): ReasoningCardState {
+    const s: string | undefined = this.reasoningStates[idx];
+    if (s === 'collapsed' || s === 'preview' || s === 'expanded') {
+      return s as ReasoningCardState;
+    }
+    return (this.streaming || this.sawStream) ? 'preview' : 'collapsed';
+  }
+
+  private toggleReasoning(idx: number, loading: boolean): void {
+    const cur: ReasoningCardState = this.reasoningStateAt(idx);
+    const next: ReasoningCardState =
+      onReasoningExpandedChange(!reasoningCardStateExpanded(cur), loading);
+    const copy: Record<number, string> = {};
+    const keys: string[] = Object.keys(this.reasoningStates);
+    for (const k of keys) {
+      copy[Number(k)] = this.reasoningStates[Number(k)];
+    }
+    copy[idx] = next;
+    this.reasoningStates = copy;
+  }
+
+  // 头部文案(:296-300/:325-349):流式且有独占加粗行 → title;
+  //   否则 showReasoningDuration(finishedAt≠null 或 loading)→ 秒数;否则 深度思考
+  //   裁剪:budgetLabel(需 assistant 注入)= P1;流式 title 右侧 duration extra = P1
+  private reasoningHeader(p: UIMessagePartReasoning): string {
+    const loading: boolean = this.reasoningLoading(p);
+    if (loading) {
+      const title: string | null = extractThinkingTitle(p.reasoning);
+      if (title !== null) return title;
+    }
+    if (p.finishedAt !== null || loading) {
+      const ms: number = reasoningDurationMs(p.createdAt, p.finishedAt, loading, Date.now());
+      return formatThoughtSeconds(ms / 1000);
+    }
+    return '深度思考';
+  }
 
   build() {
     Column() {
@@ -108,12 +170,46 @@ struct MessageRow {
             .borderRadius(8)
             .margin({ bottom: 4 })
         } else if (p.type === 'reasoning') {
-          Text(p.reasoning)
-            .fontSize(12).fontColor(INK2)
-            .padding(8)
-            .backgroundColor(SURFACE2)
-            .borderRadius(8)
-            .margin({ bottom: 4 })
+          // D-053:reasoning 卡片(ChatMessageReasoning.kt 全文语义)—
+          //   头(脑图标+title/秒数/深度思考+展开箭头)可点切换;
+          //   collapsed 仅头;preview 1600 字尾窗(5 行截断,Android 100dp
+          //   滚动窗裁剪登记 Spike C);expanded 18000 字尾窗全文;
+          //   2dp 左竖线+14dp 缩进(:244-256)
+          Column() {
+            Row() {
+              Text('🧠').fontSize(12)
+              Text(this.reasoningHeader(p as UIMessagePartReasoning))
+                .fontSize(12).fontColor(ACCENT)
+                .margin({ left: 6 })
+                .layoutWeight(1)
+              Text(this.reasoningStateAt(i) === 'expanded' ? '▾' : '▸')
+                .fontSize(11).fontColor(INK3)
+            }
+            .width('100%')
+            .padding({ left: 2, top: 6, bottom: 6 })
+            .onClick((): void => {
+              this.toggleReasoning(i, this.reasoningLoading(p as UIMessagePartReasoning));
+            })
+            if (this.reasoningStateAt(i) === 'preview') {
+              Text(toDisplayReasoningText((p as UIMessagePartReasoning).reasoning,
+                this.reasoningLoading(p as UIMessagePartReasoning), false))
+                .fontSize(13).fontColor(INK2)
+                .maxLines(5)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+                .padding({ left: 14, top: 2, bottom: 2 })
+                .border({ width: { left: 2 }, color: { left: '#D8D2C6' } })
+            } else if (this.reasoningStateAt(i) === 'expanded') {
+              Text(toDisplayReasoningText((p as UIMessagePartReasoning).reasoning,
+                this.reasoningLoading(p as UIMessagePartReasoning), true))
+                .fontSize(13).fontColor(INK2)
+                .width('100%')
+                .padding({ left: 14, top: 2, bottom: 2 })
+                .border({ width: { left: 2 }, color: { left: '#D8D2C6' } })
+            }
+          }
+          .width('100%')
+          .margin({ bottom: 4 })
         } else if (p.type === 'tool') {
           Text(`工具:${p.toolName}`)
             .fontSize(11).fontColor(ACCENT)
@@ -789,13 +885,13 @@ struct ChatPage {
           // D-041:regenerate 流式预览渲染在目标节点行下
           if (row.nodeId === this.regenNodeId && this.regenTail !== null) {
             ListItem() {
-              MessageRow({ message: this.regenTail as UIMessage })
+              MessageRow({ message: this.regenTail as UIMessage, streaming: true })
             }
           }
         }, (row: MsgRow): string => row.nodeId)
         ForEach(this.streamingTail, (m: UIMessage): void => {
           ListItem() {
-            MessageRow({ message: m })
+            MessageRow({ message: m, streaming: true })
           }
         }, (m: UIMessage): string => `tail-${m.id}`)
         if (this.sending) {

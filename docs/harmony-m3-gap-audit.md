@@ -54,7 +54,7 @@
 | 动态 system prompt blocks（time/date/lorebook/mode 注入） | Assistant.kt modeInjectionIds/lorebookIds | 依赖 lorebook/mode 存储 |
 | ~~customHeaders/customBodies 编辑 UI~~ **已完成(D-049)** | AssistantRequestPage.kt:78-95 + PropertyEditor.kt | 助手级编辑+运行时注入完成;model 级自定义参数编辑面 = P1(数据已被 mergeCustomParams 消费) |
 | memory（全局/助手级） | AssistantVM.kt:89-94 getMemories | 依赖 memory 存储设计 |
-| reasoning 折叠/展开交互 | Android ChatList reasoning 块 | UI 层 |
+| ~~reasoning 折叠/展开交互~~ **已完成(D-053)** | ChatMessageReasoning.kt(452 行) + MarkdownUtils.kt:35-55 | 三态卡片+流式迁移+秒数头部+尾窗截断完成;残余:budgetLabel 后缀/title 右侧 duration/shimmer+Markdown 富渲染/100dp 滚动窗 = P1(Spike C 视觉) |
 
 ## 6. 结论
 

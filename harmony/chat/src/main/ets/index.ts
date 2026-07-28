@@ -112,6 +112,17 @@ export {
   buildAuditEventLine, recordPendingQueueEvent,
 } from './chat/pending_queue_store.ts';
 
+// ===== reasoning 卡片显示(D-053,ChatMessageReasoning.kt 全文) =====
+export type { ReasoningCardState } from './chat/reasoning_display.ts';
+export {
+  REASONING_PREVIEW_CHAR_LIMIT, REASONING_EXPANDED_STREAM_CHAR_LIMIT,
+  REASONING_EXPANDED_FINAL_CHAR_LIMIT,
+  reasoningCardStateExpanded, onReasoningExpandedChange,
+  reasoningDisplayLimit, toDisplayReasoningText, isReasoningTailTrimmed,
+  reasoningDurationMs, formatThoughtSeconds, reasoningBudgetLabel,
+  extractThinkingTitle, resolveOnStreamStart, resolveOnStreamEnd,
+} from './chat/reasoning_display.ts';
+
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,
   serializeMessageList, parseMessageList,
