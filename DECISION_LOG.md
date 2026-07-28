@@ -270,3 +270,13 @@
   - temperature 空输入 → null(助手默认跟随全局,对齐 Android temperature: Float? 语义);contextMessageSize 空/非法 → 0(不截断)。
   - 助手绑定会话(conversation.assistantId 已在线格式)+ 每会话选助手 = P1;当前 resolveChatRuntime 取首个助手(D-019 策略延续)。
 - **可逆性**:纯新增页面;KV 线格式不变(全字段序列化早已锁定)。
+
+## D-028（L0，2026-07-28）会话-助手绑定：assistantId 全链路(runtime 解析/新对话指定/列表入口)
+
+- **背景**：conversation.assistantId 早在线格式(D-013),但 runtime 一直取首助手(D-019),助手管理页(D-027)落地后绑定成为真实可用性缺口。
+- **决定**：
+  - **resolveChatRuntime(assistantId?)**:绑定 id 命中即用;未传/未命中 → 首助手(D-019 延续,老会话 DEFAULT_ASSISTANT_ID 自然回退)。ChatPage send/regenerate 均传 conversation.assistantId。
+  - **新对话指定助手**:ChatPage 读 router 参数 assistantId → 命中则 makeConversation({assistantId}) + 用该助手 seedConversationWithPresets(presetMessages 按助手隔离,对齐 Android 每助手隔离会话语义);未命中回退首助手。
+  - **入口**:ChatAssistantsPage 行内「对话」→ 带 assistantId 直开新会话。
+  - 会话列表按助手分组/过滤 = P1(Android 有助手维度隔离视图)。
+- **可逆性**:resolveChatRuntime 参数可选,旧调用零影响。

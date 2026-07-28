@@ -282,12 +282,22 @@ export const describeChatModel = async (): Promise<string> => {
   return `${choice.provider.name} / ${choice.model.modelId}`;
 };
 
-export const resolveChatRuntime = async (): Promise<ChatRuntime | null> => {
+export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRuntime | null> => {
   const choice = await resolveChatProviderChoice();
   if (choice === null) return null;
   const chosen: ProviderSettingOpenAIVariant = choice.provider;
   const model = choice.model;
-  const assistant: Assistant = (await getChatAssistants())[0];
+  // 助手解析(D-028):会话绑定 assistantId 优先,未命中/未传 → 首个(D-019 延续)
+  const assistants: Assistant[] = await getChatAssistants();
+  let assistant: Assistant = assistants[0];
+  if (assistantId !== undefined) {
+    for (const a of assistants) {
+      if (a.id === assistantId) {
+        assistant = a;
+        break;
+      }
+    }
+  }
   const sessionDefaults = resolveSessionDefaults(assistant, null, 'auto');
   const merged = mergeCustomParams(assistant, model);
   const params = makeTextGenerationParams({

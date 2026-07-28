@@ -4,7 +4,7 @@
 //   (runRegenerateAt);regenerate 流式预览裁 MVP(spinner 代替,已登记)
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import type { Conversation, UIMessage, UIMessagePart } from '@amber/chat-domain';
+import type { Conversation, UIMessage, UIMessagePart, Assistant } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, runChatTurn,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
@@ -162,9 +162,18 @@ struct ChatPage {
         }
       });
     } else {
+      // 新对话:支持 router 参数 assistantId 指定助手(D-028)
+      const wantAssistantId: string = params ? (params['assistantId'] ?? '') : '';
       getChatAssistants().then((assistants): void => {
-        const fresh = makeConversation(newId(), []);
-        this.conversation = seedConversationWithPresets(fresh, assistants[0]);
+        let picked: Assistant = assistants[0];
+        for (const a of assistants) {
+          if (a.id === wantAssistantId) {
+            picked = a;
+            break;
+          }
+        }
+        const fresh = makeConversation(newId(), [], { assistantId: picked.id });
+        this.conversation = seedConversationWithPresets(fresh, picked);
         this.rows = buildRows(this.conversation);
         this.suggestions = this.conversation.chatSuggestions;
       });
@@ -189,7 +198,7 @@ struct ChatPage {
     this.errorMsg = '';
     const conv: Conversation = this.conversation;
     const holder: RuntimeHolder = { rt: null };
-    resolveChatRuntime()
+    resolveChatRuntime(conv.assistantId)
       .then((rt: ChatRuntime | null): Promise<Conversation> => {
         holder.rt = rt;
         if (rt === null) {
@@ -300,7 +309,7 @@ struct ChatPage {
     const tailStart: number = currentMessages(conv).length + 1;
     // holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制)
     const holder: RuntimeHolder = { rt: null };
-    resolveChatRuntime()
+    resolveChatRuntime(conv.assistantId)
       .then((rt: ChatRuntime | null): Promise<Conversation> => {
         holder.rt = rt;
         if (rt === null) {

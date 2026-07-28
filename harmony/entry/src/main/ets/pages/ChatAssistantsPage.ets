@@ -124,8 +124,19 @@ struct ChatAssistantsPage {
           ForEach(this.items, (a: Assistant): void => {
             ListItem() {
               Column() {
-                Text(a.name.length > 0 ? a.name : '未命名助手')
-                  .fontSize(15).fontColor(INK)
+                Row() {
+                  Text(a.name.length > 0 ? a.name : '未命名助手')
+                    .fontSize(15).fontColor(INK)
+                    .layoutWeight(1)
+                  Text('对话')
+                    .fontSize(12).fontColor(ACCENT)
+                    .onClick((): void => {
+                      const params: Record<string, string> = {};
+                      params['assistantId'] = a.id;
+                      router.pushUrl({ url: 'pages/ChatPage', params: params });
+                    })
+                }
+                .width('100%')
                 if (a.systemPrompt.trim().length > 0) {
                   Text(a.systemPrompt)
                     .fontSize(11).fontColor(INK3).margin({ top: 4 })

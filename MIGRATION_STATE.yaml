@@ -63,4 +63,4 @@ next_slices:                      # 按优先级,取最高未阻塞项
 parity_baseline:
   单元测试总数: 819               # deepread 603 + chat 216
   已知行为偏差: 6                # 详见 PARITY_DEBT.md PD-001..006(+1 条 Android 内部不一致待核实)
-  决策记录: "DECISION_LOG.md D-001..D-027"
+  决策记录: "DECISION_LOG.md D-001..D-028"
