@@ -50,7 +50,7 @@
 | FOLLOWUP 发送排队 | ChatService.kt:505 clearPendingUserMessages；ChatPage.kt:827 | D-042 登记；排队 UI + 生成中注入 |
 | ContextEngine + compact（上下文压缩） | ChatService invalidateCompacts / copyValidCompacts | regenerate 窗口化 merge 偏差残余 |
 | 图片压缩 + file:// 私有目录存储 | FileEncoder.kt compressAndEncode | PD-007；PixelMap 管线 |
-| Google/Claude 请求构建 | ai/ provider 各实现 | openai_request 同构扩展 |
+| Google 请求构建 | ai/ GoogleProvider.kt(949 行) | Claude 已完成(D-044:请求/解析/SSE/组装 23 测试);Google 同构扩展 |
 | 动态 system prompt blocks（time/date/lorebook/mode 注入） | Assistant.kt modeInjectionIds/lorebookIds | 依赖 lorebook/mode 存储 |
 | customHeaders/customBodies 编辑 UI | AssistantBasicPage | 模型/wire 已备（D-016） |
 | memory（全局/助手级） | AssistantVM.kt:89-94 getMemories | 依赖 memory 存储设计 |

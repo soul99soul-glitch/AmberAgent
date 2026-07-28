@@ -112,6 +112,25 @@ export type {
 export { createOpenAIChatApi, asChatStreamProvider, openAIAuthHeaders } from './chat/openai_chat_api.ts';
 export type { OpenAIChatApiDeps, OpenAIChatApi, CallOpts } from './chat/openai_chat_api.ts';
 
+// Claude(D-044):请求构建 + 解析 + API 组装
+// (SYSTEM_PROMPT_CACHE_* 常量由 context_assembly 导出,claude_request 复用)
+export {
+  buildClaudeMessageRequest, buildClaudeMessages, insertMessagesCacheControl,
+  toClaudeContentBlock, toClaudeToolUseBlock, toClaudeToolResultBlock,
+} from './chat/claude_request.ts';
+export type {
+  ClaudeEncodedImage, ClaudeImageEncoder, BuildClaudeMessageRequestInput,
+} from './chat/claude_request.ts';
+export {
+  parseClaudeMessage, parseClaudeTokenUsage, parseClaudeResponseBody,
+  parseClaudeStreamEvent,
+} from './chat/claude_parse.ts';
+export type { ClaudeStreamEventResult } from './chat/claude_parse.ts';
+export {
+  createClaudeChatApi, asClaudeChatStreamProvider, ANTHROPIC_VERSION,
+} from './chat/claude_chat_api.ts';
+export type { ClaudeChatApiDeps } from './chat/claude_chat_api.ts';
+
 export {
   makeAssistant, patchAssistant, makeAssistantRegex, reasoningLevelForModel,
 } from './chat/assistant.ts';

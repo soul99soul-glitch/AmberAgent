@@ -425,3 +425,13 @@
   - MIGRATION_STATE M3 里程碑状态更新为"source-only 完成;设备验证待 G-D(G-C 阻塞)"。
   - 后续 source-only 方向:P1 清单中无设备依赖纯逻辑项(FOLLOWUP 排队/Google+Claude 请求构建/customHeaders-customBodies 编辑)。
 - **可逆性**:文档与状态记录,无代码改动。
+
+## D-044（L0，2026-07-28）Claude 请求构建移植：Messages API 全链路(协议档)
+
+- **背景**：M5「多 provider」核心项;Android ClaudeProvider.kt(621 行)语义明确;鸿蒙 ProviderSettingClaude 模型/wire 已备(D-017)但无请求构建 → Claude 变体空壳。
+- **决定**：
+  - **claude_request.ts(TDD 12 测试锁定)**:buildMessageRequest 忠实移植 — 默认 max_tokens=64000;**temperature 仅 reasoningLevel=off 时携带**(:302-305);top_p 无条件;system 抽出为块数组(cache_control 仅打显式 EPHEMERAL 标记的末个 part,DISABLED 全禁,无标记不打);thinking adaptive+summarized(OFF→disabled,显式档→output_config.effort);tools input_schema + caching 末位 cache_control;assistant 已执行 tool → tool_use + 紧跟 user tool_result(groupPartsByToolBoundary 复用);reasoning part → thinking 块 + metadata 并入(signature);insertMessagesCacheControl(倒数第二条非 tool_result user 末位 content)。
+  - **claude_parse.ts(TDD 11 测试锁定)**:parseMessage(text/thinking+signature/redacted_thinking 跳过/tool_use/input_json_delta);parseTokenUsage(input+cache_read+cache_creation 合计 prompt,message.usage 回退);响应体提取;**parseClaudeStreamEvent**(event: 字段分发 — SseAssembler 双运行时设计预期;content_block+delta 合并复用 parseMessage;**顶层 index 注入 tool metadata** — 并行 tool use 唯一关联键,Android 注释逐字;message_stop→done;error→parseErrorDetail 复用 openai 泛型实现)。
+  - **claude_chat_api.ts**:createClaudeChatApi(streamText/generateText,复用 OpenAIChatApi 结构签名)+ asClaudeChatStreamProvider(D-040 双路径);x-api-key + anthropic-version:2023-06-01 头;abort signal 透传;**entry 接线未做**(设置页无 Claude 变体编辑 UI — provider 编辑面 P1,登记)。
+  - **裁剪登记(PD-008)**:keyRoulette 多 key 轮换 → 单 apiKey;ClaudeImageEncoder Port(mime + 无前缀 base64)由 entry adapter 实现时落地(D-038 EntryImageEncoder 加 detailed 形态即可,当前未接)。
+- **可逆性**:纯增模块,零既有路径改动;OpenAI 链路不受影响。
