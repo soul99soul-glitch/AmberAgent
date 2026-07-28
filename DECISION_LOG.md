@@ -850,3 +850,15 @@
   - **ChatPage output 链**:3 站点改 [thinkTag, base64Image, regexOutput](Android 相对序忠实,MiniApp P1)。
   - **TDD 9 测试**:常量/substringAfter/data 前缀/decode 往返+三种抛错/转换全链+text 原引用/不可解码保留/非 data 原引用/onGenerationFinish 全消息/非法 base64 传播;另 transformers.test.ts 既有 onGenerationFinish 用法改 await(1 处)。
 - **可逆性**:1459 测试全绿(deepread 603 + chat 856),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。output 链残余:MiniAppOutputTransformer(P1,依附 webmount)。
+
+## D-077a（L0，2026-07-28）tool system prompt 块(buildSystemPromptParts:739-741,:763-770)
+
+- **背景**：动态 system prompt blocks 收尾切片之一。Android 锚点:GenerationHandler.kt:739-741(toolPrompt join)/:763-770(tool_prompts part);ai/core/Tool.kt:16(systemPrompt 签名)。
+- **决定**：
+  - **buildToolSystemPrompt(HAR,context_assembly)**:tools.map { systemPrompt(model, messages) } → blank 过滤 → '\n\n' 连接(:739-741 忠实);model/messages 透传逐工具(测试锁定)。
+  - **assembleInternalMessages**:AssembleInternalInput + toolPrompt?: string;非 blank → 附加第三 text part(metadata **仅** {system_prompt_block:'tool_prompts'},无 cache_control,:766-768 逐字);块序 static → dynamic → tool_prompts(:743-770 忠实)。
+  - **tool_loop**:ToolLoopOptions + toolPromptModel?: ChatModel(未提供 → 不产出,等价 tools 空列表);每步重算(对齐 Android 每次 generateInternal 重算),工具集 = 本步暴露子集 stepTools(与发 provider 的 stepDefs 同口径,D-062 懒暴露语义一致)。
+  - **entry ChatPage**:buildToolLoop + toolPromptModel: rt.params.model。
+  - **chat_turn 非工具路径不动**:无工具 → Android 同(空 tools → 空 prompt → 无块)。
+  - **TDD 4 测试**:blank 过滤+'\n\n' 连接/model+messages 透传/块序+metadata 逐字(无 cache_control)/blank+缺省无块。
+- **可逆性**:1463 测试全绿(deepread 603 + chat 860),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。动态块残余:recentChats(memory/generativeUi = P1 大特性)。

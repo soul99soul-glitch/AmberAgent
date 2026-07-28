@@ -381,7 +381,7 @@ export {
 
 export {
   SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_DISABLED, SYSTEM_PROMPT_CACHE_EPHEMERAL,
-  buildStaticSystemPromptParts, assembleInternalMessages,
+  buildStaticSystemPromptParts, buildToolSystemPrompt, assembleInternalMessages,
   resolveSessionDefaults, mergeCustomParams, toChatModel, seedConversationWithPresets,
 } from './chat/context_assembly.ts';
 export type {

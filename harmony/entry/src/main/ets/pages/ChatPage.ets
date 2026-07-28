@@ -930,6 +930,8 @@ struct ChatPage {
           customBody: rt.params.customBody,
         })),
       consumeSteerMessages: (): Promise<UIMessage[]> => this.drainSteerMessages(),
+      // D-077a:tool system prompt 块所需模型(buildSystemPromptParts:739-741)
+      toolPromptModel: rt.params.model,
     };
   }
 

@@ -16,9 +16,10 @@ import assert from 'node:assert/strict';
 
 import {
   SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL,
-  buildStaticSystemPromptParts, assembleInternalMessages,
+  buildStaticSystemPromptParts, buildToolSystemPrompt, assembleInternalMessages,
   resolveSessionDefaults, mergeCustomParams, toChatModel, seedConversationWithPresets,
 } from '../main/ets/chat/context_assembly.ts';
+import { makeAgentTool } from '../main/ets/chat/tool.ts';
 import { makeAssistant } from '../main/ets/chat/assistant.ts';
 import { makeProviderModel } from '../main/ets/chat/provider_settings.ts';
 import { makeUserMessage, makeAssistantMessage } from '../main/ets/chat/message.ts';
@@ -131,4 +132,76 @@ test('seedConversationWithPresets: 空会话 → presets 成节点;非空 → �
   const existing = makeConversation('c2', []);
   const withHistory = seedConversationWithPresets(existing, makeAssistant({}));
   assert.equal(withHistory.messageNodes.length, 0, '无 presets → 不动');
+});
+
+// ===== D-077a:tool system prompt 块(buildSystemPromptParts:739-741,:763-770) =====
+
+test('buildToolSystemPrompt: 非 blank 收集 + \\n\\n 连接', () => {
+  const model = toChatModel(makeProviderModel({}));
+  const noop = (): Promise<never[]> => Promise.resolve([]);
+  const tools = [
+    makeAgentTool({
+      name: 'a', description: '', execute: noop,
+      systemPrompt: (): string => 'PA',
+    }),
+    makeAgentTool({ name: 'b', description: '', execute: noop }), // 默认 '' → 过滤
+    makeAgentTool({
+      name: 'c', description: '', execute: noop,
+      systemPrompt: (): string => '  ', // blank → 过滤
+    }),
+    makeAgentTool({
+      name: 'd', description: '', execute: noop,
+      systemPrompt: (): string => 'PD',
+    }),
+  ];
+  assert.equal(buildToolSystemPrompt(tools, model, []), 'PA\n\nPD');
+  assert.equal(buildToolSystemPrompt([], model, []), '');
+});
+
+test('buildToolSystemPrompt: model/messages 透传给每个工具', () => {
+  const model = toChatModel(makeProviderModel({ modelId: 'm-x' }));
+  const msgs = [makeUserMessage('hello')];
+  let seen = '';
+  const tools = [
+    makeAgentTool({
+      name: 'a', description: '', execute: (): Promise<never[]> => Promise.resolve([]),
+      systemPrompt: (m, ms): string => {
+        seen = `${m.modelId}|${ms.length}`;
+        return 'P';
+      },
+    }),
+  ];
+  buildToolSystemPrompt(tools, model, msgs);
+  assert.equal(seen, 'm-x|1');
+});
+
+test('assembleInternalMessages: tool_prompts 块附加于 dynamic 之后,metadata 逐字', () => {
+  const out = assembleInternalMessages({
+    messages: [makeUserMessage('m')],
+    assistant: makeAssistant({ systemPrompt: 'SP' }),
+    agentSoul: '',
+    contextMessageSize: 0,
+    extraSystemBlocks: ['DYN'],
+    toolPrompt: 'TOOLP',
+  });
+  const sysParts = out[0].parts as UIMessagePartText[];
+  assert.equal(sysParts.length, 3);
+  assert.equal(sysParts[0].text, 'SP');
+  assert.equal(sysParts[1].text, 'DYN');
+  assert.equal((sysParts[1].metadata as JsonObject)['system_prompt_block'], 'dynamic');
+  assert.equal(sysParts[2].text, 'TOOLP');
+  assert.equal((sysParts[2].metadata as JsonObject)['system_prompt_block'], 'tool_prompts');
+  // tool block 无 cache_control(:766-768 仅 system_prompt_block)
+  assert.equal((sysParts[2].metadata as JsonObject)[SYSTEM_PROMPT_CACHE_CONTROL_METADATA], undefined);
+});
+
+test('assembleInternalMessages: toolPrompt blank/缺省 → 无 tool 块', () => {
+  const base = {
+    messages: [makeUserMessage('m')],
+    assistant: makeAssistant({ systemPrompt: 'SP' }),
+    agentSoul: '',
+    contextMessageSize: 0,
+  };
+  assert.equal(assembleInternalMessages(base)[0].parts.length, 1);
+  assert.equal(assembleInternalMessages({ ...base, toolPrompt: '  ' })[0].parts.length, 1);
 });

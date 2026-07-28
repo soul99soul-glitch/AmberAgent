@@ -28,13 +28,13 @@ import type { ChatStreamProvider, ChatTurnDeps } from './chat_turn.ts';
 import { generateAssistantOnce, runAppendUserMessage, runChatTurn } from './chat_turn.ts';
 import type { RegenerateDeps, RegenerateSeed } from './regenerate.ts';
 import { prepareRegenerateSeed, runRegenerateAt } from './regenerate.ts';
-import { assembleInternalMessages } from './context_assembly.ts';
+import { assembleInternalMessages, buildToolSystemPrompt } from './context_assembly.ts';
 import type { TransformerContext } from './transformer_pipeline.ts';
 import {
   applyInputTransformers, applyVisualTransformersStreamingTail,
 } from './transformer_pipeline.ts';
 import type { VisionFallbackHook } from './vision_fallback.ts';
-import type { ChatToolDefinition } from './provider_model.ts';
+import type { ChatModel, ChatToolDefinition } from './provider_model.ts';
 import type { AgentTool } from './tool.ts';
 import { toChatToolDefinition } from './tool.ts';
 import type { GenerationRetrySetting } from './generation_retry.ts';
@@ -81,6 +81,9 @@ export interface ToolLoopOptions {
   //   另需 assistant.streamOutput != false(GenerationHandler:187)
   speculativeEnabled?: boolean;
   speculativeMaxConcurrentTools?: number;
+  // D-077a:tool system prompt 块(buildSystemPromptParts:739-741)所需模型;
+  //   未提供 → 不产出 tool prompt 块(等价 Android tools 空列表)
+  toolPromptModel?: ChatModel;
 }
 
 const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
@@ -199,11 +202,17 @@ export const runAgenticToolLoop = async (
       const preparedMessages: UIMessage[] = deps.prepareContextMessages !== undefined
         ? await deps.prepareContextMessages(contextInput)
         : contextInput;
+      // D-077a:tool system prompt 块(每步重算,buildSystemPromptParts:739-741;
+      //   工具集 = 本步暴露子集,与发往 provider 的 stepDefs 同口径)
+      const toolPrompt: string = loop.toolPromptModel !== undefined
+        ? buildToolSystemPrompt(stepTools, loop.toolPromptModel, preparedMessages)
+        : '';
       const assembled: UIMessage[] = assembleInternalMessages({
         messages: preparedMessages,
         assistant: deps.assistant,
         agentSoul: deps.agentSoul ?? '',
         extraSystemBlocks: budgetPrompt.length > 0 ? [budgetPrompt] : [],
+        toolPrompt,
         contextMessageSize: deps.prepareContextMessages !== undefined
           ? 0
           : (deps.contextMessageSize ?? 0),

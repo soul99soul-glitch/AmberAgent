@@ -19,6 +19,7 @@ import type { UIMessage, UIMessagePartText } from './message.ts';
 import { makeUIMessage } from './message.ts';
 import type { ChatModel, CustomBody, Modality, ReasoningLevel } from './provider_model.ts';
 import type { ProviderModel } from './provider_settings.ts';
+import type { AgentTool } from './tool.ts';
 
 // ===== SystemPromptMarkers.kt =====
 
@@ -46,6 +47,15 @@ export const buildStaticSystemPromptParts = (
   }];
 };
 
+// ===== tool system prompt 块(buildSystemPromptParts:739-741,:763-770) =====
+// tools.mapNotNull { systemPrompt(model, messages).takeIf(isNotBlank) }.joinToString('\n\n')
+export const buildToolSystemPrompt = (
+  tools: AgentTool[], model: ChatModel, messages: UIMessage[],
+): string => tools
+  .map((t: AgentTool): string => t.systemPrompt(model, messages))
+  .filter((s: string): boolean => s.trim().length > 0)
+  .join('\n\n');
+
 // ===== internal messages 组装(generateInternal:434-446 骨架) =====
 
 export interface AssembleInternalInput {
@@ -57,6 +67,9 @@ export interface AssembleInternalInput {
   //   generativeUI/recentChats 之现存子集);合并为一个 dynamic part 附于静态块后
   //   (metadata system_prompt_block:'dynamic',:755-761;无 cache_control)
   extraSystemBlocks?: string[];
+  // D-077a:tool system prompt 块(:739-741 buildToolSystemPrompt 产出,
+  //   :763-770 附加为第三 part,metadata system_prompt_block:'tool_prompts')
+  toolPrompt?: string;
 }
 
 export const assembleInternalMessages = (input: AssembleInternalInput): UIMessage[] => {
@@ -69,6 +82,15 @@ export const assembleInternalMessages = (input: AssembleInternalInput): UIMessag
       type: 'text',
       text: dynamicPrompt,
       metadata: { system_prompt_block: 'dynamic' },
+    });
+  }
+  // D-077a:tool prompt 块(dynamic 之后,:763-770)
+  const toolPrompt: string = input.toolPrompt ?? '';
+  if (toolPrompt.trim().length > 0) {
+    systemParts.push({
+      type: 'text',
+      text: toolPrompt,
+      metadata: { system_prompt_block: 'tool_prompts' },
     });
   }
   const truncated = limitContext(input.messages, input.contextMessageSize);
