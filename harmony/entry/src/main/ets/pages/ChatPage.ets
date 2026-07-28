@@ -12,12 +12,14 @@ import type {
   Conversation, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
   PendingUserMessage, DequeueNextResult, UIMessagePartReasoning, ReasoningCardState,
   CompactPolicy, CompactResult, PreparedContext,
+  UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
+  TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
 } from '@amber/chat-domain';
 import {
-  currentMessages, makeConversation, newId, runChatTurn,
+  currentMessages, makeConversation, newId,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
-  nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt, deleteMessage, editMessage,
+  nodeCurrentMessage, nodeRole, selectMessageBranch, deleteMessage, editMessage,
   forkConversation, patchConversation,
   runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
   applyVisualTransformersStreamingTail,
@@ -30,6 +32,10 @@ import {
   makeCompactPolicy, prepareContext, invalidateCompacts,
   copyValidCompactsToConversation, ContextCompactionFailedError,
   conversationWithMessagesAsNodes,
+  runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
+  createTimeTool, makeUIMessage,
+  applyToolApprovalToConversation, conversationHasPendingTools,
+  conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -95,6 +101,9 @@ struct MessageRow {
   onDelete: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onFork: () => void = (): void => {};
+  // D-057:工具审批回调(toolCallId 定位,ChatService.handleToolApproval)
+  onApproveTool: (toolCallId: string) => void = (_id: string): void => {};
+  onDenyTool: (toolCallId: string) => void = (_id: string): void => {};
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
   @State reasoningStates: Record<number, string> = {};
   // D-053:本会话内见过流式(Android sawStreamingMessage:123 —
@@ -112,6 +121,16 @@ struct MessageRow {
   // loading = messageLoading && finishedAt == null(ChatMessageReasoning.kt:107)
   private reasoningLoading(p: UIMessagePartReasoning): boolean {
     return this.streaming && p.finishedAt === null;
+  }
+
+  // D-057:工具状态文案(approvalStateSimpleName 显示面子集)
+  private toolStateLabel(t: UIMessagePartTool): string {
+    if (t.output.length > 0) return '已执行';
+    if (t.approvalState.type === 'pending') return '待审批';
+    if (t.approvalState.type === 'approved') return '已批准';
+    if (t.approvalState.type === 'denied') return '已拒绝';
+    if (t.approvalState.type === 'answered') return '已应答';
+    return '';
   }
 
   // 初始 Collapsed(:88);流式开始 → Preview(:125-126,showThinkingContent
@@ -215,12 +234,51 @@ struct MessageRow {
           .width('100%')
           .margin({ bottom: 4 })
         } else if (p.type === 'tool') {
-          Text(`工具:${p.toolName}`)
-            .fontSize(11).fontColor(ACCENT)
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .backgroundColor(SURFACE2)
-            .borderRadius(6)
-            .margin({ bottom: 4 })
+          // D-057:工具卡片 MVP(Android ChatMessageTool 子集)— 名称 + 状态;
+          //   pending → 批准/拒绝按钮(ChatPage 工具审批门);
+          //   已执行 → 首条 output 文本 3 行预览(完整卡片视觉 = P1)
+          Column() {
+            Row() {
+              Text(`工具:${(p as UIMessagePartTool).toolName}`)
+                .fontSize(11).fontColor(ACCENT)
+                .layoutWeight(1)
+              Text(this.toolStateLabel(p as UIMessagePartTool))
+                .fontSize(10).fontColor(INK3)
+            }
+            .width('100%')
+            if ((p as UIMessagePartTool).approvalState.type === 'pending') {
+              Row() {
+                Text('批准')
+                  .fontSize(12).fontColor(ACCENT)
+                  .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+                  .onClick((): void => {
+                    this.onApproveTool((p as UIMessagePartTool).toolCallId);
+                  })
+                Text('拒绝')
+                  .fontSize(12).fontColor(INK2)
+                  .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+                  .margin({ left: 8 })
+                  .onClick((): void => {
+                    this.onDenyTool((p as UIMessagePartTool).toolCallId);
+                  })
+              }
+              .margin({ top: 4 })
+            }
+            if ((p as UIMessagePartTool).output.length > 0
+              && (p as UIMessagePartTool).output[0].type === 'text') {
+              Text(((p as UIMessagePartTool).output[0] as UIMessagePartText).text)
+                .fontSize(11).fontColor(INK2)
+                .maxLines(3)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+                .margin({ top: 4 })
+            }
+          }
+          .width('100%')
+          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+          .backgroundColor(SURFACE2)
+          .borderRadius(6)
+          .margin({ bottom: 4 })
         }
       }, partKey)
       if ((this.isAssistant && (this.branchCount > 1 || this.isLastAssistant))
@@ -383,7 +441,7 @@ struct ChatPage {
         // D-055:重生成使 compact 失效(ChatService.kt:1097 'message_regenerated'),
         //   先于生成完成,避免 prepareContext 读到过期摘要
         return this.invalidateConvCompacts(conv.id, 'message_regenerated')
-          .then((): Promise<Conversation> => runRegenerateAt(conv, nodeId, {
+          .then((): Promise<Conversation> => runRegenerateAtWithTools(conv, nodeId, {
           assistant: rt.assistant,
           inputTransformers: [createTemplateTransformer()],
           outputTransformers: [thinkTagTransformer, regexOutputTransformer],
@@ -407,7 +465,7 @@ struct ChatPage {
             this.regenNodeId = nodeId;
             this.regenTail = transformed[transformed.length - 1];
           },
-        }));
+        }, this.buildToolLoop(rt)));
       })
       .then((out: Conversation): void => {
         this.conversation = out;
@@ -694,6 +752,139 @@ struct ChatPage {
       : e.message;
   }
 
+  // ===== D-057 工具循环接线(GenerationHandler:161-391 调用面) =====
+
+  // 工具循环选项:首批内置工具 = get_time_info(TimeTool.kt);
+  //   autoApprove 默认 false(设置面 = P1,登记);每步 provider 工厂按步内
+  //   工具定义重建 params(arkts-no-spread 逐字段,不用 rt.params 展开)
+  private buildToolLoop(rt: ChatRuntime): ToolLoopOptions {
+    return {
+      tools: [createTimeTool()],
+      makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
+        asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({
+          model: rt.params.model,
+          temperature: rt.params.temperature,
+          topP: rt.params.topP,
+          maxTokens: rt.params.maxTokens,
+          tools: defs,
+          reasoningLevel: rt.params.reasoningLevel,
+          customBody: rt.params.customBody,
+        })),
+      consumeSteerMessages: (): Promise<UIMessage[]> => this.drainSteerMessages(),
+    };
+  }
+
+  // steer 消息步间消费(Android session.dequeueSteerPendingUserMessages,
+  //   GenerationHandler:386-390):生成中到达的 STEER 出队 → user 消息注入会话;
+  //   出队后 durable persist + 审计(D-052 同规)
+  private drainSteerMessages(): Promise<UIMessage[]> {
+    const steers: PendingUserMessage[] = this.pendingQueue.filter(
+      (m: PendingUserMessage): boolean => m.mode === 'STEER');
+    if (steers.length === 0) return Promise.resolve([]);
+    this.pendingQueue = this.pendingQueue.filter(
+      (m: PendingUserMessage): boolean => m.mode !== 'STEER');
+    this.syncPendingRows();
+    this.persistQueue();
+    for (const s of steers) {
+      this.auditQueueEvent('dequeue', s.id, 'steer');
+    }
+    return Promise.resolve(steers.map(
+      (s: PendingUserMessage): UIMessage => makeUIMessage('user', s.parts)));
+  }
+
+  // 工具审批(ChatService.kt:1122-1188):改写 approvalState → 持久化 →
+  //   无 pending 残留 → 续跑生成(handleMessageComplete)
+  private handleToolApproval(toolCallId: string, approved: boolean): void {
+    if (this.conversation === null || this.sending) return;
+    const verdict: ToolApprovalVerdict = approved
+      ? { kind: 'approved' }
+      : { kind: 'denied', reason: '' };
+    const out: Conversation = applyToolApprovalToConversation(
+      this.conversation, toolCallId, verdict);
+    this.conversation = out;
+    this.rows = buildRows(out);
+    getChatRepository().save(out)
+      .then((): void => {
+        if (!conversationHasPendingTools(out)) {
+          this.resumeToolLoop(out);
+        }
+      })
+      .catch((e: Error): void => {
+        this.errorMsg = e.message;
+      });
+  }
+
+  // 审批后续跑:不追加 user 消息,直接进工具循环;流式预览复用 D-041
+  //   regenTail 机制(末条 assistant 行下渲染 — 写回的就是末条消息)
+  private resumeToolLoop(conv: Conversation): void {
+    if (this.sending) return;
+    this.sending = true;
+    this.errorMsg = '';
+    this.abortController = new EntryAbortController();
+    const lastNodeId: string = conv.messageNodes.length > 0
+      ? conv.messageNodes[conv.messageNodes.length - 1].id
+      : '';
+    const holder: RuntimeHolder = { rt: null };
+    resolveChatRuntime(conv.assistantId)
+      .then((rt: ChatRuntime | null): Promise<Conversation> => {
+        holder.rt = rt;
+        if (rt === null) {
+          return Promise.reject(new Error('未配置可用的 Provider/模型'));
+        }
+        return runToolLoopContinuation(conv, {
+          assistant: rt.assistant,
+          inputTransformers: [createTemplateTransformer()],
+          outputTransformers: [thinkTagTransformer, regexOutputTransformer],
+          provider: asChatStreamProvider(rt.api, () => rt.params),
+          store: getChatRepository(),
+          contextMessageSize: rt.contextMessageSize,
+          prepareContextMessages: this.buildPrepareContext(conv, rt),
+          abortSignal: this.abortController?.signal,
+          onRetryStatus: (status: string | null): void => {
+            this.retryStatus = status ?? '';
+          },
+          onUpdate: (msgs: UIMessage[]): void => {
+            if (msgs.length === 0 || holder.rt === null) return;
+            const ctx: TransformerContext = { assistant: holder.rt.assistant };
+            const transformed: UIMessage[] = applyVisualTransformersStreamingTail(
+              msgs, [thinkTagTransformer, regexOutputTransformer], ctx);
+            this.regenNodeId = lastNodeId;
+            this.regenTail = transformed[transformed.length - 1];
+          },
+        }, this.buildToolLoop(rt));
+      })
+      .then((out: Conversation): void => {
+        this.conversation = out;
+        this.rows = buildRows(out);
+        this.suggestions = out.chatSuggestions;
+        this.sending = false;
+        this.abortController = null;
+        this.regenTail = null;
+        this.regenNodeId = '';
+        this.scrollToBottom();
+        if (holder.rt !== null) {
+          this.maybeAutoTitle(out, holder.rt);
+          this.maybeSuggestions(out, holder.rt);
+        }
+        this.drainPendingQueue();
+      })
+      .catch((e: Error): void => {
+        this.errorMsg = this.compactErrorText(e);
+        this.sending = false;
+        this.abortController = null;
+        this.regenTail = null;
+        this.regenNodeId = '';
+        // 审批态/部分写回已持久化,刷新显示
+        getChatRepository().getById(conv.id).then((saved: Conversation | null): void => {
+          if (saved !== null) {
+            this.conversation = saved;
+            this.rows = buildRows(saved);
+          }
+          this.drainPendingQueue();
+        });
+      });
+  }
+
   // 生成中发送 → 入队;满 20 拒绝(Android 文案逐字)。
   // 模式(D-051,Android ChatInput.kt:259/272 + ChatService.kt:699):
   //   answer=true(点击发送)→ 恒 FOLLOWUP;answer=false(长按)生成中 → STEER
@@ -729,6 +920,9 @@ struct ChatPage {
   // 生成完成(成功/失败/中断)后出队下一条继续派发(Android 循环逐条 catch 后继续)
   private drainPendingQueue(): void {
     if (this.sending || this.conversation === null) return;
+    // D-057:未执行/待审批工具阻塞 → 停止派发(ChatService.kt:860 break;
+    //   审批续跑/「继续」解阻后再 drain)
+    if (conversationHasPendingOrUnexecutedTools(this.conversation)) return;
     const dq: DequeueNextResult = dequeueNextPendingUserMessage(this.pendingQueue);
     if (dq.next === null) return;
     const prep = preparePendingMessageForDispatch(dq.rest, dq.next);
@@ -754,7 +948,7 @@ struct ChatPage {
         });
       return;
     }
-    this.sendParts(prep.dispatch.parts);
+    this.sendParts(prep.dispatch.parts, prep.dispatch.id);
   }
 
   // D-051:长按发送 = 只记录不生成(Android ChatInput.kt:272 → queueMode;
@@ -818,7 +1012,7 @@ struct ChatPage {
     this.sendParts(inputParts);
   }
 
-  private sendParts(inputParts: UIMessagePart[]): void {
+  private sendParts(inputParts: UIMessagePart[], dispatchMessageId: string = ''): void {
     if (this.conversation === null) return;
     // 单文本 part → 退化为 string(与既有 send 路径行为一致)
     let userInput: string | UIMessagePart[] = inputParts;
@@ -831,6 +1025,10 @@ struct ChatPage {
     const conv: Conversation = this.conversation;
     // 流式尾部起点 = 现有消息 + 即将入列的 user 消息
     const tailStart: number = currentMessages(conv).length + 1;
+    // D-057:续跑模式(idle blocker「继续」/应答)— 不追加 user 消息,
+    //   流式预览切换为末条消息(写回末条 assistant,regenTail 机制)
+    let resumeMode: boolean = false;
+    let resumeNodeId: string = '';
     // holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制)
     const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime(conv.assistantId)
@@ -839,7 +1037,7 @@ struct ChatPage {
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型(providers 未持久化或无可用 auth)'));
         }
-        return runChatTurn(conv, userInput, {
+        const deps: ChatTurnDeps = {
           assistant: rt.assistant,
           inputTransformers: [createTemplateTransformer()],
           outputTransformers: [thinkTagTransformer, regexOutputTransformer],
@@ -855,14 +1053,51 @@ struct ChatPage {
             this.retryStatus = status ?? '';
           },
           onUpdate: (msgs: UIMessage[]): void => {
+            if (resumeMode) {
+              if (msgs.length > 0) {
+                this.regenNodeId = resumeNodeId;
+                this.regenTail = msgs[msgs.length - 1];
+              }
+              return;
+            }
             this.streamingTail = msgs.slice(tailStart);
           },
-        });
+        };
+        // D-057:idle 工具阻塞(ChatService.kt:757/:838 — 派发前先解阻塞;
+        //   「继续」批准/ask_user 应答 → 消息不入列直接续跑;否则取消陈旧工具)
+        const isPureText: boolean = inputParts.every(
+          (p: UIMessagePart): boolean => p.type === 'text');
+        const answerText: string = inputParts
+          .filter((p: UIMessagePart): boolean => p.type === 'text')
+          .map((p: UIMessagePart): string => (p as UIMessagePartText).text)
+          .join('\n');
+        const blocker: IdleToolBlockerResult = resolveIdleToolBlocker(conv, answerText, isPureText);
+        if (blocker.changed) {
+          this.auditQueueEvent(blocker.event ?? 'pending_tool_cancel', dispatchMessageId,
+            blocker.blockingToolNames.join(','));
+          if (blocker.shouldResume) {
+            resumeMode = true;
+            resumeNodeId = blocker.conversation.messageNodes.length > 0
+              ? blocker.conversation.messageNodes[blocker.conversation.messageNodes.length - 1].id
+              : '';
+            this.conversation = blocker.conversation;
+            this.rows = buildRows(blocker.conversation);
+            return getChatRepository().save(blocker.conversation)
+              .then((): Promise<Conversation> => runToolLoopContinuation(
+                blocker.conversation, deps, this.buildToolLoop(rt)));
+          }
+          return getChatRepository().save(blocker.conversation)
+            .then((): Promise<Conversation> => runChatTurnWithTools(
+              blocker.conversation, userInput, deps, this.buildToolLoop(rt)));
+        }
+        return runChatTurnWithTools(conv, userInput, deps, this.buildToolLoop(rt));
       })
       .then((out: Conversation): void => {
         this.conversation = out;
         this.rows = buildRows(out);
         this.streamingTail = [];
+        this.regenTail = null;
+        this.regenNodeId = '';
         this.suggestions = out.chatSuggestions;
         this.inputText = '';
         this.pendingImages = [];
@@ -882,6 +1117,8 @@ struct ChatPage {
         this.sending = false;
         this.abortController = null;
         this.streamingTail = [];
+        this.regenTail = null;
+        this.regenNodeId = '';
         // 图片已随 user 快照持久化,清空避免重发时重复
         this.pendingImages = [];
         // user 消息快照已持久化(chat_turn 语义),刷新显示
@@ -945,6 +1182,8 @@ struct ChatPage {
               onDelete: (): void => this.confirmDeleteMessage(row),
               onEdit: (): void => this.startEditMessage(row),
               onFork: (): void => this.forkAt(row),
+              onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
+              onDenyTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, false),
             })
           }
           // D-041:regenerate 流式预览渲染在目标节点行下

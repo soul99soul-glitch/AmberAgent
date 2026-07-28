@@ -70,9 +70,19 @@ export interface RegenerateDeps {
   onRetryStatus?: (status: string | null) => void;
 }
 
-export const runRegenerateAt = async (
-  conversation: Conversation, nodeId: string, deps: RegenerateDeps,
-): Promise<Conversation> => {
+// ===== 再生基底(D-057 提取:runRegenerateAt 与 runRegenerateAtWithTools 共享) =====
+
+export interface RegenerateSeed {
+  // 生成基底会话:assistant 节点 = 目标节点之前(messageRange 0..<nodeIndex);
+  //   user 节点 = 截断目标之后(含该 user 消息,**已持久化**,ChatService.kt:1091-1099)
+  seed: Conversation;
+  nodeIndex: number;
+  isUserNode: boolean;
+}
+
+export const prepareRegenerateSeed = async (
+  conversation: Conversation, nodeId: string, store: ConversationStore,
+): Promise<RegenerateSeed> => {
   const nodeIndex: number = conversation.messageNodes.findIndex(
     (n: MessageNode): boolean => n.id === nodeId);
   if (nodeIndex < 0) {
@@ -80,11 +90,6 @@ export const runRegenerateAt = async (
   }
   const target: MessageNode = conversation.messageNodes[nodeIndex];
   const isUserNode: boolean = nodeRole(target) === 'user';
-
-  // 1. 上下文基底
-  //    assistant 节点:目标节点之前的 currentMessages(Android messageRange 0..<nodeIndex)
-  //    user 节点:截断目标之后节点,**先持久化截断**(ChatService.kt:1091-1099),
-  //    基底含该 user 消息
   let working: Conversation = conversation;
   if (isUserNode) {
     working = {
@@ -92,11 +97,24 @@ export const runRegenerateAt = async (
       messageNodes: conversation.messageNodes.slice(0, nodeIndex + 1),
       updateAt: nowIso(),
     };
-    await deps.store.save(working);
+    await store.save(working);
   }
-  const priorConversation: Conversation = isUserNode
+  const seed: Conversation = isUserNode
     ? working
     : { ...conversation, messageNodes: conversation.messageNodes.slice(0, nodeIndex) };
+  return { seed, nodeIndex, isUserNode };
+};
+
+export const runRegenerateAt = async (
+  conversation: Conversation, nodeId: string, deps: RegenerateDeps,
+): Promise<Conversation> => {
+  // 1. 上下文基底(D-057 起走 prepareRegenerateSeed,语义不变)
+  const seedInfo: RegenerateSeed = await prepareRegenerateSeed(conversation, nodeId, deps.store);
+  const nodeIndex: number = seedInfo.nodeIndex;
+  const isUserNode: boolean = seedInfo.isUserNode;
+  const working: Conversation = seedInfo.seed;
+  const target: MessageNode = conversation.messageNodes[nodeIndex];
+  const priorConversation: Conversation = working;
   const baseMessages: UIMessage[] = currentMessages(priorConversation);
   const ctx: TransformerContext = { assistant: deps.assistant };
 

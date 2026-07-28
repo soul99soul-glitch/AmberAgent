@@ -53,10 +53,24 @@ export interface AssembleInternalInput {
   assistant: Assistant;
   agentSoul: string;
   contextMessageSize: number;
+  // D-057:动态 system 块(buildSystemPromptParts:726-736 — memory/loopBudget/
+  //   generativeUI/recentChats 之现存子集);合并为一个 dynamic part 附于静态块后
+  //   (metadata system_prompt_block:'dynamic',:755-761;无 cache_control)
+  extraSystemBlocks?: string[];
 }
 
 export const assembleInternalMessages = (input: AssembleInternalInput): UIMessage[] => {
-  const systemParts = buildStaticSystemPromptParts(input.agentSoul, input.assistant);
+  const systemParts: UIMessagePartText[] = buildStaticSystemPromptParts(input.agentSoul, input.assistant);
+  const dynamicPrompt: string = (input.extraSystemBlocks ?? [])
+    .filter((s: string): boolean => s.trim().length > 0)
+    .join('\n\n');
+  if (dynamicPrompt.length > 0) {
+    systemParts.push({
+      type: 'text',
+      text: dynamicPrompt,
+      metadata: { system_prompt_block: 'dynamic' },
+    });
+  }
   const truncated = limitContext(input.messages, input.contextMessageSize);
   const out: UIMessage[] = [];
   if (systemParts.length > 0) {

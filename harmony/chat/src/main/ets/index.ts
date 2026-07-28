@@ -202,6 +202,23 @@ export {
   agentLoopBudgetStage, buildAgentLoopBudgetPrompt, agentLoopShouldHideTools,
 } from './chat/agent_loop_budget.ts';
 
+// ===== D-057:agentic 工具循环 + 审批 + 首个内置工具 =====
+export type { ToolLoopOptions } from './chat/tool_loop.ts';
+export {
+  MIN_AGENT_TOOL_LOOP_STEPS, MAX_AGENT_TOOL_LOOP_STEPS, DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
+  runAgenticToolLoop, runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
+} from './chat/tool_loop.ts';
+export type { RegenerateSeed } from './chat/regenerate.ts';
+export { prepareRegenerateSeed } from './chat/regenerate.ts';
+export type { ToolApprovalVerdict, IdleToolBlockerResult } from './chat/tool_approval.ts';
+export {
+  TOOL_APPROVAL_CONTINUATION_WORDS, isToolApprovalContinuation,
+  findToolNameInConversation, conversationHasPendingOrUnexecutedTools,
+  resolveApprovalState, applyToolApprovalToConversation, conversationHasPendingTools,
+  cancelToolForNewUserMessage, skipStaleToolForContinuation, resolveIdleToolBlocker,
+} from './chat/tool_approval.ts';
+export { createTimeTool } from './chat/builtin_time_tool.ts';
+
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,
   serializeMessageList, parseMessageList,

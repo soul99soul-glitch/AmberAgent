@@ -176,7 +176,31 @@ export const runChatTurn = async (
   });
   const internalMessages: UIMessage[] = applyInputTransformers(assembled, deps.inputTransformers, ctx);
 
-  // 3. provider 流式 → accumulator;节流 onUpdate 带 streamingTail visual
+  // 3. 生成一步(D-057 抽取出共享核心;单跑行为与 D-050 逐字节一致)
+  const finalMessages: UIMessage[] = await generateAssistantOnce(baseMessages, internalMessages, deps);
+
+  // 4. 终态:assistant 节点入列 → 持久化
+  if (finalMessages.length > baseMessages.length) {
+    for (const msg of finalMessages.slice(baseMessages.length)) {
+      conv = appendNode(conv, msg);
+    }
+    await deps.store.save(conv);
+  }
+  return conv;
+};
+
+// ===== 生成一步(D-057 抽取,供单跑/工具循环共用) =====
+// 语义与抽取前 runChatTurn 第 3-4 段逐字节一致:流式/非流式 → 节流 onUpdate
+//   (streamingTail visual)→ D-050 重试循环(失败尝试丢弃,base 全量通知)→
+//   abort 部分快照终态化 → onGenerationFinish。返回全量 finalMessages
+//   (seed + 生成),入列由调用方决定。
+export const generateAssistantOnce = async (
+  seedMessages: UIMessage[], internalMessages: UIMessage[], deps: ChatTurnDeps,
+  providerOverride?: ChatStreamProvider,
+): Promise<UIMessage[]> => {
+  const provider: ChatStreamProvider = providerOverride ?? deps.provider;
+  const ctx: TransformerContext = { assistant: deps.assistant };
+  // 流式 UI 刷新节流(Android STREAM_UI_FLUSH_INTERVAL_MS);0 = 每个 chunk 都刷新
   const flushIntervalMs: number = deps.flushIntervalMs ?? 50;
   const nowMs: () => number = deps.nowMs ?? ((): number => Date.now());
   const streamOpts: StreamOpts | undefined = deps.abortSignal !== undefined
@@ -185,36 +209,36 @@ export const runChatTurn = async (
   // D-040:streamOutput=false 且 provider 支持 → 非流式单次补全(Android
   //   GenerationHandler.kt:255);chunk 以 message 形式进同一 accumulator
   const useNonStream: boolean = deps.assistant.streamOutput === false
-    && deps.provider.generateText !== undefined;
+    && provider.generateText !== undefined;
   // D-050 重试循环(runProviderCallWithRetry:774-820 忠实):
-  //   每次尝试全新 accumulator;失败 → classify → 可重试则 onBeforeRetry
-  //   (base 快照全量通知)+ 状态文案 + delay 后整轮重跑
+  //   每次尝试全新 accumulator(失败尝试的部分输出丢弃);
+  //   sawChunk 仅累计「最终存活尝试」的 chunk
   const retrySetting: GenerationRetrySetting = deps.retrySetting ?? makeGenerationRetrySetting({});
   const sleep: (ms: number) => Promise<void> = deps.sleep
     ?? ((ms: number): Promise<void> => new Promise((resolve): void => {
       setTimeout(resolve, ms);
     }));
   let attempt: number = 1;
-  let lastAccumulator: MessageStreamAccumulator = new MessageStreamAccumulator(baseMessages);
+  let lastAccumulator: MessageStreamAccumulator = new MessageStreamAccumulator(seedMessages);
   let lastFlushAt: number = 0;
   const isAborted = (): boolean =>
     deps.abortSignal !== undefined && deps.abortSignal.aborted;
   while (true) {
     // 首次尝试必跑(abort 检查在 catch 与 sleep 后 — provider 抛错时
     //   signal.aborted=true 的既有语义不回归,D-035)
-    const accumulator: MessageStreamAccumulator = new MessageStreamAccumulator(baseMessages);
+    const accumulator: MessageStreamAccumulator = new MessageStreamAccumulator(seedMessages);
     lastAccumulator = accumulator;
     lastFlushAt = 0;
     try {
-      if (useNonStream && deps.provider.generateText !== undefined) {
-        const chunk: MessageChunk = await deps.provider.generateText(internalMessages, streamOpts);
+      if (useNonStream && provider.generateText !== undefined) {
+        const chunk: MessageChunk = await provider.generateText(internalMessages, streamOpts);
         accumulator.append(chunk);
         if (deps.onUpdate !== undefined) {
           const snapshot: UIMessage[] = accumulator.snapshot();
           deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
         }
       } else {
-        await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+        await provider.streamText(internalMessages, (chunk: MessageChunk): void => {
           accumulator.append(chunk);
           if (deps.onUpdate !== undefined) {
             const now: number = nowMs();
@@ -242,7 +266,7 @@ export const runChatTurn = async (
       // onBeforeRetry(:625-628):messages = baseMessages + 全量 onUpdate
       //   —— 失败尝试的部分输出被丢弃,UI 回到 user 尾部
       if (deps.onUpdate !== undefined) {
-        deps.onUpdate(applyVisualTransformersStreamingTail(baseMessages, deps.outputTransformers, ctx));
+        deps.onUpdate(applyVisualTransformersStreamingTail(seedMessages, deps.outputTransformers, ctx));
       }
       // 状态文案(strings.xml:386;秒 = delayMs/1000 整除 coerceAtLeast 1)
       if (deps.onRetryStatus !== undefined) {
@@ -262,15 +286,6 @@ export const runChatTurn = async (
     }
   }
 
-  // 4. 终态:onGenerationFinish transforms → assistant 节点入列 → 持久化
-  const finalMessages: UIMessage[] = applyOnGenerationFinish(
-    lastAccumulator.snapshot(), deps.outputTransformers, ctx,
-  );
-  if (finalMessages.length > baseMessages.length) {
-    for (const msg of finalMessages.slice(baseMessages.length)) {
-      conv = appendNode(conv, msg);
-    }
-    await deps.store.save(conv);
-  }
-  return conv;
+  // 终态:onGenerationFinish transforms(入列在调用方)
+  return applyOnGenerationFinish(lastAccumulator.snapshot(), deps.outputTransformers, ctx);
 };
