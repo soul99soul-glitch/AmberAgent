@@ -754,3 +754,14 @@
   - **orchestrator 忠实点**:topic 五值/depth 三值/allow_webview toBooleanStrictOrNull;MAX_SOURCES 5/变体调用 cap 10(先全源 v0,再逐变体轮发);评分 60-5si-3vi-rank + hit*3 + freshness12(仅 news 且 timeRange!=any 且 publishedAt 非 blank);dup +12;**byKey+byTitle 双图**;canonical 黑名单多 yclid;**toEmit 图片预算修正版**(:124-138);status partial/ok/empty 状态机;webview_fallback 三引擎建议(google/ddg/bing,URLEncoder 形式编码);sanitizeError 正则替换全 occurrence;status()/explain() 全字段;apiKeyConfigured 分类型(bing_local/searxng → null);OrchestratorSource sealed → 判别联合(id/name/kind/builtin/priority/reason 逐字);preferred_sources ?: services 选择器(滤空)。
   - **TDD 18 测试**(aggregator 9 + orchestrator 9):公式钉住(perServiceSize/perCallSize/评分 87/59/variant_count [3,3,2,2] cap10 行为);调试中发现测试误算三处(变体产生额外 dup、topic news 排除 wikipedia、recency 文本条件 :347)均以 Android 源为准修正测试。
 - **可逆性**:全新模块;1373 测试全绿(deepread 603 + chat 770),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-070（L0，2026-07-28）SearchTools 工具组 + SearchPrefs 持久化 + entry 接线 — 搜索子系统收官
+
+- **背景**：搜索 epic 末片。SearchTools.kt(256 行)四工具 + SearchPrefs.kt(92 行)持久化 + ChatService.kt:2232-2234 enableWebSearch 门 + DataSourceModule.kt:406 SDK init。
+- **决定**:
+  - **search_prefs**:PreferencesKeys.kt:49-58 十键字符串冻结(ADR-0001);DataStore typed → KV 字符串 Port(int/bool 存串,`!= false` 语义保留:仅 'false' 串 → false);decodeJsonOrNull → try/catch 回默认(services [bing_local]/common 10);update next==current 短路 → JSON 串相等(偏差登记);enableWebSearch 属 ChatPrefs 默认 true(设置面 = P1 登记)。
+  - **search_tools**:四件注册序(search_web/search_sources_status/search_strategy_explain/scrape_web);scrape_web 门 = scrapeEnabledServices 非空 || jina 内置;描述模板 trimIndent 逐字(enabledServiceNames joinToString/builtinStatus 六件条件列/Today deps 注入);参数 schema 八键 + scrape 两键逐字;resolveScrapeService 全链(selected 索引命中 → candidates 首 → jina 内置回退;service 选择器 enabled 过滤 + jina 四别名 contains);错误文案逐字。
+  - **entry 接线**:SearchSdkInit.ets — ensureSearchSdk()(幂等)= DataSourceModule.kt:406 等价;LRU store 文件名 lru_key_roulette.json 逐字(cacheDir,fs sync,读失败 → null/写失败吞咽同 Android catch);acceptLanguage = i18n.System language-region 映射 BingSearchService.kt:52 格式(偏差:Locale.getDefault → i18n.System)。ChatPage:aboutToAppear ensureSearchSdk + loadSearchPrefs → buildToolLoop 注册搜索工具(enableWebSearch 门,ChatService.kt:2232-2234 逐字;prefs 未就绪当轮不带搜索工具,与 StateFlow 就绪时序等价,登记)。
+  - **SearchSettings 扩展**:searchServiceSelected 字段(resolveScrapeService 依赖,SearchPrefs.kt:25)。
+  - **TDD 10 测试**(prefs 4 + tools 6):默认逐字/往返+冻结键/decode 失败回默认/`!= false`/update 短路;四件注册序+scrape 门/描述模板替换/schema 键序/无源错误对象/status+explain 直通/resolveScrapeService 三路径(jina 别名/索引命中/逐字 error)。
+- **可逆性**:1383 测试全绿(deepread 603 + chat 780),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。

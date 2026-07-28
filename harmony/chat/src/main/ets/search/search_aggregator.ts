@@ -22,6 +22,7 @@ export interface SearchSettings {
   enableWebSearch: boolean;
   searchCommonOptions: SearchCommonOptions;
   searchServices: SearchServiceOptions[];
+  searchServiceSelected: number; // SearchPrefs.kt:25(resolveScrapeService 用)
   searchEnabledServiceIds: string[];
   searchBuiltinJinaEnabled: boolean;
   searchBuiltinDuckDuckGoEnabled: boolean;

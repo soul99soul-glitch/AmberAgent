@@ -458,3 +458,9 @@ export {
   buildSources, buildQueryVariants, orchestratorCanonicalizeUrl,
   searchOrchestratorSearch, searchOrchestratorStatus, searchOrchestratorExplain,
 } from './search/search_orchestrator.ts';
+
+// ===== D-070:搜索工具组 + 搜索偏好持久化 + entry 接线面 =====
+export {
+  SEARCH_PREFS_KEYS, defaultSearchPrefs, loadSearchPrefs, saveSearchPrefs, updateSearchPrefs,
+} from './search/search_prefs.ts';
+export { createSearchTools } from './search/search_tools.ts';

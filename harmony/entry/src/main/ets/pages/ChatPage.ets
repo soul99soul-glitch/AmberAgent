@@ -42,6 +42,7 @@ import {
   parseDeepReadSlashCommand,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
+  loadSearchPrefs, SearchSettings, createSearchTools,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -50,6 +51,7 @@ import {
 import { readImageAsDataUrl } from '../platform_impl/EntryImageEncoder.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
+import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -350,6 +352,8 @@ struct ChatPage {
   @State suggestions: string[] = [];
   @State inputText: string = '';
   @State sending: boolean = false;
+  // D-070:搜索偏好(aboutToAppear 异步加载;SearchTools 工具组输入)
+  searchSettings: SearchSettings | null = null;
   @State errorMsg: string = '';
   @State title: string = '新对话';
   @State modelLabel: string = '';
@@ -374,6 +378,11 @@ struct ChatPage {
   aboutToAppear(): void {
     // 每次进入(含从选择器返回)刷新模型标签
     describeChatModel().then((label: string): void => { this.modelLabel = label; });
+    // D-070:搜索 SDK 运行时装配(幂等)+ 搜索偏好加载(SearchTools 工具组接线)
+    ensureSearchSdk();
+    loadSearchPrefs(getChatKvStore()).then((s: SearchSettings): void => {
+      this.searchSettings = s;
+    });
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';
     if (convId.length > 0) {
@@ -824,6 +833,12 @@ struct ChatPage {
         },
         sha256Hex: sha256HexUtf8,
       }),
+      // D-070:搜索工具组(ChatService.kt:2232-2234 — enableWebSearch 门内
+      //   addAll(createSearchTools(settings)));searchSettings 未加载完成时
+      //   本轮不带搜索工具(偏好加载为异步,与 Android StateFlow 就绪时序等价)
+      ...(this.searchSettings !== null && this.searchSettings.enableWebSearch
+        ? createSearchTools(this.searchSettings)
+        : []),
     ]);
     return {
       // createRunTools(ChatService.kt:2326-2329):registry.tools() +

@@ -24,6 +24,7 @@ const makeSettings = (
   enableWebSearch: true,
   searchCommonOptions: { resultSize: 10 },
   searchServices: services,
+  searchServiceSelected: 0,
   searchEnabledServiceIds: enabledIds,
   searchBuiltinJinaEnabled: true,
   searchBuiltinDuckDuckGoEnabled: true,
