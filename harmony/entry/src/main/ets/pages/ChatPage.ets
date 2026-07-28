@@ -58,6 +58,7 @@ import {
   runMemoryExtraction, MemoryWorkerModelResolution, memoryWorkerModelCandidates,
   buildAgentSoulPrompt,
   toChatModel, DEFAULT_COMPRESS_PROMPT,
+  makeGenerationRetrySetting,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   probeVisionModelHealth,
 } from '@amber/chat-domain';
@@ -883,6 +884,12 @@ struct ChatPage {
           memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
           extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
+          // D-115:GenerationHandler.kt:357/475/621 — retrySetting =
+          //   settings.agentRuntime.generationRetry(PreferencesStore.kt:181 持久化)
+          retrySetting: makeGenerationRetrySetting({
+            enabled: this.agentRuntime.generationRetry.enabled,
+            maxRetries: this.agentRuntime.generationRetry.maxRetries,
+          }),
           // D-050:重试状态(send 路径同语义)
           onRetryStatus: (status: string | null): void => {
             this.retryStatus = status ?? '';
@@ -1437,6 +1444,10 @@ struct ChatPage {
       // D-104:speculativeToolExecution(PreferencesStore.kt:226-229)门接线
       speculativeEnabled: this.agentRuntime.speculativeToolExecution.enabled,
       speculativeMaxConcurrentTools: this.agentRuntime.speculativeToolExecution.maxConcurrentTools,
+      // D-115:ChatService.kt:1349-1352 —
+      //   maxSteps = settings.agentRuntime.maxToolLoopSteps.coerceIn(16,512)
+      //   (coerceIn 引擎侧 tool_loop.ts:147-148 已忠实,此处原样透传)
+      maxSteps: this.agentRuntime.maxToolLoopSteps,
     };
   }
 
@@ -1546,6 +1557,12 @@ struct ChatPage {
           memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
           extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
+          // D-115:GenerationHandler.kt:357/475/621 — retrySetting =
+          //   settings.agentRuntime.generationRetry(续跑路径同接线)
+          retrySetting: makeGenerationRetrySetting({
+            enabled: this.agentRuntime.generationRetry.enabled,
+            maxRetries: this.agentRuntime.generationRetry.maxRetries,
+          }),
           onRetryStatus: (status: string | null): void => {
             this.retryStatus = status ?? '';
           },
@@ -1880,6 +1897,12 @@ struct ChatPage {
           memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
           extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
+          // D-115:GenerationHandler.kt:357/475/621 — retrySetting =
+          //   settings.agentRuntime.generationRetry(PreferencesStore.kt:181 持久化)
+          retrySetting: makeGenerationRetrySetting({
+            enabled: this.agentRuntime.generationRetry.enabled,
+            maxRetries: this.agentRuntime.generationRetry.maxRetries,
+          }),
           // D-050:重试状态(strings.xml:386 文案;null 清除)
           onRetryStatus: (status: string | null): void => {
             this.retryStatus = status ?? '';

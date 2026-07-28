@@ -1573,3 +1573,21 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-074 残余「parse*」全部可移植部分(DOCX/PPTX/EPUB)。
 - **未移植(P1 登记)**: **PdfParser = MuPDF native 平台阻断定案** — HarmonyOS 无 MuPDF AAR;纯 ArkTS PDF 文本提取(内容流 Tj/TJ 解析)为独立子系统,需独立 spike 评估投入/保真度;OfficeNativeSwitch 维持不移植。
 - **验证**: chat tsc 干净 + 1129 测试(+11)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-115 — 执行设置面(maxToolLoopSteps + generationRetry 持久化/运行时接线/UI)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingAgentExecutionPage.kt(395 行中两卡三行:'运行'卡工具循环上限 :77-153/'生成稳定性'卡自动重试生成+重试上限 :320-371)/PreferencesStore.kt:163,181,268-270/GenerationHandler.kt:357/475/621/ChatService.kt:1349-1352/values-zh:643-644,646-651,993-995
+- **背景**: maxToolLoopSteps 持久化字段与 generationRetry 持久化字段在 Android 均由 AgentRuntimeSetting 承载并全量接线三条生成路径;harmony 引擎侧早已忠实(tool_loop.ts:147-148 coerceIn(16,512);chat_turn.ts:252 retrySetting 注入点)但**持久化值从未被读取** — 两字段恒走默认,设置面缺失(D-104 登记 P1)。
+- **决策**:
+  1. AgentRuntimePrefs.ets:AgentRuntimeJson += maxToolLoopSteps?:number + generationRetry?:{enabled?,maxRetries?}(kotlinx 线格式缺省语义);Snapshot += 两字段(默认 256 / {true,5} — PreferencesStore.kt:163,181 + GenerationRetry.kt:14-20 逐字);读侧非 number → 默认、界外值原样持有(Android 同样原样持有,钳制在消费侧);updateAgentRuntimeExecution RMW(保留未知字段,generationRetry 嵌套 copy 语义逐字)。
+  2. ChatPage 运行时接线:**三处 ChatTurnDeps 构造点全量 += retrySetting**(send/regenerate/resumeToolLoop — GenerationHandler.kt:357/475/621 三路径等价);buildToolLoop += maxSteps: agentRuntime.maxToolLoopSteps(原样透传,coerceIn 引擎侧已忠实)。
+  3. 新页 ChatAgentExecutionPage.ets:标题 '运行与显示'(:643 逐字);'运行'卡(:644)— 工具循环上限 select 芯片行(选项 64/128/256/384/512 逐字 :46,selectedOption coerceIn(16,512) :132-135,'N 步' :995,desc :994);'生成稳定性'卡(:646)— 自动重试生成 switch(:647-648 逐字)+ 重试上限 select(选项 1/2/3/5 :47,coerceIn(1,5) :353,'N 次' :651,desc :650);main_pages.json 注册;ChatListPage 顶栏 '权限' 后 += '运行' 入口。
+- **偏差/适配登记**:
+  - 入口 placement:Android 居设置索引页(SettingPage.kt:199-205,标签 '运行与显示' :976);harmony 无设置索引页,入口居对话列表顶栏,短标签 '运行'('权限' 先例) — placement 偏差登记;
+  - Select+ValueChip → 芯片行(选中态 ACCENT 填充,D-107 chip 先例;选项少且定长,无弹出层);
+  - GenerationRetrySetting 的 initialDelayMs/maxDelayMs/jitterRatio 无 Android 设置面(恒 1000/16000/0.15),同不暴露。
+- **关闭**: D-104 登记「maxToolLoopSteps …设置面」之 maxToolLoopSteps 部分 + generationRetry 设置面。
+- **未移植(P1 登记)**: SettingAgentExecutionPage 其余行 — 显示卡 operationPreviewMode/generativeUi 行/实时状态卡 enableLiveStatusNotification+hideSensitiveLiveStatus/Live 伴随卡 liveMode 五行/后台保活 keepGenerationAliveInBackground(均属未落地子系统,不做静默无操作开关);harnessDebug/任务调度设置面(扩展页残余,D-104 登记维持)。
+- **验证**: chat tsc+deepread tsc 干净 + 1129/603 测试(无域层改动,计数不变)/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

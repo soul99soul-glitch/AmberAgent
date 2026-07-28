@@ -202,6 +202,11 @@ struct ChatListPage {
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatSearchSettingsPage' }); })
         Text('权限').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatAgentPermissionsPage' }); })
+        // D-115:SettingPage.kt:199-205 入口(zh '运行与显示',values-zh:976;
+        //   顶栏短标签同 '权限' 先例缩写为 '运行',placement 偏差登记 —
+        //   harmony 无设置索引页,入口居对话列表顶栏)
+        Text('运行').fontSize(13).fontColor(INK3).margin({ right: 16 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/ChatAgentExecutionPage' }); })
         // D-106:删除全部入口(HistoryPage.kt:99-105 Delete01 IconButton;
         //   contentDescription '删除全部' zh 逐字)
         Text('删除全部').fontSize(13).fontColor(DANGER).margin({ right: 16 })

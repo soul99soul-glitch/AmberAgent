@@ -71,6 +71,21 @@ export interface AgentRuntimeSnapshot {
   // D-104:PreferencesStore.kt:226-229(默认 enabled=false/maxConcurrentTools=4;
   //   tool_loop speculativeRunner 门消费,tool_loop.ts:184-188)
   speculativeToolExecution: SpeculativeToolExecutionSnapshot;
+  // D-115:PreferencesStore.kt:163(默认 DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS=256,
+  //   :268-270 界 16/512;ChatService.kt:1349-1352 coerceIn 消费
+  //   → tool_loop.ts:147-148 同位已忠实)
+  maxToolLoopSteps: number;
+  // D-115:PreferencesStore.kt:181(GenerationRetrySetting() 默认 enabled=true/
+  //   maxRetries=5 — GenerationRetry.kt:14-20);GenerationHandler.kt:357/475/621
+  //   三条生成路径全量接线 → chat_turn.ts:252 deps.retrySetting
+  generationRetry: GenerationRetrySnapshot;
+}
+
+// D-115:GenerationRetrySetting(GenerationRetry.kt:14-20)子集 —
+//   initialDelayMs/maxDelayMs/jitterRatio 无设置面(恒 1000/16000/0.15),同不暴露
+export interface GenerationRetrySnapshot {
+  enabled: boolean;
+  maxRetries: number;
 }
 
 // D-104:SpeculativeToolExecutionSetting(PreferencesStore.kt:226-229)
@@ -127,11 +142,20 @@ interface AgentRuntimeJson {
   enableLongTermMemory?: boolean;
   memoryRecall?: MemoryRecallJson;
   memoryWorker?: MemoryWorkerJson;
+  maxToolLoopSteps?: number;
+  generationRetry?: GenerationRetryJson;
 }
 
 interface SpeculativeToolExecutionJson {
   enabled?: boolean;
   maxConcurrentTools?: number;
+}
+
+// D-115:GenerationRetrySetting 线格式(kotlinx encodeDefaults;
+//   缺省 → 读侧默认,与 kotlinx 缺省语义互逆)
+interface GenerationRetryJson {
+  enabled?: boolean;
+  maxRetries?: number;
 }
 
 const defaultMemoryRecall = (): MemoryRecallSetting => ({
@@ -166,6 +190,10 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   autoApproveAllToolCalls: false,
   autoApproveHighRiskToolCalls: false,
   speculativeToolExecution: { enabled: false, maxConcurrentTools: 4 },
+  // :163 默认 256(DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,:269)
+  maxToolLoopSteps: 256,
+  // :181 → GenerationRetry.kt:14-20 默认 true/5
+  generationRetry: { enabled: true, maxRetries: 5 },
 });
 
 const parseMemoryRecall = (raw: MemoryRecallJson | undefined): MemoryRecallSetting => {
@@ -258,6 +286,16 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
             ? parsed.speculativeToolExecution.maxConcurrentTools : 4,
       },
       memoryWorker: parseMemoryWorker(parsed.memoryWorker),
+      // D-115:非 number → 默认 256(kotlinx 缺省语义);界外值原样持有,
+      //   消费侧 coerceIn(16,512)(ChatService.kt:1349-1352 → tool_loop 同位)
+      maxToolLoopSteps: typeof parsed.maxToolLoopSteps === 'number'
+        ? parsed.maxToolLoopSteps : 256,
+      // D-115::181 默认 true/5(仅显式 false 关;非 number → 5)
+      generationRetry: {
+        enabled: parsed.generationRetry?.enabled !== false,
+        maxRetries: typeof parsed.generationRetry?.maxRetries === 'number'
+          ? parsed.generationRetry.maxRetries : 5,
+      },
     };
   } catch {
     return defaultAgentRuntimeSnapshot();
@@ -484,6 +522,41 @@ export const updateAgentRuntimePermissions = async (
     const spec: SpeculativeToolExecutionJson = root.speculativeToolExecution ?? {};
     spec.enabled = patch.speculativeEnabled;
     root.speculativeToolExecution = spec;
+  }
+  await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
+  return loadAgentRuntimeSnapshot(kv);
+};
+
+// ===== D-115:执行参数写回(SettingAgentExecutionPage.kt:136-143/:331-344
+//   /:353-364 updateSettings { copy(agentRuntime = ...) } 全文档重写 →
+//   RMW 保留未知字段;generationRetry 嵌套 copy 语义逐字) =====
+
+export interface AgentRuntimeExecutionPatch {
+  maxToolLoopSteps?: number;
+  retryEnabled?: boolean;
+  retryMaxRetries?: number;
+}
+
+export const updateAgentRuntimeExecution = async (
+  kv: KeyValueStore, patch: AgentRuntimeExecutionPatch,
+): Promise<AgentRuntimeSnapshot> => {
+  const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
+  let root: AgentRuntimeJson = {};
+  if (raw !== null) {
+    try {
+      root = JSON.parse(raw) as AgentRuntimeJson;
+    } catch {
+      root = {};
+    }
+  }
+  if (patch.maxToolLoopSteps !== undefined) {
+    root.maxToolLoopSteps = patch.maxToolLoopSteps;
+  }
+  if (patch.retryEnabled !== undefined || patch.retryMaxRetries !== undefined) {
+    const retry: GenerationRetryJson = root.generationRetry ?? {};
+    if (patch.retryEnabled !== undefined) retry.enabled = patch.retryEnabled;
+    if (patch.retryMaxRetries !== undefined) retry.maxRetries = patch.retryMaxRetries;
+    root.generationRetry = retry;
   }
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
