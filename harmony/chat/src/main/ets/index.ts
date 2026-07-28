@@ -251,6 +251,13 @@ export {
 // ===== D-062:ToolExposureState 懒暴露 =====
 export type { ToolExposureState } from './chat/tool_exposure.ts';
 export { createToolExposureState } from './chat/tool_exposure.ts';
+
+// ===== D-063:SpeculativeToolRunner 推测执行 =====
+export type {
+  SpeculativeToolStatus, SpeculativeToolState,
+  SpeculativeToolRunnerDeps, SpeculativeToolRunner,
+} from './chat/speculative_tool_runner.ts';
+export { createSpeculativeToolRunner } from './chat/speculative_tool_runner.ts';
 export type { SessionAccessGrant, GrantValidation } from './chat/session_grant_store.ts';
 export {
   SessionAccessGrantStore,

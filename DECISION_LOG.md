@@ -651,3 +651,14 @@
   - **tool_loop.ts 四接线点**(GenerationHandler.kt 位置逐字):from → 循环前 createToolExposureState(loop.tools)(:159);**exposeToolNames(pendingTools.toolName)** — 每步 pending 计算后、toolsForStep 前(:167,待恢复工具强制可见);stepTools = hideTools ? [] : toolExposure.toolsForStep()(:183 — dispatcher defs 与请求 defs 同为暴露子集,executeBatch:350 toolsInternal 语义);**observeExecutedTools(executedTools)** — executeBatch 非空后、写回前(:364)。
   - **tool_loop.test.ts 集成 2 测试**:45 工具(44 hidden + 真实 tool_search)— 首步 defs 仅 ['tool_search'],执行后第二步 ['hidden_tool_7','tool_search'](原序);≤40 → 两步 defs 恒全量(D-061 前行为不变)。调试记录:末条消息 toText 期望 '\n完成' 初判为 bug — 核实 Message.kt:164-169 toText 非文本段映射 '' 再 '\n' join,[tool,text] → '\n完成' 为 Android 逐字行为,改测试不改实现。
 - **可逆性**:目录 ≤40(当前 entry 目录 17 件)时懒模式恒关,行为与 D-061 逐字节一致(集成测试锁定);1245 测试全绿(deepread 603 + chat 642),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-063（L0，2026-07-28）SpeculativeToolRunner 推测执行 + 流式观察点接线
+
+- **背景**：D-056 登记「SpeculativeToolRunner(146 行)= P1」,工具执行行最后一块核心循环件。推测执行 = 流式期间对只读 eligible 工具提前并发跑,流终模型确认调用(name+input 一致)则复用结果,掩盖只读工具延迟。
+- **决定**：
+  - **chat/speculative_tool_runner.ts(TDD,10 测试)**:SpeculativeToolRunner.kt 全文忠实 —— observe 过滤链(toolCallId 非空白 && !isExecuted → isLikelyCompleteJsonObject(trim 首尾大括号)→ invocationPolicy(inputText).speculativeEligible → take(maxConcurrentTools 默认 4,PreferencesStore.kt:228));同 id 同 name+input 不重启/变则 cancel 重来;状态机 pending→completed/failed(+result/error);**reusableResults**(未进 final 或不符 → cancel+discarded;job 未完结 → cancel+discarded+跳过;否则 await 完结 job / 回落 state.result);snapshot 按 toolCallId 排序;updateStateIfCurrent(name+input 匹配才更新)。**偏差登记**:CoroutineScope.async/Deferred → Promise+标志位(JS Promise 不可取消:cancel 仅置标志,执行至完结但不覆盖 discarded/cancelled 状态、结果永不复用 — 可观察行为等价);Deferred.isCompleted/isCancelled → settled/cancelled 标志;CancellationException → cancel 处置 cancelled/discarded。调试记录:工具异常经 executeWithHooks catch-all 归一为失败载荷**结果**(非抛出)→ runner 状态 completed 且可复用,初版测试误判 failed,核实 D-056 dispatcher 语义后改测试。
+  - **chat_turn.ts onRawFlushSnapshot**(ChatTurnDeps 新增可选回调):raw(未 visual transform)快照于**节流 flush 与流终**两点回调(GenerationHandler.kt:519-526/:540-543);**节流检查移出 onUpdate 门**(Android 不依赖 UI 监听者;onUpdate 定义时行为不变,未定义且未定义 raw 回调时不取快照仅推进节流戳)。
+  - **tool_loop.ts 接线**:ToolLoopOptions 新增 speculativeEnabled/speculativeMaxConcurrentTools;**每步**创建 runner(:187-197 — speculativeEnabled && assistant.streamOutput !== false);stepDeps 注入 onRawFlushSnapshot → runner.observe(末条消息工具 × stepDefsMap 暴露 defs,tools.associateBy 语义);executeBatch prefetchedTools = await runner.reusableResults(toolsToProcess)(:356,替换恒空 Map)。runner 为 null 时 deps 原样传递(零包装)。
+  - **集成 2 测试(tool_loop)**:enabled + 宏任务工具 → flush 推测 1 次 + 未完结丢弃 + 真实执行 1 次 = 2 次调用、输出取真实执行;默认未传 → 仅 1 次。
+  - **entry**:不接线(默认禁用 = Android 默认 enabled=false 逐字;设置面 SettingAgentExtensionsPage.kt:136-227 = P1 登记)。
+- **可逆性**:默认禁用,未传 speculativeEnabled 时循环与 D-062 逐字节一致(集成测试锁定);1257 测试全绿(deepread 603 + chat 654),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。

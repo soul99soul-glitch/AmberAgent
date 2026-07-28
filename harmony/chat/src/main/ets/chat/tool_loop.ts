@@ -46,6 +46,8 @@ import { AgentToolDispatcher as DefaultDispatcher, defaultToolInvocationHooks } 
 import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_loop_budget.ts';
 import type { ToolExposureState } from './tool_exposure.ts';
 import { createToolExposureState } from './tool_exposure.ts';
+import type { SpeculativeToolRunner } from './speculative_tool_runner.ts';
+import { createSpeculativeToolRunner } from './speculative_tool_runner.ts';
 import type { JsonObject } from './json.ts';
 
 // ===== maxSteps 常量(PreferencesStore.kt:268-270) =====
@@ -73,6 +75,11 @@ export interface ToolLoopOptions {
   makeProviderForStep: (stepTools: ChatToolDefinition[]) => ChatStreamProvider;
   // steer 消息步间消费(:386-390;Android session.dequeueSteerPendingUserMessages)
   consumeSteerMessages?: () => Promise<UIMessage[]>;
+  // D-063:推测执行(settings.agentRuntime.speculativeToolExecution,
+  //   PreferencesStore.kt:226-229 默认 enabled=false/maxConcurrentTools=4);
+  //   另需 assistant.streamOutput != false(GenerationHandler:187)
+  speculativeEnabled?: boolean;
+  speculativeMaxConcurrentTools?: number;
 }
 
 const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
@@ -168,6 +175,16 @@ export const runAgenticToolLoop = async (
     const stepTools: AgentTool[] = hideTools ? [] : toolExposure.toolsForStep();
     const stepDefsMap = new Map<string, AgentTool>(
       stepTools.map((t: AgentTool): [string, AgentTool] => [t.name, t]));
+    // D-063(:187-197):每步推测执行器 — enabled && streamOutput;
+    //   maxConcurrentTools 默认 4(PreferencesStore.kt:228)
+    const speculativeRunner: SpeculativeToolRunner | null =
+      (loop.speculativeEnabled ?? false) && deps.assistant.streamOutput !== false
+        ? createSpeculativeToolRunner({
+          dispatcher,
+          maxConcurrentTools: loop.speculativeMaxConcurrentTools ?? 4,
+          invocationContext,
+        })
+        : null;
 
     let toolsToProcess: UIMessagePartTool[];
 
@@ -194,8 +211,23 @@ export const runAgenticToolLoop = async (
         assembled, deps.inputTransformers, ctx);
       const stepProvider: ChatStreamProvider = loop.makeProviderForStep(
         stepTools.map((t: AgentTool): ChatToolDefinition => toChatToolDefinition(t)));
+      // D-063(:519-526/:540-543):raw 快照 → 推测观察(末条消息工具 × 暴露 defs)
+      const stepDeps: ChatTurnDeps = speculativeRunner === null ? deps : {
+        ...deps,
+        onRawFlushSnapshot: (msgs: UIMessage[]): void => {
+          if (deps.onRawFlushSnapshot !== undefined) deps.onRawFlushSnapshot(msgs);
+          const last: UIMessage | undefined = msgs.length > 0
+            ? msgs[msgs.length - 1]
+            : undefined;
+          const observed: UIMessagePartTool[] = last !== undefined
+            ? last.parts.filter((p: UIMessagePart): boolean =>
+              p.type === 'tool') as UIMessagePartTool[]
+            : [];
+          speculativeRunner.observe(observed, stepDefsMap);
+        },
+      };
       const finalMessages: UIMessage[] = await generateAssistantOnce(
-        baseMessages, internalMessages, deps, stepProvider);
+        baseMessages, internalMessages, stepDeps, stepProvider);
       // Android messages = accumulator.snapshot() 全量覆盖:末条 base 消息
       //   (assistant 工具消息)可能被就地合并进新内容(text/tool 续写同一消息);
       //   引用不等 → 节点写回;新增消息 → 追加入列
@@ -259,10 +291,14 @@ export const runAgenticToolLoop = async (
     }
 
     // 执行(approved 执行/denied 处理)(:348-358)
+    // D-063(:356):prefetchedTools = runner.reusableResults(流终确认一致才复用)
+    const prefetchedTools: Map<string, UIMessagePartTool> = speculativeRunner !== null
+      ? await speculativeRunner.reusableResults(toolsToProcess)
+      : new Map<string, UIMessagePartTool>();
     const executedTools: UIMessagePartTool[] = await dispatcher.executeBatch(
       toolsToProcess, stepDefsMap,
       autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
-      invocationContext, new Map<string, UIMessagePartTool>(), toolRetry);
+      invocationContext, prefetchedTools, toolRetry);
     if (executedTools.length === 0) {
       // 全部 pending 无结果(:360-363)
       break;

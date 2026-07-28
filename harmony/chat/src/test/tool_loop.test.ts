@@ -523,3 +523,62 @@ describe('ToolExposureState 懒暴露接线', () => {
     assert.deepEqual(capturedDefs[1], ['conversation_search']);
   });
 });
+
+// ===== D-063 推测执行接线(GenerationHandler:187-197/:519-526/:540-543/:356) =====
+
+describe('SpeculativeToolRunner 接线', () => {
+  it('enabled + streamOutput:flush 触发推测执行;未完结 → 丢弃后真实执行(共 2 次)', async () => {
+    let calls: number = 0;
+    const slowTool: AgentTool = makeAgentTool({
+      name: 'spec_ro_tool',
+      description: 'read only',
+      execute: (_input: JsonValue): Promise<UIMessagePart[]> => {
+        calls += 1;
+        // 宏任务完结 — reusableResults(微任务链)时点恒未 settled
+        return new Promise((resolve): void => {
+          setTimeout((): void => {
+            resolve([{ type: 'text', text: `run#${calls}`, metadata: null }]);
+          }, 0);
+        });
+      },
+    });
+    const provider = scriptedProvider([
+      [toolDelta('c1', 'spec_ro_tool', '{}')],
+      [textDelta('收尾')],
+    ]);
+    const conv: Conversation = makeConversation('c-spec', []);
+    const out = await runChatTurnWithTools(conv, 'hi', baseDeps(provider), {
+      tools: [slowTool],
+      makeProviderForStep: (_defs: ChatToolDefinition[]): ChatStreamProvider => provider,
+      speculativeEnabled: true,
+    });
+    // 推测执行 1 次(flush 观察)+ 未完结丢弃 → dispatcher 真实执行 1 次
+    assert.equal(calls, 2);
+    // 第二步文本并入同一 assistant 消息(D-057 语义)→ 工具在末条消息
+    const msgs = currentMessages(out);
+    const tp = toolPartOf(msgs[msgs.length - 1], 'c1');
+    assert.equal((tp.output[0] as { text: string }).text, 'run#2');
+  });
+
+  it('默认(未传 speculativeEnabled):不推测,仅真实执行 1 次', async () => {
+    let calls: number = 0;
+    const tool: AgentTool = makeAgentTool({
+      name: 'spec_ro_tool',
+      description: 'read only',
+      execute: (_input: JsonValue): Promise<UIMessagePart[]> => {
+        calls += 1;
+        return Promise.resolve([{ type: 'text', text: 'ran', metadata: null }]);
+      },
+    });
+    const provider = scriptedProvider([
+      [toolDelta('c1', 'spec_ro_tool', '{}')],
+      [textDelta('收尾')],
+    ]);
+    const conv: Conversation = makeConversation('c-nospec', []);
+    await runChatTurnWithTools(conv, 'hi', baseDeps(provider), {
+      tools: [tool],
+      makeProviderForStep: (_defs: ChatToolDefinition[]): ChatStreamProvider => provider,
+    });
+    assert.equal(calls, 1);
+  });
+});

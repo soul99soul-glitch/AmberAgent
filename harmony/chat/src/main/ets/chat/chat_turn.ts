@@ -93,6 +93,10 @@ export interface ChatTurnDeps {
   flushIntervalMs?: number;
   nowMs?: () => number;
   onUpdate?: (messages: UIMessage[]) => void;
+  // D-063:raw 快照回调(GenerationHandler.kt:519-526/:540-543 — 节流 flush 与
+  //   流终两处,**未经 visual transforms**;推测执行观察点。与 onUpdate 独立:
+  //   Android 节流检查不依赖 UI 监听者)
+  onRawFlushSnapshot?: (messages: UIMessage[]) => void;
   // 停止生成(D-035):abort 信号透传 provider;provider 抛错且 signal.aborted
   //   → 部分快照走终态 transforms 入列并持久化,正常 resolve(对齐 Android
   //   CancellationException → checkpointConversation(force) 语义);
@@ -240,15 +244,26 @@ export const generateAssistantOnce = async (
       } else {
         await provider.streamText(internalMessages, (chunk: MessageChunk): void => {
           accumulator.append(chunk);
-          if (deps.onUpdate !== undefined) {
-            const now: number = nowMs();
-            if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
-              lastFlushAt = now;
+          // D-063:节流检查移出 onUpdate 门(Android :519-526 不依赖 UI 监听者)
+          const now: number = nowMs();
+          if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
+            lastFlushAt = now;
+            if (deps.onRawFlushSnapshot !== undefined || deps.onUpdate !== undefined) {
               const snapshot: UIMessage[] = accumulator.snapshot();
-              deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
+              if (deps.onRawFlushSnapshot !== undefined) {
+                deps.onRawFlushSnapshot(snapshot);
+              }
+              if (deps.onUpdate !== undefined) {
+                deps.onUpdate(applyVisualTransformersStreamingTail(
+                  snapshot, deps.outputTransformers, ctx));
+              }
             }
           }
         }, streamOpts);
+        // D-063(:540-543):流终 raw 快照观察点(成功收流后、终态前)
+        if (deps.onRawFlushSnapshot !== undefined) {
+          deps.onRawFlushSnapshot(accumulator.snapshot());
+        }
       }
       // 成功:状态清零(Android :787 processingStatus.value = null)
       if (deps.onRetryStatus !== undefined) deps.onRetryStatus(null);
