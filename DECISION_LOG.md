@@ -1316,3 +1316,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 审计行 52 P1「搜索设置面 UI」(服务 CRUD/开关部分);D-070 enableWebSearch 默认偏差。
 - **未移植(P1 登记)**: webview_search_open 工具(依附 WebView 面)/搜索服务 Description composables/拖拽排序手势。
 - **验证**: chat tsc 干净 + 1047 测试(+1 键接线)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-100 — 提示词注入写路径(序列化 + mode_injections/lorebooks save/update)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: core/model/.../Assistant.kt:144-233(模型声明序/默认值/SerialName)/ExtensionPrefs.kt:49-56,58-90,92-113(update 短路/readFrom/writeTo)/core/agent-utils/.../Json.kt:12-19(JsonInstant 配置)/PreferencesKeys.kt:74-75(冻结键)
+- **背景**: D-075 落地注入 domain + 读路径 + ChatPage 接线,但无写路径无 UI——mode_injections/lorebooks 用户不可配(「动态 system prompt blocks」P1 残余);D-075 读侧逐字段 ?? 合并比 kotlinx 宽松(类型错不丢)。
+- **决策**:
+  1. chat HAR injection_serialize(TDD 7 测试):modeInjection/regexInjection/lorebook toJson(声明序逐字 + encodeDefaults 全量;无 type 判别——存储为具体类型列表)/fromJson(kotlinx 容错语义:缺字段 → 默认,id 缺失生成(Uuid.random() 默认);未知键忽略;类型错/枚举非法/坏 JSON → 整体 null)+ encode/decode 列表对。
+  2. ExtensionPrefs.ets 重写:load* 改走 decode ?? emptyList(与 readFrom 逐字;**收紧 D-075 宽松合并**,登记);新增 save*(writeTo 全量)+ update*(:49-56 短路,JSON 串相等 = data class 相等,同 D-070 登记)。
+  3. 核实:DEFAULT_MODE_INJECTIONS(Learning Mode,b87eaf16)在当前 Android 读路径为 vestigial——composeRawSettings(:348)恒以 ext.modeInjections(缺失 → [])覆盖 Settings 默认,无 seed 路径 → 不移植,登记。
+- **偏差/适配登记**: data class 相等 → JSON 串相等(update 短路);D-075 读侧宽松合并被 kotlinx 严格语义替代(类型错条目由「部分默认填充」变「整体 []」——Android decodeJsonOrNull 行为)。
+- **关闭**: 「动态 system prompt blocks」写路径前置;为 D-101 管理面/D-102 助手链接面供数据。
+- **未移植(P1 登记)**: PromptPage 管理 CRUD UI(D-101)/AssistantExtensionsPage 链接 UI + quickMessages/skills 两 tab(D-102)/注入导入导出文件 picker/拖拽排序手势。
+- **验证**: chat tsc 干净 + 1054 测试(+7)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

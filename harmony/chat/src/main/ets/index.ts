@@ -531,6 +531,13 @@ export type {
   PromptInjectionDeps, RegexInjection,
 } from './chat/prompt_injection_transformer.ts';
 
+// ===== D-100:注入序列化 + mode_injections/lorebooks 写路径 =====
+export {
+  decodeLorebooks, decodeModeInjections, encodeLorebooks, encodeModeInjections,
+  lorebookFromJson, lorebookToJson, modeInjectionFromJson, modeInjectionToJson,
+  regexInjectionFromJson, regexInjectionToJson,
+} from './chat/injection_serialize.ts';
+
 // ===== D-079a:图片压缩纯函数(FileEncoder.kt:14-30,53-66,236-303) =====
 // PixelMap 解码/EXIF 归一化在 entry(ImageKit),HAR 只承载无平台依赖的部分。
 export {
