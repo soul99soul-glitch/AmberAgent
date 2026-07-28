@@ -387,3 +387,23 @@ export {
 export type {
   AssembleInternalInput, SessionGroupDefault, ResolvedSessionDefaults, MergedCustomParams,
 } from './chat/context_assembly.ts';
+
+// ===== D-065:搜索 SDK 核心(SearchService.kt + KeyRoulette.kt) =====
+export type {
+  SearchCommonOptions, SearchResult, SearchResultItem,
+  ScrapedResult, ScrapedResultUrl, ScrapedResultMetadata,
+  SearchServiceOptions, SearchServiceOptionsType,
+  BingLocalOptions, ZhipuOptions, TavilyOptions, ExaOptions, SearXNGOptions,
+  LinkUpOptions, BraveOptions, SerperOptions, SerpApiOptions, MetasoOptions,
+  OllamaOptions, PerplexityOptions, FirecrawlOptions, JinaOptions, BochaOptions,
+  AmberAgentSearchOptions, GrokOptions,
+  SearchService, SearchSdkRuntime, KeyRoulette, LruKeyRouletteStore,
+} from './search/search_service.ts';
+export {
+  DEFAULT_SEARCH_COMMON_OPTIONS, SEARCH_SERVICE_TYPES, GROK_DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_SEARCH_SERVICE_OPTIONS,
+  makeSearchServiceOptions, searchServiceOptionsToJson, searchServiceOptionsFromJson,
+  searchResultToJson, scrapedResultToJson,
+  initSearchSdk, searchSdkRuntime,
+  createDefaultKeyRoulette, createLruKeyRoulette,
+} from './search/search_service.ts';

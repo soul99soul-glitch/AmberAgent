@@ -671,3 +671,16 @@
   - **entry ChatPage 接线**(SendMessageOrchestrator.kt:26-41 语义):send()/sendWithoutAnswer() 组 parts 后、排队/发送前拦截(编辑态除外 — Android 编辑走 handleMessageEdit 不经 orchestrator;D-051 已登记编辑态长按偏差,维持);命中 → router.pushUrl('pages/DeepReadArticlePage') + 清空输入(不入队、不发模型、不改会话);bus.tryEmit 恒真 = 页面存活即有收集者,与 deep_read_open 工具同口径。deep_read_open bus emit 与斜杠路由合并为 openDeepRead 单一路径。
   - **残余登记**:canSendWithoutChatModel 门(ChatPage.kt:532/675/695/823 — 无聊天模型时仅斜杠命令可发送 + '请先选择模型' toast)= 依赖模型缺失态门控面,鸿蒙发送路径尚无模型空值门,整体 = P1。
 - **可逆性**:纯追加(解析器 + 发送路径前置守卫),非斜杠输入路径逐字节不变;1277 测试全绿(deepread 603 + chat 674),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-065（L0，2026-07-28）搜索 SDK 核心(SearchService.kt + KeyRoulette.kt)
+
+- **背景**：工具执行残余「search tools(createSearchTools)」依赖整个 search 模块(17 provider ~2500 行 + Aggregator/Orchestrator/Tools ~1500 行)。按 data/protocol 优先级启动搜索史诗,切五片:D-065 核心类型 → D-066/067 provider 批次 → D-068 聚合/编排 → D-069 工具组+entry。deepread HAR 的简化 SearchProvider 抽象(preview 期为深读管线所建,非 Android search SDK 移植)维持独立,不合并。
+- **决定**：
+  - **chat/search/search_service.ts(TDD,14 测试)**:SearchService.kt 全文 + KeyRoulette.kt 全文忠实 ——
+    - **SearchServiceOptions 17 类 type 判别联合**(SerialName 逐字:bing_local/zhipu/tavily/exa/searxng/linkup/brave/serper/serpapi/metaso/ollama/perplexity/firecrawl/jina/bocha/amber_agent/grok);构造默认逐字(tavily depth 'advanced'/linkup 'standard'/jina 双 URL/bocha summary true/perplexity 双 null/grok model+customUrl+systemPrompt 逐字/searxng 五空串);Uuid → string(newId);**SEARCH_SERVICE_TYPES** 17 显示名 mapOf 插入序('Bing HTML 兜底'/'智谱'/'秘塔'/'博查'…);DEFAULT = bing_local。
+    - **序列化 kotlinx 语义**:classDiscriminator 'type' 居首 + 字段声明序 + explicitNulls=false(null 省略)+ ignoreUnknownKeys;fromJson 未知 type 抛错、缺字段回默认、类型不符回默认;17 类 round-trip 测试钉住。
+    - **结果模型**(SearchResult/ScrapedResult 及嵌套):toJson 声明序 + null 省略;SearchResultItem images 恒落键(空数组不省略,explicitNulls 仅管 null)。
+    - **KeyRoulette**:splitKey([\\s,]+ split → trim → 非空白 → distinct 首次序);default 轮询(注入随机源,空列表 → 原串);**LRU**(24h 过期;本 provider 过滤不在 keyList/已过期条目;优先从未使用,否则最久未使用 minBy 平手取先遇=插入序;写回嵌套 JSON;他 provider 全过期清理;load 失败 → 空缓存;save 失败吞咽 — 平台缓存非业务数据)。
+    - **SearchService 接口** + **SearchSdkRuntime**(companion httpClient/keyRoulette + init)。
+  - **偏差登记**:泛型 SearchService\<T\> → 联合类型参数(provider 内窄化);suspend Result\<\> → Promise+抛错;@Composable Description() 属 UI 不移植;Call.await 协程桥 → HttpClient Port(@amber/deepread-domain,chat 既有 provider 同 Port)原生 Promise;**Android 默认 OkHttpClient 不可复刻 → 鸿蒙必须 initSearchSdk 注入,未注入访问运行时装抛错**;getService(options) when 分派随 provider 批次落地(D-067)。
+- **可逆性**:全新模块,无既有行为变更;1291 测试全绿(deepread 603 + chat 688),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
