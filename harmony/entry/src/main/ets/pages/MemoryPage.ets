@@ -1,34 +1,45 @@
-// MemoryPage — 记忆管理页首片(D-088):dream 手动整理审核 + 候选记忆审核
+// MemoryPage — 记忆管理页(D-088 首片:dream 审核+候选;D-089 二片:worker 开关组+
+//   记忆库三桶 CRUD + 事件日志)
 // Android 锚点:
-//   SettingAgentMemoryPage.kt:993-1080(DreamReviewSection:标题/说明/摘要行/
-//     来源行/notes take(4)/merge take(5)/supersede take(5) maxLines 3/空文案/
-//     三按钮 enabled 门)
-//   SettingAgentMemoryPage.kt:884-906(候选卡:meta 行 %.2f/建议人工审核后缀/
-//     content maxLines 4/reason maxLines 2/接受+忽略)
-//   SettingAgentMemoryPage.kt:912-991(候选区:SectionLabel/空文案/忽略低置信
-//     按钮右对齐仅 lowConfidenceCount>0)
-//   SettingAgentMemoryVM.kt:95-204(操作编排 → chat-domain memory_dream_ops)
-// 裁剪(P1 登记):worker 开关组(本地/LLM 整理 Switch)、记忆库列表、事件流、
-//   导出导入按钮、Agent Soul 卡 = 设置面后续切片;操作反馈 snackbar →
-//   promptAction toast(瞬时语义一致)。
+//   SettingAgentMemoryPage.kt:993-1080(DreamReviewSection)/:884-906,912-991(候选区)
+//   SettingAgentMemoryPage.kt:432-526(MemoryWorkerSubpage 开关组:三 Switch +
+//     supporting 文案逐字 + canRunDream 门 + '立即运行不可用' 提示)
+//   SettingAgentMemoryPage.kt:570-687(Library:三桶 RecordsSection + 维护工具)
+//   SettingAgentMemoryPage.kt:1183-1316(MemoryRecordsSection/MemoryItem:
+//     #id + content maxLines 5 + 编辑/删除;空文案 zh strings 逐字)
+//   SettingAgentMemoryPage.kt:1105-1135(MemoryEventsSection:take(6) + 空文案 +
+//     message 空白回退 'memory=X candidate=Y')
+//   SettingAgentMemoryPage.kt:127-149(编辑对话框:标题/label/保存/取消;
+//     id==0 → addMemory 否则 updateMemory)/:254-269(删除确认:confirm_delete)
+//   SettingAgentMemoryVM.kt:68-74(updateAgentRuntime)/:77-93(add/update/delete)
+// 裁剪(P1 登记):Overview 导航/Recall 开关页/Compaction 页/AgentSoul 卡/
+//   记忆汇总卡('Amber 对你的了解')/导入导出(目录选择器未落地)/toolbar
+//   '立即运行一次'(依附 workScheduler 调度环)/记忆库?'信息'图标视觉(以文字 '?' 代)。
 import { promptAction, router } from '@kit.ArkUI';
 import type {
-  MemoryCandidate, MemoryDreamPlanOpResult, MemoryDreamApplyOpResult,
-  MemoryIgnoreLowConfidenceResult, MemoryMergeSuggestion, MemorySupersedeSuggestion,
-  PersistedMemoryDreamPlan,
+  AssistantMemory, MemoryCandidate, MemoryDreamPlanOpResult, MemoryDreamApplyOpResult,
+  MemoryEvent, MemoryIgnoreLowConfidenceResult, MemoryMergeSuggestion,
+  MemorySupersedeSuggestion, PersistedMemoryDreamPlan,
 } from '@amber/chat-domain';
 import {
   acceptMemoryCandidate, applyMemoryDreamPlanOp, dismissMemoryDreamPlanOp,
-  ignoreLowConfidenceMemoryCandidates, ignoreMemoryCandidate,
+  ignoreLowConfidenceMemoryCandidates, ignoreMemoryCandidate, isAnyDreamEnabled,
   memoryDreamApplyFailureMessage, memoryDreamPlanFailureMessage,
   memoryDreamReviewSummaryText, memoryDreamPlanHasChanges,
   memoryLowConfidenceIgnoredMessage, planMemoryDreamOp,
   LOW_CONFIDENCE_CANDIDATE_THRESHOLD,
+  MEMORY_BUCKET_GLOBAL, MEMORY_BUCKET_LONG_TERM, MEMORY_BUCKET_SHORT_TERM,
   MEMORY_DREAM_APPLIED_MESSAGE, MEMORY_DREAM_APPLY_EMPTY_MESSAGE,
   MEMORY_DREAM_PLAN_EMPTY_MESSAGE, MEMORY_DREAM_PLAN_REPLACED_MESSAGE,
   MEMORY_DREAM_PLAN_SAVED_MESSAGE, MEMORY_NO_LOW_CONFIDENCE_MESSAGE,
 } from '@amber/chat-domain';
-import { getMemoryDreamPlanStore } from '../platform_impl/MemoryStore.ets';
+import type { MemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
+import { getMemoryDreamPlanStore, getMemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
+import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
+import {
+  loadAgentRuntimeSnapshot, updateMemoryWorkerToggles,
+} from '../platform_impl/AgentRuntimePrefs.ets';
+import { getChatKvStore } from '../di/AppContainer.ets';
 import {
   getMemoryCandidateOpsDeps, loadMemoryDreamApplyOpDeps,
   loadMemoryDreamPlanOpDeps, loadPendingMemoryCandidates,
@@ -62,6 +73,31 @@ const supersedeLineText = (s: MemorySupersedeSuggestion): string => {
   return s.reason.trim().length > 0 ? `${base} · ${s.reason}` : base;
 };
 
+// 事件行回退文案(Page :1120-1124:message 空白 → 原始 id 行,逐字)
+const eventMessageText = (e: MemoryEvent): string =>
+  e.message.trim().length > 0
+    ? e.message
+    : `memory=${e.memoryId !== null ? e.memoryId : '-'} ` +
+      `candidate=${e.candidateId !== null ? e.candidateId : '-'}`;
+
+// zh strings 逐字(values-zh/strings.xml)
+const TEXT_EDIT_TITLE: string = '编辑记忆';
+const TEXT_CONTENT_LABEL: string = '记忆内容';
+const TEXT_CORE_EMPTY: string = '还没有核心记忆。';
+const TEXT_SHORT_EMPTY: string =
+  '还没有短期记忆。等某个任务聊得比较久，AmberAgent 会把“这轮在做什么、进展到哪一步”整理到这里。';
+const TEXT_LONG_EMPTY: string =
+  '还没有长期记忆。稳定偏好、长期项目和反复出现的重要事实，会被整理到这里。';
+const TEXT_SHORT_INFO_TITLE: string = '短期记忆怎么形成？';
+const TEXT_SHORT_INFO_BODY: string =
+  '短期记忆更像一张临时任务便签。比如这轮正在调试短信权限、刚安装了一个 skill 包、某个网页搜索已经做到第几步，AmberAgent 会把这些近期进展整理起来，让接下来的几轮对话能接得上。任务结束后，它可能会被替换、清理，或沉淀成长期记忆。';
+const TEXT_LONG_INFO_TITLE: string = '长期记忆怎么形成？';
+const TEXT_LONG_INFO_BODY: string =
+  '长期记忆保存更稳定的信息。比如你偏好中文简洁回复、正在长期改造 AmberAgent、常用 workspace 是某个目录，或反复提到的重要事实。它会跨会话保留，帮助 AmberAgent 下次更快理解你的习惯和长期项目。';
+const TEXT_CORE_INFO_TITLE: string = '核心记忆是什么？';
+const TEXT_CORE_INFO_BODY: string =
+  '核心记忆、短期记忆和长期记忆是并列的三类记忆。核心记忆优先级最高，适合手动维护稳定偏好、身份设定和长期规则。';
+
 @Entry
 @Component
 struct MemoryPage {
@@ -69,6 +105,21 @@ struct MemoryPage {
   @State running: boolean = false;
   @State plan: PersistedMemoryDreamPlan | null = null;
   @State candidates: MemoryCandidate[] = [];
+  // worker 开关组(VM settings.agentRuntime.memoryWorker 快照字段)
+  @State workerEnabled: boolean = true;
+  @State dreamMaintenanceEnabled: boolean = true;
+  @State dreamModelEnabled: boolean = false;
+  @State runOnlyOnIdle: boolean = true;
+  // 记忆库三桶(VM :50-58 三 Flow;快照 Promise 适配,P1 观察)
+  @State coreMemories: AssistantMemory[] = [];
+  @State shortMemories: AssistantMemory[] = [];
+  @State longMemories: AssistantMemory[] = [];
+  // 事件(VM :62-64 getRecentEventsFlow(100))
+  @State recentEvents: MemoryEvent[] = [];
+  @State showEventsDialog: boolean = false;
+  // 编辑/新增对话框(Page :127-149;id==0 → 新增核心记忆)
+  @State editingMemory: AssistantMemory | null = null;
+  @State editDraft: string = '';
 
   aboutToAppear(): void {
     this.refresh();
@@ -82,6 +133,26 @@ struct MemoryPage {
     });
     loadPendingMemoryCandidates().then((list: MemoryCandidate[]): void => {
       this.candidates = list;
+    });
+    loadAgentRuntimeSnapshot(getChatKvStore())
+      .then((s: AgentRuntimeSnapshot): void => {
+        this.workerEnabled = s.memoryWorker.enabled;
+        this.dreamMaintenanceEnabled = s.memoryWorker.dreamMaintenanceEnabled;
+        this.dreamModelEnabled = s.memoryWorker.dreamModelEnabled;
+        this.runOnlyOnIdle = s.memoryWorker.runOnlyOnIdle;
+      });
+    const lib: MemoryLibraryOps = getMemoryLibraryOps();
+    lib.listBucket(MEMORY_BUCKET_GLOBAL).then((l: AssistantMemory[]): void => {
+      this.coreMemories = l;
+    });
+    lib.listBucket(MEMORY_BUCKET_SHORT_TERM).then((l: AssistantMemory[]): void => {
+      this.shortMemories = l;
+    });
+    lib.listBucket(MEMORY_BUCKET_LONG_TERM).then((l: AssistantMemory[]): void => {
+      this.longMemories = l;
+    });
+    lib.getRecentEvents(100).then((l: MemoryEvent[]): void => {
+      this.recentEvents = l;
     });
   }
 
@@ -167,6 +238,96 @@ struct MemoryPage {
         this.refresh();
       })
       .catch((e: Error): void => logMemoryDreamOpFailure('ignoreLowConfidence', e));
+  }
+
+  // ===== D-089:worker 开关组(VM :68-74 updateAgentRuntime)=====
+
+  // canRunDream 门(Page :156-159,MemoryWorkerDreamGate.isAnyDreamEnabled)
+  private canRunDream(): boolean {
+    return this.workerEnabled
+      && isAnyDreamEnabled({
+        enabled: this.workerEnabled,
+        dreamMaintenanceEnabled: this.dreamMaintenanceEnabled,
+        dreamModelEnabled: this.dreamModelEnabled,
+      });
+  }
+
+  // Page :447-451 本地整理建议 Switch(写回联动 dreamEnabled=false 在 prefs 写路径)
+  private onToggleMaintenance(v: boolean): void {
+    updateMemoryWorkerToggles(getChatKvStore(), { dreamMaintenanceEnabled: v })
+      .then((s: AgentRuntimeSnapshot): void => {
+        this.dreamMaintenanceEnabled = s.memoryWorker.dreamMaintenanceEnabled;
+      })
+      .catch((e: Error): void => logMemoryDreamOpFailure('toggleMaintenance', e));
+  }
+
+  // Page :473-479 LLM 整理建议 Switch
+  private onToggleModelDream(v: boolean): void {
+    updateMemoryWorkerToggles(getChatKvStore(), { dreamModelEnabled: v })
+      .then((s: AgentRuntimeSnapshot): void => {
+        this.dreamModelEnabled = s.memoryWorker.dreamModelEnabled;
+      })
+      .catch((e: Error): void => logMemoryDreamOpFailure('toggleModelDream', e));
+  }
+
+  // Page :489-496 仅设备空闲时自动运行 Switch
+  private onToggleRunOnlyOnIdle(v: boolean): void {
+    updateMemoryWorkerToggles(getChatKvStore(), { runOnlyOnIdle: v })
+      .then((s: AgentRuntimeSnapshot): void => {
+        this.runOnlyOnIdle = s.memoryWorker.runOnlyOnIdle;
+      })
+      .catch((e: Error): void => logMemoryDreamOpFailure('toggleRunOnlyOnIdle', e));
+  }
+
+  // ===== D-089:记忆库 CRUD(VM :86-93 + Page :127-149/:254-269)=====
+  // 注:Android core 区 onAddMemory 被 info 图标分支遮蔽(Page :1250-1255
+  //   if info else if add),新增入口在 Android UI 不可达 — 忠实移植,无新增按钮;
+  //   VM addMemory(:77-84)路径经 memory_* 工具已覆盖(D-085c)。
+
+  private startEditMemory(m: AssistantMemory): void {
+    this.editingMemory = m;
+    this.editDraft = m.content;
+  }
+
+  private confirmEditMemory(): void {
+    const editing: AssistantMemory | null = this.editingMemory;
+    if (editing === null) return;
+    this.editingMemory = null;
+    // VM :86-89 updateMemory → repository.updateContent(id, content)
+    getMemoryLibraryOps().updateContent(editing.id, this.editDraft)
+      .then((): void => this.refresh())
+      .catch((e: Error): void => logMemoryDreamOpFailure('updateMemory', e));
+  }
+
+  private confirmDeleteMemory(m: AssistantMemory): void {
+    AlertDialog.show({
+      title: '确认删除',
+      message: m.content,
+      primaryButton: {
+        value: '取消',
+        action: (): void => {},
+      },
+      secondaryButton: {
+        value: '确认',
+        action: (): void => {
+          // VM :91-93 deleteMemory → repository.deleteMemory(id)(未命中 no-op)
+          getMemoryLibraryOps().deleteMemory(m.id)
+            .then((): void => this.refresh())
+            .catch((e: Error): void => logMemoryDreamOpFailure('deleteMemory', e));
+        },
+      },
+    });
+  }
+
+  private showInfoDialog(title: string, text: string): void {
+    AlertDialog.show({
+      title,
+      message: text,
+      primaryButton: {
+        value: '确认',
+        action: (): void => {},
+      },
+    });
   }
 
   private lowConfidenceCount(): number {
@@ -266,54 +427,285 @@ struct MemoryPage {
     .padding(16).backgroundColor(SURFACE).borderRadius(12)
   }
 
-  build() {
-    Column() {
-      Row() {
-        Text('‹ 返回')
-          .fontSize(14).fontColor(INK3)
-          .onClick((): void => { router.back(); })
-        Blank()
-        Text('记忆')
-          .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
-        Blank()
-        Text('').width(48)
+  // ===== D-089:worker 开关组(Page :445-514)=====
+
+  @Builder
+  switchItem(label: string, desc: string, isOn: boolean, onChange: (v: boolean) => void) {
+    Row() {
+      Column({ space: 4 }) {
+        Text(label).fontSize(14).fontColor(INK)
+        Text(desc).fontSize(12).fontColor(INK3)
       }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 12 })
+      .alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Toggle({ type: ToggleType.Switch, isOn: isOn })
+        .onChange(onChange)
+    }
+    .width('100%')
+  }
 
-      if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
-      } else {
-        Scroll() {
-          Column({ space: 16 }) {
-            this.dreamReviewCard()
+  @Builder
+  workerToggleCard() {
+    Column({ space: 14 }) {
+      this.switchItem(
+        '本地整理建议',
+        '每 24 小时后台生成待审核整理建议；应用前需要确认。核心记忆不会自动修改。' +
+          '自动运行需要联网、电量不低；可按设置要求设备空闲。\n' +
+          `当前候选 ${this.candidates.length} 条，最近事件 ${this.recentEvents.length} 条。`,
+        this.dreamMaintenanceEnabled,
+        (v: boolean): void => this.onToggleMaintenance(v))
+      this.switchItem(
+        'LLM 整理建议',
+        '开启后，Daydream 可以让模型提出冲突替换等高级建议；仍需人工确认后才会应用。',
+        this.dreamModelEnabled,
+        (v: boolean): void => this.onToggleModelDream(v))
+      this.switchItem(
+        '仅设备空闲时自动运行',
+        '关闭后，自动整理不再要求 Android device idle；仍需要联网和电量不低。',
+        this.runOnlyOnIdle,
+        (v: boolean): void => this.onToggleRunOnlyOnIdle(v))
+      if (!this.canRunDream()) {
+        Column({ space: 4 }) {
+          Text('立即运行不可用').fontSize(14).fontColor(INK)
+          Text('请先开启本地整理或 LLM 整理建议。').fontSize(12).fontColor(INK3)
+        }
+        .width('100%').alignItems(HorizontalAlign.Start)
+      }
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+    .padding(16).backgroundColor(SURFACE).borderRadius(12)
+  }
 
-            Column({ space: 8 }) {
-              Text('候选记忆审核')
-                .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
-              if (this.candidates.length === 0) {
-                Text('暂无待审核候选。').fontSize(12).fontColor(INK3)
-              } else {
-                if (this.lowConfidenceCount() > 0) {
-                  Row() {
-                    Blank()
-                    Text(`忽略低置信候选（${this.lowConfidenceCount()}）`)
-                      .fontSize(13).fontColor(ACCENT)
-                      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-                      .onClick((): void => this.onIgnoreLowConfidence())
-                  }
-                  .width('100%')
-                }
-                ForEach(this.candidates, (c: MemoryCandidate): void => {
-                  this.candidateCard(c)
-                }, (c: MemoryCandidate): string => c.id)
-              }
+  // ===== D-089:记忆库三桶(Page :1183-1262 RecordsSection/:1264-1316 MemoryItem)=====
+
+  @Builder
+  memoryItem(m: AssistantMemory) {
+    Row({ space: 4 }) {
+      Column({ space: 4 }) {
+        Text(`#${m.id}`).fontSize(12).fontColor(INK)
+        Text(m.content)
+          .fontSize(14).fontColor(INK)
+          .maxLines(5).textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .alignItems(HorizontalAlign.Start).layoutWeight(1)
+      Text('编辑')
+        .fontSize(13).fontColor(ACCENT)
+        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+        .onClick((): void => this.startEditMemory(m))
+      Text('删除')
+        .fontSize(13).fontColor(INK2)
+        .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+        .onClick((): void => this.confirmDeleteMemory(m))
+    }
+    .width('100%')
+    .padding(16).backgroundColor(SURFACE).borderRadius(12)
+  }
+
+  // 三桶共用区(Page :622-648 调用点)— info '?' 三桶皆有(core/short/long);
+  //   core 的 add 图标被 info 分支遮蔽(:1250-1255),忠实移植无新增按钮
+  @Builder
+  recordsSection(
+    title: string, emptyText: string, memories: AssistantMemory[],
+    infoTitle: string, infoText: string,
+  ) {
+    Column({ space: 8 }) {
+      Row() {
+        Text(title)
+          .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
+        Blank()
+        Text('?')
+          .fontSize(12).fontColor(INK3)
+          .textAlign(TextAlign.Center)
+          .width(24).height(24)
+          .border({ width: 1, color: LINE, radius: 12 })
+          .onClick((): void => this.showInfoDialog(infoTitle, infoText))
+      }
+      .width('100%')
+      if (memories.length === 0) {
+        Text(emptyText).fontSize(12).fontColor(INK3)
+      }
+      ForEach(memories, (m: AssistantMemory): void => {
+        this.memoryItem(m)
+      }, (m: AssistantMemory): string => `${m.id}`)
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+  }
+
+  // ===== D-089:维护工具(Page :1138-1154;导入导出 P1 — 目录选择器未落地)=====
+
+  @Builder
+  maintenanceCard() {
+    Column({ space: 8 }) {
+      Text('维护工具')
+        .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
+      Row() {
+        Column({ space: 4 }) {
+          Text('事件日志').fontSize(14).fontColor(INK)
+          Text(`查看最近 ${this.recentEvents.length} 条记忆后台事件。`)
+            .fontSize(12).fontColor(INK3)
+        }
+        .alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text('›').fontSize(16).fontColor(INK3)
+      }
+      .width('100%')
+      .padding(16).backgroundColor(SURFACE).borderRadius(12)
+      .onClick((): void => {
+        this.showEventsDialog = true;
+      })
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+  }
+
+  // ===== D-089:事件日志对话框(Page :1105-1135,take(6))=====
+
+  @Builder
+  eventsOverlay() {
+    Column() {
+      Column({ space: 10 }) {
+        Text('事件日志')
+          .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+        if (this.recentEvents.length === 0) {
+          Text('暂无记忆事件。').fontSize(12).fontColor(INK3)
+        } else {
+          ForEach(this.recentEvents.slice(0, 6), (e: MemoryEvent): void => {
+            Column({ space: 2 }) {
+              Text(e.type).fontSize(13).fontColor(INK)
+              Text(eventMessageText(e))
+                .fontSize(12).fontColor(INK3)
+                .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
             }
             .width('100%').alignItems(HorizontalAlign.Start)
-          }
-          .width('100%')
-          .padding({ left: 16, right: 16, bottom: 24 })
+          }, (e: MemoryEvent): string => e.id)
         }
-        .layoutWeight(1)
+        Row() {
+          Blank()
+          Text('确认')
+            .fontSize(13).fontColor(ACCENT)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => {
+              this.showEventsDialog = false;
+            })
+        }
+        .width('100%')
+      }
+      .width('86%')
+      .padding(16).backgroundColor(SURFACE).borderRadius(16)
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('#66000000')
+    .onClick((): void => {
+      this.showEventsDialog = false;
+    })
+  }
+
+  // ===== D-089:编辑记忆对话框(Page :127-149)=====
+
+  @Builder
+  editOverlay() {
+    Column() {
+      Column({ space: 10 }) {
+        Text(TEXT_EDIT_TITLE)
+          .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+        TextArea({ text: this.editDraft, placeholder: TEXT_CONTENT_LABEL })
+          .fontSize(14)
+          .height(120)
+          .backgroundColor(BG)
+          .onChange((v: string): void => {
+            this.editDraft = v;
+          })
+        Row({ space: 8 }) {
+          Blank()
+          Text('取消')
+            .fontSize(13).fontColor(INK2)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => {
+              this.editingMemory = null;
+            })
+          Text('保存')
+            .fontSize(13).fontColor(ACCENT)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => this.confirmEditMemory())
+        }
+        .width('100%')
+      }
+      .width('86%')
+      .padding(16).backgroundColor(SURFACE).borderRadius(16)
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('#66000000')
+  }
+
+  build() {
+    Stack() {
+      Column() {
+        Row() {
+          Text('‹ 返回')
+            .fontSize(14).fontColor(INK3)
+            .onClick((): void => { router.back(); })
+          Blank()
+          Text('记忆')
+            .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
+          Blank()
+          Text('').width(48)
+        }
+        .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 12 })
+
+        if (!this.loaded) {
+          Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        } else {
+          Scroll() {
+            Column({ space: 16 }) {
+              this.workerToggleCard()
+              this.dreamReviewCard()
+
+              Column({ space: 8 }) {
+                Text('候选记忆审核')
+                  .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
+                if (this.candidates.length === 0) {
+                  Text('暂无待审核候选。').fontSize(12).fontColor(INK3)
+                } else {
+                  if (this.lowConfidenceCount() > 0) {
+                    Row() {
+                      Blank()
+                      Text(`忽略低置信候选（${this.lowConfidenceCount()}）`)
+                        .fontSize(13).fontColor(ACCENT)
+                        .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                        .onClick((): void => this.onIgnoreLowConfidence())
+                    }
+                    .width('100%')
+                  }
+                  ForEach(this.candidates, (c: MemoryCandidate): void => {
+                    this.candidateCard(c)
+                  }, (c: MemoryCandidate): string => c.id)
+                }
+              }
+              .width('100%').alignItems(HorizontalAlign.Start)
+
+              this.recordsSection(
+                '核心记忆', TEXT_CORE_EMPTY, this.coreMemories,
+                TEXT_CORE_INFO_TITLE, TEXT_CORE_INFO_BODY)
+              this.recordsSection(
+                '短期记忆', TEXT_SHORT_EMPTY, this.shortMemories,
+                TEXT_SHORT_INFO_TITLE, TEXT_SHORT_INFO_BODY)
+              this.recordsSection(
+                '长期记忆', TEXT_LONG_EMPTY, this.longMemories,
+                TEXT_LONG_INFO_TITLE, TEXT_LONG_INFO_BODY)
+              this.maintenanceCard()
+            }
+            .width('100%')
+            .padding({ left: 16, right: 16, bottom: 24 })
+          }
+          .layoutWeight(1)
+        }
+      }
+      .width('100%').height('100%')
+
+      if (this.editingMemory !== null) {
+        this.editOverlay()
+      }
+      if (this.showEventsDialog) {
+        this.eventsOverlay()
       }
     }
     .width('100%').height('100%').backgroundColor(BG)

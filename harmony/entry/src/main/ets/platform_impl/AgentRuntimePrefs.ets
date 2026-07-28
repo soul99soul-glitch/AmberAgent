@@ -172,3 +172,46 @@ export const systemLanguage = (): string => {
     return 'en';
   }
 };
+
+// ===== D-089:memoryWorker 开关写回(VM updateAgentRuntime :68-74)=====
+
+export interface MemoryWorkerTogglePatch {
+  dreamMaintenanceEnabled?: boolean;
+  dreamModelEnabled?: boolean;
+  runOnlyOnIdle?: boolean;
+}
+
+// Android: settingsStore.update { settings.copy(agentRuntime = ...) } 全文档重写
+//   (kotlinx encodeDefaults);鸿蒙 agent_runtime 独立 KV 键(D-072 适配)——
+//   读-改-写 raw JSON,保留未识别字段原样(wire 兼容:已知键缺失即默认语义,
+//   与 parseMemoryWorker 读侧互逆)。
+// dream 开关联动(Page :447-451/:475-479):写 dreamMaintenanceEnabled 或
+//   dreamModelEnabled 时同步 dreamEnabled=false(旧别名迁移写回语义逐字)。
+export const updateMemoryWorkerToggles = async (
+  kv: KeyValueStore, patch: MemoryWorkerTogglePatch,
+): Promise<AgentRuntimeSnapshot> => {
+  const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
+  let root: AgentRuntimeJson = {};
+  if (raw !== null) {
+    try {
+      root = JSON.parse(raw) as AgentRuntimeJson;
+    } catch {
+      root = {};
+    }
+  }
+  const worker: MemoryWorkerJson = root.memoryWorker ?? {};
+  if (patch.dreamMaintenanceEnabled !== undefined) {
+    worker.dreamMaintenanceEnabled = patch.dreamMaintenanceEnabled;
+    worker.dreamEnabled = false;
+  }
+  if (patch.dreamModelEnabled !== undefined) {
+    worker.dreamModelEnabled = patch.dreamModelEnabled;
+    worker.dreamEnabled = false;
+  }
+  if (patch.runOnlyOnIdle !== undefined) {
+    worker.runOnlyOnIdle = patch.runOnlyOnIdle;
+  }
+  root.memoryWorker = worker;
+  await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
+  return loadAgentRuntimeSnapshot(kv);
+};

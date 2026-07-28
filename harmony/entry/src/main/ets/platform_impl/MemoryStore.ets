@@ -360,6 +360,28 @@ export const getMemoryDreamStoreOps = (): MemoryDreamStoreOps => ({
   addEvent,
 });
 
+// ===== D-089:记忆库面(MemoryPage 三桶列表 + CRUD + 事件) =====
+
+export interface MemoryLibraryOps {
+  // getMemoriesOfAssistant(DAO :16-17)— 桶精确匹配,插入序(含 archived,
+  //   Android Flow 不过滤,UI 全量展示)
+  listBucket: (bucket: string) => Promise<AssistantMemory[]>;
+  // MemoryRepository.kt:102-133 addMemory / :84-89 updateContent / :145-147 deleteMemory
+  addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
+  updateContent: (id: number, content: string) => Promise<MemoryRecord>;
+  deleteMemory: (id: number) => Promise<void>;
+  // MemoryEventDAO :15-16 — created_at DESC LIMIT :limit(VM getRecentEventsFlow(100))
+  getRecentEvents: (limit: number) => Promise<MemoryEvent[]>;
+}
+
+export const getMemoryLibraryOps = (): MemoryLibraryOps => ({
+  listBucket: listMemoriesOfAssistant,
+  addMemory,
+  updateContent,
+  deleteMemory,
+  getRecentEvents,
+});
+
 // ===== D-085g:dream plan JSON 持久化 + Store/Notifier =====
 
 const DOMAIN: number = 0x0001;

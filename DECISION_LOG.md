@@ -1153,3 +1153,21 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
   - 接受/单条忽略失败:Android 无消息(runCatching 外层无)→ 本实现 hilog.warn(非静默,宪章条款)。
 - **未移植(P1 登记)**: worker 开关组(本地/LLM 整理 Switch + runOnlyOnIdle + 不可运行提示)/记忆库三桶列表(records CRUD UI)/记忆事件区/导出导入按钮(UI 触发,domain 已备)/Agent Soul 卡/任务模型 picker 设置面/dream 自动调度环(workScheduler)。
 - **验证**: chat tsc 干净 + 1030 测试(+15)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-089 — Memory 页二片:worker 开关组 + 记忆库三桶 CRUD + 事件日志
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingAgentMemoryPage.kt:432-526(WorkerSubpage 开关组)/:570-687(Library 编排)/:1105-1154(Events/Maintenance)/:1183-1316(RecordsSection/MemoryItem)/:127-149(编辑对话框)/:254-269(删除确认)/SettingAgentMemoryVM.kt:68-93(updateAgentRuntime/add/update/delete)/values-zh/strings.xml:604-612,51,121,173,255-256(文案)
+- **决策**:
+  1. `AgentRuntimePrefs.ets` 写路径:MemoryWorkerTogglePatch + updateMemoryWorkerToggles(kv, patch)— 读-改-写 raw JSON 保留未识别字段(D-072 独立 KV 键适配延续,与 parseMemoryWorker 读侧互逆);dream 两开关写回时联动 dreamEnabled=false(Page :447-451/:475-479 旧别名迁移写回逐字);返回新快照。
+  2. `MemoryStore.ets`:MemoryLibraryOps + getMemoryLibraryOps(listBucket=桶精确匹配插入序含 archived/addMemory/updateContent/deleteMemory/getRecentEvents(limit)— 复用 D-085c 写路径与 D-085 事件查询)。
+  3. `MemoryPage.ets` 扩展:worker 开关卡(三 Switch + supporting 文案逐字——本地整理建议含'当前候选 N 条，最近事件 N 条。'实时计数;canRunDream=enabled&&isAnyDreamEnabled 门 → '立即运行不可用'+'请先开启本地整理或 LLM 整理建议。')置于 dream 审核卡上方(Android Worker 子页序);记忆库三桶(核心/短期/长期:标题+'?'信息(zh strings 逐字 AlertDialog)+ 空文案逐字 + MemoryItem #id/content maxLines 5/编辑/删除);编辑对话框(页内 overlay:标题'编辑记忆'+TextArea placeholder'记忆内容'+保存/取消 → updateContent);删除 AlertDialog('确认删除'+content+取消/确认 → deleteMemory 未命中 no-op);维护工具卡(事件日志 entry → overlay 对话框:take(6) 事件,type wireName + message 空白回退 'memory=X candidate=Y' 逐字,空文案'暂无记忆事件。')。
+  4. **Android 行为忠实记录**: core 区 onAddMemory 被 RecordsSection 的 info 图标分支遮蔽(Page :1250-1255 if info else if add),新增入口在 Android UI 不可达 — 忠实移植,无新增按钮(VM addMemory :77-84 路径由 memory_* 工具覆盖,D-085c)。
+- **偏差/适配登记**:
+  - prefs 写回:Android settingsStore.update 全文档 kotlinx 重写 → 鸿蒙 agent_runtime 键 raw JSON 读-改-写(未知字段透传;已知键缺失即默认,wire 语义等价,D-072 适配延续);
+  - 编辑/事件对话框:Android AlertDialog/EditStateContent → 页内 Stack overlay(交互等价);
+  - 记忆库/事件观察:Android Flow stateIn → 操作后快照刷新(与全 entry 页面同策略,P1 观察);
+  - 开关/CRUD 失败:Android 无用户可见反馈 → hilog.warn(非静默,宪章条款)。
+- **未移植(P1 登记)**: Overview 导航页/Recall 开关页/Compaction 页(contextCompaction 开关)/AgentSoul 卡(agentSoulMarkdown 读写在 prefs 未移植)/记忆汇总卡('Amber 对你的了解',三组过滤器)/导入导出 UI(目录选择器,domain import-export 已备 D-085e)/toolbar '立即运行一次'(依附 workScheduler 调度环)/Compaction contextCompaction prefs 字段。
+- **验证**: chat tsc 干净 + 1030 测试(无新增——entry 侧切片)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
