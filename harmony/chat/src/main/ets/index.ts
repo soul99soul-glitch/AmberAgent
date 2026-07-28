@@ -487,3 +487,10 @@ export {
 export type {
   TimeReminderDeps, TimeReminderFormatters,
 } from './chat/time_reminder_transformer.ts';
+
+// ===== D-073:占位符替换(PlaceholderTransformer.kt 全文) =====
+export {
+  PLACEHOLDER_KEYS, createPlaceholderTransformer, replaceAllIgnoreCase,
+  replacePlaceholders, resolvePlaceholderValue,
+} from './chat/placeholder_transformer.ts';
+export type { PlaceholderValues } from './chat/placeholder_transformer.ts';

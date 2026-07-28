@@ -44,6 +44,7 @@ import {
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
   loadSearchPrefs, SearchSettings, createSearchTools,
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
+  createPlaceholderTransformer,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -57,6 +58,7 @@ import { createEntryOcrTransformer, loadOcrSeed, OcrSeed } from '../platform_imp
 import {
   AgentRuntimeSnapshot, defaultAgentRuntimeSnapshot, loadAgentRuntimeSnapshot, systemLanguage,
 } from '../platform_impl/AgentRuntimePrefs.ets';
+import { createEntryPlaceholderValues, loadUserNickname } from '../platform_impl/PlaceholderSupport.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -384,10 +386,13 @@ struct ChatPage {
 
   // D-072:agent_runtime 快照(transform 调用时读 = Android settingsFlow.value 语义)
   private agentRuntime: AgentRuntimeSnapshot = defaultAgentRuntimeSnapshot();
+  // D-073:display_setting.userNickname 快照(placeholder nickname/user 取值)
+  private userNickname: string = '';
 
-  // D-071b/D-072:input transformers 链 — [timeReminder, template, ocr]
-  //   (Android ChatService.kt:169-177:TimeReminderTransformer 居首,OcrTransformer
-  //   居尾,忠实);seed 未就绪当轮不带 OCR(同 D-070 搜索工具门模式)
+  // D-071b/D-072/D-073:input transformers 链 — [timeReminder, template, placeholder, ocr]
+  //   (Android ChatService.kt:169-177:TimeReminder 居首/Placeholder 第四/Ocr 居尾,
+  //   相对序忠实;template 为本移植 D-016 既有位置);
+  //   seed 未就绪当轮不带 OCR(同 D-070 搜索工具门模式)
   private buildInputTransformers(rt: ChatRuntime): MessageTransformer[] {
     const list: MessageTransformer[] = [
       createTimeReminderTransformer({
@@ -396,6 +401,9 @@ struct ChatPage {
         formatLocalDateTime: javaLocalDateTimeString,
       }),
       createTemplateTransformer(),
+      createPlaceholderTransformer(createEntryPlaceholderValues(
+        rt.params.model.modelId, rt.params.model.displayName,
+        (): string => this.userNickname)),
     ];
     if (this.ocrSeed !== null) {
       list.push(createEntryOcrTransformer(this.ocrSeed, rt.modelSupportsImageInput));
@@ -418,6 +426,10 @@ struct ChatPage {
     // D-072:agent_runtime 快照加载(enableTimeReminder 等;缺失/损坏 → 默认 false)
     loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
       this.agentRuntime = snap;
+    });
+    // D-073:display_setting.userNickname 快照(placeholder nickname/user)
+    loadUserNickname(getChatKvStore()).then((nick: string): void => {
+      this.userNickname = nick;
     });
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';

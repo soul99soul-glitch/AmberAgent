@@ -802,3 +802,14 @@
   - **ChatPage 链序**:[timeReminder, template, ocr] — TimeReminder 居首/Ocr 居尾(ChatService.kt:170,176 忠实);agentRuntime 快照 aboutToAppear 加载。
   - **TDD 8 测试**:gate 关原引用/3600 整不注入+3601 注入(文案逐字+user 角色)/首消息不注入+多处注入/formatGap 三档边界+截断/NaN 安全退化/完整 transform/javaLocalDateTimeString 三档+补零/dayOfWeek zh/en。
 - **可逆性**:1422 测试全绿(deepread 603 + chat 819),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。input 链残余:PromptInjection/MiniAppPrompt/Placeholder/DocumentAsPrompt = P1。
+
+## D-073（L0，2026-07-28）PlaceholderTransformer + PlaceholderValues entry — input 链第二片
+
+- **背景**：ChatService.kt:174 链位。Android 锚点：PlaceholderTransformer.kt(全文 182 行)、PreferencesKeys.kt:22('display_setting')、UIPrefs.kt:56(decode 失败回默认)、PreferencesStore.kt:310-318(DisplaySetting/userNickname 默认 '')。
+- **决定**：
+  - **placeholder_transformer(HAR)**:13 键插入序冻结(LinkedHashMap 迭代序);replacePlaceholders 逐字 — 逐键 replace('{{key}}')+replace('{key}') ignoreCase=true 全替换,**顺序执行**(后键可命中前键产出文本,测试锁定 nickname='{char}' 链);replaceAllIgnoreCase = 正则转义 + /gi + **函数 replacer**(Kotlin replace 字面语义,值含 '$' 不解释,测试锁定);resolver blank 回退逐字(nickname/user blank→'user',char=assistant.name blank→'assistant');transform 全量 copy 无恒等短路。
+  - **PlaceholderValues 注入**:ctx.model 不在 TransformerContext → model_id/model_name 由 values 供给(entry 取 rt.params.model);平台取值(battery/device/locale/timezone/version/时间格式化)entry 实现。
+  - **PlaceholderSupport.ets(entry)**:Intl dateStyle/timeStyle medium(Java FormatStyle.MEDIUM 语义档,字节级偏差登记);locale displayName → language-region 原始 tag(Intl.DisplayNames 不可用,登记);timezone → IANA 名(resolvedOptions,登记);system_version → 'HarmonyOS API v${sdkApiVersion} (${osFullName})'(命名偏差登记);device_info → deviceInfo.brand+productModel;battery → batteryInfo.batterySOC(异常 → -1,BatteryManager 不可用语义);display_setting 键逐字 + userNickname decode 失败回 ''。
+  - **ChatPage 链序**:[timeReminder, template, placeholder, ocr](Android 相对序忠实:TimeReminder 1 < Placeholder 4 < Ocr 6;template 为 D-016 既有位);userNickname 快照 aboutToAppear 加载。
+  - **TDD 7 测试**:13 键序/双形态+大小写+全替换/$ 字面+链式顺序/blank 回退三键/全键映射/transform text 替换+非 text 不动+全量 copy/正则元字符安全。
+- **可逆性**:1429 测试全绿(deepread 603 + chat 826),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。input 链残余:PromptInjection/MiniAppPrompt/DocumentAsPrompt = P1。
