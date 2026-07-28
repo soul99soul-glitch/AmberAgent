@@ -436,3 +436,11 @@ export { metasoSearchService } from './search/metaso_service.ts';
 export { linkUpService } from './search/linkup_service.ts';
 export { perplexitySearchService } from './search/perplexity_service.ts';
 export { exaSearchService } from './search/exa_service.ts';
+
+// ===== D-068c:需 key 搜索源批次 C(Tavily/博查/SearXNG/Grok/Firecrawl)+ getService 分派 =====
+export { tavilySearchService } from './search/tavily_service.ts';
+export { bochaSearchService } from './search/bocha_service.ts';
+export { searXNGService } from './search/searxng_service.ts';
+export { grokSearchService } from './search/grok_service.ts';
+export { firecrawlSearchService } from './search/firecrawl_service.ts';
+export { getSearchService } from './search/service_registry.ts';

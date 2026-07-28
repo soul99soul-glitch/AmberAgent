@@ -112,3 +112,28 @@ export const buildQuery = (params: Array<[string, string]>): string =>
     .map(([k, v]: [string, string]): string =>
       `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
     .join('&');
+
+// ===== okhttp Credentials.basic(user, pass)(ISO-8859-1)→ Base64 =====
+
+const B64_ALPHABET: string = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+// Latin-1 字节化(charCode & 0xFF)+ 标准 Base64(含 padding)
+export const base64EncodeLatin1 = (s: string): string => {
+  const bytes: number[] = [];
+  for (let i = 0; i < s.length; i++) bytes.push(s.charCodeAt(i) & 0xFF);
+  let out: string = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0: number = bytes[i];
+    const b1: number = i + 1 < bytes.length ? bytes[i + 1] : -1;
+    const b2: number = i + 2 < bytes.length ? bytes[i + 2] : -1;
+    out += B64_ALPHABET[b0 >> 2];
+    out += B64_ALPHABET[((b0 & 0x03) << 4) | (b1 >= 0 ? b1 >> 4 : 0)];
+    out += b1 >= 0 ? B64_ALPHABET[((b1 & 0x0F) << 2) | (b2 >= 0 ? b2 >> 6 : 0)] : '=';
+    out += b2 >= 0 ? B64_ALPHABET[b2 & 0x3F] : '=';
+  }
+  return out;
+};
+
+// Credentials.basic(username, password) = "Basic " + base64("u:p")
+export const basicAuthHeader = (username: string, password: string): string =>
+  `Basic ${base64EncodeLatin1(`${username}:${password}`)}`;
