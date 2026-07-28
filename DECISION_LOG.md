@@ -125,3 +125,14 @@
   - per-host reasoning 矩阵 10 分支逐字迁移（含 SiliconFlow 26 模型名单 verbatim）；`mergeCustomBody` 深合并（同键 JsonObject 递归，否则替换，blank key 跳过）逐字迁移。
   - **连带修复（提交门堵漏）**：`topic_id_node.ts`（import node 'crypto' + 全局 URL/URLSearchParams）从 `deepread/src/main/ets/domain/` 移至 `src/test/`——文件注释自称"仅 node 测试"，但 `assembleHar` 的 HarCompileArkTS 编译 ets 树全部文件，非引用图可达集；此前门只跑过 `assembleHap`（引用图编译）漏检。本切片起 hvigor 门 = `assembleHar`（全模块）+ `assembleHap` 双绿。另修 `council_manager.test.ts` 2 处存量 TS2722（可选方法 `addEventListener` 缺 `!` 断言，与 D-010 同类）。
 - **可逆性**：纯逻辑层字段增删不影响 wire 格式；matcher 简化仅影响温度/top_p 是否下发，测试锁定。
+
+## D-015（L0，2026-07-28）OpenAI Chat API 组装层：HTTP Port 接线、错误传播优先级、ohpm 依赖链接入提交门
+
+- **背景**：Chat 主回路 source-only 收口（请求构建 → HttpClient Port → SSE 装配 → chunk 回调）。基准 = ChatCompletionsAPI.kt streamText(:165-291)/generateText(:107-163)/onFailure(:258-278)。
+- **决定**：
+  - `createOpenAIChatApi({http, setting, headers?, encodeImage?})`：URL = `baseUrl + chatCompletionsPath`；默认 `Content-Type: application/json`；**auth/customHeaders/referer 由 adapter 经 `headers()` 注入**（bearerResolver/KeyRoulette/configureReferHeaders 不进纯逻辑层，secret 不出 adapter）。
+  - **错误传播优先级**：流内 parse 异常/error payload（OpenAiStreamError）> 非 2xx 状态。非 2xx 且 body 可解析 → `parseOpenAiErrorDetail`（先取 normalize 首行，对齐 :266-268）；不可解析 → `Failed to get response: CODE RAW` 根因错误（不用 parse 异常覆盖根因，对齐 :272-274）。
+  - 终止语义：parse 失败/[DONE] 后不再消费后续事件（对齐 :205-206 主动 cancel+close 的语义）；OkHttp `eventSource.cancel` 在本 Port 无对应，底层流由 adapter `signal` 收尾——注释登记，不记 PD（Port 层差异，设备端 spike A 验证）。
+  - `asChatStreamProvider(api, paramsFor)` 薄适配 chat_turn 的 ChatStreamProvider（params 按会话供给，不烘焙进 API）。
+  - **门堵漏**：chat HAR 首个 import `@amber/deepread-domain` 的 main 源文件暴露 ohpm 链接缺失（node 侧走 tsconfig paths 从未暴露）；修复 = 模块内 `ohpm install`（file: 链接，oh_modules gitignored）。提交门补充：新引入跨 HAR import 后必须 `ohpm install` + `hvigorw clean` 全量重建双绿（本次 clean assembleHap 4.9s 验证）。
+- **可逆性**：组装层无 wire 格式决策；错误语义测试锁定。

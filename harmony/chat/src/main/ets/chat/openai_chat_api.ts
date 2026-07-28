@@ -1,0 +1,171 @@
+// OpenAI Chat API 组装层(请求构建 → HttpClient Port → SSE 装配 → MessageChunk 回调)
+//
+// Android 基准: ChatCompletionsAPI.kt
+//   streamText(:165-291) / generateText(:107-163) / onFailure(:258-278)
+//
+// 裁剪(D-014 延续):
+//   - bearerResolver/customHeaders/configureReferHeaders 由 adapter 经 headers() 注入;
+//     secret 不进纯逻辑层(宪章:日志/快照不落 token)。
+//   - OkHttp EventSource.cancel 在本 Port 无对应:解析失败抛错即终止消费,
+//     底层流由 adapter 的 signal 收尾(注释对齐 :205-206 的主动 cancel 语义)。
+
+import type { HttpClient, HttpRequest, AbortSignalLike } from '@amber/deepread-domain';
+import { SseAssembler } from '@amber/deepread-domain';
+import type { SseEvent } from '@amber/deepread-domain';
+
+import type { MessageChunk, UIMessage, UIMessageChoice } from './message.ts';
+import type { JsonObject, JsonValue } from './json.ts';
+import type { ProviderSettingOpenAI, TextGenerationParams } from './provider_model.ts';
+import { buildChatCompletionRequest } from './openai_request.ts';
+import type { ImageEncoder } from './openai_request.ts';
+import { normalizeOpenAIStreamDataLines } from './openai_normalize.ts';
+import {
+  parseChatCompletionMessage, parseOpenAiTokenUsage, parseOpenAiErrorDetail,
+  parseOpenAiStreamEventData,
+} from './openai_parse.ts';
+import type { ChatStreamProvider } from './chat_turn.ts';
+
+export interface OpenAIChatApiDeps {
+  http: HttpClient;
+  setting: ProviderSettingOpenAI;
+  // adapter 注入的额外 header(auth/custom/referer);secret 由 adapter 持有
+  headers?: () => Record<string, string>;
+  encodeImage?: ImageEncoder;
+}
+
+export interface CallOpts {
+  signal?: AbortSignalLike;
+}
+
+export interface OpenAIChatApi {
+  streamText(
+    messages: UIMessage[],
+    params: TextGenerationParams,
+    onChunk: (chunk: MessageChunk) => void,
+    opts?: CallOpts,
+  ): Promise<void>;
+  generateText(messages: UIMessage[], params: TextGenerationParams, opts?: CallOpts): Promise<MessageChunk>;
+}
+
+const buildRequest = (
+  deps: OpenAIChatApiDeps,
+  messages: UIMessage[],
+  params: TextGenerationParams,
+  stream: boolean,
+): HttpRequest => {
+  const body = buildChatCompletionRequest({
+    messages, params, setting: deps.setting, stream, encodeImage: deps.encodeImage,
+  });
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const extra = deps.headers !== undefined ? deps.headers() : {};
+  for (const k of Object.keys(extra)) headers[k] = extra[k];
+  return {
+    url: `${deps.setting.baseUrl}${deps.setting.chatCompletionsPath}`,
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  };
+};
+
+// onFailure(:258-278):body 非空 → 尝试 parseErrorDetail;解析失败保留根因
+const errorFromFailureBody = (status: number, bodyRaw: string): Error => {
+  if (bodyRaw.trim().length > 0) {
+    try {
+      const normalized = normalizeOpenAIStreamDataLines(bodyRaw);
+      const candidate = normalized.length > 0 ? normalized[0] : bodyRaw;
+      const parsed: unknown = JSON.parse(candidate);
+      return parseOpenAiErrorDetail(parsed as JsonValue);
+    } catch {
+      // body 解析失败 → 落到根因错误(不要用 parse 异常覆盖)
+    }
+  }
+  return new Error(`Failed to get response: ${status} ${bodyRaw}`);
+};
+
+export const createOpenAIChatApi = (deps: OpenAIChatApiDeps): OpenAIChatApi => {
+  const streamText = async (
+    messages: UIMessage[],
+    params: TextGenerationParams,
+    onChunk: (chunk: MessageChunk) => void,
+    opts?: CallOpts,
+  ): Promise<void> => {
+    const req = buildRequest(deps, messages, params, true);
+    const assembler = new SseAssembler();
+    // holder:闭包赋值不破坏 CFA(见 D-010 模式)
+    const state: { error: Error | null; done: boolean } = { error: null, done: false };
+
+    const resp = await deps.http.fetchStream(req, {
+      signal: opts?.signal,
+      onChunk: (bytes: ArrayBuffer, end: boolean): void => {
+        if (state.error !== null || state.done) return; // 终止后不再消费
+        try {
+          const events: SseEvent[] = assembler.feed(bytes);
+          if (end) events.push(...assembler.flush());
+          for (const evt of events) {
+            const result = parseOpenAiStreamEventData(evt.data);
+            if (result.done) {
+              state.done = true;
+              return;
+            }
+            for (const chunk of result.chunks) onChunk(chunk);
+          }
+        } catch (e) {
+          // parse 异常/error payload → 记录,终止消费,统一在 await 后抛出
+          state.error = e instanceof Error ? e : new Error(String(e));
+        }
+      },
+    });
+
+    if (state.error !== null) throw state.error;
+    if (resp.status < 200 || resp.status >= 300) {
+      throw errorFromFailureBody(resp.status, resp.body);
+    }
+  };
+
+  const generateText = async (
+    messages: UIMessage[],
+    params: TextGenerationParams,
+    opts?: CallOpts,
+  ): Promise<MessageChunk> => {
+    const req = buildRequest(deps, messages, params, false);
+    const resp = await deps.http.fetch(req, { signal: opts?.signal });
+    if (resp.status < 200 || resp.status >= 300) {
+      throw new Error(`Failed to get response: ${resp.status} ${resp.body}`);
+    }
+    const bodyJson = JSON.parse(resp.body) as JsonObject;
+    const id = typeof bodyJson['id'] === 'string' ? bodyJson['id'] : '';
+    const model = typeof bodyJson['model'] === 'string' ? bodyJson['model'] : '';
+    const choices = Array.isArray(bodyJson['choices']) ? bodyJson['choices'] : [];
+    if (choices.length === 0) throw new Error('choices is null');
+    const choice = choices[0] as JsonObject;
+    const message = choice['message'];
+    if (message === null || typeof message !== 'object' || Array.isArray(message)) {
+      throw new Error('message is null');
+    }
+    const finishReason = typeof choice['finish_reason'] === 'string'
+      ? choice['finish_reason'] : 'unknown';
+    const usageRaw = bodyJson['usage'];
+    const usage = parseOpenAiTokenUsage(
+      usageRaw !== null && typeof usageRaw === 'object' && !Array.isArray(usageRaw)
+        ? usageRaw : null);
+
+    const uiChoice: UIMessageChoice = {
+      index: 0,
+      delta: null,
+      message: parseChatCompletionMessage(message),
+      finishReason,
+    };
+    return { id, model, choices: [uiChoice], usage };
+  };
+
+  return { streamText, generateText };
+};
+
+// 适配 chat_turn 的 ChatStreamProvider(params 由调用方按会话供给)
+export const asChatStreamProvider = (
+  api: OpenAIChatApi,
+  paramsFor: () => TextGenerationParams,
+): ChatStreamProvider => ({
+  streamText: (messages: UIMessage[], onChunk: (chunk: MessageChunk) => void): Promise<void> =>
+    api.streamText(messages, paramsFor(), onChunk),
+});
