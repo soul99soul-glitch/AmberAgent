@@ -7,7 +7,7 @@
 meta:
   updated: 2026-07-28
   branch: harmony-preview
-  head: cb061867d
+  head: 8a89793f3
 
 phase:
   current: "Phase 0 → Phase 1 过渡"
