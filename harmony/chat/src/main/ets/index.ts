@@ -238,6 +238,15 @@ export {
   createToolSearchTool, createRegistryIntrospectionTools,
   TOOL_SEARCH_TOOL_NAME, TOOL_SEARCH_AUTO_THRESHOLD, TOOL_SEARCH_DEFAULT_LIMIT,
 } from './chat/builtin_introspection_tools.ts';
+
+// ===== D-061:本地工具三件(run_plan_update/clipboard_tool/deep_read_open) =====
+export type {
+  ClipboardPort, DeepReadOpenEvent, DeepReadOpenBus, DeepReadOpenToolDeps,
+} from './chat/builtin_local_tools.ts';
+export {
+  createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
+  createDeepReadOpenEvent, DEEP_READ_TITLE_MAX_CHARS,
+} from './chat/builtin_local_tools.ts';
 export type { SessionAccessGrant, GrantValidation } from './chat/session_grant_store.ts';
 export {
   SessionAccessGrantStore,

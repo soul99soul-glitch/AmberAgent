@@ -14,7 +14,7 @@ import type {
   CompactPolicy, CompactResult, PreparedContext,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
-  ToolRegistry,
+  ToolRegistry, DeepReadOpenEvent,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -38,6 +38,7 @@ import {
   createAskUserTool, createConversationContextTools, createConversationHistoryTools,
   createConversationQueueTools, createToolRegistry,
   createToolSearchTool, createRegistryIntrospectionTools,
+  createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
 } from '@amber/chat-domain';
@@ -47,6 +48,7 @@ import {
 } from '../di/AppContainer.ets';
 import { readImageAsDataUrl } from '../platform_impl/EntryImageEncoder.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
+import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -806,6 +808,23 @@ struct ChatPage {
           }
           return Promise.resolve();
         },
+      }),
+      // D-061:本地工具三件(LocalTools runPlanUpdateTool/clipboardTool/
+      //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
+      //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)
+      createRunPlanUpdateTool(),
+      createClipboardTool(createEntryClipboardPort()),
+      createDeepReadOpenTool({
+        bus: {
+          hasCollectors: (): boolean => true,
+          emit: (event: DeepReadOpenEvent): void => {
+            const params: Record<string, string> = {};
+            params['topicId'] = event.topicId;
+            params['title'] = event.title;
+            router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
+          },
+        },
+        sha256Hex: sha256HexUtf8,
       }),
     ]);
     return {
