@@ -7,7 +7,7 @@
 meta:
   updated: 2026-07-28
   branch: harmony-preview
-  head: a58184854
+  head: a53c19f78
 
 phase:
   current: "Phase 0 → Phase 1 过渡"
@@ -37,7 +37,7 @@ codebase:
   harmony工程:
     entry: "HAP — UIAbility + 12 页面(+Assistants,D-019/D-020/D-023/D-027) + platform_impl 真实 adapter + ChatKvStore/ChatRdbRepository(D-021)"
     deepread: "HAR — 纯 ArkTS 领域层,零 SDK 依赖: agent/council/novel/domain/platform/research"
-    chat: "HAR(@amber/chat-domain)— 模型/accumulator/OpenAI provider(fixture 8/8)/transformer+chat_turn(D-012)/持久化(D-013)/请求侧纯逻辑(D-014)/API 组装层(D-015)/Assistant 全量模型+wire(D-016)/ProviderSetting 持久化 3 变体+Model 全量(D-017)/regenerate+分支切换(D-024)/自动命名(D-025)/会话建议(D-026)/消息删除(D-029)/user 节点 regenerate(D-030)/消息编辑(D-031)/会话 fork(D-033)/手动改名(D-034)/停止生成(D-035/D-036 全路径)/多模态图片输入(D-038);设备端 adapter 待 G-C"
+    chat: "HAR(@amber/chat-domain)— 模型/accumulator/OpenAI provider(fixture 8/8)/transformer+chat_turn(D-012)/持久化(D-013)/请求侧纯逻辑(D-014)/API 组装层(D-015)/Assistant 全量模型+wire(D-016)/ProviderSetting 持久化 3 变体+Model 全量(D-017)/regenerate+分支切换(D-024)/自动命名(D-025)/会话建议(D-026)/消息删除(D-029)/user 节点 regenerate(D-030)/消息编辑(D-031)/会话 fork(D-033)/手动改名(D-034)/停止生成(D-035/D-036 全路径)/多模态图片输入(D-038)/助手参数组闭环(D-039);设备端 adapter 待 G-C"
     复用说明: "platform 层 Port(HttpClient/Storage/Database/FileStore/Notifier)即 Chat MVP 所需同一批接口"
   android源码: "只读基准,禁止修改"
 
@@ -63,4 +63,4 @@ next_slices:                      # 按优先级,取最高未阻塞项
 parity_baseline:
   单元测试总数: 844               # deepread 603 + chat 241
   已知行为偏差: 7                # 详见 PARITY_DEBT.md PD-001..007(+1 条 Android 内部不一致待核实)
-  决策记录: "DECISION_LOG.md D-001..D-038"
+  决策记录: "DECISION_LOG.md D-001..D-039"
