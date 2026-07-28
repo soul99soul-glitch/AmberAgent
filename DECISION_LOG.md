@@ -149,3 +149,15 @@
   - 存储 Port：`KeyValueStore{get/put/delete}` + memory 实现；`assistants` blob 键为我方 schema（Android 是整个 Settings blob 内嵌字段，设备端 adapter 定最终形态）；`loadAssistants` 无键 → `null`（对齐 DataStore 无值语义，默认值由调用方落）。
   - 解析容忍：ignoreUnknownKeys（未知键忽略）、缺失字段取默认、缺 `id` 抛 `missing field 'id'`；`isLenient/allowTrailingComma` 同 serialize.ts 沿用 JSON.parse 严格解析（已有口径，不重复记 PD）。
 - **可逆性**：线格式 golden 锁定；后续 Android 导入工具按此 blob 直接读写。
+
+## D-017（L0，2026-07-28）ProviderSetting 持久化：sealed 3 变体线格式、静息 secret 归属、请求侧/持久化双模型并存
+
+- **背景**：providers 同存 Settings DataStore（PreferencesStore.kt:88）。基准 = ProviderSetting.kt(openai/google/claude)+ Model.kt(含 BuiltInTools sealed 与 providerOverwrite 递归)。
+- **决定**：
+  - **静息 secret 归属**：`apiKey/privateKey/serviceAccountEmail` 是 DataStore 静息字段，进持久化线格式；请求侧 `provider_model.ts` 的 `ProviderSettingOpenAI` 保持 secret-free（D-014 不变），adapter 做 persisted→request 映射（apiKey→bearerResolver 等价物）。宪章"日志不落 token"不受影响——golden 测试用哑值。
+  - **双模型并存**：请求侧 `ChatModel`（子集）与持久化 `ProviderModel`（全量：id/type/customHeaders/customBodies/tools/contextWindowTokens/providerOverwrite）并存，adapter 映射；避免请求层背持久化字段。
+  - `@Transient` 的 `builtIn/description/shortDescription`（Compose lambda）不迁移——UI 关注点，不进线格式（kotlinx 也不序列化）。
+  - 线格式：sealed 鉴别 `"type"` 最前（openai/google/claude），声明序键序，枚举大写（ModelType/Modality/ModelAbility），BuiltInTools `{"type":"search"}` 形态，`contextWindowTokens/providerOverwrite` null 省略，`providerOverwrite` 递归同格式；旧 JSON 缺 `brand/authMode` → generic/api_key（ProviderSetting.kt:183-190 注释口径，未知枚举值回退默认）。
+  - 纯逻辑 helper 一并迁移：`hasUsableAuth`（picker 与 data fallback 共用判定矩阵）、`openAIBrandAvailableAuthModes`、`openAIAuthModeFixedBaseUrl`/`googleAuthModeFixedBaseUrl`。
+  - KV 复用 D-016 Port：`PROVIDERS_KEY='providers'` blob。
+- **可逆性**：golden + round-trip 测试锁定；Google/Claude provider 的请求构建不在本切片（P1），仅持久化面。

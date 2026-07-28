@@ -1,0 +1,213 @@
+// ProviderSetting 持久化全量模型(纯数据层,含静息 secret 字段)
+//
+// Android 基准: ai/provider/ProviderSetting.kt(sealed 3 变体)+ Model.kt + BalanceOption
+//
+// D-017:
+//   - apiKey/privateKey 等是静息持久化字段(DataStore at rest),进本模型;
+//     请求侧 provider_model.ts(ProviderSettingOpenAI)保持 secret-free,adapter 映射
+//   - @Transient builtIn/description/shortDescription 不迁移(UI 关注点,不进线格式)
+//   - 领域枚举小写 union;线格式见 provider_settings_serialize.ts
+
+import { newId } from './ids.ts';
+import type { CustomBody, ModelAbility } from './provider_model.ts';
+import type { CustomHeader } from './assistant.ts';
+import type { OpenAIAuthMode, OpenAIBrand } from './provider_model.ts';
+
+// ===== Model(Model.kt 全量) =====
+
+export type ModelType = 'chat' | 'image' | 'embedding';
+export type ModalityFull = 'text' | 'image' | 'audio';
+export type BuiltInTools = 'search' | 'url_context' | 'image_generation';
+
+export interface ProviderModel {
+  modelId: string;
+  displayName: string;
+  id: string;
+  type: ModelType;
+  customHeaders: CustomHeader[];
+  customBodies: CustomBody[];
+  inputModalities: ModalityFull[];
+  outputModalities: ModalityFull[];
+  abilities: ModelAbility[];
+  tools: BuiltInTools[];
+  contextWindowTokens: number | null;
+  providerOverwrite: ProviderSetting | null;
+}
+
+export const makeProviderModel = (opts: Partial<ProviderModel> = {}): ProviderModel => ({
+  modelId: opts.modelId ?? '',
+  displayName: opts.displayName ?? '',
+  id: opts.id ?? newId(),
+  type: opts.type ?? 'chat',
+  customHeaders: opts.customHeaders ?? [],
+  customBodies: opts.customBodies ?? [],
+  inputModalities: opts.inputModalities ?? ['text'],
+  outputModalities: opts.outputModalities ?? ['text'],
+  abilities: opts.abilities ?? [],
+  tools: opts.tools ?? [],
+  contextWindowTokens: opts.contextWindowTokens ?? null,
+  providerOverwrite: opts.providerOverwrite ?? null,
+});
+
+// ===== BalanceOption =====
+
+export interface BalanceOption {
+  enabled: boolean;
+  apiPath: string;
+  resultPath: string;
+}
+
+export const makeBalanceOption = (opts: Partial<BalanceOption> = {}): BalanceOption => ({
+  enabled: opts.enabled ?? false,
+  apiPath: opts.apiPath ?? '/credits',
+  resultPath: opts.resultPath ?? 'data.total_usage',
+});
+
+// ===== GoogleAuthMode =====
+
+export type GoogleAuthMode = 'api_key' | 'gemini_code_assist_oauth';
+
+// ===== ProviderSetting(sealed 3 变体) =====
+
+interface ProviderSettingBase {
+  id: string;
+  enabled: boolean;
+  name: string;
+  models: ProviderModel[];
+  balanceOption: BalanceOption;
+}
+
+export interface ProviderSettingOpenAIVariant extends ProviderSettingBase {
+  type: 'openai';
+  apiKey: string;
+  baseUrl: string;
+  chatCompletionsPath: string;
+  useResponseApi: boolean;
+  authMode: OpenAIAuthMode;
+  brand: OpenAIBrand;
+}
+
+export interface ProviderSettingGoogle extends ProviderSettingBase {
+  type: 'google';
+  apiKey: string;
+  baseUrl: string;
+  vertexAI: boolean;
+  useServiceAccount: boolean;
+  privateKey: string;
+  serviceAccountEmail: string;
+  location: string;
+  projectId: string;
+  authMode: GoogleAuthMode;
+}
+
+export interface ProviderSettingClaude extends ProviderSettingBase {
+  type: 'claude';
+  apiKey: string;
+  baseUrl: string;
+  promptCaching: boolean;
+}
+
+export type ProviderSetting =
+  | ProviderSettingOpenAIVariant
+  | ProviderSettingGoogle
+  | ProviderSettingClaude;
+
+type Opts<T> = Partial<T>;
+
+export const makeProviderSettingOpenAIVariant = (
+  opts: Opts<ProviderSettingOpenAIVariant> = {},
+): ProviderSettingOpenAIVariant => ({
+  type: 'openai',
+  id: opts.id ?? newId(),
+  enabled: opts.enabled ?? true,
+  name: opts.name ?? 'OpenAI',
+  models: opts.models ?? [],
+  balanceOption: opts.balanceOption ?? makeBalanceOption(),
+  apiKey: opts.apiKey ?? '',
+  baseUrl: opts.baseUrl ?? 'https://api.openai.com/v1',
+  chatCompletionsPath: opts.chatCompletionsPath ?? '/chat/completions',
+  useResponseApi: opts.useResponseApi ?? false,
+  authMode: opts.authMode ?? 'api_key',
+  brand: opts.brand ?? 'generic',
+});
+
+export const makeProviderSettingGoogle = (
+  opts: Opts<ProviderSettingGoogle> = {},
+): ProviderSettingGoogle => ({
+  type: 'google',
+  id: opts.id ?? newId(),
+  enabled: opts.enabled ?? true,
+  name: opts.name ?? 'Google',
+  models: opts.models ?? [],
+  balanceOption: opts.balanceOption ?? makeBalanceOption(),
+  apiKey: opts.apiKey ?? '',
+  baseUrl: opts.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta',
+  vertexAI: opts.vertexAI ?? false,
+  useServiceAccount: opts.useServiceAccount ?? false,
+  privateKey: opts.privateKey ?? '',
+  serviceAccountEmail: opts.serviceAccountEmail ?? '',
+  location: opts.location ?? 'us-central1',
+  projectId: opts.projectId ?? '',
+  authMode: opts.authMode ?? 'api_key',
+});
+
+export const makeProviderSettingClaude = (
+  opts: Opts<ProviderSettingClaude> = {},
+): ProviderSettingClaude => ({
+  type: 'claude',
+  id: opts.id ?? newId(),
+  enabled: opts.enabled ?? true,
+  name: opts.name ?? 'Claude',
+  models: opts.models ?? [],
+  balanceOption: opts.balanceOption ?? makeBalanceOption(),
+  apiKey: opts.apiKey ?? '',
+  baseUrl: opts.baseUrl ?? 'https://api.anthropic.com/v1',
+  promptCaching: opts.promptCaching ?? false,
+});
+
+// ===== 纯逻辑 helper(ProviderSetting.kt:117-138, 389-408) =====
+
+export const openAIBrandAvailableAuthModes = (brand: OpenAIBrand): OpenAIAuthMode[] => {
+  switch (brand) {
+    case 'generic':
+    case 'deepseek': return ['api_key'];
+    case 'openai': return ['api_key', 'codex_oauth'];
+    case 'zhipu': return ['api_key', 'zhipu_coding_plan'];
+    case 'kimi': return ['api_key', 'kimi_coding_plan'];
+    case 'mimo': return ['api_key', 'mimo_coding_plan'];
+    case 'minimax': return ['api_key', 'minimax_token_plan'];
+  }
+};
+
+export const openAIAuthModeFixedBaseUrl = (mode: OpenAIAuthMode): string | null => {
+  switch (mode) {
+    case 'api_key': return null;
+    case 'codex_oauth': return 'https://chatgpt.com/backend-api/codex';
+    case 'zhipu_coding_plan': return 'https://open.bigmodel.cn/api/coding/paas/v4';
+    case 'kimi_coding_plan': return 'https://api.kimi.com/coding/v1';
+    case 'mimo_coding_plan': return 'https://token-plan-cn.xiaomimimo.com/v1';
+    case 'minimax_token_plan': return 'https://api.minimaxi.com/v1';
+  }
+};
+
+export const googleAuthModeFixedBaseUrl = (mode: GoogleAuthMode): string | null => {
+  switch (mode) {
+    case 'api_key': return null;
+    case 'gemini_code_assist_oauth': return 'https://cloudcode-pa.googleapis.com';
+  }
+};
+
+// hasUsableAuth(ProviderSetting.kt:389-408):picker 与 data 层 fallback 共用判定
+export const hasUsableAuth = (setting: ProviderSetting): boolean => {
+  if (!setting.enabled) return false;
+  if (setting.type === 'openai') {
+    if (setting.authMode === 'codex_oauth') return true;
+    return setting.apiKey.trim().length > 0;
+  }
+  if (setting.type === 'google') {
+    if (setting.authMode === 'gemini_code_assist_oauth') return true;
+    if (setting.apiKey.trim().length > 0) return true;
+    return setting.vertexAI && setting.useServiceAccount && setting.privateKey.trim().length > 0;
+  }
+  return setting.apiKey.trim().length > 0;
+};

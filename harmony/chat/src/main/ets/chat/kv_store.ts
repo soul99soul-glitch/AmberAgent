@@ -8,6 +8,8 @@
 
 import type { Assistant } from './assistant.ts';
 import { serializeAssistantList, parseAssistantList } from './assistant_serialize.ts';
+import type { ProviderSetting } from './provider_settings.ts';
+import { serializeProviderSettingList, parseProviderSettingList } from './provider_settings_serialize.ts';
 
 export interface KeyValueStore {
   get(key: string): Promise<string | null>;
@@ -50,4 +52,16 @@ export const loadAssistants = async (store: KeyValueStore): Promise<Assistant[] 
   const raw = await store.get(ASSISTANTS_KEY);
   if (raw === null) return null;
   return parseAssistantList(raw);
+};
+
+// providers blob 键(同 D-016 口径,我方 schema)
+export const PROVIDERS_KEY = 'providers';
+
+export const saveProviders = (store: KeyValueStore, list: ProviderSetting[]): Promise<void> =>
+  store.put(PROVIDERS_KEY, serializeProviderSettingList(list));
+
+export const loadProviders = async (store: KeyValueStore): Promise<ProviderSetting[] | null> => {
+  const raw = await store.get(PROVIDERS_KEY);
+  if (raw === null) return null;
+  return parseProviderSettingList(raw);
 };

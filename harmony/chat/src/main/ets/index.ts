@@ -116,5 +116,23 @@ export {
 
 export {
   createMemoryKeyValueStore, saveAssistants, loadAssistants, ASSISTANTS_KEY,
+  saveProviders, loadProviders, PROVIDERS_KEY,
 } from './chat/kv_store.ts';
 export type { KeyValueStore, MemoryKeyValueStore } from './chat/kv_store.ts';
+
+export {
+  makeProviderModel, makeBalanceOption,
+  makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,
+  openAIBrandAvailableAuthModes, openAIAuthModeFixedBaseUrl, googleAuthModeFixedBaseUrl,
+  hasUsableAuth,
+} from './chat/provider_settings.ts';
+export type {
+  ProviderModel, BalanceOption, ProviderSetting, ProviderSettingOpenAIVariant,
+  ProviderSettingGoogle, ProviderSettingClaude, ModelType, ModalityFull, BuiltInTools,
+  GoogleAuthMode,
+} from './chat/provider_settings.ts';
+
+export {
+  serializeProviderSetting, parseProviderSetting,
+  serializeProviderSettingList, parseProviderSettingList,
+} from './chat/provider_settings_serialize.ts';
