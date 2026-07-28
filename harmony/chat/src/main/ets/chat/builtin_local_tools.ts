@@ -21,7 +21,7 @@
 //     无条件注册(等价全选项开;门控 = P1 登记)
 
 import type { JsonObject, JsonValue } from './json.ts';
-import type { UIMessagePart } from './message.ts';
+import type { UIMessagePart, UIMessagePartText } from './message.ts';
 import type { AgentTool } from './tool.ts';
 import { makeAgentTool, makeInputSchemaObj } from './tool.ts';
 
@@ -291,3 +291,91 @@ export const createDeepReadOpenTool = (deps: DeepReadOpenToolDeps): AgentTool =>
       ]);
     },
   });
+
+// ===== parseDeepReadSlashCommand(DeepReadOpenRequest.kt:31-66;D-064) =====
+//
+// 发送路径斜杠命令:SendMessageOrchestrator.kt:26-41 — send() 先解析,
+//   命中且 bus.tryEmit 成功 → return true(不入队、不发给模型);
+//   entry 在 ChatPage send/sendWithoutAnswer 组 parts 后拦截(编辑态除外,
+//   对齐 Android 编辑走 handleMessageEdit 不经 orchestrator)
+// Kotlin 语义复刻:
+//   - startsWith(prefix, ignoreCase=true) 大小写不敏感前缀
+//   - rest.first().isWhitespace():Char.isWhitespace 常用集近似(NBSP 等
+//     异域空白差异登记;真实输入为 ASCII 空白)
+//   - force 检测 = 旗标 ∈ body.lowercase()(子串,折叠前);
+//     折叠 = flags 列表序字面量全量替换(ignoreCase)—— '--regen' 先于
+//     '--regenerate' 折叠,后者残留 'erate'(Android quirk,测试钉住)
+//   - URL 提取正则 https?://\S+(IGNORE_CASE)首个命中;标题 = cleaned
+//     去除 URL 字面量(大小写敏感)trim 后非空,否则 null → 事件内 URL 派生
+//   - runCatching{...}.getOrNull():事件构造抛错 → null
+
+export const DEEP_READ_ROUTE_TAG: string = '[ROUTE:deepread]';
+export const DEEP_READ_FORCE_FLAGS: string[] =
+  ['--force', '--regen', '--regenerate', '重新生成', '强制刷新'];
+const DEEP_READ_HTTP_URL_REGEX: RegExp = /https?:\/\/\S+/i;
+
+const startsWithIgnoreCase = (text: string, prefix: string): boolean =>
+  text.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase();
+
+// Kotlin Char.isWhitespace 近似:ASCII 空白 + C0 分隔符 \u001C-\u001F
+const isKotlinWhitespace = (ch: string): boolean =>
+  ch === ' ' || (ch >= '\t' && ch <= '\r') || (ch >= '\u001C' && ch <= '\u001F');
+
+// Kotlin String.replace(oldValue, "", ignoreCase=true) — 字面量全量替换
+const replaceAllIgnoreCase = (text: string, needle: string): string => {
+  const lowerText: string = text.toLowerCase();
+  const lowerNeedle: string = needle.toLowerCase();
+  let out: string = '';
+  let cursor: number = 0;
+  for (;;) {
+    const idx: number = lowerText.indexOf(lowerNeedle, cursor);
+    if (idx < 0) return out + text.slice(cursor);
+    out += text.slice(cursor, idx);
+    cursor = idx + needle.length;
+  }
+};
+
+export const parseDeepReadSlashCommand = (
+  parts: UIMessagePart[], sha256Hex: (input: string) => string,
+): DeepReadOpenEvent | null => {
+  const text: string = parts
+    .filter((p: UIMessagePart): boolean => p.type === 'text')
+    .map((p: UIMessagePart): string => (p as UIMessagePartText).text)
+    .join('\n')
+    .trim();
+  if (text.length === 0) return null;
+  let body: string;
+  if (startsWithIgnoreCase(text, DEEP_READ_ROUTE_TAG)) {
+    body = text.slice(DEEP_READ_ROUTE_TAG.length).trim();
+  } else if (startsWithIgnoreCase(text, '/deepread')) {
+    const rest: string = text.slice('/deepread'.length);
+    if (rest.length > 0 && !isKotlinWhitespace(rest.charAt(0))) return null;
+    body = rest.trim();
+  } else {
+    return null;
+  }
+  if (body.length === 0) return null;
+  const lowerBody: string = body.toLowerCase();
+  const force: boolean =
+    DEEP_READ_FORCE_FLAGS.some((flag: string): boolean => lowerBody.includes(flag));
+  let cleaned: string = body;
+  for (const flag of DEEP_READ_FORCE_FLAGS) {
+    cleaned = replaceAllIgnoreCase(cleaned, flag);
+  }
+  cleaned = cleaned.trim();
+  if (cleaned.length === 0) return null;
+  const m: RegExpExecArray | null = DEEP_READ_HTTP_URL_REGEX.exec(cleaned);
+  const sourceUrl: string | null = m !== null ? m[0] : null;
+  let title: string | null;
+  if (sourceUrl !== null) {
+    const removed: string = cleaned.split(sourceUrl).join('').trim();
+    title = removed.length > 0 ? removed : null;
+  } else {
+    title = cleaned;
+  }
+  try {
+    return createDeepReadOpenEvent(title, sourceUrl, force, sha256Hex);
+  } catch {
+    return null;
+  }
+};

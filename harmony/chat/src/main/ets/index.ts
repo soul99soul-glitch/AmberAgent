@@ -246,6 +246,7 @@ export type {
 export {
   createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
   createDeepReadOpenEvent, DEEP_READ_TITLE_MAX_CHARS,
+  parseDeepReadSlashCommand, DEEP_READ_ROUTE_TAG, DEEP_READ_FORCE_FLAGS,
 } from './chat/builtin_local_tools.ts';
 
 // ===== D-062:ToolExposureState 懒暴露 =====

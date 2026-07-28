@@ -662,3 +662,12 @@
   - **集成 2 测试(tool_loop)**:enabled + 宏任务工具 → flush 推测 1 次 + 未完结丢弃 + 真实执行 1 次 = 2 次调用、输出取真实执行;默认未传 → 仅 1 次。
   - **entry**:不接线(默认禁用 = Android 默认 enabled=false 逐字;设置面 SettingAgentExtensionsPage.kt:136-227 = P1 登记)。
 - **可逆性**:默认禁用,未传 speculativeEnabled 时循环与 D-062 逐字节一致(集成测试锁定);1257 测试全绿(deepread 603 + chat 654),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-064（L0，2026-07-28）/deepread 斜杠命令解析 + 发送路径拦截
+
+- **背景**：D-061 登记「parseDeepReadSlashCommand(DeepReadOpenRequest.kt:31-68,发送路径路由)= 残余」。深读子系统(entry DeepReadArticlePage + deepread HAR 管线)与 deep_read_open 工具均已就位,斜杠命令是该入口的最后一块。
+- **决定**：
+  - **chat/builtin_local_tools.ts 追加(TDD,20 测试)**:parseDeepReadSlashCommand(parts, sha256Hex) — DeepReadOpenRequest.kt:31-66 忠实:仅 Text 段 join('\n') trim;前缀 `[ROUTE:deepread]` 或 `/deepread` 大小写不敏感,后者要求余文首字符 isWhitespace(Kotlin Char.isWhitespace 常用集近似:ASCII 空白 + -,NBSP 等异域空白差异登记);body/折叠后 cleaned 空白 → null;**force = 旗标 ∈ lowercased body(子串,折叠前)**;折叠 = DEEP_READ_FORCE_FLAGS 列表序**字面量**全量替换(ignoreCase)— quirk 钉住:'--regen' 先于 '--regenerate' 折叠,后者残留 'erate';URL = /https?:\/\/\S+/i 首命中;标题 = cleaned 去除 URL 字面量(大小写敏感)trim 非空,否则 null → createDeepReadOpenEvent 内 URL 派生;runCatching → 构造抛错吞为 null。导出 DEEP_READ_ROUTE_TAG/DEEP_READ_FORCE_FLAGS。
+  - **entry ChatPage 接线**(SendMessageOrchestrator.kt:26-41 语义):send()/sendWithoutAnswer() 组 parts 后、排队/发送前拦截(编辑态除外 — Android 编辑走 handleMessageEdit 不经 orchestrator;D-051 已登记编辑态长按偏差,维持);命中 → router.pushUrl('pages/DeepReadArticlePage') + 清空输入(不入队、不发模型、不改会话);bus.tryEmit 恒真 = 页面存活即有收集者,与 deep_read_open 工具同口径。deep_read_open bus emit 与斜杠路由合并为 openDeepRead 单一路径。
+  - **残余登记**:canSendWithoutChatModel 门(ChatPage.kt:532/675/695/823 — 无聊天模型时仅斜杠命令可发送 + '请先选择模型' toast)= 依赖模型缺失态门控面,鸿蒙发送路径尚无模型空值门,整体 = P1。
+- **可逆性**:纯追加(解析器 + 发送路径前置守卫),非斜杠输入路径逐字节不变;1277 测试全绿(deepread 603 + chat 674),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。

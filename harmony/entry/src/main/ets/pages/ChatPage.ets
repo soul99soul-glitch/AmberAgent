@@ -39,6 +39,7 @@ import {
   createConversationQueueTools, createToolRegistry,
   createToolSearchTool, createRegistryIntrospectionTools,
   createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
+  parseDeepReadSlashCommand,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
 } from '@amber/chat-domain';
@@ -818,10 +819,7 @@ struct ChatPage {
         bus: {
           hasCollectors: (): boolean => true,
           emit: (event: DeepReadOpenEvent): void => {
-            const params: Record<string, string> = {};
-            params['topicId'] = event.topicId;
-            params['title'] = event.title;
-            router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
+            this.openDeepRead(event);
           },
         },
         sha256Hex: sha256HexUtf8,
@@ -1026,6 +1024,27 @@ struct ChatPage {
     this.sendParts(prep.dispatch.parts, prep.dispatch.id);
   }
 
+  // ===== D-064 /deepread 斜杠命令(SendMessageOrchestrator.kt:26-41) =====
+
+  // 深读页路由(deep_read_open 工具 bus 与斜杠命令共用)
+  private openDeepRead(event: DeepReadOpenEvent): void {
+    const params: Record<string, string> = {};
+    params['topicId'] = event.topicId;
+    params['title'] = event.title;
+    router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
+  }
+
+  // 命中 → 路由深读页 + 清空输入,不入队/不发给模型(orchestrator:34-38
+  //   bus.tryEmit 恒真 = 页面存活即有收集者,与 deep_read_open 同口径)
+  private tryRouteDeepReadSlash(inputParts: UIMessagePart[]): boolean {
+    const event: DeepReadOpenEvent | null = parseDeepReadSlashCommand(inputParts, sha256HexUtf8);
+    if (event === null) return false;
+    this.inputText = '';
+    this.pendingImages = [];
+    this.openDeepRead(event);
+    return true;
+  }
+
   // D-051:长按发送 = 只记录不生成(Android ChatInput.kt:272 → queueMode;
   //   ChatVM.sendMessageWithoutAnswer → sendMessage(answer=false))
   //   生成中 → STEER 入队(插在生成后首位);否则直接 appendUserMessage
@@ -1041,6 +1060,8 @@ struct ChatPage {
     for (const url of this.pendingImages) {
       inputParts.push({ type: 'image', url, metadata: null });
     }
+    // D-064:斜杠命令拦截(编辑态除外 — Android 编辑走 handleMessageEdit 不经 orchestrator)
+    if (this.editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
     this.inputText = '';
     this.pendingImages = [];
     if (this.editingNodeId.length > 0) this.cancelEdit();
@@ -1070,6 +1091,8 @@ struct ChatPage {
     for (const url of this.pendingImages) {
       inputParts.push({ type: 'image', url, metadata: null });
     }
+    // D-064:斜杠命令拦截(orchestrator 在排队/发送前解析;编辑态除外)
+    if (this.editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
     // D-048:生成中 → FOLLOWUP 入队(编辑态同 — 编辑重发需等当前生成结束;
     //   入队即退出编辑态,排队消息按新消息派发,登记偏差:Android 无编辑态排队交互)
     if (this.sending) {
