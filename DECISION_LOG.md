@@ -1117,3 +1117,21 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
   - entry 严格 ArkTS:交叉类型工厂参数不接受对象字面量 → withId 显式构造(注释钉住)。
 - **未移植(P1 登记)**: 会话删除文件清理(deleteChatFiles 接线依附 History 撤销窗流程,撤销窗未移植)/附件移除清理(ChatInputAttachments:130)/头像清理(AssistantVM:69/AssistantDetailVM:199,211)/syncFolder/getRelativePathInFilesDir 公共化/upload 库观察 UI/countChatFiles。
 - **验证**: chat tsc 干净 + 1012 测试(+6)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-087 — 任务模型解析链(worker/daydream/compress/title/suggestion):消除 chat 模型顶替偏差
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: PreferencesStore.kt:479-481(resolveTaskChatModel)/MemoryExtractor.kt:185-195(worker 链)/MemoryDreamPlanner.kt:102-120(daydream 五分支)/AiAuxiliaryGenerator.kt:41-59,87(title/suggestion)/ConversationContextEngine.kt:689(compaction)/DefaultProviders.kt:95(DEFAULT_AUTO_MODEL_ID)
+- **决策**:
+  1. `chat/task_model.ts`: DEFAULT_AUTO_MODEL_ID('b7055fb4-39f9-4042-a88a-0d80ed76cf08' 逐字)+ TaskModelWorkerGate(modelId/followCompressModel/daydreamModelId/daydreamFollowCompressModel)+ 默认值(AUTO/true/AUTO/true)+ pickMemoryWorkerModelId(modelId≠AUTO → followCompress?compress:chat;否则 chat)+ memoryWorkerModelCandidates(=[pick, chat] 外层 ?: 链)+ pickDaydreamModelId(五分支 daydreamModelId→daydreamFollow?compress:null→modelId→follow?compress:null→chat)+ daydreamModelCandidates(=[pick, compress, chat])。
+  2. entry prefs: agent_runtime memoryWorker += modelId/daydreamModelId(默认 AUTO,空串→AUTO 迁移)/followCompressModel/daydreamFollowCompressModel(默认 true)。
+  3. AppContainer: buildProviderApi 自 resolveChatRuntime 抽出(三变体分发+keyRoulette 逐字);TITLE/SUGGESTION/COMPRESS_MODEL_KEY + loadTaskModelIds(空→AUTO)+ resolveCurrentChatModelUuid(selection→providers 反查 m.id,否则 AUTO)+ resolveTaskChatModelChoice(findModelByIdInProviders → {provider: effectiveProvider, model};未命中 → resolveChatProviderChoice 兜底 = resolveTaskChatModel 的 ?: getCurrentChatModel)+ resolveTaskModelChain(candidates 依序解析,首个非空)。
+  4. ChatPage 接线:compressChoice 快照(aboutToAppear 加载)+ compressProvider(choice null→rt.api 默认参;否则 buildProviderApi+TextGenerationParams(model) 最小参,ConversationContextEngine.kt:689)仅接两处压缩点;maybeMemoryExtraction 闭包内缓存 extractionChoicePromise(memoryWorkerModelCandidates 链),resolveWorkerModel null→no_model,generateText 按 choice 建 api+最小参(MemoryExtractor.kt:121);maybeAutoTitle/maybeSuggestions 按 titleModelId/suggestionModelId 解析,null→throw(对齐 Android ?: return 静默跳过,由 runAutoTitle/runSuggestion 错误路径承接)+ reasoning OFF + customHeaders(record 化,trim 滤空名)+customBodies(AiAuxiliaryGenerator.kt:56-61 逐字,不再带 chat 温度/topP/maxTokens)。
+- **偏差消除**: worker/daydream/title/suggestion/compress 的「chat 模型顶替」(D-025/D-026 裁剪+D-085d/D-085f 登记偏差类)全部闭合;title/suggestion 参数自 chat 全参改为 Android 忠实最小参(model+reasoning OFF+custom headers/bodies)——此前为偏差,现消除。
+- **残余偏差登记**:
+  - daydreamReasoningLevel 未移植(MemoryWorkerSetting 字段,Android 仅 planner 使用,P1 随 dream 手动触发 UI);
+  - no_provider 解析支在 entry 不可达(resolveTaskChatModelChoice 捆绑 provider+model,findProvider 失败支无对应物;Android 该支返回 null → 任务跳过,鸿蒙 choice null 同效);
+  - compressChoice/extractionChoice 为 aboutToAppear/首次调用快照,运行期改任务模型设置需重进页面生效(与 ocrSeed 快照同类,P1 设置面落地后改订阅)。
+- **未移植(P1 登记)**: 任务模型设置面 UI(title/suggestion/compress/worker/daydream 模型 picker + followCompress 开关);daydream 链 entry 接线(runMemoryDreamRun 调用点待手动触发 UI)。
+- **验证**: chat tsc 干净 + 1015 测试(+3)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

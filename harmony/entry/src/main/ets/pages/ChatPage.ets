@@ -16,6 +16,7 @@ import type {
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
   ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
+  MessageChunk, OpenAIChatApi,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -49,12 +50,15 @@ import {
   createPromptInjectionTransformer, PromptInjection, Lorebook,
   RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, RecentChatItem, ConversationSummary,
   buildMemoryRecallPrompt, MemoryRecallRuntimeGate, createMemoryTools,
-  runMemoryExtraction, MemoryWorkerModelResolution,
+  runMemoryExtraction, MemoryWorkerModelResolution, memoryWorkerModelCandidates,
+  toChatModel,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
   getChatKvStore, getCompactStore, getSessionGrantStore,
   resolveChatProviderChoice, ChatProviderChoice,
+  buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
+  resolveTaskModelChain,
 } from '../di/AppContainer.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
@@ -371,6 +375,10 @@ struct ChatPage {
   @State suggestions: string[] = [];
   @State inputText: string = '';
   @State sending: boolean = false;
+  // D-087:任务模型选择快照(compress/title/suggestion;aboutToAppear 异步加载,
+  //   与 ocrSeed/searchSettings 同档;null = 未解析或无可用模型 → 回退 chat 运行态)
+  private compressChoice: ChatProviderChoice | null = null;
+  private taskChoicesLoaded: boolean = false;
   // D-070:搜索偏好(aboutToAppear 异步加载;SearchTools 工具组输入)
   searchSettings: SearchSettings | null = null;
   @State errorMsg: string = '';
@@ -478,6 +486,14 @@ struct ChatPage {
     // D-071b:OCR 种子加载(providers/ocr_model/ocr_prompt 快照)
     loadOcrSeed(getChatKvStore()).then((seed: OcrSeed): void => {
       this.ocrSeed = seed;
+    });
+    // D-087:compress 任务模型选择快照(resolveTaskChatModel(compressModelId),
+    //   未设 = AUTO → findById 必失 → 回退当前 chat 模型,语义逐字)
+    loadTaskModelIds().then((ids): void => {
+      resolveTaskChatModelChoice(ids.compressModelId).then((choice): void => {
+        this.compressChoice = choice;
+        this.taskChoicesLoaded = true;
+      });
     });
     // D-072:agent_runtime 快照加载(enableTimeReminder 等;缺失/损坏 → 默认 false)
     loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
@@ -630,24 +646,43 @@ struct ChatPage {
   private maybeMemoryExtraction(conv: Conversation, rt: ChatRuntime): void {
     if (conversationHasPendingOrUnexecutedTools(conv)) return;
     const ops = getMemoryExtractionStoreOps();
+    // D-087:链解析缓存(resolveWorkerModel 与 generateText 同一次编排共用,
+    //   对齐 Android 单次 resolveMemoryModel 后模型+provider 配套使用)
+    let extractionChoicePromise: Promise<ChatProviderChoice | null> | null = null;
+    const resolveExtractionChoice = (): Promise<ChatProviderChoice | null> => {
+      if (extractionChoicePromise === null) {
+        extractionChoicePromise = (async (): Promise<ChatProviderChoice | null> => {
+          const ids = await loadTaskModelIds();
+          const chatUuid: string = await currentChatModelUuid();
+          return resolveTaskModelChain(memoryWorkerModelCandidates(
+            this.agentRuntime.memoryWorker, ids.compressModelId, chatUuid));
+        })();
+      }
+      return extractionChoicePromise;
+    };
     runMemoryExtraction(conv, {
       worker: this.agentRuntime.memoryWorker,
       locale: systemLanguage(),
+      // D-087:worker 任务模型链(MemoryExtractor.kt:185-195)— modelId≠AUTO →
+      //   followCompress → chat;外层 ?: chat;解析结果在闭包内缓存一次
       resolveWorkerModel: async (): Promise<MemoryWorkerModelResolution> => {
-        const choice: ChatProviderChoice | null = await resolveChatProviderChoice();
+        const choice: ChatProviderChoice | null = await resolveExtractionChoice();
         return choice === null
           ? { kind: 'no_model' }
           : { kind: 'ok', modelId: choice.model.modelId };
       },
-      generateText: (prompt: string): Promise<string> =>
-        rt.api.generateText(
+      generateText: async (prompt: string): Promise<string> => {
+        const choice: ChatProviderChoice | null = await resolveExtractionChoice();
+        if (choice === null) throw new Error('no model');
+        const api: OpenAIChatApi = buildProviderApi(choice.provider, {});
+        // TextGenerationParams(model = model) 默认参(MemoryExtractor.kt:121)
+        const chunk: MessageChunk = await api.generateText(
           [makeUserMessage(prompt)],
-          // TextGenerationParams(model = model) 默认参(MemoryExtractor.kt:121)
-          makeTextGenerationParams({ model: rt.params.model }),
-        ).then((chunk): string => {
-          const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
-          return msg !== null ? toText(msg) : '';
-        }),
+          makeTextGenerationParams({ model: toChatModel(choice.model) }),
+        );
+        const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
+        return msg !== null ? toText(msg) : '';
+      },
       getAllActiveRecords: ops.getAllActiveRecords,
       addCandidates: ops.addCandidates,
       addCandidate: ops.addCandidate,
@@ -665,23 +700,33 @@ struct ChatPage {
   private maybeAutoTitle(conv: Conversation, rt: ChatRuntime): void {
     if (conv.title.trim().length > 0) return;
     runAutoTitle(conv, {
-      generateText: (prompt: string): Promise<string> =>
-        rt.api.generateText(
+      // D-087:title 任务模型(AiAuxiliaryGenerator.kt:41)—
+      //   resolveTaskChatModel(titleModelId) ?: return(无模型静默跳过);
+      //   params = model + reasoning OFF + model.customHeaders/customBodies(:55-59,
+      //   不带 chat 温度/topP/maxTokens)
+      generateText: async (prompt: string): Promise<string> => {
+        const ids = await loadTaskModelIds();
+        const choice: ChatProviderChoice | null =
+          await resolveTaskChatModelChoice(ids.titleModelId);
+        if (choice === null) throw new Error('no title model');
+        const headers: Record<string, string> = {};
+        for (const h of choice.model.customHeaders) {
+          const name: string = h.name.trim();
+          if (name.length === 0) continue;
+          headers[name] = h.value.trim();
+        }
+        const api: OpenAIChatApi = buildProviderApi(choice.provider, headers);
+        const chunk: MessageChunk = await api.generateText(
           [makeUserMessage(prompt)],
-          // reasoning OFF(对齐 Android AiAuxiliaryGenerator);arkts-no-spread 禁用接口展开
           makeTextGenerationParams({
-            model: rt.params.model,
-            temperature: rt.params.temperature,
-            topP: rt.params.topP,
-            maxTokens: rt.params.maxTokens,
-            tools: rt.params.tools,
+            model: toChatModel(choice.model),
             reasoningLevel: 'off',
-            customBody: rt.params.customBody,
+            customBody: choice.model.customBodies,
           }),
-        ).then((chunk): string => {
-          const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
-          return msg !== null ? toText(msg) : '';
-        }),
+        );
+        const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
+        return msg !== null ? toText(msg) : '';
+      },
       store: getChatRepository(),
       locale: '简体中文',
     })
@@ -700,22 +745,30 @@ struct ChatPage {
   // 不上浮 UI — Android 对建议失败也不打扰用户,仅 printStackTrace)
   private maybeSuggestions(conv: Conversation, rt: ChatRuntime): void {
     runSuggestion(conv, {
-      generateText: (prompt: string): Promise<string> =>
-        rt.api.generateText(
+      // D-087:suggestion 任务模型(AiAuxiliaryGenerator.kt:87)— 同 title 链
+      generateText: async (prompt: string): Promise<string> => {
+        const ids = await loadTaskModelIds();
+        const choice: ChatProviderChoice | null =
+          await resolveTaskChatModelChoice(ids.suggestionModelId);
+        if (choice === null) throw new Error('no suggestion model');
+        const headers: Record<string, string> = {};
+        for (const h of choice.model.customHeaders) {
+          const name: string = h.name.trim();
+          if (name.length === 0) continue;
+          headers[name] = h.value.trim();
+        }
+        const api: OpenAIChatApi = buildProviderApi(choice.provider, headers);
+        const chunk: MessageChunk = await api.generateText(
           [makeUserMessage(prompt)],
           makeTextGenerationParams({
-            model: rt.params.model,
-            temperature: rt.params.temperature,
-            topP: rt.params.topP,
-            maxTokens: rt.params.maxTokens,
-            tools: rt.params.tools,
+            model: toChatModel(choice.model),
             reasoningLevel: 'off',
-            customBody: rt.params.customBody,
+            customBody: choice.model.customBodies,
           }),
-        ).then((chunk): string => {
-          const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
-          return msg !== null ? toText(msg) : '';
-        }),
+        );
+        const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
+        return msg !== null ? toText(msg) : '';
+      },
       store: getChatRepository(),
       locale: '简体中文',
     })
@@ -897,6 +950,17 @@ struct ChatPage {
   //   重建 messageNodes 供压缩规划(message id 保持);policy 默认值
   //   keepRecentTurns=8(PreferencesStore.kt:241 ContextCompactionSetting 默认,
   //   设置面未做前硬编码);precompact 异步 launch(engine:173-186)
+  // D-087:compact 生成 provider(ConversationContextEngine.kt:408-410/:689)—
+  //   压缩任务模型(resolveTaskChatModel(compressModelId),未设=AUTO→chat 模型)
+  //   + TextGenerationParams(model) 最小参;快照未加载/无模型 → chat 运行态兜底
+  private compressProvider(rt: ChatRuntime): ChatStreamProvider {
+    const choice: ChatProviderChoice | null = this.compressChoice;
+    if (choice === null) return asChatStreamProvider(rt.api, () => rt.params);
+    const api: OpenAIChatApi = buildProviderApi(choice.provider, {});
+    return asChatStreamProvider(
+      api, () => makeTextGenerationParams({ model: toChatModel(choice.model) }));
+  }
+
   private buildPrepareContext(conv: Conversation, rt: ChatRuntime):
     (messages: UIMessage[]) => Promise<UIMessage[]> {
     const policy: CompactPolicy = makeCompactPolicy({ keepRecentTurns: 8 });
@@ -904,7 +968,7 @@ struct ChatPage {
       const effConv: Conversation = conversationWithMessagesAsNodes(conv, messages);
       return prepareContext(effConv, policy, rt.modelContextWindowTokens,
         messages, rt.contextMessageSize, {
-          provider: asChatStreamProvider(rt.api, () => rt.params),
+          provider: this.compressProvider(rt),
           store: getCompactStore(),
           launchPrecompact: (run: () => Promise<CompactResult>): void => {
             run().catch((e: Error): void => {
@@ -963,7 +1027,7 @@ struct ChatPage {
           policy: makeCompactPolicy({ keepRecentTurns: 8 }),
           modelContextWindowTokens: rt.modelContextWindowTokens,
           compactEngineDeps: {
-            provider: asChatStreamProvider(rt.api, () => rt.params),
+            provider: this.compressProvider(rt),
             store: getCompactStore(),
           },
         }),

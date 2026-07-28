@@ -681,3 +681,10 @@ export {
 export type {
   DeleteChatFilesDeps, FilesRepository, ManagedFileDaoPort, ManagedFileEntity,
 } from './chat/managed_files.ts';
+
+// ===== D-087:任务模型解析链(worker/daydream/title/suggestion/compress) =====
+export {
+  daydreamModelCandidates, memoryWorkerModelCandidates, pickDaydreamModelId,
+  pickMemoryWorkerModelId, DEFAULT_AUTO_MODEL_ID, DEFAULT_TASK_MODEL_WORKER_GATE,
+} from './chat/task_model.ts';
+export type { TaskModelWorkerGate } from './chat/task_model.ts';

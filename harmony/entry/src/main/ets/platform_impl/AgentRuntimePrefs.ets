@@ -7,6 +7,7 @@
 //   设置面)= P1 已登记,本文件仅承载 D-072 所需快照
 import { i18n } from '@kit.LocalizationKit';
 import type { KeyValueStore, MemoryRecallSetting } from '@amber/chat-domain';
+import { DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
 import { DEFAULT_MEMORY_RECALL_SETTING } from '@amber/chat-domain';
 
 export const AGENT_RUNTIME_KEY: string = 'agent_runtime';
@@ -28,6 +29,11 @@ export interface MemoryWorkerGateSnapshot {
   runOnlyOnIdle: boolean;
   runOnlyOnCharging: boolean;
   dreamMaxDailyRuns: number;
+  // D-087:任务模型链字段(MemoryModels.kt:138-141;modelId 缺省 = AUTO 标记)
+  modelId: string;
+  followCompressModel: boolean;
+  daydreamModelId: string;
+  daydreamFollowCompressModel: boolean;
 }
 
 export interface AgentRuntimeSnapshot {
@@ -59,6 +65,10 @@ interface MemoryWorkerJson {
   runOnlyOnIdle?: boolean;
   runOnlyOnCharging?: boolean;
   dreamMaxDailyRuns?: number;
+  modelId?: string;
+  followCompressModel?: boolean;
+  daydreamModelId?: string;
+  daydreamFollowCompressModel?: boolean;
   // 旧 Daydream 开关别名(SettingsAggregator.kt:542-553 迁移:
   //   dreamModelEnabled ||= dreamEnabled,写回时 dreamEnabled=false)
   dreamEnabled?: boolean;
@@ -91,6 +101,8 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
     enabled: true, extractionEnabled: true, maxDailyRuns: 8,
     dreamMaintenanceEnabled: true, dreamModelEnabled: false,
     runOnlyOnIdle: true, runOnlyOnCharging: true, dreamMaxDailyRuns: 1,
+    modelId: DEFAULT_AUTO_MODEL_ID, followCompressModel: true,
+    daydreamModelId: DEFAULT_AUTO_MODEL_ID, daydreamFollowCompressModel: true,
   },
 });
 
@@ -119,6 +131,13 @@ const parseMemoryWorker = (raw: MemoryWorkerJson | undefined): MemoryWorkerGateS
   runOnlyOnCharging: raw?.runOnlyOnCharging !== false,
   // 默认 1(:152);非 number → 默认
   dreamMaxDailyRuns: typeof raw?.dreamMaxDailyRuns === 'number' ? raw.dreamMaxDailyRuns : 1,
+  // :138-141 — 非 string → AUTO;parseUuidOrNull 无效 → AUTO 等价(空串回退)
+  modelId: typeof raw?.modelId === 'string' && raw.modelId.length > 0
+    ? raw.modelId : DEFAULT_AUTO_MODEL_ID,
+  followCompressModel: raw?.followCompressModel !== false,
+  daydreamModelId: typeof raw?.daydreamModelId === 'string' && raw.daydreamModelId.length > 0
+    ? raw.daydreamModelId : DEFAULT_AUTO_MODEL_ID,
+  daydreamFollowCompressModel: raw?.daydreamFollowCompressModel !== false,
 });
 
 // AgentPrefs.kt:47-51 — 缺失/解析失败 → 默认(enableTimeReminder=false)
