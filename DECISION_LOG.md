@@ -456,3 +456,13 @@
   - **provider 设置编辑 UI 仍 openai-only**:google/claude 变体仅在其数据已存在于 KV(如后续编辑面落地或导入)时被运行时消费;编辑 UI = P1(登记于 M3 gap audit)。
   - 三 createXxxChatApi 均返回结构 `OpenAIChatApi`(streamText/generateText),`ChatRuntime.api` 类型无需变更;streamOutput=false 非流式路径(D-040)对三 provider 自动生效。
 - **可逆性**:openai 路径行为逐行不变(同构代码搬入 else 分支);choice/picker 仅放宽过滤,既有 openai 选择与回退结果不受影响。
+
+## D-047（L0，2026-07-28）provider 设置编辑 UI：三变体列表 + 逐变体表单
+
+- **背景**：D-046 后运行时/选择器可消费 google/claude 变体,但设置页(D-020 MVP)只能编辑首个 openai provider —— 用户无从创建 google/claude 配置,运行时接线空转。
+- **决定**：
+  - **ChatProviderSettingsPage.ets 重写**(Android 基准 SettingProviderConfigPage.kt):provider 列表(名 · 类型 · 停用/编辑中标记,点选载入表单)+ 三个新增按钮(+ OpenAI/+ Google/+ Claude,makeProviderSettingXxx 默认值)+ 删除(AlertDialog 确认,删后选首个;用户持久化选择失效由 resolveChatProviderChoice 的 D-019 回退自然兜底)。兼容旧行为:进入默认选中首个 openai(D-020 延续),无则首个。
+  - **逐变体表单忠实 Android 字段条件**:openai —— Base URL/API Path(useResponseApi 时隐藏,:545)/useResponseApi 开关;google —— apiKey(vertex+serviceAccount 时隐藏,:456)/Vertex AI 开关/useServiceAccount 开关(vertex 时显示)/!vertex → Base URL,vertex+serviceAccount → email/privateKey/location/projectId 四字段(:590-622);claude —— Base URL/promptCaching 开关(:637-641)。公共:启用/名称/API Key/模型(逗号分隔)。
+  - **保存合并语义**:表单未覆盖字段(authMode/brand/balanceOption)从选中快照原样保留,不被默认值覆盖。
+  - **裁剪登记**:authMode 选择不呈现(openai 固定 api_key — codex_oauth token store P1;google 固定 api_key — Code Assist OAuth 传输 P1,api 层显式抛错,避免用户配置出必败 provider);brand 编辑/余额区/service account JSON 导入按钮 = P1;编辑中切换选中丢弃未保存修改(MVP 草稿语义)。
+- **可逆性**:纯 entry 页面重写;KV 线格式未变(D-017 三变体序列化既有);旧单 openai 数据载入后字段完全等价。
