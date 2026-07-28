@@ -580,3 +580,14 @@ export {
 export type {
   MemoryRecallFreshness, MemoryRecallScore, MemoryRecallSelection,
 } from './chat/memory_recall.ts';
+
+// ===== D-085b:记忆召回编排(MemoryRecallStore.kt:14-53)+ 动态块通道 =====
+export {
+  buildMemoryRecallPrompt, recallMemoryRecords, recallMemorySelections,
+} from './chat/memory_recall_store.ts';
+export type {
+  MemoryReadRepository, MemoryRecallRuntimeGate,
+} from './chat/memory_recall_store.ts';
+export {
+  filterActiveMemoryRecords, touchMemoryRecords,
+} from './chat/memory_recall_store.ts';

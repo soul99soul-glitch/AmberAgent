@@ -60,6 +60,8 @@ export interface RegenerateDeps {
   store: ConversationStore;
   agentSoul?: string;
   contextMessageSize?: number;
+  // D-085b:记忆召回块供给(chat_turn 同语义,动态序最前)
+  memorySystemBlocks?: () => Promise<string[]>;
   // D-077b:动态 system 块供给(chat_turn 同语义,每次组装重取)
   extraSystemBlocks?: () => Promise<string[]>;
   // D-055:压缩引擎钩子(chat_turn 同语义);存在时组装以其结果为基底,
@@ -137,9 +139,11 @@ export const runRegenerateAt = async (
     contextMessageSize: deps.prepareContextMessages !== undefined
       ? 0
       : (deps.contextMessageSize ?? 0),
-    extraSystemBlocks: deps.extraSystemBlocks !== undefined
-      ? await deps.extraSystemBlocks()
-      : [],
+    // D-085b:memory 块在动态序最前(GenerationHandler.kt:727)
+    extraSystemBlocks: [
+      ...(deps.memorySystemBlocks !== undefined ? await deps.memorySystemBlocks() : []),
+      ...(deps.extraSystemBlocks !== undefined ? await deps.extraSystemBlocks() : []),
+    ],
   });
   const internalMessages: UIMessage[] = await applyInputTransformers(
     assembled, deps.inputTransformers, ctx);

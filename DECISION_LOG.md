@@ -972,3 +972,28 @@
 ### 备注
 - Store 编排(recallSelections→getActiveRecords→rank→touchMemories→buildMemoryContext)与设置/动态块接线在 D-085b。
 - extraction(MemoryExtractor/CandidateFilter/Prompt)、dream、导出导入、memory_* 工具、设置面 UI 后续切片。
+
+## D-085b:记忆召回编排 + 设置 + JSON 存储 + 动态块接线
+
+**日期**: 2026-07-28
+**来源**: `core/memory/recall/MemoryRecallStore.kt:14-53`(编排)、`MemoryRepository.kt:69-72,149-153`(读路径仓储)、`MemoryDAO.kt:19-23,43-44`(查询语义)、`PreferencesStore.kt:152-154,174`(设置默认)、`GenerationHandler.kt:414,726-736`(动态块序)
+
+### 内容
+- **HAR `memory_recall_store.ts`**:
+  - `recallMemorySelections`(:38-53 逐字)— scopes 门(三开关,core→short→long 序,空 → [] 且**不触仓**)→ getActiveRecords → rankMemoryRecords。
+  - `recallMemoryRecords`(:34-36)/`buildMemoryRecallPrompt`(:17-32)— selections → touchMemories(ids)→ buildMemoryContext(debug 时 details = id→score.toDebugText())。
+  - DAO 语义纯函数:`filterActiveMemoryRecords`(scope IN && !archived && (expiresAt null||>now);无 ORDER BY → 插入序)、`touchMemoryRecords`(命中置 lastUsedAt,新数组不改输入)。
+- **deps 通道**:`memorySystemBlocks?: () => Promise<string[]>` 加入 ChatTurnDeps/RegenerateDeps;动态块序对齐 Android(:727 memory 最前)— tool_loop 组合 `[memory, budget, extra]`,chat_turn/regenerate 组合 `[memory, extra]`。
+- **entry**:
+  - `AgentRuntimePrefs.ets` 快照扩字段:enableCoreMemory/enableShortTermMemory/enableLongTermMemory(默认 true,:152-154,仅显式 false 才关)+ memoryRecall(默认 {12,2000,false},:174;逐字段解析,缺失回默认)。
+  - `MemoryStore.ets`(新):JSON 文件 `memory/memory_records.json` 持久化;数组序 = 插入序;getActiveRecords/touchMemories 实现 MemoryReadRepository(空 ids no-op,:150);突变串行队列;文件缺失/损坏 → 空库。
+  - `ChatPage.ets`:loadMemorySystemBlocks(gate 取自 agentRuntime 快照,messages = currentMessages(当前会话,含刚入列 user))→ '' → 不进块(:727 isNotBlank 门);三处 deps 站点(send/regenerate/继续)接线。
+
+### 不迁移登记
+- **`memories: List<AssistantMemory>` 参数(GenerationHandler.kt:143/:254/:406)**:generateInternal 体内**零消费**(声明后从未读取,全仓唯一消费者路径是 memoryContextPrompt)→ Android 死参数,不迁移。AssistantMemory 桶(global/short_term/long_term 的 getMemories 面)随 memory_* 工具与设置面切片再评估。
+
+### 测试
++12(chat HAR 909→921):编排 9(scopes 门序/部分开关/全关不触仓/rank 透传/touch 序/debug details/空召回仍 touch/record 映射/score 形状)+ DAO 纯函数 3(scope/archived/expiresAt 边界 ==now 排除/插入序/touch 命中与不改输入)。
+
+### 残余(已登记 P1)
+extraction(MemoryExtractor/CandidateFilter/Prompt)、dream 子系统、导出导入 frontmatter、memory_* 工具(memory 类)、写路径(addMemory/updateContent/archive/候选)、遥测 MemoryEvent 落库、设置面 memory UI(含 enableCoreMemory 消费的 AssistantMemory 桶)。

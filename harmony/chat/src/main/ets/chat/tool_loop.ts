@@ -212,8 +212,9 @@ export const runAgenticToolLoop = async (
         assistant: deps.assistant,
         agentSoul: deps.agentSoul ?? '',
         // D-077b:Android 动态块序 memory → loopBudget → generativeUi → recentChats
-        //   (:726-736);budget 前置,deps 供给(recentChats)随后
+        //   (:726-736);D-085b memory 前置,budget 居中,deps 供给(recentChats)随后
         extraSystemBlocks: [
+          ...(deps.memorySystemBlocks !== undefined ? await deps.memorySystemBlocks() : []),
           ...(budgetPrompt.length > 0 ? [budgetPrompt] : []),
           ...(deps.extraSystemBlocks !== undefined ? await deps.extraSystemBlocks() : []),
         ],

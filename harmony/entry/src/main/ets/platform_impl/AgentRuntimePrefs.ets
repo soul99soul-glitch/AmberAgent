@@ -6,7 +6,8 @@
 // 裁剪:其余 agentRuntime 字段(autoApproveAllToolCalls/推测执行/compact 等
 //   设置面)= P1 已登记,本文件仅承载 D-072 所需快照
 import { i18n } from '@kit.LocalizationKit';
-import type { KeyValueStore } from '@amber/chat-domain';
+import type { KeyValueStore, MemoryRecallSetting } from '@amber/chat-domain';
+import { DEFAULT_MEMORY_RECALL_SETTING } from '@amber/chat-domain';
 
 export const AGENT_RUNTIME_KEY: string = 'agent_runtime';
 
@@ -14,17 +15,53 @@ export interface AgentRuntimeSnapshot {
   enableTimeReminder: boolean;
   // D-077b:PreferencesStore.kt:155 默认 true(GenerationHandler.kt:736 消费)
   enableRecentChatsReference: boolean;
+  // D-085b:PreferencesStore.kt:152-154 三开关默认 true(MemoryRecallStore.kt:39-43 消费)
+  enableCoreMemory: boolean;
+  enableShortTermMemory: boolean;
+  enableLongTermMemory: boolean;
+  // D-085b:PreferencesStore.kt:174 默认 MemoryRecallSetting(){12,2000,false}
+  memoryRecall: MemoryRecallSetting;
+}
+
+interface MemoryRecallJson {
+  maxItems?: number;
+  maxPromptChars?: number;
+  debug?: boolean;
 }
 
 interface AgentRuntimeJson {
   enableTimeReminder?: boolean;
   enableRecentChatsReference?: boolean;
+  enableCoreMemory?: boolean;
+  enableShortTermMemory?: boolean;
+  enableLongTermMemory?: boolean;
+  memoryRecall?: MemoryRecallJson;
 }
+
+const defaultMemoryRecall = (): MemoryRecallSetting => ({
+  maxItems: DEFAULT_MEMORY_RECALL_SETTING.maxItems,
+  maxPromptChars: DEFAULT_MEMORY_RECALL_SETTING.maxPromptChars,
+  debug: DEFAULT_MEMORY_RECALL_SETTING.debug,
+});
 
 export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   enableTimeReminder: false,
   enableRecentChatsReference: true,
+  enableCoreMemory: true,
+  enableShortTermMemory: true,
+  enableLongTermMemory: true,
+  memoryRecall: defaultMemoryRecall(),
 });
+
+const parseMemoryRecall = (raw: MemoryRecallJson | undefined): MemoryRecallSetting => {
+  if (raw === undefined) return defaultMemoryRecall();
+  return {
+    maxItems: typeof raw.maxItems === 'number' ? raw.maxItems : DEFAULT_MEMORY_RECALL_SETTING.maxItems,
+    maxPromptChars: typeof raw.maxPromptChars === 'number'
+      ? raw.maxPromptChars : DEFAULT_MEMORY_RECALL_SETTING.maxPromptChars,
+    debug: raw.debug === true,
+  };
+};
 
 // AgentPrefs.kt:47-51 — 缺失/解析失败 → 默认(enableTimeReminder=false)
 export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<AgentRuntimeSnapshot> => {
@@ -36,6 +73,11 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
       enableTimeReminder: parsed.enableTimeReminder === true,
       // 默认 true:仅显式 false 才关(PreferencesStore.kt:155)
       enableRecentChatsReference: parsed.enableRecentChatsReference !== false,
+      // 默认 true:仅显式 false 才关(PreferencesStore.kt:152-154)
+      enableCoreMemory: parsed.enableCoreMemory !== false,
+      enableShortTermMemory: parsed.enableShortTermMemory !== false,
+      enableLongTermMemory: parsed.enableLongTermMemory !== false,
+      memoryRecall: parseMemoryRecall(parsed.memoryRecall),
     };
   } catch {
     return defaultAgentRuntimeSnapshot();

@@ -48,6 +48,7 @@ import {
   createPlaceholderTransformer, createDocumentTransformer,
   createPromptInjectionTransformer, PromptInjection, Lorebook,
   RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, RecentChatItem, ConversationSummary,
+  buildMemoryRecallPrompt, MemoryRecallRuntimeGate,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -66,6 +67,7 @@ import { createEntryPlaceholderValues, loadUserNickname } from '../platform_impl
 import { createEntryDocumentReader } from '../platform_impl/DocumentSupport.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
 import { createEntryBase64ImageTransformer } from '../platform_impl/Base64ImageSupport.ets';
+import { getMemoryReadRepository } from '../platform_impl/MemoryStore.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -446,6 +448,22 @@ struct ChatPage {
       });
   }
 
+  // D-085b:记忆召回块(GenerationHandler.kt:414 → :727,动态序最前);
+  //   每次组装重取 — 召回对当前会话消息(含刚入列的 user)打分;
+  //   空召回/三开关全关 → buildMemoryRecallPrompt 回 '' → 不进块(Android :727 isNotBlank 门)
+  private loadMemorySystemBlocks(): Promise<string[]> {
+    const conv: Conversation | null = this.conversation;
+    if (conv === null) return Promise.resolve([]);
+    const gate: MemoryRecallRuntimeGate = {
+      enableCoreMemory: this.agentRuntime.enableCoreMemory,
+      enableShortTermMemory: this.agentRuntime.enableShortTermMemory,
+      enableLongTermMemory: this.agentRuntime.enableLongTermMemory,
+      memoryRecall: this.agentRuntime.memoryRecall,
+    };
+    return buildMemoryRecallPrompt(gate, currentMessages(conv), getMemoryReadRepository())
+      .then((prompt: string): string[] => prompt.length > 0 ? [prompt] : []);
+  }
+
   aboutToAppear(): void {
     // 每次进入(含从选择器返回)刷新模型标签
     describeChatModel().then((label: string): void => { this.modelLabel = label; });
@@ -559,6 +577,8 @@ struct ChatPage {
           // D-055:压缩引擎接管上下文(同 send 路径)
           prepareContextMessages: this.buildPrepareContext(conv, rt),
           // D-077b:recentChats 动态块(每次组装重取)
+          // D-085b:记忆召回块(动态序最前,GenerationHandler.kt:727)
+          memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
           extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
           // D-050:重试状态(send 路径同语义)
@@ -1037,6 +1057,8 @@ struct ChatPage {
           contextMessageSize: rt.contextMessageSize,
           prepareContextMessages: this.buildPrepareContext(conv, rt),
           // D-077b:recentChats 动态块(每次组装重取)
+          // D-085b:记忆召回块(动态序最前,GenerationHandler.kt:727)
+          memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
           extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
           onRetryStatus: (status: string | null): void => {
@@ -1303,6 +1325,8 @@ struct ChatPage {
           //   chat_turn 侧 contextMessageSize 强制 0,避免双重截断)
           prepareContextMessages: this.buildPrepareContext(conv, rt),
           // D-077b:recentChats 动态块(每次组装重取)
+          // D-085b:记忆召回块(动态序最前,GenerationHandler.kt:727)
+          memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
           extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
           // D-050:重试状态(strings.xml:386 文案;null 清除)

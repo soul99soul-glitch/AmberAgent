@@ -54,7 +54,7 @@
 | ~~Google 请求构建~~ **已完成(D-045)** | ai/ GoogleProvider.kt(949 行) | Claude(D-044)/Google(D-045)均完成;**entry 运行时接线已完成(D-046)**;entry 运行时接线(D-046)与三变体设置编辑 UI(D-047)均完成;残余:BuiltInTools/Vertex service account/Code Assist OAuth 传输/authMode-brand 编辑面 = P1 |
 | 动态 system prompt blocks（time/date/lorebook/mode 注入） | Assistant.kt modeInjectionIds/lorebookIds | 依赖 lorebook/mode 存储 |
 | ~~customHeaders/customBodies 编辑 UI~~ **已完成(D-049)** | AssistantRequestPage.kt:78-95 + PropertyEditor.kt | 助手级编辑+运行时注入完成;model 级自定义参数编辑面 = P1(数据已被 mergeCustomParams 消费) |
-| memory（全局/助手级） | AssistantVM.kt:89-94 getMemories | 依赖 memory 存储设计 |
+| ~~memory 召回读路径~~ **已完成(D-085a/b)** | MemoryRecallStore.kt + MemoryPromptBuilder.kt + MemoryTimeAnchorParser.kt + MemoryModels.kt + MemoryRepository.kt 读路径 | 纯模块(模型/时间锚/提示词/召回打分)+编排(buildMemoryRecallPrompt)+三开关+recall 设置+JSON 文件存储+memorySystemBlocks 动态块(序最前)完成;残余:extraction/dream/导出导入/memory_* 工具/写路径(addMemory/update/archive)/设置面 memory UI = P1;AssistantVM getMemories(助手级 core 桶展示)随设置面 |
 | ~~reasoning 折叠/展开交互~~ **已完成(D-053)** | ChatMessageReasoning.kt(452 行) + MarkdownUtils.kt:35-55 | 三态卡片+流式迁移+秒数头部+尾窗截断完成;残余:budgetLabel 后缀/title 右侧 duration/shimmer+Markdown 富渲染/100dp 滚动窗 = P1(Spike C 视觉) |
 
 ## 6. 结论
