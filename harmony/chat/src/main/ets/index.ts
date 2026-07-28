@@ -368,8 +368,25 @@ export {
 export {
   createMemoryKeyValueStore, saveAssistants, loadAssistants, ASSISTANTS_KEY,
   saveProviders, loadProviders, PROVIDERS_KEY,
+  saveMcpServers, loadMcpServers, MCP_SERVERS_KEY,
 } from './chat/kv_store.ts';
 export type { KeyValueStore, MemoryKeyValueStore } from './chat/kv_store.ts';
+
+// D-116:MCP 配置模型/线格式/导入解析器(McpConfig.kt+McpStatus.kt+McpImportParser.kt)
+export {
+  makeMcpCommonOptions, makeMcpTool, makeMcpSseServer, makeMcpStreamableHttpServer,
+  cloneMcpServerConfig,
+  MCP_STATUS_IDLE, MCP_STATUS_CONNECTING, MCP_STATUS_CONNECTED,
+  mcpStatusReconnecting, mcpStatusError,
+} from './chat/mcp_config.ts';
+export type {
+  McpCommonOptions, McpTool, McpServerConfig, McpSseServerConfig,
+  McpStreamableHttpServerConfig, McpServerKind, McpStatus,
+} from './chat/mcp_config.ts';
+export {
+  serializeMcpServerConfigList, parseMcpServerConfigList,
+} from './chat/mcp_config_serialize.ts';
+export { parseMcpServersFromJson } from './chat/mcp_import.ts';
 
 export {
   makeProviderModel, makeBalanceOption,

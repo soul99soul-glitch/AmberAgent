@@ -10,6 +10,8 @@ import type { Assistant } from './assistant.ts';
 import { serializeAssistantList, parseAssistantList } from './assistant_serialize.ts';
 import type { ProviderSetting } from './provider_settings.ts';
 import { serializeProviderSettingList, parseProviderSettingList } from './provider_settings_serialize.ts';
+import type { McpServerConfig } from './mcp_config.ts';
+import { parseMcpServerConfigList, serializeMcpServerConfigList } from './mcp_config_serialize.ts';
 
 export interface KeyValueStore {
   get(key: string): Promise<string | null>;
@@ -64,4 +66,17 @@ export const loadProviders = async (store: KeyValueStore): Promise<ProviderSetti
   const raw = await store.get(PROVIDERS_KEY);
   if (raw === null) return null;
   return parseProviderSettingList(raw);
+};
+
+// D-116:mcpServers blob 键(Settings.kt:101 内嵌字段 → 独立 KV,D-016 同口径;
+//   线格式 = kotlinx sealed 鉴别名 'sse'/'streamable_http' 逐字)
+export const MCP_SERVERS_KEY = 'mcp_servers';
+
+export const saveMcpServers = (store: KeyValueStore, list: McpServerConfig[]): Promise<void> =>
+  store.put(MCP_SERVERS_KEY, serializeMcpServerConfigList(list));
+
+export const loadMcpServers = async (store: KeyValueStore): Promise<McpServerConfig[] | null> => {
+  const raw = await store.get(MCP_SERVERS_KEY);
+  if (raw === null) return null;
+  return parseMcpServerConfigList(raw);
 };

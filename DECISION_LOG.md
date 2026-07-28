@@ -1591,3 +1591,19 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-104 登记「maxToolLoopSteps …设置面」之 maxToolLoopSteps 部分 + generationRetry 设置面。
 - **未移植(P1 登记)**: SettingAgentExecutionPage 其余行 — 显示卡 operationPreviewMode/generativeUi 行/实时状态卡 enableLiveStatusNotification+hideSensitiveLiveStatus/Live 伴随卡 liveMode 五行/后台保活 keepGenerationAliveInBackground(均属未落地子系统,不做静默无操作开关);harnessDebug/任务调度设置面(扩展页残余,D-104 登记维持)。
 - **验证**: chat tsc+deepread tsc 干净 + 1129/603 测试(无域层改动,计数不变)/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-116 — MCP 子系统切片①:配置模型/状态/导入解析器/Settings 字段
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: app/core/ai/mcp/McpConfig.kt(60 行全文)+McpStatus.kt(9 行全文)+McpImportParser.kt(24 行全文)+PreferencesStore.kt:101(mcpServers 字段)
+- **背景**: MCP 为余量中最高优先级协议子系统(charter:data/protocol > core loop;D-059 登记「mcp 组依赖未移植管理器」)。五切片推进:①配置(D-116)②JSON-RPC client 核③两 transport④McpManager⑤工具桥接+设置面。SDK 基线定档:io.modelcontextprotocol:kotlin-sdk **0.8.4**(gradle/libs.versions.toml:150),协议版本 LATEST=2025-06-18/SUPPORTED=[2024-11-05,2025-03-26,2025-06-18](jar 常量提取证实)。
+- **决策**:
+  1. chat HAR mcp_config.ts(+15 测试):McpCommonOptions(enable=true/name=''/headers=[]/tools=[])/McpTool(enable=true/needsApproval=**true fail-closed 注释逐字**/description·inputSchema=null)/McpServerConfig union(kind 'sse'|'streamable_http',id 随机 uuid,clone 默认参=自身字段)/McpStatus 五态。
+  2. chat HAR mcp_config_serialize.ts:**kotlinx 线格式逐字** — 鉴别名 'type' 首键/声明序键序/encodeDefaults(全默认亦写出)/explicitNulls=false(description·inputSchema·required 为 null 省略)/Pair → {"first","second"}/InputSchema.Obj → {"type":"object",...};parse 容忍未知键(ignoreUnknownKeys)/缺字段落默认(id 缺 → 随机,kotlinx 默认参语义);未知鉴别名 → 抛(kotlinx 缺 subclass 同抛)。
+  3. chat HAR mcp_import.ts:parseMcpServersFromJson 逐字 — root/mcpServers 非对象 → 抛(jsonObject 语义);mcpServers 缺失 → [];type 缺省 'streamable_http';url 缺失/非串 → mapNotNull 跳过;headers 值 contentOrNull(number/bool → 字面串,对象 → '');when(type) else → StreamableHTTP。
+  4. kv_store.ts += MCP_SERVERS_KEY/save/loadMcpServers(assistants/providers 同先例;无键 → null)。
+- **偏差/适配登记**: properties 任意 JsonObject 经 JSON.stringify 直传(kotlinx Double 1.0→'1.0' 浮点边缘不逐字,D-016 同款登记);Uuid → string。
+- **关闭**: MCP 子系统配置面(Settings.kt:101 字段承载)。
+- **未移植(P1 登记)**: SDK Protocol/Client 子集(initialize 握手/tools list·call,D-117);SseClientTransport/StreamableHttpClientTransport(D-118);McpManager 513 行(D-119);createRunTools mcp 组+mcp_call_tool+MCP 设置面 UI(D-120)。
+- **验证**: chat tsc 干净 + 1144 测试(+15)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
