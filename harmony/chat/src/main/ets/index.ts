@@ -64,7 +64,7 @@ export {
 } from './chat/transformers.ts';
 
 export type {
-  ChatStreamProvider, ConversationStore, MemoryConversationStore, ChatTurnDeps,
+  ChatStreamProvider, ConversationStore, MemoryConversationStore, ChatTurnDeps, StreamOpts,
 } from './chat/chat_turn.ts';
 export { createMemoryConversationStore, runChatTurn } from './chat/chat_turn.ts';
 export { selectMessageBranch, runRegenerateAt } from './chat/regenerate.ts';

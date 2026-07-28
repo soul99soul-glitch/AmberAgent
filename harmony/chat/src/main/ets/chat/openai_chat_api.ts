@@ -23,7 +23,7 @@ import {
   parseChatCompletionMessage, parseOpenAiTokenUsage, parseOpenAiErrorDetail,
   parseOpenAiStreamEventData,
 } from './openai_parse.ts';
-import type { ChatStreamProvider } from './chat_turn.ts';
+import type { ChatStreamProvider, StreamOpts } from './chat_turn.ts';
 
 export interface OpenAIChatApiDeps {
   http: HttpClient;
@@ -166,8 +166,11 @@ export const asChatStreamProvider = (
   api: OpenAIChatApi,
   paramsFor: () => TextGenerationParams,
 ): ChatStreamProvider => ({
-  streamText: (messages: UIMessage[], onChunk: (chunk: MessageChunk) => void): Promise<void> =>
-    api.streamText(messages, paramsFor(), onChunk),
+  streamText: (
+    messages: UIMessage[], onChunk: (chunk: MessageChunk) => void, opts?: StreamOpts,
+  ): Promise<void> =>
+    api.streamText(messages, paramsFor(), onChunk,
+      opts?.signal !== undefined ? { signal: opts.signal } : undefined),
 });
 
 // addOpenAICompatibleAuthHeader(ChatCompletionsAPI.kt:545-557)

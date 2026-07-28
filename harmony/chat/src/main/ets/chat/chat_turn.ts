@@ -25,12 +25,20 @@ import {
   applyInputTransformers, applyOnGenerationFinish, applyVisualTransformersStreamingTail,
 } from './transformer_pipeline.ts';
 import { nowIso } from './ids.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 
 // ===== Ports =====
 
+export interface StreamOpts {
+  signal?: AbortSignalLike;
+}
+
 // 流式 provider:回调式 chunk 推送;resolve = 流正常结束,reject = 失败
+// opts.signal(D-035):中止信号透传至 API/HTTP 层
 export interface ChatStreamProvider {
-  streamText(messages: UIMessage[], onChunk: (chunk: MessageChunk) => void): Promise<void>;
+  streamText(
+    messages: UIMessage[], onChunk: (chunk: MessageChunk) => void, opts?: StreamOpts,
+  ): Promise<void>;
 }
 
 // 会话持久化 Port(真机 adapter 走 RDB/文件;测试用 memory 实现)
@@ -68,6 +76,11 @@ export interface ChatTurnDeps {
   flushIntervalMs?: number;
   nowMs?: () => number;
   onUpdate?: (messages: UIMessage[]) => void;
+  // 停止生成(D-035):abort 信号透传 provider;provider 抛错且 signal.aborted
+  //   → 部分快照走终态 transforms 入列并持久化,正常 resolve(对齐 Android
+  //   CancellationException → checkpointConversation(force) 语义);
+  //   非 abort 错误维持传播(D-012)
+  abortSignal?: AbortSignalLike;
 }
 
 const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
@@ -102,17 +115,29 @@ export const runChatTurn = async (
   const flushIntervalMs: number = deps.flushIntervalMs ?? 50;
   const nowMs: () => number = deps.nowMs ?? ((): number => Date.now());
   let lastFlushAt: number = 0;
-  await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
-    accumulator.append(chunk);
-    if (deps.onUpdate !== undefined) {
-      const now: number = nowMs();
-      if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
-        lastFlushAt = now;
-        const snapshot: UIMessage[] = accumulator.snapshot();
-        deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
+  const streamOpts: StreamOpts | undefined = deps.abortSignal !== undefined
+    ? { signal: deps.abortSignal }
+    : undefined;
+  try {
+    await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+      accumulator.append(chunk);
+      if (deps.onUpdate !== undefined) {
+        const now: number = nowMs();
+        if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
+          lastFlushAt = now;
+          const snapshot: UIMessage[] = accumulator.snapshot();
+          deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
+        }
       }
+    }, streamOpts);
+  } catch (e) {
+    // abort(停止生成):部分快照照常终态化入列(Android checkpoint force 语义);
+    // 其余错误传播(D-012)
+    const aborted: boolean = deps.abortSignal !== undefined && deps.abortSignal.aborted;
+    if (!aborted) {
+      throw e;
     }
-  });
+  }
 
   // 4. 终态:onGenerationFinish transforms → assistant 节点入列 → 持久化
   const finalMessages: UIMessage[] = applyOnGenerationFinish(

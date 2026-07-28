@@ -16,6 +16,7 @@ import {
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
 } from '../di/AppContainer.ets';
+import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -164,6 +165,7 @@ struct ChatPage {
   @State editingTitle: boolean = false;
   @State titleInput: string = '';
   private conversation: Conversation | null = null;
+  private abortController: EntryAbortController | null = null;
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
@@ -411,6 +413,7 @@ struct ChatPage {
     }
     this.sending = true;
     this.errorMsg = '';
+    this.abortController = new EntryAbortController();
     const conv: Conversation = this.conversation;
     // 流式尾部起点 = 现有消息 + 即将入列的 user 消息
     const tailStart: number = currentMessages(conv).length + 1;
@@ -429,6 +432,7 @@ struct ChatPage {
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
+          abortSignal: this.abortController?.signal,
           onUpdate: (msgs: UIMessage[]): void => {
             this.streamingTail = msgs.slice(tailStart);
           },
@@ -441,6 +445,7 @@ struct ChatPage {
         this.suggestions = out.chatSuggestions;
         this.inputText = '';
         this.sending = false;
+        this.abortController = null;
         this.scrollToBottom();
         // 自动命名 + 会话建议(非阻塞,对齐 Android 独立 launch)
         if (holder.rt !== null) {
@@ -451,6 +456,7 @@ struct ChatPage {
       .catch((e: Error): void => {
         this.errorMsg = e.message;
         this.sending = false;
+        this.abortController = null;
         this.streamingTail = [];
         // user 消息快照已持久化(chat_turn 语义),刷新显示
         getChatRepository().getById(conv.id).then((saved: Conversation | null): void => {
@@ -574,11 +580,18 @@ struct ChatPage {
           .backgroundColor(SURFACE)
           .borderRadius(8)
           .onChange((v: string): void => { this.inputText = v; })
-        Text(this.sending ? '…' : '发送')
+        Text(this.sending ? '停止' : '发送')
           .fontSize(15)
-          .fontColor(this.sending ? INK3 : ACCENT)
+          .fontColor(this.sending ? '#B43A3A' : ACCENT)
           .padding({ left: 14, right: 6 })
-          .onClick((): void => this.send())
+          .onClick((): void => {
+            if (this.sending) {
+              // 停止生成(D-035):abort → 部分内容照常入列(chat_turn 语义)
+              this.abortController?.abort();
+            } else {
+              this.send();
+            }
+          })
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 12 })

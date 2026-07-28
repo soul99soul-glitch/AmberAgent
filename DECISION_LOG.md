@@ -336,3 +336,14 @@
   - **UI**:ChatPage 标题点击 → 内联 TextInput 编辑(保存/取消);子组件 onClick 优先,模型标签点击仍进选择器;编辑态屏蔽父 Column 导航。
   - 改名后 auto-title 不再覆盖(title 非空白,D-025 条件天然满足)。
 - **可逆性**:纯增项;标题清空后下一轮生成会重新自动命名(Android 同语义)。
+
+## D-035（L0，2026-07-28）停止生成：abort 全链路 + 部分保存语义 + EntryAbortController
+
+- **背景**：Android stopGeneration 取消 job,流收集 onFailure(CancellationException)→ checkpointConversation(force) **保存部分生成内容**,错误不上浮。
+- **决定**：
+  - **链路**:HttpClient.fetchStream(signal,RcpHttpClient 早已实现 destroy 收尾)→ OpenAIChatApi.streamText(CallOpts.signal,已有)→ ChatStreamProvider 新增可选第三参 StreamOpts{signal}(向后兼容,asChatStreamProvider 透传)→ runChatTurn deps.abortSignal。
+  - **语义(chat_turn,TDD 4 测试锁定)**:provider 抛错且 signal.aborted → 已累积快照**照常走 onGenerationFinish transforms** → 部分 assistant 节点入列 + 持久化 → **正常 resolve**(对齐 checkpoint force 语义);无 chunk → 仅 user 快照,resolve;非 abort 错误维持 D-012 传播。signal 透传由测试锁定。
+  - **EntryAbortController**:ArkTS 无全局 AbortController — deepread runtime_api 双运行时设计(接口而非全局类型)的预期 entry 实现:aborted 标志 + abort 监听列表,满足 RcpHttpClient addEventListener 形态。abort 前注册/abort 后注册均触发。
+  - **UI**:发送中按钮变「停止」(红)→ abort();部分消息立即可读,可继续对话或 regenerate。
+  - regenerate 路径 abort 处理 = P1(当前 abort 仅接 send;regenerate 用同 provider 但不传 signal,行为同前)。
+- **可逆性**:StreamOpts 可选,全链路向后兼容;不传 signal 行为与 D-012 完全一致。
