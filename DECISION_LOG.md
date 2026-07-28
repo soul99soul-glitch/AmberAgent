@@ -903,3 +903,14 @@
   - **ChatPage.pickImages**:改异步压缩物化(每张独立 then/catch,失败逐张告警非静默,语义不变);readImageAsDataUrl 删除(链路整体迁移,无遗留死代码)。
   - **偏差(登记 PARITY_DEBT PD-007 更新)**:压缩时机 = 物化一次 vs Android 每次发送(载荷等价,重复发送不重复压缩);file:// 来源(D-076 upload 落盘图)encode 期仍原样;选图仍不落私有目录(残余 P1)。
 - **可逆性**:1476 测试全绿(deepread 603 + chat 873),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。PD-007 压缩缺口消除,残余:file:// 私有目录存储 + file:// encode 期压缩。
+
+## D-080（L0，2026-07-28）canSendWithoutChatModel 模型空值门 — 发送/长按/建议三路径
+
+- **背景**：Android ChatPage.kt:532-533(canSendWithoutChatModel = parseDeepReadSlashCommand(parts) != null)+ 五处发送门(:676-679 发送/:695-698 长按/:823-825 建议单击/:864-869/:880-885):currentChatModel == null 且非斜杠路由 → toast '请先选择模型'(Error,逐字)中止,输入保留;编辑态 canRouteWithoutChatModel 恒 false(编辑必走模型)。鸿蒙此前:无模型时一路进 sendParts → resolveChatRuntime null → reject '未配置可用的 Provider/模型…',且入队路径完全无门(排队消息到派发时才失败,Android 输入时即拦截)。
+- **决定**：
+  - **AppContainer**:resolveChatProviderChoice + ChatProviderChoice 导出(原私有),作为 currentChatModel == null 的等价判定(KV 异步读,Android 为 VM 缓存态 — 每次点击重读,语义等价且更严)。
+  - **ChatPage.gateModelConfigured(onConfigured)**:choice null → errorMsg='请先选择模型' 逐字 return;catch → errorMsg。斜杠命令无需判 — 各路径斜杠拦截已前置(D-064),命中即路由返回。
+  - **接线三路径**:① send() — 斜杠拦截后进门,门内续走 FOLLOWUP 入队/编辑重发/sendParts(编辑态同样在门内,:675 !isEditing 语义);② sendWithoutAnswer() — 门过才清输入/取消编辑态/入队/append(中止时输入框原样保留,对齐 Android 未 clearInput);③ 建议长按生成中入队 — 门内入队(非生成中走 this.send() 复用门)。
+  - **输入保留语义**:send() 原本仅成功才清输入(:1317),门中止天然保留;sendWithoutAnswer 原先行前清输入,改为门内清(行为修正)。
+  - **sendParts 内 rt-null reject 保留**为纵深防御(门后竞态:用户在门与派发间删 provider)。
+- **可逆性**:1476 测试全绿(deepread 603 + chat 873,纯 entry UI 变更无新增测试),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit 残余「canSendWithoutChatModel 模型空值门」消除。

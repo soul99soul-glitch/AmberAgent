@@ -52,6 +52,7 @@ import {
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
   getChatKvStore, getCompactStore, getSessionGrantStore,
+  resolveChatProviderChoice, ChatProviderChoice,
 } from '../di/AppContainer.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
@@ -1175,20 +1176,40 @@ struct ChatPage {
     }
     // D-064:斜杠命令拦截(编辑态除外 — Android 编辑走 handleMessageEdit 不经 orchestrator)
     if (this.editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
-    this.inputText = '';
-    this.pendingImages = [];
-    if (this.editingNodeId.length > 0) this.cancelEdit();
-    if (this.sending) {
-      this.enqueuePendingParts(inputParts, false);
-      return;
-    }
-    runAppendUserMessage(this.conversation, inputParts, getChatRepository())
-      .then((out: Conversation): void => {
-        this.conversation = out;
-        this.rows = buildRows(out);
-        this.scrollToBottom();
-      })
-      .catch((e: Error): void => { this.errorMsg = e.message; });
+    // D-080:模型门(Android 长按发送 :695-698);门过才清输入(中止时输入保留)
+    this.gateModelConfigured((): void => {
+      this.inputText = '';
+      this.pendingImages = [];
+      if (this.editingNodeId.length > 0) this.cancelEdit();
+      if (this.sending) {
+        this.enqueuePendingParts(inputParts, false);
+        return;
+      }
+      runAppendUserMessage(this.conversation as Conversation, inputParts, getChatRepository())
+        .then((out: Conversation): void => {
+          this.conversation = out;
+          this.rows = buildRows(out);
+          this.scrollToBottom();
+        })
+        .catch((e: Error): void => { this.errorMsg = e.message; });
+    });
+  }
+
+  // ===== D-080 模型空值门 =====
+  // Android ChatPage.kt:532-533 canSendWithoutChatModel + :676-679/:695-698/
+  //   :823-825/:864-869/:880-885 发送门 — currentChatModel == null 且非
+  //   /deepread 斜杠(编辑态恒要模型)→ toast '请先选择模型'(逐字)中止:
+  //   输入保留,不入队/不生成/不编辑。斜杠路由已在各路径前置拦截,无需在此判断。
+  private gateModelConfigured(onConfigured: () => void): void {
+    resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+      if (choice === null) {
+        this.errorMsg = '请先选择模型';
+        return;
+      }
+      onConfigured();
+    }).catch((e: Error): void => {
+      this.errorMsg = e.message;
+    });
   }
 
   private send(): void {
@@ -1206,21 +1227,24 @@ struct ChatPage {
     }
     // D-064:斜杠命令拦截(orchestrator 在排队/发送前解析;编辑态除外)
     if (this.editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
-    // D-048:生成中 → FOLLOWUP 入队(编辑态同 — 编辑重发需等当前生成结束;
-    //   入队即退出编辑态,排队消息按新消息派发,登记偏差:Android 无编辑态排队交互)
-    if (this.sending) {
-      this.enqueuePendingParts(inputParts, true);
-      this.inputText = '';
-      this.pendingImages = [];
-      if (this.editingNodeId.length > 0) this.cancelEdit();
-      return;
-    }
-    // 编辑态:走「编辑并重发」(编辑态不携带待发图片,对齐 Android 编辑仅文本)
-    if (this.editingNodeId.length > 0) {
-      this.sendEdit(text);
-      return;
-    }
-    this.sendParts(inputParts);
+    // D-080:模型门(编辑态同要模型 — Android canRouteWithoutChatModel 编辑恒 false)
+    this.gateModelConfigured((): void => {
+      // D-048:生成中 → FOLLOWUP 入队(编辑态同 — 编辑重发需等当前生成结束;
+      //   入队即退出编辑态,排队消息按新消息派发,登记偏差:Android 无编辑态排队交互)
+      if (this.sending) {
+        this.enqueuePendingParts(inputParts, true);
+        this.inputText = '';
+        this.pendingImages = [];
+        if (this.editingNodeId.length > 0) this.cancelEdit();
+        return;
+      }
+      // 编辑态:走「编辑并重发」(编辑态不携带待发图片,对齐 Android 编辑仅文本)
+      if (this.editingNodeId.length > 0) {
+        this.sendEdit(text);
+        return;
+      }
+      this.sendParts(inputParts);
+    });
   }
 
   private sendParts(inputParts: UIMessagePart[], dispatchMessageId: string = ''): void {
@@ -1450,13 +1474,16 @@ struct ChatPage {
                 .borderRadius(12)
                 .margin({ right: 8 })
                 // Android ChatPage.kt:812-830:点击 = 填入输入框;
-                //   长按 = 直接发送(D-042);生成中 → FOLLOWUP 入队(D-048)
+                //   长按 = 直接发送(D-042);生成中 → FOLLOWUP 入队(D-048);
+                //   D-080:模型空值门(:823/:864/:880,建议文本非斜杠恒要模型)
                 .onClick((): void => { this.inputText = s; })
                 .gesture(
                   LongPressGesture()
                     .onAction((): void => {
                       if (this.sending) {
-                        this.enqueuePendingParts([{ type: 'text', text: s, metadata: null }], true);
+                        this.gateModelConfigured((): void => {
+                          this.enqueuePendingParts([{ type: 'text', text: s, metadata: null }], true);
+                        });
                         return;
                       }
                       this.inputText = s;

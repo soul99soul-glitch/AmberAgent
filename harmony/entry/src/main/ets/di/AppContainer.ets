@@ -275,13 +275,14 @@ export interface ChatRuntime {
   modelSupportsImageInput: boolean;
 }
 
-interface ChatProviderChoice {
+export interface ChatProviderChoice {
   // D-046:三变体(openai/google/claude)统一解析;api 层均为结构 OpenAIChatApi
   provider: ProviderSetting;
   model: ProviderModel;
 }
 
-const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | null> => {
+// D-080:导出供 ChatPage 发送门(canSendWithoutChatModel 等价物)使用
+export const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | null> => {
   const providers = await loadProviders(getChatKvStore());
   if (providers === null) return null;
   // 用户选择优先(D-023;D-046 起不再限定 openai 变体)
