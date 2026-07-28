@@ -53,19 +53,19 @@ test('applyTemplate: 未知变量保留原文', () => {
 
 // ===== TemplateTransformer =====
 
-test('template: 默认模板 "{{ message }}" → 套用后恒等(D-016:无 null-skip,忠实 Android)', () => {
+test('template: 默认模板 "{{ message }}" → 套用后恒等(D-016:无 null-skip,忠实 Android)', async () => {
   const t = createTemplateTransformer();
   const msgs = [makeUserMessage('hi')];
-  const out = t.transform!(ctx(makeAssistant({})), msgs);
+  const out = await t.transform!(ctx(makeAssistant({})), msgs);
   assert.notEqual(out, msgs, '总是套用(新数组)');
   assert.equal(out[0].parts[0].type === 'text' ? out[0].parts[0].text : '', 'hi', '默认模板恒等');
 });
 
-test('template: 所有消息的 text part 都套模板,非 text part 不动', () => {
+test('template: 所有消息的 text part 都套模板,非 text part 不动', async () => {
   const t = createTemplateTransformer();
   const assistant = makeAssistant({ messageTemplate: '[{{role}}] {{message}}' });
   const imgMsg = makeUIMessage('user', [{ type: 'image', url: 'data:x', metadata: null }]);
-  const out = t.transform!(ctx(assistant), [makeUserMessage('hello'), imgMsg]);
+  const out = await t.transform!(ctx(assistant), [makeUserMessage('hello'), imgMsg]);
   const first = out[0].parts[0];
   assert.equal(first.type === 'text' ? first.text : '', '[user] hello');
   assert.equal(out[1], imgMsg, '无 text part 的消息保持引用');
@@ -166,18 +166,19 @@ test('regex: 无规则 → 引用相等', () => {
 
 // ===== pipeline 不变量(Transformer.kt:174-211) =====
 
-test('pipeline: 移除 system 消息的 transformer → 抛错', () => {
+test('pipeline: 移除 system 消息的 transformer → 抛错', async () => {
   const evil: MessageTransformer = {
     transform: (_c: TransformerContext, msgs: UIMessage[]): UIMessage[] =>
       msgs.filter((m: UIMessage): boolean => m.role !== 'system'),
   };
-  assert.throws(
-    () => applyInputTransformers([makeSystemMessage('s'), makeUserMessage('u')], [evil], ctx(makeAssistant({}))),
+  // D-071a:pipeline 异步化 → 同步 throw 变 rejection
+  await assert.rejects(
+    applyInputTransformers([makeSystemMessage('s'), makeUserMessage('u')], [evil], ctx(makeAssistant({}))),
     /removed the system message/,
   );
 });
 
-test('pipeline: 改动 tool 签名 → 抛错;合法转换通过', () => {
+test('pipeline: 改动 tool 签名 → 抛错;合法转换通过', async () => {
   const toolMsg = makeUIMessage('assistant', [{
     type: 'tool', toolCallId: 'c1', toolName: 'search', input: '{}',
     output: [], approvalState: { type: 'auto' }, metadata: null,
@@ -190,15 +191,16 @@ test('pipeline: 改动 tool 签名 → 抛错;合法转换通过', () => {
           p.type === 'tool' ? { ...p, input: '{"evil":1}' } : p),
       })),
   };
-  assert.throws(
-    () => applyInputTransformers([toolMsg], [evil], ctx(makeAssistant({}))),
+  // D-071a:pipeline 异步化 → 同步 throw 变 rejection
+  await assert.rejects(
+    applyInputTransformers([toolMsg], [evil], ctx(makeAssistant({}))),
     /modified tool call\/result ordering/,
   );
   const benign: MessageTransformer = {
     transform: (_c: TransformerContext, msgs: UIMessage[]): UIMessage[] =>
       msgs.map((m: UIMessage): UIMessage => ({ ...m })),
   };
-  const out = applyInputTransformers([toolMsg], [benign], ctx(makeAssistant({})));
+  const out = await applyInputTransformers([toolMsg], [benign], ctx(makeAssistant({})));
   assert.equal(out.length, 1);
 });
 

@@ -33,6 +33,7 @@ import type { TransformerContext } from './transformer_pipeline.ts';
 import {
   applyInputTransformers, applyVisualTransformersStreamingTail,
 } from './transformer_pipeline.ts';
+import type { VisionFallbackHook } from './vision_fallback.ts';
 import type { ChatToolDefinition } from './provider_model.ts';
 import type { AgentTool } from './tool.ts';
 import { toChatToolDefinition } from './tool.ts';
@@ -150,7 +151,7 @@ export const runAgenticToolLoop = async (
   const invocationContext: ToolInvocationContext = loop.invocationContext ?? 'normal';
   const toolRetry: GenerationRetrySetting = loop.toolRetrySetting
     ?? makeGenerationRetrySetting({ enabled: false });
-  const ctx: TransformerContext = { assistant: deps.assistant };
+  const ctx: TransformerContext = { assistant: deps.assistant, processingStatus: deps.onRetryStatus };
   // D-062:懒暴露状态(GenerationHandler:159 — 循环开始前 from(tools))
   const toolExposure: ToolExposureState = createToolExposureState(loop.tools);
 
@@ -207,8 +208,16 @@ export const runAgenticToolLoop = async (
           ? 0
           : (deps.contextMessageSize ?? 0),
       });
-      const internalMessages: UIMessage[] = applyInputTransformers(
+      const internalMessages: UIMessage[] = await applyInputTransformers(
         assembled, deps.inputTransformers, ctx);
+      // D-071a:视觉兜底重建闭包(逐步构建 — assembled 每步不同,
+      //   chat_turn 同语义,GenerationHandler.kt:613/:648)
+      const visionFallback: VisionFallbackHook | undefined =
+        deps.modelSupportsImageInput === undefined ? undefined : {
+          modelSupportsImageInput: deps.modelSupportsImageInput,
+          rebuildInternalMessages: (): Promise<UIMessage[]> => applyInputTransformers(
+            assembled, deps.inputTransformers, { ...ctx, forceImageToText: true }),
+        };
       const stepProvider: ChatStreamProvider = loop.makeProviderForStep(
         stepTools.map((t: AgentTool): ChatToolDefinition => toChatToolDefinition(t)));
       // D-063(:519-526/:540-543):raw 快照 → 推测观察(末条消息工具 × 暴露 defs)
@@ -227,7 +236,7 @@ export const runAgenticToolLoop = async (
         },
       };
       const finalMessages: UIMessage[] = await generateAssistantOnce(
-        baseMessages, internalMessages, stepDeps, stepProvider);
+        baseMessages, internalMessages, stepDeps, stepProvider, visionFallback);
       // Android messages = accumulator.snapshot() 全量覆盖:末条 base 消息
       //   (assistant 工具消息)可能被就地合并进新内容(text/tool 续写同一消息);
       //   引用不等 → 节点写回;新增消息 → 追加入列

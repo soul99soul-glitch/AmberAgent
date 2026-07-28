@@ -33,15 +33,20 @@ export const defaultTransformerClock = (): TransformerClock => ({
 export interface TransformerContext {
   assistant: Assistant;
   clock?: TransformerClock;
+  // D-071a:Android TransformerContext 两字段补齐(vision fallback 需要)
+  forceImageToText?: boolean; // Transformer.kt:18(OcrTransformer 消费)
+  processingStatus?: (status: string | null) => void; // Android MutableStateFlow<String?>
 }
 
 export const clockOf = (ctx: TransformerContext): TransformerClock =>
   ctx.clock ?? defaultTransformerClock();
 
 // ===== 接口(Android 默认方法 = 这里的可选方法,缺省即恒等) =====
+// D-071a:Android transform 为 suspend(OcrTransformer 需 await 视觉识别)
+//   → 允许返回 Promise;applyInputTransformers 同步改异步
 
 export interface MessageTransformer {
-  transform?(ctx: TransformerContext, messages: UIMessage[]): UIMessage[];
+  transform?(ctx: TransformerContext, messages: UIMessage[]): UIMessage[] | Promise<UIMessage[]>;
 }
 
 export interface OutputMessageTransformer extends MessageTransformer {
@@ -94,13 +99,13 @@ export const validateTransformerInvariants = (
 
 // ===== pipeline 折叠(Transformer.kt:70-172) =====
 
-export const applyInputTransformers = (
+export const applyInputTransformers = async (
   messages: UIMessage[], transformers: MessageTransformer[], ctx: TransformerContext,
-): UIMessage[] => {
+): Promise<UIMessage[]> => {
   let acc: UIMessage[] = messages;
   for (const t of transformers) {
     if (t.transform === undefined) continue;
-    const out: UIMessage[] = t.transform(ctx, acc);
+    const out: UIMessage[] = await t.transform(ctx, acc);
     if (out !== acc) validateTransformerInvariants(acc, out, 'transformer');
     acc = out;
   }

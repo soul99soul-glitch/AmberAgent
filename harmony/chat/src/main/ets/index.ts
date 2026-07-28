@@ -464,3 +464,16 @@ export {
   SEARCH_PREFS_KEYS, defaultSearchPrefs, loadSearchPrefs, saveSearchPrefs, updateSearchPrefs,
 } from './search/search_prefs.ts';
 export { createSearchTools } from './search/search_tools.ts';
+
+// ===== D-071a:视觉兜底(分类器/缓存/OcrTransformer/生成接线) =====
+export {
+  ImageEncodingError, VisualRecognitionError, hasImageParts,
+  shouldFallbackToVisionRecognition, resolveVisionRecognitionPrompt,
+  DEFAULT_VISION_RECOGNITION_PROMPT, DEFAULT_OCR_PROMPT, javaStringHashCode,
+  runWithVisionFallback, VISION_FALLBACK_STATUS,
+} from './chat/vision_fallback.ts';
+export type { VisionFallbackHook } from './chat/vision_fallback.ts';
+export { createVisionCache } from './chat/vision_cache.ts';
+export type { VisionCache, VisionCacheFileStore } from './chat/vision_cache.ts';
+export { createOcrTransformer, performImageRecognition } from './chat/ocr_transformer.ts';
+export type { OcrTransformerDeps } from './chat/ocr_transformer.ts';

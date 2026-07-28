@@ -12,8 +12,8 @@
 //   失败尝试的部分输出不混入后续尝试。
 //
 // 裁剪(D-012/PD-006):
-//   - vision fallback(forceImageToText 依赖 image→text transformer 链)= P1
-//   - 工具执行/审批/生成守卫 = P1 范围,不在骨架
+//   - vision fallback(D-071a 已落地:modelSupportsImageInput + 分类器 +
+//     forceImageToText 重跑,vision_fallback.ts;entry 侧 OCR 接线 = D-071b)
 //   - provider/persist 为 Port;chunk 用回调式(对齐 deepread HttpClient.fetchStream 风格,
 //     避免 AsyncIterable 在 ArkTS 的不确定性)
 //   - 错误路径:不可重试错误直接传播;user 消息快照已持久化,assistant 节点不入列
@@ -38,6 +38,8 @@ import {
   decideGenerationRetry, makeGenerationRetrySetting, RETRY_STATUS_TEMPLATE,
 } from './generation_retry.ts';
 import type { GenerationRetrySetting } from './generation_retry.ts';
+import { runWithVisionFallback } from './vision_fallback.ts';
+import type { VisionFallbackHook } from './vision_fallback.ts';
 
 // ===== Ports =====
 
@@ -114,6 +116,11 @@ export interface ChatTurnDeps {
   //   (system 前置与 input transforms 仍由本函数在返回后施加,次序对齐
   //   GenerationHandler:434-446)
   prepareContextMessages?: (messages: UIMessage[]) => Promise<UIMessage[]>;
+  // D-071a:模型是否支持图像输入(model.inputModalities.contains(IMAGE),
+  //   GenerationHandler.kt:431);提供且为 true 时启用视觉兜底 — 首轮生成错误
+  //   命中分类器(vision_fallback.ts)则 forceImageToText 重跑;
+  //   未提供 = 不兜底(等价 Android 模型不含 IMAGE 模态)
+  modelSupportsImageInput?: boolean;
 }
 
 const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
@@ -160,7 +167,9 @@ export const runChatTurn = async (
   await deps.store.save(conv);
 
   const baseMessages: UIMessage[] = currentMessages(conv);
-  const ctx: TransformerContext = { assistant: deps.assistant };
+  // D-071a:processingStatus 透传(Android TransformerContext.processingStatus
+  //   与 GenerationHandler 同一 StateFlow — OcrTransformer 状态文案经此上屏)
+  const ctx: TransformerContext = { assistant: deps.assistant, processingStatus: deps.onRetryStatus };
 
   // 2. 上下文组装:prepareContext(D-055,提供时:edit→compact→注入替换)
   //    或 limitContext 窗口(D-018)→ system 前置 → input transforms(次序对齐
@@ -178,10 +187,20 @@ export const runChatTurn = async (
       ? 0
       : (deps.contextMessageSize ?? 0),
   });
-  const internalMessages: UIMessage[] = applyInputTransformers(assembled, deps.inputTransformers, ctx);
+  const internalMessages: UIMessage[] = await applyInputTransformers(
+    assembled, deps.inputTransformers, ctx);
+  // D-071a:视觉兜底重建闭包(prepareInternalMessages(forceImageToText = true),
+  //   GenerationHandler.kt:613/:648);模型不支持图像时整条兜底不启用
+  const visionFallback: VisionFallbackHook | undefined =
+    deps.modelSupportsImageInput === undefined ? undefined : {
+      modelSupportsImageInput: deps.modelSupportsImageInput,
+      rebuildInternalMessages: (): Promise<UIMessage[]> => applyInputTransformers(
+        assembled, deps.inputTransformers, { ...ctx, forceImageToText: true }),
+    };
 
   // 3. 生成一步(D-057 抽取出共享核心;单跑行为与 D-050 逐字节一致)
-  const finalMessages: UIMessage[] = await generateAssistantOnce(baseMessages, internalMessages, deps);
+  const finalMessages: UIMessage[] = await generateAssistantOnce(
+    baseMessages, internalMessages, deps, undefined, visionFallback);
 
   // 4. 终态:assistant 节点入列 → 持久化
   if (finalMessages.length > baseMessages.length) {
@@ -200,7 +219,7 @@ export const runChatTurn = async (
 //   (seed + 生成),入列由调用方决定。
 export const generateAssistantOnce = async (
   seedMessages: UIMessage[], internalMessages: UIMessage[], deps: ChatTurnDeps,
-  providerOverride?: ChatStreamProvider,
+  providerOverride?: ChatStreamProvider, visionFallback?: VisionFallbackHook,
 ): Promise<UIMessage[]> => {
   const provider: ChatStreamProvider = providerOverride ?? deps.provider;
   const ctx: TransformerContext = { assistant: deps.assistant };
@@ -233,16 +252,18 @@ export const generateAssistantOnce = async (
     const accumulator: MessageStreamAccumulator = new MessageStreamAccumulator(seedMessages);
     lastAccumulator = accumulator;
     lastFlushAt = 0;
-    try {
+    // D-071a:provider 调用闭包 — 视觉兜底重跑与首轮共用**同一 accumulator**
+    //   (GenerationHandler.kt:601-665:fallback 生成接续写入同一消息流)
+    const callProvider = async (msgs: UIMessage[]): Promise<void> => {
       if (useNonStream && provider.generateText !== undefined) {
-        const chunk: MessageChunk = await provider.generateText(internalMessages, streamOpts);
+        const chunk: MessageChunk = await provider.generateText(msgs, streamOpts);
         accumulator.append(chunk);
         if (deps.onUpdate !== undefined) {
           const snapshot: UIMessage[] = accumulator.snapshot();
           deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
         }
       } else {
-        await provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+        await provider.streamText(msgs, (chunk: MessageChunk): void => {
           accumulator.append(chunk);
           // D-063:节流检查移出 onUpdate 门(Android :519-526 不依赖 UI 监听者)
           const now: number = nowMs();
@@ -265,6 +286,11 @@ export const generateAssistantOnce = async (
           deps.onRawFlushSnapshot(accumulator.snapshot());
         }
       }
+    };
+    try {
+      // D-071a:内层视觉兜底(:601-665);不可兜底/兜底自身错误 → 外层重试循环
+      await runWithVisionFallback(
+        internalMessages, visionFallback, callProvider, deps.onRetryStatus);
       // 成功:状态清零(Android :787 processingStatus.value = null)
       if (deps.onRetryStatus !== undefined) deps.onRetryStatus(null);
       break;

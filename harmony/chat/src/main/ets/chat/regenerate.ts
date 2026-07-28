@@ -32,6 +32,8 @@ import {
   decideGenerationRetry, makeGenerationRetrySetting, RETRY_STATUS_TEMPLATE,
 } from './generation_retry.ts';
 import type { GenerationRetrySetting } from './generation_retry.ts';
+import { runWithVisionFallback } from './vision_fallback.ts';
+import type { VisionFallbackHook } from './vision_fallback.ts';
 
 // ===== 分支切换 =====
 
@@ -68,6 +70,8 @@ export interface RegenerateDeps {
   retrySetting?: GenerationRetrySetting;
   sleep?: (ms: number) => Promise<void>;
   onRetryStatus?: (status: string | null) => void;
+  // D-071a:模型是否支持图像输入(GenerationHandler.kt:431);true 时启用视觉兜底
+  modelSupportsImageInput?: boolean;
 }
 
 // ===== 再生基底(D-057 提取:runRegenerateAt 与 runRegenerateAtWithTools 共享) =====
@@ -116,7 +120,7 @@ export const runRegenerateAt = async (
   const target: MessageNode = conversation.messageNodes[nodeIndex];
   const priorConversation: Conversation = working;
   const baseMessages: UIMessage[] = currentMessages(priorConversation);
-  const ctx: TransformerContext = { assistant: deps.assistant };
+  const ctx: TransformerContext = { assistant: deps.assistant, processingStatus: deps.onRetryStatus };
 
   // 2. 组装 + input transforms(作用于发往 provider 的副本,不污染会话本体);
   //    D-055:prepareContextMessages 存在时引擎接管(压缩/编辑/截断),
@@ -132,7 +136,15 @@ export const runRegenerateAt = async (
       ? 0
       : (deps.contextMessageSize ?? 0),
   });
-  const internalMessages: UIMessage[] = applyInputTransformers(assembled, deps.inputTransformers, ctx);
+  const internalMessages: UIMessage[] = await applyInputTransformers(
+    assembled, deps.inputTransformers, ctx);
+  // D-071a:视觉兜底重建闭包(chat_turn 同语义,GenerationHandler.kt:613/:648)
+  const visionFallback: VisionFallbackHook | undefined =
+    deps.modelSupportsImageInput === undefined ? undefined : {
+      modelSupportsImageInput: deps.modelSupportsImageInput,
+      rebuildInternalMessages: (): Promise<UIMessage[]> => applyInputTransformers(
+        assembled, deps.inputTransformers, { ...ctx, forceImageToText: true }),
+    };
 
   // 3. provider 流式(重试见下;不可重试错误直接传播 — 对齐 runChatTurn;
   //    user 节点路径截断已持久化,与 Android 同序)
@@ -167,16 +179,18 @@ export const runRegenerateAt = async (
     const accumulator: MessageStreamAccumulator = new MessageStreamAccumulator(seed);
     lastAccumulator = accumulator;
     sawChunk = false;
-    try {
+    // D-071a:provider 调用闭包 — 视觉兜底重跑与首轮共用同一 accumulator
+    //   (chat_turn generateAssistantOnce 同构,GenerationHandler.kt:601-665)
+    const callProvider = async (msgs: UIMessage[]): Promise<void> => {
       if (useNonStream && deps.provider.generateText !== undefined) {
-        const chunk: MessageChunk = await deps.provider.generateText(internalMessages, streamOpts);
+        const chunk: MessageChunk = await deps.provider.generateText(msgs, streamOpts);
         sawChunk = true;
         accumulator.append(chunk);
         if (deps.onUpdate !== undefined) {
           deps.onUpdate(accumulator.snapshot());
         }
       } else {
-        await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+        await deps.provider.streamText(msgs, (chunk: MessageChunk): void => {
           sawChunk = true;
           accumulator.append(chunk);
           if (deps.onUpdate !== undefined) {
@@ -184,6 +198,11 @@ export const runRegenerateAt = async (
           }
         }, streamOpts);
       }
+    };
+    try {
+      // D-071a:内层视觉兜底;不可兜底/兜底自身错误 → 外层重试循环(chat_turn 同语义)
+      await runWithVisionFallback(
+        internalMessages, visionFallback, callProvider, deps.onRetryStatus);
       if (deps.onRetryStatus !== undefined) deps.onRetryStatus(null);
       break;
     } catch (e) {
