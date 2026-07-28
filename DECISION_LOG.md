@@ -1171,3 +1171,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
   - 开关/CRUD 失败:Android 无用户可见反馈 → hilog.warn(非静默,宪章条款)。
 - **未移植(P1 登记)**: Overview 导航页/Recall 开关页/Compaction 页(contextCompaction 开关)/AgentSoul 卡(agentSoulMarkdown 读写在 prefs 未移植)/记忆汇总卡('Amber 对你的了解',三组过滤器)/导入导出 UI(目录选择器,domain import-export 已备 D-085e)/toolbar '立即运行一次'(依附 workScheduler 调度环)/Compaction contextCompaction prefs 字段。
 - **验证**: chat tsc 干净 + 1030 测试(无新增——entry 侧切片)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-090 — agents.md / Soul 全链:默认准则 + prompt 构建 + 生成注入 + AgentSoul 卡
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: GenerationPrompts.kt:14-28(buildAgentSoulPrompt)/PreferencesStore.kt:157,272-300(agentSoulMarkdown 字段+默认值)/GenerationHandler.kt:715-724(静态块首槽位)/SettingAgentMemoryPage.kt:792-908(AgentSoulCard+编辑对话框)/SettingAgentMemoryVM.kt:190-194/values-zh/strings.xml:583-588
+- **背景**: Android 默认即将 DEFAULT_AGENT_SOUL_MARKDOWN 注入每次对话的 system 静态块首槽;鸿蒙 ChatTurnDeps.agentSoul(D-018 已留槽)从未传值 → 每会话缺一整段默认行为准则(core-loop 缺口,本切片补齐)。
+- **决策**:
+  1. `chat/agent_soul_prompt.ts`(TDD 5 测试):DEFAULT_AGENT_SOUL_MARKDOWN 逐字(Kotlin raw string 首尾换行属值,golden 锁定首尾);buildAgentSoulPrompt 逐字(trim → 空白 '';否则 '\n**AmberAgent Soul / agents.md**\n…<agents_md>\n{soul}\n</agents_md>\n')。默认文案引用 Android 专属工具(webview_open/terminal_*/officepro_* 等)——数据保真优先逐字,不改写。
+  2. `AgentRuntimePrefs.ets`:snapshot/JSON += agentSoulMarkdown(缺省→DEFAULT;显式空串保留=合法不注入意图,kotlinx 缺省语义)+ updateAgentSoulMarkdown 写回(raw 读-改-写,D-089 同策略)。
+  3. ChatPage 三处生成 deps(send :1430/regenerate :587/工具续跑 :1163)+= agentSoul: buildAgentSoulPrompt(snapshot.agentSoulMarkdown)——空白 → '' 被静态块 filter 自然滤除(GenerationHandler.kt:723 同语义)。
+  4. MemoryPage AgentSoul 卡(zh strings 逐字:title/desc/空预览/编辑提示/编辑标题/label):卡片点击 → 编辑 overlay(TextArea + 保存/取消);预览 maxLines 4 + 圆角边框盒;保存 → updateAgentSoulMarkdown → 快照回读。
+- **偏差/适配登记**: 编辑对话框 AlertDialog → 页内 overlay(D-089 同);保存失败 hilog.warn(Android 无反馈,非静默条款)。
+- **未移植(P1 登记)**: 记忆汇总卡('Amber 对你的了解'三组过滤器)/Overview-Recall-Compaction 子页/导入导出 UI(目录选择器)/toolbar 立即运行(workScheduler)。
+- **验证**: chat tsc 干净 + 1035 测试(+5)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

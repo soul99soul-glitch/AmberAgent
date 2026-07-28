@@ -639,6 +639,9 @@ export { upsertMemoryRecord } from './chat/memory_write.ts';
 // ===== D-085f:dream 子系统核心(Gate/Prompt/Planner/Applier) =====
 export { buildMemoryDreamPrompt } from './chat/memory_dream_prompt.ts';
 export {
+  buildAgentSoulPrompt, DEFAULT_AGENT_SOUL_MARKDOWN,
+} from './chat/agent_soul_prompt.ts';
+export {
   dreamPlanOnlyApplicable, isAnyDreamEnabled, isDreamMaintenanceEnabled,
   isDreamModelEnabled, makeMemoryDreamPlan, memoryDreamPlanHasChanges,
   memoryDreamPlanSummaryText, mergeDreamPlanWith, parseDreamModelPlanJson,

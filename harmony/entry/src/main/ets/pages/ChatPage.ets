@@ -51,6 +51,7 @@ import {
   RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, RecentChatItem, ConversationSummary,
   buildMemoryRecallPrompt, MemoryRecallRuntimeGate, createMemoryTools,
   runMemoryExtraction, MemoryWorkerModelResolution, memoryWorkerModelCandidates,
+  buildAgentSoulPrompt,
   toChatModel,
 } from '@amber/chat-domain';
 import {
@@ -586,6 +587,8 @@ struct ChatPage {
         return this.invalidateConvCompacts(conv.id, 'message_regenerated')
           .then((): Promise<Conversation> => runRegenerateAtWithTools(conv, nodeId, {
           assistant: rt.assistant,
+          // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
+          agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
           inputTransformers: this.buildInputTransformers(rt),
           // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
           modelSupportsImageInput: rt.modelSupportsImageInput,
@@ -1162,6 +1165,8 @@ struct ChatPage {
         }
         return runToolLoopContinuation(conv, {
           assistant: rt.assistant,
+          // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
+          agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
           inputTransformers: this.buildInputTransformers(rt),
           // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
           modelSupportsImageInput: rt.modelSupportsImageInput,
@@ -1429,6 +1434,9 @@ struct ChatPage {
         }
         const deps: ChatTurnDeps = {
           assistant: rt.assistant,
+          // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724;
+          //   buildAgentSoulPrompt 空白 → '' 自然滤除)
+          agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
           inputTransformers: this.buildInputTransformers(rt),
           // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
           modelSupportsImageInput: rt.modelSupportsImageInput,

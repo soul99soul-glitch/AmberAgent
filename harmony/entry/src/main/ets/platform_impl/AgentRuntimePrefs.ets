@@ -8,7 +8,7 @@
 import { i18n } from '@kit.LocalizationKit';
 import type { KeyValueStore, MemoryRecallSetting } from '@amber/chat-domain';
 import { DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
-import { DEFAULT_MEMORY_RECALL_SETTING } from '@amber/chat-domain';
+import { DEFAULT_AGENT_SOUL_MARKDOWN, DEFAULT_MEMORY_RECALL_SETTING } from '@amber/chat-domain';
 
 export const AGENT_RUNTIME_KEY: string = 'agent_runtime';
 
@@ -46,6 +46,8 @@ export interface AgentRuntimeSnapshot {
   enableLongTermMemory: boolean;
   // D-085b:PreferencesStore.kt:174 默认 MemoryRecallSetting(){12,2000,false}
   memoryRecall: MemoryRecallSetting;
+  // D-090:PreferencesStore.kt:157 默认 DEFAULT_AGENT_SOUL_MARKDOWN(:272-300)
+  agentSoulMarkdown: string;
   // D-085d:MemoryExtractor.kt:45,69 消费
   memoryWorker: MemoryWorkerGateSnapshot;
 }
@@ -75,6 +77,7 @@ interface MemoryWorkerJson {
 }
 
 interface AgentRuntimeJson {
+  agentSoulMarkdown?: string;
   enableTimeReminder?: boolean;
   enableRecentChatsReference?: boolean;
   enableCoreMemory?: boolean;
@@ -97,6 +100,7 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   enableShortTermMemory: true,
   enableLongTermMemory: true,
   memoryRecall: defaultMemoryRecall(),
+  agentSoulMarkdown: DEFAULT_AGENT_SOUL_MARKDOWN,
   memoryWorker: {
     enabled: true, extractionEnabled: true, maxDailyRuns: 8,
     dreamMaintenanceEnabled: true, dreamModelEnabled: false,
@@ -155,6 +159,9 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
       enableShortTermMemory: parsed.enableShortTermMemory !== false,
       enableLongTermMemory: parsed.enableLongTermMemory !== false,
       memoryRecall: parseMemoryRecall(parsed.memoryRecall),
+      // kotlinx 缺省→默认(:157);用户显式空串保留(空串 → 不注入,合法意图)
+      agentSoulMarkdown: typeof parsed.agentSoulMarkdown === 'string'
+        ? parsed.agentSoulMarkdown : DEFAULT_AGENT_SOUL_MARKDOWN,
       memoryWorker: parseMemoryWorker(parsed.memoryWorker),
     };
   } catch {
@@ -212,6 +219,25 @@ export const updateMemoryWorkerToggles = async (
     worker.runOnlyOnIdle = patch.runOnlyOnIdle;
   }
   root.memoryWorker = worker;
+  await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
+  return loadAgentRuntimeSnapshot(kv);
+};
+
+// D-090:agentSoulMarkdown 写回(VM :190-194 updateAgentRuntime {
+//   copy(agentSoulMarkdown = value) };Page :792-791 AgentSoulCard onSave)
+export const updateAgentSoulMarkdown = async (
+  kv: KeyValueStore, value: string,
+): Promise<AgentRuntimeSnapshot> => {
+  const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
+  let root: AgentRuntimeJson = {};
+  if (raw !== null) {
+    try {
+      root = JSON.parse(raw) as AgentRuntimeJson;
+    } catch {
+      root = {};
+    }
+  }
+  root.agentSoulMarkdown = value;
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
 };

@@ -37,7 +37,7 @@ import type { MemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
 import { getMemoryDreamPlanStore, getMemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import {
-  loadAgentRuntimeSnapshot, updateMemoryWorkerToggles,
+  loadAgentRuntimeSnapshot, updateAgentSoulMarkdown, updateMemoryWorkerToggles,
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
@@ -97,6 +97,14 @@ const TEXT_LONG_INFO_BODY: string =
 const TEXT_CORE_INFO_TITLE: string = '核心记忆是什么？';
 const TEXT_CORE_INFO_BODY: string =
   '核心记忆、短期记忆和长期记忆是并列的三类记忆。核心记忆优先级最高，适合手动维护稳定偏好、身份设定和长期规则。';
+// agents.md / Soul 卡(values-zh/strings.xml:583-588 逐字)
+const TEXT_SOUL_TITLE: string = 'agents.md / Soul';
+const TEXT_SOUL_DESC: string =
+  '这段应用级 Markdown 行为准则会在每次对话前注入到 System Prompt 中。';
+const TEXT_SOUL_LABEL: string = '系统行为 Markdown';
+const TEXT_SOUL_EMPTY_PREVIEW: string = '还没有写入 agents.md 行为准则。';
+const TEXT_SOUL_EDIT_HINT: string = '点击编辑 agents.md';
+const TEXT_SOUL_EDIT_TITLE: string = '编辑 agents.md';
 
 @Entry
 @Component
@@ -120,6 +128,10 @@ struct MemoryPage {
   // 编辑/新增对话框(Page :127-149;id==0 → 新增核心记忆)
   @State editingMemory: AssistantMemory | null = null;
   @State editDraft: string = '';
+  // AgentSoul 卡(Page :792-791 AgentSoulCard;D-090)
+  @State agentSoul: string = '';
+  @State showSoulEditor: boolean = false;
+  @State soulDraft: string = '';
 
   aboutToAppear(): void {
     this.refresh();
@@ -140,6 +152,7 @@ struct MemoryPage {
         this.dreamMaintenanceEnabled = s.memoryWorker.dreamMaintenanceEnabled;
         this.dreamModelEnabled = s.memoryWorker.dreamModelEnabled;
         this.runOnlyOnIdle = s.memoryWorker.runOnlyOnIdle;
+        this.agentSoul = s.agentSoulMarkdown;
       });
     const lib: MemoryLibraryOps = getMemoryLibraryOps();
     lib.listBucket(MEMORY_BUCKET_GLOBAL).then((l: AssistantMemory[]): void => {
@@ -330,6 +343,23 @@ struct MemoryPage {
     });
   }
 
+  // ===== D-090:AgentSoul 卡(Page :792-791;VM :190-194)=====
+
+  private startEditSoul(): void {
+    this.soulDraft = this.agentSoul;
+    this.showSoulEditor = true;
+  }
+
+  // VM :191-193 onSave → updateAgentRuntime { copy(agentSoulMarkdown = value) }
+  private confirmEditSoul(): void {
+    this.showSoulEditor = false;
+    updateAgentSoulMarkdown(getChatKvStore(), this.soulDraft)
+      .then((s: AgentRuntimeSnapshot): void => {
+        this.agentSoul = s.agentSoulMarkdown;
+      })
+      .catch((e: Error): void => logMemoryDreamOpFailure('saveSoul', e));
+  }
+
   private lowConfidenceCount(): number {
     return this.candidates.filter(
       (c: MemoryCandidate): boolean =>
@@ -425,6 +455,69 @@ struct MemoryPage {
     }
     .width('100%').alignItems(HorizontalAlign.Start)
     .padding(16).backgroundColor(SURFACE).borderRadius(12)
+  }
+
+  // ===== D-089:worker 开关组(Page :445-514)=====
+
+  // ===== D-090:AgentSoul 卡(Page :799-872)— 点击卡片进入编辑;
+  //   预览 maxLines 4 + 圆角边框盒,空白 → 空预览文案
+  @Builder
+  soulCard() {
+    Column({ space: 10 }) {
+      Text(TEXT_SOUL_TITLE)
+        .fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK)
+      Text(TEXT_SOUL_DESC)
+        .fontSize(12).fontColor(INK3)
+      Text(this.agentSoul.trim().length > 0 ? this.agentSoul : TEXT_SOUL_EMPTY_PREVIEW)
+        .fontSize(12)
+        .fontColor(this.agentSoul.trim().length > 0 ? INK : INK3)
+        .maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+        .padding(14)
+        .border({ width: 1, color: LINE, radius: 16 })
+      Text(TEXT_SOUL_EDIT_HINT)
+        .fontSize(12).fontColor(ACCENT)
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+    .padding(16).backgroundColor(SURFACE).borderRadius(12)
+    .onClick((): void => this.startEditSoul())
+  }
+
+  // Page :874-908 编辑对话框(TextField minLines 8;保存/取消)
+  @Builder
+  soulEditorOverlay() {
+    Column() {
+      Column({ space: 10 }) {
+        Text(TEXT_SOUL_EDIT_TITLE)
+          .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+        TextArea({ text: this.soulDraft, placeholder: TEXT_SOUL_LABEL })
+          .fontSize(13)
+          .height(240)
+          .backgroundColor(BG)
+          .onChange((v: string): void => {
+            this.soulDraft = v;
+          })
+        Row({ space: 8 }) {
+          Blank()
+          Text('取消')
+            .fontSize(13).fontColor(INK2)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => {
+              this.showSoulEditor = false;
+            })
+          Text('保存')
+            .fontSize(13).fontColor(ACCENT)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => this.confirmEditSoul())
+        }
+        .width('100%')
+      }
+      .width('86%')
+      .padding(16).backgroundColor(SURFACE).borderRadius(16)
+    }
+    .width('100%').height('100%')
+    .justifyContent(FlexAlign.Center)
+    .backgroundColor('#66000000')
   }
 
   // ===== D-089:worker 开关组(Page :445-514)=====
@@ -656,6 +749,7 @@ struct MemoryPage {
         } else {
           Scroll() {
             Column({ space: 16 }) {
+              this.soulCard()
               this.workerToggleCard()
               this.dreamReviewCard()
 
@@ -703,6 +797,9 @@ struct MemoryPage {
 
       if (this.editingMemory !== null) {
         this.editOverlay()
+      }
+      if (this.showSoulEditor) {
+        this.soulEditorOverlay()
       }
       if (this.showEventsDialog) {
         this.eventsOverlay()
