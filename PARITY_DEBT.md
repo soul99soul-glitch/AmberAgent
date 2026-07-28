@@ -16,6 +16,8 @@
 
 - **2026-07-28 / chat 流式合并（内部不一致，非鸿蒙偏差）**：Android 两条合并路径对 reasoning `finishedAt` 处理不一致 —— `MessageStreamAccumulator.appendReasoning`（主路径）在 delta reasoning 非空时**采用 delta 的 finishedAt**（可为 null，即覆盖已有值）；`Message.kt appendChunk`（不可变变体）在相同情形下**强制置 null**。鸿蒙 chat-domain 两条路径均按 Android 各自语义忠实实现（stream_accumulator.ts / 测试锁定）。需人工确认哪条为权威语义；若统一，改其中一条并更新测试。
 
+- **2026-07-28 / RegexOutputTransformer 的 visual 标志（已核实,忠实保留,非鸿蒙偏差）**：Android `RegexOutputTransformer.transformMessage` 在 `visualTransform`/`visualTransformTail` 内对 Text 与 Reasoning 均硬编码 `visual = false`（RegexOutputTransformer.kt:47,53），即 visual 变换命中的是 `visualOnly = false` 的规则；`visualOnly = true` 的规则不经此 transformer（由渲染层另行应用）。集成测试 integration_chat_loop.test.ts 以源码锚点锁定该口径。
+
 ## 已消除
 
 （暂无）
