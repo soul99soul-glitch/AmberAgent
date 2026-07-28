@@ -19,6 +19,9 @@ export interface MemoryWorkerGateSnapshot {
   enabled: boolean;
   extractionEnabled: boolean;
   maxDailyRuns: number;
+  // D-085f:MemoryModels.kt:144-145(dream 门;MemoryWorkerDreamGate 消费)
+  dreamMaintenanceEnabled: boolean;
+  dreamModelEnabled: boolean;
 }
 
 export interface AgentRuntimeSnapshot {
@@ -45,6 +48,11 @@ interface MemoryWorkerJson {
   enabled?: boolean;
   extractionEnabled?: boolean;
   maxDailyRuns?: number;
+  dreamMaintenanceEnabled?: boolean;
+  dreamModelEnabled?: boolean;
+  // 旧 Daydream 开关别名(SettingsAggregator.kt:542-553 迁移:
+  //   dreamModelEnabled ||= dreamEnabled,写回时 dreamEnabled=false)
+  dreamEnabled?: boolean;
 }
 
 interface AgentRuntimeJson {
@@ -70,7 +78,10 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   enableShortTermMemory: true,
   enableLongTermMemory: true,
   memoryRecall: defaultMemoryRecall(),
-  memoryWorker: { enabled: true, extractionEnabled: true, maxDailyRuns: 8 },
+  memoryWorker: {
+    enabled: true, extractionEnabled: true, maxDailyRuns: 8,
+    dreamMaintenanceEnabled: true, dreamModelEnabled: false,
+  },
 });
 
 const parseMemoryRecall = (raw: MemoryRecallJson | undefined): MemoryRecallSetting => {
@@ -89,6 +100,10 @@ const parseMemoryWorker = (raw: MemoryWorkerJson | undefined): MemoryWorkerGateS
   extractionEnabled: raw?.extractionEnabled !== false,
   // 默认 8(:152);非 number → 默认
   maxDailyRuns: typeof raw?.maxDailyRuns === 'number' ? raw.maxDailyRuns : 8,
+  // 默认 true(:144);仅显式 false 关
+  dreamMaintenanceEnabled: raw?.dreamMaintenanceEnabled !== false,
+  // 默认 false(:145)+ 旧别名迁移(dreamEnabled=true → true)
+  dreamModelEnabled: raw?.dreamModelEnabled === true || raw?.dreamEnabled === true,
 });
 
 // AgentPrefs.kt:47-51 — 缺失/解析失败 → 默认(enableTimeReminder=false)

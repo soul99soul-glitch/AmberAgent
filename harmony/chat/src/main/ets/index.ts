@@ -635,3 +635,17 @@ export type {
   MemoryExportFs, MemoryExportResult, MemoryImportExportDeps, MemoryImportResult,
 } from './chat/memory_import_export.ts';
 export { upsertMemoryRecord } from './chat/memory_write.ts';
+
+// ===== D-085f:dream 子系统核心(Gate/Prompt/Planner/Applier) =====
+export { buildMemoryDreamPrompt } from './chat/memory_dream_prompt.ts';
+export {
+  dreamPlanOnlyApplicable, isAnyDreamEnabled, isDreamMaintenanceEnabled,
+  isDreamModelEnabled, makeMemoryDreamPlan, memoryDreamPlanHasChanges,
+  memoryDreamPlanSummaryText, mergeDreamPlanWith, parseDreamModelPlanJson,
+  planDreamMaintenance, runMemoryDreamApply, runMemoryDreamPlan,
+} from './chat/memory_dream.ts';
+export type {
+  MemoryDaydreamModelResolution, MemoryDreamApplierDeps, MemoryDreamPlan,
+  MemoryDreamPlannerDeps, MemoryDreamWorkerGate, MemoryMergeSuggestion,
+  MemorySupersedeSuggestion,
+} from './chat/memory_dream.ts';

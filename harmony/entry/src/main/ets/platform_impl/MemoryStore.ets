@@ -292,3 +292,59 @@ export const getMemoryImportExportDeps = (): MemoryImportExportDeps => ({
   getRecentEvents,
   upsertRecord,
 });
+
+// ===== D-085f:dream 存储面 =====
+
+// getPendingCandidates(MemoryCandidateDAO :19-20)— status='pending' ORDER created_at DESC
+const getPendingCandidates = async (): Promise<MemoryCandidate[]> => {
+  const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
+  return all.filter((c: MemoryCandidate): boolean => c.status === 'pending').reverse();
+};
+
+// getAllCandidates(DAO :22-23)— ORDER created_at DESC(文件为时间升序 → 反转)
+const getAllCandidates = async (): Promise<MemoryCandidate[]> => {
+  const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
+  return [...all].reverse();
+};
+
+// updateCandidate(MemoryRepository.kt:174-176)— copy(updatedAt=now) 后 update;
+//   Room @Update 未命中 = 0 行(no-op)
+const updateCandidate = (candidate: MemoryCandidate): Promise<void> =>
+  enqueueWrite(async (): Promise<void> => {
+    const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
+    const index: number = all.findIndex((c: MemoryCandidate): boolean => c.id === candidate.id);
+    if (index < 0) return;
+    const updated: MemoryCandidate = {
+      id: candidate.id, content: candidate.content, scope: candidate.scope,
+      kind: candidate.kind, sourceConversationId: candidate.sourceConversationId,
+      sourceMessageIds: candidate.sourceMessageIds, expiresAt: candidate.expiresAt,
+      confidence: Math.min(1, Math.max(0, candidate.confidence)), reason: candidate.reason,
+      sensitive: candidate.sensitive, status: candidate.status,
+      createdAt: candidate.createdAt, updatedAt: Date.now(),
+    };
+    const next: MemoryCandidate[] = [...all];
+    next[index] = updated;
+    await writeJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE), next);
+  });
+
+export interface MemoryDreamStoreOps {
+  getAllRecords: () => Promise<MemoryRecord[]>;
+  getPendingCandidates: () => Promise<MemoryCandidate[]>;
+  getAllCandidates: () => Promise<MemoryCandidate[]>;
+  upsertRecord: (record: MemoryRecord) => Promise<MemoryRecord>;
+  addMemory: (params: MemoryAddParams) => Promise<MemoryRecord>;
+  updateCandidate: (candidate: MemoryCandidate) => Promise<void>;
+  addEvent: (event: MemoryEvent) => Promise<void>;
+}
+
+// runMemoryDreamPlan/runMemoryDreamApply 的存储面 deps
+//   (模型解析/generateText/调度触发随 dream 调度切片与设置面,P1 登记)
+export const getMemoryDreamStoreOps = (): MemoryDreamStoreOps => ({
+  getAllRecords: readAll,
+  getPendingCandidates,
+  getAllCandidates,
+  upsertRecord,
+  addMemory,
+  updateCandidate,
+  addEvent,
+});

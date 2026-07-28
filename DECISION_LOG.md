@@ -1067,3 +1067,20 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 +9(chat HAR 952→961):encode 键序/转义/Float 文本/可选行;decode 往返/缺分隔抛错/缺时间 now/非法 confidence/同键覆盖;fileName slug/48 截断/空→memory/resolveRoot;exportTo 目录/manifest 键序字符串值/ndjson 声明序/结果计数;importFrom 匹配沿用 id/全新 0/嵌套规则;upsertRecord 三路径+实体映射;事件 JSON null 显式。
 
 ### 至此 memory/ 目录 19 文件完成 14;残余:dream 子系统 5 文件(Planner/Applier/Scheduler/Notifier/PlanStore + DreamGate 12 行)= D-085f(P1)。
+
+## D-085f — dream 子系统核心(Planner/Applier/Gate/Prompt)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: MemoryDreamPlanner.kt(320)/MemoryDreamApplier.kt(189)/MemoryDreamPlanStore.kt(summary)/MemoryWorkerDreamGate.kt(12)/MemoryDreamPrompt.kt(全文)
+- **决策**:
+  1. `chat/memory_dream_prompt.ts`: buildMemoryDreamPrompt 逐字(模板 + `- #id [scope/kind] content` 行)。
+  2. `chat/memory_dream.ts`: MemoryDreamPlan 模型 + makeMemoryDreamPlan/hasChanges(notes 不计)/summaryText(MemoryDreamPlanStore.kt:30-33 逐字);MemoryDreamWorkerGate 三谓词;planDreamMaintenance(过期归档/重复组 normalize+组排序 pinned>long_term>confidence>updatedAt+逐字 reason/promote 0.82+lastUsedAt 门/噪声候选/4 中文 notes,note 用 distinct 前 size Planner.kt:183);parseDreamModelPlanJson(fence 剥离+{} 子串+id 集校验+Kotlin getter 抛错+notes take240/take6+confidence ?:0.7);mergeDreamPlanWith(集合键去重 sorted-join,takes 12/24/48/48/12/12);runMemoryDreamPlan(local+模型 runCatching→null,merge,DREAM_PLANNED source merged/model/maintenance/none 逐字);dreamPlanOnlyApplicable(supersede 五门/merge managed+superseded 排除+managedCompare 重定向,duplicates 保 candidates 原序 Applier.kt:141-143/promote/archive 过滤);runMemoryDreamApply(无变更早退不打 DREAM_APPLIED,merge trim>=8 回退/promote '__long_term__'+expiresAt null/supersede firstNotNull 会话+distinct 列表/ignore 候选 status 'ignored',全部事件消息逐字)。
+  3. entry: AgentRuntimePrefs memoryWorker += dreamMaintenanceEnabled(默认 true)/dreamModelEnabled(`raw?.dreamModelEnabled === true || raw?.dreamEnabled === true` 旧 Daydream 别名迁移,SettingsAggregator.kt:542-553);MemoryStore getPendingCandidates(status='pending',created_at DESC=反转)/getAllCandidates(DESC)/updateCandidate(updatedAt=Date.now(),MemoryRepository.kt:175)+ getMemoryDreamStoreOps 聚合。
+- **偏差登记**:
+  - resolveDaydreamModel(Planner.kt:102-120 任务模型链 daydreamModelId/daydreamFollowCompressModel/modelId/followCompressModel/chatModelId)→ deps.resolveDaydreamModel;鸿蒙任务模型设置未移植,entry 以 chat 模型顶替(D-085d 同类,任务模型设置面 P1 闭合)。
+  - daydreamReasoningLevel(默认 HIGH)→ entry generateText 用 chat 默认 reasoning(登记)。
+  - 模型/provider 空三种 null 返回合并为 unavailable(Android 无区分消费)。
+  - JSON 解析失败文本 = JS SyntaxError(仅影响 runCatching 吞掉路径)。
+- **未移植(P1 登记)**: MemoryDreamPlanStore 持久化(PersistedMemoryDreamPlan+DAO)、MemoryDreamScheduler/Worker/Notifier/RunCoordinator(WorkManager/notification 平台调度)、手动触发 UI、ChatPage 触发接线。
+- **验证**: chat tsc 干净 + 991 测试(+30)/deepread tsc + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
