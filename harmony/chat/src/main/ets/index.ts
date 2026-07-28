@@ -388,6 +388,17 @@ export {
 } from './chat/mcp_config_serialize.ts';
 export { parseMcpServersFromJson } from './chat/mcp_import.ts';
 
+// D-117:MCP JSON-RPC client 核(kotlin-sdk 0.8.4 Protocol/Client 使用面子集)
+export {
+  McpClient, McpError, McpTimeoutError,
+  JSONRPC_VERSION, MCP_LATEST_PROTOCOL_VERSION, MCP_SUPPORTED_PROTOCOL_VERSIONS,
+  MCP_DEFAULT_REQUEST_TIMEOUT_MS,
+  MCP_ERROR_CONNECTION_CLOSED, MCP_ERROR_REQUEST_TIMEOUT, MCP_ERROR_METHOD_NOT_FOUND,
+} from './chat/mcp_protocol.ts';
+export type {
+  McpTransport, McpClientInfo, McpContentBlock, McpCallToolResult, McpServerTool,
+} from './chat/mcp_protocol.ts';
+
 export {
   makeProviderModel, makeBalanceOption,
   makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,

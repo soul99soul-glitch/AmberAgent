@@ -1607,3 +1607,24 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: MCP 子系统配置面(Settings.kt:101 字段承载)。
 - **未移植(P1 登记)**: SDK Protocol/Client 子集(initialize 握手/tools list·call,D-117);SseClientTransport/StreamableHttpClientTransport(D-118);McpManager 513 行(D-119);createRunTools mcp 组+mcp_call_tool+MCP 设置面 UI(D-120)。
 - **验证**: chat tsc 干净 + 1144 测试(+15)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-117 — MCP 切片②:JSON-RPC client 核(kotlin-sdk 0.8.4 Protocol/Client 使用面子集)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: io.modelcontextprotocol:kotlin-sdk **0.8.4**(libs.versions.toml:150)shared/Protocol.kt + client/Client.kt + types/jsonRpc.kt/McpException.kt/methods.kt/tools.kt 中 McpManager 使用面(connect/initialize 握手/listTools/callTool/close + 入站分发)
+- **背景**: D-116 落地配置面;client 核为 SDK 外部依赖,amber 自有代码(McpManager/transport)忠实以 SDK 行为为基准。SDK 源取自 GitHub tag 0.8.4(jar 常量提取证实 LATEST=2025-06-18)。
+- **决策**:
+  1. chat HAR mcp_protocol.ts(+16 测试):
+     - **initialize 握手逐字**(Client.kt:172-211):请求帧 {id(32hex 无连字符 — Uuid.random().toHexString),method,params{protocolVersion:'2025-06-18',capabilities:{},clientInfo},jsonrpc:'2.0'(尾键,kotlinx 声明序)};SUPPORTED=[2024-11-05,2025-03-26,2025-06-18] 校验失败 → 'Server's protocol version is not supported: <v>' + close;成功后 serverCapabilities/serverVersion/serverInstructions 沉淀 + notifications/initialized(无 params 键,explicitNulls=false);catch → close + 映射(McpError/McpTimeoutError 原样,其余 → 'Error connecting to transport: <msg>');**super.connect/transport.start 在握手 try 之外 — start 失败原样传播**(测试证实)。
+     - **request quirk 逐字**(Protocol.kt:503-520):withTimeout **仅裹 send**,响应无限等;超时 → CancelledNotification{requestId,reason='MCP error -32001: Request timed out'} + 抛 'Timed out waiting for <ms> ms';非超时 send 失败 → 原样传播且 handler 残留(SDK 同,doClose 才结算)。
+     - **strict capabilities 默认 true**(ClientOptions:70-73):tools/call·tools/list 于 serverCapabilities.tools 缺失时抛 'Server does not support tools (required for ToolsCall/ToolsList)'(枚举名);initialize/ping 豁免。
+     - onResponse(Protocol.kt:368-399):未知 id → 协议级 onError 'Received a response for an unknown message ID: <json>';error → McpError(code,message,data),**message='MCP error <code>: <msg>' 逐字**(McpException.kt)。
+     - 入站:request 无 handler → METHOD_NOT_FOUND(-32601) 回复 'Server does not support <method>';notifications/progress → 'Received a progress notification for an unknown token: <json>';空消息 → Unit;分发序 response→request→notification→error→empty(:246-256)。
+     - doClose(:261-273):挂起全数 'MCP error -32000: Connection closed' + onClose;close()=transport?.close()。
+     - listTools:ToolSchema.toSchema(properties ?: {}, required 原样 — McpManager.kt:511-513);callTool:content text/image/other 三型 + isError/structuredContent;DEFAULT 60s(McpManager 传 120s)。
+     - McpTransport 接口 = shared/Transport.kt 六成员(start/send/close/onClose/onError/onMessage)。
+- **偏差/适配登记**: JS 工件两处(不改变可观察行为)— send 完成后 clearTimeout(协程 withTimeout 取消倒计时等价;不清则 Node 事件循环挂 60/120s);SDK 语义残留 handler 的 done 预挂 noop catch 防 unhandledRejection 噪音。协议级 onError 默认仅 Kotlin Log → 注入 hook 默认 noop(日志适配同例)。
+- **关闭**: MCP client 协议核(初始化/工具列出/调用/关闭)。
+- **未移植(P1 登记)**: SseClientTransport/StreamableHttpClientTransport(D-118);McpManager 513 行(D-119);createRunTools mcp 组+mcp_call_tool+MCP 设置面 UI(D-120)。
+- **验证**: chat tsc 干净 + 1160 测试(+16)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧三修(实现无改):connectWithTools 回应时序/async 抛=rejects/start 失败期望(super.connect 在 try 外,SDK 证实)+ FakeTransport 受理后再挂起。
