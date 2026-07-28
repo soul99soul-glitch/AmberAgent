@@ -162,6 +162,7 @@ export const createOpenAIChatApi = (deps: OpenAIChatApiDeps): OpenAIChatApi => {
 };
 
 // 适配 chat_turn 的 ChatStreamProvider(params 由调用方按会话供给)
+// D-040:generateText 透传 → assistant.streamOutput=false 走非流式单次补全
 export const asChatStreamProvider = (
   api: OpenAIChatApi,
   paramsFor: () => TextGenerationParams,
@@ -170,6 +171,9 @@ export const asChatStreamProvider = (
     messages: UIMessage[], onChunk: (chunk: MessageChunk) => void, opts?: StreamOpts,
   ): Promise<void> =>
     api.streamText(messages, paramsFor(), onChunk,
+      opts?.signal !== undefined ? { signal: opts.signal } : undefined),
+  generateText: (messages: UIMessage[], opts?: StreamOpts): Promise<MessageChunk> =>
+    api.generateText(messages, paramsFor(),
       opts?.signal !== undefined ? { signal: opts.signal } : undefined),
 });
 

@@ -111,14 +111,26 @@ export const runRegenerateAt = async (
   const streamOpts: StreamOpts | undefined = deps.abortSignal !== undefined
     ? { signal: deps.abortSignal }
     : undefined;
+  // D-040:streamOutput=false 且 provider 支持 → 非流式单次补全(chat_turn 同语义)
+  const useNonStream: boolean = deps.assistant.streamOutput === false
+    && deps.provider.generateText !== undefined;
   try {
-    await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+    if (useNonStream && deps.provider.generateText !== undefined) {
+      const chunk: MessageChunk = await deps.provider.generateText(internalMessages, streamOpts);
       sawChunk = true;
       accumulator.append(chunk);
       if (deps.onUpdate !== undefined) {
         deps.onUpdate(accumulator.snapshot());
       }
-    }, streamOpts);
+    } else {
+      await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+        sawChunk = true;
+        accumulator.append(chunk);
+        if (deps.onUpdate !== undefined) {
+          deps.onUpdate(accumulator.snapshot());
+        }
+      }, streamOpts);
+    }
   } catch (e) {
     // abort(停止生成):部分快照照常终态化入列(chat_turn D-035 同语义);
     // 其余错误传播(user 路径截断保持已持久化,Android 同序)

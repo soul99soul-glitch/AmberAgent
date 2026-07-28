@@ -38,6 +38,7 @@ struct ChatAssistantsPage {
   @State editMaxTokens: string = '';
   @State editContextSize: string = '';
   @State editReasoning: ReasoningLevel = 'auto';
+  @State editStreamOutput: boolean = true;
   @State showEditor: boolean = false;
 
   aboutToAppear(): void {
@@ -60,6 +61,7 @@ struct ChatAssistantsPage {
     this.editMaxTokens = a.maxTokens !== null ? String(a.maxTokens) : '';
     this.editContextSize = a.contextMessageSize > 0 ? String(a.contextMessageSize) : '';
     this.editReasoning = a.reasoningLevel;
+    this.editStreamOutput = a.streamOutput;
     this.showEditor = true;
   }
 
@@ -72,6 +74,7 @@ struct ChatAssistantsPage {
     this.editMaxTokens = '';
     this.editContextSize = '';
     this.editReasoning = 'auto';
+    this.editStreamOutput = true;
     this.showEditor = true;
   }
 
@@ -118,6 +121,7 @@ struct ChatAssistantsPage {
             maxTokens: this.parsePositiveIntOrNull(this.editMaxTokens),
             contextMessageSize: this.parseIntOrZero(this.editContextSize),
             reasoningLevel: this.editReasoning,
+            streamOutput: this.editStreamOutput,
           });
         });
       } else {
@@ -129,6 +133,7 @@ struct ChatAssistantsPage {
           maxTokens: this.parsePositiveIntOrNull(this.editMaxTokens),
           contextMessageSize: this.parseIntOrZero(this.editContextSize),
           reasoningLevel: this.editReasoning,
+          streamOutput: this.editStreamOutput,
         })];
       }
       saveAssistants(getChatKvStore(), next).then((): void => {
@@ -286,6 +291,15 @@ struct ChatAssistantsPage {
                 .margin({ right: 8, bottom: 8 })
                 .onClick((): void => { this.editReasoning = level; })
             }, (level: ReasoningLevel): string => level)
+          }
+          .width('100%').margin({ bottom: 8 })
+          // 流式输出开关(D-040,Android AssistantBasicPage.kt:459-463)
+          Row() {
+            Text('流式输出(关闭则整段返回)')
+              .fontSize(13).fontColor(INK2)
+            Blank()
+            Toggle({ type: ToggleType.Switch, isOn: this.editStreamOutput })
+              .onChange((isOn: boolean): void => { this.editStreamOutput = isOn; })
           }
           .width('100%').margin({ bottom: 8 })
           Row() {

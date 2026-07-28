@@ -40,6 +40,11 @@ export interface ChatStreamProvider {
   streamText(
     messages: UIMessage[], onChunk: (chunk: MessageChunk) => void, opts?: StreamOpts,
   ): Promise<void>;
+  // 非流式单次补全(D-040):assistant.streamOutput=false 时优先调用
+  //   (Android GenerationHandler.kt:255 stream = assistant.streamOutput →
+  //   ChatCompletionsAPI.generateText);未实现时回退流式(Port 可选,
+  //   Android provider 接口双实现恒在)
+  generateText?(messages: UIMessage[], opts?: StreamOpts): Promise<MessageChunk>;
 }
 
 // 会话持久化 Port(真机 adapter 走 RDB/文件;测试用 memory 实现)
@@ -131,18 +136,31 @@ export const runChatTurn = async (
   const streamOpts: StreamOpts | undefined = deps.abortSignal !== undefined
     ? { signal: deps.abortSignal }
     : undefined;
+  // D-040:streamOutput=false 且 provider 支持 → 非流式单次补全(Android
+  //   GenerationHandler.kt:255);chunk 以 message 形式进同一 accumulator
+  const useNonStream: boolean = deps.assistant.streamOutput === false
+    && deps.provider.generateText !== undefined;
   try {
-    await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+    if (useNonStream && deps.provider.generateText !== undefined) {
+      const chunk: MessageChunk = await deps.provider.generateText(internalMessages, streamOpts);
       accumulator.append(chunk);
       if (deps.onUpdate !== undefined) {
-        const now: number = nowMs();
-        if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
-          lastFlushAt = now;
-          const snapshot: UIMessage[] = accumulator.snapshot();
-          deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
-        }
+        const snapshot: UIMessage[] = accumulator.snapshot();
+        deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
       }
-    }, streamOpts);
+    } else {
+      await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+        accumulator.append(chunk);
+        if (deps.onUpdate !== undefined) {
+          const now: number = nowMs();
+          if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
+            lastFlushAt = now;
+            const snapshot: UIMessage[] = accumulator.snapshot();
+            deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
+          }
+        }
+      }, streamOpts);
+    }
   } catch (e) {
     // abort(停止生成):部分快照照常终态化入列(Android checkpoint force 语义);
     // 其余错误传播(D-012)

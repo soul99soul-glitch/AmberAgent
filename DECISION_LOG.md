@@ -387,3 +387,13 @@
   - **链路核实(无新逻辑)**:mergeCustomParams(context_assembly.ts:105-110)取 assistant.topP;resolveSessionDefaults(:82-94)maxTokens 回退链 assistant → 组默认 → null;openai_request.ts:389-393 仅非 null 时写 temperature/top_p/max_tokens(MiMo 走 max_completion_tokens)。编辑即生效,无需 provider 侧改动。
   - wire round-trip 已由 D-016 assistant_serialize 测试字节级锁定;参数合并/回退由 context_assembly.test.ts 锁定 → 本切片不新增领域测试(entry-only)。
 - **可逆性**:纯增项;不填时行为与 D-027 完全一致(全 null)。
+
+## D-040（L0，2026-07-28）非流式输出：streamOutput=false → generateText 单次补全
+
+- **背景**：Android AssistantBasicPage.kt:459-463 有 streamOutput 开关;GenerationHandler.kt:255 `stream = assistant.streamOutput` — false 时走 ChatCompletionsAPI.generateText(非 SSE 单次补全)。鸿蒙 generateText(D-015)已备但无路由 → streamOutput=false 无效果。
+- **决定**：
+  - **ChatStreamProvider 新增可选 generateText**(Port 可选;Android provider 接口双实现恒在,缺失时回退流式——登记为实现选择,非偏差:语义降级方向安全)。
+  - **chat_turn/runRegenerateAt 双路径路由(TDD 6 测试,stream_output.test.ts)**:assistant.streamOutput=false 且 generateText 存在 → 单次补全,chunk 以 message 形式进同一 accumulator(replaceActive 语义,stream_accumulator.ts:264-293 既有);abort/finalize/persist 语义与流式完全一致(复用同一 try/catch 分叉);signal 透传 generateText opts(StreamOpts 复用)。
+  - **asChatStreamProvider 透传 generateText** → OpenAIChatApi.generateText(非流式请求 + 单 chunk 解析,D-015 既有)。
+  - **编辑器新增流式输出 Switch**(Android 同语义:默认 true;关闭则整段返回)。
+- **可逆性**:generateText 可选,streamOutput 默认 true → 不传/默认时行为与 D-039 完全一致。
