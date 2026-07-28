@@ -422,3 +422,10 @@ export {
 } from './search/html_dom.ts';
 export { bingSearchService } from './search/bing_service.ts';
 export { duckDuckGoSearch } from './search/duckduckgo_service.ts';
+
+// ===== D-068a:需 key 搜索源批次 A(AmberAgent/Ollama/Serper/SerpAPI/智谱) =====
+export { amberAgentSearchService } from './search/amberagent_service.ts';
+export { ollamaSearchService } from './search/ollama_service.ts';
+export { serperSearchService } from './search/serper_service.ts';
+export { serpApiSearchService } from './search/serpapi_service.ts';
+export { zhipuSearchService } from './search/zhipu_service.ts';

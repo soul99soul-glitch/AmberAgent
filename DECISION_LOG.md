@@ -706,3 +706,15 @@
   - **search/duckduckgo_service.ts(全文 109 行,普通函数形态忠实)**:lite 优先(Android 移动 UA)→ 空则 html 兜底(桌面 UA);Accept/Accept-Language 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'/Referer 逐字;parseLite — a.result-link **filterNot parents any hasClass('result-sponsored')** + uddg 解码 + '//'→'https:'/'/'→域前缀归一 + resultSnippet(上两级行后 3 行内首个 td.result-snippet 非空);parseHtml — .result → a.result__a ?: h2 a + .result__snippet,.result__body Elements.text() 空格 join;双空 → pageText(lite+' '+html lowercase)风控词(bots use duckduckgo/anomaly-modal)→ 'DuckDuckGo requires human verification',否则 'DuckDuckGo returned no parseable organic results' 逐字。
   - **TDD 8 测试**:Bing 5(请求形态逐字段/主解析+跳转解码+去重/风控/fallback+全空/schema+scrape)+ DDG 3(sponsored 过滤+解码+snippet/html 兜底链/双错误文案)。
 - **可逆性**:全新模块;1322 测试全绿(deepread 603 + chat 719),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-068a（L0，2026-07-28）需 key 搜索源批次 A(AmberAgent/Ollama/Serper/SerpAPI/智谱)
+
+- **背景**：D-067 后剩余 15 个需配置源(~2374 行),按体量切三子片。批次 A = 五件小体量(各 110-128 行)。新增 search/json_pick.ts 共享容错取值助手(kotlinx ignoreUnknownKeys 取字段面;等价此前各 provider 局部副本,D-068 起共用)。
+- **决定**(全部 SearchService 形态,parameters/scrapingParameters schema 逐字,options 类型不符抛错 = Kotlin CCE 语义;非 2xx/缺参/缺 key 错误文案逐字)：
+  - **amberagent_service**:POST api.rikka-ai.com/v1/search,体四键恒 JsonPrimitive 字符串(q/depth/outputType='sourcedAnswer'/**includeImages='false' 字符串**),Bearer 恒加;响应 answer + sources take(resultSize) → name/url/snippet;失败 'response failed #N: BODY'(带响应体);scrape 用 error()(suspend 异步抛出,非 Result.failure)→ 'AmberAgent does not support scraping'。**偏差:Log.i(query) 不移植 — 宪章禁日志落用户查询**。
+  - **ollama_service**:POST ollama.com/api/web_search,体 {query, max_results coerceIn(5..10)};映射 results → title/url/content;失败 'Ollama search failed with code N: ' (**okhttp response.message 无 Port 对应 → 尾空串登记**);scrape 'Scraping is not supported for Ollama'。
+  - **serper_service**:require key 'Serper API key is required';topic contentOrNull(仅 string)=news → /news 否则 /search;体 {q, num coerceIn(1,20)},X-API-KEY;映射 (news ?: organic ?: []) — **空数组不回退**(Kotlin Elvis 仅 null 触发),title/link/snippet.orEmpty()/date,take(resultSize);失败 'Serper request failed #N'。
+  - **serpapi_service**:require key 'SerpAPI key is required';GET search.json query 链(engine=google/q/api_key/num coerceIn(1,20)/**tbm=nws 仅 topic=news**);映射 (news_results ?: organic_results ?: []);失败 'SerpAPI request failed #N'。
+  - **zhipu_service**:POST open.bigmodel.cn/api/paas/v4/web_search,体 {search_query, search_engine='search_std', count=resultSize 数字};映射 search_result → title/link/content;三失败路径逐字('Zhipu response failed #N'/'Failed to decode Zhipu response (N chars): MSG'/'Failed to get response body' — **body 空串视为 okhttp null body,登记**)。
+  - **TDD 10 测试**:请求形态逐字段/映射/错误文案全覆盖;mock 顺序响应队列。
+- **可逆性**:全新模块;1332 测试全绿(deepread 603 + chat 729),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
