@@ -1135,3 +1135,21 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
   - compressChoice/extractionChoice 为 aboutToAppear/首次调用快照,运行期改任务模型设置需重进页面生效(与 ocrSeed 快照同类,P1 设置面落地后改订阅)。
 - **未移植(P1 登记)**: 任务模型设置面 UI(title/suggestion/compress/worker/daydream 模型 picker + followCompress 开关);daydream 链 entry 接线(runMemoryDreamRun 调用点待手动触发 UI)。
 - **验证**: chat tsc 干净 + 1015 测试(+3)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-088 — Memory 页首片:dream 手动整理审核 + 候选记忆审核 + daydream 链 entry 接线
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingAgentMemoryVM.kt(:30 阈值/:95-204 dream 与候选操作段)/MemoryRepository.kt:178-191(acceptCandidate 链)/SettingAgentMemoryPage.kt:884-906,912-991(候选区)/:993-1080(DreamReviewSection)/MemoryDreamPlanner.kt:74-100(daydream generateText)
+- **决策**:
+  1. `chat/memory_dream_ops.ts`(TDD 15 测试):LOW_CONFIDENCE_CANDIDATE_THRESHOLD=0.60;操作消息常量全量逐字(plan 三态/apply 两态/低置信两态/失败两函数,全角冒号);memoryDreamReviewSummaryText(页内版,'合并 N 组 · ...',与 domain summaryText 不同——忠实页实现);planMemoryDreamOp(plan → replacedPending=hasChanges&&存量 pending 非空 → savePending('manual')/no_changes,错误传播);applyMemoryDreamPlanOp(无 pending→no_plan;apply 后 hasChanges→markApplied 否则 markDismissed);dismissMemoryDreamPlanOp(无 pending→false);acceptMemoryCandidate(candidate→addMemory 七字段透传→status 'accepted';未找到 throw 'Memory candidate #id not found' 逐字);ignoreMemoryCandidate(未找到→false 不写);ignoreLowConfidenceMemoryCandidates(仅 pending&&<0.60,逐条 'ignored',非空打 candidate_ignored 事件——文案 Kotlin Float 插值 0.60f→"0.6" 逐字)。
+  2. entry `MemoryDreamOps.ets`:loadMemoryDreamPlanOpDeps(prefs 快照 worker 门 + getMemoryDreamStoreOps + daydream 链——toTaskGate 四字段 → daydreamModelCandidates → resolveTaskModelChain,首次求值缓存,与 ChatPage extraction 闭包同策略;generateText = buildProviderApi + 最小参 model-only,choices.firstOrNull()?.message?.toText().orEmpty() 等价)+ loadMemoryDreamApplyOpDeps + getMemoryCandidateOpsDeps + loadPendingMemoryCandidates + logMemoryDreamOpFailure。
+  3. entry `MemoryPage.ets`:DreamReviewSection 等价(标题/说明逐字/running LoadingProgress/摘要行/来源行(自动 Daydream/手动生成)/notes take(4) '• x'/merge take(5) '合并 #t <- ids'/supersede take(5) maxLines 3/空文案'还没有手动整理建议。'/三按钮 enabled 门:生成=!running,应用=!running&&plan?.hasChanges,清除=!running&&plan!=null)+ 候选区(SectionLabel/空文案/忽略低置信按钮仅 count>0 右对齐,文案'忽略低置信候选（N）'全角括号/候选卡 meta 行 [scope/kind] confidence %.2f + 高置信' · 建议人工审核'/content maxLines 4/reason 非空白 maxLines 2/接受+忽略)+ 操作反馈 toast。路由注册 + ChatListPage 头部'记忆'入口。
+- **偏差/适配登记**:
+  - daydreamReasoningLevel 未移植(延续 D-087 登记):generateText 最小参 model-only,Android 第二参 reasoningLevel=worker.daydreamReasoningLevel;P1 随任务模型设置面;
+  - resolveDaydreamModel 的 model.findProvider 失败支 entry 不可达(choice 捆绑 provider+model,choice null ⇔ Android 任一 ?: return null,效果一致);
+  - acceptCandidate 查询:Android candidateDAO.getCandidateById → 本实现 getAllCandidates find(同表按 id 唯一,查询语义等价);
+  - 操作反馈:Android snackbar(operationMessage+consume)→ promptAction toast(瞬时反馈语义一致);
+  - 接受/单条忽略失败:Android 无消息(runCatching 外层无)→ 本实现 hilog.warn(非静默,宪章条款)。
+- **未移植(P1 登记)**: worker 开关组(本地/LLM 整理 Switch + runOnlyOnIdle + 不可运行提示)/记忆库三桶列表(records CRUD UI)/记忆事件区/导出导入按钮(UI 触发,domain 已备)/Agent Soul 卡/任务模型 picker 设置面/dream 自动调度环(workScheduler)。
+- **验证**: chat tsc 干净 + 1030 测试(+15)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

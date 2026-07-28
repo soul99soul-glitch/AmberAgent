@@ -673,6 +673,23 @@ export type {
   MemoryDreamRunOutcome, MemoryDreamWorkerRunDeps,
 } from './chat/memory_dream_run.ts';
 
+// ===== D-088:Memory 页 dream/候选操作编排(SettingAgentMemoryVM 操作段) =====
+export {
+  acceptMemoryCandidate, applyMemoryDreamPlanOp, dismissMemoryDreamPlanOp,
+  ignoreLowConfidenceMemoryCandidates, ignoreMemoryCandidate,
+  memoryDreamApplyFailureMessage, memoryDreamPlanFailureMessage,
+  memoryDreamReviewSummaryText, memoryLowConfidenceIgnoredMessage,
+  planMemoryDreamOp,
+  LOW_CONFIDENCE_CANDIDATE_THRESHOLD,
+  MEMORY_DREAM_APPLIED_MESSAGE, MEMORY_DREAM_APPLY_EMPTY_MESSAGE,
+  MEMORY_DREAM_PLAN_EMPTY_MESSAGE, MEMORY_DREAM_PLAN_REPLACED_MESSAGE,
+  MEMORY_DREAM_PLAN_SAVED_MESSAGE, MEMORY_NO_LOW_CONFIDENCE_MESSAGE,
+} from './chat/memory_dream_ops.ts';
+export type {
+  MemoryCandidateOpsDeps, MemoryDreamApplyOpDeps, MemoryDreamApplyOpResult,
+  MemoryDreamPlanOpDeps, MemoryDreamPlanOpResult, MemoryIgnoreLowConfidenceResult,
+} from './chat/memory_dream_ops.ts';
+
 // ===== D-086:FilesRepository 跟踪(managed_files) =====
 export {
   createFilesRepository, deleteChatFiles, makeManagedFileEntity, trackUploadFile,
