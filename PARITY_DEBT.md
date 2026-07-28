@@ -21,3 +21,9 @@
 ## 已消除
 
 （暂无）
+
+## regenerate 窗口化 merge 偏差(D-024,2026-07-28)
+- Android: regenerate 经 mergeGeneratedMessagesIntoWindow/streamingTail 合并 + invalidateCompacts(ContextEngine);依附时间线分页架构。
+- Harmony: 扁平节点模型等价语义(上下文截断 + 分支追加不覆盖);ContextEngine/compact = P1,无 invalidateCompacts 对应物。
+- 影响:功能等价;时间线分页(大会话性能)未移植,若移植需重估 merge 路径。
+- regenerate 流式预览:Android 有,本实现 MVP spinner 代替(P1 补)。

@@ -227,3 +227,14 @@
   - **ChatModelPickerPage**:列出 usable openai variants × models,当前选中打「当前」标;空态引导去 Provider 设置页。ChatPage 头部标题下显示「provider / modelId」标签(每次 aboutToAppear 刷新),点击进入选择器。
   - **种子数据核实(否决项)**:Android ProviderTemplatePickerSheet 只提供 generic `ProviderSetting.OpenAI()/Google()/Claude()` 空模板(ProviderTemplatePickerSheet.kt:151,159-172),无预置 baseUrl 种子列表 → 不做 provider 种子,保持忠实。
 - **可逆性**:删两个 Preferences 键即回到 D-019 行为;回退策略保证旧状态可用。
+
+## D-024（L0，2026-07-28）assistant 分支再生 + 分支切换：扁平节点等价语义,窗口化 merge 记偏差
+
+- **背景**：消息分支(MessageNode 多选)是 Android 核心交互;domain 原语已有(selectIndex),缺再生编排与 UI。
+- **决定**：
+  - **runRegenerateAt(chat-domain,TDD 9 测试)**:assistant 节点 regenerate = 目标节点之前的 currentMessages 为上下文(对齐 ChatService.kt:1105 messageRange 0..<nodeIndex)→ 组装+input transforms → provider 流式 → 新 assistant 消息**追加进同一节点**(追加不覆盖)且 selectIndex 指向新分支;provider 抛错 → 传播且会话不变(runChatTurn 同语义)。**user 节点 regenerate(截断重跑)裁 P1,domain 显式抛错**(宪章禁静默 no-op)。
+  - **accumulator 占位修法**:base 以 assistant 结尾时直接 seed 会把新流并入旧消息(accumulator 末条=活动流式消息)→ 追加 `makeUIMessage('assistant',[])` 空占位作流式尾部,与 Android 生成尾部占位同构;无 chunk 到达 → 会话不变。
+  - **selectMessageBranch**:夹取越界索引(不环绕);未知 nodeId 原样返回(UI 竞态安全)。
+  - **与 Android 偏差(记 PARITY_DEBT)**:Android 窗口化 merge(streamingTail/mergeGeneratedMessagesIntoWindow/时间线分页)+ invalidateCompacts 依附其分页架构与 ContextEngine(P1);本实现为扁平节点模型等价语义。
+  - **UI(ChatPage)**:渲染源从扁平 messages 改为节点 rows(buildRows);assistant 行 ◀ n/m ▶ 分支切换(>1 分支时)+ 末条 assistant「重新生成」;chat-turn 流式经 streamingTail 渲染(切片起点=现有消息+新 user),regenerate 流式预览裁 MVP(spinner)。
+- **可逆性**:纯新增文件 + ChatPage 重构;runChatTurn 路径不变。

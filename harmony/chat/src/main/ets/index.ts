@@ -67,6 +67,8 @@ export type {
   ChatStreamProvider, ConversationStore, MemoryConversationStore, ChatTurnDeps,
 } from './chat/chat_turn.ts';
 export { createMemoryConversationStore, runChatTurn } from './chat/chat_turn.ts';
+export { selectMessageBranch, runRegenerateAt } from './chat/regenerate.ts';
+export type { RegenerateDeps } from './chat/regenerate.ts';
 
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,

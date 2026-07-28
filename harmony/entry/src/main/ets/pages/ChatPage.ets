@@ -1,11 +1,14 @@
 // ChatPage — 聊天页:消息流(text/reasoning/tool)+ 输入发送 + 流式更新
-// 回路: runChatTurn(chat-domain) + OpenAIChatApi(RcpHttpClient)+ memory 仓库(D-019 登记)
+// 回路: runChatTurn(chat-domain) + OpenAIChatApi(RcpHttpClient)+ RDB 仓库(D-021)
+// D-024:assistant 分支 — ◀ n/m ▶ 切换(selectMessageBranch) + 末条「重新生成」
+//   (runRegenerateAt);regenerate 流式预览裁 MVP(spinner 代替,已登记)
 import { router } from '@kit.ArkUI';
 import type { Conversation, UIMessage, UIMessagePart } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, runChatTurn,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
+  nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -22,9 +25,43 @@ const ACCENT: string = '#B8623A';
 
 const partKey = (p: UIMessagePart, i: number): string => `${p.type}-${i}`;
 
+// 节点视图模型:分支切换/重新生成需要节点级信息
+interface MsgRow {
+  nodeId: string;
+  message: UIMessage;
+  branchCount: number;
+  selectIndex: number;
+  isAssistant: boolean;
+  isLastAssistant: boolean;
+}
+
+const buildRows = (conv: Conversation): MsgRow[] => {
+  let lastAssistantIdx: number = -1;
+  for (let i = conv.messageNodes.length - 1; i >= 0; i--) {
+    if (nodeRole(conv.messageNodes[i]) === 'assistant') {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  return conv.messageNodes.map((n, i: number): MsgRow => ({
+    nodeId: n.id,
+    message: nodeCurrentMessage(n),
+    branchCount: n.messages.length,
+    selectIndex: n.selectIndex,
+    isAssistant: nodeRole(n) === 'assistant',
+    isLastAssistant: i === lastAssistantIdx,
+  }));
+};
+
 @Component
 struct MessageRow {
   @Prop message: UIMessage;
+  @Prop branchCount: number = 1;
+  @Prop selectIndex: number = 0;
+  @Prop isAssistant: boolean = false;
+  @Prop isLastAssistant: boolean = false;
+  onSwitch: (idx: number) => void = (_idx: number): void => {};
+  onRegenerate: () => void = (): void => {};
 
   build() {
     Column() {
@@ -54,6 +91,29 @@ struct MessageRow {
             .margin({ bottom: 4 })
         }
       }, partKey)
+      if (this.isAssistant && (this.branchCount > 1 || this.isLastAssistant)) {
+        Row() {
+          if (this.branchCount > 1) {
+            Text('◀').fontSize(11).fontColor(this.selectIndex > 0 ? ACCENT : INK3)
+              .onClick((): void => {
+                if (this.selectIndex > 0) this.onSwitch(this.selectIndex - 1);
+              })
+            Text(`${this.selectIndex + 1}/${this.branchCount}`)
+              .fontSize(10).fontColor(INK3).margin({ left: 6, right: 6 })
+            Text('▶').fontSize(11)
+              .fontColor(this.selectIndex < this.branchCount - 1 ? ACCENT : INK3)
+              .margin({ right: 12 })
+              .onClick((): void => {
+                if (this.selectIndex < this.branchCount - 1) this.onSwitch(this.selectIndex + 1);
+              })
+          }
+          if (this.isLastAssistant) {
+            Text('重新生成').fontSize(11).fontColor(ACCENT)
+              .onClick((): void => this.onRegenerate())
+          }
+        }
+        .margin({ top: 2 })
+      }
     }
     .width('100%')
     .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
@@ -64,7 +124,8 @@ struct MessageRow {
 @Entry
 @Component
 struct ChatPage {
-  @State messages: UIMessage[] = [];
+  @State rows: MsgRow[] = [];
+  @State streamingTail: UIMessage[] = [];
   @State inputText: string = '';
   @State sending: boolean = false;
   @State errorMsg: string = '';
@@ -83,7 +144,7 @@ struct ChatPage {
         if (conv !== null) {
           this.conversation = conv;
           this.title = conv.title.length > 0 ? conv.title : '对话';
-          this.messages = currentMessages(conv);
+          this.rows = buildRows(conv);
         } else {
           this.errorMsg = '会话不存在';
         }
@@ -92,7 +153,7 @@ struct ChatPage {
       getChatAssistants().then((assistants): void => {
         const fresh = makeConversation(newId(), []);
         this.conversation = seedConversationWithPresets(fresh, assistants[0]);
-        this.messages = currentMessages(this.conversation);
+        this.rows = buildRows(this.conversation);
       });
     }
   }
@@ -101,12 +162,53 @@ struct ChatPage {
     this.scroller.scrollEdge(Edge.Bottom);
   }
 
+  private switchBranch(nodeId: string, idx: number): void {
+    if (this.conversation === null || this.sending) return;
+    const updated: Conversation = selectMessageBranch(this.conversation, nodeId, idx);
+    this.conversation = updated;
+    this.rows = buildRows(updated);
+    getChatRepository().save(updated);
+  }
+
+  private regenerate(nodeId: string): void {
+    if (this.conversation === null || this.sending) return;
+    this.sending = true;
+    this.errorMsg = '';
+    const conv: Conversation = this.conversation;
+    resolveChatRuntime()
+      .then((rt: ChatRuntime | null): Promise<Conversation> => {
+        if (rt === null) {
+          return Promise.reject(new Error('未配置可用的 Provider/模型'));
+        }
+        return runRegenerateAt(conv, nodeId, {
+          assistant: rt.assistant,
+          inputTransformers: [createTemplateTransformer()],
+          outputTransformers: [thinkTagTransformer, regexOutputTransformer],
+          provider: asChatStreamProvider(rt.api, () => rt.params),
+          store: getChatRepository(),
+          contextMessageSize: rt.contextMessageSize,
+        });
+      })
+      .then((out: Conversation): void => {
+        this.conversation = out;
+        this.rows = buildRows(out);
+        this.sending = false;
+        this.scrollToBottom();
+      })
+      .catch((e: Error): void => {
+        this.errorMsg = e.message;
+        this.sending = false;
+      });
+  }
+
   private send(): void {
     const text: string = this.inputText.trim();
     if (text.length === 0 || this.sending || this.conversation === null) return;
     this.sending = true;
     this.errorMsg = '';
     const conv: Conversation = this.conversation;
+    // 流式尾部起点 = 现有消息 + 即将入列的 user 消息
+    const tailStart: number = currentMessages(conv).length + 1;
     resolveChatRuntime()
       .then((rt: ChatRuntime | null): Promise<Conversation> => {
         if (rt === null) {
@@ -120,13 +222,14 @@ struct ChatPage {
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
           onUpdate: (msgs: UIMessage[]): void => {
-            this.messages = msgs;
+            this.streamingTail = msgs.slice(tailStart);
           },
         });
       })
       .then((out: Conversation): void => {
         this.conversation = out;
-        this.messages = currentMessages(out);
+        this.rows = buildRows(out);
+        this.streamingTail = [];
         this.inputText = '';
         this.sending = false;
         this.scrollToBottom();
@@ -134,11 +237,12 @@ struct ChatPage {
       .catch((e: Error): void => {
         this.errorMsg = e.message;
         this.sending = false;
+        this.streamingTail = [];
         // user 消息快照已持久化(chat_turn 语义),刷新显示
         getChatRepository().getById(conv.id).then((saved: Conversation | null): void => {
           if (saved !== null) {
             this.conversation = saved;
-            this.messages = currentMessages(saved);
+            this.rows = buildRows(saved);
           }
         });
       });
@@ -158,11 +262,24 @@ struct ChatPage {
       .onClick((): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage' }); })
 
       List({ scroller: this.scroller }) {
-        ForEach(this.messages, (m: UIMessage): void => {
+        ForEach(this.rows, (row: MsgRow): void => {
+          ListItem() {
+            MessageRow({
+              message: row.message,
+              branchCount: row.branchCount,
+              selectIndex: row.selectIndex,
+              isAssistant: row.isAssistant,
+              isLastAssistant: row.isLastAssistant,
+              onSwitch: (idx: number): void => this.switchBranch(row.nodeId, idx),
+              onRegenerate: (): void => this.regenerate(row.nodeId),
+            })
+          }
+        }, (row: MsgRow): string => row.nodeId)
+        ForEach(this.streamingTail, (m: UIMessage): void => {
           ListItem() {
             MessageRow({ message: m })
           }
-        }, (m: UIMessage): string => m.id)
+        }, (m: UIMessage): string => `tail-${m.id}`)
         if (this.sending) {
           ListItem() {
             Text('生成中…').fontSize(12).fontColor(INK3)
