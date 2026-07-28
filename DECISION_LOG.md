@@ -567,3 +567,23 @@
   - **chat/agent_loop_budget.ts(TDD,6 测试)**:AgentLoopBudgetPrompt.kt 全文 53 行 —— SMALL_LOOP_MAX_STEPS=4 双阈值族(stepIndex>0 门);build 三文案逐字;shouldHideTools。
   - **范围登记**:ToolRegistry 注册/去重/包装层(from/tools()/ToolMetadata)随内置工具落地(D-058);SpeculativeToolRunner(146 行)与生成循环集成(maxSteps/budget 提示注入/结果回写)归 D-057;SubAgent/Cron/ModelCouncil 上下文已建模但调用方未接。
 - **可逆性**:纯增模块 5 个 + index 导出,零既有路径改动;无工具注入时 chat_turn 行为逐字节不变;1115 测试全绿(deepread 603 + chat 512),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-057（L0，2026-07-28）chat_turn 工具循环集成 + 审批闭环 + 分支再生工具化
+
+- **背景**：D-056 落地了工具执行核心(调度/权限/策略/预算),本切片把它接进**生成主回路** —— GenerationHandler.kt:161-391 agentic 循环全文移植 + ChatService 审批/idle 阻塞/续跑语义 + ChatPage 审批 UI,并以首个真实内置工具 get_time_info(TimeTool.kt)打通端到端(非占位,章程反空实现条款)。
+- **决定**：
+  - **chat/tool_loop.ts(TDD,17 测试)**:GenerationHandler 主循环忠实 —
+    - **runAgenticToolLoop**(:161-391):pendingTools = 末条消息 canResumeExecution 工具(:164-166)→ 有则跳生成直接执行(resume 路径 :342-346);无则每步 prepareContext(对齐 generateInternal 内部位置 :434-446)+ budget prompt 经 **extraSystemBlocks dynamic system 块**注入(buildSystemPromptParts:726-736 现存子集,context_assembly 扩展,metadata {system_prompt_block:'dynamic'} 逐字)→ generateAssistantOnce(chat_turn.ts 提取 :166-275,单跑行为逐字节不变)→ 无工具调用 break(:281-285)→ ASK 决策置 Pending + permission_trace metadata + emit + break 等用户(:288-339)→ executeBatch 结果**写回同一 assistant 消息**(:366-373,不发 TOOL 角色消息)→ steer 消息步间消费(:386-390)。maxSteps coerceIn(16,512) 默认 256(ChatService:1349-1352 + PreferencesStore.kt:268-270)。
+    - **关键语义修正(循环调试发现)**:Android 多步循环**共用同一条 assistant 消息**(ai/ui/Message.kt:537-541 注释逐字「多轮 tool 循环共用同一条 assistant 消息」)— accumulator 以末条 base 消息播种,同 role delta 就地合并;第二步文本/工具调用并入带工具结果的消息而非新开消息。初版实现按「追加新消息」理解丢了合并内容,修正为 rewriteLastMessage 节点写回(finalMessages 末元素引用不等 → 写回;slice 新增 → 追加),测试断言同步对齐该语义。
+    - **runChatTurnWithTools**(空工具集 → 退化 runChatTurn 逐字节一致;user 消息先入列再循环,D-051 同序;空输入引用原样返回);**runToolLoopContinuation**(审批后续跑,不追加 user 消息);**runRegenerateAtWithTools**(ChatService.regenerateAtMessage:1078-1118)— user 节点截断先持久化后直跑循环;assistant 节点追加**空 assistant 占位节点**作流式尾(runRegenerateAt:124-129 占位同构,否则新流被 accumulator 并入基底末条 assistant),产出合入占位节点后**并入目标 alternatives**(分支追加不覆盖,selectIndex 指新分支),占位无产出(abort/无 chunk)→ 目标不变(!sawChunk 同语义);空 parts 消息不进 internalMessages(占位过滤,hook 输入同滤)。regenerate.ts 提取 **prepareRegenerateSeed**(node 查找/截断/持久化)供双路径共享,runRegenerateAt 重构复用(30 测试锁行为)。
+  - **chat/tool_approval.ts(TDD,17 测试)**:ChatService.kt:869-975 + 1122-1190 忠实 — applyToolApprovalToConversation(全节点全消息改写,answer>approved>denied 三态 :1136-1140);conversationHasPendingTools 续跑门(:1166-1172);**resolveIdleToolBlocker**(:869-943:「继续」词表 15 词 + startsWith 继续/可以继续,CJK/ASCII 标点剥离,仅纯文本消息;ask_user pending + 非空文本 → Answered(4000 截断);否则 cancelToolForNewUserMessage 逐字 cancelled JSON + Denied reason;事件 pending_tool_resume/cancel + count + 逗号工具名)。
+  - **chat/builtin_time_tool.ts(TDD,3 测试)**:TimeTool.kt 全文 45 行 — payload 键序逐字(year..timestamp_ms 12 键),ISO weekday Monday=1,utcOffsetId('Z'|±HH:mm);nowProvider 可注入。
+  - **ChatPage 接线**:
+    - **MessageRow 工具卡片 MVP**:名称 + 状态文案(待审批/已批准/已拒绝/已应答/已执行)+ pending → **批准/拒绝按钮** + 已执行首条 output 3 行预览(完整卡片视觉 = P1 登记)。
+    - **handleToolApproval**(ChatService:1122-1188):改写 → 持久化 → conversationHasPendingTools 门 → **resumeToolLoop** 续跑(流式预览复用 D-041 regenTail 机制 — 写回末条消息,末条 assistant 行下渲染)。
+    - **sendParts 派发前 idle blocker**(:757/:838 位置):纯文本判定 + 文本 join 应答;changed → 审计(pending_tool_resume/cancel,detail 逗号工具名)+ 持久化;shouldResume → 消息不入列直接 runToolLoopContinuation(「继续」语义,Android 同);否则以更新后会话走 runChatTurnWithTools。
+    - **drainPendingQueue 阻塞门**(:860 break):conversationHasPendingOrUnexecutedTools → 停止派发,审批/续跑解阻后再 drain。
+    - **regenerate/sendEdit 全量走 runRegenerateAtWithTools**(工具循环覆盖重生成路径)。
+    - **buildToolLoop**:tools=[createTimeTool()];makeProviderForStep 按步内工具定义逐字段重建 params(arkts-no-spread,不用 rt.params 展开;temperature/topP/maxTokens/reasoningLevel/customBody 透传);**consumeSteerMessages** = pendingQueue STEER 出队 → user 消息注入(session.dequeueSteerPendingUserMessages 语义,出队 durable persist + dequeue/steer 审计)。**autoApprove 默认 false**(autoApproveAllToolCalls/autoApproveHighRiskToolCalls/conversation.autoApproveToolCalls 设置面 = P1,登记 — 鸿蒙 Assistant/Conversation 模型尚无该字段)。
+  - **偏差登记**:ToolExposureState 懒暴露/SpeculativeToolRunner = P1(D-056 既登,prefetchedTools 恒空);每步 finishedAt 戳(:275-278)未加(与单跑路径同,PARITY_DEBT);assistant 分支再生中途持久化形态 = 基底+占位节点(追加形态),完成改写为分支形态(Android 窗口化 merge 依附分页架构,PARITY_DEBT 既登);entry tsc 未 typed object literal → ChatTurnDeps 显式标注(arkts-no-untyped-obj-literals)。
+- **可逆性**:空工具集全路径退化(runChatTurn/runRegenerateAt/原样返回)与 D-055 行为逐字节一致;审批 UI 无回调默认 no-op;1152 测试全绿(deepread 603 + chat 549),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
