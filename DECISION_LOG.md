@@ -1101,3 +1101,19 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
   - 通知投递:notificationManager API 26 SDK 模块冲突(deepread 同 TODO),当前 hilog(文案逐字,非空实现);真实 publish/cancel 待 DevEco 验证。
 - **未移植(P1 登记)**: 鸿蒙 workScheduler 适配(夜窗调度环)/真实通知 publish/设置面手动触发 UI(runOnce)/pending plan 审查 UI(apply/dismiss 入口)。
 - **验证**: chat tsc 干净 + 1006 测试(+15)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-086 — FilesRepository 跟踪(managed_files)+ upload 落盘记库接线
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: ManagedFileEntity.kt(32)/ManagedFileDAO.kt(36)/FilesRepository.kt(30)/FilesManager.kt(trackUploadFile :482-505/deleteChatFiles :263-301/FileFolders :649-656)
+- **决策**:
+  1. `chat/managed_files.ts`: ManagedFileEntity + makeManagedFileEntity + FileFolders 四常量 + ManagedFileDaoPort(查询语义逐条注释)+ createFilesRepository(insert 返回 copy(id=rowid),其余直通)+ trackUploadFile(已存在同 relativePath → 跳过;否则 insert folder='upload' createdAt=updatedAt=now)+ deleteChatFiles(file: 前缀过滤 → relativePath 须 'upload/' 开头 → Set 去重收集但文件删除按 URI 出现次数逐次 → 各自 runCatching 吞错 → 逐个 deleteByPath 吞错)。
+  2. entry `ManagedFileStore.ets`: filesDir/managed_files.json({nextId, rows}) — Room 语义 JSON 等价:REPLACE(relative_path 唯一冲突删旧)+ AUTOINCREMENT 高水位 nextId 不复用/@Update 未命中 no-op/deleteBy* 返回行数/listByFolder created_at DESC;enqueueWrite 串行;缺失/损坏 → 空表(MemoryStore 同策略);getFilesRepository 单例。
+  3. Base64ImageSupport: saveUploadImage 落盘后 trackUploadFile fire-and-forget(displayName 'image.png'/mimeType 'image/png'/sizeBytes=字节长,FilesManager.kt:200 逐字)。
+- **偏差登记**:
+  - trackUploadFile 失败:Android appScope.launch+runCatching 静默吞错 → 本实现 hilog.warn(可观测性增强,成功路径语义不变);
+  - listByFolder Flow → 快照 Promise(观察 UI = P1,与 memory 各 Flow 同处理);
+  - entry 严格 ArkTS:交叉类型工厂参数不接受对象字面量 → withId 显式构造(注释钉住)。
+- **未移植(P1 登记)**: 会话删除文件清理(deleteChatFiles 接线依附 History 撤销窗流程,撤销窗未移植)/附件移除清理(ChatInputAttachments:130)/头像清理(AssistantVM:69/AssistantDetailVM:199,211)/syncFolder/getRelativePathInFilesDir 公共化/upload 库观察 UI/countChatFiles。
+- **验证**: chat tsc 干净 + 1012 测试(+6)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

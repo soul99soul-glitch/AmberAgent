@@ -5,16 +5,18 @@
 //   FilesManager.kt:643-646 Bitmap.compressToPng(PNG, 100)
 //   FilesManager.kt:469-480 buildUuidFileName('image.png','image/png') → uuid.png
 // 偏差(登记):
-//   - FilesRepository(Room ManagedFileEntity)跟踪未移植 → 仅落盘不记库
-//     (P1:upload 文件库观察/计数功能待 FilesRepository 移植)
 //   - Bitmap.compress PNG → @kit.ImageKit packToData(image/png, quality 100)
+//   - trackUploadFile 失败:Android appScope.launch+runCatching 静默吞错;
+//     本实现 hilog.warn 记录(可观测性增强,不改变成功路径语义)
 import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   FILE_FOLDER_UPLOAD, MAX_CHAT_ATTACHMENT_BYTES,
-  createBase64ImageToLocalFileTransformer, newId,
+  createBase64ImageToLocalFileTransformer, newId, trackUploadFile,
 } from '@amber/chat-domain';
 import type { Base64ImageDeps, OutputMessageTransformer } from '@amber/chat-domain';
+import { getFilesRepository } from './ManagedFileStore.ets';
 
 // BitmapFactory.decodeByteArray + compressToPng:不可解码 → null
 const reencodeToPng = async (bytes: Uint8Array): Promise<Uint8Array | null> => {
@@ -54,7 +56,8 @@ const saveUploadImage = async (pngBytes: Uint8Array): Promise<string> => {
     // 已存在
   }
   // buildUuidFileName('image.png','image/png') → uuid.png(FilesManager.kt:469-480)
-  const path: string = `${dir}/${newId()}.png`;
+  const fileName: string = `${newId()}.png`;
+  const path: string = `${dir}/${fileName}`;
   const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
   const file: fileIo.File = await fileIo.open(path, mode);
   try {
@@ -64,6 +67,16 @@ const saveUploadImage = async (pngBytes: Uint8Array): Promise<string> => {
   } finally {
     await fileIo.close(file);
   }
+  // D-086:trackUploadFile(FilesManager.kt:200/:482-505)— fire-and-forget;
+  //   Android runCatching 静默,此处 hilog.warn(登记偏差)
+  trackUploadFile(getFilesRepository(), {
+    relativePath: `${FILE_FOLDER_UPLOAD}/${fileName}`,
+    displayName: 'image.png',
+    mimeType: 'image/png',
+    sizeBytes: pngBytes.byteLength,
+  }).catch((error: Error): void => {
+    hilog.warn(0x0001, 'Chat.Base64Image', '[trackUploadFile] %{public}s', error.message);
+  });
   return `file://${path}`;
 };
 

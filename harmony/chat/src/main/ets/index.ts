@@ -672,3 +672,12 @@ export type {
   MemoryDreamReviewNotifier, MemoryDreamRunCoordinatorDeps, MemoryDreamRunGate,
   MemoryDreamRunOutcome, MemoryDreamWorkerRunDeps,
 } from './chat/memory_dream_run.ts';
+
+// ===== D-086:FilesRepository 跟踪(managed_files) =====
+export {
+  createFilesRepository, deleteChatFiles, makeManagedFileEntity, trackUploadFile,
+  FILE_FOLDERS_CHAT_IMAGES, FILE_FOLDERS_IMAGES, FILE_FOLDERS_SKILLS, FILE_FOLDERS_UPLOAD,
+} from './chat/managed_files.ts';
+export type {
+  DeleteChatFilesDeps, FilesRepository, ManagedFileDaoPort, ManagedFileEntity,
+} from './chat/managed_files.ts';
