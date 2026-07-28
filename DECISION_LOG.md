@@ -161,3 +161,15 @@
   - 纯逻辑 helper 一并迁移：`hasUsableAuth`（picker 与 data fallback 共用判定矩阵）、`openAIBrandAvailableAuthModes`、`openAIAuthModeFixedBaseUrl`/`googleAuthModeFixedBaseUrl`。
   - KV 复用 D-016 Port：`PROVIDERS_KEY='providers'` blob。
 - **可逆性**：golden + round-trip 测试锁定；Google/Claude provider 的请求构建不在本切片（P1），仅持久化面。
+
+## D-018（L0，2026-07-28）上下文组装：静态 system 块子集、截断次序、会话默认注入、预设播种时机
+
+- **背景**：发送列表组装是核心回路最后一块 source-only 逻辑。基准 = GenerationHandler.kt(:413-468,:712-767)+ PreferencesStore.resolveSessionDefaults(:419-438)+ ChatService.kt:567-572。
+- **决定**：
+  - `buildStaticSystemPromptParts` 只迁移**静态块**（[agentSoul, assistant.systemPrompt].filter{非blank}.join \n\n + metadata {system_prompt_cache_control: ephemeral, system_prompt_block: static}，常量对齐 SystemPromptMarkers.kt）；dynamic/tool prompt（memory/generativeUI/loopBudget/recentChats/工具 prompt）裁到 P1 → 不记 PD（功能分期，非偏差）。
+  - **次序忠实**：先 `limitContext` 截断会话消息，再前置 system（Android preparedContext 在 system 组装之外）；`contextMessageSize=0` 不截断。ConversationContextEngine 的 compact 路径裁 P1。
+  - `resolveSessionDefaults(assistant, groupDefault, defaultReasoningLevel)`：组默认与模型默认由调用方注入（settings 反查是 adapter 关注点）；回退链逐字（AUTO→注入默认；contextSize 0→组默认→0；maxTokens assistant??组默认）。
+  - `mergeCustomParams`：customHeaders/customBodies **assistant 在前 model 在后**（:460-467 顺序即覆盖优先级，customBody 深合并时后者胜）；temperature/topP 取自 assistant。
+  - `toChatModel`：D-017 双模型映射落地；`provider_model.Modality` 补 `'audio'`（Android Modality 三值，请求侧只消费 image，类型拓宽无行为变化）。
+  - **预设播种时机**：presetMessages 在**会话创建时**成初始节点（ChatService:567-572），非每轮注入；`seedConversationWithPresets` 只在空会话生效。
+- **可逆性**：全部为组装层纯函数；P1 加回 dynamic 块时 static 块语义不变。

@@ -136,3 +136,12 @@ export {
   serializeProviderSetting, parseProviderSetting,
   serializeProviderSettingList, parseProviderSettingList,
 } from './chat/provider_settings_serialize.ts';
+
+export {
+  SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_DISABLED, SYSTEM_PROMPT_CACHE_EPHEMERAL,
+  buildStaticSystemPromptParts, assembleInternalMessages,
+  resolveSessionDefaults, mergeCustomParams, toChatModel, seedConversationWithPresets,
+} from './chat/context_assembly.ts';
+export type {
+  AssembleInternalInput, SessionGroupDefault, ResolvedSessionDefaults, MergedCustomParams,
+} from './chat/context_assembly.ts';

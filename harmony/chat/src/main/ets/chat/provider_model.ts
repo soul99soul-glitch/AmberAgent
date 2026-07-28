@@ -15,7 +15,7 @@ import type { JsonObject, JsonValue } from './json.ts';
 // ===== 模型能力/模态 =====
 
 export type ModelAbility = 'tool' | 'reasoning';
-export type Modality = 'text' | 'image';
+export type Modality = 'text' | 'image' | 'audio';  // Android Modality(TEXT/IMAGE/AUDIO)
 
 export interface ChatModel {
   modelId: string;
