@@ -1331,3 +1331,20 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 「动态 system prompt blocks」写路径前置;为 D-101 管理面/D-102 助手链接面供数据。
 - **未移植(P1 登记)**: PromptPage 管理 CRUD UI(D-101)/AssistantExtensionsPage 链接 UI + quickMessages/skills 两 tab(D-102)/注入导入导出文件 picker/拖拽排序手势。
 - **验证**: chat tsc 干净 + 1054 测试(+7)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-101 — 提示词注入管理面(ChatPromptsPage:模式注入/世界书 CRUD)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: PromptPage.kt(全文 1176 行)/values-zh/strings.xml:417-459(label 逐字)
+- **背景**: D-075 注入 domain + D-100 写路径已备,但无管理 UI——模式注入/世界书用户不可建不可编(「动态 system prompt blocks」P1 残余的管理面部分)。
+- **决策**:
+  1. ChatPromptsPage:底部二 tab(NavigationBar 适配:模式注入/世界书);列表卡逐字(模式注入:name 空 → '未命名' + position/priority '优先级：%d'/'已禁用' tag;世界书:name 空 → '未命名Lorebook' + desc 一行 + '%d 条目'/'已禁用' tag);空态 '暂无模式注入'/'暂无世界书' + '点击下方按钮添加'。
+  2. useEditState confirm 语义逐字:id 定位 → 替换,否则 append(列表与条目两级同);delete = list - item;新增 = makeModeInjection()/makeLorebook()/makeRegexInjection() 全默认新 id(Android 默认构造等价)。
+  3. 编辑器 overlay:模式注入(name/启用/优先级/注入位置五值/AT_DEPTH→注入深度/注入角色二值/注入内容);世界书(name/描述/启用/条目列表 '条目（%d）' + '＋ 添加条目' + 条目卡 name 空 → '未命名条目'/'关键词：k1, k2'/'已禁用');条目编辑二级 overlay(全字段 + 关键词 chips ✕ 移除 + 新关键词 isNotBlank 守卫;**canSave = keywords 非空 || constantActive**,不可点时灰色)。
+  4. int 输入:toIntOrNull()?.let 语义 = 草稿串 + 确认时解析失败回退最后有效值(整串正则校验)。
+  5. 入口:ChatAssistantsPage 头部 '提示词注入' 链接;main_pages.json 注册。
+- **偏差/适配登记**: HorizontalPager+NavigationBar → 底部二 tab 行;长按拖拽 → 上移/下移 按钮(D-099 先例);SwipeToDismiss → 卡内'删除'按钮;ModalBottomSheet/AlertDialog → 全屏 overlay(D-094 先例);导入/导出文件 picker + ExportDialog 未移植(外部目录 picker 未移植先例);tag 视觉简化(色边小标,交互档)。
+- **关闭**: 「动态 system prompt blocks」管理面(模式注入/世界书 CRUD 全链:存储 → 管理 UI → D-075 运行注入)。
+- **未移植(P1 登记)**: AssistantExtensionsPage 链接 UI(D-102)/quickMessages/skills 两 tab/注入导入导出 picker/拖拽手势。
+- **验证**: chat tsc 干净 + 1054 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

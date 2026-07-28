@@ -295,6 +295,8 @@ struct ChatAssistantsPage {
         Text('助手')
           .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
         Blank()
+        Text('提示词注入').fontSize(13).fontColor(INK3).margin({ right: 16 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/ChatPromptsPage' }); })
         Text('+ 新助手')
           .fontSize(14).fontColor(ACCENT)
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
