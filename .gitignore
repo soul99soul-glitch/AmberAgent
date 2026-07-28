@@ -38,3 +38,6 @@ docs/cloud-design/**/.thumbnail
 
 # Local deepwork notes for long-running agent sessions
 .slim/deepwork/
+/harmony/.idea/
+.zcode/
+BuildProfile.ets

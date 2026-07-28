@@ -1,8 +1,10 @@
 {
   "name": "@amber/deepread-entry",
   "version": "0.0.1",
-  "description": "Deep Read HarmonyOS entry module",
+  "description": "Deep Read HarmonyOS entry module (UIAbility + ArkUI pages)",
   "main": "",
   "license": "Apache-2.0",
-  "dependencies": {}
+  "dependencies": {
+    "@amber/deepread-domain": "file:../deepread"
+  }
 }

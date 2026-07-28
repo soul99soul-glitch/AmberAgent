@@ -1,7 +1,7 @@
 # HarmonyOS Gate 0 Toolchain Readiness Report
 
-> Generated: 2026-07-16T09:28:24.683Z
-> Source commit: `2f8b7e979`
+> Generated: 2026-07-27T10:31:44.012Z
+> Source commit: `5471075d4`
 > Gate status: **blocked**
 
 Gate 0 must be ready before any HarmonyOS spike result is marked `pass`, `limited`, or `fail` in `docs/harmony-capability-matrix.md`.
@@ -12,17 +12,17 @@ Toolchain probe IDs use `G0-Txx` to avoid colliding with conceptual Gate 0 IDs i
 
 | ID | Item | Status | Detail |
 |---|---|---|---|
-| G0-T01 | DevEco Studio app | missing | /Applications/DevEco-Studio.app ; /Applications/DevEco Studio.app ; /Users/mi/Applications/DevEco-Studio.app ; /Users/mi/Applications/DevEco Studio.app |
+| G0-T01 | DevEco Studio app | found | /Applications/DevEco-Studio.app |
 | G0-T02 | Command Line Tools directory | found | /Users/mi/Library/Huawei/commandline/command-line-tools |
-| G0-T03 | OHOS_SDK_HOME | found | /Users/mi/Library/Huawei/commandline/command-line-tools/sdk/default |
+| G0-T03 | OHOS_SDK_HOME | missing | not set |
 | G0-T04 | HARMONYOS_HOME | missing | not set |
-| G0-T05 | DEVECO_SDK_HOME | found | /Users/mi/Library/Huawei/commandline/command-line-tools/sdk/default |
-| G0-T06 | hvigor/hvigorw | found | /Users/mi/Library/Huawei/commandline/command-line-tools/bin/hvigorw (6.26.1) |
+| G0-T05 | DEVECO_SDK_HOME | missing | not set |
+| G0-T06 | hvigor/hvigorw | found | /Applications/DevEco-Studio.app/Contents/tools/ohpm/bin/ohpm (6.1.2.285) |
 | G0-T07 | ohpm | found | /Users/mi/Library/Huawei/commandline/command-line-tools/bin/ohpm (26.0.0.410) |
 | G0-T08 | hdc | found | /Users/mi/Library/Huawei/commandline/command-line-tools/sdk/default/openharmony/toolchains/hdc (Ver: 3.2.0e) |
 | G0-T09 | hdc targets | missing | hdc returned no targets |
 | G0-T10 | node | found | /opt/homebrew/bin/node (v25.4.0) |
-| G0-T11 | cmake | missing | /Users/mi/command-line-tools/bin/cmake ; /Users/mi/Library/Huawei/commandline/command-line-tools/bin/cmake |
+| G0-T11 | cmake | found | /Applications/DevEco-Studio.app/Contents/tools/ohpm/bin/ohpm (6.1.2.285) |
 | G0-T12 | rustc | found | /opt/homebrew/opt/rustup/bin/rustc (rustc 1.93.0 (254b59607 2026-01-19)) |
 | G0-T13 | cargo | found | /opt/homebrew/opt/rustup/bin/cargo (cargo 1.93.0 (083ac5135 2025-12-15)) |
 | G0-T14 | OHOS_BASE_SDK_HOME | missing | not set |

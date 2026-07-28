@@ -1,18 +1,36 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "/Users/mi/.ohos/config/default_harmony_zYrpmTbrYJKEvKM8dAeCe1QqpyW0q5C9p7pkuVLuNFE=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BADDC623ACA9EF6D4B3A8E6D423B8047C76719ADFB838240028021E59A1DE8E77CBE33E8ABF9C56",
+          "profile": "/Users/mi/.ohos/config/default_harmony_zYrpmTbrYJKEvKM8dAeCe1QqpyW0q5C9p7pkuVLuNFE=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/Users/mi/.ohos/config/default_harmony_zYrpmTbrYJKEvKM8dAeCe1QqpyW0q5C9p7pkuVLuNFE=.p12",
+          "storePassword": "0000001B922003D89605E3E415DDF7EC99DF75D192BFCC846039EF296CFE7328E3066A8874F7DD4C488AB4"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
-        "compileSdkVersion": "26.0.0",
+        "signingConfig": "default",
         "compatibleSdkVersion": "5.0.0(12)",
         "runtimeOS": "HarmonyOS",
-        "targetSdkVersion": "26.0.0"
+        "targetSdkVersion": "5.0.0(12)"
       }
     ],
     "buildModeSet": [
-      { "name": "debug" },
-      { "name": "release" }
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
     ]
   },
   "modules": [
@@ -20,7 +38,24 @@
       "name": "entry",
       "srcPath": "./entry",
       "targets": [
-        { "name": "default", "applyToProducts": ["default"] }
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "deepread",
+      "srcPath": "./deepread",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
       ]
     }
   ]

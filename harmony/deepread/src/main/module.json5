@@ -1,0 +1,11 @@
+{
+  "module": {
+    "name": "deepread",
+    "type": "har",
+    "deviceTypes": [
+      "phone",
+      "tablet"
+    ],
+    "installationFree": false
+  }
+}

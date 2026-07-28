@@ -1,10 +1,6 @@
 {
   "apiType": "stageMode",
-  "buildOption": {
-    "arkOptions": {
-      "runtimeOS": "HarmonyOS"
-    }
-  },
+  "buildOption": {},
   "buildOptionSet": [
     {
       "name": "release",
