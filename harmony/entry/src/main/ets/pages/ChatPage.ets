@@ -1,13 +1,14 @@
 // ChatPage — 聊天页:消息流(text/reasoning/tool)+ 输入发送 + 流式更新
 // 回路: runChatTurn(chat-domain) + OpenAIChatApi(RcpHttpClient)+ RDB 仓库(D-021)
 // D-024:assistant 分支 — ◀ n/m ▶ 切换(selectMessageBranch) + 末条「重新生成」
-//   (runRegenerateAt);regenerate 流式预览裁 MVP(spinner 代替,已登记)
+//   (runRegenerateAt);D-041:regenerate 流式预览落地(目标节点行下渲染流式
+//   快照,visual transforms 与 send 路径一致),MVP spinner 裁剪项清零
 // D-038:图片输入 — PhotoViewPicker 选图 → readImageAsDataUrl 物化为 data: URL
 //   → UIMessagePart[] 发送(文本可空,图片不可空);渲染 Image(p.url)
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
-import type { Conversation, UIMessage, UIMessagePart, Assistant } from '@amber/chat-domain';
+import type { Conversation, UIMessage, UIMessagePart, Assistant, TransformerContext } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, runChatTurn,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
@@ -15,6 +16,7 @@ import {
   nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt, deleteMessage, editMessage,
   forkConversation, patchConversation,
   runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
+  applyVisualTransformersStreamingTail,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -178,6 +180,9 @@ struct ChatPage {
   @State titleInput: string = '';
   // D-038:待发图片(data: URL 物化,发送后清空)
   @State pendingImages: string[] = [];
+  // D-041:regenerate 流式预览(目标节点行下渲染;完成后清空)
+  @State regenTail: UIMessage | null = null;
+  @State regenNodeId: string = '';
   private conversation: Conversation | null = null;
   private abortController: EntryAbortController | null = null;
   private scroller: Scroller = new Scroller();
@@ -250,6 +255,16 @@ struct ChatPage {
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
           abortSignal: this.abortController?.signal,
+          // D-041:流式预览 — 快照末条即活动流式消息(assistant 路径占位
+          //   合并/user 路径尾部追加,均为末条);visual transforms 与 send 一致
+          onUpdate: (msgs: UIMessage[]): void => {
+            if (msgs.length === 0 || holder.rt === null) return;
+            const ctx: TransformerContext = { assistant: holder.rt.assistant };
+            const transformed: UIMessage[] = applyVisualTransformersStreamingTail(
+              msgs, [thinkTagTransformer, regexOutputTransformer], ctx);
+            this.regenNodeId = nodeId;
+            this.regenTail = transformed[transformed.length - 1];
+          },
         });
       })
       .then((out: Conversation): void => {
@@ -258,6 +273,8 @@ struct ChatPage {
         this.suggestions = out.chatSuggestions;
         this.sending = false;
         this.abortController = null;
+        this.regenTail = null;
+        this.regenNodeId = '';
         this.scrollToBottom();
         if (holder.rt !== null) {
           this.maybeSuggestions(out, holder.rt);
@@ -267,6 +284,8 @@ struct ChatPage {
         this.errorMsg = e.message;
         this.sending = false;
         this.abortController = null;
+        this.regenTail = null;
+        this.regenNodeId = '';
       });
   }
 
@@ -583,6 +602,12 @@ struct ChatPage {
               onEdit: (): void => this.startEditMessage(row),
               onFork: (): void => this.forkAt(row),
             })
+          }
+          // D-041:regenerate 流式预览渲染在目标节点行下
+          if (row.nodeId === this.regenNodeId && this.regenTail !== null) {
+            ListItem() {
+              MessageRow({ message: this.regenTail as UIMessage })
+            }
           }
         }, (row: MsgRow): string => row.nodeId)
         ForEach(this.streamingTail, (m: UIMessage): void => {

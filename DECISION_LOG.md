@@ -397,3 +397,13 @@
   - **asChatStreamProvider 透传 generateText** → OpenAIChatApi.generateText(非流式请求 + 单 chunk 解析,D-015 既有)。
   - **编辑器新增流式输出 Switch**(Android 同语义:默认 true;关闭则整段返回)。
 - **可逆性**:generateText 可选,streamOutput 默认 true → 不传/默认时行为与 D-039 完全一致。
+
+## D-041（L0，2026-07-28）regenerate 流式预览落地：D-024 MVP 裁剪项清零
+
+- **背景**：D-024 把 regenerate 流式预览裁为 MVP(spinner 代替,PARITY_DEBT 登记 P1);runRegenerateAt 的 onUpdate 端口(D-030)已备,仅缺 entry 接线。
+- **决定**：
+  - **渲染位置**:onUpdate 快照末条即活动流式消息(assistant 路径 = 占位合并后的流式尾部;user 路径 = 截断后尾部追加,均为末条),渲染在**目标节点行下**(regenNodeId 匹配),完成后 regenTail 清空、buildRows 重排。
+  - **visual transforms 与 send 路径一致**:applyVisualTransformersStreamingTail(thinkTag + regex,ctx.assistant = rt.assistant)——原始快照直出会泄漏 <think> 标签,与 send 不一致。
+  - 非流式(D-040)regenerate:onUpdate 单次触发,预览即终态,无缝衔接。
+  - PARITY_DEBT regenerate 分组"流式预览"条目标记消除。
+- **可逆性**:纯 UI 增项;领域层零改动(复用 D-030 onUpdate 端口)。
