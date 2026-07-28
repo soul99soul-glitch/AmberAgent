@@ -22,6 +22,7 @@ import {
   applyVisualTransformersStreamingTail,
   makePendingUserMessage, enqueuePendingUserMessage, dequeueNextPendingUserMessage,
   cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
+  convertSteerToFollowup, runAppendUserMessage,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -500,10 +501,15 @@ struct ChatPage {
       (m: PendingUserMessage): PendingChipRow => ({ id: m.id, preview: pendingPreviewText(m) }));
   }
 
-  // 生成中发送 → FOLLOWUP 入队;满 20 拒绝(Android 文案逐字)
-  private enqueuePendingParts(parts: UIMessagePart[]): void {
+  // 生成中发送 → 入队;满 20 拒绝(Android 文案逐字)。
+  // 模式(D-051,Android ChatInput.kt:259/272 + ChatService.kt:699):
+  //   answer=true(点击发送)→ 恒 FOLLOWUP;answer=false(长按)生成中 → STEER
+  //   (插 STEER 前缀位,派发时 asFollowup 转换),否则 FOLLOWUP
+  private enqueuePendingParts(parts: UIMessagePart[], answer: boolean): void {
     const msg: PendingUserMessage = makePendingUserMessage({
-      parts, answer: true, mode: 'FOLLOWUP',
+      parts,
+      answer,
+      mode: !answer && this.sending ? 'STEER' : 'FOLLOWUP',
     });
     const r = enqueuePendingUserMessage(this.pendingQueue, msg);
     if (!r.accepted) {
@@ -530,7 +536,54 @@ struct ChatPage {
     const prep = preparePendingMessageForDispatch(dq.rest, dq.next);
     this.pendingQueue = prep.rest;
     this.syncPendingRows();
+    // D-051:answer=false → 只记录不生成(ChatService.kt:847-850
+    //   appendUserMessage;answer 才 handleMessageComplete),随后继续出队
+    if (!prep.dispatch.answer) {
+      runAppendUserMessage(this.conversation, prep.dispatch.parts, getChatRepository())
+        .then((out: Conversation): void => {
+          this.conversation = out;
+          this.rows = buildRows(out);
+          this.scrollToBottom();
+          this.drainPendingQueue();
+        })
+        .catch((e: Error): void => {
+          this.errorMsg = e.message;
+          this.drainPendingQueue();
+        });
+      return;
+    }
     this.sendParts(prep.dispatch.parts);
+  }
+
+  // D-051:长按发送 = 只记录不生成(Android ChatInput.kt:272 → queueMode;
+  //   ChatVM.sendMessageWithoutAnswer → sendMessage(answer=false))
+  //   生成中 → STEER 入队(插在生成后首位);否则直接 appendUserMessage
+  //   登记偏差:编辑态不支持(Android 无此交互),编辑态长按按普通发送语义入队
+  private sendWithoutAnswer(): void {
+    const text: string = this.inputText.trim();
+    const hasImages: boolean = this.pendingImages.length > 0;
+    if ((text.length === 0 && !hasImages) || this.conversation === null) return;
+    const inputParts: UIMessagePart[] = [];
+    if (text.length > 0) {
+      inputParts.push({ type: 'text', text, metadata: null });
+    }
+    for (const url of this.pendingImages) {
+      inputParts.push({ type: 'image', url, metadata: null });
+    }
+    this.inputText = '';
+    this.pendingImages = [];
+    if (this.editingNodeId.length > 0) this.cancelEdit();
+    if (this.sending) {
+      this.enqueuePendingParts(inputParts, false);
+      return;
+    }
+    runAppendUserMessage(this.conversation, inputParts, getChatRepository())
+      .then((out: Conversation): void => {
+        this.conversation = out;
+        this.rows = buildRows(out);
+        this.scrollToBottom();
+      })
+      .catch((e: Error): void => { this.errorMsg = e.message; });
   }
 
   private send(): void {
@@ -549,7 +602,7 @@ struct ChatPage {
     // D-048:生成中 → FOLLOWUP 入队(编辑态同 — 编辑重发需等当前生成结束;
     //   入队即退出编辑态,排队消息按新消息派发,登记偏差:Android 无编辑态排队交互)
     if (this.sending) {
-      this.enqueuePendingParts(inputParts);
+      this.enqueuePendingParts(inputParts, true);
       this.inputText = '';
       this.pendingImages = [];
       if (this.editingNodeId.length > 0) this.cancelEdit();
@@ -744,7 +797,7 @@ struct ChatPage {
                   LongPressGesture()
                     .onAction((): void => {
                       if (this.sending) {
-                        this.enqueuePendingParts([{ type: 'text', text: s, metadata: null }]);
+                        this.enqueuePendingParts([{ type: 'text', text: s, metadata: null }], true);
                         return;
                       }
                       this.inputText = s;
@@ -850,10 +903,20 @@ struct ChatPage {
             if (this.sending) {
               // 停止生成(D-035):abort → 部分内容照常入列(chat_turn 语义)
               this.abortController?.abort();
+              // D-051:停止时 STEER 队列转 FOLLOWUP(Android stopGeneration:2419-2454)
+              const conv2 = convertSteerToFollowup(this.pendingQueue);
+              if (conv2.changed) {
+                this.pendingQueue = conv2.messages;
+                this.syncPendingRows();
+              }
             } else {
               this.send();
             }
           })
+          // D-051:长按 = 只记录不生成(answer=false,Android ChatInput.kt:272)
+          .gesture(LongPressGesture().onAction((): void => {
+            this.sendWithoutAnswer();
+          }))
       }
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 12 })

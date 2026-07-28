@@ -117,6 +117,24 @@ const isEmptyInput = (parts: UIMessagePart[]): boolean =>
   parts.length === 0
   || parts.every((p: UIMessagePart): boolean => p.type === 'text' && p.text.trim().length === 0);
 
+// ===== answer=false 派发(D-051,ChatService.kt:847-850) =====
+
+// appendUserMessage 等价:user 消息入列 + 持久化,**不触发生成**。
+// 队列循环中 answer=false 的派发走此路径;空输入与 runChatTurn 同 no-op 语义。
+export const runAppendUserMessage = async (
+  conversation: Conversation, userInput: string | UIMessagePart[], store: ConversationStore,
+): Promise<Conversation> => {
+  const userParts: UIMessagePart[] = typeof userInput === 'string'
+    ? makeUserMessage(userInput).parts
+    : userInput;
+  if (isEmptyInput(userParts)) {
+    return conversation;
+  }
+  const conv: Conversation = appendNode(conversation, makeUIMessage('user', userParts));
+  await store.save(conv);
+  return conv;
+};
+
 // userInput:string(纯文本)或 UIMessagePart[](多模态,D-038)
 export const runChatTurn = async (
   conversation: Conversation, userInput: string | UIMessagePart[], deps: ChatTurnDeps,

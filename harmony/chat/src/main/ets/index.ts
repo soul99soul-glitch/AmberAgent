@@ -66,7 +66,7 @@ export {
 export type {
   ChatStreamProvider, ConversationStore, MemoryConversationStore, ChatTurnDeps, StreamOpts,
 } from './chat/chat_turn.ts';
-export { createMemoryConversationStore, runChatTurn } from './chat/chat_turn.ts';
+export { createMemoryConversationStore, runChatTurn, runAppendUserMessage } from './chat/chat_turn.ts';
 export { selectMessageBranch, runRegenerateAt } from './chat/regenerate.ts';
 export { deleteMessage } from './chat/delete_message.ts';
 export { editMessage } from './chat/edit_message.ts';

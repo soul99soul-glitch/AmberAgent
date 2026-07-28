@@ -47,7 +47,7 @@
 |---|---|---|
 | ~~生成错误恢复（retry/vision fallback）~~ **retry 已完成(D-050)** | GenerationRetry.kt + GenerationHandler.kt:774-820 | classifier+循环+状态文案忠实;残余:vision fallback(image→text transformer 链依赖)/生成守卫 = P1(PD-006 更新) |
 | 工具执行 + 审批循环 | GenerationHandler.kt:281+ toolDispatcher | PD-006；依赖工具定义落地 |
-| ~~FOLLOWUP 发送排队~~ **已完成(D-048)** | ChatService.kt:687-867；ConversationSession.kt:110-232 | 队列纯逻辑+chips UI+循环派发完成;残余:持久化(PendingMessageStore)/STEER 进行中注入/answer=false = P1 |
+| ~~FOLLOWUP 发送排队~~ **已完成(D-048)**；~~answer=false 发送路径~~ **已完成(D-051)** | ChatService.kt:687-867；ConversationSession.kt:110-232；ChatInput.kt:272 | 队列纯逻辑+chips UI+循环派发完成;长按发送=只记录不生成(STEER/FOLLOWUP 逐字忠实)+停止时 STEER→FOLLOWUP 完成;残余:持久化(PendingMessageStore)/STEER 进行中注入 = P1 |
 | ContextEngine + compact（上下文压缩） | ChatService invalidateCompacts / copyValidCompacts | regenerate 窗口化 merge 偏差残余 |
 | 图片压缩 + file:// 私有目录存储 | FileEncoder.kt compressAndEncode | PD-007；PixelMap 管线 |
 | ~~Google 请求构建~~ **已完成(D-045)** | ai/ GoogleProvider.kt(949 行) | Claude(D-044)/Google(D-045)均完成;**entry 运行时接线已完成(D-046)**;entry 运行时接线(D-046)与三变体设置编辑 UI(D-047)均完成;残余:BuiltInTools/Vertex service account/Code Assist OAuth 传输/authMode-brand 编辑面 = P1 |

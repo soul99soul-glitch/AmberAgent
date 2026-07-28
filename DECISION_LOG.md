@@ -494,3 +494,12 @@
   - **ChatPage 接线**:sendParts/regenerate 均接 onRetryStatus → @State retryStatus,输入区上方 ACCENT 色展示。
   - **裁剪登记**:vision fallback(forceImageToText 依赖 image→text transformer 链,鸿蒙无 → 做了会是静默 no-op,违宪章)留 PD-006;生成守卫/generative-ui 重试 = P1;retry 设置的设置面编辑 = P1(用默认值);AgentToolDispatcher 的工具重试(同 classifier)随工具循环落地。
 - **可逆性**:deps 全可选,未注入时行为 = Android 默认;不可重试错误路径逐字节不变;既有 3 个用可重试错误文本的测试注入即时 sleep 后断言原样通过。
+
+## D-051（L0，2026-07-28）answer=false 发送路径：只记录不生成(长按发送)
+
+- **背景**：D-048 登记项 —— enqueue 恒 answer=true,Android 有 sendMessageWithoutAnswer 路径(ChatVM → sendMessage(answer=false, queueMode);ChatInput.kt:272 长按发送按钮 → `queueMode = loading ? STEER : FOLLOWUP`),鸿蒙缺失。
+- **决定**：
+  - **chat_turn.ts runAppendUserMessage(TDD,3 测试锁定,933 总数)**:ChatService.kt:847-850 派发分支的独立助手 —— user append + persist,**不触发生成**(answer=false 时 Android 不调用 handleMessageComplete);isEmptyInput 空输入 no-op 引用原样返回(string 经 makeUserMessage 归一,parts 直用)。
+  - **ChatPage 接线**:enqueuePendingParts 增 answer 参,**mode 逐字忠实 ChatInput.kt:272** —— answer=false 且生成中 → STEER(插 STEER 前缀位,派发时 preparePendingMessageForDispatch asFollowup 转换),否则 FOLLOWUP;**drainPendingQueue answer=false 分支** → runAppendUserMessage 落库 + UI 刷新 + 递归继续出队(Android 循环语义:append 后 loop 继续 dequeue);**sendWithoutAnswer()**(生成中 → STEER 入队;否则直接 runAppendUserMessage,清空输入与待发图);发送/停止按钮 **LongPressGesture** → sendWithoutAnswer;**停止按钮点击追加 STEER→FOLLOWUP 转换**(Android stopGeneration:2419-2454 语义 — D-048 时因鸿蒙无 STEER 来源降级 no-op,本切片恢复为真实转换)。
+  - **偏差登记**:编辑态长按发送 → 取消编辑态按新消息处理(Android 无编辑态+长按组合交互);COLLECT 合并消息 answer=any(既有 D-048 语义,answer=false 消息参与合并时可能被并入 answer=true 派发,与 Android buildCollectedPendingUserMessage 逐行一致)。
+- **可逆性**:点击发送路径逐字节不变(answer=true 恒 FOLLOWUP 同 D-048);长按手势为纯增量交互;STEER→FOLLOWUP 转换仅在队列含 STEER 时 changed=true。
