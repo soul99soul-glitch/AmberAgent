@@ -1434,3 +1434,22 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 审计行「会话列表」delete-all 残余(P1 清单「delete-all 会话(History toolbar)」)。
 - **未移植(P1 登记)**: 无新增(FTS/favorites/chat_images 沿用已登项)。
 - **验证**: chat tsc 干净 + 1064 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-107 — assistant toolProfile/localTools 编辑面
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: AssistantBasicPage.kt:243-261(工具范围 FormItem)/:98-105(label() 六档 zh)/AssistantLocalToolPage.kt(全文 280 行,13 LocalToolOption 行)/values-zh/strings.xml:83-92,1294-1303 + values/strings.xml:998-1003(zh 缺失三项的 en 回退)/MainAgentToolProfile.kt(六值声明序)
+- **背景**: D-082(ToolProfileFilter 门控)+ D-083(LocalToolOption 门控)数据链已落地,但两字段均无编辑面——assistant.toolProfile/localTools 用户不可配。
+- **决策**:
+  1. **工具范围**(编辑器内):ChatAssistantsPage 编辑器 += 六档 chips(完整/最小/网页只读/文件只读/编程/手机控制,label() 逐字);label '工具范围' + desc '限制此助手可使用的工具类别；不会自动启用未开启的本地工具。'(硬编码 zh 逐字);startEdit/startCreate/save 三处接线(patchAssistant/makeAssistant += toolProfile,默认 'full' :140)。
+  2. **本地工具**(新页):ChatAssistantLocalToolsPage — 13 行行序逐字(javascript_engine → webmount_eval),title/desc zh 逐字;toggleLocalTool :71-84 逐字(enable → + option Set 去重;disable → webmount 连带 - webmount_eval,否则 - option);webmount_eval 开关 .enabled = webmount 已开(:273);保存 = patchAssistant({localTools}) + saveAssistants(同 D-102 saveAssistant 模式)。入口:助手行 '工具'(扩展/复制之间);main_pages.json 注册。
+- **偏差/适配登记**:
+  - workspace/terminal/screen 三项 values-zh 无键 → 按 Android zh 回退行为取 en 逐字(values/strings.xml:998-1003);
+  - detail tab → 独立页(同 D-102 扩展页先例);
+  - 工具范围位置:Android 居 chatModel/imageModel 之间,本编辑器无模型选择器 → 置于流式输出后;
+  - 平台专属工具(terminal/screen/system_access/webview/icloud/webmount 系)harmony 无实现 — 开关仅落 localTools 配置(Android 同为纯配置面);
+  - Select → chips(同推理力度选择器惯例)。
+- **关闭**: 审计行「工具执行 + 审批循环」残余「ToolProfileFilter 设置面选择 UI」「LocalToolOption 编辑面 UI」。
+- **未移植(P1 登记)**: 平台专属工具实体(terminal/screen/system_access 等 Android-only)。
+- **验证**: chat tsc 干净 + 1064 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

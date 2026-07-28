@@ -18,6 +18,7 @@
     "pages/ChatSearchSettingsPage",
     "pages/ChatPromptsPage",
     "pages/ChatAssistantExtensionsPage",
+    "pages/ChatAssistantLocalToolsPage",
     "pages/ChatAgentPermissionsPage"
   ]
 }

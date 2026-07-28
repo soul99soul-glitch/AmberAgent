@@ -9,11 +9,18 @@
 // 请求自定义语义(Android PropertyEditor.kt 忠实):header name/value trim;
 //   body value = JSON,逐键解析,非法 JSON 行内报错并保留旧值(:160-176)
 import { router } from '@kit.ArkUI';
-import type { Assistant, ReasoningLevel, CustomHeader, CustomBody, JsonValue } from '@amber/chat-domain';
+import type {
+  Assistant, ReasoningLevel, CustomHeader, CustomBody, JsonValue, MainAgentToolProfile,
+} from '@amber/chat-domain';
 import {
   loadAssistants, saveAssistants, makeAssistant, patchAssistant, newId,
 } from '@amber/chat-domain';
 import { getChatKvStore, getChatAssistants, getChatRepository } from '../di/AppContainer.ets';
+
+// D-107:工具范围(MainAgentToolProfile.entries 声明序;label() :98-105 逐字)
+const TOOL_PROFILES: MainAgentToolProfile[] =
+  ['full', 'minimal', 'web_read', 'workspace_read', 'coding', 'mobile_control'];
+const TOOL_PROFILE_LABELS: string[] = ['完整', '最小', '网页只读', '文件只读', '编程', '手机控制'];
 
 // 推理力度 7 档(provider_model.ts REASONING_LEVEL_TABLE,与 Android ReasoningLevel.entries 同序)
 const REASONING_LEVELS: ReasoningLevel[] = ['auto', 'off', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -42,6 +49,8 @@ struct ChatAssistantsPage {
   @State editContextSize: string = '';
   @State editReasoning: ReasoningLevel = 'auto';
   @State editStreamOutput: boolean = true;
+  // D-107:工具范围(AssistantBasicPage.kt:243-261;makeAssistant 默认 'full')
+  @State editToolProfile: MainAgentToolProfile = 'full';
   // D-049:请求自定义(PropertyEditor.kt) — headers 直接编辑;bodies 的
   //   JSON 值以文本态编辑(editBodyTexts),解析成功才落 editBodies,
   //   失败行内报错(editBodyErrors)并保留旧值(Android :160-176 语义)
@@ -72,6 +81,7 @@ struct ChatAssistantsPage {
     this.editContextSize = a.contextMessageSize > 0 ? String(a.contextMessageSize) : '';
     this.editReasoning = a.reasoningLevel;
     this.editStreamOutput = a.streamOutput;
+    this.editToolProfile = a.toolProfile;
     this.editHeaders = a.customHeaders.map(
       (h: CustomHeader): CustomHeader => ({ name: h.name, value: h.value }));
     this.editBodies = a.customBodies.map(
@@ -91,6 +101,7 @@ struct ChatAssistantsPage {
     this.editContextSize = '';
     this.editReasoning = 'auto';
     this.editStreamOutput = true;
+    this.editToolProfile = 'full';
     this.editHeaders = [];
     this.editBodies = [];
     this.editBodyTexts = [];
@@ -216,6 +227,7 @@ struct ChatAssistantsPage {
             contextMessageSize: this.parseIntOrZero(this.editContextSize),
             reasoningLevel: this.editReasoning,
             streamOutput: this.editStreamOutput,
+            toolProfile: this.editToolProfile,
             customHeaders: this.normalizedHeaders(),
             customBodies: this.normalizedBodies(),
           });
@@ -230,6 +242,7 @@ struct ChatAssistantsPage {
           contextMessageSize: this.parseIntOrZero(this.editContextSize),
           reasoningLevel: this.editReasoning,
           streamOutput: this.editStreamOutput,
+          toolProfile: this.editToolProfile,
           customHeaders: this.normalizedHeaders(),
           customBodies: this.normalizedBodies(),
         })];
@@ -331,6 +344,15 @@ struct ChatAssistantsPage {
                       params['assistantId'] = a.id;
                       router.pushUrl({ url: 'pages/ChatAssistantExtensionsPage', params: params });
                     })
+                  // D-107:本地工具(AssistantLocalToolPage tab → 独立页)
+                  Text('工具')
+                    .fontSize(12).fontColor(INK3)
+                    .margin({ right: 14 })
+                    .onClick((): void => {
+                      const params: Record<string, string> = {};
+                      params['assistantId'] = a.id;
+                      router.pushUrl({ url: 'pages/ChatAssistantLocalToolsPage', params: params });
+                    })
                   Text('复制')
                     .fontSize(12).fontColor(INK3)
                     .margin({ right: 14 })
@@ -409,6 +431,28 @@ struct ChatAssistantsPage {
             Blank()
             Toggle({ type: ToggleType.Switch, isOn: this.editStreamOutput })
               .onChange((isOn: boolean): void => { this.editStreamOutput = isOn; })
+          }
+          .width('100%').margin({ bottom: 8 })
+
+          // ── D-107 工具范围(AssistantBasicPage.kt:243-261) ──
+          //   label/desc 硬编码 zh 逐字;Select → 六档 chips(同推理力度惯例)
+          //   位置偏差:Android 居于 chatModel 与 imageModel 之间,本编辑器无
+          //   模型选择器 → 置于流式输出之后
+          Text('工具范围')
+            .fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 4, top: 4 })
+          Text('限制此助手可使用的工具类别；不会自动启用未开启的本地工具。')
+            .fontSize(11).fontColor(INK3).width('100%').margin({ bottom: 6 })
+          Flex({ wrap: FlexWrap.Wrap }) {
+            ForEach(TOOL_PROFILES, (profile: MainAgentToolProfile, i: number): void => {
+              Text(TOOL_PROFILE_LABELS[i])
+                .fontSize(13)
+                .fontColor(this.editToolProfile === profile ? Color.White : INK2)
+                .backgroundColor(this.editToolProfile === profile ? ACCENT : SURFACE)
+                .borderRadius(12)
+                .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                .margin({ right: 8, bottom: 8 })
+                .onClick((): void => { this.editToolProfile = profile; })
+            }, (profile: MainAgentToolProfile): string => profile)
           }
           .width('100%').margin({ bottom: 8 })
 
