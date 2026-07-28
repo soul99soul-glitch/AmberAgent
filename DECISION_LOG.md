@@ -1525,3 +1525,22 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 审计行 29(PD-006 错误恢复残余清零 → ✅)+ 行 48 残余「VisionModelHealthChecker 探测/生成守卫」。
 - **未移植(P1 登记)**: 附件状态常驻角标视觉(ImageAttachmentPreview)。
 - **验证**: chat tsc 干净 + 1088 测试(+20)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-112 — DocxParser 全文移植 + XML/ZIP 平台适配(document 模块首片)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: document/DocxParser.kt(349 行全文)/org.xmlpull.v1.XmlPullParser(kxml2 语义子集)/java.util.zip.ZipInputStream(条目扫描)/DocumentAsPromptTransformer.kt parseDocx 消费点(D-074 deps)
+- **背景**: D-074 文档 transformer 的 parse* deps 刻意不提供(document 模块未移植)→ .docx 附件走 '[ERROR, failed to read file]'。document 模块四解析器中 Docx/Pptx/Epub 为纯 ZIP+XML 逻辑(可移植),PdfParser 依赖 MuPDF native(平台阻断)。
+- **决策**:
+  1. chat HAR xml_pull.ts:XmlPullPort(eventType/name/depth/text/getAttributeValue/next)+ XmlPullFactory + ZipEntryTextProvider 端口;getAttributeValue(null,name)= kxml2 任意命名空间通配语义。
+  2. chat HAR docx_parser.ts(+14 测试):parse 双文案逐字('Unable to find document content in DOCX file'/'Error parsing DOCX file: <msg>'/'Error parsing document XML: <msg>');body 门 + p/tbl 分发;pStyle Heading*/heading* → '#'*N(末位非数字 → 1,digitToIntOrNull ?: 1);numPr ilvl/numId → 缩进列表(**number 恒 1 = Android 原样,不修正**);rPr b/i → **/*/*** 包裹;表格 markdown(maxCols 补空/首行后 --- 分隔/尾 '\n');单元格多段落 ' ' 连接;文档级 trim;toIntOrNull 严格全串(JS parseInt 前缀解析不忠实 → 自实现)。
+  3. entry EntryDocumentParser.ets:SAX/token 回调两遍解析(tokenValueCallbackFunction 收集事件流(ParseInfo.getDepth/getAttributeCount 自带)+ attributeWithTagCallbackFunction 三元组按 attrCount 顺序对齐,消除配对歧义);本地名还原(kxml2 namespace-aware);CDATA → TEXT(kxml2 同);zlib.decompressFile 整包解压临时目录 → 条目名读文本 → 递归清理。
+  4. DocumentSupport:createEntryDocumentReader += parseDocx: parseDocxEntry。
+- **偏差/适配登记**:
+  - ZIP 整包解压 vs Android 流式扫描(输出等价;临时目录 cacheDir/docparse_<uuid> 用后递归删,失败静默 = 平台缓存清理同档);
+  - HarmonyOS xml 无 SAX handler 重载(ets API 仅 ParseOptions)→ 两遍回调重放,深度/属性计数由 ParseInfo 供给;
+  - 测试以 token 脚本 fake 驱动域层(平台适配层薄,无 JVM 面)。
+- **关闭**: D-074 残余「parse*」之 DOCX 部分。
+- **未移植(P1 登记)**: PptxParser(453 行,同 Port 续切片 D-113)/EpubParser(231 行,D-114);**PdfParser = MuPDF native 平台阻断**(HarmonyOS 无 MuPDF AAR;需纯 ArkTS PDF 文本提取或 native 移植评估 → spike 登记);OfficeNativeSwitch 维持不移植。
+- **验证**: chat tsc 干净 + 1102 测试(+14)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL(ArkTS 严检两轮:首轮回函 apply/call + TextEncoder 静态调用 + SAX 重载不存在三错,已修)。

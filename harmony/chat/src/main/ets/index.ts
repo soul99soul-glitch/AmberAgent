@@ -487,6 +487,12 @@ export type { VisionCache, VisionCacheFileStore } from './chat/vision_cache.ts';
 export { createOcrTransformer, performImageRecognition } from './chat/ocr_transformer.ts';
 export type { OcrTransformerDeps } from './chat/ocr_transformer.ts';
 
+// ===== D-112:文档解析(DocxParser.kt 全文;XmlPull/ZIP 端口) =====
+export { parseDocxDocumentXml, parseDocxFromZip } from './chat/docx_parser.ts';
+export type {
+  XmlPullEvent, XmlPullFactory, XmlPullPort, ZipEntryTextProvider,
+} from './chat/xml_pull.ts';
+
 // ===== D-111:视觉健康探测 + 图片附件发送守卫 =====
 //   (VisionModelHealthChecker.kt / ImageAttachmentValidator.kt 全文)
 export {

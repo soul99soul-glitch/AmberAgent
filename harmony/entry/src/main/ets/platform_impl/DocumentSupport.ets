@@ -6,13 +6,15 @@
 //   - bufferedReader 字符读取 → 整读 + UTF-8 decode + 截断(语义等价;
 //     64MB 上限已由上层判定)
 // 偏差(登记):
-//   - PDF/DOCX/PPTX/EPUB 解析(document 模块未移植)→ parse* 不提供,
-//     HAR 侧抛错走 '[ERROR, failed to read file]'(与 Android 解析失败同文案)= P1
+//   - PDF/PPTX/EPUB 解析未移植(PDF = MuPDF native 平台阻断;PPTX/EPUB 续切片)
+//     → parse* 不提供,HAR 侧抛错走 '[ERROR, failed to read file]'
+//     (与 Android 解析失败同文案)= P1;DOCX 已落地(D-112 EntryDocumentParser)
 //   - OfficeNativeSwitch(native 桥)不移植
 import { fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import type { UIMessagePartDocument } from '@amber/chat-domain';
 import type { DocumentFileHandle, DocumentReaderDeps } from '@amber/chat-domain';
+import { parseDocxEntry } from './EntryDocumentParser.ets';
 
 const S_IFMT: number = 0o170000;
 const S_IFREG: number = 0o100000;
@@ -56,8 +58,9 @@ const readText = (handle: DocumentFileHandle, maxCharsPlusOne: number): Promise<
   }
 };
 
-// parse*(PDF/DOCX/PPTX/EPUB)刻意不提供 — document 模块未移植(P1 登记)
+// parseDocx 已接线(D-112);PDF/PPTX/EPUB 不提供(P1 登记,同 Android 解析失败文案路径)
 export const createEntryDocumentReader = (): DocumentReaderDeps => ({
   statFile: statOne,
   readTextFile: readText,
+  parseDocx: parseDocxEntry,
 });
