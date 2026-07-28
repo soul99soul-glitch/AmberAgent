@@ -484,3 +484,13 @@
   - **助手编辑 UI(ChatAssistantsPage)**:PropertyEditor.kt 忠实 —— headers 行(名/值双输入+删除;+ 添加 Header 追加 CustomHeader("",""),:108-113);bodies 行(键输入+JSON 值 TextArea+删除;+ 添加 Body 追加 CustomBody("",JsonPrimitive("")) 文本态显示 '""',:213-218);**JSON 逐键解析**:解析成功落 value、失败行内报「无效 JSON: <msg take 100>」并保留旧值(:160-176);trim 在保存点归一(Android 逐键 trim 等价收敛);编辑器包 Scroll(行数增长防溢出)。
   - **裁剪/偏差登记**:JSON 解析为 JS 严格模式(Android jsonLenient 允许尾逗号/未加引号等 — 引擎差异,PD-005 同类);代码高亮编辑(HighlightCodeVisualTransformation)无对应;**model 级 customHeaders/customBodies 编辑面 = P1**(数据已被 mergeCustomParams 消费,仅缺 UI);助手编辑其余字段(mcpServers/localTools/modeInjection/lorebook 等)仍保留原值。
 - **可逆性**:无 custom 配置的用户行为零变化(空数组 → 空 Record/空 customBody,请求构建逐字节不变);纯 UI + adapter 注入增项。
+
+## D-050（L0，2026-07-28）生成错误恢复(重试档)：GenerationRetry 全文移植 + 循环集成
+
+- **背景**：PD-006 第三档等价优先级最大缺口 —— provider 抛错直接传播(Android 有 runProviderCallWithRetry:指数回退 + 失败分类 + 状态文案)。retry 纯逻辑无设备依赖,可 source-only 移植。
+- **决定**：
+  - **chat/generation_retry.ts(TDD,11 测试锁定,930 总数)**:GenerationRetry.kt 全文 166 行忠实 —— GenerationRetrySetting(enabled/5 次/1000ms 起步/16000ms 上限/jitter 0.15);12 类 GenerationFailureCategory;**classify 分支顺序即语义**(CONTEXT→QUOTA→SAFETY→AUTH(401/403 不同 reason)→BAD_REQUEST→RATE_LIMIT→TIMEOUT→SERVER→NETWORK→UNKNOWN);errorText cause 链遍历(类名:消息 拼接 lowercase,seen 防循环);hasNetworkCause 四类名;decide(禁用/超次数/不可重试 → false);**delayForAttempt**(shl 指数 → JS <<、cap、jitter trunc 截断、[-jitter,+jitter] 闭区间整数、coerceAtLeast 0 — 种子化测试锁定 850/1150 边界)。JS 映射登记:CancellationException → Error.name==='AbortError';Error.cause 经交叉类型 CausedError(ArkTS SDK lib 未声明 ES2022 cause,运行时存在)。
+  - **chat_turn.ts / regenerate.ts 重试循环**(runProviderCallWithRetry:774-820 忠实):每次失败 → decide → 可重试则 **onBeforeRetry 等价**(base/seed 快照全量 onUpdate,失败尝试的部分输出丢弃,:625-628)→ 状态文案(**strings.xml:386 逐字** "Connection interrupted. Retrying in %1$d s (%2$d/%3$d): %4$s",秒 = delayMs/1000 整除 coerceAtLeast 1)→ sleep → 整轮重跑;**每次尝试全新 accumulator**(部分输出不混入成功结果,测试锁定);成功/不可重试抛错前 onRetryStatus(null)(processingStatus 清零语义,:787/:797);调用次数 = 1 + maxRetries(锁定);**首次尝试必跑**(abort 检查在 catch 与 sleep 后 — D-035「provider 抛错时 signal.aborted=true」语义不回归,修复 loop-top 检查吞掉首轮的回归);重试等待中 abort → 不发起新尝试走部分快照终态化。deps 新增 retrySetting/sleep(测试即时注入)/onRetryStatus,默认全开(Android 默认 enabled=true 忠实)。
+  - **ChatPage 接线**:sendParts/regenerate 均接 onRetryStatus → @State retryStatus,输入区上方 ACCENT 色展示。
+  - **裁剪登记**:vision fallback(forceImageToText 依赖 image→text transformer 链,鸿蒙无 → 做了会是静默 no-op,违宪章)留 PD-006;生成守卫/generative-ui 重试 = P1;retry 设置的设置面编辑 = P1(用默认值);AgentToolDispatcher 的工具重试(同 classifier)随工具循环落地。
+- **可逆性**:deps 全可选,未注入时行为 = Android 默认;不可重试错误路径逐字节不变;既有 3 个用可重试错误文本的测试注入即时 sleep 后断言原样通过。

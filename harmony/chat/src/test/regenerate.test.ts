@@ -63,6 +63,8 @@ const deps = (provider: RegenerateDeps['provider']): RegenerateDeps => ({
   outputTransformers: [],
   provider,
   store: createMemoryConversationStore(),
+  // D-050:重试回退即时化(计时不在本文件断言范围)
+  sleep: (): Promise<void> => Promise.resolve(),
 });
 
 describe('selectMessageBranch', () => {

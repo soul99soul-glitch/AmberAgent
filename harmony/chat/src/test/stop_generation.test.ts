@@ -43,6 +43,8 @@ const baseDeps = (streamText: ChatTurnDeps['provider']['streamText']): ChatTurnD
   outputTransformers: [],
   provider: { streamText },
   store: createMemoryConversationStore(),
+  // D-050:重试回退即时化(计时不在本文件断言范围)
+  sleep: (): Promise<void> => Promise.resolve(),
 });
 
 describe('runChatTurn abort(停止生成)', () => {

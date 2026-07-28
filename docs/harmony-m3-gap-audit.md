@@ -45,7 +45,7 @@
 
 | 项 | Android 锚点 | 依赖/说明 |
 |---|---|---|
-| 生成错误恢复（retry/vision fallback） | GenerationHandler.kt runProviderCallWithRetry | PD-006；M3 设备端阶段补 |
+| ~~生成错误恢复（retry/vision fallback）~~ **retry 已完成(D-050)** | GenerationRetry.kt + GenerationHandler.kt:774-820 | classifier+循环+状态文案忠实;残余:vision fallback(image→text transformer 链依赖)/生成守卫 = P1(PD-006 更新) |
 | 工具执行 + 审批循环 | GenerationHandler.kt:281+ toolDispatcher | PD-006；依赖工具定义落地 |
 | ~~FOLLOWUP 发送排队~~ **已完成(D-048)** | ChatService.kt:687-867；ConversationSession.kt:110-232 | 队列纯逻辑+chips UI+循环派发完成;残余:持久化(PendingMessageStore)/STEER 进行中注入/answer=false = P1 |
 | ContextEngine + compact（上下文压缩） | ChatService invalidateCompacts / copyValidCompacts | regenerate 窗口化 merge 偏差残余 |

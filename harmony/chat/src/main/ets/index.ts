@@ -78,6 +78,16 @@ export type { SuggestionDeps } from './chat/suggestion.ts';
 export type { AutoTitleDeps } from './chat/auto_title.ts';
 export type { RegenerateDeps } from './chat/regenerate.ts';
 
+// ===== 生成重试(D-050,GenerationRetry.kt 全文) =====
+export type {
+  GenerationRetrySetting, GenerationFailureCategory, GenerationFailureClassification,
+  GenerationRetryDecision,
+} from './chat/generation_retry.ts';
+export {
+  RETRY_STATUS_TEMPLATE, makeGenerationRetrySetting,
+  classifyGenerationFailure, decideGenerationRetry, delayForAttempt,
+} from './chat/generation_retry.ts';
+
 // ===== 发送排队(D-048,PendingUserMessage.kt / ConversationSession.kt:110-232) =====
 export type {
   PendingUserMessageMode, PendingUserMessage, PendingUserMessageOpts,

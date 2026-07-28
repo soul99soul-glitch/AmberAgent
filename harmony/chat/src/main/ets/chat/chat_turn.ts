@@ -5,11 +5,18 @@
 //   (节流 onUpdate + streamingTail visual)→ 终态 snapshot → onGenerationFinish
 //   → assistant 节点入列 → persist
 //
+// 重试(D-050):runProviderCallWithRetry(:774-820)忠实 — 失败后 classify
+//   (generation_retry.ts),可重试 → onBeforeRetry(重置 baseMessages 全量
+//   通知 UI,:625-628)→ 状态文案(strings.xml:386)→ delay → 重新整轮;
+//   不可重试/超次数 → 原错误传播。每次尝试用全新 accumulator,
+//   失败尝试的部分输出不混入后续尝试。
+//
 // 裁剪(D-012/PD-006):
-//   - retry/vision fallback/工具执行/审批/生成守卫 = P1 范围,不在骨架
+//   - vision fallback(forceImageToText 依赖 image→text transformer 链)= P1
+//   - 工具执行/审批/生成守卫 = P1 范围,不在骨架
 //   - provider/persist 为 Port;chunk 用回调式(对齐 deepread HttpClient.fetchStream 风格,
 //     避免 AsyncIterable 在 ArkTS 的不确定性)
-//   - 错误路径:provider 抛错直接传播;user 消息快照已持久化,assistant 节点不入列
+//   - 错误路径:不可重试错误直接传播;user 消息快照已持久化,assistant 节点不入列
 
 import type { Conversation } from './conversation.ts';
 import { currentMessages, toMessageNode } from './conversation.ts';
@@ -27,6 +34,10 @@ import {
 } from './transformer_pipeline.ts';
 import { nowIso } from './ids.ts';
 import type { AbortSignalLike } from '@amber/deepread-domain';
+import {
+  decideGenerationRetry, makeGenerationRetrySetting, RETRY_STATUS_TEMPLATE,
+} from './generation_retry.ts';
+import type { GenerationRetrySetting } from './generation_retry.ts';
 
 // ===== Ports =====
 
@@ -87,6 +98,12 @@ export interface ChatTurnDeps {
   //   CancellationException → checkpointConversation(force) 语义);
   //   非 abort 错误维持传播(D-012)
   abortSignal?: AbortSignalLike;
+  // 生成重试(D-050,GenerationRetry.kt):默认 enabled/5 次/1s 起步指数/jitter 0.15;
+  //   sleep 可注入(测试即时);onRetryStatus 状态回调(strings.xml:386 文案,
+  //   成功或不可重试抛错前回 null,Android processingStatus 语义)
+  retrySetting?: GenerationRetrySetting;
+  sleep?: (ms: number) => Promise<void>;
+  onRetryStatus?: (status: string | null) => void;
 }
 
 const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
@@ -129,10 +146,8 @@ export const runChatTurn = async (
   const internalMessages: UIMessage[] = applyInputTransformers(assembled, deps.inputTransformers, ctx);
 
   // 3. provider 流式 → accumulator;节流 onUpdate 带 streamingTail visual
-  const accumulator = new MessageStreamAccumulator(baseMessages);
   const flushIntervalMs: number = deps.flushIntervalMs ?? 50;
   const nowMs: () => number = deps.nowMs ?? ((): number => Date.now());
-  let lastFlushAt: number = 0;
   const streamOpts: StreamOpts | undefined = deps.abortSignal !== undefined
     ? { signal: deps.abortSignal }
     : undefined;
@@ -140,39 +155,85 @@ export const runChatTurn = async (
   //   GenerationHandler.kt:255);chunk 以 message 形式进同一 accumulator
   const useNonStream: boolean = deps.assistant.streamOutput === false
     && deps.provider.generateText !== undefined;
-  try {
-    if (useNonStream && deps.provider.generateText !== undefined) {
-      const chunk: MessageChunk = await deps.provider.generateText(internalMessages, streamOpts);
-      accumulator.append(chunk);
-      if (deps.onUpdate !== undefined) {
-        const snapshot: UIMessage[] = accumulator.snapshot();
-        deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
-      }
-    } else {
-      await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+  // D-050 重试循环(runProviderCallWithRetry:774-820 忠实):
+  //   每次尝试全新 accumulator;失败 → classify → 可重试则 onBeforeRetry
+  //   (base 快照全量通知)+ 状态文案 + delay 后整轮重跑
+  const retrySetting: GenerationRetrySetting = deps.retrySetting ?? makeGenerationRetrySetting({});
+  const sleep: (ms: number) => Promise<void> = deps.sleep
+    ?? ((ms: number): Promise<void> => new Promise((resolve): void => {
+      setTimeout(resolve, ms);
+    }));
+  let attempt: number = 1;
+  let lastAccumulator: MessageStreamAccumulator = new MessageStreamAccumulator(baseMessages);
+  let lastFlushAt: number = 0;
+  const isAborted = (): boolean =>
+    deps.abortSignal !== undefined && deps.abortSignal.aborted;
+  while (true) {
+    // 首次尝试必跑(abort 检查在 catch 与 sleep 后 — provider 抛错时
+    //   signal.aborted=true 的既有语义不回归,D-035)
+    const accumulator: MessageStreamAccumulator = new MessageStreamAccumulator(baseMessages);
+    lastAccumulator = accumulator;
+    lastFlushAt = 0;
+    try {
+      if (useNonStream && deps.provider.generateText !== undefined) {
+        const chunk: MessageChunk = await deps.provider.generateText(internalMessages, streamOpts);
         accumulator.append(chunk);
         if (deps.onUpdate !== undefined) {
-          const now: number = nowMs();
-          if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
-            lastFlushAt = now;
-            const snapshot: UIMessage[] = accumulator.snapshot();
-            deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
-          }
+          const snapshot: UIMessage[] = accumulator.snapshot();
+          deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
         }
-      }, streamOpts);
-    }
-  } catch (e) {
-    // abort(停止生成):部分快照照常终态化入列(Android checkpoint force 语义);
-    // 其余错误传播(D-012)
-    const aborted: boolean = deps.abortSignal !== undefined && deps.abortSignal.aborted;
-    if (!aborted) {
-      throw e;
+      } else {
+        await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+          accumulator.append(chunk);
+          if (deps.onUpdate !== undefined) {
+            const now: number = nowMs();
+            if (lastFlushAt === 0 || now - lastFlushAt >= flushIntervalMs) {
+              lastFlushAt = now;
+              const snapshot: UIMessage[] = accumulator.snapshot();
+              deps.onUpdate(applyVisualTransformersStreamingTail(snapshot, deps.outputTransformers, ctx));
+            }
+          }
+        }, streamOpts);
+      }
+      // 成功:状态清零(Android :787 processingStatus.value = null)
+      if (deps.onRetryStatus !== undefined) deps.onRetryStatus(null);
+      break;
+    } catch (e) {
+      // abort(停止生成):部分快照照常终态化入列(Android checkpoint force 语义)
+      if (isAborted()) break;
+      const err: Error = e instanceof Error ? e : new Error(String(e));
+      const decision = decideGenerationRetry(err, attempt, retrySetting);
+      if (!decision.retryable) {
+        // 不可重试/超次数:状态清零后原错误传播(Android :797)
+        if (deps.onRetryStatus !== undefined) deps.onRetryStatus(null);
+        throw err;
+      }
+      // onBeforeRetry(:625-628):messages = baseMessages + 全量 onUpdate
+      //   —— 失败尝试的部分输出被丢弃,UI 回到 user 尾部
+      if (deps.onUpdate !== undefined) {
+        deps.onUpdate(applyVisualTransformersStreamingTail(baseMessages, deps.outputTransformers, ctx));
+      }
+      // 状态文案(strings.xml:386;秒 = delayMs/1000 整除 coerceAtLeast 1)
+      if (deps.onRetryStatus !== undefined) {
+        const seconds: number = Math.max(1, Math.trunc(decision.delayMs / 1000));
+        deps.onRetryStatus(
+          RETRY_STATUS_TEMPLATE
+            .replace('%1$d', String(seconds))
+            .replace('%2$d', String(attempt))
+            .replace('%3$d', String(retrySetting.maxRetries))
+            .replace('%4$s', decision.reason),
+        );
+      }
+      await sleep(decision.delayMs);
+      attempt++;
+      // 重试等待中点停止(含即时 sleep):不发起新尝试,走部分快照终态化
+      if (isAborted()) break;
     }
   }
 
   // 4. 终态:onGenerationFinish transforms → assistant 节点入列 → 持久化
   const finalMessages: UIMessage[] = applyOnGenerationFinish(
-    accumulator.snapshot(), deps.outputTransformers, ctx,
+    lastAccumulator.snapshot(), deps.outputTransformers, ctx,
   );
   if (finalMessages.length > baseMessages.length) {
     for (const msg of finalMessages.slice(baseMessages.length)) {

@@ -197,6 +197,8 @@ struct ChatPage {
   // D-048:发送排队(FOLLOWUP;内存态 — Android PendingMessageStore 持久化裁 P1)
   @State pendingRows: PendingChipRow[] = [];
   private pendingQueue: PendingUserMessage[] = [];
+  // D-050:重试状态文案(strings.xml:386;null = 清除)
+  @State retryStatus: string = '';
   private conversation: Conversation | null = null;
   private abortController: EntryAbortController | null = null;
   private scroller: Scroller = new Scroller();
@@ -269,6 +271,10 @@ struct ChatPage {
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
           abortSignal: this.abortController?.signal,
+          // D-050:重试状态(send 路径同语义)
+          onRetryStatus: (status: string | null): void => {
+            this.retryStatus = status ?? '';
+          },
           // D-041:流式预览 — 快照末条即活动流式消息(assistant 路径占位
           //   合并/user 路径尾部追加,均为末条);visual transforms 与 send 一致
           onUpdate: (msgs: UIMessage[]): void => {
@@ -586,6 +592,10 @@ struct ChatPage {
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
           abortSignal: this.abortController?.signal,
+          // D-050:重试状态(strings.xml:386 文案;null 清除)
+          onRetryStatus: (status: string | null): void => {
+            this.retryStatus = status ?? '';
+          },
           onUpdate: (msgs: UIMessage[]): void => {
             this.streamingTail = msgs.slice(tailStart);
           },
@@ -704,6 +714,13 @@ struct ChatPage {
       if (this.errorMsg.length > 0) {
         Text(this.errorMsg)
           .fontSize(12).fontColor('#B33A3A')
+          .padding({ left: 16, right: 16, top: 4, bottom: 4 })
+      }
+
+      // D-050:重试状态(strings.xml:386 文案,重试等待期间显示)
+      if (this.retryStatus.length > 0) {
+        Text(this.retryStatus)
+          .fontSize(12).fontColor(ACCENT)
           .padding({ left: 16, right: 16, top: 4, bottom: 4 })
       }
 
