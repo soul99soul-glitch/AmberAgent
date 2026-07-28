@@ -174,6 +174,14 @@ struct MessageRow {
     return '';
   }
 
+  // :952-960 已拒绝展示:'已拒绝' + 非空白 reason → ': reason'(红色;
+  //   chat_message_tool_denied zh 逐字,冒号为 ASCII ': ')
+  private deniedLabel(t: UIMessagePartTool): string {
+    if (t.approvalState.type !== 'denied') return '';
+    const reason: string = t.approvalState.reason;
+    return reason.trim().length > 0 ? `已拒绝: ${reason}` : '已拒绝';
+  }
+
   // ===== D-105:ask_user 问题卡片(ChatMessageAskUserStep.kt 子集) =====
   // :87-99 解析(渲染期重算,题量小;解析失败 → [])
   private askQuestionsOf(t: UIMessagePartTool): AskUserQuestion[] {
@@ -491,6 +499,13 @@ struct MessageRow {
               }
               .margin({ top: 4 })
             }
+            if ((p as UIMessagePartTool).toolName !== ASK_USER_TOOL_NAME
+              && (p as UIMessagePartTool).approvalState.type === 'denied') {
+              // D-108:已拒绝原因展示(:952-960;ask_user 卡早退不渲染,:676-679)
+              Text(this.deniedLabel(p as UIMessagePartTool))
+                .fontSize(11).fontColor('#B43A3A')
+                .width('100%').margin({ top: 4 })
+            }
             if ((p as UIMessagePartTool).output.length > 0
               && (p as UIMessagePartTool).output[0].type === 'text') {
               Text(((p as UIMessagePartTool).output[0] as UIMessagePartText).text)
@@ -580,6 +595,9 @@ struct ChatPage {
   // D-070:搜索偏好(aboutToAppear 异步加载;SearchTools 工具组输入)
   searchSettings: SearchSettings | null = null;
   @State errorMsg: string = '';
+  // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
+  @State denyDialogToolCallId: string = '';
+  @State denyReasonText: string = '';
   @State title: string = '新对话';
   @State modelLabel: string = '';
   @State editingNodeId: string = '';
@@ -1369,11 +1387,33 @@ struct ChatPage {
 
   // 工具审批(ChatService.kt:1122-1188):改写 approvalState → 持久化 →
   //   无 pending 残留 → 续跑生成(handleMessageComplete)
-  private handleToolApproval(toolCallId: string, approved: boolean): void {
+  private handleToolApproval(toolCallId: string, approved: boolean, reason: string = ''): void {
     const verdict: ToolApprovalVerdict = approved
       ? { kind: 'approved' }
-      : { kind: 'denied', reason: '' };
+      : { kind: 'denied', reason };
     this.applyToolVerdict(toolCallId, verdict);
+  }
+
+  // ===== D-108:拒绝理由弹窗(ToolDenyReasonDialog :428-461 + 调用点 :966-974) =====
+  //   拒绝按钮 → showDenyDialog;confirm(reason) → onToolApproval(id,false,reason)
+  private openDenyDialog(toolCallId: string): void {
+    this.denyReasonText = '';
+    this.denyDialogToolCallId = toolCallId;
+  }
+
+  private dismissDenyDialog(): void {
+    this.denyDialogToolCallId = '';
+    this.denyReasonText = '';
+  }
+
+  private confirmDenyDialog(): void {
+    const id: string = this.denyDialogToolCallId;
+    const reason: string = this.denyReasonText;
+    this.denyDialogToolCallId = '';
+    this.denyReasonText = '';
+    if (id.length > 0) {
+      this.handleToolApproval(id, false, reason);
+    }
   }
 
   // D-105:ask_user 应答(ChatService.handleToolApproval answer 分支,:1136-1140
@@ -1793,6 +1833,7 @@ struct ChatPage {
   }
 
   build() {
+    Stack() {
     Column() {
       Column() {
         if (this.editingTitle) {
@@ -1841,7 +1882,7 @@ struct ChatPage {
               onEdit: (): void => this.startEditMessage(row),
               onFork: (): void => this.forkAt(row),
               onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
-              onDenyTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, false),
+              onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
               onAnswerTool: (toolCallId: string, answer: string): void =>
                 this.handleToolAnswer(toolCallId, answer),
             })
@@ -2030,5 +2071,46 @@ struct ChatPage {
       .padding({ left: 16, right: 16, top: 8, bottom: 12 })
     }
     .width('100%').height('100%').backgroundColor(BG)
+
+    // ===== D-108:拒绝理由弹窗(ToolDenyReasonDialog :428-461 逐字) =====
+    //   title '拒绝工具执行'/hint '原因（可选）'/confirm '拒绝'/dismiss '取消'
+    //   (strings.xml:204/:203/:202);AlertDialog → Stack overlay(同 D-101 先例)
+    if (this.denyDialogToolCallId.length > 0) {
+      Column() {
+        Column() {
+          Text('拒绝工具执行')
+            .fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK)
+            .width('100%').margin({ bottom: 10 })
+          TextArea({ text: this.denyReasonText, placeholder: '原因（可选）' })
+            .width('100%').height(88).fontSize(13).fontColor(INK)
+            .backgroundColor(SURFACE2).borderRadius(10)
+          Row() {
+            Blank()
+            Text('取消')
+              .fontSize(14).fontColor(INK3)
+              .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+              .onClick((): void => { this.dismissDenyDialog(); })
+            Text('拒绝')
+              .fontSize(14).fontColor('#B43A3A')
+              .padding({ left: 20, right: 8, top: 8, bottom: 8 })
+              .onClick((): void => { this.confirmDenyDialog(); })
+          }
+          .width('100%').margin({ top: 12 })
+        }
+        .width('86%')
+        .padding(18)
+        .backgroundColor(SURFACE)
+        .borderRadius(16)
+        .border({ width: 1, color: LINE })
+        // 消费点击,防穿透到遮罩 onClick(遮罩点击 = onDismissRequest)
+        .onClick((): void => {})
+      }
+      .width('100%').height('100%')
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor('#66000000')
+      .onClick((): void => { this.dismissDenyDialog(); })
+    }
+    }
+    .width('100%').height('100%')
   }
 }

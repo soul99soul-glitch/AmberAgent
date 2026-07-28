@@ -1453,3 +1453,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 审计行「工具执行 + 审批循环」残余「ToolProfileFilter 设置面选择 UI」「LocalToolOption 编辑面 UI」。
 - **未移植(P1 登记)**: 平台专属工具实体(terminal/screen/system_access 等 Android-only)。
 - **验证**: chat tsc 干净 + 1064 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-108 — ToolDenyReasonDialog 拒绝理由输入
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: ChatMessageAskUserStep.kt:428-461(ToolDenyReasonDialog 全文)/ChatMessageTools.kt:681,736-744(拒绝按钮 → showDenyDialog)/:966-974(confirm → onToolApproval(id,false,reason))/:952-960(已拒绝展示)/ChatService.kt:1122-1140(reason → Denied(reason))/values-zh/strings.xml:201-204
+- **背景**: D-057 审批闭环拒绝路径恒空理由(登记「拒绝理由输入 = P1」);domain 层 tool_approval.ts denied verdict 早已支持 reason,缺 UI 输入面与展示。
+- **决策**:
+  1. ChatPage:拒绝按钮 onDenyTool 改 → openDenyDialog(重置理由文本 + 记录 toolCallId);Stack 根 + overlay 弹窗(title '拒绝工具执行'/TextArea hint '原因（可选）'/确认 '拒绝' 红/取消 zh 逐字);遮罩点击 = onDismissRequest;confirm → handleToolApproval(id, false, reason)(handleToolApproval += reason 参数,默认 '' — :1126 默认逐字)。
+  2. MessageRow 工具卡:denied 态 += 展示 '已拒绝' + 非空白 reason → ': reason'(ASCII 冒号+空格,:955-956 逐字,红色 labelSmall);ask_user 卡早退不渲染(:676-679)→ 门控非 ask_user。
+  3. denied verdict 线格式不变(domain 既有);reason 全程原样持有(trim 仅用于空白判定,:956 isNotBlank 语义)。
+- **偏差/适配登记**: AlertDialog → Stack overlay(同 D-101 编辑器先例);OutlinedTextField → TextArea;卡片内点击消费防穿透遮罩。
+- **关闭**: D-057/D-105 登记残余「ToolDenyReasonDialog 拒绝理由输入」。
+- **未移植(P1 登记)**: 无新增。
+- **验证**: chat tsc 干净 + 1064 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
