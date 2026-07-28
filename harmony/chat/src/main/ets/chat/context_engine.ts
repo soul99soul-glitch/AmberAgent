@@ -25,10 +25,11 @@
 //   - handoffPrompt(Agent-editable 配置)默认 '';locale 默认 'Chinese'
 
 import type { UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool } from './message.ts';
-import { makeSystemMessage, makeUserMessage, isToolExecuted } from './message.ts';
+import { makeSystemMessage, makeUserMessage, isToolExecuted, toText } from './message.ts';
 import type { MessageNode, Conversation } from './conversation.ts';
-import { limitContext, nodeCurrentMessage, toMessageNode } from './conversation.ts';
+import { limitContext, nodeCurrentMessage, toMessageNode, currentMessages } from './conversation.ts';
 import type { ChatStreamProvider } from './chat_turn.ts';
+import type { JsonObject } from './json.ts';
 import type {
   CompactPlan, CompactPolicy, CompactResult, ConversationCompact,
 } from './context_compact.ts';
@@ -38,6 +39,7 @@ import {
   selectCompactsForInjection, compactInjectionText, compactInjectionTextParts,
   normalizeCompactModelOutput, compactFallbackPayload, isHighQualityPayload,
   compactTimelineSummary, remapCoveredCompactIds, toolResultSummarize,
+  compactSearchableText, estimateConversationInputTokens,
 } from './context_compact.ts';
 
 // ===== DEFAULT_COMPRESS_PROMPT(CompressPrompt.kt 逐字) =====
@@ -760,4 +762,128 @@ export const effectiveContextNextAction = (
   if (ratio >= policy.forceRatio) return 'force_threshold';
   if (ratio >= policy.precompactRatio) return 'precompact_threshold';
   return 'below_threshold';
+};
+
+// ===== 检索/展开/状态(ConversationContextRepository.kt:95-134 + engine:623-666) =====
+// D-058 随 conversation_* 工具落地(D-055 登记项);repository 的 DB 查询语义
+//   转为纯函数(compacts 由调用方自 CompactStore 读取,conversation 直传)
+
+export interface ContextSearchResult {
+  source: string; // 'compact_summary' | 'message'
+  id: string;
+  preview: string;
+  nodeIndex: number | null; // 仅 source='message'
+}
+
+// previewAround(repository:164-170 逐字):空白/未命中 → take(240);
+//   命中 → index-120 .. index+qlen+120 窗口
+export const previewAround = (text: string, query: string): string => {
+  if (query.trim().length === 0) return text.slice(0, 240);
+  const index: number = text.toLowerCase().indexOf(query.toLowerCase());
+  if (index < 0) return text.slice(0, 240);
+  const start: number = Math.max(index - 120, 0);
+  const end: number = Math.min(index + query.length + 120, text.length);
+  return text.substring(start, end);
+};
+
+// ASCII 折叠(SQL LIKE 大小写语义,persistence.ts 同口径)
+const asciiLower = (s: string): string =>
+  s.replace(/[A-Z]/g, (c: string): string => c.toLowerCase());
+
+// search(repository:95-120):compact 摘要(searchableText LIKE 命中)→ 消息
+//   节点扫描(currentMessage.toText() contains ignoreCase,带 nodeIndex);
+//   消息结果取剩余额度,总量 take(limit)
+export const searchConversationContext = (
+  conversation: Conversation, compacts: ConversationCompact[],
+  query: string, limit: number,
+): ContextSearchResult[] => {
+  const cappedLimit: number = Math.min(Math.max(limit, 1), 20);
+  const compactResults: ContextSearchResult[] = [];
+  if (query.trim().length > 0) {
+    const needle: string = asciiLower(query);
+    for (const c of compacts) {
+      if (compactResults.length >= cappedLimit) break;
+      const searchable: string = compactSearchableText(c.summary);
+      if (asciiLower(searchable).includes(needle)) {
+        compactResults.push({
+          source: 'compact_summary',
+          id: c.id,
+          preview: previewAround(searchable, query),
+          nodeIndex: null,
+        });
+      }
+    }
+  }
+  const messageResults: ContextSearchResult[] = [];
+  const remaining: number = Math.max(cappedLimit - compactResults.length, 0);
+  if (remaining > 0 && query.trim().length > 0) {
+    const needle: string = query.toLowerCase();
+    const nodes: MessageNode[] = conversation.messageNodes;
+    for (let i = 0; i < nodes.length && messageResults.length < remaining; i++) {
+      const msg: UIMessage = nodeCurrentMessage(nodes[i]);
+      const text: string = toText(msg);
+      if (text.toLowerCase().includes(needle)) {
+        messageResults.push({
+          source: 'message',
+          id: msg.id,
+          preview: previewAround(text, query),
+          nodeIndex: i,
+        });
+      }
+    }
+  }
+  return [...compactResults, ...messageResults].slice(0, cappedLimit);
+};
+
+// expand(repository:122-134):compact id → sourceMessageIds 过滤 currentMessages;
+//   否则消息 id 定位 ± radius(coerce 0..8)
+export const expandConversationContext = (
+  conversation: Conversation, compacts: ConversationCompact[],
+  sourceId: string, radius: number,
+): UIMessage[] => {
+  const messages: UIMessage[] = currentMessages(conversation);
+  const compact: ConversationCompact | undefined = compacts.find(
+    (c: ConversationCompact): boolean => c.id === sourceId);
+  if (compact !== undefined) {
+    const ids: Set<string> = new Set<string>(compact.sourceMessageIds);
+    return messages.filter((m: UIMessage): boolean => ids.has(m.id));
+  }
+  const index: number = messages.findIndex((m: UIMessage): boolean => m.id === sourceId);
+  if (index < 0) return [];
+  const r: number = Math.min(Math.max(radius, 0), 8);
+  const start: number = Math.max(index - r, 0);
+  const end: number = Math.min(index + r, messages.length - 1);
+  return messages.slice(start, end + 1);
+};
+
+// status(engine:631-666):effective(注入替换后)为头条 + raw 对照;
+//   偏差登记:compact 生命周期 StateFlow 未移植 → compact_lifecycle_status 恒
+//   'idle',latest_lifecycle_compact_id 恒省略(Android 无记录时同形态)
+export const conversationContextStatus = (
+  conversation: Conversation, compacts: ConversationCompact[],
+  policy: CompactPolicy, modelContextWindowTokens: number | null,
+): JsonObject => {
+  const plan: CompactPlan = planCompaction(
+    conversation.messageNodes, compacts, policy, modelContextWindowTokens);
+  const effectiveTokens: number = estimateConversationInputTokens(
+    currentMessages(conversation), compacts);
+  const rawPressureRatio: number = plan.estimatedTokens / plan.contextWindowTokens;
+  const effectivePressureRatio: number = effectiveTokens / plan.contextWindowTokens;
+  const lastCompact: ConversationCompact | undefined =
+    compacts.length > 0 ? compacts[compacts.length - 1] : undefined;
+  return {
+    enabled: policy.enabled,
+    notify_only: policy.notifyOnly,
+    estimated_tokens: effectiveTokens,
+    raw_tokens: plan.estimatedTokens,
+    context_window_tokens: plan.contextWindowTokens,
+    pressure_ratio: effectivePressureRatio,
+    raw_pressure_ratio: rawPressureRatio,
+    summary_count: compacts.filter(
+      (c: ConversationCompact): boolean => c.status === 'completed').length,
+    latest_status: lastCompact !== undefined ? lastCompact.status : 'none',
+    compact_lifecycle_status: 'idle',
+    next_action: effectiveContextNextAction(policy, effectiveTokens, plan.contextWindowTokens),
+    raw_next_action: plan.reason,
+  };
 };

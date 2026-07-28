@@ -37,6 +37,7 @@ import {
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
   hasUsableAuth, openAIAuthHeaders,
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
+  SessionAccessGrantStore,
 } from '@amber/chat-domain';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
 import { createChatRdbRepository } from '../platform_impl/ChatRdbRepository.ets';
@@ -243,6 +244,16 @@ export const getCompactStore = (): CompactStore => {
     compactStore = createEntryCompactStore(getChatKvStore());
   }
   return compactStore;
+};
+
+// D-058:session 访问授权 store 单例(SessionAccessGrantStore.kt;签发方 history
+//   subagent 未移植,store 仅承载 validate/recordUse)
+let sessionGrantStore: SessionAccessGrantStore | null = null;
+export const getSessionGrantStore = (): SessionAccessGrantStore => {
+  if (sessionGrantStore === null) {
+    sessionGrantStore = new SessionAccessGrantStore();
+  }
+  return sessionGrantStore;
 };
 
 export const getChatAssistants = async (): Promise<Assistant[]> => {

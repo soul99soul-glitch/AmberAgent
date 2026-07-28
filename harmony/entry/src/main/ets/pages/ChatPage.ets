@@ -14,6 +14,7 @@ import type {
   CompactPolicy, CompactResult, PreparedContext,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
+  ToolRegistry,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -34,12 +35,14 @@ import {
   conversationWithMessagesAsNodes,
   runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
   createTimeTool, makeUIMessage,
+  createAskUserTool, createConversationContextTools, createConversationHistoryTools,
+  createToolRegistry,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
-  getChatKvStore, getCompactStore,
+  getChatKvStore, getCompactStore, getSessionGrantStore,
 } from '../di/AppContainer.ets';
 import { readImageAsDataUrl } from '../platform_impl/EntryImageEncoder.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
@@ -465,7 +468,7 @@ struct ChatPage {
             this.regenNodeId = nodeId;
             this.regenTail = transformed[transformed.length - 1];
           },
-        }, this.buildToolLoop(rt)));
+        }, this.buildToolLoop(rt, conv)));
       })
       .then((out: Conversation): void => {
         this.conversation = out;
@@ -754,12 +757,37 @@ struct ChatPage {
 
   // ===== D-057 工具循环接线(GenerationHandler:161-391 调用面) =====
 
-  // 工具循环选项:首批内置工具 = get_time_info(TimeTool.kt);
+  // 工具循环选项:D-058 首批内置工具 = get_time_info + ask_user +
+  //   conversation_*(4) + session_*(4),经 ToolRegistry 包装层(ToolRegistry.kt
+  //   :31-161 — 派生 needsApproval/display_title 注入/output budget);
   //   autoApprove 默认 false(设置面 = P1,登记);每步 provider 工厂按步内
   //   工具定义重建 params(arkts-no-spread 逐字段,不用 rt.params 展开)
-  private buildToolLoop(rt: ChatRuntime): ToolLoopOptions {
+  private buildToolLoop(rt: ChatRuntime, conv: Conversation): ToolLoopOptions {
+    // Android conversationProvider = getConversationFlow().value(最新会话态)
+    const conversationProvider: () => Promise<Conversation> = (): Promise<Conversation> =>
+      Promise.resolve(this.conversation ?? conv);
+    const registry: ToolRegistry = createToolRegistry([
+      createTimeTool(),
+      createAskUserTool(),
+      ...createConversationContextTools({
+        conversationProvider,
+        compactStore: getCompactStore(),
+        // 与 buildPrepareContext 同口径(settings.agentRuntime.contextCompaction)
+        policy: makeCompactPolicy({ keepRecentTurns: 8 }),
+        modelContextWindowTokens: rt.modelContextWindowTokens,
+        compactEngineDeps: {
+          provider: asChatStreamProvider(rt.api, () => rt.params),
+          store: getCompactStore(),
+        },
+      }),
+      ...createConversationHistoryTools({
+        repository: getChatRepository(),
+        currentConversationProvider: conversationProvider,
+        grantStore: getSessionGrantStore(),
+      }),
+    ]);
     return {
-      tools: [createTimeTool()],
+      tools: registry.tools(),
       makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
         asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({
           model: rt.params.model,
@@ -851,7 +879,7 @@ struct ChatPage {
             this.regenNodeId = lastNodeId;
             this.regenTail = transformed[transformed.length - 1];
           },
-        }, this.buildToolLoop(rt));
+        }, this.buildToolLoop(rt, conv));
       })
       .then((out: Conversation): void => {
         this.conversation = out;
@@ -1084,13 +1112,13 @@ struct ChatPage {
             this.rows = buildRows(blocker.conversation);
             return getChatRepository().save(blocker.conversation)
               .then((): Promise<Conversation> => runToolLoopContinuation(
-                blocker.conversation, deps, this.buildToolLoop(rt)));
+                blocker.conversation, deps, this.buildToolLoop(rt, blocker.conversation)));
           }
           return getChatRepository().save(blocker.conversation)
             .then((): Promise<Conversation> => runChatTurnWithTools(
-              blocker.conversation, userInput, deps, this.buildToolLoop(rt)));
+              blocker.conversation, userInput, deps, this.buildToolLoop(rt, blocker.conversation)));
         }
-        return runChatTurnWithTools(conv, userInput, deps, this.buildToolLoop(rt));
+        return runChatTurnWithTools(conv, userInput, deps, this.buildToolLoop(rt, conv));
       })
       .then((out: Conversation): void => {
         this.conversation = out;

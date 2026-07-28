@@ -219,6 +219,25 @@ export {
 } from './chat/tool_approval.ts';
 export { createTimeTool } from './chat/builtin_time_tool.ts';
 
+// ===== D-058:内置工具首批 + ToolRegistry 包装层 =====
+export type { ToolMetadata, ToolRegistry } from './chat/tool_registry.ts';
+export { toToolMetadata, createToolRegistry } from './chat/tool_registry.ts';
+export { createAskUserTool } from './chat/builtin_ask_user_tool.ts';
+export type { ConversationContextToolsDeps } from './chat/builtin_conversation_tools.ts';
+export { createConversationContextTools } from './chat/builtin_conversation_tools.ts';
+export type { ConversationHistoryToolsDeps } from './chat/builtin_session_tools.ts';
+export { createConversationHistoryTools } from './chat/builtin_session_tools.ts';
+export type { SessionAccessGrant, GrantValidation } from './chat/session_grant_store.ts';
+export {
+  SessionAccessGrantStore,
+  GRANT_DEFAULT_TTL_MS, GRANT_MAX_GRANT_CHARS, GRANT_MAX_SESSIONS,
+} from './chat/session_grant_store.ts';
+export type { ContextSearchResult } from './chat/context_engine.ts';
+export {
+  previewAround, searchConversationContext, expandConversationContext,
+  conversationContextStatus,
+} from './chat/context_engine.ts';
+
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,
   serializeMessageList, parseMessageList,
