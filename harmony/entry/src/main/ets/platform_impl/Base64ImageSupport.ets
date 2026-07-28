@@ -1,0 +1,75 @@
+// Base64ImageSupport — Base64ImageToLocalFileTransformer 的 entry 实现(D-076)
+// Android 基准:
+//   FilesManager.kt:183-206 createChatFilesByByteArrays(128MB require + 写文件)
+//   FilesManager.kt:239-247 BitmapFactory.decodeByteArray null → 保留 data url
+//   FilesManager.kt:643-646 Bitmap.compressToPng(PNG, 100)
+//   FilesManager.kt:469-480 buildUuidFileName('image.png','image/png') → uuid.png
+// 偏差(登记):
+//   - FilesRepository(Room ManagedFileEntity)跟踪未移植 → 仅落盘不记库
+//     (P1:upload 文件库观察/计数功能待 FilesRepository 移植)
+//   - Bitmap.compress PNG → @kit.ImageKit packToData(image/png, quality 100)
+import { fileIo } from '@kit.CoreFileKit';
+import { image } from '@kit.ImageKit';
+import {
+  FILE_FOLDER_UPLOAD, MAX_CHAT_ATTACHMENT_BYTES,
+  createBase64ImageToLocalFileTransformer, newId,
+} from '@amber/chat-domain';
+import type { Base64ImageDeps, OutputMessageTransformer } from '@amber/chat-domain';
+
+// BitmapFactory.decodeByteArray + compressToPng:不可解码 → null
+const reencodeToPng = async (bytes: Uint8Array): Promise<Uint8Array | null> => {
+  try {
+    const buffer: ArrayBuffer = bytes.buffer.slice(
+      bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const source: image.ImageSource = image.createImageSource(buffer);
+    const pixelMap: image.PixelMap = await source.createPixelMap();
+    try {
+      const packer: image.ImagePacker = image.createImagePacker();
+      const packed: ArrayBuffer = await packer.packToData(
+        pixelMap, { format: 'image/png', quality: 100 });
+      return new Uint8Array(packed);
+    } finally {
+      pixelMap.release();
+    }
+  } catch {
+    // undecodable → keeping data url part(FilesManager.kt:240-246)
+    return null;
+  }
+};
+
+const filesDir = (): string => {
+  const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+  return ctx.filesDir;
+};
+
+// createChatFilesByByteArrays 单文件:require ≤128MB → upload/{uuid}.png → file:// uri
+const saveUploadImage = async (pngBytes: Uint8Array): Promise<string> => {
+  if (pngBytes.byteLength > MAX_CHAT_ATTACHMENT_BYTES) {
+    throw new Error(`Chat attachment exceeds ${MAX_CHAT_ATTACHMENT_BYTES} byte limit`);
+  }
+  const dir: string = `${filesDir()}/${FILE_FOLDER_UPLOAD}`;
+  try {
+    await fileIo.mkdir(dir, true);
+  } catch {
+    // 已存在
+  }
+  // buildUuidFileName('image.png','image/png') → uuid.png(FilesManager.kt:469-480)
+  const path: string = `${dir}/${newId()}.png`;
+  const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
+  const file: fileIo.File = await fileIo.open(path, mode);
+  try {
+    const buffer: ArrayBuffer = pngBytes.buffer.slice(
+      pngBytes.byteOffset, pngBytes.byteOffset + pngBytes.byteLength) as ArrayBuffer;
+    await fileIo.write(file.fd, buffer);
+  } finally {
+    await fileIo.close(file);
+  }
+  return `file://${path}`;
+};
+
+const ENTRY_BASE64_IMAGE_DEPS: Base64ImageDeps = {
+  reencodeToPng, saveUploadImage,
+};
+
+export const createEntryBase64ImageTransformer = (): OutputMessageTransformer =>
+  createBase64ImageToLocalFileTransformer(ENTRY_BASE64_IMAGE_DEPS);

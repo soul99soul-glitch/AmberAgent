@@ -504,6 +504,14 @@ export type {
   DocumentFileHandle, DocumentReaderDeps,
 } from './chat/document_transformer.ts';
 
+// ===== D-076:base64 图片落盘(Base64ImageToLocalFileTransformer.kt + FilesManager.kt:183-265) =====
+export {
+  FILE_FOLDER_UPLOAD, MAX_CHAT_ATTACHMENT_BYTES,
+  convertBase64ImagePartToLocalFile, createBase64ImageToLocalFileTransformer,
+  decodeBase64, extractBase64Payload, isDataImageUrl,
+} from './chat/base64_image_transformer.ts';
+export type { Base64ImageDeps } from './chat/base64_image_transformer.ts';
+
 // ===== D-075:提示词注入(PromptInjectionTransformer.kt 全文 + Assistant.kt:140-287) =====
 // (SYSTEM_PROMPT_CACHE_* 常量已在 context_assembly.ts 导出块,D-045)
 export {

@@ -51,7 +51,9 @@ export interface MessageTransformer {
 
 export interface OutputMessageTransformer extends MessageTransformer {
   visualTransform?(ctx: TransformerContext, messages: UIMessage[]): UIMessage[];
-  onGenerationFinish?(ctx: TransformerContext, messages: UIMessage[]): UIMessage[];
+  // D-076:Android onGenerationFinish 为 suspend(Base64ImageToLocalFile 需 await
+  //   图片解码/落盘)→ 允许返回 Promise;applyOnGenerationFinish 同步改异步
+  onGenerationFinish?(ctx: TransformerContext, messages: UIMessage[]): UIMessage[] | Promise<UIMessage[]>;
 }
 
 export interface TailSafeOutputMessageTransformer extends OutputMessageTransformer {
@@ -152,13 +154,13 @@ export const applyVisualTransformersStreamingTail = (
   return out;
 };
 
-export const applyOnGenerationFinish = (
+export const applyOnGenerationFinish = async (
   messages: UIMessage[], transformers: OutputMessageTransformer[], ctx: TransformerContext,
-): UIMessage[] => {
+): Promise<UIMessage[]> => {
   let acc: UIMessage[] = messages;
   for (const t of transformers) {
     if (t.onGenerationFinish === undefined) continue;
-    const out: UIMessage[] = t.onGenerationFinish(ctx, acc);
+    const out: UIMessage[] = await t.onGenerationFinish(ctx, acc);
     validateTransformerInvariants(acc, out, 'onGenerationFinish');
     acc = out;
   }

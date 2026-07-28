@@ -836,3 +836,17 @@
   - **ChatPage 链序**:[timeReminder, promptInjection, template, placeholder, document, ocr](Android 相对序 1<2<4<5<6 忠实;MiniAppPrompt 3 P1 已登记);modeInjections/lorebooks 快照 aboutToAppear 加载。
   - **TDD 14 测试**:isTriggered 短路/大小写/regex 异常/takeLast 0 与负/收集过滤+lorebook scanDepth+system 排除/findSafeInsertIndex 回退与 clamp/role 合并/system parts 顺序+metadata 逐字/无 system 新建+'\n' 前缀 quirk/TOP/BOTTOM/AT_DEPTH 索引/空注入原引用+priority 降序稳定/deps 延迟读取/cache 常量逐字。
 - **可逆性**:1450 测试全绿(deepread 603 + chat 847),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL(含 entry 接线)。**input 链 6 片全移植完成**(MiniAppPrompt 除外,P1 登记);entry 链相对序与 ChatService.kt:169-177 全对齐。
+
+## D-076（L0，2026-07-28）Base64ImageToLocalFileTransformer + Base64ImageSupport entry — output 链收官(除 MiniApp)
+
+- **背景**：ChatService.kt:179-184 output 链序 [ThinkTag, Base64Image, MiniAppOutput(P1), RegexOutput]。Android 锚点:Base64ImageToLocalFileTransformer.kt(全文)、FilesManager.kt:183-265/469-480/643-646。
+- **决定**：
+  - **pipeline 异步化**:Android onGenerationFinish 为 suspend → OutputMessageTransformer.onGenerationFinish 允许返回 Promise;applyOnGenerationFinish 同步改异步(await);chat_turn/regenerate 两调用点加 await(D-071a transform 异步化同模式)。
+  - **base64_image_transformer(HAR)**:convertBase64ImagePartToLocalFile 忠实 — 仅 Image part 且 url startsWith('data:image');base64 段 = substringAfter('base64,')(不含分隔符 → 整串);decodeBase64 失败抛错向外传播(Kotlin Base64.decode 同);reencodeToPng → null(不可解码)**保留 data url part 原引用**;可解码 → saveUploadImage → part.copy(url);非 data/非 image part 原引用;顺序 await(Kotlin map 序)。
+  - **decodeBase64 内建(HAR 纯)**:标准 alphabet,非法符号/长度非 4 倍/pad 位置错 → 抛错(Kotlin IllegalArgumentException 语义,测试锁定三种错误)。
+  - **Base64ImageDeps Port**:reencodeToPng(BitmapFactory+compressToPng 等价)/saveUploadImage(128MB require + upload/{uuid}.png 落盘 → file:// uri);Koin 全局获取 → deps 注入。
+  - **Base64ImageSupport.ets(entry)**:@kit.ImageKit — createImageSource → createPixelMap → packToData(image/png, quality 100)(compressToPng 等价),任何一步抛错 → null;fileIo 写 filesDir/upload/{newId()}.png(buildUuidFileName('image.png','image/png') 语义);128MB 超界抛错文案逐字。
+  - **偏差(登记)**:FilesRepository(Room ManagedFileEntity)跟踪未移植 → 仅落盘不记库(P1:upload 库观察/countChatFiles/删除跟踪待 FilesRepository 移植);PixelMap.release() 在打包后调用(资源管理补充,无语义偏差)。
+  - **ChatPage output 链**:3 站点改 [thinkTag, base64Image, regexOutput](Android 相对序忠实,MiniApp P1)。
+  - **TDD 9 测试**:常量/substringAfter/data 前缀/decode 往返+三种抛错/转换全链+text 原引用/不可解码保留/非 data 原引用/onGenerationFinish 全消息/非法 base64 传播;另 transformers.test.ts 既有 onGenerationFinish 用法改 await(1 处)。
+- **可逆性**:1459 测试全绿(deepread 603 + chat 856),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。output 链残余:MiniAppOutputTransformer(P1,依附 webmount)。

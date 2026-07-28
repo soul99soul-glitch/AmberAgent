@@ -328,5 +328,5 @@ export const generateAssistantOnce = async (
   }
 
   // 终态:onGenerationFinish transforms(入列在调用方)
-  return applyOnGenerationFinish(lastAccumulator.snapshot(), deps.outputTransformers, ctx);
+  return await applyOnGenerationFinish(lastAccumulator.snapshot(), deps.outputTransformers, ctx);
 };

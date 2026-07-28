@@ -240,7 +240,7 @@ export const runRegenerateAt = async (
   }
 
   // 4. 终态 transforms → 入列
-  const finalMessages: UIMessage[] = applyOnGenerationFinish(
+  const finalMessages: UIMessage[] = await applyOnGenerationFinish(
     lastAccumulator.snapshot(), deps.outputTransformers, ctx,
   );
   const generated: UIMessage[] = finalMessages.slice(baseMessages.length);

@@ -62,6 +62,7 @@ import {
 import { createEntryPlaceholderValues, loadUserNickname } from '../platform_impl/PlaceholderSupport.ets';
 import { createEntryDocumentReader } from '../platform_impl/DocumentSupport.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
+import { createEntryBase64ImageTransformer } from '../platform_impl/Base64ImageSupport.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -530,7 +531,7 @@ struct ChatPage {
           inputTransformers: this.buildInputTransformers(rt),
           // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
           modelSupportsImageInput: rt.modelSupportsImageInput,
-          outputTransformers: [thinkTagTransformer, regexOutputTransformer],
+          outputTransformers: [thinkTagTransformer, createEntryBase64ImageTransformer(), regexOutputTransformer], // ChatService.kt:179-184 序(MiniApp P1)
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
@@ -994,7 +995,7 @@ struct ChatPage {
           inputTransformers: this.buildInputTransformers(rt),
           // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
           modelSupportsImageInput: rt.modelSupportsImageInput,
-          outputTransformers: [thinkTagTransformer, regexOutputTransformer],
+          outputTransformers: [thinkTagTransformer, createEntryBase64ImageTransformer(), regexOutputTransformer], // ChatService.kt:179-184 序(MiniApp P1)
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
@@ -1227,7 +1228,7 @@ struct ChatPage {
           inputTransformers: this.buildInputTransformers(rt),
           // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
           modelSupportsImageInput: rt.modelSupportsImageInput,
-          outputTransformers: [thinkTagTransformer, regexOutputTransformer],
+          outputTransformers: [thinkTagTransformer, createEntryBase64ImageTransformer(), regexOutputTransformer], // ChatService.kt:179-184 序(MiniApp P1)
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,

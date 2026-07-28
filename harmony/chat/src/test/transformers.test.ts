@@ -98,9 +98,9 @@ test('thinkTag visualTransform: 未闭合 think 块 → reasoning finishedAt=nul
   }
 });
 
-test('thinkTag onGenerationFinish: 未闭合 reasoning 强制关闭', () => {
+test('thinkTag onGenerationFinish: 未闭合 reasoning 强制关闭', async () => {
   const msg = makeAssistantMessage('<think>流中断了');
-  const out = thinkTagTransformer.onGenerationFinish!(ctx(makeAssistant({})), [msg]);
+  const out = await thinkTagTransformer.onGenerationFinish!(ctx(makeAssistant({})), [msg]);
   const r = out[0].parts[0];
   assert.equal(r.type, 'reasoning');
   if (r.type === 'reasoning') assert.ok(r.finishedAt !== null);
