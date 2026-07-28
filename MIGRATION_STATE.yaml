@@ -17,7 +17,7 @@ phase:
     M0_工具链: "部分完成 — CLI 构建 verified(2026-07-16), hdc 无 device target"
     M1_三个P0_spike: "未开始(等设备) — SSE/RDB/ArkUI 均无设备端 verified 结论"
     M2_工程骨架: "完成 — entry HAP + deepread HAR,hvigor BUILD SUCCESSFUL"
-    M3_Chat_MVP: "source-only 阶段完成(2026-07-28,4 切片:模型/accumulator/OpenAI provider/chat_turn);设备端 UI+持久化 adapter 待 G-C"
+    M3_Chat_MVP: "source-only 完成(2026-07-28,收尾盘点 docs/harmony-m3-gap-audit.md:6/6 交付物达成,D-012..D-042);设备验证待 G-D(G-C 阻塞)"
 
 gate0:
   status: blocked                 # 唯一阻塞: hdc list targets 为空
