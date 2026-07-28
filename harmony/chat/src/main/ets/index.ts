@@ -591,3 +591,18 @@ export type {
 export {
   filterActiveMemoryRecords, touchMemoryRecords,
 } from './chat/memory_recall_store.ts';
+
+// ===== D-085c:memory_* 工具(MemoryTools.kt 全文)+ 写路径纯函数 =====
+export {
+  createMemoryTools, makeAssistantMemory,
+} from './chat/builtin_memory_tools.ts';
+export type {
+  AssistantMemory, MemoryToolDeps, MemoryToolWriteRequest,
+} from './chat/builtin_memory_tools.ts';
+export {
+  appendMemoryRecord, deleteMemoryRecord, memoriesOfAssistant,
+  memoryBucketForScope, memoryKindForBucketAdd, memoryRecordToAssistantMemory,
+  memoryScopeForBucket, nextMemoryId, updateMemoryRecordContent,
+  MEMORY_BUCKET_GLOBAL, MEMORY_BUCKET_LONG_TERM, MEMORY_BUCKET_SHORT_TERM,
+} from './chat/memory_write.ts';
+export type { MemoryAddParams, MemoryWriteResult } from './chat/memory_write.ts';

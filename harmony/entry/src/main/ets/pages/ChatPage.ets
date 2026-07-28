@@ -48,7 +48,7 @@ import {
   createPlaceholderTransformer, createDocumentTransformer,
   createPromptInjectionTransformer, PromptInjection, Lorebook,
   RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, RecentChatItem, ConversationSummary,
-  buildMemoryRecallPrompt, MemoryRecallRuntimeGate,
+  buildMemoryRecallPrompt, MemoryRecallRuntimeGate, createMemoryTools,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -67,7 +67,7 @@ import { createEntryPlaceholderValues, loadUserNickname } from '../platform_impl
 import { createEntryDocumentReader } from '../platform_impl/DocumentSupport.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
 import { createEntryBase64ImageTransformer } from '../platform_impl/Base64ImageSupport.ets';
-import { getMemoryReadRepository } from '../platform_impl/MemoryStore.ets';
+import { getMemoryReadRepository, getMemoryToolDeps } from '../platform_impl/MemoryStore.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -906,6 +906,15 @@ struct ChatPage {
       filterToolProfile([
         ...(localOpts.indexOf('time_info') >= 0 ? [createTimeTool()] : []),
         ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
+        // D-085c:memory_* 四件(ChatService.kt:2280 addAll(createMemoryTools),
+        //   位置 = MCP 之后/ConversationContextTools 之前;MCP 未移植);
+        //   三开关全关 → 空组(:2346-2351);todayText = toLocalString(true) 等价
+        //   (本地化 MEDIUM 日期,建工具时快照)
+        ...((this.agentRuntime.enableCoreMemory || this.agentRuntime.enableShortTermMemory
+          || this.agentRuntime.enableLongTermMemory)
+          ? createMemoryTools(getMemoryToolDeps(
+            new Intl.DateTimeFormat(systemLanguage(), { dateStyle: 'medium' }).format(new Date())))
+          : []),
         ...createConversationContextTools({
           conversationProvider,
           compactStore: getCompactStore(),

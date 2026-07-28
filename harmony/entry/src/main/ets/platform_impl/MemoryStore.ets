@@ -4,8 +4,14 @@
 //   查询/更新语义纯函数在 HAR(filterActiveMemoryRecords/touchMemoryRecords)。
 import { Context } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
-import type { MemoryReadRepository, MemoryRecord, MemoryScope } from '@amber/chat-domain';
-import { filterActiveMemoryRecords, touchMemoryRecords } from '@amber/chat-domain';
+import type {
+  AssistantMemory, MemoryAddParams, MemoryReadRepository, MemoryRecord, MemoryScope,
+  MemoryToolDeps, MemoryToolWriteRequest,
+} from '@amber/chat-domain';
+import {
+  appendMemoryRecord, deleteMemoryRecord, filterActiveMemoryRecords, memoriesOfAssistant,
+  memoryRecordToAssistantMemory, touchMemoryRecords, updateMemoryRecordContent,
+} from '@amber/chat-domain';
 
 const MEMORY_FOLDER: string = 'memory';
 const MEMORY_FILE: string = 'memory_records.json';
@@ -45,12 +51,12 @@ const writeAll = async (records: MemoryRecord[]): Promise<void> => {
   }
 };
 
-// 突变串行化(touch 与后续写路径切片互斥)
+// 突变串行化(touch 与写路径互斥;泛型 — op 结果透传给调用方)
 let writeQueue: Promise<void> = Promise.resolve();
 
-const enqueueWrite = (op: () => Promise<void>): Promise<void> => {
-  const next: Promise<void> = writeQueue.then(op, op);
-  writeQueue = next.catch((): void => {});
+const enqueueWrite = <T>(op: () => Promise<T>): Promise<T> => {
+  const next: Promise<T> = writeQueue.then(op, op);
+  writeQueue = next.then((): void => {}, (): void => {});
   return next;
 };
 
@@ -68,4 +74,74 @@ export const getMemoryReadRepository = (): MemoryReadRepository => ({
       await writeAll(touchMemoryRecords(all, ids, Date.now()));
     });
   },
+});
+
+// ===== D-085c:写路径(MemoryRepository.kt addMemory/updateContent/deleteMemory) =====
+
+// addMemory(:102-133)— id 自增在 appendMemoryRecord(max+1);返回所插记录
+const addMemory = (params: MemoryAddParams): Promise<MemoryRecord> =>
+  enqueueWrite(async (): Promise<MemoryRecord> => {
+    const all: MemoryRecord[] = await readAll();
+    const out = appendMemoryRecord(all, params, Date.now());
+    await writeAll(out.records);
+    return out.record;
+  });
+
+// updateContent(:84-89)— 未命中错误消息逐字,经 enqueueWrite 传播
+const updateContent = (id: number, content: string): Promise<MemoryRecord> =>
+  enqueueWrite(async (): Promise<MemoryRecord> => {
+    const all: MemoryRecord[] = await readAll();
+    const out = updateMemoryRecordContent(all, id, content, Date.now());
+    await writeAll(out.records);
+    return out.record;
+  });
+
+// deleteMemory(:145-147)— 未命中 no-op
+const deleteMemory = (id: number): Promise<void> =>
+  enqueueWrite(async (): Promise<void> => {
+    const all: MemoryRecord[] = await readAll();
+    await writeAll(deleteMemoryRecord(all, id));
+  });
+
+// getMemoriesOfAssistant(DAO :16-17)— 桶精确匹配,插入序
+const listMemoriesOfAssistant = async (assistantId: string): Promise<AssistantMemory[]> =>
+  memoriesOfAssistant(await readAll(), assistantId);
+
+// memoryBucket(ChatService.kt:2400-2405)— else → long_term 桶(逐字)
+const memoryBucket = (scope: string): string => {
+  if (scope === 'core') return '__global__';
+  if (scope === 'short_term') return '__short_term__';
+  return '__long_term__';
+};
+
+// createMemoryTools 接线(ChatService.kt:2345-2397):
+//   onList — core→getGlobalMemories()/short/long 桶,else → [](:2357-2362);
+//   onCreation — source 非空白拼 '\nSource: '(:2365-2369)+ addMemory(
+//     assistantId=memoryBucket(scope.wireName))(:2370-2379);
+//   onUpdate → updateContent;onDelete → deleteMemory
+export const getMemoryToolDeps = (todayText: string): MemoryToolDeps => ({
+  todayText,
+  onList: async (scope: string): Promise<AssistantMemory[]> => {
+    if (scope !== 'core' && scope !== 'short_term' && scope !== 'long_term') return [];
+    return listMemoriesOfAssistant(memoryBucket(scope));
+  },
+  onCreation: async (request: MemoryToolWriteRequest): Promise<AssistantMemory> => {
+    const finalContent: string = request.source === null || request.source.trim().length === 0
+      ? request.content
+      : `${request.content}\nSource: ${request.source}`;
+    const record: MemoryRecord = await addMemory({
+      scope: request.scope,
+      kind: request.kind,
+      content: finalContent,
+      assistantId: memoryBucket(request.scope),
+      sourceConversationId: request.sourceConversationId,
+      sourceMessageIds: request.sourceMessageIds,
+      expiresAt: request.expiresAt,
+      confidence: request.confidence,
+    });
+    return memoryRecordToAssistantMemory(record);
+  },
+  onUpdate: async (id: number, content: string): Promise<AssistantMemory> =>
+    memoryRecordToAssistantMemory(await updateContent(id, content)),
+  onDelete: (id: number): Promise<void> => deleteMemory(id),
 });

@@ -997,3 +997,25 @@
 
 ### 残余(已登记 P1)
 extraction(MemoryExtractor/CandidateFilter/Prompt)、dream 子系统、导出导入 frontmatter、memory_* 工具(memory 类)、写路径(addMemory/updateContent/archive/候选)、遥测 MemoryEvent 落库、设置面 memory UI(含 enableCoreMemory 消费的 AssistantMemory 桶)。
+
+## D-085c:memory_* 工具四件 + 写路径纯函数 + entry 接线
+
+**日期**: 2026-07-28
+**来源**: `core/ai/tools/MemoryTools.kt`(全文 344 行)、`MemoryRepository.kt:84-153,207-340`(写路径)、`MemoryDAO.kt:16-17`、`ChatService.kt:2280,2345-2405`(接线)、`core/model/Assistant.kt:107-117`(AssistantMemory)
+
+### 内容
+- **HAR `builtin_memory_tools.ts`**(buildMemoryTools 全文):
+  - memory_list(:42-85)— type 默认 all,require 集合校验(消息逐字);条目 toJson(:333-343)键序 id/type/scope/kind/content/expiresAt(仅非 null)/confidence/pinned/archived;type 字段 = memory.scope ifBlank 调用桶。
+  - memory_write(:86-156)/memory_delete(:157-182)— needsApproval=true + allowsAutoApproval=false 逐字;delete payload {success:true,id}。
+  - memory_tool(:183-331)— 描述 trimIndent 逐字(含弯引号示例);`Today is ${toLocalString(true)}` → deps.todayText 快照;create/edit/delete 分支,错误消息全逐字(含 `unknown action: X, must be one of [create, edit, delete]`)。
+  - AssistantMemory serializer payload = JsonInstant(encodeDefaults=true + explicitNulls 默认 true,AppModule.kt:20)→ 全字段恒在声明序,expiresAt null → null 字面量;confidence Float 文本还原(整数值 '1.0',JS number 无 int/float 之分)。
+  - 输入解析:kotlinx contentOrNull/intOrNull/floatOrNull/toLongOrNull 语义(数字↔文本互解,'123.5'→null,数组项 mapNotNull)。
+- **HAR `memory_write.ts`**(写路径存储无关纯函数):bucket 常量/映射(bucketForScope;scopeForBucket else→long_term 逐字;kindForBucketAdd SHORT→PROJECT 否则 NOTE)、nextMemoryId(max+1,空库 1 = Room 自增)、appendMemoryRecord(:102-133,confidence coerce 0-1/supersedesIds distinct 保序/archived=false/createdAt=updatedAt=now)、updateMemoryRecordContent(:84-89,未命中 error 消息逐字)、deleteMemoryRecord(未命中 no-op = SQL DELETE 0 行)、memoryRecordToAssistantMemory(:218-227)、memoriesOfAssistant(DAO :16-17 桶匹配插入序)。
+- **entry `MemoryStore.ets`** 扩写路径:addMemory/updateContent/deleteMemory/listMemoriesOfAssistant(全走 enqueueWrite 串行泛型队列,op 结果透传);getMemoryToolDeps(ChatService.kt:2345-2397 逐字)— onList 三桶 else→[]、onCreation source 非空白拼 '\nSource: '+addMemory(assistantId=memoryBucket(wire))、onUpdate/onDelete 直通。
+- **ChatPage 接线**:工具数组中 memory_* 位于 local tools 之后/ConversationContextTools 之前(:2280 位次,MCP 未移植);三开关全关 → 空组(:2346-2351);todayText = Intl dateStyle:'medium'(toLocalString(true) 等价)。
+
+### 测试
++14(chat HAR 921→935):memory_list 平铺/键序/expiresAt 省略/非法 type;memory_write 默认/审批门/serializer 形状逐字串/expiresAt 解析边界;memory_delete 门/payload/id 必填;memory_tool 描述逐字/create 全参/edit/delete/未知 action 全错误消息;写路径 bucket/id 自增/confidence 钳/distinct/update 抛错/delete no-op/toAssistantMemory;schema 键序与 required。
+
+### 残余(已登记 P1)
+候选(addCandidate/acceptCandidate)/事件遥测(addEvent/countEventsSince)→ 随 extraction 切片(D-085d);upsertRecord → dream 切片;addMemory(assistantId,content) 两参变体与助手级桶展示 UI → 设置面切片。
