@@ -684,3 +684,15 @@
     - **SearchService 接口** + **SearchSdkRuntime**(companion httpClient/keyRoulette + init)。
   - **偏差登记**:泛型 SearchService\<T\> → 联合类型参数(provider 内窄化);suspend Result\<\> → Promise+抛错;@Composable Description() 属 UI 不移植;Call.await 协程桥 → HttpClient Port(@amber/deepread-domain,chat 既有 provider 同 Port)原生 Promise;**Android 默认 OkHttpClient 不可复刻 → 鸿蒙必须 initSearchSdk 注入,未注入访问运行时装抛错**;getService(options) when 分派随 provider 批次落地(D-067)。
 - **可逆性**:全新模块,无既有行为变更;1291 测试全绿(deepread 603 + chat 688),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-066（L0，2026-07-28）免费/内置搜索源(JSON 协议三件 + URL 编解码)
+
+- **背景**：D-065 搜索史诗第二片。17 源分三类:HTML 抓取型(Bing/DuckDuckGo — 依赖 Jsoup DOM+CSS 选择器,需先建 mini-DOM,切至 D-067)、JSON API 内置源(Wikipedia/HackerNews — 普通 object 非 SearchService)、JSON API 服务型(Jina — SearchService 形态含 scrape)。本片落地后两者 + 编解码基座。
+- **决定**：
+  - **search/url_codec.ts(ArkTS 无全局 TextEncoder/TextDecoder → 手写 UTF-8 编解码,含代理对;截断序列单字节原样登记)**:javaUrlEncodeForm(alphanum+".-*_" 保留/空格 '+'/大写 hex,~ 编码 — Java URLEncoder 表单语义逐字)、javaUrlDecodeForm('+'→空格/%XX UTF-8)、buildQuery(okhttp addQueryParameter 插入序,encodeURIComponent 近似,!'()* 差异登记)。
+  - **search/wikipedia_service.ts(全文 74 行,普通函数形态忠实)**:CJK 字符(UTF-16 code unit ∈ 0x4E00..0x9FFF,charCodeAt 等价)→ zh host 否则 en;六参数链(action=query/list=search/srsearch/srlimit coerceIn(1,10)/format=json/utf8=1);UA 'AmberAgent/1.0 search (Android)' 逐字;映射 title/url=base+javaUrlEncodeForm(title 空格→_)/snippet Regex("<[^>]+>") 剥标签/publishedAt=timestamp;非 2xx 'Wikipedia request failed #N' 逐字。
+  - **search/hackernews_service.ts(全文 65 行)**:Algolia 三参数(query/tags=story/hitsPerPage coerceIn(1,20));映射 title?:story_title?:跳过/url 缺省 news.ycombinator.com/item?id=objectID 兜底/text 'HN points=X, comments=Y' null→0 逐字/publishedAt=created_at;非 2xx 'Hacker News request failed #N' 逐字。
+  - **search/jina_service.ts(全文 199 行,SearchService 形态)**:parameters/scrapingParameters schema 逐字(query/url required);search — POST searchUrl(blank→默认 s.jina.ai),body {"q"},Accept/Content-Type json,**apiKey 非 blank 才加 Bearer**,响应 data take(resultSize) → title/url/description→text;非 2xx 'response failed #N';query 缺失 'query is required'(jsonPrimitive.content 语义:string 原串/number·boolean 字符串化);scrape — POST scrapeUrl(blank→r.jina.ai),body {"url"},**X-Return-Format markdown**,metadata title/description(language 无字段 → null);**Kotlin 笔误 'urls is required' 逐字保留**;非 2xx 'response failed for url X #N'。options 类型不符 → 抛错(Kotlin CCE 语义)。
+  - **TDD 15 测试**:编解码 3 + wikipedia 3 + hn 3 + jina 6(schema/请求形态/错误文案全钉)。mock HttpClient 捕获请求逐字段断言。
+  - **切片边界登记**:Bing/DuckDuckGo(Jsoup 依赖)→ D-067 mini-DOM(html_dom 子集:tag.class/后代/逗号/selectFirst/parents/nextElementSibling/text/attr)+ 两源。
+- **可逆性**:全新模块;1306 测试全绿(deepread 603 + chat 703),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。

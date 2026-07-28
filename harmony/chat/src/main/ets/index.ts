@@ -407,3 +407,9 @@ export {
   initSearchSdk, searchSdkRuntime,
   createDefaultKeyRoulette, createLruKeyRoulette,
 } from './search/search_service.ts';
+
+// ===== D-066:免费/内置搜索源(JSON 协议三件 + URL 编解码) =====
+export { javaUrlEncodeForm, javaUrlDecodeForm, buildQuery } from './search/url_codec.ts';
+export { wikipediaSearch } from './search/wikipedia_service.ts';
+export { hackerNewsSearch } from './search/hackernews_service.ts';
+export { jinaSearchService } from './search/jina_service.ts';
