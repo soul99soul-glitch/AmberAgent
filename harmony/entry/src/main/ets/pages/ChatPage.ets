@@ -9,6 +9,7 @@ import {
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
   nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt,
+  runAutoTitle, makeUserMessage, toText, makeTextGenerationParams,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -121,6 +122,11 @@ struct MessageRow {
   }
 }
 
+// holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制 + arkts-no-obj-literals-as-types)
+interface RuntimeHolder {
+  rt: ChatRuntime | null;
+}
+
 @Entry
 @Component
 struct ChatPage {
@@ -201,6 +207,42 @@ struct ChatPage {
       });
   }
 
+  // 自动命名(D-025):title 空白时非阻塞调用(对齐 Android 独立 launch);
+  // 失败上浮到 errorMsg(非静默,Android addError 同语义)
+  private maybeAutoTitle(conv: Conversation, rt: ChatRuntime): void {
+    if (conv.title.trim().length > 0) return;
+    runAutoTitle(conv, {
+      generateText: (prompt: string): Promise<string> =>
+        rt.api.generateText(
+          [makeUserMessage(prompt)],
+          // reasoning OFF(对齐 Android AiAuxiliaryGenerator);arkts-no-spread 禁用接口展开
+          makeTextGenerationParams({
+            model: rt.params.model,
+            temperature: rt.params.temperature,
+            topP: rt.params.topP,
+            maxTokens: rt.params.maxTokens,
+            tools: rt.params.tools,
+            reasoningLevel: 'off',
+            customBody: rt.params.customBody,
+          }),
+        ).then((chunk): string => {
+          const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
+          return msg !== null ? toText(msg) : '';
+        }),
+      store: getChatRepository(),
+      locale: '简体中文',
+    })
+      .then((titled: Conversation): void => {
+        if (this.conversation !== null && this.conversation.id === titled.id) {
+          this.conversation = titled;
+          this.title = titled.title.length > 0 ? titled.title : this.title;
+        }
+      })
+      .catch((e: Error): void => {
+        this.errorMsg = `自动命名失败:${e.message}`;
+      });
+  }
+
   private send(): void {
     const text: string = this.inputText.trim();
     if (text.length === 0 || this.sending || this.conversation === null) return;
@@ -209,8 +251,11 @@ struct ChatPage {
     const conv: Conversation = this.conversation;
     // 流式尾部起点 = 现有消息 + 即将入列的 user 消息
     const tailStart: number = currentMessages(conv).length + 1;
+    // holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制)
+    const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime()
       .then((rt: ChatRuntime | null): Promise<Conversation> => {
+        holder.rt = rt;
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型(providers 未持久化或无可用 auth)'));
         }
@@ -233,6 +278,10 @@ struct ChatPage {
         this.inputText = '';
         this.sending = false;
         this.scrollToBottom();
+        // 自动命名(非阻塞,对齐 Android 独立 launch)
+        if (holder.rt !== null) {
+          this.maybeAutoTitle(out, holder.rt);
+        }
       })
       .catch((e: Error): void => {
         this.errorMsg = e.message;

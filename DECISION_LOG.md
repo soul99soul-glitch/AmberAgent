@@ -238,3 +238,14 @@
   - **与 Android 偏差(记 PARITY_DEBT)**:Android 窗口化 merge(streamingTail/mergeGeneratedMessagesIntoWindow/时间线分页)+ invalidateCompacts 依附其分页架构与 ContextEngine(P1);本实现为扁平节点模型等价语义。
   - **UI(ChatPage)**:渲染源从扁平 messages 改为节点 rows(buildRows);assistant 行 ◀ n/m ▶ 分支切换(>1 分支时)+ 末条 assistant「重新生成」;chat-turn 流式经 streamingTail 渲染(切片起点=现有消息+新 user),regenerate 流式预览裁 MVP(spinner)。
 - **可逆性**:纯新增文件 + ChatPage 重构;runChatTurn 路径不变。
+
+## D-025（L0，2026-07-28）会话自动命名：AiAuxiliaryGenerator 等价 + titleModel 裁剪
+
+- **背景**：Android 生成完成后自动命名空白标题会话(AiAuxiliaryGenerator.kt:27-71,独立 launch 非阻塞)。
+- **决定**：
+  - **chat-domain auto_title.ts(TDD 8 测试)**:DEFAULT_TITLE_PROMPT 逐字(TitleSummary.kt:3-15 trimIndent 后,golden 测试锁定);buildTitlePrompt = {locale}/{content} 替换,content = currentMessages.takeLast(4) 的 summaryAsText 摘要(复用已移植的 summaryAsText);runAutoTitle:title 非空白且非 force → 不调用模型(测试锁定);trim 后保存;模型抛错 → 传播、会话不变、不持久化(调用方上浮,对齐 runCatching→addError 的错误上浮语义)。
+  - **裁剪**:Android 用独立 titleModelId 设置 + resolveTaskChatModel 回退;鸿蒙 MVP 注入 generateText Port,entry 用当前 runtime 的 api.generateText(**reasoning OFF**,对齐 Android 参数)——titleModel 设置项 = P1。
+  - **locale**:调用方传入(Android 取系统 Locale displayName);entry MVP 硬编码'简体中文'(AGENTS.md 本地化条款)。
+  - **entry 接线**:send 成功路径尾部非阻塞 maybeAutoTitle(holder 模式传 runtime);失败 → errorMsg 上浮(非静默)。
+  - ArkTS 修法登记:接口对象禁用 spread(arkts-no-spread)→ makeTextGenerationParams 全字段工厂;holder 对象字面量类型需具名 interface(RuntimeHolder)。
+- **可逆性**:纯新增;命名失败不影响会话本体。
