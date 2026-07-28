@@ -613,3 +613,19 @@
   - **ChatPage 接线**:buildToolLoop 注册表追加 createConversationQueueTools —— pendingProvider = 页面 pendingQueue 快照;cancelOne 复用既有 cancelPendingById(changed 才 persist+审计 'cancel',ChatService:498-503 同语义);clearAll 新增页面路径(count>0 → 清空 + syncPendingRows + persistQueue + 审计 'clear' detail=count=N,:505-511 同语义)。
   - **范围登记**:findToolName/hasPendingOrUnexecutedTools/toolOutputPreview(:2547-2570)为 ChatService 私有助手,非本工具组范围(hasPendingOrUnexecutedTools 等价物 conversationHasPendingOrUnexecutedTools 已于 D-057 存在)。
 - **可逆性**:新模块 + buildToolLoop 追加,零既有路径改动;1201 测试全绿(deepread 603 + chat 598),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-060（L0，2026-07-28）自省/发现工具组：tools_list + tool_policy_explain + tool_search + isResidentTool
+
+- **背景**：D-058 登记「tools_list/tool_policy_explain 自省工具 = P1」—— 唯一阻塞是 ToolRegistry 注册层未就位,D-058 落地后解除。createRunTools 收尾三件套(ChatService.kt:2326-2329:registry.tools() + createToolSearchTool + registryIntrospectionTools)全量移植,run 工具目录装配面闭合(除依赖未移植子系统的组)。
+- **决定**：
+  - **chat/builtin_introspection_tools.ts(TDD,19 测试)**:
+    - **isResidentTool**(ToolSearch.kt:313-321 判定序逐字 + DISCOVERY_UTILITY/RESIDENT_EXACT/RESIDENT_CONTEXT/RESIDENT_MODEL_COUNCIL 四集合 :323-370 逐字;agent_task_ 白名单仅 list/read,context 类目门)。
+    - **tools_list**(ToolsListTool.kt 全文):四 schema props 描述逐字;过滤(category contentOrNull 精确等值 / query ignoreCase 名称+描述子串);顶层键序 enabled_count/include_disabled_supported=false/catalog_mode='debug'/callability_note/next_action 逐字 + include_disabled→note 逐字;条目键序 16 键(name..required_permissions),invoke policy 条件键(parallel_group/requires_foreground_app_package/speculative_block_reason 仅非空输出),resident=isResidentTool,description take(240)。
+    - **tool_policy_explain**(ToolPolicyExplainTool.kt 全文):tool_name 必填;input JSON 字符串 runCatching 解析(非法 → null 评估);payload status/tool_name + policy 13 键条件输出,risk 小写。
+    - **tool_search + ToolSearchIndex**(ToolSearch.kt:30-268):searchPayload 键序逐字(status/query/[category]/limit/total_tools/resident_tools/matches_count/expanded_tools/callability_note/trace{mode(>40 lazy else bypass)/query/hit_tools/expanded_tools/estimated_*4 键,savings coerceAtLeast 0}/tools/[无命中:category_candidates top16+debug_hint | 命中:next_step] 文案逐字);**scoreTool 评分表逐字**(category+25/exact name+240/token==name+180/name==token 120|startsWith 80|contains 55|category==35|contains 24|desc 16;别名 query==100|contains 55|反含+len≥2 32|token==80|token 含+len≥2 24;split('_') token+30;只读常规+2);**searchAliases 中文别名表逐字**(screen_/wm_/feishu_docs_/subagent_/model_council_/file_/terminal_/mcp_ 八组);排序 = 分降序+名升序;limit coerce 1..20 默认 5;systemPrompt trimIndent 六行模板逐字(类目计数 desc+key 排序拼接、resident 计数动态)。
+    - **Kotlin data class toString 形态忠实**:schema 字段/schemaFootprintChars = 'Obj(properties=<json>, required=[a, b])'(InputSchema.Obj 无 toString 覆盖;JsonObject 段 JSON、List 段原始 join、null 段 'null')—— 非 JSON,复刻。
+    - **createRegistryIntrospectionTools**(LocalTools.kt:86-92 对)。
+  - **偏差登记**:AgentPermissionBroker 未移植 → tools_list capabilities 恒空(required_permissions=[]、risk 回落 metadata.risk.name 大写 — 与 Android 零 capability 逐字节一致);MainAgentToolProfile/ToolProfileFilter 未移植 → profile 恒 null(trace 无 profile/profile_filtered 键);ToolExposureState 懒暴露机制(toolsForStep/exposeToolNames/observeExecutedTools/expandedToolNames)= P1 既登,isResidentTool 纯函数先行。
+  - **ChatPage 接线**:buildToolLoop tools = [...registry.tools(), createToolSearchTool(registry), ...createRegistryIntrospectionTools(registry)](createRunTools:2326-2329 顺序逐字;自省三件不经 registry 包装,与 Android 同)。
+  - **调试记录**:三处测试期望初版误判,逐一对 Android 源核实后改测试不改实现 —— ① registry.tools() 包装注入 display_title(withDisplayTitleHint,ToolRegistry.kt:66-75)→ schema 含 display_title;② ask_user 只读常规 → policy.parallel_group='utility'(:390);③ needsApproval=true → speculative_block_reason 出现(approval 阻塞)。
+- **可逆性**:新模块 + buildToolLoop 尾部追加;1220 测试全绿(deepread 603 + chat 617),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。

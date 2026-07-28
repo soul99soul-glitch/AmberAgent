@@ -37,6 +37,7 @@ import {
   createTimeTool, makeUIMessage,
   createAskUserTool, createConversationContextTools, createConversationHistoryTools,
   createConversationQueueTools, createToolRegistry,
+  createToolSearchTool, createRegistryIntrospectionTools,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
 } from '@amber/chat-domain';
@@ -808,7 +809,13 @@ struct ChatPage {
       }),
     ]);
     return {
-      tools: registry.tools(),
+      // createRunTools(ChatService.kt:2326-2329):registry.tools() +
+      //   tool_search + 自省对(profile=null — ToolProfileFilter 未移植,登记)
+      tools: [
+        ...registry.tools(),
+        createToolSearchTool(registry),
+        ...createRegistryIntrospectionTools(registry),
+      ],
       makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
         asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({
           model: rt.params.model,

@@ -231,6 +231,13 @@ export { createConversationHistoryTools } from './chat/builtin_session_tools.ts'
 // ===== D-059:conversation_queue_* 工具对 =====
 export type { ConversationQueueToolsDeps } from './chat/builtin_queue_tools.ts';
 export { createConversationQueueTools } from './chat/builtin_queue_tools.ts';
+
+// ===== D-060:自省/发现工具组(tools_list/tool_policy_explain/tool_search) =====
+export {
+  isResidentTool, createToolsListTool, createToolPolicyExplainTool,
+  createToolSearchTool, createRegistryIntrospectionTools,
+  TOOL_SEARCH_TOOL_NAME, TOOL_SEARCH_AUTO_THRESHOLD, TOOL_SEARCH_DEFAULT_LIMIT,
+} from './chat/builtin_introspection_tools.ts';
 export type { SessionAccessGrant, GrantValidation } from './chat/session_grant_store.ts';
 export {
   SessionAccessGrantStore,
