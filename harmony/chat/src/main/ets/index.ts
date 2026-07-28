@@ -131,6 +131,27 @@ export {
 } from './chat/claude_chat_api.ts';
 export type { ClaudeChatApiDeps } from './chat/claude_chat_api.ts';
 
+// Google(D-045):请求构建 + 解析 + API 组装
+export {
+  buildGoogleCompletionRequestBody, buildGoogleContents, toGooglePart,
+  toGoogleFunctionCallPart, toGoogleFunctionResponsePart,
+  removeJsonElements, isGemini3Series, isGemini25Pro, commonRoleToGoogleRole,
+} from './chat/google_request.ts';
+export type {
+  GoogleImageEncoder, GoogleEncodedImage, BuildGoogleCompletionRequestInput,
+} from './chat/google_request.ts';
+export {
+  parseGoogleMessagePart, parseGoogleMessage, parseGoogleUsageMeta,
+  parseGoogleResponseBody, parseGoogleStreamEventData,
+  createGoogleStreamToolIdAllocator, googleRoleToCommonRole,
+  parseSearchGroundingMetadata,
+} from './chat/google_parse.ts';
+export type { GoogleToolIdAllocator } from './chat/google_parse.ts';
+export {
+  createGoogleChatApi, asGoogleChatStreamProvider,
+} from './chat/google_chat_api.ts';
+export type { GoogleChatApiDeps } from './chat/google_chat_api.ts';
+
 export {
   makeAssistant, patchAssistant, makeAssistantRegex, reasoningLevelForModel,
 } from './chat/assistant.ts';

@@ -435,3 +435,13 @@
   - **claude_chat_api.ts**:createClaudeChatApi(streamText/generateText,复用 OpenAIChatApi 结构签名)+ asClaudeChatStreamProvider(D-040 双路径);x-api-key + anthropic-version:2023-06-01 头;abort signal 透传;**entry 接线未做**(设置页无 Claude 变体编辑 UI — provider 编辑面 P1,登记)。
   - **裁剪登记(PD-008)**:keyRoulette 多 key 轮换 → 单 apiKey;ClaudeImageEncoder Port(mime + 无前缀 base64)由 entry adapter 实现时落地(D-038 EntryImageEncoder 加 detailed 形态即可,当前未接)。
 - **可逆性**:纯增模块,零既有路径改动;OpenAI 链路不受影响。
+
+## D-045（L0，2026-07-28）Google 请求构建移植：Gemini generateContent 全链路(协议档)
+
+- **背景**：D-044 Claude 后最后一个 provider 空壳;Android GoogleProvider.kt(949 行)。鸿蒙 ProviderSettingGoogle 模型/wire 已备(D-017)。
+- **决定**：
+  - **google_request.ts(TDD 12 测试锁定)**:buildCompletionRequestBody 忠实移植 — systemInstruction(text 合并 \n\n,图片输出模型不带);generationConfig(temperature/topP/maxOutputTokens/responseModalities);**thinkingConfig 全分支**(AUTO 仅 includeThoughts;OFF:3 系→thinkingLevel minimal(OAuth 传输不强制)/2.5 pro→不覆盖/其余→budget 0+includeThoughts false;显式档:3 系→thinkingLevel low/medium/high(XHIGH/MAX→high),非 3 系→thinkingBudget);tools functionDeclarations + **parameters 六键递归裁剪**(removeElements 移植);contents(assistant tool→model functionCall+user functionResponse 配对;reasoning part 不进 Google);safetySettings 5 条 OFF 逐字。**ModelDsl tokenize+TokenSequenceMatcher 忠实移植**(GEMINI_3_SERIES 四成员 token 序列,非简化正则)。
+  - **google_parse.ts(TDD 8 测试锁定)**:parseMessagePart(text thought→reasoning/functionCall→tool(thoughtSignature metadata,args 缺失→"null")/inlineData→image(草稿图→[Draft Image] reasoning,非 image mime 抛错));grounding url_citation(缺 uri/title 跳过);usage(completion=candidates+thoughts);响应体提取(blockReason/空 candidates/content 缺失+finishReason 三抛错);**流式 tool id 稳定分配器**(google-fc-<uuid8>-<ordinal> + stream index,Android :331-349 — functionCall 无 id,随机 id 会导致 merge 串线);SSE {response} 解包(cloudcode-pa 兼容)。
+  - **google_chat_api.ts**:buildUrl 三形态(vertex/service account→**抛错**(P1,非静默));api key:vertex→key query 参数,否则 x-goog-api-key 头;streamGenerateContent?alt=sse;**OAuth 模式命中即抛错**(v1internal 包装 = P1);malformed event 吞掉即抛(Android :407-412 注释语义)。
+  - **裁剪登记**:BuiltInTools(googleSearch/urlContext)— 鸿蒙 ChatModel 无 tools 字段(P1);Vertex service account / Code Assist OAuth = P1;keyRoulette 已由 PD-008 覆盖;entry 接线未做(provider 编辑面 P1,与 Claude 同)。
+- **可逆性**:纯增模块;三 provider 协议层齐备(openai/claude/google),entry 接线可独立推进。
