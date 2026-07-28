@@ -1544,3 +1544,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-074 残余「parse*」之 DOCX 部分。
 - **未移植(P1 登记)**: PptxParser(453 行,同 Port 续切片 D-113)/EpubParser(231 行,D-114);**PdfParser = MuPDF native 平台阻断**(HarmonyOS 无 MuPDF AAR;需纯 ArkTS PDF 文本提取或 native 移植评估 → spike 登记);OfficeNativeSwitch 维持不移植。
 - **验证**: chat tsc 干净 + 1102 测试(+14)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL(ArkTS 严检两轮:首轮回函 apply/call + TextEncoder 静态调用 + SAX 重载不存在三错,已修)。
+
+## D-113 — PptxParser 全文移植 + ZIP 中央目录读取(CD 枚举序升级)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: document/PptxParser.kt(453 行全文)/java.util.zip.ZipFile(entries 枚举序/getEntry/getInputStream 语义)/@ohos.zlib Zip 类(inflateInit2 raw deflate)
+- **背景**: D-112 落地 DOCX 时 ZIP 走整包解压临时目录(偏差登记);PPTX 移植需 ZipFile 随机访问 + **枚举序忠实**(PptxParser 排序键 quirk 下枚举序决定幻灯片顺序)。
+- **决策**:
+  1. chat HAR zip_archive.ts(+6 测试):EOCD 尾部 64KB 反扫 → 中央目录顺序遍历(ZipFile.entries() 枚举序忠实)→ local header 数据段切片;stored 直取/deflate 经 InflateRawPort(平台注入)/未知方法抛错(非静默);UTF-8 名/文本解码域内实现。
+  2. chat HAR pptx_parser.ts(+10 测试):**排序 quirk 逐字保留**(sortKey = substringAfter('slide').substringBefore('.xml').toIntOrNull ?: 0 — 'slide' 首现于 'slides' 段 → 键恒 0 → 稳定排序 = CD 枚举序);slideNumber = 排序 index+1,notesSlide<N> 同 index;'## Slide N'/'### Speaker Notes' 形态;slide 异常 → 'Error parsing slide XML: <msg>\n' 内联/notes 异常 → '' 静默;bullet(buChar/buAutoNum/lvl)→ 缩进 '- '/'1. ';表格 markdown(尾 '\n' **在 if 内**,与 docx 不同);isNotesTextShape 事件消费前瞻(ph type=='body')原样。
+  3. entry:readFileBytes + inflateRawEntry(zlib.createZipSync inflateInit2(-15) FINISH;输出容量 = 声明 uncompressedSize,溢出/失败抛错非静默);**parseDocxEntry 重构为 CD 读取**(D-112 整包解压临时目录偏差消除,EOCD 失败经 provider 抛入域层原文案路径);parsePptxEntry 接线;DocumentSupport += parsePptx。
+- **偏差/适配登记**: 测试夹具首版 local header 多 2 字节致 deflate 切片错位 — 按 ZIP 规格校验后修为夹具错(实现无改);HarmonyOS 无现成单条目解压 API → inflate 状态机自管(inflateEnd finally)。
+- **关闭**: D-074 残余「parse*」之 PPTX 部分 + D-112 整包解压偏差。
+- **未移植(P1 登记)**: EpubParser(231 行,D-114 续);**PdfParser = MuPDF native 平台阻断**(spike 登记);OfficeNativeSwitch 维持不移植。
+- **验证**: chat tsc 干净 + 1118 测试(+16)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

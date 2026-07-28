@@ -493,6 +493,11 @@ export type {
   XmlPullEvent, XmlPullFactory, XmlPullPort, ZipEntryTextProvider,
 } from './chat/xml_pull.ts';
 
+// ===== D-113:ZIP 读取(中央目录序)+ PptxParser 全文 =====
+export { extractZipEntryData, readZipEntries, readZipEntryText } from './chat/zip_archive.ts';
+export type { InflateRawPort, ZipEntryRecord } from './chat/zip_archive.ts';
+export { parsePptxFromZip, parsePptxNotesXml, parsePptxSlideXml } from './chat/pptx_parser.ts';
+
 // ===== D-111:视觉健康探测 + 图片附件发送守卫 =====
 //   (VisionModelHealthChecker.kt / ImageAttachmentValidator.kt 全文)
 export {

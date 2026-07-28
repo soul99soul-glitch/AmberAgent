@@ -1,19 +1,18 @@
-// EntryDocumentParser — 文档解析 entry 适配(D-112)
-// Android 基准:document 模块 DocxParser.kt 平台子集
-//   - java.util.zip.ZipInputStream 条目流扫描 → zlib.decompressFile 整包解压到
-//     临时目录后按条目名读文本(**偏差登记**:整包解压 vs 流式扫描,输出等价)
+// EntryDocumentParser — 文档解析 entry 适配(D-112/D-113)
+// Android 基准:document 模块 DocxParser.kt/PptxParser.kt 平台子集
+//   - java.util.zip.ZipFile/ZipInputStream → zip_archive.ts(EOCD+中央目录序,
+//     D-113 起 CD 枚举序忠实;deflate = zlib.inflateInit2 raw 流注入)
 //   - org.xmlpull.v1.XmlPullParser(kxml2,namespace-aware,本地名)→ @kit.ArkTS
 //     xml.XmlPullParser(ParseOptions 回调;两遍解析:token 流 + 属性三元组,
 //     按 ParseInfo.getAttributeCount 顺序对齐,消除配对歧义)
 //   - getAttributeValue(null, name)= kxml2 任意命名空间通配 → 本地名/前缀名匹配
-// 清理:临时目录用后递归删除(平台缓存,非业务数据;失败静默对齐 Android use{} 关闭)
 import { fileIo } from '@kit.CoreFileKit';
 import { util, xml } from '@kit.ArkTS';
 import { zlib } from '@kit.BasicServicesKit';
 import type {
-  DocumentFileHandle, XmlPullEvent, XmlPullPort, ZipEntryTextProvider,
+  DocumentFileHandle, XmlPullEvent, XmlPullPort, ZipEntryRecord, ZipEntryTextProvider,
 } from '@amber/chat-domain';
-import { newId, parseDocxFromZip } from '@amber/chat-domain';
+import { parseDocxFromZip, parsePptxFromZip, readZipEntries, readZipEntryText } from '@amber/chat-domain';
 
 // ===== XML pull 适配(ParseOptions 回调 → token 流) =====
 
@@ -131,54 +130,71 @@ class EntryXmlPull implements XmlPullPort {
 
 export const createEntryXmlPull = (xmlText: string): XmlPullPort => new EntryXmlPull(xmlText);
 
-// ===== ZIP 条目供给(整包解压 → 条目名读文本) =====
+// ===== ZIP 读取(D-113 升级:中央目录序 + raw inflate,取代 D-112 整包解压) =====
+// Java ZipFile 语义:entries() = CD 枚举序;getInputStream(entry) = 单条目解压;
+//   deflate = zlib.inflateInit2(-15) raw 流(平台能力,InflateRawPort 注入域层)
 
-const readFileText = (path: string): string => {
+const readFileBytes = (path: string): Uint8Array => {
   const file = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
   try {
     const st = fileIo.statSync(file.fd);
     const buf = new ArrayBuffer(st.size);
     fileIo.readSync(file.fd, buf);
-    return util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buf));
+    return new Uint8Array(buf);
   } finally {
     fileIo.closeSync(file);
   }
 };
 
-// 递归删除临时目录(平台缓存;失败静默 = Android 临时资源清理同档)
-const removeDirRecursive = (dir: string): void => {
+// InflateRawPort entry 实现(raw deflate,负 windowBits;输出容量 = 头声明
+//   uncompressedSize,不足即抛 — 非静默)
+const inflateRawEntry = async (data: Uint8Array, expectedSize: number): Promise<Uint8Array> => {
+  const inCopy: Uint8Array = new Uint8Array(data); // subarray .buffer 偏移剥离
+  const outCap: number = Math.max(expectedSize, 1);
+  const strm: zlib.ZStream = {
+    nextIn: inCopy.buffer as ArrayBuffer,
+    availableIn: inCopy.length,
+    nextOut: new ArrayBuffer(outCap),
+    availableOut: outCap,
+  };
+  const zip = zlib.createZipSync();
+  const init: zlib.ReturnStatus = await zip.inflateInit2(strm, -15);
+  if (init !== zlib.ReturnStatus.OK) {
+    throw new Error(`inflateInit2 failed: ${init}`);
+  }
   try {
-    const names: string[] = fileIo.listFileSync(dir);
-    for (const n of names) {
-      const p: string = `${dir}/${n}`;
-      try {
-        const st = fileIo.statSync(p);
-        if (st.isDirectory()) {
-          removeDirRecursive(p);
-        } else {
-          fileIo.unlinkSync(p);
-        }
-      } catch { /* 单点失败不阻断其余清理 */ }
+    const status: zlib.ReturnStatus = await zip.inflate(strm, zlib.CompressFlushMode.FINISH);
+    if (status !== zlib.ReturnStatus.STREAM_END && status !== zlib.ReturnStatus.OK) {
+      throw new Error(`inflate failed: ${status}`);
     }
-    fileIo.rmdirSync(dir);
-  } catch { /* 目录不存在/已清理 */ }
+    if (status === zlib.ReturnStatus.OK && (strm.availableOut ?? 0) === 0) {
+      throw new Error('inflate output overflow (declared size too small)');
+    }
+    const total: number = strm.totalOut ?? 0;
+    return new Uint8Array((strm.nextOut as ArrayBuffer).slice(0, total));
+  } finally {
+    await zip.inflateEnd(strm);
+  }
 };
 
-// DocxParser.kt:21-38 parse(File) 平台段:zip 开流(失败 → 抛 → 域层
-//   'Error parsing DOCX file: <msg>')+ 条目扫描(未命中 → null → 域层原文案)
+// DocxParser.kt:21-38 parse(File) 平台段:CD 解析失败(EOCD)经 provider 抛入
+//   域层 catch → 'Error parsing DOCX file: <msg>';条目未命中 → null → 原文案
 export const parseDocxEntry = async (handle: DocumentFileHandle): Promise<string> => {
-  const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
-  const dir: string = `${ctx.cacheDir}/docparse_${newId()}`;
-  fileIo.mkdirSync(dir, true);
-  try {
-    await zlib.decompressFile(handle.absolutePath, dir);
-    const entryText: ZipEntryTextProvider = (entryName: string): Promise<string | null> => {
-      const p: string = `${dir}/${entryName}`;
-      if (!fileIo.accessSync(p)) return Promise.resolve(null);
-      return Promise.resolve(readFileText(p));
-    };
-    return await parseDocxFromZip(entryText, createEntryXmlPull);
-  } finally {
-    removeDirRecursive(dir);
-  }
+  const bytes: Uint8Array = readFileBytes(handle.absolutePath);
+  let cached: ZipEntryRecord[] | null = null;
+  const entryText: ZipEntryTextProvider = async (entryName: string): Promise<string | null> => {
+    if (cached === null) cached = readZipEntries(bytes);
+    const rec: ZipEntryRecord | undefined =
+      cached.find((e: ZipEntryRecord): boolean => e.name === entryName);
+    if (rec === undefined) return null;
+    return await readZipEntryText(bytes, rec, inflateRawEntry);
+  };
+  return await parseDocxFromZip(entryText, createEntryXmlPull);
+};
+
+// PptxParser.kt:18-57 parse(File) 平台段:CD 序枚举在域层(zip_archive);
+//   EOCD/解压失败 → 域层 'Error parsing PPTX file: <msg>'
+export const parsePptxEntry = async (handle: DocumentFileHandle): Promise<string> => {
+  const bytes: Uint8Array = readFileBytes(handle.absolutePath);
+  return await parsePptxFromZip(bytes, inflateRawEntry, createEntryXmlPull);
 };
