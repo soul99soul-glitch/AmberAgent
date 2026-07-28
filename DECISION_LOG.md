@@ -289,3 +289,13 @@
   - **UI**:MessageRow 长按 → AlertDialog 确认(明示不可恢复)→ 删除当前分支消息 + 持久化;**sending 中不提供入口**(对齐 ChatVM 生成中禁删语义)。
   - 删除是用户主动发起且经确认,L0 用户数据操作。
 - **可逆性**:纯新增;节点模型不变。
+
+## D-030（L0，2026-07-28）user 节点 regenerate 落地：截断先持久化 + 新节点续跑(D-024 P1 项清零)
+
+- **背景**：D-024 把 user 消息 regenerate(截断重跑)裁为 P1 并显式抛错;assistant 路径落地后该裁剪成为功能缺口(Android 完整支持)。
+- **决定**：
+  - **语义(ChatService.kt:1091-1099 逐行对齐)**:截断目标 user 节点之后的所有节点(subList 0..indexAt)→ **先持久化截断** → 以截断后会话为基底生成 → 新 assistant 作为**新节点**入列(非分支追加,与 assistant 路径语义区分)→ 再持久化。provider 抛错 → 截断保持已持久化(Android 同序,测试锁定 saved[0]=截断/saved[1]=终态)。
+  - **accumulator 占位**:user 路径基底以 user 结尾,新 assistant delta 自然开新消息,**不加占位**(assistant 路径仍需占位);两条路径在实现内显式分叉并注释。
+  - **regenerateAssistantMsg=false 分支**(仅保存不生成)= 冷门路径,裁 P1(UI 无入口)。
+  - **UI**:user 消息行也显示「重新生成」(任意 user 消息可截断重跑,语义良定义);D-024 P1 裁剪项清零。
+- **可逆性**:两路径共享流式骨架;assistant 路径行为经既有 8 测试锁定无回归。

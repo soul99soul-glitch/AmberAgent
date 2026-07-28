@@ -135,13 +135,48 @@ describe('runRegenerateAt', () => {
     assert.equal(store.saved.length, 0);
   });
 
-  it('user 节点 regenerate = P1 裁剪:显式抛错而非静默 no-op', async () => {
+  it('user 节点 regenerate:截断后续 + 先持久化截断 + 新 assistant 节点入列', async () => {
     const conv = threeNodeConv();
-    const d: RegenerateDeps = deps(textProvider('x'));
-    await assert.rejects(
-      () => runRegenerateAt(conv, conv.messageNodes[0].id, d),
-      /user/,
-    );
+    const store = createMemoryConversationStore();
+    const capture: { messages?: UIMessage[] } = {};
+    const d: RegenerateDeps = { ...deps(textProvider('a1-new', capture)), store };
+    const out = await runRegenerateAt(conv, conv.messageNodes[0].id, d);
+    // 截断:只留 user 节点;新生成 assistant 追加为新节点
+    assert.equal(out.messageNodes.length, 2);
+    assert.equal(out.messageNodes[1].messages.length, 1);
+    const gen = out.messageNodes[1].messages[0];
+    assert.equal(gen.parts[0].type === 'text' ? (gen.parts[0] as { text: string }).text : '', 'a1-new');
+    // 持久化次序:saved[0]=截断(1 节点),saved[1]=终态(2 节点)
+    assert.equal(store.saved.length, 2);
+    assert.equal(store.saved[0].messageNodes.length, 1);
+    assert.equal(store.saved[1].messageNodes.length, 2);
+    // provider 上下文含该 user 消息(截断后基底)
+    const texts = (capture.messages ?? []).map((m: UIMessage): string =>
+      m.parts.filter((p) => p.type === 'text').map((p) => (p as { text: string }).text).join(''));
+    assert.deepEqual(texts, ['u1']);
+  });
+
+  it('user 节点 regenerate + provider 抛错:截断已持久化(Android 同序),错误传播', async () => {
+    const conv = threeNodeConv();
+    const store = createMemoryConversationStore();
+    const d: RegenerateDeps = { ...deps(failingProvider()), store };
+    await assert.rejects(() => runRegenerateAt(conv, conv.messageNodes[0].id, d), /network down/);
+    // 截断在生成前持久化(ChatService.kt:1091-1099 同序)
+    assert.equal(store.saved.length, 1);
+    assert.equal(store.saved[0].messageNodes.length, 1);
+  });
+
+  it('user 节点为末节点:无截断,直接续跑', async () => {
+    const base = threeNodeConv();
+    const conv: Conversation = {
+      ...base,
+      messageNodes: [base.messageNodes[0]],
+    };
+    const store = createMemoryConversationStore();
+    const d: RegenerateDeps = { ...deps(textProvider('a1')), store };
+    const out = await runRegenerateAt(conv, conv.messageNodes[0].id, d);
+    assert.equal(out.messageNodes.length, 2);
+    assert.equal(store.saved.length, 2);
   });
 
   it('未知 nodeId → 抛错(调用方传错是 bug,不静默)', async () => {

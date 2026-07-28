@@ -1,21 +1,20 @@
-// regenerate — assistant 分支再生 + 分支切换
+// regenerate — assistant 分支再生 + user 截断重跑 + 分支切换
 //
 // Android 基准:
-//   - ChatService.regenerateAtMessage(ChatService.kt:1078-1118):assistant 消息
-//     regenerate 时以目标节点之前的消息(messageRange 0..<nodeIndex)为上下文重跑
-//     生成;新结果追加进同一 MessageNode("regenerate 追加不覆盖",conversation.ts 头注)
+//   - ChatService.regenerateAtMessage(ChatService.kt:1078-1118):
+//     · assistant 消息:以目标节点之前的消息(messageRange 0..<nodeIndex)为上下文
+//       重跑;新结果追加进同一 MessageNode("regenerate 追加不覆盖")
+//     · user 消息(:1091-1099):截断目标之后的节点(subList 0..indexAt),**先持久化
+//       截断**再重跑生成,新 assistant 作为新节点入列
 //   - ChatService.selectMessageNode(ChatVM.kt:420 调用链):设置节点 selectIndex 并持久化
 //
 // 与 Android 的偏差(已登记 PARITY_DEBT):
 //   - Android 的窗口化 merge(streamingTail/mergeGeneratedMessagesIntoWindow/时间线分页)
-//     依附于其分页架构;本实现为扁平节点模型下的等价语义:上下文截断 + 分支追加
+//     依附于其分页架构;本实现为扁平节点模型下的等价语义
 //   - Android regenerate 会 invalidateCompacts;ConversationContextEngine = P1,无对应物
-//
-// 裁剪(P1):user 消息节点 regenerate(截断后续节点重跑)——domain 层显式抛错,
-//   不做静默 no-op(宪章)
 
 import type { Conversation, MessageNode } from './conversation.ts';
-import { currentMessages, nodeRole } from './conversation.ts';
+import { currentMessages, nodeRole, toMessageNode } from './conversation.ts';
 import type { MessageChunk, UIMessage } from './message.ts';
 import { makeUIMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
@@ -65,16 +64,24 @@ export const runRegenerateAt = async (
     throw new Error(`runRegenerateAt: node not found: ${nodeId}`);
   }
   const target: MessageNode = conversation.messageNodes[nodeIndex];
-  if (nodeRole(target) !== 'assistant') {
-    // P1 裁剪:user 节点 regenerate(截断后续 + 重跑)尚未实现,显式抛错
-    throw new Error('runRegenerateAt: regenerate at user node is not supported (P1)');
-  }
+  const isUserNode: boolean = nodeRole(target) === 'user';
 
-  // 1. 上下文 = 目标节点之前的 currentMessages(Android messageRange 0..<nodeIndex)
-  const priorConversation: Conversation = {
-    ...conversation,
-    messageNodes: conversation.messageNodes.slice(0, nodeIndex),
-  };
+  // 1. 上下文基底
+  //    assistant 节点:目标节点之前的 currentMessages(Android messageRange 0..<nodeIndex)
+  //    user 节点:截断目标之后节点,**先持久化截断**(ChatService.kt:1091-1099),
+  //    基底含该 user 消息
+  let working: Conversation = conversation;
+  if (isUserNode) {
+    working = {
+      ...conversation,
+      messageNodes: conversation.messageNodes.slice(0, nodeIndex + 1),
+      updateAt: nowIso(),
+    };
+    await deps.store.save(working);
+  }
+  const priorConversation: Conversation = isUserNode
+    ? working
+    : { ...conversation, messageNodes: conversation.messageNodes.slice(0, nodeIndex) };
   const baseMessages: UIMessage[] = currentMessages(priorConversation);
   const ctx: TransformerContext = { assistant: deps.assistant };
 
@@ -87,12 +94,16 @@ export const runRegenerateAt = async (
   });
   const internalMessages: UIMessage[] = applyInputTransformers(assembled, deps.inputTransformers, ctx);
 
-  // 3. provider 流式(错误直接传播,会话不变 — 对齐 runChatTurn)
-  //    accumulator 语义:末条 initial 消息是"活动流式消息"。regenerate 的 base
-  //    可能以 assistant 结尾(目标节点之前的消息),若直接 seed 会把新流并入旧
-  //    消息;故追加空 assistant 占位作为流式尾部(与 Android 生成时尾部占位同构)
-  const accumulator = new MessageStreamAccumulator(
-    [...baseMessages, makeUIMessage('assistant', [])]);
+  // 3. provider 流式(错误直接传播 — 对齐 runChatTurn;user 节点路径截断已持久化,
+  //    与 Android 同序)
+  //    accumulator 语义:末条 initial 消息是"活动流式消息"。assistant 分支再生时
+  //    base 可能以 assistant 结尾(目标节点之前的消息),若直接 seed 会把新流并入
+  //    旧消息;故追加空 assistant 占位作为流式尾部(与 Android 生成时尾部占位同构);
+  //    user 节点路径 base 以 user 结尾,新 assistant delta 自然开新消息,无需占位
+  const seed: UIMessage[] = isUserNode
+    ? baseMessages
+    : [...baseMessages, makeUIMessage('assistant', [])];
+  const accumulator = new MessageStreamAccumulator(seed);
   let sawChunk: boolean = false;
   await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
     sawChunk = true;
@@ -102,17 +113,28 @@ export const runRegenerateAt = async (
     }
   });
   if (!sawChunk) {
-    return conversation;
+    return isUserNode ? working : conversation;
   }
 
-  // 4. 终态 transforms → 新 assistant 消息追加进目标节点(追加不覆盖)
+  // 4. 终态 transforms → 入列
   const finalMessages: UIMessage[] = applyOnGenerationFinish(
     accumulator.snapshot(), deps.outputTransformers, ctx,
   );
   const generated: UIMessage[] = finalMessages.slice(baseMessages.length);
   if (generated.length === 0) {
-    return conversation;
+    return isUserNode ? working : conversation;
   }
+  if (isUserNode) {
+    // user 截断重跑:新 assistant 作为新节点入列(runChatTurn 同构)
+    const out: Conversation = {
+      ...working,
+      messageNodes: [...working.messageNodes, ...generated.map((m: UIMessage): MessageNode => toMessageNode(m))],
+      updateAt: nowIso(),
+    };
+    await deps.store.save(out);
+    return out;
+  }
+  // assistant 分支再生:新消息追加进目标节点(追加不覆盖),selectIndex 指向新分支
   const newMessages: UIMessage[] = [...target.messages, ...generated];
   const updatedNode: MessageNode = {
     ...target,

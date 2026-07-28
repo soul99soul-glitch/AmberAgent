@@ -97,7 +97,8 @@ struct MessageRow {
             .margin({ bottom: 4 })
         }
       }, partKey)
-      if (this.isAssistant && (this.branchCount > 1 || this.isLastAssistant)) {
+      if ((this.isAssistant && (this.branchCount > 1 || this.isLastAssistant))
+        || this.message.role === 'user') {
         Row() {
           if (this.branchCount > 1) {
             Text('◀').fontSize(11).fontColor(this.selectIndex > 0 ? ACCENT : INK3)
@@ -113,7 +114,7 @@ struct MessageRow {
                 if (this.selectIndex < this.branchCount - 1) this.onSwitch(this.selectIndex + 1);
               })
           }
-          if (this.isLastAssistant) {
+          if (this.isLastAssistant || this.message.role === 'user') {
             Text('重新生成').fontSize(11).fontColor(ACCENT)
               .onClick((): void => this.onRegenerate())
           }
