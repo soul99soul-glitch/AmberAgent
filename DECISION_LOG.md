@@ -924,3 +924,14 @@
   - **不变项(核对后确认忠实)**:普通发送生成中 FOLLOWUP+answer=true(:259 恒 FOLLOWUP);建议长按入队 FOLLOWUP+answer=true(:871);非生成中长按 answer=false 直接 append;队列满文案逐字(:706);tool_loop 步间消费+写回+emit(:386-390 等价,appendNode+save+emitSnapshot);drainSteerMessages filter-all ≡ takeWhile-prefix(入队不变式保证 STEER 仅在前缀);STEER 仅工具循环消费,非工具路径等派发降级(Android 同)。
   - **COLLECT 模式不移植(登记)**:Android 全代码库无任何 COLLECT 入队点(enum/isCollectable/合并机器/UI 标签齐备但无生产者,休眠路径);HAR pending_queue 已含 isCollectable/buildCollected 纯函数(D-048 随队列移植,测试锁定)即足够;若 Android 复活该路径再补 UI。
 - **可逆性**:1476 测试全绿(deepread 603 + chat 873),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit「STEER 进行中注入」残余消除。
+
+## D-082（L0，2026-07-28）ToolProfileFilter — 工具画像过滤 + tool_search profile trace
+
+- **背景**：gap-audit 工具行残余。Android 锚点:MainAgentToolProfile.kt(6 值 SerialName)、ToolProfileFilter.kt 全文(filter/isAllowed/MINIMAL 7 + WEB_READ 61 + WORKSPACE_READ 16 + CODING 4 + MOBILE_CONTROL 4)、ToolRegistry.kt:424-457(Tool.category() when 链)、ChatService.kt:2302/:2324(过滤点)/:2326-2329(tool_search(profile))、ToolSearch.kt:28-31/:115-118(profile 仅进 trace)。
+- **决定**：
+  - **toolCategory 复用不重复移植**:ToolRegistry.kt:424-457 when 链已由 tool_policy.ts:179 先行逐字移植(D-056 族),本模块 import 复用;测试锁定 when 链全分支。
+  - **tool_profile_filter(HAR)**:ToolProfileFilterResult{profile,tools,filteredCount,filteredByCategory};filter 逐字 — FULL 直通(同引用+空 map);kept/filterNot 按 keptNames 名集合(同名重复工具同留同滤,测试锁定);filteredByCategory 插入序 = 源遍历序。isAllowed when(profile) 逐字;常量集四组冻结数组,形状锁定(MINIMAL 7)。
+  - **tool_search profile 透传**:createToolSearchTool(registry, profile=null);searchPayload trace 键序 — mode,query,[profile,profile_filtered],hit_tools…(buildJsonObject 序 :113-119);profile=full → filtered=false;null → 无键(向后兼容);评分不受 profile 影响(Android 同)。
+  - **ChatPage.buildToolLoop 接线**:原始工具数组先 filterToolProfile(rt.assistant.toolProfile).tools 再 createToolRegistry;tool_search 传 rt.assistant.toolProfile;自省对在过滤后追加(Android :2326-2329 同序)。登记:Android 第二过滤点(:2324)针对 subagent/modelCouncil 增广工具 — 鸿蒙无此两族工具(未移植),单过滤点等价。
+  - **Assistant.toolProfile 早已在模型层**(D-016,默认 'full' → 默认行为零变化);助手编辑面选择 UI = P1(交互档)。
+- **可逆性**:1485 测试全绿(deepread 603 + chat 882,+9),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit「ToolProfileFilter」残余消除(设置面 UI 除外)。

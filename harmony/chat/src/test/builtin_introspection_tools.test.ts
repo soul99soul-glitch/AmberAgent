@@ -222,6 +222,37 @@ test('tool_search:无命中 → category_candidates + debug_hint 逐字', async 
   assert.equal('next_step' in payload, false);
 });
 
+// D-082:profile 透传(ToolSearch.kt:115-118)— 非 null 时 trace 出
+//   profile(name.lowercase)/profile_filtered(!= FULL);键序在 query 后 hit_tools 前
+test('tool_search:profile 非 null → trace profile/profile_filtered', async () => {
+  const reg: ToolRegistry = makeRegistry();
+  const t: AgentTool = createToolSearchTool(reg, 'web_read');
+  const payload: JsonObject = textOf(await t.execute({ query: 'ask_user' }));
+  const trace: JsonObject = payload['trace'] as JsonObject;
+  assert.equal(trace['profile'], 'web_read');
+  assert.equal(trace['profile_filtered'], true);
+  // 键序:mode, query, profile, profile_filtered, hit_tools ...
+  const keys: string[] = Object.keys(trace);
+  assert.ok(keys.indexOf('profile') > keys.indexOf('query'));
+  assert.ok(keys.indexOf('profile') < keys.indexOf('hit_tools'));
+  assert.ok(keys.indexOf('profile_filtered') > keys.indexOf('profile'));
+  assert.ok(keys.indexOf('profile_filtered') < keys.indexOf('hit_tools'));
+});
+
+test('tool_search:profile=full → profile_filtered=false;缺省 → 无键', async () => {
+  const reg: ToolRegistry = makeRegistry();
+  const full: AgentTool = createToolSearchTool(reg, 'full');
+  const traceFull: JsonObject =
+    (textOf(await full.execute({ query: 'ask_user' })))['trace'] as JsonObject;
+  assert.equal(traceFull['profile'], 'full');
+  assert.equal(traceFull['profile_filtered'], false);
+  const bare: AgentTool = createToolSearchTool(reg);
+  const traceBare: JsonObject =
+    (textOf(await bare.execute({ query: 'ask_user' })))['trace'] as JsonObject;
+  assert.equal('profile' in traceBare, false);
+  assert.equal('profile_filtered' in traceBare, false);
+});
+
 test('tool_search:limit 越界 coerce 1..20 + category 过滤小写化', async () => {
   const reg: ToolRegistry = makeRegistry();
   const t: AgentTool = createToolSearchTool(reg);

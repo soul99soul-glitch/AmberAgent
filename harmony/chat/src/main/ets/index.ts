@@ -543,3 +543,11 @@ export {
   calculateInSampleSize, guessImageMimeType, mapExifOrientationToTransform,
 } from './chat/image_compress.ts';
 export type { ExifTransformType } from './chat/image_compress.ts';
+
+// ===== D-082:工具画像过滤(ToolProfileFilter.kt 全文 + ToolRegistry.kt:424-457) =====
+export {
+  PROFILE_CODING_CATEGORIES, PROFILE_MINIMAL_TOOLS, PROFILE_MOBILE_CONTROL_CATEGORIES,
+  PROFILE_WEB_READ_TOOLS, PROFILE_WORKSPACE_READ_TOOLS,
+  filterToolProfile,
+} from './chat/tool_profile_filter.ts';
+export type { ToolProfileFilterResult } from './chat/tool_profile_filter.ts';

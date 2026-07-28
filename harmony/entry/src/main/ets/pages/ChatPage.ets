@@ -15,7 +15,7 @@ import type {
   CompactPolicy, CompactResult, PreparedContext,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
-  ToolRegistry, DeepReadOpenEvent, MessageTransformer,
+  ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -38,7 +38,7 @@ import {
   createTimeTool, makeUIMessage,
   createAskUserTool, createConversationContextTools, createConversationHistoryTools,
   createConversationQueueTools, createToolRegistry,
-  createToolSearchTool, createRegistryIntrospectionTools,
+  createToolSearchTool, createRegistryIntrospectionTools, filterToolProfile,
   createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
   parseDeepReadSlashCommand,
   applyToolApprovalToConversation, conversationHasPendingTools,
@@ -873,72 +873,76 @@ struct ChatPage {
     // Android conversationProvider = getConversationFlow().value(最新会话态)
     const conversationProvider: () => Promise<Conversation> = (): Promise<Conversation> =>
       Promise.resolve(this.conversation ?? conv);
-    const registry: ToolRegistry = createToolRegistry([
-      createTimeTool(),
-      createAskUserTool(),
-      ...createConversationContextTools({
-        conversationProvider,
-        compactStore: getCompactStore(),
-        // 与 buildPrepareContext 同口径(settings.agentRuntime.contextCompaction)
-        policy: makeCompactPolicy({ keepRecentTurns: 8 }),
-        modelContextWindowTokens: rt.modelContextWindowTokens,
-        compactEngineDeps: {
-          provider: asChatStreamProvider(rt.api, () => rt.params),
-          store: getCompactStore(),
-        },
-      }),
-      ...createConversationHistoryTools({
-        repository: getChatRepository(),
-        currentConversationProvider: conversationProvider,
-        grantStore: getSessionGrantStore(),
-      }),
-      // D-059:conversation_queue_* 工具对(ChatService.kt:2457-2544);
-      //   变更经既有页面路径(cancelPendingById/clear)— persist+审计与
-      //   ChatService:498-511 同语义(changed/count>0 才记录)
-      ...createConversationQueueTools({
-        pendingProvider: (): Promise<PendingUserMessage[]> => Promise.resolve(this.pendingQueue),
-        cancelOne: (messageId: string): Promise<void> => {
-          this.cancelPendingById(messageId);
-          return Promise.resolve();
-        },
-        clearAll: (): Promise<void> => {
-          const count: number = this.pendingQueue.length;
-          if (count > 0) {
-            this.pendingQueue = [];
-            this.syncPendingRows();
-            this.persistQueue();
-            this.auditQueueEvent('clear', '', `count=${count}`);
-          }
-          return Promise.resolve();
-        },
-      }),
-      // D-061:本地工具三件(LocalTools runPlanUpdateTool/clipboardTool/
-      //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
-      //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)
-      createRunPlanUpdateTool(),
-      createClipboardTool(createEntryClipboardPort()),
-      createDeepReadOpenTool({
-        bus: {
-          hasCollectors: (): boolean => true,
-          emit: (event: DeepReadOpenEvent): void => {
-            this.openDeepRead(event);
+    // D-082:ToolProfileFilter(ChatService.kt:2302)— 先按 assistant.toolProfile
+    //   过滤原始工具集,再建 registry;tool_search/自省对在过滤后追加(:2326-2329)
+    const profiledTools: AgentTool[] =
+      filterToolProfile([
+        createTimeTool(),
+        createAskUserTool(),
+        ...createConversationContextTools({
+          conversationProvider,
+          compactStore: getCompactStore(),
+          // 与 buildPrepareContext 同口径(settings.agentRuntime.contextCompaction)
+          policy: makeCompactPolicy({ keepRecentTurns: 8 }),
+          modelContextWindowTokens: rt.modelContextWindowTokens,
+          compactEngineDeps: {
+            provider: asChatStreamProvider(rt.api, () => rt.params),
+            store: getCompactStore(),
           },
-        },
-        sha256Hex: sha256HexUtf8,
-      }),
-      // D-070:搜索工具组(ChatService.kt:2232-2234 — enableWebSearch 门内
-      //   addAll(createSearchTools(settings)));searchSettings 未加载完成时
-      //   本轮不带搜索工具(偏好加载为异步,与 Android StateFlow 就绪时序等价)
-      ...(this.searchSettings !== null && this.searchSettings.enableWebSearch
-        ? createSearchTools(this.searchSettings)
-        : []),
-    ]);
+        }),
+        ...createConversationHistoryTools({
+          repository: getChatRepository(),
+          currentConversationProvider: conversationProvider,
+          grantStore: getSessionGrantStore(),
+        }),
+        // D-059:conversation_queue_* 工具对(ChatService.kt:2457-2544);
+        //   变更经既有页面路径(cancelPendingById/clear)— persist+审计与
+        //   ChatService:498-511 同语义(changed/count>0 才记录)
+        ...createConversationQueueTools({
+          pendingProvider: (): Promise<PendingUserMessage[]> => Promise.resolve(this.pendingQueue),
+          cancelOne: (messageId: string): Promise<void> => {
+            this.cancelPendingById(messageId);
+            return Promise.resolve();
+          },
+          clearAll: (): Promise<void> => {
+            const count: number = this.pendingQueue.length;
+            if (count > 0) {
+              this.pendingQueue = [];
+              this.syncPendingRows();
+              this.persistQueue();
+              this.auditQueueEvent('clear', '', `count=${count}`);
+            }
+            return Promise.resolve();
+          },
+        }),
+        // D-061:本地工具三件(LocalTools runPlanUpdateTool/clipboardTool/
+        //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
+        //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)
+        createRunPlanUpdateTool(),
+        createClipboardTool(createEntryClipboardPort()),
+        createDeepReadOpenTool({
+          bus: {
+            hasCollectors: (): boolean => true,
+            emit: (event: DeepReadOpenEvent): void => {
+              this.openDeepRead(event);
+            },
+          },
+          sha256Hex: sha256HexUtf8,
+        }),
+        // D-070:搜索工具组(ChatService.kt:2232-2234 — enableWebSearch 门内
+        //   addAll(createSearchTools(settings)));searchSettings 未加载完成时
+        //   本轮不带搜索工具(偏好加载为异步,与 Android StateFlow 就绪时序等价)
+        ...(this.searchSettings !== null && this.searchSettings.enableWebSearch
+          ? createSearchTools(this.searchSettings)
+          : []),
+      ], rt.assistant.toolProfile).tools;
+    const registry: ToolRegistry = createToolRegistry(profiledTools);
     return {
       // createRunTools(ChatService.kt:2326-2329):registry.tools() +
-      //   tool_search + 自省对(profile=null — ToolProfileFilter 未移植,登记)
+      //   tool_search(profile 透传,D-082)+ 自省对
       tools: [
         ...registry.tools(),
-        createToolSearchTool(registry),
+        createToolSearchTool(registry, rt.assistant.toolProfile),
         ...createRegistryIntrospectionTools(registry),
       ],
       makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>

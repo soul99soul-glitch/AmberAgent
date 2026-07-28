@@ -10,8 +10,9 @@
 //   - AgentPermissionBroker 未移植 → capabilities 恒空:tools_list 条目
 //     required_permissions=[]、risk 回落 metadata.risk.name(与 Android 零
 //     capability 时逐字节一致)
-//   - MainAgentToolProfile/ToolProfileFilter 未移植 → tool_search profile
-//     恒 null(trace 不出 profile/profile_filtered 键,评分不受 profile 影响)
+//   - ToolProfileFilter D-082 已移植 → createToolSearchTool(registry, profile)
+//     profile 非 null 时 trace 出 profile/profile_filtered 键(:115-118);
+//     评分不受 profile 影响(Android 同 — profile 仅进 trace)
 //   - ToolExposureState 懒暴露机制(toolsForStep/exposeToolNames/
 //     observeExecutedTools/expandedToolNames)= P1(D-056 既登);
 //     isResidentTool 为纯函数先行移植
@@ -22,6 +23,7 @@
 import type { JsonObject, JsonValue } from './json.ts';
 import type { UIMessage, UIMessagePart } from './message.ts';
 import type { ChatModel } from './provider_model.ts';
+import type { MainAgentToolProfile } from './assistant.ts';
 import type { AgentTool, InputSchemaObj } from './tool.ts';
 import { makeAgentTool, makeInputSchemaObj } from './tool.ts';
 import type { ToolInvocationPolicy, ToolRisk } from './tool_policy.ts';
@@ -436,10 +438,12 @@ const residentToolCount = (registry: ToolRegistry): number => {
   return count;
 };
 
-// searchPayload(ToolSearch.kt:92-149 键序逐字;profile 恒 null → 无 profile 键)
+// searchPayload(ToolSearch.kt:92-149 键序逐字;profile 非 null → trace 出
+//   profile/profile_filtered 键(:115-118,位置在 query 之后 hit_tools 之前))
 const searchPayload = (
   registry: ToolRegistry, query: string,
   category: string | null, limit: number,
+  profile: MainAgentToolProfile | null = null,
 ): JsonObject => {
   const trimmed: string | null = category !== null ? category.trim().toLowerCase() : null;
   const normalizedCategory: string | null =
@@ -473,14 +477,19 @@ const searchPayload = (
   const trace: JsonObject = {
     mode: registry.metadata.length > TOOL_SEARCH_AUTO_THRESHOLD ? 'lazy' : 'bypass',
     query,
-    hit_tools: expandedTools,
-    expanded_tools: expandedTools,
-    estimated_full_schema_chars: fullSchemaChars,
-    estimated_resident_schema_chars: residentSchemaChars,
-    estimated_expanded_schema_chars: expandedSchemaChars,
-    estimated_schema_savings_chars:
-      Math.max(fullSchemaChars - residentSchemaChars - expandedSchemaChars, 0),
   };
+  // :115-118 — profile?.let { profile(name.lowercase) + profile_filtered(!= FULL) }
+  if (profile !== null) {
+    trace['profile'] = profile; // 鸿蒙联合值即 SerialName 小写
+    trace['profile_filtered'] = profile !== 'full';
+  }
+  trace['hit_tools'] = expandedTools;
+  trace['expanded_tools'] = expandedTools;
+  trace['estimated_full_schema_chars'] = fullSchemaChars;
+  trace['estimated_resident_schema_chars'] = residentSchemaChars;
+  trace['estimated_expanded_schema_chars'] = expandedSchemaChars;
+  trace['estimated_schema_savings_chars'] =
+    Math.max(fullSchemaChars - residentSchemaChars - expandedSchemaChars, 0);
   payload['trace'] = trace;
   payload['tools'] = matches.map(scoredToolToJson);
   if (matches.length === 0) {
@@ -495,7 +504,9 @@ const searchPayload = (
   return payload;
 };
 
-export const createToolSearchTool = (registry: ToolRegistry): AgentTool => makeAgentTool({
+// ToolSearch.kt:28-31 — profile 透传 ToolSearchIndex(trace 两键)
+export const createToolSearchTool = (
+  registry: ToolRegistry, profile: MainAgentToolProfile | null = null): AgentTool => makeAgentTool({
   name: TOOL_SEARCH_TOOL_NAME,
   description: "Search AmberAgent's full tool catalog by intent/category and expose the best matching tool schemas for the next step.",
   parameters: () => makeInputSchemaObj(
@@ -540,7 +551,7 @@ export const createToolSearchTool = (registry: ToolRegistry): AgentTool => makeA
     // contentOrNull?.ifBlank { null }
     const category: string | null = rawCategory.length === 0 ? null : rawCategory;
     const limit: number = inputIntOrNull(input, 'limit') ?? TOOL_SEARCH_DEFAULT_LIMIT;
-    const payload: JsonObject = searchPayload(registry, query, category, limit);
+    const payload: JsonObject = searchPayload(registry, query, category, limit, profile);
     return Promise.resolve([
       { type: 'text', text: JSON.stringify(payload), metadata: null },
     ]);
