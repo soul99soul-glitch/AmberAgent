@@ -11,7 +11,8 @@
 // 与 Android 的偏差(已登记 PARITY_DEBT):
 //   - Android 的窗口化 merge(streamingTail/mergeGeneratedMessagesIntoWindow/时间线分页)
 //     依附于其分页架构;本实现为扁平节点模型下的等价语义
-//   - Android regenerate 会 invalidateCompacts;ConversationContextEngine = P1,无对应物
+//   - Android regenerate 会 invalidateCompacts;D-055 起由 entry 层接线
+//     (ChatPage.regenerate → invalidateConvCompacts('message_regenerated'))
 
 import type { Conversation, MessageNode } from './conversation.ts';
 import { currentMessages, nodeRole, toMessageNode } from './conversation.ts';
@@ -57,6 +58,9 @@ export interface RegenerateDeps {
   store: ConversationStore;
   agentSoul?: string;
   contextMessageSize?: number;
+  // D-055:压缩引擎钩子(chat_turn 同语义);存在时组装以其结果为基底,
+  //   contextMessageSize 强制 0(引擎内部截断,避免双重截断)
+  prepareContextMessages?: (messages: UIMessage[]) => Promise<UIMessage[]>;
   onUpdate?: (messages: UIMessage[]) => void;
   // 停止生成(D-035 扩展):abort → 部分快照照常入列(分支追加/新节点),正常 resolve
   abortSignal?: AbortSignalLike;
@@ -96,12 +100,19 @@ export const runRegenerateAt = async (
   const baseMessages: UIMessage[] = currentMessages(priorConversation);
   const ctx: TransformerContext = { assistant: deps.assistant };
 
-  // 2. 组装 + input transforms(作用于发往 provider 的副本,不污染会话本体)
+  // 2. 组装 + input transforms(作用于发往 provider 的副本,不污染会话本体);
+  //    D-055:prepareContextMessages 存在时引擎接管(压缩/编辑/截断),
+  //    assembleInternalMessages 的 contextMessageSize 强制 0(chat_turn 同语义)
+  const preparedMessages: UIMessage[] = deps.prepareContextMessages !== undefined
+    ? await deps.prepareContextMessages(baseMessages)
+    : baseMessages;
   const assembled: UIMessage[] = assembleInternalMessages({
-    messages: baseMessages,
+    messages: preparedMessages,
     assistant: deps.assistant,
     agentSoul: deps.agentSoul ?? '',
-    contextMessageSize: deps.contextMessageSize ?? 0,
+    contextMessageSize: deps.prepareContextMessages !== undefined
+      ? 0
+      : (deps.contextMessageSize ?? 0),
   });
   const internalMessages: UIMessage[] = applyInputTransformers(assembled, deps.inputTransformers, ctx);
 

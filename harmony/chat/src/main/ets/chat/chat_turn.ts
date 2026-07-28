@@ -104,6 +104,12 @@ export interface ChatTurnDeps {
   retrySetting?: GenerationRetrySetting;
   sleep?: (ms: number) => Promise<void>;
   onRetryStatus?: (status: string | null) => void;
+  // 上下文压缩(D-055,ConversationContextEngine.prepareContext:112-286):
+  //   提供则替代 limitContext 窗口(edit→plan→compact→注入→fit);
+  //   输入为当前会话消息(含新 user),返回发往 provider 的消息序列
+  //   (system 前置与 input transforms 仍由本函数在返回后施加,次序对齐
+  //   GenerationHandler:434-446)
+  prepareContextMessages?: (messages: UIMessage[]) => Promise<UIMessage[]>;
 }
 
 const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
@@ -152,14 +158,21 @@ export const runChatTurn = async (
   const baseMessages: UIMessage[] = currentMessages(conv);
   const ctx: TransformerContext = { assistant: deps.assistant };
 
-  // 2. 上下文组装(system 前置 + 截断,D-018)→ input transforms(次序对齐
+  // 2. 上下文组装:prepareContext(D-055,提供时:edit→compact→注入替换)
+  //    或 limitContext 窗口(D-018)→ system 前置 → input transforms(次序对齐
   //    GenerationHandler:434-446:先 [system]+preparedContext 再 transforms);
   //    均作用于发往 provider 的副本,不污染会话本体
+  const preparedMessages: UIMessage[] = deps.prepareContextMessages !== undefined
+    ? await deps.prepareContextMessages(baseMessages)
+    : baseMessages;
   const assembled: UIMessage[] = assembleInternalMessages({
-    messages: baseMessages,
+    messages: preparedMessages,
     assistant: deps.assistant,
     agentSoul: deps.agentSoul ?? '',
-    contextMessageSize: deps.contextMessageSize ?? 0,
+    // prepareContext 内部已处理截断/替换;未提供时走原窗口
+    contextMessageSize: deps.prepareContextMessages !== undefined
+      ? 0
+      : (deps.contextMessageSize ?? 0),
   });
   const internalMessages: UIMessage[] = applyInputTransformers(assembled, deps.inputTransformers, ctx);
 

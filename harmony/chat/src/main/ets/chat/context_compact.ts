@@ -81,6 +81,16 @@ export interface CompactPlan {
 export const compactPlanSourceMessageCount = (p: CompactPlan): number =>
   p.shouldCompact ? p.sourceEndIndex - p.sourceStartIndex + 1 : 0;
 
+// CompactResult(Models.kt:61-68)
+export interface CompactResult {
+  status: string;
+  summaryId?: string;
+  sourceMessageCount?: number;
+  estimatedTokensBefore?: number;
+  estimatedTokensAfter?: number;
+  error?: string;
+}
+
 // ===== 字符权重(ContextFootprintEstimator.kt:18-31,UTF-16 码元迭代) =====
 
 export const weightedTokenChars = (s: string): number => {

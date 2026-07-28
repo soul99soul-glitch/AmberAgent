@@ -125,7 +125,7 @@ export {
 
 // ===== 上下文压缩纯逻辑(D-054,Planner/Estimator/Payload/Models 全文) =====
 export type {
-  ConversationCompact, CompactPolicy, CompactPlan, CompactSummaryPayload,
+  ConversationCompact, CompactPolicy, CompactPlan, CompactSummaryPayload, CompactResult,
 } from './chat/context_compact.ts';
 export {
   COMPACT_SCHEMA_VERSION, makeCompactPolicy, compactPlanSourceMessageCount,
@@ -143,6 +143,21 @@ export {
   MAX_COMPACT_TIMELINE_SUMMARY_CHARS, MAX_COMPACT_HANDOFF_CHARS,
   DEFAULT_COMPACT_CONTEXT_WINDOW_TOKENS,
 } from './chat/context_compact.ts';
+
+// ===== 上下文压缩引擎执行(D-055,ConversationContextEngine/PreparedContextEditor) =====
+export type {
+  CompressionPromptInput, ContextPreparationStepTrace, ContextPreparationTrace,
+  PreparedContextEditResult, CompactStore, MemoryCompactStore,
+  CompactEngineDeps, PreparedContext, PrepareContextDeps,
+} from './chat/context_engine.ts';
+export {
+  DEFAULT_COMPRESS_PROMPT, applyPlaceholders, buildCompressionPrompt,
+  COMPACT_RETRY_SUFFIX, emptyContextPreparationTrace, editPreparedContext,
+  createMemoryCompactStore, invalidateCompacts, copyValidCompactsToConversation,
+  compactConversation, ContextCompactionFailedError,
+  conversationWithMessagesAsNodes,
+  withEffectiveMessages, prepareContext, effectiveContextNextAction,
+} from './chat/context_engine.ts';
 
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,

@@ -11,6 +11,7 @@ import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import type {
   Conversation, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
   PendingUserMessage, DequeueNextResult, UIMessagePartReasoning, ReasoningCardState,
+  CompactPolicy, CompactResult, PreparedContext,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, runChatTurn,
@@ -26,10 +27,13 @@ import {
   persistPendingQueue, loadPendingQueue, recordPendingQueueEvent,
   toDisplayReasoningText, extractThinkingTitle, reasoningDurationMs, formatThoughtSeconds,
   reasoningCardStateExpanded, onReasoningExpandedChange,
+  makeCompactPolicy, prepareContext, invalidateCompacts,
+  copyValidCompactsToConversation, ContextCompactionFailedError,
+  conversationWithMessagesAsNodes,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
-  getChatKvStore,
+  getChatKvStore, getCompactStore,
 } from '../di/AppContainer.ets';
 import { readImageAsDataUrl } from '../platform_impl/EntryImageEncoder.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
@@ -359,6 +363,8 @@ struct ChatPage {
     this.conversation = updated;
     this.rows = buildRows(updated);
     getChatRepository().save(updated);
+    // D-055:分支切换使 compact 失效(ChatService.kt:2152 'message_branch_changed')
+    this.invalidateConvCompacts(updated.id, 'message_branch_changed');
   }
 
   private regenerate(nodeId: string): void {
@@ -374,13 +380,18 @@ struct ChatPage {
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型'));
         }
-        return runRegenerateAt(conv, nodeId, {
+        // D-055:重生成使 compact 失效(ChatService.kt:1097 'message_regenerated'),
+        //   先于生成完成,避免 prepareContext 读到过期摘要
+        return this.invalidateConvCompacts(conv.id, 'message_regenerated')
+          .then((): Promise<Conversation> => runRegenerateAt(conv, nodeId, {
           assistant: rt.assistant,
           inputTransformers: [createTemplateTransformer()],
           outputTransformers: [thinkTagTransformer, regexOutputTransformer],
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
+          // D-055:压缩引擎接管上下文(同 send 路径)
+          prepareContextMessages: this.buildPrepareContext(conv, rt),
           abortSignal: this.abortController?.signal,
           // D-050:重试状态(send 路径同语义)
           onRetryStatus: (status: string | null): void => {
@@ -396,7 +407,7 @@ struct ChatPage {
             this.regenNodeId = nodeId;
             this.regenTail = transformed[transformed.length - 1];
           },
-        });
+        }));
       })
       .then((out: Conversation): void => {
         this.conversation = out;
@@ -412,7 +423,7 @@ struct ChatPage {
         }
       })
       .catch((e: Error): void => {
-        this.errorMsg = e.message;
+        this.errorMsg = this.compactErrorText(e);
         this.sending = false;
         this.abortController = null;
         this.regenTail = null;
@@ -509,7 +520,15 @@ struct ChatPage {
   // 会话分叉(D-033):复制 0..目标节点为新会话并跳转
   private forkAt(row: MsgRow): void {
     if (this.conversation === null || this.sending) return;
+    const sourceConvId: string = this.conversation.id;
     const fork: Conversation = forkConversation(this.conversation, row.message.id);
+    // D-055:分叉复制有效 compact(ChatService.kt:2120 copyValidCompactsToConversation);
+    //   失败 hilog 非静默,不阻断分叉
+    copyValidCompactsToConversation(
+      getCompactStore(), sourceConvId, fork, (): string => newId(), (): number => Date.now())
+      .catch((e: Error): void => {
+        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'fork compact copy failed: %{public}s', e.message);
+      });
     getChatRepository().save(fork).then((): void => {
       const params: Record<string, string> = {};
       params['conversationId'] = fork.id;
@@ -574,6 +593,8 @@ struct ChatPage {
     this.rows = buildRows(updated);
     this.editingNodeId = '';
     this.editingMessageId = '';
+    // D-055:编辑使 compact 失效(ChatService.kt:2082 'message_edited')
+    this.invalidateConvCompacts(updated.id, 'message_edited');
     getChatRepository().save(updated).then((): void => {
       this.regenerate(nodeId);
     });
@@ -599,6 +620,8 @@ struct ChatPage {
           this.conversation = updated;
           this.rows = buildRows(updated);
           getChatRepository().save(updated);
+          // D-055:删除使 compact 失效(ChatService.kt:2171 'message_deleted')
+          this.invalidateConvCompacts(updated.id, 'message_deleted');
         },
       },
     });
@@ -630,6 +653,45 @@ struct ChatPage {
       .catch((e: Error): void => {
         hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'pending queue audit failed: %{public}s', e.message);
       });
+  }
+
+  // ===== D-055 上下文压缩引擎接线(ConversationContextEngine.kt:112-286) =====
+
+  // 失效钩子(ChatService.kt:1097/:2082/:2152/:2171;失败 hilog 非静默,不阻断交互)
+  private invalidateConvCompacts(convId: string, reason: string): Promise<void> {
+    return invalidateCompacts(getCompactStore(), convId, reason)
+      .catch((e: Error): void => {
+        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'compact invalidate failed: %{public}s', e.message);
+      });
+  }
+
+  // prepareContextMessages 闭包:chat_turn 在 append user 后以基线消息回调;
+  //   重建 messageNodes 供压缩规划(message id 保持);policy 默认值
+  //   keepRecentTurns=8(PreferencesStore.kt:241 ContextCompactionSetting 默认,
+  //   设置面未做前硬编码);precompact 异步 launch(engine:173-186)
+  private buildPrepareContext(conv: Conversation, rt: ChatRuntime):
+    (messages: UIMessage[]) => Promise<UIMessage[]> {
+    const policy: CompactPolicy = makeCompactPolicy({ keepRecentTurns: 8 });
+    return (messages: UIMessage[]): Promise<UIMessage[]> => {
+      const effConv: Conversation = conversationWithMessagesAsNodes(conv, messages);
+      return prepareContext(effConv, policy, rt.modelContextWindowTokens,
+        messages, rt.contextMessageSize, {
+          provider: asChatStreamProvider(rt.api, () => rt.params),
+          store: getCompactStore(),
+          launchPrecompact: (run: () => Promise<CompactResult>): void => {
+            run().catch((e: Error): void => {
+              hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'precompact failed: %{public}s', e.message);
+            });
+          },
+        }).then((prepared: PreparedContext): UIMessage[] => prepared.messages);
+    };
+  }
+
+  // 压缩失败统一文案(Android ChatVM 错误映射)
+  private compactErrorText(e: Error): string {
+    return e instanceof ContextCompactionFailedError
+      ? '上下文已满，压缩失败，请配置任务模型'
+      : e.message;
   }
 
   // 生成中发送 → 入队;满 20 拒绝(Android 文案逐字)。
@@ -784,6 +846,9 @@ struct ChatPage {
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
+          // D-055:压缩引擎接管上下文(engine 内部编辑/规划/截断;
+          //   chat_turn 侧 contextMessageSize 强制 0,避免双重截断)
+          prepareContextMessages: this.buildPrepareContext(conv, rt),
           abortSignal: this.abortController?.signal,
           // D-050:重试状态(strings.xml:386 文案;null 清除)
           onRetryStatus: (status: string | null): void => {
@@ -813,7 +878,7 @@ struct ChatPage {
         this.drainPendingQueue();
       })
       .catch((e: Error): void => {
-        this.errorMsg = e.message;
+        this.errorMsg = this.compactErrorText(e);
         this.sending = false;
         this.abortController = null;
         this.streamingTail = [];

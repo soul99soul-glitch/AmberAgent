@@ -1,0 +1,763 @@
+// context_engine.ts — 上下文压缩引擎(执行 + prepareContext 管线 + 存储 Port)
+//
+// Android 基准:
+//   ConversationContextEngine.kt(prepareContext:112-286/compactConversation
+//     :346-395/compactInternal:397-605/streamCompactSummary:674-729/
+//     buildCompressionPrompt:731-773/withEffectiveMessages:775-791/
+//     effectiveContextNextAction:794-806)
+//   ConversationContextRepository.kt(invalidateCompacts:85-88/
+//     copyValidCompactsToConversation:38-84)
+//   PreparedContextEditor.kt(全文 205 行)
+//   CompactSummaryNormalizer.kt(委托 D-054 payload 函数)
+//   core/ai-prompts/.../CompressPrompt.kt(DEFAULT_COMPRESS_PROMPT 逐字)
+//   StringUtils.kt applyPlaceholders(:37-44)
+//
+// 裁剪/偏差登记:
+//   - compactMutex/_compactingConversations/生命周期 StateFlow → 调用方串行
+//     (entry 单页面);onStream 回调替代 _summaryStreamFlow(30fps flush 裁剪,
+//     每 chunk 回调)
+//   - capabilitySnapshotBuilder.build(tools)(:303)— 工具能力快照,鸿蒙无工具
+//     执行,跳过(工具循环落地时接入)
+//   - tools 参数 promptOverhead 估算(:153)→ promptOverheadTokens 参数直入
+//   - CancellationException → Error.name==='AbortError'(D-050 同口径)
+//   - precompact 异步触发(engine:182-191 appScope.launch)→ launchPrecompact
+//     回调;未提供时 floating promise + .catch(recordEvent)
+//   - handoffPrompt(Agent-editable 配置)默认 '';locale 默认 'Chinese'
+
+import type { UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool } from './message.ts';
+import { makeSystemMessage, makeUserMessage, isToolExecuted } from './message.ts';
+import type { MessageNode, Conversation } from './conversation.ts';
+import { limitContext, nodeCurrentMessage, toMessageNode } from './conversation.ts';
+import type { ChatStreamProvider } from './chat_turn.ts';
+import type {
+  CompactPlan, CompactPolicy, CompactResult, ConversationCompact,
+} from './context_compact.ts';
+import {
+  estimateTokens, estimateContextWindow, planCompaction, planForceCompaction,
+  prepareMessagesWithCompacts, fitMessagesToTokenBudget, buildCompressionInput,
+  selectCompactsForInjection, compactInjectionText, compactInjectionTextParts,
+  normalizeCompactModelOutput, compactFallbackPayload, isHighQualityPayload,
+  compactTimelineSummary, remapCoveredCompactIds, toolResultSummarize,
+} from './context_compact.ts';
+
+// ===== DEFAULT_COMPRESS_PROMPT(CompressPrompt.kt 逐字) =====
+
+export const DEFAULT_COMPRESS_PROMPT: string = `You are a conversation compression assistant. Compress the following conversation into a structured continuation handoff.
+
+Requirements:
+1. Preserve key facts, decisions, and important context that would be needed to continue the conversation
+2. Keep the summary in the same language as the original conversation
+3. Target approximately {target_tokens} tokens
+4. Return valid JSON only, with no Markdown fence and no prose before or after the JSON
+5. The JSON must follow the schema requested in the additional context
+6. Use {locale} language
+7. Keep \`timeline_summary\` human-readable and keep \`handoff_markdown\` dense enough for another model to resume the task
+
+{additional_context}
+
+<conversation>
+{content}
+</conversation>`;
+
+// ===== applyPlaceholders(StringUtils.kt:37-44) =====
+
+export const applyPlaceholders = (template: string, pairs: [string, string][]): string => {
+  let result: string = template;
+  for (const [placeholder, replacement] of pairs) {
+    result = result.split(`{${placeholder}}`).join(replacement);
+  }
+  return result;
+};
+
+// ===== buildCompressionPrompt(engine:731-773,模板逐字) =====
+
+export interface CompressionPromptInput {
+  basePrompt: string;
+  content: string;
+  targetTokens: number;
+  additionalPrompt: string;
+  sourceMessageIds: string[];
+  previousCompacts: ConversationCompact[];
+  coveredCompactIds: string[];
+  payloadCreatedAt: number;
+  handoffPrompt: string;
+  locale: string;
+}
+
+export const buildCompressionPrompt = (input: CompressionPromptInput): string => {
+  const previousCompactContext: string = input.previousCompacts
+    .map(compactInjectionText)
+    .join('\n\n');
+  const coveredJson: string = input.coveredCompactIds.map((id: string): string => `"${id}"`).join(', ');
+  const sourceJson: string = input.sourceMessageIds.map((id: string): string => `"${id}"`).join(', ');
+  const structuredInstructions: string =
+    'Return valid JSON only. Required schema:\n'
+    + '{\n'
+    + '  "schema_version": 2,\n'
+    + '  "timeline_summary": "4-5 complete human-readable sentences in the user\'s language for the chat timeline.",\n'
+    + '  "handoff_markdown": "Dense Markdown continuation handoff with sections: Goal, Constraints, Progress, Decisions, Current State, Next Steps, Critical Context, Relevant Files.",\n'
+    + `  "covered_compact_ids": [${coveredJson}],\n`
+    + `  "source_message_ids": [${sourceJson}],\n`
+    + `  "created_at": ${input.payloadCreatedAt}\n`
+    + '}\n'
+    + '`covered_compact_ids`, `source_message_ids`, and `created_at` must exactly match the values above.\n'
+    + 'Preserve concrete names, files, commands, errors, user preferences, rejected approaches, tool outcomes, and unresolved decisions.\n'
+    + 'The timeline summary is for the human timeline; the handoff Markdown is what the next model will receive.\n'
+    + '\n'
+    + 'Agent-editable handoff instructions:\n'
+    + `${input.handoffPrompt}\n`
+    + '\n'
+    + 'Previous compact handoffs to carry forward:\n'
+    + `${previousCompactContext.trim().length > 0 ? previousCompactContext : 'None.'}`;
+  const additionalContext: string = [structuredInstructions, input.additionalPrompt]
+    .filter((s: string): boolean => s.trim().length > 0)
+    .join('\n\n');
+  return applyPlaceholders(input.basePrompt, [
+    ['content', input.content],
+    ['target_tokens', `${input.targetTokens}`],
+    ['additional_context', additionalContext],
+    ['locale', input.locale],
+  ]);
+};
+
+// 质量重试附加提示(engine:502-505 逐字)
+export const COMPACT_RETRY_SUFFIX: string =
+  'Retry because the previous compaction did not satisfy the schema or the timeline summary was too short. Return valid JSON only. `timeline_summary` must contain 4-5 complete sentences, and `handoff_markdown` must contain the required sections.';
+
+// ===== PreparedContextEditor(全文 205 行) =====
+
+export interface ContextPreparationStepTrace {
+  stage: string;
+  reason: string;
+  beforeTokens: number;
+  afterTokens: number;
+  savedTokens: number;
+  changedMessages: number;
+}
+
+export interface ContextPreparationTrace {
+  originalTokenEstimate: number;
+  finalTokenEstimate: number;
+  steps: ContextPreparationStepTrace[];
+}
+
+export const emptyContextPreparationTrace = (): ContextPreparationTrace => ({
+  originalTokenEstimate: 0,
+  finalTokenEstimate: 0,
+  steps: [],
+});
+
+export interface PreparedContextEditResult {
+  messages: UIMessage[];
+  trace: ContextPreparationTrace;
+}
+
+const TRIM_TOOL_RESULT_AFTER_CHARS: number = 16000;
+const TRIMMED_TOOL_RESULT_CHARS: number = 8000;
+const CLEAR_TOOL_RESULT_AFTER_CHARS: number = 2000;
+
+const CLEARABLE_TOOL_NAMES: string[] = [
+  'file_list', 'file_read', 'file_search', 'tools_list', 'tool_search',
+  'tool_policy_explain', 'conversation_context_status', 'conversation_search',
+  'conversation_expand', 'agent_runtime_status', 'agent_task_list',
+  'agent_task_read', 'mcp_list',
+];
+const SENSITIVE_SESSION_TOOLS: string[] = ['session_read', 'session_expand'];
+
+const partsOutputChars = (parts: UIMessagePart[]): number =>
+  parts.reduce((acc: number, part: UIMessagePart): number => {
+    if (part.type === 'text') return acc + (part as UIMessagePartText).text.length;
+    if (part.type === 'reasoning') {
+      return acc + (part as unknown as { reasoning: string }).reasoning.length;
+    }
+    if (part.type === 'tool') {
+      const t = part as UIMessagePartTool;
+      return acc + t.input.length + partsOutputChars(t.output);
+    }
+    return acc + JSON.stringify(part).length;
+  }, 0);
+
+const partsContainsMultimodal = (parts: UIMessagePart[]): boolean =>
+  parts.some((part: UIMessagePart): boolean => {
+    if (part.type === 'image' || part.type === 'video'
+      || part.type === 'audio' || part.type === 'document') return true;
+    if (part.type === 'tool') return partsContainsMultimodal((part as UIMessagePartTool).output);
+    return false;
+  });
+
+const partsLooksFailedOrDenied = (parts: UIMessagePart[]): boolean =>
+  parts
+    .filter((p: UIMessagePart): boolean => p.type === 'text')
+    .some((p: UIMessagePart): boolean => {
+      const text: string = (p as UIMessagePartText).text.toLowerCase();
+      return text.includes('"status":"failed"') || text.includes('"status":"denied"')
+        || text.includes('"approval_required"') || text.includes('"error"');
+    });
+
+const canEditPreparedResult = (tool: UIMessagePartTool): boolean =>
+  isToolExecuted(tool)
+  && tool.approvalState.type !== 'pending'
+  && !partsContainsMultimodal(tool.output)
+  && !partsLooksFailedOrDenied(tool.output);
+
+const safeToClearPreparedResult = (tool: UIMessagePartTool): boolean =>
+  CLEARABLE_TOOL_NAMES.includes(tool.toolName)
+  || tool.toolName.startsWith('conversation_')
+  || (tool.toolName.startsWith('session_') && !SENSITIVE_SESSION_TOOLS.includes(tool.toolName));
+
+const trimToolResult = (tool: UIMessagePartTool): UIMessagePartTool => {
+  if (!canEditPreparedResult(tool)) return tool;
+  const outputChars: number = partsOutputChars(tool.output);
+  if (outputChars <= TRIM_TOOL_RESULT_AFTER_CHARS) return tool;
+  const preview: string = toolResultSummarize(tool.output, TRIMMED_TOOL_RESULT_CHARS);
+  return {
+    ...tool,
+    output: [{
+      type: 'text',
+      text: JSON.stringify({
+        status: 'trimmed_tool_result',
+        tool_name: tool.toolName,
+        tool_call_id: tool.toolCallId,
+        original_output_chars: outputChars,
+        preview,
+      }),
+      metadata: null,
+    }],
+  };
+};
+
+const clearToolResult = (tool: UIMessagePartTool): UIMessagePartTool => {
+  if (!canEditPreparedResult(tool)) return tool;
+  if (!safeToClearPreparedResult(tool)) return tool;
+  const outputChars: number = partsOutputChars(tool.output);
+  if (outputChars <= CLEAR_TOOL_RESULT_AFTER_CHARS) return tool;
+  return {
+    ...tool,
+    output: [{
+      type: 'text',
+      text: JSON.stringify({
+        status: 'cleared_tool_result',
+        tool_name: tool.toolName,
+        tool_call_id: tool.toolCallId,
+        input_chars: tool.input.length,
+        original_output_chars: outputChars,
+        reason: 'Historical result was cleared from prepared context only. Original conversation storage is unchanged; call the tool again or expand history if exact output is needed.',
+      }),
+      metadata: null,
+    }],
+  };
+};
+
+interface EditorStageResult {
+  messages: UIMessage[];
+  trace: ContextPreparationStepTrace;
+}
+
+const editMessageTools = (
+  message: UIMessage, index: number, messageCount: number, keepRecentMessages: number,
+  transform: (t: UIMessagePartTool) => UIMessagePartTool,
+): UIMessage => {
+  if (index >= messageCount - Math.max(keepRecentMessages, 0)) return message;
+  if (partsContainsMultimodal(message.parts)) return message;
+  let changed: boolean = false;
+  const parts: UIMessagePart[] = message.parts.map((part: UIMessagePart): UIMessagePart => {
+    if (part.type === 'tool') {
+      const next: UIMessagePartTool = transform(part as UIMessagePartTool);
+      if (next !== part) changed = true;
+      return next;
+    }
+    return part;
+  });
+  return changed ? { ...message, parts } : message;
+};
+
+const applyEditorStage = (
+  stage: string, reason: string, messages: UIMessage[],
+  transform: (m: UIMessage, i: number) => UIMessage,
+): EditorStageResult => {
+  const before: number = estimateTokens(messages);
+  let changed: number = 0;
+  const edited: UIMessage[] = messages.map((m: UIMessage, i: number): UIMessage => {
+    const next: UIMessage = transform(m, i);
+    if (next !== m) changed++;
+    return next;
+  });
+  const after: number = estimateTokens(edited);
+  return {
+    messages: edited,
+    trace: {
+      stage, reason, beforeTokens: before, afterTokens: after,
+      savedTokens: Math.max(before - after, 0), changedMessages: changed,
+    },
+  };
+};
+
+export const editPreparedContext = (
+  messages: UIMessage[], keepRecentMessages: number,
+): PreparedContextEditResult => {
+  const originalTokens: number = estimateTokens(messages);
+  const trim: EditorStageResult = applyEditorStage(
+    'trim', 'long historical tool results are trimmed before compaction planning',
+    messages,
+    (m: UIMessage, i: number): UIMessage =>
+      editMessageTools(m, i, messages.length, keepRecentMessages, trimToolResult));
+  const clear: EditorStageResult = applyEditorStage(
+    'clear', 'retriable historical tool results are replaced with placeholders',
+    trim.messages,
+    (m: UIMessage, i: number): UIMessage =>
+      editMessageTools(m, i, trim.messages.length, keepRecentMessages, clearToolResult));
+  return {
+    messages: clear.messages,
+    trace: {
+      originalTokenEstimate: originalTokens,
+      finalTokenEstimate: estimateTokens(clear.messages),
+      steps: [trim.trace, clear.trace],
+    },
+  };
+};
+
+// ===== CompactStore Port + memory 实现 =====
+
+export interface CompactStore {
+  getCompacts(conversationId: string): Promise<ConversationCompact[]>;
+  insertCompact(compact: ConversationCompact): Promise<void>;
+  deleteByConversation(conversationId: string): Promise<void>;
+  recordEvent?(conversationId: string, eventType: string,
+    summaryId: string | null, message: string): Promise<void>;
+}
+
+export interface MemoryCompactStore extends CompactStore {
+  compacts: Map<string, ConversationCompact[]>;
+  events: string[];
+}
+
+export const createMemoryCompactStore = (): MemoryCompactStore => {
+  const compacts = new Map<string, ConversationCompact[]>();
+  const events: string[] = [];
+  return {
+    compacts,
+    events,
+    getCompacts(conversationId: string): Promise<ConversationCompact[]> {
+      return Promise.resolve(compacts.get(conversationId) ?? []);
+    },
+    insertCompact(compact: ConversationCompact): Promise<void> {
+      const list: ConversationCompact[] = compacts.get(compact.conversationId) ?? [];
+      compacts.set(compact.conversationId, [...list, compact]);
+      return Promise.resolve();
+    },
+    deleteByConversation(conversationId: string): Promise<void> {
+      compacts.delete(conversationId);
+      return Promise.resolve();
+    },
+    recordEvent(conversationId: string, eventType: string,
+      summaryId: string | null, message: string): Promise<void> {
+      events.push(`${conversationId}|${eventType}|${summaryId ?? ''}|${message}`);
+      return Promise.resolve();
+    },
+  };
+};
+
+// ===== invalidateCompacts(repository:85-88) =====
+
+export const invalidateCompacts = async (
+  store: CompactStore, conversationId: string, reason: string,
+): Promise<void> => {
+  await store.deleteByConversation(conversationId);
+  if (store.recordEvent !== undefined) {
+    await store.recordEvent(conversationId, 'compact_invalidated', null, reason);
+  }
+};
+
+// ===== copyValidCompactsToConversation(repository:38-84) =====
+
+export const copyValidCompactsToConversation = async (
+  store: CompactStore, sourceConversationId: string,
+  targetConversation: Conversation, newId: () => string, now: () => number,
+  reason: string = 'conversation_forked_compacts_copied',
+): Promise<number> => {
+  const targetMessageIds: Set<string> = new Set<string>(
+    targetConversation.messageNodes.map((n: MessageNode): string => nodeCurrentMessage(n).id));
+  const targetLastIndex: number = targetConversation.messageNodes.length - 1;
+  const eligible: ConversationCompact[] = (await store.getCompacts(sourceConversationId))
+    .filter((c: ConversationCompact): boolean =>
+      c.status === 'completed' && c.sourceEndIndex <= targetLastIndex
+      && c.sourceMessageIds.length > 0
+      && c.sourceMessageIds.every((id: string): boolean => targetMessageIds.has(id)));
+  if (eligible.length === 0) return 0;
+  const idMapping = new Map<string, string>();
+  for (const c of eligible) idMapping.set(c.id, newId());
+  const nowMs: number = now();
+  for (const c of eligible) {
+    await store.insertCompact({
+      ...c,
+      id: idMapping.get(c.id) as string,
+      conversationId: targetConversation.id,
+      summary: remapCoveredCompactIds(c.summary, idMapping),
+      updatedAt: nowMs,
+    });
+  }
+  if (store.recordEvent !== undefined) {
+    await store.recordEvent(targetConversation.id, reason, null,
+      `Copied ${eligible.length} compact summaries from fork parent`);
+  }
+  return eligible.length;
+};
+
+// ===== compactConversation(engine:346-605) =====
+
+export interface CompactEngineDeps {
+  provider: ChatStreamProvider;
+  store: CompactStore;
+  now?: () => number;
+  newId?: () => string;
+  handoffPrompt?: string;
+  locale?: string;
+  compressPrompt?: string;
+  onStream?: (text: string) => void;
+}
+
+const streamCompactSummary = async (
+  deps: CompactEngineDeps, prompt: string,
+): Promise<string> => {
+  let accumulated: string = '';
+  await deps.provider.streamText([makeUserMessage(prompt)], (chunk): void => {
+    const choice = chunk.choices[0];
+    const parts: UIMessagePart[] = choice !== undefined
+      ? (choice.delta !== null ? choice.delta.parts
+        : (choice.message !== null ? choice.message.parts : []))
+      : [];
+    const deltaText: string = parts
+      .filter((p: UIMessagePart): boolean => p.type === 'text')
+      .map((p: UIMessagePart): string => (p as UIMessagePartText).text)
+      .join('');
+    if (deltaText.length > 0) {
+      accumulated += deltaText;
+      if (deps.onStream !== undefined) deps.onStream(accumulated);
+    }
+  });
+  return accumulated.trim();
+};
+
+export const compactConversation = async (
+  conversation: Conversation, policy: CompactPolicy,
+  modelContextWindowTokens: number | null,
+  reason: string = 'manual_compact',
+  additionalPrompt: string = '',
+  force: boolean = false,
+  deps: CompactEngineDeps,
+): Promise<CompactResult> => {
+  const now: () => number = deps.now ?? Date.now;
+  try {
+    const activeCompacts: ConversationCompact[] = await deps.store.getCompacts(conversation.id);
+    const enabledPolicy: CompactPolicy = { ...policy, enabled: true };
+    const plan: CompactPlan = force
+      ? planForceCompaction(conversation.messageNodes, activeCompacts,
+        enabledPolicy, modelContextWindowTokens)
+      : planCompaction(conversation.messageNodes, activeCompacts,
+        enabledPolicy, modelContextWindowTokens);
+    if (!plan.shouldCompact) {
+      if (deps.store.recordEvent !== undefined) {
+        await deps.store.recordEvent(conversation.id, reason, null, `Skipped: ${plan.reason}`);
+      }
+      return {
+        status: 'skipped',
+        estimatedTokensBefore: plan.estimatedTokens,
+        estimatedTokensAfter: plan.estimatedTokens,
+        error: plan.reason,
+      };
+    }
+    const nodes: MessageNode[] =
+      conversation.messageNodes.slice(plan.sourceStartIndex, plan.sourceEndIndex + 1);
+    const contentToCompress: string =
+      buildCompressionInput(nodes.map(nodeCurrentMessage));
+    const existingMessageIds: Set<string> = new Set<string>(
+      conversation.messageNodes.map((n: MessageNode): string => nodeCurrentMessage(n).id));
+    const previousCompacts: ConversationCompact[] =
+      selectCompactsForInjection(activeCompacts, existingMessageIds);
+    const coveredCompactIds: string[] = previousCompacts.map(
+      (c: ConversationCompact): string => c.id);
+    const previousCompactContext: string = previousCompacts
+      .map(compactInjectionText)
+      .join('\n\n');
+    const payloadCreatedAt: number = now();
+    const basePrompt: string = deps.compressPrompt ?? DEFAULT_COMPRESS_PROMPT;
+    const handoffPrompt: string = deps.handoffPrompt ?? '';
+    const locale: string = deps.locale ?? 'Chinese';
+    const promptInput = (additional: string): CompressionPromptInput => ({
+      basePrompt,
+      content: contentToCompress,
+      targetTokens: policy.maxSummaryTokens,
+      additionalPrompt: additional,
+      sourceMessageIds: plan.sourceMessageIds,
+      previousCompacts,
+      coveredCompactIds,
+      payloadCreatedAt,
+      handoffPrompt,
+      locale,
+    });
+    const summary: string = await streamCompactSummary(deps, buildCompressionPrompt(promptInput(additionalPrompt)));
+    let normalizedSummary: string | null = normalizeCompactModelOutput(
+      summary, plan.sourceMessageIds, coveredCompactIds, payloadCreatedAt);
+    if (normalizedSummary === null || !isHighQualityPayload(normalizedSummary)) {
+      const retryAdditional: string = [additionalPrompt, COMPACT_RETRY_SUFFIX]
+        .filter((s: string): boolean => s.trim().length > 0)
+        .join('\n\n');
+      const retrySummary: string =
+        await streamCompactSummary(deps, buildCompressionPrompt(promptInput(retryAdditional)));
+      normalizedSummary = normalizeCompactModelOutput(
+        retrySummary, plan.sourceMessageIds, coveredCompactIds, payloadCreatedAt);
+      if (normalizedSummary === null || !isHighQualityPayload(normalizedSummary)) {
+        normalizedSummary = compactFallbackPayload(
+          retrySummary.trim().length > 0 ? retrySummary : summary,
+          plan.sourceMessageIds, coveredCompactIds, payloadCreatedAt,
+          contentToCompress, previousCompactContext);
+      }
+    }
+    const compactId: string = deps.newId !== undefined ? deps.newId() : `${now()}`;
+    const compact: ConversationCompact = {
+      id: compactId,
+      conversationId: conversation.id,
+      summary: normalizedSummary,
+      level: 1,
+      sourceStartIndex: plan.sourceStartIndex,
+      sourceEndIndex: plan.sourceEndIndex,
+      sourceMessageIds: plan.sourceMessageIds,
+      tokenEstimate: estimateTokens([makeSystemMessage(
+        compactInjectionTextParts(compactId, normalizedSummary, plan.sourceMessageIds))]),
+      createdAt: payloadCreatedAt,
+      updatedAt: now(),
+      status: 'completed',
+    };
+    await deps.store.insertCompact(compact);
+    if (deps.store.recordEvent !== undefined) {
+      const count: number = plan.shouldCompact
+        ? plan.sourceEndIndex - plan.sourceStartIndex + 1
+        : 0;
+      await deps.store.recordEvent(conversation.id, reason, compact.id,
+        `Compacted ${count} messages`);
+    }
+    return {
+      status: 'completed',
+      summaryId: compact.id,
+      sourceMessageCount: plan.sourceEndIndex - plan.sourceStartIndex + 1,
+      estimatedTokensBefore: plan.estimatedTokens,
+      estimatedTokensAfter: compact.tokenEstimate,
+    };
+  } catch (e) {
+    const err: Error = e as Error;
+    if (err.name === 'AbortError') throw err;
+    if (deps.store.recordEvent !== undefined) {
+      await deps.store.recordEvent(conversation.id, reason, null, err.message);
+    }
+    return { status: 'failed', error: err.message };
+  }
+};
+
+// ===== ContextCompactionFailedException(engine:52-67) =====
+
+export class ContextCompactionFailedError extends Error {
+  public readonly phase: string;
+  public readonly compactionReason: string;
+
+  constructor(phase: string, compactionReason: string) {
+    super(`Context compression failed [${phase}]: ${compactionReason}`);
+    this.name = 'ContextCompactionFailedError';
+    this.phase = phase;
+    this.compactionReason = compactionReason;
+  }
+}
+
+// ===== prepareContext(engine:112-286) =====
+
+export interface PreparedContext {
+  messages: UIMessage[];
+  tokenEstimate: number;
+  compressionApplied: boolean;
+  summaryIds: string[];
+  trace: ContextPreparationTrace;
+}
+
+export interface PrepareContextDeps extends CompactEngineDeps {
+  launchPrecompact?: (run: () => Promise<CompactResult>) => void;
+  promptOverheadTokens?: number;
+}
+
+// 以消息列表重建会话节点(D-055 entry 接线用:prepareContextMessages 回调拿到的
+//   基线消息 → 重建 messageNodes 供压缩规划;message id 保持。entry 侧 ArkTS
+//   禁对象展开,故helper 置于 HAR 内)
+export const conversationWithMessagesAsNodes = (
+  conv: Conversation, messages: UIMessage[],
+): Conversation => ({
+  ...conv,
+  messageNodes: messages.map((m: UIMessage): MessageNode => toMessageNode(m)),
+});
+
+// withEffectiveMessages(engine:775-791)
+export const withEffectiveMessages = (  conversation: Conversation, effectiveMessages: UIMessage[],
+): Conversation => {
+  const byId = new Map<string, UIMessage>();
+  for (const m of effectiveMessages) byId.set(m.id, m);
+  return {
+    ...conversation,
+    messageNodes: conversation.messageNodes.map((node: MessageNode): MessageNode => {
+      const edited: UIMessage | undefined = byId.get(nodeCurrentMessage(node).id);
+      if (edited === undefined || edited === nodeCurrentMessage(node)) return node;
+      return {
+        ...node,
+        messages: node.messages.map((m: UIMessage): UIMessage =>
+          m.id === edited.id ? edited : m),
+      };
+    }),
+  };
+};
+
+export const prepareContext = async (
+  conversation: Conversation | null,
+  policy: CompactPolicy,
+  modelContextWindowTokens: number | null,
+  messages: UIMessage[],
+  contextMessageSize: number,
+  deps: PrepareContextDeps,
+): Promise<PreparedContext> => {
+  const editResult: PreparedContextEditResult = policy.enabled
+    ? editPreparedContext(messages, Math.max(policy.keepRecentTurns * 2, 4))
+    : {
+      messages,
+      trace: {
+        originalTokenEstimate: estimateTokens(messages),
+        finalTokenEstimate: estimateTokens(messages),
+        steps: [],
+      },
+    };
+  const effectiveMessages: UIMessage[] = editResult.messages;
+  const effectiveConversation: Conversation | null = conversation !== null
+    ? withEffectiveMessages(conversation, effectiveMessages)
+    : null;
+  if (conversation === null || !policy.enabled) {
+    const limited: UIMessage[] = limitContext(effectiveMessages, contextMessageSize);
+    const estimate: number = estimateTokens(limited);
+    return {
+      messages: limited,
+      tokenEstimate: estimate,
+      compressionApplied: false,
+      summaryIds: [],
+      trace: { ...editResult.trace, finalTokenEstimate: estimate },
+    };
+  }
+  const overheadEstimate: number = Math.max(deps.promptOverheadTokens ?? 0, 0);
+  const compacts: ConversationCompact[] = await deps.store.getCompacts(conversation.id);
+  const plan: CompactPlan = planCompaction(
+    (effectiveConversation as Conversation).messageNodes,
+    compacts, policy, modelContextWindowTokens, overheadEstimate);
+  const shouldForce: boolean = plan.reason === 'force_threshold';
+  if (plan.shouldCompact && !policy.notifyOnly) {
+    if (shouldForce) {
+      const result: CompactResult = await compactConversation(
+        conversation, policy, modelContextWindowTokens, 'auto_force', '', false, deps);
+      if (result.status === 'failed') {
+        throw new ContextCompactionFailedError('auto_force', result.error ?? result.status);
+      }
+    } else if (deps.launchPrecompact !== undefined) {
+      deps.launchPrecompact(() => compactConversation(
+        conversation as Conversation, policy, modelContextWindowTokens,
+        'auto_precompact', '', false, deps));
+    } else {
+      const run: Promise<CompactResult> = compactConversation(
+        conversation, policy, modelContextWindowTokens, 'auto_precompact', '', false, deps);
+      run.catch((e: Error): void => {
+        if (deps.store.recordEvent !== undefined) {
+          deps.store.recordEvent((conversation as Conversation).id,
+            'auto_precompact', null, `floating precompact failed: ${e.message}`)
+            .catch((): void => {});
+        }
+      });
+    }
+  }
+  let latestCompacts: ConversationCompact[] = await deps.store.getCompacts(conversation.id);
+  const traceSteps: ContextPreparationStepTrace[] = [...editResult.trace.steps];
+  const beforeCompactEstimate: number = estimateTokens(effectiveMessages) + overheadEstimate;
+  let preparedMessages: UIMessage[] = prepareMessagesWithCompacts(
+    effectiveMessages, latestCompacts, policy, contextMessageSize);
+  const afterCompactEstimate: number = estimateTokens(preparedMessages) + overheadEstimate;
+  if (latestCompacts.some((c: ConversationCompact): boolean => c.status === 'completed')) {
+    traceSteps.push({
+      stage: 'compact',
+      reason: 'completed compact summaries replaced covered source messages',
+      beforeTokens: beforeCompactEstimate,
+      afterTokens: afterCompactEstimate,
+      savedTokens: Math.max(beforeCompactEstimate - afterCompactEstimate, 0),
+      changedMessages: latestCompacts.filter(
+        (c: ConversationCompact): boolean => c.status === 'completed').length,
+    });
+  }
+  const contextWindow: number = estimateContextWindow(modelContextWindowTokens);
+  const softTotalBudget: number = Math.max(Math.trunc(contextWindow * policy.forceRatio), 4000);
+  const targetMessageBudget: number = Math.max(softTotalBudget - overheadEstimate, 1000);
+  let estimate: number = estimateTokens(preparedMessages) + overheadEstimate;
+  if (policy.enabled && !policy.notifyOnly
+    && estimate > Math.trunc(contextWindow * policy.forceRatio)) {
+    const fitPolicy: CompactPolicy = {
+      ...policy, keepRecentTurns: Math.max(Math.floor(policy.keepRecentTurns / 2), 2),
+    };
+    const result: CompactResult = await compactConversation(
+      conversation, fitPolicy, modelContextWindowTokens,
+      'auto_fit_model_window', '', true, deps);
+    if (result.status === 'failed') {
+      throw new ContextCompactionFailedError('auto_fit_model_window',
+        result.error ?? result.status);
+    }
+    latestCompacts = await deps.store.getCompacts(conversation.id);
+    const beforeFitCompactEstimate: number = estimateTokens(preparedMessages) + overheadEstimate;
+    preparedMessages = prepareMessagesWithCompacts(
+      effectiveMessages, latestCompacts, fitPolicy, contextMessageSize);
+    estimate = estimateTokens(preparedMessages) + overheadEstimate;
+    traceSteps.push({
+      stage: 'compact',
+      reason: 'forced compaction to fit model window',
+      beforeTokens: beforeFitCompactEstimate,
+      afterTokens: estimate,
+      savedTokens: Math.max(beforeFitCompactEstimate - estimate, 0),
+      changedMessages: latestCompacts.filter(
+        (c: ConversationCompact): boolean => c.status === 'completed').length,
+    });
+  }
+  if (estimate > Math.trunc(contextWindow * policy.forceRatio)) {
+    const beforeFitEstimate: number = estimate;
+    preparedMessages = fitMessagesToTokenBudget(preparedMessages, targetMessageBudget);
+    estimate = estimateTokens(preparedMessages) + overheadEstimate;
+    traceSteps.push({
+      stage: 'fit',
+      reason: 'prepared context still exceeded force ratio after editing/compaction',
+      beforeTokens: beforeFitEstimate,
+      afterTokens: estimate,
+      savedTokens: Math.max(beforeFitEstimate - estimate, 0),
+      changedMessages: 0,
+    });
+  }
+  return {
+    messages: preparedMessages,
+    tokenEstimate: estimate,
+    compressionApplied: latestCompacts.some(
+      (c: ConversationCompact): boolean => c.status === 'completed'),
+    summaryIds: latestCompacts
+      .filter((c: ConversationCompact): boolean => c.status === 'completed')
+      .map((c: ConversationCompact): string => c.id),
+    trace: {
+      originalTokenEstimate: editResult.trace.originalTokenEstimate,
+      finalTokenEstimate: estimate,
+      steps: traceSteps,
+    },
+  };
+};
+
+// ===== effectiveContextNextAction(engine:794-806) =====
+
+export const effectiveContextNextAction = (
+  policy: CompactPolicy, effectiveTokens: number, contextWindowTokens: number,
+): string => {
+  if (!policy.enabled) return 'disabled';
+  const ratio: number = effectiveTokens / Math.max(contextWindowTokens, 1);
+  if (ratio >= policy.forceRatio) return 'force_threshold';
+  if (ratio >= policy.precompactRatio) return 'precompact_threshold';
+  return 'below_threshold';
+};

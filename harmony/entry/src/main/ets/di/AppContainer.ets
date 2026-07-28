@@ -30,7 +30,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle,
-  ProviderModel,
+  ProviderModel, CompactStore,
 } from '@amber/chat-domain';
 import {
   loadAssistants, loadProviders, makeAssistant,
@@ -40,6 +40,7 @@ import {
 } from '@amber/chat-domain';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
 import { createChatRdbRepository } from '../platform_impl/ChatRdbRepository.ets';
+import { createEntryCompactStore } from '../platform_impl/EntryCompactStore.ets';
 import { encodeImageForChat, encodeImageDetailed } from '../platform_impl/EntryImageEncoder.ets';
 
 const DOMAIN: number = 0x0001;
@@ -235,6 +236,15 @@ export const getChatRepository = (): ConversationRepository => {
   return chatRepo;
 };
 
+// D-055:compact 存储单例(ConversationContextRepository.kt 的 KV 形态)
+let compactStore: CompactStore | null = null;
+export const getCompactStore = (): CompactStore => {
+  if (compactStore === null) {
+    compactStore = createEntryCompactStore(getChatKvStore());
+  }
+  return compactStore;
+};
+
 export const getChatAssistants = async (): Promise<Assistant[]> => {
   const loaded = await loadAssistants(getChatKvStore());
   if (loaded !== null && loaded.length > 0) return loaded;
@@ -246,6 +256,8 @@ export interface ChatRuntime {
   assistant: Assistant;
   params: TextGenerationParams;
   contextMessageSize: number;
+  // D-055:压缩规划用的模型上下文窗口(Android Model.contextWindowTokens,null → 引擎默认窗口)
+  modelContextWindowTokens: number | null;
 }
 
 interface ChatProviderChoice {
@@ -369,5 +381,9 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
       encodeImage: encodeImageForChat,
     });
   }
-  return { api, assistant, params, contextMessageSize: sessionDefaults.contextMessageSize };
+  return {
+    api, assistant, params,
+    contextMessageSize: sessionDefaults.contextMessageSize,
+    modelContextWindowTokens: model.contextWindowTokens,
+  };
 };
