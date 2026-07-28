@@ -487,6 +487,22 @@ export type { VisionCache, VisionCacheFileStore } from './chat/vision_cache.ts';
 export { createOcrTransformer, performImageRecognition } from './chat/ocr_transformer.ts';
 export type { OcrTransformerDeps } from './chat/ocr_transformer.ts';
 
+// ===== D-111:视觉健康探测 + 图片附件发送守卫 =====
+//   (VisionModelHealthChecker.kt / ImageAttachmentValidator.kt 全文)
+export {
+  checkingVisionModelHealth, isVisionHealthAvailable, probeVisionModelHealth,
+  VISION_PROBE_SYSTEM_PROMPT, VISION_PROBE_TINY_PNG, VISION_PROBE_USER_TEXT,
+} from './chat/vision_health.ts';
+export type { VisionModelHealth, VisionModelHealthKind, VisionProbeDeps } from './chat/vision_health.ts';
+export {
+  checkingImageAttachment, firstImageBlockingIssue, firstImageBlockingIssueForSend,
+  imageAttachmentBlocksSend, inspectImageAttachment, MAX_IMAGES_PER_MESSAGE,
+  readableImageError,
+} from './chat/image_attachment_guard.ts';
+export type {
+  ImageAttachmentStatus, ImageAttachmentStatusKind, ImageEncodeCheck, ImageGuardSettings,
+} from './chat/image_attachment_guard.ts';
+
 // ===== D-072:时间提醒注入(TimeReminderTransformer.kt 全文) =====
 export {
   TIME_GAP_THRESHOLD_SECONDS, applyTimeReminder, createTimeReminderTransformer,

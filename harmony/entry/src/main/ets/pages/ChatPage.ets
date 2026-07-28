@@ -17,6 +17,7 @@ import type {
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
   ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
   MessageChunk, OpenAIChatApi, AskUserQuestion, AskedAnswers, ConversationCompact,
+  ImageGuardSettings, VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -57,6 +58,8 @@ import {
   runMemoryExtraction, MemoryWorkerModelResolution, memoryWorkerModelCandidates,
   buildAgentSoulPrompt,
   toChatModel, DEFAULT_COMPRESS_PROMPT,
+  firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
+  probeVisionModelHealth,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -69,7 +72,8 @@ import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
-import { createEntryOcrTransformer, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
+import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
+import { encodeImageDetailed } from '../platform_impl/EntryImageEncoder.ets';
 import {
   AgentRuntimeSnapshot, defaultAgentRuntimeSnapshot, loadAgentRuntimeSnapshot, systemLanguage,
 } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -1700,22 +1704,25 @@ struct ChatPage {
     // D-064:斜杠命令拦截(编辑态除外 — Android 编辑走 handleMessageEdit 不经 orchestrator)
     if (this.editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
     // D-080:模型门(Android 长按发送 :695-698);门过才清输入(中止时输入保留)
-    this.gateModelConfigured((): void => {
-      this.inputText = '';
-      this.pendingImages = [];
-      if (this.editingNodeId.length > 0) this.cancelEdit();
-      if (this.sending) {
-        // D-081:STEER + answer=true(ChatPage.kt:708) — 插话注入进行中生成
-        this.enqueuePendingParts(inputParts, true, 'STEER');
-        return;
-      }
-      runAppendUserMessage(this.conversation as Conversation, inputParts, getChatRepository())
-        .then((out: Conversation): void => {
-          this.conversation = out;
-          this.rows = buildRows(out);
-          this.scrollToBottom();
-        })
-        .catch((e: Error): void => { this.errorMsg = e.message; });
+    // D-111:门后图片守卫(ChatInput.kt:279 sendMessageWithoutAnswer);守卫失败同保留
+    this.gateModelConfigured((choice: ChatProviderChoice): void => {
+      this.guardImagesForSend(inputParts, choice, (): void => {
+        this.inputText = '';
+        this.pendingImages = [];
+        if (this.editingNodeId.length > 0) this.cancelEdit();
+        if (this.sending) {
+          // D-081:STEER + answer=true(ChatPage.kt:708) — 插话注入进行中生成
+          this.enqueuePendingParts(inputParts, true, 'STEER');
+          return;
+        }
+        runAppendUserMessage(this.conversation as Conversation, inputParts, getChatRepository())
+          .then((out: Conversation): void => {
+            this.conversation = out;
+            this.rows = buildRows(out);
+            this.scrollToBottom();
+          })
+          .catch((e: Error): void => { this.errorMsg = e.message; });
+      });
     });
   }
 
@@ -1724,16 +1731,70 @@ struct ChatPage {
   //   :823-825/:864-869/:880-885 发送门 — currentChatModel == null 且非
   //   /deepread 斜杠(编辑态恒要模型)→ toast '请先选择模型'(逐字)中止:
   //   输入保留,不入队/不生成/不编辑。斜杠路由已在各路径前置拦截,无需在此判断。
-  private gateModelConfigured(onConfigured: () => void): void {
+  // D-111:choice 透传(图片守卫需要 chat 模型 inputModalities)
+  private gateModelConfigured(onConfigured: (choice: ChatProviderChoice) => void): void {
     resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
       if (choice === null) {
         this.errorMsg = '请先选择模型';
         return;
       }
-      onConfigured();
+      onConfigured(choice);
     }).catch((e: Error): void => {
       this.errorMsg = e.message;
     });
+  }
+
+  // ===== D-111 图片发送守卫(ImageAttachmentValidator.kt:79-100;消费点 ChatInput.kt:250/:279) =====
+  // Android:sendMessage/sendMessageWithoutAnswer 协程内 firstBlockingIssueForSend —
+  //   blockingIssue != null → toast 错误中止(输入/待发附件保留);null → 放行。
+  // 鸿蒙接线:模型门已通过(chat 模型空值分支不可达,Android 同文案等价);
+  //   守卫失败 → errorMsg(toast 等价面);回退场景实时探测视觉健康
+  //   (generateVisionText 与 OcrTransformer 同口径,OcrSupport D-071b)。
+  private guardImagesForSend(
+    inputParts: UIMessagePart[], choice: ChatProviderChoice, onPass: () => void,
+  ): void {
+    const seed: OcrSeed | null = this.ocrSeed;
+    const settings: ImageGuardSettings = {
+      chatModel: choice.model,
+      ocrModelId: seed !== null ? seed.ocrModelId : '',
+      providers: seed !== null ? seed.providers : [],
+    };
+    const encodeCheck = (url: string): void => { encodeImageDetailed(url); };
+    const probeHealth = (): Promise<VisionModelHealth> => probeVisionModelHealth({
+      findOcrModel: (): ProviderModel | null =>
+        findModelByIdInProviders(settings.providers, settings.ocrModelId),
+      modelSupportsImage: (m: ProviderModel): boolean => m.inputModalities.includes('image'),
+      findProvider: (m: ProviderModel): ProviderSetting | null =>
+        findProviderOfModel(settings.providers, m),
+      generateText: (p: ProviderSetting, m: ProviderModel, msgs: UIMessage[]): Promise<string | null> =>
+        generateVisionText(p, m, msgs),
+    });
+    firstImageBlockingIssueForSend(inputParts, settings, encodeCheck, probeHealth)
+      .then((issue): void => {
+        if (issue !== null) {
+          this.errorMsg = issue.message;
+          return;
+        }
+        onPass();
+      })
+      .catch((e: Error): void => { this.errorMsg = e.message; });
+  }
+
+  // 附件点按(ChatInputAttachments.kt:onStatusClick)— blocked 才 toast 错误,其余静默
+  private inspectPendingImage(url: string): void {
+    resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+      const seed: OcrSeed | null = this.ocrSeed;
+      const settings: ImageGuardSettings = {
+        chatModel: choice !== null ? choice.model : null,
+        ocrModelId: seed !== null ? seed.ocrModelId : '',
+        providers: seed !== null ? seed.providers : [],
+      };
+      const status = inspectImageAttachment(url, settings,
+        (u: string): void => { encodeImageDetailed(u); });
+      if (imageAttachmentBlocksSend(status)) {
+        this.errorMsg = status.message;
+      }
+    }).catch((e: Error): void => { this.errorMsg = e.message; });
   }
 
   private send(): void {
@@ -1752,22 +1813,25 @@ struct ChatPage {
     // D-064:斜杠命令拦截(orchestrator 在排队/发送前解析;编辑态除外)
     if (this.editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
     // D-080:模型门(编辑态同要模型 — Android canRouteWithoutChatModel 编辑恒 false)
-    this.gateModelConfigured((): void => {
-      // D-048:生成中 → FOLLOWUP 入队(编辑态同 — 编辑重发需等当前生成结束;
-      //   入队即退出编辑态,排队消息按新消息派发,登记偏差:Android 无编辑态排队交互)
-      if (this.sending) {
-        this.enqueuePendingParts(inputParts, true);
-        this.inputText = '';
-        this.pendingImages = [];
-        if (this.editingNodeId.length > 0) this.cancelEdit();
-        return;
-      }
-      // 编辑态:走「编辑并重发」(编辑态不携带待发图片,对齐 Android 编辑仅文本)
-      if (this.editingNodeId.length > 0) {
-        this.sendEdit(text);
-        return;
-      }
-      this.sendParts(inputParts);
+    // D-111:门后图片守卫(ChatInput.kt:250 sendMessage);编辑态无图片 part → 守卫直放行
+    this.gateModelConfigured((choice: ChatProviderChoice): void => {
+      this.guardImagesForSend(inputParts, choice, (): void => {
+        // D-048:生成中 → FOLLOWUP 入队(编辑态同 — 编辑重发需等当前生成结束;
+        //   入队即退出编辑态,排队消息按新消息派发,登记偏差:Android 无编辑态排队交互)
+        if (this.sending) {
+          this.enqueuePendingParts(inputParts, true);
+          this.inputText = '';
+          this.pendingImages = [];
+          if (this.editingNodeId.length > 0) this.cancelEdit();
+          return;
+        }
+        // 编辑态:走「编辑并重发」(编辑态不携带待发图片,对齐 Android 编辑仅文本)
+        if (this.editingNodeId.length > 0) {
+          this.sendEdit(text);
+          return;
+        }
+        this.sendParts(inputParts);
+      });
     });
   }
 
@@ -2016,7 +2080,7 @@ struct ChatPage {
                   LongPressGesture()
                     .onAction((): void => {
                       if (this.sending) {
-                        this.gateModelConfigured((): void => {
+                        this.gateModelConfigured((_choice: ChatProviderChoice): void => {
                           this.enqueuePendingParts([{ type: 'text', text: s, metadata: null }], true);
                         });
                         return;
@@ -2068,7 +2132,8 @@ struct ChatPage {
         .margin({ bottom: 6 })
       }
 
-      // D-038:待发图片预览(可移除)
+      // D-038:待发图片预览(可移除);D-111:点按 = inspectImage 状态检查,
+      //   blocked → errorMsg(ChatInputAttachments.kt:onStatusClick,toast 等价面)
       if (this.pendingImages.length > 0) {
         Scroll() {
           Row() {
@@ -2086,6 +2151,7 @@ struct ChatPage {
                   .onClick((): void => { this.removePendingImage(i); })
               }
               .margin({ right: 8 })
+              .onClick((): void => { this.inspectPendingImage(url); })
             }, (url: string): string => url)
           }
           .padding({ left: 16, right: 16 })

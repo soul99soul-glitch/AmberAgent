@@ -12,9 +12,9 @@ import { router } from '@kit.ArkUI';
 import {
   loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
-  DEFAULT_OCR_PROMPT, resolveVisionRecognitionPrompt,
+  DEFAULT_OCR_PROMPT, resolveVisionRecognitionPrompt, probeVisionModelHealth,
 } from '@amber/chat-domain';
-import type { ProviderSetting, ProviderModel } from '@amber/chat-domain';
+import type { ProviderSetting, ProviderModel, UIMessage, VisionModelHealth } from '@amber/chat-domain';
 import {
   getChatKvStore, saveTaskModelId, loadTaskModelIds, TaskModelIds,
   resolveTaskChatModelChoice, saveTaskPrompt, loadTaskPrompts, TaskPrompts,
@@ -24,7 +24,7 @@ import {
 } from '../di/AppContainer.ets';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import {
-  getOcrModelId, getOcrPrompt, saveOcrPrompt,
+  getOcrModelId, getOcrPrompt, saveOcrPrompt, findProviderOfModel, generateVisionText,
 } from '../platform_impl/OcrSupport.ets';
 import {
   loadAgentRuntimeSnapshot, updateMemoryWorkerModels, AgentRuntimeSnapshot,
@@ -66,6 +66,10 @@ struct ChatTaskModelsPage {
   // D-098:OCR(ChatPrefs.kt:80,83 — 未配置 = random uuid;prompt 缺失 → DEFAULT)
   @State ocrUuid: string = '';
   @State ocrPromptRaw: string = DEFAULT_OCR_PROMPT;
+  // D-111:视觉健康标签(VisionModelHealthChecker;初始 checking '检测中' 逐字)
+  @State ocrHealthLabel: string = '检测中';
+  // 健康探测用原始 providers(Android settings.providers 未过滤;显示用 usable 过滤列表)
+  private rawProviders: ProviderSetting[] = [];
 
   aboutToAppear(): void {
     this.refresh();
@@ -76,6 +80,7 @@ struct ChatTaskModelsPage {
     const providers: ProviderSetting[] | null = await loadProviders(kv);
     const usable: ProviderSetting[] = [];
     if (providers !== null) {
+      this.rawProviders = providers;
       for (const p of providers) {
         if (p.models.length > 0 && hasUsableAuth(p)) usable.push(p);
       }
@@ -103,6 +108,29 @@ struct ChatTaskModelsPage {
     this.ocrUuid = await getOcrModelId(kv);
     this.ocrPromptRaw = await getOcrPrompt(kv);
     this.loaded = true;
+    // D-111:健康探测(produceState key = ocrModelId + providers;refresh 即重键)
+    this.probeOcrHealth();
+  }
+
+  // D-111:SettingModelPage.kt:518-526 — initial checking();IO 探测 → label;
+  //   generateText 与 OcrTransformer 同口径(OcrSupport.generateVisionText,D-071b)
+  private probeOcrHealth(): void {
+    this.ocrHealthLabel = '检测中';
+    const providers: ProviderSetting[] = this.rawProviders;
+    const ocrId: string = this.ocrUuid;
+    probeVisionModelHealth({
+      findOcrModel: (): ProviderModel | null => findModelByIdInProviders(providers, ocrId),
+      modelSupportsImage: (m: ProviderModel): boolean => m.inputModalities.includes('image'),
+      findProvider: (m: ProviderModel): ProviderSetting | null =>
+        findProviderOfModel(providers, m),
+      generateText: (p: ProviderSetting, m: ProviderModel, msgs: UIMessage[]): Promise<string | null> =>
+        generateVisionText(p, m, msgs),
+    }).then((h: VisionModelHealth): void => {
+      this.ocrHealthLabel = h.label;
+    }).catch((): void => {
+      // probe 内部 runCatching 语义不拒promise;此处仅兜底装配期异常
+      this.ocrHealthLabel = '不可用：检测失败';
+    });
   }
 
   // follows = findModelById(id) == null(:446/:485/:568)
@@ -351,9 +379,9 @@ struct ChatTaskModelsPage {
                 'daydream', false, true)
 
               // 视觉识别模型(:511-553;D-098)— 无 allowClear;IMAGE 模态过滤在 picker;
-              //   健康探测(VisionModelHealthChecker)未移植(P1 登记) → desc 无健康后缀
+              //   D-111:desc 健康后缀 "${desc} · ${health.label}"(:529 逐字)
               this.taskCard('视觉识别模型',
-                '当前聊天模型不能直接读取图片时，用它理解图片内容',
+                `当前聊天模型不能直接读取图片时，用它理解图片内容 · ${this.ocrHealthLabel}`,
                 this.selectedName(this.ocrUuid).length > 0 ? this.selectedName(this.ocrUuid) : '未配置',
                 '',
                 false, '', 'ocr', true, false)

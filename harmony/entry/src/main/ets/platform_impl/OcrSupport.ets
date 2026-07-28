@@ -126,6 +126,18 @@ export const findProviderOfModel = (
 // ===== generateText(OcrTransformer.kt:107-120;三变体分发,AppContainer 同模式) =====
 // TextGenerationParams(model = model) — 仅模型,不带 assistant 参数/自定义头;
 //   auth:openai 由 adapter 注入,claude/google 由 api 层从 setting.apiKey 注入
+// D-111:提取为导出函数 — VisionModelHealthChecker 探针复用同口径调用
+export const generateVisionText = async (
+  provider: ProviderSetting, model: ProviderModel, messages: UIMessage[],
+): Promise<string | null> => {
+  const api: OpenAIChatApi = buildVisionApi(provider);
+  const chunk = await api.generateText(
+    messages, makeTextGenerationParams({ model: toChatModel(model) }));
+  const first = chunk.choices.length > 0 ? chunk.choices[0] : null;
+  if (first === null || first.message === null) return null;
+  return toText(first.message);
+};
+
 const buildVisionApi = (provider: ProviderSetting): OpenAIChatApi => {
   const http = getAppContainer().httpClient;
   if (provider.type === 'claude') {
@@ -194,16 +206,9 @@ export const createEntryOcrTransformer = (
       model.inputModalities.includes('image'),
     findProviderForModel: (model: ProviderModel): ProviderSetting | null =>
       findProviderOfModel(seed.providers, model),
-    generateText: async (
+    generateText: (
       provider: ProviderSetting, model: ProviderModel, messages: UIMessage[],
-    ): Promise<string | null> => {
-      const api: OpenAIChatApi = buildVisionApi(provider);
-      const chunk = await api.generateText(
-        messages, makeTextGenerationParams({ model: toChatModel(model) }));
-      const first = chunk.choices.length > 0 ? chunk.choices[0] : null;
-      if (first === null || first.message === null) return null;
-      return toText(first.message);
-    },
+    ): Promise<string | null> => generateVisionText(provider, model, messages),
     ocrPrompt: (): string => seed.ocrPrompt,
     cache: getVisionCache(),
   });

@@ -1503,3 +1503,25 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 审计行 51 残余「ContextUsageIndicator 环」。
 - **未移植(P1 登记)**: ModelRegistry 注册表/ReasoningLevelChip/ComposerUsageSheet(provider 配额)。
 - **验证**: chat tsc 干净 + 1068 测试(+4)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-111 — VisionModelHealthChecker 探测 + 图片附件生成守卫
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: VisionModelHealthChecker.kt(72 行全文)/ImageAttachmentValidator.kt(116 行全文)/SettingModelPage.kt:511-553(OCR 行健康后缀)/ChatInput.kt:239-264,267-292(双发送路径守卫)/ChatInputAttachments.kt:143-171(附件 inspect + onStatusClick)
+- **背景**: D-071a/D-071b 视觉兜底 + OCR 设置面已备,但两处 VisionModelHealthChecker 消费点未移植:OCR 设置行健康后缀(用户不知视觉模型是否可用)与发送前生成守卫(回退场景不探测,发出去才失败 = 错误恢复缺口)。
+- **决策**:
+  1. chat HAR vision_health.ts(+8 测试):六健康态 + zh 标签逐字(检测中/可用/未配置/不支持图片/提供商不可用/不可用：<msg ?: 检测失败>,全角冒号);TINY_PNG/探针消息逐字(system 'Reply with OK if you can receive this test image.' + user [Text('Vision probe. Reply only OK.'), Image(TINY_PNG)]);isAvailable = kind == AVAILABLE;端口化 VisionProbeDeps(findOcrModel/modelSupportsImage/findProvider/generateText 闭包注入,ProviderManager 不进域层)。
+  2. chat HAR image_attachment_guard.ts(+12 测试):四附件态 + zh 文案逐字(正在检查图片/图片可由当前模型读取/将先由视觉识别模型读取图片 + 各 blocked);MAX_IMAGES_PER_MESSAGE=4;inspectImage 判定顺序逐字(encode → chat 空 → chat IMAGE → 视觉模型三查 → FALLBACK);firstBlockingIssue(>4 拦截 → 逐张首个 blocked 短路);firstImageBlockingIssueForSend(静态拦截先行,有 FALLBACK → 探测健康,不可用 → blocked 健康标签原文);readableImageError 关键词映射表逐字(ImageEncodingError.cause 解包同 :103);encodeBase64(withPrefix=false) → 注入 ImageEncodeCheck(entry = encodeImageDetailed)。
+  3. OcrSupport:generateVisionText 提取导出(OcrTransformer.kt:107-120 同口径,三变体分发;createEntryOcrTransformer 改委托)。
+  4. ChatPage:gateModelConfigured 透传 choice;guardImagesForSend 包 send()/sendWithoutAnswer() 门后全路径(守卫失败 → errorMsg toast 等价面,输入/待发图片保留;无图片 part → 域内短路不探测);待发图片点按 = inspectImage,blocked → errorMsg(onStatusClick 语义)。
+  5. ChatTaskModelsPage:OCR 行 desc += ' · <健康标签>'(:529 逐字);refresh 后 probeOcrHealth(初始 '检测中';探测数据源 = 未过滤 rawProviders,对齐 Android settings.providers)。
+- **偏差/适配登记**:
+  - 「视觉识别模型的提供商不可用」分支防御性不可达(findModelById 与 findProvider 扫同一 providers 列表,命中前者必命中后者;Android 同构)—— 分支逐字保留,无测试构造(登记);
+  - 探测时序:Android produceState(key=ocrModelId+providers) 组合即探 → 鸿蒙 refresh() 尾部触发(从设置页返回 aboutToAppear 重触发,等价就绪点,D-070 模式);
+  - 附件状态常驻角标(ImageAttachmentPreview 视觉)= 视觉残余,P1 登记;点按检查已落地;
+  - 守卫顺序:Android 守卫内含 chat 模型空检查,鸿蒙模型门(D-080)先行 → 该分支不可达,同文案等价结果;
+  - toast → errorMsg 行内错误面(既有 D-0xx 统一适配)。
+- **关闭**: 审计行 29(PD-006 错误恢复残余清零 → ✅)+ 行 48 残余「VisionModelHealthChecker 探测/生成守卫」。
+- **未移植(P1 登记)**: 附件状态常驻角标视觉(ImageAttachmentPreview)。
+- **验证**: chat tsc 干净 + 1088 测试(+20)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
