@@ -207,3 +207,13 @@
   - **排序/搜索口径**:ORDER BY is_pinned DESC, update_at DESC;title LIKE '%text%'(SQLite ASCII 大小写不敏感,对齐 Android DAO)。
   - deepread 侧 RdbRepository(memory fallback)本切片不动——它是另一契约,随 spike B 一并处理。
 - **可逆性**:getChatRepository 一行换回 memory 即可回退;schema IF NOT EXISTS 幂等。
+
+## D-022（L0，2026-07-28）会话列表交互闭环：搜索 + 滑动置顶/删除(确认弹窗)
+
+- **背景**：ChatListPage 此前只读;repo Port 的 search/delete 与 RDB 路径(刚落地 D-021)缺真实调用方。
+- **决定**：
+  - **搜索**:TextInput onChange 即时过滤;query 非空走 `repo.search`(title LIKE,ASCII 大小写不敏感,SQLite 语义),空走 `repo.list`——与 Android 会话列表搜索同口径。
+  - **置顶切换**:swipeAction「置顶/取消置顶」→ getById + 翻转 isPinned + save(upsert 路径);排序由 repo 层 pinned DESC,updated DESC 保证,UI 不重排。
+  - **删除**:swipeAction「删除」→ AlertDialog 二次确认(标题明示不可恢复)后 repo.delete(显式级联)。删除是用户主动发起且经确认,属 L0 用户数据操作,非 agent 自主删除。
+  - UI 文案硬编码中文(AGENTS.md:未明确要求本地化时先实现功能)。
+- **可逆性**:纯 UI 变更;repo Port 未动。
