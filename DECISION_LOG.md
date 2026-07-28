@@ -1468,3 +1468,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-057/D-105 登记残余「ToolDenyReasonDialog 拒绝理由输入」。
 - **未移植(P1 登记)**: 无新增。
 - **验证**: chat tsc 干净 + 1064 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-109 — model 级自定义参数编辑面(customHeaders/customBodies)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingProviderModelSettingsForm.kt:259-271(高级设置 tab 结构)/:289-312(节标)/:315-395(ModelCustomHeaders)/:397-499(ModelCustomBodies)/SettingProviderModelTabPage.kt:694-721(草稿 + 确认/取消)/values-zh/strings.xml:41-42,49-50,69-70,79-80,82
+- **背景**: mergeCustomParams(context_assembly.ts:141-145)已消费 model.customHeaders/customBodies(assistant 级 + model 级串联),但模型级两字段无编辑面,用户不可配。
+- **决策**:
+  1. ChatModelParamsPage(新页,router params providerId+modelId):草稿语义(:694-696 编辑 dialogState,确认才落库,取消丢弃);两节节标 '自定义 Headers'/'自定义 Body' + '· N';行 'HEADER N'/'BODY N' + 删除(removeAt);name/key 确认时 trim(:363/:450 存储 trimmed 语义);body value = JSON 文本逐键解析(:458-472 — 合法 → 更新草稿值+清错;非法 → 行内 '无效的 JSON: <msg.take(100)>' 保留旧值);添加 Header(CustomHeader("",""))/添加 Body(CustomBody("",JsonPrimitive("")) → 文本 '""');确认 → provider.models by id 替换 → saveProviders。
+  2. ChatProviderSettingsPage:模型区 += 已持久化模型行 '参数' 入口 → 新页;**parseModels 数据保留修正** — modelId 命中既有行原样保留(此前恒 makeProviderModel 重建会抹掉 D-109 写入的 custom params;Android 模型经独立 sheet 编辑无整体重建)。
+  3. displayName 非空确认使能(:716)= 本页不编辑 displayName → N/A 登记。
+- **偏差/适配登记**: Android 逐键 trim 入草稿(显示 raw)→ 确认时统一 trim(持久化结果等价);ProviderOverwriteSettings(:251-257)/内置工具 tab(:275-283)未移植(P1 已登,本页仅两节);provider sealed 变体替换经 JSON round-trip(D-017 线格式无损)。
+- **关闭**: 审计行 56 残余「model 级自定义参数编辑面」。
+- **未移植(P1 登记)**: 模型 overwrite 编辑面/BuiltInTools tab(沿用已登项)。
+- **验证**: chat tsc 干净 + 1064 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

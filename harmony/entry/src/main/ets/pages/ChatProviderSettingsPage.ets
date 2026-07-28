@@ -134,11 +134,19 @@ struct ChatProviderSettingsPage {
   }
 
   private parseModels(): ProviderModel[] {
+    // D-109:modelId 命中既有行 → 原样保留(customHeaders/customBodies/
+    //   modalities 等不被逗号文本编辑抹掉;Android 模型经独立 sheet 编辑,
+    //   不存在整体重建;此前恒新建会丢弃 D-109 参数 → 数据保留修正)
+    const existing: ProviderModel[] = this.selectedRaw !== null ? this.selectedRaw.models : [];
     return this.modelsText
       .split(',')
       .map((s: string): string => s.trim())
       .filter((s: string): boolean => s.length > 0)
-      .map((id: string): ProviderModel => makeProviderModel({ modelId: id, displayName: id }));
+      .map((id: string): ProviderModel => {
+        const hit: ProviderModel | undefined = existing.find(
+          (m: ProviderModel): boolean => m.modelId === id);
+        return hit !== undefined ? hit : makeProviderModel({ modelId: id, displayName: id });
+      });
   }
 
   private save(): void {
@@ -386,6 +394,32 @@ struct ChatProviderSettingsPage {
                   .height(80)
                   .onChange((v: string): void => { this.modelsText = v; })
               }.width('100%').alignItems(HorizontalAlign.Start)
+
+              // D-109:模型级自定义参数入口(Android 模型行 → 编辑 sheet;
+              //   已持久化模型逐行列出,'参数' → ChatModelParamsPage)
+              if (this.selectedRaw !== null && this.selectedRaw.models.length > 0) {
+                Column() {
+                  ForEach(this.selectedRaw.models, (m: ProviderModel) => {
+                    Row() {
+                      Text(m.displayName.length > 0 ? m.displayName : m.modelId)
+                        .fontSize(13).fontColor(INK)
+                        .layoutWeight(1)
+                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Text('参数')
+                        .fontSize(12).fontColor(ACCENT)
+                        .padding({ left: 12, right: 4, top: 4, bottom: 4 })
+                        .onClick((): void => {
+                          const params: Record<string, string> = {};
+                          params['providerId'] = this.selectedId;
+                          params['modelId'] = m.id;
+                          router.pushUrl({ url: 'pages/ChatModelParamsPage', params: params });
+                        })
+                    }
+                    .width('100%').padding({ top: 8, bottom: 8 })
+                  }, (m: ProviderModel): string => m.id)
+                }
+                .width('100%').alignItems(HorizontalAlign.Start).margin({ top: 4 })
+              }
 
               Row() {
                 Text('删除此 Provider').fontSize(13).fontColor('#C0392B')

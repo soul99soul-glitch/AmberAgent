@@ -19,6 +19,7 @@
     "pages/ChatPromptsPage",
     "pages/ChatAssistantExtensionsPage",
     "pages/ChatAssistantLocalToolsPage",
+    "pages/ChatModelParamsPage",
     "pages/ChatAgentPermissionsPage"
   ]
 }
