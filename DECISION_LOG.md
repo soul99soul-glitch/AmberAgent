@@ -416,3 +416,12 @@
   - **裁剪登记**:Android 长按直发走 queueMode=FOLLOWUP(生成中排队待发,ChatService.kt:505 clearPendingUserMessages 配套);鸿蒙发送排队机制整体裁 P1 → 生成中长按不响应(sending 拦截),登记进 M3 gap 审计。
   - 长按时若有待发图片会一并发送(与鸿蒙输入模型一致;Android 长按仅发文本 parts——交互组合差异,影响面小,登记)。
 - **可逆性**:纯 UI 增项;点击行为不变。
+
+## D-043（L0，2026-07-28）M3 Chat MVP 收尾盘点：source-only 退出判定
+
+- **背景**：D-012..D-042 共 23 个 chat 切片后,source-only 主线功能面接近穷尽,需对照权威计划 §M3 做退出判定。
+- **决定**：
+  - 产出 docs/harmony-m3-gap-audit.md:M3 六项交付物逐条锚点核对(全部 source-only 达成)/M4 提前完成项/偏差汇总(PD-001..007)/G-D 设备验证清单(4 项,含 D-038 登记项)/P1 剩余清单(10 项,Android 锚点)。
+  - MIGRATION_STATE M3 里程碑状态更新为"source-only 完成;设备验证待 G-D(G-C 阻塞)"。
+  - 后续 source-only 方向:P1 清单中无设备依赖纯逻辑项(FOLLOWUP 排队/Google+Claude 请求构建/customHeaders-customBodies 编辑)。
+- **可逆性**:文档与状态记录,无代码改动。

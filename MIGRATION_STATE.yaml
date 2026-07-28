@@ -7,7 +7,7 @@
 meta:
   updated: 2026-07-28
   branch: harmony-preview
-  head: 48cfd49e0
+  head: PENDING
 
 phase:
   current: "Phase 0 → Phase 1 过渡"
@@ -63,4 +63,4 @@ next_slices:                      # 按优先级,取最高未阻塞项
 parity_baseline:
   单元测试总数: 850               # deepread 603 + chat 247
   已知行为偏差: 7                # 详见 PARITY_DEBT.md PD-001..007(+1 条 Android 内部不一致待核实)
-  决策记录: "DECISION_LOG.md D-001..D-042"
+  决策记录: "DECISION_LOG.md D-001..D-043"
