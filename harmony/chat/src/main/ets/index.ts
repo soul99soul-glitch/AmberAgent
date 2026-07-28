@@ -366,7 +366,7 @@ export {
   makeProviderModel, makeBalanceOption,
   makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,
   openAIBrandAvailableAuthModes, openAIAuthModeFixedBaseUrl, googleAuthModeFixedBaseUrl,
-  hasUsableAuth,
+  hasUsableAuth, copyProviderSettingWithModels, findProviderForModel,
 } from './chat/provider_settings.ts';
 export type {
   ProviderModel, BalanceOption, ProviderSetting, ProviderSettingOpenAIVariant,

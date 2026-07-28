@@ -944,3 +944,13 @@
   - **空转登记**:其余 10 variant(javascript_engine/tts/workspace_files/terminal/screen_automation/system_access/webview/icloud_drive/webmount/webmount_eval)对应工具族未移植,门控为空转;移植各自工具族时按 LocalTools.kt:107-181 同序接入。
   - **assistant.localTools 模型层早已在**(D-016,默认 ['time_info'] → 默认行为变化 = 对齐 Android:ask_user/clipboard 不再默认暴露);助手编辑面勾选 UI = P1(交互档,Android AssistantLocalToolPage.kt)。
 - **可逆性**:1485 测试全绿(deepread 603 + chat 882,纯 entry 接线无新增),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit「LocalToolOption 门控」残余消除(编辑面 UI 除外)。
+
+## D-084（L0，2026-07-28）providerOverwrite — Model.findProvider overwrite 语义落地
+
+- **背景**：gap-audit 残余。模型层 providerOverwrite 字段 + 线格式递归早已移植(D-016/D-017),运行解析一直忽略。Android 锚点:PreferencesStore.kt:500-507(findProvider:容器反查 ?: null → checkOverwrite && providerOverwrite != null → overwrite.copyProvider(models=emptyList()))、:509-518(反查 providers × models 声明序)、ProviderSetting.kt:156-165(copyProvider = data class copy,变体字段全保留)、GenerationHandler.kt:155(生成路径 checkOverwrite 默认 true)、OcrTransformer.kt:50(vision 查找同)。
+- **决定**：
+  - **HAR provider_settings**:copyProviderSettingWithModels(三变体显式字段,arkts-no-spread;builtIn/description/shortDescription 为 Android @Transient UI 字段,鸿蒙模型层本不携带)+ findProviderForModel(providers, model, checkOverwrite=true)逐字(未命中容器 → null,overwrite 不兜底)。
+  - **AppContainer.effectiveProvider**:resolveChatProviderChoice 两返回点(用户选择/回退)统一经 effectiveProvider — 容器命中后 overwrite 副本(models=[])替代;hasUsableAuth 预检留在容器上(Android 同:findProvider 不校验 overwrite auth,坏 auth 在 API 层显式失败)。
+  - **OcrSupport.findProviderOfModel**:本地反查(无 overwrite)改委托 HAR findProviderForModel(默认 checkOverwrite=true),消除 D-071a 登记的 P1 分支。
+  - **TDD 6 测试**:容器未命中 → null/无 overwrite → 容器同引用/overwrite 副本 models=[] + google 变体字段全保留/checkOverwrite=false/反查声明序/openai+claude 变体字段保留。
+- **可逆性**:1491 测试全绿(deepread 603 + chat 888,+6),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit「providerOverwrite」残余消除(模型编辑面 overwrite UI = P1 交互档)。

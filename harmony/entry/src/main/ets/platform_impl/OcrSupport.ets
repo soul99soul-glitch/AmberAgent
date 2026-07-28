@@ -21,8 +21,9 @@ import type {
 } from '@amber/chat-domain';
 import {
   createClaudeChatApi, createGoogleChatApi, createOcrTransformer, createOpenAIChatApi,
-  createVisionCache, DEFAULT_OCR_PROMPT, loadProviders, makeProviderSettingOpenAI,
-  makeTextGenerationParams, newId, openAIAuthHeaders, toChatModel, toText,
+  createVisionCache, DEFAULT_OCR_PROMPT, findProviderForModel, loadProviders,
+  makeProviderSettingOpenAI, makeTextGenerationParams, newId, openAIAuthHeaders,
+  toChatModel, toText,
 } from '@amber/chat-domain';
 import { getAppContainer } from '../di/AppContainer.ets';
 import { encodeImageDetailed, encodeImageForChat } from './EntryImageEncoder.ets';
@@ -105,18 +106,12 @@ export const findModelByIdInProviders = (
   return null;
 };
 
-// checkOverwrite 默认 true 的 overwrite 分支未移植(providerOverwrite = P1 登记);
-//   其余逐字:按 model.id 反查所属 provider
+// model.findProvider(OcrTransformer.kt:50,checkOverwrite 默认 true)—
+//   D-084 委托 HAR findProviderForModel(PreferencesStore.kt:500-518 逐字:
+//   容器反查未命中 → null;命中且 providerOverwrite 非 null → overwrite 副本)
 export const findProviderOfModel = (
   providers: ProviderSetting[], model: ProviderModel,
-): ProviderSetting | null => {
-  for (const p of providers) {
-    for (const m of p.models) {
-      if (m.id === model.id) return p;
-    }
-  }
-  return null;
-};
+): ProviderSetting | null => findProviderForModel(providers, model);
 
 // ===== generateText(OcrTransformer.kt:107-120;三变体分发,AppContainer 同模式) =====
 // TextGenerationParams(model = model) — 仅模型,不带 assistant 参数/自定义头;

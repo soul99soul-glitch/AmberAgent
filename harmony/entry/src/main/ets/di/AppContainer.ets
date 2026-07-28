@@ -36,7 +36,7 @@ import type {
 import {
   loadAssistants, loadProviders, makeAssistant,
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
-  hasUsableAuth, openAIAuthHeaders,
+  hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore,
 } from '@amber/chat-domain';
@@ -281,6 +281,13 @@ export interface ChatProviderChoice {
   model: ProviderModel;
 }
 
+// D-084:Model.findProvider(PreferencesStore.kt:500-507)— 生成路径 checkOverwrite
+//   恒 true(GenerationHandler.kt:155):model.providerOverwrite 非 null →
+//   overwrite 副本(models = [])替代容器 provider;容器反查未命中时 overwrite
+//   不兜底(此处容器已命中,语义逐字)
+const effectiveProvider = (p: ProviderSetting, m: ProviderModel): ProviderSetting =>
+  m.providerOverwrite !== null ? copyProviderSettingWithModels(m.providerOverwrite, []) : p;
+
 // D-080:导出供 ChatPage 发送门(canSendWithoutChatModel 等价物)使用
 export const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | null> => {
   const providers = await loadProviders(getChatKvStore());
@@ -292,7 +299,7 @@ export const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | 
       if (p.id === selection.providerId && hasUsableAuth(p)) {
         for (const m of p.models) {
           if (m.modelId === selection.modelId) {
-            return { provider: p, model: m };
+            return { provider: effectiveProvider(p, m), model: m };
           }
         }
       }
@@ -301,7 +308,8 @@ export const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | 
   // 回退 D-019 策略:第一个 hasUsableAuth 且非空 models 的变体(任意类型)+ 首模型
   for (const p of providers) {
     if (p.models.length > 0 && hasUsableAuth(p)) {
-      return { provider: p, model: p.models[0] };
+      const m: ProviderModel = p.models[0];
+      return { provider: effectiveProvider(p, m), model: m };
     }
   }
   return null;

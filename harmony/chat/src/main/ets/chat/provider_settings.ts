@@ -211,3 +211,68 @@ export const hasUsableAuth = (setting: ProviderSetting): boolean => {
   }
   return setting.apiKey.trim().length > 0;
 };
+
+// ===== Model.findProvider(PreferencesStore.kt:500-518) =====
+
+// copyProvider(models = …)(ProviderSetting.kt:156-165):data class copy —
+//   变体字段全保留,仅覆盖列出字段(此处仅 models;builtIn/description/
+//   shortDescription 为 @Transient UI 字段,鸿蒙模型层本就不携带)
+export const copyProviderSettingWithModels = (
+  setting: ProviderSetting, models: ProviderModel[],
+): ProviderSetting => {
+  switch (setting.type) {
+    case 'openai': {
+      const s: ProviderSettingOpenAIVariant = setting;
+      return {
+        type: 'openai', id: s.id, enabled: s.enabled, name: s.name, models,
+        balanceOption: s.balanceOption, apiKey: s.apiKey, baseUrl: s.baseUrl,
+        chatCompletionsPath: s.chatCompletionsPath, useResponseApi: s.useResponseApi,
+        authMode: s.authMode, brand: s.brand,
+      };
+    }
+    case 'google': {
+      const s: ProviderSettingGoogle = setting;
+      return {
+        type: 'google', id: s.id, enabled: s.enabled, name: s.name, models,
+        balanceOption: s.balanceOption, apiKey: s.apiKey, baseUrl: s.baseUrl,
+        vertexAI: s.vertexAI, useServiceAccount: s.useServiceAccount,
+        privateKey: s.privateKey, serviceAccountEmail: s.serviceAccountEmail,
+        location: s.location, projectId: s.projectId, authMode: s.authMode,
+      };
+    }
+    case 'claude': {
+      const s: ProviderSettingClaude = setting;
+      return {
+        type: 'claude', id: s.id, enabled: s.enabled, name: s.name, models,
+        balanceOption: s.balanceOption, apiKey: s.apiKey, baseUrl: s.baseUrl,
+        promptCaching: s.promptCaching,
+      };
+    }
+  }
+};
+
+// findProvider(:500-507 逐字):先按 model.id 反查容器 provider(:509-518
+//   providers.forEach × models.forEach 序);未命中 → null(overwrite 不兜底);
+//   命中且 checkOverwrite 且 providerOverwrite != null → overwrite 副本(models=[])
+export const findProviderForModel = (
+  providers: ProviderSetting[], model: ProviderModel,
+  checkOverwrite: boolean = true,
+): ProviderSetting | null => {
+  let found: ProviderSetting | null = null;
+  for (const p of providers) {
+    let hit: boolean = false;
+    for (const m of p.models) {
+      if (m.id === model.id) {
+        found = p;
+        hit = true;
+        break;
+      }
+    }
+    if (hit) break;
+  }
+  if (found === null) return null;
+  if (checkOverwrite && model.providerOverwrite !== null) {
+    return copyProviderSettingWithModels(model.providerOverwrite, []);
+  }
+  return found;
+};
