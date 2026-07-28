@@ -39,6 +39,7 @@ import {
   hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
+  DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -321,9 +322,9 @@ export const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | 
 //   PreferencesKeys.kt(infra):29-30/:36 — 'title_model'/'suggestion_model'/'compress_model'
 //   ChatPrefs.kt:71-77 — parseUuidOrNull 失败 → DEFAULT_AUTO_MODEL_ID
 //   PreferencesStore.kt:479-481 — resolveTaskChatModel = findModelById ?: getCurrentChatModel
-const TITLE_MODEL_KEY: string = 'title_model';
-const SUGGESTION_MODEL_KEY: string = 'suggestion_model';
-const COMPRESS_MODEL_KEY: string = 'compress_model';
+export const TASK_TITLE_MODEL_KEY: string = 'title_model';
+export const TASK_SUGGESTION_MODEL_KEY: string = 'suggestion_model';
+export const TASK_COMPRESS_MODEL_KEY: string = 'compress_model';
 
 export interface TaskModelIds {
   titleModelId: string;
@@ -339,10 +340,47 @@ const readTaskModelId = async (key: string): Promise<string> => {
 };
 
 export const loadTaskModelIds = async (): Promise<TaskModelIds> => ({
-  titleModelId: await readTaskModelId(TITLE_MODEL_KEY),
-  suggestionModelId: await readTaskModelId(SUGGESTION_MODEL_KEY),
-  compressModelId: await readTaskModelId(COMPRESS_MODEL_KEY),
+  titleModelId: await readTaskModelId(TASK_TITLE_MODEL_KEY),
+  suggestionModelId: await readTaskModelId(TASK_SUGGESTION_MODEL_KEY),
+  compressModelId: await readTaskModelId(TASK_COMPRESS_MODEL_KEY),
 });
+
+// D-094:任务模型写路径(SettingModelPage.kt onSelect/onClear)—
+//   onSelect → it.id 直存;onClear → DEFAULT_AUTO_MODEL_ID 字面量
+//   (ChatPrefs.kt:94-96 writeTo 直存 uuid 字符串;读侧空/缺失亦归一 AUTO)
+export const saveTaskModelId = async (key: string, modelUuid: string): Promise<void> => {
+  const storage = getAppContainer().storage;
+  await storage.set<string>(key, modelUuid);
+};
+
+// D-094:任务提示词读写 —
+//   PreferencesKeys.kt:32-37 — 'title_prompt'/'suggestion_prompt'/'compress_prompt'
+//   ChatPrefs.kt:81-84 读:键缺失 → DEFAULT_*;已存值(含空串)逐字返回
+//   ChatPrefs.kt:99-102 写:直存字符串
+export const TASK_TITLE_PROMPT_KEY: string = 'title_prompt';
+export const TASK_SUGGESTION_PROMPT_KEY: string = 'suggestion_prompt';
+export const TASK_COMPRESS_PROMPT_KEY: string = 'compress_prompt';
+
+export interface TaskPrompts {
+  titlePrompt: string;
+  suggestionPrompt: string;
+  compressPrompt: string;
+}
+
+export const loadTaskPrompts = async (): Promise<TaskPrompts> => {
+  const storage = getAppContainer().storage;
+  const title: string = await storage.get<string>(TASK_TITLE_PROMPT_KEY, DEFAULT_TITLE_PROMPT);
+  const suggestion: string =
+    await storage.get<string>(TASK_SUGGESTION_PROMPT_KEY, DEFAULT_SUGGESTION_PROMPT);
+  const compress: string =
+    await storage.get<string>(TASK_COMPRESS_PROMPT_KEY, DEFAULT_COMPRESS_PROMPT);
+  return { titlePrompt: title, suggestionPrompt: suggestion, compressPrompt: compress };
+};
+
+export const saveTaskPrompt = async (key: string, value: string): Promise<void> => {
+  const storage = getAppContainer().storage;
+  await storage.set<string>(key, value);
+};
 
 // 当前 chat 模型的 uuid 等价物(Android settings.chatModelId 对应):
 //   选择态 → providers 内命中模型的 m.id;未选择 → AUTO(findById 必失,

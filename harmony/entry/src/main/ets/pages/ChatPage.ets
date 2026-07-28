@@ -52,14 +52,14 @@ import {
   buildMemoryRecallPrompt, MemoryRecallRuntimeGate, createMemoryTools,
   runMemoryExtraction, MemoryWorkerModelResolution, memoryWorkerModelCandidates,
   buildAgentSoulPrompt,
-  toChatModel,
+  toChatModel, DEFAULT_COMPRESS_PROMPT,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
   getChatKvStore, getCompactStore, getSessionGrantStore,
   resolveChatProviderChoice, ChatProviderChoice,
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
-  resolveTaskModelChain,
+  resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
 } from '../di/AppContainer.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
@@ -380,6 +380,9 @@ struct ChatPage {
   //   与 ocrSeed/searchSettings 同档;null = 未解析或无可用模型 → 回退 chat 运行态)
   private compressChoice: ChatProviderChoice | null = null;
   private taskChoicesLoaded: boolean = false;
+  // D-094:任务提示词快照(compress 同步工具构建位使用;aboutToAppear 加载,
+  //   与 compressChoice/ocrSeed 同档;title/suggestion 走调用时新取)
+  private taskPromptsCache: TaskPrompts | null = null;
   // D-070:搜索偏好(aboutToAppear 异步加载;SearchTools 工具组输入)
   searchSettings: SearchSettings | null = null;
   @State errorMsg: string = '';
@@ -495,6 +498,10 @@ struct ChatPage {
         this.compressChoice = choice;
         this.taskChoicesLoaded = true;
       });
+    });
+    // D-094:任务提示词快照(compress 同步位;缺失键 → DEFAULT_*)
+    loadTaskPrompts().then((prompts: TaskPrompts): void => {
+      this.taskPromptsCache = prompts;
     });
     // D-072:agent_runtime 快照加载(enableTimeReminder 等;缺失/损坏 → 默认 false)
     loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
@@ -700,8 +707,11 @@ struct ChatPage {
 
   // 自动命名(D-025):title 空白时非阻塞调用(对齐 Android 独立 launch);
   // 失败上浮到 errorMsg(非静默,Android addError 同语义)
-  private maybeAutoTitle(conv: Conversation, rt: ChatRuntime): void {
+  private async maybeAutoTitle(conv: Conversation, rt: ChatRuntime): Promise<void> {
     if (conv.title.trim().length > 0) return;
+    // D-094:settings.titlePrompt(ChatPrefs.kt:81)→ runAutoTitle deps.template
+    //   (auto_title.ts:60;调用时新取 = settingsFlow.value 语义)
+    const prompts: TaskPrompts = await loadTaskPrompts();
     runAutoTitle(conv, {
       // D-087:title 任务模型(AiAuxiliaryGenerator.kt:41)—
       //   resolveTaskChatModel(titleModelId) ?: return(无模型静默跳过);
@@ -732,6 +742,7 @@ struct ChatPage {
       },
       store: getChatRepository(),
       locale: '简体中文',
+      template: prompts.titlePrompt,
     })
       .then((titled: Conversation): void => {
         if (this.conversation !== null && this.conversation.id === titled.id) {
@@ -746,7 +757,10 @@ struct ChatPage {
 
   // 会话建议(D-026):每轮生成完成后非阻塞刷新;失败 hilog 记录(非静默,
   // 不上浮 UI — Android 对建议失败也不打扰用户,仅 printStackTrace)
-  private maybeSuggestions(conv: Conversation, rt: ChatRuntime): void {
+  private async maybeSuggestions(conv: Conversation, rt: ChatRuntime): Promise<void> {
+    // D-094:settings.suggestionPrompt(ChatPrefs.kt:82)→ runSuggestion deps.template
+    //   (suggestion.ts:57;调用时新取)
+    const prompts: TaskPrompts = await loadTaskPrompts();
     runSuggestion(conv, {
       // D-087:suggestion 任务模型(AiAuxiliaryGenerator.kt:87)— 同 title 链
       generateText: async (prompt: string): Promise<string> => {
@@ -774,6 +788,7 @@ struct ChatPage {
       },
       store: getChatRepository(),
       locale: '简体中文',
+      template: prompts.suggestionPrompt,
     })
       .then((suggested: Conversation): void => {
         if (this.conversation !== null && this.conversation.id === suggested.id) {
@@ -977,18 +992,23 @@ struct ChatPage {
       keepRecentTurns: cc.keepRecentTurns,
       maxSummaryTokens: cc.maxSummaryTokens,
     });
-    return (messages: UIMessage[]): Promise<UIMessage[]> => {
+    return async (messages: UIMessage[]): Promise<UIMessage[]> => {
       const effConv: Conversation = conversationWithMessagesAsNodes(conv, messages);
-      return prepareContext(effConv, policy, rt.modelContextWindowTokens,
-        messages, rt.contextMessageSize, {
+      // D-094:settings.compressPrompt(ChatPrefs.kt:84)→ CompactEngineDeps.compressPrompt
+      //   (context_engine.ts:485;调用时新取 = settingsFlow.value 语义)
+      const prompts: TaskPrompts = await loadTaskPrompts();
+      const prepared: PreparedContext = await prepareContext(effConv, policy,
+        rt.modelContextWindowTokens, messages, rt.contextMessageSize, {
           provider: this.compressProvider(rt),
           store: getCompactStore(),
+          compressPrompt: prompts.compressPrompt,
           launchPrecompact: (run: () => Promise<CompactResult>): void => {
             run().catch((e: Error): void => {
               hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'precompact failed: %{public}s', e.message);
             });
           },
-        }).then((prepared: PreparedContext): UIMessage[] => prepared.messages);
+        });
+      return prepared.messages;
     };
   }
 
@@ -1049,6 +1069,10 @@ struct ChatPage {
           compactEngineDeps: {
             provider: this.compressProvider(rt),
             store: getCompactStore(),
+            // D-094:settings.compressPrompt(同步构建位 → aboutToAppear 快照,
+            //   未就绪 → DEFAULT_COMPRESS_PROMPT,与 deps.compressPrompt ?? DEFAULT 同义)
+            compressPrompt: this.taskPromptsCache !== null
+              ? this.taskPromptsCache.compressPrompt : DEFAULT_COMPRESS_PROMPT,
           },
         }),
         ...createConversationHistoryTools({

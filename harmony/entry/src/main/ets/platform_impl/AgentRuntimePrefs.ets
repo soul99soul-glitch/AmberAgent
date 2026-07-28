@@ -267,6 +267,46 @@ export const updateMemoryWorkerToggles = async (
   return loadAgentRuntimeSnapshot(kv);
 };
 
+// D-094:worker/daydream 任务模型写回(SettingModelPage.kt:619-643/:684-697)—
+//   onClear → modelId = DEFAULT_AUTO_MODEL_ID + followCompressModel = true
+//   onSelect → modelId = it.id + followCompressModel = false(daydream 同构)
+export interface MemoryWorkerModelPatch {
+  modelId?: string;
+  followCompressModel?: boolean;
+  daydreamModelId?: string;
+  daydreamFollowCompressModel?: boolean;
+}
+
+export const updateMemoryWorkerModels = async (
+  kv: KeyValueStore, patch: MemoryWorkerModelPatch,
+): Promise<AgentRuntimeSnapshot> => {
+  const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
+  let root: AgentRuntimeJson = {};
+  if (raw !== null) {
+    try {
+      root = JSON.parse(raw) as AgentRuntimeJson;
+    } catch {
+      root = {};
+    }
+  }
+  const worker: MemoryWorkerJson = root.memoryWorker ?? {};
+  if (patch.modelId !== undefined) {
+    worker.modelId = patch.modelId;
+  }
+  if (patch.followCompressModel !== undefined) {
+    worker.followCompressModel = patch.followCompressModel;
+  }
+  if (patch.daydreamModelId !== undefined) {
+    worker.daydreamModelId = patch.daydreamModelId;
+  }
+  if (patch.daydreamFollowCompressModel !== undefined) {
+    worker.daydreamFollowCompressModel = patch.daydreamFollowCompressModel;
+  }
+  root.memoryWorker = worker;
+  await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
+  return loadAgentRuntimeSnapshot(kv);
+};
+
 // D-090:agentSoulMarkdown 写回(VM :190-194 updateAgentRuntime {
 //   copy(agentSoulMarkdown = value) };Page :792-791 AgentSoulCard onSave)
 export const updateAgentSoulMarkdown = async (

@@ -1225,3 +1225,19 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **偏差/适配登记**: 无新增。
 - **未移植(P1 登记)**: Overview 子页导航/导入导出 UI(目录选择器)/toolbar 立即运行(workScheduler)。
 - **验证**: chat tsc 干净 + 1040 测试(+5)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-094 — 任务模型设置面:五行 picker + title/suggestion/compress 提示词模板全链
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingModelPage.kt:433-700(title :433-470/suggestion :472-509/compress :556-592/worker :594-645/daydream :647-700;ModelPickerRow :798;ModelPromptSheet :845)/ChatPrefs.kt:71-84,93-102/PreferencesKeys.kt:29-37
+- **背景**: D-087 落地了任务模型解析链与生成消费,但 (a) title/suggestion/compress 三 KV 键无写路径;(b) title/suggestion/compress 提示词模板虽有 domain hook(auto_title.ts:60/suggestion.ts:57/context_engine.ts:485)却未接线——用户自定义提示词不可写不可用(D-025/D-026 登记偏差);(c) worker/daydream modelId/followCompressModel 无写路径;(d) 无设置面 UI。
+- **决策**:
+  1. `AppContainer.ets`:saveTaskModelId(key, uuid)——onClear 写 DEFAULT_AUTO_MODEL_ID 字面量(ChatPrefs.kt:94-96 writeTo 直存 uuid;读侧空/缺失亦归一 AUTO,双语义兼容);loadTaskPrompts/saveTaskPrompt('title_prompt'/'suggestion_prompt'/'compress_prompt',读 = 键缺失 → DEFAULT_*、已存值含空串逐字,ChatPrefs.kt:81-84 同语义);键常量导出供页面层。
+  2. `AgentRuntimePrefs.ets`:updateMemoryWorkerModels(raw 读-改-写,D-089 策略)——onClear → modelId=AUTO+followCompressModel=true(:619-630);onSelect → modelId=id+follow=false(:631-641);daydream 同构(:678-697)。
+  3. ChatPage 接线:maybeAutoTitle/maybeSuggestions 调用时新取 loadTaskPrompts → deps.template(关闭 D-025/D-026 提示词自定义偏差);buildPrepareContext 闭包(async 化)内新取 compressPrompt → prepareContext deps(context_engine.ts:485 hook 接线);compactEngineDeps 同步构建位用 aboutToAppear 快照 taskPromptsCache(未就绪 → DEFAULT_COMPRESS_PROMPT,与 deps.compressPrompt ?? DEFAULT 同义)。
+  4. 新页面 ChatTaskModelsPage(五行卡片:标题/建议/压缩 follows = findModelById==null → '跟随当前聊天模型'+'当前使用：X';worker/daydream follows = followCompressModel && findById==null → '跟随压缩模型'+'当前跟随压缩模型：X',zh strings 逐字;提示词 overlay 编辑器 = ModelPromptSheet 等价:变量 hint 逐字 + '重置为默认' → DEFAULT_*)+ ChatTaskModelPickerPage(按 m.id uuid 列选,区别于 ChatModelPickerPage 的 (providerId, modelId) 对);ChatListPage 头部 '任务模型' 入口;main_pages.json 注册两页。
+- **偏差/适配登记**: 提示词编辑改'保存'按钮提交(Android onPromptChange 逐字符直写,交互档);模型选择改独立 picker 页跳转(Android inline ModelSelector 下拉,交互档)。
+- **关闭**: D-087 P1「任务模型设置面 UI」;D-025/D-026 titlePrompt/suggestionPrompt 自定义偏差;compressPrompt 自定义(domain hook 已接线)。
+- **未移植(P1 登记)**: daydreamReasoningLevel(ModelPromptSheet reasoning 选择器)/OCR 设置面(ocr_model/ocr_prompt)/生图模型与生图提示词设置(imageGenerationModelId/ImagePromptInjectionSheet)/模型组默认规则面(modelGroupSessionDefaults)。
+- **验证**: chat tsc 干净 + 1040 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
