@@ -27,3 +27,14 @@ export {
   makeConversation, currentMessages, getMessageNodeByMessageId, updateCurrentMessages,
   limitContext, finishReasoning, finishPendingTools, collectFileUrls,
 } from './chat/conversation.ts';
+
+export {
+  STREAM_TOOL_INDEX_METADATA_KEY, STREAM_TOOL_ARGS_REPLACE_METADATA_KEY,
+  REASONING_CONTENT_PRESENT_METADATA_KEY,
+  streamToolIndex, withStreamToolIndex, withStreamArgsReplace, isStreamArgsReplace,
+  withoutStreamArgsReplace, findToolMergeTarget, mergeTool, hasExplicitReasoningContentField,
+} from './chat/tool_merge.ts';
+
+export {
+  MessageStreamAccumulator, appendChunkToMessage, handleMessageChunk, coalesceStreamParts,
+} from './chat/stream_accumulator.ts';

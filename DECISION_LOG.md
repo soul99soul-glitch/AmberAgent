@@ -75,3 +75,9 @@
 ## D-009（L0，2026-07-28）limitContext 级联语义以 Android 算法为准
 
 - 测试初稿假设"已执行 tool 起点只前扩一级"，实际 Android 算法会**级联**（已执行结果→tool call→user 消息，直至 0 号位）。实现与测试均以 Android 生产语义为准修正。无代码偏差。
+
+## D-010（L0，2026-07-28）chat HAR 校验门增加 `tsc --noEmit`
+
+- **背景**：node+tsx 测试走 esbuild，只转译不做类型检查；切片 2 中 `coalesceStreamParts` 的 TS2698（闭包赋值使裸 let 控制流收窄失效）测试全绿但类型错误。
+- **决定**：chat HAR 提交门 = `npx tsc --noEmit` 干净 + `npm test` 绿 + hvigor BUILD SUCCESSFUL，三者缺一不提交。
+- **影响**：TS 严格性向 ArkTS 编译器行为靠拢，提前暴露 esbuild 漏掉的类型错误。

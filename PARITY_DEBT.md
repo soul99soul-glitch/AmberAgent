@@ -12,7 +12,7 @@
 
 ## 待 Android 侧核实的疑似偏差
 
-（无——G-B 矩阵产出后补充）
+- **2026-07-28 / chat 流式合并（内部不一致，非鸿蒙偏差）**：Android 两条合并路径对 reasoning `finishedAt` 处理不一致 —— `MessageStreamAccumulator.appendReasoning`（主路径）在 delta reasoning 非空时**采用 delta 的 finishedAt**（可为 null，即覆盖已有值）；`Message.kt appendChunk`（不可变变体）在相同情形下**强制置 null**。鸿蒙 chat-domain 两条路径均按 Android 各自语义忠实实现（stream_accumulator.ts / 测试锁定）。需人工确认哪条为权威语义；若统一，改其中一条并更新测试。
 
 ## 已消除
 
