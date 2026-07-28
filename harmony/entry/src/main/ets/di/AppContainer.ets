@@ -304,13 +304,24 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
   }
   const sessionDefaults = resolveSessionDefaults(assistant, null, 'auto');
   const merged = mergeCustomParams(assistant, model);
+  // D-049:customBodies 进 params(三 provider 请求构建层均 mergeCustomBody);
+  //   customHeaders(assistant+model 拼接,GenerationHandler.kt:453-468 忠实)
+  //   注入各 provider 请求头,blank name 跳过,重名后值覆盖(toHeaders 语义),
+  //   且覆盖 auth 头(与各 api 层 extra-headers 覆盖语义一致)
   const params = makeTextGenerationParams({
     model: toChatModel(model),
     temperature: merged.temperature,
     topP: merged.topP,
     maxTokens: sessionDefaults.maxTokens,
     reasoningLevel: sessionDefaults.reasoningLevel,
+    customBody: merged.customBodies,
   });
+  const customHeaderRecord: Record<string, string> = {};
+  for (const h of merged.customHeaders) {
+    const name: string = h.name.trim();
+    if (name.length === 0) continue;
+    customHeaderRecord[name] = h.value.trim();
+  }
   // D-046:按变体类型分发到对应 api 组装层(均返回结构 OpenAIChatApi)。
   // auth header 归属:openai 由 adapter(openAIAuthHeaders);claude/google 由各自
   // api 层从 setting.apiKey 注入(x-api-key / x-goog-api-key)。
@@ -321,6 +332,7 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
     api = createClaudeChatApi({
       http: getAppContainer().httpClient,
       setting: claudeSetting,
+      headers: (): Record<string, string> => customHeaderRecord,
       encodeImage: encodeImageDetailed,
     });
   } else if (chosen.type === 'google') {
@@ -328,6 +340,7 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
     api = createGoogleChatApi({
       http: getAppContainer().httpClient,
       setting: googleSetting,
+      headers: (): Record<string, string> => customHeaderRecord,
       encodeImage: encodeImageDetailed,
     });
   } else {
@@ -345,8 +358,13 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
         authMode: openaiSetting.authMode,
         brand: openaiSetting.brand,
       }),
-      headers: (): Record<string, string> =>
-        openAIAuthHeaders(openaiSetting.authMode, openaiSetting.baseUrl, token),
+      headers: (): Record<string, string> => {
+        const auth: Record<string, string> =
+          openAIAuthHeaders(openaiSetting.authMode, openaiSetting.baseUrl, token);
+        // customHeaders 后写覆盖(auth 冲突时 custom 赢,同 claude/google 层语义)
+        for (const k of Object.keys(customHeaderRecord)) auth[k] = customHeaderRecord[k];
+        return auth;
+      },
       // D-038:图片编码(data:/http(s): 直通,file:// 读文件编码;失败即抛)
       encodeImage: encodeImageForChat,
     });

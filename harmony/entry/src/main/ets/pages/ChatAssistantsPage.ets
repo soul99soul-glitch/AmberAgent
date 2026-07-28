@@ -1,12 +1,15 @@
 // ChatAssistantsPage — 助手列表 + MVP 编辑(D-027)
-// 编辑面(D-039 补齐参数组):name/systemPrompt/temperature/topP/maxTokens/
-// contextMessageSize/推理力度;其余 24 字段保留原值
+// 编辑面(D-039 补齐参数组;D-049 补齐请求自定义组):name/systemPrompt/
+// temperature/topP/maxTokens/contextMessageSize/推理力度/streamOutput/
+// customHeaders/customBodies;其余 22 字段保留原值
 // (替换 by id 回写整个 blob,与 Provider 设置页同构)。全量编辑器 = P1。
 // 参数语义(Android AssistantBasicPage.kt 忠实):topP/maxTokens 可空,
 //   空白 = null(继承 provider 默认);maxTokens 必须 > 0,否则视为 null
 //   (AssistantBasicPage.kt:496-501 toIntOrNull()?.takeIf { it > 0 })
+// 请求自定义语义(Android PropertyEditor.kt 忠实):header name/value trim;
+//   body value = JSON,逐键解析,非法 JSON 行内报错并保留旧值(:160-176)
 import { router } from '@kit.ArkUI';
-import type { Assistant, ReasoningLevel } from '@amber/chat-domain';
+import type { Assistant, ReasoningLevel, CustomHeader, CustomBody, JsonValue } from '@amber/chat-domain';
 import {
   loadAssistants, saveAssistants, makeAssistant, patchAssistant, newId,
 } from '@amber/chat-domain';
@@ -39,6 +42,13 @@ struct ChatAssistantsPage {
   @State editContextSize: string = '';
   @State editReasoning: ReasoningLevel = 'auto';
   @State editStreamOutput: boolean = true;
+  // D-049:请求自定义(PropertyEditor.kt) — headers 直接编辑;bodies 的
+  //   JSON 值以文本态编辑(editBodyTexts),解析成功才落 editBodies,
+  //   失败行内报错(editBodyErrors)并保留旧值(Android :160-176 语义)
+  @State editHeaders: CustomHeader[] = [];
+  @State editBodies: CustomBody[] = [];
+  @State editBodyTexts: string[] = [];
+  @State editBodyErrors: string[] = [];
   @State showEditor: boolean = false;
 
   aboutToAppear(): void {
@@ -62,6 +72,12 @@ struct ChatAssistantsPage {
     this.editContextSize = a.contextMessageSize > 0 ? String(a.contextMessageSize) : '';
     this.editReasoning = a.reasoningLevel;
     this.editStreamOutput = a.streamOutput;
+    this.editHeaders = a.customHeaders.map(
+      (h: CustomHeader): CustomHeader => ({ name: h.name, value: h.value }));
+    this.editBodies = a.customBodies.map(
+      (b: CustomBody): CustomBody => ({ key: b.key, value: b.value }));
+    this.editBodyTexts = a.customBodies.map((b: CustomBody): string => JSON.stringify(b.value));
+    this.editBodyErrors = a.customBodies.map((): string => '');
     this.showEditor = true;
   }
 
@@ -75,6 +91,10 @@ struct ChatAssistantsPage {
     this.editContextSize = '';
     this.editReasoning = 'auto';
     this.editStreamOutput = true;
+    this.editHeaders = [];
+    this.editBodies = [];
+    this.editBodyTexts = [];
+    this.editBodyErrors = [];
     this.showEditor = true;
   }
 
@@ -101,6 +121,80 @@ struct ChatAssistantsPage {
     return Number.isFinite(v) && v > 0 ? Math.floor(v) : null;
   }
 
+  // ===== D-049 请求自定义行操作(数组整体替换触发 @State 刷新) =====
+
+  private setHeaderName(index: number, v: string): void {
+    const next: CustomHeader[] = [...this.editHeaders];
+    next[index] = { name: v, value: next[index].value };
+    this.editHeaders = next;
+  }
+
+  private setHeaderValue(index: number, v: string): void {
+    const next: CustomHeader[] = [...this.editHeaders];
+    next[index] = { name: next[index].name, value: v };
+    this.editHeaders = next;
+  }
+
+  private removeHeader(index: number): void {
+    this.editHeaders = this.editHeaders.filter((_: CustomHeader, i: number): boolean => i !== index);
+  }
+
+  private addHeader(): void {
+    // Android PropertyEditor.kt:108-113 — 追加 CustomHeader("", "")
+    this.editHeaders = [...this.editHeaders, { name: '', value: '' }];
+  }
+
+  private setBodyKey(index: number, v: string): void {
+    const next: CustomBody[] = [...this.editBodies];
+    next[index] = { key: v, value: next[index].value };
+    this.editBodies = next;
+  }
+
+  // Android :160-176 — 逐键解析;非法 JSON 行内报错(msg take 100)且保留旧值
+  private setBodyValueText(index: number, v: string): void {
+    const texts: string[] = [...this.editBodyTexts];
+    texts[index] = v;
+    this.editBodyTexts = texts;
+    const errs: string[] = [...this.editBodyErrors];
+    try {
+      const parsed: JsonValue = JSON.parse(v) as JsonValue;
+      const bodies: CustomBody[] = [...this.editBodies];
+      bodies[index] = { key: bodies[index].key, value: parsed };
+      this.editBodies = bodies;
+      errs[index] = '';
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      errs[index] = `无效 JSON: ${msg.substring(0, 100)}`;
+    }
+    this.editBodyErrors = errs;
+  }
+
+  private removeBody(index: number): void {
+    this.editBodies = this.editBodies.filter((_: CustomBody, i: number): boolean => i !== index);
+    this.editBodyTexts = this.editBodyTexts.filter((_: string, i: number): boolean => i !== index);
+    this.editBodyErrors = this.editBodyErrors.filter((_: string, i: number): boolean => i !== index);
+  }
+
+  private addBody(): void {
+    // Android :213-218 — 追加 CustomBody("", JsonPrimitive("")),文本态显示 ""
+    this.editBodies = [...this.editBodies, { key: '', value: '' }];
+    this.editBodyTexts = [...this.editBodyTexts, '""'];
+    this.editBodyErrors = [...this.editBodyErrors, ''];
+  }
+
+  // 保存前归一:header name/value、body key trim(Android 逐键 trim 等价在保存点收敛)
+  private normalizedHeaders(): CustomHeader[] {
+    return this.editHeaders.map((h: CustomHeader): CustomHeader => ({
+      name: h.name.trim(), value: h.value.trim(),
+    }));
+  }
+
+  private normalizedBodies(): CustomBody[] {
+    return this.editBodies.map((b: CustomBody): CustomBody => ({
+      key: b.key.trim(), value: b.value,
+    }));
+  }
+
   private save(): void {
     const name: string = this.editName.trim();
     if (name.length === 0) return;
@@ -122,6 +216,8 @@ struct ChatAssistantsPage {
             contextMessageSize: this.parseIntOrZero(this.editContextSize),
             reasoningLevel: this.editReasoning,
             streamOutput: this.editStreamOutput,
+            customHeaders: this.normalizedHeaders(),
+            customBodies: this.normalizedBodies(),
           });
         });
       } else {
@@ -134,6 +230,8 @@ struct ChatAssistantsPage {
           contextMessageSize: this.parseIntOrZero(this.editContextSize),
           reasoningLevel: this.editReasoning,
           streamOutput: this.editStreamOutput,
+          customHeaders: this.normalizedHeaders(),
+          customBodies: this.normalizedBodies(),
         })];
       }
       saveAssistants(getChatKvStore(), next).then((): void => {
@@ -248,7 +346,8 @@ struct ChatAssistantsPage {
         .width('100%').layoutWeight(1)
         .divider({ strokeWidth: 1, color: LINE })
       } else {
-        // ── 编辑器(MVP 4 字段) ──
+        // ── 编辑器 ──
+        Scroll() {
         Column() {
           Text(this.editingId.length > 0 ? '编辑助手' : '新建助手')
             .fontSize(15).fontColor(INK2)
@@ -302,6 +401,66 @@ struct ChatAssistantsPage {
               .onChange((isOn: boolean): void => { this.editStreamOutput = isOn; })
           }
           .width('100%').margin({ bottom: 8 })
+
+          // ── D-049 自定义请求头(PropertyEditor.kt:47-121) ──
+          Text('自定义请求头')
+            .fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 6, top: 4 })
+          ForEach(this.editHeaders, (h: CustomHeader, i: number): void => {
+            Row() {
+              TextInput({ text: h.name, placeholder: 'Header 名' })
+                .fontSize(13).height(38).backgroundColor(SURFACE)
+                .layoutWeight(1)
+                .onChange((v: string): void => this.setHeaderName(i, v))
+              TextInput({ text: h.value, placeholder: '值' })
+                .fontSize(13).height(38).backgroundColor(SURFACE)
+                .layoutWeight(1).margin({ left: 8 })
+                .onChange((v: string): void => this.setHeaderValue(i, v))
+              Text('删除')
+                .fontSize(12).fontColor('#B43A3A')
+                .padding({ left: 10 })
+                .onClick((): void => this.removeHeader(i))
+            }
+            .width('100%').margin({ bottom: 8 })
+          }, (h: CustomHeader, i: number): string => `h-${i}`)
+          Text('+ 添加 Header')
+            .fontSize(13).fontColor(ACCENT)
+            .padding({ top: 4, bottom: 4 })
+            .margin({ bottom: 8 })
+            .onClick((): void => this.addHeader())
+
+          // ── D-049 自定义请求体(PropertyEditor.kt:124-226) ──
+          Text('自定义请求体(JSON 合并)')
+            .fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 6, top: 4 })
+          ForEach(this.editBodies, (b: CustomBody, i: number): void => {
+            Column() {
+              Row() {
+                TextInput({ text: b.key, placeholder: 'Body 键' })
+                  .fontSize(13).height(38).backgroundColor(SURFACE)
+                  .layoutWeight(1)
+                  .onChange((v: string): void => this.setBodyKey(i, v))
+                Text('删除')
+                  .fontSize(12).fontColor('#B43A3A')
+                  .padding({ left: 10 })
+                  .onClick((): void => this.removeBody(i))
+              }
+              .width('100%').margin({ bottom: 6 })
+              TextArea({ text: this.editBodyTexts[i] ?? '', placeholder: 'JSON 值,如 {"thinking":{"type":"enabled"}}' })
+                .fontSize(12).backgroundColor(SURFACE)
+                .height(72)
+                .onChange((v: string): void => this.setBodyValueText(i, v))
+              if (this.editBodyErrors[i] !== undefined && this.editBodyErrors[i].length > 0) {
+                Text(this.editBodyErrors[i])
+                  .fontSize(11).fontColor('#B43A3A')
+                  .width('100%').margin({ top: 4 })
+              }
+            }
+            .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 10 })
+          }, (b: CustomBody, i: number): string => `b-${i}`)
+          Text('+ 添加 Body')
+            .fontSize(13).fontColor(ACCENT)
+            .padding({ top: 4, bottom: 4 })
+            .margin({ bottom: 8 })
+
           Row() {
             Text('取消')
               .fontSize(14).fontColor(INK3)
@@ -316,7 +475,9 @@ struct ChatAssistantsPage {
           }
           .width('100%')
         }
-        .width('100%').padding({ left: 16, right: 16 })
+        .width('100%').padding({ left: 16, right: 16, bottom: 32 })
+        }
+        .layoutWeight(1)
       }
     }
     .width('100%').height('100%').backgroundColor(BG)

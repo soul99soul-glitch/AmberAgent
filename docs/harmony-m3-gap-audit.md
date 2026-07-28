@@ -52,7 +52,7 @@
 | 图片压缩 + file:// 私有目录存储 | FileEncoder.kt compressAndEncode | PD-007；PixelMap 管线 |
 | ~~Google 请求构建~~ **已完成(D-045)** | ai/ GoogleProvider.kt(949 行) | Claude(D-044)/Google(D-045)均完成;**entry 运行时接线已完成(D-046)**;entry 运行时接线(D-046)与三变体设置编辑 UI(D-047)均完成;残余:BuiltInTools/Vertex service account/Code Assist OAuth 传输/authMode-brand 编辑面 = P1 |
 | 动态 system prompt blocks（time/date/lorebook/mode 注入） | Assistant.kt modeInjectionIds/lorebookIds | 依赖 lorebook/mode 存储 |
-| customHeaders/customBodies 编辑 UI | AssistantBasicPage | 模型/wire 已备（D-016） |
+| ~~customHeaders/customBodies 编辑 UI~~ **已完成(D-049)** | AssistantRequestPage.kt:78-95 + PropertyEditor.kt | 助手级编辑+运行时注入完成;model 级自定义参数编辑面 = P1(数据已被 mergeCustomParams 消费) |
 | memory（全局/助手级） | AssistantVM.kt:89-94 getMemories | 依赖 memory 存储设计 |
 | reasoning 折叠/展开交互 | Android ChatList reasoning 块 | UI 层 |
 
@@ -61,4 +61,4 @@
 M3（Chat MVP）source-only 阶段 **完成**，进入设备验证等待态（G-C blocked_by_human）。
 source-only 可做的 chat 主线功能面已基本穷尽；后续 source-only 切片转向：
 P1 清单中无设备依赖的纯逻辑项（~~FOLLOWUP 排队~~ **已完成 D-048**、~~Google/Claude 请求构建~~ **已完成 D-044/D-045/D-046**、
-customHeaders/customBodies 编辑、~~google/claude 变体设置编辑 UI~~ **已完成 D-047**）与 deepread/novel/council 域的剩余差距。
+~~customHeaders/customBodies 编辑~~ **已完成 D-049**、~~google/claude 变体设置编辑 UI~~ **已完成 D-047**）与 deepread/novel/council 域的剩余差距。

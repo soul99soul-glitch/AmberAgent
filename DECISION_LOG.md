@@ -475,3 +475,12 @@
   - **ChatPage.ets 接线**:send() 生成中 → enqueuePendingParts(FOLLOWUP,answer=true;满 20 错误文案逐字「消息队列已满，请先等待或取消一些排队消息。」),清空输入与待发图;派发重构为 sendParts(parts)(单文本 part 退化 string 与既有路径一致);.then/.catch 末尾 drainPendingQueue(出队 → prepare → sendParts;**失败也继续**,Android 循环逐条 catch → addError 后 dequeue 续行);停止按钮路径自然覆盖(abort → catch → drain,Android stopGeneration:2419-2454 同语义 — STEER 降级为 no-op 因鸿蒙队列不产 STEER);建议长按生成中 → 入队(D-042 登记项消除);排队 chips UI(「排队中」+ preview + ✕ 取消,横滑,Android ChatListIndicators pending 区语义);编辑态生成中发送 → 入队并退出编辑态(登记偏差:Android 无此交互组合)。
   - **裁剪登记**:队列持久化(Android PendingMessageStore 进程杀恢复)→ 内存态(P1);STEER 进行中注入(生成中流内插队,依赖 GenerationHandler 注入点)= P1;answer=false(只记录不回答)发送路径 = P1(enqueue 恒 answer=true);工具阻塞跳出(hasPendingOrUnexecutedTools)→ 鸿蒙无工具执行,循环无条件排空;regenerate 完成不 drain(Android 同 — 循环仅 initialize/send/stop 触发)。
 - **可逆性**:纯增模块 + send 路径重构;未生成中发送行为逐行不变(同构代码搬入 sendParts);测试 893 → 919。
+
+## D-049（L0，2026-07-28）customHeaders/customBodies：助手级编辑 UI + 运行时注入
+
+- **背景**：M3 gap 审计 P1 项 —— 模型/wire 已备(D-016 assistant.customHeaders/customBodies;D-017 序列化;mergeCustomParams(D-018)已拼接 assistant+model),但无编辑面且运行时未消费 → 只加 UI 会成静默 no-op(宪章禁止),必须编辑+消费同切片。
+- **决定**：
+  - **运行时消费(AppContainer.resolveChatRuntime)**:customBodies 进 params.customBody(三 provider 请求构建层均 mergeCustomBody,即插即通);customHeaders(assistant+model 拼接,GenerationHandler.kt:453-468 忠实)构建 Record —— blank name 跳过、name/value trim、重名后值覆盖(toHeaders 语义);注入:openai → auth 头之后后写覆盖;claude/google → api 层 headers? 回调(层内 extra 覆盖内建头语义一致)。**custom 覆盖 auth 为有意选择**(与 api 层 extra-headers 覆盖顺序一致,登记)。
+  - **助手编辑 UI(ChatAssistantsPage)**:PropertyEditor.kt 忠实 —— headers 行(名/值双输入+删除;+ 添加 Header 追加 CustomHeader("",""),:108-113);bodies 行(键输入+JSON 值 TextArea+删除;+ 添加 Body 追加 CustomBody("",JsonPrimitive("")) 文本态显示 '""',:213-218);**JSON 逐键解析**:解析成功落 value、失败行内报「无效 JSON: <msg take 100>」并保留旧值(:160-176);trim 在保存点归一(Android 逐键 trim 等价收敛);编辑器包 Scroll(行数增长防溢出)。
+  - **裁剪/偏差登记**:JSON 解析为 JS 严格模式(Android jsonLenient 允许尾逗号/未加引号等 — 引擎差异,PD-005 同类);代码高亮编辑(HighlightCodeVisualTransformation)无对应;**model 级 customHeaders/customBodies 编辑面 = P1**(数据已被 mergeCustomParams 消费,仅缺 UI);助手编辑其余字段(mcpServers/localTools/modeInjection/lorebook 等)仍保留原值。
+- **可逆性**:无 custom 配置的用户行为零变化(空数组 → 空 Record/空 customBody,请求构建逐字节不变);纯 UI + adapter 注入增项。
