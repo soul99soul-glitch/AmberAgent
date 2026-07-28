@@ -179,6 +179,43 @@ describe('runRegenerateAt', () => {
     assert.equal(store.saved.length, 2);
   });
 
+  it('assistant 路径 abort:部分分支照常追加入节点,正常 resolve(D-035 同语义)', async () => {
+    const conv = threeNodeConv();
+    const store = createMemoryConversationStore();
+    const signal = { aborted: true };
+    const d: RegenerateDeps = {
+      ...deps({
+        streamText: (_m: UIMessage[], onChunk: (c: MessageChunk) => void): Promise<void> => {
+          onChunk(chunkOf('部分'));
+          return Promise.reject(new Error('stream aborted'));
+        },
+      }),
+      store,
+      abortSignal: signal,
+    };
+    const out = await runRegenerateAt(conv, conv.messageNodes[2].id, d);
+    const node = out.messageNodes[2];
+    assert.equal(node.messages.length, 3);
+    assert.equal(node.selectIndex, 2);
+    const last = node.messages[2];
+    assert.equal(last.parts[0].type === 'text' ? (last.parts[0] as { text: string }).text : '', '部分');
+    assert.equal(store.saved.length, 1);
+  });
+
+  it('非 abort 错误维持传播(会话不变)', async () => {
+    const conv = threeNodeConv();
+    const store = createMemoryConversationStore();
+    const d: RegenerateDeps = {
+      ...deps({
+        streamText: (): Promise<void> => Promise.reject(new Error('HTTP 500')),
+      }),
+      store,
+      abortSignal: { aborted: false },
+    };
+    await assert.rejects(() => runRegenerateAt(conv, conv.messageNodes[2].id, d), /HTTP 500/);
+    assert.equal(store.saved.length, 0);
+  });
+
   it('未知 nodeId → 抛错(调用方传错是 bug,不静默)', async () => {
     const conv = threeNodeConv();
     const d: RegenerateDeps = deps(textProvider('x'));

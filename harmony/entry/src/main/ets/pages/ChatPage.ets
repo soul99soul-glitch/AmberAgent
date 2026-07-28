@@ -219,6 +219,7 @@ struct ChatPage {
     if (this.conversation === null || this.sending) return;
     this.sending = true;
     this.errorMsg = '';
+    this.abortController = new EntryAbortController();
     const conv: Conversation = this.conversation;
     const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime(conv.assistantId)
@@ -234,6 +235,7 @@ struct ChatPage {
           provider: asChatStreamProvider(rt.api, () => rt.params),
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
+          abortSignal: this.abortController?.signal,
         });
       })
       .then((out: Conversation): void => {
@@ -241,6 +243,7 @@ struct ChatPage {
         this.rows = buildRows(out);
         this.suggestions = out.chatSuggestions;
         this.sending = false;
+        this.abortController = null;
         this.scrollToBottom();
         if (holder.rt !== null) {
           this.maybeSuggestions(out, holder.rt);
@@ -249,6 +252,7 @@ struct ChatPage {
       .catch((e: Error): void => {
         this.errorMsg = e.message;
         this.sending = false;
+        this.abortController = null;
       });
   }
 

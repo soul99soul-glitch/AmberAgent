@@ -347,3 +347,12 @@
   - **UI**:发送中按钮变「停止」(红)→ abort();部分消息立即可读,可继续对话或 regenerate。
   - regenerate 路径 abort 处理 = P1(当前 abort 仅接 send;regenerate 用同 provider 但不传 signal,行为同前)。
 - **可逆性**:StreamOpts 可选,全链路向后兼容;不传 signal 行为与 D-012 完全一致。
+
+## D-036（L0，2026-07-28）regenerate abort 落地：D-035 停止生成 P1 项清零
+
+- **背景**：D-035 停止生成仅接 send 路径,regenerate abort 裁为 P1。
+- **决定**：
+  - **RegenerateDeps.abortSignal**(TDD 2 测试):assistant 路径 abort → 部分分支照常追加进节点 + selectIndex 指向 + 持久化 + 正常 resolve(chat_turn D-035 同语义);非 abort 错误维持传播、会话不变;user 路径 abort → 截断保持已持久化(Android 同序,逻辑复用同一 catch 分叉)。
+  - **UI**:regenerate 也创建 EntryAbortController 并传入;「停止」按钮对 send/regenerate 均生效(同一 this.sending/abortController 状态机)。
+  - D-035 P1 项清零,停止生成语义全路径一致。
+- **可逆性**:abortSignal 可选;不传行为与 D-030 完全一致。

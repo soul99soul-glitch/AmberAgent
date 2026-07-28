@@ -24,7 +24,8 @@ import type {
   MessageTransformer, OutputMessageTransformer, TransformerContext,
 } from './transformer_pipeline.ts';
 import { applyInputTransformers, applyOnGenerationFinish } from './transformer_pipeline.ts';
-import type { ChatStreamProvider, ConversationStore } from './chat_turn.ts';
+import type { ChatStreamProvider, ConversationStore, StreamOpts } from './chat_turn.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import { nowIso } from './ids.ts';
 
 // ===== 分支切换 =====
@@ -53,6 +54,8 @@ export interface RegenerateDeps {
   agentSoul?: string;
   contextMessageSize?: number;
   onUpdate?: (messages: UIMessage[]) => void;
+  // 停止生成(D-035 扩展):abort → 部分快照照常入列(分支追加/新节点),正常 resolve
+  abortSignal?: AbortSignalLike;
 }
 
 export const runRegenerateAt = async (
@@ -105,13 +108,25 @@ export const runRegenerateAt = async (
     : [...baseMessages, makeUIMessage('assistant', [])];
   const accumulator = new MessageStreamAccumulator(seed);
   let sawChunk: boolean = false;
-  await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
-    sawChunk = true;
-    accumulator.append(chunk);
-    if (deps.onUpdate !== undefined) {
-      deps.onUpdate(accumulator.snapshot());
+  const streamOpts: StreamOpts | undefined = deps.abortSignal !== undefined
+    ? { signal: deps.abortSignal }
+    : undefined;
+  try {
+    await deps.provider.streamText(internalMessages, (chunk: MessageChunk): void => {
+      sawChunk = true;
+      accumulator.append(chunk);
+      if (deps.onUpdate !== undefined) {
+        deps.onUpdate(accumulator.snapshot());
+      }
+    }, streamOpts);
+  } catch (e) {
+    // abort(停止生成):部分快照照常终态化入列(chat_turn D-035 同语义);
+    // 其余错误传播(user 路径截断保持已持久化,Android 同序)
+    const aborted: boolean = deps.abortSignal !== undefined && deps.abortSignal.aborted;
+    if (!aborted) {
+      throw e;
     }
-  });
+  }
   if (!sawChunk) {
     return isUserNode ? working : conversation;
   }
