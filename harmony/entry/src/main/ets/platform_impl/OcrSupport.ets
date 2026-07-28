@@ -26,6 +26,7 @@ import {
 } from '@amber/chat-domain';
 import { getAppContainer } from '../di/AppContainer.ets';
 import { encodeImageDetailed, encodeImageForChat } from './EntryImageEncoder.ets';
+import { getChatKeyRoulette } from './KeyRouletteSupport.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.OcrSupport';
@@ -127,6 +128,7 @@ const buildVisionApi = (provider: ProviderSetting): OpenAIChatApi => {
       http,
       setting: provider as ProviderSettingClaude,
       encodeImage: encodeImageDetailed,
+      keyRoulette: getChatKeyRoulette(),
     });
   }
   if (provider.type === 'google') {
@@ -134,6 +136,7 @@ const buildVisionApi = (provider: ProviderSetting): OpenAIChatApi => {
       http,
       setting: provider as ProviderSettingGoogle,
       encodeImage: encodeImageDetailed,
+      keyRoulette: getChatKeyRoulette(),
     });
   }
   const o: ProviderSettingOpenAIVariant = provider as ProviderSettingOpenAIVariant;
@@ -149,7 +152,8 @@ const buildVisionApi = (provider: ProviderSetting): OpenAIChatApi => {
       authMode: o.authMode,
       brand: o.brand,
     }),
-    headers: (): Record<string, string> => openAIAuthHeaders(o.authMode, o.baseUrl, o.apiKey),
+    headers: (): Record<string, string> => openAIAuthHeaders(
+      o.authMode, o.baseUrl, getChatKeyRoulette().next(o.apiKey, o.id)),
     encodeImage: encodeImageForChat,
   });
 };

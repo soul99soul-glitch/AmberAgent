@@ -4,7 +4,6 @@
 //   generateText(:107-152) / streamText(:154-287) / onFailure(:256-273)
 //
 // 裁剪(D-014 同构延续):
-//   - keyRoulette 多 key 轮换 → 单 apiKey(adapter headers() 注入,P1)
 //   - configureReferHeaders 由 adapter 经 headers() 注入;secret 不进纯逻辑层
 //   - OkHttp EventSource.cancel 无对应:解析失败抛错即终止消费(同 openai_chat_api)
 
@@ -22,9 +21,14 @@ import { parseClaudeResponseBody, parseClaudeStreamEvent } from './claude_parse.
 import { parseOpenAiErrorDetail } from './openai_parse.ts';
 import type { ChatStreamProvider, StreamOpts } from './chat_turn.ts';
 import type { CallOpts, OpenAIChatApi } from './openai_chat_api.ts';
+import { createDefaultKeyRoulette } from '../search/search_service.ts';
+import type { KeyRoulette } from '../search/search_service.ts';
 
 // ClaudeProvider.kt:65
 export const ANTHROPIC_VERSION: string = '2023-06-01';
+
+// KeyRoulette.default()(KeyRoulette.kt:12;deps 未注入时兜底)
+const DEFAULT_ROULETTE: KeyRoulette = createDefaultKeyRoulette();
 
 export interface ClaudeChatApiDeps {
   http: HttpClient;
@@ -32,6 +36,9 @@ export interface ClaudeChatApiDeps {
   // adapter 注入的额外 header(custom/referer);x-api-key/anthropic-version 由本层加
   headers?: () => Record<string, string>;
   encodeImage?: ClaudeImageEncoder;
+  // D-078:多 key 轮换(ClaudeProvider.kt:68/:74 — 每请求 next(apiKey, id));
+  //   未提供 → DefaultKeyRoulette(random)
+  keyRoulette?: KeyRoulette;
 }
 
 const buildRequest = (
@@ -43,9 +50,11 @@ const buildRequest = (
   const body = buildClaudeMessageRequest({
     messages, params, setting: deps.setting, stream, encodeImage: deps.encodeImage,
   });
+  const roulette: KeyRoulette = deps.keyRoulette ?? DEFAULT_ROULETTE;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-api-key': deps.setting.apiKey,
+    // ClaudeProvider.kt:74 — 每请求 keyRoulette.next(apiKey, id)
+    'x-api-key': roulette.next(deps.setting.apiKey, deps.setting.id),
     'anthropic-version': ANTHROPIC_VERSION,
   };
   const extra = deps.headers !== undefined ? deps.headers() : {};

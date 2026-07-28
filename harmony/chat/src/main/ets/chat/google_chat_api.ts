@@ -5,7 +5,6 @@
 //   generateText(:194-281) / streamText(:283-463) / onFailure(:416-448)
 //
 // 裁剪(登记):
-//   - keyRoulette 多 key 轮换 → 单 apiKey(PD-008)
 //   - Vertex AI service account(JWT 换 token)= P1;命中即抛错(非静默)
 //   - Gemini Code Assist OAuth(v1internal 包装/解包 + Bearer)= P1;
 //     纯逻辑层的 isCodeAssistOAuth/response 解包已保留
@@ -27,6 +26,11 @@ import {
 } from './google_parse.ts';
 import type { ChatStreamProvider, StreamOpts } from './chat_turn.ts';
 import type { CallOpts, OpenAIChatApi } from './openai_chat_api.ts';
+import { createDefaultKeyRoulette } from '../search/search_service.ts';
+import type { KeyRoulette } from '../search/search_service.ts';
+
+// KeyRoulette.default()(KeyRoulette.kt:12;deps 未注入时兜底)
+const DEFAULT_ROULETTE: KeyRoulette = createDefaultKeyRoulette();
 
 export interface GoogleChatApiDeps {
   http: HttpClient;
@@ -34,6 +38,9 @@ export interface GoogleChatApiDeps {
   // adapter 注入的额外 header(custom/referer);api key 由本层加
   headers?: () => Record<string, string>;
   encodeImage?: GoogleImageEncoder;
+  // D-078:多 key 轮换(GoogleProvider.kt:77/:134 — 每请求 next(apiKey, id));
+  //   未提供 → DefaultKeyRoulette(random)
+  keyRoulette?: KeyRoulette;
 }
 
 // buildUrl(:111-119)
@@ -50,14 +57,16 @@ const buildGoogleUrl = (setting: ProviderSettingGoogle, path: string): string =>
 
 // transformRequest(:121-145) 的 URL/头形态(api key 路径):
 //   vertexAI → key 作为 query 参数;否则 x-goog-api-key 头
+// D-078:key 由调用方按请求轮换解析(GoogleProvider.kt:134)
 const applyGoogleAuth = (
   setting: ProviderSettingGoogle, url: string, headers: Record<string, string>,
+  key: string,
 ): string => {
   if (setting.vertexAI) {
     const sep: string = url.indexOf('?') >= 0 ? '&' : '?';
-    return `${url}${sep}key=${encodeURIComponent(setting.apiKey)}`;
+    return `${url}${sep}key=${encodeURIComponent(key)}`;
   }
-  headers['x-goog-api-key'] = setting.apiKey;
+  headers['x-goog-api-key'] = key;
   return url;
 };
 
@@ -86,7 +95,10 @@ const buildRequest = (
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const extra = deps.headers !== undefined ? deps.headers() : {};
   for (const k of Object.keys(extra)) headers[k] = extra[k];
-  url = applyGoogleAuth(deps.setting, url, headers);
+  // GoogleProvider.kt:134 — 每请求 keyRoulette.next(apiKey, id)
+  const roulette: KeyRoulette = deps.keyRoulette ?? DEFAULT_ROULETTE;
+  url = applyGoogleAuth(deps.setting, url, headers,
+    roulette.next(deps.setting.apiKey, deps.setting.id));
   return { url, method: 'POST', headers, body: JSON.stringify(body) };
 };
 

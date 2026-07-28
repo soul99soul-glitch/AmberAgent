@@ -874,3 +874,13 @@
   - **ChatPage**:loadExtraSystemBlocks — 关 → [];开 → listRecent(10) → title + Intl medium date(updateAt) → buildRecentChatsPrompt → 非空才成块;3 个生成 deps 站点接线。
   - **TDD 3 测试**:LIMIT 常量/pretty 4 空格形状逐字/模板逐字+空列表。
 - **可逆性**:1466 测试全绿(deepread 603 + chat 863),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。动态块残余:memory(memory 子系统 P1)/generativeUi(generative UI 大特性 P1)。
+
+## D-078（L0，2026-07-28）chat provider 多 key 轮换接线 — PD-008 消除
+
+- **背景**：KeyRoulette 本体已随搜索移植(D-065,KeyRoulette.kt 全文:split/distinct/DefaultRandom/LRU 24h 过期/持久化结构),chat 三 provider 一直单 key 直用(PD-008 open)。Android 锚点:OpenAIProvider.kt:61(ChatCompletionsAPI.kt:102-105 bearerResolver 每请求)/ClaudeProvider.kt:68,:74/GoogleProvider.kt:77,:134/KeyRoulette.kt:43(LRU_CACHE_FILE 逐字)。
+- **决定**：
+  - **HAR api 层**:ClaudeChatApiDeps/GoogleChatApiDeps + keyRoulette?: KeyRoulette(未提供 → 模块级 DEFAULT_ROULETTE = createDefaultKeyRoulette());x-api-key/x-goog-api-key/vertex key query **每请求** roulette.next(setting.apiKey, setting.id)(:74/:134 语义);openai 层不动(token 注入设计,轮换点 = adapter headers() 每请求调用)。
+  - **KeyRouletteSupport.ets(entry)**:LRU 单例(getChatKeyRoulette);store = cacheDir/lru_key_roulette.json 逐字文件名,read 不存在/失败 → null,write 吞咽(Android saveCache catch {} 语义),nowMs = Date.now;app 运行时恒 LRU(Android context != null 分支)。
+  - **接线**:AppContainer resolveChatRuntime 三变体 — claude/google 传 keyRoulette;openai token 从一次性解析改 nextToken() 闭包(headers() 内每请求轮换,bearerResolver 语义);OcrSupport buildVisionApi 同接线(vision api 走同一 provider 池)。
+  - **TDD 4 测试**:claude 每请求 next(apiKey,id)+x-api-key 轮换/google 头轮换/vertex key query encode/缺省 roulette 随机取一不抛错。
+- **可逆性**:1470 测试全绿(deepread 603 + chat 867),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。PARITY_DEBT PD-008 → closed;open 偏差余 6 条。

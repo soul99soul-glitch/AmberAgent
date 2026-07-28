@@ -24,6 +24,7 @@ import { createOpenAiCompatibleAiClient } from '../platform_impl/OpenAiCompatibl
 import { createTavilyAndFallbackRegistry } from '../platform_impl/SearchRegistry.ets';
 import { createNotificationNotifier } from '../platform_impl/NotificationNotifier.ets';
 import { createFileStore } from '../platform_impl/FileStore.ets';
+import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
 import { createNovelModelAdapter } from '../platform_impl/NovelModelAdapter.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -360,6 +361,8 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
       setting: claudeSetting,
       headers: (): Record<string, string> => customHeaderRecord,
       encodeImage: encodeImageDetailed,
+      // D-078:每请求 LRU 轮换(ClaudeProvider.kt:68/:74,PD-008 消除)
+      keyRoulette: getChatKeyRoulette(),
     });
   } else if (chosen.type === 'google') {
     const googleSetting: ProviderSettingGoogle = chosen as ProviderSettingGoogle;
@@ -368,10 +371,16 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
       setting: googleSetting,
       headers: (): Record<string, string> => customHeaderRecord,
       encodeImage: encodeImageDetailed,
+      // D-078:每请求 LRU 轮换(GoogleProvider.kt:77/:134)
+      keyRoulette: getChatKeyRoulette(),
     });
   } else {
     const openaiSetting: ProviderSettingOpenAIVariant = chosen as ProviderSettingOpenAIVariant;
-    const token: string = openaiSetting.apiKey;
+    // D-078:bearerResolver 语义(ChatCompletionsAPI.kt:103-105)— token 不再
+    //   一次性解析,headers() 每请求调用时轮换(ChatCompletionsAPI.kt:102-105
+    //   bearerResolver 每请求语义;PD-008 消除)
+    const nextToken: () => string = (): string =>
+      getChatKeyRoulette().next(openaiSetting.apiKey, openaiSetting.id);
     api = createOpenAIChatApi({
       http: getAppContainer().httpClient,
       setting: makeProviderSettingOpenAI({
@@ -386,7 +395,7 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
       }),
       headers: (): Record<string, string> => {
         const auth: Record<string, string> =
-          openAIAuthHeaders(openaiSetting.authMode, openaiSetting.baseUrl, token);
+          openAIAuthHeaders(openaiSetting.authMode, openaiSetting.baseUrl, nextToken());
         // customHeaders 后写覆盖(auth 冲突时 custom 赢,同 claude/google 层语义)
         for (const k of Object.keys(customHeaderRecord)) auth[k] = customHeaderRecord[k];
         return auth;
