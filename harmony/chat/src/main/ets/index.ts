@@ -123,6 +123,27 @@ export {
   extractThinkingTitle, resolveOnStreamStart, resolveOnStreamEnd,
 } from './chat/reasoning_display.ts';
 
+// ===== 上下文压缩纯逻辑(D-054,Planner/Estimator/Payload/Models 全文) =====
+export type {
+  ConversationCompact, CompactPolicy, CompactPlan, CompactSummaryPayload,
+} from './chat/context_compact.ts';
+export {
+  COMPACT_SCHEMA_VERSION, makeCompactPolicy, compactPlanSourceMessageCount,
+  weightedTokenChars, partEstimatedChars, partInputFootprintChars,
+  estimateTokens, estimateContextWindow, estimateMessagesFootprint,
+  takeMiddle, toolResultSummarize, partSummaryLine, buildCompressionInput,
+  cleanRaw, cleanMarkdown, cleanHumanText, ensureTerminalPeriod, looksLikeJsonFragment,
+  parseCompactSummary, compactTimelineSummary, compactSearchableText,
+  compactInjectionText, compactInjectionTextParts,
+  validCompletedCompacts, selectCompactsForInjection,
+  compactSentenceCount, isHighQualityPayload,
+  normalizeCompactModelOutput, compactFallbackPayload, remapCoveredCompactIds,
+  planCompaction, planForceCompaction, prepareMessagesWithCompacts,
+  fitMessagesToTokenBudget, estimateConversationInputTokens,
+  MAX_COMPACT_TIMELINE_SUMMARY_CHARS, MAX_COMPACT_HANDOFF_CHARS,
+  DEFAULT_COMPACT_CONTEXT_WINDOW_TOKENS,
+} from './chat/context_compact.ts';
+
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,
   serializeMessageList, parseMessageList,
