@@ -1213,3 +1213,15 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **偏差/适配登记**: 无新增(六 Switch 合并为单 handler + Record patch,语义逐条等价)。
 - **未移植(P1 登记)**: 记忆汇总卡/Overview 子页导航/导入导出 UI/toolbar 立即运行(workScheduler)/memoryRecall maxItems/maxPromptChars 编辑(Android 亦无 UI,仅 JSON 持有)。
 - **验证**: chat tsc 干净 + 1035 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-093 — 记忆汇总卡('Amber 对你的了解'三组过滤器)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingAgentMemoryPage.kt:793-884(MemorySummarySection/MemorySummaryGroup)/:907-909(isSummarySensitive)
+- **决策**:
+  1. `chat/memory_summary.ts`(TDD 5 测试):memorySummaryGroups(core, longTerm, shortTerm)→ {stable, longTermProjects, currentProjects}——stable=(core+longTerm) 串联过滤(!archived && !isSensitiveMemoryContent && (scope==core || kind∈{user,feedback,routine} || pinned))后 distinctBy(id) 首次保序;longTermProjects=longTerm 过滤 kind∈{project,reference};currentProjects=shortTerm 过滤 kind==project(敏感判定复用 D-085b isSensitiveMemoryContent)。
+  2. MemoryPage summaryCard 置于记忆库三桶前(Android Library 子页顶序):标题'Amber 对你的了解';三组(稳定偏好/长期项目/当前短期事项)各 take(6),行文本 '#id [scope/kind] content' maxLines 2 点击 → startEditMemory(同记录编辑对话框);三组全空 → '暂无可汇总的正式记忆。'。分组在三桶 Promise.all 加载后一次性计算入 @State(渲染期不重复过滤)。
+- **偏差/适配登记**: 无新增。
+- **未移植(P1 登记)**: Overview 子页导航/导入导出 UI(目录选择器)/toolbar 立即运行(workScheduler)。
+- **验证**: chat tsc 干净 + 1040 测试(+5)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

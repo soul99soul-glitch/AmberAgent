@@ -21,7 +21,9 @@ import type {
   MemoryEvent, MemoryIgnoreLowConfidenceResult, MemoryMergeSuggestion,
   MemorySupersedeSuggestion, PersistedMemoryDreamPlan,
 } from '@amber/chat-domain';
+import type { MemorySummaryGroups } from '@amber/chat-domain';
 import {
+  memorySummaryGroups,
   acceptMemoryCandidate, applyMemoryDreamPlanOp, dismissMemoryDreamPlanOp,
   ignoreLowConfidenceMemoryCandidates, ignoreMemoryCandidate, isAnyDreamEnabled,
   memoryDreamApplyFailureMessage, memoryDreamPlanFailureMessage,
@@ -142,6 +144,10 @@ struct MemoryPage {
   @State coreMemories: AssistantMemory[] = [];
   @State shortMemories: AssistantMemory[] = [];
   @State longMemories: AssistantMemory[] = [];
+  // 汇总卡分组(D-093;三桶加载后一次性计算,避免渲染期重复过滤)
+  @State summaryStable: AssistantMemory[] = [];
+  @State summaryLongProjects: AssistantMemory[] = [];
+  @State summaryCurrentProjects: AssistantMemory[] = [];
   // 事件(VM :62-64 getRecentEventsFlow(100))
   @State recentEvents: MemoryEvent[] = [];
   @State showEventsDialog: boolean = false;
@@ -197,14 +203,19 @@ struct MemoryPage {
         this.recallMaxPromptChars = s.memoryRecall.maxPromptChars;
       });
     const lib: MemoryLibraryOps = getMemoryLibraryOps();
-    lib.listBucket(MEMORY_BUCKET_GLOBAL).then((l: AssistantMemory[]): void => {
-      this.coreMemories = l;
-    });
-    lib.listBucket(MEMORY_BUCKET_SHORT_TERM).then((l: AssistantMemory[]): void => {
-      this.shortMemories = l;
-    });
-    lib.listBucket(MEMORY_BUCKET_LONG_TERM).then((l: AssistantMemory[]): void => {
-      this.longMemories = l;
+    Promise.all([
+      lib.listBucket(MEMORY_BUCKET_GLOBAL),
+      lib.listBucket(MEMORY_BUCKET_SHORT_TERM),
+      lib.listBucket(MEMORY_BUCKET_LONG_TERM),
+    ]).then((lists: AssistantMemory[][]): void => {
+      this.coreMemories = lists[0];
+      this.shortMemories = lists[1];
+      this.longMemories = lists[2];
+      const groups: MemorySummaryGroups =
+        memorySummaryGroups(this.coreMemories, this.longMemories, this.shortMemories);
+      this.summaryStable = groups.stable;
+      this.summaryLongProjects = groups.longTermProjects;
+      this.summaryCurrentProjects = groups.currentProjects;
     });
     lib.getRecentEvents(100).then((l: MemoryEvent[]): void => {
       this.recentEvents = l;
@@ -721,6 +732,48 @@ struct MemoryPage {
     .padding(16).backgroundColor(SURFACE).borderRadius(12)
   }
 
+  // ===== D-093:记忆汇总卡(Page :793-884,'Amber 对你的了解')=====
+
+  @Builder
+  summaryGroup(title: string, memories: AssistantMemory[]) {
+    if (memories.length > 0) {
+      Column({ space: 6 }) {
+        Text(title)
+          .fontSize(12).fontWeight(FontWeight.Medium).fontColor(ACCENT)
+        ForEach(memories.slice(0, 6), (m: AssistantMemory): void => {
+          Text(`#${m.id} [${m.scope}/${m.kind}] ${m.content}`)
+            .fontSize(12).fontColor(INK3)
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+            .onClick((): void => this.startEditMemory(m))
+        }, (m: AssistantMemory): string => `${m.id}`)
+      }
+      .width('100%').alignItems(HorizontalAlign.Start)
+    }
+  }
+
+  @Builder
+  summaryCard() {
+    Column({ space: 8 }) {
+      Text('Amber 对你的了解')
+        .fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
+      Column({ space: 12 }) {
+        if (this.summaryStable.length === 0
+          && this.summaryLongProjects.length === 0
+          && this.summaryCurrentProjects.length === 0) {
+          Text('暂无可汇总的正式记忆。').fontSize(12).fontColor(INK3)
+        } else {
+          this.summaryGroup('稳定偏好', this.summaryStable)
+          this.summaryGroup('长期项目', this.summaryLongProjects)
+          this.summaryGroup('当前短期事项', this.summaryCurrentProjects)
+        }
+      }
+      .width('100%').alignItems(HorizontalAlign.Start)
+      .padding(16).backgroundColor(SURFACE).borderRadius(12)
+    }
+    .width('100%').alignItems(HorizontalAlign.Start)
+  }
+
   // 三桶共用区(Page :622-648 调用点)— info '?' 三桶皆有(core/short/long);
   //   core 的 add 图标被 info 分支遮蔽(:1250-1255),忠实移植无新增按钮
   @Builder
@@ -906,6 +959,7 @@ struct MemoryPage {
               }
               .width('100%').alignItems(HorizontalAlign.Start)
 
+              this.summaryCard()
               this.recordsSection(
                 '核心记忆', TEXT_CORE_EMPTY, this.coreMemories,
                 TEXT_CORE_INFO_TITLE, TEXT_CORE_INFO_BODY)

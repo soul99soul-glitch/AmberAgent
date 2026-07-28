@@ -641,6 +641,8 @@ export { buildMemoryDreamPrompt } from './chat/memory_dream_prompt.ts';
 export {
   buildAgentSoulPrompt, DEFAULT_AGENT_SOUL_MARKDOWN,
 } from './chat/agent_soul_prompt.ts';
+export { memorySummaryGroups } from './chat/memory_summary.ts';
+export type { MemorySummaryGroups } from './chat/memory_summary.ts';
 export {
   dreamPlanOnlyApplicable, isAnyDreamEnabled, isDreamMaintenanceEnabled,
   isDreamModelEnabled, makeMemoryDreamPlan, memoryDreamPlanHasChanges,
