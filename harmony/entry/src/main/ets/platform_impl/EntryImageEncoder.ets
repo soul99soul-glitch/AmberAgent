@@ -90,17 +90,6 @@ export const encodeImageDetailed = (url: string): EntryEncodedImage => {
   }
 };
 
-// 读 picker 返回的 content/file URI → data: URL(选图即刻物化,避免临时授权过期;
-//   偏差登记:Android 复制到应用私有目录存 file://,鸿蒙 MVP 直接存 data: URL)
-export const readImageAsDataUrl = (uri: string): string => {
-  const file = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
-  try {
-    const stat = fileIo.statSync(file.fd);
-    const buf = new ArrayBuffer(stat.size);
-    fileIo.readSync(file.fd, buf);
-    const base64 = new util.Base64Helper().encodeToStringSync(new Uint8Array(buf));
-    return `data:${mimeFromPath(uri)};base64,${base64}`;
-  } finally {
-    fileIo.closeSync(file);
-  }
-};
+// 选图物化链路(D-038)已迁至 ImageCompress.ets(D-079b,物化即压缩);
+//   本文件仅保留 encode 期 Port 实现。PD-007 残余登记:file:// 私有目录存储、
+//   file:// encode 期压缩(鸿蒙压缩在物化点完成,encode 期 file:// 原样)。

@@ -3,8 +3,9 @@
 // D-024:assistant 分支 — ◀ n/m ▶ 切换(selectMessageBranch) + 末条「重新生成」
 //   (runRegenerateAt);D-041:regenerate 流式预览落地(目标节点行下渲染流式
 //   快照,visual transforms 与 send 路径一致),MVP spinner 裁剪项清零
-// D-038:图片输入 — PhotoViewPicker 选图 → readImageAsDataUrl 物化为 data: URL
-//   → UIMessagePart[] 发送(文本可空,图片不可空);渲染 Image(p.url)
+// D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
+//   (文本可空,图片不可空);渲染 Image(p.url)
+// D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
@@ -52,7 +53,7 @@ import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
   getChatKvStore, getCompactStore, getSessionGrantStore,
 } from '../di/AppContainer.ets';
-import { readImageAsDataUrl } from '../platform_impl/EntryImageEncoder.ets';
+import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
@@ -716,7 +717,9 @@ struct ChatPage {
     this.inputText = '';
   }
 
-  // 图片选择(D-038):PhotoViewPicker → 读为 data: URL → 待发预览;
+  // 图片选择(D-038):PhotoViewPicker → data: URL → 待发预览;
+  //   D-079b:物化时压缩(gif 直通,其余 JPEG q85 长边 ≤2048 + EXIF 归一),
+  //   对齐 Android FileEncoder.compressAndEncode 载荷;
   //   读取失败逐张告警(非静默),Android 同语义(FileEncoder 失败即抛)
   private pickImages(): void {
     if (this.sending) return;
@@ -727,15 +730,12 @@ struct ChatPage {
     picker.select(options).then((result: photoAccessHelper.PhotoSelectResult): void => {
       const uris: string[] = result.photoUris;
       for (const uri of uris) {
-        // 同步读取(fileIo):失败逐张告警,不静默
-        try {
-          const dataUrl: string = readImageAsDataUrl(uri);
+        compressImageAsDataUrl(uri).then((dataUrl: string): void => {
           this.pendingImages = [...this.pendingImages, dataUrl];
-        } catch (e) {
-          const msg: string = (e as Error).message;
-          hilog.warn(0x0001, 'ChatPage', `图片读取失败: ${msg}`);
-          this.errorMsg = `图片读取失败: ${msg}`;
-        }
+        }).catch((e: Error): void => {
+          hilog.warn(0x0001, 'ChatPage', `图片读取失败: ${e.message}`);
+          this.errorMsg = `图片读取失败: ${e.message}`;
+        });
       }
     }).catch((e: Error): void => {
       // 用户取消选择也会走 reject(cancel)— 仅记录,不算错误

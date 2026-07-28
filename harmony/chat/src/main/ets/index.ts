@@ -530,3 +530,16 @@ export type {
   InjectionPosition, InjectionRole, Lorebook, PromptInjection,
   PromptInjectionDeps, RegexInjection,
 } from './chat/prompt_injection_transformer.ts';
+
+// ===== D-079a:图片压缩纯函数(FileEncoder.kt:14-30,53-66,236-303) =====
+// PixelMap 解码/EXIF 归一化在 entry(ImageKit),HAR 只承载无平台依赖的部分。
+export {
+  AVIF_BRANDS, COMPRESS_JPEG_QUALITY, COMPRESS_MAX_DIMENSION, HEIF_BRANDS,
+  SUPPORTED_IMAGE_TYPES,
+  EXIF_ORIENTATION_FLIP_HORIZONTAL, EXIF_ORIENTATION_FLIP_VERTICAL,
+  EXIF_ORIENTATION_NORMAL, EXIF_ORIENTATION_ROTATE_180, EXIF_ORIENTATION_ROTATE_270,
+  EXIF_ORIENTATION_ROTATE_90, EXIF_ORIENTATION_TRANSPOSE, EXIF_ORIENTATION_TRANSVERSE,
+  EXIF_ORIENTATION_UNDEFINED,
+  calculateInSampleSize, guessImageMimeType, mapExifOrientationToTransform,
+} from './chat/image_compress.ts';
+export type { ExifTransformType } from './chat/image_compress.ts';

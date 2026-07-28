@@ -884,3 +884,22 @@
   - **接线**:AppContainer resolveChatRuntime 三变体 — claude/google 传 keyRoulette;openai token 从一次性解析改 nextToken() 闭包(headers() 内每请求轮换,bearerResolver 语义);OcrSupport buildVisionApi 同接线(vision api 走同一 provider 池)。
   - **TDD 4 测试**:claude 每请求 next(apiKey,id)+x-api-key 轮换/google 头轮换/vertex key query encode/缺省 roulette 随机取一不抛错。
 - **可逆性**:1470 测试全绿(deepread 603 + chat 867),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。PARITY_DEBT PD-008 → closed;open 偏差余 6 条。
+
+## D-079a（L0，2026-07-28）图片压缩 HAR 纯函数 — FileEncoder.kt 无平台依赖部分
+
+- **背景**：PD-007 登记图片压缩裁剪。压缩管线拆两层:纯函数(mime 魔数嗅探/采样步进/EXIF 映射)进 HAR 可测;PixelMap 解码/变换/打包进 entry(ImageKit)。Android 锚点:FileEncoder.kt:14-30(supportedTypes/HEIF/AVIF brands)、:53-66(EXIF 8 值映射)、:236-250(calculateInSampleSize)、:252-303(guessMimeType)。
+- **决定**：
+  - **image_compress(HAR)**:COMPRESS_MAX_DIMENSION=2048/COMPRESS_JPEG_QUALITY=85(:140-141 默认参);SUPPORTED_IMAGE_TYPES 6 frozen;HEIF_BRANDS 10/AVIF_BRANDS 2 逐字。
+  - **guessImageMimeType(Uint8Array)**:逐字 — <12 字节抛 'File too short to determine MIME type';ftyp box(offset 4 ASCII)+ brand(offset 8-12)→ image/heic|avif;JPEG FFD8;PNG 8 字节魔数;RIFF+WEBP;GIF89a/87a;否则抛 `Failed to guess MIME type: {header6}, {bytes}`(无符号字节逗号连接,逐字)。
+  - **calculateInSampleSize(w,h,req=2048)**:两个 while 逐字 — 第一循环整除(Math.trunc 对齐 Kotlin Int 除法)倍增至 ≤req;16MP 安全网(Long 乘积,Math.trunc 后相乘)再倍增。测试锁定:8000x8000 → 4(第一循环主导,16MP 网未触及);16384x16384 → 8。
+  - **EXIF 常量 0-8 + mapExifOrientationToTransform**:switch 逐字,NORMAL/UNDEFINED/未知 → NONE;ExifTransformType 为字符串 union(Android internal enum 忠实)。
+- **可逆性**:1476 测试全绿(deepread 603 + chat 873),tsc 双 HAR clean。entry 管线见 D-079b。
+
+## D-079b（L0，2026-07-28）选图物化即压缩 — ImageCompress.ets + ChatPage 接线(PD-007 压缩缺口消除)
+
+- **背景**：Android 链:picker → 复制私有目录存 file:// → 每次发送 encode 时 compressAndEncode。鸿蒙 D-038 起选图即刻物化 data: URL;encode 期链(claude/google/openai 请求构建)同步深入,异步 ImageKit 无法不重构即注入 → **压缩点移前至物化**(单次),提供商载荷等价(JPEG q85,长边 ≤2048,EXIF 归一)。
+- **决定**：
+  - **ImageCompress.ets(entry)**:compressImageAsDataUrl(uri) — fileIo 开只读 fd;头 16 字节 → HAR guessImageMimeType(逐字错误);**gif 原样直通**(:143-146,offset=0 重读全文件,保 image/gif);createImageSource(fd) → getImageInfo 取尺寸,失败/≤0 → 'Failed to decode image dimensions: X' 逐字(:153-155);calculateInSampleSize → createPixelMap({sampleSize}) 失败 → 'Failed to decode image: X' 逐字(:161-170,heic/avif API 等级变体鸿蒙无对应物,统一 else 分支);EXIF 经 getImageProperty(ORIENTATION) 文本→整型映射(Top-left=1…Left-bottom=8)回 HAR mapExifOrientationToTransform,读取失败按 NORMAL(:189-198 runCatching 语义);变换 = PixelMap.flip/rotate 原地顺序(TRANSPOSE=rotate90+flipH / TRANSVERSE=rotate270+flipH,与 Matrix postScale 合成等价),catch 保留原图(:221-223);packToData(image/jpeg, 85) → data:image/jpeg 前缀(:174-186 强制 JPEG)。
+  - **ChatPage.pickImages**:改异步压缩物化(每张独立 then/catch,失败逐张告警非静默,语义不变);readImageAsDataUrl 删除(链路整体迁移,无遗留死代码)。
+  - **偏差(登记 PARITY_DEBT PD-007 更新)**:压缩时机 = 物化一次 vs Android 每次发送(载荷等价,重复发送不重复压缩);file:// 来源(D-076 upload 落盘图)encode 期仍原样;选图仍不落私有目录(残余 P1)。
+- **可逆性**:1476 测试全绿(deepread 603 + chat 873),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。PD-007 压缩缺口消除,残余:file:// 私有目录存储 + file:// encode 期压缩。
