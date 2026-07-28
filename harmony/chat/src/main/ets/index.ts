@@ -429,3 +429,10 @@ export { ollamaSearchService } from './search/ollama_service.ts';
 export { serperSearchService } from './search/serper_service.ts';
 export { serpApiSearchService } from './search/serpapi_service.ts';
 export { zhipuSearchService } from './search/zhipu_service.ts';
+
+// ===== D-068b:需 key 搜索源批次 B(Brave/秘塔/LinkUp/Perplexity/Exa) =====
+export { braveSearchService } from './search/brave_service.ts';
+export { metasoSearchService } from './search/metaso_service.ts';
+export { linkUpService } from './search/linkup_service.ts';
+export { perplexitySearchService } from './search/perplexity_service.ts';
+export { exaSearchService } from './search/exa_service.ts';

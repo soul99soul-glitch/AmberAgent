@@ -718,3 +718,15 @@
   - **zhipu_service**:POST open.bigmodel.cn/api/paas/v4/web_search,体 {search_query, search_engine='search_std', count=resultSize 数字};映射 search_result → title/link/content;三失败路径逐字('Zhipu response failed #N'/'Failed to decode Zhipu response (N chars): MSG'/'Failed to get response body' — **body 空串视为 okhttp null body,登记**)。
   - **TDD 10 测试**:请求形态逐字段/映射/错误文案全覆盖;mock 顺序响应队列。
 - **可逆性**:全新模块;1332 测试全绿(deepread 603 + chat 729),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-068b（L0，2026-07-28）需 key 搜索源批次 B(Brave/秘塔/LinkUp/Perplexity/Exa)
+
+- **背景**：D-068 第二子片。五件含两个带抓取/图片/轮询的复杂面(LinkUp scrape、Perplexity 响应级图片、LinkUp/Exa KeyRoulette)。
+- **决定**(schema/错误文案逐字,options 不符抛错):
+  - **brave_service**:GET res/v1/web/search?q={javaUrlEncodeForm}&count=N;X-Subscription-Token;映射 web?.results ?: [] → title/url/description?:'';**thumbnail.original 优先 src 兜底(http 前缀才取)** → images 单元素;失败 'Brave search failed with code N: '(message 尾空登记)。
+  - **metaso_service**:POST metaso.cn/api/v1/search 体 {q, scope='webpage', size=N 数字, includeSummary false 布尔};webpages → title/link/snippet?:'';三失败路径逐字(含 decode/空 body 同 zhipu 手法)。
+  - **linkup_service(含 scrape)**:**apiKey = keyRoulette.next(apiKey, id)**(runtime 注入轮询器);search POST /v1/search 体四键同 AmberAgent 形态;scrape POST /v1/fetch 体 {url, includeRawHtml/renderJs/extractImages 三 false 布尔} → ScrapedResultUrl(url=输入, content=markdown, metadata null);'url is required'/失败带 body 逐字。
+  - **perplexity_service**:空 key error() 'Perplexity API key is required';体 {query, max_results=N, **max_tokens/max_tokens_per_page 仅 >0 落键**};**响应级 images:image_url distinct take(5) 挂首个有效结果**(title/url blank 过滤后首条;origin_url 不取);text = snippet ?: text ?: '';失败带 body。
+  - **exa_service**:体 {query, numResults=N, **type = params.type content ?: 'auto'**, contents:{text:true}};keyRoulette 选 key;answer = output?.content;items → title/url/text?:'';三失败路径(decode 文案同构)。
+  - **TDD 10 测试**:轮询器钉随机源验证选 key;条件落键;图片挂载规则;Elvis 空数组不回退(serper 同型已在批次 A 钉)。
+- **可逆性**:全新模块;1342 测试全绿(deepread 603 + chat 739),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
