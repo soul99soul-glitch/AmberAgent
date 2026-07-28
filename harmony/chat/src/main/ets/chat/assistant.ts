@@ -103,6 +103,14 @@ export interface Assistant {
   rememberedReasoningLevelsByModelId: Record<string, ReasoningLevel>;
 }
 
+// patchAssistant:返回应用 patch 后的新 Assistant(不可变更新)
+// 鸿蒙增补工具:ArkTS entry(.ets)禁用接口对象展开(arkts-no-spread),
+// 编辑页经此 helper 做字段更新,语义同 Kotlin data class copy()
+export const patchAssistant = (base: Assistant, patch: Partial<Assistant>): Assistant => ({
+  ...base,
+  ...patch,
+});
+
 export const makeAssistant = (opts: Partial<Assistant> = {}): Assistant => ({
   id: opts.id ?? newId(),
   chatModelId: opts.chatModelId ?? null,

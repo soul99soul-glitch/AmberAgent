@@ -260,3 +260,13 @@
   - **UI**:输入框上方横向滚动 chips,点击填入输入框(不直接发送,发送由用户确认);sending 中隐藏。
   - 裁剪:同 D-025,suggestionModelId 设置 = P1;locale 硬编码'简体中文'。
 - **可逆性**:纯新增 + ChatPage 渲染增项;建议生成失败不影响会话。
+
+## D-027（L0，2026-07-28）助手管理 UI MVP：4 字段编辑 + patchAssistant helper(ArkTS 限制系统性修法)
+
+- **背景**：Assistant 30 字段已全量移植(D-016)且 KV 持久化可用,但无管理 UI;系统提示词是 Android 助手核心能力。
+- **决定**：
+  - **ChatAssistantsPage**:列表(loadAssistants,空回退默认)+ 内联编辑器;MVP 编辑面 = name/systemPrompt/temperature/contextMessageSize 4 字段,其余 26 字段保留原值(替换 by id 回写整个 blob,与 Provider 设置页同构)。全量编辑器(tags/regexes/presetMessages/localTools/mode/lorebook 等) = P1。
+  - **patchAssistant(chat-domain,2 测试)**:语义 = Kotlin data class copy()。**系统性修法登记**:entry .ets 禁用接口对象展开(arkts-no-spread),凡领域对象不可变更新一律在 HAR 内提供 copy helper(chat HAR 的 .ts 不受此限,已验证 assembleHar 通过)。
+  - temperature 空输入 → null(助手默认跟随全局,对齐 Android temperature: Float? 语义);contextMessageSize 空/非法 → 0(不截断)。
+  - 助手绑定会话(conversation.assistantId 已在线格式)+ 每会话选助手 = P1;当前 resolveChatRuntime 取首个助手(D-019 策略延续)。
+- **可逆性**:纯新增页面;KV 线格式不变(全字段序列化早已锁定)。

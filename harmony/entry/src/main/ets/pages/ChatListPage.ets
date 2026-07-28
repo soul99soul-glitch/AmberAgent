@@ -96,6 +96,8 @@ struct ChatListPage {
         Text('对话')
           .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
         Blank()
+        Text('助手').fontSize(13).fontColor(INK3).margin({ right: 16 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/ChatAssistantsPage' }); })
         Text('Provider').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); })
         Text('+ 新对话')

@@ -109,7 +109,7 @@ export { createOpenAIChatApi, asChatStreamProvider, openAIAuthHeaders } from './
 export type { OpenAIChatApiDeps, OpenAIChatApi, CallOpts } from './chat/openai_chat_api.ts';
 
 export {
-  makeAssistant, makeAssistantRegex, reasoningLevelForModel,
+  makeAssistant, patchAssistant, makeAssistantRegex, reasoningLevelForModel,
 } from './chat/assistant.ts';
 export type {
   Assistant, AssistantRegex, AssistantAffectScope, Avatar,

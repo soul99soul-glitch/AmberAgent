@@ -10,6 +10,7 @@
     "pages/ChatListPage",
     "pages/ChatPage",
     "pages/ChatProviderSettingsPage",
-    "pages/ChatModelPickerPage"
+    "pages/ChatModelPickerPage",
+    "pages/ChatAssistantsPage"
   ]
 }
