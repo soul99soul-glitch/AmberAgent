@@ -23,9 +23,11 @@ import {
   makePendingUserMessage, enqueuePendingUserMessage, dequeueNextPendingUserMessage,
   cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
   convertSteerToFollowup, runAppendUserMessage,
+  persistPendingQueue, loadPendingQueue, recordPendingQueueEvent,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
+  getChatKvStore,
 } from '../di/AppContainer.ets';
 import { readImageAsDataUrl } from '../platform_impl/EntryImageEncoder.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
@@ -195,7 +197,7 @@ struct ChatPage {
   // D-041:regenerate 流式预览(目标节点行下渲染;完成后清空)
   @State regenTail: UIMessage | null = null;
   @State regenNodeId: string = '';
-  // D-048:发送排队(FOLLOWUP;内存态 — Android PendingMessageStore 持久化裁 P1)
+  // D-048:发送排队;D-052:KV 持久化(进程死亡恢复,PendingMessageStore 语义)
   @State pendingRows: PendingChipRow[] = [];
   private pendingQueue: PendingUserMessage[] = [];
   // D-050:重试状态文案(strings.xml:386;null = 清除)
@@ -216,6 +218,18 @@ struct ChatPage {
           this.title = conv.title.length > 0 ? conv.title : '对话';
           this.rows = buildRows(conv);
           this.suggestions = conv.chatSuggestions;
+          // D-052:恢复持久化队列(session 创建时 load,ChatService.kt:334);
+          //   解析失败 → hilog + 空队列(Android Log.w + getOrDefault 语义)
+          loadPendingQueue(getChatKvStore(), conv.id, undefined, (e: Error): void => {
+            hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'load pending queue failed: %{public}s', e.message);
+          }).then((msgs: PendingUserMessage[]): void => {
+            if (msgs.length === 0) return;
+            this.pendingQueue = msgs;
+            this.syncPendingRows();
+            // launchPendingMessageLoopIfNeeded(ChatService.kt:588-595):
+            //   未生成且队列非空 → 恢复派发循环(进程死亡恢复)
+            if (!this.sending) this.drainPendingQueue();
+          });
         } else {
           this.errorMsg = '会话不存在';
         }
@@ -501,6 +515,27 @@ struct ChatPage {
       (m: PendingUserMessage): PendingChipRow => ({ id: m.id, preview: pendingPreviewText(m) }));
   }
 
+  // D-052:每次队列变更 → KV 持久化(Android ConversationSession 通知点
+  //   :128-231 + durable persist :712/:1046);失败 hilog 非静默
+  private persistQueue(): void {
+    if (this.conversation === null) return;
+    const convId: string = this.conversation.id;
+    persistPendingQueue(getChatKvStore(), convId, this.pendingQueue)
+      .catch((e: Error): void => {
+        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'persist pending queue failed: %{public}s', e.message);
+      });
+  }
+
+  // D-052:审计事件(recordEvent:62-87;entry 现有交互子集 enqueue/dequeue/cancel)
+  private auditQueueEvent(event: string, messageId: string, detail?: string): void {
+    if (this.conversation === null) return;
+    const convId: string = this.conversation.id;
+    recordPendingQueueEvent(getChatKvStore(), convId, { event, messageId, detail })
+      .catch((e: Error): void => {
+        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'pending queue audit failed: %{public}s', e.message);
+      });
+  }
+
   // 生成中发送 → 入队;满 20 拒绝(Android 文案逐字)。
   // 模式(D-051,Android ChatInput.kt:259/272 + ChatService.kt:699):
   //   answer=true(点击发送)→ 恒 FOLLOWUP;answer=false(长按)生成中 → STEER
@@ -518,6 +553,9 @@ struct ChatPage {
     }
     this.pendingQueue = r.messages;
     this.syncPendingRows();
+    this.persistQueue();
+    // 审计:enqueue(detail = mode 小写,Android mode.name.lowercase())
+    this.auditQueueEvent('enqueue', msg.id, msg.mode.toLowerCase());
   }
 
   private cancelPendingById(id: string): void {
@@ -525,6 +563,8 @@ struct ChatPage {
     if (r.changed) {
       this.pendingQueue = r.messages;
       this.syncPendingRows();
+      this.persistQueue();
+      this.auditQueueEvent('cancel', id);
     }
   }
 
@@ -536,6 +576,10 @@ struct ChatPage {
     const prep = preparePendingMessageForDispatch(dq.rest, dq.next);
     this.pendingQueue = prep.rest;
     this.syncPendingRows();
+    // D-052:dequeue 后 durable persist(ChatService.kt:1046-1053)+ 审计
+    //   (detail = 派发消息 mode 小写 — STEER 经 prepare 已转 FOLLOWUP)
+    this.persistQueue();
+    this.auditQueueEvent('dequeue', prep.dispatch.id, prep.dispatch.mode.toLowerCase());
     // D-051:answer=false → 只记录不生成(ChatService.kt:847-850
     //   appendUserMessage;answer 才 handleMessageComplete),随后继续出队
     if (!prep.dispatch.answer) {
@@ -908,6 +952,7 @@ struct ChatPage {
               if (conv2.changed) {
                 this.pendingQueue = conv2.messages;
                 this.syncPendingRows();
+                this.persistQueue();
               }
             } else {
               this.send();

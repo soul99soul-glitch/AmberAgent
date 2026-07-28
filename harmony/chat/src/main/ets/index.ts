@@ -103,6 +103,15 @@ export {
   preparePendingMessageForDispatch,
 } from './chat/pending_queue.ts';
 
+// ===== 队列持久化(D-052,PendingMessageStore.kt 全文) =====
+export type { PendingQueueAuditEvent } from './chat/pending_queue_store.ts';
+export {
+  pendingQueueKey, pendingQueueAuditKey,
+  serializePendingUserMessage, serializePendingQueue, parsePendingQueue,
+  persistPendingQueue, loadPendingQueue,
+  buildAuditEventLine, recordPendingQueueEvent,
+} from './chat/pending_queue_store.ts';
+
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,
   serializeMessageList, parseMessageList,

@@ -503,3 +503,12 @@
   - **ChatPage 接线**:enqueuePendingParts 增 answer 参,**mode 逐字忠实 ChatInput.kt:272** —— answer=false 且生成中 → STEER(插 STEER 前缀位,派发时 preparePendingMessageForDispatch asFollowup 转换),否则 FOLLOWUP;**drainPendingQueue answer=false 分支** → runAppendUserMessage 落库 + UI 刷新 + 递归继续出队(Android 循环语义:append 后 loop 继续 dequeue);**sendWithoutAnswer()**(生成中 → STEER 入队;否则直接 runAppendUserMessage,清空输入与待发图);发送/停止按钮 **LongPressGesture** → sendWithoutAnswer;**停止按钮点击追加 STEER→FOLLOWUP 转换**(Android stopGeneration:2419-2454 语义 — D-048 时因鸿蒙无 STEER 来源降级 no-op,本切片恢复为真实转换)。
   - **偏差登记**:编辑态长按发送 → 取消编辑态按新消息处理(Android 无编辑态+长按组合交互);COLLECT 合并消息 answer=any(既有 D-048 语义,answer=false 消息参与合并时可能被并入 answer=true 派发,与 Android buildCollectedPendingUserMessage 逐行一致)。
 - **可逆性**:点击发送路径逐字节不变(answer=true 恒 FOLLOWUP 同 D-048);长按手势为纯增量交互;STEER→FOLLOWUP 转换仅在队列含 STEER 时 changed=true。
+
+## D-052（L0，2026-07-28）发送队列持久化：PendingMessageStore 全文移植 → KV + 进程死亡恢复
+
+- **背景**：D-048 登记项 —— 队列为内存态,进程杀后丢失(Android PendingMessageStore 文件镜像 + 审计 jsonl,进程死亡恢复语义)。
+- **决定**：
+  - **chat/pending_queue_store.ts(TDD,14 测试锁定,947 总数)**:PendingMessageStore.kt 全文 104 行忠实 —— serialize(kotlinx 线格式 1:1:声明序 id/parts/answer/mode/createdAtMs,parts 复用 D-013 serializePart);parse(ignoreUnknownKeys 容忍未知键;缺省 answer=true/mode=FOLLOWUP/createdAtMs=注入 now,对齐 Kotlin 默认值;非法 mode 抛错);**persist**(:48-60 空删非空写);**load**(:32-40 无键 → [],损坏 → onError 回调 + [](Android Log.w + getOrDefault(emptyList) 非静默语义));**审计**(recordEvent:62-87 buildJsonObject 键序逐字 created_at_ms/conversation_id/event/message_id?/count?/detail? + '\n',可选缺省即省略)。存储复用 KeyValueStore Port(键 `pending-queue/<convId>` / `<convId>.events`)。
+  - **ChatPage 接线**:**每次队列变更持久化**(Android ConversationSession 通知点 :128-231 + durable :712/:1046-1053)—— enqueue/cancel/dequeue/停止时 STEER→FOLLOWUP 转换后 persistQueue();**页面打开恢复**(session 创建时 load,:334)→ launchPendingMessageLoopIfNeeded(:588-595 逐字:**未生成且队列非空 → 自动恢复派发循环**,进程死亡后重开会话即续跑);审计事件子集 enqueue/dequeue(detail=mode 小写)/cancel(messageId),失败均 hilog.warn 非静默。
+  - **偏差登记**:Android 原子写(tmp+rename,:95-103)→ KV put 单键天然原子;文件 append → KV read-concat-write(单页面无并发写者);审计子集 — clear/move/pending_tool_* 事件随对应 UI/工具循环落地接入(ops 已在域层备妥);revision 防乱序通道(:361-378)省略 — Harmony 端 persist 调用点全在同一线程顺序触发。
+- **可逆性**:纯增模块 + 页面接线增点;无持久化数据时行为与 D-048/051 逐字节一致(无键 → 空队列,无自动 drain);KV 键空间独立于 assistants/providers blob。
