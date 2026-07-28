@@ -551,3 +551,32 @@ export {
   filterToolProfile,
 } from './chat/tool_profile_filter.ts';
 export type { ToolProfileFilterResult } from './chat/tool_profile_filter.ts';
+
+// ===== D-085a:记忆子系统读路径纯模块 =====
+// memory_models(MemoryModels.kt)/memory_time_anchor(MemoryTimeAnchorParser.kt)/
+// memory_prompt_builder(MemoryPromptBuilder.kt)/memory_recall(MemoryRecallStore.kt
+// 的 rank/score/tokenize 纯函数)。Store 编排与接线留 D-085b。
+export {
+  DEFAULT_MEMORY_RECALL_SETTING,
+  memoryCandidateStatusFromWireName, memoryEventTypeFromWireName,
+  memoryKindFromWireName, memoryScopeFromWireName,
+  makeMemoryCandidate, makeMemoryEvent, makeMemoryRecord,
+} from './chat/memory_models.ts';
+export type {
+  MemoryCandidate, MemoryCandidateStatus, MemoryEvent, MemoryEventType,
+  MemoryKind, MemoryRecallSetting, MemoryRecord, MemoryScope,
+} from './chat/memory_models.ts';
+export {
+  classifyMemoryFreshness, deriveMemoryExpiresAt,
+} from './chat/memory_time_anchor.ts';
+export type { MemoryFreshness } from './chat/memory_time_anchor.ts';
+export {
+  buildMemoryContext, isSensitiveMemoryContent, SENSITIVE_MEMORY_TERMS,
+} from './chat/memory_prompt_builder.ts';
+export {
+  memoryRecallScoreToDebugText, rankMemoryRecords, scoreMemoryRecord,
+  tokenizeMemoryQuery, USER_ALWAYS_ELIGIBLE_CONFIDENCE,
+} from './chat/memory_recall.ts';
+export type {
+  MemoryRecallFreshness, MemoryRecallScore, MemoryRecallSelection,
+} from './chat/memory_recall.ts';

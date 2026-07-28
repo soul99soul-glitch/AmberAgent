@@ -954,3 +954,21 @@
   - **OcrSupport.findProviderOfModel**:本地反查(无 overwrite)改委托 HAR findProviderForModel(默认 checkOverwrite=true),消除 D-071a 登记的 P1 分支。
   - **TDD 6 测试**:容器未命中 → null/无 overwrite → 容器同引用/overwrite 副本 models=[] + google 变体字段全保留/checkOverwrite=false/反查声明序/openai+claude 变体字段保留。
 - **可逆性**:1491 测试全绿(deepread 603 + chat 888,+6),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit「providerOverwrite」残余消除(模型编辑面 overwrite UI = P1 交互档)。
+
+## D-085a:记忆子系统读路径纯模块(chat HAR)
+
+**日期**: 2026-07-28
+**来源**: `core/memory/api/.../MemoryModels.kt`、`core/memory/impl/.../time/MemoryTimeAnchorParser.kt`、`MemoryPromptBuilder.kt`、`MemoryRecallStore.kt` 中 rankRecords/scoreRecord/tokenize 纯函数段
+
+### 内容
+- `memory_models.ts`: MemoryScope/MemoryKind/MemoryCandidateStatus/MemoryEventType wireName 枚举 + fromWireName 兜底(scope→long_term, kind→note, status→pending, event→extraction_skipped); MemoryRecord/MemoryCandidate/MemoryEvent/MemoryRecallSetting 接口 + 工厂(默认逐字:record confidence=1、candidate confidence=0.5/updatedAt=createdAt、recall {maxItems:12,maxPromptChars:2000,debug:false})。MemoryWorkerSetting 属后台 worker 面,随 extraction/dream 切片再迁。
+- `memory_time_anchor.ts`: LocalDate/YearMonth/ZoneId.systemDefault → JS Date 本地时区;锚点校验(月 1-12、日 1..daysInMonth,非法→null)、ABSOLUTE_DATE/中文年月日/ENGLISH_FUTURE 正则逐字、FUTURE_HINTS(9)/HISTORICAL_HINTS(11) 逐字;classifyMemoryFreshness(!future||historical→current)、deriveMemoryExpiresAt(取非 before 锚点最小过期)。
+- `memory_prompt_builder.ts`: buildMemoryContext 逐字 — 引导行 + '- [scope/kind(/pinned)] content',content 换行→空格(Kotlin replace 全量语义,JS 用 split/join),debug 后缀 '(id=N, confidence=X.XX[, details])',收尾 '</memory_context>';SENSITIVE_MEMORY_TERMS(12)+ isSensitiveMemoryContent。
+- `memory_recall.ts`: USER_ALWAYS_ELIGIBLE_CONFIDENCE 0.70、TIME_DECAY_MULTIPLIER 0.35;tokenizeMemoryQuery(unicode 词 ≤48 + CJK 窗口 size4/step2 take80,并集 take160);scoreMemoryRecord(查询前缀 +30/slice(0,60)、term 权重 max(2,min(len,12))、no-match 早退、pinned 100、kind 52/44/24/18/12/6、scope 26/18/14、lastUsed 8/(1+days)、updated 10/(1+days)、decay ×0.35、confidence 钳 0.1-1、reasons 去重);rankMemoryRecords(slice(-16) 拼查询、钳 maxItems[1,40]/maxPromptChars[256,12000]、score>0||terms 空过滤、稳定排序 pinned>score>updatedAt、takeRecallBudget cost=len+32 首条恒收)。
+
+### 测试
++21(memory_recall.test.ts;含 fromWireName 兜底、锚点校验/正则、freshness 门、expiresAt、prompt 逐字含 debug、敏感词、tokenize 窗口、score 各加成、rank 过滤/排序/预算/钳制)。chat HAR 888→909。
+
+### 备注
+- Store 编排(recallSelections→getActiveRecords→rank→touchMemories→buildMemoryContext)与设置/动态块接线在 D-085b。
+- extraction(MemoryExtractor/CandidateFilter/Prompt)、dream、导出导入、memory_* 工具、设置面 UI 后续切片。
