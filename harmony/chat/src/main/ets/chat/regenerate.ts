@@ -60,6 +60,8 @@ export interface RegenerateDeps {
   store: ConversationStore;
   agentSoul?: string;
   contextMessageSize?: number;
+  // D-077b:动态 system 块供给(chat_turn 同语义,每次组装重取)
+  extraSystemBlocks?: () => Promise<string[]>;
   // D-055:压缩引擎钩子(chat_turn 同语义);存在时组装以其结果为基底,
   //   contextMessageSize 强制 0(引擎内部截断,避免双重截断)
   prepareContextMessages?: (messages: UIMessage[]) => Promise<UIMessage[]>;
@@ -135,6 +137,9 @@ export const runRegenerateAt = async (
     contextMessageSize: deps.prepareContextMessages !== undefined
       ? 0
       : (deps.contextMessageSize ?? 0),
+    extraSystemBlocks: deps.extraSystemBlocks !== undefined
+      ? await deps.extraSystemBlocks()
+      : [],
   });
   const internalMessages: UIMessage[] = await applyInputTransformers(
     assembled, deps.inputTransformers, ctx);

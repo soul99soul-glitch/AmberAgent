@@ -504,6 +504,12 @@ export type {
   DocumentFileHandle, DocumentReaderDeps,
 } from './chat/document_transformer.ts';
 
+// ===== D-077b:Recent Chats 动态块(GenerationPrompts.kt:219-241) =====
+export {
+  RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, prettyPrintRecentChatsJson,
+} from './chat/recent_chats_prompt.ts';
+export type { RecentChatItem } from './chat/recent_chats_prompt.ts';
+
 // ===== D-076:base64 图片落盘(Base64ImageToLocalFileTransformer.kt + FilesManager.kt:183-265) =====
 export {
   FILE_FOLDER_UPLOAD, MAX_CHAT_ATTACHMENT_BYTES,

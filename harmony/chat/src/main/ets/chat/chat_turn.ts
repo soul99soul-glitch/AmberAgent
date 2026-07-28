@@ -121,6 +121,10 @@ export interface ChatTurnDeps {
   //   命中分类器(vision_fallback.ts)则 forceImageToText 重跑;
   //   未提供 = 不兜底(等价 Android 模型不含 IMAGE 模态)
   modelSupportsImageInput?: boolean;
+  // D-077b:动态 system 块供给(GenerationHandler.kt:726-736 — memory/generativeUi/
+  //   recentChats 之 recentChats 子集;loopBudget 由 tool_loop 前置);
+  //   每次组装调用时取数(Android 每次 generateInternal 重算语义)
+  extraSystemBlocks?: () => Promise<string[]>;
 }
 
 const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
@@ -186,6 +190,9 @@ export const runChatTurn = async (
     contextMessageSize: deps.prepareContextMessages !== undefined
       ? 0
       : (deps.contextMessageSize ?? 0),
+    extraSystemBlocks: deps.extraSystemBlocks !== undefined
+      ? await deps.extraSystemBlocks()
+      : [],
   });
   const internalMessages: UIMessage[] = await applyInputTransformers(
     assembled, deps.inputTransformers, ctx);

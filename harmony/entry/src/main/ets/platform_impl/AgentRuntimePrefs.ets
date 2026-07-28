@@ -12,14 +12,18 @@ export const AGENT_RUNTIME_KEY: string = 'agent_runtime';
 
 export interface AgentRuntimeSnapshot {
   enableTimeReminder: boolean;
+  // D-077b:PreferencesStore.kt:155 默认 true(GenerationHandler.kt:736 消费)
+  enableRecentChatsReference: boolean;
 }
 
 interface AgentRuntimeJson {
   enableTimeReminder?: boolean;
+  enableRecentChatsReference?: boolean;
 }
 
 export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   enableTimeReminder: false,
+  enableRecentChatsReference: true,
 });
 
 // AgentPrefs.kt:47-51 — 缺失/解析失败 → 默认(enableTimeReminder=false)
@@ -28,7 +32,11 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
   if (raw === null) return defaultAgentRuntimeSnapshot();
   try {
     const parsed: AgentRuntimeJson = JSON.parse(raw) as AgentRuntimeJson;
-    return { enableTimeReminder: parsed.enableTimeReminder === true };
+    return {
+      enableTimeReminder: parsed.enableTimeReminder === true,
+      // 默认 true:仅显式 false 才关(PreferencesStore.kt:155)
+      enableRecentChatsReference: parsed.enableRecentChatsReference !== false,
+    };
   } catch {
     return defaultAgentRuntimeSnapshot();
   }

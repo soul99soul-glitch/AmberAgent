@@ -46,6 +46,7 @@ import {
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
   createPlaceholderTransformer, createDocumentTransformer,
   createPromptInjectionTransformer, PromptInjection, Lorebook,
+  RECENT_CHATS_PROMPT_LIMIT, buildRecentChatsPrompt, RecentChatItem, ConversationSummary,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -425,6 +426,24 @@ struct ChatPage {
     return list;
   }
 
+  // D-077b:动态 system 块供给(recentChats 子集,GenerationHandler.kt:736);
+  //   每次组装调用时重取(Android 每次 generateInternal 重算语义);
+  //   enableRecentChatsReference 默认 true(PreferencesStore.kt:155)
+  private loadExtraSystemBlocks(): Promise<string[]> {
+    if (!this.agentRuntime.enableRecentChatsReference) return Promise.resolve([]);
+    return getChatRepository().listRecent(RECENT_CHATS_PROMPT_LIMIT)
+      .then((recent: ConversationSummary[]): string[] => {
+        const items: RecentChatItem[] = recent.map(
+          (s: ConversationSummary): RecentChatItem => ({
+            title: s.title,
+            lastChat: new Intl.DateTimeFormat(systemLanguage(), { dateStyle: 'medium' })
+              .format(new Date(s.updateAt)),
+          }));
+        const prompt: string = buildRecentChatsPrompt(items);
+        return prompt.length > 0 ? [prompt] : [];
+      });
+  }
+
   aboutToAppear(): void {
     // 每次进入(含从选择器返回)刷新模型标签
     describeChatModel().then((label: string): void => { this.modelLabel = label; });
@@ -537,6 +556,8 @@ struct ChatPage {
           contextMessageSize: rt.contextMessageSize,
           // D-055:压缩引擎接管上下文(同 send 路径)
           prepareContextMessages: this.buildPrepareContext(conv, rt),
+          // D-077b:recentChats 动态块(每次组装重取)
+          extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
           // D-050:重试状态(send 路径同语义)
           onRetryStatus: (status: string | null): void => {
@@ -1002,6 +1023,8 @@ struct ChatPage {
           store: getChatRepository(),
           contextMessageSize: rt.contextMessageSize,
           prepareContextMessages: this.buildPrepareContext(conv, rt),
+          // D-077b:recentChats 动态块(每次组装重取)
+          extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
           onRetryStatus: (status: string | null): void => {
             this.retryStatus = status ?? '';
@@ -1237,6 +1260,8 @@ struct ChatPage {
           // D-055:压缩引擎接管上下文(engine 内部编辑/规划/截断;
           //   chat_turn 侧 contextMessageSize 强制 0,避免双重截断)
           prepareContextMessages: this.buildPrepareContext(conv, rt),
+          // D-077b:recentChats 动态块(每次组装重取)
+          extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
           abortSignal: this.abortController?.signal,
           // D-050:重试状态(strings.xml:386 文案;null 清除)
           onRetryStatus: (status: string | null): void => {

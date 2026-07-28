@@ -862,3 +862,15 @@
   - **chat_turn 非工具路径不动**:无工具 → Android 同(空 tools → 空 prompt → 无块)。
   - **TDD 4 测试**:blank 过滤+'\n\n' 连接/model+messages 透传/块序+metadata 逐字(无 cache_control)/blank+缺省无块。
 - **可逆性**:1463 测试全绿(deepread 603 + chat 860),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。动态块残余:recentChats(memory/generativeUi = P1 大特性)。
+
+## D-077b（L0，2026-07-28）Recent Chats 动态 system 块 + enableRecentChatsReference 接线
+
+- **背景**：动态块收尾(GenerationHandler.kt:736)。Android 锚点:GenerationPrompts.kt:219-241(无 assistant 变体)、ConversationDAO.kt:29-30(is_pinned DESC, update_at DESC LIMIT 10)、TimeUtil.kt:14-21(toLocalDate = 系统时区 MEDIUM localized date)、core/agent-utils Json.kt:22-30(JsonInstantPretty)、PreferencesStore.kt:155(默认 true)。
+- **决定**：
+  - **recent_chats_prompt(HAR)**:RECENT_CHATS_PROMPT_LIMIT=10;buildRecentChatsPrompt 模板逐字(appendLine 序列:'\n**Recent Chats**\n' + 文案 + '\n' + json + '\n';空列表 → '');prettyPrintRecentChatsJson = JSON.stringify(_, null, 4)(kotlinx prettyPrint 默认 4 空格,扁平对象数组形状逐字节一致,测试锁定含中文/引号转义)。
+  - **偏差(登记)**:toLocalDate 格式化在 entry(Intl medium date,PlaceholderSupport D-073 同档);仓库取数走既有 ChatRepository.listRecent(排序同 DAO);HAR 收预格式化字符串。
+  - **deps 通道**:ChatTurnDeps/RegenerateDeps + extraSystemBlocks?: () => Promise<string[]>(每次组装调用时取数 = Android 每次 generateInternal 重算语义);chat_turn/regenerate 直通 assemble;tool_loop 组合 [budget, ...deps](Android 动态块序 memory→loopBudget→generativeUi→recentChats,:726-736)。
+  - **AgentRuntimePrefs(entry)**:snapshot + enableRecentChatsReference,默认 true(仅显式 false 才关,PreferencesStore.kt:155);缺失/损坏 → 默认快照。
+  - **ChatPage**:loadExtraSystemBlocks — 关 → [];开 → listRecent(10) → title + Intl medium date(updateAt) → buildRecentChatsPrompt → 非空才成块;3 个生成 deps 站点接线。
+  - **TDD 3 测试**:LIMIT 常量/pretty 4 空格形状逐字/模板逐字+空列表。
+- **可逆性**:1466 测试全绿(deepread 603 + chat 863),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。动态块残余:memory(memory 子系统 P1)/generativeUi(generative UI 大特性 P1)。
