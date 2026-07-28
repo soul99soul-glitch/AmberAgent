@@ -3,6 +3,7 @@ import SwiftUI
 struct NovelChapterManagementView: View {
     let viewModel: NovelCreationViewModel
     let onOpenChapter: (NovelChapterSelection) -> Void
+    let onBatchPolish: () -> Void
 
     var body: some View {
         ScrollView {
@@ -19,11 +20,23 @@ struct NovelChapterManagementView: View {
     }
 
     private var directoryHeader: some View {
-        HStack {
+        HStack(spacing: 12) {
             Text("目录")
                 .font(.headline)
                 .foregroundStyle(AmberTheme.foreground)
             Spacer()
+            if hasChapters {
+                Button(action: onBatchPolish) {
+                    Label("批量润色", systemImage: "wand.and.sparkles")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(
+                            batchPolishBlockReason == nil ? AmberTheme.accent : AmberTheme.muted
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(batchPolishBlockReason != nil)
+                .accessibilityLabel(batchPolishAccessibilityLabel)
+            }
             if let count = viewModel.branchSnapshot?.chapterSelections.count, count > 0 {
                 Text("共 \(count) 章")
                     .font(.subheadline)
@@ -31,6 +44,26 @@ struct NovelChapterManagementView: View {
             }
         }
         .padding(.horizontal, 2)
+    }
+
+    private var hasChapters: Bool {
+        (viewModel.branchSnapshot?.chapterSelections.count ?? 0) > 0
+    }
+
+    /// 与阅读器 `polishBlockReason` 同义,只用 workspace 快照即可表达。真正的发起门禁
+    /// 还在 `NovelSessionViewModel.canStartBatchPolish` 兜底,这里只负责按钮的禁用态。
+    private var batchPolishBlockReason: String? {
+        if !viewModel.canMutate { return "项目当前只读" }
+        if viewModel.branchSnapshot?.branch.activeRunID != nil { return "请先停止当前生成" }
+        if viewModel.branchSnapshot?.branch.syncStatus == .needsSync { return "请先同步剧情状态" }
+        if viewModel.projectSnapshot?.pendingOperations.isEmpty == false { return "请先完成正文操作" }
+        if viewModel.isPerforming { return "项目正在处理其他操作" }
+        return nil
+    }
+
+    private var batchPolishAccessibilityLabel: String {
+        guard let batchPolishBlockReason else { return "批量整章润色" }
+        return "批量整章润色（\(batchPolishBlockReason)）"
     }
 
     @ViewBuilder

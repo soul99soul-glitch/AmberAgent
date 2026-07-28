@@ -271,7 +271,8 @@ struct NovelProjectWorkspaceView: View {
                 viewModel: viewModel,
                 onOpenChapter: { chapter in
                     chapterReaderRoute = NovelChapterReaderRoute(selection: chapter)
-                }
+                },
+                onBatchPolish: { activeSheet = .batchPolish }
             )
         case .compendium:
             NovelCompendiumView(
@@ -337,6 +338,14 @@ struct NovelProjectWorkspaceView: View {
 
         case .polishPreference:
             NovelPolishPreferenceSheet(viewModel: viewModel)
+
+        case .batchPolish:
+            NovelBatchPolishSheet(
+                chapters: chapterOptions,
+                workspace: viewModel,
+                sessionViewModel: sessionViewModel,
+                onEditPolishPreference: { transition(to: .polishPreference) }
+            )
 
         case .collectCandidate(let candidateID):
             NovelCollectCandidateSheet(
@@ -720,6 +729,7 @@ private enum NovelWorkspaceSheet: Identifiable {
     case modelPicker(NovelModelRole)
     case materialEditor(NovelMaterialRecord?, NovelMaterialKind)
     case polishPreference
+    case batchPolish
     case collectCandidate(NovelCandidateID)
     case manualRewrite(NovelCandidateID)
     case forkCheckpoint(NovelCheckpointID)
@@ -734,6 +744,7 @@ private enum NovelWorkspaceSheet: Identifiable {
         case .materialEditor(let material, let suggestedKind):
             "material-\(material?.id.description ?? suggestedKind.displayName)"
         case .polishPreference: "polish-preference"
+        case .batchPolish: "batch-polish"
         case .collectCandidate(let candidateID): "collect-\(candidateID)"
         case .manualRewrite(let candidateID): "manual-rewrite-\(candidateID)"
         case .forkCheckpoint(let checkpointID): "fork-checkpoint-\(checkpointID)"

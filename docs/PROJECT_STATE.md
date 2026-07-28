@@ -22,6 +22,14 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
+### 2026-07-28 小说批量整章润色
+
+- 正文目录新增「批量润色」入口:选中多章(默认全选)后按目录顺序逐章「生成候选 → 采用(含剧情漂移校验)」,省去逐章手动点击。通过校验的章自动采用为新版本;漂移判定改了剧情的章自动跳过(原文不变);失败章记录在案。选择/运行/报告三态共用一个 sheet(`NovelBatchPolishSheet`),实时显示第 X/Y 章与进度条,可随时停止;已采用章都保留旧版本,可在该章版本历史撤销。文风方向仍来自项目级「整章润色偏好」,sheet 在未设置时给出跳转。
+- 链路由两条硬约束决定:一个项目同一时刻只能跑一个 run(lifecycle actor 强制 `projectBusy`),且采用会推进分支 head 使其他已生成候选作废(`NovelPolishTransactions` `staleBranchHeadRevision`),因此只能串行「生成一章 → 采用一章 → 下一章」,做成全自动 sweep 而非「批量生成后逐个审」。驱动仿连续性审计的「VM 存 Task + 串行 for + 每项 `checkCancellation` + 容错计数 + 汇总报告」,但不全程持锁——每章的 start/adopt 各自 `acquireSessionOperation`。
+- 关键修复:`isBatchPolishing` 折进 `isBusy` 能挡住外部并发,但也会经 `canStart` 的 `!isBusy` 把批量自己的 start 挡掉(首测全部章 failed=3/adopted=0 暴露);加 `isBatchStartingRun` 重入标志(仅 start 握手期间为真)让 `canStart` 放行批量自身启动,外部启动仍被 `isBusy` 挡住。等待候选以「出现新的可用候选」为成功主信号、「run 落定 + 宽限窗 + 超时」为失败兜底;宽限窗与超时可经 init 注入(仿 `terminalQuietDelay`)加快失败用例。
+- 验证:新增 `NovelBatchPolishTests` 5 项(全兼容采用 / 漂移跳过续跑 / 生成失败续跑 / 取消停在下一章 / 门禁与 isBusy)通过;回归 `NovelPolishTests` 6、`NovelPolishIntegrityTests` 15、`NovelContinuityAuditTests` 25、`NovelSessionViewModelTests` 63 全绿(合计 109 项,iPhone 17 Pro / iOS 26.5 Simulator)。CLI 构建需 `-skipMacroValidation`(传递依赖 Equatable 宏插件校验;`xcodegen generate` 重生成 gitignore 的 `.xcodeproj` 纳入新文件)。真机 11 章实际润色手感、停止/撤销与后台行为仍待设备目测。
+- subagent 对抗性 review 确认逻辑闭环(C2 顺序、C3 不持锁、章间快照新鲜、6 种事务状态全处理、无重复启动、sheet 状态机全射、VM 释放不泄漏;最担心的「永久卡 running / isBatchStartingRun 毒化」「成功采用误判为 failed」均不成立),并据其发现两处加固:①`awaitPolishCandidate` 落定判定去掉 `!terminalAwaitingRefresh`(该窗口 activeRunID 本就为 nil,真正防误判的是宽限窗),避免终态 refreshDurable 失败时白等到 900s 超时;②删去 adopt 后的 `checkCancellation`,先读真实事务状态再返回,避免把漂移期间被取消但实际已采用的章误报为 cancelled。修复后 89 项(批量 5 + Polish 6 + Integrity 15 + SessionViewModel 63)复跑全绿。残余:zombie run(lifecycle 接受但无终态事件)仍有 900s 有界等待;批量进行中切换项目/分支会逐章失败收口(闭环但不优雅),均未额外处理。
+
 ### 2026-07-28 Chat review 复核与状态闭环修复
 
 - 按默认生产路径 `ChatView -> ChatSwiftUIMessageList` 复核外部 review 后，只修复可由测试或真实持久化失败证明的问题：发送前统一校验 provider/model/base URL/API key/附件与 OCR 状态，`sendMessage()` 和 Watch 回传真实成功结果；前台、后台、审批、取消、会话切换和 terminal save 由各自 run/conversation owner 收口，不再让旧快照或后台 job 串入当前会话。标题与后台合并使用 compare-and-set，suggestion/OCR/PhotosPicker 结果绑定启动它们的会话。
@@ -37,6 +45,21 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 - 真机 iPhone Air / iOS 27.0 beta 在 22:39:54、22:40:07 连续产生同栈崩溃：`ComposerDockSendButton → ChatGenerationCoordinator.start → BackgroundGenerationKeepAlive.begin → BGTaskScheduler._handleSubmissionWithoutRegistrationForTaskRequest → SIGABRT`。真机控制台与带有效 `BGTaskSchedulerPermittedIdentifiers` 的 iOS 26.5 Simulator 均确认启动期注册 `app.amber.ios.keepalive.*` 返回 false；根因是把 Info.plist 的通配许可模式误当成运行时 handler identifier，随后仍提交具体 run identifier，Objective-C assertion 无法由 Swift `do/catch` 捕获。
 - 最小修复只落在执行权所有者：删除 `AppShell` 的启动期通配注册；每轮在 submit 前注册同一个具体 identifier，注册失败时不 submit、仍保留既有 UIKit 约 30 秒短保活；进程内记录已成功注册的具体 identifier，供议会固定 `council` lease 与 Chat 审批恢复复用，避免第二次注册被系统终止。未改 provider、消息、输入框、持久化或新增重试/状态机。
 - 红测试先同时命中「注册了通配符」与「注册失败仍 submit」两处断言，再转绿。`BackgroundGenerationKeepAliveTests` 16 条 + `IOSChatBackgroundSuspensionTests` 9 条在 iPhone 17 Pro / iOS 26.5 Simulator **25 passed / 0 failed**（`Test-iosApp-2026.07.27_23-14-28-+0800.xcresult`）；最新测试构建启动日志不再出现通配注册拒绝，`git diff --check` 通过。真机 Debug 包以 Team `89QRFX9548` 全新 DerivedData 构建，`codesign --verify --deep --strict` 通过，包内保留 `processing` 与 `app.amber.ios.keepalive.*`，23:26 覆盖安装到 iPhone Air 并成功启动；主进程 PID 19778 与 Activity Widget 持续存活，安装后未新增 `iosApp` 崩溃报告。模拟器真实发送因无 API Key 且 CuaDriver 在 provider 导航中丢失 Simulator 窗口未完成；设备端是否实际点击发送无法从外部独立确认，Continued Processing 的系统接管仍待一次可观察的真机生成验证。
+
+### 2026-07-27 模型议会动态席位跨 provider 路由与双模式默认轮数
+
+- 根因确认：Room 请求此前只携带当前 `providerSetting`，动态候选池也只读取该 provider 的模型，最终所有席位即使模型 ID 不同仍会通过当前 provider 发出；自由群聊分支则把新议会轮数硬编码为 1，绕过了已正确持久化的 `defaultRounds`。
+- 最小修复沿用现有 provider 配置链：UI 请求传入当前 Settings 的 providers；每个运行席位新增可持久化的 `providerId + modelId` 路由，动态池只纳入已启用、配置有效且支持 Chat streaming 的精确路由，并优先从不同于主持人的 provider 各取一个模型。联通探测和正式发言都按席位路由选择 provider，不再把别家模型兜回当前 provider；历史归档与追问续轮保留同一路由，旧归档缺 providerId 时仍按原有当前模型路径加载。
+- 新议会的自由群聊和辩论现在都执行 `limits.defaultRounds`；追问保持每次只追加一轮。两个设置入口的步进范围与 normalized 契约统一为 1...5，说明文案同步更新。
+- 最终回归：`IOSCouncilRunnerMechanicsTests` + `IOSCouncilRoomArchiveStoreTests` **71 passed / 0 failed / 0 skipped**（iPhone 17 Pro / iOS 26.5 Simulator，`Test-iosApp-2026.07.27_14-29-11-+0800.xcresult`）；覆盖跨 provider 探测/发言顺序、两种模式两轮执行、续轮、不可达模型替换、归档 route 往返。`git diff --check` 通过。
+- 真机 Debug 包使用 Team `89QRFX9548` 构建并通过 `codesign --verify --deep --strict`；14:27 覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`（安装路径 `D8F0251C-3D85-4B16-A611-66541DD5D600/iosApp.app`），14:28 启动成功。因本机仍无 Watch App profile，安装包未嵌入 Watch companion；完整 Watch target 已在生成工程中恢复。真实服务商混合调用的额度/网络结果仍需在设备上发起一场动态议会目测确认。
+
+### 2026-07-27 top-bar Liquid Glass glyph contrast and accent restoration
+
+- 真机截图确认首页设置键与议会返回/历史/设置键一起变成近白，不是单个 SF Symbol 或禁用态；回归由 `e091530d6` 把 `AmberGlassCircleButton` 从「图标标签承载 glass」改成同一 ZStack 内「独立 glass Circle + 图标」引入。iOS 26 的 glass 独立合成层会在真机上洗淡同级 glyph。
+- 共享圆形按钮现在把 `.glassEffect(.regular.interactive(), in: Circle())` 重新附着到含图标的标签本体，并新增局部 `tint` 输入；默认仍为中性 `foreground2`。首页右上设置、议会右上历史/设置显式使用当前强调色，议会左上返回使用高对比 `foreground`；尺寸、布局、点击行为和其他调用点默认配色不变。
+- `IOSCouncilRunnerMechanicsTests.testTopBarCircleButtonsKeepGlyphsAboveNativeGlassAndTintTrailingActions` 在旧实现上 7 处断言实测全红，修复后定点绿测通过；`git diff --check` 通过。设备 Debug 包使用现有 Team `89QRFX9548` 的主 App/Activity Widget profiles 完成通用 iOS 构建并通过 `codesign --verify --deep --strict`。本机缺少新 Watch App profile 且 Xcode 账户凭据不可用，因此本次待装包未嵌入 Watch companion；本地生成工程已恢复原始 `project.yml` 的完整 Watch target。
+- 13:32 设备恢复 connected 后，已把验签包覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`；CoreDevice 返回新安装路径 `08DDAB0D-F01B-4F3B-9AC6-0992D2A98699/iosApp.app`，13:33 以 bundle id `app.amber.ios` 启动成功。以上证明本次包已安装并运行；首页与议会顶栏的最终颜色观感仍需设备目测。
 
 ### 2026-07-27 系统灵动岛收紧宽度、接入 Chat 实时状态
 
