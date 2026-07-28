@@ -1483,3 +1483,23 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 审计行 56 残余「model 级自定义参数编辑面」。
 - **未移植(P1 登记)**: 模型 overwrite 编辑面/BuiltInTools tab(沿用已登项)。
 - **验证**: chat tsc 干净 + 1064 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-110 — ContextUsageIndicator 上下文用量环
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: ChatInputUsage.kt:77-162(ContextUsageIndicator 全文)/:164-168(formatContextTokens)/core/utils/StringUtils.kt:56-87(Int.formatNumber)/ConversationContextEngine.kt:365,451(PLANNING/COMPACTING 生命周期)/values-zh/strings.xml:225
+- **背景**: D-054/D-055 压缩引擎 + estimateConversationInputTokens(消费活动 compacts 的 post-substitution 足迹)已备,composer 用量指示登记 P1——用户看不到上下文预算消耗与压缩活动。
+- **决策**:
+  1. chat HAR format_number.ts(+4 测试):formatNumberInt(:56-87 逐字,K/M/B 档整数无小数/非整 toFixed(1)/负号前置)+ formatContextTokens(:164-168 逐字,≤0 → '0'/<1000 → '<1K')。
+  2. context_engine:PrepareContextDeps += onCompactActiveChange 可选钩子;force 分支(:657 前后)true/finally false(PLANNING/COMPACTING → 终态复位语义;precompact 由 launchPrecompact 包装方自跟踪)。
+  3. ChatPage:composer 上 += 指示行 — ProgressType.Ring 10vp(strokeWidth 1.6,轨道 faint 0.24,弧色 :120-125 四态:压缩中 blue '#4EA6FF'/≥0.7 red/≥0.5 amber/else muted)+ 10sp 文案(压缩中 '正在压缩上下文' zh 逐字;否则 'Context <used> / <window|-->');used = estimateConversationInputTokens(currentMessages, contextCompacts);窗口 = resolveChatProviderChoice().model.contextWindowTokens;compacts 快照于会话加载 + 六处回合完成点刷新;活动计数 = precompact 包装 ++/-- + force 钩子。
+- **偏差/适配登记**:
+  - **ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询未移植**(ALL_MODELS 静态表 + matchScore 模糊匹配子系统)→ 取持久化值 = Android 未知/自定义模型回退路径(:110-111),P1 登记;
+  - Canvas drawArc → ProgressType.Ring;环色 red/amber 取浅主题近似(workspace 主题色动态,视觉级偏差);
+  - 流式中指示按最近落库基线(流式尾不入估计,Android fingerprint 随流式重算 — 视觉级);
+  - Kotlin toFixed HALF_UP vs JS toFixed 半值边界末位可能差异(显示级,登记);
+  - ReasoningLevelChip/ComposerUsageSheet(同文件另两 composable)= 独立特性,未在本切片,P1。
+- **关闭**: 审计行 51 残余「ContextUsageIndicator 环」。
+- **未移植(P1 登记)**: ModelRegistry 注册表/ReasoningLevelChip/ComposerUsageSheet(provider 配额)。
+- **验证**: chat tsc 干净 + 1068 测试(+4)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

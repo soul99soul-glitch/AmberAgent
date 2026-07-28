@@ -16,7 +16,7 @@ import type {
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
   ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
-  MessageChunk, OpenAIChatApi, AskUserQuestion, AskedAnswers,
+  MessageChunk, OpenAIChatApi, AskUserQuestion, AskedAnswers, ConversationCompact,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -47,6 +47,7 @@ import {
   parseAskUserQuestions, buildAskUserAnswerPayload,
   parseAskedAnswers, askAnswerDisplayText,
   isAskUserSubmittable, hasAnyAskAnswer, ASK_USER_TOOL_NAME,
+  estimateConversationInputTokens, formatNumberInt, formatContextTokens,
   loadSearchPrefs, SearchSettings, createSearchTools,
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
   createPlaceholderTransformer, createDocumentTransformer,
@@ -598,6 +599,10 @@ struct ChatPage {
   // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
   @State denyDialogToolCallId: string = '';
   @State denyReasonText: string = '';
+  // D-110:上下文用量指示(ContextUsageIndicator)— compacts/窗口快照 + 压缩活动计数
+  @State contextCompacts: ConversationCompact[] = [];
+  @State contextWindowTokens: number | null = null;
+  @State compactActiveCount: number = 0;
   @State title: string = '新对话';
   @State modelLabel: string = '';
   @State editingNodeId: string = '';
@@ -694,6 +699,12 @@ struct ChatPage {
   aboutToAppear(): void {
     // 每次进入(含从选择器返回)刷新模型标签
     describeChatModel().then((label: string): void => { this.modelLabel = label; });
+    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
+    //   = P1 登记;取持久化 model.contextWindowTokens = Android 未知模型
+    //   回退路径 :110-111)
+    resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+      this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
+    });
     // D-070:搜索 SDK 运行时装配(幂等)+ 搜索偏好加载(SearchTools 工具组接线)
     ensureSearchSdk();
     loadSearchPrefs(getChatKvStore()).then((s: SearchSettings): void => {
@@ -739,6 +750,7 @@ struct ChatPage {
           this.title = conv.title.length > 0 ? conv.title : '对话';
           this.rows = buildRows(conv);
           this.suggestions = conv.chatSuggestions;
+          this.refreshContextCompacts();
           // D-052:恢复持久化队列(session 创建时 load,ChatService.kt:334);
           //   解析失败 → hilog + 空队列(Android Log.w + getOrDefault 语义)
           loadPendingQueue(getChatKvStore(), conv.id, undefined, (e: Error): void => {
@@ -776,6 +788,51 @@ struct ChatPage {
 
   private scrollToBottom(): void {
     this.scroller.scrollEdge(Edge.Bottom);
+  }
+
+  // ===== D-110:ContextUsageIndicator(ChatInputUsage.kt:77-162) =====
+
+  private refreshContextCompacts(): void {
+    const conv: Conversation | null = this.conversation;
+    if (conv === null) {
+      this.contextCompacts = [];
+      return;
+    }
+    getCompactStore().getCompacts(conv.id)
+      .then((cs: ConversationCompact[]): void => {
+        this.contextCompacts = cs;
+      })
+      .catch((): void => {});
+  }
+
+  // :103-117 — estimate(消费活动 compacts,post-substitution 足迹)+ ratio clamp 0..1
+  private contextUsageRatio(): number {
+    const w: number | null = this.contextWindowTokens;
+    if (w === null || w <= 0 || this.conversation === null) return 0;
+    const used: number = estimateConversationInputTokens(
+      currentMessages(this.conversation), this.contextCompacts);
+    const r: number = used / w;
+    return r < 0 ? 0 : (r > 1 ? 1 : r);
+  }
+
+  // :150-160 — 文案:压缩中 → '正在压缩上下文'(zh :225 逐字);
+  //   否则 'Context <used> / <window|-->'
+  private contextUsageText(): string {
+    if (this.compactActiveCount > 0) return '正在压缩上下文';
+    if (this.conversation === null) return 'Context 0 / --';
+    const used: number = estimateConversationInputTokens(
+      currentMessages(this.conversation), this.contextCompacts);
+    const w: number | null = this.contextWindowTokens;
+    return `Context ${formatContextTokens(used)} / ${w !== null ? formatNumberInt(w) : '--'}`;
+  }
+
+  // :120-125 — 环色:压缩中 blue;≥0.7 red;≥0.5 amber;否则 muted
+  private contextRingColor(): string {
+    if (this.compactActiveCount > 0) return '#4EA6FF';
+    const r: number = this.contextUsageRatio();
+    if (r >= 0.7) return '#B43A3A';
+    if (r >= 0.5) return '#C08A2D';
+    return '#8F8B80';
   }
 
   private switchBranch(nodeId: string, idx: number): void {
@@ -843,6 +900,7 @@ struct ChatPage {
         this.rows = buildRows(out);
         this.suggestions = out.chatSuggestions;
         this.sending = false;
+        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.regenTail = null;
         this.regenNodeId = '';
@@ -855,6 +913,7 @@ struct ChatPage {
       .catch((e: Error): void => {
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
+        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.regenTail = null;
         this.regenNodeId = '';
@@ -1215,9 +1274,19 @@ struct ChatPage {
           store: getCompactStore(),
           compressPrompt: prompts.compressPrompt,
           launchPrecompact: (run: () => Promise<CompactResult>): void => {
+            // D-110:precompact 活动跟踪(engine:182-191 appScope.launch;
+            //   PLANNING/COMPACTING → 完成/失败复位)
+            this.compactActiveCount = this.compactActiveCount + 1;
             run().catch((e: Error): void => {
               hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'precompact failed: %{public}s', e.message);
+            }).then((): void => {
+              this.compactActiveCount = Math.max(0, this.compactActiveCount - 1);
             });
+          },
+          // D-110:force 压缩活动钩子(context_engine onCompactActiveChange)
+          onCompactActiveChange: (active: boolean): void => {
+            this.compactActiveCount = Math.max(0,
+              this.compactActiveCount + (active ? 1 : -1));
           },
         });
       return prepared.messages;
@@ -1491,6 +1560,7 @@ struct ChatPage {
         this.rows = buildRows(out);
         this.suggestions = out.chatSuggestions;
         this.sending = false;
+        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.regenTail = null;
         this.regenNodeId = '';
@@ -1505,6 +1575,7 @@ struct ChatPage {
       .catch((e: Error): void => {
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
+        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.regenTail = null;
         this.regenNodeId = '';
@@ -1799,6 +1870,7 @@ struct ChatPage {
         this.inputText = '';
         this.pendingImages = [];
         this.sending = false;
+        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.scrollToBottom();
         // 自动命名 + 会话建议(非阻塞,对齐 Android 独立 launch)
@@ -1813,6 +1885,7 @@ struct ChatPage {
       .catch((e: Error): void => {
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
+        this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.streamingTail = [];
         this.regenTail = null;
@@ -2022,6 +2095,22 @@ struct ChatPage {
         .width('100%')
         .margin({ bottom: 6 })
       }
+
+      // D-110:ContextUsageIndicator(:127-161)— 10dp 环(轨道 faint 0.24 +
+      //   弧 ringColor,ProgressType.Ring 适配)+ 10sp 文案(muted 0.72)
+      Row() {
+        Progress({ value: this.contextUsageRatio() * 100, total: 100, type: ProgressType.Ring })
+          .width(10).height(10)
+          .color(this.contextRingColor())
+          .backgroundColor('#3DB6B1A4')
+          .style({ strokeWidth: 1.6 })
+        Text(this.contextUsageText())
+          .fontSize(10).fontColor('#B88F8B80')
+          .maxLines(1)
+          .margin({ left: 4 })
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, bottom: 2 })
 
       Row() {
         if (this.editingNodeId.length > 0) {

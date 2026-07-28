@@ -582,6 +582,10 @@ export interface PreparedContext {
 export interface PrepareContextDeps extends CompactEngineDeps {
   launchPrecompact?: (run: () => Promise<CompactResult>) => void;
   promptOverheadTokens?: number;
+  // D-110:force 压缩活动钩子(Android ConversationContextEngine.kt:365/:451
+  //   PLANNING/COMPACTING → COMPLETED/FAILED 的 compactActive 观察面子集;
+  //   precompact 路径由 launchPrecompact 包装方自跟踪)
+  onCompactActiveChange?: (active: boolean) => void;
 }
 
 // 以消息列表重建会话节点(D-055 entry 接线用:prepareContextMessages 回调拿到的
@@ -654,10 +658,16 @@ export const prepareContext = async (
   const shouldForce: boolean = plan.reason === 'force_threshold';
   if (plan.shouldCompact && !policy.notifyOnly) {
     if (shouldForce) {
-      const result: CompactResult = await compactConversation(
-        conversation, policy, modelContextWindowTokens, 'auto_force', '', false, deps);
-      if (result.status === 'failed') {
-        throw new ContextCompactionFailedError('auto_force', result.error ?? result.status);
+      // D-110:PLANNING/COMPACTING → active(engine:365/:451;含失败终态复位)
+      if (deps.onCompactActiveChange !== undefined) deps.onCompactActiveChange(true);
+      try {
+        const result: CompactResult = await compactConversation(
+          conversation, policy, modelContextWindowTokens, 'auto_force', '', false, deps);
+        if (result.status === 'failed') {
+          throw new ContextCompactionFailedError('auto_force', result.error ?? result.status);
+        }
+      } finally {
+        if (deps.onCompactActiveChange !== undefined) deps.onCompactActiveChange(false);
       }
     } else if (deps.launchPrecompact !== undefined) {
       deps.launchPrecompact(() => compactConversation(

@@ -127,6 +127,7 @@ export {
 export type {
   ConversationCompact, CompactPolicy, CompactPlan, CompactSummaryPayload, CompactResult,
 } from './chat/context_compact.ts';
+export { formatNumberInt, formatContextTokens } from './chat/format_number.ts';
 export {
   COMPACT_SCHEMA_VERSION, makeCompactPolicy, compactPlanSourceMessageCount,
   weightedTokenChars, partEstimatedChars, partInputFootprintChars,
