@@ -21,6 +21,8 @@ import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { ChatToolDefinition } from '../main/ets/chat/provider_model.ts';
 import type { JsonValue } from '../main/ets/chat/json.ts';
 import { createTimeTool } from '../main/ets/chat/builtin_time_tool.ts';
+import { createToolRegistry } from '../main/ets/chat/tool_registry.ts';
+import { createToolSearchTool } from '../main/ets/chat/builtin_introspection_tools.ts';
 
 // ===== 构造助手 =====
 
@@ -465,5 +467,59 @@ describe('runRegenerateAtWithTools 分支再生(ChatService.regenerateAtMessage:
     const target = out.messageNodes[3];
     assert.equal(target.messages.length, 2);
     assert.equal(toText(target.messages[1]), '单步再生');
+  });
+});
+
+// ===== D-062 懒暴露循环接线(GenerationHandler:159/:167/:183/:364) =====
+
+describe('ToolExposureState 懒暴露接线', () => {
+  it('>40 工具:首步仅常驻可见;tool_search expanded_tools 步间暴露', async () => {
+    const hidden: AgentTool[] = [];
+    for (let i = 0; i < 44; i++) hidden.push(echoTool(`hidden_tool_${i}`));
+    const registry = createToolRegistry(hidden);
+    const tools: AgentTool[] = [...hidden, createToolSearchTool(registry)];
+    const capturedDefs: string[][] = [];
+    const provider = scriptedProvider([
+      [toolDelta('c1', 'tool_search', '{"query":"hidden_tool_7"}')],
+      [textDelta('完成')],
+    ]);
+    const loop: ToolLoopOptions = {
+      tools,
+      makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider => {
+        capturedDefs.push(defs.map((d: ChatToolDefinition): string => d.name));
+        return provider;
+      },
+    };
+    const conv: Conversation = makeConversation('c-exp', []);
+    const out = await runChatTurnWithTools(conv, 'hi', baseDeps(provider), loop);
+    // 45 非发现工具 > 40 且含 tool_search → 懒开:首步仅 tool_search 常驻
+    assert.deepEqual(capturedDefs[0], ['tool_search']);
+    // tool_search 执行输出 expanded_tools=['hidden_tool_7'] →
+    //   第二步暴露(toolsForStep 保原序:hidden_tool_7 在前)
+    assert.deepEqual(capturedDefs[1], ['hidden_tool_7', 'tool_search']);
+    // hidden_tool_7 第二步未被调用(模型只回了文本)→ 循环正常收尾;
+    //   toText 非文本段映射 '' 再 '\n' join(Message.kt:164-169 逐字)
+    //   → [tool, text('完成')] = '\n完成'
+    assert.equal(toText(currentMessages(out)[currentMessages(out).length - 1]), '\n完成');
+  });
+
+  it('≤40 工具:懒模式关,步内 defs 恒全量(行为与 D-061 前一致)', async () => {
+    const tools: AgentTool[] = [echoTool('conversation_search')];
+    const capturedDefs: string[][] = [];
+    const provider = scriptedProvider([
+      [toolDelta('c1', 'conversation_search', '{"q":"x"}')],
+      [textDelta('完')],
+    ]);
+    const loop: ToolLoopOptions = {
+      tools,
+      makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider => {
+        capturedDefs.push(defs.map((d: ChatToolDefinition): string => d.name));
+        return provider;
+      },
+    };
+    const conv: Conversation = makeConversation('c-full', []);
+    await runChatTurnWithTools(conv, 'hi', baseDeps(provider), loop);
+    assert.deepEqual(capturedDefs[0], ['conversation_search']);
+    assert.deepEqual(capturedDefs[1], ['conversation_search']);
   });
 });

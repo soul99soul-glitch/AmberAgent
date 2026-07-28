@@ -642,3 +642,12 @@
   - **ChatPage 接线**:注册表追加三件;deep_read bus 收集器 = router.pushUrl('pages/DeepReadArticlePage',{topicId,title})(Index.startDeepRead:120-127 同路由),页面存活即 hasCollectors=true。
   - **偏差登记**:java.net.URI → 手写 scheme/authority 拆分(D-056 parseUrlHost 同手法;URI.toString() 重建规范化未复刻,合法输入 trim 原文等价 — 调试发现并修正一处:slug 提取须先剥 authority,Java URI.path 语义);**parseDeepReadSlashCommand**(/deepread 斜杠命令 + [ROUTE:deepread] 标签,DeepReadOpenRequest.kt:36-68,属发送路径路由)= 残余登记;**LocalToolOption per-assistant 门控**(鸿蒙 Assistant 模型无 localTools 字段)→ 工具无条件注册(等价全选项开),门控 = P1。
 - **可逆性**:新模块 + 注册表追加;1235 测试全绿(deepread 603 + chat 632),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-062（L0，2026-07-28）ToolExposureState 懒暴露 + 循环接线
+
+- **背景**：D-056 登记「ToolExposureState 懒暴露 = P1」,D-060 落地 isResidentTool/tool_search 后解除阻塞。懒暴露是大目录(>40 工具)下的 token 节流机制:初始仅常驻工具入请求,tool_search 按需暴露。
+- **决定**：
+  - **chat/tool_exposure.ts(TDD,8 测试)**:ToolSearch.kt:270-311 + :373-380 忠实 —— createToolExposureState(from):toolCount = 非 DISCOVERY_UTILITY 三件计数;**lazyMode = toolCount > 40 && hasSearch**;非懒 → 全名暴露;懒 → runCatching createToolRegistry(失败 → category 恒 null)+ isResidentTool 初集;toolsForStep 非懒全量/懒**原序过滤**(不重排);exposeToolNames 懒守卫 + 仅已知名(toolsByName,associateBy 后赢);observeExecutedTools 仅 tool_search 工具的 expandedToolNames(output Text 段 JSON.parse → expanded_tools 字符串数组,非法 JSON/缺键/非字符串项静默,mapNotNull contentOrNull 语义)。
+  - **tool_loop.ts 四接线点**(GenerationHandler.kt 位置逐字):from → 循环前 createToolExposureState(loop.tools)(:159);**exposeToolNames(pendingTools.toolName)** — 每步 pending 计算后、toolsForStep 前(:167,待恢复工具强制可见);stepTools = hideTools ? [] : toolExposure.toolsForStep()(:183 — dispatcher defs 与请求 defs 同为暴露子集,executeBatch:350 toolsInternal 语义);**observeExecutedTools(executedTools)** — executeBatch 非空后、写回前(:364)。
+  - **tool_loop.test.ts 集成 2 测试**:45 工具(44 hidden + 真实 tool_search)— 首步 defs 仅 ['tool_search'],执行后第二步 ['hidden_tool_7','tool_search'](原序);≤40 → 两步 defs 恒全量(D-061 前行为不变)。调试记录:末条消息 toText 期望 '\n完成' 初判为 bug — 核实 Message.kt:164-169 toText 非文本段映射 '' 再 '\n' join,[tool,text] → '\n完成' 为 Android 逐字行为,改测试不改实现。
+- **可逆性**:目录 ≤40(当前 entry 目录 17 件)时懒模式恒关,行为与 D-061 逐字节一致(集成测试锁定);1245 测试全绿(deepread 603 + chat 642),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。

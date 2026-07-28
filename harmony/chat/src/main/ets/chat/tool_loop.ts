@@ -44,6 +44,8 @@ import type { PermissionDecision } from './tool_permission.ts';
 import type { AgentToolDispatcher } from './tool_dispatcher.ts';
 import { AgentToolDispatcher as DefaultDispatcher, defaultToolInvocationHooks } from './tool_dispatcher.ts';
 import { buildAgentLoopBudgetPrompt, agentLoopShouldHideTools } from './agent_loop_budget.ts';
+import type { ToolExposureState } from './tool_exposure.ts';
+import { createToolExposureState } from './tool_exposure.ts';
 import type { JsonObject } from './json.ts';
 
 // ===== maxSteps 常量(PreferencesStore.kt:268-270) =====
@@ -142,6 +144,8 @@ export const runAgenticToolLoop = async (
   const toolRetry: GenerationRetrySetting = loop.toolRetrySetting
     ?? makeGenerationRetrySetting({ enabled: false });
   const ctx: TransformerContext = { assistant: deps.assistant };
+  // D-062:懒暴露状态(GenerationHandler:159 — 循环开始前 from(tools))
+  const toolExposure: ToolExposureState = createToolExposureState(loop.tools);
 
   for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
     const baseMessages: UIMessage[] = currentMessages(conv);
@@ -154,10 +158,14 @@ export const runAgenticToolLoop = async (
         p.type === 'tool' && canToolResumeExecution(p as UIMessagePartTool)) as UIMessagePartTool[]
       : [];
     const hasResumableTools: boolean = pendingTools.length > 0;
+    // D-062(:167):待恢复 pending 工具强制暴露(先于 toolsForStep)
+    toolExposure.exposeToolNames(
+      pendingTools.map((t: UIMessagePartTool): string => t.toolName));
     const budgetPrompt: string = buildAgentLoopBudgetPrompt(stepIndex, maxSteps);
     const hideTools: boolean = agentLoopShouldHideTools(stepIndex, maxSteps, hasResumableTools);
-    // toolsInternal(:177-186):预算 FINAL 且无 resumable → 空(懒暴露裁剪登记)
-    const stepTools: AgentTool[] = hideTools ? [] : loop.tools;
+    // toolsInternal(:177-186):预算 FINAL 且无 resumable → 空;
+    //   D-062 否则 toolsForStep()(懒模式 = 常驻+已暴露子集)
+    const stepTools: AgentTool[] = hideTools ? [] : toolExposure.toolsForStep();
     const stepDefsMap = new Map<string, AgentTool>(
       stepTools.map((t: AgentTool): [string, AgentTool] => [t.name, t]));
 
@@ -259,6 +267,8 @@ export const runAgenticToolLoop = async (
       // 全部 pending 无结果(:360-363)
       break;
     }
+    // D-062(:364):tool_search expanded_tools 步间暴露(先于写回)
+    toolExposure.observeExecutedTools(executedTools);
 
     // 写回同一 assistant 消息(:366-373)
     conv = rewriteLastMessageTools(conv, executedTools);

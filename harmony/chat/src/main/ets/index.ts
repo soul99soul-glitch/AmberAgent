@@ -247,6 +247,10 @@ export {
   createRunPlanUpdateTool, createClipboardTool, createDeepReadOpenTool,
   createDeepReadOpenEvent, DEEP_READ_TITLE_MAX_CHARS,
 } from './chat/builtin_local_tools.ts';
+
+// ===== D-062:ToolExposureState 懒暴露 =====
+export type { ToolExposureState } from './chat/tool_exposure.ts';
+export { createToolExposureState } from './chat/tool_exposure.ts';
 export type { SessionAccessGrant, GrantValidation } from './chat/session_grant_store.ts';
 export {
   SessionAccessGrantStore,
