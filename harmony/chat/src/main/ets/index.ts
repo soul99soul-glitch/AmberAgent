@@ -159,6 +159,49 @@ export {
   withEffectiveMessages, prepareContext, effectiveContextNextAction,
 } from './chat/context_engine.ts';
 
+// ===== 工具执行核心(D-056,Tool/ToolRegistry 策略/PermissionDecisionResolver/
+//   AgentToolDispatcher/ToolInvocationHooks/ToolFailure/AgentLoopBudgetPrompt 全文) =====
+export type { InputSchemaObj, AgentTool, AgentToolOpts } from './chat/tool.ts';
+export {
+  makeInputSchemaObj, makeAgentTool, toolParametersToJson, toChatToolDefinition,
+} from './chat/tool.ts';
+export type { ToolRisk, ToolInvocationPolicy } from './chat/tool_policy.ts';
+export {
+  toolCategory, toolMutatesState, toolRiskProfile, toolAlwaysAsk,
+  requiresFailClosedAutoApproval, toolConcurrencySafe, toolSensitiveRead,
+  toolForegroundPackageRequirement, toolSpeculativeBlockReason,
+  toolOutputBudgetChars, toolInvocationPolicy, toolInvocationPolicyFromText,
+  isPrivateNetworkTarget, inputStringValue, inputBooleanValue,
+  containsExternalCliCouncilSeat, allowsExternalCliCouncil,
+  enforceOutputBudget, truncatedEnvelope, withDisplayTitleHint,
+  DEFAULT_TOOL_OUTPUT_BUDGET_CHARS, MODEL_COUNCIL_TOOL_OUTPUT_BUDGET_CHARS,
+  SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS, EXTERNAL_CLI_COUNCIL_RUNNER_TYPES,
+} from './chat/tool_policy.ts';
+export type {
+  ToolInvocationContext, PermissionDecisionAction, PermissionDecision,
+  PermissionDecisionTrace, PermissionResolverOpts,
+} from './chat/tool_permission.ts';
+export {
+  PermissionDecisionResolver, permissionDecisionTraceToJson,
+  approvalStateSimpleName, toolHasSessionGrant, policyRequiresSubAgentApproval,
+  HISTORY_READ_TOOLS_AUTO_APPROVED_FOR_SUBAGENT, ASK_USER_TOOL_NAME,
+} from './chat/tool_permission.ts';
+export type {
+  ToolInvocationRequest, ToolInvocationResult, ToolInvocationHook,
+  AgentToolDispatcherDeps,
+} from './chat/tool_dispatcher.ts';
+export {
+  AgentToolDispatcher, defaultToolInvocationHooks,
+  createToolTraceHook, createToolArgumentValidationHook, createToolFailureNormalizeHook,
+  sanitizedToolFailureMessage, isRecoverableToolFailure,
+  toAgentToolFailurePayload, toAgentToolFailureJson,
+  withPermissionTrace, withHookMetadata, TOOL_DISPLAY_METADATA_KEYS,
+} from './chat/tool_dispatcher.ts';
+export type { AgentLoopBudgetStage } from './chat/agent_loop_budget.ts';
+export {
+  agentLoopBudgetStage, buildAgentLoopBudgetPrompt, agentLoopShouldHideTools,
+} from './chat/agent_loop_budget.ts';
+
 export {
   serializeUIMessage, parseUIMessage, serializePart, parsePart,
   serializeMessageList, parseMessageList,

@@ -46,7 +46,7 @@
 | 项 | Android 锚点 | 依赖/说明 |
 |---|---|---|
 | ~~生成错误恢复（retry/vision fallback）~~ **retry 已完成(D-050)** | GenerationRetry.kt + GenerationHandler.kt:774-820 | classifier+循环+状态文案忠实;残余:vision fallback(image→text transformer 链依赖)/生成守卫 = P1(PD-006 更新) |
-| 工具执行 + 审批循环 | GenerationHandler.kt:281+ toolDispatcher | PD-006；依赖工具定义落地 |
+| 工具执行 + 审批循环（执行核心**已完成(D-056)**） | Tool.kt + ToolRegistry.kt 策略 + PermissionDecisionResolver.kt + AgentToolDispatcher.kt + ToolInvocationHooks.kt + ToolFailure.kt + AgentLoopBudgetPrompt.kt | Tool 模型/策略全表/权限决策链/批量调度+hooks+重试/循环预算提示完成;残余:chat_turn 循环集成+审批 UI(D-057)/内置工具(D-058)/SpeculativeToolRunner = P1 |
 | ~~FOLLOWUP 发送排队~~ **已完成(D-048)**；~~answer=false 发送路径~~ **已完成(D-051)**；~~队列持久化~~ **已完成(D-052)** | ChatService.kt:687-867；ConversationSession.kt:110-232；ChatInput.kt:272；PendingMessageStore.kt | 队列纯逻辑+chips UI+循环派发完成;长按发送=只记录不生成(STEER/FOLLOWUP 逐字忠实)+停止时 STEER→FOLLOWUP 完成;KV 持久化+进程死亡恢复(launchPendingMessageLoopIfNeeded 逐字)+审计 jsonl 完成;残余:STEER 进行中注入 = P1 |
 | ~~ContextEngine + compact（上下文压缩）~~ **已完成(D-054 纯逻辑 + D-055 引擎执行+集成)** | ConversationContextEngine.kt(806 行) + PreparedContextEditor.kt + CompressPrompt.kt + ChatService invalidateCompacts/copyValidCompacts | prepareContext 管线(编辑→规划→force/precompact→注入→fit)+compactConversation(质量重试+fallback)+四失效钩子+fork 复制+KV 存储完成;残余:compact 设置面/compress 任务模型/ContextUsageIndicator 环/repository search-expand = P1 |
 | 图片压缩 + file:// 私有目录存储 | FileEncoder.kt compressAndEncode | PD-007；PixelMap 管线 |
