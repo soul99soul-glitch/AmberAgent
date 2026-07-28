@@ -7,7 +7,7 @@ import type {
 } from '../main/ets/chat/managed_files.ts';
 import {
   createFilesRepository, deleteChatFiles, makeManagedFileEntity, trackUploadFile,
-  conversationFileUris,
+  conversationFileUris, removedFileUris,
   FILE_FOLDERS_UPLOAD,
 } from '../main/ets/chat/managed_files.ts';
 import { makeConversation, makeMessageNode } from '../main/ets/chat/conversation.ts';
@@ -255,4 +255,31 @@ test('conversationFileUris: tool output 嵌套递归展开 + 不去重(列表语
 
 test('conversationFileUris: 空会话 → []', () => {
   assert.deepEqual(conversationFileUris(makeConversation('c1', [])), []);
+});
+
+// ===== removedFileUris(D-097;ChatService.kt:1903-1912 checkFilesDelete)=====
+
+test('removedFileUris: old 有 new 无 → 移除项;顺序保持 old 序', () => {
+  assert.deepEqual(
+    removedFileUris(
+      ['file:///f/upload/a.png', 'file:///f/upload/b.png', 'file:///f/upload/c.png'],
+      ['file:///f/upload/b.png'],
+    ),
+    ['file:///f/upload/a.png', 'file:///f/upload/c.png'],
+  );
+});
+
+test('removedFileUris: 重复项不去重(Android filter 列表语义)', () => {
+  assert.deepEqual(
+    removedFileUris(
+      ['file:///f/upload/a.png', 'file:///f/upload/a.png'],
+      [],
+    ),
+    ['file:///f/upload/a.png', 'file:///f/upload/a.png'],
+  );
+});
+
+test('removedFileUris: 无移除 → [](new 含全部/old 空)', () => {
+  assert.deepEqual(removedFileUris(['file:///f/a.png'], ['file:///f/a.png']), []);
+  assert.deepEqual(removedFileUris([], ['file:///f/a.png']), []);
 });

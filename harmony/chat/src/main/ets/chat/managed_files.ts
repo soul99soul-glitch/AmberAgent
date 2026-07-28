@@ -195,3 +195,8 @@ export const conversationFileUris = (conv: Conversation): string[] => {
   }
   return uris;
 };
+
+// ===== removedFileUris(D-097;ChatService.kt:1903-1912 checkFilesDelete diff)=====
+// oldFiles.filter { file -> newFiles.none { it == file } } 逐字 — 不去重,保持 old 序
+export const removedFileUris = (oldUris: string[], newUris: string[]): string[] =>
+  oldUris.filter((uri: string): boolean => newUris.indexOf(uri) < 0);

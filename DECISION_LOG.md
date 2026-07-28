@@ -1270,3 +1270,17 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-029 登记「撤销窗 (History undo)」;PD-007 会话删除清理接线。
 - **未移植(P1 登记)**: checkFilesDelete(ChatService.kt:1903-1912 save 挂钩的消息/附件移除清理——挂点设计待决,Android 在 ChatService 层,harmony 无该层)/composer removePart 清理(ChatInputAttachments.kt:126-131)/checkUserAvatarDelete(ChatVM.kt:213-221)/delete-all 会话(HistoryPage toolbar)/FTS deleteConversation(依附 FTS 索引)。
 - **验证**: chat tsc 干净 + 1043 测试(+3)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-097 — checkFilesDelete 持久化挂钩(消息/附件移除文件清理)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: ChatService.kt:1868-1877(updateConversation checkDeletedFiles 默认 true)/:1903-1912(checkFilesDelete diff)/ConversationAccess.kt:13(旗标默认)
+- **背景**: D-096 落地会话级 purge,但消息删除(D-029)/编辑(D-031)/分支再生等"会话内附件移除"无文件清理(PD-007 残余);Android 在会话状态更新时 diff files → deleteChatFiles(removed)。
+- **决策**:
+  1. domain `removedFileUris`(TDD 3 测试):oldFiles.filter { newFiles.none == it } 逐字——不去重,保持 old 序。
+  2. ChatRdbRepository.save 挂钩:持久化前 getById 取库内旧态 → removedFileUris(conversationFileUris(old), conversationFileUris(conv)) → 非空 → hilog.warn(:1911 Log.w 等价,uri 为 uuid 文件名不含消息内容)+ deleteChatFiles fire-and-forget(FilesManager appScope.launch 语义);旧不存在(新会话/撤销恢复/fork)→ 跳过。
+- **偏差/适配登记**: 挂点为持久化 save(Android 在 ChatService 内存态 updateConversation;harmony 无 session 层,ChatPage 保存即持久化,流式中间态不落库 → Android false 旗标位自然不触发,save 挂钩 = Android 终态 diff 的最近等价);每次 save 多一次 getById 全量读(Android 为内存比较,性能档);memory 回退分支同样生效(getById 自带回退)。
+- **关闭**: PD-007 附件移除清理接线(消息级)。
+- **未移植(P1 登记)**: composer removePart 清理(ChatInputAttachments.kt:126-131,依附输入附件移除 UI)/checkUserAvatarDelete(ChatVM.kt:213-221,依附头像设置面)/window 合并(mergeConversationWindowIntoFull,依附分页加载——harmony 恒全量,N/A)。
+- **验证**: chat tsc 干净 + 1046 测试(+3)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

@@ -15,7 +15,9 @@ import type {
 import {
   CHAT_SCHEMA_SQL, conversationToRow, rowToConversation,
   messageNodeToRow, rowToMessageNode, createMemoryConversationRepository,
+  conversationFileUris, removedFileUris, deleteChatFiles,
 } from '@amber/chat-domain';
+import { getDeleteChatFilesDeps } from './ManagedFileStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.ChatRdbRepository';
@@ -130,6 +132,21 @@ class ChatRdbRepository implements ConversationRepository {
   }
 
   async save(conv: Conversation): Promise<void> {
+    // D-097:checkFilesDelete(ChatService.kt:1868-1877 updateConversation 默认 true +
+    //   :1903-1912 diff)— 持久化前与库内旧态 diff files,移除项 deleteChatFiles;
+    //   fire-and-forget(FilesManager appScope.launch 语义);旧不存在(新会话/
+    //   撤销恢复插入)→ 跳过;流式中间态不落库,不受影响(Android false 旗标位)
+    const old: Conversation | null = await this.getById(conv.id);
+    if (old !== null) {
+      const removed: string[] =
+        removedFileUris(conversationFileUris(old), conversationFileUris(conv));
+      if (removed.length > 0) {
+        // Log.w(TAG, "checkFilesDelete: $deletedFiles")(:1911)— uri 为 uuid 文件名,
+        //   不含消息内容(宪章隐私条款兼容)
+        hilog.warn(DOMAIN, TAG, 'checkFilesDelete: %{public}s', JSON.stringify(removed));
+        deleteChatFiles(getDeleteChatFilesDeps(), removed).catch((): void => {});
+      }
+    }
     const store = await this.ensureStore();
     if (store === null) return this.memory.save(conv);
     // upsert conv + 整体替换 nodes(对齐 Android ConversationDAO save 语义:
