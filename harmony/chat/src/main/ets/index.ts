@@ -24,7 +24,7 @@ export {
 export type { MessageNode, Conversation } from './chat/conversation.ts';
 export {
   DEFAULT_ASSISTANT_ID, makeMessageNode, toMessageNode, nodeCurrentMessage, nodeRole,
-  makeConversation, currentMessages, getMessageNodeByMessageId, updateCurrentMessages,
+  makeConversation, patchConversation, currentMessages, getMessageNodeByMessageId, updateCurrentMessages,
   limitContext, finishReasoning, finishPendingTools, collectFileUrls,
 } from './chat/conversation.ts';
 

@@ -327,3 +327,12 @@
   - **裁剪**:copyWithForkedFileUrl(file: 协议文件复制)= P1(鸿蒙多模态输入未落地,无文件类 part 来源,恒等处理);copyValidCompacts(ContextEngine = P1)。
   - **UI**:所有消息行加「分叉」→ 保存新会话 → 跳转新 ChatPage 实例(conversationId 参数)。
 - **可逆性**:fork 产生独立新会话,原会话零影响。
+
+## D-034（L0，2026-07-28）会话手动改名 + patchConversation(copy helper 家族补齐)
+
+- **背景**：Android ChatVM.updateTitle(copy title + save);自动命名(D-025)已备,手动改名缺失。
+- **决定**：
+  - **patchConversation(chat-domain,1 测试)**:Kotlin copy 语义;与 patchAssistant(D-027)同一系统性修法(entry .ets 禁接口展开)。saveTitle 改经此 helper。
+  - **UI**:ChatPage 标题点击 → 内联 TextInput 编辑(保存/取消);子组件 onClick 优先,模型标签点击仍进选择器;编辑态屏蔽父 Column 导航。
+  - 改名后 auto-title 不再覆盖(title 非空白,D-025 条件天然满足)。
+- **可逆性**:纯增项;标题清空后下一轮生成会重新自动命名(Android 同语义)。

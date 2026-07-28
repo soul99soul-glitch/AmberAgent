@@ -8,7 +8,7 @@ import { makeUserMessage, makeAssistantMessage, makeUIMessage } from '../main/et
 import type { UIMessage, UIMessagePartTool, UIMessagePartReasoning } from '../main/ets/chat/message.ts';
 import {
   makeMessageNode, toMessageNode, nodeCurrentMessage, nodeRole,
-  makeConversation, currentMessages, updateCurrentMessages,
+  makeConversation, patchConversation, currentMessages, updateCurrentMessages,
   limitContext, finishReasoning, finishPendingTools, collectFileUrls,
   DEFAULT_ASSISTANT_ID,
 } from '../main/ets/chat/conversation.ts';
@@ -184,4 +184,13 @@ test('collectFileUrls: 递归 tool output,只收 file:// 前缀', () => {
 
 test('DEFAULT_ASSISTANT_ID 与 Android 一致', () => {
   assert.equal(DEFAULT_ASSISTANT_ID, '0950e2dc-9bd5-4801-afa3-aa887aa36b4e');
+});
+
+test('patchConversation 覆盖指定字段,其余保留(copy 语义)', () => {
+  const base = makeConversation('c1', [], { title: 'T', assistantId: 'a1' });
+  const out = patchConversation(base, { title: 'T2' });
+  assert.equal(out.title, 'T2');
+  assert.equal(out.assistantId, 'a1');
+  assert.equal(out.id, 'c1');
+  assert.notEqual(out, base);
 });

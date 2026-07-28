@@ -74,6 +74,16 @@ export const makeConversation = (
   updateAt: opts.updateAt ?? nowIso(),
 });
 
+// patchConversation:不可变更新(语义 = Kotlin data class copy)
+// 鸿蒙增补工具:ArkTS entry(.ets)禁用接口对象展开(arkts-no-spread),
+// 与 patchAssistant(D-027)同一系统性修法
+export const patchConversation = (
+  base: Conversation, patch: Partial<Omit<Conversation, 'id'>>,
+): Conversation => ({
+  ...base,
+  ...patch,
+});
+
 // currentMessages(Conversation.kt:43):每个 node 取 selectIndex 处消息
 export const currentMessages = (conv: Conversation): UIMessage[] =>
   conv.messageNodes.map((n: MessageNode): UIMessage => n.messages[n.selectIndex]);

@@ -10,7 +10,7 @@ import {
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
   nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt, deleteMessage, editMessage,
-  forkConversation,
+  forkConversation, patchConversation,
   runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
 } from '@amber/chat-domain';
 import {
@@ -161,6 +161,8 @@ struct ChatPage {
   @State modelLabel: string = '';
   @State editingNodeId: string = '';
   @State editingMessageId: string = '';
+  @State editingTitle: boolean = false;
+  @State titleInput: string = '';
   private conversation: Conversation | null = null;
   private scroller: Scroller = new Scroller();
 
@@ -318,6 +320,22 @@ struct ChatPage {
       });
   }
 
+  // 手动改名(D-034):Android ChatVM.updateTitle 语义(copy title + save)
+  private startEditTitle(): void {
+    if (this.conversation === null) return;
+    this.titleInput = this.conversation.title;
+    this.editingTitle = true;
+  }
+
+  private saveTitle(): void {
+    if (this.conversation === null) return;
+    const updated: Conversation = patchConversation(this.conversation, { title: this.titleInput.trim() });
+    this.conversation = updated;
+    this.title = updated.title.length > 0 ? updated.title : '对话';
+    this.editingTitle = false;
+    getChatRepository().save(updated);
+  }
+
   // 会话分叉(D-033):复制 0..目标节点为新会话并跳转
   private forkAt(row: MsgRow): void {
     if (this.conversation === null || this.sending) return;
@@ -448,15 +466,36 @@ struct ChatPage {
   build() {
     Column() {
       Column() {
-        Text(this.title)
-          .fontSize(17).fontWeight(FontWeight.Medium).fontColor(INK)
+        if (this.editingTitle) {
+          Row() {
+            TextInput({ text: this.titleInput, placeholder: '会话标题' })
+              .fontSize(15).layoutWeight(1).height(36)
+              .backgroundColor(SURFACE)
+              .onChange((v: string): void => { this.titleInput = v; })
+            Text('保存').fontSize(13).fontColor(ACCENT)
+              .padding({ left: 10, right: 4 })
+              .onClick((): void => this.saveTitle())
+            Text('取消').fontSize(13).fontColor(INK3)
+              .padding({ left: 10, right: 4 })
+              .onClick((): void => { this.editingTitle = false; })
+          }
+          .padding({ left: 16, right: 16 })
+        } else {
+          Text(this.title)
+            .fontSize(17).fontWeight(FontWeight.Medium).fontColor(INK)
+            .onClick((): void => this.startEditTitle())
+        }
         Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型 — 点我选择')
           .fontSize(11)
           .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
           .margin({ top: 2 })
       }
       .padding({ top: 16, bottom: 8 })
-      .onClick((): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage' }); })
+      .onClick((): void => {
+        if (!this.editingTitle) {
+          router.pushUrl({ url: 'pages/ChatModelPickerPage' });
+        }
+      })
 
       List({ scroller: this.scroller }) {
         ForEach(this.rows, (row: MsgRow): void => {
