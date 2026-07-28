@@ -914,3 +914,13 @@
   - **输入保留语义**:send() 原本仅成功才清输入(:1317),门中止天然保留;sendWithoutAnswer 原先行前清输入,改为门内清(行为修正)。
   - **sendParts 内 rt-null reject 保留**为纵深防御(门后竞态:用户在门与派发间删 provider)。
 - **可逆性**:1476 测试全绿(deepread 603 + chat 873,纯 entry UI 变更无新增测试),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit 残余「canSendWithoutChatModel 模型空值门」消除。
+
+## D-081（L0，2026-07-28）STEER 进行中注入修正 — 长按生成中 answer=true + mode/answer 解耦
+
+- **背景**：核查「STEER 进行中注入」残余时对 Android 重锚,发现 D-051/D-048 引入两处偏差。Android 锚点:ChatInput.kt:259(普通发送恒 FOLLOWUP)/:265-289(长按:loading 且输入空 → onCancelClick;否则 queueMode = loading ? STEER : FOLLOWUP)、ChatPage.kt:706-710(**answer = loadingJob != null && queueMode == STEER**)、ChatService.kt:695-700(mode = isGenerating ? queueMode : FOLLOWUP)、:386-390(步间消费)、:1070(派发时 STEER → asFollowup)。
+- **决定**：
+  - **修正 1(answer 标志)**:鸿蒙长按生成中原先入队 STEER + answer=false(被消费则无害,但未消费降级派发时只记录不生成 — 与 Android 相反)。Android 语义:生成中长按 = STEER + answer=**true**(插话被进行中生成消费即「已应答」;未消费降级 FOLLOWUP 派发时仍触发生成)。修正为 enqueuePendingParts(inputParts, true, 'STEER')。
+  - **修正 2(mode/answer 解耦)**:原 mode 推导 `!answer && sending ? STEER : FOLLOWUP` 把 answer 与 mode 耦合(Android 两者正交:FOLLOWUP+answer=true 普通发送 / STEER+answer=true 长按 / 非生成中长按 answer=false 直接 append 不入队)。enqueuePendingParts 改显式 mode 参数(默认 FOLLOWUP)。
+  - **不变项(核对后确认忠实)**:普通发送生成中 FOLLOWUP+answer=true(:259 恒 FOLLOWUP);建议长按入队 FOLLOWUP+answer=true(:871);非生成中长按 answer=false 直接 append;队列满文案逐字(:706);tool_loop 步间消费+写回+emit(:386-390 等价,appendNode+save+emitSnapshot);drainSteerMessages filter-all ≡ takeWhile-prefix(入队不变式保证 STEER 仅在前缀);STEER 仅工具循环消费,非工具路径等派发降级(Android 同)。
+  - **COLLECT 模式不移植(登记)**:Android 全代码库无任何 COLLECT 入队点(enum/isCollectable/合并机器/UI 标签齐备但无生产者,休眠路径);HAR pending_queue 已含 isCollectable/buildCollected 纯函数(D-048 随队列移植,测试锁定)即足够;若 Android 复活该路径再补 UI。
+- **可逆性**:1476 测试全绿(deepread 603 + chat 873),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。gap-audit「STEER 进行中注入」残余消除。

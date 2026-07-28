@@ -11,7 +11,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import type {
   Conversation, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
-  PendingUserMessage, DequeueNextResult, UIMessagePartReasoning, ReasoningCardState,
+  PendingUserMessage, PendingUserMessageMode, DequeueNextResult, UIMessagePartReasoning, ReasoningCardState,
   CompactPolicy, CompactResult, PreparedContext,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
@@ -1076,11 +1076,14 @@ struct ChatPage {
   // 模式(D-051,Android ChatInput.kt:259/272 + ChatService.kt:699):
   //   answer=true(点击发送)→ 恒 FOLLOWUP;answer=false(长按)生成中 → STEER
   //   (插 STEER 前缀位,派发时 asFollowup 转换),否则 FOLLOWUP
-  private enqueuePendingParts(parts: UIMessagePart[], answer: boolean): void {
+  // ChatService.kt:695-700:mode 显式传入(默认 FOLLOWUP);非生成期 Android 强制
+  //   FOLLOWUP — 鸿蒙入队仅在 sending 分支发生,天然等价
+  private enqueuePendingParts(
+    parts: UIMessagePart[], answer: boolean, mode: PendingUserMessageMode = 'FOLLOWUP'): void {
     const msg: PendingUserMessage = makePendingUserMessage({
       parts,
       answer,
-      mode: !answer && this.sending ? 'STEER' : 'FOLLOWUP',
+      mode,
     });
     const r = enqueuePendingUserMessage(this.pendingQueue, msg);
     if (!r.accepted) {
@@ -1159,9 +1162,11 @@ struct ChatPage {
     return true;
   }
 
-  // D-051:长按发送 = 只记录不生成(Android ChatInput.kt:272 → queueMode;
-  //   ChatVM.sendMessageWithoutAnswer → sendMessage(answer=false))
-  //   生成中 → STEER 入队(插在生成后首位);否则直接 appendUserMessage
+  // D-051/D-081:长按发送(ChatInput.kt:265-289 + ChatPage.kt:706-710):
+  //   生成中 → STEER 入队(插在生成后首位)+ answer=TRUE(:708
+  //   answer = loadingJob != null && queueMode == STEER — 插话被进行中的
+  //   生成消费,属「已应答」;未被消费则降级 FOLLOWUP 派发时仍要生成);
+  //   非生成中 → answer=false 直接 appendUserMessage(只记录不生成)
   //   登记偏差:编辑态不支持(Android 无此交互),编辑态长按按普通发送语义入队
   private sendWithoutAnswer(): void {
     const text: string = this.inputText.trim();
@@ -1182,7 +1187,8 @@ struct ChatPage {
       this.pendingImages = [];
       if (this.editingNodeId.length > 0) this.cancelEdit();
       if (this.sending) {
-        this.enqueuePendingParts(inputParts, false);
+        // D-081:STEER + answer=true(ChatPage.kt:708) — 插话注入进行中生成
+        this.enqueuePendingParts(inputParts, true, 'STEER');
         return;
       }
       runAppendUserMessage(this.conversation as Conversation, inputParts, getChatRepository())
