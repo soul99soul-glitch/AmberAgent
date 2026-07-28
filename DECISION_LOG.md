@@ -1380,3 +1380,22 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-087 登记「daydreamReasoningLevel 未移植」。
 - **未移植(P1 登记)**: 无(该字段链完整)。
 - **验证**: chat tsc 干净 + 1054 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-104 — 权限与批准设置面(autoApprove 双开关 + 推测执行开关)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: SettingAgentPermissionsPage.kt(全文 159 行)/SettingAgentExtensionsPage.kt:216-233(推测执行开关宿主)/PreferencesStore.kt:164-165,226-229(默认)/ChatService.kt:1345-1347(消费链)/values-zh/strings.xml:634-635,654-656,996-997,1307-1310,255
+- **背景**: harmony tool_loop.ts:66-83 四字段(autoApproveTools/autoApproveHighRiskTools/speculativeEnabled/speculativeMaxConcurrentTools)自 D-056/D-063 已就绪,但快照无字段、ChatPage 未传、无写入助手、无设置面——四开关恒默认,用户不可配。
+- **决策**:
+  1. AgentRuntimePrefs:AgentRuntimeJson/AgentRuntimeSnapshot += autoApproveAllToolCalls/autoApproveHighRiskToolCalls(解析 `=== true`,默认 false,:164-165 逐字)+ speculativeToolExecution { enabled(`=== true` 默认 false)/maxConcurrentTools(非数 → 4,:226-229)};默认快照同步;新增 updateAgentRuntimePermissions RMW 写入助手(autoApproveAllToolCalls?/autoApproveHighRiskToolCalls?/speculativeEnabled?)。
+  2. ChatPage.buildToolLoop:四字段接线——autoApproveTools = agentRuntime.autoApproveAllToolCalls || conv.autoApproveToolCalls(ChatService.kt:1345-1347 逐字,会话级覆盖优先 OR 语义);autoApproveHighRiskTools = agentRuntime.autoApproveHighRiskToolCalls;speculative* 两字段直传。
+  3. ChatAgentPermissionsPage(新页):批准策略卡——全局自动批准直写;高风险自动批准开启 → AlertDialog(title/desc zh 逐字;取消重置本地态/确认写 true),关闭直写(:140-151 逐字);实验卡——推测执行开关直写 speculativeEnabled。入口:ChatListPage 头部 '权限' 链接;main_pages.json 注册。
+  4. 构建修复:D-104 编辑将 SpeculativeToolExecutionJson 接口插入 AgentRuntimeJson 中段致接口断裂(9+ ArkTS 10505001)——重排为 AgentRuntimeJson 完整十二字段 + SpeculativeToolExecutionJson 独立;AgentRuntimeSnapshot 移入 import type 块(接口类型规则)。
+- **偏差/适配登记**:
+  - '系统权限' section(:95-110 → SettingSystemAccess)= Android 系统权限子系统(短信/拨号/联系人/日历/录音/终端),平台专属 → N/A 登记不移植;
+  - 推测执行开关 Android 宿主于扩展/运行任务页(任务调度列表未移植)→ 并入本页第二卡(placement 偏差);
+  - maxConcurrentTools 无 Android UI(恒 4)→ 同不暴露;AlertDialog deprecation 警告为既有 API 用法,同其他页先例。
+- **关闭**: 审计行「工具执行 + 审批循环」残余「autoApprove 设置面/推测执行设置面」。
+- **未移植(P1 登记)**: maxToolLoopSteps/harnessDebug/任务调度设置面(扩展页残余);系统权限子系统(Android-only)。
+- **验证**: chat tsc 干净 + 1054 测试/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

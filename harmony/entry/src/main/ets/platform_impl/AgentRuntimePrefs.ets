@@ -3,8 +3,8 @@
 //   PreferencesKeys.kt:77 — 'agent_runtime' 键名逐字
 //   AgentPrefs.kt:47-51 — decodeJsonOrNull → 默认 AgentRuntimeSetting
 //   PreferencesStore.kt:156 — enableTimeReminder 默认 false
-// 裁剪:其余 agentRuntime 字段(autoApproveAllToolCalls/推测执行/compact 等
-//   设置面)= P1 已登记,本文件仅承载 D-072 所需快照
+// 裁剪:其余 agentRuntime 字段(maxToolLoopSteps/harnessDebug/任务调度等
+//   设置面)= P1 已登记,本文件仅承载已落地切片所需快照
 import { i18n } from '@kit.LocalizationKit';
 import type { KeyValueStore, MemoryRecallSetting, ReasoningLevel } from '@amber/chat-domain';
 import { DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
@@ -65,6 +65,18 @@ export interface AgentRuntimeSnapshot {
   contextCompaction: ContextCompactionSnapshot;
   // D-085d:MemoryExtractor.kt:45,69 消费
   memoryWorker: MemoryWorkerGateSnapshot;
+  // D-104:PreferencesStore.kt:164-165(默认 false;ChatService.kt:1345-1347 消费)
+  autoApproveAllToolCalls: boolean;
+  autoApproveHighRiskToolCalls: boolean;
+  // D-104:PreferencesStore.kt:226-229(默认 enabled=false/maxConcurrentTools=4;
+  //   tool_loop speculativeRunner 门消费,tool_loop.ts:184-188)
+  speculativeToolExecution: SpeculativeToolExecutionSnapshot;
+}
+
+// D-104:SpeculativeToolExecutionSetting(PreferencesStore.kt:226-229)
+export interface SpeculativeToolExecutionSnapshot {
+  enabled: boolean;
+  maxConcurrentTools: number;
 }
 
 interface MemoryRecallJson {
@@ -104,6 +116,9 @@ interface ContextCompactionJson {
 
 interface AgentRuntimeJson {
   agentSoulMarkdown?: string;
+  autoApproveAllToolCalls?: boolean;
+  autoApproveHighRiskToolCalls?: boolean;
+  speculativeToolExecution?: SpeculativeToolExecutionJson;
   contextCompaction?: ContextCompactionJson;
   enableTimeReminder?: boolean;
   enableRecentChatsReference?: boolean;
@@ -112,6 +127,11 @@ interface AgentRuntimeJson {
   enableLongTermMemory?: boolean;
   memoryRecall?: MemoryRecallJson;
   memoryWorker?: MemoryWorkerJson;
+}
+
+interface SpeculativeToolExecutionJson {
+  enabled?: boolean;
+  maxConcurrentTools?: number;
 }
 
 const defaultMemoryRecall = (): MemoryRecallSetting => ({
@@ -142,6 +162,10 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
     daydreamModelId: DEFAULT_AUTO_MODEL_ID, daydreamFollowCompressModel: true,
     daydreamReasoningLevel: 'high',
   },
+  // :164-165/:226-229 默认
+  autoApproveAllToolCalls: false,
+  autoApproveHighRiskToolCalls: false,
+  speculativeToolExecution: { enabled: false, maxConcurrentTools: 4 },
 });
 
 const parseMemoryRecall = (raw: MemoryRecallJson | undefined): MemoryRecallSetting => {
@@ -224,6 +248,15 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
       agentSoulMarkdown: typeof parsed.agentSoulMarkdown === 'string'
         ? parsed.agentSoulMarkdown : DEFAULT_AGENT_SOUL_MARKDOWN,
       contextCompaction: parseContextCompaction(parsed.contextCompaction),
+      // :164-165 默认 false(仅显式 true 开)
+      autoApproveAllToolCalls: parsed.autoApproveAllToolCalls === true,
+      autoApproveHighRiskToolCalls: parsed.autoApproveHighRiskToolCalls === true,
+      speculativeToolExecution: {
+        enabled: parsed.speculativeToolExecution?.enabled === true,
+        maxConcurrentTools:
+          typeof parsed.speculativeToolExecution?.maxConcurrentTools === 'number'
+            ? parsed.speculativeToolExecution.maxConcurrentTools : 4,
+      },
       memoryWorker: parseMemoryWorker(parsed.memoryWorker),
     };
   } catch {
@@ -415,6 +448,42 @@ export const updateRecallToggles = async (
     const recall: MemoryRecallJson = root.memoryRecall ?? {};
     recall.debug = patch.memoryRecallDebug;
     root.memoryRecall = recall;
+  }
+  await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
+  return loadAgentRuntimeSnapshot(kv);
+};
+
+// ===== D-104:权限/推测执行写回(SettingAgentPermissionsPage/SettingAgentExtensionsPage
+//   updateSettings { copy(agentRuntime = ...) } 全文档重写 → RMW 保留未知字段) =====
+
+export interface AgentRuntimePermissionsPatch {
+  autoApproveAllToolCalls?: boolean;
+  autoApproveHighRiskToolCalls?: boolean;
+  speculativeEnabled?: boolean;
+}
+
+export const updateAgentRuntimePermissions = async (
+  kv: KeyValueStore, patch: AgentRuntimePermissionsPatch,
+): Promise<AgentRuntimeSnapshot> => {
+  const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
+  let root: AgentRuntimeJson = {};
+  if (raw !== null) {
+    try {
+      root = JSON.parse(raw) as AgentRuntimeJson;
+    } catch {
+      root = {};
+    }
+  }
+  if (patch.autoApproveAllToolCalls !== undefined) {
+    root.autoApproveAllToolCalls = patch.autoApproveAllToolCalls;
+  }
+  if (patch.autoApproveHighRiskToolCalls !== undefined) {
+    root.autoApproveHighRiskToolCalls = patch.autoApproveHighRiskToolCalls;
+  }
+  if (patch.speculativeEnabled !== undefined) {
+    const spec: SpeculativeToolExecutionJson = root.speculativeToolExecution ?? {};
+    spec.enabled = patch.speculativeEnabled;
+    root.speculativeToolExecution = spec;
   }
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);

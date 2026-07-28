@@ -1025,7 +1025,7 @@ struct ChatPage {
   //   conversation_*(4) + session_*(4),D-059 追加 conversation_queue_*(2),
   //   经 ToolRegistry 包装层(ToolRegistry.kt
   //   :31-161 — 派生 needsApproval/display_title 注入/output budget);
-  //   autoApprove 默认 false(设置面 = P1,登记);每步 provider 工厂按步内
+  //   autoApprove/speculative 经 agentRuntime 快照接线(D-104);每步 provider 工厂按步内
   //   工具定义重建 params(arkts-no-spread 逐字段,不用 rt.params 展开)
   private buildToolLoop(rt: ChatRuntime, conv: Conversation): ToolLoopOptions {
     // Android conversationProvider = getConversationFlow().value(最新会话态)
@@ -1144,6 +1144,14 @@ struct ChatPage {
       consumeSteerMessages: (): Promise<UIMessage[]> => this.drainSteerMessages(),
       // D-077a:tool system prompt 块所需模型(buildSystemPromptParts:739-741)
       toolPromptModel: rt.params.model,
+      // D-104:ChatService.kt:1345-1347 逐字 —
+      //   autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls
+      //     || conversation.autoApproveToolCalls
+      autoApproveTools: this.agentRuntime.autoApproveAllToolCalls || conv.autoApproveToolCalls,
+      autoApproveHighRiskTools: this.agentRuntime.autoApproveHighRiskToolCalls,
+      // D-104:speculativeToolExecution(PreferencesStore.kt:226-229)门接线
+      speculativeEnabled: this.agentRuntime.speculativeToolExecution.enabled,
+      speculativeMaxConcurrentTools: this.agentRuntime.speculativeToolExecution.maxConcurrentTools,
     };
   }
 
