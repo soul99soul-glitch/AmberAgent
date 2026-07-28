@@ -100,4 +100,17 @@
   - `RegexOutputTransformer` 忠实保留 Android 的"只实现 visualTransform/visualTransformTail、onGenerationFinish 缺省恒等"行为（尽管看起来可疑，Android 即如此，不改）。
 - **可逆性**：全部为模块内裁剪，设备端阶段可逐层加回。
 
+## D-013（L0，2026-07-28）Chat 持久化 schema：RDB 表结构、行映射与序列化 quirk 复刻
+
+- **背景**：M3「本地保存/重启恢复」前置。基准 = DATA_SCHEMA_MATRIX T01/T02 + ConversationEntity/MessageNodeEntity + ConversationDAO + ai/util/Json.kt。
+- **决定**：
+  - `conversation` 表**丢弃 Android 废弃 `nodes` 列**（矩阵注明"迁移时可丢弃"；Android 侧恒 `"[]"`）。
+  - 表名用 `conversation`/`message_node`（矩阵已定）；Android Room 实际表名为 `conversationentity`——**未来 Android DB 导入工具需做表名映射**，登记在案。
+  - `create_at`/`update_at` 为 epoch ms INTEGER（Android Long），领域层 ISO 字符串在行映射处互转（Date.parse/toISOString，精度毫秒无损）。
+  - 消息正文 = `message_node.messages` JSON blob，序列化严格对齐 kotlinx（鉴别器优先 + 声明序、encodeDefaults、explicitNulls=false、ignoreUnknownKeys）→ golden blob 测试锁定键序。
+  - **quirk Q-1 忠实复刻**：`Reasoning.finishedAt` 声明默认 `Clock.System.now()`，null 省略后解码时复活为解析时刻；`parseUIMessage(blob, now)` 的 now 参数即此来源（可注入）。
+  - Repository Port 覆盖 DAO 语义子集：upsert+整体替换 nodes、list/search 一律 `is_pinned DESC, update_at DESC`、title 搜索 ASCII-only 大小写折叠（SQLite LIKE 语义）、delete 级联。Paging/Flow 响应式为 Android 框架关注点，不进 Port。
+- **可逆性**：schema 首版；设备阶段 spike B 验证 RDB 兼容后冻结，后续变更走迁移策略。
+
+
 

@@ -69,3 +69,16 @@ export type {
   ChatStreamProvider, ConversationStore, MemoryConversationStore, ChatTurnDeps,
 } from './chat/chat_turn.ts';
 export { createMemoryConversationStore, runChatTurn } from './chat/chat_turn.ts';
+
+export {
+  serializeUIMessage, parseUIMessage, serializePart, parsePart,
+  serializeMessageList, parseMessageList,
+} from './chat/serialize.ts';
+
+export {
+  CHAT_SCHEMA_SQL, conversationToRow, rowToConversation,
+  messageNodeToRow, rowToMessageNode, createMemoryConversationRepository,
+} from './chat/persistence.ts';
+export type {
+  ConversationRow, MessageNodeRow, ConversationSummary, ConversationRepository,
+} from './chat/persistence.ts';
