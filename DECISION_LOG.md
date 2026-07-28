@@ -249,3 +249,14 @@
   - **entry 接线**:send 成功路径尾部非阻塞 maybeAutoTitle(holder 模式传 runtime);失败 → errorMsg 上浮(非静默)。
   - ArkTS 修法登记:接口对象禁用 spread(arkts-no-spread)→ makeTextGenerationParams 全字段工厂;holder 对象字面量类型需具名 interface(RuntimeHolder)。
 - **可逆性**:纯新增;命名失败不影响会话本体。
+
+## D-026（L0，2026-07-28）会话建议：generateSuggestion 等价 + 失败处理偏差(非静默 hilog)
+
+- **背景**：Android 每轮生成完成后刷新 chatSuggestions(AiAuxiliaryGenerator.kt:81-134)。
+- **决定**：
+  - **chat-domain suggestion.ts(TDD 7 测试)**:DEFAULT_SUGGESTION_PROMPT 逐字(Suggestion.kt:3-21 trimIndent 后,golden 锁定);content = takeLast(8) 摘要;split('\n') → trim → 滤空 → **take(10)**(次序忠实:先滤后取);模型返回空 → 清空旧建议(替换语义,非保留);抛错 → 传播、不持久化、会话不变。
+  - **偏差(显式选择,非 PARITY_DEBT)**:Android 建议失败仅 printStackTrace(静默);鸿蒙 domain 传播 + entry hilog.warn 记录——满足宪章非静默条款且不打扰 UI(建议为辅助功能,失败不上浮 errorMsg,与 Android 不打扰用户的意图一致)。
+  - **触发点**:send 成功 + regenerate 成功(对齐 Android handleMessageComplete 后触发);均为非阻塞。中间态清空(in-memory clear)裁 MVP——鸿蒙一次性生成后替换,无中间写库。
+  - **UI**:输入框上方横向滚动 chips,点击填入输入框(不直接发送,发送由用户确认);sending 中隐藏。
+  - 裁剪:同 D-025,suggestionModelId 设置 = P1;locale 硬编码'简体中文'。
+- **可逆性**:纯新增 + ChatPage 渲染增项;建议生成失败不影响会话。

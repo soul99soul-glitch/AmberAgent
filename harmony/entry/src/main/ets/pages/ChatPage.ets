@@ -3,13 +3,14 @@
 // D-024:assistant 分支 — ◀ n/m ▶ 切换(selectMessageBranch) + 末条「重新生成」
 //   (runRegenerateAt);regenerate 流式预览裁 MVP(spinner 代替,已登记)
 import { router } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { Conversation, UIMessage, UIMessagePart } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, runChatTurn,
   createTemplateTransformer, thinkTagTransformer, regexOutputTransformer,
   asChatStreamProvider, seedConversationWithPresets,
   nodeCurrentMessage, nodeRole, selectMessageBranch, runRegenerateAt,
-  runAutoTitle, makeUserMessage, toText, makeTextGenerationParams,
+  runAutoTitle, runSuggestion, makeUserMessage, toText, makeTextGenerationParams,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -23,6 +24,9 @@ const INK2: string = '#57544C';
 const INK3: string = '#8F8B80';
 const LINE: string = '#E4E0D6';
 const ACCENT: string = '#B8623A';
+
+const HILOG_DOMAIN: number = 0x0001;
+const HILOG_TAG: string = 'DeepRead.ChatPage';
 
 const partKey = (p: UIMessagePart, i: number): string => `${p.type}-${i}`;
 
@@ -132,6 +136,7 @@ interface RuntimeHolder {
 struct ChatPage {
   @State rows: MsgRow[] = [];
   @State streamingTail: UIMessage[] = [];
+  @State suggestions: string[] = [];
   @State inputText: string = '';
   @State sending: boolean = false;
   @State errorMsg: string = '';
@@ -151,6 +156,7 @@ struct ChatPage {
           this.conversation = conv;
           this.title = conv.title.length > 0 ? conv.title : '对话';
           this.rows = buildRows(conv);
+          this.suggestions = conv.chatSuggestions;
         } else {
           this.errorMsg = '会话不存在';
         }
@@ -160,6 +166,7 @@ struct ChatPage {
         const fresh = makeConversation(newId(), []);
         this.conversation = seedConversationWithPresets(fresh, assistants[0]);
         this.rows = buildRows(this.conversation);
+        this.suggestions = this.conversation.chatSuggestions;
       });
     }
   }
@@ -181,8 +188,10 @@ struct ChatPage {
     this.sending = true;
     this.errorMsg = '';
     const conv: Conversation = this.conversation;
+    const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime()
       .then((rt: ChatRuntime | null): Promise<Conversation> => {
+        holder.rt = rt;
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型'));
         }
@@ -198,8 +207,12 @@ struct ChatPage {
       .then((out: Conversation): void => {
         this.conversation = out;
         this.rows = buildRows(out);
+        this.suggestions = out.chatSuggestions;
         this.sending = false;
         this.scrollToBottom();
+        if (holder.rt !== null) {
+          this.maybeSuggestions(out, holder.rt);
+        }
       })
       .catch((e: Error): void => {
         this.errorMsg = e.message;
@@ -243,6 +256,40 @@ struct ChatPage {
       });
   }
 
+  // 会话建议(D-026):每轮生成完成后非阻塞刷新;失败 hilog 记录(非静默,
+  // 不上浮 UI — Android 对建议失败也不打扰用户,仅 printStackTrace)
+  private maybeSuggestions(conv: Conversation, rt: ChatRuntime): void {
+    runSuggestion(conv, {
+      generateText: (prompt: string): Promise<string> =>
+        rt.api.generateText(
+          [makeUserMessage(prompt)],
+          makeTextGenerationParams({
+            model: rt.params.model,
+            temperature: rt.params.temperature,
+            topP: rt.params.topP,
+            maxTokens: rt.params.maxTokens,
+            tools: rt.params.tools,
+            reasoningLevel: 'off',
+            customBody: rt.params.customBody,
+          }),
+        ).then((chunk): string => {
+          const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
+          return msg !== null ? toText(msg) : '';
+        }),
+      store: getChatRepository(),
+      locale: '简体中文',
+    })
+      .then((suggested: Conversation): void => {
+        if (this.conversation !== null && this.conversation.id === suggested.id) {
+          this.conversation = suggested;
+          this.suggestions = suggested.chatSuggestions;
+        }
+      })
+      .catch((e: Error): void => {
+        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'suggestion failed: %{public}s', e.message);
+      });
+  }
+
   private send(): void {
     const text: string = this.inputText.trim();
     if (text.length === 0 || this.sending || this.conversation === null) return;
@@ -275,12 +322,14 @@ struct ChatPage {
         this.conversation = out;
         this.rows = buildRows(out);
         this.streamingTail = [];
+        this.suggestions = out.chatSuggestions;
         this.inputText = '';
         this.sending = false;
         this.scrollToBottom();
-        // 自动命名(非阻塞,对齐 Android 独立 launch)
+        // 自动命名 + 会话建议(非阻塞,对齐 Android 独立 launch)
         if (holder.rt !== null) {
           this.maybeAutoTitle(out, holder.rt);
+          this.maybeSuggestions(out, holder.rt);
         }
       })
       .catch((e: Error): void => {
@@ -292,6 +341,7 @@ struct ChatPage {
           if (saved !== null) {
             this.conversation = saved;
             this.rows = buildRows(saved);
+            this.suggestions = saved.chatSuggestions;
           }
         });
       });
@@ -343,6 +393,30 @@ struct ChatPage {
         Text(this.errorMsg)
           .fontSize(12).fontColor('#B33A3A')
           .padding({ left: 16, right: 16, top: 4, bottom: 4 })
+      }
+
+      // 会话建议 chips(D-026):生成完成后刷新;点击填入输入框
+      if (this.suggestions.length > 0 && !this.sending) {
+        Scroll() {
+          Row() {
+            ForEach(this.suggestions, (s: string): void => {
+              Text(s)
+                .fontSize(12).fontColor(INK2)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+                .backgroundColor(SURFACE)
+                .borderRadius(12)
+                .margin({ right: 8 })
+                .onClick((): void => { this.inputText = s; })
+            }, (s: string): string => s)
+          }
+          .padding({ left: 16, right: 16 })
+        }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .margin({ bottom: 4 })
       }
 
       Row() {
