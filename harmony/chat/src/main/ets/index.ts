@@ -413,3 +413,12 @@ export { javaUrlEncodeForm, javaUrlDecodeForm, buildQuery } from './search/url_c
 export { wikipediaSearch } from './search/wikipedia_service.ts';
 export { hackerNewsSearch } from './search/hackernews_service.ts';
 export { jinaSearchService } from './search/jina_service.ts';
+
+// ===== D-067:mini-DOM + HTML 抓取源(Bing/DuckDuckGo) =====
+export type { HtmlElement, HtmlDocument } from './search/html_dom.ts';
+export {
+  parseHtml, select, selectFirst, elementText, attr, hasClass,
+  parentsOf, parentOf, nextElementSiblingOf,
+} from './search/html_dom.ts';
+export { bingSearchService } from './search/bing_service.ts';
+export { duckDuckGoSearch } from './search/duckduckgo_service.ts';

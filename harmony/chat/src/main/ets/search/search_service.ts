@@ -348,13 +348,22 @@ export interface SearchService {
 export interface SearchSdkRuntime {
   http: HttpClient;
   keyRoulette: KeyRoulette;
+  // Locale.getDefault() → "${language}-${country},${language}"(Bing Accept-Language);
+  // 平台 locale 由 entry 注入,缺省 zh-CN,zh(偏差登记:无系统 locale 默认值)
+  acceptLanguage: () => string;
 }
 
 let sdkRuntime: SearchSdkRuntime | null = null;
 
 // Android init(client, context?):鸿蒙必须注入 http;roulette 缺省 = default()
-export const initSearchSdk = (http: HttpClient, keyRoulette?: KeyRoulette): void => {
-  sdkRuntime = { http, keyRoulette: keyRoulette ?? createDefaultKeyRoulette() };
+export const initSearchSdk = (
+  http: HttpClient, keyRoulette?: KeyRoulette, acceptLanguage?: () => string,
+): void => {
+  sdkRuntime = {
+    http,
+    keyRoulette: keyRoulette ?? createDefaultKeyRoulette(),
+    acceptLanguage: acceptLanguage ?? ((): string => 'zh-CN,zh'),
+  };
 };
 
 export const searchSdkRuntime = (): SearchSdkRuntime => {

@@ -696,3 +696,13 @@
   - **TDD 15 测试**:编解码 3 + wikipedia 3 + hn 3 + jina 6(schema/请求形态/错误文案全钉)。mock HttpClient 捕获请求逐字段断言。
   - **切片边界登记**:Bing/DuckDuckGo(Jsoup 依赖)→ D-067 mini-DOM(html_dom 子集:tag.class/后代/逗号/selectFirst/parents/nextElementSibling/text/attr)+ 两源。
 - **可逆性**:全新模块;1306 测试全绿(deepread 603 + chat 703),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
+
+## D-067（L0，2026-07-28）mini-DOM(html_dom)+ Bing/DuckDuckGo HTML 抓取源
+
+- **背景**：D-066 登记「Bing/DuckDuckGo 依赖 Jsoup(DOM+CSS 选择器)→ 先建 mini-DOM」。两源为 SearchTools 内建兜底链(Bing HTML 兜底/DuckDuckGo)与 BingLocalOptions(DEFAULT 服务)的承载体,不能用正则伪解析充数(不等价),自建选择器子集引擎。
+- **决定**：
+  - **search/html_dom.ts(TDD,8 测试)**:容错 HTML 解析(未闭合自动闭合于文档尾/close-tag 弹栈至匹配/void 16 标签/script·style rawtext 不解析/属性单双引号·无引号/实体含数字与 &nbsp;)+ 选择器子集(逗号组/后代空格/子代 >/复合 [tag][#id][.class]*)+ 遍历(select/selectFirst/attr 缺省 ''/hasClass/parents/parent/nextElementSibling)+ text() 递归聚合折叠 trim。**偏差登记**:不做 HTML5 implied-close(<li> 相邻不互闭,与 Jsoup 树形差异);text() 块边界空格规则近似;textChunks 集中存放致文本/子元素交错序失真(折叠空白下不影响标题/摘要提取)。
+  - **search/bing_service.ts(全文 133 行,SearchService 形态)**:请求形态逐字(URL q=javaUrlEncodeForm/UA Chrome131/Accept 群/Connection/Referer/Cookie SRCHHPGUSR=ULSR=1);**Accept-Language = runtime.acceptLanguage() 注入**(Locale.getDefault() "${language}-${country},${language}" → initSearchSdk 第三参,缺省 'zh-CN,zh' 登记);风控检测三连(verify you are human/unusual traffic/captcha ignoreCase)→ 'Bing blocked the request with a verification page' 逐字;主解析 li.b_algo(h2 a + .b_caption p,.b_snippet,p 首命中)+ fallback(main h2 a,#b_results h2 a,h2 a → parent.parent text take(500));decodeBingUrl(query 首段 key∈{u,url} → URLDecoder);filter 非空标题+http → distinctBy(url) 保首序 → take(resultSize);空 → 'Search failed: no results found';scrape → 'Scraping is not supported for Bing';**Jsoup timeout 10s → HttpClient Port 默认超时(登记)**。
+  - **search/duckduckgo_service.ts(全文 109 行,普通函数形态忠实)**:lite 优先(Android 移动 UA)→ 空则 html 兜底(桌面 UA);Accept/Accept-Language 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7'/Referer 逐字;parseLite — a.result-link **filterNot parents any hasClass('result-sponsored')** + uddg 解码 + '//'→'https:'/'/'→域前缀归一 + resultSnippet(上两级行后 3 行内首个 td.result-snippet 非空);parseHtml — .result → a.result__a ?: h2 a + .result__snippet,.result__body Elements.text() 空格 join;双空 → pageText(lite+' '+html lowercase)风控词(bots use duckduckgo/anomaly-modal)→ 'DuckDuckGo requires human verification',否则 'DuckDuckGo returned no parseable organic results' 逐字。
+  - **TDD 8 测试**:Bing 5(请求形态逐字段/主解析+跳转解码+去重/风控/fallback+全空/schema+scrape)+ DDG 3(sponsored 过滤+解码+snippet/html 兜底链/双错误文案)。
+- **可逆性**:全新模块;1322 测试全绿(deepread 603 + chat 719),tsc 双 HAR clean,assembleHar+assembleHap BUILD SUCCESSFUL。
