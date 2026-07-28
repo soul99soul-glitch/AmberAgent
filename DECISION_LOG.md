@@ -1255,3 +1255,18 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: D-088 P1「导出导入 UI」。
 - **未移植(P1 登记)**: 外部目录 picker 导出(DocumentViewPicker)/记忆观察 Flow→订阅。
 - **验证**: chat tsc 干净 + 1040 测试(无新增——entry 侧)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-096 — 会话删除撤销窗(HistoryPage undo)+ 会话级文件清理接线
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: HistoryPage.kt:124-153(SwipeableConversationItem onDelete + snackbar)/HistoryVM.kt:41-68(delete deferCleanup/restore/purge)/ConversationRepository.kt:400-432(deleteConversation deferCleanup + cleanupDeletedConversation)/Conversation.kt:33-37,172-184(files getter + collectAllParts/fileUri)/FilesManager.kt:263-301,512-518(deleteChatFiles + getRelativePathInFilesDir)
+- **背景**: harmony 会话删除是 AlertDialog 确认后立即物理删除(D-022 适配),无撤销且无文件清理(PD-007 残余);Android HistoryPage = 滑动即删 + 4s 撤销 snackbar,超时才 purge 文件。
+- **决策**:
+  1. domain `conversationFileUris`(TDD 3 测试):Conversation.files getter 逐字——messageNodes 全 message 全 parts + Tool.output 递归展开(collectAllParts :172-173),Image/Video/Audio/Document 且 url 'file://' 前缀(fileUri :178-184),不去重(列表语义,去重在 deleteChatFiles 的 Set)。
+  2. entry ManagedFileStore:getDeleteChatFilesDeps(getRelativePathInFilesDir = file:// 去前缀 + filesDir 前缀比较;canonical 简化登记)+ cleanupDeletedConversation(ConversationRepository.kt:425-432;favoriteDAO 无 favorites 面/deleteChatImagesDir 依附 generate_image,均未移植登记)。
+  3. ChatListPage 删除改撤销窗:滑动删除 → getById 取完整会话 → repo.delete(deferCleanup 语义:仅删会话)→ 4s snackbar('对话已删除'/'撤销',strings.xml:308/:320 逐字,SnackbarDuration.Short);撤销 → repo.save(full) 恢复(insertConversation 等价:upsert conv+nodes);超时/被新删除顶替 → cleanupDeletedConversation purge(deleteChatFiles,PD-007 会话级清理接线落地)。
+- **偏差/适配登记**: D-022 的 AlertDialog 确认删除为当时适配偏差,现按 Android 原语义(滑动即删+可撤销)替代——撤销窗存在期数据可恢复,窗后 purge 与 Android 逐字一致;snackbar 视觉为自绘底条(非 SnackbarHost 组件,交互档)。
+- **关闭**: D-029 登记「撤销窗 (History undo)」;PD-007 会话删除清理接线。
+- **未移植(P1 登记)**: checkFilesDelete(ChatService.kt:1903-1912 save 挂钩的消息/附件移除清理——挂点设计待决,Android 在 ChatService 层,harmony 无该层)/composer removePart 清理(ChatInputAttachments.kt:126-131)/checkUserAvatarDelete(ChatVM.kt:213-221)/delete-all 会话(HistoryPage toolbar)/FTS deleteConversation(依附 FTS 索引)。
+- **验证**: chat tsc 干净 + 1043 测试(+3)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

@@ -6,9 +6,10 @@
 // 存储:filesDir/managed_files.json({nextId, rows});写操作 enqueueWrite 串行。
 import { Context } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
-import { createFilesRepository } from '@amber/chat-domain';
+import { createFilesRepository, deleteChatFiles, conversationFileUris } from '@amber/chat-domain';
 import type {
-  FilesRepository, ManagedFileDaoPort, ManagedFileEntity,
+  DeleteChatFilesDeps, FilesRepository, ManagedFileDaoPort, ManagedFileEntity,
+  Conversation,
 } from '@amber/chat-domain';
 
 interface ManagedFileFileShape {
@@ -153,4 +154,35 @@ let cached: FilesRepository | null = null;
 export const getFilesRepository = (): FilesRepository => {
   if (cached === null) cached = createFilesRepository(dao);
   return cached;
+};
+
+// ===== D-096:会话删除清理(deleteChatFiles 调用侧 deps + cleanup 编排)=====
+
+const filesDirPath = (): string => {
+  const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+  return ctx.filesDir;
+};
+
+// getRelativePathInFilesDir(FilesManager.kt:512-518):file:// 去前缀后须落在
+//   filesDir 内 → 相对路径化;canonical 解析简化为前缀比较(沙箱内无 symlink 面,登记)
+export const getDeleteChatFilesDeps = (): DeleteChatFilesDeps => ({
+  toRelativePath: (uri: string): string | null => {
+    if (!uri.startsWith('file://')) return null;
+    const path: string = uri.substring('file://'.length);
+    const base: string = filesDirPath();
+    return path.startsWith(`${base}/`) ? path.substring(base.length + 1) : null;
+  },
+  fileExists: (relativePath: string): Promise<boolean> =>
+    fileIo.access(`${filesDirPath()}/${relativePath}`),
+  deleteFile: (relativePath: string): Promise<void> =>
+    fileIo.unlink(`${filesDirPath()}/${relativePath}`),
+  deleteByPath: (relativePath: string): Promise<number> =>
+    getFilesRepository().deleteByPath(relativePath),
+});
+
+// cleanupDeletedConversation(ConversationRepository.kt:425-432)—
+//   favoriteDAO.deleteByConversation:favorites 面未移植(无对应表);
+//   deleteChatImagesDir:依附 generate_image 工具,未移植(P1 登记)
+export const cleanupDeletedConversation = async (conv: Conversation): Promise<void> => {
+  await deleteChatFiles(getDeleteChatFilesDeps(), conversationFileUris(conv));
 };

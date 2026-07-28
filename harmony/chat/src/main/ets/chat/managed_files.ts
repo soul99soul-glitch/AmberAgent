@@ -16,6 +16,9 @@
 //   - deleteChatFiles:仅 file: 前缀 uri;relativePath 须以 'upload/' 开头;
 //     文件删除与库删除各自 runCatching 独立吞错;File.toUri 相对路径解析在调用侧
 
+import type { Conversation } from './conversation.ts';
+import type { UIMessagePart } from './message.ts';
+
 // ===== FileFolders(FilesManager.kt:649-656)=====
 export const FILE_FOLDERS_UPLOAD: string = 'upload';
 export const FILE_FOLDERS_SKILLS: string = 'skills';
@@ -152,4 +155,43 @@ export const deleteChatFiles = async (
     }
   }
   return relativePaths;
+};
+
+// ===== conversationFileUris(D-096;Conversation.kt:33-37 files getter)=====
+// collectAllParts(:172-173):parts + Tool.output 递归展开;
+// fileUri(:178-184):Image/Video/Audio/Document 且 url.startsWith('file://');
+// 不去重(Android mapNotNull 列表语义;去重在 deleteChatFiles 的 relativePaths Set)
+const filePartUri = (part: UIMessagePart): string | null => {
+  switch (part.type) {
+    case 'image':
+    case 'video':
+    case 'audio':
+    case 'document':
+      return part.url.startsWith('file://') ? part.url : null;
+    default:
+      return null;
+  }
+};
+
+const collectAllParts = (parts: UIMessagePart[]): UIMessagePart[] => {
+  const out: UIMessagePart[] = [...parts];
+  for (const p of parts) {
+    if (p.type === 'tool') {
+      for (const nested of collectAllParts(p.output)) out.push(nested);
+    }
+  }
+  return out;
+};
+
+export const conversationFileUris = (conv: Conversation): string[] => {
+  const uris: string[] = [];
+  for (const node of conv.messageNodes) {
+    for (const message of node.messages) {
+      for (const part of collectAllParts(message.parts)) {
+        const uri: string | null = filePartUri(part);
+        if (uri !== null) uris.push(uri);
+      }
+    }
+  }
+  return uris;
 };

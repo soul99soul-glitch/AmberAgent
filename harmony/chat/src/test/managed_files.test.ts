@@ -7,8 +7,11 @@ import type {
 } from '../main/ets/chat/managed_files.ts';
 import {
   createFilesRepository, deleteChatFiles, makeManagedFileEntity, trackUploadFile,
+  conversationFileUris,
   FILE_FOLDERS_UPLOAD,
 } from '../main/ets/chat/managed_files.ts';
+import { makeConversation, makeMessageNode } from '../main/ets/chat/conversation.ts';
+import { makeUIMessage } from '../main/ets/chat/message.ts';
 
 const entity = (over: Partial<ManagedFileEntity>): ManagedFileEntity => makeManagedFileEntity({
   folder: FILE_FOLDERS_UPLOAD,
@@ -192,4 +195,64 @@ test('deleteChatFiles: file: 前缀 + upload/ 门 + 去重 + 各自吞错 + 返�
   //   FilesManager.kt:270-282;重复 URI 第二次删除 = File.delete 幂等 false)
   assert.deepEqual(deletedFiles, ['upload/a.png', 'upload/a.png']);
   assert.deepEqual(deletedRows, ['upload/a.png', 'upload/missing.png', 'upload/boom.png']);
+});
+
+// ===== conversationFileUris(D-096;Conversation.kt:33-37 files getter +
+//   :172-184 collectAllParts/fileUri)=====
+
+test('conversationFileUris: file:// 的 image/video/audio/document 全收,其余跳过', () => {
+  const conv = makeConversation('c1', [
+    makeMessageNode([
+      makeUIMessage('user', [
+        { type: 'image', url: 'file:///data/files/upload/a.png', metadata: null },
+        { type: 'image', url: 'https://cdn/x.png', metadata: null },     // 非 file:// → 跳
+        { type: 'text', text: 'file:///data/files/upload/not-a-part.txt', metadata: null }, // text → 跳
+        { type: 'document', url: 'file:///data/files/upload/d.txt', fileName: 'd.txt', mime: 'text/*', metadata: null },
+        { type: 'video', url: 'file:///data/files/upload/v.mp4', mime: 'video/mp4', metadata: null },
+        { type: 'audio', url: 'file:///data/files/upload/a.mp3', fileName: 'a.mp3', mime: 'audio/mpeg', metadata: null },
+      ]),
+    ]),
+  ]);
+  assert.deepEqual(conversationFileUris(conv), [
+    'file:///data/files/upload/a.png',
+    'file:///data/files/upload/d.txt',
+    'file:///data/files/upload/v.mp4',
+    'file:///data/files/upload/a.mp3',
+  ]);
+});
+
+test('conversationFileUris: tool output 嵌套递归展开 + 不去重(列表语义)', () => {
+  const conv = makeConversation('c1', [
+    makeMessageNode([
+      makeUIMessage('assistant', [
+        {
+          type: 'tool', toolCallId: 'c1', toolName: 'read_file', input: '{}',
+          output: [
+            { type: 'image', url: 'file:///data/files/upload/inner.png', metadata: null },
+            {
+              type: 'tool', toolCallId: 'c2', toolName: 'nested', input: '{}',
+              output: [
+                { type: 'image', url: 'file:///data/files/upload/deep.png', metadata: null },
+              ],
+              approvalState: { type: 'auto' }, metadata: null,
+            },
+          ],
+          approvalState: { type: 'auto' }, metadata: null,
+        },
+      ]),
+      // 多 message 节点(分支)全部纳入
+      makeUIMessage('user', [
+        { type: 'image', url: 'file:///data/files/upload/inner.png', metadata: null }, // 重复不去重
+      ]),
+    ]),
+  ]);
+  assert.deepEqual(conversationFileUris(conv), [
+    'file:///data/files/upload/inner.png',
+    'file:///data/files/upload/deep.png',
+    'file:///data/files/upload/inner.png',
+  ]);
+});
+
+test('conversationFileUris: 空会话 → []', () => {
+  assert.deepEqual(conversationFileUris(makeConversation('c1', [])), []);
 });
