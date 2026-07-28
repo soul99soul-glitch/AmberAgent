@@ -4,7 +4,7 @@ sse_edge,CRLF/LF,okio 行读取均支持,SSE.kt,鸿蒙解析器必须同样容�
 sse_edge,事件间空行,事件分派点,SSE.kt;ResponseAPI.kt:279-314,SseAssembler 已实现,verified_by_unit_test
 sse_edge,[DONE] 标记,reader 无特殊处理作为普通 data 上抛由 provider 层判停;Codex 手写解析器自行判停,SSE.kt;ChatCompletionsAPI.kt:200;ResponseAPI.kt:176;ClaudeProvider.kt:198,SseAssembler 已置 done flag,verified_by_unit_test
 sse_edge,注释行(:开头),okhttp reader 忽略不回调;Codex 手写解析器静默丢弃,SSE.kt;ResponseAPI.kt:279-314,鸿蒙解析器应忽略不回调,committed
-sse_edge,event: 字段,作为 type 传给 onEvent(Claude/Responses 依赖;ChatCompletions/Gemini 忽略),SSE.kt,SseAssembler 当前仅 data-only 需扩展 event 字段以支持 Claude/Responses,gap
+sse_edge,event: 字段,作为 type 传给 onEvent(Claude/Responses 依赖;ChatCompletions/Gemini 忽略),SSE.kt,SseAssembler 已扩展 event 字段捕获(7932d837e),verified_by_unit_test
 sse_edge,id: 字段,仅透传无业务使用,SSE.kt,透传即可,committed
 sse_edge,retry: 字段,onRetryChange 明确忽略不自动重连,SSE.kt:114,同样忽略不自动重连,committed
 sse_edge,Content-Type 校验,必须 text/event-stream 否则 onFailure,SSE.kt:87-90,保留校验,committed

@@ -7,7 +7,7 @@
 meta:
   updated: 2026-07-28
   branch: harmony-preview
-  head: 待提交(G-B 审计收口)
+  head: 7932d837e
 
 phase:
   current: "Phase 0 → Phase 1 过渡"
@@ -54,14 +54,11 @@ next_slices:                      # 按优先级,取最高未阻塞项
   - id: S-CHAT-MVP-SCAFFOLD
     状态: source_only_ok
     内容: "Chat 领域模型(UIMessage/MessageNode/Conversation)ArkTS 化 + accumulator + fixture 回放;STREAMING_SEMANTICS_MATRIX 为规格,可不等设备先行"
-  - id: S-SSE-EVENT-FIELD
-    状态: source_only_ok
-    内容: "SseAssembler 扩展 event: 字段(Claude/Responses 依赖,矩阵已标 gap)"
   - id: S-G1-CONFIRM
     状态: blocked_by_human
     内容: "DECISION_PACKET_001 人工确认(9 项决策)"
 
 parity_baseline:
-  单元测试总数: 595
-  已知行为偏差: 2                # 详见 PARITY_DEBT.md PD-001/PD-002
-  决策记录: "DECISION_LOG.md D-001..D-005"
+  单元测试总数: 603
+  已知行为偏差: 3                # 详见 PARITY_DEBT.md PD-001..003
+  决策记录: "DECISION_LOG.md D-001..D-007"
