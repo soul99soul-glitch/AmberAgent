@@ -29,7 +29,7 @@ import { createNovelModelAdapter } from '../platform_impl/NovelModelAdapter.ets'
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
-  ProviderSettingOpenAIVariant,
+  ProviderSettingOpenAIVariant, ProviderModel,
 } from '@amber/chat-domain';
 import {
   loadAssistants, loadProviders, makeAssistant,
@@ -182,11 +182,37 @@ export const getNovelCreation = (): NovelCreation => {
   return novelCreation;
 };
 
-// ===== Chat 装配(D-019/D-021) =====
+// ===== Chat 装配(D-019/D-021/D-023) =====
 // 持久化:会话仓库 = ChatRdbRepository(relationalStore 真实实现,D-013 schema;
 //   初始化失败自动回退 memory + hilog 警告,非静默)。assistants/providers 走
 //   Preferences KV(真实持久化)。
-// Provider 选择:第一个 hasUsableAuth 且非空 models 的 openai variant(选择器 UI = P1)。
+// Provider 选择(D-023):用户选择(Preferences 持久化 providerId/modelId)优先,
+//   未选择或选择失效 → 回退 D-019 策略(第一个 hasUsableAuth 且非空 models 的
+//   openai variant + 首模型)。选择器页 = ChatModelPickerPage。
+// 注(已核实 Android 基准):ProviderTemplatePickerSheet 只提供 generic
+//   OpenAI()/Google()/Claude() 空模板,无预置种子列表 → 不做 provider 种子数据。
+
+const SELECTED_PROVIDER_KEY: string = 'chat_selected_provider_id';
+const SELECTED_MODEL_KEY: string = 'chat_selected_model_id';
+
+export interface ChatModelSelection {
+  providerId: string;
+  modelId: string;
+}
+
+export const getChatModelSelection = async (): Promise<ChatModelSelection | null> => {
+  const storage = getAppContainer().storage;
+  const providerId: string = await storage.get<string>(SELECTED_PROVIDER_KEY, '');
+  const modelId: string = await storage.get<string>(SELECTED_MODEL_KEY, '');
+  if (providerId.length === 0 || modelId.length === 0) return null;
+  return { providerId, modelId };
+};
+
+export const saveChatModelSelection = async (sel: ChatModelSelection): Promise<void> => {
+  const storage = getAppContainer().storage;
+  await storage.set<string>(SELECTED_PROVIDER_KEY, sel.providerId);
+  await storage.set<string>(SELECTED_MODEL_KEY, sel.modelId);
+};
 
 
 let chatKv: KeyValueStore | null = null;
@@ -219,19 +245,49 @@ export interface ChatRuntime {
   contextMessageSize: number;
 }
 
-export const resolveChatRuntime = async (): Promise<ChatRuntime | null> => {
+interface ChatProviderChoice {
+  provider: ProviderSettingOpenAIVariant;
+  model: ProviderModel;
+}
+
+const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | null> => {
   const providers = await loadProviders(getChatKvStore());
   if (providers === null) return null;
-  let chosen: ProviderSettingOpenAIVariant | null = null;
-  for (const p of providers) {
-    if (p.type === 'openai' && p.models.length > 0 && hasUsableAuth(p)) {
-      chosen = p;
-      break;
+  // 用户选择优先(D-023)
+  const selection = await getChatModelSelection();
+  if (selection !== null) {
+    for (const p of providers) {
+      if (p.type === 'openai' && p.id === selection.providerId && hasUsableAuth(p)) {
+        for (const m of p.models) {
+          if (m.modelId === selection.modelId) {
+            return { provider: p, model: m };
+          }
+        }
+      }
     }
   }
-  if (chosen === null) return null;
+  // 回退 D-019 策略:第一个 hasUsableAuth 且非空 models 的 openai variant + 首模型
+  for (const p of providers) {
+    if (p.type === 'openai' && p.models.length > 0 && hasUsableAuth(p)) {
+      return { provider: p, model: p.models[0] };
+    }
+  }
+  return null;
+};
+
+// 头部展示用:「provider 名 / modelId」;未配置返回 ''
+export const describeChatModel = async (): Promise<string> => {
+  const choice = await resolveChatProviderChoice();
+  if (choice === null) return '';
+  return `${choice.provider.name} / ${choice.model.modelId}`;
+};
+
+export const resolveChatRuntime = async (): Promise<ChatRuntime | null> => {
+  const choice = await resolveChatProviderChoice();
+  if (choice === null) return null;
+  const chosen: ProviderSettingOpenAIVariant = choice.provider;
+  const model = choice.model;
   const assistant: Assistant = (await getChatAssistants())[0];
-  const model = chosen.models[0];
   const sessionDefaults = resolveSessionDefaults(assistant, null, 'auto');
   const merged = mergeCustomParams(assistant, model);
   const params = makeTextGenerationParams({
@@ -254,7 +310,7 @@ export const resolveChatRuntime = async (): Promise<ChatRuntime | null> => {
       authMode: chosen.authMode,
       brand: chosen.brand,
     }),
-    headers: (): Record<string, string> => openAIAuthHeaders(chosen!.authMode, chosen!.baseUrl, token),
+    headers: (): Record<string, string> => openAIAuthHeaders(chosen.authMode, chosen.baseUrl, token),
   });
   return { api, assistant, params, contextMessageSize: sessionDefaults.contextMessageSize };
 };

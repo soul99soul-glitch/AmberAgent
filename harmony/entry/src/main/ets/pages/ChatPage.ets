@@ -8,7 +8,7 @@ import {
   asChatStreamProvider, seedConversationWithPresets,
 } from '@amber/chat-domain';
 import {
-  getChatRepository, getChatAssistants, resolveChatRuntime, ChatRuntime,
+  getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
 } from '../di/AppContainer.ets';
 
 const BG: string = '#F4F2EC';
@@ -69,10 +69,13 @@ struct ChatPage {
   @State sending: boolean = false;
   @State errorMsg: string = '';
   @State title: string = '新对话';
+  @State modelLabel: string = '';
   private conversation: Conversation | null = null;
   private scroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
+    // 每次进入(含从选择器返回)刷新模型标签
+    describeChatModel().then((label: string): void => { this.modelLabel = label; });
     const params = router.getParams() as Record<string, string>;
     const convId: string = params ? (params['conversationId'] ?? '') : '';
     if (convId.length > 0) {
@@ -143,9 +146,16 @@ struct ChatPage {
 
   build() {
     Column() {
-      Text(this.title)
-        .fontSize(17).fontWeight(FontWeight.Medium).fontColor(INK)
-        .padding({ top: 16, bottom: 8 })
+      Column() {
+        Text(this.title)
+          .fontSize(17).fontWeight(FontWeight.Medium).fontColor(INK)
+        Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型 — 点我选择')
+          .fontSize(11)
+          .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
+          .margin({ top: 2 })
+      }
+      .padding({ top: 16, bottom: 8 })
+      .onClick((): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage' }); })
 
       List({ scroller: this.scroller }) {
         ForEach(this.messages, (m: UIMessage): void => {

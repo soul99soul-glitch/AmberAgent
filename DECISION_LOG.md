@@ -217,3 +217,13 @@
   - **删除**:swipeAction「删除」→ AlertDialog 二次确认(标题明示不可恢复)后 repo.delete(显式级联)。删除是用户主动发起且经确认,属 L0 用户数据操作,非 agent 自主删除。
   - UI 文案硬编码中文(AGENTS.md:未明确要求本地化时先实现功能)。
 - **可逆性**:纯 UI 变更;repo Port 未动。
+
+## D-023（L0，2026-07-28）Provider/模型选择器：用户选择优先 + D-019 回退;Android 无种子列表(已核实)
+
+- **背景**：D-019 把「选择器 UI」裁到 P1,但单 provider 场景验证完,多模型已是真实使用阻塞(逗号录入可配多模型却无法切换)。
+- **决定**：
+  - **选择持久化**:Preferences 键 `chat_selected_provider_id`/`chat_selected_model_id`(entry 层常量,经 Storage Port;不进 chat HAR 线格式)。
+  - **解析顺序**:用户选择(provider id + model id 均命中且 hasUsableAuth)→ 命中即用;未选/失效 → 回退 D-019 策略(首可用 openai variant + 首模型)。`resolveChatProviderChoice` 私有函数统一供 resolveChatRuntime/describeChatModel 消费,选择逻辑单点。
+  - **ChatModelPickerPage**:列出 usable openai variants × models,当前选中打「当前」标;空态引导去 Provider 设置页。ChatPage 头部标题下显示「provider / modelId」标签(每次 aboutToAppear 刷新),点击进入选择器。
+  - **种子数据核实(否决项)**:Android ProviderTemplatePickerSheet 只提供 generic `ProviderSetting.OpenAI()/Google()/Claude()` 空模板(ProviderTemplatePickerSheet.kt:151,159-172),无预置 baseUrl 种子列表 → 不做 provider 种子,保持忠实。
+- **可逆性**:删两个 Preferences 键即回到 D-019 行为;回退策略保证旧状态可用。

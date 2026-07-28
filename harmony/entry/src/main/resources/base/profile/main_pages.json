@@ -9,6 +9,7 @@
     "pages/NovelWorkspacePage",
     "pages/ChatListPage",
     "pages/ChatPage",
-    "pages/ChatProviderSettingsPage"
+    "pages/ChatProviderSettingsPage",
+    "pages/ChatModelPickerPage"
   ]
 }

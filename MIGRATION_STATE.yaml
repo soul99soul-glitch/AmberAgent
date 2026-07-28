@@ -35,7 +35,7 @@ build_and_test:
 
 codebase:
   harmony工程:
-    entry: "HAP — UIAbility + 10 页面(ChatList/Chat/ProviderSettings,D-019/D-020) + platform_impl 真实 adapter + ChatKvStore/ChatRdbRepository(D-021)"
+    entry: "HAP — UIAbility + 11 页面(ChatList/Chat/ProviderSettings/ModelPicker,D-019/D-020/D-023) + platform_impl 真实 adapter + ChatKvStore/ChatRdbRepository(D-021)"
     deepread: "HAR — 纯 ArkTS 领域层,零 SDK 依赖: agent/council/novel/domain/platform/research"
     chat: "HAR(@amber/chat-domain)— 模型/accumulator/OpenAI provider(fixture 8/8)/transformer+chat_turn(D-012)/持久化(D-013)/请求侧纯逻辑(D-014)/API 组装层(D-015)/Assistant 全量模型+wire(D-016)/ProviderSetting 持久化 3 变体+Model 全量(D-017);设备端 adapter 待 G-C"
     复用说明: "platform 层 Port(HttpClient/Storage/Database/FileStore/Notifier)即 Chat MVP 所需同一批接口"
@@ -63,4 +63,4 @@ next_slices:                      # 按优先级,取最高未阻塞项
 parity_baseline:
   单元测试总数: 793               # deepread 603 + chat 190
   已知行为偏差: 6                # 详见 PARITY_DEBT.md PD-001..006(+1 条 Android 内部不一致待核实)
-  决策记录: "DECISION_LOG.md D-001..D-022"
+  决策记录: "DECISION_LOG.md D-001..D-023"
