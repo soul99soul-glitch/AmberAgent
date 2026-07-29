@@ -442,6 +442,21 @@ export type {
   SkillWorkspacePort, SkillWorkspaceEntry, CreateSkillToolsDeps,
 } from './chat/skills.ts';
 
+// D-124:workspace 子系统域层(WorkspaceManager.kt/WorkspacePaths.kt/
+//   WorkspaceTools.kt/ToolJson.kt 全文;SAF → POSIX 镜像,
+//   configured 恒 true 登记偏差)
+export {
+  PosixWorkspaceManager, normalizeWorkspacePath, joinWorkspacePath,
+  textMimeTypeForPath, toolInputString, toolInputRequiredString, toolInputBoolean,
+  toolInputInt, normalizeFileReadMaxChars, buildFileReadJson,
+  workspaceActivityInputPreview, createWorkspaceTools,
+  FILE_READ_DEFAULT_MAX_CHARS, FILE_READ_HARD_MAX_CHARS,
+} from './chat/workspace.ts';
+export type {
+  WorkspaceEntry, WorkspaceEditResult, WorkspaceSearchResult,
+  WorkspaceFsEntry, WorkspaceFsPort, PosixWorkspaceManagerDeps,
+} from './chat/workspace.ts';
+
 export {
   makeProviderModel, makeBalanceOption,
   makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,

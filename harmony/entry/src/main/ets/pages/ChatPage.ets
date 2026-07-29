@@ -63,6 +63,7 @@ import {
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   probeVisionModelHealth,
   createMcpManagementTools, createMcpServerTools, makeAgentTool, createSkillTools,
+  createWorkspaceTools,
   loadAssistants, saveAssistants, patchAssistant,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
@@ -74,6 +75,7 @@ import {
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
+  getWorkspaceManager,
   getSkillWorkspacePort,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
@@ -1363,14 +1365,22 @@ struct ChatPage {
     // D-083:LocalToolOption 门控(LocalTools.kt:105-124 + ChatService.kt:2237)—
     //   time_info/ask_user/clipboard 按 assistant.localTools 勾选加入;
     //   run_plan_update/deep_read_open 无门恒在(:182/:188);
-    //   其余 10 variant(javascript_engine/tts/workspace_files/terminal/
-    //   screen_automation/system_access/webview/icloud_drive/webmount/
-    //   webmount_eval)工具族未移植 → 门为空转(登记)
+    //   workspace_files 六件 D-124 落地(见下);同组
+    //   workspaceArtifactTools/externalFileTools 及其余 9 variant
+    //   (javascript_engine/tts/terminal/screen_automation/system_access/
+    //   webview/icloud_drive/webmount/webmount_eval)未移植 → 门为空转(登记)
     const localOpts: LocalToolOption[] = rt.assistant.localTools;
     const profiledTools: AgentTool[] =
       filterToolProfile([
         ...(localOpts.indexOf('time_info') >= 0 ? [createTimeTool()] : []),
         ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
+        // D-124:workspace 六件(LocalTools.kt:122-126 — workspace_files 门内
+        //   workspaceTools.getTools(),位置 = ask_user 之后;同组
+        //   workspaceArtifactTools/externalFileTools 未移植 → P1 登记);
+        //   activityStore = 全局单例(D-122)
+        ...(localOpts.indexOf('workspace_files') >= 0
+          ? createWorkspaceTools(getWorkspaceManager(), getToolActivityStore())
+          : []),
         // D-123:skills 工具组(ChatService.kt:2239-2246 — createSkillTools 五/六件,
         //   位置 = localTools 之后/MCP 管理之前);enabledSkills/allSkills =
         //   createRunTools 时快照(rt.assistant/rt.allSkills 同为本次发送快照);

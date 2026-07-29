@@ -1786,3 +1786,32 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: mcp_import_from_skill(D-118 登记残余)关闭;skills 工具面全链路可用(装包 → 校验/导入/启停/读取)。
 - **未移植(P1 登记)**: 内置技能 rawfile 安装;SkillsPage/SkillDetailPage/QuickMessagesPage UI(~2000 行,assistant 扩展页两 tab 随此前置);WorkspaceTools 工具族(workspace_files variant)与文件 sheet;Web 预览组件(沿用 D-122 登记)。
 - **验证**: chat tsc 干净 + 1278 测试(+40)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧两修:mcpImportKey 重复实现收敛 + mcp_import_from_skill/use_skill execute 同步抛改 async(suspend 语义);测试侧四修(全为实现逐字核对后的夹具/期望修正):skill.md.txt 仅 dropLast(4) quirk/空 SKILL.md 三问题(独立 if)/MemFs renameTo POSIX 语义/use_skill 工具存在性前提(available 非空)。
+
+## D-124 — workspace 子系统域层 + createWorkspaceTools 六件(file_list/read/write/edit/search/move)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: app/core/files/WorkspaceManager.kt(639 行读写照逻辑)+ WorkspacePaths.kt(normalize/join 全文)+ feature/tools/impl WorkspaceTools.kt(286 行全文)+ feature/tools/access ToolJson.kt(27 行全文)+ LocalTools.kt:122-126(workspace_files 门)+ ChatService.kt:2237 装配位。
+- **背景**: workspace_files 是 agent 文件产出(notes/reports/ppt/scripts/data 子目录约定)与 skill_import 实用路径(/workspace 收集)的核心环底座。HarmonyOS 无 SAF:Android 双层(SAF DocumentFile 树 + filesDir/amberagent/workspace-mirror POSIX 镜像)收敛为镜像目录即 workspace。webview_search_open 需 7 件 WebView 工具组 + WebViewOperationStore + ArkWeb 子系统,体量过大留 P1;本切片为 LocalTools 门内第一件可落地组。
+- **决策**:
+  1. chat HAR workspace.ts(+17 测试):
+     - WorkspacePaths 逐字:normalize(blank/'.'/'/'/workspace 别名 → '.';'/workspace[...]' 前缀剥离;绝对非 /workspace → 抛 'Only /workspace paths are allowed';'..' → 抛 'Path traversal is not allowed')+ join(parent '.'/blank → child)。
+     - WorkspaceFsPort 最小面(exists/isDirectory/isFile/listNames/readText/writeText(abs,content,append)/fileSize/mkdirs/rename/copyFile/deleteRecursively);绝对路径操作,相对→绝对由域层拼接。
+     - PosixWorkspaceManager:全方法 async(Android suspend 对等;同步抛会破坏 assert.rejects 错误通道);list(目录优先 + name 小写排序,'Path not found'/'Not a directory' 逐字)/readText('Not a file')/writeText(自动建父目录 + append + 返回 WorkspaceEntry)/editText(首替换 slice-concat — **JS String.replace 替换串 `$&`/`$1` 特殊序列陷阱**,replaceAll 用 split-join;计数两分支;'Text not found in X'/'old_text must not be empty' 逐字)/move(同父 rename vs 跨父 copyDocument+deleteRecursively;三错误 'Source and target are the same path'/'Moving a path into itself is not allowed'/'Target path already exists' 逐字)/search(每文件首命中行 + 行号 + 240 截尾 + maxResults 封顶;'query is required')。
+     - requireRoot 自动建镜像目录(mirror 语义);requireDocument/findDocument 段走查;requireOrCreateFile/Parent;requireFilePath '.' → 抛 'A file path under /workspace is required: .'。
+     - textMimeTypeForPath 10 项扩展名表(DocumentFile.type → 词法派生,登记;默认 text/plain)。
+     - ToolJson 四件逐字(kotlinx 语义:contentOrNull number/bool → 字面串;toBooleanStrictOrNull 仅 'true'/'false';toIntOrNull 严格整型)。
+     - FILE_READ_DEFAULT/HARD = 65536/262144;normalizeFileReadMaxChars('max_chars must be greater than 0');buildFileReadJson 五键键序钉住(path/content/total_size_chars/truncated/max_chars)。
+     - workspaceActivityInputPreview(file_write: path/append/content_chars;file_edit: path/old_text_chars/new_text_chars/replace_all;else JSON.stringify 原样)。
+     - createWorkspaceTools 六件:track 包装(startTool(toolName,title,inputPreview,'SAF workspace','/workspace') + complete(previewText takeLast 1600)/fail 三段);file_write/edit/move needsApproval + allowsAutoApproval=false;description 逐字(含 file_write 多行子目录指南)。
+  2. entry:WorkspaceStore.ets — createEntryWorkspaceFsPort(fileIo 同步:accessSync/statSync/listFileSync/mkdirSync(recursive)/openSync/readSync/writeSync(APPEND vs TRUNC)/renameSync/copyFileSync/unlinkSync/rmdirSync;readText 经 util.TextDecoder utf-8)+ createEntryWorkspaceManager(根 = filesDir/amberagent/workspace-mirror)。
+  3. 装配:AppContainer getWorkspaceManager 单例;ChatPage `localOpts.indexOf('workspace_files') >= 0` 门 → createWorkspaceTools(getWorkspaceManager(), getToolActivityStore()),插入位 = localTools 三件套 ask_user 之后(LocalTools.kt:122-126 序)/skills 组之前。
+- **偏差/适配登记**:
+  - SAF DocumentFile 层(持久授权/treeUri/SAF↔mirror 双向同步/withMirrorSync/copyUriToUploads/deleteWorkspaceFile)无 HarmonyOS 对应物 → 镜像目录直读写;WorkspaceState.configured 恒 true,'No AmberAgent workspace selected' 不可达(登记)。
+  - DocumentFile.type(SAF mime)→ textMimeTypeForPath 扩展名表(登记)。
+  - activity 事件 runtime 标签 'SAF workspace' 保留逐字(与 Android 事件面一致;SAF 已不存在但标签属事件契约)。
+  - File.renameTo → fileIo.renameSync(POSIX 语义:目标空目录/文件可覆盖;域层已前置检查 'Target path already exists')。
+  - 跨父目录 move = copyFileSync + deleteRecursively(Android copyDocument 镜像分支同语义)。
+- **关闭**: workspace_files 门内第一件(workspaceTools 六件)全链路可用(agent 文件读写/编辑/搜索/移动 + activity 事件三段)。
+- **未移植(P1 登记)**: 同组 WorkspaceArtifactTools/ExternalFileTools 两件(LocalTools.kt:123-125);SAF↔mirror 同步环(随文件 sheet/terminal);文件 sheet UI;terminal 工具族。
+- **验证**: chat tsc 干净 + 1295 测试(+17)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧两修:manager 全方法 async(suspend 对等)+ editText 替换串 $ 字面 slice-concat;测试侧三修(全为实现逐字核对后的夹具/期望修正):seed 补建镜像根(requireRoot 自动建目录语义)/search 大小写不敏感(WorkspaceManager.kt:219 ignoreCase=true)/editText replaceAll 计数期望('baz bar foo' 中 'ba' 两处非三处)。

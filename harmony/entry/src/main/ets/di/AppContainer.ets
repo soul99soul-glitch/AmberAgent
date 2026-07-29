@@ -41,7 +41,7 @@ import {
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
-  McpManager, SkillManager, AgentToolActivityStore,
+  McpManager, SkillManager, AgentToolActivityStore, PosixWorkspaceManager,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -54,6 +54,7 @@ import { getMcpFilesStore } from '../platform_impl/McpFilesStore.ets';
 import {
   createEntrySkillFilePort, createEntrySkillWorkspacePort,
 } from '../platform_impl/SkillStore.ets';
+import { createEntryWorkspaceManager } from '../platform_impl/WorkspaceStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
@@ -338,6 +339,17 @@ export const getSkillWorkspacePort = (): SkillWorkspacePort => {
     skillWorkspacePort = createEntrySkillWorkspacePort();
   }
   return skillWorkspacePort;
+};
+
+// D-124:PosixWorkspaceManager 单例(WorkspaceManager.kt + Koin single)—
+//   根 = filesDir/amberagent/workspace-mirror(SAF 层不移植,镜像即 workspace,
+//   configured 恒 true,登记);ChatPage workspace_files 门 → createWorkspaceTools
+let workspaceManager: PosixWorkspaceManager | null = null;
+export const getWorkspaceManager = (): PosixWorkspaceManager => {
+  if (workspaceManager === null) {
+    workspaceManager = createEntryWorkspaceManager();
+  }
+  return workspaceManager;
 };
 
 export const getChatAssistants = async (): Promise<Assistant[]> => {
