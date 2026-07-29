@@ -405,6 +405,15 @@ private final class IOSGrokWebBrowserTransport: NSObject, WKNavigationDelegate, 
         finishLoading(throwing: error)
     }
 
+    // 系统因内存压力等原因终止 WKWebView 内容进程时，进行中的 fetch 不会再 settle，
+    // 也不会触发 didFail。若不在这里收口，stream/load 的 continuation 会永久挂起。
+    // 用浏览器错误而非 CancellationError：这是真实的传输中断，应作为失败上报，不被当作取消吞掉。
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        let error = IOSGrokWebError.browser("Grok Web 浏览器进程被系统终止。")
+        finishLoading(throwing: error)
+        finishStream(throwing: error)
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any],
               body["requestId"] as? String == activeRequestId,
@@ -508,7 +517,11 @@ private final class IOSGrokWebBrowserTransport: NSObject, WKNavigationDelegate, 
             signal: controller.signal
           }).then(async response => {
             post("response", { status: response.status });
-            if (!response.ok || !response.body) return;
+            // 非 2xx 由 native 侧的 "response" 分支按 status 收口；这里只关心"成功但无可读流"。
+            // 200 + 空 body 会让 fetch 流立即 done、读不到任何行；若此时静默 return，
+            // native 的 stream continuation 永远等不到 complete/error 而永久挂起。故显式 complete。
+            if (!response.ok) return;
+            if (!response.body) { post("complete", {}); return; }
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let pending = "";
