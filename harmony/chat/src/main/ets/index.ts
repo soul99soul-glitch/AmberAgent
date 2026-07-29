@@ -904,6 +904,39 @@ export {
   DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT,
 } from './chat/agent_prompt_config.ts';
 
+// ===== D-132a Task 1:subagent 运行时模型与线格式 =====
+export type {
+  SubAgentToolProfile, SubAgentTaskSpec, SubAgentTaskSpecInit,
+  SubAgentRunStatus, SubAgentResult, SubAgentResultInit,
+  SubAgentRun, SubAgentRunInit, SubAgentValidationResult,
+} from './chat/subagent_models.ts';
+export {
+  EXTENDED_SUB_AGENT_TIMEOUT_MS, EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS,
+  makeSubAgentTaskSpec, subAgentRunStatusRunning,
+  makeSubAgentResult,
+  makeSubAgentRun, makeSubAgentValidationResult,
+} from './chat/subagent_models.ts';
+
+// ===== D-132a Task 2:subagent 稳定名称与验证器 =====
+export {
+  DEFAULT_DYNAMIC_READ_ONLY_TOOLS, subAgentParseTask,
+  subAgentResolveDefinition, subAgentValidateToolAllowlist,
+} from './chat/subagent_validator.ts';
+
+// ===== D-132a Task 3:subagent 结构化报告捕获 =====
+export {
+  SUBAGENT_REPORT_TOOL_NAME, SubAgentReportCapture,
+} from './chat/subagent_report_tool.ts';
+
+// ===== D-132a Task 4:subagent child-only 工具作用域 =====
+export { scopedSubAgentTools } from './chat/subagent_tool_scope.ts';
+
+// ===== D-132a Task 5:subagent JSONL 转录端口/manager 写入 =====
+export type { SubAgentTranscriptPort } from './chat/subagent_transcript.ts';
+export {
+  appendSubAgentTranscriptEvent, readSubAgentDisplayTextFromTranscript,
+} from './chat/subagent_transcript.ts';
+
 // ===== D-129:permissions_status 工具 + AgentPermissionBroker/Registry =====
 export type {
   AgentPermissionRisk, AgentPermissionStatus, AgentSpecialAccess,

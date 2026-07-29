@@ -1974,3 +1974,23 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**:agent_task_* 六件可调用;Scheduler/Store 单例装配完成;任务 list/read/cancel/retry/cleanup/runtime status 全链路 source-only 闭环。
 - **未移植(P1 登记)**:AgentTaskScheduler 周期任务 WorkManager 部分(103 行中的后台周期唤醒);任务管理 UI/cron 设置页;后台无头聊天执行体与通知链路(既有 PD-011)。
 - **验证**:chat tsc 干净 + 1402 测试(+6)/deepread tsc 干净 + 610/assembleHar+assembleHap 双 BUILD SUCCESSFUL。
+
+## D-132a — Subagent 纯域基础(models/validator/report/scope/transcript)
+
+- **日期**: 2026-07-29
+- **状态**: 已执行
+- **范围**: feature/subagent 的 SubAgentModels.kt/SmartSubAgentNames.kt/SubAgentValidator.kt/SubAgentReportTool.kt/SubAgentToolScope.kt/SubAgentTranscriptReader.kt 及对应 Android 测试；D-128 的 SubAgentRuntimeSetting/六内置角色/override 继续作为唯一事实源。
+- **背景**: D-128 只落地提示词与设置数据面，D-131 已提供共享 AgentTaskStore/Scheduler；隔离 runner/manager 前必须先闭合子代理任务模型、输入验证、结构化报告、child 工具隔离和 transcript 协议/安全边界。
+- **决策**:
+  1. chat HAR `subagent_models.ts`:TaskSpec/Result/Run/ValidationResult/Profile 与 Android wire literals/default constructors；不引入当前无消费者的通用 codec、roundtrip 或普通对象键序契约。
+  2. `subagent_validator.ts`:任务默认指引、context 6000 上限、raw tool-result marker 拒绝、built-in/custom/override/smart-dynamic 解析、工具 profile/allowlist/预算/模型参数验证及 18 个稳定名称逐字移植；Kotlin signed Int hash、Uuid.parse、Int/Long 边界和 Float32 单次 round-to-nearest-even 语义精确保留；私有验证 helper 不导出。
+  3. `subagent_report_tool.ts`:内部 `subagent_report` schema 顺序、截断上限、latest capture、SubAgentResult 映射和 visible-text fallback 逐字；只导出 runner 当前消费的 tool name/capture。
+  4. `subagent_tool_scope.ts`:复用既有 ToolRegistry 与三件 discovery factory；先过滤 child executable tools，恒排除 `subagent_*`，再以 child registry 重建 tool_search/可选 tools_list/tool_policy_explain；parent-only policy 查询返回 scoped not_found，不建立第二套 metadata/policy 系统。
+  5. `subagent_transcript.ts`:最小异步 SubAgentTranscriptPort；started/finished JSONL 外层顺序固定为 event/created_at_ms/payload；reader 限 `.jsonl`、canonical root containment、regular file、末尾 256 KiB、跳过部分首行/畸形行并取最新非空 display_text；保留 JsonPrimitive.contentOrNull 的 string/boolean/number 及数字词法语义。
+  6. 提交前 plan-drift + 反过度设计专项审查:移除三个 test-only validator 导出、测试对 Set/嵌套 payload 顺序的实现细节依赖，并修订旧计划中的无消费者 codec/普通键序要求；仅 report schema 与 transcript 外层 envelope 顺序视为协议。
+- **偏差/适配登记**:
+  - 无新增 PARITY_DEBT。Uuid → string；Kotlin Set → ReadonlySet/去重数组；File/RandomAccessFile/canonicalFile → 最小异步 transcript Port；kotlinx JsonPrimitive 行为由域层窄 parser 承载。
+  - transcript 平台 fileIo adapter 延至 D-132c；D-132a 仅定义 domain Port，不伪造平台成功路径。
+- **关闭**:subagent 纯域模型、验证、结构化报告、child 工具作用域与 transcript reader/writer 已 source-only 闭环，为 D-132b runner/manager 提供经审查依赖。
+- **未移植(P1 登记)**:D-132b 隔离 runner + manager 生命周期/竞态/任务看板；D-132c 五件公共工具、完整设置持久化、entry file/provider adapter 与 ChatPage 装配；专属 ChatMessageSubAgentStep 聚合 UI 延后到 runtime 闭环后。
+- **验证**:Task 1–5 定向 91 测试；chat tsc 干净 + 1493 测试，deepread tsc 干净 + 610 测试；assembleHar 5.269s、assembleHap 6.686s 均 BUILD SUCCESSFUL；五任务逐项规格/质量审查及阶段 plan-drift/反过度设计复审全部通过。
