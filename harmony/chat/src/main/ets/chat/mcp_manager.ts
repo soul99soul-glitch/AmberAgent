@@ -1,0 +1,593 @@
+// mcp_manager — McpManager 全文移植(513 行,amber 自有代码)
+//
+// Android 基准:app/src/main/java/app/amber/core/ai/mcp/McpManager.kt(513 行全文)
+//   常量:MAX_RECONNECT_ATTEMPTS=5/BASE 1000ms/MAX 30000ms(:50-52)
+//   init:settingsFlow.map{mcpServers}.collect → enable 过滤 + checkDifferent(id)
+//     → toAdd launch runCatching addClient / toRemove launch removeClient(:85-114)
+//   getClient:id 匹配(:116-118)
+//   getAllAvailableTools:enable && id ∈ assistant.mcpServers → tools filter enable(:120-131)
+//   callTool:'Failed to execute tool, because no such tool'/'...no such mcp client
+//     for the tool'(:136/:139);transport==null → connect;timeout 120s(:143-152);
+//     content 映射 Text/Image→file part/else→JsonInstant 串(:153-159)
+//   callConfiguredTool:require 'tool_name is required'(:168);error 'MCP tool not
+//     found in enabled servers: $toolName'(:175)/'MCP tool not found on
+//     ${server.name}: $toolName'(:177)/require 'MCP tool is disabled:
+//     ${name}/$toolName'(:178)/'MCP client is not connected: ${name}'(:185)(:162-205)
+//   convertImageContentToFilePart:Base64.decode + MimeTypeMap ext ?: 'bin' +
+//     saveUploadFromBytes('mcp_image.$ext') + getFile.toUri(:207-219)
+//   getTransport:kind 分派 + commonOptions.headers 注入(:221-249)
+//   addClient:removeClient 先 + cancelReconnect + attempts=0;transport 回调
+//     status==Connected 才 scheduleReconnect;clients[config]=client;
+//     runCatching{Connecting→connect→sync→Connected→attempts=0}
+//     onFailure → Error(msg ?: 类名)(:251-295)
+//   sync:listTools 合并(新增 enable=true/更新 description+inputSchema/removeIf 缺席)
+//     + clients re-key(config.clone(:340-347))(:297-360)
+//   syncAll:clients.keys 快照逐个 runCatching(:362-370)
+//   removeClient:cancelReconnect + id 匹配 entries close+remove+状态摘除 +
+//     attempts 摘除(:372-386)
+//   scheduleReconnect:>5 → Error('连接断开，已达最大重连次数')(:395);
+//     退避 1000*2^(min(attempt-1,10)) cap 30000(:441-445);job:setStatus
+//     Reconnecting→delay→配置仍启用?→reconnectClient;CancellationException 重抛/
+//     Exception → 递归 scheduleReconnect(:388-434)
+//   reconnectClient:旧 entry close+remove → 新 client+回调 → Connecting→connect→
+//     sync→Connected→attempts=0(:447-487)
+//   McpJson(:501-509)/ToolSchema.toSchema(properties ?: {}, required :511-513)
+//
+// 端口:settings(SettingsAggregator 快照/更新/订阅)、files(字节落盘+MimeTypeMap)、
+//   http(D-118 McpHttpPort);launch/delay 可注入(测试)。
+// 偏差登记:
+// - clients 键:Kotlin data class 结构相等 → JS 恒等键;sync/addClient/reconnect
+//   内部均持同一对象引用,外部查询一律 id 匹配(与 Android 所有使用点语义一致)
+// - setStatus/emit 同步化(StateFlow.emit 顺序语义 = 调用序即时生效);getStatus
+//   Flow → subscribeStatuses(首发射 = 当前快照,对齐 StateFlow.map 初值)
+// - CancellationException:JS 以 cancelled 旗标等价(delay 后检查,静默返回)
+// - printStackTrace/Log → log 回调(默认 noop,日志适配同例)
+// - Base64.decode 域内纯实现(标准字母表+padding;kotlin.io.encoding.Base64 等价)
+
+import type { JsonObject } from './json.ts';
+import { McpClient } from './mcp_protocol.ts';
+import type { McpTransport, McpServerTool, McpContentBlock } from './mcp_protocol.ts';
+import {
+  McpSseClientTransport, McpStreamableHttpTransport,
+} from './mcp_transports.ts';
+import type { McpHttpPort } from './mcp_transports.ts';
+import {
+  makeMcpTool, cloneMcpServerConfig, MCP_STATUS_IDLE,
+  MCP_STATUS_CONNECTING, MCP_STATUS_CONNECTED,
+  mcpStatusReconnecting, mcpStatusError,
+} from './mcp_config.ts';
+import type { McpServerConfig, McpTool, McpStatus } from './mcp_config.ts';
+import type { UIMessagePartText, UIMessagePartImage } from './message.ts';
+
+export type McpMessagePart = UIMessagePartText | UIMessagePartImage;
+
+// ===== 端口 =====
+
+export interface McpSettingsPort {
+  // settingsStore.settingsFlow.value 快照
+  getMcpServers(): McpServerConfig[];
+  getCurrentAssistantMcpServerIds(): string[];
+  // settingsStore.update { old -> new }(mcpServers 字段级 RMW 由 entry 保证)
+  updateMcpServers(updater: (old: McpServerConfig[]) => McpServerConfig[]): void;
+  // settingsFlow.map{mcpServers}.collect(每次发射,含初值)
+  subscribeMcpServers(listener: (configs: McpServerConfig[]) => void): () => void;
+}
+
+export interface McpFilesPort {
+  // FilesManager.saveUploadFromBytes + getFile(entity).toUri() 折叠为一次(返回 uri 串)
+  saveUploadFromBytes(bytes: Uint8Array, displayName: string, mimeType: string): Promise<string>;
+  // android.webkit.MimeTypeMap.getExtensionFromMimeType(无 → null,domain 补 'bin')
+  extensionFromMimeType(mimeType: string): string | null;
+}
+
+export interface McpManagerDeps {
+  http: McpHttpPort;
+  settings: McpSettingsPort;
+  files: McpFilesPort;
+  // appScope.launch 等价(默认:浮空 promise,catch 已内挂)
+  launch?: (task: () => Promise<void>) => void;
+  // delay(默认真实 setTimeout;测试注入瞬发)
+  delay?: (ms: number) => Promise<void>;
+  // Log/printStackTrace 适配(默认 noop)
+  log?: (msg: string) => void;
+}
+
+// ===== 常量(:50-52) =====
+
+export const MCP_MAX_RECONNECT_ATTEMPTS: number = 5;
+export const MCP_BASE_RECONNECT_DELAY_MS: number = 1000;
+export const MCP_MAX_RECONNECT_DELAY_MS: number = 30000;
+
+// 退避(:441-445 逐字):1000 * 2^(min(attempt-1,10)),cap 30000
+export const mcpCalculateBackoffDelay = (attempt: number): number => {
+  const shift: number = Math.min(attempt - 1, 10);
+  return Math.min(MCP_BASE_RECONNECT_DELAY_MS * (2 ** shift), MCP_MAX_RECONNECT_DELAY_MS);
+};
+
+// checkDifferent(core/utils):toAdd = other 中 this 无;toRemove = this 中 other 无
+const checkDifferent = <T>(current: T[], other: T[],
+  eq: (a: T, b: T) => boolean): { toAdd: T[]; toRemove: T[] } => ({
+  toAdd: other.filter((n: T): boolean => !current.some((c: T): boolean => eq(c, n))),
+  toRemove: current.filter((c: T): boolean => !other.some((n: T): boolean => eq(c, n))),
+});
+
+// kotlin.io.encoding.Base64.decode 等价(标准字母表)
+export const base64Decode = (data: string): Uint8Array => {
+  const alphabet: string = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const clean: string = data.replace(/[\r\n]/g, '');
+  const out: number[] = [];
+  let acc: number = 0;
+  let bits: number = 0;
+  for (const ch of clean) {
+    if (ch === '=') break;
+    const v: number = alphabet.indexOf(ch);
+    if (v < 0) throw new Error(`Invalid base64 character: ${ch}`);
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((acc >> bits) & 0xff);
+    }
+  }
+  return new Uint8Array(out);
+};
+
+interface ReconnectHandle {
+  cancel: () => void;
+}
+
+export class McpManager {
+  private readonly deps: Required<Omit<McpManagerDeps, 'http' | 'settings' | 'files'>>;
+  private readonly http: McpHttpPort;
+  private readonly settings: McpSettingsPort;
+  private readonly files: McpFilesPort;
+  // MutableMap<McpServerConfig, Client>(:80)— JS 恒等键(见头注偏差)
+  private readonly clients: Map<McpServerConfig, McpClient> = new Map();
+  private readonly reconnectJobs: Map<string, ReconnectHandle> = new Map();
+  private readonly reconnectAttempts: Map<string, number> = new Map();
+  // MutableStateFlow<Map<Uuid, McpStatus>>(:83)
+  private syncingStatus: Map<string, McpStatus> = new Map();
+  private readonly statusListeners: Array<(m: ReadonlyMap<string, McpStatus>) => void> = [];
+  private readonly unsubscribeSettings: () => void;
+
+  constructor(deps: McpManagerDeps) {
+    this.http = deps.http;
+    this.settings = deps.settings;
+    this.files = deps.files;
+    this.deps = {
+      launch: deps.launch ?? ((task: () => Promise<void>): void => {
+        task().catch((): void => {});
+      }),
+      delay: deps.delay ?? ((ms: number): Promise<void> => new Promise(
+        (resolve): void => {
+          setTimeout(resolve, ms);
+        })),
+      log: deps.log ?? ((): void => {}),
+    };
+
+    // init(:85-114)
+    this.unsubscribeSettings = this.settings.subscribeMcpServers(
+      (mcpServerConfigs: McpServerConfig[]): void => {
+        try {
+          const newConfigs: McpServerConfig[] = mcpServerConfigs.filter(
+            (c: McpServerConfig): boolean => c.commonOptions.enable);
+          const currentConfigs: McpServerConfig[] = [...this.clients.keys()];
+          const { toAdd, toRemove } = checkDifferent(
+            currentConfigs, newConfigs, (a, b): boolean => a.id === b.id);
+          this.deps.log(`update configs: ${mcpServerConfigs.map((c) => c.commonOptions.name)}`);
+          this.deps.log(`to_add: ${toAdd.map((c) => c.commonOptions.name)}`);
+          this.deps.log(`to_remove: ${toRemove.map((c) => c.commonOptions.name)}`);
+          for (const cfg of toAdd) {
+            this.deps.launch(async (): Promise<void> => {
+              try {
+                await this.addClient(cfg);
+              } catch (e) {
+                this.deps.log(String(e));
+              }
+            });
+          }
+          for (const cfg of toRemove) {
+            this.deps.launch(async (): Promise<void> => {
+              await this.removeClient(cfg);
+            });
+          }
+        } catch (e) {
+          this.deps.log(String(e));
+        }
+      });
+  }
+
+  // :116-118
+  getClient(config: McpServerConfig): McpClient | null {
+    for (const [k, v] of this.clients) {
+      if (k.id === config.id) return v;
+    }
+    return null;
+  }
+
+  // :120-131
+  getAllAvailableTools(): McpTool[] {
+    const assistantIds: string[] = this.settings.getCurrentAssistantMcpServerIds();
+    return this.settings.getMcpServers()
+      .filter((c: McpServerConfig): boolean =>
+        c.commonOptions.enable && assistantIds.includes(c.id))
+      .flatMap((c: McpServerConfig): McpTool[] =>
+        c.commonOptions.tools.filter((t: McpTool): boolean => t.enable));
+  }
+
+  // :133-160
+  async callTool(toolName: string, args: JsonObject): Promise<McpMessagePart[]> {
+    const tools: McpTool[] = this.getAllAvailableTools();
+    const tool: McpTool | undefined = tools.find((t: McpTool): boolean => t.name === toolName);
+    if (tool === undefined) {
+      return [{ type: 'text', text: 'Failed to execute tool, because no such tool', metadata: null }];
+    }
+    let client: McpClient | null = null;
+    for (const [k, v] of this.clients) {
+      if (k.commonOptions.tools.some((t: McpTool): boolean => t.name === toolName)) {
+        client = v;
+        break;
+      }
+    }
+    if (client === null) {
+      return [{ type: 'text', text: 'Failed to execute tool, because no such mcp client for the tool', metadata: null }];
+    }
+    let config: McpServerConfig | null = null;
+    for (const [k, v] of this.clients) {
+      if (v === client) {
+        config = k;
+        break;
+      }
+    }
+    this.deps.log(`callTool: ${toolName} keys=${Object.keys(args)}`);
+
+    if (!client.hasTransport) await client.connect(this.getTransport(config as McpServerConfig));
+    const result = await client.callTool(tool.name, args, 120000);
+    return this.mapContent(result.content);
+  }
+
+  // :162-205
+  async callConfiguredTool(serverId: string | null, serverName: string | null,
+    toolName: string, args: JsonObject): Promise<McpMessagePart[]> {
+    if (toolName.trim().length === 0) throw new Error('tool_name is required');
+    const server: McpServerConfig | undefined = this.settings.getMcpServers()
+      .find((config: McpServerConfig): boolean =>
+        config.commonOptions.enable &&
+        (serverId === null || serverId.trim().length === 0 || config.id === serverId) &&
+        (serverName === null || serverName.trim().length === 0 ||
+          config.commonOptions.name === serverName) &&
+        config.commonOptions.tools.some((t: McpTool): boolean => t.name === toolName));
+    if (server === undefined) {
+      throw new Error(`MCP tool not found in enabled servers: ${toolName}`);
+    }
+    const tool: McpTool | undefined = server.commonOptions.tools
+      .find((t: McpTool): boolean => t.name === toolName);
+    if (tool === undefined) {
+      throw new Error(`MCP tool not found on ${server.commonOptions.name}: ${toolName}`);
+    }
+    if (!tool.enable) {
+      throw new Error(`MCP tool is disabled: ${server.commonOptions.name}/${toolName}`);
+    }
+
+    let client: McpClient | null = this.getClient(server);
+    if (client === null) {
+      await this.addClient(server);
+      client = this.getClient(server);
+    }
+    if (client === null) {
+      throw new Error(`MCP client is not connected: ${server.commonOptions.name}`);
+    }
+    let liveConfig: McpServerConfig = server;
+    for (const k of this.clients.keys()) {
+      if (k.id === server.id) {
+        liveConfig = k;
+        break;
+      }
+    }
+    if (!client.hasTransport) await client.connect(this.getTransport(liveConfig));
+    this.deps.log(
+      `callConfiguredTool: ${server.commonOptions.name}/${toolName} keys=${Object.keys(args)}`);
+    const result = await client.callTool(tool.name, args, 120000);
+    return this.mapContent(result.content);
+  }
+
+  // content 映射(:153-159/:198-204 同一 when)
+  private async mapContent(content: McpContentBlock[]): Promise<McpMessagePart[]> {
+    const out: McpMessagePart[] = [];
+    for (const block of content) {
+      if (block.type === 'text') {
+        out.push({ type: 'text', text: block.text, metadata: null });
+      } else if (block.type === 'image') {
+        out.push(await this.convertImageContentToFilePart(block.data, block.mimeType));
+      } else {
+        // JsonInstant.encodeToString(it)(:157)
+        out.push({ type: 'text', text: JSON.stringify(block.raw), metadata: null });
+      }
+    }
+    return out;
+  }
+
+  // :207-219
+  private async convertImageContentToFilePart(data: string,
+    mimeType: string): Promise<UIMessagePartImage> {
+    const bytes: Uint8Array = base64Decode(data);
+    const ext: string = this.files.extensionFromMimeType(mimeType) ?? 'bin';
+    const uri: string = await this.files.saveUploadFromBytes(
+      bytes, `mcp_image.${ext}`, mimeType);
+    this.deps.log(`convertImageContentToFilePart: saved mcp image to ${uri}`);
+    return { type: 'image', url: uri, metadata: null };
+  }
+
+  // :221-249
+  private getTransport(config: McpServerConfig): McpTransport {
+    if (config.kind === 'sse') {
+      return new McpSseClientTransport(this.http, config.url, config.commonOptions.headers);
+    }
+    return new McpStreamableHttpTransport(this.http, config.url, config.commonOptions.headers);
+  }
+
+  // :251-295
+  async addClient(config: McpServerConfig): Promise<void> {
+    await this.removeClient(config); // Remove first
+    this.cancelReconnect(config.id);
+    this.reconnectAttempts.set(config.id, 0);
+
+    const transport: McpTransport = this.getTransport(config);
+    const client: McpClient = new McpClient({ name: config.commonOptions.name, version: '1.0' });
+    this.installReconnectHooks(config, transport);
+
+    this.clients.set(config, client);
+    try {
+      this.setStatus(config, MCP_STATUS_CONNECTING);
+      await client.connect(transport);
+      await this.sync(config);
+      this.setStatus(config, MCP_STATUS_CONNECTED);
+      this.reconnectAttempts.set(config.id, 0); // 重置重连计数
+      this.deps.log(`addClient: connected ${config.commonOptions.name}`);
+    } catch (e) {
+      this.deps.log(String(e));
+      const msg: string = e instanceof Error ? (e.message || e.name) : String(e);
+      this.setStatus(config, mcpStatusError(msg));
+    }
+  }
+
+  // transport 回调(:265-281/:464-478 同一对)
+  private installReconnectHooks(config: McpServerConfig, transport: McpTransport): void {
+    transport.onClose((): void => {
+      this.deps.log(`Transport closed for ${config.commonOptions.name}`);
+      const currentStatus: McpStatus | undefined = this.syncingStatus.get(config.id);
+      // 只有在已连接状态下才触发重连，避免正常关闭时重连
+      if (currentStatus !== undefined && currentStatus.kind === 'connected') {
+        this.scheduleReconnect(config);
+      }
+    });
+    transport.onError((error: Error): void => {
+      this.deps.log(`Transport error for ${config.commonOptions.name}: ${error.message}`);
+      const currentStatus: McpStatus | undefined = this.syncingStatus.get(config.id);
+      if (currentStatus !== undefined && currentStatus.kind === 'connected') {
+        this.scheduleReconnect(config);
+      }
+    });
+  }
+
+  // :297-360
+  async sync(config: McpServerConfig): Promise<void> {
+    const client: McpClient | undefined = this.clients.get(config);
+    if (client === undefined) return;
+
+    this.setStatus(config, MCP_STATUS_CONNECTING);
+
+    if (!client.hasTransport) await client.connect(this.getTransport(config));
+    const serverTools: McpServerTool[] = await client.listTools();
+    this.deps.log(`sync: tools: ${JSON.stringify(serverTools)}`);
+    this.settings.updateMcpServers((old: McpServerConfig[]): McpServerConfig[] =>
+      old.map((serverConfig: McpServerConfig): McpServerConfig => {
+        if (serverConfig.id !== config.id) return serverConfig;
+        const common = serverConfig.commonOptions;
+        const tools: McpTool[] = [...common.tools];
+
+        // 基于server对比
+        for (const serverTool of serverTools) {
+          const existing: McpTool | undefined = tools.find(
+            (t: McpTool): boolean => t.name === serverTool.name);
+          // ToolSchema.toSchema(:511-513)→ InputSchemaObj(type 'object')
+          const schema = {
+            type: 'object' as const,
+            properties: serverTool.inputSchema.properties,
+            required: serverTool.inputSchema.required,
+          };
+          if (existing === undefined) {
+            tools.push(makeMcpTool({
+              name: serverTool.name,
+              description: serverTool.description,
+              enable: true,
+              inputSchema: schema,
+            }));
+          } else {
+            const index: number = tools.indexOf(existing);
+            tools[index] = makeMcpTool({
+              name: existing.name,
+              description: serverTool.description,
+              enable: existing.enable, // copy 仅改 description+inputSchema(:329-332)
+              needsApproval: existing.needsApproval,
+              inputSchema: schema,
+            });
+          }
+        }
+
+        // 删除不在server内的
+        const merged: McpTool[] = tools.filter((tool: McpTool): boolean =>
+          serverTools.some((st: McpServerTool): boolean => st.name === tool.name));
+
+        // 更新clients(:340-347)
+        this.clients.delete(config);
+        const newCommon = { ...common, tools: merged };
+        this.clients.set(cloneMcpServerConfig(config, config.id, newCommon), client);
+
+        // 返回新的serverConfig，更新到settings store
+        return cloneMcpServerConfig(serverConfig, serverConfig.id, newCommon);
+      }));
+
+    this.setStatus(config, MCP_STATUS_CONNECTED);
+  }
+
+  // :362-370
+  async syncAll(): Promise<void> {
+    for (const config of [...this.clients.keys()]) {
+      try {
+        await this.sync(config);
+      } catch (e) {
+        this.deps.log(String(e));
+      }
+    }
+  }
+
+  // :372-386
+  async removeClient(config: McpServerConfig): Promise<void> {
+    this.cancelReconnect(config.id);
+    const toRemove: Array<[McpServerConfig, McpClient]> = [...this.clients.entries()]
+      .filter(([k]): boolean => k.id === config.id);
+    for (const [key, client] of toRemove) {
+      try {
+        await client.close();
+      } catch (e) {
+        this.deps.log(String(e));
+      }
+      this.clients.delete(key);
+      const next: Map<string, McpStatus> = new Map(this.syncingStatus);
+      next.delete(key.id);
+      this.syncingStatus = next;
+      this.emitStatuses();
+      this.deps.log(`removeClient: ${key.commonOptions.name}`);
+    }
+    this.reconnectAttempts.delete(config.id);
+  }
+
+  // :388-434
+  private scheduleReconnect(config: McpServerConfig): void {
+    const configId: string = config.id;
+    const currentAttempt: number = (this.reconnectAttempts.get(configId) ?? 0) + 1;
+
+    if (currentAttempt > MCP_MAX_RECONNECT_ATTEMPTS) {
+      this.deps.log(`Max reconnect attempts reached for ${config.commonOptions.name}`);
+      this.setStatus(config, mcpStatusError('连接断开，已达最大重连次数'));
+      return;
+    }
+
+    this.reconnectAttempts.set(configId, currentAttempt);
+
+    // 取消之前的重连任务
+    this.reconnectJobs.get(configId)?.cancel();
+
+    // 计算指数退避延迟
+    const delayMs: number = mcpCalculateBackoffDelay(currentAttempt);
+    this.deps.log(`Scheduling reconnect for ${config.commonOptions.name}, ` +
+      `attempt ${currentAttempt}/${MCP_MAX_RECONNECT_ATTEMPTS}, delay ${delayMs}ms`);
+
+    let cancelled: boolean = false;
+    const task = async (): Promise<void> => {
+      try {
+        this.setStatus(config, mcpStatusReconnecting(currentAttempt, MCP_MAX_RECONNECT_ATTEMPTS));
+        await this.deps.delay(delayMs);
+        if (cancelled) return; // CancellationException 等价(头注偏差)
+
+        // 检查配置是否仍然启用
+        const currentConfig: McpServerConfig | undefined = this.settings.getMcpServers()
+          .find((c: McpServerConfig): boolean => c.id === configId && c.commonOptions.enable);
+        if (currentConfig === undefined) {
+          this.deps.log(`Config disabled or removed, cancelling reconnect for ${config.commonOptions.name}`);
+          return;
+        }
+
+        this.deps.log(`Attempting reconnect for ${config.commonOptions.name}`);
+        await this.reconnectClient(currentConfig);
+      } catch (e) {
+        if (cancelled) return;
+        this.deps.log(`Reconnect failed for ${config.commonOptions.name}: ${String(e)}`);
+        // 继续尝试重连
+        this.scheduleReconnect(config);
+      }
+    };
+    const handle: ReconnectHandle = {
+      cancel: (): void => {
+        cancelled = true;
+      },
+    };
+    this.reconnectJobs.set(configId, handle);
+    task().catch((): void => {});
+  }
+
+  // :436-439
+  private cancelReconnect(configId: string): void {
+    this.reconnectJobs.get(configId)?.cancel();
+    this.reconnectJobs.delete(configId);
+  }
+
+  // :447-487
+  private async reconnectClient(config: McpServerConfig): Promise<void> {
+    // 先关闭旧客户端
+    let oldEntry: [McpServerConfig, McpClient] | null = null;
+    for (const entry of this.clients.entries()) {
+      if (entry[0].id === config.id) {
+        oldEntry = entry;
+        break;
+      }
+    }
+    if (oldEntry !== null) {
+      try {
+        await oldEntry[1].close();
+      } catch (e) {
+        this.deps.log(String(e));
+      }
+      this.clients.delete(oldEntry[0]);
+    }
+
+    const transport: McpTransport = this.getTransport(config);
+    const client: McpClient = new McpClient({ name: config.commonOptions.name, version: '1.0' });
+    this.installReconnectHooks(config, transport);
+
+    this.clients.set(config, client);
+    this.setStatus(config, MCP_STATUS_CONNECTING);
+    await client.connect(transport);
+    await this.sync(config);
+    this.setStatus(config, MCP_STATUS_CONNECTED);
+    this.reconnectAttempts.set(config.id, 0); // 重置重连计数
+    this.deps.log(`Reconnected successfully: ${config.commonOptions.name}`);
+  }
+
+  // :489-493(StateFlow.emit → 同步映射+通知,头注偏差)
+  private setStatus(config: McpServerConfig, status: McpStatus): void {
+    const next: Map<string, McpStatus> = new Map(this.syncingStatus);
+    next.set(config.id, status);
+    this.syncingStatus = next;
+    this.emitStatuses();
+  }
+
+  private emitStatuses(): void {
+    for (const l of this.statusListeners) l(this.syncingStatus);
+  }
+
+  // :495-497 — Flow.map ?: Idle → 快照 + 订阅(首发射对齐 StateFlow 初值)
+  getStatus(config: McpServerConfig): McpStatus {
+    return this.syncingStatus.get(config.id) ?? MCP_STATUS_IDLE;
+  }
+
+  getStatusMap(): ReadonlyMap<string, McpStatus> {
+    return this.syncingStatus;
+  }
+
+  subscribeStatuses(listener: (m: ReadonlyMap<string, McpStatus>) => void): () => void {
+    this.statusListeners.push(listener);
+    listener(this.syncingStatus);
+    return (): void => {
+      const i: number = this.statusListeners.indexOf(listener);
+      if (i >= 0) this.statusListeners.splice(i, 1);
+    };
+  }
+
+  // 测试/生命周期辅助:退订 settings + 取消全部重连(Android 无对应,appScope 常驻)
+  dispose(): void {
+    this.unsubscribeSettings();
+    for (const id of [...this.reconnectJobs.keys()]) this.cancelReconnect(id);
+  }
+}

@@ -156,6 +156,25 @@ const sseBaseUrl = (requestUrl: string): string => {
 
 // ===== SseClientTransport(201 行全文) =====
 
+// SDK AbstractTransport 回调为组合语义(onClose/onError:old→block 链;
+// McpManager 先于 client.connect 注册的 hook 不被覆盖 — 0.8.4 源证实)
+const compose0 = (old: () => void, block: () => void): () => void =>
+  (): void => {
+    old();
+    block();
+  };
+const compose1 = (old: (e: Error) => void, block: (e: Error) => void): (e: Error) => void =>
+  (e: Error): void => {
+    old(e);
+    block(e);
+  };
+const composeMsg = (old: (m: JsonObject) => void,
+  block: (m: JsonObject) => void): (m: JsonObject) => void =>
+  (m: JsonObject): void => {
+    old(m);
+    block(m);
+  };
+
 export class McpSseClientTransport implements McpTransport {
   private readonly port: McpHttpPort;
   private readonly urlString: string;
@@ -178,15 +197,15 @@ export class McpSseClientTransport implements McpTransport {
   }
 
   onClose(block: () => void): void {
-    this.closeBlock = block;
+    this.closeBlock = compose0(this.closeBlock, block);
   }
 
   onError(block: (e: Error) => void): void {
-    this.errorBlock = block;
+    this.errorBlock = compose1(this.errorBlock, block);
   }
 
   onMessage(block: (msg: JsonObject) => void): void {
-    this.messageBlock = block;
+    this.messageBlock = composeMsg(this.messageBlock, block);
   }
 
   // :65-93
@@ -340,15 +359,15 @@ export class McpStreamableHttpTransport implements McpTransport {
   }
 
   onClose(block: () => void): void {
-    this.closeBlock = block;
+    this.closeBlock = compose0(this.closeBlock, block);
   }
 
   onError(block: (e: Error) => void): void {
-    this.errorBlock = block;
+    this.errorBlock = compose1(this.errorBlock, block);
   }
 
   onMessage(block: (msg: JsonObject) => void): void {
-    this.messageBlock = block;
+    this.messageBlock = composeMsg(this.messageBlock, block);
   }
 
   // :82-87

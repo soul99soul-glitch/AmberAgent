@@ -1652,3 +1652,33 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: MCP 两 transport 行为面(二启/check/端点解析/事件分发/inline SSE/重放改写/会话终止全分支金样)。
 - **未移植(P1 登记)**: McpManager 513 行(D-119);createRunTools mcp 组+mcp_call_tool+MCP 设置面 UI(D-120);McpManager 构造侧 transport 选择(sse vs streamable_http 按 config.kind)随 D-119。
 - **验证**: chat tsc 干净 + 1186 测试(+26)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧两修(测试证实):contentType 比较侧补 withoutParameters(带参 ct 误判 else 分支)+ inline dispatch 解码失败补 onError(:344-348 漏挂)。
+
+## D-119 — MCP 切片④:McpManager 全文(513 行:生命周期/sync 合并/退避重连/callTool×2)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: app/src/main/java/app/amber/core/ai/mcp/McpManager.kt(513 行全文)+ core/utils checkDifferent + kotlin.io.encoding.Base64 使用面。
+- **背景**: D-116..D-118 落地配置/协议核/两 transport;本切片为 MCP 管理面收口。端口架构延续:settings(SettingsAggregator)/files(FilesManager+MimeTypeMap)/http(D-118 McpHttpPort)注入,launch/delay/log 可注入(测试瞬发退避)。
+- **决策**:
+  1. chat HAR mcp_manager.ts(+19 测试,脚本化 MCP server fake 全栈驱动 manager→transport→client):
+     - 常量/退避逐字(:50-52/:441-445):1000*2^(min(attempt-1,10)) cap 30000(金表 1→1000..5→16000,6→30000,12→30000)。
+     - init(:85-114):订阅 settings mcpServers → enable 过滤 + checkDifferent(id)→ toAdd launch addClient(runCatching→log)/toRemove launch removeClient。
+     - getAllAvailableTools(:120-131):enable && id ∈ assistant.mcpServers → tools filter enable(三过滤测试)。
+     - callTool(:133-160)金样:'Failed to execute tool, because no such tool'/'...no such mcp client for the tool';transport==null → connect;120s;content 三型 Text/Image→convertImageContentToFilePart/else→JSON.stringify(:157)。
+     - callConfiguredTool(:162-205)金样:require 'tool_name is required'/error 'MCP tool not found in enabled servers: <t>'/'MCP tool not found on <s>: <t>'/require 'MCP tool is disabled: <s>/<t>'/'MCP client is not connected: <s>';client 缺 → addClient 懒建;liveConfig = clients 内同 id 键 ?: server(:186)。
+     - convertImageContentToFilePart(:207-219):Base64 域内纯解码(标准字母表+换行容忍)+ ext ?: 'bin' + saveUploadFromBytes('mcp_image.<ext>')。
+     - getTransport(:221-249):kind 分派两 transport + commonOptions.headers。
+     - addClient(:251-295):removeClient 先/cancelReconnect/attempts=0;回调门 status==Connected;runCatching Connecting→connect→sync→Connected→attempts=0,onFailure → Error(msg ?: 类名)。
+     - sync(:297-360):listTools 合并(新增 enable=true/更新仅 description+inputSchema 保 enable/removeIf 缺席)+ clients re-key clone(:340-347,在 settings updater 内,同 Android 副作用位);syncAll 逐个 runCatching(:362-370)。
+     - removeClient(:372-386)/scheduleReconnect(:388-434,>5 → '连接断开，已达最大重连次数'逐字;任务:setStatus Reconnecting→delay→配置仍启用?→reconnectClient;失败递归)/reconnectClient(:447-487)。
+  2. **D-118 修正(SDK 0.8.4 AbstractTransport.kt 源证实)**:onClose/onError/onMessage 为**组合链**(old→block),非单槽覆盖 — McpManager 先于 client.connect 注册的 hook 存活。两 transport 回调 setter 改组合;D-117/D-118 测试全绿无回归(单 hook 场景组合与覆盖同构)。
+  3. **Android 竞争 quirk 忠实再现+测试编码**:removeClient 先 close(此时 status==Connected → onClose hook 命中 scheduleReconnect)后删 status entry — Connected 客户端手动移除会调度一次重连(config 仍在 settings+enabled 时 delay 到期冗余 reconnectClient;settings-diff 路径因配置已除名而 delay 后静默中止)。任务 setStatus(Reconnecting) 同步前缀先于 entry 删除执行,终态 entry 已删(时序确定)。
+- **偏差/适配登记**:
+  - clients 键 Kotlin data class 结构相等 → JS 恒等键(内部均持同引用;外部查询全 id 匹配 — 与 Android 所有使用点语义一致)。
+  - setStatus/MutableStateFlow.emit → 同步映射+订阅通知(顺序语义不变);getStatus Flow.map ?: Idle → 快照+subscribeStatuses(首发射对齐 StateFlow 初值)。
+  - CancellationException → cancelled 旗标(delay 后检查静默返回);printStackTrace/Log → log 回调默认 noop。
+  - 端口折叠:saveUploadFromBytes+getFile.toUri → 单次调用返回 uri;MimeTypeMap → extensionFromMimeType(null→'bin' 域内补)。
+  - AbstractTransport._onMessage 的 initialized 门(注册前消息挂起)未移植 — amber 使用面消息必经 connect 注册后到达(start 由 connect 调),不可达。
+- **关闭**: MCP 管理面全行为(生命周期/同步/重连/调用)。
+- **未移植(P1 登记)**: createRunTools mcp 组+mcp_call_tool+MCP 设置面 UI(D-120);okHttp 超时档(20s/10min/120s)— entry 端口现 15s/120s 统一,G-D 设备验证时校准;entry 侧 McpSettingsPort/McpFilesPort 接线随 D-120 设置面。
+- **验证**: chat tsc 干净 + 1205 测试(+19)/deepread tsc 干净/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧四修(实现一修):SDK 组合回调补(D-118 实现)+ 三测试 toolsResult 未设致 sync 清表 + '重连门'测试前提与 Android 竞争行为相悖(改编码 quirk)。

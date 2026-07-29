@@ -409,6 +409,15 @@ export type {
   McpPostStreamResponse, McpSseLineStream,
 } from './chat/mcp_transports.ts';
 
+// D-119:McpManager 全文(生命周期/sync 合并/退避重连/callTool×2)
+export {
+  McpManager, mcpCalculateBackoffDelay, base64Decode,
+  MCP_MAX_RECONNECT_ATTEMPTS, MCP_BASE_RECONNECT_DELAY_MS, MCP_MAX_RECONNECT_DELAY_MS,
+} from './chat/mcp_manager.ts';
+export type {
+  McpSettingsPort, McpFilesPort, McpManagerDeps, McpMessagePart,
+} from './chat/mcp_manager.ts';
+
 export {
   makeProviderModel, makeBalanceOption,
   makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,
