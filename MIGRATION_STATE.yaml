@@ -5,9 +5,9 @@
 #        + docs/harmony-inventory/(Android 源码审计,仓库原生)
 
 meta:
-  updated: 2026-07-28
+  updated: 2026-07-29
   branch: harmony-preview
-  head: 94f89d897
+  head: c8cb1875a
 
 phase:
   current: "Phase 0 → Phase 1 过渡"
@@ -16,7 +16,7 @@ phase:
   milestone_status:
     M0_工具链: "部分完成 — CLI 构建 verified(2026-07-16), hdc 无 device target"
     M1_三个P0_spike: "未开始(等设备) — SSE/RDB/ArkUI 均无设备端 verified 结论"
-    M2_工程骨架: "完成 — entry HAP + deepread HAR,hvigor BUILD SUCCESSFUL"
+    M2_工程骨架: "完成 — entry HAP + chat/deepread HAR,hvigor BUILD SUCCESSFUL"
     M3_Chat_MVP: "source-only 完成(2026-07-28,收尾盘点 docs/harmony-m3-gap-audit.md:6/6 交付物达成,D-012..D-042);设备验证待 G-D(G-C 阻塞)"
 
 gate0:
@@ -29,7 +29,7 @@ build_and_test:
   单元测试: "cd harmony/deepread && npm test; cd harmony/chat && npm test  # node+tsx,无需设备"
   类型检查: "cd harmony/deepread && npx tsc --noEmit; cd harmony/chat && npx tsc --noEmit  # 双 HAR,esbuild 不查类型,提交门之一(D-010/D-014)"
   构建: "cd harmony && hvigorw assembleHar --mode module -p product=default && hvigorw assembleHap --mode module -p product=default  # 双绿门(D-014)"
-  最近验证: "2026-07-28 deepread 603 + chat 888 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL"
+  最近验证: "2026-07-29 deepread 610 + chat 1493 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL(D-132a)"
   fixture校验: "node scripts/harmony-inventory/validate-harmony-fixtures.mjs"
   契约校验: "node scripts/harmony-inventory/check-source-contracts.mjs"
 
@@ -47,20 +47,23 @@ active_goals:
   G-C_设备解锁: blocked_by_human # 模拟器镜像下载或真机接入
   G-D_真机P0_spike: pending(G-C)
   G-E_Chat_MVP主线: "source-only done(2026-07-28);设备端 pending(G-D)"
-  G-F_P1能力面: pending(G-E)
+  G-F_P1能力面: "source-only in_progress(D-132 subagent);设备能力仍 pending(G-D)"
 
 next_slices:                      # 按优先级,取最高未阻塞项
+  - id: D-132b
+    状态: in_progress
+    内容: "subagent 隔离 runner + manager 生命周期/竞态/任务看板"
+  - id: D-132c
+    状态: pending(D-132b)
+    内容: "subagent 五件公共工具 + 设置/entry adapter + ChatPage 装配"
   - id: S-DEVICE-UNBLOCK
     状态: blocked_by_human
     内容: "DevEco Device Manager 下载 API 26 模拟器镜像并启动,或接入真机"
-  - id: S-CHAT-MVP-SCAFFOLD
-    状态: source_only_ok
-    内容: "Chat 领域模型(UIMessage/MessageNode/Conversation)ArkTS 化 + accumulator + fixture 回放;STREAMING_SEMANTICS_MATRIX 为规格,可不等设备先行"
   - id: S-G1-CONFIRM
     状态: blocked_by_human
     内容: "DECISION_PACKET_001 人工确认(9 项决策)"
 
 parity_baseline:
-  单元测试总数: 1470              # deepread 603 + chat 867
-  已知行为偏差: 9                # 详见 PARITY_DEBT.md PD-001..008(+1 条 Android 内部不一致待核实)
-  决策记录: "DECISION_LOG.md D-001..D-074"
+  单元测试总数: 2103              # deepread 610 + chat 1493
+  已知行为偏差: 10               # PARITY_DEBT.md 11 条:10 open + 1 closed;另 1 条 Android 内部不一致待核实
+  决策记录: "DECISION_LOG.md D-001..D-132a(含分片决策)"
