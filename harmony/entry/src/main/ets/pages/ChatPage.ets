@@ -77,7 +77,7 @@ import {
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
   getWorkspaceManager,
   getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
-  getPermissionsStatusTool, getAgentCronTools,
+  getPermissionsStatusTool, getAgentTaskTools, getAgentCronTools,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
@@ -620,6 +620,8 @@ struct ChatPage {
   // D-130:cron 四工具(aboutToAppear 异步水合,与 searchSettings 同档;
   //   水合完成前的极早轮次不带 cron 工具 — 异步加载时序等价先例)
   private agentCronToolsCache: AgentTool[] = [];
+  // D-131:AgentTaskTools 六件,与 cron 共用 AgentTaskStore/调度器缓存。
+  private agentTaskToolsCache: AgentTool[] = [];
   @State errorMsg: string = '';
   // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
   @State denyDialogToolCallId: string = '';
@@ -744,6 +746,10 @@ struct ChatPage {
     ensureSearchSdk();
     loadSearchPrefs(getChatKvStore()).then((s: SearchSettings): void => {
       this.searchSettings = s;
+    });
+    // D-131:AgentTaskTools 水合(异步单例就绪后入目录;ChatService.kt:2299 无条件)
+    getAgentTaskTools().then((tools: AgentTool[]): void => {
+      this.agentTaskToolsCache = tools;
     });
     // D-130:cron 四工具水合(异步单例就绪后入目录;LocalTools.kt:181 位)
     getAgentCronTools().then((tools: AgentTool[]): void => {
@@ -1489,6 +1495,9 @@ struct ChatPage {
             return Promise.resolve();
           },
         }),
+        // D-131:agent_task_* 六件(ChatService.kt:2299 无条件;
+        //   createConversationQueueTools(:2297)之后)
+        ...this.agentTaskToolsCache,
         // D-129:permissions_status(LocalTools.kt:180 无条件,位置 =
         //   agentCron(:181)/runPlanUpdate(:182)之前)
         getPermissionsStatusTool(),

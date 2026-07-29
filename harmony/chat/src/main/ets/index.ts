@@ -931,6 +931,10 @@ export {
   copyAgentTaskSnapshot, agentTaskSnapshotToJson, agentTaskSnapshotFromJson,
   agentTaskStatusRunning, agentTaskStatusToQueueState, agentTaskStatusToRecoveryState,
 } from './chat/agent_task.ts';
+export type { AgentRuntimeStatus } from './chat/agent_task_scheduler.ts';
+export { AgentTaskScheduler } from './chat/agent_task_scheduler.ts';
+export type { AgentTaskOutputProbe } from './chat/agent_task_tools.ts';
+export { AgentTaskTools } from './chat/agent_task_tools.ts';
 export type {
   CronExpression, AgentCronTaskStatus, AgentCronTask, AgentCronTaskInit,
   AgentCronPersistencePort, AgentCronSchedulerPort,

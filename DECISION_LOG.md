@@ -1955,3 +1955,22 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: cron 四工具 CRUD/状态机/看板登记/恢复语义全链路;任务看板(AgentTaskStore)基础设施就绪(board/任务页/其他任务型工具复用)。
 - **未移植(P1 登记)**: AgentCronRunExecutor 真实实现(无头聊天运行 = 后台运行基础设施);WorkSchedulerExtensionAbility 进程级唤醒;AgentCronWorker 通知三段(运行中前台/完成/失败);AgentTaskScheduler(103 行 WorkManager 周期任务);cron 设置页 UI(SettingAgentExtensionsPage);AgentTaskTools(210 行 agent_task_* 工具组)。
 - **验证**: chat tsc 干净 + 1396 测试(+31)/deepread tsc 干净 + 610/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧四修(自身笔误:范围文案字段位错/cron 型快照抢占恢复分支三处);entry 侧一修(arkts-no-obj-literals-as-types 命名接口)。
+
+## D-131 — AgentTaskTools 六件 + Scheduler/Tools 装配
+
+- **日期**: 2026-07-29
+- **状态**: 已执行
+- **范围**: feature/tools/impl/.../AgentTaskTools.kt(全文 210)+feature/task/.../AgentTaskScheduler.kt(全文 103)+ChatService.kt:2297-2299(createConversationQueueTools 后无条件装配)+AgentInfraModule.kt:42(Scheduler 复用 Store 单例)。
+- **背景**: D-130 已落地 AgentTaskStore 看板与恢复面，但 LocalTools/ChatService 尾部六件 agent_task_* 工具仍未移植;AgentTaskScheduler 是工具访问任务 CRUD/状态/恢复的唯一门面。
+- **决策**:
+  1. chat HAR agent_task_scheduler.ts:Scheduler 全文移植(enqueue/start/complete/fail/cancel/retry/cleanup/reconcileOnStartup/list/read/status + AgentRuntimeStatus/AgentTaskAdapter);tasksFlow → AgentTaskStore.subscribe 转发;byType 使用 Map 插入序。
+  2. chat HAR agent_task_tools.ts:六件顺序逐字(agent_task_list/read/cancel/retry/cleanup + agent_runtime_status);描述、参数 schema、required、审批旗标、错误文案逐字;list status/type 过滤忽略大小写;cleanup delete_private_output 严格布尔解析默认 false;runtime status 输出 total_tasks/七状态计数/by_type。
+  3. toJson 键序逐字对齐 AgentTaskTools.kt:168-204:task_id/type/title/queue_state/recovery_state/retryable/retry_requires_approval/retry_count/retry_max/(retry_reason)/output_exists/(output_ref)/last_heartbeat_ms/spec/runtime/source_tool_name/source_conversation_id/status/output_path/output_offset/created_at_ms/updated_at_ms/notified/cancel_capability/(permission_trace_id)/(summary 截断 4000)/(last_error_code)/(error 截断 1000);output_exists 采用 AgentTaskOutputProbe 异步端口，outputRef 优先，否则探测 outputPath，缺失能力明确 false。
+  4. entry AppContainer:复用 getAgentTaskStore Promise 创建并缓存 AgentTaskScheduler;getAgentTaskTools 水合时注入 createEntryAgentTaskFilePort().exists;ChatPage aboutToAppear 异步水合，buildToolLoop 在 createConversationQueueTools 后插入六件，位序对应 ChatService.kt:2299。
+  5. 测试 agent_task_tools.test.ts:六件定义/顺序/审批/过滤/not_found/toJson 键序与截断/异步输出探测/cancel/retry/cleanup/runtime status 六组覆盖。
+- **偏差/适配登记**:
+  - 无新增 PARITY_DEBT。Android `java.io.File.exists()` 通过异步文件端口承载，Android 失败/缺失语义在工具输出中保留 false，不改变任务状态机。
+  - ArkTS 适配:JsonObject 逐键写入避免对象展开;工具输入采用命名端口与可空字段;AgentTaskStore 的异步文件端口复用既有 D-130 entry 实现。
+- **关闭**:agent_task_* 六件可调用;Scheduler/Store 单例装配完成;任务 list/read/cancel/retry/cleanup/runtime status 全链路 source-only 闭环。
+- **未移植(P1 登记)**:AgentTaskScheduler 周期任务 WorkManager 部分(103 行中的后台周期唤醒);任务管理 UI/cron 设置页;后台无头聊天执行体与通知链路(既有 PD-011)。
+- **验证**:chat tsc 干净 + 1402 测试(+6)/deepread tsc 干净 + 610/assembleHar+assembleHap 双 BUILD SUCCESSFUL。

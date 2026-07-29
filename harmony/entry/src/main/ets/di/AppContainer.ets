@@ -46,7 +46,7 @@ import {
   McpManager, SkillManager, AgentToolActivityStore, PosixWorkspaceManager,
   AgentPromptConfigRepository, createAgentPromptConfigTool,
   AgentPermissionBroker, createPermissionsStatusTool,
-  AgentTaskStore, AgentCronManager, AgentCronTools,
+  AgentTaskStore, AgentTaskScheduler, AgentTaskTools, AgentCronManager, AgentCronTools,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -253,6 +253,24 @@ export const getAgentTaskStore = (): Promise<AgentTaskStore> => {
     });
   }
   return agentTaskStorePromise;
+};
+
+// D-131:AgentTaskScheduler 复用上面的 AgentTaskStore Promise(Koin single 等价)。
+let agentTaskSchedulerPromise: Promise<AgentTaskScheduler> | null = null;
+export const getAgentTaskScheduler = (): Promise<AgentTaskScheduler> => {
+  if (agentTaskSchedulerPromise === null) {
+    agentTaskSchedulerPromise = getAgentTaskStore().then(
+      (store: AgentTaskStore): AgentTaskScheduler => new AgentTaskScheduler(store));
+  }
+  return agentTaskSchedulerPromise;
+};
+
+// agent_task_* 六件(LocalTools/ChatService.kt:2299 无条件，紧随 conversation_queue_* 之后)。
+export const getAgentTaskTools = async (): Promise<AgentTool[]> => {
+  const files = createEntryAgentTaskFilePort();
+  return new AgentTaskTools(await getAgentTaskScheduler(), {
+    outputExists: (path: string): Promise<boolean> => files.exists(path),
+  }).getTools();
 };
 
 let agentCronManagerPromise: Promise<AgentCronManager> | null = null;
