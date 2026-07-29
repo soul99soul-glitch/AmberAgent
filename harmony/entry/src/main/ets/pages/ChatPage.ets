@@ -18,6 +18,7 @@ import type {
   ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
   MessageChunk, OpenAIChatApi, AskUserQuestion, AskedAnswers, ConversationCompact,
   ImageGuardSettings, VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting,
+  AgentToolActivityStore, SandboxActivityUiState, McpToolActivityPort, JsonValue,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId,
@@ -61,7 +62,9 @@ import {
   makeGenerationRetrySetting,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   probeVisionModelHealth,
-  createMcpManagementTools, createMcpServerTools,
+  createMcpManagementTools, createMcpServerTools, makeAgentTool,
+  deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
+  withStepProgress, isActiveOperation,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -69,7 +72,7 @@ import {
   resolveChatProviderChoice, ChatProviderChoice,
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
-  getMcpManager, initMcpManager,
+  getMcpManager, initMcpManager, getToolActivityStore,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
@@ -97,6 +100,8 @@ const INK2: string = '#57544C';
 const INK3: string = '#8F8B80';
 const LINE: string = '#E4E0D6';
 const ACCENT: string = '#B8623A';
+// D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
+const ROW: string = '#EFECE4';
 
 const HILOG_DOMAIN: number = 0x0001;
 const HILOG_TAG: string = 'DeepRead.ChatPage';
@@ -624,6 +629,12 @@ struct ChatPage {
   @State regenNodeId: string = '';
   // D-048:发送排队;D-052:KV 持久化(进程死亡恢复,PendingMessageStore 语义)
   @State pendingRows: PendingChipRow[] = [];
+  // D-122:沙盒活动时间线(ChatPage.kt:500-536)— live 单槽订阅 + 步骤选择
+  //   (-1 = 最新,:523-527 coerceIn 等价)+ sheet 开关
+  @State liveActivity: SandboxActivityUiState | null = null;
+  @State selectedSandboxIndex: number = -1;
+  @State sandboxSheetOpen: boolean = false;
+  private unsubActivity: () => void = (): void => {};
   private pendingQueue: PendingUserMessage[] = [];
   // D-050:重试状态文案(strings.xml:386;null = 清除)
   @State retryStatus: string = '';
@@ -704,10 +715,14 @@ struct ChatPage {
       .then((prompt: string): string[] => prompt.length > 0 ? [prompt] : []);
   }
 
+  // D-122:页面消失退订(store 为全局单例,防泄漏/跨页回调)
+  aboutToDisappear(): void {
+    this.unsubActivity();
+  }
+
   aboutToAppear(): void {
     // 每次进入(含从选择器返回)刷新模型标签
-    describeChatModel().then((label: string): void => { this.modelLabel = label; });
-    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
+    describeChatModel().then((label: string): void => { this.modelLabel = label; });    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
     //   = P1 登记;取持久化 model.contextWindowTokens = Android 未知模型
     //   回退路径 :110-111)
     resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
@@ -745,6 +760,11 @@ struct ChatPage {
     initMcpManager().catch((e: Error): void => {
       hilog.error(0x0001, 'Chat.Page', 'initMcpManager failed: %{public}s', e.message);
     });
+    // D-122:activityStore.sandboxActivity collect(:501)— StateFlow 首发射语义
+    this.unsubActivity = getToolActivityStore().subscribe(
+      (a: SandboxActivityUiState | null): void => {
+        this.liveActivity = a;
+      });
     // D-073:display_setting.userNickname 快照(placeholder nickname/user)
     loadUserNickname(getChatKvStore()).then((nick: string): void => {
       this.userNickname = nick;
@@ -1356,7 +1376,12 @@ struct ChatPage {
           settings: getMcpSettingsStore(),
           manager: getMcpManager(),
         }),
-        ...createMcpServerTools({ manager: getMcpManager() }),
+        // D-122:activityStore 事件面接线(ChatService.kt:2262-2274 —
+        //   startTool/complete/fail 三段;scope 由终表统一包覆,见 tools 组装)
+        ...createMcpServerTools({
+          manager: getMcpManager(),
+          activity: this.mcpActivityPort(),
+        }),
         // D-085c:memory_* 四件(ChatService.kt:2280 addAll(createMemoryTools),
         //   位置 = MCP 之后/ConversationContextTools 之前);
         //   三开关全关 → 空组(:2346-2351);todayText = toLocalString(true) 等价
@@ -1438,12 +1463,13 @@ struct ChatPage {
     const registry: ToolRegistry = createToolRegistry(profiledTools);
     return {
       // createRunTools(ChatService.kt:2326-2329):registry.tools() +
-      //   tool_search(profile 透传,D-082)+ 自省对
-      tools: [
+      //   tool_search(profile 透传,D-082)+ 自省对;
+      //   D-122:scopedToConversation(:2329 → :2332-2343)终表统一包覆
+      tools: this.scopedToConversation([
         ...registry.tools(),
         createToolSearchTool(registry, rt.assistant.toolProfile),
         ...createRegistryIntrospectionTools(registry),
-      ],
+      ], conv),
       makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
         asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({
           model: rt.params.model,
@@ -1489,6 +1515,97 @@ struct ChatPage {
     const searchOn: boolean = this.searchSettings !== null && this.searchSettings.enableWebSearch;
     if (!searchOn && getMcpManager().getAllAvailableTools().length === 0) return;
     this.errorMsg = '当前模型未开启工具调用，请在设置内启用模型的工具能力，再使用搜索/MCP等功能';
+  }
+
+  // ===== D-122:沙盒活动时间线(ChatPage.kt:500-536 + ChatInputSandbox.kt) =====
+
+  // :503-522 — derive + scoped live + merge + operationPreviewMode 门;
+  //   偏差:processingStatus ← retryStatus(harmony 无独立 live-status 流,
+  //   enableLiveStatusNotification 子系统未移植,P1 延续)
+  private sandboxTimeline(): SandboxActivityUiState[] {
+    const conv: Conversation | null = this.conversation;
+    if (conv === null) return [];
+    const messageActivities: SandboxActivityUiState[] = deriveSandboxActivities(
+      conv, this.sending, this.retryStatus.length > 0 ? this.retryStatus : null);
+    // scopedLiveSandboxActivity(:508-511):conversationId 匹配,或 null 且
+    //   消息时间线含该 toolCallId
+    let scoped: SandboxActivityUiState | null = null;
+    const live: SandboxActivityUiState | null = this.liveActivity;
+    if (live !== null) {
+      const inMessages: boolean = messageActivities.some(
+        (a: SandboxActivityUiState): boolean => a.toolCallId === live.toolCallId);
+      if (live.conversationId === conv.id || (live.conversationId === null && inMessages)) {
+        scoped = withStepProgress(live, conv);
+      }
+    }
+    const raw: SandboxActivityUiState[] = mergeSandboxTimeline(messageActivities, scoped);
+    // :516-522 — ALWAYS 空 → idle 兜底;AUTO 过滤活动态;HIDDEN 空
+    const mode: string = this.agentRuntime.operationPreviewMode;
+    if (mode === 'always') {
+      return raw.length > 0 ? raw : [idleSandboxActivity(conv)];
+    }
+    if (mode === 'auto') return raw.filter(isActiveOperation);
+    return [];
+  }
+
+  // :523-529 — selectedSandboxIndex clamp(-1 = 最新)+ canCancel
+  private currentSandboxActivity(timeline: SandboxActivityUiState[]): SandboxActivityUiState | null {
+    const latest: number = timeline.length - 1;
+    if (latest < 0) return null;
+    if (this.selectedSandboxIndex >= 0 && this.selectedSandboxIndex <= latest) {
+      return timeline[this.selectedSandboxIndex];
+    }
+    return timeline[latest];
+  }
+
+  // sandboxStatusLabel(:280-286 文案逐字)
+  private sandboxStatusZh(status: string): string {
+    if (status === 'running') return '执行中';
+    if (status === 'waiting_for_permission') return '待授权';
+    if (status === 'succeeded') return '成功';
+    if (status === 'failed') return '失败';
+    return '已取消';
+  }
+
+  // stepProgressText(:362-370):agent_idle → '待命';x/y;否则状态文案
+  private sandboxStepText(activity: SandboxActivityUiState): string {
+    if (activity.toolName === 'agent_idle') return '待命';
+    if (activity.stepIndex !== null && activity.stepTotal !== null) {
+      return `${activity.stepIndex}/${activity.stepTotal}`;
+    }
+    return this.sandboxStatusZh(activity.status);
+  }
+
+  // ChatService.kt:2254-2282 activityStore 事件面 — store 适配 McpToolActivityPort
+  private mcpActivityPort(): McpToolActivityPort {
+    const store: AgentToolActivityStore = getToolActivityStore();
+    return {
+      startTool: (toolName: string, title: string, inputPreview: string, runtime: string): string =>
+        store.startTool(toolName, title, inputPreview, runtime),
+      complete: (toolCallId: string, outputPreview: string): void => {
+        store.complete(toolCallId, outputPreview);
+      },
+      fail: (toolCallId: string, error: Error): void => {
+        store.fail(toolCallId, error);
+      },
+    };
+  }
+
+  // ChatService.kt:2332-2343 — 终表每工具 execute 包 withConversation(scopeId)
+  private scopedToConversation(tools: AgentTool[], conv: Conversation): AgentTool[] {
+    const scopeId: string = conv.id;
+    const store: AgentToolActivityStore = getToolActivityStore();
+    return tools.map((tool: AgentTool): AgentTool => makeAgentTool({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      systemPrompt: tool.systemPrompt,
+      needsApproval: tool.needsApproval,
+      allowsAutoApproval: tool.allowsAutoApproval,
+      mandatoryApproval: tool.mandatoryApproval,
+      execute: (input: JsonValue): Promise<UIMessagePart[]> =>
+        store.withConversation(scopeId, (): Promise<UIMessagePart[]> => tool.execute(input)),
+    }));
   }
 
   // steer 消息步间消费(Android session.dequeueSteerPendingUserMessages,
@@ -2036,6 +2153,166 @@ struct ChatPage {
       });
   }
 
+  // 当前索引(:523-527 — selected coerceIn(0,latest) ?: latest;-1 = 未选)
+  private currentSandboxIndexOf(timeline: SandboxActivityUiState[]): number {
+    const latest: number = timeline.length - 1;
+    if (latest < 0) return -1;
+    if (this.selectedSandboxIndex >= 0 && this.selectedSandboxIndex <= latest) {
+      return this.selectedSandboxIndex;
+    }
+    return latest;
+  }
+
+  // SandboxStepStatusIcon(:763-793)— 16dp 圆:成功 accent 勾/失败红 ✕/
+  //   取消 muted ✕/进行中 accent 勾(颜色为 theme 近似,登记)
+  @Builder
+  sandboxStatusIcon(status: string) {
+    if (status === 'failed') {
+      Text('✕').fontSize(9).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+        .width(16).height(16).backgroundColor('#E45A5A').borderRadius(8)
+    } else if (status === 'cancelled') {
+      Text('✕').fontSize(9).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+        .width(16).height(16).backgroundColor(INK3).borderRadius(8)
+    } else {
+      Text('✓').fontSize(9).fontColor('#FFFFFF').textAlign(TextAlign.Center)
+        .width(16).height(16).backgroundColor(ACCENT).borderRadius(8)
+    }
+  }
+
+  // SandboxStepArrow(:738-760)— 左/右 chevron,不可用淡化
+  @Builder
+  sandboxArrow(left: boolean, enabled: boolean, onTap: () => void) {
+    Text(left ? '‹' : '›')
+      .fontSize(13)
+      .fontColor(enabled ? INK : '#C9C5BA')
+      .padding({ left: 4, right: 4 })
+      .onClick((): void => {
+        if (enabled) onTap();
+      })
+  }
+
+  // SandboxStepPeek(:657-736)— 999 圆角 pill:图标+标题+中断+步骤箭头;
+  //   点击开 sheet;canCancel = activity.canCancel && loading(:529)
+  @Builder
+  sandboxStrip(timeline: SandboxActivityUiState[]) {
+    Row() {
+      this.sandboxStatusIcon(this.currentSandboxActivity(timeline)?.status ?? 'running')
+      Text(this.currentSandboxActivity(timeline)?.title ?? '')
+        .fontSize(10.5).fontWeight(FontWeight.Medium).fontColor(INK)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1).margin({ left: 8 })
+      if ((this.currentSandboxActivity(timeline)?.canCancel ?? false) && this.sending) {
+        Text('✕')
+          .fontSize(10).fontColor(ACCENT)
+          .padding({ left: 4, right: 4 })
+          .onClick((): void => {
+            // onCancelClick → vm.stopGeneration(:640-642;同输入区停止按钮)
+            this.abortController?.abort();
+          })
+      }
+      this.sandboxArrow(true, this.currentSandboxIndexOf(timeline) > 0, (): void => {
+        this.selectedSandboxIndex = this.currentSandboxIndexOf(timeline) - 1;
+      })
+      Text(this.sandboxStepText(this.currentSandboxActivity(timeline) ??
+        timeline[timeline.length - 1]))
+        .fontSize(9.5).fontColor(INK3).maxLines(1)
+      this.sandboxArrow(false,
+        this.currentSandboxIndexOf(timeline) >= 0 &&
+        this.currentSandboxIndexOf(timeline) < timeline.length - 1,
+        (): void => {
+          this.selectedSandboxIndex = this.currentSandboxIndexOf(timeline) + 1;
+        })
+    }
+    .width('100%')
+    .padding({ left: 6, right: 10, top: 3, bottom: 3 })
+    .backgroundColor(SURFACE)
+    .borderRadius(999)
+    .border({ width: 1, color: LINE })
+    .margin({ left: 16, right: 16, bottom: 4 })
+    .onClick((): void => { this.sandboxSheetOpen = true; })
+  }
+
+  // SandboxActivitySheet(:1113+;web 预览路径 = webview 子系统未移植 P1)
+  //   头部 :796-870 + 工具内容 :873-899 + 代码块 :1070-1110
+  @Builder
+  sandboxSheet(timeline: SandboxActivityUiState[]) {
+    Column() {
+      // 头部
+      Row() {
+        this.sandboxStatusIcon(this.currentSandboxActivity(timeline)?.status ?? 'running')
+        Column() {
+          Text(this.currentSandboxActivity(timeline)?.title ?? '')
+            .fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(((): string => {
+            const a: SandboxActivityUiState | null = this.currentSandboxActivity(timeline);
+            if (a === null) return '';
+            return a.runtime.trim().length > 0 ? a.runtime : a.toolName;
+          })())
+            .fontSize(11).fontColor(INK3).margin({ top: 2 })
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 10 })
+        if ((this.currentSandboxActivity(timeline)?.canCancel ?? false) && this.sending) {
+          Text('中断')
+            .fontSize(11).fontColor(ACCENT)
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .backgroundColor(ROW)
+            .borderRadius(999)
+            .onClick((): void => { this.abortController?.abort(); })
+        }
+        this.sandboxArrow(true, this.currentSandboxIndexOf(timeline) > 0, (): void => {
+          this.selectedSandboxIndex = this.currentSandboxIndexOf(timeline) - 1;
+        })
+        Text(this.sandboxStepText(this.currentSandboxActivity(timeline) ??
+          timeline[timeline.length - 1]))
+          .fontSize(13).fontColor(INK3).maxLines(1)
+        this.sandboxArrow(false,
+          this.currentSandboxIndexOf(timeline) >= 0 &&
+          this.currentSandboxIndexOf(timeline) < timeline.length - 1,
+          (): void => {
+            this.selectedSandboxIndex = this.currentSandboxIndexOf(timeline) + 1;
+          })
+      }
+      .width('100%').padding({ left: 12, right: 12, top: 9, bottom: 9 })
+      .backgroundColor(SURFACE).borderRadius(22)
+      .border({ width: 1, color: LINE })
+
+      // 内容(:873-899)— 调用内容/调用结果两块
+      Scroll() {
+        Column() {
+          Text('调用内容')
+            .fontSize(11).fontColor(INK3).width('100%')
+          Text(((): string => {
+            const a: SandboxActivityUiState | null = this.currentSandboxActivity(timeline);
+            if (a === null) return '';
+            return a.inputPreview.trim().length > 0 ? a.inputPreview : a.title;
+          })())
+            .fontSize(12).fontColor(INK).fontFamily('monospace')
+            .width('100%').margin({ top: 4 })
+            .padding(10).backgroundColor(ROW).borderRadius(10)
+          Text('调用结果')
+            .fontSize(11).fontColor(INK3).width('100%').margin({ top: 12 })
+          Text(((): string => {
+            const a: SandboxActivityUiState | null = this.currentSandboxActivity(timeline);
+            if (a === null) return '';
+            if (a.outputTail.trim().length > 0) return a.outputTail;
+            if (a.status === 'running' || a.status === 'waiting_for_permission') {
+              return '等待工具返回输出...';
+            }
+            return '无输出';
+          })())
+            .fontSize(12).fontColor(INK).fontFamily('monospace')
+            .width('100%').margin({ top: 4 })
+            .padding(10).backgroundColor(ROW).borderRadius(10)
+        }
+        .width('100%').alignItems(HorizontalAlign.Start)
+      }
+      .width('100%').layoutWeight(1).margin({ top: 12 })
+    }
+    .width('100%').height('70%').padding(16)
+  }
+
   build() {
     Stack() {
     Column() {
@@ -2229,6 +2506,12 @@ struct ChatPage {
         .margin({ bottom: 6 })
       }
 
+      // D-122:沙盒活动 peek(ChatInputSandbox.kt SandboxStepPeek)—
+      //   时间线非空才显示(:516-522 模式门已在 sandboxTimeline 内)
+      if (this.sandboxTimeline().length > 0) {
+        this.sandboxStrip(this.sandboxTimeline())
+      }
+
       // D-110:ContextUsageIndicator(:127-161)— 10dp 环(轨道 faint 0.24 +
       //   弧 ringColor,ProgressType.Ring 适配)+ 10sp 文案(muted 0.72)
       Row() {
@@ -2334,5 +2617,10 @@ struct ChatPage {
     }
     }
     .width('100%').height('100%')
+    // D-122:沙盒活动 sheet(sandboxOverlayOpen → sandboxSheetOpen)
+    .bindSheet(this.sandboxSheetOpen, this.sandboxSheet(this.sandboxTimeline()), {
+      height: SheetSize.LARGE,
+      onDisappear: (): void => { this.sandboxSheetOpen = false; },
+    })
   }
 }

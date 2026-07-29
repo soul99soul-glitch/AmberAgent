@@ -1732,3 +1732,29 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: MCP 全部登记残余(skills/activityStore 之外)。
 - **未移植(P1 登记)**: mcp_import_from_skill(skills 子系统);ToolActivityStore(mcp__ 活动事件);okHttp 超时档(G-D 校准)。
 - **验证**: chat tsc 干净 + 1214 测试/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;无实现侧返修(ArkTS 适配一次通过)。
+
+## D-122 — AgentToolActivityStore 子系统:活动单槽 + 沙盒时间线 + ChatPage 显示面 + operationPreviewMode
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: feature/runtime/api/.../AgentToolActivityStore.kt(155 行全文)+ AgentRuntimeModels.kt:77-110 + ToolFailure.kt(已由 D-056 tool_dispatcher 移植,复用)+ ChatPage.kt:500-536/1166-1470(时间线接线+纯函数)+ ChatInputSandbox.kt(SandboxStepPeek :657-736/箭头 :738-760/图标 :763-793/状态文案 :280-286/stepProgressText :362-370/SheetHeader :796-870/ToolActivityContent :873-899)+ ChatService.kt:2332-2343(scopedToConversation)+ PreferencesStore.kt:158,257-266 + SettingAgentExecutionPage.kt:75-100。
+- **背景**: D-120 留下的 ToolActivityStore 登记残余(mcp__ 组 activity 事件 + toolOutputPreview 非 text 保真)。本切片落地整个活动显示子系统:store、时间线纯函数、peek/sheet UI、预览模式设置行,并接线 mcp__ 事件与终表会话作用域。
+- **决策**:
+  1. chat HAR tool_activity.ts(+24 测试):
+     - 模型:ToolActivityStatus 五态(running/waiting_for_permission/succeeded/failed/cancelled,SerialName 小写)+ SandboxActivityUiState 十三字段 + maker(默认值逐项对齐)。
+     - AgentToolActivityStore(155 行全文):单槽 current + subscribe(StateFlow 初值首发射);start(withCurrentConversation 填充)/appendOutput(appendTailLine 换行拼接+1600 截尾)/startTool(id '<name>_<millis>';inputPreview 截 800;RUNNING)/completeWithExitCode(0→succeeded 否则 failed)/complete/fail(outputTail=失败 JSON 截尾)/cancel/clear(全部仅匹配 toolCallId 生效,endedAt/canCancel=false);withConversation(blank 直通;scope 变量 finally 恢复)。
+     - ToolFailure 复用 tool_dispatcher(D-056 同源移植) — 不重复实现/导出(重复导出冲突发现后收敛)。
+     - 时间线纯函数(ChatPage.kt:1166-1470):MAX 24/1600/80000;currentRunMessages(末条 user 后);isSandboxActivityTool 名表 32 项逐字;sandboxActivityTools;outputText(无限 join/限量尾块);outputJson(blank/>80000/非 object/解析失败→{});activityStatus 矩阵(pending→waiting/denied→cancelled/!isExecuted 双分支 RUNNING quirk 忠实/indicatesFailure→failed/else succeeded);indicatesFailure(error 非空/exit_code≠0/failed 严格 true/status∈{failed,error,denied} 小写);outputTail(output>error>outputText 回退);sandboxTitle/inputPreview/defaultRuntime/defaultWorkspace 文案表逐字(mcp__ → '调用 MCP <name>');deriveSandboxActivities(空+processingStatus 门 → 'processing-status' 条目);mergeSandboxTimeline(替换/追加+步骤重编号);idleSandboxActivity('Agent 操作预览'/'等待下一次工具调用'/'standby' 逐字);withStepProgress(命中 i+1/未中 size+1/已有不覆盖);isActiveOperation;compactSandboxText(空白折叠+超长 '…')。
+     - kotlinx JsonPrimitive 语义 helper:getStringContent(number/bool→字符串)/getFirstStringContent(首非空)/jsonIntOrNull(严格整数)/jsonBoolStrictOrNull(仅 true/false 字面)。
+  2. ChatPage 接线(:500-536):store 订阅(aboutToAppear/aboutToDisappear 退订防泄漏);sandboxTimeline() = derive(loading=sending,processingStatus←retryStatus)+ scoped live(conversationId 匹配或 null 且消息含 id,:508-511)+ withStepProgress + merge + 模式门(ALWAYS 空→idle 兜底/AUTO 过滤活动态/HIDDEN 空,:516-522);currentSandboxActivity/Index(selected clamp,-1=最新,:523-529);peek(SandboxStepPeek:图标+标题+中断+步骤箭头,tap 开 sheet;canCancel=canCancel&&sending :529)+ sheet(头部 runtime 非空?runtime:toolName;'中断' 按钮;'调用内容'(inputPreview 空→title)/'调用结果'(outputTail 空→running/waiting '等待工具返回输出...' 否则 '无输出'))。
+  3. mcp__ 事件接线(D-120 可选端口实接):mcpActivityPort() 适配 store(startTool/complete/fail);scopedToConversation(:2332-2343)终表统一包覆(registry.tools+tool_search+自省对,makeAgentTool 逐字段重建,execute 包 withConversation(conv.id))。
+  4. operationPreviewMode 设置:AgentRuntimeSnapshot += operationPreviewMode('always'|'auto'|'hidden',PreferencesStore.kt:158 默认 ALWAYS;非法值→默认);updateAgentRuntimeExecution patch;ChatAgentExecutionPage '运行' 组首项 '操作预览' 行(values-zh:986-990 '常驻'/'自动'/'隐藏' 逐字,:75-100) — D-115 登记残余部分关闭(generativeUi 行仍 P1)。
+- **偏差/适配登记**:
+  - ThreadLocal+asContextElement → store 实例 scope 变量(await 边界 finally 恢复;JS 异步交错下并发 withConversation 语义弱于协程作用域 — harmony 单页单会话生成,影响面为零,登记)。
+  - processingStatus ← retryStatus(enableLiveStatusNotification/live-status 流子系统未移植,P1 延续;derive 仅在无沙盒工具且 loading 时消费)。
+  - Web 预览路径(ChatInputSandbox.kt OperationWebPreview/HiddenWebOperationRenderer 等 WebView 组件)= webview 子系统未移植,P1;sheet 仅工具活动内容路径。
+  - 视觉:theme.toolPillBg/toolDoneBg/workspace.red → SURFACE/ACCENT/#E45A5A 近似;ModalBottomSheet → bindSheet;状态图标 HugeIcons → '✓'/'✕' 文本。
+  - agentRuntime 为页面快照(非 @State 订阅;模式变更返回页面后 aboutToAppear 重载生效 — 与页内其他 agentRuntime 消费同惯例)。
+- **关闭**: 工具活动显示子系统全链路(store/时间线/UI/事件源/设置门);D-120 ToolActivityStore 登记残余关闭(toolOutputPreview 非 text 段 JSON.stringify 偏差仍登记 — data-class toString 不可复现)。
+- **未移植(P1 登记)**: enableLiveStatusNotification/hideSensitiveLiveStatus(实时状态卡 :155-199 + ChatService:1697-1708 notifyRunning 活动消费);generativeUi 设置行;Web 预览组件;其余工具族 activity 事件(SystemAccessTools/ExternalFileTools 等随各族移植)。
+- **验证**: chat tsc 干净 + 1238 测试(+24)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧两修:ToolFailure 重复导出收敛(tool_dispatcher 复用)+ import type → 值导入(AgentToolActivityStore new 调用);测试侧两修:MessageNode 分支语义(每消息一节点)+ outputTail 回退期望(原始串)。

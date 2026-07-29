@@ -49,8 +49,13 @@ export interface ContextCompactionSnapshot {
   maxSummaryTokens: number;
 }
 
+// D-122:AgentOperationPreviewMode(PreferencesStore.kt:257-266,SerialName 小写)
+export type AgentOperationPreviewMode = 'always' | 'auto' | 'hidden';
+
 export interface AgentRuntimeSnapshot {
   enableTimeReminder: boolean;
+  // D-122:PreferencesStore.kt:158(默认 ALWAYS;ChatPage.kt:516-522 时间线门消费)
+  operationPreviewMode: AgentOperationPreviewMode;
   // D-077b:PreferencesStore.kt:155 默认 true(GenerationHandler.kt:736 消费)
   enableRecentChatsReference: boolean;
   // D-085b:PreferencesStore.kt:152-154 三开关默认 true(MemoryRecallStore.kt:39-43 消费)
@@ -131,6 +136,7 @@ interface ContextCompactionJson {
 
 interface AgentRuntimeJson {
   agentSoulMarkdown?: string;
+  operationPreviewMode?: string;
   autoApproveAllToolCalls?: boolean;
   autoApproveHighRiskToolCalls?: boolean;
   speculativeToolExecution?: SpeculativeToolExecutionJson;
@@ -171,6 +177,8 @@ export const defaultAgentRuntimeSnapshot = (): AgentRuntimeSnapshot => ({
   enableShortTermMemory: true,
   enableLongTermMemory: true,
   memoryRecall: defaultMemoryRecall(),
+  // :158 默认 ALWAYS
+  operationPreviewMode: 'always',
   agentSoulMarkdown: DEFAULT_AGENT_SOUL_MARKDOWN,
   // :235-240 默认 true/false/0.70/0.85/8/2000
   contextCompaction: {
@@ -272,6 +280,10 @@ export const loadAgentRuntimeSnapshot = async (kv: KeyValueStore): Promise<Agent
       enableShortTermMemory: parsed.enableShortTermMemory !== false,
       enableLongTermMemory: parsed.enableLongTermMemory !== false,
       memoryRecall: parseMemoryRecall(parsed.memoryRecall),
+      // :158 默认 ALWAYS;非法值 → 默认(kotlinx 解析失败回默认快照语义)
+      operationPreviewMode: parsed.operationPreviewMode === 'auto' ||
+        parsed.operationPreviewMode === 'hidden'
+        ? parsed.operationPreviewMode : 'always',
       // kotlinx 缺省→默认(:157);用户显式空串保留(空串 → 不注入,合法意图)
       agentSoulMarkdown: typeof parsed.agentSoulMarkdown === 'string'
         ? parsed.agentSoulMarkdown : DEFAULT_AGENT_SOUL_MARKDOWN,
@@ -535,6 +547,8 @@ export interface AgentRuntimeExecutionPatch {
   maxToolLoopSteps?: number;
   retryEnabled?: boolean;
   retryMaxRetries?: number;
+  // D-122:SettingAgentExecutionPage.kt:79-90(operationPreviewMode = mode)
+  operationPreviewMode?: AgentOperationPreviewMode;
 }
 
 export const updateAgentRuntimeExecution = async (
@@ -551,6 +565,9 @@ export const updateAgentRuntimeExecution = async (
   }
   if (patch.maxToolLoopSteps !== undefined) {
     root.maxToolLoopSteps = patch.maxToolLoopSteps;
+  }
+  if (patch.operationPreviewMode !== undefined) {
+    root.operationPreviewMode = patch.operationPreviewMode;
   }
   if (patch.retryEnabled !== undefined || patch.retryMaxRetries !== undefined) {
     const retry: GenerationRetryJson = root.generationRetry ?? {};

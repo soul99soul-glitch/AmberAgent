@@ -12,14 +12,16 @@
 //   PreferencesStore.kt:268-270(界 MIN 16 / DEFAULT 256 / MAX 512)
 //   values-zh/strings.xml:643-644,646-651,993-995(标题/组名/文案逐字)
 // 未移植行(P1 登记,对应未落地子系统,不做静默无操作开关):
-//   显示卡 operationPreviewMode/generativeUi 行(:80-124 部分);
+//   显示卡 generativeUi 行(:80-124 部分;operationPreviewMode 已落地 D-122);
 //   实时状态卡 enableLiveStatusNotification/hideSensitiveLiveStatus(:155-199);
 //   Live 伴随卡 liveMode 五行(:201-318);
 //   后台保活 keepGenerationAliveInBackground(:372-390)
 import {
   loadAgentRuntimeSnapshot, updateAgentRuntimeExecution,
 } from '../platform_impl/AgentRuntimePrefs.ets';
-import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
+import type {
+  AgentOperationPreviewMode, AgentRuntimeSnapshot,
+} from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 
 const BG: string = '#F4F2EC';
@@ -32,6 +34,9 @@ const ACCENT: string = '#B8623A';
 // :46/:47 选项逐字
 const TOOL_LOOP_STEP_OPTIONS: number[] = [64, 128, 256, 384, 512];
 const RETRY_COUNT_OPTIONS: number[] = [1, 2, 3, 5];
+// D-122::48 AgentOperationPreviewMode.entries 序 + values-zh:986-990 文案逐字
+const PREVIEW_MODE_OPTIONS: AgentOperationPreviewMode[] = ['always', 'auto', 'hidden'];
+const PREVIEW_MODE_LABELS: string[] = ['常驻', '自动', '隐藏'];
 
 // :132-135 / :353 — 显示选中值 coerceIn(与 Android 同:持久化原样持有,显示钳制)
 const coerceIn = (v: number, lo: number, hi: number): number =>
@@ -44,6 +49,7 @@ struct ChatAgentExecutionPage {
   @State maxToolLoopSteps: number = 256;
   @State retryEnabled: boolean = true;
   @State retryMaxRetries: number = 5;
+  @State operationPreviewMode: AgentOperationPreviewMode = 'always';
 
   aboutToAppear(): void {
     this.refresh();
@@ -54,6 +60,7 @@ struct ChatAgentExecutionPage {
     this.maxToolLoopSteps = snap.maxToolLoopSteps;
     this.retryEnabled = snap.generationRetry.enabled;
     this.retryMaxRetries = snap.generationRetry.maxRetries;
+    this.operationPreviewMode = snap.operationPreviewMode;
     this.loaded = true;
   }
 
@@ -62,6 +69,14 @@ struct ChatAgentExecutionPage {
     updateAgentRuntimeExecution(getChatKvStore(), { maxToolLoopSteps: steps })
       .then((snap: AgentRuntimeSnapshot): void => {
         this.maxToolLoopSteps = snap.maxToolLoopSteps;
+      });
+  }
+
+  // D-122::81-90 — agentRuntime.copy(operationPreviewMode = mode)
+  private setPreviewMode(mode: AgentOperationPreviewMode): void {
+    updateAgentRuntimeExecution(getChatKvStore(), { operationPreviewMode: mode })
+      .then((snap: AgentRuntimeSnapshot): void => {
+        this.operationPreviewMode = snap.operationPreviewMode;
       });
   }
 
@@ -136,6 +151,35 @@ struct ChatAgentExecutionPage {
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
   }
 
+  // D-122:字符串选项变体(:79-100 Select + optionToString)
+  @Builder
+  selectTextCard(title: string, desc: string, options: string[], labels: string[],
+    selected: string, onSelect: (v: string) => void) {
+    Row() {
+      Column() {
+        Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
+        Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 })
+      }
+      .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
+      Row() {
+        ForEach(options, (opt: string, index: number) => {
+          Text(labels[index])
+            .fontSize(12)
+            .fontColor(opt === selected ? '#FFFFFF' : INK)
+            .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+            .backgroundColor(opt === selected ? ACCENT : SURFACE)
+            .border({ width: 1, color: opt === selected ? ACCENT : LINE })
+            .borderRadius(10)
+            .margin({ left: 6 })
+            .onClick((): void => { onSelect(opt); })
+        }, (opt: string): string => opt)
+      }
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .backgroundColor(SURFACE).borderRadius(12)
+    .border({ width: 1, color: LINE }).margin({ bottom: 8 })
+  }
+
   build() {
     Column() {
       Row() {
@@ -152,6 +196,10 @@ struct ChatAgentExecutionPage {
           Column() {
             // :644 组名逐字
             this.groupLabel('运行')
+            // D-122::75-100 操作预览行(组内首项;values-zh:986-990 逐字)
+            this.selectTextCard('操作预览', '控制输入框上方的 Agent 实时操作预览显示方式。',
+              PREVIEW_MODE_OPTIONS, PREVIEW_MODE_LABELS, this.operationPreviewMode,
+              (v: string): void => { this.setPreviewMode(v as AgentOperationPreviewMode); })
             // :993-995 文案逐字;:132-135 selectedOption coerceIn(16,512)
             this.selectCard('工具循环上限', '单次回复最多调用多少轮工具。',
               TOOL_LOOP_STEP_OPTIONS, coerceIn(this.maxToolLoopSteps, 16, 512), '步',

@@ -815,3 +815,21 @@ export {
   pickMemoryWorkerModelId, DEFAULT_AUTO_MODEL_ID, DEFAULT_TASK_MODEL_WORKER_GATE,
 } from './chat/task_model.ts';
 export type { TaskModelWorkerGate } from './chat/task_model.ts';
+
+// D-122:AgentToolActivityStore + 沙盒活动时间线(AgentToolActivityStore.kt/
+//   AgentRuntimeModels.kt/ChatPage.kt:1166-1470;ToolFailure.kt 复用
+//   tool_dispatcher D-056 既有移植,不重复导出)
+export {
+  AgentToolActivityStore, makeSandboxActivityUiState, compactSandboxText,
+  currentRunMessages, isSandboxActivityTool, sandboxActivityTools, toolOutputText,
+  toolOutputJson, toolActivityStatus, indicatesFailure, toolActivityOutputTail,
+  toolSandboxTitle, toolSandboxInputPreview, toolDefaultRuntime,
+  toolDefaultWorkspace, deriveSandboxActivities, mergeSandboxTimeline,
+  idleSandboxActivity, withStepProgress, isActiveOperation,
+  ACTIVITY_MAX_INPUT_PREVIEW_CHARS, ACTIVITY_MAX_OUTPUT_TAIL_CHARS,
+  MAX_SANDBOX_TIMELINE_ITEMS, MAX_SANDBOX_OUTPUT_TAIL_CHARS,
+  MAX_SANDBOX_JSON_PARSE_CHARS,
+} from './chat/tool_activity.ts';
+export type {
+  ToolActivityStatus, SandboxActivityUiState, SandboxActivityUiStateOpts,
+} from './chat/tool_activity.ts';

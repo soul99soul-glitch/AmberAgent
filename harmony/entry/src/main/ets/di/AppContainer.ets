@@ -40,7 +40,7 @@ import {
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
-  McpManager,
+  McpManager, AgentToolActivityStore,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -284,6 +284,16 @@ export const getMcpManager = (): McpManager => {
 export const initMcpManager = async (): Promise<void> => {
   await initMcpSettingsStore();
   getMcpManager();
+};
+
+// D-122:AgentToolActivityStore(AgentInfraModule.kt:38 single)全局单例 —
+//   工具活动单槽时间线;ChatPage 订阅显示,mcp__ 组 execute 上报
+let toolActivityStore: AgentToolActivityStore | null = null;
+export const getToolActivityStore = (): AgentToolActivityStore => {
+  if (toolActivityStore === null) {
+    toolActivityStore = new AgentToolActivityStore();
+  }
+  return toolActivityStore;
 };
 
 export const getChatAssistants = async (): Promise<Assistant[]> => {
