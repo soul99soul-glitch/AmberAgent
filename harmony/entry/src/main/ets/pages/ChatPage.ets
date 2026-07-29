@@ -61,6 +61,7 @@ import {
   makeGenerationRetrySetting,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   probeVisionModelHealth,
+  createMcpManagementTools, createMcpServerTools,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -68,7 +69,9 @@ import {
   resolveChatProviderChoice, ChatProviderChoice,
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
+  getMcpManager, initMcpManager,
 } from '../di/AppContainer.ets';
+import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
@@ -735,6 +738,13 @@ struct ChatPage {
     loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
       this.agentRuntime = snap;
     });
+    // D-120:MCP manager 初始化(settings hydrate → 订阅回放真值,
+    //   Android settingsFlow collect 时序等价);assistant mcpServers 白名单
+    //   provider 于 runtime 解析后接线(wireMcpAssistant — 会话绑定 assistant,
+    //   Android settings.getCurrentAssistant() 的页面级等价,登记偏差)
+    initMcpManager().catch((e: Error): void => {
+      hilog.error(0x0001, 'Chat.Page', 'initMcpManager failed: %{public}s', e.message);
+    });
     // D-073:display_setting.userNickname 快照(placeholder nickname/user)
     loadUserNickname(getChatKvStore()).then((nick: string): void => {
       this.userNickname = nick;
@@ -863,6 +873,7 @@ struct ChatPage {
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型'));
         }
+        this.wireMcpAssistant(rt);
         // D-055:重生成使 compact 失效(ChatService.kt:1097 'message_regenerated'),
         //   先于生成完成,避免 prepareContext 读到过期摘要
         return this.invalidateConvCompacts(conv.id, 'message_regenerated')
@@ -1336,8 +1347,17 @@ struct ChatPage {
       filterToolProfile([
         ...(localOpts.indexOf('time_info') >= 0 ? [createTimeTool()] : []),
         ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
+        // D-120:MCP 工具桥接(ChatService.kt:2247-2282)— 管理三件
+        //   (mcp_list/mcp_call_tool/mcp_test;mcp_import_from_skill 依赖 skills
+        //   子系统 → P1 登记)+ mcp__ 组(getAllAvailableTools 逐个;
+        //   activityStore 事件面未移植 → P1 登记)
+        ...createMcpManagementTools({
+          settings: getMcpSettingsStore(),
+          manager: getMcpManager(),
+        }),
+        ...createMcpServerTools({ manager: getMcpManager() }),
         // D-085c:memory_* 四件(ChatService.kt:2280 addAll(createMemoryTools),
-        //   位置 = MCP 之后/ConversationContextTools 之前;MCP 未移植);
+        //   位置 = MCP 之后/ConversationContextTools 之前);
         //   三开关全关 → 空组(:2346-2351);todayText = toLocalString(true) 等价
         //   (本地化 MEDIUM 日期,建工具时快照)
         ...((this.agentRuntime.enableCoreMemory || this.agentRuntime.enableShortTermMemory
@@ -1451,6 +1471,12 @@ struct ChatPage {
     };
   }
 
+  // D-120:assistant.mcpServers 白名单 provider 接线(runtime 解析后;
+  //   Android settings.getCurrentAssistant().mcpServers 的会话级等价)
+  private wireMcpAssistant(rt: ChatRuntime): void {
+    getMcpSettingsStore().setAssistantIdsProvider((): string[] => rt.assistant.mcpServers);
+  }
+
   // steer 消息步间消费(Android session.dequeueSteerPendingUserMessages,
   //   GenerationHandler:386-390):生成中到达的 STEER 出队 → user 消息注入会话;
   //   出队后 durable persist + 审计(D-052 同规)
@@ -1540,6 +1566,7 @@ struct ChatPage {
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型'));
         }
+        this.wireMcpAssistant(rt);
         return runToolLoopContinuation(conv, {
           assistant: rt.assistant,
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
@@ -1877,6 +1904,7 @@ struct ChatPage {
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型(providers 未持久化或无可用 auth)'));
         }
+        this.wireMcpAssistant(rt);
         const deps: ChatTurnDeps = {
           assistant: rt.assistant,
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724;

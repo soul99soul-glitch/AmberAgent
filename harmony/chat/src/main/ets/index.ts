@@ -418,6 +418,15 @@ export type {
   McpSettingsPort, McpFilesPort, McpManagerDeps, McpMessagePart,
 } from './chat/mcp_manager.ts';
 
+// D-120:MCP 工具桥接(管理三件 + createRunTools mcp__ 组)
+export {
+  createMcpManagementTools, createMcpServerTools,
+  mcpArgumentsObject, mcpStatusToString, mcpImportKey, toolOutputPreview,
+} from './chat/mcp_tools.ts';
+export type {
+  McpManagementToolsDeps, McpServerToolsDeps, McpToolActivityPort,
+} from './chat/mcp_tools.ts';
+
 export {
   makeProviderModel, makeBalanceOption,
   makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,

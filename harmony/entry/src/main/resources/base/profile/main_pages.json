@@ -21,6 +21,7 @@
     "pages/ChatAssistantLocalToolsPage",
     "pages/ChatModelParamsPage",
     "pages/ChatAgentPermissionsPage",
-    "pages/ChatAgentExecutionPage"
+    "pages/ChatAgentExecutionPage",
+    "pages/ChatMcpSettingsPage"
   ]
 }

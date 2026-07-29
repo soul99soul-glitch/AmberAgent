@@ -1682,3 +1682,34 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: MCP 管理面全行为(生命周期/同步/重连/调用)。
 - **未移植(P1 登记)**: createRunTools mcp 组+mcp_call_tool+MCP 设置面 UI(D-120);okHttp 超时档(20s/10min/120s)— entry 端口现 15s/120s 统一,G-D 设备验证时校准;entry 侧 McpSettingsPort/McpFilesPort 接线随 D-120 设置面。
 - **验证**: chat tsc 干净 + 1205 测试(+19)/deepread tsc 干净/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧四修(实现一修):SDK 组合回调补(D-118 实现)+ 三测试 toolsResult 未设致 sync 清表 + '重连门'测试前提与 Android 竞争行为相悖(改编码 quirk)。
+
+## D-120 — MCP 切片⑤:工具桥接(mcp 管理/服务器工具组)+设置面 UI+entry 端口接线(收口)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: ChatService.kt:2240-2300(mcp__ 组)/McpManagementTools.kt(245 行全文)/SettingMcpPage.kt(1004 行全文)+ values-zh setting_mcp_page_* 全集 + ChatService:2547-2551 toolOutputPreview。
+- **背景**: D-116..D-119 落地配置/协议核/transport/manager;本切片把 MCP 接进聊天工具循环与 UI,并补齐 entry 侧 settings/files 端口,MCP 特性面收口。
+- **决策**:
+  1. chat HAR mcp_tools.ts(+9 测试):
+     - mcpArgumentsObject(:32-54 逐字):arguments ?? args ?? {};primitive 先 trim 后 parse;array → 'arguments must be a JSON object';parsed 非 object → 'Element <type> is not a JsonObject'。
+     - createMcpManagementTools(:58-186):mcp_list(include_tools 默认 true/include_schema 默认 false;payload servers + call_tool 引导文案逐字;schemaToKotlinString = Kotlin data-class toString 金样 'Obj(properties=<json>, required=[a, b]|null)')/mcp_call_tool(needsApproval+allowsAutoApproval 双 true;**execute async** — JS 同步 throw 逃逸 assert.rejects,suspend 语义等价;'tool_name is required' 逐字)/mcp_test(needsApproval true;findMcpServer 'MCP server not found' 逐字;payload {server,status})。
+     - mcpStatusToString(idle/connecting/connected/'reconnecting:a/m'/'error:msg')/mcpImportKey('kind|name|url')/serverToJson(键序 id/name/enabled/status/tool_count/enabled_tool_count/type/url[/tools];tool 键 name/description.slice(0,240)/enabled/needs_approval[/schema])。
+     - createMcpServerTools(:2240-2300):mcp__ 组 name 'mcp__<tool>'/description ?? ''/parameters=inputSchema/needsApproval 透传;execute: activity?.startTool(name,'调用 MCP 工具',JSON.stringify(input),'MCP') → manager.callTool → complete(toolOutputPreview)/fail+rethrow。
+     - toolOutputPreview(:2547-2551):text 段 join '\n' slice 末 1600;非 text 段 JSON.stringify(Android 为 part.toString() data-class 串,不可复现 → 登记偏差)。
+     - McpToolActivityPort(startTool→id/complete/fail)可选注入 — activityStore 子系统未移植,缺席即无事件(非假 no-op,登记)。
+     - mcp_import_from_skill **P1 登记**(skills 子系统未落地,不做静默缺位)。
+  2. entry 端口:McpSettingsStore.ets(内存缓存权威+init hydrate 后向订阅者回放 = DataStore 首发射/StateFlow 初值语义;updateMcpServers 写穿异步持久化,失败仅 hilog;setAssistantIdsProvider 由页面注入)+ McpFilesStore.ets(extensionFromMimeType 表 png/jpg/gif/webp/bmp/svg 否则 null;saveUploadFromBytes → upload/<id>.<ext> file:// uri;trackUploadFile fire-and-forget)。
+  3. AppContainer:getMcpManager()/initMcpManager()(先 initMcpSettingsStore hydrate 再取 manager — 保证 manager 构造订阅后首发射即连既有 enabled servers)。
+  4. ChatPage 接线:aboutToAppear initMcpManager().catch(hilog);wireMcpAssistant(rt) 在三处 resolveChatRuntime 成功点注入 provider(rt.assistant.mcpServers);buildToolLoop 于 createMemoryTools 之前插入 ...createMcpManagementTools + ...createMcpServerTools(经既有 filterToolProfile 管道)。
+  5. ChatMcpSettingsPage.ets(SettingMcpPage.kt 1004 行全文移植):列表(订阅 servers+statuses;'{}' 图标块;enable 圆点;transport/status 双 pill 英文标签逐字;gear 编辑;swipeAction end 删除)+ 下拉 Refresh → syncAll(refreshing = 任一 connecting/reconnecting,:156)+ 空态双行 + 顶栏 导入/＋;编辑 bindSheet 两 tab 基础设置/工具(保存门 name 非空,:453;新建 append/编辑按 id 替换,:104-122);基础设置 enable 开关/名称/传输 segmented(0=Streamable HTTP 1=SSE,切换保 id/commonOptions/url,:573-595)/URL(按类型 desc+placeholder)/请求头编辑器(trim 写入/删除/'' to '' 添加,:678/:702/:746);工具 tab getClient null → 不可用文案逐字(:784-787),卡片 needsApproval/启用开关+展开(描述+参数 tag required 高亮,:913-931);导入 modal parseMcpServersFromJson(D-116)/空 → '未找到有效的 MCP Server 配置'/异常 → 'JSON 解析失败：<msg>'/按 name 去重 append(:218-219)。全部文案 values-zh 逐字。
+  6. ChatListPage 顶栏 'MCP' 入口(置 '运行' 后)+ main_pages.json 注册。
+- **偏差/适配登记**:
+  - placement:Android 入口居设置索引页;harmony 无设置索引页 → 对话列表顶栏文本入口(同 D-115 '运行' 先例)。
+  - 视觉:BG/SURFACE/INK/INK3/LINE/ACCENT 设置面惯例;extendColors.green6/red6 → #34A853/#EA4335 近似;ModalBottomSheet 0.9/0.7 → bindSheet SheetSize.LARGE;TabRow → 双文本+borderWidth 选中态;SingleChoiceSegmentedButtonRow → 双格拼接按钮。
+  - 滑动删除无撤销(Android 本页即无,区别于 D-096 会话删除)。
+  - 当前 assistant 等价:Android settings.getCurrentAssistant() 全域 → 页面态 provider(ChatPage runtime 解析点注入;登记 D-119 同)。
+  - ArkTS 严格模式适配(无语义变化):禁解构 for 改 pair[0]/pair[1];catch 重抛包装非 Error;patchCommon Record 展开 → CommonPatch 显式接口逐字段构造;swipeAction 内联 builder → @Builder 引用(ChatListPage 先例);SheetOptions 无 onDismiss → onDisappear(手势/程序化两路复位);Refresh refreshing → $$ 双向。
+  - **D-118 潜伏缺陷修复登记**:McpHttpPortImpl.ets 解构/throw 两处 ArkTS 违规(D-118 提交时 assembleHap 增量编译未重检该新文件,本切片全量编译暴露)——已修,无语义变化。
+- **关闭**: MCP 特性面全链路(配置模型/线格式/导入/协议核/两 transport/manager/工具桥接/设置 UI/entry 接线)。
+- **未移植(P1 登记)**: mcp_import_from_skill(skills 子系统);ToolActivityStore(mcp__ 组活动事件+toolOutputPreview 非 text 段保真);ChatService:1279 tools_warning 门(模型无 TOOL 能力且启用搜索/MCP 时 addError);AssistantMcpPage/McpPicker(assistant 详情 MCP 选择器);okHttp 超时档(20s/10min/120s vs entry 15s/120s,G-D 校准);编辑 modal 内工具列表实时 sync(Android 亦以保存后重进为准,同语义)。
+- **验证**: chat tsc 干净 + 1214 测试(+9)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧修复:McpHttpPortImpl 解构/throw(D-118 潜伏)+ 设置页六类 ArkTS 违规;McpSettingsStore 导入路径(AppContainer 先例)。

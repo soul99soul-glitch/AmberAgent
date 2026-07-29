@@ -78,14 +78,14 @@ const headerPairs = (raw: Object | undefined): Array<[string, string]> => {
 
 const headerRecord = (headers: Array<[string, string]>): Record<string, string> => {
   const rec: Record<string, string> = {};
-  for (const [k, v] of headers) rec[k] = v;
+  for (const pair of headers) rec[pair[0]] = pair[1];
   return rec;
 };
 
 const headerFind = (headers: Array<[string, string]>, name: string): string | null => {
   const lower: string = name.toLowerCase();
-  for (const [k, v] of headers) {
-    if (k.toLowerCase() === lower) return v;
+  for (const pair of headers) {
+    if (pair[0].toLowerCase() === lower) return pair[1];
   }
   return null;
 };
@@ -236,7 +236,9 @@ class OhosMcpHttpPort implements McpHttpPort {
       };
     } catch (e) {
       hilog.error(DOMAIN, TAG, 'request FAILED: %{public}s err=%{public}s', url, String(e));
-      throw e;
+      // arkts-limited-throw:仅允许 Error 类型,非 Error 包装重抛
+      if (e instanceof Error) throw e;
+      throw new Error(String(e));
     } finally {
       httpRequest.destroy();
     }

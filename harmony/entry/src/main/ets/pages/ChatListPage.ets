@@ -207,6 +207,10 @@ struct ChatListPage {
         //   harmony 无设置索引页,入口居对话列表顶栏)
         Text('运行').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatAgentExecutionPage' }); })
+        // D-120:MCP 设置入口(SettingMcpPage.kt title 'MCP' zh 逐字,无需缩写;
+        //   placement 同 '运行' 先例 — harmony 无设置索引页,入口居对话列表顶栏)
+        Text('MCP').fontSize(13).fontColor(INK3).margin({ right: 16 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/ChatMcpSettingsPage' }); })
         // D-106:删除全部入口(HistoryPage.kt:99-105 Delete01 IconButton;
         //   contentDescription '删除全部' zh 逐字)
         Text('删除全部').fontSize(13).fontColor(DANGER).margin({ right: 16 })

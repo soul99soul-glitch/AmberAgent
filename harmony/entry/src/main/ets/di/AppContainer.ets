@@ -40,12 +40,16 @@ import {
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
+  McpManager,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
 import { createChatRdbRepository } from '../platform_impl/ChatRdbRepository.ets';
 import { createEntryCompactStore } from '../platform_impl/EntryCompactStore.ets';
 import { encodeImageForChat, encodeImageDetailed } from '../platform_impl/EntryImageEncoder.ets';
+import { createMcpHttpPort } from '../platform_impl/McpHttpPortImpl.ets';
+import { getMcpSettingsStore, initMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
+import { getMcpFilesStore } from '../platform_impl/McpFilesStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
@@ -257,6 +261,29 @@ export const getSessionGrantStore = (): SessionAccessGrantStore => {
     sessionGrantStore = new SessionAccessGrantStore();
   }
   return sessionGrantStore;
+};
+
+// D-120:McpManager 单例(McpManager.kt 全文移植的容器位);
+//   init 顺序:settings store hydrate(首发射回放)→ manager 构建(订阅即收真值,
+//   与 Android settingsFlow collect 时序等价);ChatPage.aboutToAppear 调 initMcpManager
+let mcpManager: McpManager | null = null;
+export const getMcpManager = (): McpManager => {
+  if (mcpManager === null) {
+    mcpManager = new McpManager({
+      http: createMcpHttpPort(),
+      settings: getMcpSettingsStore(),
+      files: getMcpFilesStore(),
+      log: (msg: string): void => {
+        hilog.info(0x0001, 'Mcp.Manager', '%{public}s', msg);
+      },
+    });
+  }
+  return mcpManager;
+};
+
+export const initMcpManager = async (): Promise<void> => {
+  await initMcpSettingsStore();
+  getMcpManager();
 };
 
 export const getChatAssistants = async (): Promise<Assistant[]> => {
