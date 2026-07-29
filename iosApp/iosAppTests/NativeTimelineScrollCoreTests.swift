@@ -49,12 +49,6 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         )
     }
 
-    func testNativeScrollDriverFlagDefaultsOff() {
-        UserDefaults.standard.removeObject(forKey: NativeTimelineScrollFeatureFlags.key)
-
-        XCTAssertFalse(NativeTimelineScrollFeatureFlags.isEnabled)
-    }
-
     @MainActor
     func testAttachOnlyConnectsScrollViewWithoutChangingPositionOrFollowState() {
         let driver = NativeTimelineScrollDriver()

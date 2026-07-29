@@ -1,7 +1,6 @@
 import SwiftUI
 import Shared
 import SwiftStreamingMarkdown
-import MarkdownView
 import Photos
 
 enum ChatMarkdownOpenURLPolicy {
@@ -26,32 +25,16 @@ enum ChatMarkdownOpenURLPolicy {
 }
 
 enum ChatMarkdownRendererSelection: Equatable {
-    case liyanan
-    case microsoft
     case block
-    case fade
     case stable
 }
 
 enum ChatMarkdownRendererPolicy {
     static func selection(
-        experimentalRenderingAllowed: Bool,
-        liyananEnabled: Bool,
-        microsoftEnabled: Bool,
-        blockRendererEnabled: Bool,
-        fadeRendererNeeded: Bool
+        blockRendererEnabled: Bool
     ) -> ChatMarkdownRendererSelection {
-        if experimentalRenderingAllowed, liyananEnabled {
-            return .liyanan
-        }
-        if experimentalRenderingAllowed, microsoftEnabled {
-            return .microsoft
-        }
         if blockRendererEnabled {
             return .block
-        }
-        if fadeRendererNeeded {
-            return .fade
         }
         return .stable
     }
@@ -490,16 +473,13 @@ struct ChatAssistantMarkdownView: View {
     var frozenMarkdownSnapshot: String?
     var onGenerativeWidgetAction: (String) -> Void = { _ in }
 
-    @AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown) private var microsoftStreamingMarkdown = false
-    @AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown) private var liyananStreamingMarkdown = false
-    @AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown) private var streamingBlockMarkdown = true
-    @AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks) private var coalescedTextBlocks = false
+    // 渲染器选择已硬编码：block 渲染器无条件参与竞争，coalesced 合并默认开启。
+    // 不再暴露 microsoft/liyanan/streamingBlock/coalesced 开关给用户。
     @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0
     @AppStorage(IOSDisplayPreferenceKeys.chatFont) private var chatFont = IOSChatFont.default.rawValue
     @ScaledMetric(relativeTo: .body) private var scaledBodyPointSize: CGFloat = 17
-    /// per-view-instance 的「这个 bubble 曾经流式过」latch。它覆盖 completion 瞬间;
-    /// 回收后的完成态则由 projection 层的 hasEverStreamed + liveRenderingEnabled 明确驱动。
-    @State private var hasUsedStreamingMarkdownRenderer = false
+    /// per-view-instance 的「这个 bubble 用过 block 流式渲染」latch，覆盖 completion 瞬间；
+    /// 回收后的完成态由 projection 层 hasEverStreamed + liveRenderingEnabled 驱动。
     @State private var hasUsedBlockMarkdownRenderer = false
     @State private var renderedMarkdownSnapshot = ""
     /// 表格/widget 探测器放在引用盒子里而不是 @State 值类型:探测器每个 chunk 都要
@@ -615,7 +595,6 @@ struct ChatAssistantMarkdownView: View {
             }
             updateWidgetPayloadLatch(with: markdown)
             if isStreaming && liveRenderingEnabled {
-                hasUsedStreamingMarkdownRenderer = true
                 updateTableRendererLatch(with: renderedMarkdown)
             }
         }
@@ -629,7 +608,6 @@ struct ChatAssistantMarkdownView: View {
         }
         .onChange(of: isStreaming) { _, newValue in
             if newValue && liveRenderingEnabled {
-                hasUsedStreamingMarkdownRenderer = true
                 renderedMarkdownSnapshot = markdown
                 if !hasUsedBlockMarkdownRenderer {
                     updateTableRendererLatch(with: markdown)
@@ -654,7 +632,6 @@ struct ChatAssistantMarkdownView: View {
                 hasUsedBlockMarkdownRenderer = true
             }
             if newValue && isStreaming {
-                hasUsedStreamingMarkdownRenderer = true
                 if !hasUsedBlockMarkdownRenderer {
                     updateTableRendererLatch(with: markdown)
                 }
@@ -678,20 +655,7 @@ struct ChatAssistantMarkdownView: View {
         return markdown
     }
 
-    private func shouldUseExperimentalMarkdownRenderer(liveStreaming: Bool) -> Bool {
-        liveStreaming || hasUsedStreamingMarkdownRenderer || (hasEverStreamed && liveRenderingEnabled)
-    }
-
-    private func shouldUseFadeStreamingRenderer(liveStreaming: Bool) -> Bool {
-        // 逐词淡入目前只有 SwiftStreamingMarkdown 提供真实 glyph fade。
-        // LiYanan MarkdownView 的 StreamingMarkdownReader 负责增量解析,但没有文字淡入层。
-        // 正在流式的可见尾行、完成瞬间和重新进入可见区的已流式消息继续走
-        // SwiftStreamingMarkdown，避免同一条消息在两套 renderer 间反复切换。
-        liveStreaming || hasUsedStreamingMarkdownRenderer || (hasEverStreamed && liveRenderingEnabled)
-    }
-
     private func shouldUseBlockStreamingRenderer(liveStreaming: Bool) -> Bool {
-        guard streamingBlockMarkdown else { return false }
         // 流式从首帧一律走同一块路径，表格前后的稳定块可以冻结复用；绝不允许
         // 中途从单文档切到块路径，否则 vendor ParagraphView 重建会让已上屏内容
         // 整段重淡入。latch 保证完成瞬间保持 renderer 连续；表格探测仍兜底
@@ -821,7 +785,7 @@ struct ChatAssistantMarkdownView: View {
             // 新段落也不再是「新建视图 + 从 alpha 0 淡入」。合并块内的增长仍走
             // ParagraphUIView 的 append 快路径(行距/段距烘进属性串,视图侧传 nil)。
             // 这里是三个界面(Chat/议会/小说)共用的唯一 config 构造点。
-            .withCoalescesAdjacentTextBlocks(value: coalescedTextBlocks)
+            .withCoalescesAdjacentTextBlocks(value: true)
     }
 
     @ViewBuilder
@@ -838,40 +802,19 @@ struct ChatAssistantMarkdownView: View {
                 chatFont: chatFont,
                 themePaper: AmberThemeRuntime.shared.paper.rawValue,
                 themeAccentHex: AmberThemeRuntime.shared.accentHex,
-                coalescedTextBlocks: coalescedTextBlocks
+                coalescedTextBlocks: true
             ),
             build: { streamingMarkdownConfig(liveStreaming: liveStreaming) }
         )
         switch ChatMarkdownRendererPolicy.selection(
-            experimentalRenderingAllowed: shouldUseExperimentalMarkdownRenderer(liveStreaming: liveStreaming),
-            liyananEnabled: liyananStreamingMarkdown,
-            microsoftEnabled: microsoftStreamingMarkdown,
-            blockRendererEnabled: shouldUseBlockStreamingRenderer(liveStreaming: liveStreaming),
-            fadeRendererNeeded: shouldUseFadeStreamingRenderer(liveStreaming: liveStreaming)
+            blockRendererEnabled: shouldUseBlockStreamingRenderer(liveStreaming: liveStreaming)
         ) {
-        case .liyanan:
-            LiyananStreamingMarkdownContentView(content: content)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        case .microsoft:
-            ChatStableStreamingMarkdownView(
-                text: content,
-                config: config,
-                cacheIdentity: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix):monolith" }
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
         case .block:
             ChatStreamingBlockMarkdownView(
                 text: content,
                 config: config,
                 liveStreaming: liveStreaming,
                 renderCacheNamespace: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix)" }
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case .fade:
-            ChatStableStreamingMarkdownView(
-                text: content,
-                config: config,
-                cacheIdentity: renderCacheNamespace.map { "\($0):\(cacheIdentitySuffix):monolith" }
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         case .stable:
@@ -2624,23 +2567,6 @@ private extension UIFont {
             return self
         }
         return UIFont(descriptor: descriptor, size: pointSize)
-    }
-}
-
-private struct LiyananStreamingMarkdownContentView: View {
-    let content: String
-    @State private var source = StreamingMarkdownSource()
-
-    var body: some View {
-        StreamingMarkdownReader(source) { parseResult in
-            MarkdownView(parseResult)
-        }
-        .onAppear {
-            source.text = content
-        }
-        .onChange(of: content) { _, newValue in
-            source.text = newValue
-        }
     }
 }
 

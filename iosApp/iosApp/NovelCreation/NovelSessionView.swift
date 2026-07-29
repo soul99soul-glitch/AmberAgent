@@ -86,7 +86,6 @@ struct NovelSessionView: View {
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
-    @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeScrollDriverEnabled = false
     @State private var scrollPosition = ScrollPosition()
     @State private var followState = NovelSessionBottomFollowState()
     @State private var latestAtBottom = true
@@ -151,6 +150,8 @@ struct NovelSessionView: View {
         }
         .onAppear {
             isNativeScrollSurfaceVisible = true
+            // 重新进入页面时清除上一次的 fallback 粘连，给原生滚动 driver 一次重试机会。
+            nativeScrollFallbackReason = nil
         }
         .task(id: bindingTaskID) {
             await viewModel.bindToCurrentSelection()
@@ -171,12 +172,6 @@ struct NovelSessionView: View {
         }
         .onChange(of: followGeneration) { _, enabled in
             scrollDriver.setAutomaticFollowEnabled(enabled)
-        }
-        .onChange(of: nativeScrollDriverEnabled) { _, enabled in
-            if !enabled {
-                nativeScrollFallbackReason = nil
-                scrollDriver.invalidate()
-            }
         }
         .confirmationDialog(
             "放弃这次润色？",
@@ -1236,8 +1231,7 @@ struct NovelSessionView: View {
     }
 
     private var isNativeScrollDriverDesired: Bool {
-        nativeScrollDriverEnabled &&
-            nativeScrollFallbackReason == nil &&
+        nativeScrollFallbackReason == nil &&
             isNativeScrollSurfaceVisible
     }
 

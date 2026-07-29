@@ -10,20 +10,17 @@ final class IOSSettingsWiringTests: XCTestCase {
         return try String(contentsOf: fileURL, encoding: .utf8)
     }
 
-    func testNativeTimelineScrollAndChatRendererTogglesAreIndependent() throws {
+    func testRenderingInteractionSectionOnlyExposesFollowGenerationToggle() throws {
         let settings = try source("iosApp/DisplayFontSettingsView.swift")
 
-        XCTAssertTrue(settings.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
-        XCTAssertTrue(settings.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
-        XCTAssertTrue(settings.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
-        XCTAssertTrue(settings.contains("isOn: nativeTimelineScrollDriver"))
-        XCTAssertTrue(settings.contains("nativeTimelineScrollDriver.toggle()"))
-        XCTAssertTrue(settings.contains("isOn: nativeChatTimelineEnabled"))
-        XCTAssertTrue(settings.contains("nativeTimelineStaticRender && nativeTimelineStreamingTail"))
-        XCTAssertTrue(settings.contains("nativeTimelineStaticRender = enabled"))
-        XCTAssertTrue(settings.contains("nativeTimelineStreamingTail = enabled"))
-        XCTAssertFalse(settings.contains("nativeTimelineStaticRender && nativeTimelineStreamingTail && nativeTimelineScrollDriver"))
-        XCTAssertFalse(settings.contains("nativeTimelineScrollDriver = enabled"))
+        // 渲染/滚动相关的实验开关已全部 hardcode 默认开启，设置页不再暴露；
+        // 交互区只保留「生成时跟随滚动」一个用户开关。
+        XCTAssertTrue(settings.contains("DisplayToggleRow(title: \"生成时跟随滚动\", isOn: followGeneration)"))
+        XCTAssertFalse(settings.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
+        XCTAssertFalse(settings.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
+        XCTAssertFalse(settings.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
+        XCTAssertFalse(settings.contains("nativeTimelineScrollDriver.toggle()"))
+        XCTAssertFalse(settings.contains("setNativeChatTimelineEnabled"))
     }
 
     func testNovelCreationAdvancedEntryOpensFeatureAndSharedSettingsPersistRoleDefaults() throws {
@@ -77,26 +74,28 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(chat.contains("张图片处理失败"))
     }
 
-    func testNativeTimelineRouteReadsSettingsToggleFlags() throws {
+    func testChatMessageListRendersNativeTimelineDirectlyWithoutRoutePolicy() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let list = try source("iosApp/ChatCollectionMessageList.swift")
 
-        XCTAssertTrue(chatView.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
-        XCTAssertTrue(chatView.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
-        XCTAssertTrue(chatView.contains("nativeTimelineStaticRenderEnabled: nativeTimelineStaticRenderEnabled"))
-        XCTAssertTrue(chatView.contains("nativeTimelineStreamingTailEnabled: nativeTimelineStreamingTailEnabled"))
+        // native timeline 已 hardcode 为唯一 Chat 列表路径：route 判定层（route enum /
+        // policy / eligibility / 开关 flag）整层退役，ChatView 直接渲染 NativeChatTimelineView。
         XCTAssertTrue(chatView.contains("NativeChatTimelineView("))
-        XCTAssertTrue(list.contains("NativeChatTimelineRoutePolicy.shouldUseNativeTimeline"))
-        XCTAssertTrue(list.contains("staticRenderEnabled: nativeTimelineStaticRenderEnabled"))
-        XCTAssertTrue(list.contains("streamingTailEnabled: nativeTimelineStreamingTailEnabled"))
+        XCTAssertFalse(chatView.contains("ChatMessageListRoutePolicy.route"))
+        XCTAssertFalse(chatView.contains("swiftUICleanListEnabled"))
+        XCTAssertFalse(chatView.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
+        XCTAssertFalse(chatView.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
+        XCTAssertFalse(list.contains("enum ChatMessageListRoutePolicy"))
+        XCTAssertFalse(list.contains("NativeChatTimelineRoutePolicy.shouldUseNativeTimeline"))
     }
 
-    func testNativeTimelineScrollDriverFlagIsConsumedByNativeTimelineView() throws {
+    func testNativeTimelineScrollDriverIsHardcodedOnAndConsumedByNativeTimelineView() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let list = try source("iosApp/ChatCollectionMessageList.swift")
 
-        XCTAssertTrue(chatView.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
-        XCTAssertTrue(chatView.contains("nativeScrollDriverEnabled: nativeTimelineScrollDriverEnabled"))
+        // 原生滚动 driver 已 hardcode 开启，不再由设置开关驱动。
+        XCTAssertTrue(chatView.contains("nativeScrollDriverEnabled: true"))
+        XCTAssertFalse(chatView.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
         XCTAssertTrue(list.contains("@State private var scrollDriver = NativeTimelineScrollDriver()"))
         XCTAssertTrue(list.contains("var nativeScrollDriverEnabled: Bool"))
         XCTAssertTrue(list.contains("scrollDriver.attach(scrollView)"))
@@ -228,45 +227,15 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(activityIsland.contains("Capsule().fill(.ultraThinMaterial)"))
     }
 
-    func testStreamingMarkdownRendererTogglesAreWiredAndMutuallyExclusive() throws {
-        let settings = try source("iosApp/DisplayFontSettingsView.swift")
-        let bubble = try source("iosApp/MessageBubbleView.swift")
-
-        XCTAssertTrue(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown)"))
-        XCTAssertTrue(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown)"))
-        XCTAssertTrue(settings.contains("microsoftStreamingMarkdown.toggle()"))
-        XCTAssertTrue(settings.contains("liyananStreamingMarkdown = false"))
-        XCTAssertTrue(settings.contains("liyananStreamingMarkdown.toggle()"))
-        XCTAssertTrue(settings.contains("microsoftStreamingMarkdown = false"))
-
-        XCTAssertTrue(bubble.contains("@AppStorage(IOSDisplayPreferenceKeys.microsoftStreamingMarkdown)"))
-        XCTAssertTrue(bubble.contains("@AppStorage(IOSDisplayPreferenceKeys.liyananStreamingMarkdown)"))
-        XCTAssertTrue(bubble.contains("LiyananStreamingMarkdownContentView(content: content)"))
-        XCTAssertTrue(bubble.contains("ChatStableStreamingMarkdownView("))
-        XCTAssertTrue(bubble.contains("liyananEnabled: liyananStreamingMarkdown"))
-        XCTAssertTrue(bubble.contains("microsoftEnabled: microsoftStreamingMarkdown"))
-    }
-
-    func testExplicitStreamingMarkdownRendererSelectionTakesPrecedenceOverDefaults() {
+    func testStreamingMarkdownRendererSelectionPrefersBlockOverStable() {
+        // 渲染器已简化为 block / stable 两态；liyanan / microsoft / fade 实验路径全部退役。
         XCTAssertEqual(
-            ChatMarkdownRendererPolicy.selection(
-                experimentalRenderingAllowed: true,
-                liyananEnabled: true,
-                microsoftEnabled: false,
-                blockRendererEnabled: true,
-                fadeRendererNeeded: true
-            ),
-            .liyanan
+            ChatMarkdownRendererPolicy.selection(blockRendererEnabled: true),
+            .block
         )
         XCTAssertEqual(
-            ChatMarkdownRendererPolicy.selection(
-                experimentalRenderingAllowed: true,
-                liyananEnabled: false,
-                microsoftEnabled: true,
-                blockRendererEnabled: true,
-                fadeRendererNeeded: true
-            ),
-            .microsoft
+            ChatMarkdownRendererPolicy.selection(blockRendererEnabled: false),
+            .stable
         )
     }
 
@@ -320,32 +289,28 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(bubble.contains("bodyPointSize: scaledBodyPointSize"))
     }
 
-    /// 合并渲染开关必须接到三界面共用的那一处 config 构造点（`streamingMarkdownConfig`），
-    /// 而不是某个界面私有的分支；并且必须默认关闭、能一键回滚。
-    func testCoalescedTextBlocksToggleIsWiredIntoTheSharedMarkdownConfig() throws {
+    /// 长文合并渲染已 hardcode 开启，必须接到三界面共用的那一处 config 构造点
+    /// （`streamingMarkdownConfig`）；config 记忆化的键必须与 config 同值，设置页不再暴露开关。
+    func testCoalescedTextBlocksIsHardcodedIntoTheSharedMarkdownConfig() throws {
         let settings = try source("iosApp/DisplayFontSettingsView.swift")
         let bubble = try source("iosApp/MessageBubbleView.swift")
 
-        XCTAssertTrue(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks) private var coalescedTextBlocks = false"))
-        XCTAssertTrue(settings.contains("coalescedTextBlocks.toggle()"))
-        XCTAssertTrue(settings.contains("长文正文合并渲染"))
+        XCTAssertFalse(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks)"))
+        XCTAssertFalse(settings.contains("长文正文合并渲染"))
 
-        XCTAssertTrue(bubble.contains("@AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks) private var coalescedTextBlocks = false"))
-        XCTAssertTrue(bubble.contains(".withCoalescesAdjacentTextBlocks(value: coalescedTextBlocks)"))
-        // config 记忆化的键必须带上这个开关，否则设置里改了、活着的 bubble 还用旧 config。
-        XCTAssertTrue(bubble.contains("coalescedTextBlocks: coalescedTextBlocks"))
+        XCTAssertTrue(bubble.contains(".withCoalescesAdjacentTextBlocks(value: true)"))
+        // config 记忆化的键必须与 config 本身同值（true），否则 cache 命中却行为不一致。
+        XCTAssertTrue(bubble.contains("coalescedTextBlocks: true"))
     }
 
-    func testStreamingBlockMarkdownToggleIsConsumedByTableBlockRenderer() throws {
+    func testTableBlockRendererRunsUnconditionallyAndConsumesTableDetection() throws {
         let settings = try source("iosApp/DisplayFontSettingsView.swift")
         let bubble = try source("iosApp/MessageBubbleView.swift")
 
-        XCTAssertTrue(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown)"))
-        XCTAssertTrue(settings.contains("streamingBlockMarkdown.toggle()"))
-        XCTAssertTrue(settings.contains("表格流式块渲染"))
+        // 表格流式块渲染已 hardcode 无条件参与竞争，设置开关与 block guard 均已移除。
+        XCTAssertFalse(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown)"))
+        XCTAssertFalse(bubble.contains("guard streamingBlockMarkdown else { return false }"))
 
-        XCTAssertTrue(bubble.contains("@AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown)"))
-        XCTAssertTrue(bubble.contains("guard streamingBlockMarkdown else { return false }"))
         XCTAssertTrue(bubble.contains("ChatStreamingMarkdownBlockParser.containsTable"))
         XCTAssertTrue(bubble.contains("text: table.markdown"))
         XCTAssertTrue(bubble.contains("cacheIdentity: renderCacheNamespace.map"))
