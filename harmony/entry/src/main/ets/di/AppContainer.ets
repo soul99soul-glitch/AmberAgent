@@ -9,7 +9,7 @@ import type {
   DeepReadOutput, DeepReadScheduler, HttpClient, Storage,
   DeepReadRepository, SearchProviderRegistry, Notifier,
   SourcePrefetcher, FileStore, ModelRegistry,
-  ModelCouncilTextRunner, ModelCouncilRuntimeSetting,
+  ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat,
 } from '@amber/deepread-domain';
 import {
   run, makeEmptyDeepReadOutput, isInterruptedPhase, createSourcePrefetcher,
@@ -34,6 +34,7 @@ import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle,
   ProviderModel, CompactStore, ModelAbility, SkillMetadata, SkillWorkspacePort,
+  AgentTool,
 } from '@amber/chat-domain';
 import {
   loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
@@ -43,6 +44,7 @@ import {
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
   McpManager, SkillManager, AgentToolActivityStore, PosixWorkspaceManager,
+  AgentPromptConfigRepository, createAgentPromptConfigTool,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -58,6 +60,10 @@ import {
 } from '../platform_impl/SkillStore.ets';
 import { createEntryWorkspaceManager } from '../platform_impl/WorkspaceStore.ets';
 import { sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
+import {
+  createEntryPromptConfigFilePort, createEntryCouncilStrategy,
+  createEntryAgentPromptSettingsPort, promptConfigFilesDir,
+} from '../platform_impl/PromptConfigStore.ets';
 import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
@@ -183,6 +189,29 @@ export const getDeepReadPlaybookRepository = (): DeepReadPlaybookRepository => {
   }
   return playbookRepository;
 };
+
+// D-128:AgentPromptConfigRepository 单例(Koin 注册表 prompts 模块)—
+//   filesDir/agent_prompts/ 四镜像文件;设置读写 = agent_runtime 文档 RMW;
+//   council 策略直配 deepread HAR 运行时类型(全字段显式拷贝零丢失)
+let promptConfigRepository: AgentPromptConfigRepository<ModelCouncilRuntimeSetting, ModelCouncilSeat> | null = null;
+export const getAgentPromptConfigRepository =
+  (): AgentPromptConfigRepository<ModelCouncilRuntimeSetting, ModelCouncilSeat> => {
+    if (promptConfigRepository === null) {
+      promptConfigRepository = new AgentPromptConfigRepository<ModelCouncilRuntimeSetting, ModelCouncilSeat>(
+        promptConfigFilesDir(),
+        createEntryPromptConfigFilePort(),
+        createEntryCouncilStrategy(),
+      );
+    }
+    return promptConfigRepository;
+  };
+
+// agent_prompt_config 工具 deps(LocalTools.kt:98-100 lazy + :183 装配)
+export const getAgentPromptConfigTool = (): AgentTool =>
+  createAgentPromptConfigTool<ModelCouncilRuntimeSetting, ModelCouncilSeat>({
+    repository: getAgentPromptConfigRepository(),
+    settings: createEntryAgentPromptSettingsPort(getChatKvStore()),
+  });
 
 // ===== Model Council 装配 =====
 let councilRunner: ModelCouncilTextRunner | null = null;

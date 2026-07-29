@@ -1886,3 +1886,27 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: deep_read_playbook_read/update/restore_default/restore_previous 四件全链路可用;深读文章生成真实消费用户可编辑 playbook(乐观锁 + 快照回滚);Android→harmony 配置语义逐字。
 - **未移植(P1 登记)**: LocalTools 尾部余量 — permissions_status(AgentPermissionBroker)、agent_cron 四件(WorkManager→WorkScheduler + 后台运行环)、agent_prompt_config(需 subagent 数据面)、generate_image(图像生成仓库)、eval_javascript(QuickJS 平台阻断,登记先例同 pdf)、Terminal/ScreenAutomation/SystemAccess/FeishuOffice/ICloudDrive/WebMount/WebView 各组(平台/子系统级,既有登记)。
 - **验证**: chat tsc 干净 + 1327 测试(+6)/deepread tsc 干净 + 610 测试(+7)/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧一修(实现逐字核对后):saveSnapshot 非 blank summary → safe=7 个 '_' 非 'snapshot'(ifBlank 不触发,D-125 safeFileName 同 quirk);实现侧一修:判别联合 → 可空字段单结构(ArkTS 10505001)。
+
+## D-128 — agent_prompt_config 工具 + 提示词配置仓库 + subagent 数据面
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: feature/subagent/api/.../SubAgentModels.kt(子集:Mode/Override/Definition/RuntimeSetting/applyOverride + 常量;TaskSpec/Run/Result/Status 随 subagent 运行子系统留 P1)+ feature/subagent/.../SubAgentDefinitions.kt(全文 325 行,六内置角色 + find/builtInIds/extractMentions + rolePrompt)+ feature/prompts/AgentPromptConfigRepository.kt(全文 466 行)+ app/core/ai/tools/AgentPromptConfigTool.kt(全文 232 行)+ LocalTools.kt:98-100/:183(装配位)+ core/settings/PreferencesStore.kt:150-177(subAgent/modelCouncil 设置字段)。
+- **背景**: LocalTools 无条件尾部六件套中 agent_prompt_config 未移植;它是 agent 自维护提示词配置的核心环(生图默认/上下文压缩交接/subagent 角色/council 席位提示词),并首次需要 subagent 数据面(定义/覆盖模型)。
+- **决策**:
+  1. chat HAR agent_prompt_config.ts(+20 测试,1347 总量):
+     - SubAgent 数据面:SubAgentMode/SubAgentOverride(七可空字段)/SubAgentDefinition(十四字段 + makeSubAgentDefinition 默认链)/SubAgentRuntimeSetting(overrides Map)/applyOverride(非 null 覆盖;systemPrompt blank 回退内置);Uuid → string 登记;Set → string[]。
+     - SUB_AGENT_BUILT_INS 六件逐字(rolePrompt 模板骨架:HARD BOUNDARIES + extraConstraints 行 + Capabilities/Behavior/Output Format;writer 独立模板);find(id 精确/name 忽略大小写);builtInIds;extractMentions(前置文首/空白门 + id 后随非 id 字符 + 长度降序 + 去重保序)。
+     - AgentPromptConfigRepository 逐字:四镜像文件(image-generation/subagents/model-council/context-compaction-handoff.md,目录 filesDir/agent_prompts);readImageConfig(缺 → 建默认;enabled 元值 'false' ignoreCase 才 false)/writeImageConfig(validPrompt 超长 'X is too long: N chars, max M')/writeSubAgentPrompt(未知 id 抛 'Unknown built-in subagent id: X';等于内置默认 → override 移除;写镜像)/applySubAgentMarkdownToSetting(未知段 id 跳过)/writeModelCouncilSeatPrompt(seatId/role/name 三键匹配;未知 'Unknown model council seat: X')/applyModelCouncilMarkdownToSetting(blank 段跳过)/context compaction(## Prompt fence 抽取,blank → 默认)/ensureMarkdownMirrors(缺失四件全建,已存在不动);render*(safeFence ``` → ` ` `)/splitSecondLevelSections(fence 内 '##' 不切;'###' 不算)/findMetadataValue(fence 外首键行 ignoreCase);AsyncMutex 串行化。
+     - createAgentPromptConfigTool 逐字:六 action;get(target ifBlank 'all';files/markdown 四键序;:123-124 quirk 先 readContextCompactionPrompt 再读原文);update_image_generation(严格布尔 toBooleanStrictOrNull 语义:布尔直值/'true'/'false' 串,其余保持;trim 合并);update_*(require 错误文案逐字);sync_markdown_to_settings(payload status/synced/subagents/model_council);Unsupported action 抛错;buildWriteResponse {status/updated/file};needsApproval=true+allowsAutoApproval=true;description/systemPrompt 逐字。
+  2. 端口/策略抽象(承载层适配):PromptConfigFilePort(exists/readText 不存在抛/mkdirs/atomicWrite — writeTextAtomically tmp+rename+copy 兜底语义,体量 require 留域层);CouncilSettingStrategy(Kotlin data class copy 保留未触字段 → 七访问器注入;entry 直配 deepread HAR 类型,extra 字段零丢失);AgentPromptSettingsPort(subAgent/modelCouncil 两子树读写)。
+  3. entry PromptConfigStore.ets:fileIo 端口(atomicWrite: parent mkdirs + tmp 写 + renameSync,失败 copyFileSync+unlinkSync);createEntryCouncilStrategy(deepread 设置十字段/席位八字段显式拷贝);createEntryAgentPromptSettingsPort(agent_runtime 文档 RMW 保留未知字段;subAgent 键 = kotlinx camelCase 逐字(mode/ReasoningLevel 小写 serial 名);council 键 = deepread HAR 字段名 — 与 Android snake_case 席位线格式不互操作,登记:首装无存量,功能等价);parse 缺键 → 默认。
+  4. 装配:AppContainer getAgentPromptConfigRepository/getAgentPromptConfigTool 单例;ChatPage 注册于 runPlanUpdate 之后/playbook 四件之前(LocalTools.kt:183 位)。
+- **偏差/适配登记**:
+  - Uuid → string;Set<String> → string[];File → PromptConfigFilePort(tmp+rename 由 entry fileIo 承载);data class copy → 策略注入;suspend+Mutex → async+AsyncMutex。
+  - kotlinx toBooleanStrictOrNull → 严格布尔/串双判;Char.isWhitespace/isLetterOrDigit → ASCII 近似(extractMentions,同 D-064 先例)。
+  - council 设置线格式:Android @SerialName snake_case ↔ harmony deepread HAR 字段名(camelCase)— 不互操作登记(无存量数据)。
+  - ArkTS 四修:索引签名/索引访问类型禁用 → Record + 显式 ReasoningLevel 导入;对象字面量须对应显式类型 → Record 空字面量 + 逐键赋值;as unknown 禁 → as object;chat/deepread 两 ReasoningLevel 不兼容(deepread 子集)→ councilReasoning 分立。
+- **关闭**: agent_prompt_config 六 action 全链路可用(agent 可读写四镜像 markdown + 设置即时同步);subagent 六内置角色数据面落地(为 subagent 运行子系统 P1 备好模型/定义);council 席位提示词持久化进 agent_runtime。
+- **未移植(P1 登记)**: SubAgentModels 运行面(TaskSpec/Run/Result/Status)+ SubAgentRunner/Manager/Validator/ToolScope/ReportTool(2030 行 subagent 运行子系统);SubAgentOverride 非 prompt 字段(model/temperature/reasoning/budgets)的消费端;permissions_status/agent_cron/generate_image/eval_javascript(QuickJS 阻断)/Terminal/ScreenAutomation/SystemAccess 等(既有登记)。
+- **验证**: chat tsc 干净 + 1347 测试(+20)/deepread tsc 干净 + 610/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧一修(自身笔误:未知席位用例先调成功路径);entry 侧 ArkTS 四修(见上)。

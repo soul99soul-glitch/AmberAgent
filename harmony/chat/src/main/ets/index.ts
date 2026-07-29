@@ -885,3 +885,21 @@ export {
 export type {
   ToolActivityStatus, SandboxActivityUiState, SandboxActivityUiStateOpts,
 } from './chat/tool_activity.ts';
+
+// ===== D-128:agent_prompt_config(subagent 数据面 + 提示词配置仓库 + 工具) =====
+export type {
+  SubAgentMode, SubAgentOverride, SubAgentDefinition, SubAgentDefinitionInit,
+  SubAgentRuntimeSetting, PromptConfigFilePort, CouncilSettingStrategy,
+  ImagePromptInjectionConfig, PromptConfigWriteResult, AgentPromptSettingsPort,
+  AgentPromptConfigToolDeps,
+} from './chat/agent_prompt_config.ts';
+export {
+  AgentPromptConfigRepository, createAgentPromptConfigTool,
+  makeSubAgentOverride, makeSubAgentDefinition, makeSubAgentRuntimeSetting,
+  makeImagePromptInjectionConfig, subAgentApplyOverride, subAgentFindDefinition,
+  subAgentExtractMentions, SUB_AGENT_BUILT_INS, SUB_AGENT_BUILT_IN_IDS,
+  DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_TIMEOUT_MS,
+  DEFAULT_SUB_AGENT_MAX_TURNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
+  DEFAULT_IMAGE_PROMPT_INJECTION, DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION,
+  DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT,
+} from './chat/agent_prompt_config.ts';

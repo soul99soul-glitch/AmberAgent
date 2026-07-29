@@ -76,7 +76,7 @@ import {
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
   getWorkspaceManager,
-  getSkillWorkspacePort, getDeepReadPlaybookRepository,
+  getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
@@ -1487,6 +1487,9 @@ struct ChatPage {
         createRunPlanUpdateTool(),
         ...(localOpts.indexOf('clipboard') >= 0
           ? [createClipboardTool(createEntryClipboardPort())] : []),
+        // D-128:agent_prompt_config(LocalTools.kt:183 无条件,
+        //   位置 = runPlanUpdate(:182)之后/deepReadPlaybook(:187)之前)
+        getAgentPromptConfigTool(),
         // D-127:DeepReadPlaybookTools 四件(LocalTools.kt:187 无条件,
         //   位置 = deepReadOpenTool(:188)之前);仓库 = deepread HAR
         //   playbook 单例,结构直配 DeepReadPlaybookPort
