@@ -46,6 +46,7 @@ import {
   McpManager, SkillManager, AgentToolActivityStore, PosixWorkspaceManager,
   AgentPromptConfigRepository, createAgentPromptConfigTool,
   AgentPermissionBroker, createPermissionsStatusTool,
+  AgentTaskStore, AgentCronManager, AgentCronTools,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -68,6 +69,10 @@ import {
 import {
   createEntryPermissionPlatformPort, auditPermissionUseLog,
 } from '../platform_impl/PermissionStatusPortImpl.ets';
+import {
+  createEntryCronPersistencePort, createEntryAgentTaskFilePort,
+  createEntryCronSchedulerPort, agentCronTaskDir, agentCronFilesDir,
+} from '../platform_impl/AgentCronStore.ets';
 import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
@@ -233,6 +238,49 @@ export const getPermissionBroker = (): AgentPermissionBroker => {
 // permissions_status 工具(LocalTools.kt:94 lazy + :180 装配位)
 export const getPermissionsStatusTool = (): AgentTool =>
   createPermissionsStatusTool(getPermissionBroker());
+
+// ===== D-130:agent_cron 装配(AgentInfraModule.kt:40/:64) =====
+// AgentTaskStore/AgentCronManager 为异步创建(文件/KV 加载)→ 缓存
+//   Promise 单例;AmberAgentApp.kt:216-224 rescheduleCronTasks 等价 =
+//   rescheduleCronTasksOnStartup(EntryAbility.onCreate fire-and-forget)。
+let agentTaskStorePromise: Promise<AgentTaskStore> | null = null;
+export const getAgentTaskStore = (): Promise<AgentTaskStore> => {
+  if (agentTaskStorePromise === null) {
+    agentTaskStorePromise = AgentTaskStore.create({
+      taskDir: agentCronTaskDir(),
+      appFilesDir: agentCronFilesDir(),
+      files: createEntryAgentTaskFilePort(),
+    });
+  }
+  return agentTaskStorePromise;
+};
+
+let agentCronManagerPromise: Promise<AgentCronManager> | null = null;
+export const getAgentCronManager = (): Promise<AgentCronManager> => {
+  if (agentCronManagerPromise === null) {
+    agentCronManagerPromise = (async (): Promise<AgentCronManager> =>
+      new AgentCronManager(
+        createEntryCronPersistencePort(getChatKvStore()),
+        createEntryCronSchedulerPort({ manager: (): Promise<AgentCronManager> => getAgentCronManager() }),
+        await getAgentTaskStore(),
+      ))();
+  }
+  return agentCronManagerPromise;
+};
+
+// cron 四工具(LocalTools.kt:181 装配位 = permissions_status 之后/
+//   runPlanUpdate 之前)
+export const getAgentCronTools = async (): Promise<AgentTool[]> =>
+  new AgentCronTools(await getAgentCronManager()).getTools();
+
+// AmberAgentApp.rescheduleCronTasks(:216-224)等价:启动时重排全部任务
+export const rescheduleCronTasksOnStartup = (): void => {
+  getAgentCronManager()
+    .then((manager: AgentCronManager): Promise<void> => manager.rescheduleAll())
+    .catch((e: Error) => {
+      hilog.error(DOMAIN, TAG, 'rescheduleCronTasks failed: %{public}s', e.message);
+    });
+};
 
 // ===== Model Council 装配 =====
 let councilRunner: ModelCouncilTextRunner | null = null;

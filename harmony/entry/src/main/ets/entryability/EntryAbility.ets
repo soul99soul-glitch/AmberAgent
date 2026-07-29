@@ -7,7 +7,7 @@ import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { getSkillManager } from '../di/AppContainer.ets';
+import { getSkillManager, rescheduleCronTasksOnStartup } from '../di/AppContainer.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -25,6 +25,9 @@ export default class EntryAbility extends UIAbility {
       .catch((e: Error): void => {
         hilog.error(DOMAIN, TAG, 'installBuiltinSkills failed: %{public}s', String(e));
       });
+    // D-130:AmberAgentApp.kt:216-224 — 启动 fire-and-forget 重排 cron 任务
+    //   (内部已 catch + hilog;应用存活期定时器重新武装)
+    rescheduleCronTasksOnStartup();
   }
 
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {

@@ -1933,3 +1933,25 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: permissions_status 全链路可用(24 能力状态实时反映真实授权态);ensureGranted 基础设施就绪(后续系统能力工具族的门)。
 - **未移植(P1 登记)**: 系统权限设置页 UI(how_to_grant 指引目标);授权请求流(requestPermissionsFromUser 弹窗);special access 各能力 picker 免权限替代路径评估(媒体库 PhotoAccessHelper);agent_cron 四件(:181 位)。
 - **验证**: chat tsc 干净 + 1365 测试(+18)/deepread tsc 干净 + 610/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧两修(自身笔误:sdk 过滤用例第三条默认范围规格预期错误;payload 用例 apiLevel 默认 20 < manage_all_files minSdk 30);entry 侧一修(user_grant 权限需 usedScene 属性)。
+
+## D-130 — agent_cron 域面 + feature/task 三件套(模型/恢复/看板)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: feature/cron/.../CronExpression.kt(全文 106)+ AgentCronModels.kt(全文 35)+ AgentCronManager.kt(全文 389)+ feature/tools/.../AgentCronTools.kt(全文 150)+ feature/task/.../AgentTaskModels.kt(全文 136)+ AgentTaskRecoveryManager.kt(全文 68)+ AgentTaskStore.kt(全文 248 含 :235-248 映射)+ core/agent-utils/.../ToolJson.kt + feature/tools/access/.../ToolJson.kt(输入助手)+ LocalTools.kt:181(注册位)+ AmberAgentApp.kt:216-224(rescheduleCronTasks)。
+- **背景**: LocalTools 无条件尾部 :181 位的 cron 四工具未移植;它是任务调度数据面(cron 表达式解析/任务看板/恢复语义)与后续"后台运行基础设施"的前置。AgentTaskStore 同时是 boardOpportunityTools/任务页 UI 的依赖。
+- **决策**:
+  1. chat HAR agent_task.ts(+13 测试):三枚举(kotlinx @SerialName 小写线格式)/RetryPolicy/OutputRef/Snapshot(22 字段 + make + copy 全字段显式 + snake_case 编解码,缺省键省略 = kotlinx 默认)/toQueueState/toRecoveryState 逐字;RecoveryManager 五分支逐字(cron 型优先→running 中断→completed+输出→retryable→cleanup;文案/错误码逐字);AgentTaskStore 全文(upsert 回调注册语义/update 联动重算 queueState(:79)/recoveryState(:86)/cancel 四分支/retry 四分支文案逐字/cleanup 私有输出门/reconcileOnStartup/persist 静默 runCatching 忠实保留)。
+  2. chat HAR agent_cron.ts(+18 测试,1396 总量):CronExpression 全文(五字段/步进/范围/列表/周日 0→7/dom+dow 双非通配 OR 语义/错误文案逐字;nextRunAfter 逐分钟扫 366 天);Manager 全文(create/update/delete/runTaskNow/prepareTriggeredRun/scheduleNextRun/mark 三态/rescheduleAll/replaceTasks nextRunAtMs 升序持久化/严格→宽松→空 decode/resolveZone 回退);四工具全文(键序/prompt.take(2000)/可空键省略/审批旗标/required/严格布尔)。
+  3. 端口化:AgentTaskFilePort(mkdirs/listJsonFileNames/readText→null/writeText/delete/exists/isPathInside — File.canonicalFile 私有输出校验等价);AgentCronPersistencePort(DataStore 'tasks_json' 单值);AgentCronSchedulerPort(schedule/runNow/cancel — WorkManager 唯一工作等价);AgentCronRunExecutor(Worker ChatService 执行体注入位)。
+  4. 时区:ZonedDateTime → Intl.DateTimeFormat(timeZone,hourCycle h23,weekday 短名→Java MONDAY=1..SUNDAY=7)逐分钟取本地字段;ZoneId.of 非法 → cronIsValidZoneId false → resolveZone 回退系统默认;deadline 366 天 zoned → epoch 加值(DST 边界 ±1h 登记)。
+  5. entry AgentCronStore.ets:KV 持久化端口/fileIo 文件端口/应用存活期 setTimeout 调度器(setTimeout 上限 2^31-1 截断登记;runNow = REPLACE 语义先取消再立即触发;fire 控制流 = Worker.doWork 等价 prepare→markStarted→executor→markCompleted/Failed→scheduleNextRun;默认 executor 显式抛 'Cron 后台运行执行器未接线(P1)' → markRunFailed 可见非静默)。
+  6. 装配:AppContainer 缓存 Promise 单例(getAgentTaskStore/getAgentCronManager/getAgentCronTools)+ rescheduleCronTasksOnStartup(AmberAgentApp 等价,EntryAbility.onCreate fire-and-forget);ChatPage 水合字段(searchSettings 时序先例)注册于 permissions_status 之后/runPlanUpdate 之前(:181 位)。
+- **偏差/适配登记**:
+  - PD-011:WorkManager → 应用存活期定时器(进程死后不触发,启动 rescheduleAll 重排不补跑);decodeFromBackingFile(pb 二进制恢复)= Android 特有,不移植(KV 单一源);Worker 执行体未接线 → 触发显式失败。
+  - Uuid → newId();System.currentTimeMillis → Date.now();suspend+Mutex → async+AsyncMutex;MutableStateFlow → subscribe 监听。
+  - 工具 description 保留 'this Android device' 原文(模型侧协议字符串)。
+  - ArkTS 适配:对象展开 → 显式字段;索引访问类型 → 直接导入;内联对象字面量类型 → 命名接口(EntryCronManagerView)。
+- **关闭**: cron 四工具 CRUD/状态机/看板登记/恢复语义全链路;任务看板(AgentTaskStore)基础设施就绪(board/任务页/其他任务型工具复用)。
+- **未移植(P1 登记)**: AgentCronRunExecutor 真实实现(无头聊天运行 = 后台运行基础设施);WorkSchedulerExtensionAbility 进程级唤醒;AgentCronWorker 通知三段(运行中前台/完成/失败);AgentTaskScheduler(103 行 WorkManager 周期任务);cron 设置页 UI(SettingAgentExtensionsPage);AgentTaskTools(210 行 agent_task_* 工具组)。
+- **验证**: chat tsc 干净 + 1396 测试(+31)/deepread tsc 干净 + 610/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧四修(自身笔误:范围文案字段位错/cron 型快照抢占恢复分支三处);entry 侧一修(arkts-no-obj-literals-as-types 命名接口)。

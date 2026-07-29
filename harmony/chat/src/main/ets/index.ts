@@ -916,3 +916,27 @@ export {
   runtimePermissionSpecApplies, capabilityCurrentRuntimePermissions,
   createPermissionsStatusTool,
 } from './chat/permission_status.ts';
+
+// ===== D-130:agent_cron 域面 + feature/task 三件套 =====
+export type {
+  AgentTaskStatus, AgentTaskQueueState, AgentTaskRecoveryState,
+  AgentTaskRetryPolicy, AgentTaskRetryPolicyInit,
+  AgentTaskOutputRef, AgentTaskOutputRefInit,
+  AgentTaskSnapshot, AgentTaskSnapshotInit, AgentTaskSnapshotPatch,
+  TaskRecoveryAdapter, AgentTaskFilePort, AgentTaskStoreDeps,
+} from './chat/agent_task.ts';
+export {
+  AgentTaskRecoveryManager, AgentTaskStore,
+  makeAgentTaskRetryPolicy, makeAgentTaskOutputRef, makeAgentTaskSnapshot,
+  copyAgentTaskSnapshot, agentTaskSnapshotToJson, agentTaskSnapshotFromJson,
+  agentTaskStatusRunning, agentTaskStatusToQueueState, agentTaskStatusToRecoveryState,
+} from './chat/agent_task.ts';
+export type {
+  CronExpression, AgentCronTaskStatus, AgentCronTask, AgentCronTaskInit,
+  AgentCronPersistencePort, AgentCronSchedulerPort,
+} from './chat/agent_cron.ts';
+export {
+  AgentCronManager, AgentCronTools,
+  cronExpressionParse, cronNextRunAfter, cronIsValidZoneId, cronSystemZoneId,
+  makeAgentCronTask,
+} from './chat/agent_cron.ts';

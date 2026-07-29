@@ -77,7 +77,7 @@ import {
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
   getWorkspaceManager,
   getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
-  getPermissionsStatusTool,
+  getPermissionsStatusTool, getAgentCronTools,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
@@ -617,6 +617,9 @@ struct ChatPage {
   private taskPromptsCache: TaskPrompts | null = null;
   // D-070:搜索偏好(aboutToAppear 异步加载;SearchTools 工具组输入)
   searchSettings: SearchSettings | null = null;
+  // D-130:cron 四工具(aboutToAppear 异步水合,与 searchSettings 同档;
+  //   水合完成前的极早轮次不带 cron 工具 — 异步加载时序等价先例)
+  private agentCronToolsCache: AgentTool[] = [];
   @State errorMsg: string = '';
   // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
   @State denyDialogToolCallId: string = '';
@@ -741,6 +744,10 @@ struct ChatPage {
     ensureSearchSdk();
     loadSearchPrefs(getChatKvStore()).then((s: SearchSettings): void => {
       this.searchSettings = s;
+    });
+    // D-130:cron 四工具水合(异步单例就绪后入目录;LocalTools.kt:181 位)
+    getAgentCronTools().then((tools: AgentTool[]): void => {
+      this.agentCronToolsCache = tools;
     });
     // D-071b:OCR 种子加载(providers/ocr_model/ocr_prompt 快照)
     loadOcrSeed(getChatKvStore()).then((seed: OcrSeed): void => {
@@ -1483,8 +1490,11 @@ struct ChatPage {
           },
         }),
         // D-129:permissions_status(LocalTools.kt:180 无条件,位置 =
-        //   agentCron(:181,未移植)之前/runPlanUpdate(:182)之前)
+        //   agentCron(:181)/runPlanUpdate(:182)之前)
         getPermissionsStatusTool(),
+        // D-130:agent_cron 四件(LocalTools.kt:181 无条件;aboutToAppear
+        //   水合,完成前为空数组 = searchSettings 时序先例)
+        ...this.agentCronToolsCache,
         // D-061:本地工具三件(LocalTools runPlanUpdateTool/clipboardTool/
         //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
         //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)
