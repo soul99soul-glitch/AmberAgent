@@ -28,19 +28,20 @@ import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
 import { createNovelModelAdapter } from '../platform_impl/NovelModelAdapter.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import type { Context } from '@kit.AbilityKit';
 import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle,
-  ProviderModel, CompactStore, ModelAbility,
+  ProviderModel, CompactStore, ModelAbility, SkillMetadata, SkillWorkspacePort,
 } from '@amber/chat-domain';
 import {
-  loadAssistants, loadProviders, makeAssistant,
+  loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
   hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
   makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
-  McpManager, AgentToolActivityStore,
+  McpManager, SkillManager, AgentToolActivityStore,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -50,6 +51,9 @@ import { encodeImageForChat, encodeImageDetailed } from '../platform_impl/EntryI
 import { createMcpHttpPort } from '../platform_impl/McpHttpPortImpl.ets';
 import { getMcpSettingsStore, initMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { getMcpFilesStore } from '../platform_impl/McpFilesStore.ets';
+import {
+  createEntrySkillFilePort, createEntrySkillWorkspacePort,
+} from '../platform_impl/SkillStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
@@ -296,6 +300,46 @@ export const getToolActivityStore = (): AgentToolActivityStore => {
   return toolActivityStore;
 };
 
+// D-123:SkillManager 单例(SkillManager.kt + Koin single)— filesDir/skills 根;
+//   deleteSkill 级联清理全 assistants enabledSkills(:114-125)→ 异步持久化
+//   (域层同步回调 → fire-and-forget + warn 日志,登记)
+let skillManager: SkillManager | null = null;
+export const getSkillManager = (): SkillManager => {
+  if (skillManager === null) {
+    const ctx = AppStorage.get<Context>('abilityContext') as Context;
+    skillManager = new SkillManager({
+      port: createEntrySkillFilePort(),
+      skillsRoot: `${ctx.filesDir}/skills`,
+      onSkillDeleted: (name: string): void => {
+        loadAssistants(getChatKvStore())
+          .then(async (list: Assistant[] | null): Promise<void> => {
+            if (list === null) return;
+            const next: Assistant[] = list.map((a: Assistant): Assistant =>
+              a.enabledSkills.indexOf(name) >= 0
+                ? patchAssistant(a, {
+                  enabledSkills: a.enabledSkills.filter((n: string): boolean => n !== name),
+                })
+                : a);
+            await saveAssistants(getChatKvStore(), next);
+          })
+          .catch((e: Error): void => {
+            hilog.warn(DOMAIN, TAG, 'onSkillDeleted persist failed: %{public}s', String(e));
+          });
+      },
+    });
+  }
+  return skillManager;
+};
+
+// D-123:skills 导入用 workspace 读面(POSIX 镜像目录;SAF 层不移植,登记)
+let skillWorkspacePort: SkillWorkspacePort | null = null;
+export const getSkillWorkspacePort = (): SkillWorkspacePort => {
+  if (skillWorkspacePort === null) {
+    skillWorkspacePort = createEntrySkillWorkspacePort();
+  }
+  return skillWorkspacePort;
+};
+
 export const getChatAssistants = async (): Promise<Assistant[]> => {
   const loaded = await loadAssistants(getChatKvStore());
   if (loaded !== null && loaded.length > 0) return loaded;
@@ -315,6 +359,9 @@ export interface ChatRuntime {
   // D-121:model.abilities(ChatService.kt:1278 tools_warning 门 —
   //   !abilities.contains(ModelAbility.TOOL))
   modelAbilities: ModelAbility[];
+  // D-123:skillManager.listSkills() 快照(ChatService.kt:2241 createSkillTools
+  //   入参;createRunTools 时机 ≈ resolveChatRuntime 时机 = 每次发送)
+  allSkills: SkillMetadata[];
 }
 
 export interface ChatProviderChoice {
@@ -589,5 +636,7 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
     modelContextWindowTokens: model.contextWindowTokens,
     modelSupportsImageInput: model.inputModalities.includes('image'),
     modelAbilities: model.abilities,
+    // D-123:技能库快照(每次发送重新扫描;SkillManager 内部缓存,变更后失效)
+    allSkills: getSkillManager().listSkills(),
   };
 };

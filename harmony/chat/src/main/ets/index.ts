@@ -424,8 +424,23 @@ export {
   mcpArgumentsObject, mcpStatusToString, mcpImportKey, toolOutputPreview,
 } from './chat/mcp_tools.ts';
 export type {
-  McpManagementToolsDeps, McpServerToolsDeps, McpToolActivityPort,
+  McpManagementToolsDeps, McpServerToolsDeps, McpToolActivityPort, McpSkillManagerPort,
 } from './chat/mcp_tools.ts';
+
+// D-123:skills 子系统域层(SkillManager.kt/SkillPaths.kt/SkillsTools.kt 全文;
+//   mcp_import_from_skill 并入 mcp_tools.ts)
+export {
+  SkillManager, makeSkillMetadata, skillParseFrontmatter, skillEnsureDescription,
+  skillResolveDescription, skillIsPlaceholderDescription, skillExtractBody,
+  resolveSkillDirPath, resolveSkillFilePath, isLikelyTextSkillFile,
+  canonicalSkillFileName, buildSkillMobileRuntimePrompt, createSkillTools,
+  collectSkillFilesFromDirectory, collectWorkspaceSkillFiles, unzipSkillFiles,
+  MAX_SKILL_FILE_BYTES,
+} from './chat/skills.ts';
+export type {
+  SkillMetadata, SkillScanIssue, SkillFilePort, SkillDirEntry, SkillManagerDeps,
+  SkillWorkspacePort, SkillWorkspaceEntry, CreateSkillToolsDeps,
+} from './chat/skills.ts';
 
 export {
   makeProviderModel, makeBalanceOption,

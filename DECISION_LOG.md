@@ -1758,3 +1758,31 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 工具活动显示子系统全链路(store/时间线/UI/事件源/设置门);D-120 ToolActivityStore 登记残余关闭(toolOutputPreview 非 text 段 JSON.stringify 偏差仍登记 — data-class toString 不可复现)。
 - **未移植(P1 登记)**: enableLiveStatusNotification/hideSensitiveLiveStatus(实时状态卡 :155-199 + ChatService:1697-1708 notifyRunning 活动消费);generativeUi 设置行;Web 预览组件;其余工具族 activity 事件(SystemAccessTools/ExternalFileTools 等随各族移植)。
 - **验证**: chat tsc 干净 + 1238 测试(+24)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧两修:ToolFailure 重复导出收敛(tool_dispatcher 复用)+ import type → 值导入(AgentToolActivityStore new 调用);测试侧两修:MessageNode 分支语义(每消息一节点)+ outputTail 回退期望(原始串)。
+
+## D-123 — skills 子系统域层 + createSkillTools 六件 + mcp_import_from_skill 收口
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: app/core/files/SkillManager.kt(470 行全文,含 SkillFrontmatterParser :300-470)+ SkillPaths.kt(35 行全文)+ app/core/ai/tools/SkillsTools.kt(480 行全文)+ McpManagementTools.kt:131-167(mcp_import_from_skill)+ GuizangHtmlDeckValidator.kt:18-24(常量)+ ChatService.kt:2239-2246(工具组装配位)+ WorkspaceManager.kt:23(mirrorDir)/WorkspacePaths.kt(normalize)+ FilesManager.kt:651(SKILLS='skills')。
+- **背景**: skills 是阻塞 mcp_import_from_skill(D-118 登记)与 assistant 扩展页两个 tab 的底座子系统。域层遵循 Ports 原则:文件系统/工作区/解压/设置变更全部端口化,entry 以 fileIo 同步 API 实现。UI 页面(SkillsPage/SkillDetailPage/QuickMessages,~2000 行)为后续切片。
+- **决策**:
+  1. chat HAR skills.ts(+37 测试):
+     - SkillFrontmatterParser 逐字:parse('---' 前缀 + endRange 查找 + 引号剥离 + 空值跳过)/ensureDescription(占位集合 15 项;无 frontmatter 包头/description 行原位替换或 name 行后插入)/resolveDescription/isPlaceholderDescription(引号集 trim + lowercase)/extractBody;inferDescription(cleanDescriptionCandidate 七步清洗/isGenericSkillHeading 12 项/hasInvocationCue 8 词/120 截尾 '…'/fallback 中英模板)。
+     - SkillPaths:canonicalFile 符号链接解析 → 词法归一('.'/'..' 展开;沙箱私有根内无链接攻击面);resolveSkillDirPath/resolveSkillFilePath 检查矩阵逐字。
+     - SkillManager:缓存扫描(listSkills)/listSkillIssues 三文案/readSkillBody·Content/saveSkill(ensureDescription 补齐)/deleteSkill + onSkillDeleted 回调(:114-125 全 assistants 清理)/saveSkillFile/saveSkillFilesAtomically(staging-backup rename 全序列,失败恢复)/deleteSkillFile/resolveSkillFile/repairMissingDescriptions/createTempSkillDir(repeat 100)。
+     - createSkillTools 六件:skills_list(systemPrompt 状态块逐字 + payload 六键)/skill_validate(三 if 独立 → 空 SKILL.md 出三问题 quirk 钉住)/skill_import(needsApproval;workspace 收集 → 原子落盘 → setSkillEnabled)/skill_enable·skill_disable(needsApproval)/use_skill(available 空 → 不出;enabled 门文案;SKILL.md body 抽取;path 子文件;逃逸/缺失提示两分支 listSkillFilesShort take 20)。
+     - buildSkillMobileRuntimePrompt 逐字(移动运行时约束 8 条 + guizang-ppt/social-card 两特化块,RENDERER='full_html' + amberagent.local/full-html/ 两 runtime URL)。
+     - 收集/解包:canonicalSkillFileName(skill.txt→SKILL.md;skill.md.txt 仅 dropLast(4) quirk 钉住)/isLikelyTextSkillFile 16 后缀/collectSkillFilesFromDirectory/collectWorkspaceSkillFiles(单文件/zip/目录递归;walk 分支**无** 4MB 上限 quirk 忠实)/unzipSkillFiles(readZipEntries 中央目录序;目录条目跳过;首段剥离;4MB 按 uncompressedSize 预检同文案)。
+  2. mcp_tools.ts 并入 mcp_import_from_skill(:131-167 逐字;needsApproval;三错误文案;importKey 去重 — **mcpImportKey 已存在于 :82(D-118),初稿重复实现收敛复用**;existingKeys 在 updateMcpServers 闭包内取快照)。deps += skills 可选(缺省不出第四件)。
+  3. entry:SkillStore.ets — createEntrySkillFilePort(fileIo 同步:accessSync/listFileSync/statSync/mkdirSync/openSync/readSync/writeSync/unlinkSync/rmdirSync/renameSync;mkdirs/renameTo/deleteRecursively 失败 → false + warn 日志,File 语义)+ createEntrySkillWorkspacePort(filesDir/amberagent/workspace-mirror POSIX 镜像;WorkspacePaths.normalize '..' → 抛;list 排序目录优先+name 小写 :49);inflateRawEntry 从 EntryDocumentParser 导出复用。
+  4. 装配:AppContainer getSkillManager/getSkillWorkspacePort 单例(onSkillDeleted → loadAssistants+patchAssistant+saveAssistants 异步持久化);ChatRuntime += allSkills(resolveChatRuntime 每次发送快照 = createRunTools 时机);ChatPage buildToolLoop 工具组插入位 = localTools 之后/MCP 管理之前(:2239-2246);setSkillEnabled 闭包 RMW 当前 assistant(:339-350);createMcpManagementTools skills 恒传。
+- **偏差/适配登记**:
+  - Context.filesDir/assets → SkillFilePort;installBuiltinSkillsIfMissing(assets/builtin-skills 四件:deep-read-fact-check/skill-creator/会议准备/监控文档)= rawfile 打包决策 → P1 登记(本切片不装内置技能)。
+  - WorkspaceManager SAF 层(DocumentFile/持久授权/SAF↔mirror 双向同步)HarmonyOS 无对应物 → POSIX 镜像目录直读;workspace_files 工具族/文件 sheet 仍 P1。
+  - ZipInputStream 本地头流式序 → readZipEntries 中央目录序(通常一致,登记);解压经 InflateRawPort(zlib inflateInit2 负 windowBits,EntryDocumentParser 既有实现导出复用)。
+  - File.mkdirs/renameTo 平台布尔语义 → fileIo 同步 API try/catch → false(rename POSIX 语义:空目录/文件可覆盖;backup 目录恒为空 → 与 Android 实测同结果)。
+  - kotlinx JsonNull.content='null' 边界 → null 按缺省处理(mcp_tools 既有同例,边界不可达)。
+  - Log.w 域层告警 → entry 端口层 hilog.warn(不吞错:Android 返回 null/false 路径忠实)。
+- **关闭**: mcp_import_from_skill(D-118 登记残余)关闭;skills 工具面全链路可用(装包 → 校验/导入/启停/读取)。
+- **未移植(P1 登记)**: 内置技能 rawfile 安装;SkillsPage/SkillDetailPage/QuickMessagesPage UI(~2000 行,assistant 扩展页两 tab 随此前置);WorkspaceTools 工具族(workspace_files variant)与文件 sheet;Web 预览组件(沿用 D-122 登记)。
+- **验证**: chat tsc 干净 + 1278 测试(+40)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧两修:mcpImportKey 重复实现收敛 + mcp_import_from_skill/use_skill execute 同步抛改 async(suspend 语义);测试侧四修(全为实现逐字核对后的夹具/期望修正):skill.md.txt 仅 dropLast(4) quirk/空 SKILL.md 三问题(独立 if)/MemFs renameTo POSIX 语义/use_skill 工具存在性前提(available 非空)。

@@ -62,7 +62,8 @@ import {
   makeGenerationRetrySetting,
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   probeVisionModelHealth,
-  createMcpManagementTools, createMcpServerTools, makeAgentTool,
+  createMcpManagementTools, createMcpServerTools, makeAgentTool, createSkillTools,
+  loadAssistants, saveAssistants, patchAssistant,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
 } from '@amber/chat-domain';
@@ -72,9 +73,11 @@ import {
   resolveChatProviderChoice, ChatProviderChoice,
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
-  getMcpManager, initMcpManager, getToolActivityStore,
+  getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
+  getSkillWorkspacePort,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
+import { inflateRawEntry } from '../platform_impl/EntryDocumentParser.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
@@ -1368,13 +1371,26 @@ struct ChatPage {
       filterToolProfile([
         ...(localOpts.indexOf('time_info') >= 0 ? [createTimeTool()] : []),
         ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
-        // D-120:MCP 工具桥接(ChatService.kt:2247-2282)— 管理三件
-        //   (mcp_list/mcp_call_tool/mcp_test;mcp_import_from_skill 依赖 skills
-        //   子系统 → P1 登记)+ mcp__ 组(getAllAvailableTools 逐个;
-        //   activityStore 事件面未移植 → P1 登记)
+        // D-123:skills 工具组(ChatService.kt:2239-2246 — createSkillTools 五/六件,
+        //   位置 = localTools 之后/MCP 管理之前);enabledSkills/allSkills =
+        //   createRunTools 时快照(rt.assistant/rt.allSkills 同为本次发送快照);
+        //   updateEnabledSkill(:339-350)→ setSkillEnabled 闭包 RMW 当前 assistant
+        ...createSkillTools({
+          enabledSkills: rt.assistant.enabledSkills,
+          allSkills: rt.allSkills,
+          skillManager: getSkillManager(),
+          setSkillEnabled: (name: string, enable: boolean): Promise<void> =>
+            this.setSkillEnabled(rt, name, enable),
+          workspace: getSkillWorkspacePort(),
+          inflateRaw: inflateRawEntry,
+        }),
+        // D-120:MCP 工具桥接(ChatService.kt:2247-2282)— 管理四件
+        //   (mcp_list/mcp_call_tool/mcp_test + mcp_import_from_skill:D-123
+        //   skills 子系统落地并入)+ mcp__ 组(getAllAvailableTools 逐个)
         ...createMcpManagementTools({
           settings: getMcpSettingsStore(),
           manager: getMcpManager(),
+          skills: getSkillManager(),
         }),
         // D-122:activityStore 事件面接线(ChatService.kt:2262-2274 —
         //   startTool/complete/fail 三段;scope 由终表统一包覆,见 tools 组装)
@@ -1606,6 +1622,22 @@ struct ChatPage {
       execute: (input: JsonValue): Promise<UIMessagePart[]> =>
         store.withConversation(scopeId, (): Promise<UIMessagePart[]> => tool.execute(input)),
     }));
+  }
+
+  // D-123:updateEnabledSkill(SkillsTools.kt:339-350)— settingsStore.update 对
+  //   当前 assistant enabledSkills 做 +name/-name RMW;entry = assistants KV
+  //   读改写(rt.assistant.id = 本次发送解析的当前助手 = getCurrentAssistant 同义)
+  private async setSkillEnabled(rt: ChatRuntime, name: string, enable: boolean): Promise<void> {
+    const kv = getChatKvStore();
+    const list: Assistant[] = await loadAssistants(kv) ?? [];
+    const next: Assistant[] = list.map((a: Assistant): Assistant => {
+      if (a.id !== rt.assistant.id) return a;
+      const skills: string[] = enable
+        ? (a.enabledSkills.indexOf(name) >= 0 ? a.enabledSkills : a.enabledSkills.concat([name]))
+        : a.enabledSkills.filter((n: string): boolean => n !== name);
+      return patchAssistant(a, { enabledSkills: skills });
+    });
+    await saveAssistants(kv, next);
   }
 
   // steer 消息步间消费(Android session.dequeueSteerPendingUserMessages,

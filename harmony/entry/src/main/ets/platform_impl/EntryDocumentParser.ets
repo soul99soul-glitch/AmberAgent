@@ -156,7 +156,8 @@ const readFileBytes = (path: string): Uint8Array => {
 
 // InflateRawPort entry 实现(raw deflate,负 windowBits;输出容量 = 头声明
 //   uncompressedSize,不足即抛 — 非静默)
-const inflateRawEntry = async (data: Uint8Array, expectedSize: number): Promise<Uint8Array> => {
+// D-123:导出供 SkillStore(zip 技能包导入)复用
+export const inflateRawEntry = async (data: Uint8Array, expectedSize: number): Promise<Uint8Array> => {
   const inCopy: Uint8Array = new Uint8Array(data); // subarray .buffer 偏移剥离
   const outCap: number = Math.max(expectedSize, 1);
   const strm: zlib.ZStream = {

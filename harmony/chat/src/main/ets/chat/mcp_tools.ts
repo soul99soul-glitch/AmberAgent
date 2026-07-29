@@ -2,7 +2,7 @@
 //
 // Android 基准:
 //   app/core/ai/tools/McpManagementTools.kt(245 行)— mcp_list/mcp_call_tool/
-//     mcp_test 三件;mcp_import_from_skill 依赖 SkillManager(未移植)→ P1 登记
+//     mcp_test + mcp_import_from_skill(:131-167;D-123 skills 子系统落地后并入)
 //   ChatService.kt:2254-2282 — createRunTools mcp 组:getAllAvailableTools 逐个
 //     Tool('mcp__'+name, needsApproval=tool.needsApproval, execute 经
 //     activityStore.startTool(title='调用 MCP 工具',runtime='MCP')→ callTool →
@@ -14,7 +14,8 @@
 //     不发事件(非空实现;接线随活动面子系统,P1 登记)
 //   - toolOutputPreview 非 Text 分支 Kotlin data class toString → JSON.stringify
 //     (活动面落地前不可达,登记)
-//   - mcp_import_from_skill:skills 子系统未移植(P1 登记, McpManagementTools.kt:131-167)
+//   - mcp_import_from_skill:settings.update 闭包内取 existingKeys 快照
+//     (字段级 RMW 由 entry 保证,与 McpSettingsPort 既有注释同)
 
 import type { JsonObject, JsonValue } from './json.ts';
 import { makeAgentTool } from './tool.ts';
@@ -23,6 +24,7 @@ import type { UIMessagePart } from './message.ts';
 import { McpManager } from './mcp_manager.ts';
 import type { McpSettingsPort } from './mcp_manager.ts';
 import type { McpServerConfig, McpTool, McpStatus } from './mcp_config.ts';
+import { parseMcpServersFromJson } from './mcp_import.ts';
 
 // ===== helpers(McpManagementTools.kt:170-244) =====
 
@@ -132,6 +134,15 @@ const strictBool = (v: JsonValue | undefined): boolean | null => {
 export interface McpManagementToolsDeps {
   settings: McpSettingsPort;
   manager: McpManager;
+  // D-123:skills 子系统落地后由 entry 恒传;缺省 → 不出 mcp_import_from_skill
+  skills?: McpSkillManagerPort;
+}
+
+// SkillManager 读面(McpManagementTools.kt:26/143-147 用例最小集)
+export interface McpSkillManagerPort {
+  getSkillDir(skillName: string): string | null;
+  fileExists(path: string): boolean;
+  readFileText(path: string): string;
 }
 
 export const createMcpManagementTools = (deps: McpManagementToolsDeps): AgentTool[] => [
@@ -238,6 +249,53 @@ export const createMcpManagementTools = (deps: McpManagementToolsDeps): AgentToo
       return [{ type: 'text', text: JSON.stringify(payload), metadata: null }];
     },
   }),
+  // :131-167 — mcp_import_from_skill(D-123 落地;skills 子系统已移植)
+  ...(deps.skills !== undefined ? [makeAgentTool({
+    name: 'mcp_import_from_skill',
+    description: 'Import standard mcp.json from an installed Skill into the global ' +
+      'AmberAgent MCP settings.',
+    parameters: (): InputSchemaObj => ({
+      type: 'object',
+      properties: {
+        skill_name: { type: 'string', description: 'Installed skill name.' },
+      },
+      required: ['skill_name'],
+    }),
+    needsApproval: true,
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const skills: McpSkillManagerPort = deps.skills as McpSkillManagerPort;
+      const obj: JsonObject = isObj(input) ? input : {};
+      const skillName: string | null = contentOrNull(obj['skill_name']);
+      if (skillName === null) throw new Error('skill_name is required');
+      // :143 — getSkillDir(name)?.resolve("mcp.json") ?: error
+      const dir: string | null = skills.getSkillDir(skillName);
+      if (dir === null) throw new Error(`Skill not found: ${skillName}`);
+      const mcpFile: string = `${dir}/mcp.json`;
+      if (!skills.fileExists(mcpFile)) {
+        throw new Error(`Skill '${skillName}' does not contain mcp.json`);
+      }
+      const configs: McpServerConfig[] = parseMcpServersFromJson(skills.readFileText(mcpFile));
+      if (configs.length === 0) {
+        throw new Error('mcp.json does not contain valid MCP servers');
+      }
+      // :152-158 — existingKeys 在 update 闭包内取快照(mcpImportKey 去重,:82 既有)
+      let importedCount: number = 0;
+      deps.settings.updateMcpServers((old: McpServerConfig[]): McpServerConfig[] => {
+        const existingKeys: string[] = old.map(mcpImportKey);
+        const newConfigs: McpServerConfig[] = configs.filter(
+          (c: McpServerConfig): boolean => existingKeys.indexOf(mcpImportKey(c)) < 0);
+        importedCount = newConfigs.length;
+        return old.concat(newConfigs);
+      });
+      const payload: JsonObject = {
+        success: true,
+        skill_name: skillName,
+        imported_count: importedCount,
+        already_exists_count: configs.length - importedCount,
+      };
+      return Promise.resolve([{ type: 'text', text: JSON.stringify(payload), metadata: null }]);
+    },
+  })] : []),
 ];
 
 // ===== createRunTools mcp__ 组(ChatService.kt:2254-2282) =====

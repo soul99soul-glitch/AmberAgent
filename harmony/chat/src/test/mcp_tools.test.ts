@@ -7,7 +7,7 @@ import {
   createMcpManagementTools, createMcpServerTools,
   mcpArgumentsObject, mcpStatusToString, mcpImportKey, toolOutputPreview,
 } from '../main/ets/chat/mcp_tools.ts';
-import type { McpToolActivityPort } from '../main/ets/chat/mcp_tools.ts';
+import type { McpToolActivityPort, McpSkillManagerPort } from '../main/ets/chat/mcp_tools.ts';
 import { McpManager } from '../main/ets/chat/mcp_manager.ts';
 import type { McpSettingsPort, McpFilesPort } from '../main/ets/chat/mcp_manager.ts';
 import type {
@@ -352,5 +352,88 @@ test('mcp__ 组:activity 端口事件(start/complete/fail 序 + preview)', async
   await assert.rejects((bad[0].execute as (i: JsonValue) => Promise<UIMessagePart[]>)('raw'));
   assert.ok(events[0].startsWith('start:mcp__echo|调用 MCP 工具|"raw"|MCP'));
   assert.ok(events[1].startsWith('fail:tc-1|'));
+  h.manager.dispose();
+});
+
+// ===== D-123:mcp_import_from_skill(McpManagementTools.kt:131-167) =====
+
+const makeSkillPort = (dirs: Record<string, string | null>): McpSkillManagerPort => ({
+  getSkillDir: (skillName: string): string | null =>
+    skillName.indexOf('/') < 0 && skillName.indexOf('\\') < 0 &&
+      skillName !== '.' && skillName !== '..' && skillName.trim().length > 0
+      ? `/files/skills/${skillName}` : null,
+  fileExists: (path: string): boolean =>
+    Object.prototype.hasOwnProperty.call(dirs, path) && dirs[path] !== null,
+  readFileText: (path: string): string => {
+    const hit: string | null | undefined = dirs[path];
+    if (hit === undefined || hit === null) throw new Error(`NoSuchFile: ${path}`);
+    return hit;
+  },
+});
+
+const MCP_JSON: string = JSON.stringify({
+  mcpServers: {
+    alpha: { type: 'streamable_http', url: 'https://mcp.test/mcp' },
+    beta: { type: 'sse', url: 'https://mcp.test/sse' },
+  },
+});
+
+test('mcp_import_from_skill:skills 缺省 → 工具不出;传入 → 第四件', () => {
+  const h: Harness = makeHarness();
+  const without: AgentTool[] =
+    createMcpManagementTools({ settings: h.settings, manager: h.manager });
+  assert.deepEqual(without.map((t: AgentTool): string => t.name),
+    ['mcp_list', 'mcp_call_tool', 'mcp_test']);
+  const withSkill: AgentTool[] = createMcpManagementTools({
+    settings: h.settings, manager: h.manager, skills: makeSkillPort({}),
+  });
+  assert.deepEqual(withSkill.map((t: AgentTool): string => t.name),
+    ['mcp_list', 'mcp_call_tool', 'mcp_test', 'mcp_import_from_skill']);
+  h.manager.dispose();
+});
+
+test('mcp_import_from_skill:needsApproval + 三错误文案逐字', async () => {
+  const h: Harness = makeHarness();
+  const tools: AgentTool[] = createMcpManagementTools({
+    settings: h.settings, manager: h.manager,
+    skills: makeSkillPort({
+      '/files/skills/empty/mcp.json': '{"mcpServers":{}}',
+      '/files/skills/nomcp/mcp.json': null,
+    }),
+  });
+  const t: AgentTool = tools[3];
+  assert.equal(t.needsApproval, true);
+  await assert.rejects(t.execute({}), /skill_name is required/);
+  await assert.rejects(t.execute({ skill_name: '../x' }), /Skill not found: \.\.\/x/);
+  await assert.rejects(t.execute({ skill_name: 'nomcp' }),
+    /Skill 'nomcp' does not contain mcp\.json/);
+  await assert.rejects(t.execute({ skill_name: 'empty' }),
+    /mcp\.json does not contain valid MCP servers/);
+  h.manager.dispose();
+});
+
+test('mcp_import_from_skill:导入 + importKey 去重(payload 计数逐字)', async () => {
+  const h: Harness = makeHarness();
+  // 预置 alpha(importKey 相同 → 去重)
+  h.settings.servers = [makeHttpServer('existing', 'alpha')];
+  const tools: AgentTool[] = createMcpManagementTools({
+    settings: h.settings, manager: h.manager,
+    skills: makeSkillPort({ '/files/skills/pack/mcp.json': MCP_JSON }),
+  });
+  const parts: UIMessagePart[] = await tools[3].execute({ skill_name: 'pack' });
+  if (parts[0].type !== 'text') throw new Error('text part');
+  assert.deepEqual(JSON.parse(parts[0].text), {
+    success: true, skill_name: 'pack', imported_count: 1, already_exists_count: 1,
+  });
+  assert.equal(h.settings.servers.length, 2);
+  assert.equal(h.settings.servers[1].commonOptions.name, 'beta');
+  assert.equal(h.settings.servers[1].kind, 'sse');
+  // 二次导入:全部重复 → 0/2
+  const again: UIMessagePart[] = await tools[3].execute({ skill_name: 'pack' });
+  if (again[0].type !== 'text') throw new Error('text part');
+  assert.deepEqual(JSON.parse(again[0].text), {
+    success: true, skill_name: 'pack', imported_count: 0, already_exists_count: 2,
+  });
+  assert.equal(h.settings.servers.length, 2);
   h.manager.dispose();
 });

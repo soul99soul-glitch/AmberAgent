@@ -26,7 +26,8 @@ const u16 = (b: Uint8Array, off: number): number => b[off] | (b[off + 1] << 8);
 const u32 = (b: Uint8Array, off: number): number =>
   (b[off] | (b[off + 1] << 8) | (b[off + 2] << 16) | (b[off + 3] << 24)) >>> 0;
 
-const utf8Decode = (bytes: Uint8Array): string => {
+// D-123:导出供 skills 域复用(Kotlin decodeToString() UTF-8 同语义)
+export const utf8Decode = (bytes: Uint8Array): string => {
   // 解码器经 TextDecoder(ArkTS util 同语义);域层纯函数 → 手写 UTF-8 解码
   let out: string = '';
   let i: number = 0;
