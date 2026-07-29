@@ -1815,3 +1815,29 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: workspace_files 门内第一件(workspaceTools 六件)全链路可用(agent 文件读写/编辑/搜索/移动 + activity 事件三段)。
 - **未移植(P1 登记)**: 同组 WorkspaceArtifactTools/ExternalFileTools 两件(LocalTools.kt:123-125);SAF↔mirror 同步环(随文件 sheet/terminal);文件 sheet UI;terminal 工具族。
 - **验证**: chat tsc 干净 + 1295 测试(+17)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧两修:manager 全方法 async(suspend 对等)+ editText 替换串 $ 字面 slice-concat;测试侧三修(全为实现逐字核对后的夹具/期望修正):seed 补建镜像根(requireRoot 自动建目录语义)/search 大小写不敏感(WorkspaceManager.kt:219 ignoreCase=true)/editText replaceAll 计数期望('baz bar foo' 中 'ba' 两处非三处)。
+
+## D-125 — WorkspaceArtifactTools 十一件(workspace_files 门第二组;pdf 两件平台阻断显式抛错)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: app/feature/tools/WorkspaceArtifactTools.kt(862 行全文,11 件 + 全部私有助手)+ feature/workspace WorkspaceManager.kt:88-115/:134-153(readBytes/readBytesCapped/writeBytes 二进制面)+ LocalTools.kt:123(同门装配位)+ WorkspaceModule.kt:46(Koin 构造)。
+- **背景**: workspace_files 门(LocalTools.kt:122-126)含三组:WorkspaceTools(D-124 已落地)+ WorkspaceArtifactTools(本切片)+ ExternalFileTools(外部根模型 + 权限代理,随 picker 设置面留 P1)。artifact 组是 agent 产物加工核心环(HTTP 抓取/下载/压缩包/Office/图片/OCR)。
+- **决策**:
+  1. chat HAR workspace_artifacts.ts(+22 测试,1317 总量):
+     - 十一件全量保留在工具表(协议等价):http_request(method 六件门/headers value.toString().trim('"') 逐字/512KB 截断标志 >= MAX/五键 payload)/download_file(2xx 门/128MB 上限/downloads/<safeFileName(fileNameFromUrl)> 默认落点/content-type 前缀 mime)/archive_list(zip CD 序/tar 512 头走查/tar.gz gzip 剥离;limit 钳 1..1000)/archive_extract(Zip Slip '..' 与绝对路径阻断/overwrite 门 'Target already exists'/三统计)/archive_create(format=zip 门/空源门/目录直子不递归 quirk 忠实)/pdf_read·pdf_render_page(**平台阻断:execute 显式抛 PDF_BLOCKED_MESSAGE,经 track fail 事件,非静默不返假成功**)/office_read(docx/pptx 复用 D-112/114 parseDocxFromZip/parsePptxFromZip;xlsx 本文件 parseXlsxText+stripXml 逐字;64MB cap;max_chars 钳 1..80000)/image_info(64MB cap/六键 payload)/image_convert(artifactScaleDims 缩放公式逐字 — min(wL/w,hL/h,1) 不放大;format 默认 dest 扩展名;quality 钳 1..100;decode 失败 'Unable to decode image: X')/ocr_image(stage1 桩 payload 逐字)。
+     - 纯助手全移植:requireHttpUrl(scheme 精确小写比较,'HTTP://' 拒绝 — java.net.URI == 语义)/fileNameFromUrl/safeFileName('***'→'___' ifBlank 不触发)/safeBaseName(substringBeforeLast 仅剥末扩展)/mimeFromName(MimeTypeMap 常用子集表)/gunzipSplit(flag 感知 FEXTRA/FNAME/FCOMMENT/FHCRC + trailer ISIZE)/readTarHeader/alignTarSize/safeArchiveTarget/crc32(标准向量 0xCBF43926)/buildZipBytes(method 8 + UTF-8 flag + 尺寸预计算无 data descriptor)/dosTimeDate/stripXml/parseXlsxText/artifactScaleDims/limit/jsonArrayStrings/previewText。
+     - track:startTool(inputPreview JSON.stringify take 1200 — 经 store 800 再截,AgentToolActivityStore.kt:55/:152 忠实)/runtime 标签逐字('HttpURLConnection'/'HTTP -> SAF workspace'/'MuPDF'/'PdfRenderer'/'Workspace artifact')/workspace '/workspace'。
+  2. workspace.ts 扩二进制面:WorkspaceFsPort += readBytes/writeBytes(abs,bytes,append);PosixWorkspaceManager += readBytes(:88-93)/readBytesCapped(:95-115 双闸 'File exceeds X byte limit: Y')/writeBytes(:134-153,mimeType 入参直返 — SAF file.type 无镜像源,登记)。
+  3. entry:ArtifactPorts.ets — createArtifactHttpPort(@kit.NetworkKit http,UA 'AmberAgent/0.8' 逐字,ARRAY_BUFFER,connect=read=timeoutMs)/createArtifactImagePort(ImageKit:createImageSource(buffer)/getImageInfo/getImageProperty(ORIENTATION 字符串→int 0-8 映射)/PixelMap.scale(AntiAliasingLevel.HIGH ≈ filter=true)/ImagePacker.packToData;outMimeType → 魔数嗅探 PNG/JPEG/GIF/WEBP/BMP 登记)/createDeflateRawPort(zlib deflateInit2(-15),compressBound 公式,溢出显式抛);WorkspaceStore fs port += readBytes/writeBytes 二进制(fileIo READ_ONLY/APPEND|TRUNC)。
+  4. 装配:ChatPage workspace_files 门内 createWorkspaceTools 之后追加 createWorkspaceArtifactTools(LocalTools.kt:123 同门序);deps = getWorkspaceManager/getToolActivityStore 单例 + 端口工厂;newXmlParser = createEntryXmlPull(D-112 既有)。
+- **偏差/适配登记**:
+  - HttpURLConnection → @kit.NetworkKit http(NetStack DNS,与 RcpHttpClient 同选型);connection.url(重定向后最终 URL)http kit 不回传 → 原请求 URL(登记)。
+  - ZipInputStream 本地头流式序 → readZipEntries 中央目录序(D-113 起既有登记);ZipOutputStream data-descriptor 流式布局 → 尺寸预计算布局(归档功能等价,任意解压器可读)。
+  - GZIPInputStream → 域层 gzip 头剥离 + InflateRawPort(trailer ISIZE = 声明长度)。
+  - Bitmap/ExifInterface → ImageKit;outMimeType → 魔数嗅探;ORIENTATION int → 字符串映射表(不识 → 0 = ORIENTATION_UNDEFINED)。
+  - withTempWorkspaceFile(cacheDir 暂存):harmony 解析器直吃字节 → 省暂存;64MB cap 保留。
+  - OfficeNativeSwitch(native bridge)→ 直连内置解析器(native 未移植,登记)。
+  - pdf_read/pdf_render_page:MuPDF native + PdfRenderer 平台阻断(既有 spike 项)→ 工具保留协议面 + execute 显式抛错(关闭方式同 AppContainer 未落地传输模式先例)。
+- **关闭**: workspace_files 门三组其二全链路可用(六件 + 十一件);agent HTTP/下载/压缩包/Office/图片/OCR 加工环打通。
+- **未移植(P1 登记)**: ExternalFileTools 四件(external_file_list/read/write/delete — 需 externalFileAccess 设置面 + 外部根 picker + 权限代理等价物);SAF↔mirror 同步环;文件 sheet/terminal。
+- **验证**: chat tsc 干净 + 1317 测试(+22)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧四修(全为实现逐字核对后的期望修正):safeFileName('***')→'___'(ifBlank 不触发)/stripXml 标签→' ' 产生前导空格/safeBaseName 仅剥末扩展/inputPreview 经 store 800 再截;entry 侧 ArkTS 四修:Record enum 字面量→mapMethod 函数/对象 spread 禁→逐键拷贝/TextEncoder→util.TextEncoder/zlib 枚举名全限定。

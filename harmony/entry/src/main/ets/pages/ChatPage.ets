@@ -63,7 +63,7 @@ import {
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   probeVisionModelHealth,
   createMcpManagementTools, createMcpServerTools, makeAgentTool, createSkillTools,
-  createWorkspaceTools,
+  createWorkspaceTools, createWorkspaceArtifactTools,
   loadAssistants, saveAssistants, patchAssistant,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
@@ -79,7 +79,10 @@ import {
   getSkillWorkspacePort,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
-import { inflateRawEntry } from '../platform_impl/EntryDocumentParser.ets';
+import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
+import {
+  createArtifactHttpPort, createArtifactImagePort, createDeflateRawPort,
+} from '../platform_impl/ArtifactPorts.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
@@ -1365,10 +1368,10 @@ struct ChatPage {
     // D-083:LocalToolOption 门控(LocalTools.kt:105-124 + ChatService.kt:2237)—
     //   time_info/ask_user/clipboard 按 assistant.localTools 勾选加入;
     //   run_plan_update/deep_read_open 无门恒在(:182/:188);
-    //   workspace_files 六件 D-124 落地(见下);同组
-    //   workspaceArtifactTools/externalFileTools 及其余 9 variant
-    //   (javascript_engine/tts/terminal/screen_automation/system_access/
-    //   webview/icloud_drive/webmount/webmount_eval)未移植 → 门为空转(登记)
+    //   workspace_files 六件 D-124 + artifact 十一件 D-125 落地(见下);同组
+    //   externalFileTools 及其余 9 variant(javascript_engine/tts/terminal/
+    //   screen_automation/system_access/webview/icloud_drive/webmount/
+    //   webmount_eval)未移植 → 门为空转(登记)
     const localOpts: LocalToolOption[] = rt.assistant.localTools;
     const profiledTools: AgentTool[] =
       filterToolProfile([
@@ -1376,10 +1379,24 @@ struct ChatPage {
         ...(localOpts.indexOf('ask_user') >= 0 ? [createAskUserTool()] : []),
         // D-124:workspace 六件(LocalTools.kt:122-126 — workspace_files 门内
         //   workspaceTools.getTools(),位置 = ask_user 之后;同组
-        //   workspaceArtifactTools/externalFileTools 未移植 → P1 登记);
+        //   externalFileTools 未移植 → P1 登记);
         //   activityStore = 全局单例(D-122)
         ...(localOpts.indexOf('workspace_files') >= 0
           ? createWorkspaceTools(getWorkspaceManager(), getToolActivityStore())
+          : []),
+        // D-125:workspace artifact 十一件(LocalTools.kt:123 — 同门第二组
+        //   workspaceArtifactTools.getTools();pdf_read/pdf_render_page 平台
+        //   阻断显式抛错,登记)
+        ...(localOpts.indexOf('workspace_files') >= 0
+          ? createWorkspaceArtifactTools({
+            workspaceManager: getWorkspaceManager(),
+            activityStore: getToolActivityStore(),
+            http: createArtifactHttpPort(),
+            image: createArtifactImagePort(),
+            inflateRaw: inflateRawEntry,
+            deflateRaw: createDeflateRawPort(),
+            newXmlParser: createEntryXmlPull,
+          })
           : []),
         // D-123:skills 工具组(ChatService.kt:2239-2246 — createSkillTools 五/六件,
         //   位置 = localTools 之后/MCP 管理之前);enabledSkills/allSkills =

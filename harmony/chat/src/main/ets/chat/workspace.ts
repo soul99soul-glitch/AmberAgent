@@ -110,6 +110,9 @@ export interface WorkspaceFsPort {
   readText(abs: string): string;
   // append=false → 截断写;父目录须已建(域层 requireOrCreateParent)
   writeText(abs: string, content: string, append: boolean): void;
+  // D-125:二进制读写(WorkspaceManager.kt:88-115/:134-153 载体)
+  readBytes(abs: string): Uint8Array;
+  writeBytes(abs: string, bytes: Uint8Array, append: boolean): void;
   fileSize(abs: string): number;
   mkdirs(abs: string): void;
   // 同父改名/跨设备移动;目标不得已存在(域层前置检查)
@@ -172,6 +175,32 @@ export class PosixWorkspaceManager {
     return this.deps.port.readText(file);
   }
 
+  // :88-93
+  async readBytes(relativePath: string): Promise<Uint8Array> {
+    const file: string = this.requireDocument(relativePath);
+    if (!this.deps.port.isFile(file)) {
+      throw new Error(`Not a file: ${relativePath}`);
+    }
+    return this.deps.port.readBytes(file);
+  }
+
+  // :95-115 — 预检 size + 读后再核(双闸;'File exceeds X byte limit: Y' 逐字)
+  async readBytesCapped(relativePath: string, maxBytes: number): Promise<Uint8Array> {
+    if (maxBytes <= 0) throw new Error('maxBytes must be positive');
+    const file: string = this.requireDocument(relativePath);
+    if (!this.deps.port.isFile(file)) {
+      throw new Error(`Not a file: ${relativePath}`);
+    }
+    if (this.deps.port.fileSize(file) > maxBytes) {
+      throw new Error(`File exceeds ${maxBytes} byte limit: ${relativePath}`);
+    }
+    const bytes: Uint8Array = this.deps.port.readBytes(file);
+    if (bytes.length > maxBytes) {
+      throw new Error(`File exceeds ${maxBytes} byte limit: ${relativePath}`);
+    }
+    return bytes;
+  }
+
   // :117-132
   async writeText(relativePath: string, content: string, append: boolean = false): Promise<WorkspaceEntry> {
     const normalized: string = this.requireFilePath(relativePath);
@@ -184,6 +213,25 @@ export class PosixWorkspaceManager {
       directory: false,
       sizeBytes: this.deps.port.fileSize(file),
       mimeType: textMimeTypeForPath(normalized),
+    };
+  }
+
+  // :134-153 — mimeType = 入参直返(SAF file.type → 镜像无 mime 源,登记);
+  //   sizeBytes = 写后文件长度
+  async writeBytes(
+    relativePath: string, bytes: Uint8Array, mimeType: string = 'application/octet-stream',
+    append: boolean = false,
+  ): Promise<WorkspaceEntry> {
+    const normalized: string = this.requireFilePath(relativePath);
+    const file: string = this.requireOrCreateFile(normalized);
+    this.deps.port.writeBytes(file, bytes, append);
+    const name: string = normalized.substring(normalized.lastIndexOf('/') + 1);
+    return {
+      path: normalized,
+      name,
+      directory: false,
+      sizeBytes: this.deps.port.fileSize(file),
+      mimeType,
     };
   }
 

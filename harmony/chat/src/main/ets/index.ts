@@ -457,6 +457,22 @@ export type {
   WorkspaceFsEntry, WorkspaceFsPort, PosixWorkspaceManagerDeps,
 } from './chat/workspace.ts';
 
+// D-125:workspace artifact 十一件(WorkspaceArtifactTools.kt 全文;
+//   pdf 两件平台阻断显式抛错登记;ExternalFileTools 留 P1)
+export {
+  createWorkspaceArtifactTools, requireHttpUrl, fileNameFromUrl, safeFileName,
+  safeBaseName, mimeFromName, gunzipSplit, safeArchiveTarget, archiveTypeOf,
+  crc32, buildZipBytes, dosTimeDate, stripXml, parseXlsxText, artifactScaleDims,
+  OFFICE_UNSUPPORTED, PDF_BLOCKED_MESSAGE,
+  MAX_HTTP_BODY_BYTES, MAX_DOWNLOAD_BYTES, MAX_ARCHIVE_BYTES,
+  MAX_ARCHIVE_ENTRY_BYTES, MAX_IMAGE_BYTES, MAX_WORKSPACE_TEMP_FILE_BYTES,
+} from './chat/workspace_artifacts.ts';
+export type {
+  ArtifactHttpRequest, ArtifactHttpResponse, ArtifactHttpPort,
+  ArtifactImageInfo, ArtifactImagePort, DeflateRawPort,
+  WorkspaceArtifactToolsDeps, ArchiveType, ZipWriteEntry, ArtifactScaleResult,
+} from './chat/workspace_artifacts.ts';
+
 export {
   makeProviderModel, makeBalanceOption,
   makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,

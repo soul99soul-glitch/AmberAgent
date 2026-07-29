@@ -120,6 +120,28 @@ export const createEntryWorkspaceFsPort = (): WorkspaceFsPort => ({
       fileIo.closeSync(file);
     }
   },
+  // D-125:二进制读写(WorkspaceArtifactTools 载体)
+  readBytes: (abs: string): Uint8Array => {
+    const file = fileIo.openSync(abs, fileIo.OpenMode.READ_ONLY);
+    try {
+      const size: number = fileIo.statSync(file.fd).size;
+      const buf: ArrayBuffer = new ArrayBuffer(size);
+      fileIo.readSync(file.fd, buf);
+      return new Uint8Array(buf);
+    } finally {
+      fileIo.closeSync(file);
+    }
+  },
+  writeBytes: (abs: string, bytes: Uint8Array, append: boolean): void => {
+    const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE |
+      (append ? fileIo.OpenMode.APPEND : fileIo.OpenMode.TRUNC);
+    const file = fileIo.openSync(abs, mode);
+    try {
+      fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
+    } finally {
+      fileIo.closeSync(file);
+    }
+  },
   fileSize: (abs: string): number => fileIo.statSync(abs).size,
   mkdirs: (abs: string): void => {
     if (isDirectorySync(abs)) return;

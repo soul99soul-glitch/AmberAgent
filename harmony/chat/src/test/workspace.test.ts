@@ -28,7 +28,7 @@ const norm = (p: string): string => {
 
 class MemWsFs implements WorkspaceFsPort {
   dirs: Set<string> = new Set<string>(['/']);
-  files: Map<string, string> = new Map<string, string>();
+  files: Map<string, Uint8Array> = new Map<string, Uint8Array>();
 
   exists(abs: string): boolean {
     const p: string = norm(abs);
@@ -67,19 +67,34 @@ class MemWsFs implements WorkspaceFsPort {
 
   readText(abs: string): string {
     const p: string = norm(abs);
-    const content: string | undefined = this.files.get(p);
+    const content: Uint8Array | undefined = this.files.get(p);
+    if (content === undefined) throw new Error(`NoSuchFile: ${p}`);
+    return new TextDecoder().decode(content);
+  }
+
+  writeText(abs: string, content: string, append: boolean): void {
+    this.writeBytes(abs, new TextEncoder().encode(content), append);
+  }
+
+  readBytes(abs: string): Uint8Array {
+    const p: string = norm(abs);
+    const content: Uint8Array | undefined = this.files.get(p);
     if (content === undefined) throw new Error(`NoSuchFile: ${p}`);
     return content;
   }
 
-  writeText(abs: string, content: string, append: boolean): void {
+  writeBytes(abs: string, bytes: Uint8Array, append: boolean): void {
     const p: string = norm(abs);
     const parent: string = p.substring(0, p.lastIndexOf('/')) || '/';
     if (!this.dirs.has(parent)) throw new Error(`NoSuchDirectory: ${parent}`);
-    if (append) {
-      this.files.set(p, (this.files.get(p) ?? '') + content);
+    if (append && this.files.has(p)) {
+      const prev: Uint8Array = this.files.get(p) as Uint8Array;
+      const merged: Uint8Array = new Uint8Array(prev.length + bytes.length);
+      merged.set(prev, 0);
+      merged.set(bytes, prev.length);
+      this.files.set(p, merged);
     } else {
-      this.files.set(p, content);
+      this.files.set(p, new Uint8Array(bytes));
     }
   }
 
@@ -109,7 +124,7 @@ class MemWsFs implements WorkspaceFsPort {
       if (d === f || d.startsWith(prefix)) movedDirs.push([t + d.substring(f.length), d]);
     });
     moved.forEach((pair: [string, string]): void => {
-      const content: string = this.files.get(pair[1]) as string;
+      const content: Uint8Array = this.files.get(pair[1]) as Uint8Array;
       this.files.delete(pair[1]);
       this.files.set(pair[0], content);
     });
@@ -120,7 +135,7 @@ class MemWsFs implements WorkspaceFsPort {
   }
 
   copyFile(fromAbs: string, toAbs: string): void {
-    const content: string | undefined = this.files.get(norm(fromAbs));
+    const content: Uint8Array | undefined = this.files.get(norm(fromAbs));
     if (content === undefined) throw new Error(`NoSuchFile: ${fromAbs}`);
     const t: string = norm(toAbs);
     const parent: string = t.substring(0, t.lastIndexOf('/')) || '/';
