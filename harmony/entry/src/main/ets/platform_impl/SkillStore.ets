@@ -14,14 +14,17 @@
 //   - File.renameTo 平台依赖 → POSIX rename 语义(目标空目录/文件可覆盖,
 //     非空目录失败;saveSkillFilesAtomically 的 backup 目录恒为空 → 可覆盖)
 //   - File.mkdirs 失败返回 false(不抛)→ mkdirSync try/catch → false
-//   - installBuiltinSkillsIfMissing(assets/builtin-skills 四件)= rawfile
-//     打包决策 → P1 登记(本切片不装内置技能)
+// D-126 续:installBuiltinSkillsIfMissing(SkillManager.kt:66-87)= rawfile 打包
+//   entry/src/main/resources/rawfile/builtin-skills/(4 件 SKILL.md 自 Android
+//   assets 逐字拷贝);Context.assets.list/open → resourceManager
+//   getRawFileListSync/getRawFileContentSync 同步读
 
 import { fileIo } from '@kit.CoreFileKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { Context } from '@kit.AbilityKit';
 import type {
   SkillFilePort, SkillDirEntry, SkillWorkspacePort, SkillWorkspaceEntry,
+  BuiltinSkillAssetPort,
 } from '@amber/chat-domain';
 
 const TAG: string = 'SkillStore';
@@ -141,6 +144,17 @@ export const createEntrySkillFilePort = (): SkillFilePort => ({
       fileIo.closeSync(file);
     }
   },
+  // D-126:二进制写(copyAssetDirectory input.copyTo(output) 载体)
+  writeBytes: (path: string, bytes: Uint8Array): void => {
+    const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE |
+      fileIo.OpenMode.TRUNC;
+    const file = fileIo.openSync(path, mode);
+    try {
+      fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
+    } finally {
+      fileIo.closeSync(file);
+    }
+  },
   deleteRecursively: deleteRecursivelySync,
   renameTo: (from: string, to: string): boolean => {
     try {
@@ -217,3 +231,24 @@ export const createEntrySkillWorkspacePort = (): SkillWorkspacePort => ({
     return Promise.resolve(entries);
   },
 });
+
+// ===== BuiltinSkillAssetPort(rawfile 同步读;D-126) =====
+// Context.assets.list(assetPath):目录 → 子名;文件 → [](copyAssetDirectory
+//   判据)→ resourceManager.getRawFileListSync 同语义:目录 → 子名数组;
+//   文件/不存在 → [](try/catch 归一,Android orEmpty() 同)
+// Context.assets.open(assetPath) → getRawFileContentSync 一次性字节读
+
+export const createEntryBuiltinSkillAssetPort = (): BuiltinSkillAssetPort => {
+  const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+  return {
+    list: (path: string): string[] => {
+      try {
+        return ctx.resourceManager.getRawFileListSync(path);
+      } catch (_e) {
+        return []; // assets.list 文件路径/不存在 → null → orEmpty()
+      }
+    },
+    readBytes: (path: string): Uint8Array =>
+      ctx.resourceManager.getRawFileContentSync(path),
+  };
+};

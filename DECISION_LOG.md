@@ -1841,3 +1841,28 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: workspace_files 门三组其二全链路可用(六件 + 十一件);agent HTTP/下载/压缩包/Office/图片/OCR 加工环打通。
 - **未移植(P1 登记)**: ExternalFileTools 四件(external_file_list/read/write/delete — 需 externalFileAccess 设置面 + 外部根 picker + 权限代理等价物);SAF↔mirror 同步环;文件 sheet/terminal。
 - **验证**: chat tsc 干净 + 1317 测试(+22)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧四修(全为实现逐字核对后的期望修正):safeFileName('***')→'___'(ifBlank 不触发)/stripXml 标签→' ' 产生前导空格/safeBaseName 仅剥末扩展/inputPreview 经 store 800 再截;entry 侧 ArkTS 四修:Record enum 字面量→mapMethod 函数/对象 spread 禁→逐键拷贝/TextEncoder→util.TextEncoder/zlib 枚举名全限定。
+
+## D-126 — 内置技能 rawfile 安装(installBuiltinSkillsIfMissing 闭环)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: app/src/main/java/app/amber/core/files/SkillManager.kt:66-87(installBuiltinSkillsIfMissing)+ :244-263(copyAssetDirectory)+ :16(BUILTIN_SKILLS_ASSET_DIR='builtin-skills')+ app/src/main/java/app/amber/agent/AmberAgentApp.kt:205-213(启动 fire-and-forget 调用)+ app/src/main/assets/builtin-skills/ 四件(deep-read-fact-check/skill-creator/会议准备/监控文档,各单 SKILL.md)。
+- **背景**: D-123 skills 子系统域层落地时,内置技能安装环因打包形态(rawfile vs assets)登记 P1 残留。本切片闭环:Android assets.list/open → harmony rawfile 同步读,四件 SKILL.md 逐字拷贝,启动时缺失即装。核心环等价优先级(skills 可用性)。
+- **决策**:
+  1. chat HAR skills.ts:
+     - SkillFilePort += writeBytes(path,bytes)(copyAssetDirectory input.copyTo(output) 二进制载体)。
+     - 新增 BuiltinSkillAssetPort 端口:list(path) 目录→子名数组/文件→[](copyAssetDirectory 空 children 判据);readBytes(path) 一次性字节。
+     - SkillManagerDeps += assets?: BuiltinSkillAssetPort(缺省→空转)+ log?: (message)=>void(Log.w → hilog 注入)。
+     - SkillManager += installBuiltinSkillsIfMissing() 逐字:assets.list('builtin-skills') 逐名 → resolveSkillDirPath 逃逸检查 null 跳过 → SKILL.md 已存在跳过(不覆盖用户改动)→ try mkdirs+copyAssetDirectory+installedAny=true,catch → deps.log(:82 文案骨架)+ deleteRecursively 回滚;installedAny → invalidateSkillCache。
+     - copyAssetDirectory 逐字:children 空 → 父目录 mkdirs(结果忽略)+ writeBytes 文件拷贝;否则 mkdirs + 逐子递归(嵌套任意深)。
+     - +4 测试(1321 总量):assets 缺省空转/缺失全量安装(二层嵌套递归 + 缓存失效重扫)/SKILL.md 已存在跳过不覆盖/拷贝失败 log+deleteRecursively 回滚且其余技能照常安装。
+  2. rawfile 打包:harmony/entry/src/main/resources/rawfile/builtin-skills/ 新建,四件 SKILL.md 自 Android assets 逐字拷贝(cp -R,Android 源只读)。
+  3. entry SkillStore.ets:createEntrySkillFilePort += writeBytes(fileIo READ_WRITE|CREATE|TRUNC + writeSync bytes.buffer);新增 createEntryBuiltinSkillAssetPort() — ctx.resourceManager.getRawFileListSync(path)(try/catch → [],Android orEmpty() 同语义)/getRawFileContentSync(path)。
+  4. 装配:AppContainer getSkillManager deps += assets + log(hilog.warn);EntryAbility.onCreate fire-and-forget 调 installBuiltinSkillsIfMissing().catch → hilog.error(AmberAgentApp.kt:205-213 AppScope.launch(Dispatchers.IO) + runCatching/onFailure Log.e 对等;失败不阻塞启动)。
+- **偏差/适配登记**:
+  - Context.assets(流式 AssetManager)→ resourceManager rawfile 同步读(getRawFileListSync/getRawFileContentSync);文件路径 list → try/catch 归一 [](orEmpty 同)。
+  - suspend withContext(Dispatchers.IO) → async 方法 + 调用端 promise 丢弃(suspend 对等既有登记)。
+  - Log.w(:82)/Log.e(:210)→ deps.log/hilog.error 注入(无 token/密钥/隐私数据,仅技能名+错误)。
+- **关闭**: 内置技能四件首启自动落盘 filesDir/skills/,skills_list/use_skill 立即可用;用户已有同名技能不被覆盖;部分失败有日志+回滚,不残留半装目录。
+- **未移植(P1 登记)**: SkillsPage/SkillDetailPage UI(约 2000 行,既有项)。
+- **验证**: chat tsc 干净 + 1321 测试(+4)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试夹具 MemFs += writeBytes(SkillFilePort 接口变更连带)。

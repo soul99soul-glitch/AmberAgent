@@ -53,6 +53,7 @@ import { getMcpSettingsStore, initMcpSettingsStore } from '../platform_impl/McpS
 import { getMcpFilesStore } from '../platform_impl/McpFilesStore.ets';
 import {
   createEntrySkillFilePort, createEntrySkillWorkspacePort,
+  createEntryBuiltinSkillAssetPort,
 } from '../platform_impl/SkillStore.ets';
 import { createEntryWorkspaceManager } from '../platform_impl/WorkspaceStore.ets';
 
@@ -311,6 +312,11 @@ export const getSkillManager = (): SkillManager => {
     skillManager = new SkillManager({
       port: createEntrySkillFilePort(),
       skillsRoot: `${ctx.filesDir}/skills`,
+      // D-126:内置技能 rawfile 资产 + Log.w(SkillManager.kt:82)→ hilog
+      assets: createEntryBuiltinSkillAssetPort(),
+      log: (message: string): void => {
+        hilog.warn(DOMAIN, TAG, '%{public}s', message);
+      },
       onSkillDeleted: (name: string): void => {
         loadAssistants(getChatKvStore())
           .then(async (list: Assistant[] | null): Promise<void> => {

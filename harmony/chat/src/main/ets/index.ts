@@ -439,7 +439,7 @@ export {
 } from './chat/skills.ts';
 export type {
   SkillMetadata, SkillScanIssue, SkillFilePort, SkillDirEntry, SkillManagerDeps,
-  SkillWorkspacePort, SkillWorkspaceEntry, CreateSkillToolsDeps,
+  SkillWorkspacePort, SkillWorkspaceEntry, CreateSkillToolsDeps, BuiltinSkillAssetPort,
 } from './chat/skills.ts';
 
 // D-124:workspace 子系统域层(WorkspaceManager.kt/WorkspacePaths.kt/

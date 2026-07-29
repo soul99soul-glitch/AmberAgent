@@ -41,3 +41,6 @@ docs/cloud-design/**/.thumbnail
 /harmony/.idea/
 .zcode/
 BuildProfile.ets
+
+# hvigor module-level build state
+harmony/*/.hvigor/

@@ -7,6 +7,7 @@ import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { getSkillManager } from '../di/AppContainer.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -18,6 +19,12 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
     // Want 契约(§7.2):分享/deep-link 收 URL/title → 写 AppStorage 供 Index 跳转
     this.routeFromWant(want);
+    // D-126:AmberAgentApp.kt:205-213 — 启动 fire-and-forget 装内置技能
+    //   (Dispatchers.IO 异步 → promise 丢弃;失败仅 Log.e,不阻塞启动)
+    getSkillManager().installBuiltinSkillsIfMissing()
+      .catch((e: Error): void => {
+        hilog.error(DOMAIN, TAG, 'installBuiltinSkills failed: %{public}s', String(e));
+      });
   }
 
   onNewWant(want: Want, _launchParam: AbilityConstant.LaunchParam): void {

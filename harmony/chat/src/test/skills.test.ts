@@ -12,7 +12,7 @@ import {
 } from '../main/ets/chat/skills.ts';
 import type {
   SkillFilePort, SkillDirEntry, SkillWorkspacePort, SkillWorkspaceEntry,
-  SkillMetadata,
+  SkillMetadata, BuiltinSkillAssetPort,
 } from '../main/ets/chat/skills.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
@@ -95,6 +95,14 @@ class MemFs implements SkillFilePort {
     const parent: string = p.substring(0, p.lastIndexOf('/')) || '/';
     if (!this.dirs.has(parent)) throw new Error(`NoSuchDirectory: ${parent}`);
     this.files.set(p, content);
+  }
+
+  // D-126:SkillFilePort.writeBytes — 与 writeText 同语义,载体换字节
+  writeBytes(path: string, bytes: Uint8Array): void {
+    const p: string = norm(path);
+    const parent: string = p.substring(0, p.lastIndexOf('/')) || '/';
+    if (!this.dirs.has(parent)) throw new Error(`NoSuchDirectory: ${parent}`);
+    this.files.set(p, new TextDecoder().decode(bytes));
   }
 
   deleteRecursively(path: string): boolean {
@@ -819,4 +827,116 @@ test('skill_enable/skill_disable:needsApproval + payload + 回调逐字', async 
     { name: 'demo', enable: true },
     { name: 'demo', enable: false },
   ]);
+});
+
+// ===== D-126 installBuiltinSkillsIfMissing(SkillManager.kt:66-87 + :244-263) =====
+
+// 内存 BuiltinSkillAssetPort:Map 路径 → 文本;目录 list → 直属子名;文件 list → []
+class MemAssets implements BuiltinSkillAssetPort {
+  files: Map<string, string> = new Map<string, string>();
+  failOn: string | null = null;
+
+  list(path: string): string[] {
+    if (this.files.has(path)) return []; // 文件 → []
+    const prefix: string = path + '/';
+    const out: string[] = [];
+    this.files.forEach((_v: string, f: string): void => {
+      if (!f.startsWith(prefix)) return;
+      const rest: string = f.substring(prefix.length);
+      const seg: string = rest.split('/')[0];
+      if (out.indexOf(seg) < 0) out.push(seg);
+    });
+    out.sort();
+    return out;
+  }
+
+  readBytes(path: string): Uint8Array {
+    if (this.failOn !== null && path.indexOf(this.failOn) >= 0) {
+      throw new Error(`asset read failed: ${path}`);
+    }
+    const content: string | undefined = this.files.get(path);
+    if (content === undefined) throw new Error(`NoSuchAsset: ${path}`);
+    return te.encode(content);
+  }
+}
+
+const seedAssets = (assets: MemAssets, name: string, skillMd: string): void => {
+  assets.files.set(`builtin-skills/${name}/SKILL.md`, skillMd);
+};
+
+test('installBuiltinSkillsIfMissing:assets 缺省 → 空转', async () => {
+  const fs: MemFs = new MemFs();
+  const m: SkillManager = makeManager(fs);
+  await m.installBuiltinSkillsIfMissing();
+  assert.equal(fs.exists('/files/skills'), false); // 全程无写
+});
+
+test('installBuiltinSkillsIfMissing:缺失技能全量安装(递归嵌套 + 缓存失效重扫)', async () => {
+  const fs: MemFs = new MemFs();
+  fs.mkdirs('/files/skills');
+  const m: SkillManager = makeManager(fs);
+  assert.deepEqual(m.listSkills(), []); // 缓存空
+  const assets: MemAssets = new MemAssets();
+  seedAssets(assets, 'deep-read-fact-check', GOOD_MD);
+  seedAssets(assets, 'skill-creator', GOOD_MD);
+  assets.files.set('builtin-skills/skill-creator/scripts/gen.py', 'print(1)'); // 嵌套子目录
+  assets.files.set('builtin-skills/skill-creator/scripts/lib/util.py', 'x=1'); // 二层嵌套
+  (m as unknown as { deps: { assets: MemAssets } }); // 类型旁路说明:直接重建带 assets 的 manager
+  const m2: SkillManager = new SkillManager({
+    port: fs,
+    skillsRoot: '/files/skills',
+    assets,
+  });
+  await m2.installBuiltinSkillsIfMissing();
+  assert.equal(fs.readBytes('/files/skills/deep-read-fact-check/SKILL.md').length > 0, true);
+  assert.equal(
+    new TextDecoder().decode(fs.readBytes('/files/skills/skill-creator/SKILL.md')), GOOD_MD);
+  assert.equal(
+    new TextDecoder().decode(fs.readBytes('/files/skills/skill-creator/scripts/gen.py')),
+    'print(1)');
+  assert.equal(
+    new TextDecoder().decode(fs.readBytes('/files/skills/skill-creator/scripts/lib/util.py')),
+    'x=1');
+  // installedAny → invalidateSkillCache → listSkills 重扫到两件
+  const names: string[] = m2.listSkills().map((s: SkillMetadata): string => s.name).sort();
+  assert.deepEqual(names, ['demo', 'demo']); // 两件 GOOD_MD name 都是 demo
+  assert.equal(m2.listSkills().length, 2);
+});
+
+test('installBuiltinSkillsIfMissing:SKILL.md 已存在 → 跳过不覆盖', async () => {
+  const fs: MemFs = new MemFs();
+  seedSkill(fs, 'skill-creator', '---\nname: custom\ndescription: "mine"\n---\n\nbody');
+  const assets: MemAssets = new MemAssets();
+  seedAssets(assets, 'skill-creator', GOOD_MD);
+  const m: SkillManager = new SkillManager({ port: fs, skillsRoot: '/files/skills', assets });
+  await m.installBuiltinSkillsIfMissing();
+  // 原内容未被内置版本覆盖
+  assert.equal(
+    new TextDecoder().decode(fs.readBytes('/files/skills/skill-creator/SKILL.md')),
+    '---\nname: custom\ndescription: "mine"\n---\n\nbody');
+});
+
+test('installBuiltinSkillsIfMissing:拷贝失败 → log + deleteRecursively 回滚,其余继续', async () => {
+  const fs: MemFs = new MemFs();
+  const logs: string[] = [];
+  const assets: MemAssets = new MemAssets();
+  seedAssets(assets, 'bad-skill', GOOD_MD);
+  assets.files.set('builtin-skills/bad-skill/data/x.txt', 'x');
+  assets.failOn = 'data/x.txt'; // 递归拷贝到子文件时炸
+  seedAssets(assets, 'good-skill', GOOD_MD);
+  const m: SkillManager = new SkillManager({
+    port: fs,
+    skillsRoot: '/files/skills',
+    assets,
+    log: (msg: string): void => { logs.push(msg); },
+  });
+  await m.installBuiltinSkillsIfMissing();
+  // 失败技能整目录回滚
+  assert.equal(fs.exists('/files/skills/bad-skill'), false);
+  // log 记录 SkillManager.kt:82 文案骨架
+  assert.equal(logs.length, 1);
+  assert.equal(
+    logs[0].startsWith('installBuiltinSkillsIfMissing: Failed to install bad-skill:'), true);
+  // 其余技能照常安装(逐个 try,互不影响)
+  assert.equal(fs.exists('/files/skills/good-skill/SKILL.md'), true);
 });

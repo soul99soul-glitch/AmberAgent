@@ -310,10 +310,20 @@ export interface SkillFilePort {
   mkdirs(path: string): boolean;
   readBytes(path: string): Uint8Array;
   writeText(path: string, content: string): void;
+  // D-126:二进制写(copyAssetDirectory input.copyTo(output) 载体)
+  writeBytes(path: string, bytes: Uint8Array): void;
   deleteRecursively(path: string): boolean;
   renameTo(from: string, to: string): boolean;
   // File.walkTopDown().filter{isFile} → 相对 root 的 '/' 分隔路径(稳定序)
   walkFiles(root: string): string[];
+}
+
+// D-126:内置技能资产面(Context.assets → harmony rawfile;entry =
+//   resourceManager getRawFileListSync/getRawFileContentSync)
+//   assets.list(path):目录 → 子名数组;文件 → [](copyAssetDirectory 判据)
+export interface BuiltinSkillAssetPort {
+  list(path: string): string[];
+  readBytes(path: string): Uint8Array;
 }
 
 // ===== SkillManager(SkillManager.kt:10-283;缓存 + 扫描 + 原子落盘) =====
@@ -324,6 +334,10 @@ export interface SkillManagerDeps {
   skillsRoot: string;
   // deleteSkill 后清理所有 assistants 的 enabledSkills(:114-125)→ entry 注入
   onSkillDeleted?: (name: string) => void;
+  // D-126:内置技能 rawfile 资产(缺省 → installBuiltinSkillsIfMissing 空转)
+  assets?: BuiltinSkillAssetPort;
+  // Log.w 告警(:82)→ entry 注入 hilog
+  log?: (message: string) => void;
 }
 
 export class SkillManager {
@@ -358,6 +372,49 @@ export class SkillManager {
       });
     this.cachedSkills = skills;
     return skills;
+  }
+
+  // D-126::66-87(installBuiltinSkillsIfMissing)+ :244-263(copyAssetDirectory)
+  //   BUILTIN_SKILLS_ASSET_DIR = 'builtin-skills'(:16);SKILL.md 存在即跳过;
+  //   失败 → Log.w(→ deps.log)+ deleteRecursively 回滚;装过 → 缓存失效
+  async installBuiltinSkillsIfMissing(): Promise<void> {
+    const assets: BuiltinSkillAssetPort | undefined = this.deps.assets;
+    if (assets === undefined) return;
+    const builtinSkillNames: string[] = assets.list('builtin-skills');
+    let installedAny: boolean = false;
+    for (const skillName of builtinSkillNames) {
+      const targetDir: string | null = resolveSkillDirPath(this.deps.skillsRoot, skillName);
+      if (targetDir === null) continue;
+      if (this.deps.port.exists(targetDir + '/SKILL.md')) continue;
+      try {
+        this.deps.port.mkdirs(targetDir);
+        this.copyAssetDirectory(assets, `builtin-skills/${skillName}`, targetDir);
+        installedAny = true;
+      } catch (e) {
+        if (this.deps.log !== undefined) {
+          this.deps.log(`installBuiltinSkillsIfMissing: Failed to install ${skillName}: ${String(e)}`);
+        }
+        this.deps.port.deleteRecursively(targetDir);
+      }
+    }
+    if (installedAny) this.invalidateSkillCache();
+  }
+
+  // :244-263 — children 空 → 文件拷贝(父目录 mkdirs 结果忽略);否则递归
+  private copyAssetDirectory(
+    assets: BuiltinSkillAssetPort, assetPath: string, targetDir: string,
+  ): void {
+    const children: string[] = assets.list(assetPath);
+    if (children.length === 0) {
+      const parent: string = targetDir.substring(0, targetDir.lastIndexOf('/'));
+      this.deps.port.mkdirs(parent);
+      this.deps.port.writeBytes(targetDir, assets.readBytes(assetPath));
+      return;
+    }
+    this.deps.port.mkdirs(targetDir);
+    children.forEach((child: string): void => {
+      this.copyAssetDirectory(assets, `${assetPath}/${child}`, `${targetDir}/${child}`);
+    });
   }
 
   // :42-64
