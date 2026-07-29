@@ -45,6 +45,7 @@ import {
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
   McpManager, SkillManager, AgentToolActivityStore, PosixWorkspaceManager,
   AgentPromptConfigRepository, createAgentPromptConfigTool,
+  AgentPermissionBroker, createPermissionsStatusTool,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -64,6 +65,9 @@ import {
   createEntryPromptConfigFilePort, createEntryCouncilStrategy,
   createEntryAgentPromptSettingsPort, promptConfigFilesDir,
 } from '../platform_impl/PromptConfigStore.ets';
+import {
+  createEntryPermissionPlatformPort, auditPermissionUseLog,
+} from '../platform_impl/PermissionStatusPortImpl.ets';
 import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
@@ -212,6 +216,23 @@ export const getAgentPromptConfigTool = (): AgentTool =>
     repository: getAgentPromptConfigRepository(),
     settings: createEntryAgentPromptSettingsPort(getChatKvStore()),
   });
+
+// D-129:AgentPermissionBroker 单例(Koin system 模块 — AgentPermissionBroker
+//   (context,isDebugBuild));平台调用下沉 createEntryPermissionPlatformPort
+//   (atManager.checkAccessTokenSync;special access 六类无对应 → Unsupported)
+let permissionBroker: AgentPermissionBroker | null = null;
+export const getPermissionBroker = (): AgentPermissionBroker => {
+  if (permissionBroker === null) {
+    permissionBroker = new AgentPermissionBroker(
+      createEntryPermissionPlatformPort(), auditPermissionUseLog,
+    );
+  }
+  return permissionBroker;
+};
+
+// permissions_status 工具(LocalTools.kt:94 lazy + :180 装配位)
+export const getPermissionsStatusTool = (): AgentTool =>
+  createPermissionsStatusTool(getPermissionBroker());
 
 // ===== Model Council 装配 =====
 let councilRunner: ModelCouncilTextRunner | null = null;

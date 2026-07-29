@@ -1910,3 +1910,26 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: agent_prompt_config 六 action 全链路可用(agent 可读写四镜像 markdown + 设置即时同步);subagent 六内置角色数据面落地(为 subagent 运行子系统 P1 备好模型/定义);council 席位提示词持久化进 agent_runtime。
 - **未移植(P1 登记)**: SubAgentModels 运行面(TaskSpec/Run/Result/Status)+ SubAgentRunner/Manager/Validator/ToolScope/ReportTool(2030 行 subagent 运行子系统);SubAgentOverride 非 prompt 字段(model/temperature/reasoning/budgets)的消费端;permissions_status/agent_cron/generate_image/eval_javascript(QuickJS 阻断)/Terminal/ScreenAutomation/SystemAccess 等(既有登记)。
 - **验证**: chat tsc 干净 + 1347 测试(+20)/deepread tsc 干净 + 610/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧一修(自身笔误:未知席位用例先调成功路径);entry 侧 ArkTS 四修(见上)。
+
+## D-129 — permissions_status 工具 + AgentPermissionBroker/Registry(域层端口化)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: feature/system/.../AgentPermissionBroker.kt(全文 459 行 — 四枚举/RuntimePermissionSpec/AgentPermissionCapability/Broker/Registry 24 条)+ core/ai/tools/PermissionsStatusTool.kt(全文 79 行)+ LocalTools.kt:94(lazy)/:180(注册位)。
+- **背景**: LocalTools 无条件尾部 agentCron 之前的 permissions_status 未移植;D-060 登记「AgentPermissionBroker 未移植 → capabilities 恒空」由此解除一部分(工具组 tools_list 的 required_permissions/risk 仍走 ToolRegistry metadata,后续接线)。它同时是后续所有系统能力工具族(contacts/sms/calendar/media/location 等)的权限门基础设施(ensureGranted)。
+- **决策**:
+  1. chat HAR permission_status.ts(+18 测试,1365 总量):
+     - 四枚举逐字(名保留 PascalCase,输出处 lowercase);RuntimePermissionSpec(minSdk/maxSdk 模型保留);AgentPermissionCapability 十字段 + currentRuntimePermissions(sdk 过滤+distinct);Registry 24 条逐字(顺序/标题/描述/risk/grantMode/toolNames/minSdk/debugOnly)。
+     - Broker 逐字:getCapability(未知 'Unknown permission capability: X')/getStatus(debugOnly→Unsupported → minSdk→Unsupported → special → runtime All/Any)/ensureGranted(错误文案逐字 + audit)/runtimePermissionsFor/runtimePermissionsForCoreBatch(排 debugOnly/special/High,distinct)/auditPermissionUse('tool=X capability=Y reason=Z')。
+     - 工具逐字:capability_id 过滤;include_how_to_grant 严格布尔(contentOrNull→toBooleanStrictOrNull→默认 true);payload 键序 all_files_access_declared/granted/manage_intent_available/capabilities;条目键序 capability_id/title/description/risk/status/runtime_permissions/special_access?/tools/how_to_grant?;Tool 默认审批旗标(needsApproval=false/allowsAutoApproval=true)。
+  2. 平台调用端口化:AgentPermissionPlatformPort(isDebugBuild/currentApiLevel/checkSelfPermission/specialAccessGranted→boolean|null/canOpenSpecialAccessSettings);createSpecialAccessIntent(Intent?)→canOpenSpecialAccessSettings(boolean)等价;audit → 回调注入(entry hilog)。
+  3. 权限名映射 android.permission.*→ohos.permission.*(映射表文件头注;多版本 minSdk/maxSdk 条目折叠单条);special access 六类 HarmonyOS 无对应 → port null → Unsupported(D-060 降级先例);checkAccessTokenSync 对未声明/不存在名抛 BusinessError → catch → Denied(= Android 未声明 manifest 语义)。
+  4. entry PermissionStatusPortImpl.ets:atManager.checkAccessTokenSync + bundleManager.getBundleInfoForSelfSync(tokenId 缓存)+ deviceInfo.sdkApiVersion + BuildProfile.DEBUG;module.json5 声明 9 个普通 user_grant 权限(联系人/日历/麦克风/位置/蓝牙/活动识别,含 usedScene;受限 ACL 短信/通话/媒体库不声明,恒 Denied 如实展示)。
+  5. 装配:AppContainer getPermissionBroker/getPermissionsStatusTool 单例;ChatPage 注册于 runPlanUpdate 之前(LocalTools.kt:180 位,agentCron 未移植占位注释)。
+- **偏差/适配登记**:
+  - PD-010:权限名映射 + special access Unsupported + how_to_grant 平台词(Android→HarmonyOS)。
+  - manage_all_files minSdk=30(Build.VERSION_CODES.R)保留原值;currentApiLevel=deviceInfo.sdkApiVersion(API 20 设备 < 30 → Unsupported,与 special null 殊途同归)。
+  - 工具 description 保留 'Android permission capability' 原文(模型侧协议字符串,不改)。
+- **关闭**: permissions_status 全链路可用(24 能力状态实时反映真实授权态);ensureGranted 基础设施就绪(后续系统能力工具族的门)。
+- **未移植(P1 登记)**: 系统权限设置页 UI(how_to_grant 指引目标);授权请求流(requestPermissionsFromUser 弹窗);special access 各能力 picker 免权限替代路径评估(媒体库 PhotoAccessHelper);agent_cron 四件(:181 位)。
+- **验证**: chat tsc 干净 + 1365 测试(+18)/deepread tsc 干净 + 610/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧两修(自身笔误:sdk 过滤用例第三条默认范围规格预期错误;payload 用例 apiLevel 默认 20 < manage_all_files minSdk 30);entry 侧一修(user_grant 权限需 usedScene 属性)。

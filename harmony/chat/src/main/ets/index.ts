@@ -903,3 +903,16 @@ export {
   DEFAULT_IMAGE_PROMPT_INJECTION, DEFAULT_IMAGE_NEGATIVE_PROMPT_INJECTION,
   DEFAULT_CONTEXT_COMPACTION_HANDOFF_PROMPT,
 } from './chat/agent_prompt_config.ts';
+
+// ===== D-129:permissions_status 工具 + AgentPermissionBroker/Registry =====
+export type {
+  AgentPermissionRisk, AgentPermissionStatus, AgentSpecialAccess,
+  RuntimeGrantMode, RuntimePermissionSpec, AgentPermissionCapability,
+  AgentPermissionCapabilityInit, AgentPermissionPlatformPort,
+} from './chat/permission_status.ts';
+export {
+  AgentPermissionBroker, AGENT_PERMISSION_CAPABILITIES,
+  makeRuntimePermissionSpec, makeAgentPermissionCapability,
+  runtimePermissionSpecApplies, capabilityCurrentRuntimePermissions,
+  createPermissionsStatusTool,
+} from './chat/permission_status.ts';

@@ -77,6 +77,7 @@ import {
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
   getWorkspaceManager,
   getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
+  getPermissionsStatusTool,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
@@ -1481,6 +1482,9 @@ struct ChatPage {
             return Promise.resolve();
           },
         }),
+        // D-129:permissions_status(LocalTools.kt:180 无条件,位置 =
+        //   agentCron(:181,未移植)之前/runPlanUpdate(:182)之前)
+        getPermissionsStatusTool(),
         // D-061:本地工具三件(LocalTools runPlanUpdateTool/clipboardTool/
         //   deepReadOpenTool);deep_read bus 收集器 = router 打开深读页
         //   (Index.startDeepRead:120-127 同路由;页面存活即有收集者)

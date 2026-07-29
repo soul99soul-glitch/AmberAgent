@@ -37,10 +37,30 @@
         ]
       }
     ],
-    // Deep Read 需要的权限
+    // Deep Read 需要的权限 + D-129 Agent 系统能力(对照 AndroidManifest uses-permission;
+    //   仅普通 user_grant 档,受限 ACL(短信/通话/媒体库/电话状态)不声明 —
+    //   checkAccessTokenSync 对未声明名返回拒绝,权限状态工具如实展示 Denied)
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET", "reason": "$string:reason_internet" },
-      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" }
+      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
+      { "name": "ohos.permission.READ_CONTACTS", "reason": "$string:reason_contacts",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.WRITE_CONTACTS", "reason": "$string:reason_contacts",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.READ_CALENDAR", "reason": "$string:reason_calendar",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.WRITE_CALENDAR", "reason": "$string:reason_calendar",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.MICROPHONE", "reason": "$string:reason_microphone",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:reason_location",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.LOCATION", "reason": "$string:reason_location",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.ACCESS_BLUETOOTH", "reason": "$string:reason_bluetooth",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.ACTIVITY_MOTION", "reason": "$string:reason_activity_motion",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } }
     ]
   }
 }
