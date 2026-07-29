@@ -1866,3 +1866,23 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: 内置技能四件首启自动落盘 filesDir/skills/,skills_list/use_skill 立即可用;用户已有同名技能不被覆盖;部分失败有日志+回滚,不残留半装目录。
 - **未移植(P1 登记)**: SkillsPage/SkillDetailPage UI(约 2000 行,既有项)。
 - **验证**: chat tsc 干净 + 1321 测试(+4)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试夹具 MemFs += writeBytes(SkillFilePort 接口变更连带)。
+
+## D-127 — Deep Read Playbook 仓库 + 四件工具(深读编辑规则本地配置闭环)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: feature/board/impl/.../deepread/DeepReadPlaybookRepository.kt(全文 115 行)+ app/core/ai/tools/DeepReadPlaybookTools.kt(全文 111 行,四件)+ LocalTools.kt:187(无条件装配)+ DeepReadAgentRunManager.kt:350-369(运行消费点)+ BoardModule.kt:80-83(Koin single)+ app/src/main/assets/deepread/deep_read_playbook.md(默认资产)。
+- **背景**: harmony deepread 管线自始硬编码 playbookMarkdown: ''(DeepReadArticlePage)——Android 在规划前读用户可编辑的 playbook 注入 generateArticlePlan,属数据/核心环缺口;同时 LocalTools 尾部四件 deep_read_playbook_* 未移植。一处仓库同时关闭两个缺口。
+- **决策**:
+  1. deepread HAR agent/playbook.ts(+7 测试,610 总量):DeepReadPlaybookRepository 逐字 — read/update(base_revision 乐观锁冲突 'Playbook revision conflict: current=X, base=Y'/trim 后 <400 'too short'/UTF-8 >40000B 'too large'/先存快照再落盘)/restoreDefault/restorePrevious(最新 .md 快照 by mtime,'No previous playbook snapshot';substringAfter('\n\n') 剥头);ensureInitialized 首调写默认;saveSnapshot(summary \r\n→空格→\s+ 折叠→trim→take(160);safe [^A-Za-z0-9._-]→'_' take(48) ifBlank 'snapshot';文件名 ${nowMs}_${revision}_${safe}.md;头两行+空行+原文);snapshotOf(revision=sha256.take(16),updatedAt=文件 mtime 缺→nowMs);Mutex → AsyncMutex promise 链。
+  2. FileStore 端口 += mtime(path)(File.lastModified 等价;MemoryFileStore 写入序号台账,OhosFileStore fileIo.stat.mtime 秒×1000 登记)。
+  3. chat HAR builtin_deepread_playbook_tools.ts(+6 测试,1327 总量):四件逐字(名称/描述/required/审批标志:read allowsAutoApproval=true;后三件 needsApproval+allowsAutoApproval=false);payload 键序 status/revision/updated_at/markdown,成功 status=updated/restored_default/restored_previous,失败 {status:'rejected',error} 两键;JsonObject.string(trim+isNotBlank)→orEmpty() 空串落仓库。
+  4. entry:rawfile deepread/deep_read_playbook.md 逐字拷贝(diff IDENTICAL);AppContainer getDeepReadPlaybookRepository 单例(createFileStore + sha256HexUtf8(D-061)+ Date.now + resourceManager rawfile 读);ChatPage 注册于 createDeepReadOpenTool 之前(LocalTools.kt:187→:188 序);DeepReadArticlePage playbookMarkdown = 仓库 read().markdown(:350 同位),'' 硬编码缺口关闭。
+- **偏差/适配登记**:
+  - Context.assets.open → loadDefaultMarkdown 注入(resourceManager rawfile 同步读 + util.TextDecoder)。
+  - Result<Snapshot> → DeepReadPlaybookResult 可空字段单结构:**ArkTS 判别联合收窄支持不全(compiler 10505001,三元/if 均不收窄)** → {ok, snapshot|null, error|null},不变量由构造点保证;chat/deepread 两侧形状一致,仓库直配端口。
+  - File.lastModified 毫秒 ↔ fileIo.stat.mtime 秒 → ×1000(entry 侧)。
+  - exception::class.simpleName 兜底无对应(仓库消息恒非空,工具侧 error ?? '')。
+- **关闭**: deep_read_playbook_read/update/restore_default/restore_previous 四件全链路可用;深读文章生成真实消费用户可编辑 playbook(乐观锁 + 快照回滚);Android→harmony 配置语义逐字。
+- **未移植(P1 登记)**: LocalTools 尾部余量 — permissions_status(AgentPermissionBroker)、agent_cron 四件(WorkManager→WorkScheduler + 后台运行环)、agent_prompt_config(需 subagent 数据面)、generate_image(图像生成仓库)、eval_javascript(QuickJS 平台阻断,登记先例同 pdf)、Terminal/ScreenAutomation/SystemAccess/FeishuOffice/ICloudDrive/WebMount/WebView 各组(平台/子系统级,既有登记)。
+- **验证**: chat tsc 干净 + 1327 测试(+6)/deepread tsc 干净 + 610 测试(+7)/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧一修(实现逐字核对后):saveSnapshot 非 blank summary → safe=7 个 '_' 非 'snapshot'(ifBlank 不触发,D-125 safeFileName 同 quirk);实现侧一修:判别联合 → 可空字段单结构(ArkTS 10505001)。

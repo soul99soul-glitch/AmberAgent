@@ -15,6 +15,7 @@ import {
   run, makeEmptyDeepReadOutput, isInterruptedPhase, createSourcePrefetcher,
   createStorageModelRegistry, createModelCouncilManager, ModelCouncilManager,
   createNovelCreation, NovelCreation, createFileNovelRepository,
+  DeepReadPlaybookRepository,
 } from '@amber/deepread-domain';
 // 真实平台实现 import
 import { createRcpHttpClient } from '../platform_impl/RcpHttpClient.ets';
@@ -56,6 +57,8 @@ import {
   createEntryBuiltinSkillAssetPort,
 } from '../platform_impl/SkillStore.ets';
 import { createEntryWorkspaceManager } from '../platform_impl/WorkspaceStore.ets';
+import { sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
+import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
@@ -157,6 +160,29 @@ export const getAiClient = (): AiClient => getAppContainer().aiClient;
 export const getRepository = (): DeepReadRepository => getAppContainer().repository;
 export const getFileStore = (): FileStore => getAppContainer().fileStore;
 export const getModelRegistry = (): ModelRegistry => getAppContainer().modelRegistry;
+
+// D-127:DeepReadPlaybookRepository 单例(BoardModule.kt:80-83 Koin single)—
+//   根 filesDir/deep_read_playbook/;默认 markdown = rawfile
+//   deepread/deep_read_playbook.md(Android assets 逐字拷贝);sha256 =
+//   CryptoArchitectureKit(D-061 既有);System.currentTimeMillis → Date.now
+let playbookRepository: DeepReadPlaybookRepository | null = null;
+export const getDeepReadPlaybookRepository = (): DeepReadPlaybookRepository => {
+  if (playbookRepository === null) {
+    playbookRepository = new DeepReadPlaybookRepository({
+      store: getFileStore(),
+      sha256Hex: sha256HexUtf8,
+      nowMs: (): number => Date.now(),
+      loadDefaultMarkdown: (): Promise<string> => {
+        const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
+        const bytes: Uint8Array =
+          ctx.resourceManager.getRawFileContentSync('deepread/deep_read_playbook.md');
+        const text: string = util.TextDecoder.create('utf-8').decodeToString(bytes);
+        return Promise.resolve(text);
+      },
+    });
+  }
+  return playbookRepository;
+};
 
 // ===== Model Council 装配 =====
 let councilRunner: ModelCouncilTextRunner | null = null;

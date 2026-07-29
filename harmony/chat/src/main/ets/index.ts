@@ -258,6 +258,12 @@ export {
   parseDeepReadSlashCommand, DEEP_READ_ROUTE_TAG, DEEP_READ_FORCE_FLAGS,
 } from './chat/builtin_local_tools.ts';
 
+// ===== D-127:Deep Read Playbook 工具四件(LocalTools.kt:187 无条件) =====
+export type {
+  DeepReadPlaybookSnapshot, DeepReadPlaybookResult, DeepReadPlaybookPort,
+} from './chat/builtin_deepread_playbook_tools.ts';
+export { createDeepReadPlaybookTools } from './chat/builtin_deepread_playbook_tools.ts';
+
 // ===== D-062:ToolExposureState 懒暴露 =====
 export type { ToolExposureState } from './chat/tool_exposure.ts';
 export { createToolExposureState } from './chat/tool_exposure.ts';

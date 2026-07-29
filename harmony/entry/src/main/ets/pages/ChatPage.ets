@@ -63,7 +63,7 @@ import {
   firstImageBlockingIssueForSend, inspectImageAttachment, imageAttachmentBlocksSend,
   probeVisionModelHealth,
   createMcpManagementTools, createMcpServerTools, makeAgentTool, createSkillTools,
-  createWorkspaceTools, createWorkspaceArtifactTools,
+  createWorkspaceTools, createWorkspaceArtifactTools, createDeepReadPlaybookTools,
   loadAssistants, saveAssistants, patchAssistant,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
@@ -76,7 +76,7 @@ import {
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
   getWorkspaceManager,
-  getSkillWorkspacePort,
+  getSkillWorkspacePort, getDeepReadPlaybookRepository,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
@@ -1487,6 +1487,10 @@ struct ChatPage {
         createRunPlanUpdateTool(),
         ...(localOpts.indexOf('clipboard') >= 0
           ? [createClipboardTool(createEntryClipboardPort())] : []),
+        // D-127:DeepReadPlaybookTools 四件(LocalTools.kt:187 无条件,
+        //   位置 = deepReadOpenTool(:188)之前);仓库 = deepread HAR
+        //   playbook 单例,结构直配 DeepReadPlaybookPort
+        ...createDeepReadPlaybookTools(getDeepReadPlaybookRepository()),
         createDeepReadOpenTool({
           bus: {
             hasCollectors: (): boolean => true,

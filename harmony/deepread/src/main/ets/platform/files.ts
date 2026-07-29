@@ -31,12 +31,18 @@ export interface FileStore {
   delete(path: string): Promise<void>;
   // 递归建目录
   mkdir(dir: string): Promise<void>;
+  // D-127:文件最后修改时间(epoch millis,File.lastModified 等价);
+  //   不存在 → null(DeepReadPlaybookRepository updatedAt/快照挑选用)
+  mtime(path: string): Promise<number | null>;
 }
 
 // 内存实现:用 Map 存文件。供测试与兜底。
 // ArkTS 要求 class implements(对象字面量实现 interface 不允许),故用 class。
 class MemoryFileStore implements FileStore {
   private files: Map<string, string> = new Map();
+  // D-127:mtime 台账(每次写 +1;0 起单调递增)
+  private mtimes: Map<string, number> = new Map();
+  private writeSeq: number = 0;
 
   private norm(p: string): string {
     return joinPath(p);
@@ -48,13 +54,18 @@ class MemoryFileStore implements FileStore {
   }
 
   async writeText(path: string, content: string): Promise<void> {
-    this.files.set(this.norm(path), content);
+    const key: string = this.norm(path);
+    this.files.set(key, content);
+    this.writeSeq += 1;
+    this.mtimes.set(key, this.writeSeq);
   }
 
   async appendText(path: string, content: string): Promise<void> {
     const key: string = this.norm(path);
     const prev: string = this.files.has(key) ? (this.files.get(key) as string) : '';
     this.files.set(key, prev + content);
+    this.writeSeq += 1;
+    this.mtimes.set(key, this.writeSeq);
   }
 
   async exists(path: string): Promise<boolean> {
@@ -78,10 +89,19 @@ class MemoryFileStore implements FileStore {
 
   async delete(path: string): Promise<void> {
     this.files.delete(this.norm(path));
+    this.mtimes.delete(this.norm(path));
   }
 
   async mkdir(_dir: string): Promise<void> {
     // 内存实现无显式目录,写文件时隐式存在
+  }
+
+  // D-127:写入序号当 mtime(单调递增,测试可预期;epoch 语义由调用方自定)
+  async mtime(path: string): Promise<number | null> {
+    const key: string = this.norm(path);
+    if (!this.files.has(key)) return null;
+    const v: number | undefined = this.mtimes.get(key);
+    return v === undefined ? null : v;
   }
 }
 

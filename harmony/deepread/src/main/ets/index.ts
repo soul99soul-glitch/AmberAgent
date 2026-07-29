@@ -115,3 +115,10 @@ export type {
   NovelRunEvent, NovelRun, NovelCollectionResult, NovelSuggestionRefreshResult, NovelCreationDeps,
 } from './novel/creation.ts';
 export { NovelCreation, createNovelCreation } from './novel/creation.ts';
+
+// D-127:Deep Read Playbook 仓库(DeepReadPlaybookRepository.kt 全文;
+//   assets → loadDefaultMarkdown 注入,File.mtime → FileStore.mtime)
+export { DeepReadPlaybookRepository } from './agent/playbook.ts';
+export type {
+  DeepReadPlaybookSnapshot, DeepReadPlaybookResult, DeepReadPlaybookDeps,
+} from './agent/playbook.ts';

@@ -10,7 +10,9 @@ import type {
 import {
   STAGE_ORDER, STAGE_LABELS, statusOf, displayHeroImageUrl, run,
 } from '@amber/deepread-domain';
-import { getAppContainer, getNotifier, getPrefetcher } from '../di/AppContainer.ets';
+import { getAppContainer, getNotifier, getPrefetcher,
+  getDeepReadPlaybookRepository,
+} from '../di/AppContainer.ets';
 import {
   BG, SURFACE, SURFACE2, INK, INK2, INK3, INK4, LINE, ACCENT, ACCENT_LIGHT,
 } from '../design/tokens.ets';
@@ -70,6 +72,9 @@ struct DeepReadArticlePage {
       const apiKey = await storage.get<string>('ai_api_key', '');
       hilog.info(DOMAIN, TAG, 'AI config: model=%{public}s hasKey=%{public}s', model, String(apiKey.length > 0));
       const prefetcher = getPrefetcher();
+      // D-127:DeepReadAgentRunManager.kt:350 — 规划前读 playbook.markdown
+      //   (此前硬编码 '' = 登记缺口,本切片闭环)
+      const playbook = await getDeepReadPlaybookRepository().read();
       const deps: RunManagerDeps = {
         prefetcher: prefetcher,
         collectRun: async (messages: UIMessage[]): Promise<UIMessage[]> => {
@@ -78,7 +83,7 @@ struct DeepReadArticlePage {
         },
         aiClient: aiClient,
         model: model,
-        playbookMarkdown: '',
+        playbookMarkdown: playbook.markdown,
         nowIso: (): string => '2026-06-25',
       };
       const result = await run(deps, this.topicId, this.title, { force: true, seedUrl: null });

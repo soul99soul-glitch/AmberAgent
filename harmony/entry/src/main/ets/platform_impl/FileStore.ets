@@ -94,6 +94,19 @@ class OhosFileStore implements FileStore {
       // 已存在,忽略
     }
   }
+
+  // D-127:File.lastModified 等价 — fileIo.stat.mtime 单位为秒,×1000 归毫秒(登记)
+  async mtime(path: string): Promise<number | null> {
+    const full: string = await this.resolve(path);
+    const ok: boolean = await fileIo.access(full);
+    if (!ok) return null;
+    try {
+      const st: fileIo.Stat = await fileIo.stat(full);
+      return st.mtime * 1000;
+    } catch {
+      return null;
+    }
+  }
 }
 
 export const createFileStore = (): FileStore => {
