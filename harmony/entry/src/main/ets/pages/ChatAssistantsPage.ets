@@ -353,6 +353,16 @@ struct ChatAssistantsPage {
                       params['assistantId'] = a.id;
                       router.pushUrl({ url: 'pages/ChatAssistantLocalToolsPage', params: params });
                     })
+                  // D-121:助手 MCP 选择(AssistantMcpPage tab 'MCP' → 独立页,
+                  //   placement 同 '工具' 先例)
+                  Text('MCP')
+                    .fontSize(12).fontColor(INK3)
+                    .margin({ right: 14 })
+                    .onClick((): void => {
+                      const params: Record<string, string> = {};
+                      params['assistantId'] = a.id;
+                      router.pushUrl({ url: 'pages/ChatAssistantMcpPage', params: params });
+                    })
                   Text('复制')
                     .fontSize(12).fontColor(INK3)
                     .margin({ right: 14 })

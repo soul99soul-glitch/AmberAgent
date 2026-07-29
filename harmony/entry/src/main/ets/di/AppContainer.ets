@@ -31,7 +31,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle,
-  ProviderModel, CompactStore,
+  ProviderModel, CompactStore, ModelAbility,
 } from '@amber/chat-domain';
 import {
   loadAssistants, loadProviders, makeAssistant,
@@ -302,6 +302,9 @@ export interface ChatRuntime {
   // D-071b:model.inputModalities.contains(Modality.IMAGE)(GenerationHandler.kt:431
   //   canUseVisionFallback 前半 + OcrTransformer.kt:50 transform 门)
   modelSupportsImageInput: boolean;
+  // D-121:model.abilities(ChatService.kt:1278 tools_warning 门 —
+  //   !abilities.contains(ModelAbility.TOOL))
+  modelAbilities: ModelAbility[];
 }
 
 export interface ChatProviderChoice {
@@ -575,5 +578,6 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
     contextMessageSize: sessionDefaults.contextMessageSize,
     modelContextWindowTokens: model.contextWindowTokens,
     modelSupportsImageInput: model.inputModalities.includes('image'),
+    modelAbilities: model.abilities,
   };
 };

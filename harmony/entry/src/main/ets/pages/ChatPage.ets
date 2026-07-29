@@ -874,6 +874,7 @@ struct ChatPage {
           return Promise.reject(new Error('未配置可用的 Provider/模型'));
         }
         this.wireMcpAssistant(rt);
+        this.warnIfToolAbilityMissing(rt);
         // D-055:重生成使 compact 失效(ChatService.kt:1097 'message_regenerated'),
         //   先于生成完成,避免 prepareContext 读到过期摘要
         return this.invalidateConvCompacts(conv.id, 'message_regenerated')
@@ -1477,6 +1478,19 @@ struct ChatPage {
     getMcpSettingsStore().setAssistantIdsProvider((): string[] => rt.assistant.mcpServers);
   }
 
+  // D-121:tools_warning 门(ChatService.kt:1278-1286)— 模型无 TOOL 能力且
+  //   (settings.enableWebSearch || mcpManager.getAllAvailableTools() 非空) →
+  //   addError(tools_warning, title=error_title_tool_unavailable),**不中断生成**。
+  //   须在 wireMcpAssistant 之后调用(getAllAvailableTools 依赖 assistant provider)。
+  //   偏差登记:addError 带 title('工具不可用')— harmony 错误条无 title 槽位,
+  //   仅正文 values-zh:1277 逐字上浮。
+  private warnIfToolAbilityMissing(rt: ChatRuntime): void {
+    if (rt.modelAbilities.indexOf('tool') >= 0) return;
+    const searchOn: boolean = this.searchSettings !== null && this.searchSettings.enableWebSearch;
+    if (!searchOn && getMcpManager().getAllAvailableTools().length === 0) return;
+    this.errorMsg = '当前模型未开启工具调用，请在设置内启用模型的工具能力，再使用搜索/MCP等功能';
+  }
+
   // steer 消息步间消费(Android session.dequeueSteerPendingUserMessages,
   //   GenerationHandler:386-390):生成中到达的 STEER 出队 → user 消息注入会话;
   //   出队后 durable persist + 审计(D-052 同规)
@@ -1567,6 +1581,7 @@ struct ChatPage {
           return Promise.reject(new Error('未配置可用的 Provider/模型'));
         }
         this.wireMcpAssistant(rt);
+        this.warnIfToolAbilityMissing(rt);
         return runToolLoopContinuation(conv, {
           assistant: rt.assistant,
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
@@ -1905,6 +1920,7 @@ struct ChatPage {
           return Promise.reject(new Error('未配置可用的 Provider/模型(providers 未持久化或无可用 auth)'));
         }
         this.wireMcpAssistant(rt);
+        this.warnIfToolAbilityMissing(rt);
         const deps: ChatTurnDeps = {
           assistant: rt.assistant,
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724;

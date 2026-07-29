@@ -1713,3 +1713,22 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: MCP 特性面全链路(配置模型/线格式/导入/协议核/两 transport/manager/工具桥接/设置 UI/entry 接线)。
 - **未移植(P1 登记)**: mcp_import_from_skill(skills 子系统);ToolActivityStore(mcp__ 组活动事件+toolOutputPreview 非 text 段保真);ChatService:1279 tools_warning 门(模型无 TOOL 能力且启用搜索/MCP 时 addError);AssistantMcpPage/McpPicker(assistant 详情 MCP 选择器);okHttp 超时档(20s/10min/120s vs entry 15s/120s,G-D 校准);编辑 modal 内工具列表实时 sync(Android 亦以保存后重进为准,同语义)。
 - **验证**: chat tsc 干净 + 1214 测试(+9)/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧修复:McpHttpPortImpl 解构/throw(D-118 潜伏)+ 设置页六类 ArkTS 违规;McpSettingsStore 导入路径(AppContainer 先例)。
+
+## D-121 — MCP 残余面:tools_warning 门 + 助手 MCP 选择器(McpPicker/AssistantMcpPage)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: ChatService.kt:1278-1286(tools_warning 门)+ McpPicker.kt(251 行)+ AssistantMcpPage.kt(60 行)+ values-zh:132/274/1277。
+- **背景**: D-120 收口 MCP 特性面后余两处登记残余:生成路径的工具能力告警门(error recovery 层,优先级高于交互)与助手级 MCP 服务器选择 UI。McpPickerButton(:53-155)在 Android 内无任何调用点(死代码),不移植。
+- **决策**:
+  1. **tools_warning 门**(ChatService.kt:1278-1286):模型 abilities 不含 TOOL 且 (settings.enableWebSearch || mcpManager.getAllAvailableTools().isNotEmpty()) → addError(tools_warning, title=error_title_tool_unavailable),**不中断生成**。ChatRuntime += modelAbilities(resolveChatRuntime 处取 model.abilities);ChatPage.warnIfToolAbilityMissing 在三处 runtime 解析成功点 wireMcpAssistant 之后调用(send/regenerate/队列派发 — Android generate() 单入口的全路径等价);文案 values-zh:1277 逐字。
+  2. **ChatAssistantMcpPage.ets**(AssistantMcpPage.kt + McpPicker.kt:McpPicker 部分):仅列 enable 服务器(:169);行 = 状态图标(:179-192 四态)+ 名称 + 状态文本(:202-208 — 'Idle'/'Connecting'/'Connected'/'Reconnecting (a/m)'/'Error: msg' 逐字,**与 SettingMcpPage statusLabel 不同格式**,忠实保留该差异)+ Connected 时 'N/M tools' tag(:213-221)+ Switch(:223-246 — checked → ids+id / 否则 ids-id → vm.update 等价 patchAssistant+saveAssistants)。:229/:238 removeIf 无效服务器清理 — 谓词为常量(仅当列表无此 server 时清空全表),行仅为列表内 server 渲染 → 该分支不可达,忠实保留并注释。
+  3. ChatAssistantsPage 行入口 'MCP'(置 '工具' 后,placement 同 D-107 先例)+ main_pages.json 注册。
+- **偏差/适配登记**:
+  - addError title('工具不可用')折叠 — harmony 错误条无 title 槽位,仅正文上浮(D-120 前错误面同惯例)。
+  - 图标映射:HugeIcons bracket/McpServer/Alert01 → 文本 '{}'/‘MCP’/'⚠';CircularProgressIndicator → LoadingProgress;ToggleSurface/BadgedBox(McpPickerButton)随死代码不移植。
+  - AssistantDetailVM.mcpServerConfigs → McpSettingsStore 订阅(同一数据源);vm.update → loadAssistants+patchAssistant+saveAssistants(D-102 先例)。
+  - placement:Android 为 assistant 详情 tab;harmony 无详情页 → 助手行文本入口(D-107 '工具'/D-115 '运行' 先例)。
+- **关闭**: MCP 全部登记残余(skills/activityStore 之外)。
+- **未移植(P1 登记)**: mcp_import_from_skill(skills 子系统);ToolActivityStore(mcp__ 活动事件);okHttp 超时档(G-D 校准)。
+- **验证**: chat tsc 干净 + 1214 测试/deepread tsc 干净 + 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;无实现侧返修(ArkTS 适配一次通过)。
