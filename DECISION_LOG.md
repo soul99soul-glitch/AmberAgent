@@ -1628,3 +1628,27 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**: MCP client 协议核(初始化/工具列出/调用/关闭)。
 - **未移植(P1 登记)**: SseClientTransport/StreamableHttpClientTransport(D-118);McpManager 513 行(D-119);createRunTools mcp 组+mcp_call_tool+MCP 设置面 UI(D-120)。
 - **验证**: chat tsc 干净 + 1160 测试(+16)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;测试侧三修(实现无改):connectWithTools 回应时序/async 抛=rejects/start 失败期望(super.connect 在 try 外,SDK 证实)+ FakeTransport 受理后再挂起。
+
+## D-118 — MCP 切片③:两 transport(SseClientTransport 201 行/StreamableHttpClientTransport 369 行全文)
+
+- **日期**: 2026-07-28
+- **状态**: 已执行
+- **范围**: app/core/ai/mcp/transport/SseClientTransport.kt(201 行)+ StreamableHttpClientTransport.kt(369 行)全文;amber 自有代码(非 SDK),逐字基准。
+- **背景**: D-117 落地协议核 McpTransport 六成员接口;两 transport 为 I/O 适配层。按 XmlPullPort/InflateRawPort 先例:平台 HTTP/SSE 经端口注入,domain 纯类可测,entry 以 @ohos.net.http + SseAssembler 实现端口。
+- **决策**:
+  1. chat HAR mcp_transports.ts(+26 测试):
+     - **McpHttpPort 三方法**:request(非流:POST send/DELETE terminate)/openSse(GET 长连,非 2xx → McpSseOpenError{status,contentType} 供 :247-262 判定)/postStream(POST;event-stream 响应 → 行流,否则缓冲全文)。
+     - **SseClientTransport 逐字**:二启 check 'SSEClientTransport already started! If using Client class, note that connect() calls start() automatically.'(:66-68);baseUrl 三分支(path 空→origin/尾 '/'→去尾/否则截至末 '/'— :54-63);endpoint 解析 绝对路径=origin+data / 相对=baseUrl+'/'+data(:160-176);start=openSse→泵协程→endpoint Promise 等齐,失败 closeResources+initialized 复位+原样抛(:88-92);send 三 check('SseClientTransport is not initialized!'/'SseClientTransport is closed!'/'Not connected!' :97-99)+ POST Content-Type json + 非 2xx 'Error POSTing to endpoint (HTTP <n>): <body>'(:113-115)+ catch onError+抛;事件分发 'error'→onError+抛 'SSE error: <data>'/'open'→noop/'endpoint'/else→handleMessage(解析失败仅 onError :182-184);泵 finally closeResources(CAS 幂等 + onClose :187-200)。
+     - **StreamableHttpTransport 逐字**:StreamableHttpError message='Streamable HTTP error: <msg>'(:54-55);start 二启 'StreamableHttpClientTransport already started!'(:84);send check 'Transport is not started'(:105);Accept 'application/json, text/event-stream' + Content-Type json + config 头(:121-122);mcp-session-id 响应头捕获(:127);202 + notifications/initialized → **异步** startSseSession 失败仅 onError(:129-143);非 2xx → StreamableHttpError(status,body) onError+抛(:145-149);content-type 三分支(比较侧 withoutParameters):json→全文解码(失败 onError+抛)/event-stream→inline 行解析/else 空白体无 ct→return 否则 StreamableHttpError(-1,'Unexpected content type: $<ct>' **字面 $** :171-172);terminateSession 无 session 直返/405 容忍/他错 'Failed to terminate session: <desc>' + 清 sessionId·lastEventId(:201-223);startSseSession GET accept(application/json)+(resumptionToken ?: lastEventId)→Last-Event-ID,405/json-ct 静默返回(:247-262);collectSse id 沉淀 + null/'message' 解码(replay 响应 id 改写 :297-301)/'error'→StreamableHttpError(null,data)(:280-314);handleInlineSse id:/event:/data: trim **concat 无换行 quirk 逐字**(:362-366)+ 空行 dispatch + 解码失败 onError+抛(:344-348);close 未 start 静默/terminate+cancel 忽略错误/finally initialized=false+onClose(:179-196)。
+  2. entry McpHttpPortImpl.ets:request→http.request(STRING);openSse/postStream→requestInStream(ARRAY_BUFFER),响应头经 headersReceive;SSE 事件经 SseAssembler(decodeChunk 注入 util.TextDecoder);行流自缓冲切行(\r\n 兼容);statusDescription 码表(ktor description 子集,terminateSession 消息用)。
+- **偏差/适配登记**:
+  - baseUrl 取请求 URL(Android 用 session.call.request.url 终态;重定向后差异,amber 配置 URL 直出场景无差)。
+  - ktor sseSession 自动重连(reconnectionTime)未移植 — amber 恒 null(:74 默认),reconnect 由 McpManager 层承担(D-119)。
+  - resumptionToken 发送侧分支保留(:109-116)但不可达 — SDK RequestOptions 仅 timeout,McpManager 不构造。
+  - send 'SseClientTransport is closed!' check 防御性保留(initialized/jobActive 同生同灭,实际不可达)。
+  - start 二启以 Promise.reject 返回(Kotlin suspend 内 error() = await 侧抛;JS 同步 throw 会逃逸 assert.rejects,语义等价)。
+  - SseAssembler [DONE] 哨兵/done 语义在 MCP 面不出现;done=true 按流结束。
+  - entry 无真机验证(headersReceive/dataReceive 时序按 HTTP 语义假定)→ 收敛 Spike A。
+- **关闭**: MCP 两 transport 行为面(二启/check/端点解析/事件分发/inline SSE/重放改写/会话终止全分支金样)。
+- **未移植(P1 登记)**: McpManager 513 行(D-119);createRunTools mcp 组+mcp_call_tool+MCP 设置面 UI(D-120);McpManager 构造侧 transport 选择(sse vs streamable_http 按 config.kind)随 D-119。
+- **验证**: chat tsc 干净 + 1186 测试(+26)/deepread 603/assembleHar+assembleHap 双 BUILD SUCCESSFUL;实现侧两修(测试证实):contentType 比较侧补 withoutParameters(带参 ct 误判 else 分支)+ inline dispatch 解码失败补 onError(:344-348 漏挂)。

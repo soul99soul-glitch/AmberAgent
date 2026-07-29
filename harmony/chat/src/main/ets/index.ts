@@ -399,6 +399,16 @@ export type {
   McpTransport, McpClientInfo, McpContentBlock, McpCallToolResult, McpServerTool,
 } from './chat/mcp_protocol.ts';
 
+// D-118:MCP 两 transport(SseClientTransport/StreamableHttpClientTransport 全文)
+export {
+  McpSseClientTransport, McpStreamableHttpTransport,
+  StreamableHttpError, McpSseOpenError,
+} from './chat/mcp_transports.ts';
+export type {
+  McpHttpPort, McpHttpResponse, McpSseEvent, McpSseStream,
+  McpPostStreamResponse, McpSseLineStream,
+} from './chat/mcp_transports.ts';
+
 export {
   makeProviderModel, makeBalanceOption,
   makeProviderSettingOpenAIVariant, makeProviderSettingGoogle, makeProviderSettingClaude,
