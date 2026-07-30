@@ -78,6 +78,7 @@ import {
   getWorkspaceManager,
   getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
   getPermissionsStatusTool, getAgentTaskTools, getAgentCronTools,
+  hydrateSubAgentSetting, getSubAgentTools, SubAgentToolsContext,
 } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
@@ -622,6 +623,12 @@ struct ChatPage {
   private agentCronToolsCache: AgentTool[] = [];
   // D-131:AgentTaskTools 六件,与 cron 共用 AgentTaskStore/调度器缓存。
   private agentTaskToolsCache: AgentTool[] = [];
+  // D-132c:SubAgentTools 五件(每会话动态挂载)。parentToolsProvider 为惰性闭包,
+  //   读 baseToolsCache(在 buildToolLoop 内 step-4 设置),保证只暴露已 profile
+  //   的 parent base tools,不含 subagent_* 自身。subagentEnabled + 会话存在才挂载。
+  private subAgentEnabled: boolean = false;
+  private baseToolsCache: AgentTool[] = [];
+  private subAgentToolsCache: AgentTool[] = [];
   @State errorMsg: string = '';
   // D-108:拒绝理由弹窗态(ToolDenyReasonDialog;空 = 关闭)
   @State denyDialogToolCallId: string = '';
@@ -910,13 +917,15 @@ struct ChatPage {
     const conv: Conversation = this.conversation;
     const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime(conv.assistantId)
-      .then((rt: ChatRuntime | null): Promise<Conversation> => {
+      .then(async (rt: ChatRuntime | null): Promise<Conversation> => {
         holder.rt = rt;
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型'));
         }
         this.wireMcpAssistant(rt);
         this.warnIfToolAbilityMissing(rt);
+        // D-132c:水合 subagent 设置 + 工具(buildToolLoop 前;parentToolsProvider 惰性)
+        await this.prepareSubAgentTools(conv);
         // D-055:重生成使 compact 失效(ChatService.kt:1097 'message_regenerated'),
         //   先于生成完成,避免 prepareContext 读到过期摘要
         return this.invalidateConvCompacts(conv.id, 'message_regenerated')
@@ -1367,6 +1376,32 @@ struct ChatPage {
 
   // ===== D-057 工具循环接线(GenerationHandler:161-391 调用面) =====
 
+  // D-132c:Android ChatService.kt:2307 — conversation 存在且 subAgent.enabled 时挂
+  //   五件 SubAgentTools。设置水合(复用 PromptConfigStore 唯一 RMW)+ 工具构建为异步,
+  //   在 buildToolLoop 前完成;parentToolsProvider 惰性读 baseToolsCache(buildToolLoop
+  //   内 step-4 设置)。禁用/无会话 → 空缓存,buildToolLoop 不挂载。
+  private async prepareSubAgentTools(conv: Conversation): Promise<void> {
+    try {
+      const setting = await hydrateSubAgentSetting();
+      this.subAgentEnabled = setting.enabled;
+      if (!setting.enabled) {
+        this.subAgentToolsCache = [];
+        return;
+      }
+      const ctx: SubAgentToolsContext = {
+        parentConversationId: conv.id,
+        parentToolsProvider: (): AgentTool[] => this.baseToolsCache,
+      };
+      this.subAgentToolsCache = await getSubAgentTools(ctx);
+    } catch (e) {
+      // 水合失败不阻塞主对话;subagent 工具本轮不挂载(fail-open 主链路)
+      const msg: string = e instanceof Error ? e.message : String(e);
+      hilog.warn(0x0001, 'Chat.Page', 'prepareSubAgentTools failed: %{public}s', msg);
+      this.subAgentEnabled = false;
+      this.subAgentToolsCache = [];
+    }
+  }
+
   // 工具循环选项:D-058 首批内置工具 = get_time_info + ask_user +
   //   conversation_*(4) + session_*(4),D-059 追加 conversation_queue_*(2),
   //   经 ToolRegistry 包装层(ToolRegistry.kt
@@ -1534,14 +1569,27 @@ struct ChatPage {
           : []),
       ], rt.assistant.toolProfile).tools;
     const registry: ToolRegistry = createToolRegistry(profiledTools);
+    // D-132c:Android ChatService.kt:2304-2306 — baseTools = baseRegistry.tools() +
+    //   introspection(baseRegistry);parentToolsProvider 只捕获此 base 集,
+    //   不含 subagent_*(后者由 step-5 条件挂载)。缓存供 subagent_start 委派读取。
+    this.baseToolsCache = [
+      ...registry.tools(),
+      ...createRegistryIntrospectionTools(registry),
+    ];
+    // D-132c:Android ChatService.kt:2307-2315 — conversation 存在且 subAgent.enabled
+    //   时挂五件 SubAgentTools(parentToolsProvider = baseTools);否则空。
+    //   public subagent_* 不进入 child scope(manager.start 过滤);不加入 LocalTools。
+    const supervisorTools: AgentTool[] = this.subAgentEnabled && this.conversation !== null
+      ? this.subAgentToolsCache
+      : [];
     return {
       // createRunTools(ChatService.kt:2326-2329):registry.tools() +
-      //   tool_search(profile 透传,D-082)+ 自省对;
+      //   tool_search(profile 透传,D-082)+ 自省对 + supervisor tools;
       //   D-122:scopedToConversation(:2329 → :2332-2343)终表统一包覆
       tools: this.scopedToConversation([
-        ...registry.tools(),
+        ...this.baseToolsCache,
         createToolSearchTool(registry, rt.assistant.toolProfile),
-        ...createRegistryIntrospectionTools(registry),
+        ...supervisorTools,
       ], conv),
       makeProviderForStep: (defs: ChatToolDefinition[]): ChatStreamProvider =>
         asChatStreamProvider(rt.api, (): TextGenerationParams => makeTextGenerationParams({
@@ -1781,13 +1829,15 @@ struct ChatPage {
       : '';
     const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime(conv.assistantId)
-      .then((rt: ChatRuntime | null): Promise<Conversation> => {
+      .then(async (rt: ChatRuntime | null): Promise<Conversation> => {
         holder.rt = rt;
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型'));
         }
         this.wireMcpAssistant(rt);
         this.warnIfToolAbilityMissing(rt);
+        // D-132c:水合 subagent 设置 + 工具(buildToolLoop 前;parentToolsProvider 惰性)
+        await this.prepareSubAgentTools(conv);
         return runToolLoopContinuation(conv, {
           assistant: rt.assistant,
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
@@ -2120,13 +2170,15 @@ struct ChatPage {
     // holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制)
     const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime(conv.assistantId)
-      .then((rt: ChatRuntime | null): Promise<Conversation> => {
+      .then(async (rt: ChatRuntime | null): Promise<Conversation> => {
         holder.rt = rt;
         if (rt === null) {
           return Promise.reject(new Error('未配置可用的 Provider/模型(providers 未持久化或无可用 auth)'));
         }
         this.wireMcpAssistant(rt);
         this.warnIfToolAbilityMissing(rt);
+        // D-132c:水合 subagent 设置 + 工具(buildToolLoop 前;parentToolsProvider 惰性)
+        await this.prepareSubAgentTools(conv);
         const deps: ChatTurnDeps = {
           assistant: rt.assistant,
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724;

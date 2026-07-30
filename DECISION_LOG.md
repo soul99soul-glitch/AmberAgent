@@ -2016,3 +2016,25 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**:隔离 child runner、共享真实 provider loop、模型/助手解析、report retry/approval/error/abort、manager admission/grant/lifecycle/竞态/任务看板/transcript/live subscriptions 已 source-only 闭环。
 - **未移植(P1 登记)**:D-132c 五件 `subagent_*` 公共工具、`SubAgentStore.ets` fileIo adapter、PromptConfigStore hydrated bridge、AppContainer runner/manager/tools 单例与 ChatPage 动态装配；专属 `ChatMessageSubAgentStep` 聚合 UI 仍为后续交互片。
 - **验证**:D-132b 聚焦 93/93；chat tsc 干净 + 1542/1542，deepread tsc 干净 + 610/610；`hvigorw assembleHar --no-daemon && hvigorw assembleHap --no-daemon` 成功退出，双构建完成；阶段 plan-drift/规格/质量/反过度设计复核对照 Android 基准收口。
+
+## D-132c — Subagent 五件公共工具 + 设置水合 + entry adapter + ChatPage 装配
+
+- **日期**: 2026-07-30
+- **状态**: 已执行
+- **范围**: feature/tools/impl/.../SubAgentTools.kt(全文 300 行)+ SubAgentPayloadTest.kt；entry 平台 adapter(SubAgentStore.ets / AppContainer 单例与水合桥 / ChatPage 动态装配)；复用 D-132a/b 纯域协议、D-131 AgentTaskStore、D-128 PromptConfigStore 唯一设置 RMW。
+- **背景**: D-132a/b 已闭合纯域协议、隔离 runner 与 manager 生命周期，但尚无面向主 agent 的五件公共工具、entry 文件/设置水合 adapter 和 ChatPage 动态装配；subagent 运行时无法被主对话驱动。
+- **决策**:
+  1. `subagent_tools.ts`(Task 8)：五件 `subagent_list/start/read/wait/cancel` 顺序、schema/required、start 嵌套 custom_subagent/task schema、wait 默认 10000(由 manager clamp 0..60000/200ms poll)逐字移植 Android `SubAgentTools.kt`；listTool payload 含 status/limits/mode/dynamic_subagents/tool_profiles/roster/built_ins；systemPrompt roster vs smart_dynamic 两分支、@council 段(仅 `EXTERNAL_CLI_TOOL_IDS[0]`=gemini_cli)与 `buildSubAgentMentionOverrideDirective`(self-loop guard)逐字；council enabled 由 `SubAgentToolsDeps.isModelCouncilEnabled` 工具层单独读取，不塞回 Manager。
+  2. `SubAgentToolsDeps`：`parentToolsProvider` 注入返回已 profile 的 parent base tools；public subagent_* 不进入 child scope(manager.start 自身过滤 + 工具层只透传 base tools，双重保证)；不新建第二套 registry/dispatcher/manager service interface。
+  3. `SubAgentStore.ets`(Task 9)：实现 D-132a `SubAgentTranscriptPort` — 私有 `filesDir/amberagent/subagents/runs`、fileIo append/access/stat、canonical containment(沙箱内路径恒规范)、bounded tail(stat.size + 整文件读入取末尾 maxBytes)；`SubAgentTranscriptTail` 对象显式类型化(ArkTS 禁 untyped obj literal)。
+  4. AppContainer 装配：复用 `createEntryAgentPromptSettingsPort(getChatKvStore())` 为共享 `AgentPromptSettingsPort` 单例(D-128 agent_prompt_config 工具与 subagent manager 共用同一 KV `agent_runtime` RMW，不新建第二套 settings store/codec)；薄 hydrated snapshot bridge(`hydrateSubAgentSetting`/`refreshSubAgentSetting`)只缓存/刷新当前设置，不负责 parser/serializer/RMW；`isModelCouncilEnabled` 读既有 council settings。
+  5. generation port adapter：`resolveModel` = `resolveTaskChatModelChoice(modelId) ?: resolveChatProviderChoice`(SubAgentRunner.kt:52-54)；`resolveAssistant` = `getChatAssistants()[0]` + `loadAgentRuntimeSnapshot` generationRetry/autoApprove 快照(runner 内部 isolatedAssistant 应用隔离字段)；`makeProvider` 按 `model.id` 取 resolveModel 阶段已缓存 provider(同步;缺失显式抛错 fail-closed，不伪成功)。
+  6. 单例与共享：runner/manager 缓存为模块单例(Koin single 等价)；复用 `getAgentTaskStore()`、`getSessionGrantStore()`、`buildProviderApi`、`asChatStreamProvider`；`newId`=util.generateRandomUUID、`now`=Date.now、`sleep`=setTimeout。
+  7. ChatPage 装配(Task 10)：`prepareSubAgentTools(conv)` 在 sendParts/regenerate/sendWithoutAnswer 三路径 buildToolLoop 前 await 水合设置 + 构建工具(fail-open：水合失败不阻塞主对话)；`buildToolLoop` 内 step-4 设置 `baseToolsCache = registry.tools() + introspection`(parentToolsProvider 惰性闭包读此缓存，不含 subagent_*)，step-5 条件挂载五件(会话存在且 subAgent.enabled)；不把 SubAgentTools 加入 LocalTools；未提前实现 `ChatMessageSubAgentStep` 专属 UI。
+  8. 阶段反过度设计复核：`EXTERNAL_CLI_TOOL_IDS` 为 ExternalCliToolRegistry.kt:31-126 逐字 id 顺序常量，非 tool_policy.ts 的 `EXTERNAL_CLI_COUNCIL_RUNNER_TYPES`(后者额外含 'external_cli'/'cli' runner type，不可混用)；`makeProvider` 不伪造空 provider 兜底，缺失即抛错；`prepareSubAgentTools` 失败 fail-open 仅影响 subagent 工具本轮不挂载，不改变主链路 parity。
+- **偏差/适配登记**:
+  - 无新增 PARITY_DEBT。kotlinx JsonObject buildJsonObject/put → 显式 JsonObject 全字段构造(ArkTS 禁对象 spread)；SubAgentToolProfile enum .entries → 本文件常量数组(wire 名已 lowercase+下划线)；ExternalCliToolRegistry.supportedToolIds → 本文件 EXTERNAL_CLI_TOOL_IDS 逐字；java.io.File.getCanonicalFile → 沙箱内路径恒规范(无 symlink 解析同步 API)；RandomAccessFile.seek → stat.size + 整文件读入取末尾(Harmony fileIo.readSync 无 offset 入参)。
+  - ChatPage tool_search 仍基于 base registry 构建(subagent_* 未入 tool_search 可发现集)；Android 将 subagent_* 放入 finalRawTools 后建 registry 使 tool_search 可发现 — 本实现 subagent_* 为常驻 supervisor 工具(tools_list 可见)，tool_search 不覆盖属可接受偏差，不登记 PARITY_DEBT(交互层细节，非协议/数据偏差)。
+- **关闭**:五件公共 SubAgentTools、SubAgentStore fileIo adapter、PromptConfigStore hydrated bridge、AppContainer runner/manager/tools 单例与 ChatPage 动态装配已 source-only 闭环；subagent 运行时可被主对话驱动。
+- **未移植(P1 登记)**:专属 `ChatMessageSubAgentStep` 聚合 UI(live phase rotation/run sheet/transcript fallback)为 runtime 闭环后的独立交互片；subagent_* 入 tool_search 可发现集(若需与 Android 完全对齐，重构 ChatPage 为两阶段 registry)。
+- **验证**:D-132c 聚焦 18/18；chat tsc 干净 + 1560/1560(1542+18)，deepread tsc 干净 + 610/610；`hvigorw assembleHar --no-daemon && hvigorw assembleHap --no-daemon` 均 BUILD SUCCESSFUL；`git diff --check` clean；阶段 plan-drift/规格/质量/反过度设计复核对照 Android 基准收口。

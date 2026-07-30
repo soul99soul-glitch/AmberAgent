@@ -953,6 +953,10 @@ export {
 export type { SubAgentManagerDeps } from './chat/subagent_manager.ts';
 export { SubAgentManager } from './chat/subagent_manager.ts';
 
+// ===== D-132c Task 8:SubAgentTools 五件公共工具 =====
+export type { SubAgentToolsDeps } from './chat/subagent_tools.ts';
+export { SubAgentTools, buildSubAgentMentionOverrideDirective } from './chat/subagent_tools.ts';
+
 // ===== D-129:permissions_status 工具 + AgentPermissionBroker/Registry =====
 export type {
   AgentPermissionRisk, AgentPermissionStatus, AgentSpecialAccess,

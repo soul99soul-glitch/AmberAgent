@@ -34,7 +34,10 @@ import type {
   ConversationRepository, KeyValueStore, Assistant, OpenAIChatApi, TextGenerationParams,
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingClaude, ProviderSettingGoogle,
   ProviderModel, CompactStore, ModelAbility, SkillMetadata, SkillWorkspacePort,
-  AgentTool,
+  AgentTool, ChatStreamProvider, ChatToolDefinition, CustomHeader,
+  SubAgentRuntimeSetting, SubAgentOverride, SubAgentManagerDeps, SubAgentRunner,
+  SubAgentAssistantResolution, SubAgentGenerationPort,
+  AgentPromptSettingsPort,
 } from '@amber/chat-domain';
 import {
   loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
@@ -48,6 +51,9 @@ import {
   AgentPromptConfigRepository, createAgentPromptConfigTool,
   AgentPermissionBroker, createPermissionsStatusTool,
   AgentTaskStore, AgentTaskScheduler, AgentTaskTools, AgentCronManager, AgentCronTools,
+  asChatStreamProvider, makeGenerationRetrySetting, makeSubAgentRuntimeSetting,
+  SubAgentManager, GenerationSubAgentRunner, ChatStreamSubAgentGenerationPort,
+  SubAgentTools,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -74,6 +80,10 @@ import {
   createEntryCronPersistencePort, createEntryAgentTaskFilePort,
   createEntryCronSchedulerPort, agentCronTaskDir, agentCronFilesDir,
 } from '../platform_impl/AgentCronStore.ets';
+import {
+  createEntrySubAgentTranscriptPort, subAgentRunsDir, subAgentTranscriptPathForRun,
+} from '../platform_impl/SubAgentStore.ets';
+import { loadAgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
@@ -299,6 +309,167 @@ export const rescheduleCronTasksOnStartup = (): void => {
     .catch((e: Error) => {
       hilog.error(DOMAIN, TAG, 'rescheduleCronTasks failed: %{public}s', e.message);
     });
+};
+
+// ===== D-132c:Subagent 装配 =====
+// Android 锚点:
+//   SubAgentManager.kt(生命周期/transcript/task board)+ SubAgentRunner.kt
+//     (isolated assistant/child loop)+ SubAgentTools.kt(五件公共工具)
+//   Koin:SubAgentManager single;SubAgentTools per-conversation(ChatService:2299)
+// 复用约束(交接宪章):
+//   - PromptConfigStore.ets 唯一 agent_runtime parser/serializer/RMW;
+//     createEntryAgentPromptSettingsPort(getChatKvStore()) 复用于
+//     agent_prompt_config 工具与 subagent manager,不新建第二套 settings store。
+//   - 共享 AgentTaskStore(getAgentTaskStore)/SessionAccessGrantStore(getSessionGrantStore)。
+//   - provider/model/assistant 解析与 resolveChatRuntime 同口径
+//     (resolveTaskChatModelChoice/resolveChatProviderChoice/buildProviderApi)。
+//   - 仅薄 hydrated snapshot bridge 缓存当前设置,不负责 parser/serializer/RMW。
+
+// 共享 AgentPromptSettingsPort 单例(D-128 agent_prompt_config 工具与 subagent
+//   manager 共用同一 KV 'agent_runtime' RMW)
+let agentPromptSettingsPort: AgentPromptSettingsPort<ModelCouncilRuntimeSetting> | null = null;
+export const getAgentPromptSettingsPort =
+  (): AgentPromptSettingsPort<ModelCouncilRuntimeSetting> => {
+    if (agentPromptSettingsPort === null) {
+      agentPromptSettingsPort = createEntryAgentPromptSettingsPort(getChatKvStore());
+    }
+    return agentPromptSettingsPort;
+  };
+
+// 薄 hydrated snapshot bridge:只缓存/刷新共享 port 的当前 subagent 设置,
+//   不负责 parser/serializer/RMW(交接宪章:manager.getSubAgentSetting 同步读)。
+//   首次读 → 水合;后续返回缓存;refreshSubAgentSetting 用于设置变更后刷新。
+let cachedSubAgentSetting: SubAgentRuntimeSetting | null = null;
+export const hydrateSubAgentSetting = async (): Promise<SubAgentRuntimeSetting> => {
+  if (cachedSubAgentSetting === null) {
+    cachedSubAgentSetting = await getAgentPromptSettingsPort().getSubAgentSetting();
+  }
+  return cachedSubAgentSetting;
+};
+export const refreshSubAgentSetting = async (): Promise<SubAgentRuntimeSetting> => {
+  cachedSubAgentSetting = await getAgentPromptSettingsPort().getSubAgentSetting();
+  return cachedSubAgentSetting;
+};
+
+// council enabled 状态由工具层单独读取既有 council settings(不塞回 Manager)
+export const isModelCouncilEnabled = async (): Promise<boolean> => {
+  const council: ModelCouncilRuntimeSetting = await getAgentPromptSettingsPort().getCouncilSetting();
+  return council.enabled;
+};
+
+// 子代理 generation port(SubAgentRunner.kt:52-55 model/assistant 解析):
+//   resolveModel = findModelById(modelId) ?: getCurrentChatModel(= resolveChatProviderChoice)
+//   resolveAssistant = getCurrentAssistant + agentRuntime generationRetry/autoApprove 快照
+//     (runner 内部 isolatedAssistant 应用隔离字段;此处只返回 parent + retry/flags)
+//   makeProvider = buildProviderApi + asChatStreamProvider(同步;provider 由
+//     resolveModel 阶段已解析并以 model.id 为键缓存,makeProvider 按 model.id 取)
+const buildSubAgentGenerationPort = (): SubAgentGenerationPort => {
+  // model.id → 已解析 provider(resolveModel 异步解析后缓存;makeProvider 同步取)
+  //   并行子代理按各自 model.id 取 provider,不互相干扰;同 model → 同 provider(正确)
+  const providerByModelId: Map<string, ProviderSetting> = new Map<string, ProviderSetting>();
+  const resolveModel = async (modelSettingId: string | null): Promise<ProviderModel | null> => {
+    // Per-role override → fallback current chat model(SubAgentRunner.kt:52-54)
+    let choice: ChatProviderChoice | null = null;
+    if (modelSettingId !== null && modelSettingId.length > 0) {
+      choice = await resolveTaskChatModelChoice(modelSettingId);
+    }
+    if (choice === null) choice = await resolveChatProviderChoice();
+    if (choice === null) return null;
+    providerByModelId.set(choice.model.id, choice.provider);
+    return choice.model;
+  };
+  const resolveAssistant = async (): Promise<SubAgentAssistantResolution | null> => {
+    const assistants: Assistant[] = await getChatAssistants();
+    if (assistants.length === 0) return null;
+    const assistant: Assistant = assistants[0];
+    const snapshot = await loadAgentRuntimeSnapshot(getChatKvStore());
+    const generationRetry = makeGenerationRetrySetting({
+      enabled: snapshot.generationRetry.enabled,
+      maxRetries: snapshot.generationRetry.maxRetries,
+    });
+    return {
+      assistant,
+      generationRetry,
+      autoApproveTools: snapshot.autoApproveAllToolCalls,
+      autoApproveHighRiskTools: snapshot.autoApproveHighRiskToolCalls,
+    };
+  };
+  const makeProvider = (
+    model: ProviderModel, params: TextGenerationParams, headers: CustomHeader[],
+  ): ChatStreamProvider => {
+    // resolveModel 在 makeProvider 之前 await 完成并按 model.id 缓存 provider;
+    //   缺失 = resolveModel 未被调用(契约违反),显式抛错(fail-closed,不伪成功)
+    const cached: ProviderSetting | undefined = providerByModelId.get(model.id);
+    if (cached === undefined) {
+      throw new Error(`Subagent provider not resolved for model ${model.id}`);
+    }
+    const customHeaderRecord: Record<string, string> = {};
+    headers.forEach((h: CustomHeader): void => {
+      const name: string = h.name.trim();
+      if (name.length === 0) return;
+      customHeaderRecord[name] = h.value.trim();
+    });
+    const api: OpenAIChatApi = buildProviderApi(cached, customHeaderRecord);
+    return asChatStreamProvider(api, (): TextGenerationParams => params);
+  };
+  return new ChatStreamSubAgentGenerationPort({ resolveModel, resolveAssistant, makeProvider });
+};
+
+// Runner 单例(Koin single 等价;generation port 不持有会话状态)
+let subAgentRunner: SubAgentRunner | null = null;
+const getSubAgentRunner = (): SubAgentRunner => {
+  if (subAgentRunner === null) {
+    subAgentRunner = new GenerationSubAgentRunner(buildSubAgentGenerationPort());
+  }
+  return subAgentRunner;
+};
+
+// Manager 单例(Koin single 等价;deps 复用共享 store/transcript/time/path)
+let subAgentManager: SubAgentManager | null = null;
+export const getSubAgentManager = async (): Promise<SubAgentManager> => {
+  if (subAgentManager === null) {
+    await hydrateSubAgentSetting();
+    const deps: SubAgentManagerDeps = {
+      getSubAgentSetting: (): SubAgentRuntimeSetting => {
+        // 同步读缓存;manager 每次 start/listBuiltIns/runtimeSummary 调用
+        //   前由调用方确保已水合(ChatPage 发送前 await hydrateSubAgentSetting)
+        return cachedSubAgentSetting ?? makeSubAgentRuntimeSetting();
+      },
+      runner: getSubAgentRunner(),
+      agentTaskStore: await getAgentTaskStore(),
+      sessionAccessGrantStore: getSessionGrantStore(),
+      transcript: createEntrySubAgentTranscriptPort(),
+      newId: (): string => util.generateRandomUUID(false),
+      now: (): number => Date.now(),
+      sleep: (ms: number): Promise<void> =>
+        new Promise<void>((resolve): void => { setTimeout(resolve, ms); }),
+      transcriptPathForRun: (runId: string): string => subAgentTranscriptPathForRun(runId),
+    };
+    subAgentManager = new SubAgentManager(deps);
+  }
+  return subAgentManager;
+};
+
+// 五件公共工具(ChatService.kt:2299 per-conversation;parentToolsProvider 捕获
+//   第 4 步 base tools,由 ChatPage 传入)。会话存在且 subagent enabled 时由
+//   ChatPage 调用挂载;public subagent_* 不进入 child scope(manager.start 过滤)。
+export interface SubAgentToolsContext {
+  parentConversationId: string;
+  parentToolsProvider: () => AgentTool[];
+}
+export const getSubAgentTools = async (
+  ctx: SubAgentToolsContext,
+): Promise<AgentTool[]> => {
+  await hydrateSubAgentSetting();
+  const manager: SubAgentManager = await getSubAgentManager();
+  const councilEnabled: boolean = await isModelCouncilEnabled();
+  const tools: SubAgentTools = new SubAgentTools({
+    manager,
+    parentConversationId: ctx.parentConversationId,
+    parentToolsProvider: ctx.parentToolsProvider,
+    isModelCouncilEnabled: (): boolean => councilEnabled,
+  });
+  return tools.getTools();
 };
 
 // ===== Model Council 装配 =====
