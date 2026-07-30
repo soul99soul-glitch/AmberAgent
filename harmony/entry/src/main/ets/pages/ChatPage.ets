@@ -2310,6 +2310,9 @@ struct ChatPage {
         }
       })
 
+      // cachedCount 预渲染可见区外 5 项,改善滚动流畅度
+      // LazyForEach 替换 ForEach 需 IDataSource 重构(涉及 18+ 处 rows 赋值),
+      //   登记为设备验证项(需真机验证 IDataSource 响应式 + 性能提升)
       List({ scroller: this.scroller }) {
         ForEach(this.rows, (row: MsgRow): void => {
           ListItem() {
@@ -2350,6 +2353,7 @@ struct ChatPage {
         }
       }
       .width('100%').layoutWeight(1)
+      .cachedCount(5)
       .divider({ strokeWidth: 1, color: LINE })
 
       if (this.errorMsg.length > 0) {
