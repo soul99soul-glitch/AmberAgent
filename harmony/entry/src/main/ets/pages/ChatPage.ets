@@ -94,6 +94,9 @@ import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
 import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
 import { ChatInput } from '../components/ChatInput.ets';
+import { ChatMessageAvatar } from '../components/ChatMessageAvatar.ets';
+import { ChatMessageBranch } from '../components/ChatMessageBranch.ets';
+import { ChatMessageActions } from '../components/ChatMessageActions.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -281,8 +284,8 @@ struct MessageRow {
 
   build() {
     Column() {
-      Text(this.message.role === 'user' ? '我' : '助手')
-        .fontSize(11).fontColor(INK3).margin({ bottom: 4 })
+      // 第二梯队 F:ChatMessageAvatar 替换内联头像
+      ChatMessageAvatar({ message: this.message })
       // 阶段 A 接入:用 groupMessageParts 分组渲染,而非直接遍历 parts。
       //   ThinkingBlock → 连续 reasoning+tool 折叠为一组;
       //   ContentBlock → text/image/video/audio/document/mini_app;
@@ -378,35 +381,22 @@ struct MessageRow {
             .backgroundColor(SURFACE2).borderRadius(6).margin({ bottom: 4 })
         }
       }, (block: MessagePartBlock, bi: number): string => `block-${bi}-${block.kind}`)
+      // 第二梯队 F:ChatMessageBranch + ChatMessageActions 替换内联操作行
       if ((this.isAssistant && (this.branchCount > 1 || this.isLastAssistant))
         || this.message.role === 'user') {
         Row() {
-          if (this.branchCount > 1) {
-            Text('◀').fontSize(11).fontColor(this.selectIndex > 0 ? ACCENT : INK3)
-              .onClick((): void => {
-                if (this.selectIndex > 0) this.onSwitch(this.selectIndex - 1);
-              })
-            Text(`${this.selectIndex + 1}/${this.branchCount}`)
-              .fontSize(10).fontColor(INK3).margin({ left: 6, right: 6 })
-            Text('▶').fontSize(11)
-              .fontColor(this.selectIndex < this.branchCount - 1 ? ACCENT : INK3)
-              .margin({ right: 12 })
-              .onClick((): void => {
-                if (this.selectIndex < this.branchCount - 1) this.onSwitch(this.selectIndex + 1);
-              })
-          }
-          Text('分叉').fontSize(11).fontColor(INK3)
-            .margin({ right: 12 })
-            .onClick((): void => this.onFork())
-          if (this.message.role === 'user') {
-            Text('编辑').fontSize(11).fontColor(INK3)
-              .margin({ right: 12 })
-              .onClick((): void => this.onEdit())
-          }
-          if (this.isLastAssistant || this.message.role === 'user') {
-            Text('重新生成').fontSize(11).fontColor(ACCENT)
-              .onClick((): void => this.onRegenerate())
-          }
+          ChatMessageBranch({
+            branchCount: this.branchCount,
+            selectIndex: this.selectIndex,
+            onSwitch: (idx: number): void => { this.onSwitch(idx); },
+          })
+          ChatMessageActions({
+            isUser: this.message.role === 'user',
+            isLastAssistant: this.isLastAssistant,
+            onFork: (): void => this.onFork(),
+            onEdit: (): void => this.onEdit(),
+            onRegenerate: (): void => this.onRegenerate(),
+          })
         }
         .margin({ top: 2 })
       }
