@@ -121,16 +121,18 @@ struct NovelChapterReaderView: View {
             Divider()
 
             Button(role: isCurrentChapterDiscarded ? nil : .destructive) {
+                guard chapterDiscardBlockReason == nil else { return }
                 let target = !isCurrentChapterDiscarded
                 Task { @MainActor in
                     await viewModel.setChapterDiscarded(target, chapterID: chapterID)
                 }
             } label: {
                 Label(
-                    isCurrentChapterDiscarded ? "恢复本章" : "废弃本章",
+                    chapterDiscardMenuTitle,
                     systemImage: isCurrentChapterDiscarded ? "arrow.uturn.backward" : "archivebox"
                 )
             }
+            .disabled(chapterDiscardBlockReason != nil)
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .semibold))
@@ -253,10 +255,14 @@ struct NovelChapterReaderView: View {
     }
 
     private var editBlockReason: String? {
-        if !viewModel.canMutate { return "项目当前只读" }
-        if viewModel.branchSnapshot?.branch.activeRunID != nil { return "请先停止当前生成" }
-        if viewModel.projectSnapshot?.pendingOperations.isEmpty == false { return "请先完成正文操作" }
+        if isProjectReadOnly { return "项目当前只读" }
+        if viewModel.requiresReload { return "请先重新载入项目" }
+        if sessionViewModel.isRunning || viewModel.branchSnapshot?.branch.activeRunID != nil {
+            return "请先停止当前生成"
+        }
+        if currentBranchHasPendingOperations { return "请先完成当前分支的正文操作" }
         if viewModel.isPerforming { return "项目正在处理其他操作" }
+        if !viewModel.canMutate { return "当前状态暂不能编辑" }
         return nil
     }
 
@@ -266,12 +272,51 @@ struct NovelChapterReaderView: View {
     }
 
     private var polishBlockReason: String? {
-        if !viewModel.canMutate { return "项目当前只读" }
-        if sessionViewModel.isRunning { return "请先停止当前生成" }
+        if isProjectReadOnly { return "项目当前只读" }
+        if viewModel.requiresReload { return "请先重新载入项目" }
+        if isCurrentChapterDiscarded { return "请先恢复本章" }
+        if sessionViewModel.isRunning || viewModel.branchSnapshot?.branch.activeRunID != nil {
+            return "请先停止当前生成"
+        }
         if viewModel.branchSnapshot?.branch.syncStatus == .needsSync { return "请先同步剧情状态" }
-        if viewModel.projectSnapshot?.pendingOperations.isEmpty == false { return "请先完成正文操作" }
+        if !sessionViewModel.unresolvedBranchPolishTransactions.isEmpty {
+            return "请先处理上次润色检查"
+        }
+        if currentBranchHasPendingOperations { return "请先完成当前分支的正文操作" }
         if viewModel.isPerforming || sessionViewModel.isBusy { return "项目正在处理其他操作" }
+        if !viewModel.canMutate { return "当前状态暂不能生成" }
         return nil
+    }
+
+    private var chapterDiscardBlockReason: String? {
+        if isProjectReadOnly { return "项目当前只读" }
+        if viewModel.requiresReload { return "请先重新载入项目" }
+        if sessionViewModel.isRunning || viewModel.branchSnapshot?.branch.activeRunID != nil {
+            return "请先停止当前生成"
+        }
+        if currentBranchHasPendingOperations { return "请先完成当前分支的正文操作" }
+        if viewModel.isPerforming || sessionViewModel.isBusy { return "项目正在处理其他操作" }
+        if !viewModel.canMutate { return "当前状态暂不能修改章节状态" }
+        return nil
+    }
+
+    private var chapterDiscardMenuTitle: String {
+        let action = isCurrentChapterDiscarded ? "恢复本章" : "废弃本章"
+        guard let chapterDiscardBlockReason else { return action }
+        return "\(action)（\(chapterDiscardBlockReason)）"
+    }
+
+    private var isProjectReadOnly: Bool {
+        guard let access = viewModel.projectSnapshot?.access else { return false }
+        if case .readWrite = access { return false }
+        return true
+    }
+
+    private var currentBranchHasPendingOperations: Bool {
+        guard let branchID = viewModel.branchSnapshot?.branch.id else { return false }
+        return viewModel.projectSnapshot?.pendingOperations.contains {
+            $0.branchID == branchID
+        } == true
     }
 
     private var polishMenuTitle: String {
@@ -409,7 +454,16 @@ private struct NovelChapterEditSheet: View {
 
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            hasChanges
+    }
+
+    private var hasChanges: Bool {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedContent = content
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        return normalizedTitle != version.title || normalizedContent != version.content
     }
 
     private func save() {

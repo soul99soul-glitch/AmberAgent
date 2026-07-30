@@ -19,6 +19,7 @@ struct NovelSessionBubble: View {
     let isAdoptingPolish: Bool
     let committedChange: NovelSessionCommittedChangeSummary?
     let askUser: NovelAskUserPresentation?
+    var askUserBlocker: NovelSessionActionBlocker? = nil
     let actions: [NovelSessionRowActionAvailability]
     let onAction: (NovelSessionRowAction) -> Void
     let onAnswerAskUser: (NovelMessageID, String) -> Void
@@ -70,7 +71,10 @@ struct NovelSessionBubble: View {
                 }
 
                 if let askUser {
-                    NovelAskUserCard(presentation: askUser) { answers in
+                    NovelAskUserCard(
+                        presentation: askUser,
+                        blocker: askUserBlocker
+                    ) { answers in
                         onAnswerAskUser(messageID, answers)
                     }
                 }
@@ -323,6 +327,7 @@ struct NovelSessionBubble: View {
 
 private struct NovelAskUserCard: View {
     let presentation: NovelAskUserPresentation
+    let blocker: NovelSessionActionBlocker?
     let onSubmit: (String) -> Void
 
     @State private var selectedOption: String?
@@ -345,13 +350,20 @@ private struct NovelAskUserCard: View {
                     .foregroundStyle(AmberTheme.foreground2)
             } else {
                 questionEditor
+                    .disabled(blocker != nil)
+
+                if let blocker {
+                    Text(blocker.displayName)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.accentAmber)
+                }
 
                 Button("继续讨论") {
                     onSubmit(answer)
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity, alignment: .trailing)
-                .disabled(!canSubmit)
+                .disabled(!canSubmit || blocker != nil)
             }
         }
         .padding(16)
@@ -483,10 +495,11 @@ private extension NovelSessionRowAction {
     }
 }
 
-private extension NovelSessionActionBlocker {
+extension NovelSessionActionBlocker {
     var displayName: String {
         switch self {
         case .projectReadOnly: "项目当前只读"
+        case .reloadRequired: "请先重新载入项目"
         case .branchInactive: "分支已不可编辑"
         case .branchNeedsSync: "剧情状态同步未完成"
         case .generationRunning: "请先停止当前生成"

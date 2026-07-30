@@ -593,6 +593,16 @@ extension NovelLiveModelAdapter {
                     ))
                     return
                 }
+                // I-5:守护停止不得伪装成正常完成——引擎因重复相同调用而停止时,
+                // 与 hitStepLimit 同样按可重试失败呈现,而不是落进下面的完成分支。
+                if result.guardStopped {
+                    callbacks.onFailure(failure(
+                        code: "discussion_tool_loop_guard",
+                        message: "讨论时模型反复执行相同搜索，已停止。请换个问法后重试。",
+                        isRetryable: true
+                    ))
+                    return
+                }
                 if let approval = result.pendingApproval,
                    approval.toolName == "ask_user" {
                     do {

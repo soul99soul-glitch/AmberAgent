@@ -3,6 +3,85 @@ import XCTest
 
 @MainActor
 final class NovelCreationPresentationTests: XCTestCase {
+    func testCompendiumRoutesTheDisplayedEffectiveRevisionToItsOwningEditor() throws {
+        let initial = try NovelTestFixtures.document()
+        let withMaterial = try NovelReducer.apply(
+            NovelTestFixtures.materialAction(
+                document: initial,
+                title: "项目世界观",
+                content: "项目共享规则。"
+            ),
+            to: initial
+        ).document
+        let material = try XCTUnwrap(withMaterial.materials.first)
+        let overrideRevisionID = NovelMaterialRevisionID()
+        let overridden = try NovelReducer.apply(.setBranchMaterialOverride(
+            NovelSetBranchMaterialOverrideCommand(
+                context: NovelTestFixtures.context(
+                    projectRevision: withMaterial.project.revision,
+                    configRevision: withMaterial.project.configRevision,
+                    branchHeadRevision: withMaterial.branches[0].headRevision
+                ),
+                projectID: withMaterial.project.id,
+                branchID: withMaterial.branches[0].id,
+                materialID: material.id,
+                change: .createRevision(
+                    revisionID: overrideRevisionID,
+                    title: "当前分支世界观",
+                    content: "仅当前分支采用的规则。",
+                    tags: [],
+                    injectionMode: .smart
+                )
+            )
+        ), to: withMaterial).document
+        let project = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: overridden,
+            access: .readWrite
+        ))
+        let branch = overridden.branches[0]
+        let branchSnapshot = NovelBranchSnapshot(
+            projectID: overridden.project.id,
+            projectRevision: overridden.project.revision,
+            configRevision: overridden.project.configRevision,
+            branch: branch,
+            session: try XCTUnwrap(overridden.sessions.first { $0.id == branch.sessionID }),
+            headCheckpoint: try XCTUnwrap(overridden.checkpoints.first {
+                $0.id == branch.headCheckpointID
+            }),
+            currentState: try XCTUnwrap(overridden.stateSnapshots.first {
+                $0.id == branch.currentStateSnapshotID
+            }),
+            chapterSelections: branch.workingChapterSelections,
+            activeSettingProposals: [],
+            access: .readWrite
+        )
+
+        XCTAssertEqual(
+            NovelCompendiumMaterialEditTarget.resolve(
+                material: material,
+                project: project,
+                branch: branchSnapshot
+            ),
+            .branchOverride
+        )
+        XCTAssertEqual(
+            NovelCompendiumMaterialEditTarget.resolve(
+                material: material,
+                project: project,
+                branch: nil
+            ),
+            .projectRevision
+        )
+        XCTAssertEqual(
+            NovelProposalAcceptanceSheet.targetMaterialTitle(
+                for: material,
+                in: project
+            ),
+            "项目世界观",
+            "接纳建议会写项目全局 revision，目标标题也必须显示全局版本"
+        )
+    }
+
     func testWorkspacePromotesManuscriptToTheMiddleTopLevelTab() {
         XCTAssertEqual(
             NovelWorkspaceSection.allCases,
@@ -226,6 +305,108 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
     }
 
+    func testComposerSubmissionUsesTheSameGateForButtonAndKeyboard() {
+        XCTAssertTrue(NovelSessionComposerPolicy.canSubmit(canSend: true, text: "继续写"))
+        XCTAssertFalse(NovelSessionComposerPolicy.canSubmit(canSend: false, text: "继续写"))
+        XCTAssertFalse(NovelSessionComposerPolicy.canSubmit(canSend: true, text: " \n "))
+    }
+
+    func testAskUserExplainsWhyItCannotBeAnswered() {
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.askUserBlocker(
+                access: .degradedPrevious(primaryFailure: "primary unavailable"),
+                requiresReload: false,
+                isBusy: false
+            ),
+            .projectReadOnly
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.askUserBlocker(
+                access: .readWrite,
+                requiresReload: true,
+                isBusy: false
+            ),
+            .reloadRequired
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.askUserBlocker(
+                access: .readWrite,
+                requiresReload: false,
+                isBusy: true
+            ),
+            .transactionInProgress
+        )
+        XCTAssertNil(NovelSessionComposerPolicy.askUserBlocker(
+            access: .readWrite,
+            requiresReload: false,
+            isBusy: false
+        ))
+    }
+
+    func testPolishTransactionActionsExplainTheFirstBlockingCondition() {
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.polishTransactionBlocker(
+                access: .degradedPrevious(primaryFailure: "corrupt"),
+                requiresReload: true,
+                isRunning: true,
+                isBusy: true
+            ),
+            .projectReadOnly
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.polishTransactionBlocker(
+                access: .readWrite,
+                requiresReload: true,
+                isRunning: true,
+                isBusy: true
+            ),
+            .reloadRequired
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.polishTransactionBlocker(
+                access: .readWrite,
+                requiresReload: false,
+                isRunning: true,
+                isBusy: true
+            ),
+            .generationRunning
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.polishTransactionBlocker(
+                access: .readWrite,
+                requiresReload: false,
+                isRunning: false,
+                isBusy: true
+            ),
+            .transactionInProgress
+        )
+        XCTAssertNil(NovelSessionComposerPolicy.polishTransactionBlocker(
+            access: .readWrite,
+            requiresReload: false,
+            isRunning: false,
+            isBusy: false
+        ))
+    }
+
+    func testGenerationStatusFollowsTheActiveRunInsteadOfTheComposerSelection() {
+        XCTAssertTrue(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: true,
+            activeRunKind: .prose
+        ))
+        XCTAssertTrue(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: true,
+            activeRunKind: .regenerate
+        ))
+        XCTAssertFalse(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: true,
+            activeRunKind: .discussion
+        ))
+        XCTAssertFalse(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: false,
+            activeRunKind: .prose
+        ))
+    }
+
     func testDerivedProposalRequiresAnExplicitMaterialKindAndRoutesToMore() {
         let proposal = NovelSettingProposalRecord(
             id: NovelProposalID(),
@@ -258,6 +439,42 @@ final class NovelCreationPresentationTests: XCTestCase {
         XCTAssertEqual(
             NovelProposalAcceptanceSheet.initialKindChoice(for: proposal),
             NovelMaterialKindChoice(kind: .world)
+        )
+    }
+
+    func testWritingRequirementsProposalDefaultsToTheExistingManagedMaterial() {
+        let existingID = NovelMaterialID()
+        let existingRevisionID = NovelMaterialRevisionID()
+        let existing = NovelMaterialRecord(
+            id: existingID,
+            kind: .writingRequirements,
+            currentRevisionID: existingRevisionID,
+            revisionIDs: [existingRevisionID]
+        )
+        let otherID = NovelMaterialID()
+        let otherRevisionID = NovelMaterialRevisionID()
+        let other = NovelMaterialRecord(
+            id: otherID,
+            kind: .world,
+            currentRevisionID: otherRevisionID,
+            revisionIDs: [otherRevisionID]
+        )
+        let proposal = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: NovelBranchID(),
+            title: "写作要求",
+            content: "克制叙述，保持线索公平。",
+            createdAt: Date(),
+            isResolved: false,
+            origin: .quickStart(runID: NovelRunID(), suggestedKind: .writingRequirements)
+        )
+
+        XCTAssertEqual(
+            NovelProposalAcceptanceSheet.initialTargetMaterialID(
+                for: proposal,
+                activeMaterials: [other, existing]
+            ),
+            existingID
         )
     }
 
@@ -385,6 +602,63 @@ final class NovelCreationPresentationTests: XCTestCase {
             .fixed(providerID: providerID, modelID: modelID)
         )
         XCTAssertEqual(settings.snapshot.getCurrentChatModel()?.id.description(), globalModelIDBefore)
+    }
+
+    func testDisabledOrMismatchedProviderDoesNotPresentItsFixedModelAsAvailable() throws {
+        let suite = "NovelModelAvailabilityPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = IOSSharedSettingsStore(userDefaults: defaults)
+        let option = try XCTUnwrap(settings.availableChatModels().first)
+        let provider = try XCTUnwrap(settings.snapshot.providers.first { provider in
+            provider.models.contains { $0.id.description() == option.id }
+        })
+        let providerID = provider.id.description()
+        let modelID = option.id
+
+        _ = settings.updateProviderBasics(
+            providerId: providerID,
+            name: provider.name,
+            enabled: true
+        )
+
+        XCTAssertEqual(
+            NovelPresentation.modelDisplayName(
+                for: .fixed(providerID: "missing-provider", modelID: modelID),
+                sharedSettings: settings
+            ),
+            "固定模型不可用"
+        )
+
+        _ = settings.updateProviderBasics(
+            providerId: providerID,
+            name: provider.name,
+            enabled: false
+        )
+        XCTAssertEqual(
+            NovelPresentation.modelDisplayName(
+                for: .fixed(providerID: providerID, modelID: modelID),
+                sharedSettings: settings
+            ),
+            "固定模型不可用"
+        )
+
+        settings.setCurrentChatModelId(modelID)
+        XCTAssertEqual(
+            NovelPresentation.modelDisplayName(for: .global, sharedSettings: settings),
+            "全局模型不可用"
+        )
+    }
+
+    func testUnavailableModelFailurePointsToTheLiveSettingsEntry() {
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "fixed_model_missing",
+                message: "The configured model no longer exists.",
+                isRetryable: false
+            )),
+            "项目模型当前不可用，请在右上角“设置”的“项目模型覆盖”中重新选择。"
+        )
     }
 
     func testCheckpointLineageIsHeadToRootAndStopsAtInitialCheckpoint() throws {

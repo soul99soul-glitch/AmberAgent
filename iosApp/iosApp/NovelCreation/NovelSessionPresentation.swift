@@ -1,5 +1,43 @@
 import Foundation
 
+enum NovelSessionComposerPolicy {
+    static func canSubmit(canSend: Bool, text: String) -> Bool {
+        canSend && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func askUserBlocker(
+        access: NovelProjectLoadAccess?,
+        requiresReload: Bool,
+        isBusy: Bool
+    ) -> NovelSessionActionBlocker? {
+        guard access == .readWrite else { return .projectReadOnly }
+        if requiresReload { return .reloadRequired }
+        if isBusy { return .transactionInProgress }
+        return nil
+    }
+
+    static func polishTransactionBlocker(
+        access: NovelProjectLoadAccess?,
+        requiresReload: Bool,
+        isRunning: Bool,
+        isBusy: Bool
+    ) -> NovelSessionActionBlocker? {
+        guard access == .readWrite else { return .projectReadOnly }
+        if requiresReload { return .reloadRequired }
+        if isRunning { return .generationRunning }
+        if isBusy { return .transactionInProgress }
+        return nil
+    }
+
+    static func showsGenerationStatus(
+        isRunning: Bool,
+        activeRunKind: NovelRunKind?
+    ) -> Bool {
+        guard isRunning else { return false }
+        return activeRunKind == .prose || activeRunKind == .regenerate
+    }
+}
+
 enum NovelSessionTransientTailPhase: Equatable, Sendable {
     case waitingForFirstToken
     case streaming
@@ -157,6 +195,7 @@ enum NovelSessionRowAction: Hashable, Sendable {
 
 enum NovelSessionActionBlocker: String, Hashable, Sendable {
     case projectReadOnly
+    case reloadRequired
     case branchInactive
     case branchNeedsSync
     case generationRunning
@@ -340,6 +379,7 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
     let runs: [NovelActiveRunRecord]
     let pendingOperations: [NovelPendingOperationRecord]
     let polishTransactions: [NovelPendingPolishTransactionRecord]
+    let discardedChapterVersionIDs: Set<NovelChapterVersionID>
     let checkpoints: [NovelBranchCheckpointRecord]
     let stateSnapshots: [NovelStateSnapshotRecord]
     let events: [NovelStoryEventRecord]
@@ -355,6 +395,7 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
         runs: [NovelActiveRunRecord],
         pendingOperations: [NovelPendingOperationRecord],
         polishTransactions: [NovelPendingPolishTransactionRecord],
+        discardedChapterVersionIDs: Set<NovelChapterVersionID> = [],
         checkpoints: [NovelBranchCheckpointRecord] = [],
         stateSnapshots: [NovelStateSnapshotRecord] = [],
         events: [NovelStoryEventRecord] = [],
@@ -369,6 +410,7 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
         self.runs = runs
         self.pendingOperations = pendingOperations
         self.polishTransactions = polishTransactions
+        self.discardedChapterVersionIDs = discardedChapterVersionIDs
         self.checkpoints = checkpoints
         self.stateSnapshots = stateSnapshots
         self.events = events
@@ -384,6 +426,9 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
         expandedArchiveIDs: Set<NovelMessageID> = [],
         transientTail: NovelSessionTransientTail?
     ) {
+        let discardedChapterIDs = Set(project.chapters.lazy.filter {
+            $0.discardedAt != nil
+        }.map(\.id))
         self.init(
             branch: branch.branch,
             session: branch.session,
@@ -391,6 +436,9 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
             runs: project.activeRuns,
             pendingOperations: project.pendingOperations,
             polishTransactions: project.polishTransactions,
+            discardedChapterVersionIDs: Set(project.chapterVersions.lazy.filter {
+                discardedChapterIDs.contains($0.chapterID)
+            }.map(\.id)),
             checkpoints: project.checkpoints,
             stateSnapshots: project.stateSnapshots,
             events: project.events,
@@ -714,6 +762,7 @@ private struct NovelSessionProjectionIndex {
     let branchManualSyncPendingOperationIDs: Set<NovelPendingOperationID>
     let branchProseBlockingPendingOperationIDs: Set<NovelPendingOperationID>
     let branchBlockingPolishTransactionIDs: Set<NovelPendingOperationID>
+    let discardedChapterVersionIDs: Set<NovelChapterVersionID>
 
     init(input: NovelSessionProjectionInput) {
         var candidatesBySourceMessageID: [NovelMessageID: [NovelCandidateRecord]] = [:]
@@ -767,6 +816,7 @@ private struct NovelSessionProjectionIndex {
         self.polishCandidateIDs = polishCandidateIDs
         self.polishByCandidateID = polishByCandidateID
         self.branchBlockingPolishTransactionIDs = branchBlockingPolishTransactionIDs
+        self.discardedChapterVersionIDs = input.discardedChapterVersionIDs
 
         var runByID: [NovelRunID: NovelActiveRunRecord] = [:]
         var runningRunIDs: Set<NovelRunID> = []
@@ -780,7 +830,8 @@ private struct NovelSessionProjectionIndex {
         self.runningRunIDs = runningRunIDs
 
         var unresolvedQuickStartProposalByRunID: [NovelRunID: NovelSettingProposalRecord] = [:]
-        for proposal in input.settingProposals where !proposal.isResolved {
+        for proposal in input.settingProposals where
+            !proposal.isResolved && proposal.supersededByRunID == nil {
             guard case .some(.quickStart(let runID, _)) = proposal.origin else { continue }
             if unresolvedQuickStartProposalByRunID[runID] == nil {
                 unresolvedQuickStartProposalByRunID[runID] = proposal
@@ -1336,20 +1387,27 @@ private extension NovelSessionPresentation {
         ) {
             return blocker
         }
-        if run.kind == .prose || run.kind == .polish {
-            if run.kind == .polish, input.branch.syncStatus == .needsSync {
+        if run.kind == .polish || run.kind == .regenerate {
+            if input.branch.syncStatus == .needsSync {
                 return .branchNeedsSync
             }
-            if !index.branchProseBlockingPendingOperationIDs.isEmpty {
-                return .pendingOperation
+            if let blocker = index.pendingOperationBlocker(excluding: nil) {
+                return blocker
             }
+            if index.hasBlockingPolishTransaction(excluding: nil) { return .pendingOperation }
+        } else if run.kind == .prose,
+                  !index.branchProseBlockingPendingOperationIDs.isEmpty {
+            return .pendingOperation
+        }
+        if run.kind == .prose || run.kind == .polish || run.kind == .regenerate {
             if input.branch.headCheckpointID != run.baseCheckpointID ||
                 input.branch.headRevision != run.baseHeadRevision {
                 return .staleCandidate
             }
-            if run.kind == .polish {
+            if run.kind == .polish || run.kind == .regenerate {
                 guard let sourceVersionID = run.sourceChapterVersionID,
-                      index.workingChapterVersionIDs.contains(sourceVersionID) else {
+                      index.workingChapterVersionIDs.contains(sourceVersionID),
+                      !input.discardedChapterVersionIDs.contains(sourceVersionID) else {
                     return .sourceChapterChanged
                 }
             }
@@ -1441,6 +1499,11 @@ private extension NovelSessionPresentation {
                     candidate.baseHeadRevision == input.branch.headRevision
             }
             if !baseMatches { return .staleCandidate }
+        }
+        if requiresCurrentBase,
+           let sourceID = candidate.sourceChapterVersionID,
+           index.discardedChapterVersionIDs.contains(sourceID) {
+            return .sourceChapterChanged
         }
         if candidate.kind == .polish,
            let sourceID = candidate.sourceChapterVersionID,

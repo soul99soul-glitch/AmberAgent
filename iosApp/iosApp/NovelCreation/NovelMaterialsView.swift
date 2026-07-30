@@ -145,7 +145,11 @@ struct NovelMaterialsView: View {
                 .padding(.vertical, 22)
             } else {
                 ForEach(viewModel.activeMaterials, id: \.id) { material in
-                    let revision = NovelPresentation.currentRevision(for: material, in: project)
+                    let revision = NovelPresentation.effectiveRevision(
+                        for: material,
+                        project: project,
+                        branch: viewModel.branchSnapshot
+                    )
                     Button {
                         onEditMaterial(material)
                     } label: {
@@ -508,6 +512,10 @@ struct NovelProposalAcceptanceSheet: View {
         self.viewModel = viewModel
         self.proposal = proposal
         self._kindChoice = State(initialValue: Self.initialKindChoice(for: proposal))
+        self._selectedMaterialID = State(initialValue: Self.initialTargetMaterialID(
+            for: proposal,
+            activeMaterials: viewModel.activeMaterials
+        ))
         self._aliases = State(
             initialValue: proposal.suggestedCharacterAliases?.joined(separator: "，") ?? ""
         )
@@ -585,6 +593,14 @@ struct NovelProposalAcceptanceSheet: View {
         return NovelMaterialKindChoice(kind: kind)
     }
 
+    static func initialTargetMaterialID(
+        for proposal: NovelSettingProposalRecord,
+        activeMaterials: [NovelMaterialRecord]
+    ) -> NovelMaterialID? {
+        guard proposal.suggestedMaterialKind == .writingRequirements else { return nil }
+        return activeMaterials.first { $0.kind == .writingRequirements }?.id
+    }
+
     private var selectedKind: NovelMaterialKind? {
         kindChoice?.materialKind(customName: customKindName)
     }
@@ -602,7 +618,17 @@ struct NovelProposalAcceptanceSheet: View {
 
     private func materialTitle(_ material: NovelMaterialRecord) -> String {
         guard let project = viewModel.projectSnapshot else { return material.kind.displayName }
-        return NovelPresentation.currentRevision(for: material, in: project)?.title ?? material.kind.displayName
+        return Self.targetMaterialTitle(for: material, in: project)
+    }
+
+    static func targetMaterialTitle(
+        for material: NovelMaterialRecord,
+        in project: NovelProjectSnapshot
+    ) -> String {
+        NovelPresentation.currentRevision(
+            for: material,
+            in: project
+        )?.title ?? material.kind.displayName
     }
 
     private func accept() {
@@ -803,7 +829,11 @@ struct NovelInjectionPreviewSheet: View {
               let material = project.materials.first(where: { $0.id == materialID }) else {
             return "资料"
         }
-        return NovelPresentation.currentRevision(for: material, in: project)?.title ?? material.kind.displayName
+        return NovelPresentation.effectiveRevision(
+            for: material,
+            project: project,
+            branch: viewModel.branchSnapshot
+        )?.title ?? material.kind.displayName
     }
 
     private func preview() {

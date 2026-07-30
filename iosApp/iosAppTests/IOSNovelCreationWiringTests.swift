@@ -269,6 +269,48 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(reader.contains(".accessibilityLabel(\"查找和替换\")"))
     }
 
+    func testChapterMutationGatesUseTheCurrentBranchAndPreserveActionableReasons() throws {
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+        let chapters = try source("iosApp/NovelCreation/NovelChapterViews.swift")
+
+        XCTAssertTrue(reader.contains("private var currentBranchHasPendingOperations: Bool"))
+        XCTAssertTrue(chapters.contains("private var currentBranchHasPendingOperations: Bool"))
+        XCTAssertFalse(reader.contains("projectSnapshot?.pendingOperations.isEmpty == false"))
+        XCTAssertFalse(chapters.contains("projectSnapshot?.pendingOperations.isEmpty == false"))
+        XCTAssertTrue(reader.contains("if isCurrentChapterDiscarded { return \"请先恢复本章\" }"))
+        XCTAssertTrue(reader.contains(".disabled(chapterDiscardBlockReason != nil)"))
+
+        let activeRunReason = try XCTUnwrap(reader.range(of: "if sessionViewModel.isRunning"))
+        let genericMutationReason = try XCTUnwrap(reader.range(of: "if !viewModel.canMutate"))
+        XCTAssertLessThan(activeRunReason.lowerBound, genericMutationReason.lowerBound)
+    }
+
+    func testChapterSheetsExposeRestoreProgressAndRejectNoopEdits() throws {
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+        let chapters = try source("iosApp/NovelCreation/NovelChapterViews.swift")
+
+        XCTAssertTrue(reader.contains("private var hasChanges: Bool"))
+        XCTAssertTrue(reader.contains("hasChanges"))
+        XCTAssertTrue(chapters.contains("private var restoreBlockReason: String?"))
+        XCTAssertTrue(chapters.contains("ProgressView(operationProgressTitle)"))
+        XCTAssertTrue(chapters.contains(".interactiveDismissDisabled(isSubmitting)"))
+        XCTAssertTrue(chapters.contains("currentBranchHasPendingOperations"))
+        XCTAssertTrue(chapters.contains("time: .shortened"))
+    }
+
+    func testBranchMutationGatesMatchReducerBusySemantics() throws {
+        let branches = try source("iosApp/NovelCreation/NovelBranchesView.swift")
+
+        XCTAssertTrue(branches.contains("private var hasReducerBlockingBranchOperation: Bool"))
+        XCTAssertTrue(branches.contains("$0.status == .pending || $0.status == .retryable"))
+        XCTAssertFalse(branches.contains(
+            "$0.status == .pending || $0.status == .retryable || $0.status == .blocked"
+        ))
+        XCTAssertTrue(branches.contains(".disabled(!canEditBranchOverride"))
+        XCTAssertTrue(branches.contains("!canDeleteBranch"))
+        XCTAssertTrue(branches.contains("time: .shortened"))
+    }
+
     func testNovelComposerRevealsFocusedControlsWithoutPermanentSegmentedChrome() throws {
         let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
 
@@ -335,6 +377,46 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(sheets.contains("Button(role: .destructive)"))
         XCTAssertTrue(bubble.contains("canCollect ? \"生成已中断 · 可收录已生成部分\" : \"生成已中断\""))
         XCTAssertFalse(workspace.contains("Timer.publish"))
+    }
+
+    func testSessionSheetsPreserveUserDraftsAndSeparateArchiveRetryPaths() throws {
+        let sheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+        let archiveStart = try XCTUnwrap(sheets.range(of: "struct NovelDiscussionArchiveSheet"))
+        let collectStart = try XCTUnwrap(sheets.range(of: "struct NovelCollectCandidateSheet"))
+        let forkStart = try XCTUnwrap(sheets.range(of: "struct NovelSessionForkSheet"))
+        let writingContextStart = try XCTUnwrap(sheets.range(of: "struct NovelWritingContextSheet"))
+        let manualRewriteStart = try XCTUnwrap(sheets.range(of: "struct NovelManualRewriteCandidateSheet"))
+        let archiveSheet = sheets[archiveStart.lowerBound..<collectStart.lowerBound]
+        let collectSheet = sheets[collectStart.lowerBound..<forkStart.lowerBound]
+        let writingContextSheet = sheets[
+            writingContextStart.lowerBound..<manualRewriteStart.lowerBound
+        ]
+
+        XCTAssertTrue(sheets.contains("@State private var preparationTask: Task<Void, Never>?"))
+        XCTAssertTrue(sheets.contains("Button(\"取消\") { cancelPreparationAndDismiss() }"))
+        XCTAssertTrue(sheets.contains(".onDisappear { preparationTask?.cancel() }"))
+        XCTAssertTrue(sheets.contains("Button(\"重新整理\") { prepare() }"))
+        XCTAssertTrue(sheets.contains("submissionFailureMessage == nil ? \"确认归档\" : \"重试保存\""))
+        XCTAssertFalse(sheets.contains("Button(\"重试\") { prepare() }"))
+        XCTAssertTrue(archiveSheet.contains(
+            ".disabled(isSubmitting)\n            .scrollContentBackground"
+        ))
+
+        XCTAssertTrue(sheets.contains("private func refreshEditedTextAfterSelectionChange()"))
+        XCTAssertTrue(sheets.contains("guard !hasEditedText else { return }"))
+        XCTAssertTrue(sheets.contains("调整段落后会保留你的编辑"))
+        XCTAssertTrue(collectSheet.contains(
+            ".disabled(isSubmitting)\n            .scrollContentBackground"
+        ))
+        XCTAssertTrue(collectSheet.contains("let nextChapterOrdinal: Int"))
+        XCTAssertTrue(collectSheet.contains("nextChapterOrdinal: Int,"))
+        XCTAssertTrue(collectSheet.contains("let nextOrdinal = nextChapterOrdinal"))
+        XCTAssertTrue(collectSheet.contains("Text(\"新开第 \\(nextChapterOrdinal) 章\")"))
+        XCTAssertFalse(collectSheet.contains("chapters.count + 1"))
+        XCTAssertTrue(sheets.contains("title: \"整章润色偏好\""))
+        XCTAssertTrue(writingContextSheet.contains("NovelPresentation.effectiveRevision("))
+        XCTAssertTrue(writingContextSheet.contains("branch: workspace.branchSnapshot"))
+        XCTAssertFalse(writingContextSheet.contains("NovelPresentation.currentRevision("))
     }
 
     func testProjectTitleOpensWritingAndHierarchicalContextSheet() throws {
@@ -617,6 +699,71 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(markdownBody.contains("stopActiveRunsForProjectOperation"))
     }
 
+    func testUnavailableProjectRowRetriesReadingInsteadOfOpeningDeleteConfirmation() throws {
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+
+        XCTAssertTrue(list.contains("retryOpening(project)"))
+        XCTAssertTrue(list.contains("Button(\"重新读取\")"))
+        XCTAssertFalse(list.contains(
+            "if project.loadError != nil {\n                            prepareDelete(project)"
+        ))
+        XCTAssertFalse(list.contains("项目文件已经损坏"))
+        XCTAssertFalse(list.contains("项目文件损坏"))
+    }
+
+    func testUnavailableImportConflictDoesNotOfferImpossibleReplacement() throws {
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+
+        XCTAssertTrue(list.contains("if existing.loadError == nil"))
+        XCTAssertTrue(list.contains("本地项目当前无法读取，只能将导入包保留为副本。"))
+        let importSheet = try XCTUnwrap(list.range(of: "struct NovelProjectImportSheet"))
+        let previewFixtures = try XCTUnwrap(list.range(
+            of: "#if DEBUG",
+            range: importSheet.upperBound..<list.endIndex
+        ))
+        let body = list[importSheet.lowerBound..<previewFixtures.lowerBound]
+        XCTAssertEqual(body.components(separatedBy: "Label(\"替换本地项目\"").count - 1, 1)
+        XCTAssertTrue(body.contains("Label(\"保留两份\", systemImage: \"plus.square.on.square\")"))
+    }
+
+    func testProjectSettingsAlignPackageExportAndBranchSwitchWithRunningRun() throws {
+        let settings = try source("iosApp/NovelCreation/NovelProjectSettingsDetailView.swift")
+
+        XCTAssertTrue(settings.contains("private var hasRunningRun: Bool"))
+        XCTAssertTrue(settings.contains(
+            ".disabled(currentProject == nil || viewModel.isPerforming || hasRunningRun)"
+        ))
+        let markdownButton = try XCTUnwrap(settings.range(
+            of: "Button(action: exportMarkdown)"
+        ))
+        let markdownButtonEnd = try XCTUnwrap(settings.range(
+            of: "\n            }",
+            range: markdownButton.upperBound..<settings.endIndex
+        ))
+        let markdownBody = settings[markdownButton.lowerBound..<markdownButtonEnd.lowerBound]
+        XCTAssertFalse(markdownBody.contains("hasRunningRun"))
+        XCTAssertTrue(settings.contains("pendingBranchSelection"))
+        XCTAssertTrue(settings.contains("切换分支会停止当前生成"))
+        XCTAssertTrue(settings.contains("selectPendingBranch()"))
+    }
+
+    func testProjectSettingsLoadFailureHasInlineRetryInsteadOfPermanentSpinner() throws {
+        let settings = try source("iosApp/NovelCreation/NovelProjectSettingsDetailView.swift")
+
+        XCTAssertTrue(settings.contains("projectLoadFailure"))
+        XCTAssertTrue(settings.contains("Button(\"重新读取\")"))
+        XCTAssertTrue(settings.contains("await loadProject()"))
+        XCTAssertTrue(settings.contains("isLoadingProject"))
+    }
+
+    func testProjectListExplainsAutomaticStateSyncSelectionBlock() throws {
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+
+        XCTAssertTrue(list.contains("viewModel.stateSyncActivity"))
+        XCTAssertTrue(list.contains("activity.displayedCompletionFraction"))
+        XCTAssertTrue(list.contains("完成前暂不能切换项目"))
+    }
+
     func testStateSyncActivityIsProjectScopedAndScheduledSyncKeepsBackgroundLease() throws {
         let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
         let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
@@ -714,7 +861,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         let section = compendium[sectionStart.lowerBound..<sectionEnd.lowerBound]
         XCTAssertTrue(section.contains("viewModel.projectSnapshot?.project.creationMode == .quickStart"))
         XCTAssertTrue(section.contains("重新生成设定建议"))
-        XCTAssertTrue(section.contains("!viewModel.canMutate || viewModel.branchSnapshot?.branch.activeRunID != nil"))
+        XCTAssertTrue(section.contains("新一轮成功后会替换当前未处理的建议"))
 
         // 链条第三环: 入口实际挂载到「更多」子分段(NovelCompendiumMoreView)的 List 内,
         // 是常驻 Section,不依赖 proposals 是否为空。
@@ -737,6 +884,38 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(viewModel.contains("func startQuickStartSuggestions("))
         XCTAssertTrue(viewModel.contains("guidance: String? = nil"))
         XCTAssertTrue(viewModel.contains("exactUserText: String? = nil"))
+    }
+
+    func testLiveCompendiumManagesWritingRequirementsAndUsesEffectiveBranchRevisions() throws {
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
+        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+        let effectiveRevisionCallCount = compendium.components(
+            separatedBy: "NovelPresentation.effectiveRevision("
+        ).count - 1
+
+        XCTAssertTrue(compendium.contains("case .writingRequirements, .custom"))
+        XCTAssertTrue(materials.contains("initialTargetMaterialID"))
+        XCTAssertGreaterThanOrEqual(effectiveRevisionCallCount, 3)
+        XCTAssertTrue(compendium.contains("onEditMaterial: openMaterialEditor"))
+        XCTAssertTrue(compendium.contains("NovelCompendiumMaterialEditTarget.resolve("))
+        XCTAssertTrue(compendium.contains("branchOverrideRoute = NovelCompendiumBranchOverrideRoute("))
+        XCTAssertTrue(compendium.contains("NovelBranchOverrideEditorSheet(viewModel:"))
+
+        let proposalStart = try XCTUnwrap(materials.range(of: "struct NovelProposalAcceptanceSheet"))
+        let previewStart = try XCTUnwrap(materials.range(of: "struct NovelInjectionPreviewSheet"))
+        let proposalSheet = materials[proposalStart.lowerBound..<previewStart.lowerBound]
+        XCTAssertTrue(proposalSheet.contains("NovelPresentation.currentRevision("))
+        XCTAssertFalse(proposalSheet.contains("NovelPresentation.effectiveRevision("))
+    }
+
+    func testCharacterDeleteActionIsGatedByCanMutate() throws {
+        let characters = try source("iosApp/NovelCreation/NovelCharacterPagesView.swift")
+        let swipeStart = try XCTUnwrap(characters.range(of: ".swipeActions(edge: .trailing"))
+        let swipeTail = String(characters[swipeStart.lowerBound...])
+        let swipeEnd = try XCTUnwrap(swipeTail.range(of: "\n    }\n\n    private func materialTitle"))
+        let swipeBody = String(swipeTail[..<swipeEnd.lowerBound])
+
+        XCTAssertTrue(swipeBody.contains(".disabled(!viewModel.canMutate)"))
     }
 
     /// 真机实测缺陷的守护:带「调整方向」的快速开始失败后点重试,曾退回默认文案、

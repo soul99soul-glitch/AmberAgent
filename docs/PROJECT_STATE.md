@@ -1,12 +1,12 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
 ## Repository
 
-- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
+- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
 - Worktree: 2026-07-16 小说创作连续工作、流式展示/滚动收敛与 vendor TextKit 增量布局已完成整合并纳入当前分支；开始新任务仍以实时 `git status` 为准。
@@ -21,6 +21,28 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `ChatSwiftUIMessageList`。Native Timeline / UICollectionView 仍属于实验或 fallback 路径，不能用其测试结果替代默认路径验证。
 
 ## Latest Completed Slices
+
+### 2026-07-30 小说创作真实阻塞与恢复路径收敛
+
+- 会话与正文：整章重新生成的 partial Stop 现在持久化为可收录、仍指向原章的 interrupted candidate；活动 run 重新载入会重新订阅；regenerate 精确重试校验 branch head、当前工作版本与来源版本。未解决润色事务会一致阻止再次润色/重写，并在 composer、章节阅读器与批量 sheet 提供同一 blocker 及重试/放弃；批量进度绑定 owning project+branch，切换 binding 会先取消并等待旧批次，进入后台会停止本批 owned run 且不再启动下一章，全废弃章节不再出现空入口。
+- Sheet、章节与分支：收录前的手工正文不会被段落勾选覆盖；归档整理可真正取消，保存失败重试同一校对稿；提交期间冻结表单。废弃章节不再参与替换/重写，新章序号按完整目录计算；章节/版本/分支操作只受当前分支 pending 影响，并显示真实 blocker、进度与失败。切分支保留各自未发送草稿，活动生成切分支前明确确认。
+- 设定与项目生命周期：Quick Start 新一轮成功后以 `supersededByRunID` 审计关系替代同分支旧待确认建议，失败保留旧建议，不伪造用户 reject；其 transient task/status/run 以 project+branch 为 owner，切分支不会串恢复态。切分支先读取权威 durable run，需停止时由 UI 明确确认后才中断；自动同步准备失败保存 branch-scoped 可见状态并提供显式重试，主动取消不误报失败。资料库展示并编辑当前分支的有效 override，全局 proposal 目标仍显示全局版本。文档校验拒绝 Quick Start supersede 的循环/多目标/跨历史关系，并拒绝 regenerate 引用缺失或非当前来源。
+- 章节废弃闭环：补齐废弃/恢复 operation 与 outcome 的文档账本映射，transition 仍保持章节身份不可变，并要求每次 `discardedAt` 状态翻转与唯一一条对应原子操作一一匹配；废弃来源章会在展示、ViewModel 精确重试和 reducer 启动三层一致拒绝旧 regenerate/polish 重试，恢复后资格正常回来，不再模型白跑。
+- 验证：iPhone 17 Pro / iOS 26.5 Simulator 最终八组小说创作回归 **284 passed / 0 failed / 0 skipped**，覆盖 reducer、文档 transition、批量润色、会话与项目 ViewModel、展示和生产 wiring；两个最终只读 subagent 分别复核调用链与测试证据，测试证据审查 PASS。`git diff --check` 通过。尚未执行真机 Home/锁屏时序、手势、键盘、Dynamic Type、override editor 与长任务视觉验证，未提交或推送。
+
+### 2026-07-30 小说批量润色阻塞与取消闭环修复
+
+- 根因确认：批量润色在剧情漂移检查失败或超时后会留下 `retryable/blocked` 事务，却继续处理后续章节并生成第二条未解决事务；每条事务的重试/放弃又会被另一条事务判定为「有正文操作正在处理」，形成互锁。停止按钮此前只取消批量外层 Task，没有停止该批次启动的当前章节 run，界面虽停止但生成仍可能在后台继续。
+- 最小修复：遇到第一条未解决润色事务就暂停余下章节，不再累积第二条阻塞事务；批量 sheet 直接展示当前事务的失败原因以及「重试检查 / 放弃这次润色」，处理结果同步回批量报告，已有多条历史阻塞事务也可逐条解除。取消批量时只停止该批次仍然持有的 active run，避免误停后来启动或其他来源的生成；同时补齐启动握手和持久化刷新后的取消检查，已取消章节不再误报失败。
+- 验证：新增并更新批量润色回归，先复现「取消后 run 泄漏」和「失败后继续累积事务」两条红灯，再转绿；`NovelBatchPolishTests`、单章润色、完整性、会话恢复、ViewModel 与 iOS wiring 相关套件在 iPhone 17 Pro / iOS 26.5 Simulator 共 **161 passed / 0 failed / 0 skipped**。`git diff --check` 通过；尚未执行真机批量润色体验验证、提交或推送。
+
+### 2026-07-30 iOS Agent 工具执行与恢复边界复核修复
+
+- 修正工具结果保存失败后的状态收口：run 保持 `recovery_pending` 并继续被启动恢复扫描发现；只有会话消息与工具账本完成对账后才转 `interrupted`，账本/会话查询或保存失败时不误确认恢复完成。
+- `memory_tool` 按 action 区分副作用：读取为 pure，稳定 ID 的 edit/delete 为 idempotent，会分配新记录的 create 与未知输入为 sideEffect。工具循环签名改为规范化 JSON，批量 guard stop 会显式终结剩余工具，不再留下可被后续误执行的空 output。
+- 前后台执行都以 run 启动时的 `params.tools` 作为模型可见工具集；Codex single-flight 只共享实时 OAuth token，每个调用者继续用自己的冻结 provider 快照重建请求配置。
+- 同轮复核还修正了两个由既有红灯测试暴露的终态问题：provider terminal 到达后不再提前清空尚未消费的 FIFO 事件；空回复与普通完成均在消息保存成功后才发布成功终态和触发后续辅助生成。
+- 验证：iPhone 17 Pro / iOS 26.5 Simulator 定点 Agent/恢复/快照/边界回归 139 passed；存储、后台挂起与流式 FIFO 补充回归 83 passed、1 skipped；`:core:agent-store-room:jvmTest` 编译成功（该模块 JVM test 为 NO-SOURCE）；`git diff --check` 通过。尚未执行真机验证、提交或推送；当前分支仍落后远端 4 个提交，工作区保留本轮及既有未提交改动。
 
 ### 2026-07-29 模型议会 grok 伪搜索文本：显示兜底 + 席位联网查证 + 后台/退页续跑核实
 

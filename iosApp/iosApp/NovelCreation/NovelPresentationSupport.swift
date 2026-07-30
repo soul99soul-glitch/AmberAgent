@@ -197,7 +197,7 @@ enum NovelPresentation {
              "fixed_model_missing", "effective_provider_missing", "provider_disabled",
              "model_not_chat", "model_unavailable", "grok_isolation_missing",
              "grok_isolation_unavailable", "grok_provider_invalid":
-            return "项目模型当前不可用，请在“设定 > 更多”中检查模型设置。"
+            return "项目模型当前不可用，请在右上角“设置”的“项目模型覆盖”中重新选择。"
         case "invalid_quick_start_output":
             return "模型返回的创作建议格式不完整，请重新生成。"
         case "invalid_structured_output", "incomplete_polish_output", "invalid_polish_assessment":
@@ -359,15 +359,27 @@ enum NovelPresentation {
     ) -> String {
         switch policy {
         case .global:
-            return "跟随全局"
-        case .fixed(_, let modelID):
-            for provider in sharedSettings.snapshot.providers {
-                if let model = provider.models.first(where: { $0.id.description() == modelID }) {
-                    let name = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return name.isEmpty ? model.modelId : name
-                }
+            guard let model = sharedSettings.snapshot.getCurrentChatModel(),
+                  let provider = model.findProvider(
+                    providers: sharedSettings.snapshot.providers,
+                    checkOverwrite: true
+                  ),
+                  provider.enabled else {
+                return "全局模型不可用"
             }
-            return "固定模型不可用"
+            return "跟随全局"
+        case .fixed(let providerID, let modelID):
+            guard let provider = sharedSettings.snapshot.providers.first(where: {
+                $0.id.description() == providerID
+            }),
+            provider.enabled,
+            let model = provider.models.first(where: {
+                $0.id.description() == modelID
+            }) else {
+                return "固定模型不可用"
+            }
+            let name = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? model.modelId : name
         }
     }
 

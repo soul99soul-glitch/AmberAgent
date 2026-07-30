@@ -1,5 +1,27 @@
 import SwiftUI
 
+enum NovelCompendiumMaterialEditTarget: Equatable {
+    case projectRevision
+    case branchOverride
+
+    static func resolve(
+        material: NovelMaterialRecord,
+        project: NovelProjectSnapshot,
+        branch: NovelBranchSnapshot?
+    ) -> Self {
+        guard let current = NovelPresentation.currentRevision(for: material, in: project),
+              let effective = NovelPresentation.effectiveRevision(
+                  for: material,
+                  project: project,
+                  branch: branch
+              ),
+              current.id != effective.id else {
+            return .projectRevision
+        }
+        return .branchOverride
+    }
+}
+
 struct NovelCompendiumView: View {
     let viewModel: NovelCreationViewModel
     @Binding var selection: NovelCompendiumSection
@@ -9,6 +31,7 @@ struct NovelCompendiumView: View {
     let onOpenChapter: (NovelChapterSelection) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var branchOverrideRoute: NovelCompendiumBranchOverrideRoute?
 
     var body: some View {
         ZStack {
@@ -20,6 +43,9 @@ struct NovelCompendiumView: View {
             categoryPicker
         }
         .background(AmberTheme.background)
+        .sheet(item: $branchOverrideRoute) { route in
+            NovelBranchOverrideEditorSheet(viewModel: viewModel, material: route.material)
+        }
     }
 
     private var categoryPicker: some View {
@@ -40,7 +66,7 @@ struct NovelCompendiumView: View {
         case .characters:
             NovelCharacterPagesView(
                 viewModel: viewModel,
-                onEditMaterial: onEditMaterial,
+                onEditMaterial: openMaterialEditor,
                 onAcceptProposal: onAcceptProposal
             )
         case .world:
@@ -49,24 +75,49 @@ struct NovelCompendiumView: View {
                 kind: .world,
                 title: "世界观",
                 emptyText: "还没有世界观资料",
-                onEditMaterial: onEditMaterial,
+                onEditMaterial: openMaterialEditor,
                 onAcceptProposal: onAcceptProposal
             )
         case .story:
             NovelStoryCompendiumView(
                 viewModel: viewModel,
-                onEditMaterial: onEditMaterial,
+                onEditMaterial: openMaterialEditor,
                 onAcceptProposal: onAcceptProposal,
                 onOpenChapter: onOpenChapter
             )
         case .more:
             NovelCompendiumMoreView(
                 viewModel: viewModel,
-                onEditMaterial: onEditMaterial,
+                onEditMaterial: openMaterialEditor,
                 onAcceptProposal: onAcceptProposal
             )
         }
     }
+
+    private func openMaterialEditor(
+        _ material: NovelMaterialRecord?,
+        suggestedKind: NovelMaterialKind
+    ) {
+        guard let material, let project = viewModel.projectSnapshot else {
+            onEditMaterial(material, suggestedKind)
+            return
+        }
+        switch NovelCompendiumMaterialEditTarget.resolve(
+            material: material,
+            project: project,
+            branch: viewModel.branchSnapshot
+        ) {
+        case .projectRevision:
+            onEditMaterial(material, suggestedKind)
+        case .branchOverride:
+            branchOverrideRoute = NovelCompendiumBranchOverrideRoute(material: material)
+        }
+    }
+}
+
+private struct NovelCompendiumBranchOverrideRoute: Identifiable {
+    let material: NovelMaterialRecord
+    var id: NovelMaterialID { material.id }
 }
 
 private struct NovelMaterialCategoryView: View {
@@ -147,7 +198,11 @@ private struct NovelMaterialCategoryView: View {
 
     private func materialButton(_ material: NovelMaterialRecord) -> some View {
         let revision = viewModel.projectSnapshot.flatMap {
-            NovelPresentation.currentRevision(for: material, in: $0)
+            NovelPresentation.effectiveRevision(
+                for: material,
+                project: $0,
+                branch: viewModel.branchSnapshot
+            )
         }
         return Button {
             onEditMaterial(material, kind)
@@ -197,7 +252,11 @@ private struct NovelStoryCompendiumView: View {
                 } else {
                     ForEach(outlines, id: \.id) { material in
                         let revision = viewModel.projectSnapshot.flatMap {
-                            NovelPresentation.currentRevision(for: material, in: $0)
+                            NovelPresentation.effectiveRevision(
+                                for: material,
+                                project: $0,
+                                branch: viewModel.branchSnapshot
+                            )
                         }
                         Button {
                             onEditMaterial(material, .masterOutline)
@@ -321,7 +380,11 @@ private struct NovelCompendiumMoreView: View {
             Section("其他资料") {
                 ForEach(otherMaterials, id: \.id) { material in
                     let revision = viewModel.projectSnapshot.flatMap {
-                        NovelPresentation.currentRevision(for: material, in: $0)
+                        NovelPresentation.effectiveRevision(
+                            for: material,
+                            project: $0,
+                            branch: viewModel.branchSnapshot
+                        )
                     }
                     Button {
                         onEditMaterial(material, material.kind)
@@ -382,9 +445,12 @@ private struct NovelCompendiumMoreView: View {
                     Label("重新生成设定建议", systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .disabled(!viewModel.canMutate || viewModel.branchSnapshot?.branch.activeRunID != nil)
+                .disabled(
+                    !viewModel.canMutate ||
+                        viewModel.branchSnapshot?.branch.activeRunID != nil
+                )
             } footer: {
-                Text("会基于「快速开始」的原始题材重新生成一批设定建议，可选填调整方向。")
+                Text("新一轮成功后会替换当前未处理的建议；生成失败时仍保留当前建议。")
             }
         }
     }
@@ -392,8 +458,9 @@ private struct NovelCompendiumMoreView: View {
     private var otherMaterials: [NovelMaterialRecord] {
         viewModel.activeMaterials.filter {
             switch $0.kind {
-            case .custom: return true
-            case .world, .character, .masterOutline, .writingRequirements, .decisionLog:
+            case .writingRequirements, .custom:
+                return true
+            case .world, .character, .masterOutline, .decisionLog:
                 return false
             }
         }

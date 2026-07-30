@@ -903,6 +903,7 @@ struct NovelSettingProposalRecord: Codable, Equatable, Sendable {
     let content: String
     let createdAt: Date
     var isResolved: Bool
+    var supersededByRunID: NovelRunID?
     let origin: NovelSettingProposalOrigin?
     let suggestedCharacterAliases: [String]?
 
@@ -913,6 +914,7 @@ struct NovelSettingProposalRecord: Codable, Equatable, Sendable {
         content: String,
         createdAt: Date,
         isResolved: Bool,
+        supersededByRunID: NovelRunID? = nil,
         origin: NovelSettingProposalOrigin? = nil,
         suggestedCharacterAliases: [String]? = nil
     ) {
@@ -922,6 +924,7 @@ struct NovelSettingProposalRecord: Codable, Equatable, Sendable {
         self.content = content
         self.createdAt = createdAt
         self.isResolved = isResolved
+        self.supersededByRunID = supersededByRunID
         self.origin = origin
         self.suggestedCharacterAliases = suggestedCharacterAliases
     }
@@ -1123,7 +1126,9 @@ extension NovelProjectDocumentV1 {
         }
         let activeIDs = Set(state.settingProposalIDs)
         return settingProposals.filter { proposal in
-            guard proposal.branchID == branchID, !proposal.isResolved else { return false }
+            guard proposal.branchID == branchID,
+                  !proposal.isResolved,
+                  proposal.supersededByRunID == nil else { return false }
             if activeIDs.contains(proposal.id) { return true }
             if case .some(.quickStart) = proposal.origin { return true }
             return false

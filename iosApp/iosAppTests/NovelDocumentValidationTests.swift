@@ -217,6 +217,105 @@ final class NovelDocumentValidationTests: XCTestCase {
         assertInvalid(document, containing: "kind does not match")
     }
 
+    func testChapterDiscardAndRestoreAreValidAtomicTransitions() throws {
+        let current = try documentWithDiscardableChapter()
+        let chapterID = try XCTUnwrap(current.chapters.first?.id)
+        let branch = try XCTUnwrap(current.branches.first)
+        let discarded = try NovelReducer.apply(.discardChapter(NovelDiscardChapterCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: current.project.revision,
+                expectedConfigRevision: nil,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: current.project.id,
+            branchID: branch.id,
+            chapterID: chapterID
+        )), to: current, now: Date(timeIntervalSince1970: 1_700_000_010)).document
+
+        XCTAssertNoThrow(try NovelDocumentValidator.validateTransition(from: current, to: discarded))
+
+        let restored = try NovelReducer.apply(.restoreChapter(NovelRestoreChapterCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: discarded.project.revision,
+                expectedConfigRevision: nil,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: current.project.id,
+            branchID: branch.id,
+            chapterID: chapterID
+        )), to: discarded, now: Date(timeIntervalSince1970: 1_700_000_020)).document
+
+        XCTAssertNoThrow(try NovelDocumentValidator.validateTransition(from: discarded, to: restored))
+    }
+
+    func testChapterTransitionRequiresOneLedgerOperationPerStateFlip() throws {
+        let current = try documentWithDiscardableChapter()
+        let chapter = try XCTUnwrap(current.chapters.first)
+        let branch = try XCTUnwrap(current.branches.first)
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_010)
+
+        var operationWithoutFlip = current
+        operationWithoutFlip.project.revision += 1
+        operationWithoutFlip.project.updatedAt = timestamp
+        operationWithoutFlip.appliedOperations.append(NovelAppliedOperationRecord(
+            operationID: NovelOperationID(),
+            kind: .discardChapter,
+            payloadSHA256: NovelTestFixtures.hashA,
+            outcome: .chapterDiscardStateChanged(
+                projectID: current.project.id,
+                branchID: branch.id,
+                chapterID: chapter.id,
+                isDiscarded: true,
+                revision: operationWithoutFlip.project.revision
+            ),
+            appliedProjectRevision: operationWithoutFlip.project.revision,
+            appliedAt: timestamp
+        ))
+        assertInvalidTransition(
+            from: current,
+            to: operationWithoutFlip,
+            containing: "no matching state transition"
+        )
+
+        let discarded = try NovelReducer.apply(.discardChapter(NovelDiscardChapterCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: current.project.revision,
+                expectedConfigRevision: nil,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: current.project.id,
+            branchID: branch.id,
+            chapterID: chapter.id
+        )), to: current, now: timestamp).document
+        var rewrittenTimestamp = discarded
+        let secondTimestamp = Date(timeIntervalSince1970: 1_700_000_020)
+        rewrittenTimestamp.project.revision += 1
+        rewrittenTimestamp.project.updatedAt = secondTimestamp
+        rewrittenTimestamp.chapters[0].discardedAt = secondTimestamp
+        rewrittenTimestamp.appliedOperations.append(NovelAppliedOperationRecord(
+            operationID: NovelOperationID(),
+            kind: .discardChapter,
+            payloadSHA256: NovelTestFixtures.hashB,
+            outcome: .chapterDiscardStateChanged(
+                projectID: current.project.id,
+                branchID: branch.id,
+                chapterID: chapter.id,
+                isDiscarded: true,
+                revision: rewrittenTimestamp.project.revision
+            ),
+            appliedProjectRevision: rewrittenTimestamp.project.revision,
+            appliedAt: secondTimestamp
+        ))
+        assertInvalidTransition(
+            from: discarded,
+            to: rewrittenTimestamp,
+            containing: "rewrote a chapter discard timestamp"
+        )
+    }
+
     func testMaterialRevisionCannotExistOutsideMaterialHistory() throws {
         let base = try NovelTestFixtures.document()
         var document = try NovelReducer.apply(
@@ -1042,6 +1141,53 @@ final class NovelDocumentValidationTests: XCTestCase {
         line: UInt = #line
     ) {
         XCTAssertThrowsError(try NovelDocumentValidator.validate(document), file: file, line: line) { error in
+            guard let novelError = error as? NovelError,
+                  case .invalidDocument(let issues) = novelError else {
+                return XCTFail("Expected invalidDocument, got \(error)", file: file, line: line)
+            }
+            XCTAssertTrue(
+                issues.contains(where: { $0.localizedCaseInsensitiveContains(expected) }),
+                "Expected an issue containing '\(expected)', got \(issues)",
+                file: file,
+                line: line
+            )
+        }
+    }
+
+    private func documentWithDiscardableChapter() throws -> NovelProjectDocumentV1 {
+        var document = try NovelTestFixtures.document()
+        let chapterID = NovelChapterID()
+        document.chapters.append(NovelChapterRecord(
+            id: chapterID,
+            createdAt: document.project.updatedAt
+        ))
+        document.chapterVersions.append(NovelChapterVersionRecord(
+            id: NovelChapterVersionID(),
+            chapterID: chapterID,
+            kind: .collected,
+            title: "第一章",
+            content: "雾从站台尽头涌来。",
+            factCompatibilityID: UUID(),
+            sourceCandidateID: nil,
+            createdAt: document.project.updatedAt,
+            operationID: document.appliedOperations[0].operationID
+        ))
+        try NovelDocumentValidator.validate(document)
+        return document
+    }
+
+    private func assertInvalidTransition(
+        from current: NovelProjectDocumentV1,
+        to next: NovelProjectDocumentV1,
+        containing expected: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertThrowsError(
+            try NovelDocumentValidator.validateTransition(from: current, to: next),
+            file: file,
+            line: line
+        ) { error in
             guard let novelError = error as? NovelError,
                   case .invalidDocument(let issues) = novelError else {
                 return XCTFail("Expected invalidDocument, got \(error)", file: file, line: line)

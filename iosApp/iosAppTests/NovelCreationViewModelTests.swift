@@ -132,6 +132,35 @@ final class NovelCreationViewModelTests: XCTestCase {
         await viewModel.interruptSessionForBackground(deadline: .distantPast)
     }
 
+    func testBranchSelectionDoesNotSwitchWhileAutomaticSyncIsScheduled() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        _ = try await repository.createProject(document)
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        let didSelect = await viewModel.selectProject(document.project.id)
+        XCTAssertTrue(didSelect)
+        let sourceBranchID = try XCTUnwrap(viewModel.selectedBranchID)
+        let createdBranchID = await viewModel.forkBranch(
+            from: sourceBranchID,
+            checkpointID: document.branches[0].headCheckpointID,
+            name: "另一条线"
+        )
+        let destinationBranchID = try XCTUnwrap(createdBranchID)
+
+        viewModel.scheduleAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: destinationBranchID
+        )
+        await viewModel.selectBranch(sourceBranchID)
+
+        XCTAssertEqual(viewModel.selectedBranchID, destinationBranchID)
+        XCTAssertEqual(viewModel.branchSnapshot?.branch.id, destinationBranchID)
+        XCTAssertNotNil(viewModel.errorMessage)
+        await viewModel.interruptSessionForBackground(deadline: .distantPast)
+    }
+
     func testBackgroundWaitIncludesAutomaticSyncBeforeItsDelayedStart() async throws {
         let repository = InMemoryNovelProjectRepository()
         let document = try NovelTestFixtures.document()
@@ -525,6 +554,386 @@ final class NovelCreationViewModelTests: XCTestCase {
         _ = projectID
     }
 
+    func testQuickStartRegenerationSupersedesCurrentProposalsOnlyAfterSuccess() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "provider",
+                ownerProviderID: "provider",
+                modelID: "model",
+                wireModelID: "model-wire",
+                displayName: "Model",
+                contextWindowTokens: 32_000
+            ),
+            scripts: [
+                NovelModelScript(steps: [.delta(quickStartSuggestionsJSON), .complete]),
+                NovelModelScript(steps: [.delta(quickStartSuggestionsJSON), .complete]),
+            ]
+        )
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        )
+        let projectID = await viewModel.createProject(
+            name: "雾海列车",
+            mode: .quickStart,
+            genre: "奇幻悬疑",
+            coreIdea: "一列火车只在失去记忆的人面前出现。"
+        )
+        XCTAssertNotNil(projectID)
+        for _ in 0..<100 where viewModel.branchSnapshot?.activeSettingProposals.count != 4 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let firstProposalIDs = Set(
+            viewModel.branchSnapshot?.activeSettingProposals.map(\.id) ?? []
+        )
+
+        let regeneratedRunID = await viewModel.startQuickStartSuggestions(guidance: "换一套设定")
+        XCTAssertNotNil(regeneratedRunID)
+        for _ in 0..<100 where viewModel.projectSnapshot?.settingProposals.count != 8 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let requests = await adapter.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(viewModel.branchSnapshot?.activeSettingProposals.count, 4)
+        XCTAssertTrue(viewModel.projectSnapshot?.settingProposals
+            .filter { firstProposalIDs.contains($0.id) }
+            .allSatisfy { $0.supersededByRunID == regeneratedRunID } == true)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testQuickStartFailureRecoveryIsScopedToItsOwningBranch() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let projectID = NovelProjectID()
+        let sourceBranchID = NovelBranchID()
+        let createOperationID = NovelOperationID()
+        var document = try NovelReducer.createProject(NovelCreateProjectCommand(
+            context: NovelMutationContext(
+                operationID: createOperationID,
+                expectedProjectRevision: nil,
+                expectedConfigRevision: nil,
+                expectedBranchHeadRevision: nil
+            ),
+            projectID: projectID,
+            branchID: sourceBranchID,
+            sessionID: NovelSessionID(),
+            initialStateSnapshotID: NovelStateSnapshotID(),
+            initialCheckpointID: NovelCheckpointID(),
+            name: "雾海列车",
+            branchName: "主线",
+            creationMode: .quickStart,
+            quickStartSeed: NovelQuickStartSeed(
+                genre: "悬疑",
+                coreIdea: "一列没有终点的火车。"
+            )
+        )).document
+        let root = document.branches[0]
+        let checkpoint = NovelBranchCheckpointRecord(
+            id: NovelCheckpointID(),
+            kind: .manualSync,
+            createdOnBranchID: root.id,
+            parentCheckpointID: root.headCheckpointID,
+            chapterSelections: [],
+            stateSnapshotID: root.currentStateSnapshotID,
+            sessionCursor: .empty,
+            branchOverrideRevisionIDs: [],
+            sourceCandidateID: nil,
+            baseHeadRevision: 0,
+            operationID: createOperationID,
+            createdAt: document.project.updatedAt
+        )
+        document.checkpoints.append(checkpoint)
+        document.branches[0].headCheckpointID = checkpoint.id
+        document.branches[0].headRevision = 1
+        try NovelDocumentValidator.validate(document)
+        _ = try await repository.createProject(document)
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "provider",
+                ownerProviderID: "provider",
+                modelID: "model",
+                wireModelID: "model-wire",
+                displayName: "Model",
+                contextWindowTokens: 32_000
+            )
+        )
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        )
+        let didSelectProject = await viewModel.selectProject(projectID)
+        XCTAssertTrue(didSelectProject)
+        let createdBranchID = await viewModel.forkBranch(
+            from: sourceBranchID,
+            checkpointID: checkpoint.id,
+            name: "平行线"
+        )
+        let forkID = try XCTUnwrap(createdBranchID)
+        await viewModel.selectBranch(sourceBranchID)
+
+        let failedRunID = await viewModel.startQuickStartSuggestions(guidance: "换一套设定")
+        XCTAssertNotNil(failedRunID)
+        let failed = await eventually {
+            guard case .failed = viewModel.quickStartStatus else { return false }
+            return !viewModel.isPerforming
+        }
+        XCTAssertTrue(failed)
+        guard case .failed(let sourceFailure) = viewModel.quickStartStatus else {
+            return XCTFail("The source branch must retain its transient failure.")
+        }
+        await viewModel.selectBranch(forkID)
+
+        XCTAssertEqual(viewModel.selectedBranchID, forkID)
+        XCTAssertEqual(
+            viewModel.quickStartStatus,
+            .failed(message: "尚未生成创作建议，可以重新生成。")
+        )
+
+        await viewModel.selectBranch(sourceBranchID)
+        XCTAssertEqual(viewModel.quickStartStatus, .failed(message: sourceFailure))
+    }
+
+    func testAutomaticStateSyncSnapshotFailureIsVisibleAndExplicitlyRetryable() async throws {
+        let fixture = try documentWithChapter()
+        let branch = fixture.document.branches[0]
+        let sourceVersion = try XCTUnwrap(fixture.document.chapterVersions.first {
+            $0.id == fixture.versionID
+        })
+        let edited = try NovelReducer.apply(
+            .saveManualEdit(NovelSaveManualEditCommand(
+                context: NovelMutationContext(
+                    operationID: NovelOperationID(),
+                    expectedProjectRevision: fixture.document.project.revision,
+                    expectedConfigRevision: fixture.document.project.configRevision,
+                    expectedBranchHeadRevision: branch.headRevision
+                ),
+                projectID: fixture.document.project.id,
+                branchID: branch.id,
+                chapterID: sourceVersion.chapterID,
+                versionID: NovelChapterVersionID(),
+                title: sourceVersion.title,
+                content: sourceVersion.content + "\n\n等待同步。",
+                factCompatibilityID: UUID(),
+                expectedWorkingRevision: branch.workingRevision
+            )),
+            to: fixture.document
+        ).document
+        let repository = InMemoryNovelProjectRepository()
+        _ = try await repository.createProject(edited)
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "provider",
+                ownerProviderID: "provider",
+                modelID: "model",
+                wireModelID: "model-wire",
+                displayName: "Model",
+                contextWindowTokens: 32_000
+            ),
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let base = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let creation = SnapshotFailureNovelCreation(base: base)
+        let viewModel = NovelCreationViewModel(creation: creation)
+        let didSelect = await viewModel.selectProject(edited.project.id)
+        XCTAssertTrue(didSelect)
+        await creation.failNextProjectSnapshots(1)
+
+        viewModel.scheduleAutomaticStateSync(
+            projectID: edited.project.id,
+            branchID: branch.id
+        )
+        let failureBecameVisible = await eventually {
+            viewModel.automaticStateSyncFailureMessage(
+                projectID: edited.project.id,
+                branchID: branch.id
+            ) != nil
+        }
+
+        XCTAssertTrue(failureBecameVisible)
+        XCTAssertFalse(viewModel.isProjectSelectionBlocked)
+        XCTAssertNotNil(viewModel.errorMessage)
+        viewModel.retryAutomaticStateSync(
+            projectID: edited.project.id,
+            branchID: branch.id
+        )
+        let retried = await eventually {
+            let requests = await adapter.requests
+            return !requests.isEmpty
+        }
+        XCTAssertTrue(retried)
+        XCTAssertNil(viewModel.automaticStateSyncFailureMessage(
+            projectID: edited.project.id,
+            branchID: branch.id
+        ))
+        viewModel.cancelAutomaticStateSync(
+            projectID: edited.project.id,
+            branchID: branch.id
+        )
+    }
+
+    func testBranchSelectionRefreshesDurableRunBeforeRequestingConfirmation() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "provider",
+                ownerProviderID: "provider",
+                modelID: "model",
+                wireModelID: "model-wire",
+                displayName: "Model",
+                contextWindowTokens: 32_000
+            ),
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let creation = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        _ = try await repository.createProject(document)
+        let viewModel = NovelCreationViewModel(creation: creation)
+        let didSelect = await viewModel.selectProject(document.project.id)
+        XCTAssertTrue(didSelect)
+        let sourceBranchID = try XCTUnwrap(viewModel.selectedBranchID)
+        let createdBranchID = await viewModel.forkBranch(
+            from: sourceBranchID,
+            checkpointID: document.branches[0].headCheckpointID,
+            name: "另一路径"
+        )
+        let destinationBranchID = try XCTUnwrap(createdBranchID)
+        await viewModel.selectBranch(sourceBranchID)
+        let project = try await repository.loadProject(id: document.project.id).document
+        let source = try XCTUnwrap(project.branches.first { $0.id == sourceBranchID })
+        let request = NovelRunRequest(
+            id: NovelRunID(),
+            operationID: NovelOperationID(),
+            projectID: project.project.id,
+            branchID: sourceBranchID,
+            kind: .discussion,
+            mode: .discussPlan,
+            granularity: nil,
+            userText: "先生成，再切分支。",
+            userMessageID: NovelMessageID(),
+            assistantMessageID: NovelMessageID(),
+            candidateID: nil,
+            generationReceiptID: NovelReceiptID(),
+            injectionReceiptID: NovelReceiptID(),
+            sourceChapterVersionID: nil,
+            inputBudgetTokens: 16_000,
+            expectedProjectRevision: project.project.revision,
+            expectedConfigRevision: project.project.configRevision,
+            expectedBranchHeadRevision: source.headRevision
+        )
+        _ = try await creation.start(request)
+        let becameDurable = await eventually {
+            let loaded = try? await repository.loadProject(id: project.project.id).document
+            return loaded?.activeRuns.contains(where: {
+                $0.id == request.id && $0.status == .running
+            }) == true
+        }
+        XCTAssertTrue(becameDurable)
+        XCTAssertNil(viewModel.branchSnapshot?.branch.activeRunID)
+
+        let preflight = await viewModel.selectBranch(
+            destinationBranchID,
+            stoppingActiveRun: false
+        )
+
+        XCTAssertEqual(preflight, .requiresStoppingActiveRun)
+        XCTAssertEqual(viewModel.selectedBranchID, sourceBranchID)
+        XCTAssertEqual(viewModel.branchSnapshot?.branch.activeRunID, request.id)
+
+        let selected = await viewModel.selectBranch(
+            destinationBranchID,
+            stoppingActiveRun: true
+        )
+        XCTAssertEqual(selected, .selected)
+        XCTAssertEqual(viewModel.selectedBranchID, destinationBranchID)
+        let final = try await repository.loadProject(id: project.project.id).document
+        XCTAssertEqual(final.activeRuns.first(where: { $0.id == request.id })?.status, .interrupted)
+    }
+
+    func testAutomaticStateSyncCancellationIsScopedAndPublishesItsTerminalState() async throws {
+        let fixture = try documentWithChapter()
+        let branch = fixture.document.branches[0]
+        let sourceVersion = try XCTUnwrap(fixture.document.chapterVersions.first {
+            $0.id == fixture.versionID
+        })
+        let edit = NovelSaveManualEditCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: fixture.document.project.revision,
+                expectedConfigRevision: fixture.document.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: fixture.document.project.id,
+            branchID: branch.id,
+            chapterID: sourceVersion.chapterID,
+            versionID: NovelChapterVersionID(),
+            title: sourceVersion.title,
+            content: sourceVersion.content + "\n\n等待同步。",
+            factCompatibilityID: UUID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+        let document = try NovelReducer.apply(
+            .saveManualEdit(edit),
+            to: fixture.document
+        ).document
+        let repository = InMemoryNovelProjectRepository()
+        _ = try await repository.createProject(document)
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "provider",
+                ownerProviderID: "provider",
+                modelID: "model",
+                wireModelID: "model-wire",
+                displayName: "Model",
+                contextWindowTokens: 32_000
+            ),
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        )
+        let didSelect = await viewModel.selectProject(document.project.id)
+        XCTAssertTrue(didSelect)
+        let branchID = try XCTUnwrap(document.branches.first?.id)
+        viewModel.scheduleAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: branchID
+        )
+
+        let otherBranchID = NovelBranchID()
+        XCTAssertTrue(viewModel.canCancelAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: branchID
+        ))
+        XCTAssertFalse(viewModel.canCancelAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: otherBranchID
+        ))
+        viewModel.cancelAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: otherBranchID
+        )
+        XCTAssertTrue(viewModel.isProjectSelectionBlocked)
+        let requestStarted = await eventually {
+            let requests = await adapter.requests
+            return !requests.isEmpty
+        }
+        XCTAssertTrue(requestStarted)
+        let cancelledAfterWrongTarget = await adapter.cancelledRunIDs
+        XCTAssertTrue(cancelledAfterWrongTarget.isEmpty)
+
+        viewModel.cancelAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: branchID
+        )
+        let cancelled = await eventually {
+            let cancelledRunIDs = await adapter.cancelledRunIDs
+            return !cancelledRunIDs.isEmpty && !viewModel.isProjectSelectionBlocked
+        }
+        XCTAssertTrue(cancelled)
+        XCTAssertFalse(viewModel.canCancelAutomaticStateSync(
+            projectID: document.project.id,
+            branchID: branchID
+        ))
+    }
+
     func testReplaceImportUsesPreviewRevisionAndRestoresPackage() async throws {
         let repository = InMemoryNovelProjectRepository()
         let source = try NovelTestFixtures.document()
@@ -745,6 +1154,55 @@ private actor BranchSnapshotBlockingNovelCreation: NovelCreation {
 
     func start(_ request: NovelRunRequest) async throws -> NovelRun {
         try await base.start(request)
+    }
+
+    func interruptForBackground(
+        projectID: NovelProjectID,
+        deadline: Date,
+        runID: NovelRunID?
+    ) async {
+        await base.interruptForBackground(
+            projectID: projectID,
+            deadline: deadline,
+            runID: runID
+        )
+    }
+
+    func retryPendingTerminal(runID: NovelRunID) async throws {
+        try await base.retryPendingTerminal(runID: runID)
+    }
+}
+
+private actor SnapshotFailureNovelCreation: NovelCreation {
+    private let base: any NovelCreation
+    private var remainingProjectSnapshotFailures = 0
+
+    init(base: any NovelCreation) {
+        self.base = base
+    }
+
+    func failNextProjectSnapshots(_ count: Int) {
+        remainingProjectSnapshotFailures = count
+    }
+
+    func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
+        if case .project = scope, remainingProjectSnapshotFailures > 0 {
+            remainingProjectSnapshotFailures -= 1
+            throw NovelError.repositoryFailure("Injected project snapshot failure.")
+        }
+        return try await base.snapshot(scope)
+    }
+
+    func perform(_ action: NovelAction) async throws -> NovelOutcome {
+        try await base.perform(action)
+    }
+
+    func start(_ request: NovelRunRequest) async throws -> NovelRun {
+        try await base.start(request)
+    }
+
+    func interruptRun(_ command: NovelCancelRunCommand) async throws {
+        try await base.interruptRun(command)
     }
 
     func interruptForBackground(

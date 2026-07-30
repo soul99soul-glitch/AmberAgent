@@ -291,12 +291,21 @@ enum NovelGenerationReducer {
         next.sessions[sessionIndex].messages.append(message)
         next.sessions[sessionIndex].revision += 1
         if let quickStartSuggestions {
-            next.settingProposals.append(contentsOf: try quickStartProposals(
+            let proposals = try quickStartProposals(
                 quickStartSuggestions,
                 run: run,
                 document: document,
                 now: now
-            ))
+            )
+            for index in next.settingProposals.indices {
+                let proposal = next.settingProposals[index]
+                guard proposal.branchID == run.branchID,
+                      !proposal.isResolved,
+                      proposal.supersededByRunID == nil,
+                      case .some(.quickStart) = proposal.origin else { continue }
+                next.settingProposals[index].supersededByRunID = run.id
+            }
+            next.settingProposals.append(contentsOf: proposals)
         }
         if let candidateID = run.candidateID {
             let candidateKind: NovelCandidateKind = run.kind == .polish ? .polish : .prose
@@ -689,7 +698,9 @@ private extension NovelGenerationReducer {
         var next = document
         var snapshot: NovelSessionMessageSnapshot?
         if !partialContent.isEmpty {
-            let interruptedCandidateID = run.kind == .prose ? run.candidateID : nil
+            let interruptedCandidateID = (run.kind == .prose || run.kind == .regenerate)
+                ? run.candidateID
+                : nil
             let message = NovelSessionMessageRecord(
                 id: run.messageID,
                 sequence: Int64(document.sessions[sessionIndex].messages.count),
@@ -826,9 +837,16 @@ private extension NovelGenerationReducer {
             guard request.mode == .writeProse,
                   request.granularity == .wholeChapter,
                   request.candidateID != nil,
-                  request.sourceChapterVersionID != nil,
+                  let sourceID = request.sourceChapterVersionID,
+                  branch.workingChapterSelections.contains(where: { $0.versionID == sourceID }),
+                  let sourceVersion = document.chapterVersions.first(where: { $0.id == sourceID }),
+                  document.chapters.contains(where: {
+                      $0.id == sourceVersion.chapterID && $0.discardedAt == nil
+                  }),
                   request.askUserResponse == nil else {
-                throw NovelError.invalidInput("The regeneration run shape is invalid.")
+                throw NovelError.invalidInput(
+                    "The regeneration run shape or source version is invalid."
+                )
             }
         case .polish:
             guard branch.syncStatus == .synchronized else {
@@ -845,7 +863,10 @@ private extension NovelGenerationReducer {
                   request.askUserResponse == nil,
                   let sourceID = request.sourceChapterVersionID,
                   branch.workingChapterSelections.contains(where: { $0.versionID == sourceID }),
-                  document.chapterVersions.contains(where: { $0.id == sourceID }) else {
+                  let sourceVersion = document.chapterVersions.first(where: { $0.id == sourceID }),
+                  document.chapters.contains(where: {
+                      $0.id == sourceVersion.chapterID && $0.discardedAt == nil
+                  }) else {
                 throw NovelError.invalidInput("The polish run shape or source version is invalid.")
             }
         }

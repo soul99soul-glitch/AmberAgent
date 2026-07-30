@@ -67,7 +67,7 @@ enum NovelDocumentValidator {
             label: "material revision",
             issues: &issues
         )
-        appendUnchangedPrefixIssue(current.chapters, next.chapters, label: "chapter", issues: &issues)
+        validateChapterTransition(from: current, to: next, issues: &issues)
         appendUnchangedPrefixIssue(
             current.chapterVersions,
             next.chapterVersions,
@@ -645,11 +645,16 @@ enum NovelDocumentValidator {
         issues: inout [String]
     ) {
         var quickStartKindCountsByRun: [NovelRunID: [String: Int]] = [:]
+        var quickStartProposalsByRun: [NovelRunID: [NovelSettingProposalRecord]] = [:]
         for proposal in document.settingProposals {
             guard case .some(.quickStart(let runID, let suggestedKind)) = proposal.origin else {
+                if proposal.supersededByRunID != nil {
+                    issues.append("Non-quick-start proposal \(proposal.id) is marked as superseded.")
+                }
                 continue
             }
-            guard document.activeRuns.contains(where: {
+            quickStartProposalsByRun[runID, default: []].append(proposal)
+            guard let sourceRun = document.activeRuns.first(where: {
                 $0.id == runID &&
                     $0.branchID == proposal.branchID &&
                     $0.kind == .quickStart &&
@@ -657,6 +662,36 @@ enum NovelDocumentValidator {
             }) else {
                 issues.append("Quick-start proposal \(proposal.id) has no completed source run.")
                 continue
+            }
+            if proposal.isResolved && proposal.supersededByRunID != nil {
+                issues.append(
+                    "Quick-start proposal \(proposal.id) is both resolved and superseded."
+                )
+            }
+            if let supersedingRunID = proposal.supersededByRunID {
+                guard let supersedingRun = document.activeRuns.first(where: {
+                    $0.id == supersedingRunID &&
+                        $0.id != runID &&
+                        $0.branchID == proposal.branchID &&
+                        $0.kind == .quickStart &&
+                        $0.status == .completed
+                }) else {
+                    issues.append("Quick-start proposal \(proposal.id) has an invalid superseding run.")
+                    continue
+                }
+                let sourceStartRevision = document.appliedOperations.first(where: {
+                    $0.operationID == sourceRun.operationID && $0.kind == .startRun
+                })?.appliedProjectRevision
+                let supersedingStartRevision = document.appliedOperations.first(where: {
+                    $0.operationID == supersedingRun.operationID && $0.kind == .startRun
+                })?.appliedProjectRevision
+                if let sourceStartRevision,
+                   let supersedingStartRevision,
+                   supersedingStartRevision <= sourceStartRevision {
+                    issues.append(
+                        "Quick-start superseding run \(supersedingRunID) must follow its source run \(runID)."
+                    )
+                }
             }
             let kindKey: String
             switch suggestedKind {
@@ -669,6 +704,20 @@ enum NovelDocumentValidator {
                 continue
             }
             quickStartKindCountsByRun[runID, default: [:]][kindKey, default: 0] += 1
+        }
+        for (runID, proposals) in quickStartProposalsByRun {
+            let activeProposals = proposals.filter { !$0.isResolved }
+            let supersededCount = activeProposals.filter {
+                $0.supersededByRunID != nil
+            }.count
+            if supersededCount > 0 && supersededCount != activeProposals.count {
+                issues.append("Quick-start proposal round \(runID) is partially superseded.")
+            }
+            if Set(activeProposals.compactMap(\.supersededByRunID)).count > 1 {
+                issues.append(
+                    "Quick-start proposal round \(runID) names multiple superseding runs."
+                )
+            }
         }
         for run in document.activeRuns where
             run.kind == .quickStart && run.status == .completed {
@@ -956,7 +1005,7 @@ enum NovelDocumentValidator {
                     document.activeRuns.first {
                         $0.id == runID &&
                             $0.status == .interrupted &&
-                            $0.kind == .prose &&
+                            ($0.kind == .prose || $0.kind == .regenerate) &&
                             $0.candidateID == rootCandidateID
                     }
                 } != nil
@@ -1601,6 +1650,26 @@ enum NovelDocumentValidator {
                     }) {
                     issues.append("Chapter restore \(operation.operationID) has invalid outcome data.")
                 }
+            case let (
+                .discardChapter,
+                .chapterDiscardStateChanged(_, branchID, chapterID, isDiscarded, revision)
+            ):
+                if !isDiscarded ||
+                    revision != operation.appliedProjectRevision ||
+                    !document.branches.contains(where: { $0.id == branchID }) ||
+                    !document.chapters.contains(where: { $0.id == chapterID }) {
+                    issues.append("Chapter discard \(operation.operationID) has invalid outcome data.")
+                }
+            case let (
+                .restoreChapter,
+                .chapterDiscardStateChanged(_, branchID, chapterID, isDiscarded, revision)
+            ):
+                if isDiscarded ||
+                    revision != operation.appliedProjectRevision ||
+                    !document.branches.contains(where: { $0.id == branchID }) ||
+                    !document.chapters.contains(where: { $0.id == chapterID }) {
+                    issues.append("Chapter restoration \(operation.operationID) has invalid outcome data.")
+                }
             case let (.startRun, .runStarted(_, branchID, runID, receiptID, revision)):
                 if revision != operation.appliedProjectRevision ||
                     !document.activeRuns.contains(where: {
@@ -1925,6 +1994,61 @@ enum NovelDocumentValidator {
         }
     }
 
+    private static func validateChapterTransition(
+        from current: NovelProjectDocumentV1,
+        to next: NovelProjectDocumentV1,
+        issues: inout [String]
+    ) {
+        guard next.chapters.count >= current.chapters.count else {
+            issues.append("A project transition removed an immutable chapter.")
+            return
+        }
+        let appendedOperations = next.appliedOperations.dropFirst(current.appliedOperations.count)
+        for (chapter, updated) in zip(current.chapters, next.chapters) {
+            if chapter.id != updated.id || chapter.createdAt != updated.createdAt {
+                issues.append("A project transition rewrote immutable chapter identity.")
+                continue
+            }
+            guard chapter.discardedAt != updated.discardedAt else { continue }
+            let wasDiscarded = chapter.discardedAt != nil
+            let isDiscarded = updated.discardedAt != nil
+            guard wasDiscarded != isDiscarded else {
+                issues.append("A project transition rewrote a chapter discard timestamp.")
+                continue
+            }
+            let owners = appendedOperations.filter { operation in
+                guard case let .chapterDiscardStateChanged(
+                    _, _, chapterID, outcomeIsDiscarded, _
+                ) = operation.outcome,
+                      chapterID == chapter.id,
+                      outcomeIsDiscarded == isDiscarded else {
+                    return false
+                }
+                return operation.kind == (isDiscarded ? .discardChapter : .restoreChapter)
+            }
+            if owners.count != 1 ||
+                (isDiscarded && updated.discardedAt != owners.first?.appliedAt) {
+                issues.append("A chapter discard-state change has no matching atomic operation.")
+            }
+        }
+        for operation in appendedOperations {
+            guard case let .chapterDiscardStateChanged(
+                _, _, chapterID, outcomeIsDiscarded, _
+            ) = operation.outcome else { continue }
+            let expectedKind: NovelOperationKind = outcomeIsDiscarded
+                ? .discardChapter
+                : .restoreChapter
+            guard operation.kind == expectedKind,
+                  let chapter = current.chapters.first(where: { $0.id == chapterID }),
+                  let updated = next.chapters.first(where: { $0.id == chapterID }),
+                  (chapter.discardedAt != nil) != (updated.discardedAt != nil),
+                  (updated.discardedAt != nil) == outcomeIsDiscarded else {
+                issues.append("A chapter discard operation has no matching state transition.")
+                continue
+            }
+        }
+    }
+
     private static func validateBranchTransition(
         from current: NovelProjectDocumentV1,
         to next: NovelProjectDocumentV1,
@@ -2027,6 +2151,16 @@ enum NovelDocumentValidator {
         to next: NovelProjectDocumentV1,
         issues: inout [String]
     ) {
+        let newlyCompletedQuickStartRunIDs: Set<NovelRunID> = Set(
+            current.activeRuns.compactMap { run -> NovelRunID? in
+                guard run.kind == .quickStart,
+                      run.status == .running,
+                      next.activeRuns.contains(where: {
+                          $0.id == run.id && $0.kind == .quickStart && $0.status == .completed
+                      }) else { return nil }
+                return run.id
+            }
+        )
         for proposal in current.settingProposals {
             guard let updated = next.settingProposals.first(where: { $0.id == proposal.id }) else {
                 issues.append("A project transition removed setting proposal \(proposal.id).")
@@ -2041,6 +2175,40 @@ enum NovelDocumentValidator {
             }
             if proposal.isResolved && !updated.isResolved {
                 issues.append("A project transition reopened setting proposal \(proposal.id).")
+            }
+            if let supersedingRunID = proposal.supersededByRunID,
+               updated.supersededByRunID != supersedingRunID {
+                issues.append("A project transition rewrote the superseding run for proposal \(proposal.id).")
+            }
+            guard proposal.supersededByRunID == nil,
+                  let supersedingRunID = updated.supersededByRunID else { continue }
+            guard !proposal.isResolved,
+                  case .some(.quickStart(let sourceRunID, _)) = proposal.origin,
+                  newlyCompletedQuickStartRunIDs.contains(supersedingRunID),
+                  next.activeRuns.contains(where: {
+                      $0.id == supersedingRunID && $0.branchID == proposal.branchID
+                  }) else {
+                issues.append(
+                    "A project transition superseded proposal \(proposal.id) without a newly completed quick-start run."
+                )
+                continue
+            }
+            let sourceRound = current.settingProposals.filter { candidate in
+                guard candidate.branchID == proposal.branchID,
+                      !candidate.isResolved,
+                      candidate.supersededByRunID == nil,
+                      case .some(.quickStart(let candidateRunID, _)) = candidate.origin else {
+                    return false
+                }
+                return candidateRunID == sourceRunID
+            }
+            if sourceRound.contains(where: { candidate in
+                next.settingProposals.first(where: { $0.id == candidate.id })?
+                    .supersededByRunID != supersedingRunID
+            }) {
+                issues.append(
+                    "A project transition partially superseded quick-start proposal round \(sourceRunID)."
+                )
             }
         }
 

@@ -80,9 +80,11 @@ enum NovelProjectConfigurationReducer {
         try NovelReducer.requireConfigRevision(command.context, document: document)
         try NovelReducer.requireProjectRevision(command.context, document: document)
         guard let proposalIndex = document.settingProposals.firstIndex(where: {
-            $0.id == command.proposalID && !$0.isResolved
+            $0.id == command.proposalID &&
+                !$0.isResolved &&
+                $0.supersededByRunID == nil
         }) else {
-            throw NovelError.invalidInput("The project-setting proposal is missing or already resolved.")
+            throw NovelError.invalidInput("The project-setting proposal is missing or no longer active.")
         }
         let proposal = document.settingProposals[proposalIndex]
         guard let branch = document.branches.first(where: {

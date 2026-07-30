@@ -103,6 +103,7 @@ struct NovelCharacterPagesView: View {
                 title: Text("删除“\(candidate.title)”？"),
                 message: Text("历史档案和既有剧情记录会保留；后续生成不再注入这份角色档案。"),
                 primaryButton: .destructive(Text("删除")) {
+                    guard viewModel.canMutate else { return }
                     Task { await viewModel.deleteMaterial(candidate.material.id) }
                 },
                 secondaryButton: .cancel()
@@ -174,6 +175,7 @@ struct NovelCharacterPagesView: View {
             } label: {
                 Label("删除", systemImage: "trash")
             }
+            .disabled(!viewModel.canMutate)
         }
     }
 

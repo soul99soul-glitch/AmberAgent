@@ -54,6 +54,9 @@ struct NovelProjectSettingsDetailView: View {
     @State private var projectDocument: NovelProjectFileDocument?
     @State private var projectFileName = "Novel.ambernovel"
     @State private var isExportingProject = false
+    @State private var isLoadingProject = true
+    @State private var projectLoadFailure: String?
+    @State private var pendingBranchSelection: NovelBranchID?
 
     var body: some View {
         Form {
@@ -88,21 +91,41 @@ struct NovelProjectSettingsDetailView: View {
                         )
                     }
                     .buttonStyle(.plain)
-                } else {
+                } else if isLoadingProject {
                     ProgressView("正在读取项目")
+                } else if let projectLoadFailure {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("无法读取项目", systemImage: "exclamationmark.triangle")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(AmberTheme.accentAmber)
+                        Text(projectLoadFailure)
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.foreground2)
+                        Button("重新读取") {
+                            Task { @MainActor in await loadProject() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(.vertical, 4)
                 }
             }
 
-            Section("管理") {
+            Section {
                 Button(action: exportProject) {
                     Label("导出项目包", systemImage: "archivebox")
                 }
-                .disabled(currentProject == nil || viewModel.isPerforming)
+                .disabled(currentProject == nil || viewModel.isPerforming || hasRunningRun)
 
                 Button(action: exportMarkdown) {
                     Label("导出正文", systemImage: "square.and.arrow.up")
                 }
                 .disabled(currentProject == nil || viewModel.isPerforming)
+            } header: {
+                Text("管理")
+            } footer: {
+                if hasRunningRun {
+                    Text("生成结束后才能导出项目包；当前正文仍可导出。")
+                }
             }
         }
         .scrollContentBackground(.hidden)
@@ -125,10 +148,7 @@ struct NovelProjectSettingsDetailView: View {
             onCompletion: handleExportResult
         )
         .task(id: projectID) {
-            guard viewModel.selectedProjectID != projectID || viewModel.projectSnapshot == nil else {
-                return
-            }
-            await viewModel.selectProject(projectID)
+            await loadProject()
         }
     }
 
@@ -137,6 +157,13 @@ struct NovelProjectSettingsDetailView: View {
             return nil
         }
         return project
+    }
+
+    private var hasRunningRun: Bool {
+        guard viewModel.projectSnapshot?.project.id == projectID else { return false }
+        return viewModel.projectSnapshot?.activeRuns.contains(where: {
+            $0.status == .running
+        }) == true
     }
 
     private func modelRow(for purpose: NovelModelRole) -> some View {
@@ -177,10 +204,8 @@ struct NovelProjectSettingsDetailView: View {
             NavigationStack {
                 NovelBranchesView(
                     viewModel: viewModel,
-                    isSelectionDisabled: viewModel.isPerforming,
-                    onSelect: { branchID in
-                        Task { @MainActor in await viewModel.selectBranch(branchID) }
-                    },
+                    isSelectionDisabled: viewModel.isProjectSelectionBlocked,
+                    onSelect: requestBranchSelection,
                     onRename: { transition(to: .renameBranch($0)) },
                     onFork: { transition(to: .forkBranch($0)) },
                     onEditOverride: { transition(to: .branchOverride($0)) }
@@ -192,6 +217,23 @@ struct NovelProjectSettingsDetailView: View {
                         Button("完成") { activeSheet = nil }
                     }
                 }
+            }
+            .confirmationDialog(
+                "切换分支会停止当前生成",
+                isPresented: Binding(
+                    get: { pendingBranchSelection != nil },
+                    set: { if !$0 { pendingBranchSelection = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("停止生成并切换", role: .destructive) {
+                    selectPendingBranch()
+                }
+                Button("继续留在当前分支", role: .cancel) {
+                    pendingBranchSelection = nil
+                }
+            } message: {
+                Text("当前分支正在生成。切换后会先结束这次生成，再打开目标分支。")
             }
 
         case .renameBranch(let branch):
@@ -253,6 +295,44 @@ struct NovelProjectSettingsDetailView: View {
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(250))
             activeSheet = sheet
+        }
+    }
+
+    private func loadProject() async {
+        if currentProject != nil {
+            isLoadingProject = false
+            projectLoadFailure = nil
+            return
+        }
+        isLoadingProject = true
+        projectLoadFailure = nil
+        let loaded = await viewModel.selectProject(projectID)
+        isLoadingProject = false
+        guard loaded, currentProject != nil else {
+            projectLoadFailure = viewModel.errorMessage ?? "项目未能读取，请重试。"
+            viewModel.clearError()
+            return
+        }
+    }
+
+    private func requestBranchSelection(_ branchID: NovelBranchID) {
+        guard branchID != viewModel.selectedBranchID else { return }
+        Task { @MainActor in
+            let result = await viewModel.selectBranch(
+                branchID,
+                stoppingActiveRun: false
+            )
+            if result == .requiresStoppingActiveRun {
+                pendingBranchSelection = branchID
+            }
+        }
+    }
+
+    private func selectPendingBranch() {
+        guard let branchID = pendingBranchSelection else { return }
+        pendingBranchSelection = nil
+        Task { @MainActor in
+            await viewModel.selectBranch(branchID, stoppingActiveRun: true)
         }
     }
 

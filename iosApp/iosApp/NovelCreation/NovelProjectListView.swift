@@ -80,6 +80,9 @@ struct NovelProjectListView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             if viewModel.hasReloadRequirement {
                 reloadRequirementBanner
+            } else if viewModel.stateSyncActivity != nil ||
+                        (viewModel.isProjectSelectionBlocked && !viewModel.isPerforming) {
+                stateSyncSelectionBanner
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -199,20 +202,60 @@ struct NovelProjectListView: View {
         .padding(.vertical, 10)
     }
 
+    private var stateSyncSelectionBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(AmberTheme.accentAmber)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewModel.stateSyncActivity == nil
+                    ? "正在准备剧情状态同步"
+                    : "正在同步剧情状态")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+                Text("完成前暂不能切换项目。")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let activity = viewModel.stateSyncActivity,
+               let fraction = activity.displayedCompletionFraction {
+                Text("\(Int((fraction * 100).rounded(.down)))%")
+                    .font(.footnote.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(AmberTheme.accentAmber)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(AmberTheme.surface)
+        .accessibilityElement(children: .combine)
+    }
+
     private var projectList: some View {
         List {
             Section {
                 ForEach(viewModel.projects, id: \.id) { project in
-                    Button {
-                        if project.loadError != nil {
-                            prepareDelete(project)
-                        } else {
-                            onOpen(project.id)
+                    HStack(spacing: 10) {
+                        Button {
+                            if project.loadError != nil {
+                                retryOpening(project)
+                            } else {
+                                onOpen(project.id)
+                            }
+                        } label: {
+                            NovelProjectRow(project: project)
                         }
-                    } label: {
-                        NovelProjectRow(project: project)
+                        .buttonStyle(.plain)
+
+                        if project.loadError != nil {
+                            Button("重新读取") {
+                                retryOpening(project)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
                     }
-                    .buttonStyle(.plain)
                     .disabled(
                         viewModel.isProjectSelectionBlocked &&
                             viewModel.selectedProjectID != project.id
@@ -292,6 +335,15 @@ struct NovelProjectListView: View {
         }
     }
 
+    private func retryOpening(_ project: NovelProjectSummary) {
+        Task { @MainActor in
+            await viewModel.loadProjects(selecting: project.id)
+            guard viewModel.projects.first(where: { $0.id == project.id })?.loadError == nil,
+                  viewModel.projectSnapshot?.project.id == project.id else { return }
+            onOpen(project.id)
+        }
+    }
+
     private func prepareDelete(_ project: NovelProjectSummary) {
         if project.loadError != nil {
             pendingDelete = NovelProjectDeleteCandidate(project: project)
@@ -324,7 +376,7 @@ struct NovelProjectListView: View {
 
     private func deleteConfirmationMessage(for project: NovelProjectSummary) -> String {
         if project.loadError != nil {
-            return "项目文件已经损坏，无法打开或导出。删除后无法从应用内恢复。"
+            return "项目当前无法读取。删除后无法从应用内恢复，请确认不再需要重新读取或导入备份。"
         }
         if hasRunningRun(for: project.id) {
             return "Agent 正在生成。将先停止生成并保存终止状态，再删除项目。项目包未导出时无法恢复。"
@@ -333,7 +385,7 @@ struct NovelProjectListView: View {
     }
 
     private func deleteConfirmationTitle(for project: NovelProjectSummary) -> String {
-        project.loadError == nil ? "删除《\(project.name)》？" : "删除损坏的项目？"
+        project.loadError == nil ? "删除《\(project.name)》？" : "删除无法读取的项目？"
     }
 
     private func handlePackageImport(_ result: Result<[URL], Error>) {
@@ -375,13 +427,15 @@ private struct NovelProjectRow: View {
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
-                    Text(project.updatedAt, format: .relative(presentation: .named))
                     if project.loadError != nil {
-                        Text("项目文件损坏")
+                        Text("读取失败")
                             .foregroundStyle(AmberTheme.accentRed)
-                    } else if project.isDegraded {
-                        Text("只读恢复")
-                            .foregroundStyle(AmberTheme.accentAmber)
+                    } else {
+                        Text(project.updatedAt, format: .relative(presentation: .named))
+                        if project.isDegraded {
+                            Text("只读恢复")
+                                .foregroundStyle(AmberTheme.accentAmber)
+                        }
                     }
                 }
                 .font(.caption)
@@ -621,14 +675,20 @@ struct NovelProjectImportSheet: View {
 
                 if let existing = preview.existingProject {
                     Section("本地冲突") {
-                        Text("本地已有《\(existing.name)》。可替换它，或作为副本保留两份。")
-                            .font(.subheadline)
-                            .foregroundStyle(AmberTheme.foreground2)
+                        if existing.loadError == nil {
+                            Text("本地已有《\(existing.name)》。可替换它，或作为副本保留两份。")
+                                .font(.subheadline)
+                                .foregroundStyle(AmberTheme.foreground2)
 
-                        Button(role: .destructive) {
-                            isConfirmingReplace = true
-                        } label: {
-                            Label("替换本地项目", systemImage: "arrow.triangle.2.circlepath")
+                            Button(role: .destructive) {
+                                isConfirmingReplace = true
+                            } label: {
+                                Label("替换本地项目", systemImage: "arrow.triangle.2.circlepath")
+                            }
+                        } else {
+                            Text("本地项目当前无法读取，只能将导入包保留为副本。")
+                                .font(.subheadline)
+                                .foregroundStyle(AmberTheme.foreground2)
                         }
 
                         Button {

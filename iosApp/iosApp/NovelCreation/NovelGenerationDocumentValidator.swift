@@ -583,7 +583,9 @@ enum NovelGenerationDocumentValidator {
                 issues.append("Interrupted run \(run.id) has invalid terminal state.")
             }
             if !run.partialContent.isEmpty {
-                let expectedCandidateID = run.kind == .prose ? run.candidateID : nil
+                let expectedCandidateID = (run.kind == .prose || run.kind == .regenerate)
+                    ? run.candidateID
+                    : nil
                 if outputMessage?.role != .assistant ||
                     outputMessage?.kind != .interruptedDraft ||
                     outputMessage?.content != run.partialContent ||
@@ -736,6 +738,20 @@ enum NovelGenerationDocumentValidator {
                 run.candidateID == nil ||
                 run.sourceChapterVersionID == nil {
                 issues.append("Run \(run.id) has an invalid regeneration shape.")
+            }
+            if let versionID = run.sourceChapterVersionID {
+                if !document.chapterVersions.contains(where: { $0.id == versionID }) {
+                    issues.append("Run \(run.id) has a missing regeneration source version.")
+                }
+                if let baseCheckpoint = document.checkpoints.first(where: {
+                    $0.id == run.baseCheckpointID
+                }), !baseCheckpoint.chapterSelections.contains(where: {
+                    $0.versionID == versionID
+                }) {
+                    issues.append(
+                        "Run \(run.id) has a regeneration source outside its base checkpoint."
+                    )
+                }
             }
         case .polish:
             if run.mode != .writeProse ||

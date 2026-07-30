@@ -281,13 +281,63 @@ final class NovelBatchPolishTests: XCTestCase {
 
         let progress = try XCTUnwrap(harness.session.batchPolishProgress)
         XCTAssertEqual(progress.adoptedCount, 1)
-        XCTAssertEqual(progress.cancelledCount, 2)  // 第 2、3 章未处理
+        XCTAssertEqual(
+            progress.cancelledCount,
+            2,
+            "第 2、3 章都应标为未处理，实际结果：\(progress.results.map { String(describing: $0.outcome) })"
+        )
         XCTAssertFalse(harness.session.isBatchPolishing)
-
-        // 收尾:放开挂起的生成,避免泄漏的运行。
-        if let pausedRunID {
-            await harness.adapter.resume(runID: pausedRunID)
+        XCTAssertNotNil(pausedRunID)
+        let runStopped = await eventually {
+            harness.session.activeRunID == nil
         }
+        XCTAssertTrue(runStopped, "停止批量润色必须同时终止当前批量章节的 run，不能把项目留在生成中")
+    }
+
+    func testBatchPolishStopsAtFirstUnresolvedAdoptionTransaction() async throws {
+        let fixture = try documentWithChapters(3)
+        let driftFailure = NovelModelFailure(
+            code: "provider_down",
+            message: "漂移检查失败",
+            isRetryable: true
+        )
+        let scripts = [
+            polishGenScript("Polished 1."),
+            NovelModelScript(steps: [.fail(driftFailure)]),
+            // 修复前批量会把这份脚本误消费成下一章生成；修复后留给用户点“重试检查”。
+            driftScript(compatibleDriftJSON),
+        ]
+        let harness = try await makeHarness(document: fixture.document, scripts: scripts)
+
+        harness.session.startBatchPolish(chapterIDs: fixture.chapterIDs)
+        let done = await eventually { harness.session.batchPolishProgress?.phase == .done }
+        XCTAssertTrue(done)
+
+        let progress = try XCTUnwrap(harness.session.batchPolishProgress)
+        XCTAssertEqual(progress.failedCount, 1)
+        XCTAssertEqual(progress.cancelledCount, 2)
+        let requestCount = await harness.adapter.requests.count
+        XCTAssertEqual(requestCount, 2, "出现未解决事务后不得继续生成下一章")
+
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        let unresolved = persisted.polishTransactions.filter {
+            $0.status == .pending || $0.status == .retryable || $0.status == .blocked
+        }
+        XCTAssertEqual(unresolved.count, 1, "批量一次最多留下一个需要用户处理的润色事务")
+        XCTAssertEqual(unresolved.first?.status, .retryable)
+        XCTAssertFalse(harness.session.canStartBatchPolish)
+
+        harness.session.clearBatchPolish()
+        XCTAssertNotNil(
+            harness.session.batchPolishProgress,
+            "未解决检查仍存在时不能清空批量报告，否则失败与未处理章节会丢失"
+        )
+
+        let transactionID = try XCTUnwrap(unresolved.first?.id)
+        await harness.session.retryPolishTransaction(transactionID)
+        XCTAssertTrue(harness.session.unresolvedBranchPolishTransactions.isEmpty)
+        XCTAssertEqual(harness.session.batchPolishProgress?.adoptedCount, 1)
+        XCTAssertTrue(harness.session.canStartBatchPolish)
     }
 
     func testBatchPolishGuardsAndBusyFlag() async throws {
@@ -325,5 +375,130 @@ final class NovelBatchPolishTests: XCTestCase {
         if let pausedRunID {
             await harness.adapter.resume(runID: pausedRunID)
         }
+    }
+
+    func testBatchPolishReportDoesNotCrossBranchOrRetryThere() async throws {
+        let fixture = try documentWithChapters(1)
+        let failure = NovelModelFailure(code: "provider_down", message: "生成失败", isRetryable: true)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.fail(failure)])],
+            batchPolishSettleGrace: 0.05
+        )
+        let sourceBranchID = fixture.document.branches[0].id
+        let createdForkID = await harness.workspace.forkBranch(
+            from: sourceBranchID,
+            checkpointID: fixture.document.branches[0].headCheckpointID,
+            name: "报告隔离线"
+        )
+        let forkID = try XCTUnwrap(createdForkID)
+        await harness.workspace.selectBranch(sourceBranchID)
+        await harness.session.bindToCurrentSelection()
+
+        harness.session.startBatchPolish(chapterIDs: fixture.chapterIDs)
+        let reportFinished = await eventually {
+            harness.session.batchPolishProgress?.phase == .done
+        }
+        XCTAssertTrue(reportFinished)
+        XCTAssertEqual(harness.session.batchPolishProgress?.failedCount, 1)
+        let requestCount = await harness.adapter.requests.count
+
+        await harness.workspace.selectBranch(forkID)
+        XCTAssertNil(
+            harness.session.batchPolishProgress,
+            "workspace 已切到别的分支时，旧分支报告不能短暂显示在新分支"
+        )
+        harness.session.retryFailedBatchPolish()
+        try await Task.sleep(for: .milliseconds(100))
+        let requestCountAfterRetry = await harness.adapter.requests.count
+        XCTAssertEqual(requestCountAfterRetry, requestCount)
+
+        await harness.session.bindToCurrentSelection()
+        XCTAssertEqual(harness.session.binding?.branchID, forkID)
+        XCTAssertNil(harness.session.batchPolishProgress, "切 binding 后应清理旧分支的已结束报告")
+    }
+
+    func testBindingChangeCancelsRunningBatchWithoutStartingNextChapter() async throws {
+        let fixture = try documentWithChapters(2)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.delta("partial"), .pause]),
+                polishGenScript("must not start"),
+            ]
+        )
+        let sourceBranchID = fixture.document.branches[0].id
+        let createdForkID = await harness.workspace.forkBranch(
+            from: sourceBranchID,
+            checkpointID: fixture.document.branches[0].headCheckpointID,
+            name: "切换目标线"
+        )
+        let forkID = try XCTUnwrap(createdForkID)
+        await harness.workspace.selectBranch(sourceBranchID)
+        await harness.session.bindToCurrentSelection()
+
+        harness.session.startBatchPolish(chapterIDs: fixture.chapterIDs)
+        let didStart = await eventually { harness.session.activeRunID != nil }
+        XCTAssertTrue(didStart)
+        let ownedRunID = try XCTUnwrap(harness.session.activeRunID)
+
+        await harness.workspace.selectBranch(forkID)
+        await harness.session.bindToCurrentSelection()
+
+        XCTAssertEqual(harness.session.binding?.branchID, forkID)
+        XCTAssertNil(harness.session.batchPolishProgress)
+        let requestCount = await harness.adapter.requests.count
+        XCTAssertEqual(requestCount, 1, "旧批次不能在新 binding 继续下一章")
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        let stoppedRun = try XCTUnwrap(persisted.activeRuns.first { $0.id == ownedRunID })
+        XCTAssertNotEqual(stoppedRun.status, .running)
+    }
+
+    func testBackgroundCancelsBatchAndDoesNotContinueNextChapter() async throws {
+        let fixture = try documentWithChapters(2)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.delta("partial"), .pause]),
+                polishGenScript("must not start"),
+            ]
+        )
+
+        harness.session.startBatchPolish(chapterIDs: fixture.chapterIDs)
+        let didStart = await eventually { harness.session.activeRunID != nil }
+        XCTAssertTrue(didStart)
+        let ownedRunID = try XCTUnwrap(harness.session.activeRunID)
+
+        await harness.session.interruptBatchPolishForBackground()
+
+        let didStop = await eventually {
+            harness.session.batchPolishProgress?.phase == .cancelled &&
+                harness.session.activeRunID == nil
+        }
+        XCTAssertTrue(didStop)
+        try await Task.sleep(for: .milliseconds(100))
+        let requestCount = await harness.adapter.requests.count
+        XCTAssertEqual(requestCount, 1, "进入后台后不能继续发起下一章")
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        let stoppedRun = try XCTUnwrap(persisted.activeRuns.first { $0.id == ownedRunID })
+        XCTAssertEqual(stoppedRun.interruptionReason, .background)
+    }
+
+    func testAllDiscardedChaptersCannotStartBatchPolish() async throws {
+        var fixture = try documentWithChapters(2)
+        for index in fixture.document.chapters.indices {
+            fixture.document.chapters[index].discardedAt = fixture.document.project.updatedAt
+        }
+        try NovelDocumentValidator.validate(fixture.document)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.delta("must not start"), .pause])]
+        )
+
+        XCTAssertFalse(harness.session.canStartBatchPolish)
+        harness.session.startBatchPolish(chapterIDs: fixture.chapterIDs)
+        XCTAssertNil(harness.session.batchPolishProgress)
+        let requestCount = await harness.adapter.requests.count
+        XCTAssertEqual(requestCount, 0)
     }
 }

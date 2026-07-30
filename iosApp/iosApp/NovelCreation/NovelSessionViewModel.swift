@@ -39,6 +39,7 @@ struct NovelBatchPolishProgress: Equatable, Sendable {
         case cancelled
     }
 
+    let binding: NovelSessionBinding
     let total: Int
     var completed: Int
     var currentTitle: String?
@@ -216,7 +217,14 @@ final class NovelSessionViewModel {
     private(set) var operationErrorMessage: String?
     private(set) var refreshErrorMessage: String?
     private(set) var lastFailure: NovelFailure?
-    private(set) var batchPolishProgress: NovelBatchPolishProgress?
+    private var batchPolishProgressStorage: NovelBatchPolishProgress?
+
+    var batchPolishProgress: NovelBatchPolishProgress? {
+        guard let progress = batchPolishProgressStorage,
+              progress.binding == binding,
+              snapshotMatchesBinding else { return nil }
+        return progress
+    }
 
     @ObservationIgnored private let workspace: NovelCreationViewModel
     @ObservationIgnored private var consumerTask: Task<Void, Never>?
@@ -233,6 +241,9 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var cancelledStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var sessionActionOwnerID: UUID?
     @ObservationIgnored private var batchPolishTask: Task<Void, Never>?
+    @ObservationIgnored private var batchPolishTaskBinding: NovelSessionBinding?
+    @ObservationIgnored private var batchPolishOwnedRunID: NovelRunID?
+    @ObservationIgnored private var batchPolishCancellationReason: NovelRunInterruptionReason = .user
     /// 批量循环自己发起单章润色时短暂置真,让 `canStart` 放行——否则折进 `isBusy` 的
     /// `isBatchPolishing` 会把批量自己的 `start` 也挡掉。只在 start 握手期间为真。
     @ObservationIgnored private var isBatchStartingRun = false
@@ -391,6 +402,16 @@ final class NovelSessionViewModel {
         return branch.chapterSelections.compactMap { versionsByID[$0.versionID] }
     }
 
+    var hasPolishableChapters: Bool {
+        guard snapshotMatchesBinding,
+              let project = workspace.projectSnapshot,
+              let branch = workspace.branchSnapshot else { return false }
+        let selectedChapterIDs = Set(branch.chapterSelections.map(\.chapterID))
+        return project.chapters.contains {
+            selectedChapterIDs.contains($0.id) && $0.discardedAt == nil
+        }
+    }
+
     var availableProseCandidates: [NovelCandidateRecord] {
         candidates(kind: .prose).filter { $0.status == .available }
     }
@@ -411,6 +432,12 @@ final class NovelSessionViewModel {
     var branchPolishTransactions: [NovelPendingPolishTransactionRecord] {
         guard let branchID = binding?.branchID else { return [] }
         return workspace.projectSnapshot?.polishTransactions.filter { $0.branchID == branchID } ?? []
+    }
+
+    var unresolvedBranchPolishTransactions: [NovelPendingPolishTransactionRecord] {
+        branchPolishTransactions.filter {
+            $0.status == .pending || $0.status == .retryable || $0.status == .blocked
+        }
     }
 
     var access: NovelProjectLoadAccess? {
@@ -464,9 +491,11 @@ final class NovelSessionViewModel {
     /// 发起批量润色的前置门禁,与阅读器单章 `polishBlockReason` 同义。
     var canStartBatchPolish: Bool {
         workspace.canMutate &&
+            hasPolishableChapters &&
             !isRunning &&
             !needsSync &&
             branchPendingOperations.isEmpty &&
+            unresolvedBranchPolishTransactions.isEmpty &&
             !isBusy
     }
 
@@ -510,7 +539,7 @@ final class NovelSessionViewModel {
               let branch = workspace.branchSnapshot,
               workspace.selectedProjectID == project.project.id,
               workspace.selectedBranchID == branch.branch.id else {
-            resetBinding()
+            await resetBinding()
             return
         }
         let next = NovelSessionBinding(
@@ -519,6 +548,7 @@ final class NovelSessionViewModel {
         )
         let didChange = binding != next
         if didChange {
+            await cancelBatchPolishForBindingChange(from: binding)
             detachConsumer()
             // 切 binding 即作废旧 token:顺带取消可能仍在静窗里等待的 tail 退役任务。
             terminalTailRetirementTask?.cancel()
@@ -563,7 +593,12 @@ final class NovelSessionViewModel {
             await bindToCurrentSelection()
             return self.binding != nil
         }
-        return await refreshDurable(binding: binding, token: bindingToken)
+        let token = bindingToken
+        guard await refreshDurable(binding: binding, token: token) else { return false }
+        if consumerTask == nil, let run = activeRun {
+            await attach(to: run)
+        }
+        return bindingToken == token && refreshErrorMessage == nil
     }
 
     func detachConsumer() {
@@ -862,6 +897,11 @@ final class NovelSessionViewModel {
             )
             operationErrorMessage = nil
             return draft
+        } catch is CancellationError {
+            return nil
+        } catch let error as NovelStructuredModelExecutionFailure
+            where error.failure.code == "cancelled" {
+            return nil
         } catch {
             operationErrorMessage = describe(error)
             return nil
@@ -1055,6 +1095,9 @@ final class NovelSessionViewModel {
                   $0.id == transactionID && $0.branchID == branch.branch.id &&
                       ($0.status == .pending || $0.status == .retryable)
               }), snapshotMatchesBinding else { return }
+        let chapterID = project.chapterVersions.first {
+            $0.id == transaction.sourceChapterVersionID
+        }?.chapterID
         let command = NovelAdoptPolishCandidateCommand(
             context: NovelMutationContext(
                 operationID: transaction.operationID,
@@ -1071,14 +1114,18 @@ final class NovelSessionViewModel {
             expectedWorkingRevision: branch.branch.workingRevision
         )
         await applyPolishAdoption(command)
+        reconcileBatchPolishResult(transactionID: transactionID, chapterID: chapterID)
     }
 
     func abandonPolishTransaction(_ transactionID: NovelPendingOperationID) async {
         guard let project = workspace.projectSnapshot,
               let branch = workspace.branchSnapshot,
-              project.polishTransactions.contains(where: {
+              let transaction = project.polishTransactions.first(where: {
                   $0.id == transactionID && $0.branchID == branch.branch.id
               }), snapshotMatchesBinding else { return }
+        let chapterID = project.chapterVersions.first {
+            $0.id == transaction.sourceChapterVersionID
+        }?.chapterID
         _ = await perform(.abandonPolishTransaction(
             NovelAbandonPolishTransactionCommand(
                 context: mutationContext(project: project, branch: branch),
@@ -1087,6 +1134,7 @@ final class NovelSessionViewModel {
                 transactionID: transactionID
             )
         ))
+        reconcileBatchPolishResult(transactionID: transactionID, chapterID: chapterID)
     }
 
     // MARK: - 批量整章润色
@@ -1097,8 +1145,12 @@ final class NovelSessionViewModel {
     /// 版本;改了剧情的章自动跳过;失败章记录在案。任务句柄留在 ViewModel 上,关闭
     /// sheet 不中断,只有 `cancelBatchPolish()` 会停止。
     func startBatchPolish(chapterIDs: [NovelChapterID]) {
-        guard batchPolishTask == nil, !chapterIDs.isEmpty, canStartBatchPolish else { return }
-        batchPolishProgress = NovelBatchPolishProgress(
+        guard batchPolishTask == nil,
+              let binding,
+              !chapterIDs.isEmpty,
+              canStartBatchPolish else { return }
+        batchPolishProgressStorage = NovelBatchPolishProgress(
+            binding: binding,
             total: chapterIDs.count,
             completed: 0,
             currentTitle: nil,
@@ -1106,20 +1158,52 @@ final class NovelSessionViewModel {
             results: [],
             startedAt: Date()
         )
+        batchPolishTaskBinding = binding
+        batchPolishCancellationReason = .user
         batchPolishTask = Task { @MainActor [weak self] in
-            await self?.runBatchPolish(chapterIDs: chapterIDs)
+            await self?.runBatchPolish(chapterIDs: chapterIDs, binding: binding)
+            guard self?.batchPolishTaskBinding == binding else { return }
             self?.batchPolishTask = nil
+            self?.batchPolishTaskBinding = nil
+            self?.batchPolishOwnedRunID = nil
         }
     }
 
     func cancelBatchPolish() {
+        guard batchPolishTask != nil else { return }
+        batchPolishCancellationReason = .user
         batchPolishTask?.cancel()
+    }
+
+    func interruptBatchPolishForBackground() async {
+        guard let task = batchPolishTask else { return }
+        batchPolishCancellationReason = .background
+        task.cancel()
+        await task.value
+    }
+
+    private func cancelBatchPolishForBindingChange(
+        from expectedBinding: NovelSessionBinding?
+    ) async {
+        guard let expectedBinding else {
+            batchPolishProgressStorage = nil
+            return
+        }
+        if batchPolishTaskBinding == expectedBinding, let task = batchPolishTask {
+            batchPolishCancellationReason = .routeExit
+            task.cancel()
+            await task.value
+        }
+        if batchPolishProgressStorage?.binding == expectedBinding {
+            batchPolishProgressStorage = nil
+        }
     }
 
     /// 报告态下「再润色一批」用:清空进度回到选择态。运行中不允许清。
     func clearBatchPolish() {
-        guard batchPolishTask == nil else { return }
-        batchPolishProgress = nil
+        guard batchPolishTask == nil,
+              unresolvedBranchPolishTransactions.isEmpty else { return }
+        batchPolishProgressStorage = nil
     }
 
     /// 报告态下「重试失败章节」:只重跑失败和未处理的章,跳过已成功和漂移跳过的。
@@ -1133,7 +1217,10 @@ final class NovelSessionViewModel {
         startBatchPolish(chapterIDs: retryIDs)
     }
 
-    private func runBatchPolish(chapterIDs: [NovelChapterID]) async {
+    private func runBatchPolish(
+        chapterIDs: [NovelChapterID],
+        binding expectedBinding: NovelSessionBinding
+    ) async {
         var results: [NovelBatchPolishChapterResult] = []
         do {
             for (index, chapterID) in chapterIDs.enumerated() {
@@ -1142,24 +1229,45 @@ final class NovelSessionViewModel {
                 // 保证本章 start 的 canStart 门禁不被卡。refreshDurable 幂等且不 rebind/detach。
                 _ = await refreshDurable(binding: binding, token: bindingToken)
                 let title = batchPolishTitle(for: chapterID, ordinal: index + 1)
-                mutateBatchProgress {
+                mutateBatchProgress(binding: expectedBinding) {
                     $0.completed = index
                     $0.currentTitle = title
                 }
                 let result = try await polishOneChapter(chapterID: chapterID, title: title)
+                batchPolishOwnedRunID = nil
                 results.append(result)
-                mutateBatchProgress {
+                mutateBatchProgress(binding: expectedBinding) {
                     $0.completed = index + 1
                     $0.results = results
                 }
+                if !unresolvedBranchPolishTransactions.isEmpty {
+                    results.append(contentsOf: unhandledBatchResults(
+                        chapterIDs: chapterIDs,
+                        handled: results,
+                        outcome: .cancelled,
+                        message: "前一章的润色检查需要先处理。"
+                    ))
+                    mutateBatchProgress(binding: expectedBinding) {
+                        $0.completed = index + 1
+                        $0.currentTitle = nil
+                        $0.phase = .done
+                        $0.results = results
+                    }
+                    return
+                }
             }
-            mutateBatchProgress {
+            mutateBatchProgress(binding: expectedBinding) {
                 $0.completed = chapterIDs.count
                 $0.currentTitle = nil
                 $0.phase = .done
                 $0.results = results
             }
         } catch is CancellationError {
+            await stopOwnedBatchPolishRun(
+                binding: expectedBinding,
+                reason: batchPolishCancellationReason
+            )
+            batchPolishOwnedRunID = nil
             // 用户按了停止:已采用的保留,未轮到的标 cancelled,不弹错误。
             results.append(contentsOf: unhandledBatchResults(
                 chapterIDs: chapterIDs,
@@ -1167,12 +1275,13 @@ final class NovelSessionViewModel {
                 outcome: .cancelled,
                 message: nil
             ))
-            mutateBatchProgress {
+            mutateBatchProgress(binding: expectedBinding) {
                 $0.currentTitle = nil
                 $0.phase = .cancelled
                 $0.results = results
             }
         } catch {
+            batchPolishOwnedRunID = nil
             // 意料外的错误:剩余章记 failed 收口,保留已完成的结果。
             results.append(contentsOf: unhandledBatchResults(
                 chapterIDs: chapterIDs,
@@ -1180,7 +1289,7 @@ final class NovelSessionViewModel {
                 outcome: .failed,
                 message: describe(error)
             ))
-            mutateBatchProgress {
+            mutateBatchProgress(binding: expectedBinding) {
                 $0.currentTitle = nil
                 $0.phase = .done
                 $0.results = results
@@ -1207,7 +1316,11 @@ final class NovelSessionViewModel {
         )
         isBatchStartingRun = true
         let started = await startWholeChapterPolish(chapterID: chapterID)
+        batchPolishOwnedRunID = activeRunID
         isBatchStartingRun = false
+        // 停止也可能落在 run 启动握手内；`start` 会把取消收口成 false，若这里不
+        // 重新检查，当前章会被误报为普通启动失败。
+        try Task.checkCancellation()
         guard started else {
 #if DEBUG
             print("[BatchPolish] start failed \(chapterID): \(batchPolishDiagnostic())")
@@ -1285,6 +1398,10 @@ final class NovelSessionViewModel {
             // refreshDurable 的 retire 分支清掉 terminalAwaitingRefresh,进而卡住后续章节的
             // 启动门禁。refreshDurable 幂等、不 rebind、不 detach 正在跑的 consumer。
             _ = await refreshDurable(binding: binding, token: bindingToken)
+            // 停止可能与上面的 durable refresh 竞速。refresh 本身不抛取消；若不在
+            // await 后重新检查，刚被 stop 收口的当前章会被误记为“生成失败”，而不是
+            // 用户明确停止后的“未处理”。
+            try Task.checkCancellation()
             if let candidate = availablePolishCandidates.first(where: {
                 $0.sourceChapterVersionID == sourceVersionID &&
                     !preexistingIDs.contains($0.id)
@@ -1329,10 +1446,61 @@ final class NovelSessionViewModel {
         }
     }
 
-    private func mutateBatchProgress(_ mutate: (inout NovelBatchPolishProgress) -> Void) {
-        guard var progress = batchPolishProgress else { return }
+    private func mutateBatchProgress(
+        binding expectedBinding: NovelSessionBinding? = nil,
+        _ mutate: (inout NovelBatchPolishProgress) -> Void
+    ) {
+        guard var progress = batchPolishProgressStorage,
+              progress.binding == (expectedBinding ?? binding) else { return }
         mutate(&progress)
-        batchPolishProgress = progress
+        batchPolishProgressStorage = progress
+    }
+
+    private func stopOwnedBatchPolishRun(
+        binding expectedBinding: NovelSessionBinding,
+        reason: NovelRunInterruptionReason
+    ) async {
+        let runID = batchPolishOwnedRunID ?? (isBatchStartingRun ? activeRunID : nil)
+        guard let runID,
+              binding == expectedBinding,
+              activeRunID == runID else { return }
+        let durableRun = workspace.projectSnapshot?.activeRuns.first {
+            $0.id == runID && $0.branchID == expectedBinding.branchID
+        }
+        if let durableRun, durableRun.status != .running {
+            if transientTail?.runID == runID { clearTransientTail() }
+            return
+        }
+        await stop(reason: reason)
+    }
+
+    private func reconcileBatchPolishResult(
+        transactionID: NovelPendingOperationID,
+        chapterID: NovelChapterID?
+    ) {
+        guard let chapterID,
+              let transaction = workspace.projectSnapshot?.polishTransactions.first(where: {
+                  $0.id == transactionID
+              }) else { return }
+        mutateBatchProgress { progress in
+            guard let index = progress.results.firstIndex(where: { $0.chapterID == chapterID }) else {
+                return
+            }
+            switch transaction.status {
+            case .completed:
+                progress.results[index].outcome = .adopted
+                progress.results[index].message = nil
+            case .incompatible:
+                progress.results[index].outcome = .skippedDrift
+                progress.results[index].message = "润色改动了剧情事实,已跳过本章。"
+            case .abandoned:
+                progress.results[index].outcome = .failed
+                progress.results[index].message = "已放弃未完成的润色检查，可重新润色本章。"
+            case .pending, .retryable, .blocked:
+                progress.results[index].outcome = .failed
+                progress.results[index].message = transaction.lastFailure?.message ?? "润色检查仍未完成。"
+            }
+        }
     }
 
     private func batchPolishTitle(for chapterID: NovelChapterID, ordinal: Int) -> String {
@@ -1436,13 +1604,19 @@ private extension NovelSessionViewModel {
               run.status == .failed || run.status == .interrupted,
               run.status != .failed || run.terminalFailure?.isRetryable == true,
               let branch = workspace.branchSnapshot?.branch else { return false }
-        if run.kind == .prose || run.kind == .polish {
+        if run.kind == .prose || run.kind == .polish || run.kind == .regenerate {
             guard run.baseCheckpointID == branch.headCheckpointID,
                   run.baseHeadRevision == branch.headRevision else { return false }
         }
-        if run.kind == .polish {
+        if run.kind == .polish || run.kind == .regenerate {
             guard let sourceID = run.sourceChapterVersionID,
-                  branch.workingChapterSelections.contains(where: { $0.versionID == sourceID }) else {
+                  branch.workingChapterSelections.contains(where: { $0.versionID == sourceID }),
+                  let sourceVersion = workspace.projectSnapshot?.chapterVersions.first(where: {
+                      $0.id == sourceID
+                  }),
+                  workspace.projectSnapshot?.chapters.contains(where: {
+                      $0.id == sourceVersion.chapterID && $0.discardedAt == nil
+                  }) == true else {
                 return false
             }
         }
@@ -1475,9 +1649,13 @@ private extension NovelSessionViewModel {
             return !branchPendingOperations.contains(where: \.blocksProseGeneration)
         case .regenerate:
             // 要把被重写章的正文原样注入,所以必须已同步且没有未落地的正文操作。
-            return branch.syncStatus == .synchronized && branchPendingOperations.isEmpty
+            return branch.syncStatus == .synchronized &&
+                branchPendingOperations.isEmpty &&
+                unresolvedBranchPolishTransactions.isEmpty
         case .polish:
-            return branch.syncStatus == .synchronized && branchPendingOperations.isEmpty
+            return branch.syncStatus == .synchronized &&
+                branchPendingOperations.isEmpty &&
+                unresolvedBranchPolishTransactions.isEmpty
         case .quickStart:
             return false
         }
@@ -2237,7 +2415,8 @@ private extension NovelSessionViewModel {
         workspace.releaseSessionOperation(ownerID: runID.rawValue)
     }
 
-    func resetBinding() {
+    func resetBinding() async {
+        await cancelBatchPolishForBindingChange(from: binding)
         detachConsumer()
         bindingToken = UUID()
         binding = nil

@@ -633,6 +633,56 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertEqual(stale.rows[1].actions.first?.blocker, .staleCandidate)
     }
 
+    func testRegenerationCandidateCannotBeCollectedAfterItsSourceChapterIsDiscarded() throws {
+        let fixture = try makeFixture()
+        let sourceVersionID = NovelChapterVersionID()
+        let candidateID = NovelCandidateID()
+        let message = makeMessage(
+            sequence: 0,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .proseCandidate,
+            content: "重写后的整章正文",
+            candidateID: candidateID
+        )
+        var session = fixture.session
+        session.messages = [message]
+        let candidate = makeCandidate(
+            fixture: fixture,
+            id: candidateID,
+            sourceMessageID: message.id,
+            kind: .prose,
+            status: .available,
+            content: message.content,
+            sourceVersionID: sourceVersionID
+        )
+        var branch = fixture.branch
+        branch.workingChapterSelections = [NovelChapterSelection(
+            chapterID: NovelChapterID(),
+            versionID: sourceVersionID
+        )]
+
+        let available = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            branch: branch,
+            session: session,
+            candidates: [candidate]
+        ))
+        XCTAssertNil(available.rows[0].actions.first?.blocker)
+
+        let discarded = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            branch: branch,
+            session: session,
+            candidates: [candidate],
+            discardedChapterVersionIDs: [sourceVersionID]
+        ))
+        XCTAssertEqual(
+            discarded.rows[0].actions,
+            [.init(action: .collectProse(candidateID), blocker: .sourceChapterChanged)]
+        )
+    }
+
     func testProseCandidateRowPreservesItsGenerationGranularity() throws {
         let fixture = try makeFixture()
         let candidateID = NovelCandidateID()
@@ -1059,6 +1109,70 @@ final class NovelSessionReplayTests: XCTestCase {
             .init(action: .retryGeneration(retryableRun.id), blocker: .staleCandidate)
         ])
 
+        let regeneratedSourceVersionID = NovelChapterVersionID()
+        let regenerateRun = terminalRun(makeRun(
+            fixture: fixture,
+            kind: .regenerate,
+            sourceVersionID: regeneratedSourceVersionID
+        ))
+        session.messages = [makeMessage(
+            id: regenerateRun.messageID,
+            sequence: 0,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .interruptedDraft,
+            content: "保留的重写草稿",
+            runID: regenerateRun.id
+        )]
+        var regenerateBranch = fixture.branch
+        regenerateBranch.workingChapterSelections = [NovelChapterSelection(
+            chapterID: NovelChapterID(),
+            versionID: regeneratedSourceVersionID
+        )]
+        let exactRegenerateRetry = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            branch: regenerateBranch,
+            session: session,
+            runs: [regenerateRun]
+        ))
+        XCTAssertEqual(exactRegenerateRetry.rows[0].actions, [
+            .init(action: .retryGeneration(regenerateRun.id), blocker: nil)
+        ])
+
+        let discardedRegenerateSource = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            branch: regenerateBranch,
+            session: session,
+            runs: [regenerateRun],
+            discardedChapterVersionIDs: [regeneratedSourceVersionID]
+        ))
+        XCTAssertEqual(
+            discardedRegenerateSource.rows[0].actions.first?.blocker,
+            .sourceChapterChanged
+        )
+
+        regenerateBranch.headRevision += 1
+        let staleRegenerateRetry = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            branch: regenerateBranch,
+            session: session,
+            runs: [regenerateRun]
+        ))
+        XCTAssertEqual(staleRegenerateRetry.rows[0].actions.first?.blocker, .staleCandidate)
+
+        regenerateBranch.headRevision = fixture.branch.headRevision
+        regenerateBranch.workingChapterSelections = []
+        let changedRegenerateSource = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            branch: regenerateBranch,
+            session: session,
+            runs: [regenerateRun]
+        ))
+        XCTAssertEqual(
+            changedRegenerateSource.rows[0].actions.first?.blocker,
+            .sourceChapterChanged
+        )
+
         let oldSourceVersionID = NovelChapterVersionID()
         let polishRun = terminalRun(makeRun(
             fixture: fixture,
@@ -1089,6 +1203,93 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertEqual(sourceChanged.rows[0].actions, [
             .init(action: .retryGeneration(polishRun.id), blocker: .sourceChapterChanged)
         ])
+    }
+
+    func testPolishAndRegenerateRetryRespectTheSameBranchGatesAsStartingANewRun() throws {
+        let fixture = try makeFixture()
+        let sourceVersionID = NovelChapterVersionID()
+        var branch = fixture.branch
+        branch.workingChapterSelections = [NovelChapterSelection(
+            chapterID: NovelChapterID(),
+            versionID: sourceVersionID
+        )]
+
+        for kind in [NovelRunKind.polish, .regenerate] {
+            let run = terminalRun(
+                makeRun(fixture: fixture, kind: kind, sourceVersionID: sourceVersionID),
+                status: .interrupted
+            )
+            var session = fixture.session
+            session.messages = [makeMessage(
+                id: run.messageID,
+                sequence: 0,
+                role: .assistant,
+                mode: .writeProse,
+                kind: .interruptedDraft,
+                content: "保留的整章草稿",
+                runID: run.id
+            )]
+
+            var needsSyncBranch = branch
+            needsSyncBranch.syncStatus = .needsSync
+            let needsSync = NovelSessionPresentation.project(makeInput(
+                fixture: fixture,
+                branch: needsSyncBranch,
+                session: session,
+                runs: [run]
+            ))
+            XCTAssertEqual(
+                needsSync.rows[0].actions.first?.blocker,
+                .branchNeedsSync,
+                "\(kind) retry must not bypass the start gate for an unsynchronized branch."
+            )
+
+            let retryableManualSync = makePending(
+                fixture: fixture,
+                candidateID: nil,
+                status: .retryable,
+                kind: .manualSync
+            )
+            let pending = NovelSessionPresentation.project(makeInput(
+                fixture: fixture,
+                branch: branch,
+                session: session,
+                runs: [run],
+                pending: [retryableManualSync]
+            ))
+            XCTAssertEqual(
+                pending.rows[0].actions.first?.blocker,
+                .branchNeedsSync,
+                "\(kind) retry must wait for every branch operation, including retryable manual sync."
+            )
+
+            let transactionCandidate = makeCandidate(
+                fixture: fixture,
+                id: NovelCandidateID(),
+                sourceMessageID: NovelMessageID(),
+                kind: .polish,
+                status: .available,
+                content: "待检查的润色正文",
+                sourceVersionID: sourceVersionID
+            )
+            let unresolvedTransaction = makePolishTransaction(
+                fixture: fixture,
+                candidate: transactionCandidate,
+                status: .blocked
+            )
+            let unresolvedPolish = NovelSessionPresentation.project(makeInput(
+                fixture: fixture,
+                branch: branch,
+                session: session,
+                runs: [run],
+                polish: [unresolvedTransaction]
+            ))
+            XCTAssertEqual(
+                unresolvedPolish.rows[0].actions.first?.blocker,
+                .pendingOperation,
+                "\(kind) retry must not start while the previous polish check is unresolved."
+            )
+        }
     }
 
     func testInterruptedProseRowsExposeCollectBesideRetryAndKeepSyncBlocker() throws {
@@ -1770,6 +1971,7 @@ private extension NovelSessionReplayTests {
         runs: [NovelActiveRunRecord] = [],
         pending: [NovelPendingOperationRecord] = [],
         polish: [NovelPendingPolishTransactionRecord] = [],
+        discardedChapterVersionIDs: Set<NovelChapterVersionID> = [],
         checkpoints: [NovelBranchCheckpointRecord]? = nil,
         states: [NovelStateSnapshotRecord]? = nil,
         events: [NovelStoryEventRecord] = [],
@@ -1785,6 +1987,7 @@ private extension NovelSessionReplayTests {
             runs: runs,
             pendingOperations: pending,
             polishTransactions: polish,
+            discardedChapterVersionIDs: discardedChapterVersionIDs,
             checkpoints: checkpoints ?? fixture.document.checkpoints,
             stateSnapshots: states ?? fixture.document.stateSnapshots,
             events: events,

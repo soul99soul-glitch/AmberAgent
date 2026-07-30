@@ -236,6 +236,112 @@ final class NovelGenerationReducerTests: XCTestCase {
         }
     }
 
+    func testSuccessfulQuickStartRegenerationSupersedesOnlyThePreviousActiveRound() throws {
+        let document = try quickStartDocument()
+        let firstRequest = makeRequest(document: document, kind: .quickStart)
+        let firstStarted = try begin(firstRequest, in: document)
+        let firstCompleted = try NovelGenerationReducer.complete(
+            runID: firstRequest.id,
+            content: quickStartSuggestionsJSON,
+            in: firstStarted,
+            now: terminalTime
+        ).document
+        let firstProposalIDs = Set(firstCompleted.settingProposals.map(\.id))
+
+        let secondRequest = makeRequest(document: firstCompleted, kind: .quickStart)
+        let secondStarted = try begin(secondRequest, in: firstCompleted)
+        let secondCompleted = try NovelGenerationReducer.complete(
+            runID: secondRequest.id,
+            content: quickStartSuggestionsJSON,
+            in: secondStarted,
+            now: terminalTime.addingTimeInterval(1)
+        ).document
+
+        XCTAssertEqual(secondCompleted.settingProposals.count, 10)
+        XCTAssertTrue(secondCompleted.settingProposals
+            .filter { firstProposalIDs.contains($0.id) }
+            .allSatisfy { $0.supersededByRunID == secondRequest.id })
+        XCTAssertEqual(
+            secondCompleted.activeSettingProposals(for: document.branches[0].id).count,
+            5
+        )
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(secondCompleted))
+    }
+
+    func testValidatorRejectsResolvedQuickStartProposalMarkedSuperseded() throws {
+        let document = try completedQuickStartRounds(count: 2)
+        var invalid = document
+        let firstRunID = invalid.activeRuns[0].id
+        let proposalIndex = try XCTUnwrap(invalid.settingProposals.firstIndex(where: {
+            guard case .some(.quickStart(let runID, _)) = $0.origin else { return false }
+            return runID == firstRunID
+        }))
+        invalid.settingProposals[proposalIndex].isResolved = true
+
+        assertInvalid(invalid, containing: "resolved and superseded")
+    }
+
+    func testValidatorRejectsPartialQuickStartRoundSupersession() throws {
+        let document = try completedQuickStartRounds(count: 2)
+        var invalid = document
+        let firstRunID = invalid.activeRuns[0].id
+        let proposalIndex = try XCTUnwrap(invalid.settingProposals.firstIndex(where: {
+            guard case .some(.quickStart(let runID, _)) = $0.origin else { return false }
+            return runID == firstRunID
+        }))
+        invalid.settingProposals[proposalIndex].supersededByRunID = nil
+
+        assertInvalid(invalid, containing: "partially superseded")
+    }
+
+    func testValidatorRejectsQuickStartSupersessionCycle() throws {
+        let document = try completedQuickStartRounds(count: 2)
+        var invalid = document
+        let firstRunID = invalid.activeRuns[0].id
+        let secondRunID = invalid.activeRuns[1].id
+        for index in invalid.settingProposals.indices {
+            guard case .some(.quickStart(let sourceRunID, _)) =
+                invalid.settingProposals[index].origin,
+                sourceRunID == secondRunID else { continue }
+            invalid.settingProposals[index].supersededByRunID = firstRunID
+        }
+
+        assertInvalid(invalid, containing: "must follow its source run")
+    }
+
+    func testTransitionRejectsAddingHistoricalQuickStartSupersession() throws {
+        var current = try completedQuickStartRounds(count: 2)
+        let firstRunID = current.activeRuns[0].id
+        let secondRunID = current.activeRuns[1].id
+        for index in current.settingProposals.indices {
+            guard case .some(.quickStart(let sourceRunID, _)) =
+                current.settingProposals[index].origin,
+                sourceRunID == firstRunID else { continue }
+            current.settingProposals[index].supersededByRunID = nil
+        }
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(current))
+
+        var next = current
+        for index in next.settingProposals.indices {
+            guard case .some(.quickStart(let sourceRunID, _)) =
+                next.settingProposals[index].origin,
+                sourceRunID == firstRunID else { continue }
+            next.settingProposals[index].supersededByRunID = secondRunID
+        }
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(next))
+
+        XCTAssertThrowsError(try NovelDocumentValidator.validateTransition(from: current, to: next)) {
+            error in
+            guard let novelError = error as? NovelError,
+                  case .invalidDocument(let issues) = novelError else {
+                return XCTFail("Expected invalidDocument, got \(error)")
+            }
+            XCTAssertTrue(issues.contains(where: {
+                $0.localizedCaseInsensitiveContains("newly completed quick-start run")
+            }))
+        }
+    }
+
     func testStaleRevisionsFailButNeedsSyncStillAllowsProse() throws {
         let document = try NovelTestFixtures.document()
         let stale = makeRequest(
@@ -359,6 +465,120 @@ final class NovelGenerationReducerTests: XCTestCase {
         XCTAssertEqual(candidate.content, "只收录这份终态快照")
         XCTAssertEqual(interrupted.message?.message.candidateID, candidate.id)
         XCTAssertNoThrow(try NovelDocumentValidator.validate(interrupted.document))
+    }
+
+    func testInterruptedRegenerationPersistsCollectableReplacementCandidate() throws {
+        let fixture = try documentWithChapter()
+        let request = makeRequest(
+            document: fixture.document,
+            kind: .regenerate,
+            granularity: .wholeChapter,
+            sourceChapterVersionID: fixture.versionID
+        )
+        let started = try begin(request, in: fixture.document)
+
+        let interrupted = try NovelGenerationReducer.interrupt(
+            runID: request.id,
+            reason: .user,
+            partialContent: "被停止但仍可收录的整章重写",
+            in: started,
+            now: terminalTime
+        )
+
+        let candidate = try XCTUnwrap(interrupted.document.candidates.first)
+        XCTAssertEqual(candidate.id, request.candidateID)
+        XCTAssertEqual(candidate.kind, .prose)
+        XCTAssertEqual(candidate.status, .interrupted)
+        XCTAssertEqual(candidate.content, "被停止但仍可收录的整章重写")
+        XCTAssertEqual(candidate.sourceChapterVersionID, fixture.versionID)
+        XCTAssertEqual(interrupted.message?.message.kind, .interruptedDraft)
+        XCTAssertEqual(interrupted.message?.message.candidateID, candidate.id)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(interrupted.document))
+    }
+
+    func testBeginRejectsRegenerationSourceOutsideCurrentWorkingSelection() throws {
+        var fixture = try documentWithChapter()
+        let unselectedVersionID = appendUnselectedVersion(to: &fixture.document)
+        let validRequest = makeRequest(
+            document: fixture.document,
+            kind: .regenerate,
+            granularity: .wholeChapter,
+            sourceChapterVersionID: fixture.versionID
+        )
+        let artifacts = try makeArtifacts(document: fixture.document, request: validRequest)
+        let invalidRequest = replacingSourceVersion(in: validRequest, with: unselectedVersionID)
+
+        XCTAssertThrowsError(try NovelGenerationReducer.begin(
+            invalidRequest,
+            artifacts: artifacts,
+            in: fixture.document,
+            now: startTime
+        )) { error in
+            guard case .invalidInput(let message) = error as? NovelError else {
+                return XCTFail("Expected invalidInput, got \(error)")
+            }
+            XCTAssertTrue(message.localizedCaseInsensitiveContains("source version"))
+        }
+    }
+
+    func testBeginRejectsRegenerationSourceFromDiscardedChapter() throws {
+        var fixture = try documentWithChapter()
+        let planningDocument = fixture.document
+        fixture.document.chapters[0].discardedAt = terminalTime
+        let request = makeRequest(
+            document: fixture.document,
+            kind: .regenerate,
+            granularity: .wholeChapter,
+            sourceChapterVersionID: fixture.versionID
+        )
+        let artifacts = try makeArtifacts(document: planningDocument, request: request)
+
+        XCTAssertThrowsError(try NovelGenerationReducer.begin(
+            request,
+            artifacts: artifacts,
+            in: fixture.document,
+            now: startTime
+        )) { error in
+            guard case .invalidInput(let message) = error as? NovelError else {
+                return XCTFail("Expected invalidInput, got \(error)")
+            }
+            XCTAssertTrue(message.localizedCaseInsensitiveContains("source version"))
+        }
+    }
+
+    func testValidatorRejectsRegenerationSourceMissingFromDocument() throws {
+        let fixture = try documentWithChapter()
+        let request = makeRequest(
+            document: fixture.document,
+            kind: .regenerate,
+            granularity: .wholeChapter,
+            sourceChapterVersionID: fixture.versionID
+        )
+        var started = try begin(request, in: fixture.document)
+        started.activeRuns[0] = replacingSourceVersion(
+            in: started.activeRuns[0],
+            with: NovelChapterVersionID()
+        )
+
+        assertInvalid(started, containing: "missing regeneration source version")
+    }
+
+    func testValidatorRejectsRegenerationSourceOutsideBaseCheckpoint() throws {
+        var fixture = try documentWithChapter()
+        let unselectedVersionID = appendUnselectedVersion(to: &fixture.document)
+        let request = makeRequest(
+            document: fixture.document,
+            kind: .regenerate,
+            granularity: .wholeChapter,
+            sourceChapterVersionID: fixture.versionID
+        )
+        var started = try begin(request, in: fixture.document)
+        started.activeRuns[0] = replacingSourceVersion(
+            in: started.activeRuns[0],
+            with: unselectedVersionID
+        )
+
+        assertInvalid(started, containing: "regeneration source outside its base checkpoint")
     }
 
     func testLegacyInterruptedProseWithoutCandidateNormalizesAtDecodeBoundary() throws {
@@ -824,6 +1044,78 @@ private extension NovelGenerationReducerTests {
         ).document
     }
 
+    func completedQuickStartRounds(count: Int) throws -> NovelProjectDocumentV1 {
+        var document = try quickStartDocument()
+        for offset in 0..<count {
+            let request = makeRequest(document: document, kind: .quickStart)
+            let started = try begin(request, in: document)
+            document = try NovelGenerationReducer.complete(
+                runID: request.id,
+                content: quickStartSuggestionsJSON,
+                in: started,
+                now: terminalTime.addingTimeInterval(TimeInterval(offset))
+            ).document
+        }
+        return document
+    }
+
+    func replacingSourceVersion(
+        in request: NovelRunRequest,
+        with sourceChapterVersionID: NovelChapterVersionID
+    ) -> NovelRunRequest {
+        NovelRunRequest(
+            id: request.id,
+            operationID: request.operationID,
+            projectID: request.projectID,
+            branchID: request.branchID,
+            kind: request.kind,
+            mode: request.mode,
+            granularity: request.granularity,
+            userText: request.userText,
+            userMessageID: request.userMessageID,
+            assistantMessageID: request.assistantMessageID,
+            candidateID: request.candidateID,
+            generationReceiptID: request.generationReceiptID,
+            injectionReceiptID: request.injectionReceiptID,
+            sourceChapterVersionID: sourceChapterVersionID,
+            askUserResponse: request.askUserResponse,
+            injectionOverrides: request.injectionOverrides,
+            inputBudgetTokens: request.inputBudgetTokens,
+            expectedProjectRevision: request.expectedProjectRevision,
+            expectedConfigRevision: request.expectedConfigRevision,
+            expectedBranchHeadRevision: request.expectedBranchHeadRevision
+        )
+    }
+
+    func replacingSourceVersion(
+        in run: NovelActiveRunRecord,
+        with sourceChapterVersionID: NovelChapterVersionID
+    ) -> NovelActiveRunRecord {
+        NovelActiveRunRecord(
+            id: run.id,
+            operationID: run.operationID,
+            requestPayloadSHA256: run.requestPayloadSHA256,
+            branchID: run.branchID,
+            sessionID: run.sessionID,
+            kind: run.kind,
+            mode: run.mode,
+            granularity: run.granularity,
+            userMessageID: run.userMessageID,
+            messageID: run.messageID,
+            candidateID: run.candidateID,
+            sourceChapterVersionID: sourceChapterVersionID,
+            baseCheckpointID: run.baseCheckpointID,
+            baseHeadRevision: run.baseHeadRevision,
+            status: run.status,
+            partialContent: run.partialContent,
+            receiptID: run.receiptID,
+            startedAt: run.startedAt,
+            terminalAt: run.terminalAt,
+            interruptionReason: run.interruptionReason,
+            terminalFailure: run.terminalFailure
+        )
+    }
+
     func makeRequest(
         document: NovelProjectDocumentV1,
         kind: NovelRunKind,
@@ -1016,5 +1308,25 @@ private extension NovelGenerationReducerTests {
         document.branches[0].workingChapterSelections = [selection]
         try NovelDocumentValidator.validate(document)
         return (document, versionID)
+    }
+
+    func appendUnselectedVersion(
+        to document: inout NovelProjectDocumentV1
+    ) -> NovelChapterVersionID {
+        let selectedVersion = document.chapterVersions[0]
+        let versionID = NovelChapterVersionID()
+        document.chapterVersions.append(NovelChapterVersionRecord(
+            id: versionID,
+            chapterID: selectedVersion.chapterID,
+            kind: .manualEdit,
+            title: selectedVersion.title,
+            content: "An older, unselected chapter version.",
+            factCompatibilityID: UUID(),
+            sourceChapterVersionID: selectedVersion.id,
+            sourceCandidateID: nil,
+            createdAt: selectedVersion.createdAt,
+            operationID: selectedVersion.operationID
+        ))
+        return versionID
     }
 }

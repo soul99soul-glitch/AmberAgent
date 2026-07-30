@@ -131,7 +131,10 @@ struct NovelSessionView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
-                if viewModel.isRunning, currentComposerIntent != .discuss {
+                if NovelSessionComposerPolicy.showsGenerationStatus(
+                    isRunning: viewModel.isRunning,
+                    activeRunKind: viewModel.activeRunKind
+                ) {
                     generationStatusStrip
                 }
                 composer(listModel: listModel)
@@ -426,6 +429,7 @@ struct NovelSessionView: View {
         NovelSessionRowView(
             row: row,
             adoptingPolishCandidateID: viewModel.adoptingPolishCandidateID,
+            askUserBlocker: askUserBlocker,
             onAction: handleRowAction,
             onAnswerAskUser: handleAskUserAnswer,
             onToggleArchive: toggleArchive
@@ -445,6 +449,7 @@ struct NovelSessionView: View {
         _ messageID: NovelMessageID,
         _ answer: String
     ) {
+        guard askUserBlocker == nil else { return }
         dismissKeyboard()
         Task { @MainActor in
             _ = await viewModel.answerAskUser(
@@ -456,10 +461,25 @@ struct NovelSessionView: View {
 
     private func composer(listModel: NovelSessionListModel?) -> some View {
         VStack(spacing: 8) {
+            if let transaction = viewModel.unresolvedBranchPolishTransactions.first {
+                polishRecoveryBanner(transaction)
+            }
+
             if let activity = workspace.stateSyncActivity,
                activity.projectID == workspace.selectedProjectID,
                activity.branchID == workspace.selectedBranchID {
                 stateSyncProgressBanner(activity)
+            } else if let projectID = workspace.selectedProjectID,
+                      let branchID = workspace.selectedBranchID,
+                      let failure = workspace.automaticStateSyncFailureMessage(
+                          projectID: projectID,
+                          branchID: branchID
+                      ) {
+                automaticStateSyncFailureBanner(
+                    failure,
+                    projectID: projectID,
+                    branchID: branchID
+                )
             } else if !viewModel.retryableBranchPendingOperations.isEmpty && !viewModel.isBusy {
                 synchronizationBanner
             }
@@ -555,6 +575,99 @@ struct NovelSessionView: View {
         .padding(.horizontal, 4)
     }
 
+    private func automaticStateSyncFailureBanner(
+        _ message: String,
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
+                .foregroundStyle(AmberTheme.accentAmber)
+
+            Text(message)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("重试同步") {
+                workspace.retryAutomaticStateSync(
+                    projectID: projectID,
+                    branchID: branchID
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(
+                workspace.isProjectSelectionBlocked ||
+                    viewModel.isRunning ||
+                    viewModel.isBusy ||
+                    workspace.requiresReload ||
+                    viewModel.access != .readWrite
+            )
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func polishRecoveryBanner(
+        _ transaction: NovelPendingPolishTransactionRecord
+    ) -> some View {
+        let blocker = NovelSessionComposerPolicy.polishTransactionBlocker(
+            access: viewModel.access,
+            requiresReload: workspace.requiresReload,
+            isRunning: viewModel.isRunning,
+            isBusy: viewModel.isPerformingAction || workspace.isPerforming
+        )
+        return HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(AmberTheme.accentAmber)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("上次润色还需要处理")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                Text(polishRecoveryDetail(transaction, blocker: blocker))
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Menu("处理") {
+                if transaction.status == .pending || transaction.status == .retryable {
+                    Button("重试检查", systemImage: "arrow.clockwise") {
+                        Task { @MainActor in
+                            await viewModel.retryPolishTransaction(transaction.id)
+                        }
+                    }
+                }
+                Button("放弃这次润色", systemImage: "xmark.circle", role: .destructive) {
+                    pendingAbandonTransactionID = transaction.id
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(blocker != nil)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func polishRecoveryDetail(
+        _ transaction: NovelPendingPolishTransactionRecord,
+        blocker: NovelSessionActionBlocker?
+    ) -> String {
+        if let blocker {
+            return "当前不可处理：\(blocker.displayName)"
+        }
+        if let message = transaction.lastFailure?.message.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        ), !message.isEmpty {
+            return message
+        }
+        return transaction.status == .blocked
+            ? "这次润色已被阻止，可以放弃后继续创作。"
+            : "剧情一致性检查未完成，可以重试或放弃。"
+    }
+
     private func stateSyncProgressBanner(_ activity: NovelStateSyncActivity) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let fraction = activity.displayedCompletionFraction
@@ -573,6 +686,20 @@ struct NovelSessionView: View {
                         .foregroundStyle(AmberTheme.foreground2)
 
                     Spacer(minLength: 8)
+
+                    if workspace.canCancelAutomaticStateSync(
+                        projectID: activity.projectID,
+                        branchID: activity.branchID
+                    ) {
+                        Button("停止") {
+                            workspace.cancelAutomaticStateSync(
+                                projectID: activity.projectID,
+                                branchID: activity.branchID
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
 
                     if let percent {
                         Text("\(percent)%")
@@ -670,7 +797,8 @@ struct NovelSessionView: View {
         switch workspace.quickStartStatus {
         case .failed(let message):
             let hasDurableRetryOwner = workspace.projectSnapshot?.activeRuns.contains(where: {
-                $0.kind == .quickStart &&
+                $0.branchID == workspace.selectedBranchID &&
+                    $0.kind == .quickStart &&
                     ($0.status == .failed || $0.status == .interrupted)
             }) == true
             return hasDurableRetryOwner ? nil : .retry(message: message)
@@ -923,7 +1051,15 @@ struct NovelSessionView: View {
     }
 
     private var sendEnabled: Bool {
-        viewModel.canSend && !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        NovelSessionComposerPolicy.canSubmit(canSend: viewModel.canSend, text: inputText)
+    }
+
+    private var askUserBlocker: NovelSessionActionBlocker? {
+        NovelSessionComposerPolicy.askUserBlocker(
+            access: viewModel.access,
+            requiresReload: workspace.requiresReload || viewModel.hasRefreshError,
+            isBusy: viewModel.isBusy || viewModel.isRunning
+        )
     }
 
     private var inputPlaceholder: String {
@@ -960,6 +1096,7 @@ struct NovelSessionView: View {
     }
 
     private func send() {
+        guard sendEnabled else { return }
         guard let committed = composerInputController.committedText() else { return }
         guard !committed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let overrides = injectionOverrides
@@ -1363,13 +1500,15 @@ private enum NovelSessionQuickStartRecovery {
 private struct NovelSessionRowView: View, Equatable {
     let row: NovelSessionRowModel
     let adoptingPolishCandidateID: NovelCandidateID?
+    let askUserBlocker: NovelSessionActionBlocker?
     let onAction: (NovelSessionRowAction) -> Void
     let onAnswerAskUser: (NovelMessageID, String) -> Void
     let onToggleArchive: (NovelDiscussionArchivePresentation) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.row.id == rhs.row.id && lhs.row.digest == rhs.row.digest &&
-            lhs.adoptingPolishCandidateID == rhs.adoptingPolishCandidateID
+            lhs.adoptingPolishCandidateID == rhs.adoptingPolishCandidateID &&
+            lhs.askUserBlocker == rhs.askUserBlocker
     }
 
     var body: some View {
@@ -1395,6 +1534,7 @@ private struct NovelSessionRowView: View, Equatable {
                 isAdoptingPolish: row.candidate?.id == adoptingPolishCandidateID,
                 committedChange: row.committedChange,
                 askUser: row.askUser,
+                askUserBlocker: askUserBlocker,
                 actions: row.actions,
                 onAction: onAction,
                 onAnswerAskUser: onAnswerAskUser

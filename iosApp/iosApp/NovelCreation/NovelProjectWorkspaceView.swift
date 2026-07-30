@@ -19,6 +19,7 @@ struct NovelProjectWorkspaceView: View {
     @State private var sessionInputText = ""
     @State private var sessionInjectionOverrides = NovelInjectionOverrides.none
     @State private var sessionInputBudgetTokens = 16_000
+    @State private var branchComposerDrafts: [NovelBranchID: NovelBranchComposerDraft] = [:]
     @State private var isConfirmingPreviousRestore = false
     @State private var branchNotice: String?
     @State private var hasCompletedInitialNavigation = false
@@ -40,6 +41,7 @@ struct NovelProjectWorkspaceView: View {
             if hasCompletedInitialNavigation && hasLoadedRoutedProject {
                 VStack(spacing: 0) {
                     accessBanner
+                    stateSyncBanner
                     content
                 }
                 .safeAreaBar(edge: .top, spacing: 0) {
@@ -115,15 +117,29 @@ struct NovelProjectWorkspaceView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .onChange(of: viewModel.branchSnapshot?.branch.id) { _, _ in
-            sessionInputText = ""
-            sessionInjectionOverrides = .none
-            sessionInputBudgetTokens = 16_000
+        .onChange(of: viewModel.branchSnapshot?.branch.id) { previousBranchID, branchID in
+            if let previousBranchID {
+                branchComposerDrafts[previousBranchID] = NovelBranchComposerDraft(
+                    text: sessionInputText,
+                    injectionOverrides: sessionInjectionOverrides,
+                    inputBudgetTokens: sessionInputBudgetTokens
+                )
+            }
+            let draft = branchID.flatMap { branchComposerDrafts[$0] } ?? .empty
+            sessionInputText = draft.text
+            sessionInjectionOverrides = draft.injectionOverrides
+            sessionInputBudgetTokens = draft.inputBudgetTokens
             if hasCompletedInitialNavigation {
                 viewModel.scheduleAutomaticStateSyncIfNeeded()
             }
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                Task { @MainActor in
+                    await sessionViewModel.interruptBatchPolishForBackground()
+                }
+                return
+            }
             guard phase == .active,
                   hasCompletedInitialNavigation,
                   hasLoadedRoutedProject else { return }
@@ -221,6 +237,38 @@ struct NovelProjectWorkspaceView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 9)
                 .background(AmberTheme.accentAmber.opacity(0.10))
+        }
+    }
+
+    @ViewBuilder
+    private var stateSyncBanner: some View {
+        if section != .creation,
+           canCancelCurrentAutomaticStateSync || currentStateSyncActivity != nil {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(AmberTheme.accentAmber)
+                Text(currentStateSyncActivity?.phase == .preparing
+                    ? "正在准备剧情状态"
+                    : "正在同步剧情状态")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if canCancelCurrentAutomaticStateSync,
+                   let projectID = viewModel.selectedProjectID,
+                   let branchID = viewModel.selectedBranchID {
+                    Button("停止") {
+                        viewModel.cancelAutomaticStateSync(
+                            projectID: projectID,
+                            branchID: branchID
+                        )
+                    }
+                        .font(.footnote.weight(.semibold))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(AmberTheme.accentAmber.opacity(0.10))
         }
     }
 
@@ -351,6 +399,7 @@ struct NovelProjectWorkspaceView: View {
             NovelCollectCandidateSheet(
                 paragraphs: sessionViewModel.paragraphs(candidateID: candidateID),
                 chapters: chapterOptions,
+                nextChapterOrdinal: sessionViewModel.currentChapterVersions.count + 1,
                 regenerationTarget: sessionViewModel
                     .regenerationTargetChapterID(for: candidateID)
                     .flatMap { chapterID in
@@ -500,7 +549,25 @@ struct NovelProjectWorkspaceView: View {
 
     private var isSessionTransitionBusy: Bool {
         sessionViewModel.isPerformingAction ||
-            (viewModel.isPerforming && !sessionViewModel.isStarting)
+            (viewModel.isPerforming &&
+                viewModel.stateSyncActivity == nil &&
+                !sessionViewModel.isStarting)
+    }
+
+    private var currentStateSyncActivity: NovelStateSyncActivity? {
+        guard let activity = viewModel.stateSyncActivity,
+              activity.projectID == viewModel.selectedProjectID,
+              activity.branchID == viewModel.selectedBranchID else { return nil }
+        return activity
+    }
+
+    private var canCancelCurrentAutomaticStateSync: Bool {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return false }
+        return viewModel.canCancelAutomaticStateSync(
+            projectID: projectID,
+            branchID: branchID
+        )
     }
 
     private var chapterOptions: [NovelSessionChapterOption] {
@@ -593,6 +660,18 @@ struct NovelProjectWorkspaceView: View {
         }
     }
 
+}
+
+private struct NovelBranchComposerDraft {
+    let text: String
+    let injectionOverrides: NovelInjectionOverrides
+    let inputBudgetTokens: Int
+
+    static let empty = NovelBranchComposerDraft(
+        text: "",
+        injectionOverrides: .none,
+        inputBudgetTokens: 16_000
+    )
 }
 
 private struct NovelWorkspaceGlassTabBar: View {

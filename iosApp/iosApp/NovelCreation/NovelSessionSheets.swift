@@ -79,9 +79,11 @@ struct NovelDiscussionArchiveSheet: View {
     @State private var decisions: [NovelDiscussionArchiveDraftDecision] = []
     @State private var selectedDecisionIDs: Set<UUID> = []
     @State private var summary = ""
-    @State private var failureMessage: String?
+    @State private var preparationFailureMessage: String?
+    @State private var submissionFailureMessage: String?
     @State private var isPreparing = false
     @State private var isSubmitting = false
+    @State private var preparationTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -90,13 +92,20 @@ struct NovelDiscussionArchiveSheet: View {
                     Section {
                         ProgressView("正在整理本轮讨论")
                     }
-                } else if let failureMessage {
+                } else if let preparationFailureMessage {
                     Section("整理失败") {
-                        Label(failureMessage, systemImage: "exclamationmark.triangle")
+                        Label(preparationFailureMessage, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(AmberTheme.accentRed)
-                        Button("重试") { prepare() }
+                        Button("重新整理") { prepare() }
                     }
                 } else if draft != nil {
+                    if let submissionFailureMessage {
+                        Section("归档未保存") {
+                            Label(submissionFailureMessage, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(AmberTheme.accentRed)
+                        }
+                    }
+
                     Section("讨论摘要") {
                         TextEditor(text: $summary)
                             .frame(minHeight: 90)
@@ -128,18 +137,21 @@ struct NovelDiscussionArchiveSheet: View {
                     }
                 }
             }
+            .disabled(isSubmitting)
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
             .navigationTitle("归档讨论")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { cancelPreparationAndDismiss() }
                         .disabled(isSubmitting)
                 }
-                if draft != nil, failureMessage == nil {
+                if draft != nil, preparationFailureMessage == nil {
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(confirmedDecisions.isEmpty ? "取消归档" : "确认归档") {
+                        Button(confirmedDecisions.isEmpty
+                            ? "取消归档"
+                            : (submissionFailureMessage == nil ? "确认归档" : "重试保存")) {
                             submit()
                         }
                         .disabled(!canSubmit || isSubmitting)
@@ -155,7 +167,8 @@ struct NovelDiscussionArchiveSheet: View {
             }
         }
         .interactiveDismissDisabled(isPreparing || isSubmitting)
-        .task { prepare() }
+        .onAppear { prepare() }
+        .onDisappear { preparationTask?.cancel() }
     }
 
     private var confirmedDecisions: [NovelDiscussionArchiveDraftDecision] {
@@ -194,10 +207,16 @@ struct NovelDiscussionArchiveSheet: View {
     private func prepare() {
         guard !isPreparing else { return }
         isPreparing = true
-        failureMessage = nil
-        Task { @MainActor in
+        preparationFailureMessage = nil
+        preparationTask = Task { @MainActor in
             let result = await onPrepare()
+            guard !Task.isCancelled else {
+                isPreparing = false
+                preparationTask = nil
+                return
+            }
             isPreparing = false
+            preparationTask = nil
             switch result {
             case .ready(let prepared):
                 draft = prepared
@@ -205,9 +224,15 @@ struct NovelDiscussionArchiveSheet: View {
                 selectedDecisionIDs = Set(prepared.decisions.map(\.id))
                 summary = prepared.summary
             case .failed(let message):
-                failureMessage = message
+                preparationFailureMessage = message
             }
         }
+    }
+
+    private func cancelPreparationAndDismiss() {
+        preparationTask?.cancel()
+        preparationTask = nil
+        dismiss()
     }
 
     private func submit() {
@@ -219,13 +244,14 @@ struct NovelDiscussionArchiveSheet: View {
         }
         guard canSubmit else { return }
         isSubmitting = true
+        submissionFailureMessage = nil
         Task { @MainActor in
             let succeeded = await onConfirm(draft, confirmed, summary)
             isSubmitting = false
             if succeeded {
                 dismiss()
             } else {
-                failureMessage = "归档没有保存，请检查项目状态后重试。"
+                submissionFailureMessage = "归档没有保存，请检查项目状态后重试。"
             }
         }
     }
@@ -236,6 +262,7 @@ struct NovelCollectCandidateSheet: View {
 
     let paragraphs: [NovelParagraphRecord]
     let chapters: [NovelSessionChapterOption]
+    let nextChapterOrdinal: Int
     /// 非 nil 表示这个候选来自「整章重新生成」,可以替换该章。
     let regenerationTarget: NovelSessionChapterOption?
     let onCompleted: @MainActor (NovelCollectionTarget) -> Void
@@ -255,6 +282,7 @@ struct NovelCollectCandidateSheet: View {
     init(
         paragraphs: [NovelParagraphRecord],
         chapters: [NovelSessionChapterOption],
+        nextChapterOrdinal: Int,
         regenerationTarget: NovelSessionChapterOption? = nil,
         suggestedGranularity: NovelGenerationGranularity,
         onCompleted: @escaping @MainActor (NovelCollectionTarget) -> Void = { _ in },
@@ -265,6 +293,7 @@ struct NovelCollectCandidateSheet: View {
     ) {
         self.paragraphs = paragraphs
         self.chapters = chapters
+        self.nextChapterOrdinal = nextChapterOrdinal
         self.regenerationTarget = regenerationTarget
         self.onCompleted = onCompleted
         self.onCollect = onCollect
@@ -277,7 +306,7 @@ struct NovelCollectCandidateSheet: View {
             granularity: suggestedGranularity,
             hasRegenerationTarget: regenerationTarget != nil
         ))
-        let nextOrdinal = chapters.count + 1
+        let nextOrdinal = nextChapterOrdinal
         self._nextChapterTitle = State(initialValue: NovelPresentation.chapterDisplayTitle(
             storedTitle: "第 \(nextOrdinal) 章",
             content: candidateText,
@@ -293,6 +322,7 @@ struct NovelCollectCandidateSheet: View {
                 previewSection
                 targetSection
             }
+            .disabled(isSubmitting)
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
             .navigationTitle("收录正文")
@@ -382,7 +412,11 @@ struct NovelCollectCandidateSheet: View {
                 .textCase(nil)
             }
         } footer: {
-            Text("默认收录全部段落。未选择的段落仍保留在聊天气泡中。")
+            if hasEditedText {
+                Text("调整段落后会保留你的编辑；如需按当前选择重新生成正文，请点“按当前选择重置”。")
+            } else {
+                Text("默认收录全部段落。未选择的段落仍保留在聊天气泡中。")
+            }
         }
     }
 
@@ -419,7 +453,7 @@ struct NovelCollectCandidateSheet: View {
                             .tag(NovelCollectionTargetChoice.replaceChapter)
                     }
                     Text(appendCurrentLabel).tag(NovelCollectionTargetChoice.appendCurrent)
-                    Text("新开第 \(chapters.count + 1) 章")
+                    Text("新开第 \(nextChapterOrdinal) 章")
                         .tag(NovelCollectionTargetChoice.createNext)
                 }
                 .pickerStyle(.segmented)
@@ -496,11 +530,16 @@ struct NovelCollectCandidateSheet: View {
         } else {
             selectedParagraphIDs.insert(paragraphID)
         }
-        resetEditedText()
+        refreshEditedTextAfterSelectionChange()
     }
 
     private func setAllSelected(_ selected: Bool) {
         selectedParagraphIDs = selected ? Set(paragraphs.map(\.id)) : []
+        refreshEditedTextAfterSelectionChange()
+    }
+
+    private func refreshEditedTextAfterSelectionChange() {
+        guard !hasEditedText else { return }
         resetEditedText()
     }
 
@@ -770,7 +809,7 @@ struct NovelWritingContextSheet: View {
                 Button(action: onEditPolishPreference) {
                     NovelSettingsRow(
                         systemImage: "wand.and.sparkles",
-                        title: "章节风格",
+                        title: "整章润色偏好",
                         value: hasPolishPreference ? "已设置" : "未设置",
                         showsChevron: true
                     )
@@ -989,8 +1028,11 @@ struct NovelWritingContextSheet: View {
 
     private func materialTitle(_ material: NovelMaterialRecord) -> String {
         guard let project = workspace.projectSnapshot else { return material.kind.displayName }
-        return NovelPresentation.currentRevision(for: material, in: project)?.title
-            ?? material.kind.displayName
+        return NovelPresentation.effectiveRevision(
+            for: material,
+            project: project,
+            branch: workspace.branchSnapshot
+        )?.title ?? material.kind.displayName
     }
 
     private func preview() {

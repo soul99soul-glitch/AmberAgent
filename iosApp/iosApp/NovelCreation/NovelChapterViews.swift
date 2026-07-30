@@ -25,7 +25,7 @@ struct NovelChapterManagementView: View {
                 .font(.headline)
                 .foregroundStyle(AmberTheme.foreground)
             Spacer()
-            if hasChapters {
+            if hasPolishableChapters {
                 Button(action: onBatchPolish) {
                     Label("批量润色", systemImage: "wand.and.sparkles")
                         .font(.subheadline.weight(.medium))
@@ -46,19 +46,39 @@ struct NovelChapterManagementView: View {
         .padding(.horizontal, 2)
     }
 
-    private var hasChapters: Bool {
-        (viewModel.branchSnapshot?.chapterSelections.count ?? 0) > 0
+    private var hasPolishableChapters: Bool {
+        guard let project = viewModel.projectSnapshot,
+              let branch = viewModel.branchSnapshot else { return false }
+        let selectedChapterIDs = Set(branch.chapterSelections.map(\.chapterID))
+        return project.chapters.contains {
+            selectedChapterIDs.contains($0.id) && $0.discardedAt == nil
+        }
     }
 
     /// 与阅读器 `polishBlockReason` 同义,只用 workspace 快照即可表达。真正的发起门禁
     /// 还在 `NovelSessionViewModel.canStartBatchPolish` 兜底,这里只负责按钮的禁用态。
     private var batchPolishBlockReason: String? {
-        if !viewModel.canMutate { return "项目当前只读" }
+        if isProjectReadOnly { return "项目当前只读" }
+        if viewModel.requiresReload { return "请先重新载入项目" }
         if viewModel.branchSnapshot?.branch.activeRunID != nil { return "请先停止当前生成" }
         if viewModel.branchSnapshot?.branch.syncStatus == .needsSync { return "请先同步剧情状态" }
-        if viewModel.projectSnapshot?.pendingOperations.isEmpty == false { return "请先完成正文操作" }
+        if currentBranchHasPendingOperations { return "请先完成当前分支的正文操作" }
         if viewModel.isPerforming { return "项目正在处理其他操作" }
+        if !viewModel.canMutate { return "当前状态暂不能批量润色" }
         return nil
+    }
+
+    private var isProjectReadOnly: Bool {
+        guard let access = viewModel.projectSnapshot?.access else { return false }
+        if case .readWrite = access { return false }
+        return true
+    }
+
+    private var currentBranchHasPendingOperations: Bool {
+        guard let branchID = viewModel.branchSnapshot?.branch.id else { return false }
+        return viewModel.projectSnapshot?.pendingOperations.contains {
+            $0.branchID == branchID
+        } == true
     }
 
     private var batchPolishAccessibilityLabel: String {
@@ -167,6 +187,9 @@ struct NovelChapterVersionsSheet: View {
     let selection: NovelChapterSelection
 
     @State private var selectedVersionID: NovelChapterVersionID
+    @State private var isSubmitting = false
+    @State private var operationProgressTitle = ""
+    @State private var failureMessage: String?
 
     init(viewModel: NovelCreationViewModel, selection: NovelChapterSelection) {
         self.viewModel = viewModel
@@ -184,12 +207,27 @@ struct NovelChapterVersionsSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(isSubmitting)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
                 }
 
                 Divider()
                     .overlay(AmberTheme.borderSoft)
+
+                if isSubmitting {
+                    ProgressView(operationProgressTitle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                } else if let failureMessage {
+                    Label(failureMessage, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.accentRed)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                }
 
                 ScrollView {
                     if let version = selectedVersion {
@@ -219,6 +257,12 @@ struct NovelChapterVersionsSheet: View {
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .disabled(!canRestore)
+
+                                    if !isSubmitting, let restoreBlockReason {
+                                        Label(restoreBlockReason, systemImage: "info.circle")
+                                            .font(.footnote)
+                                            .foregroundStyle(AmberTheme.muted)
+                                    }
                                 } else {
                                     VStack(alignment: .leading, spacing: 10) {
                                         Label(
@@ -236,6 +280,12 @@ struct NovelChapterVersionsSheet: View {
                                         }
                                         .buttonStyle(.bordered)
                                         .disabled(!canUseAsManualRewrite)
+
+                                        if !isSubmitting, let manualRewriteBlockReason {
+                                            Label(manualRewriteBlockReason, systemImage: "info.circle")
+                                                .font(.footnote)
+                                                .foregroundStyle(AmberTheme.muted)
+                                        }
                                     }
                                 }
                             }
@@ -251,10 +301,11 @@ struct NovelChapterVersionsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }
+                        .disabled(isSubmitting)
                 }
             }
         }
-        .interactiveDismissDisabled(viewModel.isPerforming)
+        .interactiveDismissDisabled(isSubmitting)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
@@ -270,19 +321,49 @@ struct NovelChapterVersionsSheet: View {
     }
 
     private var canRestore: Bool {
-        viewModel.canMutate &&
-            viewModel.branchSnapshot?.branch.activeRunID == nil &&
-            viewModel.branchSnapshot?.branch.syncStatus == .synchronized &&
-            selectedVersion.map(canDirectlyRestore) == true &&
-            !viewModel.isPerforming
+        restoreBlockReason == nil && !isSubmitting
     }
 
     private var canUseAsManualRewrite: Bool {
-        viewModel.canMutate &&
-            viewModel.branchSnapshot?.branch.activeRunID == nil &&
-            viewModel.branchSnapshot?.branch.syncStatus == .synchronized &&
-            viewModel.projectSnapshot?.pendingOperations.isEmpty == true &&
-            !viewModel.isPerforming
+        manualRewriteBlockReason == nil && !isSubmitting
+    }
+
+    private var restoreBlockReason: String? {
+        guard let selectedVersion, selectedVersion.id != selection.versionID else {
+            return "请选择一个历史版本"
+        }
+        if isProjectReadOnly { return "项目当前只读" }
+        if viewModel.requiresReload { return "请先重新载入项目" }
+        if viewModel.branchSnapshot?.branch.activeRunID != nil { return "请先停止当前生成" }
+        if viewModel.branchSnapshot?.branch.syncStatus != .synchronized { return "请先同步剧情状态" }
+        if currentBranchHasPendingOperations { return "请先完成当前分支的正文操作" }
+        if viewModel.isPerforming { return "项目正在处理其他操作" }
+        if !viewModel.canMutate { return "当前状态暂不能恢复版本" }
+        if !canDirectlyRestore(selectedVersion) { return "剧情事实不同，不能直接恢复" }
+        return nil
+    }
+
+    private var manualRewriteBlockReason: String? {
+        if isProjectReadOnly { return "项目当前只读" }
+        if viewModel.requiresReload { return "请先重新载入项目" }
+        if viewModel.branchSnapshot?.branch.activeRunID != nil { return "请先停止当前生成" }
+        if currentBranchHasPendingOperations { return "请先完成当前分支的正文操作" }
+        if viewModel.isPerforming { return "项目正在处理其他操作" }
+        if !viewModel.canMutate { return "当前状态暂不能保存改写" }
+        return nil
+    }
+
+    private var isProjectReadOnly: Bool {
+        guard let access = viewModel.projectSnapshot?.access else { return false }
+        if case .readWrite = access { return false }
+        return true
+    }
+
+    private var currentBranchHasPendingOperations: Bool {
+        guard let branchID = viewModel.branchSnapshot?.branch.id else { return false }
+        return viewModel.projectSnapshot?.pendingOperations.contains {
+            $0.branchID == branchID
+        } == true
     }
 
     private var currentVersion: NovelChapterVersionRecord? {
@@ -295,22 +376,39 @@ struct NovelChapterVersionsSheet: View {
     }
 
     private func versionLabel(_ version: NovelChapterVersionRecord) -> String {
-        "\(version.kind.displayName) · \(version.createdAt.formatted(date: .numeric, time: .omitted))"
+        "\(version.kind.displayName) · \(version.createdAt.formatted(date: .numeric, time: .shortened))"
     }
 
     private func restore(_ versionID: NovelChapterVersionID) {
+        guard canRestore else { return }
+        isSubmitting = true
+        operationProgressTitle = "正在恢复章节版本"
+        failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
             await viewModel.restoreChapterVersion(versionID)
-            guard viewModel.errorMessage == nil else { return }
+            isSubmitting = false
+            guard viewModel.errorMessage == nil else {
+                failureMessage = viewModel.errorMessage ?? "章节版本没有恢复，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }
 
     private func useAsManualRewrite(_ version: NovelChapterVersionRecord) {
+        guard canUseAsManualRewrite else { return }
+        isSubmitting = true
+        operationProgressTitle = "正在保存手动改写"
+        failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
-            guard await viewModel.saveManualRewrite(from: version) else { return }
+            let saved = await viewModel.saveManualRewrite(from: version)
+            isSubmitting = false
+            guard saved else {
+                failureMessage = viewModel.errorMessage ?? "手动改写没有保存，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }

@@ -119,7 +119,7 @@ struct NovelBranchesView: View {
                     Label("删除分支", systemImage: "trash")
                 }
                 .disabled(
-                    !canWrite ||
+                    !canDeleteBranch ||
                         viewModel.activeBranches.count <= 1 ||
                         branch.id == project.project.mainBranchID
                 )
@@ -179,7 +179,7 @@ struct NovelBranchesView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(!canWrite || branchSnapshot.branch.syncStatus != .synchronized)
+                    .disabled(!canEditBranchOverride)
                 }
             } header: {
                 Text("分支设定覆盖")
@@ -270,6 +270,28 @@ struct NovelBranchesView: View {
         viewModel.canMutate && selectedBranch?.activeRunID == nil && !viewModel.isPerforming
     }
 
+    private var canDeleteBranch: Bool {
+        canWrite && !hasReducerBlockingBranchOperation
+    }
+
+    private var canEditBranchOverride: Bool {
+        canWrite &&
+            selectedBranch?.syncStatus == .synchronized &&
+            !hasReducerBlockingBranchOperation
+    }
+
+    /// `requireIdleBranch` 与分支覆盖 reducer 都允许 blocked 润色事务继续存在，
+    /// 只把仍可重试或尚未完成的事务视为写入冲突。
+    private var hasReducerBlockingBranchOperation: Bool {
+        guard let project = viewModel.projectSnapshot,
+              let branchID = selectedBranch?.id else { return true }
+        return project.pendingOperations.contains { $0.branchID == branchID } ||
+            project.polishTransactions.contains {
+                $0.branchID == branchID &&
+                    ($0.status == .pending || $0.status == .retryable)
+            }
+    }
+
     private var undoTitle: String {
         guard let kind = semanticUndoKind else { return "撤销上一次操作" }
         return switch kind {
@@ -299,12 +321,7 @@ struct NovelBranchesView: View {
               ) else {
             return "请先同步手动改写，再撤销上一次操作。"
         }
-        guard let branchID = selectedBranch?.id else { return "当前分支尚未载入。" }
-        if project.pendingOperations.contains(where: { $0.branchID == branchID }) ||
-            project.polishTransactions.contains(where: {
-                $0.branchID == branchID &&
-                    ($0.status == .pending || $0.status == .retryable || $0.status == .blocked)
-            }) {
+        if hasReducerBlockingBranchOperation {
             return "当前分支还有未完成的正文操作。"
         }
         return nil
@@ -517,7 +534,7 @@ struct NovelBranchForkSheet: View {
         case .restore: chapterNumber.map { "第 \($0) 章恢复后" } ?? "章节恢复后"
         case .initial: "项目开始"
         }
-        return "\(action) · \(checkpoint.createdAt.formatted(date: .abbreviated, time: .omitted))"
+        return "\(action) · \(checkpoint.createdAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
     private func fork() {

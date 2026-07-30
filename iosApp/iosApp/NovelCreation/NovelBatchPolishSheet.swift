@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// 批量整章润色入口:选择态 → 运行态 → 报告态,三态共用一个 sheet。状态全部来自
-/// `NovelSessionViewModel.batchPolishProgress`;关闭 sheet 不中断批量(任务留在
-/// ViewModel 上),只有「停止」才会取消。已采用的章都保留旧版本,可在版本历史撤销。
+/// `NovelSessionViewModel.batchPolishProgress`;运行中保留控制面板，只有「停止」才会
+/// 取消。已采用的章都保留旧版本,可在版本历史撤销。
 struct NovelBatchPolishSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -12,6 +12,9 @@ struct NovelBatchPolishSheet: View {
     let onEditPolishPreference: () -> Void
 
     @State private var selectedChapterIDs: Set<NovelChapterID>
+    @State private var pendingAbandonTransactionID: NovelPendingOperationID?
+    @State private var retryTask: Task<Void, Never>?
+    @State private var retryingTransactionID: NovelPendingOperationID?
 
     init(
         chapters: [NovelSessionChapterOption],
@@ -40,6 +43,36 @@ struct NovelBatchPolishSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(progress?.phase == .running || retryTask != nil)
+        .onDisappear {
+            retryTask?.cancel()
+            retryTask = nil
+            retryingTransactionID = nil
+        }
+        .confirmationDialog(
+            "放弃这次润色？",
+            isPresented: Binding(
+                get: { pendingAbandonTransactionID != nil },
+                set: { presented in
+                    if !presented { pendingAbandonTransactionID = nil }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("放弃润色", role: .destructive) {
+                guard transactionActionBlocker == nil,
+                      let transactionID = pendingAbandonTransactionID else { return }
+                pendingAbandonTransactionID = nil
+                Task { @MainActor in
+                    await sessionViewModel.abandonPolishTransaction(transactionID)
+                }
+            }
+            Button("取消", role: .cancel) {
+                pendingAbandonTransactionID = nil
+            }
+        } message: {
+            Text("候选会保留在创作记录中，但不能再作为这次润色版采用。")
+        }
     }
 
     @ViewBuilder
@@ -64,10 +97,17 @@ struct NovelBatchPolishSheet: View {
         case .done, .cancelled:
             ToolbarItem(placement: .confirmationAction) {
                 Button("完成") { dismiss() }
+                    .disabled(retryTask != nil)
             }
         case nil:
             ToolbarItem(placement: .cancellationAction) {
-                Button("取消") { dismiss() }
+                Button(retryTask == nil ? "取消" : "停止检查") {
+                    if let retryTask {
+                        retryTask.cancel()
+                    } else {
+                        dismiss()
+                    }
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(selectionCount > 0 ? "开始润色 (\(selectionCount))" : "开始润色") {
@@ -82,6 +122,7 @@ struct NovelBatchPolishSheet: View {
 
     private var selectionPhase: some View {
         Form {
+            unresolvedTransactionSection
             Section {
                 Text("按目录顺序逐章润色,并自动采用通过剧情漂移校验的结果。不会改变剧情事实;随时可停止;每一章都能在版本历史里撤销。")
                     .font(.footnote)
@@ -206,6 +247,7 @@ struct NovelBatchPolishSheet: View {
 
     private var reportPhase: some View {
         Form {
+            unresolvedTransactionSection
             Section {
                 summaryRow("已润色", count: progress?.adoptedCount ?? 0,
                            icon: "checkmark.circle.fill", color: AmberTheme.accent)
@@ -218,7 +260,9 @@ struct NovelBatchPolishSheet: View {
                                icon: "minus.circle.fill", color: AmberTheme.muted)
                 }
             } header: {
-                Text(progress?.phase == .cancelled ? "已停止" : "润色完成")
+                Text(unresolvedTransaction == nil
+                    ? (progress?.phase == .cancelled ? "已停止" : "润色完成")
+                    : "批量已暂停")
             }
 
             Section {
@@ -243,10 +287,13 @@ struct NovelBatchPolishSheet: View {
             }
 
             Section {
-                if (progress?.failedCount ?? 0) + (progress?.cancelledCount ?? 0) > 0 {
-                    Button("重试失败章节") { sessionViewModel.retryFailedBatchPolish() }
+                if unresolvedTransaction == nil,
+                   (progress?.failedCount ?? 0) + (progress?.cancelledCount ?? 0) > 0 {
+                    Button("重试失败和未处理章节") { sessionViewModel.retryFailedBatchPolish() }
                 }
-                Button("再润色一批") { sessionViewModel.clearBatchPolish() }
+                if unresolvedTransaction == nil {
+                    Button("再润色一批") { sessionViewModel.clearBatchPolish() }
+                }
             }
         }
         .scrollContentBackground(.hidden)
@@ -293,7 +340,86 @@ struct NovelBatchPolishSheet: View {
         case .adopted: "已采用为新版本"
         case .skippedDrift: result.message ?? "润色改动了剧情事实,已跳过"
         case .failed: result.message ?? "润色失败"
-        case .cancelled: "批量停止,未处理"
+        case .cancelled: result.message ?? "批量停止,未处理"
+        }
+    }
+
+    @ViewBuilder
+    private var unresolvedTransactionSection: some View {
+        if let transaction = unresolvedTransaction {
+            Section {
+                Label(
+                    unresolvedTransactionCount > 1
+                        ? "还有 \(unresolvedTransactionCount) 项润色检查需要处理"
+                        : "有一项润色检查需要处理",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .foregroundStyle(AmberTheme.accentAmber)
+
+                if let message = transaction.lastFailure?.message,
+                   !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+
+                if transaction.status == .pending || transaction.status == .retryable {
+                    if retryingTransactionID == transaction.id {
+                        Button("停止检查", systemImage: "stop.circle") {
+                            retryTask?.cancel()
+                        }
+                    } else {
+                        Button("重试检查", systemImage: "arrow.clockwise") {
+                            retryPolishTransaction(transaction.id)
+                        }
+                        .disabled(transactionActionBlocker != nil || retryTask != nil)
+                    }
+                }
+
+                Button("放弃这次润色", systemImage: "xmark.circle", role: .destructive) {
+                    pendingAbandonTransactionID = transaction.id
+                }
+                .disabled(transactionActionBlocker != nil || retryTask != nil)
+
+                if let transactionActionBlocker, retryTask == nil {
+                    Label(transactionActionBlocker.displayName, systemImage: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+            } header: {
+                Text("需要先处理")
+            } footer: {
+                Text("处理完当前项目后，才能继续批量润色；不会影响已经采用的章节。")
+            }
+        }
+    }
+
+    private var unresolvedTransaction: NovelPendingPolishTransactionRecord? {
+        sessionViewModel.unresolvedBranchPolishTransactions.first
+    }
+
+    private var unresolvedTransactionCount: Int {
+        sessionViewModel.unresolvedBranchPolishTransactions.count
+    }
+
+    private var transactionActionBlocker: NovelSessionActionBlocker? {
+        NovelSessionComposerPolicy.polishTransactionBlocker(
+            access: workspace.projectSnapshot?.access,
+            requiresReload: workspace.requiresReload,
+            isRunning: sessionViewModel.isRunning,
+            isBusy: sessionViewModel.isBusy
+        )
+    }
+
+    private func retryPolishTransaction(_ transactionID: NovelPendingOperationID) {
+        guard retryTask == nil, transactionActionBlocker == nil else { return }
+        retryingTransactionID = transactionID
+        retryTask = Task { @MainActor in
+            defer {
+                retryTask = nil
+                retryingTransactionID = nil
+            }
+            await sessionViewModel.retryPolishTransaction(transactionID)
         }
     }
 

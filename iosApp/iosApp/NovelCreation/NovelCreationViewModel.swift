@@ -21,9 +21,25 @@ enum NovelQuickStartStatus: Equatable, Sendable {
     case refreshFailed(message: String)
 }
 
+enum NovelBranchSelectionResult: Equatable, Sendable {
+    case selected
+    case requiresStoppingActiveRun
+    case failed
+}
+
+private struct NovelQuickStartOwner: Hashable, Sendable {
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+}
+
 private struct NovelAutomaticStateSyncTarget: Equatable, Sendable {
     let projectID: NovelProjectID
     let branchID: NovelBranchID
+}
+
+private struct NovelAutomaticStateSyncFailure: Equatable, Sendable {
+    let target: NovelAutomaticStateSyncTarget
+    let message: String
 }
 
 struct NovelStateSyncActivity: Equatable, Sendable {
@@ -139,15 +155,15 @@ final class NovelCreationViewModel {
     var reloadNoticeMessage: String?
     private(set) var reloadNoticeProjectID: NovelProjectID?
     private(set) var reloadNoticeBranchID: NovelBranchID?
-    var quickStartStatuses: [NovelProjectID: NovelQuickStartStatus] = [:]
+    private var quickStartStatuses: [NovelQuickStartOwner: NovelQuickStartStatus] = [:]
     private(set) var quickStartStartingProjectID: NovelProjectID?
     private(set) var quickStartStartingRun: NovelActiveRunRecord?
 
     @ObservationIgnored private let creation: any NovelCreation
     @ObservationIgnored private var selectionToken = UUID()
     @ObservationIgnored private var selectionIntentToken = UUID()
-    @ObservationIgnored private var quickStartTasks: [NovelProjectID: Task<Void, Never>] = [:]
-    @ObservationIgnored private var quickStartTaskRunIDs: [NovelProjectID: NovelRunID] = [:]
+    @ObservationIgnored private var quickStartTasks: [NovelQuickStartOwner: Task<Void, Never>] = [:]
+    @ObservationIgnored private var quickStartTaskRunIDs: [NovelQuickStartOwner: NovelRunID] = [:]
     @ObservationIgnored private var quickStartCreationStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var cancelledQuickStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var operationOwnerID: UUID?
@@ -156,6 +172,8 @@ final class NovelCreationViewModel {
     @ObservationIgnored private var automaticStateSyncTask: Task<Void, Never>?
     @ObservationIgnored private var automaticStateSyncTarget: NovelAutomaticStateSyncTarget?
     @ObservationIgnored private var queuedAutomaticStateSyncTarget: NovelAutomaticStateSyncTarget?
+    private var automaticStateSyncPresentationTarget: NovelAutomaticStateSyncTarget?
+    private var automaticStateSyncFailure: NovelAutomaticStateSyncFailure?
 
     init(creation: any NovelCreation) {
         self.creation = creation
@@ -190,7 +208,27 @@ final class NovelCreationViewModel {
     }
 
     var isProjectSelectionBlocked: Bool {
-        isPerforming || automaticStateSyncTask != nil
+        isPerforming || automaticStateSyncPresentationTarget != nil
+    }
+
+    func canCancelAutomaticStateSync(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> Bool {
+        automaticStateSyncPresentationTarget == NovelAutomaticStateSyncTarget(
+            projectID: projectID,
+            branchID: branchID
+        )
+    }
+
+    func cancelAutomaticStateSync(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) {
+        guard canCancelAutomaticStateSync(projectID: projectID, branchID: branchID) else {
+            return
+        }
+        automaticStateSyncTask?.cancel()
     }
 
     var presentedMessage: String? {
@@ -214,8 +252,12 @@ final class NovelCreationViewModel {
     }
 
     var quickStartStatus: NovelQuickStartStatus {
-        guard let selectedProjectID else { return .idle }
-        if let status = quickStartStatuses[selectedProjectID] {
+        guard let selectedProjectID, let selectedBranchID else { return .idle }
+        let owner = NovelQuickStartOwner(
+            projectID: selectedProjectID,
+            branchID: selectedBranchID
+        )
+        if let status = quickStartStatuses[owner] {
             return status
         }
         guard let projectSnapshot,
@@ -223,18 +265,43 @@ final class NovelCreationViewModel {
             return .idle
         }
         if let running = projectSnapshot.activeRuns.first(where: {
-            $0.kind == .quickStart && $0.status == .running
+            $0.branchID == selectedBranchID &&
+                $0.kind == .quickStart &&
+                $0.status == .running
         }) {
             return .generating(runID: running.id)
         }
-        // 注意：这里用未过滤的 settingProposals 判空，与卡片列表用的
-        // activeSettingProposals（过滤掉 isResolved）不一致——用户全部
-        // 接受/拒绝后仍会走到 idle 而非 failed。这是已知行为，不在本次
-        // 改动范围内；「重新生成设定建议」入口走显式按钮，不依赖本状态机。
-        if projectSnapshot.settingProposals.isEmpty {
+        // 注意：这里用当前分支未过滤 isResolved 的 settingProposals 判空，
+        // 与卡片列表用的 activeSettingProposals 不一致——用户全部接受/拒绝后
+        // 仍会走到 idle 而非 failed。这是已知行为，不在本次改动范围内；
+        // 「重新生成设定建议」入口走显式按钮，不依赖本状态机。
+        if !projectSnapshot.settingProposals.contains(where: {
+            $0.branchID == selectedBranchID
+        }) {
             return .failed(message: "尚未生成创作建议，可以重新生成。")
         }
         return .idle
+    }
+
+    func automaticStateSyncFailureMessage(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> String? {
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        guard automaticStateSyncFailure?.target == target,
+              selectedProjectID == projectID,
+              selectedBranchID == branchID,
+              branchSnapshot?.branch.syncStatus == .needsSync else { return nil }
+        return automaticStateSyncFailure?.message
+    }
+
+    func retryAutomaticStateSync(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) {
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        guard automaticStateSyncFailure?.target == target else { return }
+        scheduleAutomaticStateSync(projectID: projectID, branchID: branchID)
     }
 
     func waitForBackgroundGeneration() async {
@@ -344,10 +411,19 @@ final class NovelCreationViewModel {
         }
     }
 
-    func selectBranch(_ branchID: NovelBranchID) async {
-        guard let projectID = selectedProjectID else { return }
+    @discardableResult
+    func selectBranch(
+        _ branchID: NovelBranchID,
+        stoppingActiveRun: Bool = true
+    ) async -> NovelBranchSelectionResult {
+        guard let projectID = selectedProjectID else { return .failed }
+        guard branchID != selectedBranchID else { return .selected }
+        guard !isProjectSelectionBlocked else {
+            report(NovelError.projectBusy(projectID))
+            return .failed
+        }
         let operationOwnerID = UUID()
-        guard acquireOperation(ownerID: operationOwnerID) else { return }
+        guard acquireOperation(ownerID: operationOwnerID) else { return .failed }
         let intentToken = UUID()
         selectionIntentToken = intentToken
         selectionToken = UUID()
@@ -361,34 +437,56 @@ final class NovelCreationViewModel {
         }
         var interruptedSourceBranchID: NovelBranchID?
         do {
-            let refreshedProject: NovelProjectSnapshot?
+            guard let sourceBranchID = selectedBranchID else { return .failed }
+            let authoritativeSource = try await branch(
+                projectID: projectID,
+                branchID: sourceBranchID
+            )
+            let authoritativeProject = try await project(id: projectID)
+            guard selectionIntentToken == intentToken,
+                  self.operationOwnerID == operationOwnerID,
+                  selectedProjectID == projectID,
+                  selectedBranchID == sourceBranchID else { return .failed }
+            selectionToken = UUID()
+            projectSnapshot = authoritativeProject
+            branchSnapshot = rebasedBranchSnapshot(
+                authoritativeSource,
+                onto: authoritativeProject
+            )
+            injectionPreview = nil
+
+            let validatedTarget = try await branch(
+                projectID: projectID,
+                branchID: branchID
+            )
+            guard selectionIntentToken == intentToken,
+                  self.operationOwnerID == operationOwnerID,
+                  selectedProjectID == projectID,
+                  selectedBranchID == sourceBranchID else { return .failed }
+
+            let activeRun = authoritativeProject.activeRuns.first(where: {
+                $0.branchID == sourceBranchID && $0.status == .running
+            })
+            if activeRun != nil, !stoppingActiveRun {
+                errorMessage = nil
+                return .requiresStoppingActiveRun
+            }
+
+            let refreshedProject: NovelProjectSnapshot
             let snapshot: NovelBranchSnapshot
-            if selectedBranchID != branchID,
-               let sourceBranchID = selectedBranchID,
-               let activeRunID = branchSnapshot?.branch.activeRunID,
-               projectSnapshot?.activeRuns.contains(where: {
-                   $0.id == activeRunID &&
-                       $0.branchID == sourceBranchID &&
-                       $0.status == .running
-               }) == true {
-                let validatedTarget = try await branch(
-                    projectID: projectID,
-                    branchID: branchID
-                )
-                guard selectionIntentToken == intentToken,
-                      self.operationOwnerID == operationOwnerID,
-                      selectedProjectID == projectID,
-                      selectedBranchID == sourceBranchID,
-                      branchSnapshot?.branch.activeRunID == activeRunID,
-                      projectSnapshot?.activeRuns.contains(where: {
-                          $0.id == activeRunID &&
-                              $0.branchID == sourceBranchID &&
-                              $0.status == .running
-                      }) == true else { return }
+            if let activeRun {
+                let source = authoritativeProject.branches.first(where: {
+                    $0.id == sourceBranchID
+                }) ?? authoritativeSource.branch
                 try await interruptSessionRun(NovelCancelRunCommand(
-                    context: mutationContext(),
+                    context: NovelMutationContext(
+                        operationID: NovelOperationID(),
+                        expectedProjectRevision: authoritativeProject.project.revision,
+                        expectedConfigRevision: authoritativeProject.project.configRevision,
+                        expectedBranchHeadRevision: source.headRevision
+                    ),
                     projectID: projectID,
-                    runID: activeRunID,
+                    runID: activeRun.id,
                     reason: .routeExit
                 ))
                 interruptedSourceBranchID = sourceBranchID
@@ -396,20 +494,20 @@ final class NovelCreationViewModel {
                 refreshedProject = project
                 snapshot = rebasedBranchSnapshot(validatedTarget, onto: project)
             } else {
-                refreshedProject = nil
-                snapshot = try await branch(projectID: projectID, branchID: branchID)
+                refreshedProject = authoritativeProject
+                snapshot = rebasedBranchSnapshot(validatedTarget, onto: authoritativeProject)
             }
             guard selectionIntentToken == intentToken,
                   self.operationOwnerID == operationOwnerID,
-                  selectedProjectID == projectID else { return }
+                  selectedProjectID == projectID,
+                  selectedBranchID == sourceBranchID else { return .failed }
             selectionToken = UUID()
-            if let refreshedProject {
-                projectSnapshot = refreshedProject
-            }
+            projectSnapshot = refreshedProject
             selectedBranchID = branchID
             branchSnapshot = snapshot
             injectionPreview = nil
             errorMessage = nil
+            return .selected
         } catch {
             if let interruptedSourceBranchID,
                let refreshedProject = try? await project(id: projectID),
@@ -428,8 +526,9 @@ final class NovelCreationViewModel {
             }
             guard selectionIntentToken == intentToken,
                   self.operationOwnerID == operationOwnerID,
-                  selectedProjectID == projectID else { return }
+                  selectedProjectID == projectID else { return .failed }
             report(error)
+            return .failed
         }
     }
 
@@ -480,6 +579,10 @@ final class NovelCreationViewModel {
               project.project.creationMode == .quickStart,
               branch.branch.activeRunID == nil else { return nil }
         let projectID = project.project.id
+        let owner = NovelQuickStartOwner(
+            projectID: projectID,
+            branchID: branch.branch.id
+        )
         let trimmedGuidance = guidance?.trimmingCharacters(in: .whitespacesAndNewlines)
         let userText: String
         if let exactUserText, !exactUserText.isEmpty {
@@ -537,18 +640,18 @@ final class NovelCreationViewModel {
         quickStartStartingProjectID = projectID
         quickStartStartingRun = placeholder
         cancelledQuickStartRunIDs.remove(request.id)
-        quickStartStatuses[projectID] = .starting(run: placeholder)
-        quickStartTasks[projectID]?.cancel()
-        quickStartTaskRunIDs[projectID] = request.id
-        quickStartTasks[projectID] = Task { @MainActor [weak self] in
-            await self?.runQuickStart(request, projectID: projectID)
+        quickStartStatuses[owner] = .starting(run: placeholder)
+        quickStartTasks[owner]?.cancel()
+        quickStartTaskRunIDs[owner] = request.id
+        quickStartTasks[owner] = Task { @MainActor [weak self] in
+            await self?.runQuickStart(request, owner: owner)
         }
         return request.id
     }
 
-    private func runQuickStart(_ request: NovelRunRequest, projectID: NovelProjectID) async {
+    private func runQuickStart(_ request: NovelRunRequest, owner: NovelQuickStartOwner) async {
         guard !Task.isCancelled,
-              quickStartTaskRunIDs[projectID] == request.id,
+              quickStartTaskRunIDs[owner] == request.id,
               !cancelledQuickStartRunIDs.contains(request.id) else { return }
         let run: NovelRun
         quickStartCreationStartRunIDs.insert(request.id)
@@ -557,48 +660,48 @@ final class NovelCreationViewModel {
             quickStartCreationStartRunIDs.remove(request.id)
         } catch {
             quickStartCreationStartRunIDs.remove(request.id)
-            guard quickStartTaskRunIDs[projectID] == request.id else { return }
+            guard quickStartTaskRunIDs[owner] == request.id else { return }
             if cancelledQuickStartRunIDs.contains(request.id) {
-                quickStartStatuses[projectID] = .failed(
+                quickStartStatuses[owner] = .failed(
                     message: "建议生成已中断，可以重新生成。"
                 )
                 errorMessage = nil
             } else {
                 let message = errorDescription(error)
-                quickStartStatuses[projectID] = .failed(message: message)
+                quickStartStatuses[owner] = .failed(message: message)
                 report(error)
             }
             finishQuickStartTask(
-                projectID: projectID,
+                owner: owner,
                 runID: request.id,
                 releasesStartingBusy: true
             )
             return
         }
-        guard quickStartTaskRunIDs[projectID] == request.id,
+        guard quickStartTaskRunIDs[owner] == request.id,
               !cancelledQuickStartRunIDs.contains(request.id) else { return }
-        quickStartStatuses[projectID] = .generating(runID: run.id)
+        quickStartStatuses[owner] = .generating(runID: run.id)
         do {
-            try await refreshCurrentSelection(projectID: projectID)
+            try await refreshCurrentSelection(projectID: owner.projectID)
             errorMessage = nil
-            reconcileQuickStartStartingOwner(projectID: projectID, runID: request.id)
+            reconcileQuickStartStartingOwner(owner: owner, runID: request.id)
         } catch {
-            guard quickStartTaskRunIDs[projectID] == request.id else { return }
-            reportQuickStartRefreshFailure(error, projectID: projectID)
+            guard quickStartTaskRunIDs[owner] == request.id else { return }
+            reportQuickStartRefreshFailure(error, owner: owner)
         }
-        guard quickStartTaskRunIDs[projectID] == request.id else { return }
+        guard quickStartTaskRunIDs[owner] == request.id else { return }
         releaseOperation(ownerID: request.id.rawValue)
-        await consumeQuickStart(run, projectID: projectID)
+        await consumeQuickStart(run, owner: owner)
     }
 
     private func finishQuickStartTask(
-        projectID: NovelProjectID,
+        owner: NovelQuickStartOwner,
         runID: NovelRunID,
         releasesStartingBusy: Bool = false
     ) {
-        guard quickStartTaskRunIDs[projectID] == runID else { return }
-        quickStartTasks[projectID] = nil
-        quickStartTaskRunIDs[projectID] = nil
+        guard quickStartTaskRunIDs[owner] == runID else { return }
+        quickStartTasks[owner] = nil
+        quickStartTaskRunIDs[owner] = nil
         if quickStartStartingRun?.id == runID {
             quickStartStartingRun = nil
             quickStartStartingProjectID = nil
@@ -609,25 +712,27 @@ final class NovelCreationViewModel {
         }
     }
 
-    private func reportQuickStartRefreshFailure(_ error: Error, projectID: NovelProjectID) {
+    private func reportQuickStartRefreshFailure(_ error: Error, owner: NovelQuickStartOwner) {
         let message = errorDescription(error)
-        quickStartStatuses[projectID] = .refreshFailed(message: message)
+        quickStartStatuses[owner] = .refreshFailed(message: message)
         report(error)
     }
 
     func retryQuickStartPersistence(runID: NovelRunID) async {
         let ownerID = UUID()
         guard let projectID = selectedProjectID,
+              let branchID = selectedBranchID,
               acquireOperation(ownerID: ownerID) else { return }
+        let owner = NovelQuickStartOwner(projectID: projectID, branchID: branchID)
         defer { releaseOperation(ownerID: ownerID) }
         do {
             try await creation.retryPendingTerminal(runID: runID)
             try await refreshCurrentSelection(projectID: projectID)
-            quickStartStatuses[projectID] = nil
+            quickStartStatuses[owner] = nil
             errorMessage = nil
         } catch {
             let message = errorDescription(error)
-            quickStartStatuses[projectID] = .refreshFailed(message: message)
+            quickStartStatuses[owner] = .refreshFailed(message: message)
             report(error)
         }
     }
@@ -635,74 +740,76 @@ final class NovelCreationViewModel {
     func reloadQuickStartProject() async {
         let ownerID = UUID()
         guard let projectID = selectedProjectID,
+              let branchID = selectedBranchID,
               acquireOperation(ownerID: ownerID) else { return }
+        let owner = NovelQuickStartOwner(projectID: projectID, branchID: branchID)
         defer { releaseOperation(ownerID: ownerID) }
         do {
             try await refreshCurrentSelection(projectID: projectID)
             if let runID = quickStartStartingRun?.id {
-                reconcileQuickStartStartingOwner(projectID: projectID, runID: runID)
+                reconcileQuickStartStartingOwner(owner: owner, runID: runID)
             }
-            quickStartStatuses[projectID] = nil
+            quickStartStatuses[owner] = nil
             errorMessage = nil
         } catch {
             let message = errorDescription(error)
-            quickStartStatuses[projectID] = .refreshFailed(message: message)
+            quickStartStatuses[owner] = .refreshFailed(message: message)
             report(error)
         }
     }
 
-    private func consumeQuickStart(_ run: NovelRun, projectID: NovelProjectID) async {
+    private func consumeQuickStart(_ run: NovelRun, owner: NovelQuickStartOwner) async {
         for await event in run.events {
-            guard quickStartTaskRunIDs[projectID] == run.id else { return }
+            guard quickStartTaskRunIDs[owner] == run.id else { return }
             switch event {
             case .started:
                 do {
-                    try await refreshCurrentSelection(projectID: projectID)
-                    reconcileQuickStartStartingOwner(projectID: projectID, runID: run.id)
+                    try await refreshCurrentSelection(projectID: owner.projectID)
+                    reconcileQuickStartStartingOwner(owner: owner, runID: run.id)
                 } catch {
-                    guard quickStartTaskRunIDs[projectID] == run.id else { return }
-                    reportQuickStartRefreshFailure(error, projectID: projectID)
+                    guard quickStartTaskRunIDs[owner] == run.id else { return }
+                    reportQuickStartRefreshFailure(error, owner: owner)
                 }
             case .delta, .replaced:
                 continue
             case .completed:
                 do {
-                    try await refreshCurrentSelection(projectID: projectID)
-                    guard quickStartTaskRunIDs[projectID] == run.id else { return }
-                    quickStartStatuses[projectID] = nil
+                    try await refreshCurrentSelection(projectID: owner.projectID)
+                    guard quickStartTaskRunIDs[owner] == run.id else { return }
+                    quickStartStatuses[owner] = nil
                     errorMessage = nil
                 } catch {
-                    guard quickStartTaskRunIDs[projectID] == run.id else { return }
-                    reportQuickStartRefreshFailure(error, projectID: projectID)
+                    guard quickStartTaskRunIDs[owner] == run.id else { return }
+                    reportQuickStartRefreshFailure(error, owner: owner)
                 }
-                finishQuickStartTask(projectID: projectID, runID: run.id)
+                finishQuickStartTask(owner: owner, runID: run.id)
                 return
             case .interrupted:
-                quickStartStatuses[projectID] = .failed(message: "建议生成已中断，可以重新生成。")
+                quickStartStatuses[owner] = .failed(message: "建议生成已中断，可以重新生成。")
                 do {
-                    try await refreshCurrentSelection(projectID: projectID)
-                    guard quickStartTaskRunIDs[projectID] == run.id else { return }
+                    try await refreshCurrentSelection(projectID: owner.projectID)
+                    guard quickStartTaskRunIDs[owner] == run.id else { return }
                 } catch {
-                    guard quickStartTaskRunIDs[projectID] == run.id else { return }
-                    reportQuickStartRefreshFailure(error, projectID: projectID)
+                    guard quickStartTaskRunIDs[owner] == run.id else { return }
+                    reportQuickStartRefreshFailure(error, owner: owner)
                 }
-                finishQuickStartTask(projectID: projectID, runID: run.id)
+                finishQuickStartTask(owner: owner, runID: run.id)
                 return
             case .failed(let failure):
-                quickStartStatuses[projectID] = .failed(
+                quickStartStatuses[owner] = .failed(
                     message: NovelPresentation.failureMessage(failure)
                 )
                 do {
-                    try await refreshCurrentSelection(projectID: projectID)
-                    guard quickStartTaskRunIDs[projectID] == run.id else { return }
+                    try await refreshCurrentSelection(projectID: owner.projectID)
+                    guard quickStartTaskRunIDs[owner] == run.id else { return }
                 } catch {
-                    guard quickStartTaskRunIDs[projectID] == run.id else { return }
-                    reportQuickStartRefreshFailure(error, projectID: projectID)
+                    guard quickStartTaskRunIDs[owner] == run.id else { return }
+                    reportQuickStartRefreshFailure(error, owner: owner)
                 }
-                finishQuickStartTask(projectID: projectID, runID: run.id)
+                finishQuickStartTask(owner: owner, runID: run.id)
                 return
             case .persistenceBlocked(let failure):
-                quickStartStatuses[projectID] = .persistenceBlocked(
+                quickStartStatuses[owner] = .persistenceBlocked(
                     runID: run.id,
                     message: NovelPresentation.failureMessage(failure)
                 )
@@ -711,12 +818,14 @@ final class NovelCreationViewModel {
     }
 
     private func reconcileQuickStartStartingOwner(
-        projectID: NovelProjectID,
+        owner: NovelQuickStartOwner,
         runID: NovelRunID
     ) {
-        guard quickStartStartingProjectID == projectID,
+        guard quickStartStartingProjectID == owner.projectID,
               quickStartStartingRun?.id == runID,
-              projectSnapshot?.activeRuns.contains(where: { $0.id == runID }) == true else {
+              projectSnapshot?.activeRuns.contains(where: {
+                  $0.id == runID && $0.branchID == owner.branchID
+              }) == true else {
             return
         }
         quickStartStartingProjectID = nil
@@ -1141,34 +1250,37 @@ final class NovelCreationViewModel {
     }
 
     func interruptSessionRun(_ command: NovelCancelRunCommand) async throws {
-        let ownsQuickStartTask = quickStartTaskRunIDs[command.projectID] == command.runID
-        if ownsQuickStartTask {
+        let quickStartOwner = quickStartOwner(
+            projectID: command.projectID,
+            runID: command.runID
+        )
+        if let quickStartOwner {
             cancelledQuickStartRunIDs.insert(command.runID)
             if !quickStartCreationStartRunIDs.contains(command.runID) {
-                quickStartTasks[command.projectID]?.cancel()
+                quickStartTasks[quickStartOwner]?.cancel()
             }
         }
         do {
             try await creation.interruptRun(command)
         } catch {
-            if ownsQuickStartTask,
+            if let quickStartOwner,
                let novelError = error as? NovelError,
                novelError == .runNotFound(command.runID) {
                 clearQuickStartTask(
-                    projectID: command.projectID,
+                    owner: quickStartOwner,
                     runID: command.runID,
                     status: .failed(message: "建议生成已中断，可以重新生成。")
                 )
                 return
             }
-            if ownsQuickStartTask {
+            if quickStartOwner != nil {
                 cancelledQuickStartRunIDs.remove(command.runID)
             }
             throw error
         }
-        if ownsQuickStartTask {
+        if let quickStartOwner {
             await reconcileQuickStartAfterInterrupt(
-                projectID: command.projectID,
+                owner: quickStartOwner,
                 runID: command.runID
             )
         }
@@ -1183,12 +1295,15 @@ final class NovelCreationViewModel {
         runID: NovelRunID?,
         deadline: Date
     ) async {
-        let quickStartRunID = quickStartTaskRunIDs[projectID]
+        let quickStartOwner = quickStartTaskRunIDs.keys.first(where: {
+            $0.projectID == projectID
+        })
+        let quickStartRunID = quickStartOwner.flatMap { quickStartTaskRunIDs[$0] }
         let effectiveRunID = runID ?? quickStartRunID
-        if let quickStartRunID {
+        if let quickStartOwner, let quickStartRunID {
             cancelledQuickStartRunIDs.insert(quickStartRunID)
             if !quickStartCreationStartRunIDs.contains(quickStartRunID) {
-                quickStartTasks[projectID]?.cancel()
+                quickStartTasks[quickStartOwner]?.cancel()
             }
         }
         await creation.interruptForBackground(
@@ -1196,30 +1311,30 @@ final class NovelCreationViewModel {
             deadline: deadline,
             runID: effectiveRunID
         )
-        if let quickStartRunID {
+        if let quickStartOwner, let quickStartRunID {
             await reconcileQuickStartAfterInterrupt(
-                projectID: projectID,
+                owner: quickStartOwner,
                 runID: quickStartRunID
             )
         }
     }
 
     private func reconcileQuickStartAfterInterrupt(
-        projectID: NovelProjectID,
+        owner: NovelQuickStartOwner,
         runID: NovelRunID
     ) async {
         do {
-            try await refreshCurrentSelection(projectID: projectID)
+            try await refreshCurrentSelection(projectID: owner.projectID)
         } catch {
             let message = errorDescription(error)
             clearQuickStartTask(
-                projectID: projectID,
+                owner: owner,
                 runID: runID,
                 status: .refreshFailed(message: message)
             )
             return
         }
-        guard quickStartTaskRunIDs[projectID] == runID else { return }
+        guard quickStartTaskRunIDs[owner] == runID else { return }
         let run = projectSnapshot?.activeRuns.first { $0.id == runID }
         let status: NovelQuickStartStatus?
         switch run?.status {
@@ -1233,35 +1348,44 @@ final class NovelCreationViewModel {
         case .interrupted, nil:
             status = .failed(message: "建议生成已中断，可以重新生成。")
         case .running:
-            guard quickStartTaskRunIDs[projectID] == runID else { return }
-            quickStartStatuses[projectID] = .refreshFailed(
+            guard quickStartTaskRunIDs[owner] == runID else { return }
+            quickStartStatuses[owner] = .refreshFailed(
                 message: "生成状态尚未收口，请重新载入后再继续。"
             )
             releaseOperation(ownerID: runID.rawValue)
             return
         }
-        clearQuickStartTask(projectID: projectID, runID: runID, status: status)
+        clearQuickStartTask(owner: owner, runID: runID, status: status)
     }
 
     private func clearQuickStartTask(
-        projectID: NovelProjectID,
+        owner: NovelQuickStartOwner,
         runID: NovelRunID,
         status: NovelQuickStartStatus?
     ) {
-        guard quickStartTaskRunIDs[projectID] == runID else { return }
-        quickStartTasks[projectID]?.cancel()
-        quickStartTasks[projectID] = nil
-        quickStartTaskRunIDs[projectID] = nil
+        guard quickStartTaskRunIDs[owner] == runID else { return }
+        quickStartTasks[owner]?.cancel()
+        quickStartTasks[owner] = nil
+        quickStartTaskRunIDs[owner] = nil
         quickStartCreationStartRunIDs.remove(runID)
-        if quickStartStartingProjectID == projectID,
+        if quickStartStartingProjectID == owner.projectID,
            quickStartStartingRun?.id == runID {
             quickStartStartingProjectID = nil
             quickStartStartingRun = nil
         }
         cancelledQuickStartRunIDs.remove(runID)
-        quickStartStatuses[projectID] = status
+        quickStartStatuses[owner] = status
         errorMessage = nil
         releaseOperation(ownerID: runID.rawValue)
+    }
+
+    private func quickStartOwner(
+        projectID: NovelProjectID,
+        runID: NovelRunID
+    ) -> NovelQuickStartOwner? {
+        quickStartTaskRunIDs.first(where: {
+            $0.key.projectID == projectID && $0.value == runID
+        })?.key
     }
 
     func syncManualEdits() async {
@@ -1711,12 +1835,20 @@ final class NovelCreationViewModel {
     }
 
     private func startAutomaticStateSync(_ target: NovelAutomaticStateSyncTarget) {
+        if let failure = automaticStateSyncFailure, failure.target == target {
+            if errorMessage == failure.message {
+                errorMessage = nil
+            }
+            automaticStateSyncFailure = nil
+        }
         automaticStateSyncTarget = target
+        automaticStateSyncPresentationTarget = target
         automaticStateSyncTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.runAutomaticStateSync(target)
             self.automaticStateSyncTask = nil
             self.automaticStateSyncTarget = nil
+            self.automaticStateSyncPresentationTarget = nil
             if let queued = self.queuedAutomaticStateSyncTarget {
                 self.queuedAutomaticStateSyncTarget = nil
                 self.startAutomaticStateSync(queued)
@@ -1737,7 +1869,16 @@ final class NovelCreationViewModel {
                     projectID: target.projectID,
                     branchID: target.branchID
                 )
+            } catch is CancellationError {
+                return
             } catch {
+                guard !Task.isCancelled else { return }
+                let message = "自动剧情同步准备失败：\(errorDescription(error))"
+                automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
+                    target: target,
+                    message: message
+                )
+                errorMessage = message
                 return
             }
             guard branchSnapshot.branch.syncStatus == .needsSync else { return }
@@ -1844,7 +1985,8 @@ final class NovelCreationViewModel {
             projectID: project.project.id,
             projectRevision: project.project.revision,
             configRevision: project.project.configRevision,
-            branch: snapshot.branch,
+            branch: project.branches.first(where: { $0.id == snapshot.branch.id })
+                ?? snapshot.branch,
             session: snapshot.session,
             headCheckpoint: snapshot.headCheckpoint,
             currentState: snapshot.currentState,

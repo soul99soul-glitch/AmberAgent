@@ -85,6 +85,60 @@ final class NovelSessionViewModelTests: XCTestCase {
         )
     }
 
+    func testCancellingDiscussionArchivePreparationDoesNotPublishAnError() async throws {
+        var document = try NovelTestFixtures.document()
+        document.sessions[0].messages = [
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 0,
+                role: .user,
+                mode: .discussPlan,
+                kind: .userInput,
+                content: "讨论这一章的关键决定。",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_001),
+                runID: nil,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: 1,
+                role: .assistant,
+                mode: .discussPlan,
+                kind: .discussion,
+                content: "建议让主角在结尾公开真相。",
+                createdAt: Date(timeIntervalSince1970: 1_700_000_002),
+                runID: nil,
+                candidateID: nil
+            ),
+        ]
+        document.sessions[0].revision = 2
+        try NovelDocumentValidator.validate(document)
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+
+        let preparation = Task { @MainActor in
+            await harness.session.distillDiscussionArchive(chapterID: nil)
+        }
+        let requestStarted = await eventually {
+            await harness.adapter.requests.count == 1
+        }
+        XCTAssertTrue(requestStarted)
+
+        preparation.cancel()
+        let draft = await preparation.value
+
+        XCTAssertNil(draft)
+        XCTAssertNil(harness.session.errorMessage)
+        XCTAssertFalse(harness.session.isPerformingAction)
+        let requests = await harness.adapter.requests
+        let request = try XCTUnwrap(requests.first)
+        let cancelledRunIDs = await harness.adapter.cancelledRunIDs
+        XCTAssertFalse(cancelledRunIDs.isEmpty)
+        XCTAssertTrue(cancelledRunIDs.allSatisfy { $0 == request.runID })
+    }
+
     func testStartingRunProjectsUserPromptBeforeProviderConnects() async throws {
         var document = try NovelTestFixtures.document()
         document.sessions[0].messages = [
@@ -659,6 +713,46 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertTrue(received)
         try? await Task.sleep(for: .milliseconds(30))
         XCTAssertEqual(harness.session.transientTail?.content, "只追加一次")
+        await harness.session.stop()
+    }
+
+    func testRefreshReattachesAfterActiveRunSubscriptionFails() async throws {
+        let harness = try await makeHarness(
+            scripts: [NovelModelScript(steps: [
+                .pause,
+                .delta("重新订阅后收到"),
+                .pause,
+            ])],
+            usesAttachGate: true
+        )
+        harness.session.mode = .discussPlan
+        let started = await harness.session.send(text: "验证重新订阅")
+        XCTAssertTrue(started)
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+        let durable = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.contains(where: {
+                $0.id == runID && $0.status == .running
+            }) == true
+        }
+        XCTAssertTrue(durable)
+
+        harness.session.detachConsumer()
+        let gate = try XCTUnwrap(harness.attachGate)
+        await gate.failNextStart()
+        await harness.session.bindToCurrentSelection()
+        XCTAssertTrue(harness.session.hasRefreshError)
+        XCTAssertNil(harness.session.transientTail)
+
+        let refreshed = await harness.session.refresh()
+        XCTAssertTrue(refreshed)
+        XCTAssertFalse(harness.session.hasRefreshError)
+        XCTAssertEqual(harness.session.transientTail?.runID, runID)
+
+        await harness.adapter.resume(runID: runID)
+        let received = await eventually {
+            harness.session.transientTail?.content == "重新订阅后收到"
+        }
+        XCTAssertTrue(received)
         await harness.session.stop()
     }
 
@@ -2423,6 +2517,61 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(requests.count, 1)
     }
 
+    func testRegenerationRetryIsUnavailableAfterBranchHeadMoves() async throws {
+        let fixture = try documentWithChapter()
+        let failure = NovelModelFailure(code: "retryable", message: "暂时失败", isRetryable: true)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.fail(failure)])]
+        )
+
+        let started = await harness.session.startWholeChapterRegeneration(chapterID: fixture.chapterID)
+        XCTAssertTrue(started)
+        let finished = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(finished)
+        XCTAssertTrue(harness.session.canRetryLastTerminal)
+
+        await harness.workspace.undoBranchHead()
+        XCTAssertFalse(
+            harness.session.canRetryLastTerminal,
+            "整章重新生成必须和正文重试一样绑定原 branch head，不能在新 head 上伪装成精确重试"
+        )
+    }
+
+    func testRegenerationRetryTracksSourceChapterDiscardAndRestore() async throws {
+        let fixture = try documentWithChapter()
+        let failure = NovelModelFailure(code: "retryable", message: "暂时失败", isRetryable: true)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.fail(failure)])]
+        )
+
+        let started = await harness.session.startWholeChapterRegeneration(chapterID: fixture.chapterID)
+        XCTAssertTrue(started)
+        let finished = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(finished)
+        let runID = try XCTUnwrap(harness.workspace.projectSnapshot?.activeRuns.last?.id)
+        XCTAssertTrue(harness.session.canRetryLastTerminal)
+
+        await harness.workspace.setChapterDiscarded(true, chapterID: fixture.chapterID)
+
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertNotNil(
+            persisted.chapters.first(where: { $0.id == fixture.chapterID })?.discardedAt,
+            harness.workspace.errorMessage ?? "The chapter discard did not persist."
+        )
+        XCTAssertFalse(harness.session.canRetryLastTerminal)
+        let retried = await harness.session.retryGeneration(runID: runID)
+        XCTAssertFalse(retried)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 1)
+
+        await harness.workspace.setChapterDiscarded(false, chapterID: fixture.chapterID)
+        let restored = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertNil(restored.chapters.first(where: { $0.id == fixture.chapterID })?.discardedAt)
+        XCTAssertTrue(harness.session.canRetryLastTerminal)
+    }
+
     func testDiscussionRetryRemainsAllowedAfterBranchHeadMoves() async throws {
         let failure = NovelModelFailure(code: "retryable", message: "暂时失败", isRetryable: true)
         let harness = try await makeHarness(
@@ -2535,6 +2684,43 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(final.chapterVersions.last?.content, polished)
         XCTAssertEqual(final.chapterVersions.last?.sourceCandidateID, candidate.id)
         XCTAssertEqual(harness.workspace.branchSnapshot?.currentState, baselineState)
+    }
+
+    func testUnresolvedPolishTransactionBlocksStartingAnotherPolishOrRegeneration() async throws {
+        let fixture = try documentWithChapter()
+        let failure = NovelModelFailure(
+            code: "provider_down",
+            message: "漂移检查失败",
+            isRetryable: true
+        )
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [
+                    .delta("Mara crossed the quiet hall.\n\(NovelPromptCatalog.polishCompletionSentinel)"),
+                    .complete,
+                ]),
+                NovelModelScript(steps: [.fail(failure)]),
+                NovelModelScript(steps: [.pause]),
+            ]
+        )
+
+        let started = await harness.session.startWholeChapterPolish(chapterID: fixture.chapterID)
+        XCTAssertTrue(started)
+        let candidateArrived = await eventually { !harness.session.availablePolishCandidates.isEmpty }
+        XCTAssertTrue(candidateArrived)
+        let candidate = try XCTUnwrap(harness.session.availablePolishCandidates.first)
+        await harness.session.adoptPolishCandidate(candidate.id)
+        XCTAssertEqual(harness.session.unresolvedBranchPolishTransactions.count, 1)
+
+        let secondPolish = await harness.session.startWholeChapterPolish(chapterID: fixture.chapterID)
+        let regeneration = await harness.session.startWholeChapterRegeneration(chapterID: fixture.chapterID)
+        if secondPolish || regeneration { await harness.session.stop() }
+
+        XCTAssertFalse(secondPolish)
+        XCTAssertFalse(regeneration)
+        let requestCount = await harness.adapter.requests.count
+        XCTAssertEqual(requestCount, 2, "未解决润色事务不得再消耗一次正文生成请求")
     }
 
     func testIncompatiblePolishCanConvertToManualRewriteAndNeedsSync() async throws {
@@ -3101,6 +3287,7 @@ private actor NovelSessionSnapshotFailingCreation: NovelCreation {
 private actor NovelSessionAttachBlockingCreation: NovelCreation {
     private let base: any NovelCreation
     private var shouldBlockNextStart = false
+    private var shouldFailNextStart = false
     private var blockedStartContinuation: CheckedContinuation<Void, Never>?
 
     init(base: any NovelCreation) {
@@ -3109,6 +3296,10 @@ private actor NovelSessionAttachBlockingCreation: NovelCreation {
 
     func blockNextStart() {
         shouldBlockNextStart = true
+    }
+
+    func failNextStart() {
+        shouldFailNextStart = true
     }
 
     func startIsBlocked() -> Bool {
@@ -3130,6 +3321,10 @@ private actor NovelSessionAttachBlockingCreation: NovelCreation {
     }
 
     func start(_ request: NovelRunRequest) async throws -> NovelRun {
+        if shouldFailNextStart {
+            shouldFailNextStart = false
+            throw NovelError.repositoryFailure("Injected active-run subscription failure.")
+        }
         if shouldBlockNextStart {
             shouldBlockNextStart = false
             await withCheckedContinuation { continuation in
