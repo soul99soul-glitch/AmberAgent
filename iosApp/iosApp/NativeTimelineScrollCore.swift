@@ -1,14 +1,6 @@
 import CoreGraphics
 import Foundation
 
-enum NativeTimelineScrollFeatureFlags {
-    static let key = "chat.nativeTimeline.scrollDriver.enabled"
-
-    static var isEnabled: Bool {
-        UserDefaults.standard.bool(forKey: key)
-    }
-}
-
 enum NativeTimelineScrollReturnPolicy {
     static func returnedToBottom(
         liveDistanceToBottom: CGFloat?,

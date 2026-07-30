@@ -123,9 +123,6 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
-    @AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key) private var nativeTimelineStaticRenderEnabled = false
-    @AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key) private var nativeTimelineStreamingTailEnabled = false
-    @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeTimelineScrollDriverEnabled = false
     @State private var viewportState = ChatViewportState()
     @State private var scrollToBottomTrigger = 0
     @State private var scrollToBottomSource: NativeTimelineBottomIntentSource = .button
@@ -900,85 +897,28 @@ struct ChatView: View {
     // MARK: - Message List
 
     private var messageList: some View {
-        let route = messageListRoute
-        return Group {
-            if route == .nativeTimelineSwiftUI {
-                NativeChatTimelineView(
-                    signal: viewModel.messageUpdateSignal,
-                    configurationIssue: configurationIssue,
-                    isGenerationActive: viewModel.isGenerationActive,
-                    isLoading: viewModel.isLoading,
-                    isRecognizingImages: viewModel.isRecognizingImages,
-                    contextCompactState: viewModel.contextCompactState,
-                    followGeneration: followGeneration,
-                    displaySetting: sharedSettings.displaySetting,
-                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
-                    reasoningLevelLabel: composerReasoningLabel,
-                    workspaceStore: workspaceStore,
-                    nativeScrollDriverEnabled: nativeTimelineScrollDriverEnabled,
-                    scrollToBottomTrigger: scrollToBottomTrigger,
-                    scrollToBottomSource: scrollToBottomSource,
-                    messagesProvider: { viewModel.messages },
-                    variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
-                    onAction: handleChatListAction,
-                    onViewportStateChange: applyCollectionViewportState,
-                    onDismissKeyboard: dismissKeyboard
-                )
-                .id(NativeChatTimelineSessionIdentity.viewID(conversationId: conversationStore.currentConversation?.id))
-            } else if route == .swiftUICleanList {
-                ChatSwiftUIMessageList(
-                    signal: viewModel.messageUpdateSignal,
-                    configurationIssue: configurationIssue,
-                    isGenerationActive: viewModel.isGenerationActive,
-                    isLoading: viewModel.isLoading,
-                    isRecognizingImages: viewModel.isRecognizingImages,
-                    contextCompactState: viewModel.contextCompactState,
-                    followGeneration: followGeneration,
-                    displaySetting: sharedSettings.displaySetting,
-                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
-                    reasoningLevelLabel: composerReasoningLabel,
-                    workspaceStore: workspaceStore,
-                    scrollToBottomTrigger: scrollToBottomTrigger,
-                    scrollToBottomSource: scrollToBottomSource,
-                    messagesProvider: { viewModel.messages },
-                    variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
-                    onAction: handleChatListAction,
-                    onViewportStateChange: applyCollectionViewportState,
-                    onDismissKeyboard: dismissKeyboard
-                )
-            } else {
-                ChatCollectionMessageList(
-                    signal: viewModel.messageUpdateSignal,
-                    configurationIssue: configurationIssue,
-                    isGenerationActive: viewModel.isGenerationActive,
-                    isLoading: viewModel.isLoading,
-                    isRecognizingImages: viewModel.isRecognizingImages,
-                    contextCompactState: viewModel.contextCompactState,
-                    followGeneration: followGeneration,
-                    displaySetting: sharedSettings.displaySetting,
-                    generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
-                    reasoningLevelLabel: composerReasoningLabel,
-                    workspaceStore: workspaceStore,
-                    scrollToBottomTrigger: scrollToBottomTrigger,
-                    messagesProvider: { viewModel.messages },
-                    variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
-                    onAction: handleChatListAction,
-                    onViewportStateChange: applyCollectionViewportState
-                )
-            }
-        }
-    }
-
-    private var messageListRoute: ChatMessageListRoute {
-        ChatMessageListRoutePolicy.route(
-            nativeTimelineStaticRenderEnabled: nativeTimelineStaticRenderEnabled,
-            nativeTimelineStreamingTailEnabled: nativeTimelineStreamingTailEnabled,
-            swiftUICleanListEnabled: ChatSwiftUIMessageListFeatureFlags.isEnabled,
-            messages: viewModel.messages,
-            event: viewModel.messageUpdateSignal.event,
+        NativeChatTimelineView(
+            signal: viewModel.messageUpdateSignal,
+            configurationIssue: configurationIssue,
             isGenerationActive: viewModel.isGenerationActive,
-            isLoading: viewModel.isLoading
+            isLoading: viewModel.isLoading,
+            isRecognizingImages: viewModel.isRecognizingImages,
+            contextCompactState: viewModel.contextCompactState,
+            followGeneration: followGeneration,
+            displaySetting: sharedSettings.displaySetting,
+            generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
+            reasoningLevelLabel: composerReasoningLabel,
+            workspaceStore: workspaceStore,
+            nativeScrollDriverEnabled: true,
+            scrollToBottomTrigger: scrollToBottomTrigger,
+            scrollToBottomSource: scrollToBottomSource,
+            messagesProvider: { viewModel.messages },
+            variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
+            onAction: handleChatListAction,
+            onViewportStateChange: applyCollectionViewportState,
+            onDismissKeyboard: dismissKeyboard
         )
+        .id(NativeChatTimelineSessionIdentity.viewID(conversationId: conversationStore.currentConversation?.id))
     }
 
     private var isStreamingFollowActive: Bool {

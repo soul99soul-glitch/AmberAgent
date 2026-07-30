@@ -391,7 +391,9 @@ final class IOSSharedSettingsStore {
     }
 
     private static func decodeSettings(_ json: String) throws -> Settings {
-        IosSettingsJsonBridge.shared.decode(json: json)
+        // decode 现已声明 @Throws：损坏的 settings JSON 会作为 NSError 抛出，
+        // 交给上层 try? 回退默认配置，而不是在 Kotlin/Native 边界终止进程。
+        try IosSettingsJsonBridge.shared.decode(json: json)
     }
 
     // MARK: - Council seats write-back

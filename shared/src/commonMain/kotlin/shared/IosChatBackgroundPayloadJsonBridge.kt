@@ -51,6 +51,9 @@ object IosChatBackgroundPayloadJsonBridge {
         )
     )
 
+    // @Throws 必须声明：Kotlin/Native 不会把未声明的异常桥接成 Swift NSError，
+    // 否则损坏的 handoff payload 会让冷启动恢复 SIGABRT 而非回退 nil（见 loadHandoff 的 do/catch）。
+    @Throws(Throwable::class)
     fun decode(json: String): IosChatBackgroundPayload = JsonInstant.decodeFromString(json)
 
     private fun TextGenerationParams.withoutSecrets(): TextGenerationParams = copy(

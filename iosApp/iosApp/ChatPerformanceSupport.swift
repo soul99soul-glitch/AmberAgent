@@ -323,8 +323,6 @@ struct ChatPerfReplayView: View {
     private let fixedSettings = IosSettingsDefaults.shared.defaultSeededSettings()
     private let replayDefaults: UserDefaults = {
         let defaults = UserDefaults(suiteName: "app.amber.ios.chat-perf-replay.v1")!
-        defaults.set(false, forKey: IOSDisplayPreferenceKeys.microsoftStreamingMarkdown)
-        defaults.set(false, forKey: IOSDisplayPreferenceKeys.liyananStreamingMarkdown)
         defaults.set(true, forKey: IOSDisplayPreferenceKeys.streamingBlockMarkdown)
         // 回放基线固定为「逐段渲染」。要用回放做合并渲染的 A/B 比值,把这一行
         // 改成 true 再跑一次,对比同一 fixture 的 MarkdownPublish/布局耗时。

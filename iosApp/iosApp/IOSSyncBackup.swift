@@ -233,7 +233,9 @@ struct IOSSyncBackup {
         let payloadManifest = try payloadEntries[payloadManifestEntry].map {
             try JSONDecoder().decode(IOSSyncPayloadManifest.self, from: $0)
         } ?? IOSSyncPayloadManifest()
-        let settings = IosSettingsJsonBridge.shared.decode(json: settingsJson)
+        // decode 声明了 @Throws：备份内 settings.json 损坏时作为失败抛出，
+        // 由调用方报告导入失败，而不是在 Kotlin/Native 边界终止进程。
+        let settings = try IosSettingsJsonBridge.shared.decode(json: settingsJson)
         let preview = IOSSyncPreview(
             manifest: manifest,
             fileName: fileName,

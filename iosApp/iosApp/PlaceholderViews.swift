@@ -270,8 +270,6 @@ enum IOSDisplayPreferenceKeys {
     static let agentName = "app.amber.ios.display.agentName"
     static let followGeneration = "app.amber.ios.display.followGeneration"
     static let activityIslandEdgeGlow = "app.amber.ios.display.activityIslandEdgeGlow"
-    static let microsoftStreamingMarkdown = "app.amber.ios.display.microsoftStreamingMarkdown"
-    static let liyananStreamingMarkdown = "app.amber.ios.display.liyananStreamingMarkdown"
     static let streamingBlockMarkdown = "app.amber.ios.display.streamingBlockMarkdown"
     static let coalescedTextBlocks = "app.amber.ios.display.coalescedTextBlocks"
 }

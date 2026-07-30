@@ -799,7 +799,8 @@ final class IOSParityRedLightTests: XCTestCase {
         json = try injectAssistant(into: json, assistantJsonData: assistantFragment)
 
         // Decode + restoreSnapshot = the import/restore leak path.
-        let decoded = IosSettingsJsonBridge.shared.decode(json: json)
+        // decode 已声明 @Throws（Kotlin/Native 桥接），这里走成功路径，用 try。
+        let decoded = try IosSettingsJsonBridge.shared.decode(json: json)
         store.restoreSnapshot(decoded)
 
         let persisted = (defaults.string(forKey: "app.amber.ios.sharedSettingsJson") ?? "")
@@ -851,7 +852,8 @@ final class IOSParityRedLightTests: XCTestCase {
         """.data(using: .utf8)!
         json = try injectAssistant(into: json, assistantJsonData: assistantFragment)
 
-        let decoded = IosSettingsJsonBridge.shared.decode(json: json)
+        // decode 已声明 @Throws（Kotlin/Native 桥接），这里走成功路径，用 try。
+        let decoded = try IosSettingsJsonBridge.shared.decode(json: json)
         store.restoreSnapshot(decoded)
 
         let persisted = (defaults.string(forKey: "app.amber.ios.sharedSettingsJson") ?? "")

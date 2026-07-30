@@ -79,7 +79,6 @@ struct CouncilChatRuntimeView: View {
     @State private var nativeScrollFallbackReason: NativeTimelineScrollFallbackReason?
     @State private var isNativeScrollSurfaceVisible = false
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
-    @AppStorage(NativeTimelineScrollFeatureFlags.key) private var nativeScrollDriverEnabled = false
 
     init(
         settingsStore: SettingsStore,
@@ -120,6 +119,9 @@ struct CouncilChatRuntimeView: View {
         }
         .onAppear {
             isNativeScrollSurfaceVisible = true
+            // 重新进入页面时清除上一次的 fallback 粘连，给原生滚动 driver 一次重试机会；
+            // 开关移除后已无手动恢复入口，否则一次 fallback 会让 driver 对该视图实例永久禁用。
+            nativeScrollFallbackReason = nil
             viewModel.runtimeDidAppear()
         }
         // 离开页面(返回/切走)时立即存一份当前 transcript,避免运行中退出导致刚流式出的内容
@@ -134,12 +136,6 @@ struct CouncilChatRuntimeView: View {
         }
         .onChange(of: followGeneration) { _, enabled in
             scrollDriver.setAutomaticFollowEnabled(enabled)
-        }
-        .onChange(of: nativeScrollDriverEnabled) { _, enabled in
-            if !enabled {
-                nativeScrollFallbackReason = nil
-                scrollDriver.invalidate()
-            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
@@ -538,8 +534,7 @@ struct CouncilChatRuntimeView: View {
     }
 
     private var isNativeScrollDriverDesired: Bool {
-        nativeScrollDriverEnabled &&
-            nativeScrollFallbackReason == nil &&
+        nativeScrollFallbackReason == nil &&
             isNativeScrollSurfaceVisible
     }
 
