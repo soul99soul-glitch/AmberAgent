@@ -6,7 +6,6 @@ import assert from 'node:assert/strict';
 import {
   runChatTurnWithTools, runToolLoopContinuation, runAgenticToolLoop,
   runRegenerateAtWithTools,
-  MIN_AGENT_TOOL_LOOP_STEPS, MAX_AGENT_TOOL_LOOP_STEPS, DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS,
 } from '../main/ets/chat/tool_loop.ts';
 import type { ToolLoopOptions } from '../main/ets/chat/tool_loop.ts';
 import { createMemoryConversationStore } from '../main/ets/chat/chat_turn.ts';
@@ -271,10 +270,22 @@ describe('审批门(:288-339)', () => {
 });
 
 describe('预算与步数', () => {
-  it('maxSteps coerce:1→16,9999→512,默认 256', () => {
-    assert.equal(MIN_AGENT_TOOL_LOOP_STEPS, 16);
-    assert.equal(MAX_AGENT_TOOL_LOOP_STEPS, 512);
-    assert.equal(DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS, 256);
+  it('main public path clamps maxSteps 1 to 16 observable provider calls', async () => {
+    const conv: Conversation = makeConversation('c1', []);
+    const script: MessageChunk[][] = [];
+    for (let i: number = 0; i < 15; i++) {
+      script.push([toolDelta(`main-clamp-${i}`, 'conversation_search', '{"q":"x"}')]);
+    }
+    script.push([textDelta('final main step')]);
+    const provider = scriptedProvider(script);
+
+    await runChatTurnWithTools(conv, 'go', baseDeps(provider), {
+      tools: [echoTool('conversation_search')],
+      maxSteps: 1,
+      makeProviderForStep: (): ChatStreamProvider => provider,
+    });
+
+    assert.equal(provider.callCount, 16);
   });
   it('工具循环不止:每步都调工具,直至 FINAL 步隐藏工具后模型纯文本收尾', async () => {
     const conv: Conversation = makeConversation('c1', []);

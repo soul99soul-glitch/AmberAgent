@@ -1994,3 +1994,25 @@ dream 子系统(Planner/Applier/Scheduler/Notifier/PlanStore/DreamGate)、导出
 - **关闭**:subagent 纯域模型、验证、结构化报告、child 工具作用域与 transcript reader/writer 已 source-only 闭环，为 D-132b runner/manager 提供经审查依赖。
 - **未移植(P1 登记)**:D-132b 隔离 runner + manager 生命周期/竞态/任务看板；D-132c 五件公共工具、完整设置持久化、entry file/provider adapter 与 ChatPage 装配；专属 ChatMessageSubAgentStep 聚合 UI 延后到 runtime 闭环后。
 - **验证**:Task 1–5 定向 91 测试；chat tsc 干净 + 1493 测试，deepread tsc 干净 + 610 测试；assembleHar 5.269s、assembleHap 6.686s 均 BUILD SUCCESSFUL；五任务逐项规格/质量审查及阶段 plan-drift/反过度设计复审全部通过。
+
+## D-132b — Subagent 隔离 Runner + Manager 生命周期/任务看板
+
+- **日期**: 2026-07-29
+- **状态**: 已执行
+- **范围**: feature/subagent/.../SubAgentRunner.kt(全文 313)+SubAgentManager.kt(全文 440)+对应 Runner/Isolation 测试；复用 D-132a validator/report/scope/transcript、D-131 AgentTaskStore 与既有 chat tool loop/provider 层。
+- **背景**: D-132a 已闭合纯域协议，但尚无隔离 child 生成循环、模型/助手解析、流式状态、超时/取消竞态、task board 映射和 manager 公共生命周期；D-132c 五件工具及 entry 装配依赖本分片。
+- **决策**:
+  1. `tool_loop.ts` 抽取 module-private shared core：main public path 继续 16..512 clamp；仅 `invocationContext='subagent'` 使用 definition 的精确 1/2/4 step budget，不新增第二套 dispatcher/loop。真实 provider-call 测试同时钉住 main 1→16 与 child 1/2/4。
+  2. `subagent_runner.ts`：隔离 Assistant 禁用 memory/presets/regex/MCP/local/mode/lorebook/skills/time reminder/speculation，保留 parent topP/maxTokens/custom headers/bodies 和 definition temperature/reasoning；scoped tools 与内部 `subagent_report` 每 step 注入；generation/tool retry 共用 inherited `GenerationRetrySetting`；model override 失效回退 current model，model/assistant 缺失文案分离。
+  3. selected-model 会话默认值：新增 `defaultReasoningLevelForModel`，逐字采用 Android family 规则(gpt/codex/`\\bo\\d+`→medium，deepseek→high，其余 auto)；entry 主生成与 child provider 均复用 `resolveSessionDefaults`，AUTO reasoning 按实际 selected model 解析，maxTokens 使用 resolved value；不新增 Harmony 尚无消费者的 model-group settings registry。
+  4. Runner 错误恢复逐字：普通 provider 错误→FAILED；abort 在 partial generation 后复查并抛 AbortError；approval_required 只看最终消息 pending tool；缺 report 追加固定 reminder 并重试恰好两步；窄 fallback 仅在 visible text 非空、definition allowlist 为空且错误同时含 `invalid function arguments json string`/`tool_call` 时成立；early error/approval 均使用 text-only、budget-truncated display。
+  5. `subagent_manager.ts`：latest settings snapshot→验证→grant-before-admission→单计数 admission→task register→started transcript→live state→launch；registration-before-launch cancel race 用 pending terminal task update 回放；terminal first-wins；wait clamp 0..60000/200ms poll；missing run 按 transcript 映射 interrupted/not_found；live text/parts immediate replay+unsubscribe+64 soft cap且不驱逐 active run。
+  6. task/transcript 语义：初始与终态 snapshot 均 nonretryable，approval_required 映射 task RUNNING/cancel false，result 为 JSON 字符串，普通 payload 只暴露 display_text_chars，finished transcript 才写完整 display_text；timeout 保留 Android 当前 cancellation catch 后 run/task 仍 RUNNING 的行为，不擅自修正为 TIMED_OUT。
+  7. public surface 收敛：manager 只导出具体 `SubAgentManager` 与最小 `SubAgentManagerDeps(getSubAgentSetting + runner/task/grant/transcript/time/path)`；删除无生产消费者的 Service/Settings Port barrel 与 council callback；补齐 `SubAgentTranscriptTail` barrel 类型闭包。D-132c 计划改为复用既有 `PromptConfigStore.ets` 唯一 `agent_runtime` parser/serializer/RMW，只允许薄 hydrated snapshot bridge，不创建第二套 settings store。
+  8. 阶段反过度设计复核未采纳两项 speculative 防御：不为后台 task update 新增 error hook（Android `AgentTaskStore.persist` 本身 `runCatching`，Harmony D-130 已逐字保留）；不为 register/transcript pre-launch 异常新增 rollback（Android SubAgentManager 同样先 admission 入 map 再 register/append，无回滚）。两项均无当前消费者或 Android 依据，新增会改变 parity。
+- **偏差/适配登记**:
+  - 无新增 PARITY_DEBT。Uuid→string；suspend/Mutex→async/AsyncMutex；StateFlow→listener immediate replay；Job/withTimeout→本地 AbortController + Promise.race；File→D-132a transcript Port。
+  - Android 当前 dynamic admission shadow branch、timeout cancellation、task nonretryability 与 pre-launch/后台持久化错误语义按现状保留，不作为 Harmony 新偏差登记。
+- **关闭**:隔离 child runner、共享真实 provider loop、模型/助手解析、report retry/approval/error/abort、manager admission/grant/lifecycle/竞态/任务看板/transcript/live subscriptions 已 source-only 闭环。
+- **未移植(P1 登记)**:D-132c 五件 `subagent_*` 公共工具、`SubAgentStore.ets` fileIo adapter、PromptConfigStore hydrated bridge、AppContainer runner/manager/tools 单例与 ChatPage 动态装配；专属 `ChatMessageSubAgentStep` 聚合 UI 仍为后续交互片。
+- **验证**:D-132b 聚焦 93/93；chat tsc 干净 + 1542/1542，deepread tsc 干净 + 610/610；`hvigorw assembleHar --no-daemon && hvigorw assembleHap --no-daemon` 成功退出，双构建完成；阶段 plan-drift/规格/质量/反过度设计复核对照 Android 基准收口。

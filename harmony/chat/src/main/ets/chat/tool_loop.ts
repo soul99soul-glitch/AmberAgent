@@ -139,13 +139,17 @@ const emitSnapshot = (conv: Conversation, deps: ChatTurnDeps, ctx: TransformerCo
 };
 
 // ===== 主循环(:161-391) =====
-
-export const runAgenticToolLoop = async (
+// mainClamp=true preserves the existing main-agent 16..512 behavior. Subagent
+// invocation context selects the same core with the exact requested step budget.
+const runToolLoopCore = async (
   conversation: Conversation, deps: ChatTurnDeps, loop: ToolLoopOptions,
+  mainClamp: boolean,
 ): Promise<Conversation> => {
   let conv: Conversation = conversation;
   const rawSteps: number = loop.maxSteps ?? DEFAULT_AGENT_MAX_TOOL_LOOP_STEPS;
-  const maxSteps: number = Math.min(Math.max(rawSteps, MIN_AGENT_TOOL_LOOP_STEPS), MAX_AGENT_TOOL_LOOP_STEPS);
+  const maxSteps: number = mainClamp
+    ? Math.min(Math.max(rawSteps, MIN_AGENT_TOOL_LOOP_STEPS), MAX_AGENT_TOOL_LOOP_STEPS)
+    : Math.max(rawSteps, 0);
   const dispatcher: AgentToolDispatcher = loop.dispatcher
     ?? new DefaultDispatcher({ hooks: defaultToolInvocationHooks() });
   const autoApproveTools: boolean = loop.autoApproveTools ?? false;
@@ -349,6 +353,11 @@ export const runAgenticToolLoop = async (
   }
   return conv;
 };
+
+export const runAgenticToolLoop = async (
+  conversation: Conversation, deps: ChatTurnDeps, loop: ToolLoopOptions,
+): Promise<Conversation> => runToolLoopCore(
+  conversation, deps, loop, loop.invocationContext !== 'subagent');
 
 // ===== 入口:带工具循环的发送(runChatTurn 同序:user 先落库再循环) =====
 

@@ -40,7 +40,8 @@ import {
   loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
   hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
-  makeTextGenerationParams, toChatModel, resolveSessionDefaults, mergeCustomParams,
+  makeTextGenerationParams, toChatModel, defaultReasoningLevelForModel,
+  resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
   DEFAULT_TITLE_PROMPT, DEFAULT_SUGGESTION_PROMPT, DEFAULT_COMPRESS_PROMPT,
   McpManager, SkillManager, AgentToolActivityStore, PosixWorkspaceManager,
@@ -765,7 +766,11 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
       }
     }
   }
-  const sessionDefaults = resolveSessionDefaults(assistant, null, 'auto');
+  const sessionDefaults = resolveSessionDefaults(
+    assistant,
+    null,
+    defaultReasoningLevelForModel(model),
+  );
   const merged = mergeCustomParams(assistant, model);
   // D-049:customBodies 进 params(三 provider 请求构建层均 mergeCustomBody);
   //   customHeaders(assistant+model 拼接,GenerationHandler.kt:453-468 忠实)

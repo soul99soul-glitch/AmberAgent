@@ -17,7 +17,8 @@ import assert from 'node:assert/strict';
 import {
   SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_EPHEMERAL,
   buildStaticSystemPromptParts, buildToolSystemPrompt, assembleInternalMessages,
-  resolveSessionDefaults, mergeCustomParams, toChatModel, seedConversationWithPresets,
+  defaultReasoningLevelForModel, resolveSessionDefaults, mergeCustomParams,
+  toChatModel, seedConversationWithPresets,
 } from '../main/ets/chat/context_assembly.ts';
 import { makeAgentTool } from '../main/ets/chat/tool.ts';
 import { makeAssistant } from '../main/ets/chat/assistant.ts';
@@ -83,6 +84,30 @@ test('resolveSessionDefaults: AUTO→默认,显式保留,contextSize 0→组默�
   const d3 = resolveSessionDefaults(inherit, { contextMessageSize: 50, maxTokens: 8192 }, 'auto');
   assert.equal(d3.contextMessageSize, 50, 'assistant 0 → 组默认');
   assert.equal(d3.maxTokens, 8192, 'assistant null → 组默认');
+});
+
+test('defaultReasoningLevelForModel: selected model family supplies Android AUTO default', () => {
+  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'gpt-5.4' })), 'medium');
+  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'codex-mini' })), 'medium');
+  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'openai/o3-mini' })), 'medium');
+  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'deepseek-reasoner' })), 'high');
+  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'glm-5' })), 'auto');
+
+  const auto = resolveSessionDefaults(
+    makeAssistant({ maxTokens: null }),
+    null,
+    defaultReasoningLevelForModel(makeProviderModel({ modelId: 'gpt-5.4' })),
+  );
+  assert.equal(auto.reasoningLevel, 'medium');
+  assert.equal(auto.maxTokens, null);
+
+  const explicit = resolveSessionDefaults(
+    makeAssistant({ reasoningLevel: 'low', maxTokens: 2048 }),
+    null,
+    defaultReasoningLevelForModel(makeProviderModel({ modelId: 'deepseek-reasoner' })),
+  );
+  assert.equal(explicit.reasoningLevel, 'low');
+  assert.equal(explicit.maxTokens, 2048);
 });
 
 // ===== params 合并(GenerationHandler.kt:453-468) =====

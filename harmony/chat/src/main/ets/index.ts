@@ -499,7 +499,8 @@ export {
 export {
   SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_DISABLED, SYSTEM_PROMPT_CACHE_EPHEMERAL,
   buildStaticSystemPromptParts, buildToolSystemPrompt, assembleInternalMessages,
-  resolveSessionDefaults, mergeCustomParams, toChatModel, seedConversationWithPresets,
+  defaultReasoningLevelForModel, resolveSessionDefaults, mergeCustomParams,
+  toChatModel, seedConversationWithPresets,
 } from './chat/context_assembly.ts';
 export type {
   AssembleInternalInput, SessionGroupDefault, ResolvedSessionDefaults, MergedCustomParams,
@@ -932,10 +933,25 @@ export {
 export { scopedSubAgentTools } from './chat/subagent_tool_scope.ts';
 
 // ===== D-132a Task 5:subagent JSONL 转录端口/manager 写入 =====
-export type { SubAgentTranscriptPort } from './chat/subagent_transcript.ts';
+export type {
+  SubAgentTranscriptPort, SubAgentTranscriptTail,
+} from './chat/subagent_transcript.ts';
 export {
   appendSubAgentTranscriptEvent, readSubAgentDisplayTextFromTranscript,
 } from './chat/subagent_transcript.ts';
+
+// ===== D-132b Task 6:isolated child runner =====
+export type {
+  SubAgentAssistantResolution, SubAgentGenerationRequest, SubAgentGenerationPort,
+  ChatStreamSubAgentGenerationPortDeps, SubAgentRunner,
+} from './chat/subagent_runner.ts';
+export {
+  ChatStreamSubAgentGenerationPort, GenerationSubAgentRunner,
+} from './chat/subagent_runner.ts';
+
+// ===== D-132b Task 7:SubAgent Manager =====
+export type { SubAgentManagerDeps } from './chat/subagent_manager.ts';
+export { SubAgentManager } from './chat/subagent_manager.ts';
 
 // ===== D-129:permissions_status 工具 + AgentPermissionBroker/Registry =====
 export type {

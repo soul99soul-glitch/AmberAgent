@@ -115,6 +115,15 @@ export interface ResolvedSessionDefaults {
   maxTokens: number | null;
 }
 
+export const defaultReasoningLevelForModel = (model: ProviderModel): ReasoningLevel => {
+  const modelId: string = model.modelId.toLowerCase();
+  if (modelId.includes('gpt') || modelId.includes('codex') || /\bo\d+/.test(modelId)) {
+    return 'medium';
+  }
+  if (modelId.includes('deepseek')) return 'high';
+  return 'auto';
+};
+
 export const resolveSessionDefaults = (
   assistant: Assistant,
   groupDefault: SessionGroupDefault | null,

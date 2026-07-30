@@ -31,7 +31,7 @@
 | `harmony/chat/src/main/ets/chat/subagent_manager.ts` | admission/lifecycle/timeout/cancel/wait/live state/persist/task snapshot |
 | `harmony/chat/src/main/ets/chat/subagent_tools.ts` | `subagent_list/start/read/wait/cancel` 五件与系统提示 |
 | `harmony/entry/src/main/ets/platform_impl/SubAgentStore.ets` | 私有 run 目录、JSONL append/tail/containment 文件端口 |
-| `harmony/entry/src/main/ets/platform_impl/AgentRuntimePrefs.ets` | 完整 subagent 设置 RMW/水合，保留未知键 |
+| `harmony/entry/src/main/ets/platform_impl/PromptConfigStore.ets` | 复用既有 subagent/council 设置解析、序列化与 unknown-key-preserving RMW |
 | `harmony/entry/src/main/ets/di/AppContainer.ets` | runner/manager/tools Promise 单例与 provider/file adapter |
 | `harmony/entry/src/main/ets/pages/ChatPage.ets` | Android ChatService 顺序下动态挂载 supervisor tools |
 
@@ -249,7 +249,7 @@ Run all new subagent tests, full chat tests, deepread tests, HAR/HAP builds. Con
 
 - [ ] **Step 1: Write failing child-loop/runner tests**
 
-Pin child step limits 1/2/4 without changing main-agent limits, isolated assistant fields, one user task message, scoped tools + `subagent_report`, streaming visible text/rich parts, abort, report retry with exactly two extra steps, pending approval mapping, ordinary provider failure, and the narrow `invalid function arguments json string` visible-text fallback only when no executable child tools exist.
+Pin child step limits 1/2/4 without changing main-agent limits, isolated assistant fields, one user task message, scoped tools + `subagent_report`, streaming visible text/rich parts, abort, report retry with exactly two extra steps, pending approval mapping, ordinary provider failure, and the narrow visible-text fallback only when `definition.toolAllowlist` is empty and the provider error contains both `invalid function arguments json string` and `tool_call`.
 
 - [ ] **Step 2: Verify RED**
 
@@ -284,7 +284,7 @@ Run runner + existing loop/dispatcher tests and `tsc`; expect pass.
 
 - [ ] **Step 1: Write failing manager tests**
 
-Cover disabled start, overall/dynamic admission lock, registration before launch, started/finished transcript order, complete/fail/approval/cancel/timeout/interrupted, late provider race, wait clamp 0..60000 with 200ms poll, missing run with/without transcript, live text/parts/run subscriptions, 64-flow soft cap, grants, task snapshot mapping and no retry callback.
+Cover disabled start, Android's overall admission checks (including the currently shadowed dynamic-limit branch without inventing a separate counter), registration before launch, started/finished transcript order, complete/fail/approval/cancel/interrupted, late provider race, wait clamp 0..60000 with 200ms poll, missing run with/without transcript, snapshot plus live text/parts subscriptions, 64-flow soft cap, grants, and exact task snapshot mapping. Preserve Android's current cancellation-before-timeout catch behavior rather than adding a corrected `TIMED_OUT` transition in this parity slice.
 
 Exact errors:
 
@@ -303,7 +303,7 @@ Run manager tests; expected missing module failure.
 
 - [ ] **Step 3: Implement manager with serialized terminal transitions**
 
-Start reads latest settings, validates before admission, creates optional history grant, registers `AgentTaskSnapshot(type='subagent', outputRef.type='transcript')`, appends transcript and launches. Timeout/cancel abort first and transition only if current state is RUNNING. Failed snapshots are retryable with max 1 but do not register a live retry callback, preserving Android behavior.
+Start reads latest settings, validates before admission, creates optional history grant before admission, registers `AgentTaskSnapshot(type='subagent', outputRef.type='transcript')`, appends transcript and launches. Cancel/terminal transitions are first-wins while current state is RUNNING. Preserve Android's current timeout cancellation behavior and task retry policy: the initial RUNNING snapshot is non-retryable, and terminal updates do not change retryability or register a retry callback.
 
 - [ ] **Step 4: Verify GREEN and D-132b review/gates**
 
@@ -354,17 +354,19 @@ Run tools tests and `tsc`; expect pass.
 - `feature/subagent/.../SubAgentManager.kt` file paths
 
 **Files:**
-- Modify: `harmony/entry/src/main/ets/platform_impl/AgentRuntimePrefs.ets`
+- Reuse: `harmony/entry/src/main/ets/platform_impl/PromptConfigStore.ets`
 - Create: `harmony/entry/src/main/ets/platform_impl/SubAgentStore.ets`
 - Modify: `harmony/entry/src/main/ets/di/AppContainer.ets`
 
 - [ ] **Step 1: Add failing settings/adapter tests in chat-domain where platform-free**
 
-Pin old snapshot defaults, setting/override/custom-definition field semantics, unknown-key RMW preservation, numeric primitive lexical parity, file append/tail/containment semantics through the port contract, and one shared AgentTaskStore instance. Do not impose generic roundtrip or property-order contracts.
+Reuse the existing `PromptConfigStore.ets` settings tests for setting/override/custom-definition semantics and unknown-key RMW preservation; do not recreate those tests around a second adapter. Add only the platform-free manager snapshot bridge contract, file append/tail/containment semantics through the transcript port, and one shared AgentTaskStore instance. Do not impose generic roundtrip or property-order contracts.
 
 - [ ] **Step 2: Implement platform adapters**
 
-`SubAgentStore.ets` uses `filesDir/amberagent/subagents/runs`, fileIo append/stat/access and bounded tail reads. AppContainer caches runner/manager Promise and injects current settings, IDs/time/sleep, session grants, task store, files, provider/model adapter.
+`PromptConfigStore.ets` remains the sole `agent_runtime` parser/serializer/RMW implementation. Reuse `createEntryAgentPromptSettingsPort(getChatKvStore())` for both the existing D-128 `agent_prompt_config` repository/tool and the new manager; `AgentRuntimePrefs.ets` remains responsible only for its existing legacy `AgentRuntimeSnapshot` fields. The manager-facing settings adapter is a thin hydrated snapshot bridge and must not add another settings store or persistence format.
+
+`SubAgentStore.ets` uses `filesDir/amberagent/subagents/runs`, fileIo append/stat/access and bounded tail reads. AppContainer caches runner/manager Promise and injects the shared settings port/adapter, IDs/time/sleep, session grants, task store, files, provider/model adapter.
 
 - [ ] **Step 3: Verify entry build**
 
