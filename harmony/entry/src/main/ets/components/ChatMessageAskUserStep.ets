@@ -1,0 +1,174 @@
+// ChatMessageAskUserStep — ask_user 问题表单组件(阶段 C, audit 1.8)
+//
+// Android 基准: ChatMessageAskUserStep.kt(461 行)— 多问题表单+提交+已答展示
+// Harmony 后端: ask_user_questions.ts(D-105 解析/载荷/提交判定/已答展示全复刻)
+// 从 ChatPage.ets MessageRow.build() 内联抽出(line 393-507)
+//
+// 功能:
+//   - 标题:单题→首题文案;多题→'询问 N 个问题'
+//   - pending:选项 chips(single/multi)+ 文本框(text)+ 清空/提交
+//   - answered:'A' 标记+答案文本
+
+import type { UIMessagePartTool } from '@amber/chat-domain';
+import {
+  AskUserQuestion, parseAskUserQuestions, parseAskedAnswers,
+  askAnswerDisplayText, isAskUserSubmittable, hasAnyAskAnswer,
+} from '@amber/chat-domain';
+import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE } from '../design/tokens.ets';
+
+// Record<string, string> — ArkTS 允许 Record 类型
+type AnswerMap = Record<string, string>;
+type MultiAnswerMap = Record<string, string[]>;
+
+@Component
+export struct ChatMessageAskUserStep {
+  @Prop part: UIMessagePartTool;
+  @Prop answers: AnswerMap;
+  @Prop multiAnswers: MultiAnswerMap;
+  onSubmit: (answers: AnswerMap, multiAnswers: MultiAnswerMap) => void = (): void => {};
+  onAnswer: (questionId: string, value: string) => void = (): void => {};
+  onToggleMulti: (questionId: string, option: string) => void = (): void => {};
+  onClear: () => void = (): void => {};
+
+  // 每次构建重新解析(与原始 ChatPage 每帧 askQuestionsOf 一致,避免 @Prop 变化后 questions 过时)
+  private getQuestions(): AskUserQuestion[] {
+    return parseAskUserQuestions(this.part.input);
+  }
+
+  build(): void {
+    Column() {
+      Text(this.heading())
+        .fontSize(12).fontColor(ACCENT).fontWeight(FontWeight.Medium)
+        .width('100%').margin({ top: 4 })
+
+      ForEach(this.getQuestions(), (q: AskUserQuestion, qi: number) => {
+        Column() {
+          if (qi > 0) {
+            Divider().color(LINE).strokeWidth(1).margin({ top: 6, bottom: 2 })
+          }
+          Text(q.question)
+            .fontSize(12).fontColor(INK)
+            .width('100%').margin({ top: qi > 0 ? 0 : 4 })
+
+          if (this.part.approvalState.type === 'pending') {
+            // 选项 chips
+            if (q.options.length > 0) {
+              Flex({ wrap: FlexWrap.Wrap }) {
+                ForEach(q.options, (opt: string) => {
+                  Text(opt)
+                    .fontSize(11)
+                    .fontColor(this.isOptionSelected(q, opt) ? '#FFFFFF' : INK2)
+                    .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+                    .margin({ right: 6, top: 4 })
+                    .borderRadius(999)
+                    .backgroundColor(this.isOptionSelected(q, opt) ? ACCENT : SURFACE2)
+                    .border({
+                      width: this.isOptionSelected(q, opt) ? 0 : 1,
+                      color: LINE,
+                    })
+                    .onClick((): void => {
+                      if (q.selectionType === 'multi') {
+                        this.onToggleMulti(q.id, opt);
+                      } else {
+                        this.onAnswer(q.id, opt);
+                      }
+                    })
+                }, (opt: string): string => opt)
+              }
+              .width('100%')
+            }
+            // text 类型 → 自由文本框
+            if (q.selectionType !== 'single' && q.selectionType !== 'multi') {
+              TextArea({ placeholder: '在此输入回答…', text: this.answerAt(q.id) })
+                .width('100%').height(64).fontSize(12).fontColor(INK)
+                .backgroundColor(SURFACE).borderRadius(10)
+                .margin({ top: 6 })
+                .onChange((v: string): void => {
+                  this.onAnswer(q.id, v);
+                })
+            }
+          } else if (this.part.approvalState.type === 'answered') {
+            // 已应答 → 'A' 标记 + 展示文本
+            Row() {
+              Text('A')
+                .fontSize(10).fontColor(ACCENT)
+                .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                .backgroundColor('#1FB8623A')
+                .borderRadius(4)
+              Text(this.answeredText(q.id))
+                .fontSize(12).fontColor(INK)
+                .layoutWeight(1)
+            }
+            .width('100%')
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .margin({ top: 4 })
+            .backgroundColor(SURFACE2)
+            .borderRadius(8)
+            .border({ width: 1, color: LINE })
+          }
+        }
+        .width('100%').alignItems(HorizontalAlign.Start)
+      }, (q: AskUserQuestion, qi: number): string => `${qi}:${q.id}`)
+
+      // pending → 操作行:清空 + 提交
+      if (this.part.approvalState.type === 'pending') {
+        Row() {
+          Blank()
+          if (hasAnyAskAnswer(this.answers, this.multiAnswers)) {
+            Text('清空')
+              .fontSize(11).fontColor(INK3)
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .onClick((): void => { this.onClear(); })
+          }
+          Text('提交')
+            .fontSize(12).fontWeight(FontWeight.Medium)
+            .fontColor(this.submittable() ? '#FFFFFF' : INK3)
+            .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+            .margin({ left: 8 })
+            .borderRadius(999)
+            .backgroundColor(this.submittable() ? ACCENT : LINE)
+            .onClick((): void => {
+              if (this.submittable()) {
+                this.onSubmit(this.answers, this.multiAnswers);
+              }
+            })
+        }
+        .width('100%').margin({ top: 8 })
+      }
+    }
+    .width('100%')
+  }
+
+  private heading(): string {
+    const qs: AskUserQuestion[] = this.getQuestions();
+    if (qs.length === 0) return '...';
+    if (qs.length === 1) return qs[0].question;
+    return `询问 ${qs.length} 个问题`;
+  }
+
+  private isOptionSelected(q: AskUserQuestion, opt: string): boolean {
+    if (q.selectionType === 'multi') {
+      return this.multiAt(q.id).indexOf(opt) >= 0;
+    }
+    return this.answerAt(q.id) === opt;
+  }
+
+  private answerAt(id: string): string {
+    return this.answers[id] ?? '';
+  }
+
+  private multiAt(id: string): string[] {
+    return this.multiAnswers[id] ?? [];
+  }
+
+  private answeredText(id: string): string {
+    // 与原始 ChatPage:274-277 一致 — parseAskedAnswers(fallback) + 3 参数
+    if (this.part.approvalState.type !== 'answered') return '';
+    const fallback: string = this.part.approvalState.answer;
+    return askAnswerDisplayText(parseAskedAnswers(fallback), id, fallback);
+  }
+
+  private submittable(): boolean {
+    return isAskUserSubmittable(this.getQuestions(), this.answers, this.multiAnswers);
+  }
+}

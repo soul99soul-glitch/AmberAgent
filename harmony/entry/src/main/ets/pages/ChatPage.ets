@@ -32,7 +32,6 @@ import {
   cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
   convertSteerToFollowup, runAppendUserMessage,
   persistPendingQueue, loadPendingQueue, recordPendingQueueEvent,
-  toDisplayReasoningText, extractThinkingTitle, reasoningDurationMs, formatThoughtSeconds,
   reasoningCardStateExpanded, onReasoningExpandedChange,
   makeCompactPolicy, prepareContext, invalidateCompacts,
   copyValidCompactsToConversation, ContextCompactionFailedError,
@@ -47,8 +46,7 @@ import {
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
   parseAskUserQuestions, buildAskUserAnswerPayload,
-  parseAskedAnswers, askAnswerDisplayText,
-  isAskUserSubmittable, hasAnyAskAnswer, ASK_USER_TOOL_NAME,
+  ASK_USER_TOOL_NAME,
   estimateConversationInputTokens, formatNumberInt, formatContextTokens,
   loadSearchPrefs, SearchSettings, createSearchTools,
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
@@ -67,6 +65,10 @@ import {
   loadAssistants, saveAssistants, patchAssistant,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
+  groupMessageParts,
+} from '@amber/chat-domain';
+import type {
+  ThinkingStep, MessagePartBlock,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -87,6 +89,10 @@ import {
 } from '../platform_impl/ArtifactPorts.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
+import { MarkdownRichText } from '../components/MarkdownRichText.ets';
+import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
+import { ChatMessageTools } from '../components/ChatMessageTools.ets';
+import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -116,7 +122,6 @@ const ROW: string = '#EFECE4';
 const HILOG_DOMAIN: number = 0x0001;
 const HILOG_TAG: string = 'DeepRead.ChatPage';
 
-const partKey = (p: UIMessagePart, i: number): string => `${p.type}-${i}`;
 
 // 节点视图模型:分支切换/重新生成需要节点级信息
 interface MsgRow {
@@ -167,7 +172,7 @@ struct MessageRow {
   // D-105:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)
   onAnswerTool: (toolCallId: string, answer: string) => void = (_id: string, _a: string): void => {};
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
-  @State reasoningStates: Record<number, string> = {};
+  @State reasoningStates: Record<string, string> = {};
   // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
   @State askAnswers: Record<string, string> = {};
   @State askMultiAnswers: Record<string, string[]> = {};
@@ -188,16 +193,6 @@ struct MessageRow {
     return this.streaming && p.finishedAt === null;
   }
 
-  // D-057:工具状态文案(approvalStateSimpleName 显示面子集)
-  private toolStateLabel(t: UIMessagePartTool): string {
-    if (t.output.length > 0) return '已执行';
-    if (t.approvalState.type === 'pending') return '待审批';
-    if (t.approvalState.type === 'approved') return '已批准';
-    if (t.approvalState.type === 'denied') return '已拒绝';
-    if (t.approvalState.type === 'answered') return '已应答';
-    return '';
-  }
-
   // :952-960 已拒绝展示:'已拒绝' + 非空白 reason → ': reason'(红色;
   //   chat_message_tool_denied zh 逐字,冒号为 ASCII ': ')
   private deniedLabel(t: UIMessagePartTool): string {
@@ -210,22 +205,6 @@ struct MessageRow {
   // :87-99 解析(渲染期重算,题量小;解析失败 → [])
   private askQuestionsOf(t: UIMessagePartTool): AskUserQuestion[] {
     return parseAskUserQuestions(t.input);
-  }
-
-  // :106 首题文案;多题 → '询问 N 个问题'(zh strings.xml:192 逐字)
-  private askHeading(qs: AskUserQuestion[]): string {
-    if (qs.length <= 1) return qs.length > 0 ? qs[0].question : '...';
-    return `询问 ${qs.length} 个问题`;
-  }
-
-  private askAnswerAt(qid: string): string {
-    const v: string | undefined = this.askAnswers[qid];
-    return v !== undefined ? v : '';
-  }
-
-  private askMultiAt(qid: string): string[] {
-    const v: string[] | undefined = this.askMultiAnswers[qid];
-    return v !== undefined ? v : [];
   }
 
   // :174 单选/文本选项 chip 点选
@@ -270,16 +249,10 @@ struct MessageRow {
       buildAskUserAnswerPayload(qs, this.askAnswers, this.askMultiAnswers));
   }
 
-  // :246-253 已应答展示文本
-  private askAnsweredText(t: UIMessagePartTool, qid: string): string {
-    if (t.approvalState.type !== 'answered') return '';
-    const fallback: string = t.approvalState.answer;
-    return askAnswerDisplayText(parseAskedAnswers(fallback), qid, fallback);
-  }
-
   // 初始 Collapsed(:88);流式开始 → Preview(:125-126,showThinkingContent
   //   设置项鸿蒙未接,Android 默认 true);流式过 → 保持 Preview(:129-133)
-  private reasoningStateAt(idx: number): ReasoningCardState {
+  //   idx 为字符串 key(block-step 复合索引,避免数字碰撞)
+  private reasoningStateAt(idx: string): ReasoningCardState {
     const s: string | undefined = this.reasoningStates[idx];
     if (s === 'collapsed' || s === 'preview' || s === 'expanded') {
       return s as ReasoningCardState;
@@ -287,266 +260,123 @@ struct MessageRow {
     return (this.streaming || this.sawStream) ? 'preview' : 'collapsed';
   }
 
-  private toggleReasoning(idx: number, loading: boolean): void {
+  private toggleReasoning(idx: string, loading: boolean): void {
     const cur: ReasoningCardState = this.reasoningStateAt(idx);
     const next: ReasoningCardState =
       onReasoningExpandedChange(!reasoningCardStateExpanded(cur), loading);
-    const copy: Record<number, string> = {};
+    const copy: Record<string, string> = {};
     const keys: string[] = Object.keys(this.reasoningStates);
     for (const k of keys) {
-      copy[Number(k)] = this.reasoningStates[Number(k)];
+      copy[k] = this.reasoningStates[k];
     }
     copy[idx] = next;
     this.reasoningStates = copy;
   }
 
-  // 头部文案(:296-300/:325-349):流式且有独占加粗行 → title;
-  //   否则 showReasoningDuration(finishedAt≠null 或 loading)→ 秒数;否则 深度思考
-  //   裁剪:budgetLabel(需 assistant 注入)= P1;流式 title 右侧 duration extra = P1
-  private reasoningHeader(p: UIMessagePartReasoning): string {
-    const loading: boolean = this.reasoningLoading(p);
-    if (loading) {
-      const title: string | null = extractThinkingTitle(p.reasoning);
-      if (title !== null) return title;
-    }
-    if (p.finishedAt !== null || loading) {
-      const ms: number = reasoningDurationMs(p.createdAt, p.finishedAt, loading, Date.now());
-      return formatThoughtSeconds(ms / 1000);
-    }
-    return '深度思考';
+  // groupMessageParts 分组结果(每次 build 重算,题量小)
+  private getBlocks(): MessagePartBlock[] {
+    return groupMessageParts(this.message.parts);
   }
 
   build() {
     Column() {
       Text(this.message.role === 'user' ? '我' : '助手')
         .fontSize(11).fontColor(INK3).margin({ bottom: 4 })
-      ForEach(this.message.parts, (p: UIMessagePart, i: number): void => {
-        if (p.type === 'text') {
-          Text(p.text)
-            .fontSize(15).fontColor(INK)
-            .padding(10)
-            .backgroundColor(this.message.role === 'user' ? SURFACE2 : SURFACE)
-            .borderRadius(8)
-            .margin({ bottom: 4 })
-        } else if (p.type === 'image') {
-          // D-038:data: / http(s): / file:// 直渲(ArkUI Image 支持 data: URL;
-          //   真机验证见 Spike C 登记项)
-          Image(p.url)
-            .width(160)
-            .objectFit(ImageFit.Cover)
-            .borderRadius(8)
-            .margin({ bottom: 4 })
-        } else if (p.type === 'reasoning') {
-          // D-053:reasoning 卡片(ChatMessageReasoning.kt 全文语义)—
-          //   头(脑图标+title/秒数/深度思考+展开箭头)可点切换;
-          //   collapsed 仅头;preview 1600 字尾窗(5 行截断,Android 100dp
-          //   滚动窗裁剪登记 Spike C);expanded 18000 字尾窗全文;
-          //   2dp 左竖线+14dp 缩进(:244-256)
-          Column() {
-            Row() {
-              Text('🧠').fontSize(12)
-              Text(this.reasoningHeader(p as UIMessagePartReasoning))
-                .fontSize(12).fontColor(ACCENT)
-                .margin({ left: 6 })
-                .layoutWeight(1)
-              Text(this.reasoningStateAt(i) === 'expanded' ? '▾' : '▸')
-                .fontSize(11).fontColor(INK3)
-            }
-            .width('100%')
-            .padding({ left: 2, top: 6, bottom: 6 })
-            .onClick((): void => {
-              this.toggleReasoning(i, this.reasoningLoading(p as UIMessagePartReasoning));
-            })
-            if (this.reasoningStateAt(i) === 'preview') {
-              Text(toDisplayReasoningText((p as UIMessagePartReasoning).reasoning,
-                this.reasoningLoading(p as UIMessagePartReasoning), false))
-                .fontSize(13).fontColor(INK2)
-                .maxLines(5)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-                .padding({ left: 14, top: 2, bottom: 2 })
-                .border({ width: { left: 2 }, color: { left: '#D8D2C6' } })
-            } else if (this.reasoningStateAt(i) === 'expanded') {
-              Text(toDisplayReasoningText((p as UIMessagePartReasoning).reasoning,
-                this.reasoningLoading(p as UIMessagePartReasoning), true))
-                .fontSize(13).fontColor(INK2)
-                .width('100%')
-                .padding({ left: 14, top: 2, bottom: 2 })
-                .border({ width: { left: 2 }, color: { left: '#D8D2C6' } })
-            }
-          }
-          .width('100%')
-          .margin({ bottom: 4 })
-        } else if (p.type === 'tool') {
-          // D-057:工具卡片 MVP(Android ChatMessageTool 子集)— 名称 + 状态;
-          //   pending → 批准/拒绝按钮(ChatPage 工具审批门);
-          //   已执行 → 首条 output 文本 3 行预览(完整卡片视觉 = P1)
-          Column() {
-            Row() {
-              Text(`工具:${(p as UIMessagePartTool).toolName}`)
-                .fontSize(11).fontColor(ACCENT)
-                .layoutWeight(1)
-              Text(this.toolStateLabel(p as UIMessagePartTool))
-                .fontSize(10).fontColor(INK3)
-            }
-            .width('100%')
-            if ((p as UIMessagePartTool).toolName === ASK_USER_TOOL_NAME) {
-              // ===== D-105:ask_user 问题卡片(ChatMessageAskUserStep.kt:127-374 子集) =====
-              //   标题:单题 → 首题文案;多题 → '询问 N 个问题'(zh 逐字)
-              Text(this.askHeading(this.askQuestionsOf(p as UIMessagePartTool)))
-                .fontSize(12).fontColor(ACCENT).fontWeight(FontWeight.Medium)
-                .width('100%').margin({ top: 4 })
-              ForEach(this.askQuestionsOf(p as UIMessagePartTool),
-                (q: AskUserQuestion, qi: number) => {
-                  Column() {
-                    if (qi > 0) {
-                      // :149-152 题间 hairline
-                      Divider().color(LINE).strokeWidth(1).margin({ top: 6, bottom: 2 })
-                    }
-                    Text(q.question)
-                      .fontSize(12).fontColor(INK)
-                      .width('100%').margin({ top: qi > 0 ? 0 : 4 })
-                    if ((p as UIMessagePartTool).approvalState.type === 'pending') {
-                      // :163-243 pending + onToolAnswer → 输入面
-                      if (q.options.length > 0) {
-                        // single/multi/text+options 均渲染选项 chips(FlowRow → Flex wrap)
-                        Flex({ wrap: FlexWrap.Wrap }) {
-                          ForEach(q.options, (opt: string) => {
-                            Text(opt)
-                              .fontSize(11)
-                              .fontColor(
-                                (q.selectionType === 'multi'
-                                  ? this.askMultiAt(q.id).indexOf(opt) >= 0
-                                  : this.askAnswerAt(q.id) === opt) ? '#FFFFFF' : INK2)
-                              .padding({ left: 12, right: 12, top: 5, bottom: 5 })
-                              .margin({ right: 6, top: 4 })
-                              .borderRadius(999)
-                              .backgroundColor(
-                                (q.selectionType === 'multi'
-                                  ? this.askMultiAt(q.id).indexOf(opt) >= 0
-                                  : this.askAnswerAt(q.id) === opt) ? ACCENT : SURFACE2)
-                              .border({
-                                width: (q.selectionType === 'multi'
-                                  ? this.askMultiAt(q.id).indexOf(opt) >= 0
-                                  : this.askAnswerAt(q.id) === opt) ? 0 : 1,
-                                color: LINE,
-                              })
-                              .onClick((): void => {
-                                if (q.selectionType === 'multi') {
-                                  this.toggleAskMulti(q.id, opt);
-                                } else {
-                                  this.setAskAnswer(q.id, opt);
-                                }
-                              })
-                          }, (opt: string): string => opt)
-                        }
-                        .width('100%')
-                      }
-                      if (q.selectionType !== 'single' && q.selectionType !== 'multi') {
-                        // :219-241 text 类型 → 自由文本框('在此输入回答…' 逐字)
-                        TextArea({ placeholder: '在此输入回答…', text: this.askAnswerAt(q.id) })
-                          .width('100%').height(64).fontSize(12).fontColor(INK)
-                          .backgroundColor(SURFACE).borderRadius(10)
-                          .margin({ top: 6 })
-                          .onChange((v: string): void => {
-                            this.setAskAnswer(q.id, v);
-                          })
-                      }
-                    } else if ((p as UIMessagePartTool).approvalState.type === 'answered') {
-                      // :244-288 已应答 → 'A' 标记 + 展示文本
-                      Row() {
-                        Text('A')
-                          .fontSize(10).fontColor(ACCENT)
-                          .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                          .backgroundColor('#1FB8623A')
-                          .borderRadius(4)
-                        Text(this.askAnsweredText(p as UIMessagePartTool, q.id))
-                          .fontSize(12).fontColor(INK)
-                          .layoutWeight(1)
-                      }
-                      .width('100%')
-                      .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-                      .margin({ top: 4 })
-                      .backgroundColor(SURFACE2)
-                      .borderRadius(8)
-                      .border({ width: 1, color: LINE })
-                    }
-                  }
-                  .width('100%').alignItems(HorizontalAlign.Start)
+      // 阶段 A 接入:用 groupMessageParts 分组渲染,而非直接遍历 parts。
+      //   ThinkingBlock → 连续 reasoning+tool 折叠为一组;
+      //   ContentBlock → text/image/video/audio/document/mini_app;
+      //   SubAgentBlock/CouncilBlock → 占位卡片(完整 UI 后续梯队)。
+      //   reasoning 状态索引仍用原始 part index(通过 ContentBlock.index 或
+      //   ThinkingBlock 内 step 遍历时累加获得)。
+      ForEach(this.getBlocks(), (block: MessagePartBlock, bi: number): void => {
+        if (block.kind === 'thinking') {
+          ForEach(block.steps, (step: ThinkingStep, si: number): void => {
+            if (step.kind === 'reasoning') {
+              ChatMessageReasoning({
+                part: step.reasoning,
+                state: this.reasoningStateAt(`${bi}-${si}`),
+                loading: this.reasoningLoading(step.reasoning),
+                onToggle: (): void => {
+                  this.toggleReasoning(`${bi}-${si}`, this.reasoningLoading(step.reasoning));
                 },
-                (q: AskUserQuestion, qi: number): string => `${qi}:${q.id}`)
-              if ((p as UIMessagePartTool).approvalState.type === 'pending') {
-                // :293-374 操作行:清空(任一已答时)+ 提交(全部可答使能)
-                Row() {
-                  Blank()
-                  if (hasAnyAskAnswer(this.askAnswers, this.askMultiAnswers)) {
-                    Text('清空')
-                      .fontSize(11).fontColor(INK3)
-                      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-                      .onClick((): void => {
-                        this.clearAskDrafts();
-                      })
-                  }
-                  Text('提交')
-                    .fontSize(12).fontWeight(FontWeight.Medium)
-                    .fontColor(isAskUserSubmittable(this.askQuestionsOf(p as UIMessagePartTool),
-                      this.askAnswers, this.askMultiAnswers) ? '#FFFFFF' : INK3)
-                    .padding({ left: 16, right: 16, top: 6, bottom: 6 })
-                    .margin({ left: 8 })
-                    .borderRadius(999)
-                    .backgroundColor(isAskUserSubmittable(this.askQuestionsOf(p as UIMessagePartTool),
-                      this.askAnswers, this.askMultiAnswers) ? ACCENT : LINE)
-                    .onClick((): void => {
-                      if (isAskUserSubmittable(this.askQuestionsOf(p as UIMessagePartTool),
-                        this.askAnswers, this.askMultiAnswers)) {
-                        this.submitAskAnswers(p as UIMessagePartTool);
-                      }
-                    })
-                }
-                .width('100%').margin({ top: 8 })
+              })
+            } else if (step.kind === 'tool') {
+              if (step.tool.toolName === ASK_USER_TOOL_NAME) {
+                ChatMessageAskUserStep({
+                  part: step.tool,
+                  answers: this.askAnswers,
+                  multiAnswers: this.askMultiAnswers,
+                  onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
+                    this.submitAskAnswers(step.tool);
+                  },
+                  onAnswer: (qid: string, value: string): void => {
+                    this.setAskAnswer(qid, value);
+                  },
+                  onToggleMulti: (qid: string, opt: string): void => {
+                    this.toggleAskMulti(qid, opt);
+                  },
+                  onClear: (): void => {
+                    this.clearAskDrafts();
+                  },
+                })
+              } else {
+                ChatMessageTools({
+                  part: step.tool,
+                  onApprove: (toolCallId: string): void => {
+                    this.onApproveTool(toolCallId);
+                  },
+                  onDeny: (toolCallId: string): void => {
+                    this.onDenyTool(toolCallId);
+                  },
+                  deniedLabel: step.tool.approvalState.type === 'denied'
+                    ? this.deniedLabel(step.tool) : '',
+                })
               }
-            } else if ((p as UIMessagePartTool).approvalState.type === 'pending') {
-              Row() {
-                Text('批准')
-                  .fontSize(12).fontColor(ACCENT)
-                  .padding({ left: 12, right: 12, top: 4, bottom: 4 })
-                  .onClick((): void => {
-                    this.onApproveTool((p as UIMessagePartTool).toolCallId);
-                  })
-                Text('拒绝')
-                  .fontSize(12).fontColor(INK2)
-                  .padding({ left: 12, right: 12, top: 4, bottom: 4 })
-                  .margin({ left: 8 })
-                  .onClick((): void => {
-                    this.onDenyTool((p as UIMessagePartTool).toolCallId);
-                  })
+            }
+          }, (step: ThinkingStep, si: number): string => `${bi}-${si}-${step.kind}`)
+        } else if (block.kind === 'content') {
+          if (block.part.type === 'text') {
+            if (this.message.role === 'user') {
+              Text(block.part.text)
+                .fontSize(15).fontColor(INK)
+                .padding(10)
+                .backgroundColor(SURFACE2)
+                .borderRadius(8)
+                .margin({ bottom: 4 })
+            } else {
+              Column() {
+                MarkdownRichText({ content: block.part.text, fontSize: 15, fontColor: INK })
               }
-              .margin({ top: 4 })
+              .padding(10)
+              .backgroundColor(SURFACE)
+              .borderRadius(8)
+              .margin({ bottom: 4 })
             }
-            if ((p as UIMessagePartTool).toolName !== ASK_USER_TOOL_NAME
-              && (p as UIMessagePartTool).approvalState.type === 'denied') {
-              // D-108:已拒绝原因展示(:952-960;ask_user 卡早退不渲染,:676-679)
-              Text(this.deniedLabel(p as UIMessagePartTool))
-                .fontSize(11).fontColor('#B43A3A')
-                .width('100%').margin({ top: 4 })
-            }
-            if ((p as UIMessagePartTool).output.length > 0
-              && (p as UIMessagePartTool).output[0].type === 'text') {
-              Text(((p as UIMessagePartTool).output[0] as UIMessagePartText).text)
-                .fontSize(11).fontColor(INK2)
-                .maxLines(3)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-                .margin({ top: 4 })
-            }
+          } else if (block.part.type === 'image') {
+            Image(block.part.url)
+              .width(160)
+              .objectFit(ImageFit.Cover)
+              .borderRadius(8)
+              .margin({ bottom: 4 })
+          } else if (block.part.type === 'video') {
+            Text('[视频]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+          } else if (block.part.type === 'audio') {
+            Text('[音频]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+          } else if (block.part.type === 'document') {
+            Text('[文档]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+          } else if (block.part.type === 'mini_app') {
+            Text('[MiniApp]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
           }
-          .width('100%')
-          .padding({ left: 8, right: 8, top: 6, bottom: 6 })
-          .backgroundColor(SURFACE2)
-          .borderRadius(6)
-          .margin({ bottom: 4 })
+        } else if (block.kind === 'subagent') {
+          Text(`[子代理任务: ${block.step.runId}]`).fontSize(11).fontColor(INK3)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(SURFACE2).borderRadius(6).margin({ bottom: 4 })
+        } else if (block.kind === 'council') {
+          Text(`[Model Council: ${block.step.runId}]`).fontSize(11).fontColor(INK3)
+            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+            .backgroundColor(SURFACE2).borderRadius(6).margin({ bottom: 4 })
         }
-      }, partKey)
+      }, (block: MessagePartBlock, bi: number): string => `block-${bi}-${block.kind}`)
       if ((this.isAssistant && (this.branchCount > 1 || this.isLastAssistant))
         || this.message.role === 'user') {
         Row() {

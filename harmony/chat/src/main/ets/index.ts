@@ -997,3 +997,12 @@ export {
   cronExpressionParse, cronNextRunAfter, cronIsValidZoneId, cronSystemZoneId,
   makeAgentCronTask,
 } from './chat/agent_cron.ts';
+
+// ===== 阶段 A:消息 parts 分组与折叠纯逻辑(audit 1.4, ChatMessageCot.kt 全文) =====
+export type {
+  ThinkingStep, MessagePartBlock, SubAgentTaskStep, CouncilTaskStep,
+} from './chat/message_grouping.ts';
+export { groupMessageParts } from './chat/message_grouping.ts';
+
+// ===== 阶段 B:Markdown→HTML 转换器(audit 1.1, ArkUI RichText + HTML 路径) =====
+export { markdownToHtml } from './chat/markdown_html.ts';
