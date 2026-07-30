@@ -513,12 +513,30 @@ struct ChatToolStepModel: Identifiable {
         return nil
     }
 
-    private static func ishHandoffResultSummary(from output: [UIMessagePart]) -> String? {
-        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
-        guard let data = text.data(using: .utf8),
-              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            return nil
+    /// S5 (`IOSToolLoopGuard.proceedAndRemind`) appends a *separate* plain-text
+    /// reminder Text part after the tool's real JSON output (see
+    /// `appendingToolLoopReminder`), so joining every Text part with "\n" and
+    /// parsing the combined string as one JSON object breaks the moment a
+    /// reminder is present — the tool's own JSON is still valid on its own,
+    /// but "json\nreminder sentence" as a whole is not, so every summary/
+    /// failure-detection helper built on that join-then-parse pattern silently
+    /// stopped recognizing a valid result (or a failure) once a reminder was
+    /// attached. Parse each Text part independently instead and take the
+    /// first one that decodes as a JSON object — behavior is unchanged for
+    /// the common single-JSON-part case, and robust to "JSON + appended text".
+    static func firstJSONObject(in parts: [UIMessagePart]) -> [String: Any]? {
+        for text in parts.compactMap({ ($0 as? UIMessagePart.Text)?.text }) {
+            guard let data = text.data(using: .utf8),
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+                continue
+            }
+            return object
         }
+        return nil
+    }
+
+    private static func ishHandoffResultSummary(from output: [UIMessagePart]) -> String? {
+        guard let object = firstJSONObject(in: output) else { return nil }
         if let ok = object["ok"] as? Bool, !ok {
             return (object["error"] as? String) ?? (object["reason"] as? String) ?? "交接失败"
         }
@@ -528,11 +546,7 @@ struct ChatToolStepModel: Identifiable {
     }
 
     private static func ishExecuteResultSummary(from output: [UIMessagePart]) -> String? {
-        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
-        guard let data = text.data(using: .utf8),
-              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            return nil
-        }
+        guard let object = firstJSONObject(in: output) else { return nil }
         if let ok = object["ok"] as? Bool, !ok {
             return (object["error"] as? String)?.nilIfBlank
                 ?? (object["stderr"] as? String)?.nilIfBlank
@@ -547,11 +561,7 @@ struct ChatToolStepModel: Identifiable {
     }
 
     private static func ishToolResultIndicatesFailure(_ output: [UIMessagePart]) -> Bool {
-        let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
-        guard let data = text.data(using: .utf8),
-              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            return false
-        }
+        guard let object = firstJSONObject(in: output) else { return false }
         if let ok = object["ok"] as? Bool { return !ok }
         if let denied = object["denied"] as? Bool, denied { return true }
         if let status = object["status"] as? String {
@@ -598,8 +608,7 @@ struct ChatToolStepModel: Identifiable {
     private static func workspaceResultSummary(from output: [UIMessagePart]) -> String? {
         let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
         guard !text.isEmpty else { return "已返回 Workspace 结果" }
-        guard let data = text.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let object = firstJSONObject(in: output) else {
             return String(text.prefix(160))
         }
         if object["denied"] as? Bool == true {
@@ -620,8 +629,7 @@ struct ChatToolStepModel: Identifiable {
     private static func webMountResultSummary(from output: [UIMessagePart]) -> String? {
         let text = output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(separator: "\n")
         guard !text.isEmpty else { return "已返回 WebMount 结果" }
-        guard let data = text.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let object = firstJSONObject(in: output) else {
             return String(IOSWebMountRedactor.redactedText(text).prefix(160))
         }
         if object["denied"] as? Bool == true {

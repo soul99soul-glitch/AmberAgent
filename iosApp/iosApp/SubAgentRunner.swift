@@ -339,6 +339,12 @@ final class SubAgentRunner {
             } else if let providerFailure = value.providerFailureMessage {
                 mappedStatus = .failed
                 terminalError = providerFailure
+            } else if value.guardStopped {
+                // I-5: the engine detected the model repeating an identical
+                // tool call and stopped the run. Must not fall through to
+                // `.completed` — that would disguise a stuck loop as success.
+                mappedStatus = .failed
+                terminalError = "SubAgent stopped: the model repeated the same tool call with identical arguments."
             } else if value.hitStepLimit {
                 mappedStatus = .failed
                 terminalError = "SubAgent reached its maximum turn budget."
@@ -390,6 +396,7 @@ final class SubAgentRunner {
                 "steps_executed": "\(result?.stepsExecuted ?? 0)",
                 "report_captured": "\(reportCapture.captured != nil)",
                 "hit_step_limit": "\(result?.hitStepLimit ?? false)",
+                "guard_stopped": "\(result?.guardStopped ?? false)",
                 "was_cancelled": "\(result?.wasCancelled ?? (mappedStatus == .cancelled))"
             ]
         )

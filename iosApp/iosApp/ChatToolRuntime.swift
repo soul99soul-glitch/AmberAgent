@@ -155,8 +155,9 @@ final class ChatToolRuntime {
         runId: String
     ) -> [String: any IOSToolExecutor] {
         var executors: [String: any IOSToolExecutor] = [:]
+        let availableToolNames = Set(params.tools.map(\.name))
 
-        for name in IOSSearchExecutor.supportedToolNames {
+        for name in IOSSearchExecutor.supportedToolNames where availableToolNames.contains(name) {
             executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
                 guard let self else { return .failed("Chat runtime is unavailable.") }
                 guard self.shouldExecuteSearchInBackground(toolName: toolName, arguments: arguments) else {
@@ -167,7 +168,7 @@ final class ChatToolRuntime {
         }
 
         if localToolExecutor != nil {
-            for name in IOSWorkspaceToolCatalog.supportedToolNames {
+            for name in IOSWorkspaceToolCatalog.supportedToolNames where availableToolNames.contains(name) {
                 executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
                     guard let self else { return .failed("Chat runtime is unavailable.") }
                     let toolCall = self.toolCall(name: toolName, input: arguments)
@@ -179,7 +180,8 @@ final class ChatToolRuntime {
                 }
             }
 
-            for name in IOSIshToolCatalog.supportedToolNames.union(IOSEmbeddedIshToolCatalog.supportedToolNames) {
+            for name in IOSIshToolCatalog.supportedToolNames.union(IOSEmbeddedIshToolCatalog.supportedToolNames)
+            where availableToolNames.contains(name) {
                 executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
                     guard let self else { return .failed("Chat runtime is unavailable.") }
                     let toolCall = self.toolCall(name: toolName, input: arguments)
@@ -193,7 +195,8 @@ final class ChatToolRuntime {
         }
 
         if isWebMountRuntimeEnabled {
-            for name in IOSWebMountToolCatalog.supportedToolNames.union(IOSWebMountToolCatalog.unsupportedToolNames) {
+            for name in IOSWebMountToolCatalog.supportedToolNames.union(IOSWebMountToolCatalog.unsupportedToolNames)
+            where availableToolNames.contains(name) {
                 executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
                     guard let self else { return .failed("Chat runtime is unavailable.") }
                     let toolCall = self.toolCall(name: toolName, input: arguments)
@@ -206,18 +209,22 @@ final class ChatToolRuntime {
             }
         }
 
-        executors["memory_tool"] = IOSClosureToolExecutor { [weak self] _, arguments, _ in
-            guard let self else { return .failed("Chat runtime is unavailable.") }
-            let policy = self.memoryToolWritePolicy(input: arguments, isUserInitiated: false)
-            if case .needsUserAction(let reason) = policy {
-                return .denied("后台生成期间需要回到 App 确认记忆写入：\(reason)")
+        if availableToolNames.contains("memory_tool") {
+            executors["memory_tool"] = IOSClosureToolExecutor { [weak self] _, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                let policy = self.memoryToolWritePolicy(input: arguments, isUserInitiated: false)
+                if case .needsUserAction(let reason) = policy {
+                    return .denied("后台生成期间需要回到 App 确认记忆写入：\(reason)")
+                }
+                return .filled(self.dispatchMemoryToolCall(self.toolCall(name: "memory_tool", input: arguments), writePolicy: policy))
             }
-            return .filled(self.dispatchMemoryToolCall(self.toolCall(name: "memory_tool", input: arguments), writePolicy: policy))
         }
 
-        executors["generate_image"] = IOSClosureToolExecutor { [weak self] _, arguments, _ in
-            guard let self else { return .failed("Chat runtime is unavailable.") }
-            return .filledParts(await self.dispatchImageToolCall(self.toolCall(name: "generate_image", input: arguments)))
+        if availableToolNames.contains("generate_image") {
+            executors["generate_image"] = IOSClosureToolExecutor { [weak self] _, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                return .filledParts(await self.dispatchImageToolCall(self.toolCall(name: "generate_image", input: arguments)))
+            }
         }
 
         // Advanced tools in background. The foreground approval UI cannot surface
@@ -236,78 +243,88 @@ final class ChatToolRuntime {
         //    background council would overrun the BGTask window and be force-killed,
         //    leaving an incomplete run. It also drives the council-room @Observable
         //    UI, which has no subscriber in background. Revert to foreground.
-        executors["subagent_dispatch"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
-            guard let self else { return .failed("Chat runtime is unavailable.") }
-            guard self.isAdvancedToolEnabled(toolName) else {
-                return .failed("\(toolName) 未开启。请先在设置中启用对应能力。")
+        if availableToolNames.contains("subagent_dispatch") {
+            executors["subagent_dispatch"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                guard self.isAdvancedToolEnabled(toolName) else {
+                    return .failed("\(toolName) 未开启。请先在设置中启用对应能力。")
+                }
+                let result = await self.dispatchAdvancedToolCall(
+                    self.toolCall(name: toolName, input: arguments),
+                    providerSetting: providerSetting,
+                    params: params,
+                    runId: runId
+                )
+                return .filled(result)
             }
-            let result = await self.dispatchAdvancedToolCall(
-                self.toolCall(name: toolName, input: arguments),
-                providerSetting: providerSetting,
-                params: params,
-                runId: runId
-            )
-            return .filled(result)
         }
 
-        executors["model_council_run"] = IOSClosureToolExecutor { _, _, _ in
-            .denied("模型委员会运行时间较长且依赖前台房间界面，请回到 App 内执行。")
+        if availableToolNames.contains("model_council_run") {
+            executors["model_council_run"] = IOSClosureToolExecutor { _, _, _ in
+                .denied("模型委员会运行时间较长且依赖前台房间界面，请回到 App 内执行。")
+            }
         }
 
         // ask_user is a foreground HITL node. Background cannot present the card or
         // Watch decision, so deny with an explicit return-to-app reason instead of
         // leaving the tool unregistered (engine would otherwise error-fill and continue).
-        executors["ask_user"] = IOSClosureToolExecutor { _, _, _ in
-            .denied("后台生成期间需要回到 App 回答问题。")
+        if availableToolNames.contains("ask_user") {
+            executors["ask_user"] = IOSClosureToolExecutor { _, _, _ in
+                .denied("后台生成期间需要回到 App 回答问题。")
+            }
         }
 
-        executors["mcp_call"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
-            guard let self else { return .failed("Chat runtime is unavailable.") }
-            // High-risk gate mirrors the foreground path (executeAdvancedToolCall):
-            // MCP may touch external services, so only auto-run when the high-risk
-            // auto-approve switch is on. Otherwise deny so the user returns to confirm.
-            guard IOSLocalToolExecutor.isHighRiskAutoApproveEnabled else {
-                return .denied("后台生成期间需要回到 App 确认 MCP 工具。")
+        if availableToolNames.contains("mcp_call") {
+            executors["mcp_call"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                // High-risk gate mirrors the foreground path (executeAdvancedToolCall):
+                // MCP may touch external services, so only auto-run when the high-risk
+                // auto-approve switch is on. Otherwise deny so the user returns to confirm.
+                guard IOSLocalToolExecutor.isHighRiskAutoApproveEnabled else {
+                    return .denied("后台生成期间需要回到 App 确认 MCP 工具。")
+                }
+                guard self.isAdvancedToolEnabled(toolName) else {
+                    return .failed("\(toolName) 未开启。请先在设置中启用对应能力。")
+                }
+                let result = await self.dispatchAdvancedToolCall(
+                    self.toolCall(name: toolName, input: arguments),
+                    providerSetting: providerSetting,
+                    params: params,
+                    runId: runId
+                )
+                return .filled(result)
             }
-            guard self.isAdvancedToolEnabled(toolName) else {
-                return .failed("\(toolName) 未开启。请先在设置中启用对应能力。")
-            }
-            let result = await self.dispatchAdvancedToolCall(
-                self.toolCall(name: toolName, input: arguments),
-                providerSetting: providerSetting,
-                params: params,
-                runId: runId
-            )
-            return .filled(result)
         }
 
         return executors
     }
 
-    func nextPendingToolCall(in messages: [UIMessage]) -> ChatPendingToolCall? {
-        if sharedSettings.snapshot.enableWebSearch,
-           let toolCall = pendingSearchToolCall(in: messages) {
+    func nextPendingToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> ChatPendingToolCall? {
+        if let toolCall = pendingSearchToolCall(in: messages, availableToolNames: availableToolNames) {
             return ChatPendingToolCall(kind: .search, toolCall: toolCall)
         }
-        if let toolCall = pendingWorkspaceToolCall(in: messages) {
+        if let toolCall = pendingWorkspaceToolCall(in: messages, availableToolNames: availableToolNames) {
             return ChatPendingToolCall(kind: .workspace, toolCall: toolCall)
         }
-        if let toolCall = pendingIshToolCall(in: messages) {
+        if let toolCall = pendingIshToolCall(in: messages, availableToolNames: availableToolNames) {
             return ChatPendingToolCall(kind: .ish, toolCall: toolCall)
         }
-        if let toolCall = pendingWebMountToolCall(in: messages) {
+        if let toolCall = pendingWebMountToolCall(in: messages, availableToolNames: availableToolNames) {
             return ChatPendingToolCall(kind: .webMount, toolCall: toolCall)
         }
-        if let toolCall = pendingMemoryToolCall(in: messages) {
+        if let toolCall = pendingMemoryToolCall(in: messages, availableToolNames: availableToolNames) {
             return ChatPendingToolCall(kind: .memory, toolCall: toolCall)
         }
-        if let toolCall = pendingImageToolCall(in: messages) {
+        if let toolCall = pendingImageToolCall(in: messages, availableToolNames: availableToolNames) {
             return ChatPendingToolCall(kind: .image, toolCall: toolCall)
         }
-        if let toolCall = pendingAskUserToolCall(in: messages) {
+        if let toolCall = pendingAskUserToolCall(in: messages, availableToolNames: availableToolNames) {
             return ChatPendingToolCall(kind: .askUser, toolCall: toolCall)
         }
-        if let toolCall = pendingAdvancedToolCall(in: messages) {
+        if let toolCall = pendingAdvancedToolCall(in: messages, availableToolNames: availableToolNames) {
             return ChatPendingToolCall(kind: .advanced, toolCall: toolCall)
         }
         return nil
@@ -321,6 +338,25 @@ final class ChatToolRuntime {
         _ pendingToolCall: ChatPendingToolCall,
         context: ChatPendingToolApproval
     ) async -> ChatToolRuntimeResult {
+        // I-2 fail-closed: gate every kind on the same check before it reaches its
+        // own dispatch* function, all of which read `context.toolCall.input`
+        // directly. A gateway that double-writes a call, truncates one mid
+        // argument, or a model that emits bare non-JSON text must not run with
+        // silently wrong (not absent) arguments — see `parseInputStrict()`. This
+        // does not execute the tool; it resolves it in place with a structured
+        // error and lets the existing resume path hand that back to the model.
+        if let invalid = context.toolCall.parseInputStrict() as? ToolInputParse.Invalid {
+            let resolvedMessages = messagesByFinishingToolCall(
+                context.toolCall,
+                outputText: ChatToolOutputFormatter.toolArgumentsInvalidJSON(
+                    toolName: context.toolCall.toolName,
+                    message: invalid.message,
+                    rawPrefix: invalid.rawPrefix
+                ),
+                in: context.baseMessages
+            )
+            return .completed(resolvedMessages)
+        }
         switch pendingToolCall.kind {
         case .search:
             return await executeSearchToolCall(context)
@@ -674,68 +710,109 @@ final class ChatToolRuntime {
         return nil
     }
 
-    private func pendingSearchToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+    private func pendingSearchToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> UIMessagePart.Tool? {
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { IOSSearchExecutor.supportedToolNames.contains($0.toolName) && $0.output.isEmpty }) {
+                .first(where: {
+                    IOSSearchExecutor.supportedToolNames.contains($0.toolName)
+                        && availableToolNames.contains($0.toolName)
+                        && $0.output.isEmpty
+                }) {
                 return toolCall
             }
         }
         return nil
     }
 
-    private func pendingWorkspaceToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+    private func pendingWorkspaceToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> UIMessagePart.Tool? {
         guard localToolExecutor != nil else { return nil }
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { IOSWorkspaceToolCatalog.supportedToolNames.contains($0.toolName) && $0.output.isEmpty }) {
+                .first(where: {
+                    IOSWorkspaceToolCatalog.supportedToolNames.contains($0.toolName)
+                        && availableToolNames.contains($0.toolName)
+                        && $0.output.isEmpty
+                }) {
                 return toolCall
             }
         }
         return nil
     }
 
-    private func pendingIshToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+    private func pendingIshToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> UIMessagePart.Tool? {
         guard localToolExecutor != nil else { return nil }
         let ishNames = IOSIshToolCatalog.supportedToolNames
             .union(IOSEmbeddedIshToolCatalog.supportedToolNames)
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { ishNames.contains($0.toolName) && $0.output.isEmpty }) {
+                .first(where: {
+                    ishNames.contains($0.toolName)
+                        && availableToolNames.contains($0.toolName)
+                        && $0.output.isEmpty
+                }) {
                 return toolCall
             }
         }
         return nil
     }
 
-    private func pendingWebMountToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+    private func pendingWebMountToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> UIMessagePart.Tool? {
         guard isWebMountRuntimeEnabled else { return nil }
         let webMountNames = IOSWebMountToolCatalog.supportedToolNames
             .union(IOSWebMountToolCatalog.unsupportedToolNames)
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { webMountNames.contains($0.toolName) && $0.output.isEmpty }) {
+                .first(where: {
+                    webMountNames.contains($0.toolName)
+                        && availableToolNames.contains($0.toolName)
+                        && $0.output.isEmpty
+                }) {
                 return toolCall
             }
         }
         return nil
     }
 
-    private func pendingMemoryToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
-        guard IOSMemoryToolExecutor.isEnabled(runtime: sharedSettings.agentRuntime) else { return nil }
+    private func pendingMemoryToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> UIMessagePart.Tool? {
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { $0.toolName == "memory_tool" && $0.output.isEmpty }) {
+                .first(where: {
+                    $0.toolName == "memory_tool"
+                        && availableToolNames.contains($0.toolName)
+                        && $0.output.isEmpty
+                }) {
                 return toolCall
             }
         }
         return nil
     }
 
-    private func pendingImageToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+    private func pendingImageToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> UIMessagePart.Tool? {
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { $0.toolName == "generate_image" && $0.output.isEmpty }) {
+                .first(where: {
+                    $0.toolName == "generate_image"
+                        && availableToolNames.contains($0.toolName)
+                        && $0.output.isEmpty
+                }) {
                 return toolCall
             }
         }
@@ -772,10 +849,17 @@ final class ChatToolRuntime {
         return .signedIn(providerId: providerId)
     }
 
-    private func pendingAskUserToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+    private func pendingAskUserToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> UIMessagePart.Tool? {
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { $0.toolName == "ask_user" && $0.output.isEmpty }) {
+                .first(where: {
+                    $0.toolName == "ask_user"
+                        && availableToolNames.contains($0.toolName)
+                        && $0.output.isEmpty
+                }) {
                 return toolCall
             }
         }
@@ -793,11 +877,18 @@ final class ChatToolRuntime {
         ))
     }
 
-    private func pendingAdvancedToolCall(in messages: [UIMessage]) -> UIMessagePart.Tool? {
+    private func pendingAdvancedToolCall(
+        in messages: [UIMessage],
+        availableToolNames: Set<String>
+    ) -> UIMessagePart.Tool? {
         let advancedNames: Set<String> = ["mcp_call", "subagent_dispatch", "model_council_run"]
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: { advancedNames.contains($0.toolName) && $0.output.isEmpty }) {
+                .first(where: {
+                    advancedNames.contains($0.toolName)
+                        && availableToolNames.contains($0.toolName)
+                        && $0.output.isEmpty
+                }) {
                 return toolCall
             }
         }
@@ -938,12 +1029,6 @@ final class ChatToolRuntime {
     }
 
     private func dispatchSearchToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
-        guard sharedSettings.snapshot.enableWebSearch else {
-            return ChatToolOutputFormatter.toolFailureJSON(
-                toolName: toolCall.toolName,
-                reason: "Web search is disabled in settings."
-            )
-        }
         do {
             if toolCall.toolName == "search_web" {
                 return try await executeSearchWebWithFallback(toolCall)

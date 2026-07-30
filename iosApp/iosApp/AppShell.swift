@@ -154,30 +154,48 @@ struct AppShell: View {
             // 启动时引导会话存储：加载历史摘要，选最近一条或新建。
             // run recovery 不是幂等操作；在任务的第一个 await 前占位，避免 .task
             // 重启时把本进程正在运行的前台 run 改写为 interrupted。
-            var recoveredPendingApprovals: [IOSPendingApprovalRecoveryDescriptor] = []
             if !didRunStartupRecovery {
                 didRunStartupRecovery = true
                 let interruptedCouncilTaskIds = IOSAdvancedTaskStore.shared.markInterruptedCouncilTasks()
                 CouncilRoomArchiveStore.shared.markInterrupted(taskIds: interruptedCouncilTaskIds)
                 councilChatViewModel.recoverInterruptedTasks(interruptedCouncilTaskIds)
                 let backgroundRunIds = IOSChatBackgroundGenerationCoordinator.shared.restorableRunIds
-                recoveredPendingApprovals = await IOSRunRecovery.recoverPendingApprovalDescriptors(
+                let recoveredPendingApprovals = await IOSRunRecovery.recoverPendingApprovalDescriptors(
                     excludingRunIds: backgroundRunIds
                 )
-                let pendingApprovalRunIds = Set(recoveredPendingApprovals.map(\.runId))
-                _ = await IOSRunRecovery.recoverInterruptedRuns(
-                    excludingRunIds: backgroundRunIds.union(pendingApprovalRunIds)
-                )
+                await conversationStore.bootstrap()
+                didBootstrapConversations = true
+
+                // A failed approval-owner query makes it unsafe to classify any
+                // unfinished run: an awaiting approval could otherwise be swept
+                // as an ordinary interruption with its tool output still empty.
+                if let recoveredPendingApprovals {
+                    await chatViewModel.terminateRecoveredPendingApprovals(recoveredPendingApprovals)
+                    let pendingApprovalRunIds = Set(recoveredPendingApprovals.map(\.runId))
+                    let excludedFromInterrupted = backgroundRunIds.union(pendingApprovalRunIds)
+                    if let interruptedRunConversationPairs = await IOSRunRecovery.unfinishedRunConversationPairs(
+                        excludingRunIds: excludedFromInterrupted
+                    ) {
+                        let reconciledRunIds = await chatViewModel.applyToolCallLedgerRecovery(
+                            forInterruptedRuns: interruptedRunConversationPairs
+                        )
+                        let unreconciledRunIds = Set(interruptedRunConversationPairs.map(\.runId))
+                            .subtracting(reconciledRunIds)
+                        _ = await IOSRunRecovery.recoverInterruptedRuns(
+                            excludingRunIds: excludedFromInterrupted.union(unreconciledRunIds)
+                        )
+                    }
+                }
                 AgentLiveActivityController.shared.restoreExistingActivity(
                     ownedRunIds: backgroundRunIds
                 )
                 // 冷启动路径：scenePhase 的 .active 变化不保证会触发 onChange，
                 // 这里补一次。重投本身幂等，重复调用不会起两轮。
                 IOSChatBackgroundGenerationCoordinator.shared.resumeSuspendedRunsIfNeeded()
+            } else {
+                await conversationStore.bootstrap()
+                didBootstrapConversations = true
             }
-            await conversationStore.bootstrap()
-            await chatViewModel.terminateRecoveredPendingApprovals(recoveredPendingApprovals)
-            didBootstrapConversations = true
             sharedSettings.repairCurrentChatModelIfNeeded(settingsStore)
             WatchTaskCoordinator.shared.attach(
                 chatViewModel: chatViewModel,

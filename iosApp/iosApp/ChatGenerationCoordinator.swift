@@ -123,8 +123,6 @@ final class ChatStreamEventSink: @unchecked Sendable {
         let continuation = continuation
         self.continuation = nil
         isFinished = true
-        pendingEvents.removeAll()
-        pendingEventHead = 0
         lock.unlock()
         continuation?.finish()
     }
@@ -407,6 +405,9 @@ final class ChatGenerationCoordinator {
         searchTransport: dependencies.searchTransport,
         mcpManager: dependencies.mcpManager
     )
+    // W1 durable ledger (I-1): Started/Finished bookkeeping for every tool
+    // execution on the foreground path, in the shared `agent_event` table.
+    private lazy var toolLedger: IOSAgentRunLedgering = IOSAgentRunLedger()
 
     private var streamJob: Kotlinx_coroutines_coreJob? {
         get { streamJobBox.job }
@@ -418,6 +419,13 @@ final class ChatGenerationCoordinator {
     private var currentInputDigest: String?
     private var currentConversationIdForRun: KotlinUuid?
     private var currentToolResumeCount = 0
+    /// I-4 冻结快照(`ChatRunSnapshot`):与 `currentRunId` 一起设置、一起清空,
+    /// run 内的压缩配置只从这里读,不再每轮 live 读 `dependencies.sharedSettings.snapshot`。
+    private var currentRunSnapshot: ChatRunSnapshot?
+    /// I-5 打转守护(`IOSToolLoopGuard`):与 `currentRunSnapshot` 同处赋值/清理,
+    /// 生命周期等于一个 run——审批续跑属于同一 run,不重置;run 结束/取消/交接
+    /// 后台时清空,避免下一个 run 继承上一个 run 的重复计数。
+    private var currentToolLoopGuard = IOSToolLoopGuard()
     private var currentLiveActivityStage: AgentActivityStage?
     private let maxToolResumeCount = 4
     private var pendingStreamSnapshot: [UIMessage]?
@@ -441,6 +449,18 @@ final class ChatGenerationCoordinator {
     private var pendingMcpToolApproval: ChatPendingToolApproval?
     private var pendingCouncilToolApproval: ChatPendingToolApproval?
     private var pendingAskUserToolApproval: ChatPendingToolApproval?
+    /// F8 fix: I-5's "proceed and remind" verdict is computed in
+    /// `executeToolCall` at the moment a tool call is ABOUT to be dispatched
+    /// for approval — before the user has answered. If the reminder is
+    /// dropped right there (as it used to be: the `.waitingForApproval`
+    /// branch discarded `loopGuardVerdict` entirely), all 8 approval-gated
+    /// tools degrade from "warn on the 2nd repeat, hard-stop on the 3rd" to
+    /// "hard-stop on the 3rd with no warning ever shown" — the model never
+    /// sees the reminder that would have let it self-correct before hitting
+    /// the stop. Keyed by toolCallId so it survives the wait-for-user gap;
+    /// consumed (and always removed, allow or deny) at each of the 8
+    /// approval-finishing call sites via `consumingPendingLoopReminder`.
+    private var pendingLoopReminders: [String: String] = [:]
     private var backgroundHandoff: IOSChatBackgroundHandoff?
     private weak var pendingBackgroundConversationStore: IOSConversationStore?
     private var foregroundToolExecutionTask: Task<ChatToolRuntimeResult, Never>?
@@ -496,6 +516,8 @@ final class ChatGenerationCoordinator {
         let runId = UUID().uuidString
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
         currentRunId = runId
+        currentRunSnapshot = ChatRunSnapshot(runId: runId, settings: dependencies.sharedSettings.snapshot)
+        currentToolLoopGuard = IOSToolLoopGuard()
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
         currentConversationIdForRun = conversationId
@@ -597,6 +619,12 @@ final class ChatGenerationCoordinator {
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
         let inputDigest = chatInputDigest(for: input)
         currentRunId = runId
+        // runImageTool 这条路不经过 prepareAndStartStreaming(没有压缩/多轮),但仍是
+        // 一个独立的 run 入口,同样按 I-4 定格一份快照,保持“currentRunId 有值时
+        // currentRunSnapshot 必然一致存在”这条不变量,不给未来接入压缩/续流的调用
+        // 留裂缝。
+        currentRunSnapshot = ChatRunSnapshot(runId: runId, settings: dependencies.sharedSettings.snapshot)
+        currentToolLoopGuard = IOSToolLoopGuard()
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
         currentConversationIdForRun = conversationId
@@ -635,9 +663,6 @@ final class ChatGenerationCoordinator {
         ))
         bindings.setMessages(snapshot)
         bindings.bumpMessageRevision(.toolCallStarted)
-        Task { @MainActor [bindings] in
-            _ = await bindings.persistMessages(conversationId)
-        }
         if let conversationId, let providerSetting, let params {
             backgroundHandoff = IOSChatBackgroundHandoff(
                 runId: runId,
@@ -657,6 +682,58 @@ final class ChatGenerationCoordinator {
             guard let self else { return }
             await self.bindings.recordRun(runId, startedAt, "running", inputDigest, conversationId?.toHexDashString())
             guard self.currentRunId == runId else { return }
+
+            // F9 fix (I-1 durable boundary, "先记账，后动手"): generate_image is
+            // a paid sideEffect tool — before this fix, the pre-execution
+            // persist was a fire-and-forget `Task {}` fired earlier in
+            // `runImageTool` (no `await`, no ledger trace at all), so a crash
+            // between issuing the call and the image HTTP request completing
+            // left nothing durable behind. On next launch, `pendingImageToolCall`
+            // would find this same tool call still pending (empty output) and
+            // re-fire it — a real, user-charged re-execution. Persist the
+            // baseline synchronously and record a ledger Started BEFORE the
+            // execution task below; either failing means the tool must NOT
+            // run, mirroring `executeToolCall`'s exact discipline.
+            let writeBaseline = self.bindings.capturePersistMessagesBaseline(conversationId)
+            let didPersistBeforeExecution = await self.bindings.persistMessagesSnapshot(
+                snapshot,
+                conversationId,
+                writeBaseline
+            )
+            guard self.currentRunId == runId else { return }
+            guard didPersistBeforeExecution else {
+                await self.failImageToolCallBeforeExecution(
+                    toolCall,
+                    in: snapshot,
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId,
+                    reason: "无法保存工具执行前状态，请检查存储空间后重试。"
+                )
+                return
+            }
+            let didRecordToolCallStarted = await self.toolLedger.recordToolCallStarted(
+                runId: runId,
+                toolCallId: toolCall.toolCallId,
+                toolName: toolCall.toolName,
+                argsDigest: chatInputDigest(for: toolCall.input),
+                effectClass: .sideEffect
+            )
+            guard self.currentRunId == runId else { return }
+            guard didRecordToolCallStarted else {
+                await self.failImageToolCallBeforeExecution(
+                    toolCall,
+                    in: snapshot,
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId,
+                    reason: "无法保存工具执行前状态，请检查存储空间后重试。"
+                )
+                return
+            }
+
             let executionToken = UUID()
             let executionTask = Task { @MainActor [toolRuntime] in
                 await toolRuntime.messagesByExecutingImageToolCall(
@@ -668,6 +745,14 @@ final class ChatGenerationCoordinator {
             self.foregroundImageToolExecutionTask = executionTask
             let resumed = await executionTask.value
             self.clearForegroundImageToolExecution(matching: executionToken)
+            // The side effect already happened by now regardless of whether
+            // the run is still current — record Finished unconditionally,
+            // same discipline as F10's automatic/approval paths.
+            await self.toolLedger.recordToolCallFinished(
+                runId: runId,
+                toolCallId: toolCall.toolCallId,
+                outcome: "completed"
+            )
             guard self.currentRunId == runId else { return }
             self.bindings.setMessages(resumed)
             self.bindings.bumpMessageRevision(.toolResultAppended)
@@ -675,10 +760,13 @@ final class ChatGenerationCoordinator {
             let conversationHex = conversationId?.toHexDashString()
             let didPersist = await self.bindings.persistMessages(conversationId)
             let succeeded = failureReason == nil && didPersist
+            let runStatus = didPersist
+                ? (failureReason == nil ? "completed" : "failed")
+                : "recovery_pending"
             await self.bindings.recordRun(
                 runId,
                 startedAt,
-                succeeded ? "completed" : "failed",
+                runStatus,
                 inputDigest,
                 conversationHex
             )
@@ -711,6 +799,56 @@ final class ChatGenerationCoordinator {
                 self.bindings.generationSucceeded()
             }
         }
+    }
+
+    /// F9 fix helper: writes a failure output into `toolCall`'s tool part and
+    /// tears the run down as "failed", for the two pre-execution failure
+    /// points in `runImageTool` (persist-before-execution / ledger Started
+    /// both fail-closed — the tool must never actually run in that case).
+    /// Unlike `executeToolCall`'s equivalent guards (which surface a generic
+    /// stream-error card via `presentStreamError` and leave the tool call's
+    /// own output empty), this writes directly into the tool part so the
+    /// timeline shows the failure on that specific step — mirroring how a
+    /// real image-generation failure is already reported via
+    /// `ChatToolOutputFormatter.imageFailureReason`.
+    private func failImageToolCallBeforeExecution(
+        _ toolCall: UIMessagePart.Tool,
+        in snapshot: [UIMessage],
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?,
+        reason: String
+    ) async {
+        let failure = ChatToolOutputFormatter.toolFailureJSON(
+            toolName: toolCall.toolName,
+            reason: reason,
+            cancelled: false
+        )
+        let failedMessages = toolRuntime.messagesByFinishingToolCall(
+            toolCall,
+            outputText: failure,
+            in: snapshot
+        )
+        bindings.setMessages(failedMessages)
+        bindings.bumpMessageRevision(.toolResultAppended)
+        let conversationHex = conversationId?.toHexDashString()
+        let didPersist = await bindings.persistMessages(conversationId)
+        await bindings.recordRun(
+            runId,
+            startedAt,
+            didPersist ? "failed" : "recovery_pending",
+            inputDigest,
+            conversationHex
+        )
+        WatchTaskCoordinator.shared.publish(
+            runId: runId,
+            conversationId: conversationHex,
+            presentation: .failed(),
+            summary: WatchTaskText.clipped(reason, maxLength: 200)
+        )
+        await dependencies.liveActivityController.end(runId: runId, presentation: .failed())
+        finishStreaming(terminalEvent: .generationFailed)
     }
 
     func cancel() {
@@ -762,6 +900,8 @@ final class ChatGenerationCoordinator {
             ChatStreamRecorder.shared.finish(runId: runId)
         }
         currentRunId = nil
+        currentRunSnapshot = nil
+        currentToolLoopGuard = IOSToolLoopGuard()
         currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -787,7 +927,7 @@ final class ChatGenerationCoordinator {
                 await bindings.recordRun(
                     runId,
                     startedAt,
-                    didPersist ? "interrupted" : "failed",
+                    didPersist ? "interrupted" : "recovery_pending",
                     digest,
                     conversationId?.toHexDashString()
                 )
@@ -927,6 +1067,8 @@ final class ChatGenerationCoordinator {
             ChatStreamRecorder.shared.finish(runId: runId)
         }
         currentRunId = nil
+        currentRunSnapshot = nil
+        currentToolLoopGuard = IOSToolLoopGuard()
         currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -997,6 +1139,32 @@ final class ChatGenerationCoordinator {
         await finishPendingCouncilToolApproval(allow: false)
     }
 
+    /// I-4:压缩配置(`IOSContextCompactionCoordinator` 的 prepare/finalize 两处)
+    /// 只从这里取——run 开始时定格的 `ChatRunSnapshot.settings`,不再每轮 live 读
+    /// `dependencies.sharedSettings.snapshot`。同一个 run 内调用两次也拿到同一份,
+    /// 这也顺带堵上了“同一轮内两次读取之间设置也可能变化”的轮内自不一致。
+    ///
+    /// F4 fix: only write back to `currentRunSnapshot` when `runId` still IS the
+    /// active run. A `runId` that no longer matches `currentRunId` means the run
+    /// this call was made on behalf of has already been superseded (replaced by
+    /// `cancel()`/a new `start()`/`runImageTool()`) by the time this async call
+    /// finally resumes here — committing a snapshot for a dead runId would
+    /// overwrite whatever the ACTUAL active run's `settingsSnapshot(forRun:)`
+    /// call already froze, silently breaking that run's I-4 guarantee too. In
+    /// that case still return a freshly-read snapshot so the (already-doomed)
+    /// caller can finish its error path with *some* settings, but never let it
+    /// leak into `currentRunSnapshot`.
+    private func settingsSnapshot(forRun runId: String) -> Settings {
+        if let currentRunSnapshot, currentRunSnapshot.runId == runId {
+            return currentRunSnapshot.settings
+        }
+        let freshSnapshot = ChatRunSnapshot(runId: runId, settings: dependencies.sharedSettings.snapshot)
+        if currentRunId == runId {
+            currentRunSnapshot = freshSnapshot
+        }
+        return freshSnapshot.settings
+    }
+
     private func prepareAndStartStreaming(
         providerSetting: ProviderSetting,
         params: TextGenerationParams,
@@ -1022,6 +1190,14 @@ final class ChatGenerationCoordinator {
             )
             return
         }
+        // F4 fix: this is the entry point's first `await`; the run may have
+        // been replaced (cancel()/new start()/runImageTool()) while
+        // `IOSCodexProviderResolver.resolved` was suspended. The existing
+        // guard at the top of this function only covers the synchronous
+        // window before that await — re-check here before touching any
+        // run-scoped state (currentRunSnapshot via settingsSnapshot(forRun:)
+        // below, applyCompactEvent, etc).
+        guard currentRunId == runId else { return }
         let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(params, provider: effectiveProvider)
         IOSCodexProviderResolver.writeRequestDiagnostic(
             originalProvider: diagnosticOriginalProvider ?? providerSetting,
@@ -1041,7 +1217,7 @@ final class ChatGenerationCoordinator {
             preparedUploadMessages = try await IOSContextCompactionCoordinator.shared.prepareMessagesForRequest(
                 uploadMessages: uploadMessages,
                 conversationId: conversationId,
-                settings: dependencies.sharedSettings.snapshot,
+                settings: settingsSnapshot(forRun: runId),
                 params: effectiveParams,
                 fallbackProvider: effectiveProvider,
                 promptOverheadTokens: runtimeOverheadTokens,
@@ -1079,7 +1255,7 @@ final class ChatGenerationCoordinator {
         do {
             finalizedUploadMessages = try IOSContextCompactionCoordinator.shared.finalizedMessagesForRequest(
                 runtimePreparedMessages,
-                settings: dependencies.sharedSettings.snapshot,
+                settings: settingsSnapshot(forRun: runId),
                 params: effectiveParams
             )
         } catch {
@@ -1441,7 +1617,13 @@ final class ChatGenerationCoordinator {
         bindings.setMessages(updated)
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessages(conversationId)
-        await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationHex)
+        await bindings.recordRun(
+            runId,
+            startedAt,
+            didPersist ? "failed" : "recovery_pending",
+            inputDigest,
+            conversationHex
+        )
         WatchTaskCoordinator.shared.publish(
             runId: runId,
             conversationId: conversationHex,
@@ -1484,7 +1666,11 @@ final class ChatGenerationCoordinator {
             return
         }
 
-        if let pendingToolCall = toolRuntime.nextPendingToolCall(in: snapshot) {
+        let availableToolNames = Set(params.tools.map(\.name))
+        if let pendingToolCall = toolRuntime.nextPendingToolCall(
+            in: snapshot,
+            availableToolNames: availableToolNames
+        ) {
             guard currentToolResumeCount < maxToolResumeCount else {
                 await failPendingToolCalls(
                     snapshot: snapshot,
@@ -1532,14 +1718,36 @@ final class ChatGenerationCoordinator {
             bindings.setMessages(emptySnapshot)
             bindings.bumpMessageRevision(.toolResultAppended)
             let conversationHex = conversationId?.toHexDashString()
-            await bindings.recordRun(runId, startedAt, "completed", inputDigest, conversationHex)
-            WatchTaskCoordinator.shared.publishCompleted(
-                runId: runId, conversationId: conversationHex, summary: nil
+            let didPersist = await bindings.persistMessages(conversationId)
+            await bindings.recordRun(
+                runId,
+                startedAt,
+                didPersist ? "completed" : "recovery_pending",
+                inputDigest,
+                conversationHex
             )
-            await dependencies.liveActivityController.end(runId: runId, presentation: .completed())
-            _ = await bindings.persistMessages(conversationId)
-            finishStreaming(terminalEvent: .generationCompleted)
-            bindings.generationSucceeded()
+            if didPersist {
+                WatchTaskCoordinator.shared.publishCompleted(
+                    runId: runId,
+                    conversationId: conversationHex,
+                    summary: nil
+                )
+            } else {
+                WatchTaskCoordinator.shared.publish(
+                    runId: runId,
+                    conversationId: conversationHex,
+                    presentation: .failed(),
+                    summary: "回复已生成，但最终结果保存失败。"
+                )
+            }
+            await dependencies.liveActivityController.end(
+                runId: runId,
+                presentation: didPersist ? .completed() : .failed()
+            )
+            finishStreaming(terminalEvent: didPersist ? .generationCompleted : .generationFailed)
+            if didPersist {
+                bindings.generationSucceeded()
+            }
             return
         }
 
@@ -1556,7 +1764,7 @@ final class ChatGenerationCoordinator {
         await bindings.recordRun(
             runId,
             startedAt,
-            didPersist ? "completed" : "failed",
+            didPersist ? "completed" : "recovery_pending",
             inputDigest,
             conversationHex
         )
@@ -1609,7 +1817,7 @@ final class ChatGenerationCoordinator {
         await bindings.recordRun(
             runId,
             startedAt,
-            didPersist ? "truncated" : "failed",
+            didPersist ? "truncated" : "recovery_pending",
             inputDigest,
             conversationHex
         )
@@ -1685,6 +1893,31 @@ final class ChatGenerationCoordinator {
         inputDigest: String,
         conversationId: KotlinUuid?
     ) async {
+        await terminatePendingToolCalls(
+            snapshot: snapshot,
+            failureText: failureText,
+            runStatus: "failed",
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId
+        )
+    }
+
+    /// I-5 打转守护的 stop 分支复用同一套收尾:未解决的工具调用被写成一条
+    /// 结构化失败结果、run 持久化终态记录、Watch/灵动岛收尾、结束这条流。
+    /// 与 `failPendingToolCalls` 唯一的差别是 `runStatus`——`guard_stopped` 与
+    /// `failed` 在 `agent_run.status` 里都是终态字符串；只有持久化失败时
+    /// 才保留为 `recovery_pending`，交给下次启动继续对账。
+    private func terminatePendingToolCalls(
+        snapshot: [UIMessage],
+        failureText: String,
+        runStatus: String,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?
+    ) async {
         let writeBaseline = bindings.capturePersistMessagesBaseline(conversationId)
         let finalSnapshot = toolRuntime.messagesByFailingPendingToolCalls(
             in: snapshot,
@@ -1694,7 +1927,13 @@ final class ChatGenerationCoordinator {
         bindings.bumpMessageRevision(.toolResultAppended)
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessagesSnapshot(finalSnapshot, conversationId, writeBaseline)
-        await bindings.recordRun(runId, startedAt, "failed", inputDigest, conversationHex)
+        await bindings.recordRun(
+            runId,
+            startedAt,
+            didPersist ? runStatus : "recovery_pending",
+            inputDigest,
+            conversationHex
+        )
         WatchTaskCoordinator.shared.publish(
             runId: runId,
             conversationId: conversationHex,
@@ -1718,6 +1957,95 @@ final class ChatGenerationCoordinator {
         conversationId: KotlinUuid?,
         baseMessages: [UIMessage]
     ) async {
+        // F11 fix (I-2 must gate ahead of I-5/I-1, not just inside
+        // `ChatToolRuntime.execute`'s own per-kind dispatch): a tool call
+        // whose `input` fails `parseInputStrict()` never actually executes —
+        // `toolRuntime.execute` fail-closes it in place with a structured
+        // error before it reaches any dispatch*/network path. Such a call
+        // must not:
+        //   - count toward the I-5 loop-guard's repeated-signature counter
+        //     below (a call that never ran isn't "the model repeating
+        //     itself" — it would falsely accelerate genuinely-distinct calls
+        //     toward the guard's stop threshold);
+        //   - be persisted, nor get an I-1 ledger Started record (there is
+        //     nothing to retry-recover for a call rejected before it ran; a
+        //     stray Started would only leave W3's classifier a phantom
+        //     "outcome unknown" for a tool that in fact never fired).
+        // Skip straight to `toolRuntime.execute` (it fail-closes this exact
+        // case again on its own, as defense in depth) and resume the stream
+        // from its result exactly like the ordinary `.completed` branch
+        // further down handles a real execution.
+        if pendingToolCall.toolCall.parseInputStrict() is ToolInputParse.Invalid {
+            let invalidInputPending = ChatPendingToolApproval(
+                toolCall: pendingToolCall.toolCall,
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                baseMessages: baseMessages
+            )
+            let result = await toolRuntime.execute(pendingToolCall, context: invalidInputPending)
+            guard currentRunId == runId else { return }
+            guard case .completed(let resolvedMessages) = result else { return }
+            bindings.setMessages(resolvedMessages)
+            bindings.bumpMessageRevision(.toolResultAppended)
+            refreshBackgroundHandoff(
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                providerSetting: providerSetting,
+                backgroundProviderSetting: nil,
+                params: params,
+                uploadMessages: backgroundToolHandoffUploadMessages(from: resolvedMessages),
+                displayMessages: resolvedMessages
+            )
+            let generating = AgentActivityPresentation.response(stage: .generating)
+            currentLiveActivityStage = generating.stage
+            WatchTaskCoordinator.shared.publish(
+                runId: runId,
+                conversationId: conversationId?.toHexDashString(),
+                presentation: generating
+            )
+            await dependencies.liveActivityController.update(
+                runId: runId,
+                presentation: generating,
+                force: true
+            )
+            await prepareAndStartStreaming(
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                uploadMessages: resolvedMessages
+            )
+            return
+        }
+
+        // I-5 打转守护:必须在 I-1 记账段之前判断——stop 分支什么都不执行,
+        // 不该在账本里留下一条 Started 记录。maxToolResumeCount 是数量兜底,
+        // 这里是浪费方式的第一道,两者独立共存。
+        let loopGuardVerdict = currentToolLoopGuard.check(
+            toolName: pendingToolCall.toolCall.toolName,
+            input: pendingToolCall.toolCall.input
+        )
+        if case .stop(let reason) = loopGuardVerdict {
+            await terminatePendingToolCalls(
+                snapshot: baseMessages,
+                failureText: reason,
+                runStatus: "guard_stopped",
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return
+        }
+
         let pending = ChatPendingToolApproval(
             toolCall: pendingToolCall.toolCall,
             providerSetting: providerSetting,
@@ -1757,6 +2085,58 @@ final class ChatGenerationCoordinator {
             uploadMessages: backgroundToolHandoffUploadMessages(from: baseMessages),
             displayMessages: bindings.getMessages()
         )
+
+        // I-1 durable boundary ("先记账，后动手"): persist the assistant message
+        // carrying this tool call, THEN record the ledger's Started entry —
+        // BOTH before the Task below is even created, since a Swift `Task {}`
+        // starts running immediately, not lazily on first await. Mirrors
+        // `pauseForApproval`'s persist-before-hold-state discipline (same
+        // baseline/persistMessagesSnapshot pair); this is the automatic-tool
+        // sibling of that path, closing the asymmetry W1 exists to fix. Either
+        // step failing means the tool must NOT run — a slow durable "did we
+        // call it" record beats a fast one that isn't there after a crash.
+        let writeBaseline = bindings.capturePersistMessagesBaseline(conversationId)
+        let didPersistBeforeExecution = await bindings.persistMessagesSnapshot(
+            baseMessages,
+            conversationId,
+            writeBaseline
+        )
+        guard currentRunId == runId else { return }
+        guard didPersistBeforeExecution else {
+            await presentStreamError(
+                rawMessage: "无法保存工具执行前状态，请检查存储空间后重试。",
+                modelId: params.model.modelId,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return
+        }
+        let toolCallEffectClass = IOSToolEffectClassMapping.forChatKind(
+            pendingToolCall.kind,
+            input: pendingToolCall.toolCall.input
+        )
+        let didRecordToolCallStarted = await toolLedger.recordToolCallStarted(
+            runId: runId,
+            toolCallId: pendingToolCall.toolCall.toolCallId,
+            toolName: pendingToolCall.toolCall.toolName,
+            argsDigest: chatInputDigest(for: pendingToolCall.toolCall.input),
+            effectClass: toolCallEffectClass
+        )
+        guard currentRunId == runId else { return }
+        guard didRecordToolCallStarted else {
+            await presentStreamError(
+                rawMessage: "无法保存工具执行前状态，请检查存储空间后重试。",
+                modelId: params.model.modelId,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return
+        }
+
         let executionToken = UUID()
         let executionTask = Task { @MainActor [toolRuntime] in
             await toolRuntime.execute(pendingToolCall, context: pending)
@@ -1765,10 +2145,58 @@ final class ChatGenerationCoordinator {
         foregroundToolExecutionTask = executionTask
         let result = await executionTask.value
         clearForegroundToolExecution(matching: executionToken)
+
+        // F10 fix (① automatic path): the tool genuinely ran — or genuinely
+        // discovered mid-dispatch that it needs approval — by this point,
+        // regardless of whether `currentRunId` still matches `runId`. Record
+        // the honest Finished outcome for THIS attempt first, unconditionally,
+        // BEFORE the run-liveness guard below. The old order (guard first)
+        // meant a run replaced while the tool was executing left a dangling
+        // Started with no Finished even though the tool call fully completed
+        // — W3's classifier reads that as a phantom "outcome unknown" crash
+        // for a tool that in fact finished cleanly. Only the UI/stream
+        // continuation after this switch is gated on run liveness.
+        switch result {
+        case .completed:
+            await toolLedger.recordToolCallFinished(
+                runId: runId,
+                toolCallId: pendingToolCall.toolCall.toolCallId,
+                outcome: "completed"
+            )
+        case .waitingForApproval:
+            // Honest narrative (I-1/I-3): this attempt did not execute the
+            // tool — it discovered mid-dispatch that the tool needs user
+            // approval and stopped. Finished(paused_for_approval) closes THIS
+            // Started; the real execution happens later when the user
+            // approves, which writes its own fresh Started/Finished pair (see
+            // `executeApprovedAsyncTool`/`finishPendingMemoryToolApproval`)
+            // under the same toolCallId. S3's pairing rule ("take the last
+            // Started for a toolCallId, check for a Finished after it") relies
+            // on this Finished existing so the first pair reads as `.clean`
+            // rather than a phantom crash.
+            await toolLedger.recordToolCallFinished(
+                runId: runId,
+                toolCallId: pendingToolCall.toolCall.toolCallId,
+                outcome: "paused_for_approval"
+            )
+        }
+
         guard currentRunId == runId else { return }
 
         switch result {
-        case .completed(let resumedMessages):
+        case .completed(let executedMessages):
+            // I-5 第 2 次相同签名:工具照常执行,但把提醒追加进这次调用的
+            // 输出(append,不替换原结果),让模型下一轮看到自己在重复。
+            let resumedMessages: [UIMessage]
+            if case .proceedAndRemind(let reminder) = loopGuardVerdict {
+                resumedMessages = appendingToolLoopReminder(
+                    reminder,
+                    toToolCallId: pendingToolCall.toolCall.toolCallId,
+                    in: executedMessages
+                )
+            } else {
+                resumedMessages = executedMessages
+            }
             bindings.setMessages(resumedMessages)
             bindings.bumpMessageRevision(.toolResultAppended)
             refreshBackgroundHandoff(
@@ -1806,6 +2234,19 @@ final class ChatGenerationCoordinator {
                 uploadMessages: resumedMessages
             )
         case .waitingForApproval(let prompt):
+            // Finished(paused_for_approval) was already recorded above (F10
+            // fix), unconditionally, before this run-liveness guard.
+            //
+            // F8 fix: this is the ONE place `loopGuardVerdict` is known for an
+            // approval-gated tool call — capture the reminder now, keyed by
+            // toolCallId, so it survives however long the user takes to
+            // answer. `resumeAfterApproval` cannot read `loopGuardVerdict`
+            // itself (it doesn't carry `allow`/deny, and isn't in scope of
+            // this local), so each of the 8 approval-finishing call sites
+            // consumes this dictionary directly once they know the outcome.
+            if case .proceedAndRemind(let reminder) = loopGuardVerdict {
+                pendingLoopReminders[pendingToolCall.toolCall.toolCallId] = reminder
+            }
             await pauseForApproval(prompt, pending: pending)
         }
     }
@@ -1910,26 +2351,91 @@ final class ChatGenerationCoordinator {
         )
     }
 
+    // finishMemoryApproval is a synchronous, in-process, sub-millisecond write
+    // (no network round trip like the other approval kinds), so this entry
+    // point stays sync-signatured to avoid rippling `await` up through
+    // ChatViewModel/ChatView's button actions (out of W1's scope). The I-1
+    // Started/Finished pair is still recorded, sequenced inside a Task so
+    // Started durably lands before `finishMemoryApproval` runs.
     private func finishPendingMemoryToolApproval(writePolicy: IOSMemoryToolWritePolicy) {
         guard let pending = pendingMemoryToolApproval else { return }
         clearPendingMemoryApproval()
         guard currentRunId == pending.runId else { return }
-        let resumedMessages = toolRuntime.finishMemoryApproval(
-            pending: pending,
-            writePolicy: writePolicy
-        )
-        bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
-        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let didRecordStart = await self.toolLedger.recordToolCallStarted(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                toolName: pending.toolCall.toolName,
+                argsDigest: chatInputDigest(for: pending.toolCall.input),
+                effectClass: IOSToolEffectClassMapping.forChatKind(
+                    .memory,
+                    input: pending.toolCall.input
+                )
+            )
+            guard didRecordStart else {
+                await self.presentStreamError(
+                    rawMessage: "无法保存工具执行前状态，请检查存储空间后重试。",
+                    modelId: pending.params.model.modelId,
+                    runId: pending.runId,
+                    startedAt: pending.startedAt,
+                    inputDigest: pending.inputDigest,
+                    conversationId: pending.conversationId
+                )
+                return
+            }
+            // F3 fix: same window as F2 — `recordToolCallStarted` above is a
+            // suspension point; the run may have been replaced by the time it
+            // resumes here. Close out Started before running the side effect.
+            guard self.currentRunId == pending.runId else {
+                await self.toolLedger.recordToolCallFinished(
+                    runId: pending.runId,
+                    toolCallId: pending.toolCall.toolCallId,
+                    outcome: "not_executed_run_replaced"
+                )
+                return
+            }
+            let executedMessages = self.toolRuntime.finishMemoryApproval(
+                pending: pending,
+                writePolicy: writePolicy
+            )
+            await self.toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "completed"
+            )
+            guard self.currentRunId == pending.runId else { return }
+            let resumedMessages = self.consumingPendingLoopReminder(
+                for: pending.toolCall.toolCallId,
+                in: executedMessages
+            )
+            self.bindings.setMessages(resumedMessages)
+            self.bindings.bumpMessageRevision(.toolResultAppended)
+            self.resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        }
+    }
+
+    /// F8 fix: removes (and, if present, applies) a pending I-5 loop-guard
+    /// reminder for `toolCallId`. Always removes the entry regardless of
+    /// whether it was applied, so `pendingLoopReminders` never leaks a stale
+    /// reminder for a toolCallId that's already been resolved — approved,
+    /// denied, or answered.
+    private func consumingPendingLoopReminder(
+        for toolCallId: String,
+        in messages: [UIMessage]
+    ) -> [UIMessage] {
+        guard let reminder = pendingLoopReminders.removeValue(forKey: toolCallId) else { return messages }
+        return appendingToolLoopReminder(reminder, toToolCallId: toolCallId, in: messages)
     }
 
     private func finishPendingSearchToolApproval(allow: Bool) async {
         guard let pending = pendingSearchToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingSearchApproval()
-        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .pure, operation: {
             await self.toolRuntime.finishSearchApproval(pending: pending, allow: allow)
         }) else { return }
+        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1939,9 +2445,10 @@ final class ChatGenerationCoordinator {
         guard let pending = pendingWebMountToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingWebMountApproval()
-        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishWebMountApproval(pending: pending, allow: allow)
         }) else { return }
+        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1951,9 +2458,10 @@ final class ChatGenerationCoordinator {
         guard let pending = pendingWorkspaceToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingWorkspaceApproval()
-        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishWorkspaceApproval(pending: pending, allow: allow)
         }) else { return }
+        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1963,9 +2471,10 @@ final class ChatGenerationCoordinator {
         guard let pending = pendingIshHandoffToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingIshHandoffApproval()
-        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishIshHandoffApproval(pending: pending, allow: allow)
         }) else { return }
+        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1975,9 +2484,10 @@ final class ChatGenerationCoordinator {
         guard let pending = pendingMcpToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingMcpApproval()
-        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishMcpApproval(pending: pending, allow: allow)
         }) else { return }
+        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -1987,9 +2497,10 @@ final class ChatGenerationCoordinator {
         guard let pending = pendingCouncilToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingCouncilApproval()
-        guard let resumedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, operation: {
+        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishCouncilApproval(pending: pending, allow: allow)
         }) else { return }
+        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
         bindings.setMessages(resumedMessages)
         bindings.bumpMessageRevision(.toolResultAppended)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
@@ -2000,6 +2511,11 @@ final class ChatGenerationCoordinator {
         finishPendingAskUserAnswer(answer: answer)
     }
 
+    // ask_user has no side effect at all (effectClass .pure) and
+    // `finishAskUserAnswer` is a synchronous local computation, so — like
+    // memory above — the public signature stays sync (its Bool return is
+    // consulted synchronously by Watch call sites) while the ledger pair is
+    // recorded inside a Task, ordered ahead of the local write.
     @discardableResult
     private func finishPendingAskUserAnswer(answer: String) -> Bool {
         guard let pending = pendingAskUserToolApproval else { return false }
@@ -2007,22 +2523,112 @@ final class ChatGenerationCoordinator {
         // run replacement can drop the card without writing tool output.
         guard currentRunId == pending.runId else { return false }
         clearPendingAskUser()
-        let resumedMessages = toolRuntime.finishAskUserAnswer(
-            pending: pending,
-            answer: answer
-        )
-        bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
-        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let didRecordStart = await self.toolLedger.recordToolCallStarted(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                toolName: pending.toolCall.toolName,
+                argsDigest: chatInputDigest(for: pending.toolCall.input),
+                effectClass: .pure
+            )
+            guard didRecordStart else {
+                await self.presentStreamError(
+                    rawMessage: "无法保存工具执行前状态，请检查存储空间后重试。",
+                    modelId: pending.params.model.modelId,
+                    runId: pending.runId,
+                    startedAt: pending.startedAt,
+                    inputDigest: pending.inputDigest,
+                    conversationId: pending.conversationId
+                )
+                return
+            }
+            // F3 fix: same window as F2/memory above — the run may have been
+            // replaced while `recordToolCallStarted` was suspended.
+            guard self.currentRunId == pending.runId else {
+                await self.toolLedger.recordToolCallFinished(
+                    runId: pending.runId,
+                    toolCallId: pending.toolCall.toolCallId,
+                    outcome: "not_executed_run_replaced"
+                )
+                return
+            }
+            let executedMessages = self.toolRuntime.finishAskUserAnswer(
+                pending: pending,
+                answer: answer
+            )
+            await self.toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "completed"
+            )
+            guard self.currentRunId == pending.runId else { return }
+            let resumedMessages = self.consumingPendingLoopReminder(
+                for: pending.toolCall.toolCallId,
+                in: executedMessages
+            )
+            self.bindings.setMessages(resumedMessages)
+            self.bindings.bumpMessageRevision(.toolResultAppended)
+            self.resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        }
         return true
     }
 
     private func executeApprovedAsyncTool(
         pending: ChatPendingToolApproval,
         allow: Bool,
+        effectClass: IOSToolEffectClass,
         operation: @escaping @MainActor () async -> [UIMessage]
     ) async -> [UIMessage]? {
+        // A denial never reaches the tool — `operation()` here only produces a
+        // "user denied" JSON result, no side effect occurs, so there is nothing
+        // for the ledger to durably record.
         guard allow else { return await operation() }
+
+        // I-1, resumption half: this is the real (post-approval) execution of a
+        // tool call the automatic path already Started→Finished(paused_for_approval)
+        // once. `pauseForApproval` persisted the awaiting-approval snapshot before
+        // we ever got here, so — unlike the automatic path — there is no separate
+        // "persist baseMessages" step; the durable state this resumption builds on
+        // is already on disk. What's missing without this is a Started record for
+        // THIS attempt, under the same toolCallId, before the side effect below.
+        let didRecordStart = await toolLedger.recordToolCallStarted(
+            runId: pending.runId,
+            toolCallId: pending.toolCall.toolCallId,
+            toolName: pending.toolCall.toolName,
+            argsDigest: chatInputDigest(for: pending.toolCall.input),
+            effectClass: effectClass
+        )
+        guard didRecordStart else {
+            await presentStreamError(
+                rawMessage: "无法保存工具执行前状态，请检查存储空间后重试。",
+                modelId: pending.params.model.modelId,
+                runId: pending.runId,
+                startedAt: pending.startedAt,
+                inputDigest: pending.inputDigest,
+                conversationId: pending.conversationId
+            )
+            return nil
+        }
+        // F2 fix: `recordToolCallStarted` above is this function's first
+        // `await` — the run this approval belonged to may have been replaced
+        // (cancel()/new start()) while it was suspended. Without this check,
+        // `setIsLoading(true)`/`beginKeepAlive` below would run for a dead
+        // run (loading spinner stuck forever, a KeepAlive lease leaked under
+        // the new run's runId), AND the side effect below would execute on
+        // behalf of a run nobody is listening to anymore. Close out the
+        // Started we just wrote — Finished(outcome: "not_executed_run_replaced")
+        // — so W3's classifier reads this pair as `.clean`, never a phantom
+        // "outcome unknown" crash.
+        guard currentRunId == pending.runId else {
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "not_executed_run_replaced"
+            )
+            return nil
+        }
+
         bindings.setIsLoading(true)
         beginKeepAlive(for: pending)
 
@@ -2038,6 +2644,24 @@ final class ChatGenerationCoordinator {
             foregroundToolExecutionTask = executionTask
         }
         defer { clearForegroundToolExecution(matching: executionToken) }
+        // F10 fix (② approval path): `result` is `nil` exactly when
+        // `cancelForegroundToolExecutions` resumed this continuation early —
+        // the run was cancelled while `operation()` may still genuinely be
+        // running in the background (its real completion, if any, arrives
+        // later via `completeApprovedToolExecution`, whose token guard will
+        // by then no longer match and silently drop it). At that point the
+        // side effect's outcome is NOT known to be "completed" — writing
+        // Finished("completed") unconditionally here was a false record. A
+        // dangling Started (no Finished) is the honest "outcome unknown"
+        // state W3's crash-recovery classifier already knows how to read;
+        // only write Finished when this attempt actually produced a result.
+        if result != nil {
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "completed"
+            )
+        }
         guard currentRunId == pending.runId, let result else { return nil }
         guard case .completed(let resumedMessages) = result else { return nil }
         refreshBackgroundHandoff(
@@ -2083,7 +2707,7 @@ final class ChatGenerationCoordinator {
                 await self.bindings.recordRun(
                     pending.runId,
                     pending.startedAt,
-                    didPersist ? "completed" : "failed",
+                    didPersist ? "completed" : "recovery_pending",
                     pending.inputDigest,
                     conversationHex
                 )
@@ -2217,6 +2841,8 @@ final class ChatGenerationCoordinator {
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
         currentRunId = nil
+        currentRunSnapshot = nil
+        currentToolLoopGuard = IOSToolLoopGuard()
         currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -2290,6 +2916,11 @@ final class ChatGenerationCoordinator {
         clearPendingMcpApproval()
         clearPendingCouncilApproval()
         clearPendingAskUser()
+        // F8 fix: called from all 3 `currentRunId = nil` teardown points
+        // (cancel/finishStreaming/handoff-to-background) — a reminder keyed
+        // to a toolCallId whose approval card just got wiped without ever
+        // being answered must not survive into some future, unrelated run.
+        pendingLoopReminders.removeAll()
     }
 
     private func clearPendingMemoryApproval() {
@@ -2414,6 +3045,24 @@ final class ChatGenerationCoordinator {
 
     func backgroundToolHandoffUploadMessagesForTesting(_ baseMessages: [UIMessage]) -> [UIMessage] {
         backgroundToolHandoffUploadMessages(from: baseMessages)
+    }
+
+    /// I-4 测试缝：`settingsSnapshot(forRun:)` 是 private,`IOSRunSnapshotTests`
+    /// 通过这个薄包装验证冻结/新 turn 边界语义,不需要跑一整条真实生成流水线。
+    func settingsSnapshotForTesting(runId: String) -> Settings {
+        settingsSnapshot(forRun: runId)
+    }
+
+    /// I-4 测试缝：直接安装 `currentRunId`/`currentRunSnapshot`,模拟
+    /// `start()`/`runImageTool()` 真实入口已经完成的赋值,不需要驱动完整的
+    /// provider 解析 + 压缩 + 流式管线。
+    func installRunSnapshotForTesting(runId: String, snapshot: ChatRunSnapshot?) {
+        currentRunId = runId
+        currentRunSnapshot = snapshot
+    }
+
+    func currentRunSnapshotForTesting() -> ChatRunSnapshot? {
+        currentRunSnapshot
     }
 
     func finishedToolCallMessagesForTesting(

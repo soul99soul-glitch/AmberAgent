@@ -481,7 +481,11 @@ final class IOSAgentToolEngineTests: XCTestCase {
 
     func testHitStepLimitWhenModelKeepsEmittingToolCalls() async {
         // Script always returns a fresh tool call (queue of 10 > maxSteps 3).
-        let endless = (0..<10).map { toolCallMessage(toolCallId: "tc-\($0)", toolName: "echo", input: "{}") }
+        // Arguments differ per call (`{"i":N}`) so this exercises step-limit
+        // exhaustion specifically — with identical arguments, IOSToolLoopGuard
+        // (I-5) would now stop the run on the 3rd repeat before maxSteps is
+        // ever reached, which is a different (and separately tested) terminal.
+        let endless = (0..<10).map { toolCallMessage(toolCallId: "tc-\($0)", toolName: "echo", input: "{\"i\":\($0)}") }
         let provider = ScriptedProvider(endless)
         let executor = RecordingExecutor(.filled("{}"))
         let engine = IOSAgentToolEngine(

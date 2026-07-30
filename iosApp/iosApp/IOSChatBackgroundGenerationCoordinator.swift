@@ -254,6 +254,10 @@ final class IOSChatBackgroundGenerationCoordinator {
     /// 没有这道闸，用户切出去瞄一眼再回来两次就能把配额烧光。
     private var pendingResumeRequestIds: Set<String> = []
     private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
+    // W1 durable ledger (I-1): background-continued tool execution accounts
+    // itself against the SAME runId the foreground run already started under
+    // (see the `IOSAgentToolEngine(... ledger:ledgerRunId:)` call below).
+    private lazy var toolLedger: IOSAgentRunLedgering = IOSAgentRunLedger(dao: db.agentRuntimeDao())
 
     private init() {}
 
@@ -617,7 +621,9 @@ final class IOSChatBackgroundGenerationCoordinator {
                 params: requestParams,
                 runId: job.runId
             ),
-            configuration: .init(maxSteps: 6, honorApprovalPause: false)
+            configuration: .init(maxSteps: 6, honorApprovalPause: false),
+            ledger: toolLedger,
+            ledgerRunId: job.runId
         )
         let operationTask = Task { () -> IOSAgentToolEngineResult in
             switch job.mode {
@@ -681,6 +687,25 @@ final class IOSChatBackgroundGenerationCoordinator {
         if job.mode == .continueModel, result.hitStepLimit {
             finalMessages.append(Self.assistantMessage("后台生成已达到工具循环上限，已保存当前结果。"))
         }
+        // I-5: same visibility contract as the hitStepLimit notice above — the
+        // engine already wrote a per-tool stop explanation into that tool's
+        // output; this appends a chat-level notice so the user does not read
+        // the transcript as an ordinary, uninterrupted completion.
+        //
+        // F6 fix: this notice alone used to be the ONLY trace of the stop —
+        // the terminal status below still recorded "completed" and published
+        // `.completed()`/`publishCompleted`, so Watch/LiveActivity/`agent_run`
+        // all read this as an ordinary successful finish. That is I-5 failing
+        // silently specifically on the background path (the foreground
+        // sibling, `terminatePendingToolCalls`, already records "guard_stopped"
+        // and publishes `.failed()`). Capture the notice text here so the
+        // terminal-status block below can align background with foreground.
+        var guardStoppedNotice: String?
+        if job.mode == .continueModel, result.guardStopped {
+            let notice = "模型连续以相同参数重复调用工具，已停止本轮以避免空耗，已保存当前结果。"
+            finalMessages.append(Self.assistantMessage(notice))
+            guardStoppedNotice = notice
+        }
         if job.mode == .continueModel,
            let miniAppNotice = job.saveMiniAppIfPresent?(finalMessages, job.conversationId) {
             finalMessages.append(miniAppNotice)
@@ -726,11 +751,12 @@ final class IOSChatBackgroundGenerationCoordinator {
             )
             return
         }
-        let succeeded = singleToolFailureReason == nil
+        let succeeded = singleToolFailureReason == nil && guardStoppedNotice == nil
+        let runStatus = guardStoppedNotice != nil ? "guard_stopped" : (succeeded ? "completed" : "failed")
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: succeeded ? "completed" : "failed",
+            status: runStatus,
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -744,7 +770,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             WatchTaskCoordinator.shared.publish(
                 runId: job.runId,
                 conversationId: job.conversationId.toHexDashString(),
-                presentation: .failed()
+                presentation: .failed(),
+                summary: guardStoppedNotice.flatMap { WatchTaskText.clipped($0, maxLength: 200) }
             )
         }
         await job.liveActivityController.end(
@@ -823,7 +850,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: didSave ? "truncated" : "failed",
+            status: didSave ? "truncated" : "recovery_pending",
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -895,7 +922,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                 await recordRun(
                     job.runId,
                     startedAt: job.startedAt,
-                    status: "failed",
+                    status: didSave ? "failed" : "recovery_pending",
                     inputDigest: job.inputDigest,
                     conversationId: job.conversationId
                 )
@@ -1100,7 +1127,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: "failed",
+            status: didSave ? "failed" : "recovery_pending",
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -1126,7 +1153,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: succeeded ? "completed" : "failed",
+            status: didSave ? (succeeded ? "completed" : "failed") : "recovery_pending",
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -1159,7 +1186,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: "failed",
+            status: "recovery_pending",
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )

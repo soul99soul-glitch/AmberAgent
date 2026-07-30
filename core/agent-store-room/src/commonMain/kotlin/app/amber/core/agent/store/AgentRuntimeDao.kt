@@ -33,7 +33,24 @@ interface AgentRuntimeDao {
     @Query("SELECT * FROM agent_event WHERE run_id = :id ORDER BY seq ASC")
     fun observeEvents(id: String): Flow<List<AgentEventEntity>>
 
-    @Query("SELECT * FROM agent_run WHERE status IN ('running', 'awaiting_permission')")
+    /**
+     * Highest `seq` already written for this run, or 0 when the run has no
+     * events yet. W1's ledger (iOS `IOSAgentRunLedger`) uses this to seed its
+     * in-memory seq counter on first write per run, so a fresh ledger instance
+     * (e.g. after an app relaunch) continues the sequence instead of colliding
+     * with the `(run_id, seq)` unique index.
+     */
+    @Query("SELECT COALESCE(MAX(seq), 0) FROM agent_event WHERE run_id = :id")
+    suspend fun maxEventSeq(id: String): Long
+
+    /**
+     * Suspend counterpart to [observeEvents] for one-shot reads (crash-recovery
+     * sweeps, tests) that don't want a Flow subscription.
+     */
+    @Query("SELECT * FROM agent_event WHERE run_id = :id ORDER BY seq ASC")
+    suspend fun listEventsForRun(id: String): List<AgentEventEntity>
+
+    @Query("SELECT * FROM agent_run WHERE status IN ('running', 'awaiting_permission', 'recovery_pending')")
     suspend fun listUnfinished(): List<AgentRunEntity>
 
     @Query("SELECT * FROM agent_run WHERE status = 'awaiting_permission'")

@@ -2934,8 +2934,13 @@ final class CouncilRoomArchiveStore {
     func markInterrupted(taskIds: [String]) {
         for taskId in taskIds {
             guard let room = load(taskId: taskId) else { continue }
-            let messages = room.messages.map { message in
+            let messages = room.messages.map { message -> CouncilPersistedMessage in
                 guard message.status == "speaking" else { return message }
+                // W3 council 轻对齐(docs/IOS_AGENT_HARDENING_PLAN_2026-07-29.md
+                // §W3):机制不变,仍标 failed;只在 subtitle 本来就空时补一句可见
+                // 的"发言未完成"文案,复用既有 subtitle 渲染面(metaLine),不新增
+                // UI。不这样区分的话,用户看到的和"模型报错"完全一样。
+                let subtitle = (message.subtitle?.isEmpty ?? true) ? "发言未完成（应用中断）" : message.subtitle
                 return CouncilPersistedMessage(
                     id: message.id,
                     kind: message.kind,
@@ -2943,7 +2948,7 @@ final class CouncilRoomArchiveStore {
                     body: message.body,
                     systemImage: message.systemImage,
                     tintHex: message.tintHex,
-                    subtitle: message.subtitle,
+                    subtitle: subtitle,
                     status: "failed"
                 )
             }

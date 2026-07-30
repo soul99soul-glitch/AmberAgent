@@ -604,6 +604,32 @@ enum ChatToolOutputFormatter {
         return text
     }
 
+    /// Structured error for a tool call whose `input` failed
+    /// `UIMessagePart.Tool.parseInputStrict()` (I-2, fail-closed). Not executed —
+    /// this is the entire output the model sees, so it must both satisfy the
+    /// `tool_arguments_invalid` / `message` / `raw_prefix` contract callers rely on
+    /// and be recognized as a failure by `failureReason(from:)` above (hence `ok`
+    /// and `reason`, matched the same way `toolFailureJSON` is).
+    static func toolArgumentsInvalidJSON(
+        toolName: String,
+        message: String,
+        rawPrefix: String
+    ) -> String {
+        let payload: [String: Any] = [
+            "ok": false,
+            "tool": toolName,
+            "error": "tool_arguments_invalid",
+            "reason": message,
+            "message": message,
+            "raw_prefix": rawPrefix
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return "\(toolName) failed: tool_arguments_invalid: \(message)"
+        }
+        return text
+    }
+
     nonisolated static func failureReason(from output: [UIMessagePart]) -> String? {
         let texts = output.compactMap { ($0 as? UIMessagePart.Text)?.text }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

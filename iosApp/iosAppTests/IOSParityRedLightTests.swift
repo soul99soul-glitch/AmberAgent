@@ -571,7 +571,8 @@ final class IOSParityRedLightTests: XCTestCase {
             }
         }
 
-        let descriptors = await IOSRunRecovery.recoverPendingApprovalDescriptors()
+        let loadedDescriptors = await IOSRunRecovery.recoverPendingApprovalDescriptors()
+        let descriptors = try XCTUnwrap(loadedDescriptors)
         let descriptor = try XCTUnwrap(descriptors.first { $0.runId == runId })
         XCTAssertEqual(descriptor.conversationId, conversationId)
         XCTAssertEqual(descriptor.toolCallId, toolCallId)
@@ -1835,7 +1836,7 @@ final class IOSParityRedLightTests: XCTestCase {
 
         guard let completionStart = source.range(of: "private func handleCompletedStream("),
               let limitBranch = source.range(of: "if hitOutputLimit {", range: completionStart.upperBound..<source.endIndex),
-              let toolBranch = source.range(of: "toolRuntime.nextPendingToolCall(in: snapshot)", range: completionStart.upperBound..<source.endIndex) else {
+              let toolBranch = source.range(of: "toolRuntime.nextPendingToolCall(", range: completionStart.upperBound..<source.endIndex) else {
             return XCTFail("Expected handleCompletedStream to branch on the output limit")
         }
         XCTAssertLessThan(
@@ -1889,7 +1890,7 @@ final class IOSParityRedLightTests: XCTestCase {
             return XCTFail("Expected a dedicated background truncated terminal")
         }
         let truncatedBody = source[truncatedStart.lowerBound..<truncatedEnd.lowerBound]
-        XCTAssertTrue(truncatedBody.contains("status: didSave ? \"truncated\" : \"failed\""))
+        XCTAssertTrue(truncatedBody.contains("status: didSave ? \"truncated\" : \"recovery_pending\""))
         XCTAssertTrue(
             truncatedBody.contains("presentation: .failed()"),
             "Watch and Live Activity must not present truncated output as an unqualified success"

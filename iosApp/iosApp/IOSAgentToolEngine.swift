@@ -287,6 +287,12 @@ public struct IOSAgentToolEngineResult: Sendable {
     public let hitOutputLimit: Bool
     /// Whether the caller cancelled the run while the provider was in flight.
     public let wasCancelled: Bool
+    /// I-5: the loop ended because `IOSToolLoopGuard` detected the model
+    /// repeating an identical tool call a 3rd time and stopped the run.
+    /// Distinct from `hitStepLimit` — this is "the model was stuck", not "the
+    /// budget ran out" — so callers must not fold it into a normal-completion
+    /// terminal (see docs/IOS_AGENT_HARDENING_PLAN_2026-07-29.md §W5, I-5).
+    public let guardStopped: Bool
 
     public init(
         messages: [UIMessage],
@@ -295,7 +301,8 @@ public struct IOSAgentToolEngineResult: Sendable {
         hitStepLimit: Bool,
         providerFailureMessage: String? = nil,
         hitOutputLimit: Bool = false,
-        wasCancelled: Bool = false
+        wasCancelled: Bool = false,
+        guardStopped: Bool = false
     ) {
         self.messages = messages
         self.stepsExecuted = stepsExecuted
@@ -304,6 +311,7 @@ public struct IOSAgentToolEngineResult: Sendable {
         self.providerFailureMessage = providerFailureMessage
         self.hitOutputLimit = hitOutputLimit
         self.wasCancelled = wasCancelled
+        self.guardStopped = guardStopped
     }
 }
 
@@ -464,15 +472,30 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     private let provider: any IOSAgentTextProvider
     private let executors: [String: any IOSToolExecutor]
     private let configuration: Configuration
+    // W1 durable ledger (I-1), optional and off by default so every existing
+    // caller/test keeps building an engine with zero ledger traffic. Only
+    // `IOSChatBackgroundGenerationCoordinator` passes one, reusing the SAME
+    // runId the foreground run already started under — a background-continued
+    // tool execution should account itself against that run, not a new one.
+    // `SubAgentRunner` and the (currently unused) novel-discussion executor set
+    // deliberately do NOT: their inner loop has no surfaced "run" a user can
+    // recover — a crash there is invisible to the user, so the durable writes
+    // would buy nothing. See docs/IOS_AGENT_HARDENING_PLAN_2026-07-29.md §W1.
+    private let ledger: IOSAgentRunLedgering?
+    private let ledgerRunId: String?
 
     public init(
         provider: any IOSAgentTextProvider,
         executors: [String: any IOSToolExecutor],
-        configuration: Configuration = .init()
+        configuration: Configuration = .init(),
+        ledger: IOSAgentRunLedgering? = nil,
+        ledgerRunId: String? = nil
     ) {
         self.provider = provider
         self.executors = executors
         self.configuration = configuration
+        self.ledger = ledger
+        self.ledgerRunId = ledgerRunId
     }
 
     /// Streams one model turn, accumulating chunks via the shared (500-fixed)
@@ -596,6 +619,11 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     ) async -> IOSAgentToolEngineResult {
         var working = messages
         var steps = 0
+        // I-5: one guard per `run()` invocation, never carried across runs.
+        // The engine instance itself is long-lived/reused (SubAgent, chat
+        // background handoff), so this must be a local — a guard stored on
+        // `self` would leak one run's repeat-count into the next.
+        var loopGuard = IOSToolLoopGuard()
 
         // Background handoff parity: the input may carry assistant turns whose
         // tool calls were never executed — e.g. the model already decided to
@@ -610,7 +638,20 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         // real waste and a correctness hazard. Pre-execution does not consume
         // the `steps` budget: it is finishing work the prior (foreground) run
         // already started, not a fresh reasoning round.
-        working = await executePreExistingPendingTools(in: working)
+        let preExistingResult = await executePreExistingPendingTools(
+            in: working,
+            loopGuard: &loopGuard
+        )
+        working = preExistingResult.messages
+        if preExistingResult.guardStopped {
+            return IOSAgentToolEngineResult(
+                messages: working,
+                stepsExecuted: 0,
+                pendingApproval: nil,
+                hitStepLimit: false,
+                guardStopped: true
+            )
+        }
 
         while steps < configuration.maxSteps {
             let chunk: MessageChunk
@@ -728,7 +769,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             // Execute every pending tool in this turn (batch), then fill all
             // of them in place before the next round — mirrors Android's
             // AgentToolDispatcher.executeBatch.
-            let batchResult = await executeBatch(pendingTools, isUserInitiated: false)
+            let batchResult = await executeBatch(pendingTools, isUserInitiated: false, loopGuard: &loopGuard)
             if let approval = batchResult.pendingApproval, configuration.honorApprovalPause {
                 return IOSAgentToolEngineResult(
                     messages: working,
@@ -738,6 +779,20 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                 )
             }
             working = applyToolOutputs(batchResult.outputs, to: working)
+
+            // I-5: a repeated-signature stop ends the whole run here, mirroring
+            // the maxSteps-exhausted return below — the stop output is already
+            // filled in place above, so the caller sees a terminated loop with
+            // an explicit reason, not a silent extra step.
+            if batchResult.guardStopped {
+                return IOSAgentToolEngineResult(
+                    messages: working,
+                    stepsExecuted: steps + 1,
+                    pendingApproval: nil,
+                    hitStepLimit: false,
+                    guardStopped: true
+                )
+            }
 
             steps += 1
         }
@@ -755,7 +810,13 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     /// Used by direct image-edit background handoff where no follow-up model
     /// turn should be requested after the tool result is filled.
     public func executePreExistingToolsOnly(messages: [UIMessage]) async -> [UIMessage] {
-        await executePreExistingPendingTools(in: messages)
+        // Standalone entry point (bypasses `run()`), so it needs its own
+        // fresh, local guard — same "never carried across runs" rule as `run`.
+        var loopGuard = IOSToolLoopGuard()
+        return await executePreExistingPendingTools(
+            in: messages,
+            loopGuard: &loopGuard
+        ).messages
     }
 
     // MARK: - Internals
@@ -799,7 +860,15 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     /// Routes through the same `executeBatch` + `applyToolOutputs` path as the
     /// main loop, so approval/denial/failure outcomes are handled identically.
     /// Returns the messages unchanged when there is nothing pre-existing to run.
-    private func executePreExistingPendingTools(in messages: [UIMessage]) async -> [UIMessage] {
+    private struct PreExistingExecutionResult {
+        let messages: [UIMessage]
+        let guardStopped: Bool
+    }
+
+    private func executePreExistingPendingTools(
+        in messages: [UIMessage],
+        loopGuard: inout IOSToolLoopGuard
+    ) async -> PreExistingExecutionResult {
         let preExisting = messages.flatMap { message -> [UIMessagePart.Tool] in
             guard message.role == MessageRole.assistant else { return [] }
             return message.parts.compactMap { $0 as? UIMessagePart.Tool }.filter { $0.output.isEmpty }
@@ -812,14 +881,19 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         // either be re-issued by the model (and then hit the executor map) or
         // simply ignored.
         let executable = preExisting.filter { executors[$0.toolName] != nil }
-        guard !executable.isEmpty else { return messages }
-        let batchResult = await executeBatch(executable, isUserInitiated: false)
+        guard !executable.isEmpty else {
+            return PreExistingExecutionResult(messages: messages, guardStopped: false)
+        }
+        let batchResult = await executeBatch(executable, isUserInitiated: false, loopGuard: &loopGuard)
         // honorApprovalPause is irrelevant here: pre-existing tools handed off
         // from the foreground are not user-initiated prompts, and a background
         // run cannot surface an approval card. A .needsApproval outcome is
         // simply left unfilled (the model will re-issue it after streaming,
         // where the normal loop honors approvalPause per configuration).
-        return applyToolOutputs(batchResult.outputs, to: messages)
+        return PreExistingExecutionResult(
+            messages: applyToolOutputs(batchResult.outputs, to: messages),
+            guardStopped: batchResult.guardStopped
+        )
     }
 
     private struct BatchExecutionResult {
@@ -827,21 +901,95 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         /// as ChatViewModel.toolCallKey) so they can be applied in place.
         let outputs: [(tool: UIMessagePart.Tool, parts: [UIMessagePart])]
         let pendingApproval: IOSPendingToolApproval?
+        /// I-5: set when `loopGuard` returned `.stop` for one of this batch's
+        /// tools. The stopped tool's output already carries the stop
+        /// explanation; remaining tools in the batch are left unfilled (same
+        /// "leave the rest for the caller to decide" shape as `firstApproval`).
+        let guardStopped: Bool
     }
 
     private func executeBatch(
         _ tools: [UIMessagePart.Tool],
-        isUserInitiated: Bool
+        isUserInitiated: Bool,
+        loopGuard: inout IOSToolLoopGuard
     ) async -> BatchExecutionResult {
         var outputs: [(UIMessagePart.Tool, [UIMessagePart])] = []
         var firstApproval: IOSPendingToolApproval?
+        var guardStopped = false
 
         for tool in tools {
             if firstApproval != nil {
-                // Once an approval is pending, leave subsequent tools unfilled
-                // (they will be re-executed when the caller resumes the loop).
+                // Approval pauses this batch. The caller owns whether and when
+                // the remaining calls resume after the user decides.
                 continue
             }
+            if guardStopped {
+                // A guard stop is terminal, unlike an approval pause. Resolve
+                // every remaining call explicitly so no later run can mistake
+                // it for pending work and execute it out of context.
+                outputs.append((tool, [UIMessagePart.Text(
+                    text: toolLoopGuardSkippedJSON(toolName: tool.toolName),
+                    metadata: nil
+                )]))
+                continue
+            }
+            // I-2 fail-closed: refuse to dispatch a tool call whose `input` cannot
+            // be parsed as a JSON object, *before* consulting the executor map. A
+            // gateway that double-writes a call, truncates one mid-argument, or a
+            // model that emits bare non-JSON text would otherwise reach the
+            // executor with silently wrong (not absent) arguments — see
+            // `parseInputStrict()`. Refusing costs one visible retry via the
+            // model's next turn; executing anyway costs an invisible wrong answer.
+            if let invalid = tool.parseInputStrict() as? ToolInputParse.Invalid {
+                outputs.append((tool, [UIMessagePart.Text(
+                    text: toolArgumentsInvalidJSON(message: invalid.message, rawPrefix: invalid.rawPrefix),
+                    metadata: nil
+                )]))
+                continue
+            }
+
+            // I-5 打转守护:在 I-2 parse 闸门之后、I-1 账本段之前判断——参数解析
+            // 失败的调用从未真正执行,不该计入重复签名;stop 分支不执行工具,
+            // 也不进 I-1 账本(不留 Started 记录),直接写停止说明并终止整批。
+            let loopGuardVerdict = loopGuard.check(toolName: tool.toolName, input: tool.input)
+            if case .stop(let reason) = loopGuardVerdict {
+                outputs.append((tool, [UIMessagePart.Text(
+                    text: toolLoopGuardStoppedJSON(toolName: tool.toolName, reason: reason),
+                    metadata: nil
+                )]))
+                guardStopped = true
+                continue
+            }
+
+            // I-1 durable boundary: when this engine instance carries a ledger
+            // (only the chat background coordinator does — see the `ledger`
+            // property doc), record Started before the executor runs. A write
+            // failure here is treated exactly like the I-2 gate above: do not
+            // reach the executor, fail this tool call in place instead of
+            // silently executing with no durable trace. When there is no
+            // ledger, this whole block is skipped (`ledger`/`ledgerRunId` are
+            // both nil for SubAgent/Novel — zero overhead, matches today).
+            if let ledger, let ledgerRunId {
+                let effectClass = IOSToolEffectClassMapping.forToolName(
+                    tool.toolName,
+                    input: tool.input
+                )
+                let didRecordStart = await ledger.recordToolCallStarted(
+                    runId: ledgerRunId,
+                    toolCallId: tool.toolCallId,
+                    toolName: tool.toolName,
+                    argsDigest: chatInputDigest(for: tool.input),
+                    effectClass: effectClass
+                )
+                guard didRecordStart else {
+                    outputs.append((tool, [UIMessagePart.Text(
+                        text: "{\"ok\":false,\"error\":\"tool_ledger_write_failed\",\"message\":\"could not durably record tool call start\"}",
+                        metadata: nil
+                    )]))
+                    continue
+                }
+            }
+
             let executor = executors[tool.toolName]
             let result: IOSAgentToolOutcome
             if let executor {
@@ -854,11 +1002,31 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                 result = .failed("[engine] no executor registered for tool `\(tool.toolName)`")
             }
 
+            if let ledger, let ledgerRunId {
+                let outcome: String
+                switch result {
+                case .filled, .filledParts:
+                    outcome = "completed"
+                case .needsApproval:
+                    outcome = "paused_for_approval"
+                case .denied:
+                    outcome = "denied"
+                case .failed:
+                    outcome = "failed"
+                }
+                await ledger.recordToolCallFinished(
+                    runId: ledgerRunId,
+                    toolCallId: tool.toolCallId,
+                    outcome: outcome
+                )
+            }
+
+            var resultParts: [UIMessagePart]?
             switch result {
             case .filled(let text):
-                outputs.append((tool, [UIMessagePart.Text(text: text, metadata: nil)]))
+                resultParts = [UIMessagePart.Text(text: text, metadata: nil)]
             case .filledParts(let parts):
-                outputs.append((tool, parts))
+                resultParts = parts
             case .needsApproval(let reason):
                 firstApproval = IOSPendingToolApproval(
                     toolCallId: tool.toolCallId,
@@ -867,13 +1035,21 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     reason: reason
                 )
             case .denied(let reason):
-                outputs.append((tool, [UIMessagePart.Text(text: "{\"denied\":\"\(sanitized(reason))\"}", metadata: nil)]))
+                resultParts = [UIMessagePart.Text(text: "{\"denied\":\"\(sanitized(reason))\"}", metadata: nil)]
             case .failed(let reason):
-                outputs.append((tool, [UIMessagePart.Text(text: "{\"error\":\"\(sanitized(reason))\"}", metadata: nil)]))
+                resultParts = [UIMessagePart.Text(text: "{\"error\":\"\(sanitized(reason))\"}", metadata: nil)]
+            }
+            if var parts = resultParts {
+                // I-5 第 2 次相同签名:工具照常执行,把提醒追加为一个额外的
+                // Text part(append,不替换),让模型下一轮看到自己在重复。
+                if case .proceedAndRemind(let reminder) = loopGuardVerdict {
+                    parts.append(UIMessagePart.Text(text: reminder, metadata: nil))
+                }
+                outputs.append((tool, parts))
             }
         }
 
-        return BatchExecutionResult(outputs: outputs, pendingApproval: firstApproval)
+        return BatchExecutionResult(outputs: outputs, pendingApproval: firstApproval, guardStopped: guardStopped)
     }
 
     /// Rebuilds the message list with tool outputs filled in place. Replaces
@@ -955,5 +1131,26 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
+    /// Structured stop notice for a tool call `IOSToolLoopGuard` refused to run
+    /// a 3rd time with identical arguments (I-5). Same inline-JSON style as the
+    /// other structured errors in this file — the call site does not execute
+    /// the tool, so this is the only trace of "why" that ends up in the
+    /// transcript.
+    private func toolLoopGuardStoppedJSON(toolName: String, reason: String) -> String {
+        "{\"ok\":false,\"error\":\"tool_loop_guard_stopped\",\"tool\":\"\(sanitized(toolName))\",\"reason\":\"\(sanitized(reason))\"}"
+    }
+
+    private func toolLoopGuardSkippedJSON(toolName: String) -> String {
+        "{\"ok\":false,\"error\":\"tool_not_executed\",\"tool\":\"\(sanitized(toolName))\",\"reason\":\"batch stopped by repeated tool-call guard\"}"
+    }
+
+    /// Structured error for a tool call whose `input` failed `parseInputStrict()`
+    /// (I-2, fail-closed). Same inline-JSON style as the `.failed`/`.denied`
+    /// cases above (`{"error": ...}`), extended with the `message` / `raw_prefix`
+    /// fields the model needs to self-correct.
+    private func toolArgumentsInvalidJSON(message: String, rawPrefix: String) -> String {
+        "{\"ok\":false,\"error\":\"tool_arguments_invalid\",\"message\":\"\(sanitized(message))\",\"raw_prefix\":\"\(sanitized(rawPrefix))\"}"
     }
 }

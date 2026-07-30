@@ -529,6 +529,66 @@ sealed class UIMessagePart {
     }
 }
 
+/** Maximum number of characters of the raw (unparsed) tool input surfaced in [ToolInputParse.Invalid]. */
+private const val TOOL_INPUT_RAW_PREFIX_LIMIT = 200
+
+/**
+ * Outcome of [UIMessagePart.Tool.parseInputStrict]. A sealed class rather than
+ * [kotlin.Result] on purpose — inline value classes like `Result` don't bridge
+ * across the KMP → Swift boundary, and this type's only reason to exist is to be
+ * consumed from Swift execution gates.
+ */
+sealed class ToolInputParse {
+    data class Valid(val args: JsonObject) : ToolInputParse()
+    data class Invalid(val message: String, val rawPrefix: String) : ToolInputParse()
+}
+
+/**
+ * Strictly parse this tool call's `input` into a JSON object, refusing anything
+ * that is not exactly one well-formed JSON object.
+ *
+ * [inputAsJson] already exists for this and is deliberately permissive: it is a
+ * rendering helper, and coercing unparsable input to `{}` is harmless when the
+ * only consequence is a blank line in the UI. It is not harmless before dispatch.
+ * A gateway that double-writes a call (`{"a":1}{"b":2}`), truncates one mid
+ * argument, or the model itself emitting bare non-JSON text all produce *some*
+ * string that `inputAsJson()` would silently fold into an empty object — and an
+ * empty-or-partial object is not a parse failure to the tool, it is a *different,
+ * plausible-looking* set of arguments the tool will happily execute. That is the
+ * failure mode this guards against: bad arguments don't fail loudly, they succeed
+ * with the wrong meaning, and the model reasons from the resulting output as if it
+ * were true. Refusing to execute and handing the model a structured error back is
+ * strictly cheaper than that — the cost is one visible retry, not an invisible
+ * wrong answer.
+ *
+ * `json` is configured with `isLenient = true` (needed elsewhere to tolerate
+ * relaxed provider output), which means a bare word like `not-json` parses
+ * successfully as a string primitive rather than throwing — so the "is this
+ * actually a JSON *object*" check below carries real weight and isn't redundant
+ * with the try/catch.
+ */
+fun UIMessagePart.Tool.parseInputStrict(): ToolInputParse {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) return ToolInputParse.Valid(JsonObject(emptyMap()))
+    val rawPrefix = input.take(TOOL_INPUT_RAW_PREFIX_LIMIT)
+    val element = try {
+        json.parseToJsonElement(trimmed)
+    } catch (e: Exception) {
+        return ToolInputParse.Invalid(
+            message = "arguments were not valid JSON: ${e.message ?: e::class.simpleName}",
+            rawPrefix = rawPrefix,
+        )
+    }
+    return if (element is JsonObject) {
+        ToolInputParse.Valid(element)
+    } else {
+        ToolInputParse.Invalid(
+            message = "arguments parsed but were not a JSON object (was ${element::class.simpleName})",
+            rawPrefix = rawPrefix,
+        )
+    }
+}
+
 fun UIMessagePart.Tool.streamToolIndex(): Int? =
     streamIndex ?: metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
 

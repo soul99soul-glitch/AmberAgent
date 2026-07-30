@@ -634,50 +634,142 @@ final class ChatViewModel {
             guard let storedMessages = await conversationStore.messages(for: conversationId) else {
                 continue
             }
-            guard let pendingTool = storedMessages
+
+            // W3 state-machine check (docs/IOS_AGENT_HARDENING_PLAN_2026-07-29.md
+            // §W3, invariant I-3): approving a tool never flips `agent_run.status`
+            // back to "running" — `executeApprovedAsyncTool` records the ledger's
+            // Started/Finished pair for the real execution but never calls
+            // `recordRun`, so a crash during the post-approval execution leaves
+            // the run stuck at status "awaiting_permission", indistinguishable at
+            // the AgentRunEntity level from "user never tapped approve". Only the
+            // tool-call ledger tells the two apart: a genuinely-still-pending call
+            // has exactly one Started→Finished(paused_for_approval) pair; an
+            // approved-then-crashed call has a SECOND Started after that with no
+            // Finished. Consult it before assuming "cancelled" is the honest story
+            // — a side-effect tool that was actually approved and mid-execution
+            // must land as "outcome unknown", never a plain cancellation.
+            //
+            // F1 fix: this MUST run unconditionally, before any short-circuit on
+            // `descriptor`'s own tool call. A single run can have the descriptor's
+            // tc-1 (already approved, output present) followed by a second call
+            // tc-2 the model issued right after — if tc-2 died mid-execution, it
+            // has a dangling ledger Started with no Finished, but its tool part's
+            // `output` is also empty, so it looks exactly like "never approved".
+            // Skipping this plan step (as the old `guard pendingTool ... else
+            // continue` did whenever tc-1 no longer had empty output) would leave
+            // tc-2 unmarked forever: this run is excluded from AppShell's
+            // interrupted-run sweep once `completePendingApprovalRecovery` below
+            // marks it "interrupted", so tc-2 would silently re-fire (a real
+            // sideEffect re-run) the next time the user resumes this chat —
+            // violating I-3. Apply the FULL actions map (every toolCallId this
+            // run's ledger has an opinion on), not just descriptor.toolCallId.
+            guard let ledgerActions = await IOSRunRecovery.planToolCallRecovery(
+                runId: descriptor.runId,
+                messages: storedMessages
+            ) else {
+                continue
+            }
+            var recoveredMessages = IOSToolCallRecoveryApplier.apply(ledgerActions, to: storedMessages)
+            var didMutateRecovered = !ledgerActions.isEmpty
+
+            // descriptor's own tool call: only fall back to the plain "App
+            // restarted while waiting for confirmation" cancellation notice if
+            // it's still sitting with empty output AND the ledger sweep above
+            // had no opinion on it (i.e. genuinely never approved — unchanged
+            // S2 behavior). If the ledger already produced an action for it,
+            // the loop above already wrote its (possibly "outcome unknown")
+            // resolution and this branch must not overwrite that with a plain
+            // cancellation.
+            let descriptorToolStillPending = storedMessages
                 .flatMap(\.parts)
                 .compactMap({ $0 as? UIMessagePart.Tool })
-                .first(where: {
-                    $0.toolCallId == descriptor.toolCallId && $0.output.isEmpty
-                }) else {
-                await IOSRunRecovery.completePendingApprovalRecovery(runId: descriptor.runId)
+                .first(where: { $0.toolCallId == descriptor.toolCallId && $0.output.isEmpty })
+            if let descriptorToolStillPending, ledgerActions[descriptor.toolCallId] == nil {
+                let failure = ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: descriptorToolStillPending.toolName,
+                    reason: "App restarted while waiting for confirmation.",
+                    cancelled: true
+                )
+                recoveredMessages = runtime.messagesByFinishingToolCall(
+                    descriptorToolStillPending,
+                    outputText: failure,
+                    in: recoveredMessages
+                )
+                let noticeSeed = UIMessage.companion.assistant(prompt: "")
+                recoveredMessages.append(UIMessage(
+                    id: noticeSeed.id,
+                    role: noticeSeed.role,
+                    parts: [MessageKt.localGenerationErrorTextPart(
+                        text: "待确认操作因 App 重启已终止，请重新生成。"
+                    )],
+                    annotations: noticeSeed.annotations,
+                    createdAt: noticeSeed.createdAt,
+                    finishedAt: noticeSeed.finishedAt,
+                    modelId: noticeSeed.modelId,
+                    usage: noticeSeed.usage,
+                    translation: noticeSeed.translation
+                ))
+                didMutateRecovered = true
+            }
+
+            if didMutateRecovered {
+                guard await conversationStore.save(messages: recoveredMessages, to: conversationId) else {
+                    continue
+                }
+                didUpdateCurrentConversation = didUpdateCurrentConversation || currentConversationId == conversationId
+            }
+            await IOSRunRecovery.completePendingApprovalRecovery(runId: descriptor.runId)
+        }
+
+        if didUpdateCurrentConversation {
+            reloadFromStore(reason: .branchChange)
+        }
+    }
+
+    /// W3 (§ crash-recovery UX): for interrupted runs that were never
+    /// awaiting approval (the ordinary "died mid tool HTTP call / mid plain
+    /// generation" case), read each run's ledger and apply the resulting
+    /// per-toolCallId recovery action to that run's conversation. Mirrors
+    /// `terminateRecoveredPendingApprovals`'s conversation-lookup/save
+    /// pattern; a run whose conversation can no longer be found (deleted by
+    /// the user in the meantime) is skipped silently, same convention as
+    /// that method.
+    func applyToolCallLedgerRecovery(
+        forInterruptedRuns pairs: [(runId: String, conversationId: String)]
+    ) async -> Set<String> {
+        guard let conversationStore, !pairs.isEmpty else { return [] }
+        var didUpdateCurrentConversation = false
+        var reconciledRunIds = Set<String>()
+
+        for pair in pairs {
+            guard let conversationId = conversationStore.summaries.first(where: {
+                $0.id.toHexDashString() == pair.conversationId
+            })?.id else {
+                print("[AmberChat] W3 recovery: conversation \(pair.conversationId) for run \(pair.runId) not found, skipping (may have been deleted).")
+                // A deleted conversation has no pending tool node left to replay.
+                reconciledRunIds.insert(pair.runId)
+                continue
+            }
+            guard let storedMessages = await conversationStore.messages(for: conversationId) else { continue }
+            guard let actions = await IOSRunRecovery.planToolCallRecovery(
+                runId: pair.runId,
+                messages: storedMessages
+            ) else { continue }
+            guard !actions.isEmpty else {
+                reconciledRunIds.insert(pair.runId)
                 continue
             }
 
-            let failure = ChatToolOutputFormatter.toolFailureJSON(
-                toolName: pendingTool.toolName,
-                reason: "App restarted while waiting for confirmation.",
-                cancelled: true
-            )
-            var recoveredMessages = runtime.messagesByFinishingToolCall(
-                pendingTool,
-                outputText: failure,
-                in: storedMessages
-            )
-            let noticeSeed = UIMessage.companion.assistant(prompt: "")
-            recoveredMessages.append(UIMessage(
-                id: noticeSeed.id,
-                role: noticeSeed.role,
-                parts: [MessageKt.localGenerationErrorTextPart(
-                    text: "待确认操作因 App 重启已终止，请重新生成。"
-                )],
-                annotations: noticeSeed.annotations,
-                createdAt: noticeSeed.createdAt,
-                finishedAt: noticeSeed.finishedAt,
-                modelId: noticeSeed.modelId,
-                usage: noticeSeed.usage,
-                translation: noticeSeed.translation
-            ))
-            guard await conversationStore.save(messages: recoveredMessages, to: conversationId) else {
-                continue
-            }
-            await IOSRunRecovery.completePendingApprovalRecovery(runId: descriptor.runId)
+            let recoveredMessages = IOSToolCallRecoveryApplier.apply(actions, to: storedMessages)
+            guard await conversationStore.save(messages: recoveredMessages, to: conversationId) else { continue }
+            reconciledRunIds.insert(pair.runId)
             didUpdateCurrentConversation = didUpdateCurrentConversation || currentConversationId == conversationId
         }
 
         if didUpdateCurrentConversation {
             reloadFromStore(reason: .branchChange)
         }
+        return reconciledRunIds
     }
 
     /// 把当前 messages 落盘（节流：只在流式结束/取消/切换时调，不在每个 chunk 调）。
