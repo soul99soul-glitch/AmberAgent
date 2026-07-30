@@ -7,7 +7,7 @@
 meta:
   updated: 2026-07-29
   branch: harmony-preview
-  head: c8cb1875a
+  head: 1db56d3c3
 
 phase:
   current: "Phase 0 → Phase 1 过渡"
@@ -29,7 +29,7 @@ build_and_test:
   单元测试: "cd harmony/deepread && npm test; cd harmony/chat && npm test  # node+tsx,无需设备"
   类型检查: "cd harmony/deepread && npx tsc --noEmit; cd harmony/chat && npx tsc --noEmit  # 双 HAR,esbuild 不查类型,提交门之一(D-010/D-014)"
   构建: "cd harmony && hvigorw assembleHar --mode module -p product=default && hvigorw assembleHap --mode module -p product=default  # 双绿门(D-014)"
-  最近验证: "2026-07-29 deepread 610 + chat 1493 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL(D-132a)"
+  最近验证: "2026-07-29 deepread 610 + chat 1542 pass / tsc clean(双 HAR) / assembleHar+assembleHap BUILD SUCCESSFUL(D-132b)"
   fixture校验: "node scripts/harmony-inventory/validate-harmony-fixtures.mjs"
   契约校验: "node scripts/harmony-inventory/check-source-contracts.mjs"
 
@@ -47,15 +47,12 @@ active_goals:
   G-C_设备解锁: blocked_by_human # 模拟器镜像下载或真机接入
   G-D_真机P0_spike: pending(G-C)
   G-E_Chat_MVP主线: "source-only done(2026-07-28);设备端 pending(G-D)"
-  G-F_P1能力面: "source-only in_progress(D-132 subagent);设备能力仍 pending(G-D)"
+  G-F_P1能力面: "source-only in_progress(D-132c subagent tools/entry assembly);设备能力仍 pending(G-D)"
 
 next_slices:                      # 按优先级,取最高未阻塞项
-  - id: D-132b
-    状态: in_progress
-    内容: "subagent 隔离 runner + manager 生命周期/竞态/任务看板"
   - id: D-132c
-    状态: pending(D-132b)
-    内容: "subagent 五件公共工具 + 设置/entry adapter + ChatPage 装配"
+    状态: in_progress
+    内容: "subagent 五件公共工具 + PromptConfigStore 水合桥 + entry adapter + ChatPage 装配"
   - id: S-DEVICE-UNBLOCK
     状态: blocked_by_human
     内容: "DevEco Device Manager 下载 API 26 模拟器镜像并启动,或接入真机"
@@ -64,6 +61,6 @@ next_slices:                      # 按优先级,取最高未阻塞项
     内容: "DECISION_PACKET_001 人工确认(9 项决策)"
 
 parity_baseline:
-  单元测试总数: 2103              # deepread 610 + chat 1493
+  单元测试总数: 2152              # deepread 610 + chat 1542
   已知行为偏差: 10               # PARITY_DEBT.md 11 条:10 open + 1 closed;另 1 条 Android 内部不一致待核实
-  决策记录: "DECISION_LOG.md D-001..D-132a(含分片决策)"
+  决策记录: "DECISION_LOG.md D-001..D-132b(含分片决策)"
