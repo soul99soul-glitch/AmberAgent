@@ -647,6 +647,286 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(capped.map(\.name), ["A", "B"])
     }
 
+    // MARK: - 动态组席回退/重试/解析鲁棒性（辩论与自由群聊共用同一条组席路径）
+
+    /// 主持人在真正 JSON 前用了带花括号的列举时，extractJSONObject 会先抓到干扰对象；
+    /// 应跳过它，继续扫描到含 seats 的对象，而不是静默回退默认席位。
+    func testPlannedSeatsFromJSONSkipsLeadingBraceNoiseToFindSeats() {
+        let planned = IOSCouncilRoomRunner.plannedSeatsFromJSON(
+            """
+            先考虑 {历史, 政治} 两个维度，再给席位：
+            {"seats":[{"name":"考据","lens":"核史料"},{"name":"社会","lens":"看民生"}]}
+            """,
+            maxSeats: 4,
+            routes: [IOSCouncilModelRouteDescriptor(providerId: "provider-main", modelId: "gpt-main")]
+        )
+        XCTAssertEqual(planned.map(\.name), ["考据", "社会"])
+    }
+
+    /// 动态组席解析不出 ≥2 席时，必须发一条显式「回退默认」divider，不能静默——
+    /// 否则用户看到「已组建…工程、产品、风险」会误以为动态组席成功。
+    func testDynamicSeatPlanParseFailureSurfacesFallbackDivider() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let models = ["gpt-main", "gpt-alt", "gpt-engineer", "gpt-risk"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        var scripts: [Result<String, Error>] = [
+            .success("最终议题"),
+            .success("主持人这次没给 JSON，只写了一段散文。"),
+        ]
+        scripts.append(contentsOf: Array(repeating: .success("OK"), count: 12))
+        let streamer = ScriptedCouncilStreamer(scripts)
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .unavailable,
+            providerSetting: provider,
+            currentModel: models[0]
+        )
+        request.dynamicSeatGeneration = true
+        var appendedBodies: [String] = []
+        _ = await runner.run(request: request, onEvent: { event in
+            if case .append(let message) = event { appendedBodies.append(message.body) }
+        })
+
+        let surfacedFallback = appendedBodies.contains { body in
+            body.contains("动态组席") &&
+                (body.contains("默认") || body.contains("沿用") ||
+                 body.contains("失败") || body.contains("未成功"))
+        }
+        XCTAssertTrue(
+            surfacedFallback,
+            "动态组席解析失败时应发显式回退 divider，实际 append: \(appendedBodies)"
+        )
+    }
+
+    /// 动态组席调用第一次失败时，应重试一次；重试成功则采用动态席位，而非回退默认。
+    func testDynamicSeatPlanRetriesOnceAfterFailure() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let models = ["gpt-main", "gpt-alt", "gpt-engineer", "gpt-risk"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        var scripts: [Result<String, Error>] = [
+            .success("最终议题"),
+            .failure(CouncilTestError.scriptedFailure),
+            .success(#"{"seats":[{"name":"考据","lens":"核史料"},{"name":"社会","lens":"看民生"}]}"#),
+        ]
+        scripts.append(contentsOf: Array(repeating: .success("OK"), count: 12))
+        let streamer = ScriptedCouncilStreamer(scripts)
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .unavailable,
+            providerSetting: provider,
+            currentModel: models[0]
+        )
+        request.dynamicSeatGeneration = true
+        var rosters: [[IOSCouncilRoomSpeaker]] = []
+        let outcome = await runner.run(request: request, onEvent: { event in
+            if case .roster(let speakers, _, _) = event { rosters.append(speakers) }
+        })
+
+        XCTAssertEqual(outcome.status, .completed)
+        let finalSeats = (rosters.last ?? []).filter { !$0.isHost }
+        XCTAssertEqual(Set(finalSeats.map(\.name)), Set(["考据", "社会"]))
+        // 组席被调用两次：议题之后连续两次 host（首次失败 + 重试）。
+        XCTAssertEqual(
+            streamer.receivedModels.prefix(3).map(\.modelId),
+            ["gpt-main", "gpt-main", "gpt-main"]
+        )
+    }
+
+    // MARK: - 席位输出伪联网搜索文本清洗（显示兜底）
+
+    func testSanitizeSeatOutputStripsFencedPseudoWebSearchBlock() {
+        let raw = """
+        我先查一下资料。
+        ```html
+        web_search
+        query 赵匡胤 开国功臣 名将 名臣 名单
+        num_results 15
+        web_search
+        query 李世民 凌烟阁 二十四功臣 人才来源
+        num_results 10
+        ```
+        综上，人才池其实不小。
+        """
+        let cleaned = IOSCouncilRoomRunner.sanitizeSeatOutput(raw)
+        XCTAssertFalse(cleaned.contains("web_search"))
+        XCTAssertFalse(cleaned.contains("num_results"))
+        XCTAssertFalse(cleaned.contains("```"))
+        XCTAssertTrue(cleaned.contains("我先查一下资料。"))
+        XCTAssertTrue(cleaned.contains("综上，人才池其实不小。"))
+    }
+
+    func testSanitizeSeatOutputStripsBarePseudoWebSearchLines() {
+        let raw = """
+        让我搜索。
+        web_search
+        query 朱元璋 淮西集团 开国将相
+        num_results 10
+        所以结论是 X。
+        """
+        let cleaned = IOSCouncilRoomRunner.sanitizeSeatOutput(raw)
+        XCTAssertFalse(cleaned.contains("web_search"))
+        XCTAssertFalse(cleaned.contains("num_results"))
+        XCTAssertTrue(cleaned.contains("让我搜索。"))
+        XCTAssertTrue(cleaned.contains("所以结论是 X。"))
+    }
+
+    func testSanitizeSeatOutputKeepsNormalProseMentioningSearch() {
+        let raw = "我认为这个问题不需要联网搜索，从制度成本看即可。"
+        XCTAssertEqual(IOSCouncilRoomRunner.sanitizeSeatOutput(raw), raw)
+    }
+
+    /// 行首恰为 query 的英文正常发言，在没有 web_search 上下文时不得被误删——
+    /// sanitize 无条件运行(与开关无关)，误删会丢用户付费生成的合法内容。
+    func testSanitizeSeatOutputKeepsEnglishQueryLineWithoutPseudoSearchContext() {
+        let raw = """
+        Query the archive for precedents before deciding.
+        The conclusion follows from the evidence.
+        """
+        XCTAssertEqual(IOSCouncilRoomRunner.sanitizeSeatOutput(raw), raw)
+    }
+
+    /// web_search 行被一句正常散文隔开后，其后的 query 行已脱离伪搜索块，应保留；
+    /// 而 web_search 行本身仍删。验证「query 删除依赖前序 web_search 上下文」的复位逻辑。
+    func testSanitizeSeatOutputKeepsQueryLineAfterContextReset() {
+        let raw = """
+        web_search
+        This is a normal intervening line.
+        query should be kept now.
+        """
+        let cleaned = IOSCouncilRoomRunner.sanitizeSeatOutput(raw)
+        XCTAssertFalse(cleaned.contains("web_search"))
+        XCTAssertTrue(cleaned.contains("This is a normal intervening line."))
+        XCTAssertTrue(cleaned.contains("query should be kept now."))
+    }
+
+    // MARK: - 席位发言前联网查证（开关 + 尊重全局联网 consent）
+
+    /// 开关开 + consent allowed：主持调研 1 次 + 每席 1 次（2 席）= 3 次；两席发言 prompt
+    /// 均注入「本席联网查证」段且含调研标记。researcher 由 runner 注入，主持与席位共用同一实例。
+    func testSeatWebSearchRunsPerSeatResearchAndInjectsSummary() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let models = ["gpt-main", "gpt-host", "gpt-engineer", "gpt-risk"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        let researcher = CountingCouncilResearcher()
+        let streamer = ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success("工程发言"),
+            .success("风险发言"),
+            .success("主持总结"),
+        ])
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: researcher,
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .allowed,
+            providerSetting: provider,
+            currentModel: models[0]
+        )
+        request.dynamicSeatGeneration = false
+        request.seatWebSearch = true
+
+        let outcome = await runner.run(request: request, onEvent: { _ in })
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(researcher.callCount, 3)
+        let seatResearchPrompts = streamer.receivedUserPrompts.filter {
+            $0.contains("本席联网查证")
+        }
+        XCTAssertEqual(seatResearchPrompts.count, 2)
+        XCTAssertTrue(seatResearchPrompts.allSatisfy { $0.contains("SEAT_RESEARCH_MARKER_42") })
+    }
+
+    /// 开关关：席位不调研、不注入；仅主持因 consent=allowed 调研 1 次。
+    func testSeatWebSearchOffSkipsPerSeatResearch() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let models = ["gpt-main", "gpt-host", "gpt-engineer", "gpt-risk"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        let researcher = CountingCouncilResearcher()
+        let streamer = ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success("工程发言"),
+            .success("风险发言"),
+            .success("主持总结"),
+        ])
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: researcher,
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .allowed,
+            providerSetting: provider,
+            currentModel: models[0]
+        )
+        request.dynamicSeatGeneration = false
+        request.seatWebSearch = false
+
+        let outcome = await runner.run(request: request, onEvent: { _ in })
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(researcher.callCount, 1)
+        XCTAssertEqual(
+            streamer.receivedUserPrompts.filter { $0.contains("本席联网查证") }.count,
+            0
+        )
+    }
+
+    /// 开关开但 consent=unavailable（全局联网关）：主持与席位都不调研、不注入——
+    /// 席位联网尊重全局联网开关，与主持一致，避免在用户禁用联网时偷偷发请求。
+    func testSeatWebSearchRespectsUnavailableConsent() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let models = ["gpt-main", "gpt-host", "gpt-engineer", "gpt-risk"].map(makeCouncilModel)
+        let provider = makeCouncilProvider(models: models)
+        let researcher = CountingCouncilResearcher()
+        let streamer = ScriptedCouncilStreamer([
+            .success("最终议题"),
+            .success("工程发言"),
+            .success("风险发言"),
+            .success("主持总结"),
+        ])
+        let runner = IOSCouncilRoomRunner(
+            streamer: streamer,
+            researcher: researcher,
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .unavailable,
+            providerSetting: provider,
+            currentModel: models[0]
+        )
+        request.dynamicSeatGeneration = false
+        request.seatWebSearch = true
+
+        let outcome = await runner.run(request: request, onEvent: { _ in })
+
+        XCTAssertEqual(outcome.status, .completed)
+        XCTAssertEqual(researcher.callCount, 0)
+        XCTAssertEqual(
+            streamer.receivedUserPrompts.filter { $0.contains("本席联网查证") }.count,
+            0
+        )
+    }
+
     func testDynamicSeatsProbeAssignedModelsAndReplaceUnreachableOnes() async throws {
         let defaults = isolatedDefaults()
         let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
@@ -2224,6 +2504,27 @@ private final class RestartableCouncilStreamer: IOSCouncilTextStreaming {
 }
 
 @MainActor
+private final class CountingCouncilResearcher: IOSCouncilResearching {
+    private(set) var callCount = 0
+    private(set) var receivedObjectives: [String] = []
+    let marker: String
+    init(marker: String = "SEAT_RESEARCH_MARKER_42") { self.marker = marker }
+    func research(
+        objective: String,
+        settings: Settings?,
+        maxSearches: Int,
+        maxScrapes: Int
+    ) async -> IOSCouncilResearchBundle {
+        callCount += 1
+        receivedObjectives.append(objective)
+        return IOSCouncilResearchBundle(
+            searches: [],
+            scrapedPages: [IOSCouncilScrapedPage(url: "seat://research", content: marker)],
+            failures: []
+        )
+    }
+}
+
 private final class StaticCouncilResearcher: IOSCouncilResearching {
     func research(
         objective: String,

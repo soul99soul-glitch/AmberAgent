@@ -1091,6 +1091,29 @@ private struct CouncilRoomSettingsSheet: View {
                     .disabled(isReadOnly)
                 }
 
+                settingsGroup(title: "席位联网查证") {
+                    Toggle(isOn: Binding(
+                        get: { roomSettingsStore.seatWebSearch },
+                        set: { roomSettingsStore.seatWebSearch = $0 }
+                    )) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("允许席位联网搜索")
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text(roomSettingsStore.seatWebSearch
+                                 ? "开：每位议员发言前先联网查证一轮，更慢更耗；需同时开启全局联网搜索。"
+                                 : "关：议员纯推理发言（推荐，速度更快）。")
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .tint(AmberTheme.accent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .disabled(isReadOnly)
+                }
+
                 settingsGroup(title: "席位（\(roomSettingsStore.settings.seats.count)）") {
                     if roomSettingsStore.settings.seats.isEmpty {
                         Text(roomSettingsStore.dynamicSeatGeneration
@@ -1832,6 +1855,7 @@ final class CouncilChatViewModel {
             searchSettings: sharedSettings.snapshot,
             researchConsent: continuation == nil && researchAllowed ? .allowed : .unavailable,
             dynamicSeatGeneration: continuation == nil && roomSettingsStore.dynamicSeatGeneration,
+            seatWebSearch: continuation == nil && roomSettingsStore.seatWebSearch,
             continuation: continuation
         )
         let summary = await runner.run(request: request, onEvent: { [weak self] event in

@@ -246,6 +246,14 @@ final class IOSCouncilRoomSettingsStore {
 
     private static let dynamicSeatKey = "app.amber.ios.councilDynamicSeatGeneration.v1"
 
+    /// 席位发言前是否联网查证一轮。独立 UserDefaults 键,默认关(用户显式开启才联网,
+    /// 避免无谓的网络/成本);老数据无此键时按关起步。
+    var seatWebSearch: Bool {
+        didSet { userDefaults.set(seatWebSearch, forKey: Self.seatWebSearchKey) }
+    }
+
+    private static let seatWebSearchKey = "app.amber.ios.councilSeatWebSearch.v1"
+
     @ObservationIgnored private let userDefaults: UserDefaults
     @ObservationIgnored private let storageKey: String
     @ObservationIgnored private let encoder = JSONEncoder()
@@ -266,6 +274,8 @@ final class IOSCouncilRoomSettingsStore {
         }
         // 默认开启动态生成(老用户/首次进入都按"自由组建"起步)。
         self.dynamicSeatGeneration = (userDefaults.object(forKey: Self.dynamicSeatKey) as? Bool) ?? true
+        // 席位联网查证默认关:联网更慢更耗,需用户在设置里显式开启。
+        self.seatWebSearch = (userDefaults.object(forKey: Self.seatWebSearchKey) as? Bool) ?? false
     }
 
     func bootstrapLegacySeatsIfNeeded(_ legacySeats: [[String: String]], currentModelId: String) {
@@ -448,6 +458,10 @@ struct IOSCouncilRoomRunRequest {
     let researchConsent: IOSCouncilResearchConsent
     /// 开:主持人按议题自由动态生成席位;关:只用 settings.seats 里已添加的席位。
     var dynamicSeatGeneration: Bool = false
+    /// 开:每位席位发言前先联网查证一轮,把材料注入其发言 prompt(治 grok 等模型
+    /// 「想搜却无工具」而幻觉出 web_search 文本);关:席位纯推理。仍需 researchConsent
+    /// 为 allowed(全局联网开关)才真正联网,且追问(continuation)不查以控成本。
+    var seatWebSearch: Bool = false
     /// 非 nil 时沿用同一议会任务、席位与既有转录，只追加一轮追问讨论。
     var continuation: IOSCouncilRoomContinuation? = nil
 }
@@ -1250,7 +1264,9 @@ final class IOSCouncilRoomRunner {
                 onEvent(.append(dividerMessage("沿用本议会席位：\(activeSeats.map(\.name).joined(separator: "、"))")))
             } else if request.dynamicSeatGeneration {
                 onEvent(.state("组建议员席位中"))
-                let seatPlanRaw = (try? await streamWithTimeout(
+                // 组席调用失败（超时/抛错）时重试一次；调用成功但解析不出席位不重试，
+                // 走下面的显式回退——避免把"调用挂了"和"模型没给 JSON"混为一谈。
+                var seatPlanRawOrNil: String? = try? await streamWithTimeout(
                     runGeneration: currentRunGeneration,
                     seconds: limits.seatTimeoutSeconds,
                     timeoutLabel: "主持人组席"
@@ -1271,7 +1287,33 @@ final class IOSCouncilRoomRunner {
                             if !text.isEmpty { recordOutput() }
                         }
                     )
-                }) ?? ""
+                }
+                if seatPlanRawOrNil == nil {
+                    try checkCancelled(runGeneration: currentRunGeneration)
+                    seatPlanRawOrNil = try? await streamWithTimeout(
+                        runGeneration: currentRunGeneration,
+                        seconds: limits.seatTimeoutSeconds,
+                        timeoutLabel: "主持人组席重试"
+                    ) { recordOutput in
+                        try await self.stream(
+                            runGeneration: currentRunGeneration,
+                            speaker: host,
+                            systemPrompt: self.seatPlanSystemPrompt(),
+                            userPrompt: self.seatPlanPrompt(
+                                objective: objective,
+                                finalTopic: finalTopic,
+                                research: research,
+                                limits: limits
+                            ),
+                            request: request,
+                            temperature: 0.3,
+                            onUpdate: { text in
+                                if !text.isEmpty { recordOutput() }
+                            }
+                        )
+                    }
+                }
+                let seatPlanRaw = seatPlanRawOrNil ?? ""
                 try checkCancelled(runGeneration: currentRunGeneration)
                 let plannedSeats = Self.plannedSeatsFromJSON(
                     seatPlanRaw,
@@ -1284,8 +1326,19 @@ final class IOSCouncilRoomRunner {
                         )
                     )
                 )
-                if plannedSeats.count >= 2 {
+                let usedDynamicSeats = plannedSeats.count >= 2
+                if usedDynamicSeats {
                     activeSeats = plannedSeats
+                } else {
+                    // 显式回退：动态组席没产出有效席位时，明说沿用了默认席位，而不是像
+                    // 组席成功那样打印"已组建…工程、产品、风险"，让用户误以为动态生效。
+                    onEvent(.append(dividerMessage(
+                        "动态组席未返回有效席位，已沿用默认席位：\(activeSeats.map(\.name).joined(separator: "、"))"
+                    )))
+                    taskStore.appendLog(
+                        id: task.id,
+                        chunk: "dynamic seat plan fell back to defaults; raw=\(seatPlanRaw.prefix(200))\n\n"
+                    )
                 }
                 let validation = try await validateDynamicSeatModels(
                     activeSeats,
@@ -1305,7 +1358,9 @@ final class IOSCouncilRoomRunner {
                     onEvent(.append(dividerMessage("模型联通检查已替换不可用模型：\(validation.failures.map(\.modelId).joined(separator: "、"))")))
                     taskStore.appendLog(id: task.id, chunk: "dynamic model probe fallback: \(summary)\n\n")
                 }
-                onEvent(.append(dividerMessage("已组建 \(activeSeats.count) 位议员：\(activeSeats.map(\.name).joined(separator: "、"))")))
+                if usedDynamicSeats {
+                    onEvent(.append(dividerMessage("已组建 \(activeSeats.count) 位议员：\(activeSeats.map(\.name).joined(separator: "、"))")))
+                }
             } else {
                 onEvent(.append(dividerMessage("本轮议员（已添加席位）：\(activeSeats.map(\.name).joined(separator: "、"))")))
             }
@@ -1338,6 +1393,25 @@ final class IOSCouncilRoomRunner {
                     let latestMessage = IOSCouncilStreamTail()
                     do {
                         let transcriptSnapshot = transcript
+                        // 席位发言前可选联网查证：开关开 + 本轮允许联网(全局联网开) + 非追问
+                        // 时，复用主持同一条调研链路为该席查一轮，把材料注入其发言 prompt。
+                        // 该调用在 runner.run 内 → discussionTask 内 → 自动落在后台保活租约内。
+                        let seatResearch: IOSCouncilResearchBundle
+                        if request.seatWebSearch,
+                           request.researchConsent == .allowed,
+                           request.continuation == nil {
+                            try checkCancelled(runGeneration: currentRunGeneration)
+                            seatResearch = await researcher.research(
+                                objective: "\(finalTopic)（\(seat.name)视角：\(seat.rolePrompt)）",
+                                settings: request.searchSettings,
+                                maxSearches: 2,
+                                maxScrapes: 2
+                            )
+                        } else {
+                            seatResearch = IOSCouncilResearchBundle(
+                                searches: [], scrapedPages: [], failures: []
+                            )
+                        }
                         let output = try await streamWithTimeout(
                             runGeneration: currentRunGeneration,
                             seconds: limits.seatTimeoutSeconds,
@@ -1355,21 +1429,27 @@ final class IOSCouncilRoomRunner {
                                     round: round,
                                     rounds: finalRound,
                                     transcript: transcriptSnapshot,
-                                    budget: limits.outputBudgetCharacters
+                                    budget: limits.outputBudgetCharacters,
+                                    seatResearch: seatResearch
                                 ),
                                 request: request,
                                 temperature: request.mode == .debate ? 0.55 : 0.75,
                                 onUpdate: { text in
                                     if !text.isEmpty { recordOutput() }
-                                    let body = text.isEmpty ? "思考中..." : text
+                                    let shown = text.isEmpty
+                                        ? "思考中..."
+                                        : Self.sanitizeSeatOutput(text)
+                                    // 判断是否更新 latestMessage.body 必须基于原始 text：占位符
+                                    // "思考中..."(text 为空时)不算席位真实产出,否则失败兜底会把
+                                    // 占位符当成已生成内容而漏掉"席位失败"提示。shown 仅负责显示。
                                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                        latestMessage.body = text
+                                        latestMessage.body = shown
                                     }
-                                    onEvent(.updateMessage(id: messageId, body: body, status: .speaking))
+                                    onEvent(.updateMessage(id: messageId, body: shown, status: .speaking))
                                 }
                             )
                         }
-                        guard let output = output.trimmedNilIfBlank else {
+                        guard let output = Self.sanitizeSeatOutput(output).trimmedNilIfBlank else {
                             throw IOSCouncilRoomRunnerError.emptyOutput("\(seat.name)席位")
                         }
                         onEvent(.updateMessage(id: messageId, body: output, status: .completed))
@@ -1637,12 +1717,19 @@ final class IOSCouncilRoomRunner {
             return IOSCouncilModelRouteDescriptor(providerId: providerId, modelId: modelId)
         }
         guard !usableRoutes.isEmpty else { return [] }
-        guard let json = IOSDeepReadDraftGenerator.extractJSONObject(text),
-              let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let seats = obj["seats"] as? [[String: Any]] else {
-            return []
-        }
+        // 扫描所有顶层 JSON 对象，取第一个含 seats 数组的：主持人在真正 JSON 前用了带
+        // 花括号的列举（如 {历史, 政治}）时，extractJSONObject 会先抓到干扰对象而静默回退，
+        // 这里跳过它继续找含 seats 的对象。
+        let seats: [[String: Any]]? = {
+            for objectString in Self.topLevelJSONObjects(text) {
+                guard let data = objectString.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let seats = obj["seats"] as? [[String: Any]] else { continue }
+                return seats
+            }
+            return nil
+        }()
+        guard let seats else { return [] }
         var result: [IOSCouncilRoomSpeaker] = []
         var seenNames = Set<String>()
         for entry in seats {
@@ -1665,6 +1752,46 @@ final class IOSCouncilRoomRunner {
             if result.count >= maxSeats { break }
         }
         return result.count >= 2 ? result : []
+    }
+
+    /// 文本中所有顶层配平 `{...}` 对象的子串（忽略字符串内的花括号与转义），按出现顺序。
+    /// 用于在主持人输出里跳过不含 seats 的干扰对象，定位真正的席位 JSON。
+    private static func topLevelJSONObjects(_ text: String) -> [String] {
+        let chars = Array(text)
+        var result: [String] = []
+        var i = 0
+        while i < chars.count {
+            guard chars[i] == "{" else { i += 1; continue }
+            let start = i
+            var depth = 0
+            var inString = false
+            var escaped = false
+            var j = i
+            var closed = false
+            while j < chars.count {
+                let c = chars[j]
+                if inString {
+                    if escaped { escaped = false }
+                    else if c == "\\" { escaped = true }
+                    else if c == "\"" { inString = false }
+                } else if c == "\"" {
+                    inString = true
+                } else if c == "{" {
+                    depth += 1
+                } else if c == "}" {
+                    depth -= 1
+                    if depth == 0 {
+                        result.append(String(chars[start...j]))
+                        i = j + 1
+                        closed = true
+                        break
+                    }
+                }
+                j += 1
+            }
+            if !closed { break }
+        }
+        return result
     }
 
     /// Dynamic seats prefer one model from each non-host provider before reusing
@@ -2088,6 +2215,79 @@ final class IOSCouncilRoomRunner {
         """
     }
 
+    /// 清洗席位输出里模型幻觉出的伪联网搜索 / 工具调用文本。典型如 grok 在无可用工具时
+    /// 把搜索冲动写成 `web_search / query … / num_results …`，并常被其包进误标的 ```html
+    /// 围栏。终态与流式累积文本各调用一次；纯函数，便于单测。
+    static func sanitizeSeatOutput(_ text: String) -> String {
+        // 逐行状态机：围栏内整块缓冲，闭合时若含伪搜索则整块丢弃（含围栏标记），否则原样
+        // 保留——正常代码块因此不受影响；围栏外逐行删裸的 web_search/query/num_results 行。
+        // 刻意不用正则做条件删除，避开 NSRegularExpression 闭包重载与 NSRange 转换的坑。
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var out: [String] = []
+        var fenceBuffer: [String] = []
+        var inFence = false
+        // 围栏外裸行删除的上下文态：query / num_results 只有在「前序出现过裸 web_search 行」
+        // 的连续伪搜索块内才删，避免误删英文正常发言里行首恰为 query 的合法句子。
+        // 遇到非空普通行即复位（说明已脱离伪搜索块）；空行不复位。
+        var sawBareWebSearch = false
+
+        func isPseudoSearch(_ s: String) -> Bool {
+            let lower = s.lowercased()
+            return lower.contains("web_search") || lower.contains("num_results")
+        }
+        func flushFence() {
+            if !isPseudoSearch(fenceBuffer.joined(separator: "\n")) {
+                out.append(contentsOf: fenceBuffer)
+            }
+            fenceBuffer.removeAll()
+        }
+
+        for line in lines {
+            let marker = line.trimmingCharacters(in: .whitespaces)
+            if marker.hasPrefix("```") {
+                fenceBuffer.append(line)
+                if inFence {
+                    flushFence()
+                    inFence = false
+                } else {
+                    inFence = true
+                }
+                continue
+            }
+            if inFence {
+                fenceBuffer.append(line)
+                continue
+            }
+            let t = line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let isWebSearchLine = t == "web_search" || t.hasPrefix("web_search ")
+            let isQueryLine = t == "query" || t.hasPrefix("query ")
+            let isNumResultsLine = t.hasPrefix("num_results")
+            if isWebSearchLine {
+                // web_search 是伪搜索块的锚点：删它并打开上下文，使紧随的 query/num_results
+                // 行也被识别为同一伪搜索块而删除。
+                sawBareWebSearch = true
+                continue
+            }
+            if (isQueryLine || isNumResultsLine) && sawBareWebSearch {
+                // 仅当处于伪搜索块上下文内才删 query/num_results 行；否则视为正常发言保留。
+                continue
+            }
+            // 保留该行；非空普通行说明已脱离伪搜索块，复位上下文。
+            if !t.isEmpty { sawBareWebSearch = false }
+            out.append(line)
+        }
+        // 未闭合围栏（流式中围栏还没写完）：含伪搜索则暂不显示，否则保留。
+        if inFence, !isPseudoSearch(fenceBuffer.joined(separator: "\n")) {
+            out.append(contentsOf: fenceBuffer)
+        }
+
+        var result = out.joined(separator: "\n")
+        while result.contains("\n\n\n") {
+            result = result.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private func seatSystemPrompt(seat: IOSCouncilRoomSpeaker) -> String {
         """
         你是模型议会席位：\(seat.name)。
@@ -2095,6 +2295,12 @@ final class IOSCouncilRoomRunner {
         \(seat.prompt)
 
         在主持人组织下发言。不要自称主持人。输出要具体、短而有判断。
+
+        重要：你没有联网或调用工具的能力，本轮也不会为你执行任何搜索。
+        因此绝对不要输出 web_search、function call、tool use 之类的工具调用文本，
+        不要写 "query … / num_results …" 这类搜索参数，也不要用代码围栏（如 ```html）
+        去包裹任何"结构化"内容或搜索计划。请直接以自然语言给出你的判断与论据；
+        若某点你不确定，用一句话说明不确定即可，不要假装去查。
         """
     }
 
@@ -2106,7 +2312,10 @@ final class IOSCouncilRoomRunner {
         round: Int,
         rounds: Int,
         transcript: [String],
-        budget: Int
+        budget: Int,
+        seatResearch: IOSCouncilResearchBundle = IOSCouncilResearchBundle(
+            searches: [], scrapedPages: [], failures: []
+        )
     ) -> String {
         let followUpSection = followUp.map {
             """
@@ -2115,6 +2324,11 @@ final class IOSCouncilRoomRunner {
             \($0)
             """
         } ?? ""
+        // 席位发言前的联网查证材料（开关开启且本轮允许联网时由 runner 注入）；空则不渲染，
+        // 保持与未启用时逐字一致的 prompt。标题用「本席联网查证」与主持的「联网调研要点」区分。
+        let seatResearchSection = seatResearch.isEmpty
+            ? ""
+            : "\n\n本席联网查证要点（发言前为你查到的最新材料，可据此佐证，但勿照抄、勿编造其中没有的事实）：\n\(seatResearch.summaryText)"
         let instruction = followUp == nil
             ? "请从你的席位职责给出本轮发言。自由群聊要补充新角度；辩论模式要回应前文的核心判断、指出盲区或确认成立条件。"
             : "请从你的席位职责直接回应本轮追问，并结合已有讨论给出新增判断。自由群聊要补充新角度；辩论模式要回应前文的核心判断、指出盲区或确认成立条件。"
@@ -2124,7 +2338,7 @@ final class IOSCouncilRoomRunner {
 
         主持人完善后的最终议题：
         \(finalTopic)
-        \(followUpSection)
+        \(followUpSection)\(seatResearchSection)
 
         模式：\(mode.title)
         轮次：\(round)/\(rounds)
