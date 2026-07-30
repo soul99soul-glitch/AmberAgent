@@ -93,6 +93,7 @@ import { MarkdownRichText } from '../components/MarkdownRichText.ets';
 import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
 import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
+import { ChatInput } from '../components/ChatInput.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -2499,52 +2500,27 @@ struct ChatPage {
       .width('100%')
       .padding({ left: 16, right: 16, bottom: 2 })
 
-      Row() {
-        if (this.editingNodeId.length > 0) {
-          Text('取消编辑')
-            .fontSize(12).fontColor(INK3)
-            .padding({ right: 10 })
-            .onClick((): void => this.cancelEdit())
-        }
-        // 图片选择(D-038)
-        Text('图片')
-          .fontSize(13).fontColor(this.sending ? INK3 : ACCENT)
-          .padding({ right: 10 })
-          .onClick((): void => this.pickImages())
-        TextInput({ text: this.inputText,
-          placeholder: this.editingNodeId.length > 0 ? '编辑消息,发送将重发…' : '输入消息…' })
-          .layoutWeight(1)
-          .fontSize(15)
-          .padding(10)
-          .backgroundColor(SURFACE)
-          .borderRadius(8)
-          .onChange((v: string): void => { this.inputText = v; })
-        Text(this.sending ? '停止' : '发送')
-          .fontSize(15)
-          .fontColor(this.sending ? '#B43A3A' : ACCENT)
-          .padding({ left: 14, right: 6 })
-          .onClick((): void => {
-            if (this.sending) {
-              // 停止生成(D-035):abort → 部分内容照常入列(chat_turn 语义)
-              this.abortController?.abort();
-              // D-051:停止时 STEER 队列转 FOLLOWUP(Android stopGeneration:2419-2454)
-              const conv2 = convertSteerToFollowup(this.pendingQueue);
-              if (conv2.changed) {
-                this.pendingQueue = conv2.messages;
-                this.syncPendingRows();
-                this.persistQueue();
-              }
-            } else {
-              this.send();
-            }
-          })
-          // D-051:长按 = 只记录不生成(answer=false,Android ChatInput.kt:272)
-          .gesture(LongPressGesture().onAction((): void => {
-            this.sendWithoutAnswer();
-          }))
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 12 })
+      // 第二梯队 E:ChatInput 组件替换内联输入行
+      ChatInput({
+        text: this.inputText,
+        sending: this.sending,
+        editing: this.editingNodeId.length > 0,
+        hasImages: this.pendingImages.length > 0,
+        onTextChange: (v: string): void => { this.inputText = v; },
+        onSend: (): void => { this.send(); },
+        onStop: (): void => {
+          this.abortController?.abort();
+          const conv2 = convertSteerToFollowup(this.pendingQueue);
+          if (conv2.changed) {
+            this.pendingQueue = conv2.messages;
+            this.syncPendingRows();
+            this.persistQueue();
+          }
+        },
+        onSendWithoutAnswer: (): void => { this.sendWithoutAnswer(); },
+        onPickImage: (): void => { this.pickImages(); },
+        onCancelEdit: (): void => { this.cancelEdit(); },
+      })
     }
     .width('100%').height('100%').backgroundColor(BG)
 

@@ -1,5 +1,103 @@
-// 设计系统组件 — 杂志风排版原语
-import { INK, INK2, INK3, INK4, LINE, ACCENT, SURFACE, SURFACE2, TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS } from './tokens.ets';
+// 设计系统组件 — 杂志风排版原语 + 聊天交互原语
+// 基准: Android ds/AmberPrimitives.kt(186 行) + 杂志风既有组件
+import { INK, INK2, INK3, INK4, LINE, ACCENT, SURFACE, SURFACE2, BG, SIGNAL, TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS } from './tokens.ets';
+
+// ===== 聊天交互原语(Android AmberPrimitives.kt 对齐) =====
+
+// AmberCard:通用容器(surface 底 + 1dp hairline + 14dp 圆角)
+@Component
+export struct AmberCard {
+  @BuilderParam content: () => void;
+  build(): void {
+    Column() {
+      this.content();
+    }
+    .width('100%')
+    .backgroundColor(SURFACE)
+    .border({ width: 1, color: LINE })
+    .borderRadius(RADIUS)
+  }
+}
+
+// Hairline:1dp 发丝分割线
+@Component
+export struct Hairline {
+  build(): void {
+    Divider().color(LINE).strokeWidth(0.5).width('100%')
+  }
+}
+
+// BtnInk:主操作按钮(ink 实心 + bg 字 + 15dp 圆角)
+@Component
+export struct BtnInk {
+  text: string = '';
+  enabled: boolean = true;
+  onClick: () => void = () => {};
+  build(): void {
+    Text(this.text)
+      .fontSize(BODY).fontWeight(FontWeight.Medium)
+      .fontColor(this.enabled ? SURFACE : INK4)
+      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+      .borderRadius(15)
+      .backgroundColor(this.enabled ? INK : SURFACE2)
+      .onClick(() => { if (this.enabled) this.onClick(); })
+  }
+}
+
+// BtnAccent:accent 实心按钮 + accentInk 字
+@Component
+export struct BtnAccent {
+  text: string = '';
+  enabled: boolean = true;
+  onClick: () => void = () => {};
+  build(): void {
+    Text(this.text)
+      .fontSize(BODY).fontWeight(FontWeight.Medium)
+      .fontColor(this.enabled ? SURFACE : INK4)
+      .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+      .borderRadius(15)
+      .backgroundColor(this.enabled ? ACCENT : SURFACE2)
+      .onClick(() => { if (this.enabled) this.onClick(); })
+  }
+}
+
+// LiveDot:呼吸光晕活体圆点(signal 绿 / idle 灰)
+@Component
+export struct LiveDot {
+  idle: boolean = false;
+  dotSize: number = 8;
+  build(): void {
+    Circle({ width: this.dotSize, height: this.dotSize })
+      .fill(this.idle ? INK4 : SIGNAL)
+  }
+}
+
+// BlinkingCursor:闪烁终端光标(默认 accent)
+@Component
+export struct BlinkingCursor {
+  color: string = ACCENT;
+  width: number = 2;
+  height: number = 16;
+  build(): void {
+    Column()
+      .width(this.width)
+      .height(this.height)
+      .backgroundColor(this.color)
+  }
+}
+
+// SectionLabel:带 accent // 前缀的 mono 大写眉标
+@Component
+export struct SectionLabel {
+  text: string = '';
+  build(): void {
+    Row() {
+      Text('//').fontSize(10).fontColor(ACCENT).fontWeight(FontWeight.Bold)
+      Text(' ' + this.text.toUpperCase()).fontSize(10).fontWeight(FontWeight.Medium).fontColor(INK3)
+    }
+    .width('100%')
+  }
+}
 
 @Component
 export struct RubricHead {
