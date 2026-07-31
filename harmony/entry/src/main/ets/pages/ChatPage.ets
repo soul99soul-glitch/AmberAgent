@@ -166,7 +166,6 @@ struct MessageRow {
   @Prop message: UIMessage;
   @Prop branchCount: number = 1;
   @Prop selectIndex: number = 0;
-  @Prop isAssistant: boolean = false;
   @Prop isLastAssistant: boolean = false;
   // D-053:本行是否属于活动流式尾部(reasoning loading 判定;
   //   Android messageLoading 语义,流式尾/regen 预览传 true)
@@ -407,7 +406,7 @@ struct MessageRow {
       // 第三梯队:ChatMessageActionFooter 替换内联操作行(annotations + branch + actions 统一尾部)
       ChatMessageActionFooter({
         annotations: this.message.annotations,
-        mode: resolveActionFooterMode(
+        mode: this.streaming ? 'hidden' : resolveActionFooterMode(
           this.message.role, this.isLastAssistant, this.streaming, this.message.parts.length > 0,
         ),
         isUser: this.message.role === 'user',
@@ -2457,7 +2456,6 @@ struct ChatPage {
               message: row.message,
               branchCount: row.branchCount,
               selectIndex: row.selectIndex,
-              isAssistant: row.isAssistant,
               isLastAssistant: row.isLastAssistant,
               onSwitch: (idx: number): void => this.switchBranch(row.nodeId, idx),
               onRegenerate: (): void => this.regenerate(row.nodeId),
@@ -2677,6 +2675,7 @@ struct ChatPage {
           TextArea({ text: this.denyReasonText, placeholder: '原因（可选）' })
             .width('100%').height(88).fontSize(13).fontColor(INK)
             .backgroundColor(SURFACE2).borderRadius(10)
+            .onChange((v: string): void => { this.denyReasonText = v; })
           Row() {
             Blank()
             Text('取消')
