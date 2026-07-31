@@ -81,7 +81,9 @@ import {
   getSkillWorkspacePort, getDeepReadPlaybookRepository, getAgentPromptConfigTool,
   getPermissionsStatusTool, getAgentTaskTools, getAgentCronTools,
   hydrateSubAgentSetting, getSubAgentTools, SubAgentToolsContext,
+  getSubAgentManager,
 } from '../di/AppContainer.ets';
+import type { SubAgentRun } from '@amber/chat-domain';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 import { inflateRawEntry, createEntryXmlPull } from '../platform_impl/EntryDocumentParser.ets';
 import {
@@ -99,6 +101,7 @@ import { ChatMessageBranch } from '../components/ChatMessageBranch.ets';
 import { ChatMessageActions } from '../components/ChatMessageActions.ets';
 import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from '../components/ChatMessageCouncilStep.ets';
+import { SubAgentRunSheet } from '../components/SubAgentRunSheet.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -177,6 +180,7 @@ struct MessageRow {
   onDenyTool: (toolCallId: string) => void = (_id: string): void => {};
   // D-105:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)
   onAnswerTool: (toolCallId: string, answer: string) => void = (_id: string, _a: string): void => {};
+  onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void = (_id: string, _t: UIMessagePartTool[]): void => {};
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
   @State reasoningStates: Record<string, string> = {};
   // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
@@ -377,8 +381,8 @@ struct MessageRow {
           ChatMessageSubAgentStep({
             tools: block.step.tools,
             runId: block.step.runId,
-            onOpenRun: (_rid: string): void => {
-              // run sheet 待接入(需 bindSheet + SubAgentManager.subscribeLiveText)
+            onOpenRun: (rid: string): void => {
+              this.onOpenSubAgentRun(rid, block.step.tools);
             },
           })
         } else if (block.kind === 'council') {
@@ -486,6 +490,12 @@ struct ChatPage {
   @State liveActivity: SandboxActivityUiState | null = null;
   @State selectedSandboxIndex: number = -1;
   @State sandboxSheetOpen: boolean = false;
+  // SubAgent run sheet
+  @State subAgentSheetRunId: string = '';
+  @State subAgentSheetOpen: boolean = false;
+  @State subAgentLiveText: string = '';
+  private subAgentSheetTools: UIMessagePartTool[] = [];
+  private unsubSubAgentLive: (() => void) | null = null;
   private unsubActivity: () => void = (): void => {};
   private pendingQueue: PendingUserMessage[] = [];
   // D-050:重试状态文案(strings.xml:386;null = 清除)
@@ -570,6 +580,10 @@ struct ChatPage {
   // D-122:页面消失退订(store 为全局单例,防泄漏/跨页回调)
   aboutToDisappear(): void {
     this.unsubActivity();
+    if (this.unsubSubAgentLive !== null) {
+      this.unsubSubAgentLive();
+      this.unsubSubAgentLive = null;
+    }
   }
 
   aboutToAppear(): void {
@@ -1231,6 +1245,39 @@ struct ChatPage {
       this.subAgentEnabled = false;
       this.subAgentToolsCache = [];
     }
+  }
+
+  // SubAgent run sheet:打开时订阅 liveText,关闭时取消订阅
+  private async openSubAgentSheet(runId: string, tools: UIMessagePartTool[]): Promise<void> {
+    this.subAgentSheetRunId = runId;
+    this.subAgentSheetTools = tools;
+    this.subAgentLiveText = '';
+    try {
+      const manager = await getSubAgentManager();
+      // 订阅实时文本
+      this.unsubSubAgentLive = manager.subscribeLiveText(runId, (text: string): void => {
+        this.subAgentLiveText = text;
+      });
+      // 若已结束,从 snapshot 取最终文本
+      const snapshot: SubAgentRun | null = manager.snapshot(runId);
+      if (snapshot !== null && snapshot.displayText.length > 0) {
+        this.subAgentLiveText = snapshot.displayText;
+      }
+    } catch (e) {
+      const msg: string = e instanceof Error ? e.message : String(e);
+      hilog.warn(0x0001, 'Chat.Page', 'openSubAgentSheet failed: %{public}s', msg);
+    }
+    this.subAgentSheetOpen = true;
+  }
+
+  private closeSubAgentSheet(): void {
+    if (this.unsubSubAgentLive !== null) {
+      this.unsubSubAgentLive();
+      this.unsubSubAgentLive = null;
+    }
+    this.subAgentSheetOpen = false;
+    this.subAgentSheetRunId = '';
+    this.subAgentLiveText = '';
   }
 
   // 工具循环选项:D-058 首批内置工具 = get_time_info + ask_user +
@@ -2204,6 +2251,17 @@ struct ChatPage {
     .onClick((): void => { this.sandboxSheetOpen = true; })
   }
 
+  // SubAgent run sheet builder
+  @Builder
+  subAgentSheetBuilder() {
+    SubAgentRunSheet({
+      runId: this.subAgentSheetRunId,
+      tools: this.subAgentSheetTools,
+      liveText: this.subAgentLiveText,
+      onDismiss: (): void => { this.closeSubAgentSheet(); },
+    })
+  }
+
   // SandboxActivitySheet(:1113+;web 预览路径 = webview 子系统未移植 P1)
   //   头部 :796-870 + 工具内容 :873-899 + 代码块 :1070-1110
   @Builder
@@ -2341,6 +2399,9 @@ struct ChatPage {
               onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
               onAnswerTool: (toolCallId: string, answer: string): void =>
                 this.handleToolAnswer(toolCallId, answer),
+              onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
+                this.openSubAgentSheet(rid, tools);
+              },
             })
           }
           // D-041:regenerate 流式预览渲染在目标节点行下
@@ -2572,6 +2633,11 @@ struct ChatPage {
     .bindSheet(this.sandboxSheetOpen, this.sandboxSheet(this.sandboxTimeline()), {
       height: SheetSize.LARGE,
       onDisappear: (): void => { this.sandboxSheetOpen = false; },
+    })
+    // SubAgent run sheet
+    .bindSheet(this.subAgentSheetOpen, this.subAgentSheetBuilder(), {
+      height: SheetSize.LARGE,
+      onDisappear: (): void => { this.closeSubAgentSheet(); },
     })
   }
 }
