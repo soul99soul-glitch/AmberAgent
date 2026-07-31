@@ -10,8 +10,12 @@ export struct ChatMessageActions {
   onFork: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
+  onCopy: () => void = (): void => {};
   build(): void {
     Row() {
+      Text('复制').fontSize(11).fontColor(INK3)
+        .margin({ right: 12 })
+        .onClick((): void => this.onCopy())
       Text('分叉').fontSize(11).fontColor(INK3)
         .margin({ right: 12 })
         .onClick((): void => this.onFork())

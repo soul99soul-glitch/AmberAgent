@@ -18,6 +18,7 @@ export struct ChatMessageTools {
   @Prop part: UIMessagePartTool;
   onApprove: (toolCallId: string) => void = (): void => {};
   onDeny: (toolCallId: string) => void = (): void => {};
+  onOpenPreview: () => void = (): void => {};
   deniedLabel: string = '';
 
   build(): void {

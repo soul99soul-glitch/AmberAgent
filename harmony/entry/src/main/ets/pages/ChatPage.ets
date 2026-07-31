@@ -102,6 +102,8 @@ import { ChatMessageActions } from '../components/ChatMessageActions.ets';
 import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from '../components/ChatMessageCouncilStep.ets';
 import { SubAgentRunSheet } from '../components/SubAgentRunSheet.ets';
+import { ChatMessageCopySheet } from '../components/ChatMessageCopySheet.ets';
+import { ChatMessageToolPreviewSheet } from '../components/ChatMessageToolPreviewSheet.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -181,6 +183,8 @@ struct MessageRow {
   // D-105:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)
   onAnswerTool: (toolCallId: string, answer: string) => void = (_id: string, _a: string): void => {};
   onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void = (_id: string, _t: UIMessagePartTool[]): void => {};
+  onCopy: () => void = (): void => {};
+  onOpenToolPreview: (part: UIMessagePartTool) => void = (_p: UIMessagePartTool): void => {};
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
   @State reasoningStates: Record<string, string> = {};
   // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
@@ -338,6 +342,9 @@ struct MessageRow {
                   onDeny: (toolCallId: string): void => {
                     this.onDenyTool(toolCallId);
                   },
+                  onOpenPreview: (): void => {
+                    this.onOpenToolPreview(step.tool);
+                  },
                   deniedLabel: step.tool.approvalState.type === 'denied'
                     ? this.deniedLabel(step.tool) : '',
                 })
@@ -410,6 +417,7 @@ struct MessageRow {
             onFork: (): void => this.onFork(),
             onEdit: (): void => this.onEdit(),
             onRegenerate: (): void => this.onRegenerate(),
+            onCopy: (): void => this.onCopy(),
           })
         }
         .margin({ top: 2 })
@@ -496,6 +504,12 @@ struct ChatPage {
   @State subAgentLiveText: string = '';
   private subAgentSheetTools: UIMessagePartTool[] = [];
   private unsubSubAgentLive: (() => void) | null = null;
+  // Copy sheet
+  @State copySheetOpen: boolean = false;
+  private copySheetMessage: UIMessage | null = null;
+  // Tool preview sheet
+  @State toolPreviewSheetOpen: boolean = false;
+  private toolPreviewPart: UIMessagePartTool | null = null;
   private unsubActivity: () => void = (): void => {};
   private pendingQueue: PendingUserMessage[] = [];
   // D-050:重试状态文案(strings.xml:386;null = 清除)
@@ -1278,6 +1292,26 @@ struct ChatPage {
     this.subAgentSheetOpen = false;
     this.subAgentSheetRunId = '';
     this.subAgentLiveText = '';
+  }
+
+  // Copy sheet
+  private openCopySheet(msg: UIMessage): void {
+    this.copySheetMessage = msg;
+    this.copySheetOpen = true;
+  }
+
+  private closeCopySheet(): void {
+    this.copySheetOpen = false;
+  }
+
+  // Tool preview sheet
+  private openToolPreview(part: UIMessagePartTool): void {
+    this.toolPreviewPart = part;
+    this.toolPreviewSheetOpen = true;
+  }
+
+  private closeToolPreview(): void {
+    this.toolPreviewSheetOpen = false;
   }
 
   // 工具循环选项:D-058 首批内置工具 = get_time_info + ask_user +
@@ -2262,6 +2296,28 @@ struct ChatPage {
     })
   }
 
+  // Copy sheet builder
+  @Builder
+  copySheetBuilder() {
+    if (this.copySheetMessage !== null) {
+      ChatMessageCopySheet({
+        message: this.copySheetMessage as UIMessage,
+        onDismiss: (): void => { this.closeCopySheet(); },
+      })
+    }
+  }
+
+  // Tool preview sheet builder
+  @Builder
+  toolPreviewSheetBuilder() {
+    if (this.toolPreviewPart !== null) {
+      ChatMessageToolPreviewSheet({
+        part: this.toolPreviewPart as UIMessagePartTool,
+        onDismiss: (): void => { this.closeToolPreview(); },
+      })
+    }
+  }
+
   // SandboxActivitySheet(:1113+;web 预览路径 = webview 子系统未移植 P1)
   //   头部 :796-870 + 工具内容 :873-899 + 代码块 :1070-1110
   @Builder
@@ -2402,6 +2458,8 @@ struct ChatPage {
               onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
                 this.openSubAgentSheet(rid, tools);
               },
+              onCopy: (): void => { this.openCopySheet(row.message); },
+              onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
             })
           }
           // D-041:regenerate 流式预览渲染在目标节点行下
@@ -2638,6 +2696,16 @@ struct ChatPage {
     .bindSheet(this.subAgentSheetOpen, this.subAgentSheetBuilder(), {
       height: SheetSize.LARGE,
       onDisappear: (): void => { this.closeSubAgentSheet(); },
+    })
+    // Copy sheet
+    .bindSheet(this.copySheetOpen, this.copySheetBuilder(), {
+      height: SheetSize.MEDIUM,
+      onDisappear: (): void => { this.closeCopySheet(); },
+    })
+    // Tool preview sheet
+    .bindSheet(this.toolPreviewSheetOpen, this.toolPreviewSheetBuilder(), {
+      height: SheetSize.LARGE,
+      onDisappear: (): void => { this.closeToolPreview(); },
     })
   }
 }
