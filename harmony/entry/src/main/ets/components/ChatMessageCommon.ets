@@ -4,7 +4,8 @@
 //   MessageSelectionContainer(ArkUI Text 长按原生支持选择,无需封装)
 
 import type { UIMessageAnnotation } from '@amber/chat-domain';
-import { INK2, INK3, ACCENT, SURFACE2, LINE, META, LABEL } from '../design/tokens.ets';
+import { INK3, ACCENT, LABEL } from '../design/tokens.ets';
+import { common } from '@kit.AbilityKit';
 
 @Component
 export struct ChatMessageAnnotations {
@@ -26,17 +27,15 @@ export struct ChatMessageAnnotations {
             .width('100%')
             .padding({ left: 8, right: 8, top: 3, bottom: 3 })
             .onClick((): void => {
-              // 打开 URL(HarmonyOS 用系统浏览器)
-              try {
-                const context: Context = getContext(this) as Context;
-                context.startAbility({
-                  bundleName: 'com.huawei.hmos.browser',
-                  abilityName: 'com.huawei.hmos.browser.MainAbility',
-                  uri: ann.url,
-                });
-              } catch (_e) {
+              // 打开 URL(HarmonyOS 隐式 Intent:action viewData + entity browsable)
+              const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+              ctx.startAbility({
+                action: 'ohos.want.action.viewData',
+                entities: ['entity.system.browsable'],
+                uri: ann.url,
+              }).catch((_e: Error): void => {
                 // 浏览器不可用时静默降级(不伪成功)
-              }
+              });
             })
           }
         }, (ann: UIMessageAnnotation, i: number): string =>

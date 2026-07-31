@@ -7,7 +7,6 @@
 import type { UIMessage, UIMessageAnnotation } from '@amber/chat-domain';
 import { ChatMessageAnnotations } from './ChatMessageCommon.ets';
 import { ChatMessageActions } from './ChatMessageActions.ets';
-import { INK3 } from '../design/tokens.ets';
 
 export type ActionFooterMode = 'hidden' | 'reserved' | 'visible';
 
@@ -38,10 +37,10 @@ export struct ChatMessageActionFooter {
       Blank().height(0)
     } else {
       Column() {
-        // 引用注释
+        // 引用注释(流式中也显示,Android 无条件渲染)
         ChatMessageAnnotations({
           annotations: this.annotations,
-          visible: this.mode === 'visible',
+          visible: true,
         })
 
         // 操作行(reserved 态不可见但占位)
