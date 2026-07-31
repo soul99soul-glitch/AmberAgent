@@ -6,9 +6,6 @@ struct NovelContinuityAuditSection: View {
     let viewModel: NovelCreationViewModel
     let onOpenChapter: (NovelChapterSelection) -> Void
 
-    @State private var plan: NovelContinuityAuditPlan?
-    @State private var isPlanning = false
-
     var body: some View {
         Section("剧情矛盾检查") {
             // 失败必须说出来。这条链路上没有任何全局错误横幅,不显示就等于
@@ -19,10 +16,10 @@ struct NovelContinuityAuditSection: View {
                     .foregroundStyle(AmberTheme.accentRed)
             }
 
-            if viewModel.isAuditingContinuity {
+            if viewModel.isContinuityOperationRunning {
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("正在通读全书正文…")
+                    Text(viewModel.continuityOperationTitle)
                         .foregroundStyle(AmberTheme.muted)
                 }
                 .padding(.vertical, 3)
@@ -54,13 +51,11 @@ struct NovelContinuityAuditSection: View {
                         .foregroundStyle(AmberTheme.accentAmber)
                 }
                 Button("重新检查") {
-                    Task { @MainActor in
-                        viewModel.clearContinuityAudit()
-                        await beginPlanning()
-                    }
+                    viewModel.clearContinuityAudit()
+                    viewModel.startContinuityAuditPlanning()
                 }
                 .disabled(!viewModel.canMutate)
-            } else if let plan {
+            } else if let plan = viewModel.continuityAuditPlan {
                 // 预估直接摊在页面上,不弹窗:用户先看清这一趟要读多少、要发几次请求,
                 // 再决定要不要开始。
                 Text(
@@ -70,27 +65,21 @@ struct NovelContinuityAuditSection: View {
                 .font(.caption)
                 .foregroundStyle(AmberTheme.muted)
                 Button("确认开始") {
-                    self.plan = nil
                     viewModel.startContinuityAudit()
                 }
                 .disabled(!viewModel.canMutate)
-                Button("取消") { self.plan = nil }
+                Button("取消") { viewModel.clearContinuityAuditPlan() }
             } else {
                 Text("通读当前分支的全部正文，找出重复写过的情节、前后互相矛盾的说法，以及明明见过却写成初次见面这类问题。只检查，不改动一个字。")
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
                 Button {
-                    Task { @MainActor in await beginPlanning() }
+                    viewModel.startContinuityAuditPlanning()
                 } label: {
-                    if isPlanning {
-                        ProgressView()
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    } else {
-                        Label("开始检查", systemImage: "text.magnifyingglass")
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
+                    Label("开始检查", systemImage: "text.magnifyingglass")
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .disabled(!viewModel.canMutate || isPlanning)
+                .disabled(!viewModel.canMutate)
             }
         }
     }
@@ -117,14 +106,6 @@ struct NovelContinuityAuditSection: View {
                 .map(\.id)
         )
         return report.isStale(against: branch, discardedChapterIDs: discarded)
-    }
-
-    @MainActor
-    private func beginPlanning() async {
-        guard !isPlanning else { return }
-        isPlanning = true
-        defer { isPlanning = false }
-        plan = await viewModel.planContinuityAudit()
     }
 
     /// 报告里只有 chapterID —— 阅读器要的是「章 + 版本」这一对，版本以当前分支

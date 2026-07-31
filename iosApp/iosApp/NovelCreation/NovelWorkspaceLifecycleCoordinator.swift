@@ -20,6 +20,7 @@ final class NovelWorkspaceLifecycleCoordinator {
         let leaseId: String
         let interruption: BackgroundInterruption
         var completionTask: Task<Void, Never>?
+        var interruptionTask: Task<Void, Never>?
         var isExpiring: Bool
     }
 
@@ -61,6 +62,7 @@ final class NovelWorkspaceLifecycleCoordinator {
             leaseId: leaseId,
             interruption: interrupt,
             completionTask: nil,
+            interruptionTask: nil,
             isExpiring: false
         )
         // 先建好 cycle 再拿执行权：begin 有可能同步回调 onExpire（提交失败等），
@@ -96,19 +98,24 @@ final class NovelWorkspaceLifecycleCoordinator {
         current.isExpiring = true
         current.completionTask?.cancel()
         current.completionTask = nil
-        cycle = current
-
-        Task { @MainActor [weak self] in
+        let interruption = current.interruption
+        let deadline = now()
+        let interruptionTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await current.interruption(now())
+            guard !Task.isCancelled else { return }
+            await interruption(deadline)
+            guard !Task.isCancelled else { return }
             finish(cycleID: cycleID)
         }
+        current.interruptionTask = interruptionTask
+        cycle = current
     }
 
     private func finish(cycleID: UUID) {
         guard let current = cycle, current.id == cycleID else { return }
         cycle = nil
         current.completionTask?.cancel()
+        current.interruptionTask?.cancel()
         endKeepAlive(current.leaseId)
     }
 }

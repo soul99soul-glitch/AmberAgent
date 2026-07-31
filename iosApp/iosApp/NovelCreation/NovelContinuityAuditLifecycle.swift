@@ -127,7 +127,7 @@ private extension DefaultNovelCreation {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) async throws -> PreparedContinuityAudit {
-        try await recoverGenerationStateIfNeeded()
+        try await recoverGenerationStateIfNeeded(requiredProjectID: projectID)
         let loaded = try await loadCommittedProject(id: projectID)
         guard let branch = loaded.document.branches.first(where: {
             $0.id == branchID && $0.lifecycle == .active

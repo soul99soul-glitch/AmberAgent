@@ -19,6 +19,27 @@ final class NovelProjectRepositoryTests: XCTestCase {
         XCTAssertEqual(loaded.access, .readWrite)
     }
 
+    func testListProjectsUsesFreshIndexWithoutRequiringFullRescanAfterRestart() async throws {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let document = try NovelTestFixtures.document()
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        _ = try await repository.createProject(document)
+
+        // First list builds and writes the lightweight index.
+        let first = try await repository.listProjects()
+        XCTAssertEqual(first.map(\.id), [document.project.id])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: indexURL(root: root).path))
+
+        // Second list on a cold repository must stay correct while preferring the
+        // cached inventory (no project file is newer than the index).
+        let restarted = NovelFileProjectRepository(rootDirectory: root)
+        let second = try await restarted.listProjects()
+        XCTAssertEqual(second.map(\.id), [document.project.id])
+        XCTAssertEqual(second.first?.name, document.project.name)
+        XCTAssertEqual(second.first?.revision, document.project.revision)
+    }
+
     func testSuccessfulCommitsRotateOnlyThePreviousValidatedVersion() async throws {
         let root = try NovelTestFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -353,17 +374,21 @@ final class NovelProjectRepositoryTests: XCTestCase {
         }
         XCTAssertEqual(healthySnapshot.project.id, second.project.id)
 
-        let recoveredFirst = try await restartedRepository.loadProject(id: first.project.id)
+        let firstBeforeOpen = try await restartedRepository.loadProject(id: first.project.id)
         let recoveredSecond = try await restartedRepository.loadProject(id: second.project.id)
-        XCTAssertEqual(recoveredFirst.document.activeRuns.first?.status, .interrupted)
-        XCTAssertEqual(recoveredFirst.document.activeRuns.first?.interruptionReason, .recovery)
-        XCTAssertEqual(recoveredFirst.document.activeRuns.first?.partialContent, "")
+        XCTAssertEqual(firstBeforeOpen.document.activeRuns.first?.status, .running)
         XCTAssertEqual(recoveredSecond.document.activeRuns.first?.status, .interrupted)
         XCTAssertEqual(recoveredSecond.document.activeRuns.first?.interruptionReason, .recovery)
         XCTAssertEqual(recoveredSecond.document.activeRuns.first?.partialContent, "")
         XCTAssertFalse(recoveredSecond.document.sessions[0].messages.contains {
             $0.content == poison
         })
+
+        _ = try await module.snapshot(.project(first.project.id))
+        let recoveredFirst = try await restartedRepository.loadProject(id: first.project.id)
+        XCTAssertEqual(recoveredFirst.document.activeRuns.first?.status, .interrupted)
+        XCTAssertEqual(recoveredFirst.document.activeRuns.first?.interruptionReason, .recovery)
+        XCTAssertEqual(recoveredFirst.document.activeRuns.first?.partialContent, "")
         XCTAssertFalse(FileManager.default.fileExists(atPath: firstRecoveryURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: malformedRecoveryURL.path))
         let remainingSidecars = try await restartedRepository.listRecoverySidecars()

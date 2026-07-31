@@ -45,12 +45,21 @@ enum NovelPromptCatalog {
         case .discussion:
             versions.formUnion(["novel.discussion.v1", "novel.discussion.v2", "novel.discussion.v3"])
         case .proseContinuation:
-            versions.insert("novel.prose-continuation.v1")
+            versions.formUnion(["novel.prose-continuation.v1", "novel.prose-continuation.v2"])
         case .proseWholeChapter:
-            versions.formUnion(["novel.prose-whole-chapter.v1", "novel.prose-whole-chapter.v2"])
+            versions.formUnion([
+                "novel.prose-whole-chapter.v1",
+                "novel.prose-whole-chapter.v2",
+                "novel.prose-whole-chapter.v3",
+            ])
+        case .wholeChapterPolish:
+            versions.insert("novel.whole-chapter-polish.v2")
         case .wholeChapterRegeneration:
-            versions.insert("novel.whole-chapter-regeneration.v1")
-        case .discussionArchiveV1, .wholeChapterPolish, .polishDriftV1, .continuityAuditV1:
+            versions.formUnion([
+                "novel.whole-chapter-regeneration.v1",
+                "novel.whole-chapter-regeneration.v2",
+            ])
+        case .discussionArchiveV1, .polishDriftV1, .continuityAuditV1:
             break
         }
         return versions
@@ -124,7 +133,7 @@ enum NovelPromptCatalog {
         case .proseContinuation:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.prose-continuation.v2",
+                version: "novel.prose-continuation.v3",
                 systemText: """
                 Write one focused scene or passage that can be appended to the current chapter. Preserve all
                 supplied project rules, established branch facts, character motivations, point of view, and tone.
@@ -132,15 +141,16 @@ enum NovelPromptCatalog {
                 one meaningful scene beat, exchange, discovery, or action sequence, then stop at a natural local
                 beat. Do not close the chapter or manufacture a chapter ending unless the user explicitly asks.
                 Return only polished candidate prose as one complete response, with no analysis, preface, title,
-                or afterword. This output is a draft candidate and does not become canonical until the user
-                collects it. Use the user's language.
+                or afterword. Do not wrap the prose in Markdown code fences (for example ```html or ```markdown).
+                This output is a draft candidate and does not become canonical until the user collects it. Use
+                the user's language.
                 """
             )
 
         case .proseWholeChapter:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.prose-whole-chapter.v3",
+                version: "novel.prose-whole-chapter.v4",
                 systemText: """
                 Write one complete next chapter with a coherent chapter-level arc: an opening grounded in the
                 prior chapter, sustained development through connected scenes or beats, a meaningful change, and
@@ -148,8 +158,9 @@ enum NovelPromptCatalog {
                 motivations, point of view, and tone. Continue from the prior chapter without recapping or
                 rewriting it. Do not stop after a single short scene unless the user explicitly requests a short
                 chapter. Begin with one concise Markdown H1 chapter heading that names this chapter, followed by
-                the full polished chapter candidate. Return no analysis, preface, or afterword. This output is a
-                draft candidate and does not become canonical until the user collects it. Use the user's language.
+                the full polished chapter candidate. Return no analysis, preface, or afterword. Do not wrap the
+                chapter in Markdown code fences (for example ```html or ```markdown). This output is a draft
+                candidate and does not become canonical until the user collects it. Use the user's language.
                 """
             )
 
@@ -219,31 +230,33 @@ enum NovelPromptCatalog {
         case .wholeChapterPolish:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.whole-chapter-polish.v2",
+                version: "novel.whole-chapter-polish.v3",
                 systemText: """
                 Polish the complete supplied chapter while preserving its story facts exactly. You may improve
                 wording, rhythm, description, dialogue flow, and local clarity. You must not add, remove, reorder,
                 merge, or split story events; change relationships, motivations, secrets, outcomes, chronology,
                 point of view, or ending; or introduce new facts. Project polish preferences are subordinate to
                 these fixed constraints and must be ignored whenever they conflict. Return the complete polished
-                chapter as one response, then append a final line containing exactly
-                \(polishCompletionSentinel). Do not emit that sentinel anywhere else. It remains a draft candidate
-                until explicitly adopted.
+                chapter as plain manuscript text only — no analysis, preface, or afterword, and do not wrap it in
+                Markdown code fences (for example ```html or ```markdown). Then append a final line containing
+                exactly \(polishCompletionSentinel). Do not emit that sentinel anywhere else. It remains a draft
+                candidate until explicitly adopted.
                 """
             )
 
         case .wholeChapterRegeneration:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.whole-chapter-regeneration.v1",
+                version: "novel.whole-chapter-regeneration.v2",
                 systemText: """
                 Rewrite the supplied chapter completely. Unlike polishing, you MAY change story facts: events,
                 chronology, relationships, motivations, secrets, and outcomes are all open, so long as the result
                 reads as a coherent part of the same manuscript. Use the rewrite to remove contradictions,
                 repetition, or continuity errors between this chapter and the rest of the story. Keep the chapter's
                 role in the overall structure. Do not summarise, do not comment on the changes, and do not continue
-                past the end of this chapter. Return the complete rewritten chapter as one response. It remains a
-                draft candidate until the writer collects it.
+                past the end of this chapter. Return the complete rewritten chapter as plain manuscript text only —
+                no Markdown code fences (for example ```html or ```markdown). It remains a draft candidate until
+                the writer collects it.
                 """
             )
 
@@ -377,6 +390,17 @@ enum NovelPromptCatalog {
             tail without recapping it. Return only the candidate prose as one complete response. This output
             is a draft candidate and does not become canonical until the user collects it.
             """
+        case (.proseContinuation, "novel.prose-continuation.v2"):
+            """
+            Write one focused scene or passage that can be appended to the current chapter. Preserve all
+            supplied project rules, established branch facts, character motivations, point of view, and tone.
+            Continue naturally from the current manuscript tail without recapping or explaining it. Complete
+            one meaningful scene beat, exchange, discovery, or action sequence, then stop at a natural local
+            beat. Do not close the chapter or manufacture a chapter ending unless the user explicitly asks.
+            Return only polished candidate prose as one complete response, with no analysis, preface, title,
+            or afterword. This output is a draft candidate and does not become canonical until the user
+            collects it. Use the user's language.
+            """
         case (.proseWholeChapter, "novel.prose-whole-chapter.v1"):
             """
             Write one complete next chapter with a coherent opening, development, and ending beat. Preserve
@@ -395,6 +419,38 @@ enum NovelPromptCatalog {
             analysis, preface, title, or afterword. This output is a draft candidate and does not become
             canonical until the user collects it. Use the user's language.
             """
+        case (.proseWholeChapter, "novel.prose-whole-chapter.v3"):
+            """
+            Write one complete next chapter with a coherent chapter-level arc: an opening grounded in the
+            prior chapter, sustained development through connected scenes or beats, a meaningful change, and
+            an ending beat or hook. Preserve all supplied project rules, established branch facts, character
+            motivations, point of view, and tone. Continue from the prior chapter without recapping or
+            rewriting it. Do not stop after a single short scene unless the user explicitly requests a short
+            chapter. Begin with one concise Markdown H1 chapter heading that names this chapter, followed by
+            the full polished chapter candidate. Return no analysis, preface, or afterword. This output is a
+            draft candidate and does not become canonical until the user collects it. Use the user's language.
+            """
+        case (.wholeChapterPolish, "novel.whole-chapter-polish.v2"):
+            """
+            Polish the complete supplied chapter while preserving its story facts exactly. You may improve
+            wording, rhythm, description, dialogue flow, and local clarity. You must not add, remove, reorder,
+            merge, or split story events; change relationships, motivations, secrets, outcomes, chronology,
+            point of view, or ending; or introduce new facts. Project polish preferences are subordinate to
+            these fixed constraints and must be ignored whenever they conflict. Return the complete polished
+            chapter as one response, then append a final line containing exactly
+            \(polishCompletionSentinel). Do not emit that sentinel anywhere else. It remains a draft candidate
+            until explicitly adopted.
+            """
+        case (.wholeChapterRegeneration, "novel.whole-chapter-regeneration.v1"):
+            """
+            Rewrite the supplied chapter completely. Unlike polishing, you MAY change story facts: events,
+            chronology, relationships, motivations, secrets, and outcomes are all open, so long as the result
+            reads as a coherent part of the same manuscript. Use the rewrite to remove contradictions,
+            repetition, or continuity errors between this chapter and the rest of the story. Keep the chapter's
+            role in the overall structure. Do not summarise, do not comment on the changes, and do not continue
+            past the end of this chapter. Return the complete rewritten chapter as one response. It remains a
+            draft candidate until the writer collects it.
+            """
         default:
             nil
         }
@@ -411,7 +467,84 @@ enum NovelPromptCatalog {
               !content.contains(polishCompletionSentinel) else {
             return nil
         }
-        return content
+        let normalized = normalizedCandidateProse(content)
+        guard !normalized.isEmpty else { return nil }
+        return normalized
+    }
+
+    /// Strips a mistaken outer Markdown code fence from model prose/polish output.
+    /// Models (especially Grok) often wrap full chapters in ```html / ```markdown even when
+    /// asked for plain manuscript text; Chat's markdown renderer then shows a green code card.
+    ///
+    /// - If the whole string is one closed fence, returns the inner body.
+    /// - If streaming still has only an opening fence of a common wrapper language, drops that line.
+    /// - Otherwise returns the original text unchanged.
+    static func normalizedCandidateProse(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+
+        let lines = trimmed.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let first = lines.first else { return trimmed }
+        let firstTrimmed = first.trimmingCharacters(in: .whitespaces)
+        guard let opener = fenceOpener(firstTrimmed) else { return trimmed }
+
+        var end = lines.count - 1
+        while end > 0, lines[end].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            end -= 1
+        }
+        let endTrimmed = lines[end].trimmingCharacters(in: .whitespaces)
+        if end > 0, isFenceCloser(endTrimmed, matching: opener.marker) {
+            let body = lines[1..<end].joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return body.isEmpty ? trimmed : body
+        }
+
+        // Incomplete stream: drop a lone opening fence when it uses a common wrapper
+        // language so the first streamed frame is not a green code card labeled "html".
+        if shouldStripIncompleteOpener(language: opener.language) {
+            return lines.dropFirst().joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
+
+    private static let spuriousWrapperLanguages: Set<String> = [
+        "",
+        "html",
+        "htm",
+        "markdown",
+        "md",
+        "text",
+        "txt",
+        "plaintext",
+        "plain",
+        "novel",
+        "prose",
+        "chapter",
+    ]
+
+    private static func fenceOpener(_ line: String) -> (marker: String, language: String)? {
+        if line.hasPrefix("```") {
+            let language = String(line.dropFirst(3))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            return ("```", language)
+        }
+        if line.hasPrefix("~~~") {
+            let language = String(line.dropFirst(3))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            return ("~~~", language)
+        }
+        return nil
+    }
+
+    private static func isFenceCloser(_ line: String, matching marker: String) -> Bool {
+        line == marker
+    }
+
+    private static func shouldStripIncompleteOpener(language: String) -> Bool {
+        spuriousWrapperLanguages.contains(language)
     }
 }
 

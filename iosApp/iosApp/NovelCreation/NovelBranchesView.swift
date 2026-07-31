@@ -621,11 +621,24 @@ private enum NovelBranchOverrideMode: String, CaseIterable, Identifiable {
     }
 }
 
+private enum NovelBranchOverrideDraft: Equatable {
+    case inherit
+    case existing(NovelMaterialRevisionID?)
+    case newRevision(
+        title: String,
+        content: String,
+        tags: [String],
+        injectionMode: NovelInjectionMode
+    )
+}
+
 struct NovelBranchOverrideEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let viewModel: NovelCreationViewModel
     let material: NovelMaterialRecord
+
+    private let initialDraft: NovelBranchOverrideDraft
 
     @State private var mode: NovelBranchOverrideMode
     @State private var selectedRevisionID: NovelMaterialRevisionID?
@@ -635,6 +648,7 @@ struct NovelBranchOverrideEditorSheet: View {
     @State private var injectionMode: NovelInjectionMode
     @State private var isSubmitting = false
     @State private var failureMessage: String?
+    @State private var isConfirmingDiscard = false
 
     init(viewModel: NovelCreationViewModel, material: NovelMaterialRecord) {
         self.viewModel = viewModel
@@ -649,12 +663,20 @@ struct NovelBranchOverrideEditorSheet: View {
             )
         }
         let hasOverride = effective?.id != global?.id
-        self._mode = State(initialValue: hasOverride ? .existing : .inherit)
-        self._selectedRevisionID = State(initialValue: effective?.id)
-        self._title = State(initialValue: effective?.title ?? global?.title ?? "")
-        self._content = State(initialValue: effective?.content ?? global?.content ?? "")
-        self._tags = State(initialValue: (effective?.tags ?? global?.tags ?? []).joined(separator: "，"))
-        self._injectionMode = State(initialValue: effective?.injectionMode ?? global?.injectionMode ?? .smart)
+        let mode: NovelBranchOverrideMode = hasOverride ? .existing : .inherit
+        let selectedRevisionID = effective?.id
+        let title = effective?.title ?? global?.title ?? ""
+        let content = effective?.content ?? global?.content ?? ""
+        let tags = effective?.tags ?? global?.tags ?? []
+        let injectionMode = effective?.injectionMode ?? global?.injectionMode ?? .smart
+
+        self.initialDraft = hasOverride ? .existing(selectedRevisionID) : .inherit
+        self._mode = State(initialValue: mode)
+        self._selectedRevisionID = State(initialValue: selectedRevisionID)
+        self._title = State(initialValue: title)
+        self._content = State(initialValue: content)
+        self._tags = State(initialValue: tags.joined(separator: "，"))
+        self._injectionMode = State(initialValue: injectionMode)
     }
 
     var body: some View {
@@ -712,12 +734,28 @@ struct NovelBranchOverrideEditorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if hasUnsavedChanges {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                         .disabled(isSubmitting)
+                        .confirmationDialog(
+                            "放弃分支设定编辑？",
+                            isPresented: $isConfirmingDiscard,
+                            titleVisibility: .visible
+                        ) {
+                            Button("放弃更改", role: .destructive) { dismiss() }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: {
+                            Text("尚未保存的覆盖方式和分支资料修改会丢失。")
+                        }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
-                        .disabled(!canSave || isSubmitting || viewModel.isPerforming)
+                        .disabled(!canSave || isSubmitting || !viewModel.canMutate)
                 }
             }
             .overlay {
@@ -728,9 +766,9 @@ struct NovelBranchOverrideEditorSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(isSubmitting)
+        .interactiveDismissDisabled(isSubmitting || hasUnsavedChanges)
         .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)
     }
 
     private var revisions: [NovelMaterialRevisionRecord] {
@@ -740,19 +778,49 @@ struct NovelBranchOverrideEditorSheet: View {
     }
 
     private var canSave: Bool {
+        guard hasUnsavedChanges else { return false }
         switch mode {
         case .inherit:
-            true
+            return true
         case .existing:
-            selectedRevisionID != nil
+            return selectedRevisionID != nil
         case .newRevision:
-            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
                 !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
+    private var hasUnsavedChanges: Bool {
+        currentDraft != initialDraft
+    }
+
+    private var currentDraft: NovelBranchOverrideDraft {
+        switch mode {
+        case .inherit:
+            return .inherit
+        case .existing:
+            return .existing(selectedRevisionID)
+        case .newRevision:
+            return .newRevision(
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                content: content.trimmingCharacters(in: .whitespacesAndNewlines),
+                tags: normalizedTags,
+                injectionMode: injectionMode
+            )
+        }
+    }
+
+    private var normalizedTags: [String] {
+        NovelReducer.normalizedTags(
+            tags
+                .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        )
+    }
+
     private func save() {
-        guard !isSubmitting else { return }
+        guard viewModel.canMutate, canSave, hasUnsavedChanges, !isSubmitting else { return }
         let change: NovelBranchMaterialOverrideChange
         switch mode {
         case .inherit:
@@ -761,15 +829,11 @@ struct NovelBranchOverrideEditorSheet: View {
             guard let selectedRevisionID else { return }
             change = .useRevision(selectedRevisionID)
         case .newRevision:
-            let parsedTags = tags
-                .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
             change = .createRevision(
                 revisionID: NovelMaterialRevisionID(),
                 title: title,
                 content: content,
-                tags: parsedTags,
+                tags: normalizedTags,
                 injectionMode: injectionMode
             )
         }
@@ -777,10 +841,13 @@ struct NovelBranchOverrideEditorSheet: View {
         failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
-            await viewModel.setBranchMaterialOverride(materialID: material.id, change: change)
+            let saved = await viewModel.setBranchMaterialOverride(
+                materialID: material.id,
+                change: change
+            )
             isSubmitting = false
-            guard viewModel.errorMessage == nil else {
-                failureMessage = viewModel.errorMessage ?? "分支设定没有保存，请稍后重试。"
+            guard saved else {
+                failureMessage = viewModel.presentedMessage ?? "分支设定没有保存，请稍后重试。"
                 return
             }
             dismiss()

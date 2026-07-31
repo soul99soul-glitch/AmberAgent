@@ -43,6 +43,7 @@ struct NovelCompendiumView: View {
             categoryPicker
         }
         .background(AmberTheme.background)
+        .scrollContentBackground(.hidden)
         .sheet(item: $branchOverrideRoute) { route in
             NovelBranchOverrideEditorSheet(viewModel: viewModel, material: route.material)
         }
@@ -57,6 +58,7 @@ struct NovelCompendiumView: View {
         .pickerStyle(.segmented)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
         .background(AmberTheme.background)
     }
 

@@ -65,6 +65,9 @@ enum NovelPolishTransactionReducer {
                 $0.collectedCheckpointID == nil
         }), let sourceID = candidate.sourceChapterVersionID,
             let source = document.chapterVersions.first(where: { $0.id == sourceID }),
+            document.chapters.contains(where: {
+                $0.id == source.chapterID && $0.discardedAt == nil
+            }),
             branch.workingChapterSelections.contains(where: {
                 $0.chapterID == source.chapterID && $0.versionID == source.id
             }) else {
@@ -550,6 +553,8 @@ private extension NovelPolishTransactionReducer {
                 $0.collectedCheckpointID == nil
         }), let source = document.chapterVersions.first(where: {
             $0.id == transaction.sourceChapterVersionID
+        }), document.chapters.contains(where: {
+            $0.id == source.chapterID && $0.discardedAt == nil
         }), NovelDocumentValidator.sha256(source.content) == transaction.sourceContentSHA256,
             NovelDocumentValidator.sha256(document.candidates[candidateIndex].content) ==
                 transaction.candidateContentSHA256,
@@ -734,6 +739,8 @@ private extension NovelPolishTransactionReducer {
                       $0.collectedCheckpointID == nil
               }), let source = document.chapterVersions.first(where: {
                   $0.id == transaction.sourceChapterVersionID
+              }), document.chapters.contains(where: {
+                  $0.id == source.chapterID && $0.discardedAt == nil
               }), candidate.sourceChapterVersionID == source.id,
             candidate.baseCheckpointID == transaction.baseCheckpointID,
             candidate.baseHeadRevision == transaction.baseHeadRevision,

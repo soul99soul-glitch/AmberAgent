@@ -745,6 +745,17 @@ final class NovelProjectLifecycleOperationTests: XCTestCase {
         try await repository.writeLifecycleOperation(record)
         let creation = DefaultNovelCreation(repository: repository)
         _ = try await creation.snapshot(.projects)
+        let pendingAfterList = try await repository.lifecycleOperation(
+            projectID: document.project.id,
+            operationID: operationID
+        )
+        XCTAssertEqual(pendingAfterList, record)
+
+        await NovelXCTAssertThrowsErrorAsync(
+            try await creation.snapshot(.project(document.project.id))
+        ) { error in
+            XCTAssertEqual(error as? NovelError, .projectNotFound(document.project.id))
+        }
         let abandoned = try await repository.lifecycleOperation(
             projectID: document.project.id,
             operationID: operationID

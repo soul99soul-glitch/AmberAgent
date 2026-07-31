@@ -24,6 +24,21 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         let projects: [NovelProjectSummary]
     }
 
+    /// Sidecar written next to `index.json` so inventory can skip full document
+    /// decode only when every on-disk project file still matches the last scan.
+    private struct IndexManifestV1: Codable, Sendable, Equatable {
+        struct Entry: Codable, Sendable, Equatable, Hashable {
+            let projectID: NovelProjectID
+            let primaryByteCount: Int?
+            let primaryModifiedAt: TimeInterval?
+            let previousByteCount: Int?
+            let previousModifiedAt: TimeInterval?
+        }
+
+        let schemaVersion: Int
+        let entries: [Entry]
+    }
+
     private struct SchemaHeader: Decodable {
         let schemaVersion: Int
     }
@@ -83,6 +98,14 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     func listProjects() async throws -> [NovelProjectSummary] {
         try ensureDirectories()
         finishDeletionTombstonesBestEffort()
+        // Fast path: the on-disk index already holds lightweight summaries. Full
+        // document decode of every project on every entry made large novels feel
+        // like a multi-second "正在读取项目" stall. Prefer the index when its
+        // project set still matches disk and no project file is newer than the
+        // index itself; fall back to a full scan when anything looks stale.
+        if let cached = try? loadCachedProjectSummariesIfFresh() {
+            return cached
+        }
         do {
             let summaries = try scanProjectSummaries()
             writeIndexBestEffort(summaries)
@@ -675,6 +698,10 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         rootDirectory.appendingPathComponent("index.json")
     }
 
+    private var indexManifestURL: URL {
+        rootDirectory.appendingPathComponent("index.manifest.json")
+    }
+
     private func primaryURL(for projectID: NovelProjectID) -> URL {
         projectDirectory.appendingPathComponent("\(projectID.description).json")
     }
@@ -1036,10 +1063,38 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         return index
     }
 
-    private func scanProjectSummaries() throws -> [NovelProjectSummary] {
+    /// Returns cached inventory summaries when the index + file signatures still match.
+    private func loadCachedProjectSummariesIfFresh() throws -> [NovelProjectSummary]? {
+        guard fileManager.fileExists(atPath: indexURL.path),
+              fileManager.fileExists(atPath: indexManifestURL.path) else { return nil }
+
+        let diskInventory = try diskProjectInventory()
+        let index = try readIndex()
+        let manifest = try readIndexManifest()
+        let deleted = deletionTombstoneProjectIDs()
+        let cachedProjects = index.projects.filter { !deleted.contains($0.id) }
+        let cachedIDs = Set(cachedProjects.map(\.id))
+        guard cachedIDs == diskInventory.projectIDs else { return nil }
+
+        let expectedEntries = Set(manifest.entries)
+        let actualEntries = Set(diskInventory.entries)
+        guard expectedEntries == actualEntries else { return nil }
+        return cachedProjects.sorted(by: NovelProjectSummary.listOrder)
+    }
+
+    private struct DiskProjectInventory {
+        let projectIDs: Set<NovelProjectID>
+        let entries: [IndexManifestV1.Entry]
+    }
+
+    private func diskProjectInventory() throws -> DiskProjectInventory {
         let urls = try fileManager.contentsOfDirectory(
             at: projectDirectory,
-            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            includingPropertiesForKeys: [
+                .isRegularFileKey,
+                .contentModificationDateKey,
+                .fileSizeKey,
+            ],
             options: [.skipsHiddenFiles]
         )
         let deletedProjectIDs = deletionTombstoneProjectIDs()
@@ -1057,13 +1112,48 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             }
             guard let uuid = UUID(uuidString: rawID) else { continue }
             let projectID = NovelProjectID(uuid)
-            if !deletedProjectIDs.contains(projectID) {
-                projectIDs.insert(projectID)
-            }
+            guard !deletedProjectIDs.contains(projectID) else { continue }
+            projectIDs.insert(projectID)
         }
 
+        let entries = projectIDs.sorted(by: { $0.description < $1.description }).map { projectID in
+            fileSignatureEntry(for: projectID)
+        }
+        return DiskProjectInventory(projectIDs: projectIDs, entries: entries)
+    }
+
+    private func fileSignatureEntry(for projectID: NovelProjectID) -> IndexManifestV1.Entry {
+        let primary = fileSignature(at: primaryURL(for: projectID))
+        let previous = fileSignature(at: previousURL(for: projectID))
+        return IndexManifestV1.Entry(
+            projectID: projectID,
+            primaryByteCount: primary.byteCount,
+            primaryModifiedAt: primary.modifiedAt,
+            previousByteCount: previous.byteCount,
+            previousModifiedAt: previous.modifiedAt
+        )
+    }
+
+    private func fileSignature(at url: URL) -> (byteCount: Int?, modifiedAt: TimeInterval?) {
+        guard fileManager.fileExists(atPath: url.path),
+              let values = try? url.resourceValues(forKeys: [
+                  .fileSizeKey,
+                  .contentModificationDateKey,
+                  .isRegularFileKey,
+              ]),
+              values.isRegularFile == true else {
+            return (nil, nil)
+        }
+        return (
+            values.fileSize,
+            values.contentModificationDate?.timeIntervalSince1970
+        )
+    }
+
+    private func scanProjectSummaries() throws -> [NovelProjectSummary] {
+        let inventory = try diskProjectInventory()
         var summaries: [NovelProjectSummary] = []
-        for projectID in projectIDs.sorted(by: { $0.description < $1.description }) {
+        for projectID in inventory.projectIDs.sorted(by: { $0.description < $1.description }) {
             do {
                 let loaded = try loadProjectSynchronously(id: projectID)
                 summaries.append(NovelProjectSummary(
@@ -1110,11 +1200,27 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     private func writeIndexBestEffort(_ summaries: [NovelProjectSummary]) {
         do {
             try failIfRequested(.beforeIndexWrite)
-            let index = IndexV1(schemaVersion: 1, projects: summaries.sorted(by: NovelProjectSummary.listOrder))
+            let sorted = summaries.sorted(by: NovelProjectSummary.listOrder)
+            let index = IndexV1(schemaVersion: 1, projects: sorted)
+            let manifest = IndexManifestV1(
+                schemaVersion: 1,
+                entries: sorted.map { fileSignatureEntry(for: $0.id) }
+            )
             try makeEncoder().encode(index).write(to: indexURL, options: [.atomic])
+            try makeEncoder().encode(manifest).write(to: indexManifestURL, options: [.atomic])
         } catch {
             try? fileManager.removeItem(at: indexURL)
+            try? fileManager.removeItem(at: indexManifestURL)
         }
+    }
+
+    private func readIndexManifest() throws -> IndexManifestV1 {
+        let data = try readData(at: indexManifestURL, projectID: nil)
+        let manifest = try makeDecoder().decode(IndexManifestV1.self, from: data)
+        guard manifest.schemaVersion == 1 else {
+            throw NovelError.repositoryFailure("Unsupported novel index manifest schema.")
+        }
+        return manifest
     }
 
     private func refreshIndexBestEffort() {
@@ -1123,10 +1229,14 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             writeIndexBestEffort(summaries)
         } catch {
             try? fileManager.removeItem(at: indexURL)
+            try? fileManager.removeItem(at: indexManifestURL)
         }
     }
 
     private func invalidateIndex() throws {
+        if fileManager.fileExists(atPath: indexManifestURL.path) {
+            try? fileManager.removeItem(at: indexManifestURL)
+        }
         guard fileManager.fileExists(atPath: indexURL.path) else { return }
         do {
             try fileManager.removeItem(at: indexURL)

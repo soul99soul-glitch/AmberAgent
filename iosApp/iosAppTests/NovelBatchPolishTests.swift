@@ -294,6 +294,35 @@ final class NovelBatchPolishTests: XCTestCase {
         XCTAssertTrue(runStopped, "停止批量润色必须同时终止当前批量章节的 run，不能把项目留在生成中")
     }
 
+    func testBatchPolishStopDuringDriftAssessmentSettlesAsCancelled() async throws {
+        let fixture = try documentWithChapters(2)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                polishGenScript("Polished 1."),
+                NovelModelScript(steps: [.pause]),
+            ]
+        )
+
+        harness.session.startBatchPolish(chapterIDs: fixture.chapterIDs)
+        let driftStarted = await eventually {
+            await harness.adapter.requests.count == 2
+        }
+        XCTAssertTrue(driftStarted)
+
+        harness.session.cancelBatchPolish()
+        let cancelled = await eventually {
+            harness.session.batchPolishProgress?.phase == .cancelled
+        }
+        XCTAssertTrue(cancelled)
+
+        let progress = try XCTUnwrap(harness.session.batchPolishProgress)
+        XCTAssertEqual(progress.cancelledCount, 2)
+        XCTAssertEqual(progress.failedCount, 0)
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(persisted.polishTransactions.first?.status, .retryable)
+    }
+
     func testBatchPolishStopsAtFirstUnresolvedAdoptionTransaction() async throws {
         let fixture = try documentWithChapters(3)
         let driftFailure = NovelModelFailure(

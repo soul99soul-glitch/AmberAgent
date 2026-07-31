@@ -49,7 +49,7 @@ private struct NovelQuickStartOwner: Hashable, Sendable {
     let branchID: NovelBranchID
 }
 
-private struct NovelAutomaticStateSyncTarget: Equatable, Sendable {
+private struct NovelAutomaticStateSyncTarget: Equatable, Hashable, Sendable {
     let projectID: NovelProjectID
     let branchID: NovelBranchID
 }
@@ -57,6 +57,17 @@ private struct NovelAutomaticStateSyncTarget: Equatable, Sendable {
 private struct NovelAutomaticStateSyncFailure: Equatable, Sendable {
     let target: NovelAutomaticStateSyncTarget
     let message: String
+}
+
+private struct NovelContinuityAuditFailure: Equatable, Sendable {
+    let target: NovelAutomaticStateSyncTarget
+    let message: String
+}
+
+private enum NovelBackgroundGenerationProbe {
+    case active
+    case inactive
+    case unknown
 }
 
 struct NovelStateSyncActivity: Equatable, Sendable {
@@ -162,12 +173,15 @@ final class NovelCreationViewModel {
     }
 
     private(set) var continuityAuditReport: NovelContinuityAuditReport?
-    private(set) var continuityAuditFailure: String?
+    private var continuityAuditPlanStorage: NovelContinuityAuditPlan?
+    private var continuityAuditFailureStorage: NovelContinuityAuditFailure?
+    private(set) var isPlanningContinuity = false
     private(set) var isAuditingContinuity = false
     @ObservationIgnored private var continuityAuditTask: Task<Void, Never>?
     var isLoading = false
     private(set) var isPerforming = false
     private(set) var stateSyncActivity: NovelStateSyncActivity?
+    private(set) var projectListLoadError: String?
     var errorMessage: String?
     var reloadNoticeMessage: String?
     private(set) var reloadNoticeProjectID: NovelProjectID?
@@ -188,11 +202,20 @@ final class NovelCreationViewModel {
     @ObservationIgnored private var operationOwnerID: UUID?
     @ObservationIgnored private var stateSyncActivityOwnerID: UUID?
     @ObservationIgnored private var stateSyncActivityTask: Task<Void, Never>?
+    @ObservationIgnored private var manualStateSyncTask: Task<Void, Never>?
+    @ObservationIgnored private var manualStateSyncPendingID: NovelPendingOperationID?
+    private var manualStateSyncTarget: NovelAutomaticStateSyncTarget?
     @ObservationIgnored private var automaticStateSyncTask: Task<Void, Never>?
     @ObservationIgnored private var automaticStateSyncTarget: NovelAutomaticStateSyncTarget?
     @ObservationIgnored private var queuedAutomaticStateSyncTarget: NovelAutomaticStateSyncTarget?
     private var automaticStateSyncPresentationTarget: NovelAutomaticStateSyncTarget?
     private var automaticStateSyncFailure: NovelAutomaticStateSyncFailure?
+    /// Targets the user explicitly stopped. Prevents cancel from looking like a no-op when
+    /// `needsSync` remains true and would immediately reschedule the same work.
+    private var userSuppressedStateSyncTargets: Set<NovelAutomaticStateSyncTarget> = []
+    /// Targets whose Stop was pressed but mutation/task teardown has not finished yet.
+    /// Keeps a visible “正在停止” state so selection block is not unexplained.
+    private var stateSyncStoppingTargets: Set<NovelAutomaticStateSyncTarget> = []
 
     init(creation: any NovelCreation) {
         self.creation = creation
@@ -247,17 +270,57 @@ final class NovelCreationViewModel {
     }
 
     var isProjectSelectionBlocked: Bool {
-        isPerforming || automaticStateSyncPresentationTarget != nil
+        isPerforming ||
+            manualStateSyncTarget != nil ||
+            automaticStateSyncPresentationTarget != nil ||
+            !stateSyncStoppingTargets.isEmpty
+    }
+
+    var isStateSyncOperationRunning: Bool {
+        manualStateSyncTarget != nil ||
+            automaticStateSyncPresentationTarget != nil ||
+            !stateSyncStoppingTargets.isEmpty
     }
 
     func canCancelAutomaticStateSync(
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) -> Bool {
-        automaticStateSyncPresentationTarget == NovelAutomaticStateSyncTarget(
+        let target = NovelAutomaticStateSyncTarget(
             projectID: projectID,
             branchID: branchID
         )
+        // Stopping targets are no longer cancellable — Stop already took effect.
+        return (manualStateSyncTarget == target || automaticStateSyncPresentationTarget == target)
+            && !stateSyncStoppingTargets.contains(target)
+    }
+
+    func isStateSyncStopping(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> Bool {
+        stateSyncStoppingTargets.contains(
+            NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        )
+    }
+
+    /// User-visible phase copy for sync banners (running / preparing / stopping).
+    func stateSyncStatusTitle(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> String? {
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        if stateSyncStoppingTargets.contains(target) {
+            return "正在停止剧情同步"
+        }
+        guard manualStateSyncTarget == target ||
+                automaticStateSyncPresentationTarget == target else { return nil }
+        if let activity = stateSyncActivity,
+           activity.projectID == projectID,
+           activity.branchID == branchID {
+            return activity.phase == .preparing ? "正在准备剧情状态" : "正在同步剧情状态"
+        }
+        return "正在准备剧情状态"
     }
 
     func cancelAutomaticStateSync(
@@ -267,7 +330,81 @@ final class NovelCreationViewModel {
         guard canCancelAutomaticStateSync(projectID: projectID, branchID: branchID) else {
             return
         }
-        automaticStateSyncTask?.cancel()
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        // Remember the stop so auto-reschedule (`scheduleAutomaticStateSyncIfNeeded`)
+        // cannot immediately re-arm the same blocked banner after cancel returns.
+        userSuppressedStateSyncTargets.insert(target)
+        // Keep a short “正在停止” presentation until task/mutation teardown finishes so
+        // selection block is not unexplained after the running banner disappears.
+        stateSyncStoppingTargets.insert(target)
+        if let failure = automaticStateSyncFailure, failure.target == target {
+            if errorMessage == failure.message {
+                errorMessage = nil
+            }
+            automaticStateSyncFailure = nil
+        }
+
+        // Clear running presentation immediately so Stop is not a silent no-op.
+        if automaticStateSyncPresentationTarget == target || automaticStateSyncTarget == target {
+            automaticStateSyncTask?.cancel()
+            automaticStateSyncPresentationTarget = nil
+            automaticStateSyncTarget = nil
+        }
+        if manualStateSyncTarget == target {
+            // Clear the task slot immediately. The task body previously gated cleanup on
+            // `manualStateSyncPendingID == pendingID`, so cancel left an orphan task that
+            // permanently blocked `startManualStateSyncRetry`.
+            manualStateSyncTask?.cancel()
+            manualStateSyncTask = nil
+            manualStateSyncTarget = nil
+            manualStateSyncPendingID = nil
+        }
+        if queuedAutomaticStateSyncTarget == target {
+            queuedAutomaticStateSyncTarget = nil
+        }
+        if stateSyncActivity?.projectID == projectID,
+           stateSyncActivity?.branchID == branchID {
+            stateSyncActivityTask?.cancel()
+            stateSyncActivityTask = nil
+            stateSyncActivityOwnerID = nil
+            stateSyncActivity = nil
+        }
+
+        // Outer Task.cancel alone does not stop `perform` / model streaming. Cancel the
+        // durable fact-sync mutation tasks so structured model requests receive cancellation.
+        Task { @MainActor [weak self] in
+            await self?.creation.cancelInFlightBackgroundMutations(projectID: projectID)
+            // If no outer task remains to clear stopping (edge race), drop it once
+            // mutation cancel returns and we are not mid-perform for another reason.
+            guard let self else { return }
+            if self.automaticStateSyncTask == nil,
+               self.manualStateSyncTask == nil,
+               !self.isPerforming {
+                self.stateSyncStoppingTargets.remove(target)
+            }
+        }
+    }
+
+    var continuityAuditPlan: NovelContinuityAuditPlan? {
+        guard let plan = continuityAuditPlanStorage,
+              plan.projectID == selectedProjectID,
+              plan.branchID == selectedBranchID else { return nil }
+        return plan
+    }
+
+    var continuityAuditFailure: String? {
+        guard let failure = continuityAuditFailureStorage,
+              failure.target.projectID == selectedProjectID,
+              failure.target.branchID == selectedBranchID else { return nil }
+        return failure.message
+    }
+
+    var isContinuityOperationRunning: Bool {
+        isPlanningContinuity || isAuditingContinuity
+    }
+
+    var continuityOperationTitle: String {
+        isPlanningContinuity ? "正在准备剧情矛盾检查" : "正在通读全书正文"
     }
 
     var presentedMessage: String? {
@@ -340,23 +477,98 @@ final class NovelCreationViewModel {
     ) {
         let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
         guard automaticStateSyncFailure?.target == target else { return }
+        retryStateSync(projectID: projectID, branchID: branchID)
+    }
+
+    func retryStateSync(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) {
+        guard canRetryStateSync(projectID: projectID, branchID: branchID) else { return }
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        userSuppressedStateSyncTargets.remove(target)
         scheduleAutomaticStateSync(projectID: projectID, branchID: branchID)
     }
 
+    func canRetryStateSync(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> Bool {
+        guard selectedProjectID == projectID,
+              selectedBranchID == branchID,
+              branchSnapshot?.branch.syncStatus == .needsSync,
+              !requiresReload,
+              !isProjectSelectionBlocked,
+              projectSnapshot?.access == .readWrite else { return false }
+        return true
+    }
+
+    func stateSyncRecoveryMessage(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> String? {
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        guard selectedProjectID == projectID,
+              selectedBranchID == branchID,
+              branchSnapshot?.branch.syncStatus == .needsSync,
+              manualStateSyncTarget != target,
+              automaticStateSyncPresentationTarget != target,
+              !stateSyncStoppingTargets.contains(target) else { return nil }
+        if let failure = automaticStateSyncFailure, failure.target == target {
+            return failure.message
+        }
+        if let pending = retryableManualStateSyncPending(
+            projectID: projectID,
+            branchID: branchID
+        ), let detail = pending.lastError?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !detail.isEmpty {
+            return NovelPresentation.stateSyncFailureMessage(detail)
+        }
+        return "剧情状态尚未同步，完成后才能继续正文操作。"
+    }
+
     func waitForBackgroundGeneration() async {
-        while !Task.isCancelled, await hasActiveBackgroundGeneration() {
-            try? await Task.sleep(for: .milliseconds(250))
+        var unknownProbeDelayMilliseconds = 1_000
+        while !Task.isCancelled {
+            switch await backgroundGenerationProbe() {
+            case .inactive:
+                return
+            case .active:
+                unknownProbeDelayMilliseconds = 1_000
+                try? await Task.sleep(for: .milliseconds(250))
+            case .unknown:
+                try? await Task.sleep(for: .milliseconds(unknownProbeDelayMilliseconds))
+                unknownProbeDelayMilliseconds = min(
+                    unknownProbeDelayMilliseconds * 2,
+                    4_000
+                )
+            }
         }
     }
 
     func interruptSessionForBackground(deadline: Date) async {
+        guard !Task.isCancelled else { return }
+        manualStateSyncTask?.cancel()
         automaticStateSyncTask?.cancel()
+        continuityAuditTask?.cancel()
         queuedAutomaticStateSyncTarget = nil
-        let summaries = (try? await projectSummaries()) ?? []
-        var projectIDs = Set(summaries.map(\.id))
+        var projectIDs = Set(projects.map(\.id))
         if let selectedProjectID { projectIDs.insert(selectedProjectID) }
         if let quickStartStartingProjectID { projectIDs.insert(quickStartStartingProjectID) }
         for projectID in projectIDs.sorted(by: { $0.description < $1.description }) {
+            guard !Task.isCancelled else { return }
+            await interruptSessionForBackground(
+                projectID: projectID,
+                runID: nil,
+                deadline: deadline
+            )
+        }
+        guard !Task.isCancelled, Date() < deadline else { return }
+        guard let summaries = try? await projectSummaries() else { return }
+        guard !Task.isCancelled, Date() < deadline else { return }
+        let freshProjectIDs = Set(summaries.map(\.id)).subtracting(projectIDs)
+        for projectID in freshProjectIDs.sorted(by: { $0.description < $1.description }) {
+            guard !Task.isCancelled, Date() < deadline else { return }
             await interruptSessionForBackground(
                 projectID: projectID,
                 runID: nil,
@@ -365,25 +577,50 @@ final class NovelCreationViewModel {
         }
     }
 
-    private func hasActiveBackgroundGeneration() async -> Bool {
-        if isPerforming || automaticStateSyncTask != nil || quickStartStartingProjectID != nil {
-            return true
+    private func backgroundGenerationProbe() async -> NovelBackgroundGenerationProbe {
+        if isPerforming ||
+            manualStateSyncTask != nil ||
+            automaticStateSyncTask != nil ||
+            continuityAuditTask != nil ||
+            quickStartStartingProjectID != nil {
+            return .active
         }
-        guard let summaries = try? await projectSummaries() else { return false }
-        for summary in summaries where summary.loadError == nil {
-            if let snapshot = try? await project(id: summary.id),
-               snapshot.activeRuns.contains(where: { $0.status == .running }) {
-                return true
+        let summaries: [NovelProjectSummary]
+        do {
+            summaries = try await projectSummaries()
+        } catch {
+            return Task.isCancelled ? .inactive : .unknown
+        }
+        for summary in summaries {
+            guard !Task.isCancelled else { return .inactive }
+            guard summary.loadError == nil else { return .unknown }
+            do {
+                let snapshot = try await project(id: summary.id)
+                if snapshot.activeRuns.contains(where: { $0.status == .running }) {
+                    return .active
+                }
+            } catch {
+                return Task.isCancelled ? .inactive : .unknown
             }
         }
-        return false
+        return .inactive
     }
 
-    func loadProjects(selecting preferredProjectID: NovelProjectID? = nil) async {
+    func loadProjects(
+        selecting preferredProjectID: NovelProjectID? = nil,
+        restoresSelection: Bool = true
+    ) async {
         isLoading = true
         defer { isLoading = false }
         do {
-            projects = try await projectSummaries()
+            let loadedProjects = try await projectSummaries()
+            try Task.checkCancellation()
+            projects = loadedProjects
+            projectListLoadError = nil
+            guard restoresSelection else {
+                errorMessage = nil
+                return
+            }
             let nextID = preferredProjectID.flatMap { preferred in
                 projects.contains(where: { $0.id == preferred }) ? preferred : nil
             } ?? selectedProjectID.flatMap { selected in
@@ -397,7 +634,11 @@ final class NovelCreationViewModel {
                 }
                 errorMessage = nil
             }
+        } catch is CancellationError {
+            return
         } catch {
+            guard !Task.isCancelled else { return }
+            projectListLoadError = errorDescription(error)
             report(error)
         }
     }
@@ -895,9 +1136,10 @@ final class NovelCreationViewModel {
         }
     }
 
-    func renameProject(_ name: String) async {
-        guard let snapshot = projectSnapshot else { return }
-        _ = await perform(.renameProject(NovelRenameProjectCommand(
+    @discardableResult
+    func renameProject(_ name: String) async -> Bool {
+        guard let snapshot = projectSnapshot else { return false }
+        return await perform(.renameProject(NovelRenameProjectCommand(
             context: mutationContext(projectRevision: snapshot.project.revision),
             projectID: snapshot.project.id,
             name: name
@@ -907,7 +1149,10 @@ final class NovelCreationViewModel {
     @discardableResult
     func stopActiveRunsForProjectOperation(projectID: NovelProjectID) async -> Bool {
         let ownerID = UUID()
-        guard acquireOperation(ownerID: ownerID) else { return false }
+        guard acquireOperation(ownerID: ownerID) else {
+            report(NovelError.projectBusy(projectID))
+            return false
+        }
         errorMessage = nil
         defer { releaseOperation(ownerID: ownerID) }
 
@@ -979,7 +1224,8 @@ final class NovelCreationViewModel {
         )), reload: false)
         guard succeeded else { return }
         if selectedProjectID == projectID { clearSelection() }
-        await loadProjects()
+        projects.removeAll { $0.id == projectID }
+        await loadProjects(restoresSelection: false)
     }
 
     func restorePreviousProject() async {
@@ -1037,9 +1283,10 @@ final class NovelCreationViewModel {
         )))
     }
 
-    func setPolishPreference(_ preference: String) async {
-        guard let snapshot = projectSnapshot else { return }
-        _ = await perform(.setPolishPreference(NovelSetPolishPreferenceCommand(
+    @discardableResult
+    func setPolishPreference(_ preference: String) async -> Bool {
+        guard let snapshot = projectSnapshot else { return false }
+        return await perform(.setPolishPreference(NovelSetPolishPreferenceCommand(
             context: mutationContext(configRevision: snapshot.project.configRevision),
             projectID: snapshot.project.id,
             preference: preference
@@ -1139,12 +1386,15 @@ final class NovelCreationViewModel {
         )))
     }
 
+    @discardableResult
     func setBranchMaterialOverride(
         materialID: NovelMaterialID,
         change: NovelBranchMaterialOverrideChange
-    ) async {
-        guard let project = projectSnapshot, let branch = branchSnapshot else { return }
-        _ = await perform(.setBranchMaterialOverride(NovelSetBranchMaterialOverrideCommand(
+    ) async -> Bool {
+        guard canMutate,
+              let project = projectSnapshot,
+              let branch = branchSnapshot else { return false }
+        return await perform(.setBranchMaterialOverride(NovelSetBranchMaterialOverrideCommand(
             context: mutationContext(
                 projectRevision: project.project.revision,
                 configRevision: project.project.configRevision,
@@ -1484,6 +1734,7 @@ final class NovelCreationViewModel {
             projectID: projectID,
             branchID: branchID
         )
+        guard !userSuppressedStateSyncTargets.contains(target) else { return }
         guard target != automaticStateSyncTarget,
               target != queuedAutomaticStateSyncTarget else { return }
         guard automaticStateSyncTask == nil else {
@@ -1494,12 +1745,93 @@ final class NovelCreationViewModel {
     }
 
     func retryPending(_ pendingID: NovelPendingOperationID) async {
+        if projectSnapshot?.pendingOperations.contains(where: {
+            $0.id == pendingID && $0.kind == .manualSync
+        }) == true {
+            if let task = startManualStateSyncRetry(pendingID) {
+                await task.value
+            }
+            return
+        }
         guard let project = projectSnapshot else { return }
         _ = await perform(.retryPending(NovelRetryPendingCommand(
             context: mutationContext(projectRevision: project.project.revision),
             projectID: project.project.id,
             pendingID: pendingID
         )))
+    }
+
+    @discardableResult
+    func startManualStateSyncRetry(
+        _ pendingID: NovelPendingOperationID
+    ) -> Task<Void, Never>? {
+        if manualStateSyncPendingID == pendingID {
+            return manualStateSyncTask
+        }
+        guard manualStateSyncTask == nil,
+              automaticStateSyncTask == nil,
+              let project = projectSnapshot,
+              let pending = project.pendingOperations.first(where: {
+                  $0.id == pendingID &&
+                      $0.kind == .manualSync &&
+                      $0.status == .retryable
+              }),
+              reloadNoticeProjectID != project.project.id else { return nil }
+        let target = NovelAutomaticStateSyncTarget(
+            projectID: project.project.id,
+            branchID: pending.branchID
+        )
+        let ownerID = UUID()
+        guard acquireOperation(ownerID: ownerID) else { return nil }
+
+        // Explicit retry after a user Stop should lift suppress for this target.
+        userSuppressedStateSyncTargets.remove(target)
+        if automaticStateSyncFailure?.target == target {
+            automaticStateSyncFailure = nil
+            errorMessage = nil
+        }
+        manualStateSyncPendingID = pendingID
+        manualStateSyncTarget = target
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.manualStateSyncPendingID == pendingID {
+                    self.manualStateSyncTask = nil
+                    self.manualStateSyncPendingID = nil
+                    self.manualStateSyncTarget = nil
+                }
+                self.stateSyncStoppingTargets.remove(target)
+            }
+            if Task.isCancelled {
+                self.releaseOperation(ownerID: ownerID)
+            } else {
+                _ = await self.perform(
+                    .retryPending(NovelRetryPendingCommand(
+                        context: self.mutationContext(
+                            projectRevision: project.project.revision
+                        ),
+                        projectID: project.project.id,
+                        pendingID: pendingID
+                    )),
+                    reportsError: false,
+                    reservedOwnerID: ownerID
+                )
+            }
+        }
+        manualStateSyncTask = task
+        return task
+    }
+
+    private func retryableManualStateSyncPending(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> NovelPendingOperationRecord? {
+        guard projectSnapshot?.project.id == projectID else { return nil }
+        return projectSnapshot?.pendingOperations.first {
+            $0.branchID == branchID &&
+                $0.kind == .manualSync &&
+                $0.status == .retryable
+        }
     }
 
     @discardableResult
@@ -1533,30 +1865,60 @@ final class NovelCreationViewModel {
         guard let projectID = selectedProjectID, let branchID = selectedBranchID else {
             return nil
         }
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        guard !Task.isCancelled else { return nil }
         let ownerID = UUID()
         guard acquireOperation(ownerID: ownerID) else {
             // 抢不到锁不能静默返回:用户看到的就是「点了没反应」。
-            continuityAuditFailure = "有别的操作正在进行，请稍后再试。"
+            continuityAuditFailureStorage = NovelContinuityAuditFailure(
+                target: target,
+                message: "有别的操作正在进行，请稍后再试。"
+            )
             return nil
         }
         defer { releaseOperation(ownerID: ownerID) }
         do {
+            try Task.checkCancellation()
             let plan = try await creation.planContinuityAudit(
                 projectID: projectID,
                 branchID: branchID
             )
-            continuityAuditFailure = nil
+            try Task.checkCancellation()
+            continuityAuditPlanStorage = plan
+            if continuityAuditFailureStorage?.target == target {
+                continuityAuditFailureStorage = nil
+            }
             errorMessage = nil
             return plan
-        } catch {
-            continuityAuditFailure = errorDescription(error)
+        } catch is CancellationError {
+            if continuityAuditFailureStorage?.target == target {
+                continuityAuditFailureStorage = nil
+            }
             return nil
+        } catch {
+            continuityAuditFailureStorage = NovelContinuityAuditFailure(
+                target: target,
+                message: errorDescription(error)
+            )
+            return nil
+        }
+    }
+
+    func startContinuityAuditPlanning() {
+        guard continuityAuditTask == nil else { return }
+        continuityAuditPlanStorage = nil
+        isPlanningContinuity = true
+        continuityAuditTask = Task { @MainActor [weak self] in
+            _ = await self?.planContinuityAudit()
+            self?.isPlanningContinuity = false
+            self?.continuityAuditTask = nil
         }
     }
 
     /// 界面用这个入口发起扫描:任务句柄留在 ViewModel 里,「停止扫描」才有东西可取消。
     func startContinuityAudit() {
         guard continuityAuditTask == nil else { return }
+        continuityAuditPlanStorage = nil
         continuityAuditTask = Task { @MainActor [weak self] in
             await self?.auditContinuity()
             self?.continuityAuditTask = nil
@@ -1569,9 +1931,13 @@ final class NovelCreationViewModel {
 
     func auditContinuity() async {
         guard let projectID = selectedProjectID, let branchID = selectedBranchID else { return }
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
         let ownerID = UUID()
         guard acquireOperation(ownerID: ownerID) else {
-            continuityAuditFailure = "有别的操作正在进行，请稍后再试。"
+            continuityAuditFailureStorage = NovelContinuityAuditFailure(
+                target: target,
+                message: "有别的操作正在进行，请稍后再试。"
+            )
             return
         }
         isAuditingContinuity = true
@@ -1584,20 +1950,33 @@ final class NovelCreationViewModel {
                 projectID: projectID,
                 branchID: branchID
             )
+            try Task.checkCancellation()
             continuityAuditReport = audit
-            continuityAuditFailure = nil
+            if continuityAuditFailureStorage?.target == target {
+                continuityAuditFailureStorage = nil
+            }
             errorMessage = nil
         } catch is CancellationError {
             // 用户自己按的停止,不是故障,不必弹错误。
-            continuityAuditFailure = nil
+            if continuityAuditFailureStorage?.target == target {
+                continuityAuditFailureStorage = nil
+            }
         } catch {
-            continuityAuditFailure = errorDescription(error)
+            continuityAuditFailureStorage = NovelContinuityAuditFailure(
+                target: target,
+                message: errorDescription(error)
+            )
         }
     }
 
     func clearContinuityAudit() {
         continuityAuditReport = nil
-        continuityAuditFailure = nil
+        continuityAuditPlanStorage = nil
+        continuityAuditFailureStorage = nil
+    }
+
+    func clearContinuityAuditPlan() {
+        continuityAuditPlanStorage = nil
     }
 
     func previewImport(_ data: Data) async -> NovelProjectImportPreview? {
@@ -1621,9 +2000,16 @@ final class NovelCreationViewModel {
     @discardableResult
     func importProject(
         _ data: Data,
-        choice: NovelProjectImportChoice
+        choice: NovelProjectImportChoice,
+        preview acceptedPreview: NovelProjectImportPreview? = nil
     ) async -> NovelProjectImportResult? {
-        guard let preview = await previewImport(data) else { return nil }
+        let preview: NovelProjectImportPreview
+        if let acceptedPreview {
+            preview = acceptedPreview
+        } else {
+            guard let preparedPreview = await previewImport(data) else { return nil }
+            preview = preparedPreview
+        }
         let destinationID: NovelProjectID
         let policy: NovelProjectImportPolicy
         let expectedRevision: Int64?
@@ -1743,15 +2129,31 @@ final class NovelCreationViewModel {
         selecting projectID: NovelProjectID? = nil,
         selectingBranch branchID: NovelBranchID? = nil,
         reload: Bool = true,
-        reportsError: Bool = true
+        reportsError: Bool = true,
+        reservedOwnerID: UUID? = nil
     ) async -> Bool {
         if let projectID, selectedProjectID != projectID, isProjectSelectionBlocked {
             report(NovelError.projectBusy(selectedProjectID ?? action.projectID))
             return false
         }
-        let ownerID = UUID()
-        guard reloadNoticeProjectID != action.projectID,
-              acquireOperation(ownerID: ownerID) else { return false }
+        let ownerID = reservedOwnerID ?? UUID()
+        guard reloadNoticeProjectID != action.projectID else {
+            if reportsError {
+                errorMessage = errorDescription(NovelError.storageIndeterminate(action.projectID))
+            }
+            return false
+        }
+        if let reservedOwnerID {
+            guard operationOwnerID == reservedOwnerID, isPerforming else {
+                if reportsError { report(NovelError.projectBusy(action.projectID)) }
+                return false
+            }
+        } else {
+            guard acquireOperation(ownerID: ownerID) else {
+                if reportsError { report(NovelError.projectBusy(action.projectID)) }
+                return false
+            }
+        }
         let stateSyncContext = stateSyncContext(for: action)
         if let stateSyncContext {
             startStateSyncActivity(
@@ -1885,6 +2287,7 @@ final class NovelCreationViewModel {
     }
 
     private func startAutomaticStateSync(_ target: NovelAutomaticStateSyncTarget) {
+        guard !userSuppressedStateSyncTargets.contains(target) else { return }
         if let failure = automaticStateSyncFailure, failure.target == target {
             if errorMessage == failure.message {
                 errorMessage = nil
@@ -1895,10 +2298,34 @@ final class NovelCreationViewModel {
         automaticStateSyncPresentationTarget = target
         automaticStateSyncTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.runAutomaticStateSync(target)
+            let wasCancelled: Bool
+            if Task.isCancelled || self.userSuppressedStateSyncTargets.contains(target) {
+                wasCancelled = true
+            } else {
+                await self.runAutomaticStateSync(target)
+                wasCancelled = Task.isCancelled ||
+                    self.userSuppressedStateSyncTargets.contains(target)
+            }
+            if self.automaticStateSyncTarget == target {
+                self.automaticStateSyncTarget = nil
+            }
+            if self.automaticStateSyncPresentationTarget == target {
+                self.automaticStateSyncPresentationTarget = nil
+            }
             self.automaticStateSyncTask = nil
-            self.automaticStateSyncTarget = nil
-            self.automaticStateSyncPresentationTarget = nil
+            self.stateSyncStoppingTargets.remove(target)
+            if wasCancelled {
+                // Drop only the cancelled target from the queue; still start a
+                // different queued branch so stop on A does not strand B.
+                if self.queuedAutomaticStateSyncTarget == target {
+                    self.queuedAutomaticStateSyncTarget = nil
+                }
+                if let queued = self.queuedAutomaticStateSyncTarget {
+                    self.queuedAutomaticStateSyncTarget = nil
+                    self.startAutomaticStateSync(queued)
+                }
+                return
+            }
             if let queued = self.queuedAutomaticStateSyncTarget {
                 self.queuedAutomaticStateSyncTarget = nil
                 self.startAutomaticStateSync(queued)
@@ -1910,7 +2337,7 @@ final class NovelCreationViewModel {
         // Let the saving caller finish its immediate refresh before the background
         // transaction begins reading the same branch.
         try? await Task.sleep(for: .milliseconds(250))
-        while !Task.isCancelled {
+        while !Task.isCancelled, !userSuppressedStateSyncTargets.contains(target) {
             let projectSnapshot: NovelProjectSnapshot
             let branchSnapshot: NovelBranchSnapshot
             do {
@@ -1922,7 +2349,8 @@ final class NovelCreationViewModel {
             } catch is CancellationError {
                 return
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled,
+                      !userSuppressedStateSyncTargets.contains(target) else { return }
                 let message = "自动剧情同步准备失败：\(errorDescription(error))"
                 automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
                     target: target,
@@ -1931,20 +2359,31 @@ final class NovelCreationViewModel {
                 errorMessage = message
                 return
             }
-            guard branchSnapshot.branch.syncStatus == .needsSync else { return }
+            if selectedProjectID == target.projectID,
+               selectedBranchID == target.branchID {
+                self.projectSnapshot = projectSnapshot
+                self.branchSnapshot = branchSnapshot
+            }
+            guard branchSnapshot.branch.syncStatus == .needsSync else {
+                userSuppressedStateSyncTargets.remove(target)
+                return
+            }
             let branchPending = projectSnapshot.pendingOperations.filter {
                 $0.branchID == target.branchID
             }
             guard branchPending.isEmpty ||
                     (branchPending.count == 1 &&
                         branchPending[0].kind == .manualSync &&
-                        branchPending[0].status == .pending) else {
+                        (branchPending[0].status == .pending ||
+                            branchPending[0].status == .retryable)) else {
                 return
             }
             if isPerforming || branchSnapshot.branch.activeRunID != nil {
                 try? await Task.sleep(for: .milliseconds(250))
                 continue
             }
+            guard !Task.isCancelled,
+                  !userSuppressedStateSyncTargets.contains(target) else { return }
 
             let succeeded: Bool
             if let pending = branchPending.first {
@@ -1970,19 +2409,25 @@ final class NovelCreationViewModel {
                     expectedWorkingRevision: branchSnapshot.branch.workingRevision
                 )), reportsError: false)
             }
-            guard succeeded || Task.isCancelled else {
-                let detail = self.projectSnapshot?.pendingOperations.first(where: {
-                    $0.branchID == target.branchID && $0.kind == .manualSync
-                })?.lastError
-                let message = detail.map(NovelPresentation.stateSyncFailureMessage)
-                    ?? "自动剧情同步没有完成，请重试。"
-                automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
-                    target: target,
-                    message: message
-                )
-                errorMessage = message
+            // Success after a concurrent Stop still means the branch is synced —
+            // lift suppress so the next edit can auto-schedule again.
+            if succeeded {
+                userSuppressedStateSyncTargets.remove(target)
                 return
             }
+            if Task.isCancelled || userSuppressedStateSyncTargets.contains(target) {
+                return
+            }
+            let detail = self.projectSnapshot?.pendingOperations.first(where: {
+                $0.branchID == target.branchID && $0.kind == .manualSync
+            })?.lastError
+            let message = detail.map(NovelPresentation.stateSyncFailureMessage)
+                ?? "自动剧情同步没有完成，请重试。"
+            automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
+                target: target,
+                message: message
+            )
+            errorMessage = message
             return
         }
     }

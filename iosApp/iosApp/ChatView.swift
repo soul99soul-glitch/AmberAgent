@@ -563,48 +563,24 @@ struct ChatView: View {
         viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
     }
 
-    /// Liquid Glass attachment panel that springs out from the "+" with the native
-    /// `.glassEffect` material; it sits just above the input row (composer grows upward).
     private var attachmentGlassPanel: some View {
-        VStack(spacing: 0) {
-            attachmentRow(title: "拍照", icon: "camera") { presentCamera() }
-            attachmentDivider
-            attachmentRow(title: "照片", icon: "photo.on.rectangle") { presentPhotosPicker() }
-            attachmentDivider
-            attachmentRow(title: "文件", icon: "doc") { presentFileImporter() }
-        }
-        .frame(width: 220)
-        .clipShape(.rect(cornerRadius: 22))
-        .glassEffect(.regular, in: .rect(cornerRadius: 22))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 2)
-        .padding(.bottom, 2)
+        ComposerAttachmentGlassPanel(
+            onCamera: presentCamera,
+            onPhotos: presentPhotosPicker,
+            onFiles: presentFileImporter,
+            onDismiss: { isAttachExpanded = false }
+        )
     }
 
-    private var attachmentDivider: some View {
-        Divider().overlay(AmberTheme.borderSoft).padding(.leading, 52)
-    }
-
-    private func attachmentRow(title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button {
-            withAnimation(.bouncy(duration: 0.36, extraBounce: 0.1)) { isAttachExpanded = false }
-            action()
-        } label: {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(AmberTheme.accent)
-                    .frame(width: 24)
-                Text(title)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(AmberTheme.foreground)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 52)
-            .contentShape(Rectangle())
+    private var chatImageAttachmentStatus: ComposerAttachmentStatus? {
+        switch viewModel.imageAttachmentState {
+        case .blocked(let message):
+            return .warning(message)
+        case .fallback:
+            return .muted("当前模型不支持图片，将先用视觉模型识别后再发送", systemImage: "wand.and.stars")
+        case .ready, .none:
+            return nil
         }
-        .buttonStyle(.plain)
     }
 
     private var topBar: some View {
@@ -1044,84 +1020,27 @@ struct ChatView: View {
             }
 
             if !viewModel.pendingImages.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(viewModel.pendingImages) { image in
-                            ZStack(alignment: .topTrailing) {
-                                if let ui = UIImage(data: image.previewData) {
-                                    Image(uiImage: ui)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 56, height: 56)
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                }
-                                Button {
-                                    viewModel.removePendingImage(image.id)
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 16))
-                                        .foregroundStyle(.white, .black.opacity(0.45))
-                                        .padding(3)
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 2)
-                }
-                switch viewModel.imageAttachmentState {
-                case .blocked(let message):
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(AmberTheme.accentAmber)
-                        .lineLimit(2)
-                        .padding(.horizontal, 2)
-                case .fallback:
-                    Label("当前模型不支持图片，将先用视觉模型识别后再发送", systemImage: "wand.and.stars")
-                        .font(.caption2)
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(2)
-                        .padding(.horizontal, 2)
-                case .ready, .none:
-                    EmptyView()
-                }
+                ComposerPendingImageStrip(
+                    items: viewModel.pendingImages.map {
+                        .init(id: $0.id, previewData: $0.previewData)
+                    },
+                    onRemove: { viewModel.removePendingImage($0) },
+                    status: chatImageAttachmentStatus
+                )
             }
 
             if let preview = viewModel.pendingSelectedFilePreview {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Label(preview.fileName, systemImage: "doc.text")
-                            .font(.caption)
-                            .lineLimit(1)
-                        Text(preview.isTruncated ? "\(preview.byteSummary) · 已截断" : preview.byteSummary)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button {
-                            viewModel.clearPendingSelectedFilePreview()
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Text("发送后，已解析文本会保存进此会话上下文。")
-                        .font(.caption2)
-                        .foregroundStyle(AmberTheme.muted)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                ComposerPendingFileCard(
+                    fileName: preview.fileName,
+                    byteSummary: preview.byteSummary,
+                    isTruncated: preview.isTruncated,
+                    footnote: "发送后，已解析文本会保存进此会话上下文。",
+                    onRemove: { viewModel.clearPendingSelectedFilePreview() }
+                )
             }
 
             if let error = viewModel.selectedFileContextError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
+                ComposerAttachmentStatusLabel(status: .error(error))
             }
 
             if let error = viewModel.configurationError {
@@ -1169,27 +1088,17 @@ struct ChatView: View {
                     // Liquid Glass。`.bottom` 对齐让圆形发送键随胶囊向上增高时仍贴住底边。
                     HStack(alignment: .bottom, spacing: 8) {
                         HStack(alignment: .center, spacing: 6) {
-                            Button {
+                            ComposerAttachToggleButton(
+                                isExpanded: isAttachExpanded,
+                                isBusy: viewModel.isAttachingSelectedFile,
+                                isDisabled: viewModel.isLoading
+                                    || viewModel.isAttachingSelectedFile
+                                    || hasPendingToolApproval
+                            ) {
                                 withAnimation(.bouncy(duration: 0.42, extraBounce: 0.14)) {
                                     isAttachExpanded.toggle()
                                 }
-                            } label: {
-                                Image(systemName: viewModel.isAttachingSelectedFile ? "paperclip.circle.fill" : "plus")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(AmberTheme.muted)
-                                    .frame(width: 32, height: 32)
-                                    .contentShape(Circle())
-                                    .rotationEffect(.degrees(isAttachExpanded ? 45 : 0))
-                                    .contentTransition(.symbolEffect(.replace.downUp))
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
                             }
-                            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.88, haptic: .lightImpact))
-                            .disabled(
-                                viewModel.isLoading ||
-                                    viewModel.isAttachingSelectedFile ||
-                                    hasPendingToolApproval
-                            )
 
                             ZStack(alignment: .leading) {
                                 ComposerInputTextView(

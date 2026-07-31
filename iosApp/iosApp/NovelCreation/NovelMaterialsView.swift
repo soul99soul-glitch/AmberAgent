@@ -312,11 +312,22 @@ enum NovelMaterialKindChoice: String, CaseIterable, Identifiable {
     }
 }
 
+private struct NovelMaterialEditorDraft: Equatable {
+    let kind: NovelMaterialKind
+    let title: String
+    let content: String
+    let tags: [String]
+    let aliases: [String]
+    let injectionMode: NovelInjectionMode
+}
+
 struct NovelMaterialEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let viewModel: NovelCreationViewModel
     let material: NovelMaterialRecord?
+
+    private let initialDraft: NovelMaterialEditorDraft
 
     @State private var kindChoice: NovelMaterialKindChoice
     @State private var customKindName: String
@@ -327,6 +338,7 @@ struct NovelMaterialEditorSheet: View {
     @State private var injectionMode: NovelInjectionMode
     @State private var isSaving = false
     @State private var failureMessage: String?
+    @State private var isConfirmingDiscard = false
 
     init(
         viewModel: NovelCreationViewModel,
@@ -341,17 +353,34 @@ struct NovelMaterialEditorSheet: View {
             }
         }
         let kind = material?.kind ?? suggestedKind
-        self._kindChoice = State(initialValue: NovelMaterialKindChoice(kind: kind))
+        let kindChoice = NovelMaterialKindChoice(kind: kind)
+        let customKindName: String
         if case .custom(let value) = kind {
-            self._customKindName = State(initialValue: value)
+            customKindName = value
         } else {
-            self._customKindName = State(initialValue: "")
+            customKindName = ""
         }
-        self._title = State(initialValue: revision?.title ?? "")
-        self._content = State(initialValue: revision?.content ?? "")
-        self._tags = State(initialValue: revision?.tags.joined(separator: "，") ?? "")
-        self._aliases = State(initialValue: material?.aliases.joined(separator: "，") ?? "")
-        self._injectionMode = State(initialValue: revision?.injectionMode ?? .smart)
+        let title = revision?.title ?? ""
+        let content = revision?.content ?? ""
+        let tags = revision?.tags ?? []
+        let aliases = kind == .character ? (material?.aliases ?? []) : []
+        let injectionMode = revision?.injectionMode ?? .smart
+
+        self.initialDraft = NovelMaterialEditorDraft(
+            kind: kindChoice.materialKind(customName: customKindName),
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            content: content.trimmingCharacters(in: .whitespacesAndNewlines),
+            tags: NovelReducer.normalizedTags(tags),
+            aliases: NovelCharacterIdentityResolver.normalizedAliases(aliases),
+            injectionMode: injectionMode
+        )
+        self._kindChoice = State(initialValue: kindChoice)
+        self._customKindName = State(initialValue: customKindName)
+        self._title = State(initialValue: title)
+        self._content = State(initialValue: content)
+        self._tags = State(initialValue: tags.joined(separator: "，"))
+        self._aliases = State(initialValue: aliases.joined(separator: "，"))
+        self._injectionMode = State(initialValue: injectionMode)
     }
 
     var body: some View {
@@ -434,8 +463,24 @@ struct NovelMaterialEditorSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(isEditable || isSaving ? "取消" : "完成") { dismiss() }
+                    Button(isEditable || isSaving ? "取消" : "完成") {
+                        if hasUnsavedChanges {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                         .disabled(isSaving)
+                        .confirmationDialog(
+                            "放弃资料编辑？",
+                            isPresented: $isConfirmingDiscard,
+                            titleVisibility: .visible
+                        ) {
+                            Button("放弃更改", role: .destructive) { dismiss() }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: {
+                            Text("尚未保存的资料修改会丢失。")
+                        }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if isEditable || isSaving {
@@ -456,19 +501,44 @@ struct NovelMaterialEditorSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(isSaving)
+        .interactiveDismissDisabled(isSaving || hasUnsavedChanges)
         .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)
     }
 
     private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        hasUnsavedChanges &&
+            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
             (kindChoice != .custom || !customKindName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     private var isEditable: Bool {
         viewModel.canMutate
+    }
+
+    private var hasUnsavedChanges: Bool {
+        currentDraft != initialDraft
+    }
+
+    private var currentDraft: NovelMaterialEditorDraft {
+        NovelMaterialEditorDraft(
+            kind: kindChoice.materialKind(customName: customKindName),
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            content: content.trimmingCharacters(in: .whitespacesAndNewlines),
+            tags: normalizedTags,
+            aliases: normalizedAliases,
+            injectionMode: injectionMode
+        )
+    }
+
+    private var normalizedTags: [String] {
+        NovelReducer.normalizedTags(parsedList(tags))
+    }
+
+    private var normalizedAliases: [String] {
+        guard kindChoice == .character else { return [] }
+        return NovelCharacterIdentityResolver.normalizedAliases(parsedList(aliases))
     }
 
     private var readOnlyKindName: String {
@@ -480,15 +550,7 @@ struct NovelMaterialEditorSheet: View {
     }
 
     private func save() {
-        guard isEditable, canSave, !isSaving else { return }
-        let parsedTags = tags
-            .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        let parsedAliases = aliases
-            .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        guard isEditable, canSave, hasUnsavedChanges, !isSaving else { return }
         isSaving = true
         failureMessage = nil
         Task { @MainActor in
@@ -498,9 +560,9 @@ struct NovelMaterialEditorSheet: View {
                 kind: kindChoice.materialKind(customName: customKindName),
                 title: title,
                 content: content,
-                tags: parsedTags,
+                tags: normalizedTags,
                 injectionMode: injectionMode,
-                aliases: parsedAliases
+                aliases: normalizedAliases
             )
             isSaving = false
             guard viewModel.errorMessage == nil else {
@@ -510,19 +572,30 @@ struct NovelMaterialEditorSheet: View {
             dismiss()
         }
     }
+
+    private func parsedList(_ value: String) -> [String] {
+        value
+            .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
 }
 
 struct NovelPolishPreferenceSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let viewModel: NovelCreationViewModel
+    private let initialPreference: String
     @State private var preference: String
     @State private var isSaving = false
     @State private var failureMessage: String?
+    @State private var isConfirmingDiscard = false
 
     init(viewModel: NovelCreationViewModel) {
         self.viewModel = viewModel
-        self._preference = State(initialValue: viewModel.projectSnapshot?.project.polishPreference ?? "")
+        let preference = viewModel.projectSnapshot?.project.polishPreference ?? ""
+        self.initialPreference = preference
+        self._preference = State(initialValue: preference)
     }
 
     var body: some View {
@@ -550,12 +623,12 @@ struct NovelPolishPreferenceSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { requestDismiss() }
                         .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
-                        .disabled(isSaving || viewModel.isPerforming)
+                        .disabled(isSaving || viewModel.isPerforming || !hasUnsavedChanges)
                 }
             }
             .overlay {
@@ -566,9 +639,29 @@ struct NovelPolishPreferenceSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(isSaving)
+        .interactiveDismissDisabled(isSaving || hasUnsavedChanges)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .confirmationDialog(
+            "放弃润色偏好修改？",
+            isPresented: $isConfirmingDiscard,
+            titleVisibility: .visible
+        ) {
+            Button("放弃修改", role: .destructive) { dismiss() }
+            Button("继续编辑", role: .cancel) {}
+        }
+    }
+
+    private var hasUnsavedChanges: Bool {
+        normalized(preference) != normalized(initialPreference)
+    }
+
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
+            dismiss()
+        }
     }
 
     private func save() {
@@ -577,14 +670,18 @@ struct NovelPolishPreferenceSheet: View {
         failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
-            await viewModel.setPolishPreference(preference)
+            let saved = await viewModel.setPolishPreference(preference)
             isSaving = false
-            guard viewModel.errorMessage == nil else {
+            guard saved else {
                 failureMessage = viewModel.errorMessage ?? "润色偏好没有保存，请稍后重试。"
                 return
             }
             dismiss()
         }
+    }
+
+    private func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

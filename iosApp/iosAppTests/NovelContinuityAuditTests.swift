@@ -887,6 +887,109 @@ final class NovelContinuityAuditTests: XCTestCase {
 /// 靠「每个变更点手动清一次」必然漏,所以读取侧必须自己过滤。
 @MainActor
 final class NovelContinuityAuditViewModelTests: XCTestCase {
+    func testCancellationWinsWhenContinuityRuntimeReturnsAfterIgnoringIt() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let fixture = try documentWithOneChapter()
+        _ = try await repository.createProject(fixture)
+        let runtime = CancellationIgnoringContinuityCreation(
+            base: DefaultNovelCreation(repository: repository)
+        )
+        let viewModel = NovelCreationViewModel(creation: runtime)
+        let didSelect = await viewModel.selectProject(fixture.project.id)
+        XCTAssertTrue(didSelect)
+        let branchID = try XCTUnwrap(viewModel.selectedBranchID)
+
+        viewModel.startContinuityAuditPlanning()
+        let planningStarted = await eventually { await runtime.hasStartedPlanning }
+        XCTAssertTrue(planningStarted)
+        viewModel.cancelContinuityAudit()
+        await runtime.resumePlanning(NovelContinuityAuditPlan(
+            projectID: fixture.project.id,
+            branchID: branchID,
+            chapterCount: 1,
+            chunkCount: 1,
+            totalCharacterCount: 20
+        ))
+        let planningStopped = await eventually { !viewModel.isContinuityOperationRunning }
+        XCTAssertTrue(planningStopped)
+        XCTAssertNil(viewModel.continuityAuditPlan)
+
+        viewModel.startContinuityAudit()
+        let auditStarted = await eventually { await runtime.hasStartedAudit }
+        XCTAssertTrue(auditStarted)
+        viewModel.cancelContinuityAudit()
+        await runtime.resumeAudit(NovelContinuityAuditReport(
+            projectID: fixture.project.id,
+            branchID: branchID,
+            auditedChapterSelections: viewModel.branchSnapshot?.chapterSelections ?? [],
+            promptVersion: "test",
+            scannedChapterCount: 1,
+            chunkCount: 1,
+            failedChunkCount: 0,
+            issues: [],
+            droppedIssueCount: 0,
+            createdAt: Date()
+        ))
+        let auditStopped = await eventually { !viewModel.isContinuityOperationRunning }
+        XCTAssertTrue(auditStopped)
+        XCTAssertNil(viewModel.continuityAudit)
+    }
+
+    func testContinuityFailureIsHiddenAfterSelectionMovesToAnotherProject() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let first = try documentWithOneChapter()
+        let second = try NovelTestFixtures.documentWithForkableCheckpoint()
+        _ = try await repository.createProject(first)
+        _ = try await repository.createProject(second)
+        let runtime = CancellationIgnoringContinuityCreation(
+            base: DefaultNovelCreation(repository: repository)
+        )
+        let viewModel = NovelCreationViewModel(creation: runtime)
+        let didSelectFirst = await viewModel.selectProject(first.project.id)
+        XCTAssertTrue(didSelectFirst)
+
+        viewModel.startContinuityAuditPlanning()
+        let planningStarted = await eventually { await runtime.hasStartedPlanning }
+        XCTAssertTrue(planningStarted)
+        await runtime.failPlanning()
+        let failurePublished = await eventually { viewModel.continuityAuditFailure != nil }
+        XCTAssertTrue(failurePublished)
+
+        let didSelectSecond = await viewModel.selectProject(second.project.id)
+        XCTAssertTrue(didSelectSecond)
+        XCTAssertNil(viewModel.continuityAuditFailure)
+    }
+
+    func testPlanningTaskRemainsVisibleAndCanBeStoppedAfterItsViewDisappears() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let fixture = try documentWithOneChapter()
+        _ = try await repository.createProject(fixture)
+        let blocking = BlockingContinuityPlanningCreation(
+            base: DefaultNovelCreation(repository: repository)
+        )
+        let viewModel = NovelCreationViewModel(creation: blocking)
+        let didSelect = await viewModel.selectProject(fixture.project.id)
+        XCTAssertTrue(didSelect)
+
+        viewModel.startContinuityAuditPlanning()
+        let started = await eventually {
+            await blocking.hasStartedPlanning &&
+                viewModel.isPlanningContinuity &&
+                viewModel.isContinuityOperationRunning &&
+                viewModel.isPerforming
+        }
+        XCTAssertTrue(started)
+
+        viewModel.cancelContinuityAudit()
+
+        let stopped = await eventually {
+            !viewModel.isContinuityOperationRunning && !viewModel.isPerforming
+        }
+        XCTAssertTrue(stopped)
+        XCTAssertNil(viewModel.continuityAuditPlan)
+        XCTAssertNil(viewModel.continuityAuditFailure)
+    }
+
     func testReportIsHiddenAfterTheSelectionMovesToAnotherProject() async throws {
         let repository = InMemoryNovelProjectRepository()
         let fixture = try documentWithOneChapter()
@@ -965,5 +1068,148 @@ final class NovelContinuityAuditViewModelTests: XCTestCase {
         document.branches[0].workingChapterSelections = [selection]
         try NovelDocumentValidator.validate(document)
         return document
+    }
+
+    private func eventually(
+        timeout: TimeInterval = 2,
+        condition: @MainActor () async -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return await condition()
+    }
+}
+
+private actor BlockingContinuityPlanningCreation: NovelCreation {
+    private let base: any NovelCreation
+    private(set) var hasStartedPlanning = false
+
+    init(base: any NovelCreation) {
+        self.base = base
+    }
+
+    func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
+        try await base.snapshot(scope)
+    }
+
+    func perform(_ action: NovelAction) async throws -> NovelOutcome {
+        try await base.perform(action)
+    }
+
+    func start(_ request: NovelRunRequest) async throws -> NovelRun {
+        try await base.start(request)
+    }
+
+    func interruptForBackground(
+        projectID: NovelProjectID,
+        deadline: Date,
+        runID: NovelRunID?
+    ) async {
+        await base.interruptForBackground(
+            projectID: projectID,
+            deadline: deadline,
+            runID: runID
+        )
+    }
+
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        await base.cancelInFlightBackgroundMutations(projectID: projectID)
+    }
+
+    func retryPendingTerminal(runID: NovelRunID) async throws {
+        try await base.retryPendingTerminal(runID: runID)
+    }
+
+    func planContinuityAudit(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelContinuityAuditPlan {
+        hasStartedPlanning = true
+        try await Task.sleep(for: .seconds(60))
+        return try await base.planContinuityAudit(projectID: projectID, branchID: branchID)
+    }
+}
+
+private actor CancellationIgnoringContinuityCreation: NovelCreation {
+    private let base: any NovelCreation
+    private var planningContinuation: CheckedContinuation<NovelContinuityAuditPlan, Error>?
+    private var auditContinuation: CheckedContinuation<NovelContinuityAuditReport, Error>?
+    private(set) var hasStartedPlanning = false
+    private(set) var hasStartedAudit = false
+
+    init(base: any NovelCreation) {
+        self.base = base
+    }
+
+    func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
+        try await base.snapshot(scope)
+    }
+
+    func perform(_ action: NovelAction) async throws -> NovelOutcome {
+        try await base.perform(action)
+    }
+
+    func start(_ request: NovelRunRequest) async throws -> NovelRun {
+        try await base.start(request)
+    }
+
+    func interruptForBackground(
+        projectID: NovelProjectID,
+        deadline: Date,
+        runID: NovelRunID?
+    ) async {
+        await base.interruptForBackground(
+            projectID: projectID,
+            deadline: deadline,
+            runID: runID
+        )
+    }
+
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        await base.cancelInFlightBackgroundMutations(projectID: projectID)
+    }
+
+    func retryPendingTerminal(runID: NovelRunID) async throws {
+        try await base.retryPendingTerminal(runID: runID)
+    }
+
+    func planContinuityAudit(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelContinuityAuditPlan {
+        hasStartedPlanning = true
+        return try await withCheckedThrowingContinuation { continuation in
+            planningContinuation = continuation
+        }
+    }
+
+    func auditContinuity(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelContinuityAuditReport {
+        hasStartedAudit = true
+        return try await withCheckedThrowingContinuation { continuation in
+            auditContinuation = continuation
+        }
+    }
+
+    func resumePlanning(_ plan: NovelContinuityAuditPlan) {
+        planningContinuation?.resume(returning: plan)
+        planningContinuation = nil
+    }
+
+    func failPlanning() {
+        planningContinuation?.resume(
+            throwing: NovelError.repositoryFailure("Injected continuity planning failure.")
+        )
+        planningContinuation = nil
+    }
+
+    func resumeAudit(_ report: NovelContinuityAuditReport) {
+        auditContinuation?.resume(returning: report)
+        auditContinuation = nil
     }
 }

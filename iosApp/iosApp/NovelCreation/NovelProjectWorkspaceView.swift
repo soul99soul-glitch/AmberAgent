@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct NovelProjectWorkspaceView: View {
     @Environment(RouterPath.self) private var router
@@ -41,13 +40,16 @@ struct NovelProjectWorkspaceView: View {
     var body: some View {
         VStack(spacing: 0) {
             if hasCompletedInitialNavigation && hasLoadedRoutedProject {
+                // Keep tab chrome inside the same canvas as content. `safeAreaBar`
+                // uses system bar materials that read as a different white/beige band
+                // above 正文/设定's AmberTheme.background, so the picker lives in the
+                // VStack with an explicit paper fill instead.
                 VStack(spacing: 0) {
+                    sectionPicker
                     accessBanner
+                    continuityOperationBanner
                     stateSyncBanner
                     content
-                }
-                .safeAreaBar(edge: .top, spacing: 0) {
-                    sectionPicker
                 }
             } else if let routedProjectLoadFailure {
                 VStack(spacing: 16) {
@@ -69,15 +71,9 @@ struct NovelProjectWorkspaceView: View {
             }
         }
         .background(AmberTheme.background.ignoresSafeArea())
-        .background {
-            NovelNavigationDidAppearObserver {
-                guard !hasCompletedInitialNavigation else { return }
-                hasCompletedInitialNavigation = true
-            }
-            .frame(width: 0, height: 0)
-            .allowsHitTesting(false)
-        }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(AmberTheme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar { workspaceToolbar }
         .sheet(item: $activeSheet, content: sheetContent)
         .navigationDestination(item: $chapterReaderRoute) { route in
@@ -120,6 +116,9 @@ struct NovelProjectWorkspaceView: View {
             }
         }
         .onAppear {
+            if !hasCompletedInitialNavigation {
+                hasCompletedInitialNavigation = true
+            }
             restoreComposerDraft(for: currentComposerDraftOwner)
         }
         .onChange(of: currentComposerDraftOwner) { previousOwner, owner in
@@ -194,95 +193,134 @@ struct NovelProjectWorkspaceView: View {
             title: sectionTitle
         )
         .padding(.horizontal, 16)
+        .padding(.top, 4)
         .padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+        .background(AmberTheme.background)
         .disabled(isSessionTransitionBusy)
+    }
+
+    /// Status strips share the canvas color and only use ink/hairlines for emphasis,
+    /// so 正文/设定 do not get a second painted band under the tabs.
+    private func workspaceStatusStrip<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AmberTheme.background)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(AmberTheme.borderSoft)
+                    .frame(height: 0.5)
+            }
     }
 
     @ViewBuilder
     private var accessBanner: some View {
         if viewModel.requiresReload {
-            HStack(spacing: 12) {
-                Label("操作已提交，需要重新载入项目", systemImage: "arrow.clockwise.circle")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(AmberTheme.accentAmber)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            workspaceStatusStrip {
+                HStack(spacing: 12) {
+                    Label("操作已提交，需要重新载入项目", systemImage: "arrow.clockwise.circle")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.accentAmber)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                Button("重新载入") {
-                    Task { @MainActor in
-                        await viewModel.retryCommittedMutationReload()
+                    Button("重新载入") {
+                        Task { @MainActor in
+                            await viewModel.retryCommittedMutationReload()
+                        }
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(viewModel.isPerforming)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(viewModel.isPerforming)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(AmberTheme.accentAmber.opacity(0.10))
         } else if let project = viewModel.projectSnapshot, project.access != .readWrite {
-            HStack(spacing: 12) {
-                Label("已从上一个有效版本恢复，当前项目只读", systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(AmberTheme.accentAmber)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            workspaceStatusStrip {
+                HStack(spacing: 12) {
+                    Label("已从上一个有效版本恢复，当前项目只读", systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.accentAmber)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                Button {
-                    isConfirmingPreviousRestore = true
-                } label: {
-                    Label("恢复可写", systemImage: "arrow.counterclockwise")
-                        .font(.footnote.weight(.semibold))
+                    Button {
+                        isConfirmingPreviousRestore = true
+                    } label: {
+                        Label("恢复可写", systemImage: "arrow.counterclockwise")
+                            .font(.footnote.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(viewModel.isPerforming)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(viewModel.isPerforming)
             }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .background(AmberTheme.accentAmber.opacity(0.10))
+        }
+    }
+
+    @ViewBuilder
+    private var continuityOperationBanner: some View {
+        if viewModel.isContinuityOperationRunning &&
+            !(section == .compendium && compendiumSection == .story) {
+            workspaceStatusStrip {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(AmberTheme.accent)
+                    Text(viewModel.continuityOperationTitle)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("停止") {
+                        viewModel.cancelContinuityAudit()
+                    }
+                    .font(.footnote.weight(.semibold))
+                }
+            }
         }
     }
 
     @ViewBuilder
     private var stateSyncBanner: some View {
         if section != .creation,
-           canCancelCurrentAutomaticStateSync || currentStateSyncActivity != nil {
-            HStack(spacing: 10) {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(AmberTheme.accentAmber)
-                Text(currentStateSyncActivity?.phase == .preparing
-                    ? "正在准备剧情状态"
-                    : "正在同步剧情状态")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if canCancelCurrentAutomaticStateSync,
-                   let projectID = viewModel.selectedProjectID,
-                   let branchID = viewModel.selectedBranchID {
-                    Button("停止") {
-                        viewModel.cancelAutomaticStateSync(
-                            projectID: projectID,
-                            branchID: branchID
-                        )
-                    }
+           canCancelCurrentAutomaticStateSync ||
+            currentStateSyncActivity != nil ||
+            isCurrentStateSyncStopping {
+            workspaceStatusStrip {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(AmberTheme.accentAmber)
+                    Text(currentStateSyncStatusTitle)
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if canCancelCurrentAutomaticStateSync,
+                       let projectID = viewModel.selectedProjectID,
+                       let branchID = viewModel.selectedBranchID {
+                        Button("停止") {
+                            viewModel.cancelAutomaticStateSync(
+                                projectID: projectID,
+                                branchID: branchID
+                            )
+                        }
                         .font(.footnote.weight(.semibold))
+                    }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(AmberTheme.accentAmber.opacity(0.10))
         } else if section != .creation, let currentStateSyncFailure {
-            HStack(spacing: 10) {
-                Label(currentStateSyncFailure, systemImage: "exclamationmark.triangle")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(AmberTheme.accentRed)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button("重试同步", action: retryCurrentStateSync)
-                    .font(.footnote.weight(.semibold))
+            workspaceStatusStrip {
+                HStack(spacing: 10) {
+                    Label(currentStateSyncFailure, systemImage: "exclamationmark.triangle")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.accentRed)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("重试同步", action: retryCurrentStateSync)
+                        .font(.footnote.weight(.semibold))
+                        .disabled(!canRetryCurrentStateSync)
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(AmberTheme.accentRed.opacity(0.08))
         }
     }
 
@@ -291,6 +329,7 @@ struct NovelProjectWorkspaceView: View {
     private var content: some View {
         let mounted: NovelWorkspaceSection? = mountedSection == section ? section : nil
         return ZStack {
+            AmberTheme.background
             if let mounted {
                 sectionContent(mounted)
                     .transition(.opacity)
@@ -301,6 +340,7 @@ struct NovelProjectWorkspaceView: View {
                     .transition(.opacity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: mounted)
         .task(id: section) {
             guard mountedSection != section else { return }
@@ -406,8 +446,7 @@ struct NovelProjectWorkspaceView: View {
             NovelBatchPolishSheet(
                 chapters: chapterOptions,
                 workspace: viewModel,
-                sessionViewModel: sessionViewModel,
-                onEditPolishPreference: { transition(to: .polishPreference) }
+                sessionViewModel: sessionViewModel
             )
 
         case .collectCandidate(let candidateID):
@@ -629,26 +668,45 @@ struct NovelProjectWorkspaceView: View {
         )
     }
 
+    private var isCurrentStateSyncStopping: Bool {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return false }
+        return viewModel.isStateSyncStopping(projectID: projectID, branchID: branchID)
+    }
+
+    private var currentStateSyncStatusTitle: String {
+        if let projectID = viewModel.selectedProjectID,
+           let branchID = viewModel.selectedBranchID,
+           let title = viewModel.stateSyncStatusTitle(
+               projectID: projectID,
+               branchID: branchID
+           ) {
+            return title
+        }
+        return currentStateSyncActivity?.phase == .preparing
+            ? "正在准备剧情状态"
+            : "正在同步剧情状态"
+    }
+
     private var currentStateSyncFailure: String? {
         guard let projectID = viewModel.selectedProjectID,
               let branchID = viewModel.selectedBranchID else { return nil }
-        return viewModel.automaticStateSyncFailureMessage(
+        return viewModel.stateSyncRecoveryMessage(
             projectID: projectID,
             branchID: branchID
         )
     }
 
+    private var canRetryCurrentStateSync: Bool {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return false }
+        return viewModel.canRetryStateSync(projectID: projectID, branchID: branchID)
+    }
+
     private func retryCurrentStateSync() {
         guard let projectID = viewModel.selectedProjectID,
               let branchID = viewModel.selectedBranchID else { return }
-        if viewModel.automaticStateSyncFailureMessage(
-            projectID: projectID,
-            branchID: branchID
-        ) != nil {
-            viewModel.retryAutomaticStateSync(projectID: projectID, branchID: branchID)
-        } else {
-            viewModel.scheduleAutomaticStateSyncIfNeeded()
-        }
+        viewModel.retryStateSync(projectID: projectID, branchID: branchID)
     }
 
     private var chapterOptions: [NovelSessionChapterOption] {
@@ -835,46 +893,6 @@ private struct NovelWorkspaceGlassTabBar: View {
 
     private var selectionStroke: Color {
         colorScheme == .dark ? .white.opacity(0.16) : .white.opacity(0.62)
-    }
-}
-
-private struct NovelNavigationDidAppearObserver: UIViewControllerRepresentable {
-    let action: () -> Void
-
-    func makeUIViewController(context: Context) -> ObserverViewController {
-        ObserverViewController(action: action)
-    }
-
-    func updateUIViewController(_ controller: ObserverViewController, context: Context) {
-        controller.action = action
-    }
-
-    final class ObserverViewController: UIViewController {
-        var action: () -> Void
-        private var hasReportedAppearance = false
-
-        init(action: @escaping () -> Void) {
-            self.action = action
-            super.init(nibName: nil, bundle: nil)
-        }
-
-        @available(*, unavailable)
-        required init?(coder: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
-
-        override func viewDidLoad() {
-            super.viewDidLoad()
-            view.backgroundColor = .clear
-            view.isUserInteractionEnabled = false
-        }
-
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            guard !hasReportedAppearance else { return }
-            hasReportedAppearance = true
-            action()
-        }
     }
 }
 

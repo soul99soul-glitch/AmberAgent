@@ -67,6 +67,8 @@ struct NovelProjectListView: View {
     @State private var activeSheet: NovelProjectListSheet?
     @State private var pendingDelete: NovelProjectDeleteCandidate?
     @State private var isImportingPackage = false
+    @State private var isPreparingImportPreview = false
+    @State private var deletingProjectID: NovelProjectID?
 
     var body: some View {
         Group {
@@ -78,11 +80,12 @@ struct NovelProjectListView: View {
         }
         .background(AmberTheme.background.ignoresSafeArea())
         .safeAreaInset(edge: .top, spacing: 0) {
-            if viewModel.hasReloadRequirement {
-                reloadRequirementBanner
-            } else if viewModel.stateSyncActivity != nil ||
-                        (viewModel.isProjectSelectionBlocked && !viewModel.isPerforming) {
+            if viewModel.isContinuityOperationRunning {
+                continuityOperationBanner
+            } else if viewModel.isStateSyncOperationRunning {
                 stateSyncSelectionBanner
+            } else if viewModel.hasReloadRequirement {
+                reloadRequirementBanner
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -100,7 +103,7 @@ struct NovelProjectListView: View {
                     Image(systemName: "square.and.arrow.down")
                 }
                 .accessibilityLabel("导入小说项目")
-                .disabled(viewModel.isProjectSelectionBlocked)
+                .disabled(viewModel.isProjectSelectionBlocked || isPreparingImportPreview)
             }
 
             ToolbarSpacer(.fixed, placement: .topBarTrailing)
@@ -110,10 +113,18 @@ struct NovelProjectListView: View {
             }
         }
         .overlay {
-            if viewModel.projects.isEmpty && viewModel.isLoading {
-                ProgressView("正在读取项目")
-                    .padding(18)
-                    .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
+            if isPreparingImportPreview {
+                ProgressView("正在检查导入包")
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.muted)
+                    .tint(AmberTheme.accent)
+            } else if viewModel.projects.isEmpty && viewModel.isLoading {
+                ProgressView {
+                    Text("正在读取项目")
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+                .tint(AmberTheme.accent)
             }
         }
         .sheet(item: $activeSheet) { sheet in
@@ -154,10 +165,10 @@ struct NovelProjectListView: View {
         }
         .task {
             guard loadsOnAppear else { return }
-            await viewModel.loadProjects()
+            await viewModel.loadProjects(restoresSelection: false)
         }
         .refreshable {
-            await viewModel.loadProjects()
+            await viewModel.loadProjects(restoresSelection: false)
         }
     }
 
@@ -208,18 +219,21 @@ struct NovelProjectListView: View {
                 .controlSize(.small)
                 .tint(AmberTheme.accentAmber)
             VStack(alignment: .leading, spacing: 2) {
-                Text(viewModel.stateSyncActivity == nil
-                    ? "正在准备剧情状态同步"
-                    : "正在同步剧情状态")
+                Text(stateSyncSelectionBannerTitle)
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(AmberTheme.foreground2)
-                Text("完成前暂不能切换项目。")
+                Text(
+                    isCurrentStateSyncStopping
+                        ? "停止完成后即可切换项目。"
+                        : "完成前暂不能切换项目。"
+                )
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let activity = viewModel.stateSyncActivity,
+            if !isCurrentStateSyncStopping,
+               let activity = viewModel.stateSyncActivity,
                let fraction = activity.displayedCompletionFraction {
                 Text("\(Int((fraction * 100).rounded(.down)))%")
                     .font(.footnote.weight(.semibold).monospacedDigit())
@@ -247,6 +261,51 @@ struct NovelProjectListView: View {
         .background(AmberTheme.surface)
     }
 
+    private var isCurrentStateSyncStopping: Bool {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return false }
+        return viewModel.isStateSyncStopping(projectID: projectID, branchID: branchID)
+    }
+
+    private var stateSyncSelectionBannerTitle: String {
+        if let projectID = viewModel.selectedProjectID,
+           let branchID = viewModel.selectedBranchID,
+           let title = viewModel.stateSyncStatusTitle(
+               projectID: projectID,
+               branchID: branchID
+           ) {
+            return title
+        }
+        return viewModel.stateSyncActivity == nil
+            ? "正在准备剧情状态同步"
+            : "正在同步剧情状态"
+    }
+
+    private var continuityOperationBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(AmberTheme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewModel.continuityOperationTitle)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+                Text("完成前暂不能切换项目。")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button("停止") {
+                viewModel.cancelContinuityAudit()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 9)
+        .background(AmberTheme.surface)
+    }
+
     private var projectList: some View {
         List {
             Section {
@@ -263,7 +322,12 @@ struct NovelProjectListView: View {
                         }
                         .buttonStyle(.plain)
 
-                        if project.loadError != nil {
+                        if deletingProjectID == project.id {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(AmberTheme.accent)
+                                .accessibilityLabel("正在删除项目")
+                        } else if project.loadError != nil {
                             Button("重新读取") {
                                 retryOpening(project)
                             }
@@ -271,10 +335,7 @@ struct NovelProjectListView: View {
                             .controlSize(.small)
                         }
                     }
-                    .disabled(
-                        viewModel.isProjectSelectionBlocked &&
-                            viewModel.selectedProjectID != project.id
-                    )
+                    .disabled(viewModel.isProjectSelectionBlocked)
                     .listRowInsets(EdgeInsets(top: 6, leading: 22, bottom: 6, trailing: 22))
                     .listRowBackground(AmberTheme.background)
                     .listRowSeparatorTint(AmberTheme.borderSoft)
@@ -323,22 +384,40 @@ struct NovelProjectListView: View {
     }
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("开始一本新小说", systemImage: "text.book.closed")
-        } description: {
-            Text("项目会独立保存设定、正文、分支和创作记录。")
-        } actions: {
-            Button("新建项目") {
-                activeSheet = .create
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(viewModel.isProjectSelectionBlocked)
+        Group {
+            if let loadError = viewModel.projectListLoadError {
+                ContentUnavailableView {
+                    Label("项目没有读取出来", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                } description: {
+                    Text(loadError)
+                } actions: {
+                    Button("重新读取") {
+                        Task { @MainActor in
+                            await viewModel.loadProjects(restoresSelection: false)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isLoading)
+                }
+            } else {
+                ContentUnavailableView {
+                    Label("开始一本新小说", systemImage: "text.book.closed")
+                } description: {
+                    Text("项目会独立保存设定、正文、分支和创作记录。")
+                } actions: {
+                    Button("新建项目") {
+                        activeSheet = .create
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(viewModel.isProjectSelectionBlocked)
 
-            Button("导入项目") {
-                isImportingPackage = true
+                    Button("导入项目") {
+                        isImportingPackage = true
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isProjectSelectionBlocked)
+                }
             }
-            .buttonStyle(.bordered)
-            .disabled(viewModel.isProjectSelectionBlocked)
         }
     }
 
@@ -373,10 +452,15 @@ struct NovelProjectListView: View {
 
     private func delete(_ project: NovelProjectSummary) {
         Task { @MainActor in
+            guard deletingProjectID == nil else { return }
+            deletingProjectID = project.id
+            defer { deletingProjectID = nil }
             if project.loadError == nil {
                 guard viewModel.selectedProjectID == project.id else { return }
-                guard await viewModel.stopActiveRunsForProjectOperation(projectID: project.id) else {
-                    return
+                if hasRunningRun(for: project.id) {
+                    guard await viewModel.stopActiveRunsForProjectOperation(
+                        projectID: project.id
+                    ) else { return }
                 }
             }
             await viewModel.deleteProject(project)
@@ -409,6 +493,8 @@ struct NovelProjectListView: View {
             return
         }
         Task { @MainActor in
+            isPreparingImportPreview = true
+            defer { isPreparingImportPreview = false }
             do {
                 let data = try await Task.detached(priority: .userInitiated) {
                     try NovelProjectFileReader.readPackage(from: url)
@@ -670,9 +756,9 @@ struct NovelProjectRenameSheet: View {
         failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
-            await viewModel.renameProject(committedName)
+            let saved = await viewModel.renameProject(committedName)
             isSubmitting = false
-            guard viewModel.errorMessage == nil else {
+            guard saved else {
                 failureMessage = viewModel.errorMessage ?? "项目名称没有保存，请稍后重试。"
                 return
             }
@@ -787,7 +873,12 @@ struct NovelProjectImportSheet: View {
                     projectID: preview.sourceProjectID
                 ) else { return }
             }
-            switch await viewModel.importProject(packageData, choice: choice) {
+            let acceptedPreview = stoppingActiveRun ? nil : preview
+            switch await viewModel.importProject(
+                packageData,
+                choice: choice,
+                preview: acceptedPreview
+            ) {
             case .selected(let projectID):
                 dismiss()
                 onImported(projectID)

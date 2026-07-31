@@ -217,6 +217,7 @@ final class NovelSessionViewModel {
     private(set) var operationErrorMessage: String?
     private(set) var refreshErrorMessage: String?
     private(set) var lastFailure: NovelFailure?
+    private(set) var polishRetryTransactionID: NovelPendingOperationID?
     private var batchPolishProgressStorage: NovelBatchPolishProgress?
 
     var batchPolishProgress: NovelBatchPolishProgress? {
@@ -232,6 +233,7 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var attachAttemptID: UUID?
     @ObservationIgnored private var attachingRunID: NovelRunID?
     @ObservationIgnored private var attachingBindingToken: UUID?
+    @ObservationIgnored private var consumerAttachmentDesired = true
     @ObservationIgnored private var bindingToken = UUID()
     @ObservationIgnored private var currentRunDraft: NovelSessionRunDraft?
     @ObservationIgnored private var lastRetryDraft: NovelSessionRunDraft?
@@ -240,6 +242,8 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var terminalAwaitingRefresh = false
     @ObservationIgnored private var cancelledStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var sessionActionOwnerID: UUID?
+    @ObservationIgnored private var polishRetryTask: Task<Void, Never>?
+    @ObservationIgnored private var polishRetryTaskBinding: NovelSessionBinding?
     @ObservationIgnored private var batchPolishTask: Task<Void, Never>?
     @ObservationIgnored private var batchPolishTaskBinding: NovelSessionBinding?
     @ObservationIgnored private var batchPolishOwnedRunID: NovelRunID?
@@ -555,6 +559,7 @@ final class NovelSessionViewModel {
         )
         let didChange = binding != next
         if didChange {
+            await cancelPolishRetryForBindingChange(from: binding)
             await cancelBatchPolishForBindingChange(from: binding)
             detachConsumer()
             // 切 binding 即作废旧 token:顺带取消可能仍在静窗里等待的 tail 退役任务。
@@ -573,6 +578,7 @@ final class NovelSessionViewModel {
             lastFailure = nil
             granularity = project.project.lastGenerationGranularity
         }
+        consumerAttachmentDesired = true
         hydrateTerminalState()
         let currentActiveRun = activeRun
         if let run = currentActiveRun,
@@ -587,6 +593,7 @@ final class NovelSessionViewModel {
                 )
             }
         } else if currentActiveRun == nil,
+                  sessionStartingRunID == nil,
                   !terminalAwaitingRefresh,
                   isActiveTailPhase(transientTail?.phase) {
             transientTail = nil
@@ -602,13 +609,18 @@ final class NovelSessionViewModel {
         }
         let token = bindingToken
         guard await refreshDurable(binding: binding, token: token) else { return false }
-        if consumerTask == nil, let run = activeRun {
+        if consumerAttachmentDesired, consumerTask == nil, let run = activeRun {
             await attach(to: run)
         }
         return bindingToken == token && refreshErrorMessage == nil
     }
 
     func detachConsumer() {
+        consumerAttachmentDesired = false
+        clearConsumer()
+    }
+
+    private func clearConsumer() {
         consumerID = nil
         consumerTask?.cancel()
         consumerTask = nil
@@ -998,8 +1010,12 @@ final class NovelSessionViewModel {
 
     func retryPending(_ pendingID: NovelPendingOperationID) async {
         guard let project = workspace.projectSnapshot,
-              project.pendingOperations.contains(where: { $0.id == pendingID }),
+              let pending = project.pendingOperations.first(where: { $0.id == pendingID }),
               snapshotMatchesBinding else { return }
+        if pending.kind == .manualSync {
+            await workspace.retryPending(pendingID)
+            return
+        }
         _ = await perform(.retryPending(NovelRetryPendingCommand(
             context: NovelMutationContext(
                 operationID: NovelOperationID(),
@@ -1101,7 +1117,8 @@ final class NovelSessionViewModel {
               let transaction = project.polishTransactions.first(where: {
                   $0.id == transactionID && $0.branchID == branch.branch.id &&
                       ($0.status == .pending || $0.status == .retryable)
-              }), snapshotMatchesBinding else { return }
+              }), snapshotMatchesBinding,
+              polishTransactionSourceBlocker(transactionID) == nil else { return }
         let chapterID = project.chapterVersions.first {
             $0.id == transaction.sourceChapterVersionID
         }?.chapterID
@@ -1121,7 +1138,64 @@ final class NovelSessionViewModel {
             expectedWorkingRevision: branch.branch.workingRevision
         )
         await applyPolishAdoption(command)
+        let durableStatus = workspace.projectSnapshot?.polishTransactions.first(where: {
+            $0.id == transactionID
+        })?.status
+        if Task.isCancelled,
+           durableStatus != .completed,
+           durableStatus != .incompatible {
+            operationErrorMessage = nil
+            return
+        }
         reconcileBatchPolishResult(transactionID: transactionID, chapterID: chapterID)
+    }
+
+    @discardableResult
+    func startPolishRetry(_ transactionID: NovelPendingOperationID) -> Bool {
+        guard polishRetryTask == nil,
+              let binding,
+              unresolvedBranchPolishTransactions.contains(where: {
+                  $0.id == transactionID &&
+                      ($0.status == .pending || $0.status == .retryable)
+              }),
+              polishTransactionSourceBlocker(transactionID) == nil else { return false }
+        polishRetryTransactionID = transactionID
+        polishRetryTaskBinding = binding
+        polishRetryTask = Task { @MainActor [weak self] in
+            await self?.retryPolishTransaction(transactionID)
+            guard let self,
+                  self.polishRetryTransactionID == transactionID else { return }
+            self.polishRetryTransactionID = nil
+            self.polishRetryTask = nil
+            self.polishRetryTaskBinding = nil
+        }
+        return true
+    }
+
+    func cancelPolishRetry() {
+        polishRetryTask?.cancel()
+    }
+
+    func polishTransactionSourceBlocker(
+        _ transactionID: NovelPendingOperationID
+    ) -> NovelSessionActionBlocker? {
+        guard let project = workspace.projectSnapshot,
+              let branch = workspace.branchSnapshot,
+              let transaction = project.polishTransactions.first(where: {
+                  $0.id == transactionID && $0.branchID == branch.branch.id
+              }),
+              let source = project.chapterVersions.first(where: {
+                  $0.id == transaction.sourceChapterVersionID
+              }),
+              branch.branch.workingChapterSelections.contains(where: {
+                  $0.chapterID == source.chapterID && $0.versionID == source.id
+              }),
+              project.chapters.contains(where: {
+                  $0.id == source.chapterID && $0.discardedAt == nil
+              }) else {
+            return .sourceChapterChanged
+        }
+        return nil
     }
 
     @discardableResult
@@ -1283,6 +1357,7 @@ final class NovelSessionViewModel {
                 let result = try await polishOneChapter(chapterID: chapterID, title: title)
                 batchPolishOwnedRunID = nil
                 results.append(result)
+                try Task.checkCancellation()
                 mutateBatchProgress(binding: expectedBinding) {
                     $0.completed = index + 1
                     $0.results = results
@@ -1401,12 +1476,19 @@ final class NovelSessionViewModel {
             )
         }
         await adoptPolishCandidate(candidateID)
-        // 不在此处 checkCancellation:采用(含漂移校验)是非抛出的完整往返,即便批量在漂移
-        // 期间被取消,也应先读出真实事务状态(可能已 .completed 采用)再返回,避免把实际已
-        // 采用的章误报为 cancelled。取消会在下一章的循环顶部 checkCancellation 收口。
-        if let transaction = branchPolishTransactions.first(where: {
+        let transaction = branchPolishTransactions.first(where: {
             $0.candidateID == candidateID
-        }) {
+        })
+        if Task.isCancelled {
+            switch transaction?.status {
+            case .completed, .incompatible:
+                break
+            case .pending, .retryable, .blocked, .abandoned, nil:
+                operationErrorMessage = nil
+                throw CancellationError()
+            }
+        }
+        if let transaction {
             switch transaction.status {
             case .completed:
                 return NovelBatchPolishChapterResult(
@@ -1718,6 +1800,7 @@ private extension NovelSessionViewModel {
         let previousTail = transientTail
         let previousRunRecord = transientRunRecord
         let previousTerminalAwaitingRefresh = terminalAwaitingRefresh
+        let expectedBindingToken = bindingToken
 
         let candidateID: NovelCandidateID? = switch draft.kind {
         case .prose, .polish, .regenerate: NovelCandidateID()
@@ -1792,7 +1875,12 @@ private extension NovelSessionViewModel {
             lastFailure = nil
             lastRetryDraft = nil
             lastRetryRunID = nil
-            consume(run, draft: draft, token: bindingToken)
+            if consumerAttachmentDesired,
+               bindingToken == expectedBindingToken,
+               binding?.projectID == request.projectID,
+               binding?.branchID == request.branchID {
+                consume(run, draft: draft, token: expectedBindingToken)
+            }
             return true
         } catch {
             transientTail = previousTail
@@ -1816,7 +1904,7 @@ private extension NovelSessionViewModel {
     }
 
     func consume(_ run: NovelRun, draft: NovelSessionRunDraft, token: UUID) {
-        detachConsumer()
+        clearConsumer()
         let nextConsumerID = UUID()
         consumerID = nextConsumerID
         consumerTask = Task { @MainActor [weak self] in
@@ -1908,6 +1996,7 @@ private extension NovelSessionViewModel {
     }
 
     func attach(to run: NovelActiveRunRecord) async {
+        guard consumerAttachmentDesired else { return }
         let expectedToken = bindingToken
         if attachingRunID == run.id,
            attachingBindingToken == expectedToken {
@@ -1938,6 +2027,7 @@ private extension NovelSessionViewModel {
         do {
             let observed = try await workspace.startSessionRun(request)
             guard attachAttemptID == attemptID,
+                  consumerAttachmentDesired,
                   binding == expectedBinding,
                   bindingToken == expectedToken,
                   transientTail?.runID == run.id else { return }
@@ -2463,6 +2553,7 @@ private extension NovelSessionViewModel {
     }
 
     func resetBinding() async {
+        await cancelPolishRetryForBindingChange(from: binding)
         await cancelBatchPolishForBindingChange(from: binding)
         detachConsumer()
         bindingToken = UUID()
@@ -2471,6 +2562,16 @@ private extension NovelSessionViewModel {
         currentRunDraft = nil
         lastRetryDraft = nil
         lastRetryRunID = nil
+    }
+
+    func cancelPolishRetryForBindingChange(
+        from expectedBinding: NovelSessionBinding?
+    ) async {
+        guard let expectedBinding,
+              polishRetryTaskBinding == expectedBinding,
+              let task = polishRetryTask else { return }
+        task.cancel()
+        await task.value
     }
 
     func describe(_ error: Error) -> String {

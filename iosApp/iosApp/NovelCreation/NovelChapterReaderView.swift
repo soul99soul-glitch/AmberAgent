@@ -150,7 +150,51 @@ struct NovelChapterReaderView: View {
 
     @ViewBuilder
     private var chapterStatusBanner: some View {
-        if let startingAction {
+        if isCurrentStateSyncRunning {
+            HStack(spacing: 9) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(AmberTheme.accentAmber)
+                Text(currentStateSyncStatusTitle)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let projectID = viewModel.selectedProjectID,
+                   let branchID = viewModel.selectedBranchID,
+                   viewModel.canCancelAutomaticStateSync(
+                       projectID: projectID,
+                       branchID: branchID
+                   ) {
+                    Button("停止") {
+                        viewModel.cancelAutomaticStateSync(
+                            projectID: projectID,
+                            branchID: branchID
+                        )
+                    }
+                    .font(.footnote.weight(.semibold))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 9)
+            .background(AmberTheme.accentAmber.opacity(0.10))
+        } else if let recovery = currentStateSyncRecoveryMessage {
+            HStack(spacing: 9) {
+                Label(recovery, systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.accentAmber)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("重试同步") {
+                    guard let projectID = viewModel.selectedProjectID,
+                          let branchID = viewModel.selectedBranchID else { return }
+                    viewModel.retryStateSync(projectID: projectID, branchID: branchID)
+                }
+                .font(.footnote.weight(.semibold))
+                .disabled(!canRetryCurrentStateSync)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 9)
+            .background(AmberTheme.accentAmber.opacity(0.10))
+        } else if let startingAction {
             HStack(spacing: 9) {
                 ProgressView()
                     .controlSize(.small)
@@ -256,6 +300,53 @@ struct NovelChapterReaderView: View {
     private var currentVersion: NovelChapterVersionRecord? {
         guard let versionID = currentSelection?.versionID else { return nil }
         return viewModel.projectSnapshot?.chapterVersions.first { $0.id == versionID }
+    }
+
+    private var currentStateSyncActivity: NovelStateSyncActivity? {
+        guard let activity = viewModel.stateSyncActivity,
+              activity.projectID == viewModel.selectedProjectID,
+              activity.branchID == viewModel.selectedBranchID else { return nil }
+        return activity
+    }
+
+    private var isCurrentStateSyncRunning: Bool {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return false }
+        return currentStateSyncActivity != nil ||
+            viewModel.canCancelAutomaticStateSync(
+                projectID: projectID,
+                branchID: branchID
+            ) ||
+            viewModel.isStateSyncStopping(projectID: projectID, branchID: branchID)
+    }
+
+    private var currentStateSyncStatusTitle: String {
+        if let projectID = viewModel.selectedProjectID,
+           let branchID = viewModel.selectedBranchID,
+           let title = viewModel.stateSyncStatusTitle(
+               projectID: projectID,
+               branchID: branchID
+           ) {
+            return title
+        }
+        return currentStateSyncActivity?.phase == .analyzing
+            ? "正在同步剧情状态"
+            : "正在准备剧情状态"
+    }
+
+    private var currentStateSyncRecoveryMessage: String? {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return nil }
+        return viewModel.stateSyncRecoveryMessage(
+            projectID: projectID,
+            branchID: branchID
+        )
+    }
+
+    private var canRetryCurrentStateSync: Bool {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return false }
+        return viewModel.canRetryStateSync(projectID: projectID, branchID: branchID)
     }
 
     /// 废弃是可逆的标记,不删除任何记录:章节版本之间有事实兼容链,真删会断链。

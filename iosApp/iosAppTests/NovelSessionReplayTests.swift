@@ -933,6 +933,19 @@ final class NovelSessionReplayTests: XCTestCase {
         ])
         XCTAssertTrue(retryable.rows[0].actions.allSatisfy(\.isEnabled))
 
+        let discardedRetryable = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            branch: branch,
+            session: session,
+            candidates: [availableCandidate],
+            polish: [retryableTransaction],
+            discardedChapterVersionIDs: [sourceVersionID]
+        ))
+        XCTAssertEqual(discardedRetryable.rows[0].actions, [
+            .init(action: .retryPolish(retryableTransaction.id), blocker: .sourceChapterChanged),
+            .init(action: .abandonPolish(retryableTransaction.id), blocker: nil),
+        ])
+
         var incompatibleCandidate = availableCandidate
         incompatibleCandidate.status = .superseded
         var incompatibleTransaction = retryableTransaction
@@ -1941,6 +1954,37 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertTrue(source.contains("try await Task.sleep(for: .seconds(0.2))"))
         XCTAssertTrue(source.contains("if shouldReplay"))
         XCTAssertTrue(source.contains("case .reset, .userDragBegan:"))
+    }
+
+    func testPolishRetryEntrypointsShareOwnedTaskWithVisibleStopFeedback() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sessionView = try String(
+            contentsOf: iosRoot.appendingPathComponent("iosApp/NovelCreation/NovelSessionView.swift"),
+            encoding: .utf8
+        )
+        let bubble = try String(
+            contentsOf: iosRoot.appendingPathComponent("iosApp/NovelCreation/NovelSessionBubble.swift"),
+            encoding: .utf8
+        )
+
+        let sessionViewModel = try String(
+            contentsOf: iosRoot.appendingPathComponent(
+                "iosApp/NovelCreation/NovelSessionViewModel.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(sessionView.contains("@State private var polishRetryTask"))
+        XCTAssertTrue(sessionView.contains("viewModel.startPolishRetry(transaction.id)"))
+        XCTAssertTrue(sessionView.contains("case .retryPolish(let transactionID):"))
+        XCTAssertTrue(sessionView.contains("viewModel.startPolishRetry(transactionID)"))
+        XCTAssertTrue(sessionView.contains("viewModel.cancelPolishRetry()"))
+        XCTAssertTrue(sessionViewModel.contains("private var polishRetryTask: Task<Void, Never>?"))
+        XCTAssertTrue(sessionViewModel.contains("private(set) var polishRetryTransactionID"))
+        XCTAssertTrue(sessionView.contains("Text(\"正在检查剧情一致性…\")"))
+        XCTAssertTrue(bubble.contains("Button(\"停止检查\")"))
     }
 
 }

@@ -684,6 +684,36 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         XCTAssertEqual(reattachedSnapshot, snapshot)
     }
 
+    func testProjectListDefersCrashRecoveryUntilProjectSnapshot() async throws {
+        let document = try NovelTestFixtures.document()
+        let seedHarness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let request = makeRequest(document: document, kind: .discussion)
+        let seedRun = try await seedHarness.creation.start(request)
+        let runningDocument = try await seedHarness.repository.document(request.projectID)
+
+        let repository = ObservingNovelRepository()
+        try await repository.seed(runningDocument)
+        let restarted = DefaultNovelCreation(repository: repository)
+
+        guard case .projects(let summaries) = try await restarted.snapshot(.projects) else {
+            return XCTFail("Expected a project list snapshot")
+        }
+        XCTAssertEqual(summaries.map(\.id), [request.projectID])
+        let afterList = try await repository.document(request.projectID)
+        XCTAssertEqual(afterList.activeRuns.first?.status, .running)
+
+        _ = try await restarted.snapshot(.project(request.projectID))
+        let afterOpen = try await repository.document(request.projectID)
+        XCTAssertEqual(afterOpen.activeRuns.first?.status, .interrupted)
+        XCTAssertEqual(afterOpen.activeRuns.first?.interruptionReason, .recovery)
+
+        await seedHarness.adapter.resume(runID: request.id)
+        _ = await capturedEvents(seedRun.events)
+    }
+
     func testRecoveryRejectsMismatchedSidecarIdentity() async throws {
         let document = try NovelTestFixtures.document()
         let harness = try await makeHarness(
@@ -746,6 +776,198 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         let recovered = try await harness.repository.document(request.projectID)
         XCTAssertEqual(recovered.activeRuns[0].status, .interrupted)
         XCTAssertEqual(recovered.activeRuns[0].interruptionReason, .recovery)
+    }
+
+    func testRecoveryFailureInOneProjectDoesNotBlockAnotherProjectSnapshot() async throws {
+        let firstProjectID = NovelProjectID(UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+        let secondProjectID = NovelProjectID(UUID(uuidString: "00000000-0000-0000-0000-000000000002")!)
+        let firstDocument = try NovelTestFixtures.document(projectID: firstProjectID)
+        let secondDocument = try NovelTestFixtures.document(projectID: secondProjectID)
+        let firstHarness = try await makeHarness(
+            document: firstDocument,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let secondHarness = try await makeHarness(
+            document: secondDocument,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let firstRequest = makeRequest(document: firstDocument, kind: .discussion)
+        let secondRequest = makeRequest(document: secondDocument, kind: .discussion)
+        let firstRun = try await firstHarness.creation.start(firstRequest)
+        let secondRun = try await secondHarness.creation.start(secondRequest)
+
+        let repository = ObservingNovelRepository()
+        try await repository.seed(firstHarness.repository.document(firstProjectID))
+        try await repository.seed(secondHarness.repository.document(secondProjectID))
+        await repository.failCommits(for: firstProjectID)
+        let restarted = DefaultNovelCreation(repository: repository)
+
+        guard case .project(let secondSnapshot) = try await restarted.snapshot(.project(secondProjectID)) else {
+            return XCTFail("Expected the healthy project snapshot")
+        }
+        XCTAssertEqual(secondSnapshot.activeRuns.first?.status, .interrupted)
+        XCTAssertEqual(secondSnapshot.activeRuns.first?.interruptionReason, .recovery)
+        let firstAfterSecondRecovery = try await repository.document(firstProjectID)
+        XCTAssertEqual(
+            firstAfterSecondRecovery.activeRuns.first?.status,
+            .running,
+            "The failed project's marker must not be treated as recovered."
+        )
+
+        do {
+            _ = try await restarted.snapshot(.project(firstProjectID))
+            XCTFail("Expected the failed project to remain fail-closed")
+        } catch let error as NovelError {
+            guard case .repositoryFailure = error else {
+                return XCTFail("Unexpected recovery error: \(error)")
+            }
+        }
+        let firstAfterFailedOpen = try await repository.document(firstProjectID)
+        XCTAssertEqual(firstAfterFailedOpen.activeRuns.first?.status, .running)
+
+        await repository.allowCommits(for: firstProjectID)
+        guard case .project(let firstSnapshot) = try await restarted.snapshot(.project(firstProjectID)) else {
+            return XCTFail("Expected the failed project recovery to remain retryable")
+        }
+        XCTAssertEqual(firstSnapshot.activeRuns.first?.status, .interrupted)
+        XCTAssertEqual(firstSnapshot.activeRuns.first?.interruptionReason, .recovery)
+
+        await firstHarness.adapter.resume(runID: firstRequest.id)
+        await secondHarness.adapter.resume(runID: secondRequest.id)
+        _ = await capturedEvents(firstRun.events)
+        _ = await capturedEvents(secondRun.events)
+    }
+
+    func testConcurrentProjectSnapshotWaitsForCurrentRecoveryThenRecoversItsOwnMarker() async throws {
+        let firstDocument = try NovelTestFixtures.document()
+        let secondDocument = try NovelTestFixtures.document()
+        let firstHarness = try await makeHarness(
+            document: firstDocument,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let secondHarness = try await makeHarness(
+            document: secondDocument,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let firstRequest = makeRequest(document: firstDocument, kind: .discussion)
+        let secondRequest = makeRequest(document: secondDocument, kind: .discussion)
+        let firstRun = try await firstHarness.creation.start(firstRequest)
+        let secondRun = try await secondHarness.creation.start(secondRequest)
+
+        let repository = ObservingNovelRepository()
+        try await repository.seed(firstHarness.repository.document(firstDocument.project.id))
+        try await repository.seed(secondHarness.repository.document(secondDocument.project.id))
+        await repository.blockNextCommit()
+        let restarted = DefaultNovelCreation(repository: repository)
+        let firstSnapshotTask = Task {
+            try await restarted.snapshot(.project(firstDocument.project.id))
+        }
+        let firstCommitBlocked = await eventually { await repository.commitIsBlocked() }
+        XCTAssertTrue(firstCommitBlocked)
+
+        let secondCompletion = NovelSnapshotCompletionProbe()
+        let secondSnapshotTask = Task {
+            await secondCompletion.markStarted()
+            do {
+                let snapshot = try await restarted.snapshot(.project(secondDocument.project.id))
+                await secondCompletion.markCompleted()
+                return snapshot
+            } catch {
+                await secondCompletion.markCompleted()
+                throw error
+            }
+        }
+        let secondStarted = await eventually { await secondCompletion.isStarted }
+        XCTAssertTrue(secondStarted)
+        let secondReturnedBeforeFirstRecovery = await eventually(timeout: 0.1) {
+            await secondCompletion.isCompleted
+        }
+        XCTAssertFalse(
+            secondReturnedBeforeFirstRecovery,
+            "A concurrent project request must not cross an active recovery barrier."
+        )
+
+        await repository.resumeBlockedCommit()
+        guard case .project(let firstSnapshot) = try await firstSnapshotTask.value,
+              case .project(let secondSnapshot) = try await secondSnapshotTask.value else {
+            return XCTFail("Expected both recovered project snapshots")
+        }
+        XCTAssertEqual(firstSnapshot.activeRuns.first?.status, .interrupted)
+        XCTAssertEqual(secondSnapshot.activeRuns.first?.status, .interrupted)
+
+        await firstHarness.adapter.resume(runID: firstRequest.id)
+        await secondHarness.adapter.resume(runID: secondRequest.id)
+        _ = await capturedEvents(firstRun.events)
+        _ = await capturedEvents(secondRun.events)
+    }
+
+    func testScopedRecoveryLoadsRequiredProjectWhenInventoryOmitsIt() async throws {
+        let document = try NovelTestFixtures.document()
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let request = makeRequest(document: document, kind: .discussion)
+        let run = try await harness.creation.start(request)
+        let repository = ObservingNovelRepository()
+        try await repository.seed(harness.repository.document(document.project.id))
+        await repository.omitFromProjectList(document.project.id)
+
+        let restarted = DefaultNovelCreation(repository: repository)
+        guard case .project(let snapshot) = try await restarted.snapshot(.project(document.project.id)) else {
+            return XCTFail("Expected a project snapshot")
+        }
+        XCTAssertEqual(snapshot.activeRuns.first?.status, .interrupted)
+        XCTAssertEqual(snapshot.activeRuns.first?.interruptionReason, .recovery)
+
+        await harness.adapter.resume(runID: request.id)
+        _ = await capturedEvents(run.events)
+    }
+
+    func testImportPreviewRecoversOnlyDecodedProject() async throws {
+        let existingDocument = try NovelTestFixtures.document()
+        let seedHarness = try await makeHarness(
+            document: existingDocument,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let existingRequest = makeRequest(document: existingDocument, kind: .discussion)
+        let existingRun = try await seedHarness.creation.start(existingRequest)
+        let importedDocument = try NovelTestFixtures.document()
+        let package = try NovelProjectPackageCodec.encode(importedDocument)
+
+        let repository = ObservingNovelRepository()
+        try await repository.seed(seedHarness.repository.document(existingDocument.project.id))
+        await repository.failCommits(for: existingDocument.project.id)
+        let restarted = DefaultNovelCreation(repository: repository)
+
+        guard case .projectImportPreview(let preview) = try await restarted.snapshot(
+            .projectImportPreview(package.data)
+        ) else {
+            return XCTFail("Expected an import preview")
+        }
+        XCTAssertEqual(preview.sourceProjectID, importedDocument.project.id)
+        let existingAfterPreview = try await repository.document(existingDocument.project.id)
+        XCTAssertEqual(existingAfterPreview.activeRuns.first?.status, .running)
+
+        await seedHarness.adapter.resume(runID: existingRequest.id)
+        _ = await capturedEvents(existingRun.events)
+    }
+
+    func testScopedRecoveryIsRememberedAcrossProjectAndBranchSnapshots() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let restarted = DefaultNovelCreation(repository: repository)
+
+        _ = try await restarted.snapshot(.project(document.project.id))
+        let loadCountAfterProject = await repository.loadCount(for: document.project.id)
+        _ = try await restarted.snapshot(.branch(
+            projectID: document.project.id,
+            branchID: document.branches[0].id
+        ))
+
+        let loadCountAfterBranch = await repository.loadCount(for: document.project.id)
+        XCTAssertEqual(loadCountAfterBranch, loadCountAfterProject)
     }
 
     func testCancelCannotClaimSameRunIDFromAnotherProject() async throws {
@@ -830,10 +1052,11 @@ final class NovelGenerationLifecycleTests: XCTestCase {
             return false
         })
         let stored = try await harness.repository.document(document.project.id)
+        let expectedBudget = 8_192 - NovelRunKind.discussion.outputReservationTokens - 1_024
         XCTAssertEqual(stored.injectionReceipts.count, 1)
         XCTAssertEqual(stored.injectionReceipts[0].requestedInputBudgetTokens, 16_000)
-        XCTAssertEqual(stored.injectionReceipts[0].maxEstimatedInputTokens, 7_168)
-        XCTAssertLessThan(stored.injectionReceipts[0].estimatedInputTokens, 7_168)
+        XCTAssertEqual(stored.injectionReceipts[0].maxEstimatedInputTokens, expectedBudget)
+        XCTAssertLessThan(stored.injectionReceipts[0].estimatedInputTokens, expectedBudget)
     }
 
     func testConcurrentExactStartUsesOneReservationAndTwoSubscribers() async throws {
@@ -1303,8 +1526,11 @@ private actor ObservingNovelRepository: NovelProjectPersisting {
     private var writtenSidecars: [NovelRecoverySidecarV1] = []
     private var removedSidecarRunIDs: [NovelRunID] = []
     private var remainingCommitFailures = 0
+    private var failingCommitProjectIDs: Set<NovelProjectID> = []
     private var remainingSidecarRemovalFailures = 0
     private var forcedAccess: [NovelProjectID: NovelProjectLoadAccess] = [:]
+    private var omittedSummaryProjectIDs: Set<NovelProjectID> = []
+    private var projectLoadCounts: [NovelProjectID: Int] = [:]
     private var shouldBlockNextCommit = false
     private var blockedCommitContinuation: CheckedContinuation<Void, Never>?
     private var shouldBlockNextLoad = false
@@ -1323,6 +1549,18 @@ private actor ObservingNovelRepository: NovelProjectPersisting {
     func sidecarWrites() -> [NovelRecoverySidecarV1] { writtenSidecars }
     func sidecarRemovals() -> [NovelRunID] { removedSidecarRunIDs }
     func failNextCommits(_ count: Int) { remainingCommitFailures = count }
+    func failCommits(for projectID: NovelProjectID) {
+        failingCommitProjectIDs.insert(projectID)
+    }
+    func allowCommits(for projectID: NovelProjectID) {
+        failingCommitProjectIDs.remove(projectID)
+    }
+    func omitFromProjectList(_ projectID: NovelProjectID) {
+        omittedSummaryProjectIDs.insert(projectID)
+    }
+    func loadCount(for projectID: NovelProjectID) -> Int {
+        projectLoadCounts[projectID, default: 0]
+    }
     func failNextSidecarRemovals(_ count: Int) {
         remainingSidecarRemovalFailures = count
     }
@@ -1345,10 +1583,12 @@ private actor ObservingNovelRepository: NovelProjectPersisting {
     }
 
     func listProjects() async throws -> [NovelProjectSummary] {
-        try await base.listProjects()
+        let summaries = try await base.listProjects()
+        return summaries.filter { !omittedSummaryProjectIDs.contains($0.id) }
     }
 
     func loadProject(id: NovelProjectID) async throws -> NovelLoadedProject {
+        projectLoadCounts[id, default: 0] += 1
         let loaded = try await base.loadProject(id: id)
         if shouldBlockNextLoad {
             shouldBlockNextLoad = false
@@ -1374,6 +1614,9 @@ private actor ObservingNovelRepository: NovelProjectPersisting {
             await withCheckedContinuation { continuation in
                 blockedCommitContinuation = continuation
             }
+        }
+        if failingCommitProjectIDs.contains(document.project.id) {
+            throw NovelError.repositoryFailure("Injected project commit failure.")
         }
         if remainingCommitFailures > 0 {
             remainingCommitFailures -= 1
@@ -1414,6 +1657,22 @@ private actor ObservingNovelRepository: NovelProjectPersisting {
         }
         try await base.removeRecoverySidecar(projectID: projectID, runID: runID)
         removedSidecarRunIDs.append(runID)
+    }
+}
+
+private actor NovelSnapshotCompletionProbe {
+    private var started = false
+    private var completed = false
+
+    var isStarted: Bool { started }
+    var isCompleted: Bool { completed }
+
+    func markStarted() {
+        started = true
+    }
+
+    func markCompleted() {
+        completed = true
     }
 }
 

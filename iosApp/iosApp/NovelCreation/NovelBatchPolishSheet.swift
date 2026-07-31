@@ -9,9 +9,9 @@ struct NovelBatchPolishSheet: View {
     let chapters: [NovelSessionChapterOption]
     let workspace: NovelCreationViewModel
     let sessionViewModel: NovelSessionViewModel
-    let onEditPolishPreference: () -> Void
 
     @State private var selectedChapterIDs: Set<NovelChapterID>
+    @State private var isEditingPolishPreference = false
     @State private var pendingAbandonTransactionID: NovelPendingOperationID?
     @State private var pendingBulkAbandonTransactionIDs: [NovelPendingOperationID] = []
     @State private var abandonTask: Task<Void, Never>?
@@ -22,13 +22,11 @@ struct NovelBatchPolishSheet: View {
     init(
         chapters: [NovelSessionChapterOption],
         workspace: NovelCreationViewModel,
-        sessionViewModel: NovelSessionViewModel,
-        onEditPolishPreference: @escaping () -> Void
+        sessionViewModel: NovelSessionViewModel
     ) {
         self.chapters = chapters
         self.workspace = workspace
         self.sessionViewModel = sessionViewModel
-        self.onEditPolishPreference = onEditPolishPreference
         self._selectedChapterIDs = State(initialValue: Set(chapters.map(\.id)))
     }
 
@@ -46,6 +44,9 @@ struct NovelBatchPolishSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        .sheet(isPresented: $isEditingPolishPreference) {
+            NovelPolishPreferenceSheet(viewModel: workspace)
+        }
         .interactiveDismissDisabled(
             progress?.phase == .running || retryTask != nil || abandonTask != nil
         )
@@ -177,7 +178,9 @@ struct NovelBatchPolishSheet: View {
     private var preferenceHintSection: some View {
         if !hasPolishPreference {
             Section {
-                Button(action: onEditPolishPreference) {
+                Button {
+                    isEditingPolishPreference = true
+                } label: {
                     Label("还没设置整章润色偏好,点这里先定文风方向", systemImage: "textformat")
                 }
             }

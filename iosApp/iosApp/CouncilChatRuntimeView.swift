@@ -1,6 +1,9 @@
 import SwiftUI
 import Observation
+import PhotosUI
 import SwiftStreamingMarkdown
+import UIKit
+import UniformTypeIdentifiers
 @preconcurrency import Shared
 
 struct CouncilTranscriptScrollGeometry: Equatable {
@@ -79,6 +82,11 @@ struct CouncilChatRuntimeView: View {
     @State private var nativeScrollFallbackReason: NativeTimelineScrollFallbackReason?
     @State private var isNativeScrollSurfaceVisible = false
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @State private var isAttachExpanded = false
+    @State private var isImportingSelectedFile = false
+    @State private var isPhotoPickerPresented = false
+    @State private var photoPickerItems: [PhotosPickerItem] = []
+    @State private var isCameraPresented = false
 
     init(
         settingsStore: SettingsStore,
@@ -137,8 +145,46 @@ struct CouncilChatRuntimeView: View {
         .onChange(of: followGeneration) { _, enabled in
             scrollDriver.setAutomaticFollowEnabled(enabled)
         }
+        .onChange(of: viewModel.isRunning) { _, running in
+            if running {
+                withAnimation(.easeOut(duration: 0.2)) { isAttachExpanded = false }
+            }
+        }
+        .onChange(of: viewModel.isPreparingMaterials) { _, preparing in
+            if preparing {
+                withAnimation(.easeOut(duration: 0.2)) { isAttachExpanded = false }
+            }
+        }
+        .onChange(of: viewModel.isReplay) { _, replay in
+            if replay {
+                withAnimation(.easeOut(duration: 0.2)) { isAttachExpanded = false }
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
+        }
+        .fileImporter(
+            isPresented: $isImportingSelectedFile,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            handleSelectedFileImport(result)
+        }
+        .photosPicker(
+            isPresented: $isPhotoPickerPresented,
+            selection: $photoPickerItems,
+            maxSelectionCount: CouncilMaterialLimits.maxImages,
+            matching: .images
+        )
+        .onChange(of: photoPickerItems) { _, items in
+            handlePhotoPickerSelection(items)
+        }
+        .fullScreenCover(isPresented: $isCameraPresented) {
+            CameraPicker { image in
+                if let image { attachPickedImage(image) }
+                isCameraPresented = false
+            }
+            .ignoresSafeArea()
         }
         .sheet(item: $viewModel.activeSheet) { sheet in
             switch sheet {
@@ -611,28 +657,92 @@ struct CouncilChatRuntimeView: View {
         }
     }
 
+    /// 与 Chat 同构的输入区：pending 图/文件 → 错误 → 附件玻璃菜单 → dock。
     private var liveComposer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(viewModel.composerPlaceholder, text: $viewModel.inputText, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .frame(minHeight: 40)
-                .focused($isComposerFocused)
-                .disabled(viewModel.isRunning)
-                .padding(.leading, 18)
+        VStack(alignment: .leading, spacing: 8) {
+            if !viewModel.pendingImages.isEmpty {
+                ComposerPendingImageStrip(
+                    items: viewModel.pendingImages.map {
+                        .init(id: $0.id, previewData: $0.previewData)
+                    },
+                    onRemove: { viewModel.removePendingImage($0) },
+                    status: councilImageAttachmentStatus
+                )
+            }
+
+            ForEach(viewModel.pendingFiles) { file in
+                ComposerPendingFileCard(
+                    fileName: file.fileName,
+                    byteSummary: Self.byteSummary(for: file),
+                    isTruncated: file.isTruncated,
+                    footnote: "发送后，解析文本会注入议题完善与调研。",
+                    onRemove: { viewModel.removePendingFile(file.id) }
+                )
+            }
+
+            if let error = viewModel.attachmentErrorMessage {
+                ComposerAttachmentStatusLabel(status: .error(error))
+            }
+
+            if viewModel.isPreparingMaterials {
+                ComposerAttachmentStatusLabel(
+                    status: .preparing(viewModel.materialsPreparationStatus)
+                )
+            }
+
+            if isAttachExpanded {
+                ComposerAttachmentGlassPanel(
+                    isDisabled: viewModel.isRunning || viewModel.isPreparingMaterials,
+                    onCamera: presentCamera,
+                    onPhotos: { isPhotoPickerPresented = true },
+                    onFiles: { isImportingSelectedFile = true },
+                    onDismiss: { isAttachExpanded = false }
+                )
+                .transition(.scale(scale: 0.75, anchor: .bottomLeading).combined(with: .opacity))
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                HStack(alignment: .center, spacing: 6) {
+                    ComposerAttachToggleButton(
+                        isExpanded: isAttachExpanded,
+                        isBusy: viewModel.isPreparingMaterials,
+                        isDisabled: viewModel.isRunning
+                            || viewModel.isPreparingMaterials
+                            || !viewModel.canAttachMaterials
+                    ) {
+                        withAnimation(.bouncy(duration: 0.42, extraBounce: 0.14)) {
+                            isAttachExpanded.toggle()
+                        }
+                    }
+
+                    TextField(viewModel.composerPlaceholder, text: $viewModel.inputText, axis: .vertical)
+                        .lineLimit(1...5)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                        .frame(minHeight: 40)
+                        .focused($isComposerFocused)
+                        .disabled(viewModel.isRunning || viewModel.isPreparingMaterials)
+                }
+                .padding(.leading, 8)
                 .padding(.trailing, 18)
                 .padding(.vertical, 7)
                 .composerDockGlass(cornerRadius: 27)
 
-            ComposerDockSendButton(
-                isLoading: viewModel.isRunning,
-                sendEnabled: viewModel.canSend,
-                diameter: 54,
-                onSend: { viewModel.send() },
-                onStop: { viewModel.cancelDiscussion() }
-            )
+                ComposerDockSendButton(
+                    isLoading: viewModel.isRunning || viewModel.isPreparingMaterials,
+                    sendEnabled: viewModel.canSend,
+                    diameter: 54,
+                    onSend: { viewModel.send() },
+                    onStop: {
+                        if viewModel.isPreparingMaterials {
+                            viewModel.cancelMaterialsPreparation()
+                        } else {
+                            viewModel.cancelDiscussion()
+                        }
+                    }
+                )
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -644,6 +754,81 @@ struct CouncilChatRuntimeView: View {
                 endPoint: .bottom
             )
             .ignoresSafeArea()
+        }
+    }
+
+    private var councilImageAttachmentStatus: ComposerAttachmentStatus? {
+        // Council always recognizes images into text (runner is text-only).
+        guard !viewModel.pendingImages.isEmpty else { return nil }
+        return .muted("图片将先经视觉模型识别，再注入议题", systemImage: "wand.and.stars")
+    }
+
+    private static func byteSummary(for file: CouncilPendingFile) -> String {
+        let bytes = file.totalBytes
+        if bytes >= 1024 * 1024 {
+            return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+        }
+        if bytes >= 1024 {
+            return String(format: "%.0f KB", Double(bytes) / 1024)
+        }
+        return "\(bytes) B"
+    }
+
+    private func presentCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            viewModel.attachmentErrorMessage = "此设备不支持相机。"
+            return
+        }
+        isCameraPresented = true
+    }
+
+    private func attachPickedImage(_ image: UIImage) {
+        guard let encoded = ChatImageEncoder.encode(image) else {
+            viewModel.attachmentErrorMessage = "图片处理失败。"
+            return
+        }
+        viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
+    }
+
+    private func handlePhotoPickerSelection(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            var failed = 0
+            for item in items {
+                let encoded: (dataUrl: String, previewData: Data)?
+                do {
+                    if let data = try await item.loadTransferable(type: Data.self),
+                       let image = UIImage(data: data) {
+                        encoded = ChatImageEncoder.encode(image)
+                    } else {
+                        encoded = nil
+                    }
+                } catch {
+                    encoded = nil
+                }
+                guard let encoded else {
+                    failed += 1
+                    continue
+                }
+                viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
+            }
+            photoPickerItems = []
+            if failed > 0 {
+                viewModel.attachmentErrorMessage = "有 \(failed) 张图片处理失败。"
+            }
+        }
+    }
+
+    private func handleSelectedFileImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else {
+                viewModel.attachmentErrorMessage = "没有选择文件。"
+                return
+            }
+            viewModel.attachPickedFile(url: url)
+        case .failure(let error):
+            viewModel.attachmentErrorMessage = "文件选择失败：\(error.localizedDescription)"
         }
     }
 
@@ -1356,6 +1541,13 @@ final class CouncilChatViewModel {
     /// 只读重放:从「最近讨论」重开一场历史议会时为 true,隐藏输入条、不再归档/覆盖草稿。
     var isReplay = false
 
+    /// Pending file/image materials for the next opening discussion (not follow-ups).
+    var pendingFiles: [CouncilPendingFile] = []
+    var pendingImages: [CouncilPendingImage] = []
+    var attachmentErrorMessage: String?
+    var isPreparingMaterials = false
+    var materialsPreparationStatus = ""
+
     let roomSettingsStore: IOSCouncilRoomSettingsStore
 
     @ObservationIgnored private let settingsStore: SettingsStore
@@ -1364,7 +1556,11 @@ final class CouncilChatViewModel {
     @ObservationIgnored private let runner: IOSCouncilRoomRunner
     @ObservationIgnored private let transcriptDefaults: UserDefaults
     @ObservationIgnored private let archiveStore: CouncilRoomArchiveStore
+    @ObservationIgnored private let visionRecognizer: CouncilVisionMaterialRecognizer
     @ObservationIgnored private var discussionTask: Task<Void, Never>?
+    @ObservationIgnored private var materialsPreparationTask: Task<Void, Never>?
+    /// Bumped on cancel / reset / openArchive so late file/vision completions cannot start a discussion.
+    @ObservationIgnored private var materialsPrepGeneration: UInt64 = 0
     /// 同一时刻只有一场议会，租约 id 固定即可。
     private static let keepAliveLeaseId = "council"
     /// 后台期间等讨论跑完、跑完就还执行权的那个任务。
@@ -1376,6 +1572,8 @@ final class CouncilChatViewModel {
     @ObservationIgnored private var currentFinalTopic = ""
     @ObservationIgnored private var currentTaskId: String?
     @ObservationIgnored private var pendingObjective = ""
+    @ObservationIgnored private var pendingSourceMaterials: String?
+    @ObservationIgnored private var pendingResearchObjective: String?
     @ObservationIgnored private var lastRunObjective = ""
     @ObservationIgnored private var lastResearchAllowed = false
     /// 中段检查点节流:roster/append/消息完结等事件密集到达时,每个 300ms 窗口
@@ -1395,7 +1593,8 @@ final class CouncilChatViewModel {
         roomSettingsStore: IOSCouncilRoomSettingsStore = .shared,
         runner: IOSCouncilRoomRunner? = nil,
         transcriptDefaults: UserDefaults = .standard,
-        archiveStore: CouncilRoomArchiveStore = .shared
+        archiveStore: CouncilRoomArchiveStore = .shared,
+        visionRecognizer: CouncilVisionMaterialRecognizer = CouncilVisionMaterialRecognizer()
     ) {
         let restoredRoom = CouncilTranscriptStore.load(defaults: transcriptDefaults)
         self.settingsStore = settingsStore
@@ -1405,6 +1604,7 @@ final class CouncilChatViewModel {
         self.runner = runner ?? IOSCouncilRoomRunner(permissionStore: permissionStore)
         self.transcriptDefaults = transcriptDefaults
         self.archiveStore = archiveStore
+        self.visionRecognizer = visionRecognizer
         self.messages = restoredRoom?.messages.map { $0.restored() } ?? []
         if let restoredRoom {
             currentTaskId = restoredRoom.taskId.trimmedNilIfBlank
@@ -1491,16 +1691,32 @@ final class CouncilChatViewModel {
         BackgroundGenerationKeepAlive.shared.end(Self.keepAliveLeaseId)
     }
 
+    var hasPendingMaterials: Bool {
+        !pendingFiles.isEmpty || !pendingImages.isEmpty
+    }
+
+    /// Attachments only apply to a new opening discussion; follow-ups stay text-only.
+    var canAttachMaterials: Bool {
+        !isReplay && !isRunning && !isPreparingMaterials && !canContinueCurrentCouncil
+    }
+
     var canSend: Bool {
-        !isRunning &&
-            currentConfigurationIssue == nil &&
-            !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !isRunning, !isPreparingMaterials, currentConfigurationIssue == nil else { return false }
+        let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if canContinueCurrentCouncil {
+            return hasText
+        }
+        return hasText || hasPendingMaterials
     }
 
     var composerPlaceholder: String {
-        canContinueCurrentCouncil
-            ? "输入补充或追问，再讨论一轮"
-            : "输入议题开始"
+        if canContinueCurrentCouncil {
+            return "输入补充或追问，再讨论一轮"
+        }
+        if hasPendingMaterials {
+            return "补充说明（可选），或直接发送从材料生成议题"
+        }
+        return "输入议题开始，或上传文件/图片"
     }
 
     /// 用户提交对主持人提问的回答，恢复议会。
@@ -1622,9 +1838,72 @@ final class CouncilChatViewModel {
         appendToken("请主持人动态选择本轮需要加入的席位。")
     }
 
+    func addPendingImage(dataUrl: String, previewData: Data, displayName: String = "图片") {
+        guard canAttachMaterials else {
+            attachmentErrorMessage = "当前只能在新议题里附加材料；追问请用文字补充。"
+            return
+        }
+        guard pendingImages.count < CouncilMaterialLimits.maxImages else {
+            attachmentErrorMessage = "一次最多附加 \(CouncilMaterialLimits.maxImages) 张图片"
+            return
+        }
+        pendingImages.append(
+            CouncilPendingImage(dataUrl: dataUrl, previewData: previewData, displayName: displayName)
+        )
+        attachmentErrorMessage = nil
+    }
+
+    func removePendingImage(_ id: CouncilPendingImage.ID) {
+        pendingImages.removeAll { $0.id == id }
+    }
+
+    func removePendingFile(_ id: CouncilPendingFile.ID) {
+        pendingFiles.removeAll { $0.id == id }
+    }
+
+    func clearPendingMaterials() {
+        pendingFiles.removeAll()
+        pendingImages.removeAll()
+    }
+
+    /// Cancel in-flight file parse / vision prep and drop late completions via generation bump.
+    func cancelMaterialsPreparation(showCancelledMessage: Bool = true) {
+        invalidateMaterialsPreparation(showCancelledMessage: showCancelledMessage)
+    }
+
+    func attachPickedFile(url: URL) {
+        guard canAttachMaterials else {
+            attachmentErrorMessage = "当前只能在新议题里附加材料；追问请用文字补充。"
+            return
+        }
+        guard pendingFiles.count < CouncilMaterialLimits.maxFiles else {
+            attachmentErrorMessage = "一次最多附加 \(CouncilMaterialLimits.maxFiles) 个文件"
+            return
+        }
+        let generation = beginMaterialsPreparation(status: "正在解析文件…")
+        materialsPreparationTask = Task { [weak self] in
+            let outcome = await CouncilFileMaterialLoader.load(url: url)
+            await MainActor.run {
+                guard let self else { return }
+                guard self.finishMaterialsPreparation(ifGeneration: generation) else { return }
+                switch outcome {
+                case .success(let file):
+                    // Re-check caps after async gap (another file may have landed).
+                    if self.pendingFiles.count >= CouncilMaterialLimits.maxFiles {
+                        self.attachmentErrorMessage = "一次最多附加 \(CouncilMaterialLimits.maxFiles) 个文件"
+                        return
+                    }
+                    self.pendingFiles.append(file)
+                    self.attachmentErrorMessage = nil
+                case .failure(let message):
+                    self.attachmentErrorMessage = message
+                }
+            }
+        }
+    }
+
     func send() {
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
+        guard canSend, !isRunning, !isPreparingMaterials, !isReplay, activeDiscussionID == nil else { return }
         if let issue = currentConfigurationIssue {
             appendMessage(
                 kind: .system,
@@ -1637,15 +1916,104 @@ final class CouncilChatViewModel {
             )
             return
         }
-        pendingObjective = text
-        // 默认同意联网调研:web search 开启即直接联网,不再弹出确认面板。
-        startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let continuation = makeContinuationContext()
+        if continuation != nil {
+            // Follow-ups are text-only.
+            clearPendingMaterials()
+            pendingObjective = text
+            pendingSourceMaterials = nil
+            pendingResearchObjective = nil
+            startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
+            return
+        }
+
+        if !hasPendingMaterials {
+            pendingObjective = text
+            pendingSourceMaterials = nil
+            pendingResearchObjective = nil
+            startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
+            return
+        }
+
+        // Opening discussion with materials: parse images first, then start.
+        let files = pendingFiles
+        let images = pendingImages
+        let generation = beginMaterialsPreparation(
+            status: images.isEmpty ? "正在整理材料…" : "正在识别图片…"
+        )
+        materialsPreparationTask = Task { [weak self] in
+            guard let self else { return }
+            let resolved: CouncilResolvedMaterials
+            if images.isEmpty {
+                resolved = CouncilResolvedMaterials(files: files, imageContexts: [])
+            } else {
+                let vision = await self.visionRecognizer.recognize(
+                    images: images,
+                    settings: self.sharedSettings.snapshot
+                )
+                if Task.isCancelled {
+                    await MainActor.run {
+                        _ = self.finishMaterialsPreparation(ifGeneration: generation)
+                    }
+                    return
+                }
+                switch vision {
+                case .failure(let error):
+                    await MainActor.run {
+                        guard self.finishMaterialsPreparation(ifGeneration: generation) else { return }
+                        self.attachmentErrorMessage = error.localizedDescription
+                    }
+                    return
+                case .success(let contexts):
+                    resolved = CouncilResolvedMaterials(files: files, imageContexts: contexts)
+                }
+            }
+            if Task.isCancelled {
+                await MainActor.run {
+                    _ = self.finishMaterialsPreparation(ifGeneration: generation)
+                }
+                return
+            }
+            await MainActor.run {
+                guard self.finishMaterialsPreparation(ifGeneration: generation) else { return }
+                // Late completion after openArchive / reset / cancel must not start a run.
+                guard !self.isReplay, !self.isRunning, self.activeDiscussionID == nil else { return }
+                self.pendingObjective = CouncilMaterialsComposer.displayObjective(
+                    userText: text,
+                    hasMaterials: !resolved.isEmpty
+                )
+                let materialsBlock = resolved.promptBlock()
+                self.pendingSourceMaterials = materialsBlock.isEmpty ? nil : materialsBlock
+                self.pendingResearchObjective = CouncilMaterialsComposer.researchObjective(
+                    userText: text,
+                    materials: resolved
+                )
+                // Replace raw pending chips with a bubble summary; keep resolved for bubble body.
+                self.clearPendingMaterials()
+                self.startPendingDiscussion(
+                    researchAllowed: self.sharedSettings.snapshot.enableWebSearch,
+                    bubbleBody: CouncilMaterialsComposer.userBubbleBody(
+                        userText: text,
+                        materials: resolved
+                    )
+                )
+            }
+        }
     }
 
-    func startPendingDiscussion(researchAllowed: Bool) {
+    func startPendingDiscussion(
+        researchAllowed: Bool,
+        bubbleBody: String? = nil
+    ) {
         let text = pendingObjective.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceMaterials = pendingSourceMaterials
+        let researchObjective = pendingResearchObjective
         pendingObjective = ""
-        guard !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
+        pendingSourceMaterials = nil
+        pendingResearchObjective = nil
+        // Replay / archive views are read-only; never start a live run from late materials prep.
+        guard !isReplay, !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
         let continuation = makeContinuationContext()
         if continuation == nil, currentTaskId != nil || !messages.isEmpty {
             resetRoom()
@@ -1661,10 +2029,11 @@ final class CouncilChatViewModel {
         appendMessage(
             kind: .user,
             author: "你",
-            body: text,
+            body: bubbleBody ?? text,
             systemImage: "person.fill",
             tint: AmberTheme.accent,
             subtitle: continuation.map { "追问 · 第 \($0.nextRound) 轮" }
+                ?? (sourceMaterials == nil ? nil : "含上传材料")
         )
 
         let discussionID = UUID()
@@ -1675,7 +2044,9 @@ final class CouncilChatViewModel {
                 objective: text,
                 researchAllowed: researchAllowed,
                 discussionID: discussionID,
-                continuation: continuation
+                continuation: continuation,
+                sourceMaterials: continuation == nil ? sourceMaterials : nil,
+                researchObjective: continuation == nil ? researchObjective : nil
             )
         }
     }
@@ -1724,7 +2095,13 @@ final class CouncilChatViewModel {
     func openArchive(taskId: String) {
         // 切换到只读重放前,先取消节流任务,避免它在 currentTaskId 切换后再次触发写入;
         // stopAndCheckpoint 会对仍在进行的讨论做一次同步检查点。
+        // 同时作废材料准备世代,防止「识别中点开历史」后迟到 vision 结果开跑。
         cancelScheduledArchive()
+        invalidateMaterialsPreparation(showCancelledMessage: false)
+        clearPendingMaterials()
+        pendingSourceMaterials = nil
+        pendingResearchObjective = nil
+        pendingObjective = ""
         guard var room = archiveStore.load(taskId: taskId) else { return }
         stopAndCheckpointActiveDiscussion()
         if let checkpointedRoom = archiveStore.load(taskId: taskId) {
@@ -1811,7 +2188,9 @@ final class CouncilChatViewModel {
         objective: String,
         researchAllowed: Bool,
         discussionID: UUID,
-        continuation: IOSCouncilRoomContinuation?
+        continuation: IOSCouncilRoomContinuation?,
+        sourceMaterials: String? = nil,
+        researchObjective: String? = nil
     ) async {
         guard activeDiscussionID == discussionID else { return }
         isRunning = true
@@ -1856,7 +2235,9 @@ final class CouncilChatViewModel {
             researchConsent: continuation == nil && researchAllowed ? .allowed : .unavailable,
             dynamicSeatGeneration: continuation == nil && roomSettingsStore.dynamicSeatGeneration,
             seatWebSearch: continuation == nil && roomSettingsStore.seatWebSearch,
-            continuation: continuation
+            continuation: continuation,
+            sourceMaterials: sourceMaterials,
+            researchObjective: researchObjective
         )
         let summary = await runner.run(request: request, onEvent: { [weak self] event in
             guard let self, self.activeDiscussionID == discussionID else { return }
@@ -2163,12 +2544,51 @@ final class CouncilChatViewModel {
         roomStateOverride = nil
         currentObjective = ""
         currentFinalTopic = ""
+        invalidateMaterialsPreparation(showCancelledMessage: false)
+        clearPendingMaterials()
+        attachmentErrorMessage = nil
+        pendingSourceMaterials = nil
+        pendingResearchObjective = nil
+        pendingObjective = ""
         // 重开 = 把画面清成真正空白(和首次进入议会一致:只剩「输入议题开始」占位),
         // 不再自动发一条「已重新开始」系统消息(画蛇添足)。
         messages = []
         // 重新开始即清空历史(存盘也同步为空白开场),避免退出后又载回旧 transcript。
         persistTranscript()
         refreshSettingsBackedParticipants()
+    }
+
+    /// Start a materials prep epoch; cancels any previous prep task.
+    @discardableResult
+    private func beginMaterialsPreparation(status: String) -> UInt64 {
+        materialsPrepGeneration &+= 1
+        materialsPreparationTask?.cancel()
+        materialsPreparationTask = nil
+        isPreparingMaterials = true
+        materialsPreparationStatus = status
+        attachmentErrorMessage = nil
+        return materialsPrepGeneration
+    }
+
+    /// Clear preparing UI only if this completion still owns the current generation.
+    @discardableResult
+    private func finishMaterialsPreparation(ifGeneration generation: UInt64) -> Bool {
+        guard materialsPrepGeneration == generation else { return false }
+        materialsPreparationTask = nil
+        isPreparingMaterials = false
+        materialsPreparationStatus = ""
+        return true
+    }
+
+    private func invalidateMaterialsPreparation(showCancelledMessage: Bool) {
+        materialsPrepGeneration &+= 1
+        materialsPreparationTask?.cancel()
+        materialsPreparationTask = nil
+        isPreparingMaterials = false
+        materialsPreparationStatus = ""
+        if showCancelledMessage {
+            attachmentErrorMessage = "已取消材料解析"
+        }
     }
 
     private func stopAndCheckpointActiveDiscussion() {

@@ -635,6 +635,75 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertFalse(finalCancellations.contains(runID))
     }
 
+    func testDetachWhileStartIsAwaitingDoesNotInstallLateConsumerOrBlockReturnToProject() async throws {
+        let harness = try await makeHarness(
+            scripts: [NovelModelScript(steps: [.delta("离页后完成的正文"), .pause, .complete])],
+            usesAttachGate: true
+        )
+        let gate = try XCTUnwrap(harness.attachGate)
+        let otherProject = try NovelTestFixtures.document()
+        _ = try await harness.repository.createProject(otherProject)
+        await gate.blockNextStart()
+
+        let sendTask = Task { @MainActor in
+            await harness.session.send(text: "启动握手期间离开页面")
+        }
+        let startBlocked = await eventually { await gate.startIsBlocked() }
+        XCTAssertTrue(startBlocked)
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+
+        harness.session.detachConsumer()
+        await gate.resumeBlockedStart()
+        let didStart = await sendTask.value
+        XCTAssertTrue(didStart)
+
+        await harness.workspace.loadProjects(selecting: otherProject.project.id)
+        XCTAssertEqual(harness.workspace.selectedProjectID, otherProject.project.id)
+        await harness.adapter.resume(runID: runID)
+        let persisted = await eventually {
+            let document = try? await harness.repository.loadProject(id: harness.projectID).document
+            return document?.activeRuns.first { $0.id == runID }?.status == .completed
+        }
+        XCTAssertTrue(persisted)
+
+        await harness.workspace.loadProjects(selecting: harness.projectID)
+        await harness.session.bindToCurrentSelection()
+
+        XCTAssertNil(harness.session.transientTail)
+        XCTAssertFalse(harness.session.isRunning)
+        XCTAssertTrue(harness.session.canSend)
+        XCTAssertNil(harness.session.refreshErrorMessage)
+        XCTAssertEqual(harness.session.durableMessages.last?.content, "离页后完成的正文")
+    }
+
+    func testRebindWhileStartIsAwaitingRestoresConsumerWhenStartReturns() async throws {
+        let harness = try await makeHarness(
+            scripts: [NovelModelScript(steps: [.delta("重新出现后收到流"), .pause])],
+            usesAttachGate: true
+        )
+        let gate = try XCTUnwrap(harness.attachGate)
+        await gate.blockNextStart()
+
+        let sendTask = Task { @MainActor in
+            await harness.session.send(text: "启动握手期间短暂离页")
+        }
+        let startBlocked = await eventually { await gate.startIsBlocked() }
+        XCTAssertTrue(startBlocked)
+
+        harness.session.detachConsumer()
+        await harness.session.bindToCurrentSelection()
+        await gate.resumeBlockedStart()
+        let didStart = await sendTask.value
+        XCTAssertTrue(didStart)
+
+        let received = await eventually {
+            harness.session.transientTail?.content == "重新出现后收到流"
+        }
+        XCTAssertTrue(received)
+        XCTAssertNotNil(harness.session.activeRunID)
+        await harness.session.stop()
+    }
+
     func testAppBackgroundExpirationInterruptsRunAfterWorkspaceSelectsAnotherProject() async throws {
         let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
             .delta("应保存的后台片段"),
@@ -2303,6 +2372,52 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(persisted.branches[0].syncStatus, .synchronized)
     }
 
+    func testSessionManualSyncRetryCanBeStoppedThroughSharedStateSyncControl() async throws {
+        let fixture = try persistedManualSync(status: .retryable)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [
+                .delta(validRebuildJSON),
+                .pause,
+                .complete,
+            ])]
+        )
+
+        let retryTask = Task { @MainActor in
+            await harness.session.retryPending(fixture.pendingID)
+        }
+        let requestStarted = await eventually(timeout: 3) {
+            harness.workspace.stateSyncActivity?.requestStartedAt != nil
+        }
+        XCTAssertTrue(requestStarted)
+        let branchID = try XCTUnwrap(harness.workspace.selectedBranchID)
+        XCTAssertTrue(
+            harness.workspace.canCancelAutomaticStateSync(
+                projectID: harness.projectID,
+                branchID: branchID
+            ),
+            "手动重试也必须被三处同步进度 UI 的停止按钮识别"
+        )
+
+        harness.workspace.cancelAutomaticStateSync(
+            projectID: harness.projectID,
+            branchID: branchID
+        )
+        await retryTask.value
+
+        let stopped = await eventually(timeout: 3) {
+            let cancelledRunIDs = await harness.adapter.cancelledRunIDs
+            return !cancelledRunIDs.isEmpty &&
+                harness.workspace.stateSyncActivity == nil &&
+                !harness.workspace.isPerforming
+        }
+        XCTAssertTrue(stopped)
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(persisted.pendingOperations.first?.id, fixture.pendingID)
+        XCTAssertEqual(persisted.pendingOperations.first?.status, .retryable)
+        XCTAssertEqual(persisted.branches[0].syncStatus, .needsSync)
+    }
+
     /// `retryPending` is a generic retry entry point: pending operations can also be the
     /// `.collection` kind (legacy collection recovery), which never runs a state-sync model
     /// call. Retrying one of those must not publish a `stateSyncActivity`.
@@ -2448,6 +2563,63 @@ final class NovelSessionViewModelTests: XCTestCase {
             harness.workspace.projectSnapshot?.pendingOperations.first?.lastError,
             failure.message
         )
+    }
+
+    func testAutomaticSyncFailureRetryStartsRetryablePendingOnFirstTap() async throws {
+        let fixture = try persistedManualSync(status: .pending)
+        let failure = NovelModelFailure(
+            code: "state_sync_timeout",
+            message: "状态同步请求超时，请稍后重试。",
+            isRetryable: true
+        )
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.fail(failure)]),
+                NovelModelScript(steps: [
+                    .delta(validRebuildJSON),
+                    .pause,
+                    .complete,
+                ]),
+            ]
+        )
+        let branchID = try XCTUnwrap(harness.workspace.selectedBranchID)
+
+        harness.workspace.scheduleAutomaticStateSyncIfNeeded()
+        let failed = await eventually(timeout: 3) {
+            harness.workspace.automaticStateSyncFailureMessage(
+                projectID: harness.projectID,
+                branchID: branchID
+            ) != nil &&
+                harness.workspace.projectSnapshot?.pendingOperations.first?.status == .retryable
+        }
+        XCTAssertTrue(failed)
+
+        harness.workspace.retryAutomaticStateSync(
+            projectID: harness.projectID,
+            branchID: branchID
+        )
+
+        let retriedOnFirstTap = await eventually(timeout: 3) {
+            let requests = await harness.adapter.requests
+            return requests.count == 2
+        }
+        XCTAssertTrue(
+            retriedOnFirstTap,
+            "failure banner 的第一次重试必须直接执行 durable retryable pending"
+        )
+        XCTAssertTrue(harness.workspace.canCancelAutomaticStateSync(
+            projectID: harness.projectID,
+            branchID: branchID
+        ))
+        harness.workspace.cancelAutomaticStateSync(
+            projectID: harness.projectID,
+            branchID: branchID
+        )
+        let stopped = await eventually(timeout: 3) {
+            !harness.workspace.isPerforming && harness.workspace.stateSyncActivity == nil
+        }
+        XCTAssertTrue(stopped)
     }
 
     func testExactRunRetryDoesNotRetryAStillNewerTerminalBubble() async throws {
@@ -2723,6 +2895,97 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(requestCount, 2, "未解决润色事务不得再消耗一次正文生成请求")
     }
 
+    func testPolishRetryOwnerSurvivesSessionViewRemountAndCanStillStop() async throws {
+        let fixture = try documentWithChapter()
+        let failure = NovelModelFailure(
+            code: "provider_down",
+            message: "漂移检查失败",
+            isRetryable: true
+        )
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [
+                    .delta("Mara crossed the quiet hall.\n\(NovelPromptCatalog.polishCompletionSentinel)"),
+                    .complete,
+                ]),
+                NovelModelScript(steps: [.fail(failure)]),
+                NovelModelScript(steps: [.pause]),
+            ]
+        )
+        let started = await harness.session.startWholeChapterPolish(chapterID: fixture.chapterID)
+        XCTAssertTrue(started)
+        let candidateArrived = await eventually {
+            !harness.session.availablePolishCandidates.isEmpty
+        }
+        XCTAssertTrue(candidateArrived)
+        let candidate = try XCTUnwrap(harness.session.availablePolishCandidates.first)
+        await harness.session.adoptPolishCandidate(candidate.id)
+        let transactionID = try XCTUnwrap(
+            harness.session.unresolvedBranchPolishTransactions.first?.id
+        )
+
+        XCTAssertTrue(harness.session.startPolishRetry(transactionID))
+        let retryStarted = await eventually { await harness.adapter.requests.count == 3 }
+        XCTAssertTrue(retryStarted)
+        await harness.session.bindToCurrentSelection()
+        XCTAssertEqual(harness.session.polishRetryTransactionID, transactionID)
+
+        harness.session.cancelPolishRetry()
+        let retryStopped = await eventually {
+            harness.session.polishRetryTransactionID == nil && !harness.workspace.isPerforming
+        }
+        XCTAssertTrue(retryStopped)
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(persisted.polishTransactions.first?.status, .retryable)
+    }
+
+    func testCancelledPolishRetryReconcilesBatchReportWhenFinalCommitAlreadyCompleted() async throws {
+        let fixture = try documentWithChapter()
+        let failure = NovelModelFailure(
+            code: "provider_down",
+            message: "漂移检查失败",
+            isRetryable: true
+        )
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [
+                    .delta("Mara crossed the quiet hall.\n\(NovelPromptCatalog.polishCompletionSentinel)"),
+                    .complete,
+                ]),
+                NovelModelScript(steps: [.fail(failure)]),
+                NovelModelScript(steps: [.delta(compatibleDriftJSON), .complete]),
+            ],
+            usesPerformReturnGate: true
+        )
+        XCTAssertTrue(harness.session.startBatchPolish(chapterIDs: [fixture.chapterID]))
+        let batchFinished = await eventually {
+            harness.session.batchPolishProgress?.phase == .done
+        }
+        XCTAssertTrue(batchFinished)
+        XCTAssertEqual(harness.session.batchPolishProgress?.failedCount, 1)
+        let transactionID = try XCTUnwrap(
+            harness.session.unresolvedBranchPolishTransactions.first?.id
+        )
+        let gate = try XCTUnwrap(harness.performReturnGate)
+        await gate.blockNextAdoptionReturn()
+
+        XCTAssertTrue(harness.session.startPolishRetry(transactionID))
+        await gate.waitUntilAdoptionReturnBlocked()
+        let durableBeforeCancel = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(durableBeforeCancel.polishTransactions.first?.status, .completed)
+
+        harness.session.cancelPolishRetry()
+        await gate.resumeAdoptionReturn()
+        let retryFinished = await eventually {
+            harness.session.polishRetryTransactionID == nil
+        }
+        XCTAssertTrue(retryFinished)
+        XCTAssertEqual(harness.session.batchPolishProgress?.adoptedCount, 1)
+        XCTAssertEqual(harness.session.batchPolishProgress?.failedCount, 0)
+    }
+
     func testIncompatiblePolishCanConvertToManualRewriteAndNeedsSync() async throws {
         let fixture = try documentWithChapter()
         let rewritten = "Mara opened the gate and changed the plot."
@@ -2815,6 +3078,7 @@ private extension NovelSessionViewModelTests {
         let projectID: NovelProjectID
         let snapshotGate: NovelSessionSnapshotFailingCreation?
         let attachGate: NovelSessionAttachBlockingCreation?
+        let performReturnGate: NovelSessionPerformReturnBlockingCreation?
     }
 
     func makeWindow(rootViewController: UIViewController) -> UIWindow {
@@ -2838,6 +3102,7 @@ private extension NovelSessionViewModelTests {
         resolutionFailure: NovelModelFailure? = nil,
         usesSnapshotGate: Bool = false,
         usesAttachGate: Bool = false,
+        usesPerformReturnGate: Bool = false,
         terminalQuietDelay: TimeInterval = 0
     ) async throws -> Harness {
         let document = try document ?? NovelTestFixtures.document()
@@ -2866,11 +3131,16 @@ private extension NovelSessionViewModelTests {
         let attachGate = usesAttachGate
             ? NovelSessionAttachBlockingCreation(base: baseCreation)
             : nil
+        let performReturnGate = usesPerformReturnGate
+            ? NovelSessionPerformReturnBlockingCreation(base: baseCreation)
+            : nil
         let creation: any NovelCreation
         if let snapshotGate {
             creation = snapshotGate
         } else if let attachGate {
             creation = attachGate
+        } else if let performReturnGate {
+            creation = performReturnGate
         } else {
             creation = baseCreation
         }
@@ -2887,7 +3157,8 @@ private extension NovelSessionViewModelTests {
             session: session,
             projectID: document.project.id,
             snapshotGate: snapshotGate,
-            attachGate: attachGate
+            attachGate: attachGate,
+            performReturnGate: performReturnGate
         )
     }
 
@@ -3279,6 +3550,10 @@ private actor NovelSessionSnapshotFailingCreation: NovelCreation {
         )
     }
 
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        await base.cancelInFlightBackgroundMutations(projectID: projectID)
+    }
+
     func retryPendingTerminal(runID: NovelRunID) async throws {
         try await base.retryPendingTerminal(runID: runID)
     }
@@ -3348,6 +3623,82 @@ private actor NovelSessionAttachBlockingCreation: NovelCreation {
             deadline: deadline,
             runID: runID
         )
+    }
+
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        await base.cancelInFlightBackgroundMutations(projectID: projectID)
+    }
+
+    func retryPendingTerminal(runID: NovelRunID) async throws {
+        try await base.retryPendingTerminal(runID: runID)
+    }
+}
+
+private actor NovelSessionPerformReturnBlockingCreation: NovelCreation {
+    private let base: any NovelCreation
+    private var shouldBlockNextAdoptionReturn = false
+    private var adoptionReturnIsBlocked = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var returnContinuation: CheckedContinuation<Void, Never>?
+
+    init(base: any NovelCreation) {
+        self.base = base
+    }
+
+    func blockNextAdoptionReturn() {
+        shouldBlockNextAdoptionReturn = true
+    }
+
+    func waitUntilAdoptionReturnBlocked() async {
+        guard !adoptionReturnIsBlocked else { return }
+        await withCheckedContinuation { blockedWaiters.append($0) }
+    }
+
+    func resumeAdoptionReturn() {
+        adoptionReturnIsBlocked = false
+        let continuation = returnContinuation
+        returnContinuation = nil
+        continuation?.resume()
+    }
+
+    func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
+        try await base.snapshot(scope)
+    }
+
+    func perform(_ action: NovelAction) async throws -> NovelOutcome {
+        let outcome = try await base.perform(action)
+        guard shouldBlockNextAdoptionReturn,
+              case .adoptPolishCandidate = action else { return outcome }
+        shouldBlockNextAdoptionReturn = false
+        adoptionReturnIsBlocked = true
+        blockedWaiters.forEach { $0.resume() }
+        blockedWaiters.removeAll()
+        await withCheckedContinuation { returnContinuation = $0 }
+        return outcome
+    }
+
+    func start(_ request: NovelRunRequest) async throws -> NovelRun {
+        try await base.start(request)
+    }
+
+    func interruptRun(_ command: NovelCancelRunCommand) async throws {
+        try await base.interruptRun(command)
+    }
+
+    func interruptForBackground(
+        projectID: NovelProjectID,
+        deadline: Date,
+        runID: NovelRunID?
+    ) async {
+        await base.interruptForBackground(
+            projectID: projectID,
+            deadline: deadline,
+            runID: runID
+        )
+    }
+
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        await base.cancelInFlightBackgroundMutations(projectID: projectID)
     }
 
     func retryPendingTerminal(runID: NovelRunID) async throws {

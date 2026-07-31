@@ -1343,6 +1343,10 @@ protocol NovelCreation: Sendable {
         runID: NovelRunID?
     ) async
     func retryPendingTerminal(runID: NovelRunID) async throws
+    /// Cancels in-flight fact-sync mutations for a project so UI Stop can interrupt
+    /// long model work instead of only cancelling the outer awaiter.
+    /// Production implementations must not cancel polish-adopt from this entry.
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async
     func distillDiscussionArchive(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
@@ -1361,6 +1365,10 @@ protocol NovelCreation: Sendable {
 }
 
 extension NovelCreation {
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        // Default no-op for test doubles that never schedule background mutations.
+    }
+
     func distillDiscussionArchive(
         projectID: NovelProjectID,
         branchID: NovelBranchID,

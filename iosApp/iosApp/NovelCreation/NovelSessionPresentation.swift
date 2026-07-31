@@ -1255,27 +1255,32 @@ private extension NovelSessionPresentation {
         if let transaction = index.polishByCandidateID[candidate.id] {
             switch transaction.status {
             case .pending:
-                let blocker = baseMutationBlocker(
+                let baseBlocker = baseMutationBlocker(
                     input: input,
                     index: index,
                     includePending: true,
                     excludingPolishTransactionID: transaction.id
-                ) ?? staleBlocker(candidate, input: input)
-                return [
-                    availability(.retryPolish(transaction.id), blocker: blocker),
-                    availability(.abandonPolish(transaction.id), blocker: blocker)
-                ]
-            case .retryable:
-                let blocker = baseMutationBlocker(
-                    input: input,
-                    index: index,
-                    includePending: true,
-                    excludingPolishTransactionID: transaction.id
-                ) ??
+                )
+                let retryBlocker = baseBlocker ??
+                    polishTransactionSourceBlocker(transaction, index: index) ??
                     staleBlocker(candidate, input: input)
                 return [
-                    availability(.retryPolish(transaction.id), blocker: blocker),
-                    availability(.abandonPolish(transaction.id), blocker: blocker)
+                    availability(.retryPolish(transaction.id), blocker: retryBlocker),
+                    availability(.abandonPolish(transaction.id), blocker: baseBlocker)
+                ]
+            case .retryable:
+                let baseBlocker = baseMutationBlocker(
+                    input: input,
+                    index: index,
+                    includePending: true,
+                    excludingPolishTransactionID: transaction.id
+                )
+                let retryBlocker = baseBlocker ??
+                    polishTransactionSourceBlocker(transaction, index: index) ??
+                    staleBlocker(candidate, input: input)
+                return [
+                    availability(.retryPolish(transaction.id), blocker: retryBlocker),
+                    availability(.abandonPolish(transaction.id), blocker: baseBlocker)
                 ]
             case .blocked:
                 return [availability(
@@ -1578,6 +1583,17 @@ private extension NovelSessionPresentation {
             candidate.baseHeadRevision == input.branch.headRevision
             ? nil
             : .staleCandidate
+    }
+
+    static func polishTransactionSourceBlocker(
+        _ transaction: NovelPendingPolishTransactionRecord,
+        index: NovelSessionProjectionIndex
+    ) -> NovelSessionActionBlocker? {
+        guard index.workingChapterVersionIDs.contains(transaction.sourceChapterVersionID),
+              !index.discardedChapterVersionIDs.contains(transaction.sourceChapterVersionID) else {
+            return .sourceChapterChanged
+        }
+        return nil
     }
 
     static func forkBlocker(

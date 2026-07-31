@@ -42,10 +42,11 @@ final class NovelPolishTests: NovelPolishTestCase {
             )
         )
 
-        XCTAssertEqual(prompt.version, "novel.whole-chapter-polish.v2")
+        XCTAssertEqual(prompt.version, "novel.whole-chapter-polish.v3")
         XCTAssertTrue(prompt.systemText.contains("must not add, remove, reorder"))
         XCTAssertTrue(prompt.systemText.contains("subordinate"))
         XCTAssertTrue(prompt.systemText.contains(NovelPromptCatalog.polishCompletionSentinel))
+        XCTAssertTrue(prompt.systemText.contains("Markdown code fences"))
         XCTAssertEqual(receipt.promptVersion, prompt.version)
         XCTAssertEqual(receipt.sections.map(\.kind), expectedPlan.sections.map(\.kind))
         XCTAssertEqual(receipt.sections.map(\.contentSHA256), expectedPlan.sections.map(\.contentSHA256))
@@ -334,6 +335,41 @@ final class NovelPolishTests: NovelPolishTestCase {
         XCTAssertEqual(retried.polishAttempts[0], firstAttempt)
         XCTAssertEqual(retried.polishAssessments[1].result?.compatible, true)
         XCTAssertNil(retried.polishAssessments[1].failure)
+    }
+
+    func testRetryDoesNotAdoptPolishIntoDiscardedSourceChapter() async throws {
+        let harness = try await makeHarness(remainingScripts: [
+            NovelModelScript(steps: [.fail(NovelModelFailure(
+                code: "provider_failed",
+                message: "Provider failed.",
+                isRetryable: true
+            ))]),
+            NovelModelScript(steps: [.delta(compatibleDriftJSON), .complete]),
+        ])
+        let retryable = try await makeRetryablePolish(in: harness)
+        let source = try sourceVersion(in: retryable.document, id: harness.sourceVersionID)
+        let discard = NovelDiscardChapterCommand(
+            context: mutationContext(document: retryable.document),
+            projectID: retryable.document.project.id,
+            branchID: retryable.document.branches[0].id,
+            chapterID: source.chapterID
+        )
+        _ = try await harness.creation.perform(.discardChapter(discard))
+        let requestCountBeforeRetry = await harness.adapter.requests.count
+
+        await NovelXCTAssertThrowsErrorAsync(
+            try await harness.creation.perform(.adoptPolishCandidate(retryable.command))
+        )
+
+        let blocked = try await document(in: harness)
+        XCTAssertNotNil(blocked.chapters.first { $0.id == source.chapterID }?.discardedAt)
+        XCTAssertEqual(blocked.polishTransactions.first?.status, .blocked)
+        XCTAssertEqual(blocked.candidates.first { $0.id == retryable.candidateID }?.status, .available)
+        XCTAssertFalse(blocked.chapterVersions.contains {
+            $0.id == retryable.command.proposedChapterVersionID
+        })
+        let requestCountAfterRetry = await harness.adapter.requests.count
+        XCTAssertEqual(requestCountAfterRetry, requestCountBeforeRetry)
     }
 
     func testModelFailureAndTimeoutFailClosedWithRetryableEvidenceAndNoAdoptionRecords() async throws {

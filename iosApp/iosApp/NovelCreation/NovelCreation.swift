@@ -209,6 +209,8 @@ actor DefaultNovelCreation: NovelCreation {
     var blockedLifecycleProjectIDs: Set<NovelProjectID> = []
     var didRecoverGenerationState = false
     var isRecoveringGenerationState = false
+    var recoveringGenerationProjectID: NovelProjectID?
+    var recoveredGenerationProjectIDs: Set<NovelProjectID> = []
     var isReconcilingLifecycleOperations = false
 
     init(
@@ -252,7 +254,7 @@ actor DefaultNovelCreation: NovelCreation {
         branchID: NovelBranchID,
         chapterID: NovelChapterID?
     ) async throws -> NovelDiscussionArchiveDraft {
-        try await recoverGenerationStateIfNeeded()
+        try await recoverGenerationStateIfNeeded(requiredProjectID: projectID)
         let loaded = try await loadCommittedProject(id: projectID)
         guard loaded.access == .readWrite else {
             throw NovelError.degradedReadOnly(projectID: projectID)
@@ -385,26 +387,11 @@ actor DefaultNovelCreation: NovelCreation {
     }
 
     func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
-        if case .projectImportPreview(let data) = scope {
-            let decoded = try NovelProjectPackageCodec.decode(data)
-            try await recoverGenerationStateIfNeeded()
-            let summaries = try await repository.listProjects()
-            let existing = summaries.first(where: { $0.id == decoded.document.project.id })
-            return .projectImportPreview(NovelProjectImportPreview(
-                sourceProjectID: decoded.document.project.id,
-                projectName: decoded.document.project.name,
-                projectRevision: decoded.document.project.revision,
-                schemaVersion: decoded.document.schemaVersion,
-                envelopeByteCount: data.count,
-                projectByteCount: decoded.artifact.projectByteCount,
-                projectSHA256: decoded.artifact.projectSHA256,
-                runningRunCount: decoded.document.activeRuns.filter { $0.status == .running }.count,
-                existingProject: existing
-            ))
-        }
-        try await recoverGenerationStateIfNeeded()
-        switch scope {
-        case .projects:
+        if case .projects = scope {
+            // The project list is a read-only inventory. Waiting for every project's
+            // crash-recovery scan here makes one large or unfinished project block the
+            // whole entry screen. Opening a project and every mutation still run the
+            // recovery barrier below before reading or writing project contents.
             var summaries = try await repository.listProjects()
             summaries.removeAll { summary in
                 inFlightCreationProjectIDs.contains(summary.id) &&
@@ -424,6 +411,54 @@ actor DefaultNovelCreation: NovelCreation {
             }
             summaries.sort(by: NovelProjectSummary.listOrder)
             return .projects(summaries)
+        }
+        if case .projectImportPreview(let data) = scope {
+            let decoded = try NovelProjectPackageCodec.decode(data)
+            let sourceProjectID = decoded.document.project.id
+            let summaries: [NovelProjectSummary]
+            do {
+                try await recoverGenerationStateIfNeeded(
+                    requiredProjectID: sourceProjectID,
+                    allowsMissingRequiredProject: true
+                )
+                summaries = try await repository.listProjects()
+            } catch {
+                let recoveryError = error
+                let currentSummaries = try await repository.listProjects()
+                guard currentSummaries.contains(where: {
+                    $0.id == sourceProjectID && $0.loadError != nil
+                }) else {
+                    throw recoveryError
+                }
+                summaries = currentSummaries
+            }
+            let existing = summaries.first(where: { $0.id == decoded.document.project.id })
+            return .projectImportPreview(NovelProjectImportPreview(
+                sourceProjectID: sourceProjectID,
+                projectName: decoded.document.project.name,
+                projectRevision: decoded.document.project.revision,
+                schemaVersion: decoded.document.schemaVersion,
+                envelopeByteCount: data.count,
+                projectByteCount: decoded.artifact.projectByteCount,
+                projectSHA256: decoded.artifact.projectSHA256,
+                runningRunCount: decoded.document.activeRuns.filter { $0.status == .running }.count,
+                existingProject: existing
+            ))
+        }
+        let recoveryProjectID: NovelProjectID? = switch scope {
+        case .project(let projectID), .projectPackage(let projectID):
+            projectID
+        case .branch(let projectID, _), .branchMarkdown(let projectID, _):
+            projectID
+        case .injectionPreview(let request):
+            request.projectID
+        case .projects, .projectImportPreview:
+            nil
+        }
+        try await recoverGenerationStateIfNeeded(requiredProjectID: recoveryProjectID)
+        switch scope {
+        case .projects:
+            throw NovelError.invalidInput("The project list was not handled.")
 
         case .project(let projectID):
             if inFlightCreationProjectIDs.contains(projectID),
@@ -465,7 +500,26 @@ actor DefaultNovelCreation: NovelCreation {
         } else {
             preparedImport = nil
         }
-        try await recoverGenerationStateIfNeeded()
+        do {
+            try await recoverGenerationStateIfNeeded(
+                requiredProjectID: action.projectID,
+                allowsMissingRequiredProject: action.isProjectCreation ||
+                    action.operationKind == .deleteProject,
+                allowsConcurrentMutationOnRequiredProject: true
+            )
+        } catch {
+            let recoveryError = error
+            guard case .deleteProject = action else { throw recoveryError }
+            let summaries = try await repository.listProjects()
+            guard summaries.contains(where: {
+                $0.id == action.projectID && $0.loadError != nil
+            }) else {
+                throw recoveryError
+            }
+            // Deleting an explicitly confirmed unreadable project does not need
+            // its document to pass generation recovery. The deletion lifecycle
+            // below still owns tombstoning, idempotency, and artifact cleanup.
+        }
         guard !isReconcilingLifecycleOperations else {
             throw NovelError.projectBusy(action.projectID)
         }
@@ -582,14 +636,29 @@ actor DefaultNovelCreation: NovelCreation {
         }
     }
 
-    func cancelInFlightBackgroundMutations(
-        projectID: NovelProjectID
+    /// Protocol surface used by ViewModel Stop: only fact-sync mutations.
+    /// Does not cancel polish adopt — that belongs to background interrupt.
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        _ = cancelInFlightBackgroundMutationTasks(
+            projectID: projectID,
+            includePolishAdoption: false
+        )
+    }
+
+    /// Cancel background mutations for a project. Background interrupt passes
+    /// `includePolishAdoption: true` so adopted polish work can wind down too.
+    @discardableResult
+    func cancelInFlightBackgroundMutationTasks(
+        projectID: NovelProjectID,
+        includePolishAdoption: Bool = true
     ) -> [Task<NovelOutcome, Error>] {
         let tasks: [Task<NovelOutcome, Error>] = inFlightByOperation.values.compactMap {
             mutation -> Task<NovelOutcome, Error>? in
             guard mutation.projectID == projectID else { return nil }
             switch mutation.kind {
-            case .adoptPolishCandidate, .syncManualEdits, .retryPending:
+            case .adoptPolishCandidate:
+                guard includePolishAdoption else { return nil }
+            case .syncManualEdits, .retryPending:
                 break
             default:
                 return nil
@@ -602,7 +671,7 @@ actor DefaultNovelCreation: NovelCreation {
     }
 
     func start(_ request: NovelRunRequest) async throws -> NovelRun {
-        try await recoverGenerationStateIfNeeded()
+        try await recoverGenerationStateIfNeeded(requiredProjectID: request.projectID)
         guard !isRecoveringGenerationState else {
             throw NovelError.projectBusy(request.projectID)
         }

@@ -464,6 +464,10 @@ struct IOSCouncilRoomRunRequest {
     var seatWebSearch: Bool = false
     /// 非 nil 时沿用同一议会任务、席位与既有转录，只追加一轮追问讨论。
     var continuation: IOSCouncilRoomContinuation? = nil
+    /// 用户上传文件/图片解析后的文本材料（仅首轮议题完善使用；追问不重复注入）。
+    var sourceMaterials: String? = nil
+    /// 联网调研用的议题文案；缺省时回退 `objective`。可含材料摘要以提升检索相关性。
+    var researchObjective: String? = nil
 }
 
 struct IOSCouncilRoomRunSummary: Equatable {
@@ -1183,8 +1187,9 @@ final class IOSCouncilRoomRunner {
         if request.continuation != nil {
             research = IOSCouncilResearchBundle(searches: [], scrapedPages: [], failures: [])
         } else if request.researchConsent == .allowed {
+            let researchQuery = request.researchObjective?.trimmedNilIfBlank ?? objective
             research = await researcher.research(
-                objective: objective,
+                objective: researchQuery,
                 settings: request.searchSettings,
                 maxSearches: 4,
                 maxScrapes: 4
@@ -1232,6 +1237,7 @@ final class IOSCouncilRoomRunner {
                         userPrompt: self.finalTopicPrompt(
                             objective: objective,
                             research: research,
+                            sourceMaterials: request.sourceMaterials,
                             limits: limits,
                             defaultSeats: defaultSeatsForTopic
                         ),
@@ -1279,7 +1285,8 @@ final class IOSCouncilRoomRunner {
                             objective: objective,
                             finalTopic: finalTopic,
                             research: research,
-                            limits: limits
+                            limits: limits,
+                            sourceMaterials: request.sourceMaterials
                         ),
                         request: request,
                         temperature: 0.3,
@@ -1303,7 +1310,8 @@ final class IOSCouncilRoomRunner {
                                 objective: objective,
                                 finalTopic: finalTopic,
                                 research: research,
-                                limits: limits
+                                limits: limits,
+                                sourceMaterials: request.sourceMaterials
                             ),
                             request: request,
                             temperature: 0.3,
@@ -2170,17 +2178,30 @@ final class IOSCouncilRoomRunner {
     private func finalTopicPrompt(
         objective: String,
         research: IOSCouncilResearchBundle,
+        sourceMaterials: String? = nil,
         limits: IOSCouncilRoomLimits,
         defaultSeats: [IOSCouncilRoomSpeaker]
     ) -> String {
-        """
+        let materialsBlock = sourceMaterials?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let materialsSection: String
+        if let materialsBlock, !materialsBlock.isEmpty {
+            materialsSection = """
+
+            用户上传材料（文件解析 / 图片视觉识别结果）：
+            \(materialsBlock)
+            """
+        } else {
+            materialsSection = ""
+        }
+        return """
         用户议题：
         \(objective)
-
+        \(materialsSection)
         联网调研要点：
         \(research.summaryText.trimmedOr("本轮没有联网调研材料。"))
 
-        请基于以上调研完善议题、补充关键背景和最新信息，形成一个清晰、有讨论价值的「最终议题」。
+        请基于以上议题、上传材料（如有）与联网调研完善议题，补充关键背景和最新信息，形成一个清晰、有讨论价值的「最终议题」。
+        若用户上传了材料，最终议题必须紧扣材料中的事实与争议点，不要忽略附件内容。
         直接输出完善后的议题正文即可，不要列席位、不要输出 JSON。
         """
     }
@@ -2196,15 +2217,23 @@ final class IOSCouncilRoomRunner {
         objective: String,
         finalTopic: String,
         research: IOSCouncilResearchBundle,
-        limits: IOSCouncilRoomLimits
+        limits: IOSCouncilRoomLimits,
+        sourceMaterials: String? = nil
     ) -> String {
-        """
+        let materialsHint: String
+        if let materials = sourceMaterials?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !materials.isEmpty {
+            materialsHint = "用户已上传材料（文件/图片），席位应覆盖材料中的事实核验、影响面与决策维度。"
+        } else {
+            materialsHint = ""
+        }
+        return """
         最终议题：
         \(finalTopic.trimmedOr(objective))
 
         联网调研要点：
         \(research.summaryText.trimmedOr("（无联网调研材料，请基于议题本身判断）"))
-
+        \(materialsHint.isEmpty ? "" : "\n\(materialsHint)\n")
         请针对这个【具体议题】动态设计 2 到 \(limits.maxSeats) 位最有价值的议员席位：
         - 紧扣本议题的真实关键维度，不要套用「工程/产品/风险」之类的通用模板，除非它们确实最贴切。
         - 每位议员视角独特、互补，合起来能覆盖议题的核心分歧与决策要点。

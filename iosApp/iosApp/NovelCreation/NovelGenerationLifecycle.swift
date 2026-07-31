@@ -518,7 +518,10 @@ extension DefaultNovelCreation {
             }
         }
         var claimedRunIDs: [NovelRunID] = []
-        let mutationTasks = cancelInFlightBackgroundMutations(projectID: projectID)
+        let mutationTasks = cancelInFlightBackgroundMutationTasks(
+            projectID: projectID,
+            includePolishAdoption: true
+        )
         for runID in generationRuntimes.keys.sorted(by: {
             $0.description < $1.description
         }) {
@@ -597,15 +600,40 @@ extension DefaultNovelCreation {
         }
     }
 
-    func recoverGenerationStateIfNeeded() async throws {
+    func recoverGenerationStateIfNeeded(
+        requiredProjectID: NovelProjectID? = nil,
+        allowsMissingRequiredProject: Bool = false,
+        allowsConcurrentMutationOnRequiredProject: Bool = false
+    ) async throws {
         if didRecoverGenerationState { return }
+        if isRecoveringGenerationState {
+            if allowsConcurrentMutationOnRequiredProject,
+               recoveringGenerationProjectID == requiredProjectID {
+                return
+            }
+            while isRecoveringGenerationState {
+                await Task.yield()
+            }
+            return try await recoverGenerationStateIfNeeded(
+                requiredProjectID: requiredProjectID,
+                allowsMissingRequiredProject: allowsMissingRequiredProject,
+                allowsConcurrentMutationOnRequiredProject: allowsConcurrentMutationOnRequiredProject
+            )
+        }
+        if let requiredProjectID,
+           recoveredGenerationProjectIDs.contains(requiredProjectID) {
+            return
+        }
         // Recovery may be waiting on storage while another user action arrives.
         // Lifecycle-ledger reconciliation is the global write barrier. Once it
         // finishes, durable run markers and revision checks protect project-local
         // mutations while the remaining recovery scan continues.
-        if isRecoveringGenerationState { return }
         isRecoveringGenerationState = true
-        defer { isRecoveringGenerationState = false }
+        recoveringGenerationProjectID = requiredProjectID
+        defer {
+            recoveringGenerationProjectID = nil
+            isRecoveringGenerationState = false
+        }
 
         isReconcilingLifecycleOperations = true
         do {
@@ -616,15 +644,42 @@ extension DefaultNovelCreation {
             throw error
         }
         let sidecars = try await repository.listRecoverySidecars()
-        let summaries = try await repository.listProjects()
+        let summaries: [NovelProjectSummary]
+        let scopedLoadedProject: NovelLoadedProject?
+        if let requiredProjectID {
+            do {
+                // Install into the in-memory cache so the caller's subsequent
+                // loadCommittedProject does not re-decode the same large document.
+                let loaded = try installLoadedProject(
+                    try await repository.loadProject(id: requiredProjectID),
+                    id: requiredProjectID,
+                    allowsRollback: frozenProjectIDs.contains(requiredProjectID)
+                )
+                scopedLoadedProject = loaded
+                summaries = [NovelProjectSummary(
+                    document: loaded.document,
+                    isDegraded: loaded.access != .readWrite
+                )]
+            } catch NovelError.projectNotFound where allowsMissingRequiredProject {
+                recoveredGenerationProjectIDs.insert(requiredProjectID)
+                return
+            }
+        } else {
+            scopedLoadedProject = nil
+            summaries = try await repository.listProjects()
+        }
         var hasDeferredRunningRecovery = false
         for summary in summaries where summary.loadError == nil {
             let loaded: NovelLoadedProject
-            do {
-                loaded = try await repository.loadProject(id: summary.id)
-            } catch NovelError.projectNotFound {
-                // The project may be deleted after the summary snapshot.
-                continue
+            if let scopedLoadedProject {
+                loaded = scopedLoadedProject
+            } else {
+                do {
+                    loaded = try await repository.loadProject(id: summary.id)
+                } catch NovelError.projectNotFound {
+                    // The project may be deleted after the summary snapshot.
+                    continue
+                }
             }
             let hasLifecycleWriteBarrier = blockedLifecycleProjectIDs.contains(summary.id) ||
                 !(pendingLifecycleOperationsByProject[summary.id]?.isEmpty ?? true)
@@ -693,7 +748,11 @@ extension DefaultNovelCreation {
                 }
             }
         }
-        didRecoverGenerationState = !hasDeferredRunningRecovery
+        if requiredProjectID == nil {
+            didRecoverGenerationState = !hasDeferredRunningRecovery
+        } else if !hasDeferredRunningRecovery, let requiredProjectID {
+            recoveredGenerationProjectIDs.insert(requiredProjectID)
+        }
     }
 }
 
@@ -969,6 +1028,18 @@ private extension DefaultNovelCreation {
         if let claim = runtime.terminalClaim {
             return claim.intent == intent && claim.persistenceState != .persisting
         }
+        // Manuscript-like runs: strip mistaken outer ```html / ```markdown fences once
+        // at the terminal boundary so complete, interrupt, and fail share one clean
+        // snapshot for messages, candidates, collect, and adopt. Idempotent if complete
+        // path already normalized (e.g. polish sentinel handling).
+        if let normalized = Self.normalizedManuscriptPartial(
+            kind: runtime.kind,
+            partialContent: runtime.partialContent
+        ), normalized != runtime.partialContent {
+            runtime.partialContent = normalized
+            generationRuntimes[runID] = runtime
+            broadcast(.replaced(normalized), runID: runID)
+        }
         runtime.terminalClaim = NovelRunTerminalClaim(
             intent: intent,
             partialContent: runtime.partialContent,
@@ -977,6 +1048,26 @@ private extension DefaultNovelCreation {
         )
         generationRuntimes[runID] = runtime
         return true
+    }
+
+    /// Returns cleaned manuscript partial when this run kind produces user-collectable prose.
+    private static func normalizedManuscriptPartial(
+        kind: NovelRunKind,
+        partialContent: String
+    ) -> String? {
+        switch kind {
+        case .prose, .regenerate:
+            return NovelPromptCatalog.normalizedCandidateProse(partialContent)
+        case .polish:
+            // Prefer full polish contract (sentinel + strip). Fall back to fence-only
+            // strip for interrupted/partial polish messages.
+            if let completed = NovelPromptCatalog.completedPolishContent(from: partialContent) {
+                return completed
+            }
+            return NovelPromptCatalog.normalizedCandidateProse(partialContent)
+        case .quickStart, .discussion:
+            return nil
+        }
     }
 
     func cancelProviderWithoutWaiting(runID: NovelRunID) {
@@ -1076,6 +1167,8 @@ private extension DefaultNovelCreation {
             }
         }
         if runtime.kind == .polish {
+            // Sentinel is a hard completion contract; fence-stripping happens inside
+            // completedPolishContent and again at claimTerminal for interrupt paths.
             guard let completed = NovelPromptCatalog.completedPolishContent(
                 from: runtime.partialContent
             ) else {
@@ -1093,6 +1186,8 @@ private extension DefaultNovelCreation {
             generationRuntimes[runID] = runtime
             broadcast(.replaced(completed), runID: runID)
         }
+        // claimTerminal normalizes prose/regenerate/polish partials so complete,
+        // interrupt, and fail all share one durable clean snapshot.
         guard claimTerminal(runID: runID, intent: .completed) else { return }
         _ = try? await persistTerminalClaim(runID)
     }

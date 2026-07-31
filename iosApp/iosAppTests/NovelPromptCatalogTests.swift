@@ -9,6 +9,9 @@ final class NovelPromptCatalogTests: XCTestCase {
             "\($0.kind.rawValue)\n\($0.version)\n\($0.systemText)"
         }.joined(separator: "\n---\n")
 
+        // 2026-07-31 显式更新:散文/润色/重写提示词禁止 Markdown 代码围栏
+        // (```html 等会让 Chat markdown 把正文渲成绿字代码卡)。
+        //
         // 2026-07-26 显式更新(第二次):新增 `.continuityAuditV1` 模板(剧情矛盾检查,
         // 只读正文找前后打架的地方,不改一个字)。`NovelPromptKind` 因此从 10 个 case
         // 变成 11 个,快照必然变化;既有 10 条模板的正文一个字都没动。
@@ -17,7 +20,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
         XCTAssertEqual(
             sha256(snapshot),
-            "c693b0915652ba7018fa66f926802f361e2c67bb6a0d8ce3f1f63d94968be4b4"
+            "f9d4662c3bd537ff52a03054ee4545987453f53bf9bafe2dd1fa9747082bafc5"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -36,12 +39,63 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertTrue(continuation.contains("does not become canonical"))
         XCTAssertTrue(continuation.contains("one focused scene or passage"))
         XCTAssertTrue(continuation.contains("Do not close the chapter"))
+        XCTAssertTrue(continuation.contains("Do not wrap the prose in Markdown code fences"))
         XCTAssertTrue(wholeChapter.contains("complete next chapter"))
         XCTAssertTrue(wholeChapter.contains("chapter-level arc"))
         XCTAssertTrue(wholeChapter.contains("Markdown H1 chapter heading"))
+        XCTAssertTrue(wholeChapter.contains("Markdown code fences"))
         XCTAssertTrue(polish.contains("must not add, remove, reorder"))
         XCTAssertTrue(polish.contains("relationships, motivations, secrets, outcomes"))
         XCTAssertTrue(polish.contains(NovelPromptCatalog.polishCompletionSentinel))
+        XCTAssertTrue(polish.contains("Markdown code fences"))
+    }
+
+    func testNormalizedCandidateProseStripsSpuriousOuterFences() {
+        let fenced = """
+        ```html
+        # 第二章 灯火
+
+        季遥在急诊室长椅上坐到凌晨两点。
+        ```
+        """
+        XCTAssertEqual(
+            NovelPromptCatalog.normalizedCandidateProse(fenced),
+            """
+            # 第二章 灯火
+
+            季遥在急诊室长椅上坐到凌晨两点。
+            """
+        )
+
+        let incomplete = """
+        ```markdown
+        季遥扫了眼账单数字。
+        """
+        XCTAssertEqual(
+            NovelPromptCatalog.normalizedCandidateProse(incomplete),
+            "季遥扫了眼账单数字。"
+        )
+
+        let plain = "季遥扫了眼账单数字。"
+        XCTAssertEqual(NovelPromptCatalog.normalizedCandidateProse(plain), plain)
+
+        let sentinel = NovelPromptCatalog.polishCompletionSentinel
+        let polishOutput = """
+        ```html
+        # 第二章 灯火
+
+        正文
+        ```
+        \(sentinel)
+        """
+        XCTAssertEqual(
+            NovelPromptCatalog.completedPolishContent(from: polishOutput),
+            """
+            # 第二章 灯火
+
+            正文
+            """
+        )
     }
 
     func testHistoricalUserVisiblePromptsRemainVerifiable() throws {

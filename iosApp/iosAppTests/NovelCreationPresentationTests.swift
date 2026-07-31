@@ -959,6 +959,10 @@ private actor DelayedProjectSnapshotNovelCreation: NovelCreation {
         )
     }
 
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        await base.cancelInFlightBackgroundMutations(projectID: projectID)
+    }
+
     func retryPendingTerminal(runID: NovelRunID) async throws {
         try await base.retryPendingTerminal(runID: runID)
     }

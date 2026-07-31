@@ -904,7 +904,9 @@ struct NovelWritingContextSheet: View {
     private var preferencesList: some View {
         List {
             Section("写作偏好") {
-                Button(action: onEditWritingRequirements) {
+                Button {
+                    applyDraftBeforeTransition(onEditWritingRequirements)
+                } label: {
                     NovelSettingsRow(
                         systemImage: "text.badge.checkmark",
                         title: "写作要求",
@@ -915,7 +917,9 @@ struct NovelWritingContextSheet: View {
                 .buttonStyle(.plain)
                 .disabled(!workspace.canMutate)
 
-                Button(action: onEditPolishPreference) {
+                Button {
+                    applyDraftBeforeTransition(onEditPolishPreference)
+                } label: {
                     NovelSettingsRow(
                         systemImage: "wand.and.sparkles",
                         title: "整章润色偏好",
@@ -930,6 +934,11 @@ struct NovelWritingContextSheet: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(AmberTheme.background)
+    }
+
+    private func applyDraftBeforeTransition(_ transition: () -> Void) {
+        onApply(overrides, budgetTokens)
+        transition()
     }
 
     private var contextList: some View {

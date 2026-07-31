@@ -121,6 +121,42 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         await completionGate.open()
     }
 
+    func testReturningForegroundCancelsTheExpiringCycleInterruption() async {
+        var expirationHandler: (() -> Void)?
+        var endedLeaseIds: [String] = []
+        var interruptionReachedTerminalMutation = false
+        let interruptionGate = NovelWorkspaceLifecycleTestGate()
+        let completionGate = NovelWorkspaceLifecycleTestGate()
+        let coordinator = NovelWorkspaceLifecycleCoordinator(
+            beginKeepAlive: { _, onExpire in expirationHandler = onExpire },
+            endKeepAlive: { endedLeaseIds.append($0) }
+        )
+
+        coordinator.enterBackground(
+            waitForCompletion: { await completionGate.wait() },
+            interrupt: { _ in
+                await interruptionGate.wait()
+                if !Task.isCancelled {
+                    interruptionReachedTerminalMutation = true
+                }
+            }
+        )
+        expirationHandler?()
+        let didStartInterruption = await eventually { await interruptionGate.hasWaiter }
+        XCTAssertTrue(didStartInterruption)
+
+        coordinator.enterForeground()
+        await interruptionGate.open()
+        await Task.yield()
+
+        XCTAssertEqual(endedLeaseIds.count, 1)
+        XCTAssertFalse(
+            interruptionReachedTerminalMutation,
+            "The expired background cycle must not continue into a new foreground run."
+        )
+        await completionGate.open()
+    }
+
     func testWorkspaceExitDetachesConsumerWhileAppOwnsBackgroundLease() throws {
         let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
         let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
@@ -260,6 +296,54 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(sheets.contains("Stepper(value: $budgetTokens"))
     }
 
+    func testWritingContextKeepsThisGenerationDraftWhenOpeningPreferenceEditors() throws {
+        let sheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+        let writingContextStart = try XCTUnwrap(sheets.range(of: "struct NovelWritingContextSheet"))
+        let manualRewriteStart = try XCTUnwrap(sheets.range(
+            of: "struct NovelManualRewriteCandidateSheet",
+            range: writingContextStart.upperBound..<sheets.endIndex
+        ))
+        let writingContext = sheets[writingContextStart.lowerBound..<manualRewriteStart.lowerBound]
+
+        XCTAssertTrue(writingContext.contains("applyDraftBeforeTransition(onEditWritingRequirements)"))
+        XCTAssertTrue(writingContext.contains("applyDraftBeforeTransition(onEditPolishPreference)"))
+        XCTAssertTrue(writingContext.contains("onApply(overrides, budgetTokens)"))
+    }
+
+    func testPolishPreferenceDoesNotSilentlyDiscardOrFakeASave() throws {
+        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+        let sheetStart = try XCTUnwrap(materials.range(of: "struct NovelPolishPreferenceSheet"))
+        let nextSheet = try XCTUnwrap(materials.range(
+            of: "struct NovelProposalAcceptanceSheet",
+            range: sheetStart.upperBound..<materials.endIndex
+        ))
+        let sheet = materials[sheetStart.lowerBound..<nextSheet.lowerBound]
+
+        XCTAssertTrue(sheet.contains("hasUnsavedChanges"))
+        XCTAssertTrue(sheet.contains("放弃润色偏好修改？"))
+        XCTAssertTrue(sheet.contains(".interactiveDismissDisabled(isSaving || hasUnsavedChanges)"))
+        XCTAssertTrue(sheet.contains("let saved = await viewModel.setPolishPreference(preference)"))
+        XCTAssertTrue(sheet.contains("guard saved else"))
+    }
+
+    func testBatchPolishKeepsChapterSelectionWhileEditingItsPreference() throws {
+        let batch = try source("iosApp/NovelCreation/NovelBatchPolishSheet.swift")
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+
+        XCTAssertTrue(batch.contains("@State private var selectedChapterIDs"))
+        XCTAssertTrue(batch.contains("@State private var isEditingPolishPreference = false"))
+        XCTAssertTrue(batch.contains(".sheet(isPresented: $isEditingPolishPreference)"))
+        XCTAssertTrue(batch.contains("NovelPolishPreferenceSheet(viewModel: workspace)"))
+        XCTAssertFalse(batch.contains("let onEditPolishPreference"))
+        let batchSheetStart = try XCTUnwrap(workspace.range(of: "case .batchPolish:"))
+        let nextSheet = try XCTUnwrap(workspace.range(
+            of: "case .collectCandidate",
+            range: batchSheetStart.upperBound..<workspace.endIndex
+        ))
+        let batchSheet = workspace[batchSheetStart.lowerBound..<nextSheet.lowerBound]
+        XCTAssertFalse(batchSheet.contains("transition(to: .polishPreference)"))
+    }
+
     func testChapterEditorExposesNativeFindAndReplace() throws {
         let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
 
@@ -296,6 +380,55 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(chapters.contains(".interactiveDismissDisabled(isSubmitting)"))
         XCTAssertTrue(chapters.contains("currentBranchHasPendingOperations"))
         XCTAssertTrue(chapters.contains("time: .shortened"))
+    }
+
+    func testLongFormMaterialAndBranchEditorsProtectUnsavedChanges() throws {
+        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+        let branches = try source("iosApp/NovelCreation/NovelBranchesView.swift")
+        let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
+        let materialStart = try XCTUnwrap(materials.range(of: "struct NovelMaterialEditorSheet"))
+        let materialEnd = try XCTUnwrap(materials.range(of: "struct NovelPolishPreferenceSheet"))
+        let branchStart = try XCTUnwrap(branches.range(of: "private enum NovelBranchOverrideDraft"))
+        let materialSheet = materials[materialStart.lowerBound..<materialEnd.lowerBound]
+        let branchSheet = branches[branchStart.lowerBound...]
+
+        XCTAssertTrue(materialSheet.contains("private var hasUnsavedChanges: Bool"))
+        XCTAssertTrue(materialSheet.contains("currentDraft != initialDraft"))
+        XCTAssertTrue(materialSheet.contains("aliases: normalizedAliases"))
+        XCTAssertTrue(materialSheet.contains("if hasUnsavedChanges"))
+        XCTAssertTrue(materialSheet.contains("\"放弃资料编辑？\""))
+        XCTAssertTrue(materialSheet.contains(
+            ".interactiveDismissDisabled(isSaving || hasUnsavedChanges)"
+        ))
+        XCTAssertTrue(materialSheet.contains(
+            ".presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)"
+        ))
+        XCTAssertTrue(materialSheet.contains(
+            "guard isEditable, canSave, hasUnsavedChanges, !isSaving"
+        ))
+        XCTAssertTrue(materialSheet.contains("hasUnsavedChanges &&"))
+
+        XCTAssertTrue(branchSheet.contains("private var hasUnsavedChanges: Bool"))
+        XCTAssertTrue(branchSheet.contains("currentDraft != initialDraft"))
+        XCTAssertTrue(branchSheet.contains("case existing(NovelMaterialRevisionID?)"))
+        XCTAssertTrue(branchSheet.contains("case newRevision("))
+        XCTAssertTrue(branchSheet.contains("if hasUnsavedChanges"))
+        XCTAssertTrue(branchSheet.contains("\"放弃分支设定编辑？\""))
+        XCTAssertTrue(branchSheet.contains(
+            ".interactiveDismissDisabled(isSubmitting || hasUnsavedChanges)"
+        ))
+        XCTAssertTrue(branchSheet.contains(
+            ".presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)"
+        ))
+        XCTAssertTrue(branchSheet.contains("guard hasUnsavedChanges else { return false }"))
+        XCTAssertTrue(branchSheet.contains(
+            "guard viewModel.canMutate, canSave, hasUnsavedChanges, !isSubmitting"
+        ))
+        XCTAssertTrue(branchSheet.contains("let saved = await viewModel.setBranchMaterialOverride("))
+        XCTAssertTrue(branchSheet.contains("guard saved else"))
+        XCTAssertTrue(branchSheet.contains("|| !viewModel.canMutate"))
+        XCTAssertTrue(viewModel.contains("func setBranchMaterialOverride("))
+        XCTAssertTrue(viewModel.contains(") async -> Bool"))
     }
 
     func testBranchMutationGatesMatchReducerBusySemantics() throws {
@@ -511,13 +644,14 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(list.contains("pendingOpenProjectID"))
         XCTAssertFalse(list.contains(".task(id: pendingOpenProjectID)"))
         XCTAssertTrue(workspace.contains("hasCompletedInitialNavigation && hasLoadedRoutedProject"))
-        let appearance = try XCTUnwrap(workspace.range(of: "NovelNavigationDidAppearObserver"))
+        XCTAssertTrue(workspace.contains(".onAppear"))
+        XCTAssertTrue(workspace.contains("hasCompletedInitialNavigation = true"))
+        XCTAssertFalse(workspace.contains("NovelNavigationDidAppearObserver"))
         let deferredTask = try XCTUnwrap(workspace.range(of: ".task(id: hasCompletedInitialNavigation)"))
         let selection = try XCTUnwrap(workspace.range(
             of: "await viewModel.selectProject(projectID)",
             range: deferredTask.upperBound..<workspace.endIndex
         ))
-        XCTAssertLessThan(appearance.lowerBound, deferredTask.lowerBound)
         XCTAssertLessThan(deferredTask.lowerBound, selection.lowerBound)
         XCTAssertFalse(workspace.contains(".task(id: projectID)"))
     }
@@ -654,12 +788,13 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(scrollWithoutAnimationBody.contains("withAnimation"))
     }
 
-    func testColdProjectPushDefersRecoverySyncAndBoundsHistoryWork() throws {
+    func testColdProjectPushLoadsFromWorkspaceAppearanceAndBoundsHistoryWork() throws {
         let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
         let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
         let sessionViewModel = try source("iosApp/NovelCreation/NovelSessionViewModel.swift")
 
-        XCTAssertTrue(workspace.contains("NovelNavigationDidAppearObserver"))
+        XCTAssertFalse(workspace.contains("NovelNavigationDidAppearObserver"))
+        XCTAssertTrue(workspace.contains("hasCompletedInitialNavigation = true"))
         XCTAssertTrue(workspace.contains("hasCompletedInitialNavigation && hasLoadedRoutedProject"))
         XCTAssertTrue(workspace.contains(".task(id: hasCompletedInitialNavigation)"))
         XCTAssertTrue(workspace.contains("await viewModel.selectProject(projectID)"))
@@ -765,6 +900,63 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(list.contains("viewModel.stateSyncActivity"))
         XCTAssertTrue(list.contains("activity.displayedCompletionFraction"))
         XCTAssertTrue(list.contains("完成前暂不能切换项目"))
+        XCTAssertTrue(list.contains("viewModel.cancelAutomaticStateSync("))
+        let topInset = try XCTUnwrap(list.range(of: ".safeAreaInset(edge: .top"))
+        let bottomInset = try XCTUnwrap(list.range(
+            of: ".safeAreaInset(edge: .bottom",
+            range: topInset.upperBound..<list.endIndex
+        ))
+        let routing = list[topInset.lowerBound..<bottomInset.lowerBound]
+        let continuity = try XCTUnwrap(routing.range(of: "viewModel.isContinuityOperationRunning"))
+        let stateSync = try XCTUnwrap(routing.range(of: "viewModel.isStateSyncOperationRunning"))
+        let reload = try XCTUnwrap(routing.range(of: "viewModel.hasReloadRequirement"))
+        XCTAssertLessThan(continuity.lowerBound, reload.lowerBound)
+        XCTAssertLessThan(stateSync.lowerBound, reload.lowerBound)
+    }
+
+    func testProjectListLoadingStaysLightweightAndFailuresRemainRetryable() throws {
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let loadingStart = try XCTUnwrap(list.range(of: "if isPreparingImportPreview"))
+        let sheetStart = try XCTUnwrap(list.range(
+            of: ".sheet(item: $activeSheet)",
+            range: loadingStart.upperBound..<list.endIndex
+        ))
+        let loadingOverlay = list[loadingStart.lowerBound..<sheetStart.lowerBound]
+
+        XCTAssertTrue(loadingOverlay.contains("ProgressView"))
+        XCTAssertFalse(loadingOverlay.contains("amberGlass"))
+        XCTAssertTrue(list.contains("viewModel.projectListLoadError"))
+        XCTAssertTrue(list.contains("Button(\"重新读取\")"))
+        XCTAssertGreaterThanOrEqual(
+            list.components(separatedBy: "loadProjects(restoresSelection: false)").count - 1,
+            3
+        )
+        XCTAssertTrue(list.contains("let acceptedPreview = stoppingActiveRun ? nil : preview"))
+        XCTAssertTrue(list.contains("preview: acceptedPreview"))
+    }
+
+    func testProjectDeletionStopsRunsOnlyWhenNeededAndShowsRowProgress() throws {
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+
+        XCTAssertTrue(list.contains("if hasRunningRun(for: project.id)"))
+        XCTAssertTrue(list.contains("deletingProjectID = project.id"))
+        XCTAssertTrue(list.contains("defer { deletingProjectID = nil }"))
+        XCTAssertTrue(list.contains("accessibilityLabel(\"正在删除项目\")"))
+    }
+
+    func testStateSyncRecoveryAndStopAreReachableOutsideTheComposer() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        XCTAssertTrue(workspace.contains("stateSyncRecoveryMessage("))
+        XCTAssertTrue(workspace.contains("Button(\"重试同步\""))
+        XCTAssertTrue(reader.contains("currentStateSyncRecoveryMessage"))
+        XCTAssertTrue(reader.contains("Button(\"重试同步\""))
+        XCTAssertTrue(reader.contains("cancelAutomaticStateSync("))
+        XCTAssertTrue(session.contains("workspace.stateSyncRecoveryMessage("))
+        XCTAssertTrue(workspace.contains(".disabled(!canRetryCurrentStateSync)"))
+        XCTAssertTrue(reader.contains(".disabled(!canRetryCurrentStateSync)"))
     }
 
     func testStateSyncActivityIsProjectScopedAndScheduledSyncKeepsBackgroundLease() throws {
@@ -776,7 +968,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("activity.projectID == workspace.selectedProjectID"))
         XCTAssertTrue(session.contains("activity.branchID == workspace.selectedBranchID"))
         let backgroundCheck = try XCTUnwrap(viewModel.range(
-            of: "private func hasActiveBackgroundGeneration()"
+            of: "private func backgroundGenerationProbe()"
         ))
         let loadProjects = try XCTUnwrap(viewModel.range(
             of: "func loadProjects(",
@@ -994,6 +1186,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
     /// 并且跳章确实接到了阅读器路由上。
     func testContinuityAuditEntryIsReachableFromTheLiveCompendiumView() throws {
         let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
         let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
         let auditView = try source("iosApp/NovelCreation/NovelContinuityAuditView.swift")
         let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
@@ -1019,11 +1212,11 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(story.contains("NovelContinuityAuditSection("))
         XCTAssertTrue(story.contains("onOpenChapter: onOpenChapter"))
 
-        // 第三环:区块确实调 ViewModel 的预估与扫描,并按 chapterID 取当前分支的版本跳章。
-        XCTAssertTrue(auditView.contains("await viewModel.planContinuityAudit()"))
-        // 2026-07-26 显式更新:发起入口从 `await viewModel.auditContinuity()` 改为
-        // `viewModel.startContinuityAudit()`——任务句柄必须留在 ViewModel 里,
-        // 否则「停止扫描」无从取消,执行入口里的 `Task.checkCancellation` 是死代码。
+        // 第三环:预估和扫描的任务句柄都由共享 ViewModel 持有。否则离开剧情页后
+        // 局部 Task 会继续占着全局操作锁，项目列表却没有进度或停止入口。
+        XCTAssertFalse(auditView.contains("@State private var isPlanning"))
+        XCTAssertTrue(auditView.contains("viewModel.startContinuityAuditPlanning()"))
+        XCTAssertTrue(auditView.contains("viewModel.continuityAuditPlan"))
         XCTAssertTrue(auditView.contains("viewModel.startContinuityAudit()"))
         XCTAssertTrue(auditView.contains("viewModel.cancelContinuityAudit()"))
         XCTAssertTrue(auditView.contains("viewModel.branchSnapshot?.branch.workingChapterSelections"))
@@ -1036,6 +1229,11 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         // 第四环:ViewModel 转发到真正的执行入口,而不是自己攒一份假结果。
         XCTAssertTrue(viewModel.contains("try await creation.planContinuityAudit("))
         XCTAssertTrue(viewModel.contains("try await creation.auditContinuity("))
+        XCTAssertTrue(viewModel.contains("continuityAuditTask = Task"))
+        XCTAssertTrue(list.contains("viewModel.isContinuityOperationRunning"))
+        XCTAssertTrue(list.contains("viewModel.cancelContinuityAudit()"))
+        XCTAssertTrue(workspace.contains("viewModel.isContinuityOperationRunning"))
+        XCTAssertTrue(workspace.contains("viewModel.cancelContinuityAudit()"))
     }
 
     private func source(_ relativePath: String) throws -> String {

@@ -6,10 +6,10 @@ Last updated: 2026-07-31
 
 ## Repository
 
-- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
+- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 小说创作易用性收敛已于 `86ff5ea3a` 纳入当前分支；当前另有一组尚未提交的小说通知去除与灵动岛展开态改动，范围为 Activity Widget、Agent Activity、后台保活、`ChatViewModel`、对应 iOS 测试和本文件；开始新任务仍以实时 `git status` 为准。
+- Worktree: 当前有一组尚未提交的小说创作阻塞与易用性修复，覆盖项目读取、恢复隔离、任务 owner、状态同步、批量润色、编辑器与后台生命周期及对应测试；开始新任务仍以实时 `git status` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,22 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `NativeChatTimelineView`（native timeline；2026-07-30 退役 route 判定层后为唯一 Chat 列表路径）。`ChatSwiftUIMessageList` 与 UIKit `ChatCollectionMessageList` 已生产不可达（仅 `#if CHAT_PERF_REPLAY` 仍编译前者），其 replay 测试现为死路径测试，不再代表默认 Chat 门禁；默认路径验证应以走 native timeline 的回放为准，各 replay 测试直驱哪个视图、强制门禁是否仍覆盖默认路径待下一切口核对。
 
 ## Latest Completed Slices
+
+### 2026-07-31 模型议会：上传文件/图片解析后生成议题（未提交）
+
+- 议会输入区新增 `+` 附件入口（拍照 / 照片 / 文件），与 Chat 共用 `ComposerAttachment*` 控件；仅首轮新议题可附加，追问仍为纯文本。
+- 文件走 `DocumentAccessStore.previewFileForWorkspace`；图片走视觉识别模型；结果注入主持人「完善议题」与联网调研 query（`sourceMaterials` / `researchObjective`）。
+- subagent 双路 review（逻辑闭环 + 调用链）初评 PASS-WITH-CAVEATS；已修：materialsPrepGeneration 门闩、openArchive/reset 作废准备态、`startPendingDiscussion` 拦 isReplay、文件解析可取消、发送/准备中自动收起附件菜单。
+- 验证：`CouncilSourceMaterialsTests` + `IOSCouncilRunnerMechanicsTests` **71 passed / 0 failed**。真机手感与真实视觉识别仍待装机；「带材料重开 / 续聊再附材料」为产品可选增强。
+
+### 2026-07-31 小说创作阻塞与易用性深挖修复（未提交）
+
+- 项目入口的两条永久等待链路均已拆除：项目清单只读取 inventory，不再为每个项目执行全局崩溃恢复和重复全文解码；打开项目时才执行 project-scoped recovery。工作区删除 0×0 UIKit appearance 观察器，由 SwiftUI `onAppear` 驱动初次选择。清单与工作区加载失败均有内联重试，已取消请求不会发布旧结果。
+- 中央“正在读取项目”玻璃胶囊已移除，改为无容器的原生轻量进度提示。项目删除、导入、重命名和重载不再假成功或复活 ghost row；损坏项目可经既有 tombstone 生命周期删除，运行中 replace import 会停止后重新预览最新 revision。
+- 任务 owner 与终态已补齐：状态同步、连续性审计和润色重试提升到对应 ViewModel，切页后仍可见、可停止；取消后的 durable completed/incompatible 正确收口。批量润色在剧情漂移检查取消时落为 cancelled，废弃源章节不可重试/采用但仍可放弃。
+- 长表单编辑器统一处理归一化 dirty/no-op、未保存退出确认和真实保存失败；批量润色偏好作为稳定父 Sheet 的子 Sheet 展示，不再清空已选章节。后台 interruption task 有明确 owner，前台恢复会取消迟到中断，未知运行态采用有限探测。
+- 恢复并发保持原有安全顺序：同项目用户 mutation 可在全局 ledger barrier 之后进入，恢复写入会等待该 mutation 并基于最新 revision 重放；其他项目请求等待当前恢复后再恢复自己的 marker。删除重放显式允许目标已不存在，损坏 sidecar 只影响被打开的项目且不采信跨项目 payload。
+- 阶段性 subagent review 已覆盖 owner、导航、恢复、状态同步、批量润色、编辑器、后台生命周期及调用链闭环；审出的 must-fix 均已回修。iPhone 17 Pro / iOS 26.5 Simulator 上 10 个小说套件 **321 passed / 0 failed / 0 skipped**；generic iOS Debug arm64 构建成功，Team `89QRFX9548` 签名在磁盘有效。15:00 已覆盖安装并启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`，新容器为 `005F242F-7F98-4D19-B6CC-BE580718151D`；真机视觉与真实项目读取仍待人工进入小说创作确认。
 
 ### 2026-07-31 小说通知去除 + 灵动岛展开态信息重设计
 

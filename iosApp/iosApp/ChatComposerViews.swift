@@ -1029,3 +1029,216 @@ struct ComposerPopoverSurface<Content: View>: View {
             .shadow(color: .black.opacity(0.12), radius: 22, y: 5)
     }
 }
+
+// MARK: - Shared composer attachment controls (Chat + Council)
+
+/// 输入胶囊左侧「+」：展开时旋转 45° 变 ×，解析中可换成 paperclip。
+/// Chat / 模型议会共用同一触感与尺寸，避免两套 + 键。
+struct ComposerAttachToggleButton: View {
+    var isExpanded: Bool
+    var isBusy: Bool = false
+    var isDisabled: Bool = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isBusy ? "paperclip.circle.fill" : "plus")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(AmberTheme.muted)
+                .frame(width: 32, height: 32)
+                .contentShape(Circle())
+                .rotationEffect(.degrees(isExpanded ? 45 : 0))
+                .contentTransition(.symbolEffect(.replace.downUp))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.88, haptic: .lightImpact))
+        .disabled(isDisabled)
+        .accessibilityLabel(isExpanded ? "关闭附件" : "添加附件")
+    }
+}
+
+/// Liquid Glass 附件菜单：拍照 / 照片 / 文件（与 Chat 一致）。
+struct ComposerAttachmentGlassPanel: View {
+    var isDisabled: Bool = false
+    let onCamera: () -> Void
+    let onPhotos: () -> Void
+    let onFiles: () -> Void
+    /// 选中某一行后由父级收起展开态。
+    var onDismiss: () -> Void = {}
+
+    var body: some View {
+        VStack(spacing: 0) {
+            row(title: "拍照", icon: "camera", action: onCamera)
+            divider
+            row(title: "照片", icon: "photo.on.rectangle", action: onPhotos)
+            divider
+            row(title: "文件", icon: "doc", action: onFiles)
+        }
+        .frame(width: 220)
+        .clipShape(.rect(cornerRadius: 22))
+        .glassEffect(.regular, in: .rect(cornerRadius: 22))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 2)
+        .padding(.bottom, 2)
+    }
+
+    private var divider: some View {
+        Divider().overlay(AmberTheme.borderSoft).padding(.leading, 52)
+    }
+
+    private func row(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.bouncy(duration: 0.36, extraBounce: 0.1)) { onDismiss() }
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(width: 24)
+                Text(title)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(AmberTheme.foreground)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+    }
+}
+
+/// 待发送图片：56pt 圆角缩略图 + 右上角删除（Chat 同款）。
+struct ComposerPendingImageStrip: View {
+    struct Item: Identifiable {
+        let id: UUID
+        let previewData: Data
+    }
+
+    let items: [Item]
+    let onRemove: (UUID) -> Void
+    /// Optional status under the strip (blocked / fallback / preparing).
+    var status: ComposerAttachmentStatus? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(items) { item in
+                        ZStack(alignment: .topTrailing) {
+                            if let ui = UIImage(data: item.previewData) {
+                                Image(uiImage: ui)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 56, height: 56)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            }
+                            Button {
+                                onRemove(item.id)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(.white, .black.opacity(0.45))
+                                    .padding(3)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("移除图片")
+                        }
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+            if let status {
+                ComposerAttachmentStatusLabel(status: status)
+            }
+        }
+    }
+}
+
+/// 待发送文件卡片：文件名 + 字节摘要 + 可选脚注（Chat 同款 thinMaterial）。
+struct ComposerPendingFileCard: View {
+    let fileName: String
+    var byteSummary: String? = nil
+    var isTruncated: Bool = false
+    var footnote: String? = nil
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Label(fileName, systemImage: "doc.text")
+                    .font(.caption)
+                    .lineLimit(1)
+                if let byteSummary {
+                    Text(isTruncated ? "\(byteSummary) · 已截断" : byteSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("移除文件 \(fileName)")
+            }
+            if let footnote, !footnote.isEmpty {
+                Text(footnote)
+                    .font(.caption2)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+enum ComposerAttachmentStatus: Equatable {
+    case muted(String, systemImage: String = "info.circle")
+    case warning(String, systemImage: String = "exclamationmark.triangle.fill")
+    case error(String)
+    case preparing(String)
+}
+
+struct ComposerAttachmentStatusLabel: View {
+    let status: ComposerAttachmentStatus
+
+    var body: some View {
+        switch status {
+        case let .muted(message, systemImage):
+            Label(message, systemImage: systemImage)
+                .font(.caption2)
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(2)
+                .padding(.horizontal, 2)
+        case let .warning(message, systemImage):
+            Label(message, systemImage: systemImage)
+                .font(.caption2)
+                .foregroundStyle(AmberTheme.accentAmber)
+                .lineLimit(2)
+                .padding(.horizontal, 2)
+        case let .error(message):
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .lineLimit(2)
+                .padding(.horizontal, 2)
+        case let .preparing(message):
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+}

@@ -413,7 +413,9 @@ struct NovelSessionView: View {
                 hasRefreshError: viewModel.hasRefreshError,
                 isBusy: viewModel.isBusy
             ),
+            polishRetryTransactionID: viewModel.polishRetryTransactionID,
             onAction: handleRowAction,
+            onCancelPolishRetry: viewModel.cancelPolishRetry,
             onAnswerAskUser: handleAskUserAnswer,
             onToggleArchive: toggleArchive
         )
@@ -443,13 +445,28 @@ struct NovelSessionView: View {
                 polishRecoveryBanner(transaction)
             }
 
-            if let activity = workspace.stateSyncActivity,
-               activity.projectID == workspace.selectedProjectID,
-               activity.branchID == workspace.selectedBranchID {
+            if let projectID = workspace.selectedProjectID,
+               let branchID = workspace.selectedBranchID,
+               let activity = workspace.stateSyncActivity,
+               activity.projectID == projectID,
+               activity.branchID == branchID {
                 stateSyncProgressBanner(activity)
             } else if let projectID = workspace.selectedProjectID,
                       let branchID = workspace.selectedBranchID,
-                      let failure = workspace.automaticStateSyncFailureMessage(
+                      workspace.canCancelAutomaticStateSync(
+                          projectID: projectID,
+                          branchID: branchID
+                      ) ||
+                      workspace.isStateSyncStopping(
+                          projectID: projectID,
+                          branchID: branchID
+                      ) {
+                // Preparing / stopping before activity is published, or after Stop
+                // while teardown finishes — keep Stop reachable and block explained.
+                stateSyncLightweightBanner(projectID: projectID, branchID: branchID)
+            } else if let projectID = workspace.selectedProjectID,
+                      let branchID = workspace.selectedBranchID,
+                      let failure = workspace.stateSyncRecoveryMessage(
                           projectID: projectID,
                           branchID: branchID
                       ) {
@@ -568,7 +585,7 @@ struct NovelSessionView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Button("重试同步") {
-                workspace.retryAutomaticStateSync(
+                workspace.retryStateSync(
                     projectID: projectID,
                     branchID: branchID
                 )
@@ -597,6 +614,8 @@ struct NovelSessionView: View {
             isRunning: viewModel.isRunning,
             isBusy: viewModel.isPerformingAction || workspace.isPerforming
         )
+        let retryBlocker = blocker ?? viewModel.polishTransactionSourceBlocker(transaction.id)
+        let isRetrying = viewModel.polishRetryTransactionID == transaction.id
         return HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(AmberTheme.accentAmber)
@@ -607,61 +626,78 @@ struct NovelSessionView: View {
                     : "上次润色还需要处理")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground2)
-                Text(recoveryAbandonTask == nil
-                    ? polishRecoveryDetail(transaction, blocker: blocker)
-                    : "正在放弃未完成的润色…")
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(2)
+                if isRetrying {
+                    Text("正在检查剧情一致性…")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                } else {
+                    Text(recoveryAbandonTask == nil
+                        ? polishRecoveryDetail(transaction, blocker: retryBlocker)
+                        : "正在放弃未完成的润色…")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(2)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Menu("处理") {
-                if transaction.status == .pending || transaction.status == .retryable {
-                    Button("重试检查", systemImage: "arrow.clockwise") {
-                        Task { @MainActor in
-                            await viewModel.retryPolishTransaction(transaction.id)
+            if isRetrying {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Button("停止") {
+                        viewModel.cancelPolishRetry()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } else {
+                Menu("处理") {
+                    if transaction.status == .pending || transaction.status == .retryable {
+                        Button("重试检查", systemImage: "arrow.clockwise") {
+                            viewModel.startPolishRetry(transaction.id)
+                        }
+                        .disabled(retryBlocker != nil)
+                    }
+                    Button("放弃这次润色", systemImage: "xmark.circle", role: .destructive) {
+                        pendingRecoveryAbandonTransactionIDs = [transaction.id]
+                    }
+                    if unresolvedCount > 1 {
+                        Button(
+                            "放弃全部 \(unresolvedCount) 项",
+                            systemImage: "xmark.circle.fill",
+                            role: .destructive
+                        ) {
+                            pendingRecoveryAbandonTransactionIDs = unresolvedTransactions.map(\.id)
                         }
                     }
                 }
-                Button("放弃这次润色", systemImage: "xmark.circle", role: .destructive) {
-                    pendingRecoveryAbandonTransactionIDs = [transaction.id]
-                }
-                if unresolvedCount > 1 {
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+                .disabled(blocker != nil || recoveryAbandonTask != nil)
+                .confirmationDialog(
+                    pendingRecoveryAbandonTransactionIDs.count > 1
+                        ? "放弃全部 \(pendingRecoveryAbandonTransactionIDs.count) 项润色？"
+                        : "放弃这次润色？",
+                    isPresented: recoveryAbandonConfirmationBinding,
+                    titleVisibility: .visible
+                ) {
                     Button(
-                        "放弃全部 \(unresolvedCount) 项",
-                        systemImage: "xmark.circle.fill",
+                        pendingRecoveryAbandonTransactionIDs.count > 1 ? "全部放弃" : "放弃润色",
                         role: .destructive
                     ) {
-                        pendingRecoveryAbandonTransactionIDs = unresolvedTransactions.map(\.id)
+                        let transactionIDs = pendingRecoveryAbandonTransactionIDs
+                        pendingRecoveryAbandonTransactionIDs = []
+                        abandonRecoveryTransactions(transactionIDs)
                     }
+                    Button("取消", role: .cancel) {
+                        pendingRecoveryAbandonTransactionIDs = []
+                    }
+                } message: {
+                    Text("候选会保留在创作记录中，但不能再作为润色版采用。")
                 }
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .frame(minWidth: 44, minHeight: 44)
-            .contentShape(Rectangle())
-            .disabled(blocker != nil || recoveryAbandonTask != nil)
-            .confirmationDialog(
-                pendingRecoveryAbandonTransactionIDs.count > 1
-                    ? "放弃全部 \(pendingRecoveryAbandonTransactionIDs.count) 项润色？"
-                    : "放弃这次润色？",
-                isPresented: recoveryAbandonConfirmationBinding,
-                titleVisibility: .visible
-            ) {
-                Button(
-                    pendingRecoveryAbandonTransactionIDs.count > 1 ? "全部放弃" : "放弃润色",
-                    role: .destructive
-                ) {
-                    let transactionIDs = pendingRecoveryAbandonTransactionIDs
-                    pendingRecoveryAbandonTransactionIDs = []
-                    abandonRecoveryTransactions(transactionIDs)
-                }
-                Button("取消", role: .cancel) {
-                    pendingRecoveryAbandonTransactionIDs = []
-                }
-            } message: {
-                Text("候选会保留在创作记录中，但不能再作为润色版采用。")
             }
         }
         .padding(.horizontal, 4)
@@ -704,6 +740,40 @@ struct NovelSessionView: View {
             : "剧情一致性检查未完成，可以重试或放弃。"
     }
 
+    private func stateSyncLightweightBanner(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(AmberTheme.accentAmber)
+
+            Text(
+                workspace.stateSyncStatusTitle(projectID: projectID, branchID: branchID)
+                    ?? "正在准备剧情状态"
+            )
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if workspace.canCancelAutomaticStateSync(
+                projectID: projectID,
+                branchID: branchID
+            ) {
+                Button("停止") {
+                    workspace.cancelAutomaticStateSync(
+                        projectID: projectID,
+                        branchID: branchID
+                    )
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 4)
+    }
+
     private func stateSyncProgressBanner(_ activity: NovelStateSyncActivity) -> some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             let fraction = activity.displayedCompletionFraction
@@ -717,7 +787,15 @@ struct NovelSessionView: View {
                         .controlSize(.small)
                         .tint(AmberTheme.accentAmber)
 
-                    Text(activity.phase == .preparing ? "正在准备剧情状态" : "正在同步剧情状态")
+                    Text(
+                        workspace.stateSyncStatusTitle(
+                            projectID: activity.projectID,
+                            branchID: activity.branchID
+                        )
+                            ?? (activity.phase == .preparing
+                                ? "正在准备剧情状态"
+                                : "正在同步剧情状态")
+                    )
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AmberTheme.foreground2)
 
@@ -1177,7 +1255,7 @@ struct NovelSessionView: View {
         case .retryPending(let pendingID):
             Task { @MainActor in await viewModel.retryPending(pendingID) }
         case .retryPolish(let transactionID):
-            Task { @MainActor in await viewModel.retryPolishTransaction(transactionID) }
+            viewModel.startPolishRetry(transactionID)
         case .abandonPolish(let transactionID):
             Task { @MainActor in await viewModel.abandonPolishTransaction(transactionID) }
         case .convertPolishToManualRewrite(let candidateID, _):
@@ -1539,7 +1617,9 @@ private struct NovelSessionRowView: View, Equatable {
     let adoptingPolishCandidateID: NovelCandidateID?
     let askUserBlocker: NovelSessionActionBlocker?
     let runtimeActionBlocker: NovelSessionActionBlocker?
+    let polishRetryTransactionID: NovelPendingOperationID?
     let onAction: (NovelSessionRowAction) -> Void
+    let onCancelPolishRetry: () -> Void
     let onAnswerAskUser: (NovelMessageID, String) -> Void
     let onToggleArchive: (NovelDiscussionArchivePresentation) -> Void
 
@@ -1547,7 +1627,8 @@ private struct NovelSessionRowView: View, Equatable {
         lhs.row.id == rhs.row.id && lhs.row.digest == rhs.row.digest &&
             lhs.adoptingPolishCandidateID == rhs.adoptingPolishCandidateID &&
             lhs.askUserBlocker == rhs.askUserBlocker &&
-            lhs.runtimeActionBlocker == rhs.runtimeActionBlocker
+            lhs.runtimeActionBlocker == rhs.runtimeActionBlocker &&
+            lhs.polishRetryTransactionID == rhs.polishRetryTransactionID
     }
 
     var body: some View {
@@ -1575,6 +1656,8 @@ private struct NovelSessionRowView: View, Equatable {
                 askUser: row.askUser,
                 askUserBlocker: askUserBlocker,
                 runtimeActionBlocker: runtimeActionBlocker,
+                retryingPolishTransactionID: polishRetryTransactionID,
+                onCancelPolishRetry: onCancelPolishRetry,
                 actions: row.actions,
                 onAction: onAction,
                 onAnswerAskUser: onAnswerAskUser

@@ -21,6 +21,8 @@ struct NovelSessionBubble: View {
     let askUser: NovelAskUserPresentation?
     var askUserBlocker: NovelSessionActionBlocker? = nil
     var runtimeActionBlocker: NovelSessionActionBlocker? = nil
+    var retryingPolishTransactionID: NovelPendingOperationID? = nil
+    var onCancelPolishRetry: () -> Void = {}
     let actions: [NovelSessionRowActionAvailability]
     let onAction: (NovelSessionRowAction) -> Void
     let onAnswerAskUser: (NovelMessageID, String) -> Void
@@ -33,6 +35,21 @@ struct NovelSessionBubble: View {
             assistantBubble
         case .system:
             systemMessage
+        }
+    }
+
+    /// Candidate manuscript should never render as Chat code cards when the model
+    /// mistakenly wraps it in ```html / ```markdown fences.
+    private static func displayMarkdown(
+        _ content: String,
+        kind: NovelSessionMessageKind,
+        isStreaming: Bool
+    ) -> String {
+        switch kind {
+        case .proseCandidate, .polishCandidate, .interruptedDraft:
+            return NovelPromptCatalog.normalizedCandidateProse(content)
+        case .discussion, .userInput, .error:
+            return content
         }
     }
 
@@ -63,7 +80,11 @@ struct NovelSessionBubble: View {
                     }
                 } else {
                     ChatAssistantMarkdownView(
-                        markdown: content,
+                        markdown: Self.displayMarkdown(
+                            content,
+                            kind: kind,
+                            isStreaming: isStreaming
+                        ),
                         renderCacheNamespace: "novel:session:\(messageID)",
                         isStreaming: isStreaming,
                         hasEverStreamed: hasEverStreamed
@@ -196,6 +217,8 @@ struct NovelSessionBubble: View {
         NovelSessionActionButtons(
             actions: effectiveActions,
             granularity: granularity,
+            retryingPolishTransactionID: retryingPolishTransactionID,
+            onCancelPolishRetry: onCancelPolishRetry,
             onAction: onAction
         )
     }
@@ -247,7 +270,7 @@ struct NovelSessionBubble: View {
 
     @ViewBuilder
     private var polishCandidateStatus: some View {
-        if isAdoptingPolish {
+        if isAdoptingPolish || isRetryingPolish {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("正在检查剧情一致性…")
@@ -256,6 +279,13 @@ struct NovelSessionBubble: View {
             .foregroundStyle(AmberTheme.muted)
         } else {
             polishTransactionStatusView
+        }
+    }
+
+    private var isRetryingPolish: Bool {
+        guard let retryingPolishTransactionID else { return false }
+        return actions.contains {
+            $0.action == .retryPolish(retryingPolishTransactionID)
         }
     }
 
@@ -320,6 +350,8 @@ struct NovelSessionBubble: View {
 private struct NovelSessionActionButtons: View {
     let actions: [NovelSessionRowActionAvailability]
     let granularity: NovelGenerationGranularity?
+    let retryingPolishTransactionID: NovelPendingOperationID?
+    let onCancelPolishRetry: () -> Void
     let onAction: (NovelSessionRowAction) -> Void
 
     @State private var pendingAbandonTransactionID: NovelPendingOperationID?
@@ -338,7 +370,17 @@ private struct NovelSessionActionButtons: View {
 
     @ViewBuilder
     private func actionButton(_ item: NovelSessionRowActionAvailability) -> some View {
-        if case .abandonPolish(let transactionID) = item.action {
+        if case .retryPolish(let transactionID) = item.action,
+           retryingPolishTransactionID == transactionID {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Button("停止检查") {
+                    onCancelPolishRetry()
+                }
+                .frame(minHeight: 44)
+            }
+        } else if case .abandonPolish(let transactionID) = item.action {
             baseButton(item) {
                 pendingAbandonTransactionID = transactionID
             }
