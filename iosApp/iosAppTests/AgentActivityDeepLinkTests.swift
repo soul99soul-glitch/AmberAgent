@@ -67,7 +67,8 @@ final class AgentActivityDeepLinkTests: XCTestCase {
         let attributes = AgentActivityAttributes(
             runId: "run-123",
             conversationId: nil,
-            startedAt: .now
+            startedAt: .now,
+            conversationTitle: nil
         )
 
         XCTAssertNil(attributes.destinationURL(for: .openTask))

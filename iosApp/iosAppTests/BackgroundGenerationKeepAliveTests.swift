@@ -72,6 +72,23 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertTrue(keepAlive.holdsLease("run-1"))
     }
 
+    func testBeginCanSkipSystemTaskWhileKeepingUIKitLease() {
+        let spy = SystemSpy()
+        let keepAlive = spy.makeKeepAlive()
+
+        keepAlive.begin(
+            "novel-run",
+            title: "Amber 小说创作中",
+            subtitle: "后台生成",
+            submitSystemTask: false
+        )
+
+        XCTAssertEqual(spy.begunNames, ["AmberGeneration-novel-run"])
+        XCTAssertTrue(spy.registeredIdentifiers.isEmpty)
+        XCTAssertTrue(spy.submittedRequests.isEmpty)
+        XCTAssertTrue(keepAlive.holdsLease("novel-run"))
+    }
+
     func testIdentifierStaysInsidePermittedNamespace() {
         let keepAlive = SystemSpy().makeKeepAlive()
 

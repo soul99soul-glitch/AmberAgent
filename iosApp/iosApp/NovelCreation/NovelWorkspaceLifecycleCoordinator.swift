@@ -35,7 +35,8 @@ final class NovelWorkspaceLifecycleCoordinator {
                 leaseId,
                 title: "Amber 小说创作中",
                 subtitle: "后台生成",
-                onExpire: onExpire
+                onExpire: onExpire,
+                submitSystemTask: false
             )
         },
         endKeepAlive: @escaping EndKeepAlive = { leaseId in

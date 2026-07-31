@@ -24,6 +24,7 @@ final class AgentLiveActivityController {
     func start(
         runId: String,
         conversationId: String?,
+        conversationTitle: String? = nil,
         presentation: AgentActivityPresentation
     ) {
         guard activitiesEnabled else { return }
@@ -43,6 +44,7 @@ final class AgentLiveActivityController {
         requestActivity(
             runId: runId,
             conversationId: conversationId,
+            conversationTitle: conversationTitle,
             presentation: presentation
         )
     }
@@ -191,13 +193,15 @@ final class AgentLiveActivityController {
     private func requestActivity(
         runId: String,
         conversationId: String?,
+        conversationTitle: String?,
         presentation: AgentActivityPresentation
     ) {
         let now = Date()
         let attributes = AgentActivityAttributes(
             runId: runId,
             conversationId: conversationId,
-            startedAt: now
+            startedAt: now,
+            conversationTitle: conversationTitle
         )
 
         do {

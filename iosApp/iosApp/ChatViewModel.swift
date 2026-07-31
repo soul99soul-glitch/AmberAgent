@@ -2297,6 +2297,7 @@ final class ChatViewModel {
         liveActivityController.start(
             runId: runId,
             conversationId: conversationHex,
+            conversationTitle: conversationStore?.currentConversation?.title,
             presentation: presentation
         )
     }

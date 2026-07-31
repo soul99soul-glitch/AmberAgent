@@ -9,7 +9,7 @@ import UIKit
 /// 生图 / 小说 / 议会）只需在生成开始时 `begin`、终态时 `end`，生成逻辑一行
 /// 都不用改。
 ///
-/// 两条腿，缺一不可：
+/// 默认使用两条腿：
 /// - `beginBackgroundTask`：调用即生效，覆盖「提交」到「系统真正调度」之间的
 ///   空窗。没有它，App 可能在 BG 任务启动前就被挂起。上限约 30 秒。
 /// - `BGContinuedProcessingTask`：系统调度后接管，提供长执行窗口。它的 handler
@@ -17,6 +17,8 @@ import UIKit
 ///
 /// 两条腿互为兜底：BG 任务提交失败或系统迟迟不调度，第一条腿仍然撑住 30 秒；
 /// BG 任务一旦接管，第一条腿立刻释放，不白占系统配额。
+/// 不适合出现在系统 continued-processing UI 的调用方可显式关闭第二条腿；短腿与
+/// 到期回调仍保持同一租约语义。
 @MainActor
 final class BackgroundGenerationKeepAlive {
     typealias BeginBackgroundTask = (String, @escaping () -> Void) -> UIBackgroundTaskIdentifier
@@ -110,11 +112,14 @@ final class BackgroundGenerationKeepAlive {
     ///
     /// - Parameter onExpire: 执行权被系统收走时回调。上层在这里做收口
     ///   （搬后台重跑 / 转挂起）。正常跑完不会触发。
+    /// - Parameter submitSystemTask: 是否提交系统 continued-processing task。
+    ///   关闭时仍持有 UIKit 短任务，并在其到期时执行 `onExpire`。
     func begin(
         _ leaseId: String,
         title: String,
         subtitle: String,
-        onExpire: (() -> Void)? = nil
+        onExpire: (() -> Void)? = nil,
+        submitSystemTask: Bool = true
     ) {
         guard leases[leaseId] == nil else { return }
 
@@ -130,7 +135,9 @@ final class BackgroundGenerationKeepAlive {
             onExpire: onExpire
         )
 
-        submitContinuedTask(leaseId, title: title, subtitle: subtitle)
+        if submitSystemTask {
+            submitContinuedTask(leaseId, title: title, subtitle: subtitle)
+        }
         IOSBackgroundLifecycleLog.record("keepAliveBegin(\(leaseId))", detail: snapshotDetail)
     }
 

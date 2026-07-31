@@ -10,6 +10,9 @@ struct AgentActivityAttributes: ActivityAttributes {
     let runId: String
     let conversationId: String?
     let startedAt: Date
+    /// 会话标题，展开态主标题用。锁屏/灵动岛是系统共享表面，只放用户自己
+    /// 创建的标题，不放模型名或提示词。
+    let conversationTitle: String?
 }
 
 struct AgentActivityPresentation: Codable, Hashable {

@@ -6,10 +6,10 @@ Last updated: 2026-07-31
 
 ## Repository
 
-- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
+- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 当前有一组尚未提交的小说创作易用性收敛改动，范围为 `iosApp/iosApp/NovelCreation/`、对应 iOS 测试和本文件；开始新任务仍以实时 `git status` 为准。
+- Worktree: 小说创作易用性收敛已于 `86ff5ea3a` 纳入当前分支；当前另有一组尚未提交的小说通知去除与灵动岛展开态改动，范围为 Activity Widget、Agent Activity、后台保活、`ChatViewModel`、对应 iOS 测试和本文件；开始新任务仍以实时 `git status` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -22,13 +22,19 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
-### 2026-07-31 小说创作易用性三阶段收敛（未提交）
+### 2026-07-31 小说通知去除 + 灵动岛展开态信息重设计
+
+- 小说创作后台通知去除：`BackgroundGenerationKeepAlive.begin` 新增 `submitSystemTask` 参数（默认 true）；`NovelWorkspaceLifecycleCoordinator` 传 `false`，小说路径只保留 30s `UIBackgroundTask`，不提交 `BGContinuedProcessingTaskRequest`，系统不再弹横幅通知。Chat 生成路径不受影响（仍用默认 true）。
+- 灵动岛展开态信息重设计：`AgentActivityAttributes` 新增 `conversationTitle: String?`；`ChatViewModel.startLiveActivity` 从 `conversationStore.currentConversation?.title` 读取并传入。展开态 center 从“阶段标题做主标题”改为“会话标题做主标题、阶段做副标题”，回答“哪个对话在跑什么”而不是重复 compact 的“正在生成”。无标题时回退到旧行为。展开态底部只在有实质信息（进度条/度量/可执行动作）时显示，不再重复 trailing 已显示的计时器。锁屏卡片同步新层级。
+- 验证：iPhone 17 Pro / iOS 26.5 Simulator 上 `BackgroundGenerationKeepAliveTests`、`IOSChatBackgroundSuspensionTests`、`AgentActivityDeepLinkTests` 共 **30 passed / 0 failed / 0 skipped**；Stable 主应用与 Activity Widget 随测试完成编译，ExperimentalGPL Activity Widget 单独构建成功。新增机制测试锁定小说路径不注册、不提交系统 continued-processing task，但仍保留 UIKit 短租约；`git diff --check` 通过。真机灵动岛展开态视觉效果待装机目测。
+
+### 2026-07-31 小说创作易用性三阶段收敛（已提交：`86ff5ea3a`）
 
 - 批量润色：未决润色检查可一次确认并放弃全部，不再逐项反复点击；单项、批量和气泡内放弃确认都挂在触发按钮上。停止、重试、放弃均显示进行中和失败原因，入口与执行层共用同一 blocker。
 - 状态连续性：未发送输入、上下文覆盖和预算按 project+branch 保存；项目重载保留当前分支，跨项目返回恢复各自最后分支；发送成功只清理发起时所属草稿，失败保留原输入。
 - 可见闭环：章节润色/重写/废弃与自动剧情同步均有开始、失败和重试反馈；废弃章有持久标识。收录、归档、资料、偏好、建议接受、重命名和分支覆盖等异步 Sheet 在提交期间锁定，脏编辑退出前确认；durable pending 后不可再编辑无提交路径的内容。只读项目仍可浏览资料，长正文使用可滚动、可选择文本。
 - 易用性与无障碍：候选动作的运行时 blocker 同时驱动按钮和可见原因；同步停止按钮独立可达；错误关闭与主要动作满足 44pt 触控目标；Quick Start 分类显示待处理数量，跟随全局模型时显示实际模型名。
-- Review 与验证：每阶段均经调用链/状态和真实 UX 两类 subagent 复核并修复结论；最终复核 PASS。iPhone 17 Pro / iOS 26.5 Simulator 的 13 组整合回归为 **295 passed / 0 failed / 0 skipped**（`/private/tmp/amber-novel-ux-final-regression-20260731.xcresult`），`git diff --check` 通过；最终 Debug 构建已安装并启动，项目列表、长会话工作区和空正文目录目测无布局/导航回归。批量放弃、只读长资料和键盘/手势仍缺真实数据下的真机触感验证。
+- Review 与验证：每阶段均经调用链/状态和真实 UX 两类 subagent 复核并修复结论；最终复核 PASS。iPhone 17 Pro / iOS 26.5 Simulator 的 13 组整合回归为 **295 passed / 0 failed / 0 skipped**（`/private/tmp/amber-novel-ux-final-regression-20260731.xcresult`），`git diff --check` 通过；最终 Debug 构建已安装并启动，项目列表、长会话工作区和空正文目录目测无布局/导航回归。改动已提交为 `86ff5ea3a`；批量放弃、只读长资料和键盘/手势仍缺真实数据下的真机触感验证。
 
 ### 2026-07-30 小说创作真实阻塞与恢复路径收敛
 
@@ -51,6 +57,7 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 - 前后台执行都以 run 启动时的 `params.tools` 作为模型可见工具集；Codex single-flight 只共享实时 OAuth token，每个调用者继续用自己的冻结 provider 快照重建请求配置。
 - 同轮复核还修正了两个由既有红灯测试暴露的终态问题：provider terminal 到达后不再提前清空尚未消费的 FIFO 事件；空回复与普通完成均在消息保存成功后才发布成功终态和触发后续辅助生成。
 - 验证：iPhone 17 Pro / iOS 26.5 Simulator 定点 Agent/恢复/快照/边界回归 139 passed；存储、后台挂起与流式 FIFO 补充回归 83 passed、1 skipped；`:core:agent-store-room:jvmTest` 编译成功（该模块 JVM test 为 NO-SOURCE）；`git diff --check` 通过。改动提交为 `1b97ef471`；普通合并远端 4 个提交后的 Agent、小说与桥接联合回归为 **468 passed / 0 failed / 0 skipped**，尚未执行真机验证。
+
 ### 2026-07-30 借鉴 OpenMinis 做减法：退役渲染优先级链与 Chat route 判定层
 
 - 用户诉求「设计越复杂越容易出问题，要简单」，对照 OpenMinis「单写者/单回调/不为可切换可回退预留抽象」的纪律，做纯减法两轮切片，不改任何产品行为。探索阶段先纠正了上一轮清单的三处错估：滚动「删双写」无的放矢（hardcode 后双写已不存在，SwiftUI pin/measured-growth 真身份是 fallback 安全网）；iSH oneshot 已于 07-26 commit 成 spawn、生产零调用=已死；一类「删死代码零风险」低估了删 UserDefaults key 常量会炸 perf 测试、删 flag enum 牵动整层死 eligibility+死测试。
@@ -77,7 +84,7 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 - 三层修复(TDD 红→绿):①**显示兜底** `sanitizeSeatOutput`(逐行状态机:围栏内整块缓冲、闭合时看含 `web_search`/`num_results` 决定丢或留,围栏外逐行删裸伪搜索行,正常代码块与 prose 不误伤)接席位流式 `body` 与终态 `output`(顺带清洗写进 transcript/log 的文本,防污染下一轮 prompt);②**prompt 护栏** `seatSystemPrompt` 明确「你没有联网/工具能力,勿输出 web_search/function call/搜索参数,勿用代码围栏包结构化内容,直接 prose 给判断」;③**席位联网查证**(治本,满足 grok 搜索冲动):新增设置开关 `seatWebSearch`(独立 UserDefaults 键、默认关)+ request 字段 + `seatPrompt` 注入「本席联网查证」段 + 席位循环按 gate(`seatWebSearch && researchConsent==.allowed && continuation==nil`)复用主持同一条 `researcher.research` 链路(每席 maxSearches/Scrapes=2 控成本,追问不查),gate 尊重全局联网开关与主持一致。
 - **后台/退页续跑核实=已满足,本轮零代码**:经状态/生命周期审计 + 已有测试确认——generation Task 挂在 `CouncilChatViewModel`(`@Observable final class`,与 struct View 同文件)的 `discussionTask`,该 VM 由 `AppShell` 的 `@State` 持有(app 根级常驻),struct View 随页面销毁不影响 VM/Task;`runtimeDidDisappear` 只 checkpoint 不 cancel;退页续跑**已有测试背书**(`testDetachedCouncilRuntimeSkipsMandatoryAskAndFinishesInBackground` 断言 `send→runtimeDidDisappear` 后 run 仍跑完到「主持总结」);退后台由 `runtimeWillEnterBackground`→`BackgroundGenerationKeepAlive` 租约罩整场(含 B 新增每席调研,自动落在租约内),council 路径无 background interrupt。退后台无自动化测试 = `BGTaskScheduler`/`UIApplication` 系统 API 难 mock 的已知缺口(71cc64f77 当时靠真机验证),非疏漏。
 - 验证:新增 `sanitizeSeatOutput` 3 项 + 席位联网 3 项红测试先看红(失败信息复现 bug 活体:append 里出现「已组建…工程、风险」、`callCount=1≠3`),实现后转绿;`IOSCouncilRunnerMechanicsTests` 全套 **63 项 0 失败**(iPhone 17 Pro / iOS 26.5 Simulator),含中途弄破又修好的失败兜底测试。真机 grok 开「允许席位联网搜索」后应真查证、关时由 sanitize+护栏兜底,退页/退后台续跑均待真机目测。
-- subagent 对抗性 review(逻辑闭环 + 调用链路断裂)结论 **yes-with-caveats、无 CRITICAL/MAJOR**:①我担心的「调研抛错拖垮席位」被证伪——`IOSCouncilResearching.research` 签名 `async -> Bundle` 无 throws,实现把网络错误全吞进 `bundle.failures`,搜索抖动时席位照常发言;②「全伪搜索输出崩整场」被证伪——安全降级为单席失败 + 继续 + 综合照跑(有既有测试实证);③流式逐帧核心伪文本任何帧不泄漏,仅空围栏标记可能闪一瞬(无敏感载荷,终态干净);④调研无整体超时(S4)、取消不提前 break(S6)为 MINOR 残留,与主持调研既有模式对等(逐请求 8/10s 超时,非无限挂起),B 仅把 1 次放大到 N 次。review 抓出唯一真实精度缺陷 S3:sanitize 删行首 `query ` 行规则过宽,会误删英文正常发言(如 `Query the archive…`),且 sanitize 无条件运行、与开关无关→默认路径也中招。修复:状态机加 `sawBareWebSearch` 上下文态,`query`/`num_results` 行删除须依赖前序出现过裸 `web_search` 行,遇非空普通行复位;补 2 条红测试(英文 query 保留 / 上下文复位后 query 保留)先红后绿,全套 **65 项 0 失败**。明确不修(记残余,代价可接受):调研全失败时把 "Research failures" 当材料喂模型(不丢内容不泄漏)、流式空围栏闪烁(无敏感载荷)。
+- subagent 对抗性 review(逻辑闭环 + 调用链路断裂)结论 **yes-with-caveats、无 CRITICAL/MAJOR**:①我担心的「调研抛错拖垮席位」被证伪——`IOSCouncilResearching.research` 签名 `async -> Bundle` 无 throws,实现把网络错误全吞进 `bundle.failures`,搜索抖动时席位照常发言;②「全伪搜索输出崩整场」被证伪——安全降级为单席失败 + 继续 + 综合照跑(有既有测试实证);③流式逐帧核心伪文本任何帧不泄漏,仅空围栏标记可能闪一瞬(无敏感载荷,终态干净);④调研无整体超时(S4)、取消不提前 break(S6)为 MINOR 残留,与主持调研既有模式对等(逐请求 8/10s 超时,非无限挂起),B 仅把 1 次放大到 N 次。review 抓出唯一真实精度缺陷 S3:sanitize 删行首 `query` 行规则过宽,会误删英文正常发言(如 `Query the archive…`),且 sanitize 无条件运行、与开关无关→默认路径也中招。修复:状态机加 `sawBareWebSearch` 上下文态,`query`/`num_results` 行删除须依赖前序出现过裸 `web_search` 行,遇非空普通行复位;补 2 条红测试(英文 query 保留 / 上下文复位后 query 保留)先红后绿,全套 **65 项 0 失败**。明确不修(记残余,代价可接受):调研全失败时把 "Research failures" 当材料喂模型(不丢内容不泄漏)、流式空围栏闪烁(无敏感载荷)。
 
 ### 2026-07-29 模型议会动态组席静默回退默认席位修复
 

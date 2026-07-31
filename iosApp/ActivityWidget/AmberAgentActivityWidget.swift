@@ -43,6 +43,7 @@ struct AmberAgentActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.center) {
                     AgentActivityHeadline(
+                        conversationTitle: context.attributes.conversationTitle,
                         presentation: context.state.presentation,
                         isStale: context.isStale
                     )
@@ -109,23 +110,44 @@ private struct AgentActivityCompactStatus: View {
     }
 }
 
+/// 展开态主标题。iOS 27 Siri 原则：展开必须回答“哪个对话在跑什么”，
+/// 而不是重复 compact 已经说的“正在生成”。会话标题做主标题，阶段做副标题。
 private struct AgentActivityHeadline: View {
+    let conversationTitle: String?
     let presentation: AgentActivityPresentation
     let isStale: Bool
 
+    private var stageTitle: String {
+        presentation.displayStage(isStale: isStale).title
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(presentation.displayStage(isStale: isStale).title)
-                .font(.headline)
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            if let conversationTitle, !conversationTitle.isEmpty {
+                Text(conversationTitle)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
-            if presentation.kind != .response {
-                Text(presentation.kind.title)
+                Text(stageTitle)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.58))
                     .lineLimit(1)
+            } else {
+                // 无标题（工具活动等）：回退到阶段做主标题
+                Text(stageTitle)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                if presentation.kind != .response {
+                    Text(presentation.kind.title)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.58))
+                        .lineLimit(1)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -153,6 +175,8 @@ private struct AgentActivityExpandedFact: View {
     }
 }
 
+/// 展开态底部。只在有实质信息时显示：进度条、度量明细、可执行动作。
+/// 不重复 trailing 已经显示的计时器。
 private struct AgentActivityExpandedFooter: View {
     let attributes: AgentActivityAttributes
     let state: AgentActivityAttributes.ContentState
@@ -162,39 +186,44 @@ private struct AgentActivityExpandedFooter: View {
         state.presentation.displayPhase(isStale: isStale)
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if displayPhase == .running,
-               let progress = state.presentation.progressFraction {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(displayPhase.widgetColor)
-            }
+    private var hasContent: Bool {
+        (displayPhase == .running && state.presentation.progressFraction != nil)
+            || (displayPhase == .running && state.presentation.metric.detailText != nil)
+            || (state.presentation.action != nil
+                && attributes.destinationURL(for: state.presentation.action) != nil)
+    }
 
-            HStack(spacing: 10) {
-                Group {
+    var body: some View {
+        if hasContent {
+            VStack(alignment: .leading, spacing: 6) {
+                if displayPhase == .running,
+                   let progress = state.presentation.progressFraction {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .tint(displayPhase.widgetColor)
+                }
+
+                HStack(spacing: 10) {
                     if displayPhase == .running,
                        let detail = state.presentation.metric.detailText {
                         Text(detail)
-                    } else {
-                        Text(state.updatedAt, style: .relative)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.58))
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    if let action = state.presentation.action,
+                       attributes.destinationURL(for: action) != nil {
+                        Label(action.title, systemImage: "arrow.up.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color.amberAccent)
                     }
                 }
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.58))
-                .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                if let action = state.presentation.action,
-                   attributes.destinationURL(for: action) != nil {
-                    Label(action.title, systemImage: "arrow.up.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.amberAccent)
-                }
             }
+            .padding(.bottom, 2)
         }
-        .padding(.bottom, 2)
     }
 }
 
@@ -214,6 +243,7 @@ private struct LockScreenAgentActivityView: View {
                 .accessibilityHidden(true)
 
                 AgentActivityHeadline(
+                    conversationTitle: attributes.conversationTitle,
                     presentation: state.presentation,
                     isStale: isStale
                 )
@@ -364,7 +394,8 @@ private extension AgentActivityPhase {
 private let previewAttributes = AgentActivityAttributes(
     runId: "preview-run",
     conversationId: "01234567-89ab-cdef-0123-456789abcdef",
-    startedAt: .now.addingTimeInterval(-125)
+    startedAt: .now.addingTimeInterval(-125),
+    conversationTitle: "帮我写一首关于春天的诗"
 )
 
 #Preview("Lock Screen", as: .content, using: previewAttributes) {
