@@ -23,6 +23,8 @@
     "pages/ChatAgentPermissionsPage",
     "pages/ChatAgentExecutionPage",
     "pages/ChatMcpSettingsPage",
-    "pages/ChatAssistantMcpPage"
+    "pages/ChatAssistantMcpPage",
+    "pages/SettingSubAgentPage",
+    "pages/SettingModelCouncilPage"
   ]
 }

@@ -21,12 +21,12 @@ import {
   DEFAULT_SUB_AGENT_TIMEOUT_MS, DEFAULT_SUB_AGENT_MAX_TURNS,
   DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
 } from '@amber/chat-domain';
-import { INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, BG, TITLE, BODY, META, LABEL, PAD_CARD, RADIUS } from '../design/tokens.ets';
+import { INK, INK3, ACCENT, SURFACE, LINE, BG, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
 
 @Entry
 @Component
 struct SettingSubAgentPage {
-  @State enabled: boolean = false;
+  @State subAgentEnabled: boolean = false;
   @State mode: string = 'roster';
   @State allowDynamic: boolean = true;
   @State maxConcurrentRuns: number = DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS;
@@ -43,7 +43,7 @@ struct SettingSubAgentPage {
     try {
       const port = getAgentPromptSettingsPort();
       const setting: SubAgentRuntimeSetting = await port.getSubAgentSetting();
-      this.enabled = setting.enabled;
+      this.subAgentEnabled = setting.enabled;
       this.mode = setting.mode;
       this.allowDynamic = setting.allowDynamicSubAgents;
       this.maxConcurrentRuns = setting.maxConcurrentRuns;
@@ -61,7 +61,7 @@ struct SettingSubAgentPage {
       const port = getAgentPromptSettingsPort();
       const current: SubAgentRuntimeSetting = await port.getSubAgentSetting();
       const next: SubAgentRuntimeSetting = {
-        enabled: this.enabled,
+        enabled: this.subAgentEnabled,
         mode: this.mode as SubAgentMode,
         allowDynamicSubAgents: this.allowDynamic,
         maxConcurrentRuns: this.maxConcurrentRuns,
@@ -94,9 +94,9 @@ struct SettingSubAgentPage {
           Column() {
             // enabled 开关
             this.settingRow('启用子代理', '允许主 Agent 委派子任务给隔离的子代理', (): void => {
-              this.enabled = !this.enabled;
+              this.subAgentEnabled = !this.subAgentEnabled;
               this.saveSetting();
-            }, this.enabled)
+            }, this.subAgentEnabled)
 
             // mode 选择
             this.modeRow()

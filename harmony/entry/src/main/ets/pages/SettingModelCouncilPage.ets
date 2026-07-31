@@ -14,13 +14,12 @@
 
 import { getAgentPromptSettingsPort } from '../di/AppContainer.ets';
 import type { ModelCouncilRuntimeSetting } from '@amber/deepread-domain';
-import { makeRuntimeSetting } from '@amber/deepread-domain';
-import { INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, BG, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
+import { INK, INK3, ACCENT, SURFACE, LINE, BG, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
 
 @Entry
 @Component
 struct SettingModelCouncilPage {
-  @State enabled: boolean = true;
+  @State councilEnabled: boolean = true;
   @State maxSeats: number = 5;
   @State defaultRounds: number = 1;
   @State maxRounds: number = 3;
@@ -38,7 +37,7 @@ struct SettingModelCouncilPage {
     try {
       const port = getAgentPromptSettingsPort();
       const setting: ModelCouncilRuntimeSetting = await port.getCouncilSetting();
-      this.enabled = setting.enabled;
+      this.councilEnabled = setting.enabled;
       this.maxSeats = setting.maxSeats;
       this.defaultRounds = setting.defaultRounds;
       this.maxRounds = setting.maxRounds;
@@ -57,7 +56,7 @@ struct SettingModelCouncilPage {
       const port = getAgentPromptSettingsPort();
       const current: ModelCouncilRuntimeSetting = await port.getCouncilSetting();
       const next: ModelCouncilRuntimeSetting = {
-        enabled: this.enabled,
+        enabled: this.councilEnabled,
         defaultSeats: current.defaultSeats,
         synthesisModelId: current.synthesisModelId,
         maxSeats: this.maxSeats,
@@ -87,8 +86,8 @@ struct SettingModelCouncilPage {
       } else {
         Scroll() {
           Column() {
-            this.toggleRow('启用 Model Council', '多模型合议:对关键决策获取多视角对比', this.enabled, ((): void => {
-              this.enabled = !this.enabled;
+            this.toggleRow('启用 Model Council', '多模型合议:对关键决策获取多视角对比', this.councilEnabled, ((): void => {
+              this.councilEnabled = !this.councilEnabled;
               this.saveSetting();
             }))
 

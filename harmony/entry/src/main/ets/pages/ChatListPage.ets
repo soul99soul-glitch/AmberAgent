@@ -211,6 +211,11 @@ struct ChatListPage {
         //   placement 同 '运行' 先例 — harmony 无设置索引页,入口居对话列表顶栏)
         Text('MCP').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatMcpSettingsPage' }); })
+        // 子代理/Council 实验设置入口
+        Text('子代理').fontSize(13).fontColor(INK3).margin({ right: 16 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/SettingSubAgentPage' }); })
+        Text('Council').fontSize(13).fontColor(INK3).margin({ right: 16 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/SettingModelCouncilPage' }); })
         // D-106:删除全部入口(HistoryPage.kt:99-105 Delete01 IconButton;
         //   contentDescription '删除全部' zh 逐字)
         Text('删除全部').fontSize(13).fontColor(DANGER).margin({ right: 16 })
