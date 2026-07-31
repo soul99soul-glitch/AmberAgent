@@ -39,7 +39,10 @@ export struct ChatInput {
 
   // 斜杠命令可见:text 以 / 开头且非编辑态
   private isSlashVisible(): boolean {
-    return !this.editing && this.text.startsWith('/') && this.text.indexOf(' ') < 0;
+    // 支持半角 / 和全角 ／(中文输入法兼容,Android ChatInputComposers.kt:765-771)
+    return !this.editing &&
+      (this.text.startsWith('/') || this.text.startsWith('／')) &&
+      this.text.indexOf(' ') < 0;
   }
 
   private getSlashCommands(): SlashCommand[] {

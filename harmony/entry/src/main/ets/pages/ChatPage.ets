@@ -473,6 +473,7 @@ struct ChatPage {
   //   读 baseToolsCache(在 buildToolLoop 内 step-4 设置),保证只暴露已 profile
   //   的 parent base tools,不含 subagent_* 自身。subagentEnabled + 会话存在才挂载。
   private subAgentEnabled: boolean = false;
+  private subAgentMode: string = 'roster';
   private baseToolsCache: AgentTool[] = [];
   private subAgentToolsCache: AgentTool[] = [];
   @State errorMsg: string = '';
@@ -1246,6 +1247,7 @@ struct ChatPage {
     try {
       const setting = await hydrateSubAgentSetting();
       this.subAgentEnabled = setting.enabled;
+      this.subAgentMode = setting.mode;
       if (!setting.enabled) {
         this.subAgentToolsCache = [];
         return;
@@ -2646,7 +2648,7 @@ struct ChatPage {
         editing: this.editingNodeId.length > 0,
         hasImages: this.pendingImages.length > 0,
         subAgentEnabled: this.subAgentEnabled,
-        subAgentMode: this.subAgentEnabled ? 'roster' : 'roster',
+        subAgentMode: this.subAgentMode,
         onTextChange: (v: string): void => { this.inputText = v; },
         onSend: (): void => { this.send(); },
         onStop: (): void => {
