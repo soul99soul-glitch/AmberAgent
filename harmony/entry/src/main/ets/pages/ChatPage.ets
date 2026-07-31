@@ -300,6 +300,8 @@ struct MessageRow {
   }
 
   private toggleThinkingExpanded(bi: number): void {
+    // 含 pending 审批 tool 的 block 不允许折叠(用户需要看到审批按钮)
+    if (this.hasPendingToolInBlock(bi)) return;
     const key: string = `${bi}`;
     const cur: boolean = this.thinkingExpanded(bi);
     const copy: Record<string, boolean> = {};
@@ -309,6 +311,20 @@ struct MessageRow {
     }
     copy[key] = !cur;
     this.thinkingExpandedStates = copy;
+  }
+
+  // 检查指定 block 是否含 pending 审批 tool(禁止折叠)
+  private hasPendingToolInBlock(bi: number): boolean {
+    const blocks: MessagePartBlock[] = this.getBlocks();
+    if (bi >= blocks.length) return false;
+    const block: MessagePartBlock = blocks[bi];
+    if (block.kind !== 'thinking') return false;
+    // ArkTS 联合 narrowing 后需显式访问
+    const steps: ThinkingStep[] = (block as Record<string, Object>)['steps'] as ThinkingStep[];
+    for (const step of steps) {
+      if (step.kind === 'tool' && step.tool.approvalState.type === 'pending') return true;
+    }
+    return false;
   }
 
   private thinkingSummary(steps: ThinkingStep[]): string {

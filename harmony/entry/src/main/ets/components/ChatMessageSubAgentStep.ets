@@ -8,7 +8,7 @@
 //   ✅ 显示 @displayName + 状态动词(running→正在工作/completed→已完成/...)
 //   ✅ 点击展开 run sheet(显示任务目标 + 实时文本)
 //   ❌ phase 轮播动画(后续迭代,需定时器)
-//   ❌ SubAgentAvatar(后续迭代)
+//   ✅ SubAgentAvatar(已接入)
 //   ❌ 搜索图片画廊(后续迭代)
 
 import type { UIMessagePartTool, JsonValue } from '@amber/chat-domain';
