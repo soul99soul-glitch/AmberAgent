@@ -10,8 +10,9 @@
 //   - denied → 拒绝原因
 //   - 已执行 → 首条 output 文本 3 行预览(展开折叠 = 后续迭代)
 
-import type { UIMessagePartTool, UIMessagePartText } from '@amber/chat-domain';
+import type { UIMessagePartTool, UIMessagePartText, UIMessagePartImage } from '@amber/chat-domain';
 import { INK, INK2, INK3, ACCENT, SURFACE2, LINE } from '../design/tokens.ets';
+import { GeneratedImageCarousel } from './GeneratedImageCarousel.ets';
 
 @Component
 export struct ChatMessageTools {
@@ -55,7 +56,12 @@ export struct ChatMessageTools {
           .width('100%').margin({ top: 4 })
       }
 
-      // output 预览:首条 text part,3 行截断
+      // generate_image:从 output 提取 image parts 渲染轮播
+      if (this.part.toolName === 'generate_image' && this.getImageUrls().length > 0) {
+        GeneratedImageCarousel({ imageUrls: this.getImageUrls(), showActions: true })
+      }
+
+      // output 预览:首条 text part,3 行截断(generate_image 跳过,已有轮播)
       if (this.part.output.length > 0 && this.part.output[0].type === 'text') {
         Text((this.part.output[0] as UIMessagePartText).text)
           .fontSize(11).fontColor(INK2)
@@ -81,5 +87,16 @@ export struct ChatMessageTools {
     if (state === 'denied') return '已拒绝';
     if (state === 'answered') return '已应答';
     return '';
+  }
+
+  // 从 output parts 提取 image URL(generate_image 专用)
+  private getImageUrls(): string[] {
+    const urls: string[] = [];
+    for (const p of this.part.output) {
+      if (p.type === 'image') {
+        urls.push((p as UIMessagePartImage).url);
+      }
+    }
+    return urls;
   }
 }
