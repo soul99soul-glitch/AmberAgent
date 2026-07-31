@@ -341,3 +341,104 @@ export struct Tag {
       .onClick((): void => { this.onClick(); })
   }
 }
+
+// ===== 更多通用原语(第三梯队补充) =====
+
+// ImagePreviewDialog: 全屏图片预览(点击关闭)
+@Component
+export struct ImagePreviewDialog {
+  @Prop url: string = '';
+  @Prop show: boolean = false;
+  onDismiss: () => void = (): void => {};
+  build(): void {
+    if (this.show) {
+      Stack({ alignContent: Alignment.Center }) {
+        Column() {
+          Image(this.url)
+            .width('90%')
+            .objectFit(ImageFit.Contain)
+            .borderRadius(12)
+          Text('点击关闭').fontSize(META).fontColor('#FFFFFF')
+            .margin({ top: 12 })
+        }
+      }
+      .width('100%').height('100%')
+      .backgroundColor('rgba(0,0,0,0.9)')
+      .onClick((): void => { this.onDismiss(); })
+    }
+  }
+}
+
+// DotLoading: 三点跳动加载动画(MVP:静态三点,动画需设备验证)
+@Component
+export struct DotLoading {
+  @Prop color: string = INK3;
+  dotSize: number = 6;
+  build(): void {
+    Row() {
+      Text('●').fontSize(this.dotSize).fontColor(this.color)
+      Text('●').fontSize(this.dotSize).fontColor(this.color).margin({ left: 4 }).opacity(0.6)
+      Text('●').fontSize(this.dotSize).fontColor(this.color).margin({ left: 4 }).opacity(0.3)
+    }
+  }
+}
+
+// ShareSheet: 分享面板(MVP:复制链接/分享文本)
+@Component
+export struct ShareSheet {
+  @Prop show: boolean = false;
+  @Prop text: string = '';
+  onDismiss: () => void = (): void => {};
+  build(): void {
+    if (this.show) {
+      Column() {
+        Text('分享').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
+          .width('100%').padding({ left: 16, top: 12, bottom: 8 })
+        Text('复制文本').fontSize(BODY).fontColor(ACCENT)
+          .width('100%').padding({ left: 16, top: 10, bottom: 10 })
+          .onClick((): void => {
+            // 复制逻辑由消费方注入,这里仅占位
+            this.onDismiss();
+          })
+        Divider().color(LINE).strokeWidth(0.5)
+        Text('取消').fontSize(BODY).fontColor(INK3)
+          .width('100%').padding({ left: 16, top: 10, bottom: 10 })
+          .onClick((): void => { this.onDismiss(); })
+      }
+      .width('100%')
+      .backgroundColor(SURFACE)
+      .borderRadius({ topLeft: 16, topRight: 16 })
+    }
+  }
+}
+
+// ToggleSurface: 可折叠表面(标题可点切换展开/折叠)
+@Component
+export struct ToggleSurface {
+  @Prop title: string = '';
+  @Prop expanded: boolean = false;
+  onToggle: () => void = (): void => {};
+  @BuilderParam content: () => void;
+  build(): void {
+    Column() {
+      Row() {
+        Text(this.title).fontSize(BODY).fontColor(INK2).layoutWeight(1)
+        Text(this.expanded ? '▾' : '▸').fontSize(11).fontColor(INK3)
+      }
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .onClick((): void => { this.onToggle(); })
+      if (this.expanded) {
+        Column() {
+          this.content();
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, bottom: 8 })
+      }
+    }
+    .width('100%')
+    .backgroundColor(SURFACE)
+    .border({ width: 1, color: LINE })
+    .borderRadius(RADIUS)
+  }
+}
