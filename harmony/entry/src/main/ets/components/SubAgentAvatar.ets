@@ -8,28 +8,28 @@ import { INK, INK3, ACCENT, SURFACE, SIGNAL, ERROR } from '../design/tokens.ets'
 export struct SubAgentAvatar {
   @Prop subagentId: string = '';
   @Prop name: string = '';
-  @Prop size: number = 24;
+  @Prop avatarSize: number = 24;
   @Prop status: string = ''; // running/completed/failed/cancelled/...
   build(): void {
     Stack({ alignContent: Alignment.BottomEnd }) {
       // 头像主体
       Text(this.initial())
-        .fontSize(this.size * 0.4).fontWeight(FontWeight.Bold)
+        .fontSize(this.avatarSize * 0.4).fontWeight(FontWeight.Bold)
         .fontColor('#FFFFFF')
-        .width(this.size).height(this.size)
-        .borderRadius(this.size / 2)
+        .width(this.avatarSize).height(this.avatarSize)
+        .borderRadius(this.avatarSize / 2)
         .backgroundColor(this.avatarColor())
         .textAlign(TextAlign.Center)
 
       // 状态点(running=绿;failed=红;其他=不显示)
       if (this.status === 'running' || this.status === 'failed') {
-        Circle({ width: this.size * 0.3, height: this.size * 0.3 })
+        Circle({ width: this.avatarSize * 0.3, height: this.avatarSize * 0.3 })
           .fill(this.status === 'running' ? SIGNAL : ERROR)
           .stroke(SURFACE)
           .strokeWidth(1.5)
       }
     }
-    .width(this.size + 2).height(this.size + 2)
+    .width(this.avatarSize + 2).height(this.avatarSize + 2)
   }
 
   private initial(): string {

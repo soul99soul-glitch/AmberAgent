@@ -15,6 +15,7 @@ import type { UIMessagePartTool, JsonValue } from '@amber/chat-domain';
 import { toolOutputJson, toolInputAsJson } from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
 import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE, BODY, META, LABEL } from '../design/tokens.ets';
+import { SubAgentAvatar } from './SubAgentAvatar.ets';
 
 // 从 subagent_start/wait/read 工具输出解析最新 status
 const parseLatestStatus = (tools: UIMessagePartTool[]): string => {
@@ -70,7 +71,12 @@ export struct ChatMessageSubAgentStep {
   build(): void {
     Column() {
       Row() {
-        Text('🤖').fontSize(14)
+        SubAgentAvatar({
+          subagentId: this.displayName(),
+          name: this.displayName(),
+          avatarSize: 20,
+          status: this.currentStatus(),
+        })
         Text(`@${this.displayName()} ${statusVerb(this.currentStatus())}`)
           .fontSize(META).fontColor(INK2)
           .margin({ left: 6 })

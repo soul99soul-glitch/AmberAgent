@@ -126,6 +126,8 @@ const INK2: string = '#57544C';
 const INK3: string = '#8F8B80';
 const LINE: string = '#E4E0D6';
 const ACCENT: string = '#B8623A';
+const META: number = 12;
+const LABEL: number = 10;
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 const ROW: string = '#EFECE4';
 
@@ -185,6 +187,7 @@ struct MessageRow {
   onOpenToolPreview: (part: UIMessagePartTool) => void = (_p: UIMessagePartTool): void => {};
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
   @State reasoningStates: Record<string, string> = {};
+  @State thinkingExpandedStates: Record<string, boolean> = {};
   // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
   @State askAnswers: Record<string, string> = {};
   @State askMultiAnswers: Record<string, string[]> = {};
@@ -290,6 +293,37 @@ struct MessageRow {
     return groupMessageParts(this.message.parts);
   }
 
+  // ThinkingBlock 组级折叠(ChainOfThought 语义)
+  private thinkingExpanded(bi: number): boolean {
+    const v: boolean | undefined = this.thinkingExpandedStates[`${bi}`];
+    return v !== undefined ? v : true; // 默认展开
+  }
+
+  private toggleThinkingExpanded(bi: number): void {
+    const key: string = `${bi}`;
+    const cur: boolean = this.thinkingExpanded(bi);
+    const copy: Record<string, boolean> = {};
+    const keys: string[] = Object.keys(this.thinkingExpandedStates);
+    for (const k of keys) {
+      copy[k] = this.thinkingExpandedStates[k];
+    }
+    copy[key] = !cur;
+    this.thinkingExpandedStates = copy;
+  }
+
+  private thinkingSummary(steps: ThinkingStep[]): string {
+    let reasoningCount: number = 0;
+    let toolCount: number = 0;
+    for (const step of steps) {
+      if (step.kind === 'reasoning') reasoningCount++;
+      else if (step.kind === 'tool') toolCount++;
+    }
+    if (reasoningCount > 0 && toolCount > 0) return `思考 ${reasoningCount} 段 · 工具 ${toolCount} 次`;
+    if (reasoningCount > 0) return `思考 ${reasoningCount} 段`;
+    if (toolCount > 0) return `工具 ${toolCount} 次`;
+    return '思考过程';
+  }
+
   build() {
     Column() {
       // 第二梯队 F:ChatMessageAvatar 替换内联头像
@@ -302,7 +336,23 @@ struct MessageRow {
       //   ThinkingBlock 内 step 遍历时累加获得)。
       ForEach(this.getBlocks(), (block: MessagePartBlock, bi: number): void => {
         if (block.kind === 'thinking') {
-          ForEach(block.steps, (step: ThinkingStep, si: number): void => {
+          // 组级折叠头部(ChainOfThought 语义:摘要+步骤数)
+          Row() {
+            Text(this.thinkingExpanded(bi) ? '▾' : '▸').fontSize(11).fontColor(INK3)
+            Text(this.thinkingSummary(block.steps))
+              .fontSize(META).fontColor(INK3)
+              .margin({ left: 6 })
+              .layoutWeight(1)
+          }
+          .width('100%')
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(SURFACE2)
+          .borderRadius(6)
+          .margin({ bottom: 2 })
+          .onClick((): void => { this.toggleThinkingExpanded(bi); })
+
+          if (this.thinkingExpanded(bi)) {
+            ForEach(block.steps, (step: ThinkingStep, si: number): void => {
             if (step.kind === 'reasoning') {
               ChatMessageReasoning({
                 part: step.reasoning,
@@ -349,6 +399,7 @@ struct MessageRow {
               }
             }
           }, (step: ThinkingStep, si: number): string => `${bi}-${si}-${step.kind}`)
+          }
         } else if (block.kind === 'content') {
           if (block.part.type === 'text') {
             if (this.message.role === 'user') {

@@ -9,26 +9,26 @@ export struct UIAvatar {
   @Prop name: string = '';
   @Prop emoji: string = '';
   @Prop imageUrl: string = '';
-  @Prop size: number = 36;
+  @Prop avatarSize: number = 36;
   @Prop circular: boolean = true;
   build(): void {
     if (this.imageUrl.length > 0) {
       Image(this.imageUrl)
-        .width(this.size).height(this.size)
-        .borderRadius(this.circular ? this.size / 2 : 8)
+        .width(this.avatarSize).height(this.avatarSize)
+        .borderRadius(this.circular ? this.avatarSize / 2 : 8)
         .objectFit(ImageFit.Cover)
     } else {
       Stack() {
         if (this.emoji.length > 0) {
-          Text(this.emoji).fontSize(this.size * 0.5)
+          Text(this.emoji).fontSize(this.avatarSize * 0.5)
         } else {
           Text(this.initial())
-            .fontSize(this.size * 0.4).fontWeight(FontWeight.Bold)
+            .fontSize(this.avatarSize * 0.4).fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
         }
       }
-      .width(this.size).height(this.size)
-      .borderRadius(this.circular ? this.size / 2 : 8)
+      .width(this.avatarSize).height(this.avatarSize)
+      .borderRadius(this.circular ? this.avatarSize / 2 : 8)
       .backgroundColor(this.avatarColor())
     }
   }
