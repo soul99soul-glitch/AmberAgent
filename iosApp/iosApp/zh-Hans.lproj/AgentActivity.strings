@@ -30,8 +30,8 @@
 "agent.activity.action.viewResult" = "查看结果";
 
 "agent.activity.fact.waiting" = "待确认";
-"agent.activity.fact.stale" = "状态已过期";
-"agent.activity.fact.reconnecting" = "正在重连";
+"agent.activity.fact.stale" = "已过期";
+"agent.activity.fact.reconnecting" = "重连中";
 "agent.activity.fact.completed" = "已完成";
 "agent.activity.fact.failed" = "未完成";
 "agent.activity.fact.cancelled" = "已停止";

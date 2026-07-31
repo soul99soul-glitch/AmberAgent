@@ -30,8 +30,8 @@
 "agent.activity.action.viewResult" = "View result";
 
 "agent.activity.fact.waiting" = "Confirm";
-"agent.activity.fact.stale" = "Status expired";
-"agent.activity.fact.reconnecting" = "Reconnecting";
+"agent.activity.fact.stale" = "Expired";
+"agent.activity.fact.reconnecting" = "Retrying";
 "agent.activity.fact.completed" = "Done";
 "agent.activity.fact.failed" = "Incomplete";
 "agent.activity.fact.cancelled" = "Stopped";

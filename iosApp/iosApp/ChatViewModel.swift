@@ -2294,10 +2294,15 @@ final class ChatViewModel {
             presentation: presentation
         )
         guard liveActivityPreferenceEnabled else { return }
+        // 只在 conversationId 匹配当前会话时传标题，避免审批恢复/后台 handoff
+        // 时用户已切会话导致灵动岛显示错误标题。
+        let isCurrentConversation = conversationId == currentConversationId
         liveActivityController.start(
             runId: runId,
             conversationId: conversationHex,
-            conversationTitle: conversationStore?.currentConversation?.title,
+            conversationTitle: isCurrentConversation
+                ? conversationStore?.currentConversation?.title
+                : nil,
             presentation: presentation
         )
     }
