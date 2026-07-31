@@ -57,13 +57,14 @@ export struct ChatMessageTools {
           .width('100%').margin({ top: 4 })
       }
 
-      // generate_image:从 output 提取 image parts 渲染轮播
-      if (this.part.toolName === 'generate_image' && this.getImageUrls().length > 0) {
+      // generate_image:从 output 提取 image parts 渲染轮播(只遍历一次)
+      if (this.part.toolName === 'generate_image' && this.hasImageOutput()) {
         GeneratedImageCarousel({ imageUrls: this.getImageUrls(), showActions: true })
       }
 
       // output 预览:首条 text part,3 行截断(generate_image 跳过,已有轮播)
-      if (this.part.output.length > 0 && this.part.output[0].type === 'text') {
+      if (this.part.toolName !== 'generate_image' &&
+        this.part.output.length > 0 && this.part.output[0].type === 'text') {
         Text((this.part.output[0] as UIMessagePartText).text)
           .fontSize(11).fontColor(INK2)
           .maxLines(3)
@@ -88,6 +89,14 @@ export struct ChatMessageTools {
     if (state === 'denied') return '已拒绝';
     if (state === 'answered') return '已应答';
     return '';
+  }
+
+  // 检查 output 是否含 image part(比 getImageUrls 轻,用于条件判断)
+  private hasImageOutput(): boolean {
+    for (const p of this.part.output) {
+      if (p.type === 'image') return true;
+    }
+    return false;
   }
 
   // 从 output parts 提取 image URL(generate_image 专用)

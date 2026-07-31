@@ -388,6 +388,7 @@ export struct DotLoading {
 export struct ShareSheet {
   @Prop show: boolean = false;
   @Prop text: string = '';
+  onCopy: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
   build(): void {
     if (this.show) {
@@ -397,7 +398,7 @@ export struct ShareSheet {
         Text('复制文本').fontSize(BODY).fontColor(ACCENT)
           .width('100%').padding({ left: 16, top: 10, bottom: 10 })
           .onClick((): void => {
-            // 复制逻辑由消费方注入,这里仅占位
+            this.onCopy();
             this.onDismiss();
           })
         Divider().color(LINE).strokeWidth(0.5)

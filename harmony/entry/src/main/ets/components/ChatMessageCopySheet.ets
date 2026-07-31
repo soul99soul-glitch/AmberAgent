@@ -60,9 +60,6 @@ export struct ChatMessageCopySheet {
                 this.onDismiss();
               })
           }
-          if (i < this.getNonBlankTextParts().length - 1) {
-            Divider().color(LINE).strokeWidth(0.5)
-          }
         }, (p: UIMessagePartText, i: number): string => `copy-${i}`)
       } else {
         // 空状态(Android :95-110)
