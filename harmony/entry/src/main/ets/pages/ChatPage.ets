@@ -101,6 +101,7 @@ import { ChatMessageBranch } from '../components/ChatMessageBranch.ets';
 import { ChatMessageActions } from '../components/ChatMessageActions.ets';
 import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from '../components/ChatMessageCouncilStep.ets';
+import { ChatMessageActionFooter, resolveActionFooterMode } from '../components/ChatMessageActionFooter.ets';
 import { SubAgentRunSheet } from '../components/SubAgentRunSheet.ets';
 import { ChatMessageCopySheet } from '../components/ChatMessageCopySheet.ets';
 import { ChatMessageToolPreviewSheet } from '../components/ChatMessageToolPreviewSheet.ets';
@@ -405,26 +406,19 @@ struct MessageRow {
           })
         }
       }, (block: MessagePartBlock, bi: number): string => `block-${bi}-${block.kind}`)
-      // 第二梯队 F:ChatMessageBranch + ChatMessageActions 替换内联操作行
-      if ((this.isAssistant && (this.branchCount > 1 || this.isLastAssistant))
-        || this.message.role === 'user') {
-        Row() {
-          ChatMessageBranch({
-            branchCount: this.branchCount,
-            selectIndex: this.selectIndex,
-            onSwitch: (idx: number): void => { this.onSwitch(idx); },
-          })
-          ChatMessageActions({
-            isUser: this.message.role === 'user',
-            isLastAssistant: this.isLastAssistant,
-            onFork: (): void => this.onFork(),
-            onEdit: (): void => this.onEdit(),
-            onRegenerate: (): void => this.onRegenerate(),
-            onCopy: (): void => this.onCopy(),
-          })
-        }
-        .margin({ top: 2 })
-      }
+      // 第三梯队:ChatMessageActionFooter 替换内联操作行(annotations + branch + actions 统一尾部)
+      ChatMessageActionFooter({
+        annotations: this.message.annotations,
+        mode: resolveActionFooterMode(
+          this.message.role, this.isLastAssistant, this.streaming, this.message.parts.length > 0,
+        ),
+        isUser: this.message.role === 'user',
+        isLastAssistant: this.isLastAssistant,
+        onCopy: (): void => this.onCopy(),
+        onFork: (): void => this.onFork(),
+        onEdit: (): void => this.onEdit(),
+        onRegenerate: (): void => this.onRegenerate(),
+      })
     }
     .width('100%')
     .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)

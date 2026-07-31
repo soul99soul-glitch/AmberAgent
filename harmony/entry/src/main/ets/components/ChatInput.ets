@@ -45,8 +45,15 @@ export struct ChatInput {
       this.text.indexOf(' ') < 0;
   }
 
+  // 过滤匹配当前输入的命令(输入 /c → 匹配 clear/compact)
   private getSlashCommands(): SlashCommand[] {
-    return buildSlashCommands(this.subAgentEnabled, this.subAgentMode);
+    const all: SlashCommand[] = buildSlashCommands(this.subAgentEnabled, this.subAgentMode);
+    if (!this.isSlashVisible()) return [];
+    // 去掉前导 / 或 ／ 得到查询
+    const query: string = this.text.substring(1).toLowerCase();
+    if (query.length === 0) return all;
+    return all.filter((cmd: SlashCommand): boolean =>
+      cmd.title.toLowerCase().startsWith(query));
   }
 
   private handleSlashCommand(cmd: SlashCommand): void {
