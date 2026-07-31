@@ -397,7 +397,10 @@ struct MessageRow {
             tools: block.step.tools,
             runId: block.step.runId,
             onOpenRun: (_rid: string): void => {
-              // council run sheet 待接入
+              // council run sheet:复用 tool preview sheet 展示 council 工具详情
+              if (block.step.tools.length > 0) {
+                this.onOpenToolPreview(block.step.tools[0]);
+              }
             },
           })
         }
@@ -1312,6 +1315,19 @@ struct ChatPage {
 
   private closeToolPreview(): void {
     this.toolPreviewSheetOpen = false;
+  }
+
+  // 斜杠命令 /compact:手动触发上下文压缩(失效 compacts,下次发送时重新压缩)
+  private compactCurrentConversation(): void {
+    if (this.conversation === null) return;
+    const conv: Conversation = this.conversation;
+    this.invalidateConvCompacts(conv.id, 'manual_compact')
+      .then((): void => {
+        this.refreshContextCompacts();
+      })
+      .catch((e: Error): void => {
+        hilog.warn(0x0001, 'Chat.Page', 'compactCurrentConversation failed: %{public}s', e.message);
+      });
   }
 
   // 工具循环选项:D-058 首批内置工具 = get_time_info + ask_user +
@@ -2629,6 +2645,8 @@ struct ChatPage {
         sending: this.sending,
         editing: this.editingNodeId.length > 0,
         hasImages: this.pendingImages.length > 0,
+        subAgentEnabled: this.subAgentEnabled,
+        subAgentMode: this.subAgentEnabled ? 'roster' : 'roster',
         onTextChange: (v: string): void => { this.inputText = v; },
         onSend: (): void => { this.send(); },
         onStop: (): void => {
@@ -2643,6 +2661,9 @@ struct ChatPage {
         onSendWithoutAnswer: (): void => { this.sendWithoutAnswer(); },
         onPickImage: (): void => { this.pickImages(); },
         onCancelEdit: (): void => { this.cancelEdit(); },
+        onClearInput: (): void => { this.inputText = ''; },
+        onCompactContext: (): void => { this.compactCurrentConversation(); },
+        onInsertText: (t: string): void => { this.inputText = t; },
       })
     }
     .width('100%').height('100%').backgroundColor(BG)
