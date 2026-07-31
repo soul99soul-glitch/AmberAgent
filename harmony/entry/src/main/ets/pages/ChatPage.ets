@@ -97,6 +97,8 @@ import { ChatInput } from '../components/ChatInput.ets';
 import { ChatMessageAvatar } from '../components/ChatMessageAvatar.ets';
 import { ChatMessageBranch } from '../components/ChatMessageBranch.ets';
 import { ChatMessageActions } from '../components/ChatMessageActions.ets';
+import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
+import { ChatMessageCouncilStep } from '../components/ChatMessageCouncilStep.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -372,13 +374,21 @@ struct MessageRow {
             Text('[MiniApp]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
           }
         } else if (block.kind === 'subagent') {
-          Text(`[子代理任务: ${block.step.runId}]`).fontSize(11).fontColor(INK3)
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .backgroundColor(SURFACE2).borderRadius(6).margin({ bottom: 4 })
+          ChatMessageSubAgentStep({
+            tools: block.step.tools,
+            runId: block.step.runId,
+            onOpenRun: (_rid: string): void => {
+              // run sheet 待接入(需 bindSheet + SubAgentManager.subscribeLiveText)
+            },
+          })
         } else if (block.kind === 'council') {
-          Text(`[Model Council: ${block.step.runId}]`).fontSize(11).fontColor(INK3)
-            .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-            .backgroundColor(SURFACE2).borderRadius(6).margin({ bottom: 4 })
+          ChatMessageCouncilStep({
+            tools: block.step.tools,
+            runId: block.step.runId,
+            onOpenRun: (_rid: string): void => {
+              // council run sheet 待接入
+            },
+          })
         }
       }, (block: MessagePartBlock, bi: number): string => `block-${bi}-${block.kind}`)
       // 第二梯队 F:ChatMessageBranch + ChatMessageActions 替换内联操作行
