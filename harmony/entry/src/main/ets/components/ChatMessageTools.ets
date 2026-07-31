@@ -32,6 +32,7 @@ export struct ChatMessageTools {
           .fontSize(10).fontColor(INK3)
       }
       .width('100%')
+      .onClick((): void => { this.onOpenPreview(); })
 
       // pending → 批准/拒绝按钮
       if (this.part.approvalState.type === 'pending') {
