@@ -367,7 +367,8 @@ enum NovelPresentation {
                   provider.enabled else {
                 return "全局模型不可用"
             }
-            return "跟随全局"
+            let name = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? model.modelId : name
         case .fixed(let providerID, let modelID):
             guard let provider = sharedSettings.snapshot.providers.first(where: {
                 $0.id.description() == providerID

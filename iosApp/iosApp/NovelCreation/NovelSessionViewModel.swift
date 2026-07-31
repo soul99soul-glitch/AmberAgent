@@ -488,15 +488,22 @@ final class NovelSessionViewModel {
         batchPolishProgress?.phase == .running
     }
 
-    /// 发起批量润色的前置门禁,与阅读器单章 `polishBlockReason` 同义。
+    /// 目录入口、选择页和报告重试共用同一个门禁，避免先看到可用按钮、
+    /// 进入下一层才发现不能开始。
+    var batchPolishBlocker: NovelSessionActionBlocker? {
+        guard access == .readWrite else { return .projectReadOnly }
+        if workspace.requiresReload || hasRefreshError { return .reloadRequired }
+        if isRunning { return .generationRunning }
+        if needsSync { return .branchNeedsSync }
+        if !branchPendingOperations.isEmpty || !unresolvedBranchPolishTransactions.isEmpty {
+            return .pendingOperation
+        }
+        if isBusy { return .transactionInProgress }
+        return nil
+    }
+
     var canStartBatchPolish: Bool {
-        workspace.canMutate &&
-            hasPolishableChapters &&
-            !isRunning &&
-            !needsSync &&
-            branchPendingOperations.isEmpty &&
-            unresolvedBranchPolishTransactions.isEmpty &&
-            !isBusy
+        hasPolishableChapters && batchPolishBlocker == nil
     }
 
     var canSend: Bool {
@@ -1117,16 +1124,23 @@ final class NovelSessionViewModel {
         reconcileBatchPolishResult(transactionID: transactionID, chapterID: chapterID)
     }
 
-    func abandonPolishTransaction(_ transactionID: NovelPendingOperationID) async {
+    @discardableResult
+    func abandonPolishTransaction(_ transactionID: NovelPendingOperationID) async -> Bool {
         guard let project = workspace.projectSnapshot,
               let branch = workspace.branchSnapshot,
               let transaction = project.polishTransactions.first(where: {
                   $0.id == transactionID && $0.branchID == branch.branch.id
-              }), snapshotMatchesBinding else { return }
+              }), snapshotMatchesBinding else {
+            operationErrorMessage = workspace.requiresReload
+                ? "项目已变化，请重新载入后再试。"
+                : "这项润色已经处理，或当前分支已经变化。"
+            return false
+        }
         let chapterID = project.chapterVersions.first {
             $0.id == transaction.sourceChapterVersionID
         }?.chapterID
-        _ = await perform(.abandonPolishTransaction(
+        operationErrorMessage = nil
+        let outcome = await perform(.abandonPolishTransaction(
             NovelAbandonPolishTransactionCommand(
                 context: mutationContext(project: project, branch: branch),
                 projectID: project.project.id,
@@ -1135,6 +1149,31 @@ final class NovelSessionViewModel {
             )
         ))
         reconcileBatchPolishResult(transactionID: transactionID, chapterID: chapterID)
+        guard let outcome,
+              case .polishTransactionAbandoned = outcome else {
+            if operationErrorMessage == nil {
+                operationErrorMessage = workspace.requiresReload
+                    ? "项目已变化，请重新载入后再试。"
+                    : "当前有其他操作正在处理，请稍后再试。"
+            }
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    func abandonPolishTransactions(
+        _ transactionIDs: [NovelPendingOperationID]
+    ) async -> Int {
+        let ownerBinding = binding
+        var abandonedCount = 0
+        for transactionID in transactionIDs {
+            guard !Task.isCancelled,
+                  binding == ownerBinding else { break }
+            guard await abandonPolishTransaction(transactionID) else { break }
+            abandonedCount += 1
+        }
+        return abandonedCount
     }
 
     // MARK: - 批量整章润色
@@ -1144,11 +1183,17 @@ final class NovelSessionViewModel {
     /// 候选作废,所以只能生成一章、采用一章、再下一章。通过漂移校验的章自动采用为新
     /// 版本;改了剧情的章自动跳过;失败章记录在案。任务句柄留在 ViewModel 上,关闭
     /// sheet 不中断,只有 `cancelBatchPolish()` 会停止。
-    func startBatchPolish(chapterIDs: [NovelChapterID]) {
+    @discardableResult
+    func startBatchPolish(chapterIDs: [NovelChapterID]) -> Bool {
         guard batchPolishTask == nil,
               let binding,
               !chapterIDs.isEmpty,
-              canStartBatchPolish else { return }
+              canStartBatchPolish else {
+            operationErrorMessage = batchPolishBlocker?.displayName
+                ?? (chapterIDs.isEmpty ? "请至少选择一章。" : "批量润色暂时不能开始。")
+            return false
+        }
+        operationErrorMessage = nil
         batchPolishProgressStorage = NovelBatchPolishProgress(
             binding: binding,
             total: chapterIDs.count,
@@ -1167,6 +1212,7 @@ final class NovelSessionViewModel {
             self?.batchPolishTaskBinding = nil
             self?.batchPolishOwnedRunID = nil
         }
+        return true
     }
 
     func cancelBatchPolish() {
@@ -1207,14 +1253,15 @@ final class NovelSessionViewModel {
     }
 
     /// 报告态下「重试失败章节」:只重跑失败和未处理的章,跳过已成功和漂移跳过的。
-    func retryFailedBatchPolish() {
+    @discardableResult
+    func retryFailedBatchPolish() -> Bool {
         guard batchPolishTask == nil,
-              let progress = batchPolishProgress else { return }
+              let progress = batchPolishProgress else { return false }
         let retryIDs = progress.results
             .filter { $0.outcome == .failed || $0.outcome == .cancelled }
             .map(\.chapterID)
-        guard !retryIDs.isEmpty else { return }
-        startBatchPolish(chapterIDs: retryIDs)
+        guard !retryIDs.isEmpty else { return false }
+        return startBatchPolish(chapterIDs: retryIDs)
     }
 
     private func runBatchPolish(

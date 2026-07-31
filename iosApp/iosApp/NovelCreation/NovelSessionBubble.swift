@@ -20,6 +20,7 @@ struct NovelSessionBubble: View {
     let committedChange: NovelSessionCommittedChangeSummary?
     let askUser: NovelAskUserPresentation?
     var askUserBlocker: NovelSessionActionBlocker? = nil
+    var runtimeActionBlocker: NovelSessionActionBlocker? = nil
     let actions: [NovelSessionRowActionAvailability]
     let onAction: (NovelSessionRowAction) -> Void
     let onAnswerAskUser: (NovelMessageID, String) -> Void
@@ -82,7 +83,7 @@ struct NovelSessionBubble: View {
                 statusLine
                     .font(.caption)
 
-                if !actions.isEmpty {
+                if !effectiveActions.isEmpty {
                     actionBar
                 }
             }
@@ -173,7 +174,7 @@ struct NovelSessionBubble: View {
                 }
             }
 
-            if let blocker = actions.compactMap(\.blocker).first {
+            if let blocker = effectiveActions.compactMap(\.blocker).first {
                 Text(blocker.displayName)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.accentAmber)
@@ -191,16 +192,23 @@ struct NovelSessionBubble: View {
         .padding(.top, 2)
     }
 
-    @ViewBuilder
     private var actionButtons: some View {
-        ForEach(actions, id: \.action) { item in
-            if item.action.isPrimary {
-                actionButton(item)
-                    .buttonStyle(.borderedProminent)
-            } else {
-                actionButton(item)
-                    .buttonStyle(.bordered)
-            }
+        NovelSessionActionButtons(
+            actions: effectiveActions,
+            granularity: granularity,
+            onAction: onAction
+        )
+    }
+
+    private var effectiveActions: [NovelSessionRowActionAvailability] {
+        actions.map { item in
+            guard item.blocker == nil,
+                  item.action.requiresMutation,
+                  let runtimeActionBlocker else { return item }
+            return NovelSessionRowActionAvailability(
+                action: item.action,
+                blocker: runtimeActionBlocker
+            )
         }
     }
 
@@ -295,22 +303,6 @@ struct NovelSessionBubble: View {
         }
     }
 
-    private func actionButton(_ item: NovelSessionRowActionAvailability) -> some View {
-        Button {
-            onAction(item.action)
-        } label: {
-            Label(
-                item.action.displayTitle(granularity: granularity),
-                systemImage: item.action.systemImage
-            )
-                .font(.footnote.weight(.semibold))
-                .lineLimit(1)
-        }
-        .controlSize(.small)
-        .disabled(!item.isEnabled)
-        .accessibilityHint(item.blocker?.displayName ?? "")
-    }
-
     private var systemMessage: some View {
         Text(content)
             .font(.caption.weight(.medium))
@@ -322,6 +314,78 @@ struct NovelSessionBubble: View {
             .background(AmberTheme.surface, in: Capsule())
             .frame(maxWidth: .infinity)
             .accessibilityLabel(content)
+    }
+}
+
+private struct NovelSessionActionButtons: View {
+    let actions: [NovelSessionRowActionAvailability]
+    let granularity: NovelGenerationGranularity?
+    let onAction: (NovelSessionRowAction) -> Void
+
+    @State private var pendingAbandonTransactionID: NovelPendingOperationID?
+
+    var body: some View {
+        ForEach(actions, id: \.action) { item in
+            if item.action.isPrimary {
+                actionButton(item)
+                    .buttonStyle(.borderedProminent)
+            } else {
+                actionButton(item)
+                    .buttonStyle(.bordered)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actionButton(_ item: NovelSessionRowActionAvailability) -> some View {
+        if case .abandonPolish(let transactionID) = item.action {
+            baseButton(item) {
+                pendingAbandonTransactionID = transactionID
+            }
+            .confirmationDialog(
+                "放弃这次润色？",
+                isPresented: Binding(
+                    get: { pendingAbandonTransactionID == transactionID },
+                    set: { presented in
+                        if !presented { pendingAbandonTransactionID = nil }
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("放弃润色", role: .destructive) {
+                    pendingAbandonTransactionID = nil
+                    onAction(item.action)
+                }
+                Button("取消", role: .cancel) {
+                    pendingAbandonTransactionID = nil
+                }
+            } message: {
+                Text("候选气泡会保留在创作记录中，但不能再作为润色版采用。")
+            }
+        } else {
+            baseButton(item) {
+                onAction(item.action)
+            }
+        }
+    }
+
+    private func baseButton(
+        _ item: NovelSessionRowActionAvailability,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(
+                item.action.displayTitle(granularity: granularity),
+                systemImage: item.action.systemImage
+            )
+            .font(.footnote.weight(.semibold))
+            .lineLimit(1)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .controlSize(.small)
+        .disabled(!item.isEnabled)
+        .accessibilityHint(item.blocker?.displayName ?? "")
     }
 }
 
@@ -450,6 +514,11 @@ private struct NovelAskUserCard: View {
 }
 
 private extension NovelSessionRowAction {
+    var requiresMutation: Bool {
+        if case .viewSettingProposals = self { return false }
+        return true
+    }
+
     func displayTitle(granularity: NovelGenerationGranularity?) -> String {
         switch self {
         case .collectProse:

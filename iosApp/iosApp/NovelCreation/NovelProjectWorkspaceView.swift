@@ -19,11 +19,13 @@ struct NovelProjectWorkspaceView: View {
     @State private var sessionInputText = ""
     @State private var sessionInjectionOverrides = NovelInjectionOverrides.none
     @State private var sessionInputBudgetTokens = 16_000
-    @State private var branchComposerDrafts: [NovelBranchID: NovelBranchComposerDraft] = [:]
+    @State private var loadedComposerDraftOwner: NovelComposerDraftOwner?
     @State private var isConfirmingPreviousRestore = false
     @State private var branchNotice: String?
     @State private var hasCompletedInitialNavigation = false
     @State private var routedProjectLoadFailure: String?
+    @State private var sheetTransitionTask: Task<Void, Never>?
+    @State private var sheetTransitionToken: UUID?
 
     init(
         viewModel: NovelCreationViewModel,
@@ -117,18 +119,14 @@ struct NovelProjectWorkspaceView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .onChange(of: viewModel.branchSnapshot?.branch.id) { previousBranchID, branchID in
-            if let previousBranchID {
-                branchComposerDrafts[previousBranchID] = NovelBranchComposerDraft(
-                    text: sessionInputText,
-                    injectionOverrides: sessionInjectionOverrides,
-                    inputBudgetTokens: sessionInputBudgetTokens
-                )
+        .onAppear {
+            restoreComposerDraft(for: currentComposerDraftOwner)
+        }
+        .onChange(of: currentComposerDraftOwner) { previousOwner, owner in
+            if loadedComposerDraftOwner == previousOwner {
+                saveLoadedComposerDraft()
             }
-            let draft = branchID.flatMap { branchComposerDrafts[$0] } ?? .empty
-            sessionInputText = draft.text
-            sessionInjectionOverrides = draft.injectionOverrides
-            sessionInputBudgetTokens = draft.inputBudgetTokens
+            restoreComposerDraft(for: owner)
             if hasCompletedInitialNavigation {
                 viewModel.scheduleAutomaticStateSyncIfNeeded()
             }
@@ -146,6 +144,10 @@ struct NovelProjectWorkspaceView: View {
             viewModel.scheduleAutomaticStateSyncIfNeeded()
         }
         .onDisappear {
+            saveLoadedComposerDraft()
+            sheetTransitionTask?.cancel()
+            sheetTransitionTask = nil
+            sheetTransitionToken = nil
             sessionViewModel.detachConsumer()
         }
     }
@@ -269,6 +271,18 @@ struct NovelProjectWorkspaceView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 9)
             .background(AmberTheme.accentAmber.opacity(0.10))
+        } else if section != .creation, let currentStateSyncFailure {
+            HStack(spacing: 10) {
+                Label(currentStateSyncFailure, systemImage: "exclamationmark.triangle")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.accentRed)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("重试同步", action: retryCurrentStateSync)
+                    .font(.footnote.weight(.semibold))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 9)
+            .background(AmberTheme.accentRed.opacity(0.08))
         }
     }
 
@@ -317,6 +331,7 @@ struct NovelProjectWorkspaceView: View {
         case .manuscript:
             NovelChapterManagementView(
                 viewModel: viewModel,
+                sessionViewModel: sessionViewModel,
                 onOpenChapter: { chapter in
                     chapterReaderRoute = NovelChapterReaderRoute(selection: chapter)
                 },
@@ -463,7 +478,11 @@ struct NovelProjectWorkspaceView: View {
 
         case .discussionArchiveOffer(let chapterID):
             NovelDiscussionArchiveOfferSheet(
-                isReady: !sessionViewModel.needsSync && !sessionViewModel.isBusy
+                isReady: !sessionViewModel.needsSync && !sessionViewModel.isBusy,
+                needsSync: sessionViewModel.needsSync,
+                isSyncing: currentStateSyncActivity != nil,
+                syncFailureMessage: currentStateSyncFailure,
+                onRetrySync: retryCurrentStateSync
             ) {
                 transition(to: .discussionArchive(chapterID))
             }
@@ -499,6 +518,46 @@ struct NovelProjectWorkspaceView: View {
         viewModel.selectedProjectID == projectID &&
             viewModel.projectSnapshot?.project.id == projectID &&
             viewModel.branchSnapshot?.projectID == projectID
+    }
+
+    private var currentComposerDraftOwner: NovelComposerDraftOwner? {
+        guard let selectedProjectID = viewModel.selectedProjectID,
+              let selectedBranchID = viewModel.selectedBranchID else { return nil }
+        return NovelComposerDraftOwner(
+            projectID: selectedProjectID,
+            branchID: selectedBranchID
+        )
+    }
+
+    private func restoreComposerDraft(for owner: NovelComposerDraftOwner?) {
+        guard let owner else {
+            loadedComposerDraftOwner = nil
+            sessionInputText = ""
+            sessionInjectionOverrides = .none
+            sessionInputBudgetTokens = 16_000
+            return
+        }
+        let draft = viewModel.composerDraft(
+            projectID: owner.projectID,
+            branchID: owner.branchID
+        )
+        loadedComposerDraftOwner = owner
+        sessionInputText = draft.text
+        sessionInjectionOverrides = draft.injectionOverrides
+        sessionInputBudgetTokens = draft.inputBudgetTokens
+    }
+
+    private func saveLoadedComposerDraft() {
+        guard let owner = loadedComposerDraftOwner else { return }
+        viewModel.saveComposerDraft(
+            NovelComposerDraft(
+                text: sessionInputText,
+                injectionOverrides: sessionInjectionOverrides,
+                inputBudgetTokens: sessionInputBudgetTokens
+            ),
+            projectID: owner.projectID,
+            branchID: owner.branchID
+        )
     }
 
     private func loadRoutedProject() async {
@@ -568,6 +627,28 @@ struct NovelProjectWorkspaceView: View {
             projectID: projectID,
             branchID: branchID
         )
+    }
+
+    private var currentStateSyncFailure: String? {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return nil }
+        return viewModel.automaticStateSyncFailureMessage(
+            projectID: projectID,
+            branchID: branchID
+        )
+    }
+
+    private func retryCurrentStateSync() {
+        guard let projectID = viewModel.selectedProjectID,
+              let branchID = viewModel.selectedBranchID else { return }
+        if viewModel.automaticStateSyncFailureMessage(
+            projectID: projectID,
+            branchID: branchID
+        ) != nil {
+            viewModel.retryAutomaticStateSync(projectID: projectID, branchID: branchID)
+        } else {
+            viewModel.scheduleAutomaticStateSyncIfNeeded()
+        }
     }
 
     private var chapterOptions: [NovelSessionChapterOption] {
@@ -653,25 +734,19 @@ struct NovelProjectWorkspaceView: View {
     }
 
     private func transition(to sheet: NovelWorkspaceSheet) {
+        sheetTransitionTask?.cancel()
+        let token = UUID()
+        sheetTransitionToken = token
         activeSheet = nil
-        Task { @MainActor in
+        sheetTransitionTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled, sheetTransitionToken == token else { return }
             activeSheet = sheet
+            sheetTransitionTask = nil
+            sheetTransitionToken = nil
         }
     }
 
-}
-
-private struct NovelBranchComposerDraft {
-    let text: String
-    let injectionOverrides: NovelInjectionOverrides
-    let inputBudgetTokens: Int
-
-    static let empty = NovelBranchComposerDraft(
-        text: "",
-        injectionOverrides: .none,
-        inputBudgetTokens: 16_000
-    )
 }
 
 private struct NovelWorkspaceGlassTabBar: View {

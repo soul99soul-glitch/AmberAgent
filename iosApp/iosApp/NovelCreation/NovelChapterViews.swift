@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NovelChapterManagementView: View {
     let viewModel: NovelCreationViewModel
+    let sessionViewModel: NovelSessionViewModel
     let onOpenChapter: (NovelChapterSelection) -> Void
     let onBatchPolish: () -> Void
 
@@ -20,27 +21,36 @@ struct NovelChapterManagementView: View {
     }
 
     private var directoryHeader: some View {
-        HStack(spacing: 12) {
-            Text("目录")
-                .font(.headline)
-                .foregroundStyle(AmberTheme.foreground)
-            Spacer()
-            if hasPolishableChapters {
-                Button(action: onBatchPolish) {
-                    Label("批量润色", systemImage: "wand.and.sparkles")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(
-                            batchPolishBlockReason == nil ? AmberTheme.accent : AmberTheme.muted
-                        )
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 12) {
+                Text("目录")
+                    .font(.headline)
+                    .foregroundStyle(AmberTheme.foreground)
+                Spacer()
+                if hasPolishableChapters {
+                    Button(action: onBatchPolish) {
+                        Label("批量润色", systemImage: "wand.and.sparkles")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(
+                                batchPolishBlocker == nil ? AmberTheme.accent : AmberTheme.muted
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(batchPolishBlocker != nil)
+                    .accessibilityLabel(batchPolishAccessibilityLabel)
                 }
-                .buttonStyle(.plain)
-                .disabled(batchPolishBlockReason != nil)
-                .accessibilityLabel(batchPolishAccessibilityLabel)
+                if let count = viewModel.branchSnapshot?.chapterSelections.count, count > 0 {
+                    Text("共 \(count) 章")
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.muted)
+                }
             }
-            if let count = viewModel.branchSnapshot?.chapterSelections.count, count > 0 {
-                Text("共 \(count) 章")
-                    .font(.subheadline)
+
+            if hasPolishableChapters, let batchPolishBlocker {
+                Label(batchPolishBlocker.displayName, systemImage: "info.circle")
+                    .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .padding(.horizontal, 2)
@@ -55,35 +65,13 @@ struct NovelChapterManagementView: View {
         }
     }
 
-    /// 与阅读器 `polishBlockReason` 同义,只用 workspace 快照即可表达。真正的发起门禁
-    /// 还在 `NovelSessionViewModel.canStartBatchPolish` 兜底,这里只负责按钮的禁用态。
-    private var batchPolishBlockReason: String? {
-        if isProjectReadOnly { return "项目当前只读" }
-        if viewModel.requiresReload { return "请先重新载入项目" }
-        if viewModel.branchSnapshot?.branch.activeRunID != nil { return "请先停止当前生成" }
-        if viewModel.branchSnapshot?.branch.syncStatus == .needsSync { return "请先同步剧情状态" }
-        if currentBranchHasPendingOperations { return "请先完成当前分支的正文操作" }
-        if viewModel.isPerforming { return "项目正在处理其他操作" }
-        if !viewModel.canMutate { return "当前状态暂不能批量润色" }
-        return nil
-    }
-
-    private var isProjectReadOnly: Bool {
-        guard let access = viewModel.projectSnapshot?.access else { return false }
-        if case .readWrite = access { return false }
-        return true
-    }
-
-    private var currentBranchHasPendingOperations: Bool {
-        guard let branchID = viewModel.branchSnapshot?.branch.id else { return false }
-        return viewModel.projectSnapshot?.pendingOperations.contains {
-            $0.branchID == branchID
-        } == true
+    private var batchPolishBlocker: NovelSessionActionBlocker? {
+        sessionViewModel.batchPolishBlocker
     }
 
     private var batchPolishAccessibilityLabel: String {
-        guard let batchPolishBlockReason else { return "批量整章润色" }
-        return "批量整章润色（\(batchPolishBlockReason)）"
+        guard let batchPolishBlocker else { return "批量整章润色" }
+        return "批量整章润色（\(batchPolishBlocker.displayName)）"
     }
 
     @ViewBuilder
@@ -95,7 +83,11 @@ struct NovelChapterManagementView: View {
                         Button {
                             onOpenChapter(selection)
                         } label: {
-                            NovelChapterRow(index: index + 1, version: version)
+                            NovelChapterRow(
+                                index: index + 1,
+                                version: version,
+                                isDiscarded: isDiscarded(selection.chapterID)
+                            )
                         }
                         .buttonStyle(.plain)
 
@@ -145,11 +137,16 @@ struct NovelChapterManagementView: View {
         viewModel.projectSnapshot?.chapterVersions.first { $0.id == id }
     }
 
+    private func isDiscarded(_ chapterID: NovelChapterID) -> Bool {
+        viewModel.projectSnapshot?.chapters.first { $0.id == chapterID }?.discardedAt != nil
+    }
+
 }
 
 private struct NovelChapterRow: View {
     let index: Int
     let version: NovelChapterVersionRecord
+    let isDiscarded: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -160,14 +157,24 @@ private struct NovelChapterRow: View {
                 .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(NovelPresentation.chapterDisplayTitle(
-                    storedTitle: version.title,
-                    content: version.content,
-                    ordinal: index
-                ))
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(AmberTheme.foreground)
-                    .lineLimit(1)
+                HStack(spacing: 7) {
+                    Text(NovelPresentation.chapterDisplayTitle(
+                        storedTitle: version.title,
+                        content: version.content,
+                        ordinal: index
+                    ))
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(isDiscarded ? AmberTheme.muted : AmberTheme.foreground)
+                        .lineLimit(1)
+                    if isDiscarded {
+                        Text("已废弃")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AmberTheme.accentAmber)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(AmberTheme.accentAmber.opacity(0.12), in: Capsule())
+                    }
+                }
                 Text("\(version.content.count.formatted()) 字")
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
@@ -177,6 +184,7 @@ private struct NovelChapterRow: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .contentShape(Rectangle())
+        .accessibilityValue(isDiscarded ? "已废弃，不进入生成上下文" : "")
     }
 }
 

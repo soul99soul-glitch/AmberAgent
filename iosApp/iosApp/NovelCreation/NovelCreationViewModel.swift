@@ -27,6 +27,23 @@ enum NovelBranchSelectionResult: Equatable, Sendable {
     case failed
 }
 
+struct NovelComposerDraft: Equatable, Sendable {
+    let text: String
+    let injectionOverrides: NovelInjectionOverrides
+    let inputBudgetTokens: Int
+
+    static let empty = NovelComposerDraft(
+        text: "",
+        injectionOverrides: .none,
+        inputBudgetTokens: 16_000
+    )
+}
+
+struct NovelComposerDraftOwner: Hashable, Sendable {
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+}
+
 private struct NovelQuickStartOwner: Hashable, Sendable {
     let projectID: NovelProjectID
     let branchID: NovelBranchID
@@ -166,6 +183,8 @@ final class NovelCreationViewModel {
     @ObservationIgnored private var quickStartTaskRunIDs: [NovelQuickStartOwner: NovelRunID] = [:]
     @ObservationIgnored private var quickStartCreationStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var cancelledQuickStartRunIDs: Set<NovelRunID> = []
+    @ObservationIgnored private var composerDrafts: [NovelComposerDraftOwner: NovelComposerDraft] = [:]
+    @ObservationIgnored private var lastSelectedBranchIDs: [NovelProjectID: NovelBranchID] = [:]
     @ObservationIgnored private var operationOwnerID: UUID?
     @ObservationIgnored private var stateSyncActivityOwnerID: UUID?
     @ObservationIgnored private var stateSyncActivityTask: Task<Void, Never>?
@@ -177,6 +196,26 @@ final class NovelCreationViewModel {
 
     init(creation: any NovelCreation) {
         self.creation = creation
+    }
+
+    func composerDraft(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> NovelComposerDraft {
+        composerDrafts[NovelComposerDraftOwner(projectID: projectID, branchID: branchID)] ?? .empty
+    }
+
+    func saveComposerDraft(
+        _ draft: NovelComposerDraft,
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) {
+        let owner = NovelComposerDraftOwner(projectID: projectID, branchID: branchID)
+        if draft == .empty {
+            composerDrafts[owner] = nil
+        } else {
+            composerDrafts[owner] = draft
+        }
     }
 
     func acquireSessionOperation(ownerID: UUID) -> Bool {
@@ -369,6 +408,9 @@ final class NovelCreationViewModel {
             report(NovelError.projectBusy(selectedProjectID ?? projectID))
             return false
         }
+        let preferredBranchID = selectedProjectID == projectID
+            ? selectedBranchID
+            : lastSelectedBranchIDs[projectID]
         let intentToken = UUID()
         selectionIntentToken = intentToken
         let token = UUID()
@@ -379,7 +421,11 @@ final class NovelCreationViewModel {
         }
         do {
             let project = try await project(id: projectID)
-            let branchID = project.branches.first(where: {
+            let branchID = preferredBranchID.flatMap { preferred in
+                project.branches.first(where: {
+                    $0.id == preferred && $0.lifecycle == .active
+                })?.id
+            } ?? project.branches.first(where: {
                 $0.id == project.project.mainBranchID && $0.lifecycle == .active
             })?.id ?? project.branches.first(where: { $0.lifecycle == .active })?.id
             let loadedBranch: NovelBranchSnapshot?
@@ -395,6 +441,7 @@ final class NovelCreationViewModel {
             projectSnapshot = project
             selectedBranchID = branchID
             branchSnapshot = loadedBranch
+            if let branchID { lastSelectedBranchIDs[projectID] = branchID }
             injectionPreview = nil
             errorMessage = nil
             if reloadNoticeProjectID == projectID {
@@ -505,6 +552,7 @@ final class NovelCreationViewModel {
             projectSnapshot = refreshedProject
             selectedBranchID = branchID
             branchSnapshot = snapshot
+            lastSelectedBranchIDs[projectID] = branchID
             injectionPreview = nil
             errorMessage = nil
             return .selected
@@ -522,6 +570,7 @@ final class NovelCreationViewModel {
                 projectSnapshot = refreshedProject
                 selectedBranchID = interruptedSourceBranchID
                 branchSnapshot = refreshedBranch
+                lastSelectedBranchIDs[projectID] = interruptedSourceBranchID
                 injectionPreview = nil
             }
             guard selectionIntentToken == intentToken,
@@ -1109,32 +1158,33 @@ final class NovelCreationViewModel {
     }
 
     /// 标记废弃 / 恢复整章。不删除任何记录,废弃后该章不再进入生成上下文。
-    func setChapterDiscarded(_ isDiscarded: Bool, chapterID: NovelChapterID) async {
+    @discardableResult
+    func setChapterDiscarded(_ isDiscarded: Bool, chapterID: NovelChapterID) async -> Bool {
         guard let project = projectSnapshot,
               let branch = branchSnapshot,
-              let chapter = project.chapters.first(where: { $0.id == chapterID }),
-              (chapter.discardedAt != nil) != isDiscarded else {
-            return
+              let chapter = project.chapters.first(where: { $0.id == chapterID }) else {
+            errorMessage = "章节已经不存在，请重新载入项目。"
+            return false
         }
+        if (chapter.discardedAt != nil) == isDiscarded { return true }
         let context = mutationContext(
             projectRevision: project.project.revision,
             branchHeadRevision: branch.branch.headRevision
         )
         if isDiscarded {
-            _ = await perform(.discardChapter(NovelDiscardChapterCommand(
-                context: context,
-                projectID: project.project.id,
-                branchID: branch.branch.id,
-                chapterID: chapterID
-            )))
-        } else {
-            _ = await perform(.restoreChapter(NovelRestoreChapterCommand(
+            return await perform(.discardChapter(NovelDiscardChapterCommand(
                 context: context,
                 projectID: project.project.id,
                 branchID: branch.branch.id,
                 chapterID: chapterID
             )))
         }
+        return await perform(.restoreChapter(NovelRestoreChapterCommand(
+            context: context,
+            projectID: project.project.id,
+            branchID: branch.branch.id,
+            chapterID: chapterID
+        )))
     }
 
     func restoreChapterVersion(_ targetVersionID: NovelChapterVersionID) async {
@@ -1896,8 +1946,9 @@ final class NovelCreationViewModel {
                 continue
             }
 
+            let succeeded: Bool
             if let pending = branchPending.first {
-                _ = await perform(.retryPending(NovelRetryPendingCommand(
+                succeeded = await perform(.retryPending(NovelRetryPendingCommand(
                     context: mutationContext(
                         projectRevision: projectSnapshot.project.revision
                     ),
@@ -1905,7 +1956,7 @@ final class NovelCreationViewModel {
                     pendingID: pending.id
                 )), reportsError: false)
             } else {
-                _ = await perform(.syncManualEdits(NovelSyncManualEditsCommand(
+                succeeded = await perform(.syncManualEdits(NovelSyncManualEditsCommand(
                     context: mutationContext(
                         projectRevision: projectSnapshot.project.revision,
                         configRevision: projectSnapshot.project.configRevision,
@@ -1918,6 +1969,19 @@ final class NovelCreationViewModel {
                     stateSnapshotID: NovelStateSnapshotID(),
                     expectedWorkingRevision: branchSnapshot.branch.workingRevision
                 )), reportsError: false)
+            }
+            guard succeeded || Task.isCancelled else {
+                let detail = self.projectSnapshot?.pendingOperations.first(where: {
+                    $0.branchID == target.branchID && $0.kind == .manualSync
+                })?.lastError
+                let message = detail.map(NovelPresentation.stateSyncFailureMessage)
+                    ?? "自动剧情同步没有完成，请重试。"
+                automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
+                    target: target,
+                    message: message
+                )
+                errorMessage = message
+                return
             }
             return
         }
@@ -1948,6 +2012,7 @@ final class NovelCreationViewModel {
         projectSnapshot = project
         selectedBranchID = branchID
         branchSnapshot = loadedBranch
+        if let branchID { lastSelectedBranchIDs[projectID] = branchID }
         injectionPreview = nil
     }
 

@@ -225,11 +225,26 @@ struct NovelProjectListView: View {
                     .font(.footnote.weight(.semibold).monospacedDigit())
                     .foregroundStyle(AmberTheme.accentAmber)
             }
+
+            if let projectID = viewModel.selectedProjectID,
+               let branchID = viewModel.selectedBranchID,
+               viewModel.canCancelAutomaticStateSync(
+                   projectID: projectID,
+                   branchID: branchID
+               ) {
+                Button("停止") {
+                    viewModel.cancelAutomaticStateSync(
+                        projectID: projectID,
+                        branchID: branchID
+                    )
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
         .background(AmberTheme.surface)
-        .accessibilityElement(children: .combine)
     }
 
     private var projectList: some View {
@@ -568,6 +583,8 @@ struct NovelProjectRenameSheet: View {
     let currentName: String
     let canRename: Bool
     @State private var name: String
+    @State private var isSubmitting = false
+    @State private var failureMessage: String?
     @FocusState private var isNameFocused: Bool
 
     init(viewModel: NovelCreationViewModel, project: NovelProjectSummary) {
@@ -595,7 +612,13 @@ struct NovelProjectRenameSheet: View {
                     .submitLabel(.done)
                     .onSubmit(commitNameAndSave)
                     .textFieldStyle(.roundedBorder)
+                if let failureMessage {
+                    Label(failureMessage, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.accentRed)
+                }
             }
+            .disabled(isSubmitting)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
             .background(AmberTheme.background)
@@ -604,16 +627,22 @@ struct NovelProjectRenameSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                        .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { commitNameAndSave() }
                         .disabled(
                             !canRename ||
-                                name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                isSubmitting
                         )
                 }
             }
+            .overlay {
+                if isSubmitting { ProgressView("正在保存项目名称") }
+            }
         }
+        .interactiveDismissDisabled(isSubmitting)
         .presentationSizing(.fitted)
         .presentationDragIndicator(.visible)
     }
@@ -632,14 +661,21 @@ struct NovelProjectRenameSheet: View {
     }
 
     private func save(_ committedName: String) {
-        guard !committedName.isEmpty else { return }
+        guard !committedName.isEmpty, !isSubmitting else { return }
         guard committedName != currentName else {
             dismiss()
             return
         }
+        isSubmitting = true
+        failureMessage = nil
         Task { @MainActor in
+            viewModel.clearError()
             await viewModel.renameProject(committedName)
-            guard viewModel.errorMessage == nil else { return }
+            isSubmitting = false
+            guard viewModel.errorMessage == nil else {
+                failureMessage = viewModel.errorMessage ?? "项目名称没有保存，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }

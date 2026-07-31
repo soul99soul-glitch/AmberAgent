@@ -51,13 +51,30 @@ struct NovelCompendiumView: View {
     private var categoryPicker: some View {
         Picker("设定分类", selection: $selection) {
             ForEach(NovelCompendiumSection.allCases) { section in
-                Text(section.title).tag(section)
+                Text(categoryTitle(section)).tag(section)
             }
         }
         .pickerStyle(.segmented)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(AmberTheme.background)
+    }
+
+    private func categoryTitle(_ section: NovelCompendiumSection) -> String {
+        let count = pendingProposalCount(for: section)
+        return count == 0 ? section.title : "\(section.title) \(count)"
+    }
+
+    private func pendingProposalCount(for section: NovelCompendiumSection) -> Int {
+        viewModel.branchSnapshot?.activeSettingProposals.filter { proposal in
+            let route = NovelSettingProposalRoute(kind: proposal.suggestedMaterialKind)
+            return switch section {
+            case .characters: route == .characters
+            case .world: route == .world
+            case .story: route == .story
+            case .more: route == .more
+            }
+        }.count ?? 0
     }
 
     @ViewBuilder
@@ -210,7 +227,6 @@ private struct NovelMaterialCategoryView: View {
             NovelMaterialRow(material: material, revision: revision)
         }
         .buttonStyle(.plain)
-        .disabled(!viewModel.canMutate)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 pendingDelete = NovelCompendiumMaterialDeleteCandidate(
@@ -220,6 +236,7 @@ private struct NovelMaterialCategoryView: View {
             } label: {
                 Label("删除", systemImage: "trash")
             }
+            .disabled(!viewModel.canMutate)
         }
     }
 }
@@ -264,7 +281,6 @@ private struct NovelStoryCompendiumView: View {
                             NovelMaterialRow(material: material, revision: revision)
                         }
                         .buttonStyle(.plain)
-                        .disabled(!viewModel.canMutate)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
                                 pendingDelete = NovelCompendiumMaterialDeleteCandidate(
@@ -274,6 +290,7 @@ private struct NovelStoryCompendiumView: View {
                             } label: {
                                 Label("删除", systemImage: "trash")
                             }
+                            .disabled(!viewModel.canMutate)
                         }
                     }
                 }
@@ -392,7 +409,6 @@ private struct NovelCompendiumMoreView: View {
                         NovelMaterialRow(material: material, revision: revision)
                     }
                     .buttonStyle(.plain)
-                    .disabled(!viewModel.canMutate)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
                             pendingDelete = NovelCompendiumMaterialDeleteCandidate(
@@ -402,6 +418,7 @@ private struct NovelCompendiumMoreView: View {
                         } label: {
                             Label("删除", systemImage: "trash")
                         }
+                        .disabled(!viewModel.canMutate)
                     }
                 }
 
@@ -478,6 +495,8 @@ struct NovelQuickStartRegenerationSheet: View {
 
     let viewModel: NovelCreationViewModel
     @State private var guidance = ""
+    @State private var isStarting = false
+    @State private var failureMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -490,7 +509,14 @@ struct NovelQuickStartRegenerationSheet: View {
                 } footer: {
                     Text("题材和核心创意不会改变，只是把这段说明并入本次生成请求，让模型知道应该往哪个方向调整。留空则按原方式重新生成。")
                 }
+                if let failureMessage {
+                    Section {
+                        Label(failureMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(AmberTheme.accentRed)
+                    }
+                }
             }
+            .disabled(isStarting)
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
             .navigationTitle("重新生成设定建议")
@@ -498,25 +524,41 @@ struct NovelQuickStartRegenerationSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                        .disabled(isStarting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("开始") { start() }
-                        .disabled(viewModel.isPerforming)
+                        .disabled(isStarting || viewModel.isPerforming)
+                }
+            }
+            .overlay {
+                if isStarting {
+                    ProgressView("正在开始生成建议")
+                        .padding(16)
+                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
+        .interactiveDismissDisabled(isStarting)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
     private func start() {
+        guard !isStarting else { return }
+        isStarting = true
+        failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
             // startQuickStartSuggestions 的守卫(正在执行/已有活跃 run/需重载)
             // 会静默返回 nil。此时不能关闭 sheet——否则用户以为已经开始生成,
             // 实际什么都没发生。留在原地让用户可以重试。
             let runID = await viewModel.startQuickStartSuggestions(guidance: guidance)
-            guard viewModel.errorMessage == nil, runID != nil else { return }
+            isStarting = false
+            guard viewModel.errorMessage == nil, runID != nil else {
+                failureMessage = viewModel.errorMessage ?? "建议生成没有开始，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }

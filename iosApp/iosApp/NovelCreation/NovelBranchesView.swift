@@ -395,6 +395,8 @@ struct NovelBranchRenameSheet: View {
     let viewModel: NovelCreationViewModel
     let branch: NovelBranchRecord
     @State private var name: String
+    @State private var isSubmitting = false
+    @State private var failureMessage: String?
 
     init(viewModel: NovelCreationViewModel, branch: NovelBranchRecord) {
         self.viewModel = viewModel
@@ -410,7 +412,13 @@ struct NovelBranchRenameSheet: View {
                     .foregroundStyle(AmberTheme.muted)
                 TextField("分支名称", text: $name)
                     .textFieldStyle(.roundedBorder)
+                if let failureMessage {
+                    Label(failureMessage, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.accentRed)
+                }
             }
+            .disabled(isSubmitting)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
             .background(AmberTheme.background)
@@ -419,22 +427,37 @@ struct NovelBranchRenameSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                        .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(
+                            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                isSubmitting
+                        )
                 }
             }
+            .overlay {
+                if isSubmitting { ProgressView("正在保存分支名称") }
+            }
         }
+        .interactiveDismissDisabled(isSubmitting)
         .presentationSizing(.fitted)
         .presentationDragIndicator(.visible)
     }
 
     private func save() {
+        guard !isSubmitting else { return }
+        isSubmitting = true
+        failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
             await viewModel.renameBranch(branch.id, name: name)
-            guard viewModel.errorMessage == nil else { return }
+            isSubmitting = false
+            guard viewModel.errorMessage == nil else {
+                failureMessage = viewModel.errorMessage ?? "分支名称没有保存，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }
@@ -610,6 +633,8 @@ struct NovelBranchOverrideEditorSheet: View {
     @State private var content: String
     @State private var tags: String
     @State private var injectionMode: NovelInjectionMode
+    @State private var isSubmitting = false
+    @State private var failureMessage: String?
 
     init(viewModel: NovelCreationViewModel, material: NovelMaterialRecord) {
         self.viewModel = viewModel
@@ -672,7 +697,15 @@ struct NovelBranchOverrideEditorSheet: View {
                             .foregroundStyle(AmberTheme.foreground2)
                     }
                 }
+
+                if let failureMessage {
+                    Section {
+                        Label(failureMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(AmberTheme.accentRed)
+                    }
+                }
             }
+            .disabled(isSubmitting)
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
             .navigationTitle("分支设定覆盖")
@@ -680,14 +713,22 @@ struct NovelBranchOverrideEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                        .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
-                        .disabled(!canSave || viewModel.isPerforming)
+                        .disabled(!canSave || isSubmitting || viewModel.isPerforming)
+                }
+            }
+            .overlay {
+                if isSubmitting {
+                    ProgressView("正在保存分支设定")
+                        .padding(16)
+                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
-        .interactiveDismissDisabled(viewModel.isPerforming)
+        .interactiveDismissDisabled(isSubmitting)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
@@ -711,6 +752,7 @@ struct NovelBranchOverrideEditorSheet: View {
     }
 
     private func save() {
+        guard !isSubmitting else { return }
         let change: NovelBranchMaterialOverrideChange
         switch mode {
         case .inherit:
@@ -731,10 +773,16 @@ struct NovelBranchOverrideEditorSheet: View {
                 injectionMode: injectionMode
             )
         }
+        isSubmitting = true
+        failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
             await viewModel.setBranchMaterialOverride(materialID: material.id, change: change)
-            guard viewModel.errorMessage == nil else { return }
+            isSubmitting = false
+            guard viewModel.errorMessage == nil else {
+                failureMessage = viewModel.errorMessage ?? "分支设定没有保存，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }

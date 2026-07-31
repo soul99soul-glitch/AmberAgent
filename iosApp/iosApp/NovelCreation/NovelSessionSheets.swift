@@ -27,10 +27,20 @@ enum NovelDiscussionArchivePreparationResult: Equatable {
     case failed(String)
 }
 
+private struct NovelDiscussionArchiveEditingSnapshot: Equatable {
+    let decisions: [NovelDiscussionArchiveDraftDecision]
+    let selectedDecisionIDs: Set<UUID>
+    let summary: String
+}
+
 struct NovelDiscussionArchiveOfferSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// Distill requires a synchronized, idle branch; collection always leaves needsSync.
     let isReady: Bool
+    let needsSync: Bool
+    let isSyncing: Bool
+    let syncFailureMessage: String?
+    let onRetrySync: () -> Void
     let onContinue: () -> Void
 
     var body: some View {
@@ -42,8 +52,32 @@ struct NovelDiscussionArchiveOfferSheet: View {
                 Text("可以把本章讨论中已经确认的决定整理成长期记忆。整理结果会先给你确认，不会直接写入项目。")
                     .font(.body)
                     .foregroundStyle(AmberTheme.foreground2)
-                if !isReady {
+                if isSyncing {
+                    HStack(spacing: 9) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("正在同步剧情状态，完成后即可归档")
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.muted)
+                } else if let syncFailureMessage {
+                    Label(syncFailureMessage, systemImage: "exclamationmark.triangle")
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.accentRed)
+                    Button("重试同步", systemImage: "arrow.clockwise") {
+                        onRetrySync()
+                    }
+                    .buttonStyle(.bordered)
+                } else if needsSync {
                     Label("剧情状态同步完成后可归档", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.muted)
+                    Button("开始同步", systemImage: "arrow.clockwise") {
+                        onRetrySync()
+                    }
+                    .buttonStyle(.bordered)
+                } else if !isReady {
+                    Label("当前有其他操作正在处理，完成后即可归档", systemImage: "clock")
                         .font(.subheadline)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -84,6 +118,8 @@ struct NovelDiscussionArchiveSheet: View {
     @State private var isPreparing = false
     @State private var isSubmitting = false
     @State private var preparationTask: Task<Void, Never>?
+    @State private var editingBaseline: NovelDiscussionArchiveEditingSnapshot?
+    @State private var isConfirmingDiscard = false
 
     var body: some View {
         NavigationStack {
@@ -144,8 +180,26 @@ struct NovelDiscussionArchiveSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { cancelPreparationAndDismiss() }
+                    Button("取消") {
+                        if hasUnsavedChanges {
+                            isConfirmingDiscard = true
+                        } else {
+                            cancelPreparationAndDismiss()
+                        }
+                    }
                         .disabled(isSubmitting)
+                        .confirmationDialog(
+                            "放弃归档调整？",
+                            isPresented: $isConfirmingDiscard,
+                            titleVisibility: .visible
+                        ) {
+                            Button("放弃更改", role: .destructive) {
+                                cancelPreparationAndDismiss()
+                            }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: {
+                            Text("尚未归档的摘要和决定修改会丢失。")
+                        }
                 }
                 if draft != nil, preparationFailureMessage == nil {
                     ToolbarItem(placement: .confirmationAction) {
@@ -166,7 +220,7 @@ struct NovelDiscussionArchiveSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(isPreparing || isSubmitting)
+        .interactiveDismissDisabled(isPreparing || isSubmitting || hasUnsavedChanges)
         .onAppear { prepare() }
         .onDisappear { preparationTask?.cancel() }
     }
@@ -184,6 +238,15 @@ struct NovelDiscussionArchiveSheet: View {
                 !$0.topic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
                     !$0.decision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
+    }
+
+    private var hasUnsavedChanges: Bool {
+        guard let editingBaseline else { return false }
+        return editingBaseline != NovelDiscussionArchiveEditingSnapshot(
+            decisions: decisions,
+            selectedDecisionIDs: selectedDecisionIDs,
+            summary: summary
+        )
     }
 
     private func selectionBinding(for id: UUID) -> Binding<Bool> {
@@ -223,6 +286,11 @@ struct NovelDiscussionArchiveSheet: View {
                 decisions = prepared.decisions
                 selectedDecisionIDs = Set(prepared.decisions.map(\.id))
                 summary = prepared.summary
+                editingBaseline = NovelDiscussionArchiveEditingSnapshot(
+                    decisions: prepared.decisions,
+                    selectedDecisionIDs: Set(prepared.decisions.map(\.id)),
+                    summary: prepared.summary
+                )
             case .failed(let message):
                 preparationFailureMessage = message
             }
@@ -270,6 +338,10 @@ struct NovelCollectCandidateSheet: View {
         NovelParagraphSelection,
         NovelCollectionTarget
     ) async -> NovelSessionSheetSubmissionResult
+    private let initialSelectedParagraphIDs: Set<NovelParagraphID>
+    private let initialEditedText: String
+    private let initialTargetChoice: NovelCollectionTargetChoice
+    private let initialNextChapterTitle: String
 
     @State private var selectedParagraphIDs: Set<NovelParagraphID>
     @State private var editedText: String
@@ -278,6 +350,7 @@ struct NovelCollectCandidateSheet: View {
     @State private var nextChapterTitle: String
     @State private var isSubmitting = false
     @State private var submissionResult: NovelSessionSheetSubmissionResult?
+    @State private var isConfirmingDiscard = false
 
     init(
         paragraphs: [NovelParagraphRecord],
@@ -299,19 +372,25 @@ struct NovelCollectCandidateSheet: View {
         self.onCollect = onCollect
         let paragraphIDs = Set(paragraphs.map(\.id))
         let candidateText = paragraphs.map(\.text).joined(separator: "\n\n")
-        self._selectedParagraphIDs = State(initialValue: paragraphIDs)
-        self._editedText = State(initialValue: candidateText)
-        self._targetChoice = State(initialValue: NovelCollectionTargetChoice.initial(
+        let targetChoice = NovelCollectionTargetChoice.initial(
             chapterCount: chapters.count,
             granularity: suggestedGranularity,
             hasRegenerationTarget: regenerationTarget != nil
-        ))
+        )
         let nextOrdinal = nextChapterOrdinal
-        self._nextChapterTitle = State(initialValue: NovelPresentation.chapterDisplayTitle(
+        let nextTitle = NovelPresentation.chapterDisplayTitle(
             storedTitle: "第 \(nextOrdinal) 章",
             content: candidateText,
             ordinal: nextOrdinal
-        ))
+        )
+        self.initialSelectedParagraphIDs = paragraphIDs
+        self.initialEditedText = candidateText
+        self.initialTargetChoice = targetChoice
+        self.initialNextChapterTitle = nextTitle
+        self._selectedParagraphIDs = State(initialValue: paragraphIDs)
+        self._editedText = State(initialValue: candidateText)
+        self._targetChoice = State(initialValue: targetChoice)
+        self._nextChapterTitle = State(initialValue: nextTitle)
     }
 
     var body: some View {
@@ -319,8 +398,11 @@ struct NovelCollectCandidateSheet: View {
             Form {
                 submissionSection
                 paragraphSection
+                    .disabled(isSubmitting || hasDurablePending)
                 previewSection
+                    .disabled(isSubmitting || hasDurablePending)
                 targetSection
+                    .disabled(isSubmitting || hasDurablePending)
             }
             .disabled(isSubmitting)
             .scrollContentBackground(.hidden)
@@ -329,8 +411,24 @@ struct NovelCollectCandidateSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if shouldConfirmDiscard {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                         .disabled(isSubmitting)
+                        .confirmationDialog(
+                            "放弃本次收录调整？",
+                            isPresented: $isConfirmingDiscard,
+                            titleVisibility: .visible
+                        ) {
+                            Button("放弃更改", role: .destructive) { dismiss() }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: {
+                            Text("尚未收录的正文编辑、段落选择和章节位置会丢失。")
+                        }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("收录") { collect() }
@@ -345,7 +443,7 @@ struct NovelCollectCandidateSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(isSubmitting)
+        .interactiveDismissDisabled(isSubmitting || shouldConfirmDiscard)
     }
 
     @ViewBuilder
@@ -496,6 +594,17 @@ struct NovelCollectCandidateSheet: View {
     private var hasDurablePending: Bool {
         if case .pending = submissionResult { return true }
         return false
+    }
+
+    private var shouldConfirmDiscard: Bool {
+        hasUnsavedChanges && !hasDurablePending
+    }
+
+    private var hasUnsavedChanges: Bool {
+        selectedParagraphIDs != initialSelectedParagraphIDs ||
+            editedText != initialEditedText ||
+            targetChoice != initialTargetChoice ||
+            nextChapterTitle != initialNextChapterTitle
     }
 
     private var appendCurrentLabel: String {

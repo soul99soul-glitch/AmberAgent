@@ -83,6 +83,92 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testReloadingTheSelectedProjectKeepsItsCurrentActiveBranch() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        _ = try await repository.createProject(document)
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        let didSelect = await viewModel.selectProject(document.project.id)
+        XCTAssertTrue(didSelect)
+        let sourceBranchID = try XCTUnwrap(viewModel.selectedBranchID)
+        let createdForkID = await viewModel.forkBranch(
+            from: sourceBranchID,
+            checkpointID: document.branches[0].headCheckpointID,
+            name: "支线"
+        )
+        let forkID = try XCTUnwrap(createdForkID)
+        XCTAssertEqual(viewModel.selectedBranchID, forkID)
+
+        await viewModel.loadProjects()
+
+        XCTAssertEqual(viewModel.selectedProjectID, document.project.id)
+        XCTAssertEqual(viewModel.selectedBranchID, forkID)
+        XCTAssertEqual(viewModel.branchSnapshot?.branch.id, forkID)
+    }
+
+    func testReturningToAProjectRestoresItsLastActiveBranch() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let first = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let second = try NovelTestFixtures.document()
+        _ = try await repository.createProject(first)
+        _ = try await repository.createProject(second)
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        let didSelectFirst = await viewModel.selectProject(first.project.id)
+        XCTAssertTrue(didSelectFirst)
+        let sourceBranchID = try XCTUnwrap(viewModel.selectedBranchID)
+        let createdForkID = await viewModel.forkBranch(
+            from: sourceBranchID,
+            checkpointID: first.branches[0].headCheckpointID,
+            name: "支线"
+        )
+        let forkID = try XCTUnwrap(createdForkID)
+        XCTAssertEqual(viewModel.selectedBranchID, forkID)
+
+        let didSelectSecond = await viewModel.selectProject(second.project.id)
+        let didReturnToFirst = await viewModel.selectProject(first.project.id)
+        XCTAssertTrue(didSelectSecond)
+        XCTAssertTrue(didReturnToFirst)
+
+        XCTAssertEqual(viewModel.selectedProjectID, first.project.id)
+        XCTAssertEqual(viewModel.selectedBranchID, forkID)
+        XCTAssertEqual(viewModel.branchSnapshot?.branch.id, forkID)
+    }
+
+    func testComposerDraftsAreScopedToProjectAndBranch() {
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: InMemoryNovelProjectRepository())
+        )
+        let projectID = NovelProjectID()
+        let branchID = NovelBranchID()
+        let draft = NovelComposerDraft(
+            text: "继续写列车抵达雾港。",
+            injectionOverrides: NovelInjectionOverrides(
+                forceIncludeMaterialIDs: [NovelMaterialID()],
+                forceExcludeMaterialIDs: []
+            ),
+            inputBudgetTokens: 24_000
+        )
+
+        viewModel.saveComposerDraft(draft, projectID: projectID, branchID: branchID)
+
+        XCTAssertEqual(
+            viewModel.composerDraft(projectID: projectID, branchID: branchID),
+            draft
+        )
+        XCTAssertEqual(
+            viewModel.composerDraft(projectID: projectID, branchID: NovelBranchID()),
+            .empty
+        )
+        XCTAssertEqual(
+            viewModel.composerDraft(projectID: NovelProjectID(), branchID: branchID),
+            .empty
+        )
+    }
+
     func testProjectSelectionDoesNotSwitchWhileAnotherProjectOperationIsRunning() async throws {
         let repository = InMemoryNovelProjectRepository()
         let firstDocument = try NovelTestFixtures.document()
@@ -1014,13 +1100,16 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertEqual(branch.headCheckpointID, fixture.document.branches[0].headCheckpointID)
         XCTAssertEqual(branch.headRevision, fixture.document.branches[0].headRevision)
         XCTAssertEqual(edited.stateSnapshots, fixture.document.stateSnapshots)
-        XCTAssertNil(viewModel.errorMessage)
 
         let failurePersisted = await eventually {
             viewModel.projectSnapshot?.pendingOperations.first?.status == .retryable
         }
         XCTAssertTrue(failurePersisted)
-        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNotNil(viewModel.automaticStateSyncFailureMessage(
+            projectID: edited.project.id,
+            branchID: branch.id
+        ))
+        XCTAssertNotNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.count, 1)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.first?.kind, .manualSync)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.first?.status, .retryable)

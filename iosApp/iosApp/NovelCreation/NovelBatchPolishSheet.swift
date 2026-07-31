@@ -13,8 +13,11 @@ struct NovelBatchPolishSheet: View {
 
     @State private var selectedChapterIDs: Set<NovelChapterID>
     @State private var pendingAbandonTransactionID: NovelPendingOperationID?
+    @State private var pendingBulkAbandonTransactionIDs: [NovelPendingOperationID] = []
+    @State private var abandonTask: Task<Void, Never>?
     @State private var retryTask: Task<Void, Never>?
     @State private var retryingTransactionID: NovelPendingOperationID?
+    @State private var isStopRequested = false
 
     init(
         chapters: [NovelSessionChapterOption],
@@ -43,35 +46,16 @@ struct NovelBatchPolishSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .interactiveDismissDisabled(progress?.phase == .running || retryTask != nil)
+        .interactiveDismissDisabled(
+            progress?.phase == .running || retryTask != nil || abandonTask != nil
+        )
         .onDisappear {
             retryTask?.cancel()
             retryTask = nil
             retryingTransactionID = nil
         }
-        .confirmationDialog(
-            "放弃这次润色？",
-            isPresented: Binding(
-                get: { pendingAbandonTransactionID != nil },
-                set: { presented in
-                    if !presented { pendingAbandonTransactionID = nil }
-                }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("放弃润色", role: .destructive) {
-                guard transactionActionBlocker == nil,
-                      let transactionID = pendingAbandonTransactionID else { return }
-                pendingAbandonTransactionID = nil
-                Task { @MainActor in
-                    await sessionViewModel.abandonPolishTransaction(transactionID)
-                }
-            }
-            Button("取消", role: .cancel) {
-                pendingAbandonTransactionID = nil
-            }
-        } message: {
-            Text("候选会保留在创作记录中，但不能再作为这次润色版采用。")
+        .onChange(of: progress?.phase) { _, phase in
+            if phase != .running { isStopRequested = false }
         }
     }
 
@@ -92,12 +76,15 @@ struct NovelBatchPolishSheet: View {
         switch progress?.phase {
         case .running:
             ToolbarItem(placement: .cancellationAction) {
-                Button("停止") { sessionViewModel.cancelBatchPolish() }
+                Button(isStopRequested ? "正在停止…" : "停止") {
+                    requestStop()
+                }
+                .disabled(isStopRequested)
             }
         case .done, .cancelled:
             ToolbarItem(placement: .confirmationAction) {
                 Button("完成") { dismiss() }
-                    .disabled(retryTask != nil)
+                    .disabled(retryTask != nil || abandonTask != nil)
             }
         case nil:
             ToolbarItem(placement: .cancellationAction) {
@@ -123,6 +110,19 @@ struct NovelBatchPolishSheet: View {
     private var selectionPhase: some View {
         Form {
             unresolvedTransactionSection
+            if unresolvedTransaction == nil,
+               let batchPolishBlocker = sessionViewModel.batchPolishBlocker {
+                Section {
+                    Label(batchPolishBlocker.displayName, systemImage: "info.circle")
+                        .foregroundStyle(AmberTheme.accentAmber)
+                }
+            } else if unresolvedTransaction == nil,
+                      let errorMessage = sessionViewModel.errorMessage {
+                Section {
+                    Label(errorMessage, systemImage: "exclamationmark.circle")
+                        .foregroundStyle(AmberTheme.accentRed)
+                }
+            }
             Section {
                 Text("按目录顺序逐章润色,并自动采用通过剧情漂移校验的结果。不会改变剧情事实;随时可停止;每一章都能在版本历史里撤销。")
                     .font(.footnote)
@@ -203,7 +203,9 @@ struct NovelBatchPolishSheet: View {
                     ProgressView()
                         .controlSize(.small)
                         .tint(AmberTheme.accentAmber)
-                    Text("正在润色第 \(min(completed + 1, total))/\(total) 章")
+                    Text(isStopRequested
+                        ? "正在停止批量润色…"
+                        : "正在润色第 \(min(completed + 1, total))/\(total) 章")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AmberTheme.foreground2)
                     Spacer(minLength: 8)
@@ -228,13 +230,17 @@ struct NovelBatchPolishSheet: View {
                     .monospacedDigit()
 
                 Button(role: .destructive) {
-                    sessionViewModel.cancelBatchPolish()
+                    requestStop()
                 } label: {
-                    Label("停止批量润色", systemImage: "stop.circle")
+                    Label(
+                        isStopRequested ? "正在停止…" : "停止批量润色",
+                        systemImage: "stop.circle"
+                    )
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
                 .padding(.top, 4)
+                .disabled(isStopRequested)
 
                 Spacer()
             }
@@ -289,10 +295,19 @@ struct NovelBatchPolishSheet: View {
             Section {
                 if unresolvedTransaction == nil,
                    (progress?.failedCount ?? 0) + (progress?.cancelledCount ?? 0) > 0 {
-                    Button("重试失败和未处理章节") { sessionViewModel.retryFailedBatchPolish() }
+                    Button("重试失败和未处理章节") {
+                        sessionViewModel.retryFailedBatchPolish()
+                    }
+                    .disabled(sessionViewModel.batchPolishBlocker != nil)
                 }
                 if unresolvedTransaction == nil {
                     Button("再润色一批") { sessionViewModel.clearBatchPolish() }
+                }
+                if unresolvedTransaction == nil,
+                   let blocker = sessionViewModel.batchPolishBlocker {
+                    Label(blocker.displayName, systemImage: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.muted)
                 }
             }
         }
@@ -363,6 +378,12 @@ struct NovelBatchPolishSheet: View {
                         .foregroundStyle(AmberTheme.muted)
                 }
 
+                if let errorMessage = sessionViewModel.errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.accentRed)
+                }
+
                 if transaction.status == .pending || transaction.status == .retryable {
                     if retryingTransactionID == transaction.id {
                         Button("停止检查", systemImage: "stop.circle") {
@@ -372,16 +393,84 @@ struct NovelBatchPolishSheet: View {
                         Button("重试检查", systemImage: "arrow.clockwise") {
                             retryPolishTransaction(transaction.id)
                         }
-                        .disabled(transactionActionBlocker != nil || retryTask != nil)
+                        .disabled(
+                            transactionActionBlocker != nil ||
+                                retryTask != nil ||
+                                abandonTask != nil
+                        )
                     }
                 }
 
                 Button("放弃这次润色", systemImage: "xmark.circle", role: .destructive) {
                     pendingAbandonTransactionID = transaction.id
                 }
-                .disabled(transactionActionBlocker != nil || retryTask != nil)
+                .disabled(
+                    transactionActionBlocker != nil ||
+                        retryTask != nil ||
+                        abandonTask != nil
+                )
+                .confirmationDialog(
+                    "放弃这次润色？",
+                    isPresented: singleAbandonConfirmationBinding,
+                    titleVisibility: .visible
+                ) {
+                    Button("放弃润色", role: .destructive) {
+                        guard let transactionID = pendingAbandonTransactionID else { return }
+                        pendingAbandonTransactionID = nil
+                        abandonTransactions([transactionID])
+                    }
+                    Button("取消", role: .cancel) {
+                        pendingAbandonTransactionID = nil
+                    }
+                } message: {
+                    Text("候选会保留在创作记录中，但不能再作为这次润色版采用。")
+                }
 
-                if let transactionActionBlocker, retryTask == nil {
+                if unresolvedTransactionCount > 1 {
+                    Button(
+                        "放弃全部 \(unresolvedTransactionCount) 项",
+                        systemImage: "xmark.circle.fill",
+                        role: .destructive
+                    ) {
+                        pendingBulkAbandonTransactionIDs = sessionViewModel
+                            .unresolvedBranchPolishTransactions
+                            .map(\.id)
+                    }
+                    .disabled(
+                        transactionActionBlocker != nil ||
+                            retryTask != nil ||
+                            abandonTask != nil
+                    )
+                    .confirmationDialog(
+                        "放弃全部 \(pendingBulkAbandonTransactionIDs.count) 项润色？",
+                        isPresented: bulkAbandonConfirmationBinding,
+                        titleVisibility: .visible
+                    ) {
+                        Button("全部放弃", role: .destructive) {
+                            let transactionIDs = pendingBulkAbandonTransactionIDs
+                            pendingBulkAbandonTransactionIDs = []
+                            abandonTransactions(transactionIDs)
+                        }
+                        Button("取消", role: .cancel) {
+                            pendingBulkAbandonTransactionIDs = []
+                        }
+                    } message: {
+                        Text("这些候选会保留在创作记录中，但不能再作为润色版采用。")
+                    }
+                }
+
+                if abandonTask != nil {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在放弃未完成的润色…")
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                }
+
+                if let transactionActionBlocker,
+                   retryTask == nil,
+                   abandonTask == nil {
                     Label(transactionActionBlocker.displayName, systemImage: "info.circle")
                         .font(.footnote)
                         .foregroundStyle(AmberTheme.muted)
@@ -411,8 +500,39 @@ struct NovelBatchPolishSheet: View {
         )
     }
 
+    private var singleAbandonConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { pendingAbandonTransactionID != nil },
+            set: { presented in
+                if !presented { pendingAbandonTransactionID = nil }
+            }
+        )
+    }
+
+    private var bulkAbandonConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { !pendingBulkAbandonTransactionIDs.isEmpty },
+            set: { presented in
+                if !presented { pendingBulkAbandonTransactionIDs = [] }
+            }
+        )
+    }
+
+    private func abandonTransactions(_ transactionIDs: [NovelPendingOperationID]) {
+        guard !transactionIDs.isEmpty,
+              abandonTask == nil,
+              retryTask == nil,
+              transactionActionBlocker == nil else { return }
+        abandonTask = Task { @MainActor in
+            _ = await sessionViewModel.abandonPolishTransactions(transactionIDs)
+            abandonTask = nil
+        }
+    }
+
     private func retryPolishTransaction(_ transactionID: NovelPendingOperationID) {
-        guard retryTask == nil, transactionActionBlocker == nil else { return }
+        guard retryTask == nil,
+              abandonTask == nil,
+              transactionActionBlocker == nil else { return }
         retryingTransactionID = transactionID
         retryTask = Task { @MainActor in
             defer {
@@ -450,9 +570,16 @@ struct NovelBatchPolishSheet: View {
     }
 
     private func start() {
+        isStopRequested = false
         let ordered = chapters
             .map(\.selection.chapterID)
             .filter { selectedChapterIDs.contains($0) }
-        sessionViewModel.startBatchPolish(chapterIDs: ordered)
+        _ = sessionViewModel.startBatchPolish(chapterIDs: ordered)
+    }
+
+    private func requestStop() {
+        guard !isStopRequested else { return }
+        isStopRequested = true
+        sessionViewModel.cancelBatchPolish()
     }
 }

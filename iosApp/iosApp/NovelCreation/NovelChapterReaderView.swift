@@ -16,6 +16,7 @@ struct NovelChapterReaderView: View {
     @State private var chapterID: NovelChapterID
     @State private var activeSheet: ReaderSheet?
     @State private var failureMessage: String?
+    @State private var startingAction: NovelChapterStartingAction?
 
     init(
         viewModel: NovelCreationViewModel,
@@ -32,6 +33,9 @@ struct NovelChapterReaderView: View {
 
     var body: some View {
         reader
+            .safeAreaInset(edge: .top, spacing: 0) {
+                chapterStatusBanner
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 chapterNavigation
             }
@@ -122,10 +126,7 @@ struct NovelChapterReaderView: View {
 
             Button(role: isCurrentChapterDiscarded ? nil : .destructive) {
                 guard chapterDiscardBlockReason == nil else { return }
-                let target = !isCurrentChapterDiscarded
-                Task { @MainActor in
-                    await viewModel.setChapterDiscarded(target, chapterID: chapterID)
-                }
+                setChapterDiscarded(!isCurrentChapterDiscarded)
             } label: {
                 Label(
                     chapterDiscardMenuTitle,
@@ -144,6 +145,32 @@ struct NovelChapterReaderView: View {
         .buttonStyle(.plain)
         .buttonBorderShape(.circle)
         .accessibilityLabel("章节操作")
+        .disabled(startingAction != nil)
+    }
+
+    @ViewBuilder
+    private var chapterStatusBanner: some View {
+        if let startingAction {
+            HStack(spacing: 9) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(startingAction.progressTitle)
+                    .font(.footnote.weight(.medium))
+            }
+            .foregroundStyle(AmberTheme.foreground2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 9)
+            .background(AmberTheme.accent.opacity(0.08))
+        } else if isCurrentChapterDiscarded {
+            Label("已废弃 · 不进入后续生成上下文", systemImage: "archivebox.fill")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.accentAmber)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 9)
+                .background(AmberTheme.accentAmber.opacity(0.10))
+        }
     }
 
     private var reader: some View {
@@ -178,12 +205,12 @@ struct NovelChapterReaderView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground2)
                     .padding(.horizontal, 14)
-                    .frame(height: 40)
+                    .frame(height: 44)
                     .contentShape(Capsule())
                     .amberGlass(cornerRadius: 20)
                 }
                 .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
-                .disabled(currentIndex <= 0)
+                .disabled(currentIndex <= 0 || startingAction != nil)
 
                 Spacer(minLength: 24)
 
@@ -197,12 +224,16 @@ struct NovelChapterReaderView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground2)
                     .padding(.horizontal, 14)
-                    .frame(height: 40)
+                    .frame(height: 44)
                     .contentShape(Capsule())
                     .amberGlass(cornerRadius: 20)
                 }
                 .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
-                .disabled(currentIndex < 0 || currentIndex >= chapterSelections.count - 1)
+                .disabled(
+                    currentIndex < 0 ||
+                        currentIndex >= chapterSelections.count - 1 ||
+                        startingAction != nil
+                )
             }
             .frame(maxWidth: .infinity)
         }
@@ -339,8 +370,10 @@ struct NovelChapterReaderView: View {
     /// 重新生成允许改剧情,所以走普通 prose run 而不是润色事务;产出的候选
     /// 在收录面板里默认选中「替换本章」。
     private func startRegeneration() {
-        guard polishBlockReason == nil else { return }
+        guard polishBlockReason == nil, startingAction == nil else { return }
+        startingAction = .regenerate
         Task { @MainActor in
+            defer { startingAction = nil }
             let started = await sessionViewModel.startWholeChapterRegeneration(chapterID: chapterID)
             guard started else {
                 failureMessage = sessionViewModel.errorMessage ?? "重新生成没有开始，请稍后重试。"
@@ -352,8 +385,10 @@ struct NovelChapterReaderView: View {
     }
 
     private func startPolish() {
-        guard polishBlockReason == nil else { return }
+        guard polishBlockReason == nil, startingAction == nil else { return }
+        startingAction = .polish
         Task { @MainActor in
+            defer { startingAction = nil }
             let started = await sessionViewModel.startWholeChapterPolish(chapterID: chapterID)
             guard started else {
                 failureMessage = sessionViewModel.errorMessage ?? "润色没有开始，请稍后重试。"
@@ -361,6 +396,39 @@ struct NovelChapterReaderView: View {
             }
             dismiss()
             onPolishStarted()
+        }
+    }
+
+    private func setChapterDiscarded(_ isDiscarded: Bool) {
+        guard startingAction == nil else { return }
+        startingAction = isDiscarded ? .discard : .restore
+        Task { @MainActor in
+            defer { startingAction = nil }
+            viewModel.clearError()
+            let succeeded = await viewModel.setChapterDiscarded(
+                isDiscarded,
+                chapterID: chapterID
+            )
+            guard succeeded else {
+                failureMessage = viewModel.errorMessage ?? "章节状态没有更新，请稍后重试。"
+                return
+            }
+        }
+    }
+}
+
+private enum NovelChapterStartingAction {
+    case polish
+    case regenerate
+    case discard
+    case restore
+
+    var progressTitle: String {
+        switch self {
+        case .polish: "正在开始整章润色"
+        case .regenerate: "正在开始整章重写"
+        case .discard: "正在废弃本章"
+        case .restore: "正在恢复本章"
         }
     }
 }
@@ -388,6 +456,7 @@ private struct NovelChapterEditSheet: View {
     @State private var isSaving = false
     @State private var isFindPresented = false
     @State private var failureMessage: String?
+    @State private var isConfirmingDiscard = false
 
     init(viewModel: NovelCreationViewModel, version: NovelChapterVersionRecord) {
         self.viewModel = viewModel
@@ -428,8 +497,24 @@ private struct NovelChapterEditSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if hasChanges {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                         .disabled(isSaving)
+                        .confirmationDialog(
+                            "放弃本章改写？",
+                            isPresented: $isConfirmingDiscard,
+                            titleVisibility: .visible
+                        ) {
+                            Button("放弃更改", role: .destructive) { dismiss() }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: {
+                            Text("尚未保存的标题和正文修改会丢失。")
+                        }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
@@ -449,7 +534,7 @@ private struct NovelChapterEditSheet: View {
                 if isSaving { ProgressView("正在保存改写") }
             }
         }
-        .interactiveDismissDisabled(isSaving)
+        .interactiveDismissDisabled(isSaving || hasChanges)
     }
 
     private var canSave: Bool {

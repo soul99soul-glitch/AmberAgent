@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
@@ -9,7 +9,7 @@ Last updated: 2026-07-30
 - Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 2026-07-16 小说创作连续工作、流式展示/滚动收敛与 vendor TextKit 增量布局已完成整合并纳入当前分支；开始新任务仍以实时 `git status` 为准。
+- Worktree: 当前有一组尚未提交的小说创作易用性收敛改动，范围为 `iosApp/iosApp/NovelCreation/`、对应 iOS 测试和本文件；开始新任务仍以实时 `git status` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,14 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `NativeChatTimelineView`（native timeline；2026-07-30 退役 route 判定层后为唯一 Chat 列表路径）。`ChatSwiftUIMessageList` 与 UIKit `ChatCollectionMessageList` 已生产不可达（仅 `#if CHAT_PERF_REPLAY` 仍编译前者），其 replay 测试现为死路径测试，不再代表默认 Chat 门禁；默认路径验证应以走 native timeline 的回放为准，各 replay 测试直驱哪个视图、强制门禁是否仍覆盖默认路径待下一切口核对。
 
 ## Latest Completed Slices
+
+### 2026-07-31 小说创作易用性三阶段收敛（未提交）
+
+- 批量润色：未决润色检查可一次确认并放弃全部，不再逐项反复点击；单项、批量和气泡内放弃确认都挂在触发按钮上。停止、重试、放弃均显示进行中和失败原因，入口与执行层共用同一 blocker。
+- 状态连续性：未发送输入、上下文覆盖和预算按 project+branch 保存；项目重载保留当前分支，跨项目返回恢复各自最后分支；发送成功只清理发起时所属草稿，失败保留原输入。
+- 可见闭环：章节润色/重写/废弃与自动剧情同步均有开始、失败和重试反馈；废弃章有持久标识。收录、归档、资料、偏好、建议接受、重命名和分支覆盖等异步 Sheet 在提交期间锁定，脏编辑退出前确认；durable pending 后不可再编辑无提交路径的内容。只读项目仍可浏览资料，长正文使用可滚动、可选择文本。
+- 易用性与无障碍：候选动作的运行时 blocker 同时驱动按钮和可见原因；同步停止按钮独立可达；错误关闭与主要动作满足 44pt 触控目标；Quick Start 分类显示待处理数量，跟随全局模型时显示实际模型名。
+- Review 与验证：每阶段均经调用链/状态和真实 UX 两类 subagent 复核并修复结论；最终复核 PASS。iPhone 17 Pro / iOS 26.5 Simulator 的 13 组整合回归为 **295 passed / 0 failed / 0 skipped**（`/private/tmp/amber-novel-ux-final-regression-20260731.xcresult`），`git diff --check` 通过；最终 Debug 构建已安装并启动，项目列表、长会话工作区和空正文目录目测无布局/导航回归。批量放弃、只读长资料和键盘/手势仍缺真实数据下的真机触感验证。
 
 ### 2026-07-30 小说创作真实阻塞与恢复路径收敛
 

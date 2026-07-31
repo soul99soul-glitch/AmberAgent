@@ -102,7 +102,8 @@ struct NovelSessionView: View {
     @State private var composerInputController = ComposerInputController()
     @State private var isInputFocused = false
     @State private var isContextPanelPresented = false
-    @State private var pendingAbandonTransactionID: NovelPendingOperationID?
+    @State private var pendingRecoveryAbandonTransactionIDs: [NovelPendingOperationID] = []
+    @State private var recoveryAbandonTask: Task<Void, Never>?
     @State private var pendingUndo: NovelPendingCommittedUndo?
     @State private var historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
     @State private var expandedArchiveIDs: Set<NovelMessageID> = []
@@ -175,24 +176,6 @@ struct NovelSessionView: View {
         }
         .onChange(of: followGeneration) { _, enabled in
             scrollDriver.setAutomaticFollowEnabled(enabled)
-        }
-        .confirmationDialog(
-            "放弃这次润色？",
-            isPresented: abandonConfirmationBinding,
-            titleVisibility: .visible
-        ) {
-            Button("放弃润色", role: .destructive) {
-                guard let transactionID = pendingAbandonTransactionID else { return }
-                pendingAbandonTransactionID = nil
-                Task { @MainActor in
-                    await viewModel.abandonPolishTransaction(transactionID)
-                }
-            }
-            Button("取消", role: .cancel) {
-                pendingAbandonTransactionID = nil
-            }
-        } message: {
-            Text("候选气泡会保留在创作记录中，但不能再作为润色版采用。")
         }
         .confirmationDialog(
             pendingUndo?.kind == .polish ? "撤销这次润色？" : "撤销这次收录？",
@@ -425,16 +408,16 @@ struct NovelSessionView: View {
             row: row,
             adoptingPolishCandidateID: viewModel.adoptingPolishCandidateID,
             askUserBlocker: askUserBlocker,
+            runtimeActionBlocker: NovelSessionComposerPolicy.runtimeActionBlocker(
+                requiresReload: workspace.requiresReload,
+                hasRefreshError: viewModel.hasRefreshError,
+                isBusy: viewModel.isBusy
+            ),
             onAction: handleRowAction,
             onAnswerAskUser: handleAskUserAnswer,
             onToggleArchive: toggleArchive
         )
             .equatable()
-            .allowsHitTesting(
-                !viewModel.isBusy &&
-                    !viewModel.hasRefreshError &&
-                    !workspace.requiresReload
-            )
             // [TEMP-DIAG] 数 LazyVStack 的物化行数,与 contentHeight 突变对账。
             .onAppear { ChatStreamAnomalyRecorder.noteRowAppeared() }
             .onDisappear { ChatStreamAnomalyRecorder.noteRowDisappeared() }
@@ -606,6 +589,8 @@ struct NovelSessionView: View {
     private func polishRecoveryBanner(
         _ transaction: NovelPendingPolishTransactionRecord
     ) -> some View {
+        let unresolvedTransactions = viewModel.unresolvedBranchPolishTransactions
+        let unresolvedCount = unresolvedTransactions.count
         let blocker = NovelSessionComposerPolicy.polishTransactionBlocker(
             access: viewModel.access,
             requiresReload: workspace.requiresReload,
@@ -617,10 +602,14 @@ struct NovelSessionView: View {
                 .foregroundStyle(AmberTheme.accentAmber)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("上次润色还需要处理")
+                Text(unresolvedCount > 1
+                    ? "还有 \(unresolvedCount) 项润色需要处理"
+                    : "上次润色还需要处理")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground2)
-                Text(polishRecoveryDetail(transaction, blocker: blocker))
+                Text(recoveryAbandonTask == nil
+                    ? polishRecoveryDetail(transaction, blocker: blocker)
+                    : "正在放弃未完成的润色…")
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
                     .lineLimit(2)
@@ -636,14 +625,66 @@ struct NovelSessionView: View {
                     }
                 }
                 Button("放弃这次润色", systemImage: "xmark.circle", role: .destructive) {
-                    pendingAbandonTransactionID = transaction.id
+                    pendingRecoveryAbandonTransactionIDs = [transaction.id]
+                }
+                if unresolvedCount > 1 {
+                    Button(
+                        "放弃全部 \(unresolvedCount) 项",
+                        systemImage: "xmark.circle.fill",
+                        role: .destructive
+                    ) {
+                        pendingRecoveryAbandonTransactionIDs = unresolvedTransactions.map(\.id)
+                    }
                 }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(blocker != nil)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+            .disabled(blocker != nil || recoveryAbandonTask != nil)
+            .confirmationDialog(
+                pendingRecoveryAbandonTransactionIDs.count > 1
+                    ? "放弃全部 \(pendingRecoveryAbandonTransactionIDs.count) 项润色？"
+                    : "放弃这次润色？",
+                isPresented: recoveryAbandonConfirmationBinding,
+                titleVisibility: .visible
+            ) {
+                Button(
+                    pendingRecoveryAbandonTransactionIDs.count > 1 ? "全部放弃" : "放弃润色",
+                    role: .destructive
+                ) {
+                    let transactionIDs = pendingRecoveryAbandonTransactionIDs
+                    pendingRecoveryAbandonTransactionIDs = []
+                    abandonRecoveryTransactions(transactionIDs)
+                }
+                Button("取消", role: .cancel) {
+                    pendingRecoveryAbandonTransactionIDs = []
+                }
+            } message: {
+                Text("候选会保留在创作记录中，但不能再作为润色版采用。")
+            }
         }
         .padding(.horizontal, 4)
+    }
+
+    private var recoveryAbandonConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { !pendingRecoveryAbandonTransactionIDs.isEmpty },
+            set: { presented in
+                if !presented { pendingRecoveryAbandonTransactionIDs = [] }
+            }
+        )
+    }
+
+    private func abandonRecoveryTransactions(
+        _ transactionIDs: [NovelPendingOperationID]
+    ) {
+        guard !transactionIDs.isEmpty,
+              recoveryAbandonTask == nil else { return }
+        recoveryAbandonTask = Task { @MainActor in
+            _ = await viewModel.abandonPolishTransactions(transactionIDs)
+            recoveryAbandonTask = nil
+        }
     }
 
     private func polishRecoveryDetail(
@@ -718,12 +759,6 @@ struct NovelSessionView: View {
                 .monospacedDigit()
             }
             .padding(.horizontal, 4)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("剧情状态同步")
-            .accessibilityValue(
-                percent.map { "正文已处理 \($0)%，已等待 \(elapsed) 秒" }
-                    ?? "已等待 \(elapsed) 秒"
-            )
         }
     }
 
@@ -777,6 +812,8 @@ struct NovelSessionView: View {
                     viewModel.clearError()
                 } label: {
                     Image(systemName: "xmark")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("关闭错误提示")
@@ -1081,21 +1118,17 @@ struct NovelSessionView: View {
         return "剧情状态同步尚未完成"
     }
 
-    private var abandonConfirmationBinding: Binding<Bool> {
-        Binding(
-            get: { pendingAbandonTransactionID != nil },
-            set: { presented in
-                if !presented { pendingAbandonTransactionID = nil }
-            }
-        )
-    }
-
     private func send() {
         guard sendEnabled else { return }
         guard let committed = composerInputController.committedText() else { return }
         guard !committed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let overrides = injectionOverrides
         let budget = inputBudgetTokens
+        let draftOwner = workspace.selectedProjectID.flatMap { projectID in
+            workspace.selectedBranchID.map {
+                NovelComposerDraftOwner(projectID: projectID, branchID: $0)
+            }
+        }
         dismissKeyboard()
         Task { @MainActor in
             let started = await viewModel.send(
@@ -1107,6 +1140,13 @@ struct NovelSessionView: View {
             inputText = ""
             injectionOverrides = .none
             inputBudgetTokens = 16_000
+            if let draftOwner {
+                workspace.saveComposerDraft(
+                    .empty,
+                    projectID: draftOwner.projectID,
+                    branchID: draftOwner.branchID
+                )
+            }
         }
     }
 
@@ -1139,7 +1179,7 @@ struct NovelSessionView: View {
         case .retryPolish(let transactionID):
             Task { @MainActor in await viewModel.retryPolishTransaction(transactionID) }
         case .abandonPolish(let transactionID):
-            pendingAbandonTransactionID = transactionID
+            Task { @MainActor in await viewModel.abandonPolishTransaction(transactionID) }
         case .convertPolishToManualRewrite(let candidateID, _):
             onOpenManualRewrite(candidateID)
         case .cloneCollectedProse(let candidateID):
@@ -1422,15 +1462,18 @@ struct NovelSessionView: View {
     private var generationStatusText: String {
         guard let kind = viewModel.activeRunKind else { return "正在生成" }
         if kind == .regenerate { return "重写本章 · 收录后替换原文" }
+        if kind == .polish { return "正在润色本章 · 完成后检查剧情一致性" }
         return viewModel.activeRunGranularity == .wholeChapter
             ? "完整章节 · 收录后成为新章"
             : "正文片段 · 收录后进入本章"
     }
 
     private var generationStatusIcon: String {
-        viewModel.activeRunKind == .regenerate
-            ? "arrow.triangle.2.circlepath"
-            : "doc.text"
+        switch viewModel.activeRunKind {
+        case .regenerate: "arrow.triangle.2.circlepath"
+        case .polish: "wand.and.sparkles"
+        default: "doc.text"
+        }
     }
 
     /// 生成中的候选状态条。原本挂在气泡里正文的正下方,正文每增长一次它就被
@@ -1495,6 +1538,7 @@ private struct NovelSessionRowView: View, Equatable {
     let row: NovelSessionRowModel
     let adoptingPolishCandidateID: NovelCandidateID?
     let askUserBlocker: NovelSessionActionBlocker?
+    let runtimeActionBlocker: NovelSessionActionBlocker?
     let onAction: (NovelSessionRowAction) -> Void
     let onAnswerAskUser: (NovelMessageID, String) -> Void
     let onToggleArchive: (NovelDiscussionArchivePresentation) -> Void
@@ -1502,7 +1546,8 @@ private struct NovelSessionRowView: View, Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.row.id == rhs.row.id && lhs.row.digest == rhs.row.digest &&
             lhs.adoptingPolishCandidateID == rhs.adoptingPolishCandidateID &&
-            lhs.askUserBlocker == rhs.askUserBlocker
+            lhs.askUserBlocker == rhs.askUserBlocker &&
+            lhs.runtimeActionBlocker == rhs.runtimeActionBlocker
     }
 
     var body: some View {
@@ -1529,6 +1574,7 @@ private struct NovelSessionRowView: View, Equatable {
                 committedChange: row.committedChange,
                 askUser: row.askUser,
                 askUserBlocker: askUserBlocker,
+                runtimeActionBlocker: runtimeActionBlocker,
                 actions: row.actions,
                 onAction: onAction,
                 onAnswerAskUser: onAnswerAskUser

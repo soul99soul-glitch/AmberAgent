@@ -393,7 +393,10 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         ]
 
         XCTAssertTrue(sheets.contains("@State private var preparationTask: Task<Void, Never>?"))
-        XCTAssertTrue(sheets.contains("Button(\"取消\") { cancelPreparationAndDismiss() }"))
+        XCTAssertTrue(archiveSheet.contains("if hasUnsavedChanges"))
+        XCTAssertTrue(archiveSheet.contains("isConfirmingDiscard = true"))
+        XCTAssertTrue(archiveSheet.contains("\"放弃归档调整？\""))
+        XCTAssertTrue(archiveSheet.contains(".interactiveDismissDisabled(isPreparing || isSubmitting || hasUnsavedChanges)"))
         XCTAssertTrue(sheets.contains(".onDisappear { preparationTask?.cancel() }"))
         XCTAssertTrue(sheets.contains("Button(\"重新整理\") { prepare() }"))
         XCTAssertTrue(sheets.contains("submissionFailureMessage == nil ? \"确认归档\" : \"重试保存\""))
@@ -406,7 +409,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(sheets.contains("guard !hasEditedText else { return }"))
         XCTAssertTrue(sheets.contains("调整段落后会保留你的编辑"))
         XCTAssertTrue(collectSheet.contains(
-            ".disabled(isSubmitting)\n            .scrollContentBackground"
+            ".disabled(isSubmitting || hasDurablePending)"
         ))
         XCTAssertTrue(collectSheet.contains("let nextChapterOrdinal: Int"))
         XCTAssertTrue(collectSheet.contains("nextChapterOrdinal: Int,"))
@@ -826,7 +829,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             range: actionBarStart.upperBound..<bubble.endIndex
         ))
         let actionBarBody = bubble[actionBarStart.lowerBound..<actionBarEnd.lowerBound]
-        XCTAssertTrue(actionBarBody.contains("actions.compactMap(\\.blocker).first"))
+        XCTAssertTrue(actionBarBody.contains("effectiveActions.compactMap(\\.blocker).first"))
         XCTAssertTrue(actionBarBody.contains("committedChange?.branchSyncStatus == .synchronized"))
         XCTAssertTrue(actionBarBody.contains("剧情状态已同步"))
 
@@ -900,6 +903,9 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(compendium.contains("NovelCompendiumMaterialEditTarget.resolve("))
         XCTAssertTrue(compendium.contains("branchOverrideRoute = NovelCompendiumBranchOverrideRoute("))
         XCTAssertTrue(compendium.contains("NovelBranchOverrideEditorSheet(viewModel:"))
+        XCTAssertTrue(materials.contains("if isEditable"))
+        XCTAssertTrue(materials.contains(".textSelection(.enabled)"))
+        XCTAssertTrue(materials.contains(".disabled(isSaving)"))
 
         let proposalStart = try XCTUnwrap(materials.range(of: "struct NovelProposalAcceptanceSheet"))
         let previewStart = try XCTUnwrap(materials.range(of: "struct NovelInjectionPreviewSheet"))

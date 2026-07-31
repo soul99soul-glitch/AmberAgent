@@ -863,6 +863,85 @@ final class NovelPolishIntegrityTests: NovelPolishTestCase {
         XCTAssertEqual(afterTimeoutReplay, abandonedAfterTimeout)
     }
 
+    func testBulkAbandonClearsEveryUnresolvedPolishTransactionInOneAction() async throws {
+        let driftFailure = NovelModelFailure(
+            code: "provider_down",
+            message: "剧情一致性检查暂时不可用",
+            isRetryable: true
+        )
+        let secondGeneration = NovelModelScript(steps: [
+            .delta("A second wording-only polish.\n\(NovelPromptCatalog.polishCompletionSentinel)"),
+            .complete,
+        ])
+        let harness = try await makeHarness(remainingScripts: [
+            NovelModelScript(steps: [.fail(driftFailure)]),
+            secondGeneration,
+            NovelModelScript(steps: [.fail(driftFailure)]),
+        ])
+
+        let firstCandidateID = try await generatePolish(in: harness)
+        let firstGenerated = try await document(in: harness)
+        let firstAdoption = adoptionCommand(
+            document: firstGenerated,
+            candidateID: firstCandidateID
+        )
+        await NovelXCTAssertThrowsErrorAsync(
+            try await harness.creation.perform(.adoptPolishCandidate(firstAdoption))
+        )
+
+        let afterFirstFailure = try await document(in: harness)
+        let secondCandidateID = try await generatePolish(
+            in: harness,
+            document: afterFirstFailure
+        )
+        let secondGenerated = try await document(in: harness)
+        let secondAdoption = adoptionCommand(
+            document: secondGenerated,
+            candidateID: secondCandidateID
+        )
+        await NovelXCTAssertThrowsErrorAsync(
+            try await harness.creation.perform(.adoptPolishCandidate(secondAdoption))
+        )
+
+        let unresolvedDocument = try await document(in: harness)
+        let unresolvedIDs = unresolvedDocument.polishTransactions.compactMap { transaction in
+            switch transaction.status {
+            case .pending, .retryable, .blocked:
+                transaction.id
+            case .completed, .incompatible, .abandoned:
+                nil
+            }
+        }
+        XCTAssertEqual(unresolvedIDs.count, 2)
+
+        let workspace = await NovelCreationViewModel(creation: harness.creation)
+        await workspace.loadProjects(selecting: harness.projectID)
+        let session = await NovelSessionViewModel(workspace: workspace, terminalQuietDelay: 0)
+        await session.bindToCurrentSelection()
+
+        let competingOwnerID = UUID()
+        let acquired = await workspace.acquireSessionOperation(ownerID: competingOwnerID)
+        XCTAssertTrue(acquired)
+        let blockedAbandon = await session.abandonPolishTransaction(unresolvedIDs[0])
+        XCTAssertFalse(blockedAbandon)
+        let blockedMessage = await session.errorMessage
+        XCTAssertEqual(blockedMessage, "当前有其他操作正在处理，请稍后再试。")
+        await workspace.releaseSessionOperation(ownerID: competingOwnerID)
+
+        let abandonedCount = await session.abandonPolishTransactions(unresolvedIDs)
+
+        XCTAssertEqual(abandonedCount, 2)
+        let unresolvedAfterAbandon = await session.unresolvedBranchPolishTransactions
+        XCTAssertTrue(unresolvedAfterAbandon.isEmpty)
+        let abandonedDocument = try await document(in: harness)
+        XCTAssertTrue(abandonedDocument.polishTransactions.allSatisfy {
+            $0.status == .abandoned
+        })
+        XCTAssertTrue(abandonedDocument.candidates.allSatisfy {
+            $0.status == .superseded
+        })
+    }
+
     func testSourceChangesAtomicallyBlockRetryWithoutPermanentlyBlockingDeleteOrUndo() async throws {
         let deleteHarness = try await makeHarness(remainingScripts: [
             NovelModelScript(steps: [.delta("not-json"), .complete]),

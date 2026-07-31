@@ -34,7 +34,19 @@ enum NovelSessionComposerPolicy {
         activeRunKind: NovelRunKind?
     ) -> Bool {
         guard isRunning else { return false }
-        return activeRunKind == .prose || activeRunKind == .regenerate
+        return activeRunKind == .prose ||
+            activeRunKind == .regenerate ||
+            activeRunKind == .polish
+    }
+
+    static func runtimeActionBlocker(
+        requiresReload: Bool,
+        hasRefreshError: Bool,
+        isBusy: Bool
+    ) -> NovelSessionActionBlocker? {
+        if requiresReload || hasRefreshError { return .reloadRequired }
+        if isBusy { return .transactionInProgress }
+        return nil
     }
 }
 

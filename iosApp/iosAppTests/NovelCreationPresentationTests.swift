@@ -397,6 +397,10 @@ final class NovelCreationPresentationTests: XCTestCase {
             isRunning: true,
             activeRunKind: .regenerate
         ))
+        XCTAssertTrue(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: true,
+            activeRunKind: .polish
+        ))
         XCTAssertFalse(NovelSessionComposerPolicy.showsGenerationStatus(
             isRunning: true,
             activeRunKind: .discussion
@@ -404,6 +408,38 @@ final class NovelCreationPresentationTests: XCTestCase {
         XCTAssertFalse(NovelSessionComposerPolicy.showsGenerationStatus(
             isRunning: false,
             activeRunKind: .prose
+        ))
+    }
+
+    func testRuntimeRowActionsExposeTheirBlockingReasonInsteadOfDroppingTaps() {
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.runtimeActionBlocker(
+                requiresReload: true,
+                hasRefreshError: false,
+                isBusy: false
+            ),
+            .reloadRequired
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.runtimeActionBlocker(
+                requiresReload: false,
+                hasRefreshError: true,
+                isBusy: false
+            ),
+            .reloadRequired
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.runtimeActionBlocker(
+                requiresReload: false,
+                hasRefreshError: false,
+                isBusy: true
+            ),
+            .transactionInProgress
+        )
+        XCTAssertNil(NovelSessionComposerPolicy.runtimeActionBlocker(
+            requiresReload: false,
+            hasRefreshError: false,
+            isBusy: false
         ))
     }
 
@@ -620,6 +656,16 @@ final class NovelCreationPresentationTests: XCTestCase {
             providerId: providerID,
             name: provider.name,
             enabled: true
+        )
+        settings.setCurrentChatModelId(modelID)
+        let selectedModel = try XCTUnwrap(provider.models.first {
+            $0.id.description() == modelID
+        })
+        let selectedName = selectedModel.displayName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(
+            NovelPresentation.modelDisplayName(for: .global, sharedSettings: settings),
+            selectedName.isEmpty ? selectedModel.modelId : selectedName
         )
 
         XCTAssertEqual(

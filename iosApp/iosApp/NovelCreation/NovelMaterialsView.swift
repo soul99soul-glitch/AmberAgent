@@ -325,6 +325,8 @@ struct NovelMaterialEditorSheet: View {
     @State private var tags: String
     @State private var aliases: String
     @State private var injectionMode: NovelInjectionMode
+    @State private var isSaving = false
+    @State private var failureMessage: String?
 
     init(
         viewModel: NovelCreationViewModel,
@@ -356,58 +358,105 @@ struct NovelMaterialEditorSheet: View {
         NavigationStack {
             Form {
                 Section("分类") {
-                    Picker("资料类型", selection: $kindChoice) {
-                        ForEach(NovelMaterialKindChoice.allCases) { choice in
-                            Text(choice.displayName).tag(choice)
+                    if isEditable {
+                        Picker("资料类型", selection: $kindChoice) {
+                            ForEach(NovelMaterialKindChoice.allCases) { choice in
+                                Text(choice.displayName).tag(choice)
+                            }
                         }
-                    }
-                    .disabled(material != nil)
+                        .disabled(material != nil)
 
-                    if kindChoice == .custom {
-                        TextField("自定义类型名称", text: $customKindName)
-                            .disabled(material != nil)
+                        if kindChoice == .custom {
+                            TextField("自定义类型名称", text: $customKindName)
+                                .disabled(material != nil)
+                        }
+                    } else {
+                        LabeledContent("资料类型", value: readOnlyKindName)
                     }
                 }
 
                 Section("内容") {
-                    TextField("标题", text: $title)
-                    if kindChoice == .character {
-                        TextField("曾用名或别名，用逗号分隔", text: $aliases)
+                    if isEditable {
+                        TextField("标题", text: $title)
+                        if kindChoice == .character {
+                            TextField("曾用名或别名，用逗号分隔", text: $aliases)
+                        }
+                        TextEditor(text: $content)
+                            .frame(minHeight: 220)
+                        TextField("标签，用逗号分隔", text: $tags)
+                    } else {
+                        LabeledContent("标题", value: title)
+                        if kindChoice == .character, !aliases.isEmpty {
+                            LabeledContent("曾用名或别名", value: aliases)
+                        }
+                        Text(content.isEmpty ? "暂无内容" : content)
+                            .foregroundStyle(
+                                content.isEmpty ? AmberTheme.muted : AmberTheme.foreground
+                            )
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                        if !tags.isEmpty {
+                            LabeledContent("标签", value: tags)
+                        }
                     }
-                    TextEditor(text: $content)
-                        .frame(minHeight: 220)
-                    TextField("标签，用逗号分隔", text: $tags)
                 }
 
                 Section {
-                    Picker("默认注入", selection: $injectionMode) {
-                        ForEach(NovelInjectionMode.allCases, id: \.self) { mode in
-                            Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
+                    if isEditable {
+                        Picker("默认注入", selection: $injectionMode) {
+                            ForEach(NovelInjectionMode.allCases, id: \.self) { mode in
+                                Label(mode.displayName, systemImage: mode.systemImage).tag(mode)
+                            }
                         }
+                        .pickerStyle(.segmented)
+                    } else {
+                        Label(injectionMode.displayName, systemImage: injectionMode.systemImage)
                     }
-                    .pickerStyle(.segmented)
                 } header: {
                     Text("默认注入")
                 } footer: {
                     Text("常驻始终注入，智能按本次输入选择，关闭默认不注入。每次生成仍可临时调整。")
                 }
+
+                if let failureMessage {
+                    Section {
+                        Label(failureMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(AmberTheme.accentRed)
+                    }
+                }
             }
+            .disabled(isSaving)
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
-            .navigationTitle(material == nil ? "新增资料" : "编辑资料")
+            .navigationTitle(
+                material == nil ? "新增资料" : (isEditable ? "编辑资料" : "查看资料")
+            )
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                        .disabled(viewModel.isPerforming)
+                    Button(isEditable || isSaving ? "取消" : "完成") { dismiss() }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .disabled(!canSave || viewModel.isPerforming)
+                    if isEditable || isSaving {
+                        Button("保存") { save() }
+                            .disabled(!canSave || isSaving)
+                    } else {
+                        Text("只读")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                }
+            }
+            .overlay {
+                if isSaving {
+                    ProgressView("正在保存资料")
+                        .padding(16)
+                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
-        .interactiveDismissDisabled(viewModel.isPerforming)
+        .interactiveDismissDisabled(isSaving)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
@@ -418,7 +467,20 @@ struct NovelMaterialEditorSheet: View {
             (kindChoice != .custom || !customKindName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
+    private var isEditable: Bool {
+        viewModel.canMutate
+    }
+
+    private var readOnlyKindName: String {
+        if kindChoice == .custom,
+           !customKindName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return customKindName
+        }
+        return kindChoice.displayName
+    }
+
     private func save() {
+        guard isEditable, canSave, !isSaving else { return }
         let parsedTags = tags
             .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -427,6 +489,8 @@ struct NovelMaterialEditorSheet: View {
             .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        isSaving = true
+        failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
             await viewModel.saveMaterial(
@@ -438,7 +502,11 @@ struct NovelMaterialEditorSheet: View {
                 injectionMode: injectionMode,
                 aliases: parsedAliases
             )
-            guard viewModel.errorMessage == nil else { return }
+            isSaving = false
+            guard viewModel.errorMessage == nil else {
+                failureMessage = viewModel.errorMessage ?? "资料没有保存，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }
@@ -449,6 +517,8 @@ struct NovelPolishPreferenceSheet: View {
 
     let viewModel: NovelCreationViewModel
     @State private var preference: String
+    @State private var isSaving = false
+    @State private var failureMessage: String?
 
     init(viewModel: NovelCreationViewModel) {
         self.viewModel = viewModel
@@ -466,7 +536,14 @@ struct NovelPolishPreferenceSheet: View {
                 } footer: {
                     Text("这里只控制措辞、节奏、描写和对话风格。系统固定约束仍禁止新增、删除或重排剧情事实。")
                 }
+                if let failureMessage {
+                    Section {
+                        Label(failureMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(AmberTheme.accentRed)
+                    }
+                }
             }
+            .disabled(isSaving)
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
             .navigationTitle("整章润色偏好")
@@ -474,22 +551,38 @@ struct NovelPolishPreferenceSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { save() }
-                        .disabled(viewModel.isPerforming)
+                        .disabled(isSaving || viewModel.isPerforming)
+                }
+            }
+            .overlay {
+                if isSaving {
+                    ProgressView("正在保存润色偏好")
+                        .padding(16)
+                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
+        .interactiveDismissDisabled(isSaving)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
     private func save() {
+        guard !isSaving else { return }
+        isSaving = true
+        failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
             await viewModel.setPolishPreference(preference)
-            guard viewModel.errorMessage == nil else { return }
+            isSaving = false
+            guard viewModel.errorMessage == nil else {
+                failureMessage = viewModel.errorMessage ?? "润色偏好没有保存，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }
@@ -507,6 +600,8 @@ struct NovelProposalAcceptanceSheet: View {
     @State private var tags = ""
     @State private var aliases: String
     @State private var injectionMode: NovelInjectionMode = .smart
+    @State private var isSubmitting = false
+    @State private var failureMessage: String?
 
     init(viewModel: NovelCreationViewModel, proposal: NovelSettingProposalRecord) {
         self.viewModel = viewModel
@@ -564,7 +659,15 @@ struct NovelProposalAcceptanceSheet: View {
                     }
                     .pickerStyle(.segmented)
                 }
+
+                if let failureMessage {
+                    Section {
+                        Label(failureMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(AmberTheme.accentRed)
+                    }
+                }
             }
+            .disabled(isSubmitting)
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
             .navigationTitle("确认设定建议")
@@ -572,16 +675,24 @@ struct NovelProposalAcceptanceSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
+                        .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("写入") { accept() }
-                        .disabled(!canAccept || viewModel.isPerforming)
+                        .disabled(!canAccept || isSubmitting || viewModel.isPerforming)
+                }
+            }
+            .overlay {
+                if isSubmitting {
+                    ProgressView("正在写入设定")
+                        .padding(16)
+                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
         .onChange(of: kindChoice) { _, _ in selectedMaterialID = nil }
         .onChange(of: customKindName) { _, _ in selectedMaterialID = nil }
-        .interactiveDismissDisabled(viewModel.isPerforming)
+        .interactiveDismissDisabled(isSubmitting)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
@@ -632,7 +743,7 @@ struct NovelProposalAcceptanceSheet: View {
     }
 
     private func accept() {
-        guard let selectedKind else { return }
+        guard let selectedKind, !isSubmitting else { return }
         let parsedTags = tags
             .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -641,6 +752,8 @@ struct NovelProposalAcceptanceSheet: View {
             .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+        isSubmitting = true
+        failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
             await viewModel.resolveProposal(
@@ -654,7 +767,11 @@ struct NovelProposalAcceptanceSheet: View {
                     aliases: parsedAliases
                 )
             )
-            guard viewModel.errorMessage == nil else { return }
+            isSubmitting = false
+            guard viewModel.errorMessage == nil else {
+                failureMessage = viewModel.errorMessage ?? "设定没有写入，请稍后重试。"
+                return
+            }
             dismiss()
         }
     }
