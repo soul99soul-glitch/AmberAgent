@@ -1,20 +1,21 @@
 // ChatMessageActionFooter — 消息统一尾部(第三梯队)
 // Android 基准: ChatMessageActionFooter.kt(91 行)— 引用+操作行统一尾部
 //   ActionFooterMode: Hidden/Reserved/Visible
-//   resolveActionFooterMode: user→Hidden; lastMessage+loading→Reserved;
-//     lastMessage+!loading→Visible; hasContent→Visible; else→Hidden
+//   注:Android user→Hidden,但鸿蒙旧实现 user 有操作行(分叉/编辑/重发),
+//   保持鸿蒙行为:user→Visible(Android 差异登记)
 
-import type { UIMessage, UIMessageAnnotation } from '@amber/chat-domain';
+import type { UIMessageAnnotation } from '@amber/chat-domain';
 import { ChatMessageAnnotations } from './ChatMessageCommon.ets';
 import { ChatMessageActions } from './ChatMessageActions.ets';
+import { ChatMessageBranch } from './ChatMessageBranch.ets';
 
 export type ActionFooterMode = 'hidden' | 'reserved' | 'visible';
 
-// Android resolveActionFooterMode 逐字
+// resolveActionFooterMode:鸿蒙适配(user→visible,保持原有操作行入口)
 export const resolveActionFooterMode = (
   role: string, lastMessage: boolean, loading: boolean, hasContent: boolean,
 ): ActionFooterMode => {
-  if (role === 'user') return 'hidden';
+  if (role === 'user') return 'visible';
   if (lastMessage && loading) return 'reserved';
   if (lastMessage && !loading) return 'visible';
   if (hasContent) return 'visible';
@@ -27,10 +28,13 @@ export struct ChatMessageActionFooter {
   @Prop mode: ActionFooterMode = 'hidden';
   @Prop isUser: boolean = false;
   @Prop isLastAssistant: boolean = false;
+  @Prop branchCount: number = 1;
+  @Prop selectIndex: number = 0;
   onCopy: () => void = (): void => {};
   onFork: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
+  onSwitch: (index: number) => void = (_i: number): void => {};
 
   build(): void {
     if (this.mode === 'hidden') {
@@ -45,16 +49,24 @@ export struct ChatMessageActionFooter {
 
         // 操作行(reserved 态不可见但占位)
         if (this.mode === 'visible') {
-          ChatMessageActions({
-            isUser: this.isUser,
-            isLastAssistant: this.isLastAssistant,
-            onCopy: (): void => this.onCopy(),
-            onFork: (): void => this.onFork(),
-            onEdit: (): void => this.onEdit(),
-            onRegenerate: (): void => this.onRegenerate(),
-          })
+          Row() {
+            // 分支切换器(assistant 且 branchCount > 1 时显示)
+            ChatMessageBranch({
+              branchCount: this.branchCount,
+              selectIndex: this.selectIndex,
+              onSwitch: (idx: number): void => { this.onSwitch(idx); },
+            })
+            ChatMessageActions({
+              isUser: this.isUser,
+              isLastAssistant: this.isLastAssistant,
+              onCopy: (): void => this.onCopy(),
+              onFork: (): void => this.onFork(),
+              onEdit: (): void => this.onEdit(),
+              onRegenerate: (): void => this.onRegenerate(),
+            })
+          }
+          .width('100%')
         } else if (this.mode === 'reserved') {
-          // 保留布局空间(流式中占位,不可交互)
           Row().height(20).width('100%')
         }
       }

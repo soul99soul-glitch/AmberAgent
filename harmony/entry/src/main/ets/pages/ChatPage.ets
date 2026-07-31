@@ -97,8 +97,6 @@ import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
 import { ChatInput } from '../components/ChatInput.ets';
 import { ChatMessageAvatar } from '../components/ChatMessageAvatar.ets';
-import { ChatMessageBranch } from '../components/ChatMessageBranch.ets';
-import { ChatMessageActions } from '../components/ChatMessageActions.ets';
 import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from '../components/ChatMessageCouncilStep.ets';
 import { ChatMessageActionFooter, resolveActionFooterMode } from '../components/ChatMessageActionFooter.ets';
@@ -414,10 +412,13 @@ struct MessageRow {
         ),
         isUser: this.message.role === 'user',
         isLastAssistant: this.isLastAssistant,
+        branchCount: this.branchCount,
+        selectIndex: this.selectIndex,
         onCopy: (): void => this.onCopy(),
         onFork: (): void => this.onFork(),
         onEdit: (): void => this.onEdit(),
         onRegenerate: (): void => this.onRegenerate(),
+        onSwitch: (idx: number): void => { this.onSwitch(idx); },
       })
     }
     .width('100%')
