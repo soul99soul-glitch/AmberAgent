@@ -16,12 +16,13 @@
 //   ❌ custom definition 编辑(后续迭代)
 
 import { getAgentPromptSettingsPort, refreshSubAgentSetting } from '../di/AppContainer.ets';
-import type { SubAgentRuntimeSetting, SubAgentMode } from '@amber/chat-domain';
+import type { SubAgentRuntimeSetting, SubAgentMode, SubAgentOverride, SubAgentDefinition } from '@amber/chat-domain';
 import {
   DEFAULT_SUB_AGENT_TIMEOUT_MS, DEFAULT_SUB_AGENT_MAX_TURNS,
   DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
+  SUB_AGENT_BUILT_INS,
 } from '@amber/chat-domain';
-import { INK, INK3, ACCENT, SURFACE, LINE, BG, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
+import { INK, INK3, ACCENT, SURFACE, SURFACE2, LINE, BG, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
 
 @Entry
 @Component
@@ -33,6 +34,9 @@ struct SettingSubAgentPage {
   @State maxTurns: number = DEFAULT_SUB_AGENT_MAX_TURNS;
   @State timeoutMs: number = DEFAULT_SUB_AGENT_TIMEOUT_MS;
   @State outputBudgetChars: number = DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS;
+  // M3.2:per-role overrides(built-in role id → override)
+  @State overrides: Record<string, SubAgentOverride> = {};
+  @State expandedRoleId: string = '';
   @State loaded: boolean = false;
 
   aboutToAppear(): void {
@@ -50,6 +54,10 @@ struct SettingSubAgentPage {
       this.maxTurns = setting.maxTurns;
       this.timeoutMs = setting.timeoutMs;
       this.outputBudgetChars = setting.outputBudgetChars;
+      // M3.2:加载 overrides(Map → Record 便于 @State 响应式)
+      const ov: Record<string, SubAgentOverride> = {};
+      setting.overrides.forEach((v: SubAgentOverride, k: string): void => { ov[k] = v; });
+      this.overrides = ov;
       this.loaded = true;
     } catch (_e) {
       this.loaded = true;
@@ -68,7 +76,8 @@ struct SettingSubAgentPage {
         timeoutMs: this.timeoutMs,
         maxTurns: this.maxTurns,
         outputBudgetChars: this.outputBudgetChars,
-        overrides: current.overrides,
+        // M3.2:写回 overrides(Record → Map,过滤空 override)
+        overrides: this.buildOverridesMap(),
         customDefinitions: current.customDefinitions,
       };
       await port.updateSubAgentSetting(next);
@@ -136,6 +145,17 @@ struct SettingSubAgentPage {
               this.outputBudgetChars = options[(idx + 1) % options.length];
               this.saveSetting();
             }))
+
+            // M3.2:per-role override 编辑(6 内置角色)
+            Row() {
+              Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
+              Text(' 角色提示词覆盖').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
+            }
+            .width('100%').padding({ left: 16, top: 20, bottom: 8 })
+
+            ForEach(SUB_AGENT_BUILT_INS, (def: SubAgentDefinition): void => {
+              this.roleOverrideRow(def)
+            }, (def: SubAgentDefinition): string => def.id)
           }
           .width('100%')
           .padding({ bottom: 20 })
@@ -210,6 +230,109 @@ struct SettingSubAgentPage {
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { onClick(); })
+  }
+
+  // M3.2:单个内置角色的 override 编辑行(展开 → systemPrompt textarea + 重置)
+  @Builder roleOverrideRow(def: SubAgentDefinition): void {
+    Column() {
+      Row() {
+        Column() {
+          Text(def.name).fontSize(BODY).fontColor(INK)
+          Text(def.description).fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text(this.expandedRoleId === def.id ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(SURFACE)
+      .onClick((): void => {
+        // M3.2:折叠时保存(展开 → 折叠 = 提交编辑)
+        if (this.expandedRoleId === def.id) {
+          this.saveSetting();
+          this.expandedRoleId = '';
+        } else {
+          this.expandedRoleId = def.id;
+        }
+      })
+
+      if (this.expandedRoleId === def.id) {
+        Column() {
+          Text('自定义提示词(留空 = 继承默认)').fontSize(LABEL).fontColor(INK3)
+            .width('100%').margin({ bottom: 4 })
+          TextArea({
+            text: this.getOverride(def.id).systemPrompt ?? '',
+            placeholder: def.systemPrompt,
+          })
+            .width('100%').height(120).fontSize(BODY).fontColor(INK)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .onChange((v: string): void => { this.updateRolePrompt(def.id, v); })
+          Row() {
+            Text('恢复默认').fontSize(META).fontColor(ACCENT)
+              .onClick((): void => { this.resetRole(def.id); })
+          }
+          .width('100%').margin({ top: 8 })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 12 })
+        .backgroundColor(SURFACE)
+      }
+    }
+    .width('100%')
+    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+  }
+
+  // M3.2:构建 overrides Map(Record → Map;空 override 不写)
+  private buildOverridesMap(): Map<string, SubAgentOverride> {
+    const m: Map<string, SubAgentOverride> = new Map();
+    const keys: string[] = Object.keys(this.overrides);
+    for (const k of keys) {
+      const o: SubAgentOverride = this.overrides[k];
+      if (o.systemPrompt !== null || o.modelId !== null || o.temperature !== null
+        || o.reasoningLevel !== null || o.maxTurnsOverride !== null
+        || o.timeoutMsOverride !== null || o.outputBudgetOverride !== null) {
+        m.set(k, o);
+      }
+    }
+    return m;
+  }
+
+  // M3.2:获取某 role 的 override(无则空 override)
+  private getOverride(roleId: string): SubAgentOverride {
+    const o: SubAgentOverride | undefined = this.overrides[roleId];
+    if (o !== undefined) return o;
+    return {
+      systemPrompt: null, modelId: null, temperature: null,
+      reasoningLevel: null, maxTurnsOverride: null,
+      timeoutMsOverride: null, outputBudgetOverride: null,
+    };
+  }
+
+  // M3.2:更新某 role 的 systemPrompt override
+  private updateRolePrompt(roleId: string, prompt: string): void {
+    const o: SubAgentOverride = this.getOverride(roleId);
+    const next: SubAgentOverride = {
+      systemPrompt: prompt, modelId: o.modelId, temperature: o.temperature,
+      reasoningLevel: o.reasoningLevel, maxTurnsOverride: o.maxTurnsOverride,
+      timeoutMsOverride: o.timeoutMsOverride, outputBudgetOverride: o.outputBudgetOverride,
+    };
+    const ov: Record<string, SubAgentOverride> = {};
+    const keys: string[] = Object.keys(this.overrides);
+    for (const k of keys) ov[k] = this.overrides[k];
+    ov[roleId] = next;
+    this.overrides = ov;
+  }
+
+  // M3.2:清除某 role 的 override(恢复默认)
+  private resetRole(roleId: string): void {
+    const ov: Record<string, SubAgentOverride> = {};
+    const keys: string[] = Object.keys(this.overrides);
+    for (const k of keys) {
+      if (k !== roleId) ov[k] = this.overrides[k];
+    }
+    this.overrides = ov;
+    this.saveSetting();
   }
 
   private timeoutLabel(): string {

@@ -13,8 +13,11 @@
 //   ❌ 席位编辑(后续迭代)
 
 import { getAgentPromptSettingsPort } from '../di/AppContainer.ets';
-import type { ModelCouncilRuntimeSetting } from '@amber/deepread-domain';
-import { INK, INK3, ACCENT, SURFACE, LINE, BG, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
+import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePreset } from '@amber/deepread-domain';
+import {
+  LENS_PRESETS, findRolePreset, isCoreRole, makeSeat,
+} from '@amber/deepread-domain';
+import { INK, INK3, ACCENT, SURFACE, SURFACE2, LINE, BG, ERROR, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
 
 @Entry
 @Component
@@ -27,6 +30,10 @@ struct SettingModelCouncilPage {
   @State totalTimeoutMs: number = 300000;
   @State outputBudgetChars: number = 200000;
   @State showSeatOutputs: boolean = true;
+  // M3.3:席位编辑
+  @State seats: ModelCouncilSeat[] = [];
+  @State expandedSeatId: string = '';
+  @State showAddSeatMenu: boolean = false;
   @State loaded: boolean = false;
 
   aboutToAppear(): void {
@@ -45,6 +52,12 @@ struct SettingModelCouncilPage {
       this.totalTimeoutMs = setting.totalTimeoutMs;
       this.outputBudgetChars = setting.outputBudgetChars;
       this.showSeatOutputs = setting.showSeatOutputs;
+      // M3.3:加载席位
+      this.seats = setting.defaultSeats.map((s: ModelCouncilSeat): ModelCouncilSeat => ({
+        seatId: s.seatId, name: s.name, role: s.role, modelId: s.modelId,
+        systemPrompt: s.systemPrompt, outputBudgetChars: s.outputBudgetChars,
+        reasoningLevel: s.reasoningLevel, temperature: s.temperature,
+      }));
       this.loaded = true;
     } catch (_e) {
       this.loaded = true;
@@ -57,7 +70,7 @@ struct SettingModelCouncilPage {
       const current: ModelCouncilRuntimeSetting = await port.getCouncilSetting();
       const next: ModelCouncilRuntimeSetting = {
         enabled: this.councilEnabled,
-        defaultSeats: current.defaultSeats,
+        defaultSeats: this.seats,
         synthesisModelId: current.synthesisModelId,
         maxSeats: this.maxSeats,
         defaultRounds: this.defaultRounds,
@@ -124,6 +137,49 @@ struct SettingModelCouncilPage {
               this.showSeatOutputs = !this.showSeatOutputs;
               this.saveSetting();
             }))
+
+            // M3.3:席位编辑
+            Row() {
+              Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
+              Text(' 席位编辑').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
+            }
+            .width('100%').padding({ left: 16, top: 20, bottom: 8 })
+
+            ForEach(this.seats, (seat: ModelCouncilSeat): void => {
+              this.seatEditorRow(seat)
+            }, (seat: ModelCouncilSeat): string => seat.seatId)
+
+            // 添加席位
+            if (this.seats.length < this.maxSeats) {
+              Row() {
+                Text('+ 添加视角席').fontSize(BODY).fontColor(ACCENT).layoutWeight(1)
+                Text(this.showAddSeatMenu ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .backgroundColor(SURFACE)
+              .onClick((): void => { this.showAddSeatMenu = !this.showAddSeatMenu; })
+
+              if (this.showAddSeatMenu) {
+                Column() {
+                  ForEach(LENS_PRESETS, (preset: ModelCouncilRolePreset): void => {
+                    Row() {
+                      Text(preset.name).fontSize(BODY).fontColor(INK).layoutWeight(1)
+                      Text('添加').fontSize(META).fontColor(ACCENT)
+                    }
+                    .width('100%')
+                    .padding({ left: 24, right: 16, top: 10, bottom: 10 })
+                    .backgroundColor(SURFACE2)
+                    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+                    .onClick((): void => { this.addLensSeat(preset.id); })
+                  }, (preset: ModelCouncilRolePreset): string => preset.id)
+                }
+                .width('100%').backgroundColor(SURFACE2)
+              }
+            } else {
+              Text(`已达最大席位数 ${this.maxSeats}`).fontSize(LABEL).fontColor(INK3)
+                .padding({ left: 16, top: 8, bottom: 8 })
+            }
           }
           .width('100%').padding({ bottom: 20 })
         }
@@ -176,6 +232,98 @@ struct SettingModelCouncilPage {
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { onClick(); })
+  }
+
+  // M3.3:单个席位编辑行(展开 → name + systemPrompt + 删除)
+  @Builder seatEditorRow(seat: ModelCouncilSeat): void {
+    Column() {
+      Row() {
+        Column() {
+          Text(seat.name.length > 0 ? seat.name : '(未命名席位)')
+            .fontSize(BODY).fontColor(INK)
+          Text(isCoreRole(seat.role) ? '核心席' : `视角席 · ${seat.role}`)
+            .fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
+        }
+        .alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Text(this.expandedSeatId === seat.seatId ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
+      }
+      .width('100%')
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(SURFACE)
+      .onClick((): void => {
+        if (this.expandedSeatId === seat.seatId) {
+          this.saveSetting();
+          this.expandedSeatId = '';
+        } else {
+          this.expandedSeatId = seat.seatId;
+        }
+      })
+
+      if (this.expandedSeatId === seat.seatId) {
+        Column() {
+          Text('席位名称').fontSize(LABEL).fontColor(INK3).width('100%').margin({ bottom: 4 })
+          TextInput({ text: seat.name, placeholder: '席位名称' })
+            .width('100%').fontSize(BODY).fontColor(INK)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .onChange((v: string): void => { this.updateSeatName(seat.seatId, v); })
+
+          Text('系统提示词').fontSize(LABEL).fontColor(INK3)
+            .width('100%').margin({ top: 10, bottom: 4 })
+          TextArea({ text: seat.systemPrompt, placeholder: '系统提示词' })
+            .width('100%').height(100).fontSize(BODY).fontColor(INK)
+            .backgroundColor(SURFACE2).borderRadius(8)
+            .onChange((v: string): void => { this.updateSeatPrompt(seat.seatId, v); })
+
+          if (!isCoreRole(seat.role)) {
+            Text('删除席位').fontSize(META).fontColor(ERROR).margin({ top: 10 })
+              .onClick((): void => { this.deleteSeat(seat.seatId); })
+          }
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, bottom: 12 })
+        .backgroundColor(SURFACE)
+      }
+    }
+    .width('100%')
+    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+  }
+
+  // M3.3:更新席位 name
+  private updateSeatName(seatId: string, name: string): void {
+    this.seats = this.seats.map((s: ModelCouncilSeat): ModelCouncilSeat =>
+      s.seatId === seatId ? { seatId: s.seatId, name, role: s.role, modelId: s.modelId,
+        systemPrompt: s.systemPrompt, outputBudgetChars: s.outputBudgetChars,
+        reasoningLevel: s.reasoningLevel, temperature: s.temperature } : s,
+    );
+  }
+
+  // M3.3:更新席位 systemPrompt
+  private updateSeatPrompt(seatId: string, prompt: string): void {
+    this.seats = this.seats.map((s: ModelCouncilSeat): ModelCouncilSeat =>
+      s.seatId === seatId ? { seatId: s.seatId, name: s.name, role: s.role, modelId: s.modelId,
+        systemPrompt: prompt, outputBudgetChars: s.outputBudgetChars,
+        reasoningLevel: s.reasoningLevel, temperature: s.temperature } : s,
+    );
+  }
+
+  // M3.3:删除席位(核心席不可删)
+  private deleteSeat(seatId: string): void {
+    if (isCoreRole(seatId)) return;
+    this.seats = this.seats.filter((s: ModelCouncilSeat): boolean => s.seatId !== seatId);
+    this.saveSetting();
+  }
+
+  // M3.3:添加视角席(从 LENS_PRESETS 选)
+  private addLensSeat(presetId: string): void {
+    const preset = findRolePreset(presetId);
+    if (preset === null) return;
+    if (this.seats.length >= this.maxSeats) return;
+    const seat: ModelCouncilSeat = makeSeat({
+      name: preset.name, role: preset.id, systemPrompt: preset.prompt,
+    });
+    this.seats = [...this.seats, seat];
+    this.showAddSeatMenu = false;
+    this.saveSetting();
   }
 
   private timeoutLabel(ms: number): string {
