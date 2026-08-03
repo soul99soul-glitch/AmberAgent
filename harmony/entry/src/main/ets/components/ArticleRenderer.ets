@@ -1,12 +1,23 @@
-// ArticleRenderer — 对照设计 §7.3 文章渲染组件(杂志风)
-// HeroImageBlock / TimelineBlock / CorePointsBlock / AnalysisBlock / DiagramBlock /
-// ExtendedReadingBlock / ReferencesBlock
+// ArticleRenderer — DeepRead 文章渲染组件(杂志风)
+// Android 基准: feature/ui/pages/board/DeepReadScreen.kt(2076 行,杂志风多帧布局)
+//   鸿蒙 MVP:用 ArticleRenderer 统一渲染 DeepReadOutput 全量块;
+//   文本块经 MarkdownRichText(markdown→html→RichText)渲染,对齐聊天 assistant 文本路径。
 //
-// Markdown 渲染:§7.3 风险 — 鸿蒙 markdown 生态不成熟。MVP 用 Text 组件直出纯文本,
-// TODO(phase6): 自建轻量 markdown→ArkUI node 转换 或 接 ArkUI RichText。
-
-import type { DeepReadOutput, TimelineEvent, CorePoint, ReadingLink, Perspective, Quote, DeepReadDiagram } from '@amber/deepread-domain';
+// 覆盖块:Hero 图 / summary(Markdown)/ keyEntities chips / timeline / corePoints /
+//   analysis(coreDispute + perspectives + implications + quotes)/ diagram / extendedReading / references
+//
+// 降级(诚实):
+//   - diagram:仅列节点 label(Canvas/SVG 绘制节点+边 = 设备验证项,TODO 登记)
+//   - 无 hero 图:整块不渲染(非占位)
+import type {
+  DeepReadOutput, TimelineEvent, CorePoint, ReadingLink,
+  Perspective, Quote, DeepReadDiagram, DiagramNode,
+} from '@amber/deepread-domain';
 import { displayHeroImageUrl, displayHeroCaption } from '@amber/deepread-domain';
+import { MarkdownRichText } from './MarkdownRichText.ets';
+import {
+  INK, INK2, INK3, INK4, ACCENT, ACCENT_LIGHT, SURFACE, SURFACE2, LINE, BODY, META,
+} from '../design/tokens.ets';
 
 @Component
 export struct ArticleRenderer {
@@ -14,7 +25,7 @@ export struct ArticleRenderer {
 
   build(): void {
     Column() {
-      // Hero
+      // ── Hero 图(无图整块不渲染,诚实降级) ──
       if (displayHeroImageUrl(this.output) !== null) {
         Image(displayHeroImageUrl(this.output) as string)
           .width('100%')
@@ -23,73 +34,80 @@ export struct ArticleRenderer {
           .borderRadius(12)
         if (displayHeroCaption(this.output) !== null) {
           Text(displayHeroCaption(this.output) as string)
-            .fontSize(12).fontColor('#666').margin({ top: 4, bottom: 8 })
+            .fontSize(META).fontColor(INK3).margin({ top: 4, bottom: 8 })
         }
       }
 
-      // 概览 summary
+      // ── 概览 summary(Markdown 富文本) ──
       if (this.output.summary.trim().length > 0) {
-        Text(this.output.summary).fontSize(16).lineHeight(26).margin({ top: 12, bottom: 8 })
+        MarkdownRichText({ content: this.output.summary, fontSize: 16, fontColor: INK2 })
+          .margin({ top: 12, bottom: 8 })
       }
 
-      // key entities
+      // ── 关键实体 chips ──
       if (this.output.keyEntities.length > 0) {
         Flex({ wrap: FlexWrap.Wrap }) {
           ForEach(this.output.keyEntities, (e: string) => {
-            Text(e).fontSize(11).fontColor('#1976D2').padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .backgroundColor('#E3F2FD').borderRadius(10).margin({ right: 6, bottom: 6 })
+            Text(e)
+              .fontSize(META).fontColor(ACCENT)
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .backgroundColor(ACCENT_LIGHT).borderRadius(10)
+              .margin({ right: 6, bottom: 6 })
           })
         }.margin({ top: 4, bottom: 8 })
       }
 
-      // Timeline
+      // ── 时间线 ──
       if (this.output.timeline !== null && this.output.timeline.length > 0) {
         this.SectionTitle('时间线')
         ForEach(this.output.timeline, (ev: TimelineEvent) => {
           Row() {
-            Text(ev.date).fontSize(12).fontColor('#1976D2').width(80)
-            Text(ev.event).fontSize(14).layoutWeight(1).lineHeight(22)
+            Text(ev.date).fontSize(META).fontColor(ACCENT).width(80)
+            Text(ev.event).fontSize(BODY).fontColor(INK2).layoutWeight(1).lineHeight(22)
           }.width('100%').margin({ bottom: 6 })
         })
       }
 
-      // Core points
+      // ── 核心要点 ──
       if (this.output.corePoints !== null && this.output.corePoints.length > 0) {
         this.SectionTitle('核心要点')
         ForEach(this.output.corePoints, (cp: CorePoint) => {
           Column() {
-            Text(cp.point).fontSize(14).fontWeight(FontWeight.Medium)
+            Text(cp.point).fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
             if (cp.supporting !== null) {
-              Text(cp.supporting).fontSize(13).fontColor('#555').lineHeight(20).margin({ top: 2 })
+              Text(cp.supporting).fontSize(META).fontColor(INK3).lineHeight(20).margin({ top: 2 })
             }
           }.width('100%').margin({ bottom: 10 })
         })
       }
 
-      // Analysis
+      // ── 深度分析(coreDispute + perspectives + implications + quotes) ──
       this.AnalysisBlock(this.output)
 
-      // Diagram
+      // ── 图解(降级:列节点;Canvas/SVG = 设备验证项) ──
       if (this.output.diagram !== null) {
         this.DiagramBlock(this.output.diagram)
       }
 
-      // Extended reading
+      // ── 扩展阅读 ──
       if (this.output.extendedReading.length > 0) {
         this.SectionTitle('扩展阅读')
         ForEach(this.output.extendedReading, (l: ReadingLink) => {
           Row() {
-            Text(l.title).fontSize(13).layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).fontColor('#1976D2')
-            Text(l.source ?? '').fontSize(11).fontColor('#999')
+            Text(l.title)
+              .fontSize(BODY).fontColor(ACCENT).layoutWeight(1)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(l.source ?? '').fontSize(META).fontColor(INK4).margin({ left: 8 })
           }.width('100%').margin({ bottom: 4 })
         })
       }
 
-      // References
+      // ── 参考来源 ──
       if (this.output.references.length > 0) {
         this.SectionTitle('参考来源')
         ForEach(this.output.references, (r: ReadingLink, idx: number) => {
-          Text(`[${idx + 1}] ${r.title} — ${r.url}`).fontSize(11).fontColor('#777').margin({ bottom: 2 })
+          Text(`[${idx + 1}] ${r.title} — ${r.url}`)
+            .fontSize(META).fontColor(INK3).margin({ bottom: 2 })
         })
       }
     }
@@ -100,38 +118,46 @@ export struct ArticleRenderer {
 
   @Builder
   SectionTitle(title: string): void {
-    Text(title).fontSize(18).fontWeight(FontWeight.Bold).margin({ top: 20, bottom: 8 })
+    Row() {
+      Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
+      Text(' ' + title).fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK2)
+    }
+    .width('100%')
+    .margin({ top: 20, bottom: 8 })
   }
 
   @Builder
   AnalysisBlock(o: DeepReadOutput): void {
+    // 核心分歧(Markdown)
     if (o.analysis.coreDispute !== null && o.analysis.coreDispute.length > 0) {
-      this.SectionTitle('深度分析')
-      Text('核心分歧').fontSize(14).fontWeight(FontWeight.Medium).margin({ top: 4 })
-      Text(o.analysis.coreDispute).fontSize(14).lineHeight(22).fontColor('#333').margin({ top: 2, bottom: 8 })
+      this.SectionTitle('核心分歧')
+      MarkdownRichText({ content: o.analysis.coreDispute, fontSize: BODY, fontColor: INK2 })
     }
+    // 各方立场
     if (o.analysis.perspectives.length > 0) {
-      Text('各方立场').fontSize(14).fontWeight(FontWeight.Medium)
+      this.SectionTitle('各方立场')
       ForEach(o.analysis.perspectives, (p: Perspective) => {
         Column() {
           if (p.holder !== null) {
-            Text(p.holder).fontSize(12).fontColor('#1976D2')
+            Text(p.holder).fontSize(META).fontColor(ACCENT)
           }
-          Text(p.viewpoint).fontSize(13).lineHeight(20).margin({ top: 2 })
+          Text(p.viewpoint).fontSize(BODY).fontColor(INK2).lineHeight(20).margin({ top: 2 })
         }.margin({ bottom: 8, left: 8 })
       })
     }
+    // 影响分析(Markdown)
     if (o.analysis.implications !== null && o.analysis.implications.length > 0) {
-      Text('影响分析').fontSize(14).fontWeight(FontWeight.Medium).margin({ top: 4 })
-      Text(o.analysis.implications).fontSize(13).lineHeight(22).margin({ top: 2, bottom: 8 })
+      Text('影响分析').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 4 })
+      MarkdownRichText({ content: o.analysis.implications, fontSize: BODY, fontColor: INK2 })
     }
+    // 引述
     if (o.analysis.quotes.length > 0) {
-      Text('引述').fontSize(14).fontWeight(FontWeight.Medium).margin({ top: 4 })
+      Text('引述').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 4 })
       ForEach(o.analysis.quotes, (q: Quote) => {
         Column() {
-          Text(`「${q.text}」`).fontSize(13).fontColor('#555').lineHeight(20)
+          Text(`「${q.text}」`).fontSize(BODY).fontColor(INK3).lineHeight(20)
           if (q.attribution !== null) {
-            Text(`— ${q.attribution}`).fontSize(11).fontColor('#999').margin({ top: 2 })
+            Text(`— ${q.attribution}`).fontSize(META).fontColor(INK4).margin({ top: 2 })
           }
         }.margin({ bottom: 6, left: 8 })
       })
@@ -141,16 +167,16 @@ export struct ArticleRenderer {
   @Builder
   DiagramBlock(d: DeepReadDiagram): void {
     this.SectionTitle('图解')
-    Text(d.title).fontSize(15).fontWeight(FontWeight.Medium)
-    // TODO(phase6): 真正的 diagram 渲染(Canvas/SVG 绘制节点+边)。MVP 先列节点。
+    Text(d.title).fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
+    // 降级:仅列节点 id+label(Canvas/SVG 绘制节点+边 = 设备验证项,登记)
     ForEach(d.nodes, (n: DiagramNode) => {
       Row() {
-        Text(n.id).fontSize(11).fontColor('#999').width(30)
-        Text(n.label).fontSize(13).layoutWeight(1)
+        Text(n.id).fontSize(META).fontColor(INK4).width(30)
+        Text(n.label).fontSize(BODY).fontColor(INK2).layoutWeight(1)
       }.margin({ bottom: 2 })
     })
     if (d.caption !== null && d.caption.length > 0) {
-      Text(d.caption).fontSize(11).fontColor('#999').margin({ top: 4 })
+      Text(d.caption).fontSize(META).fontColor(INK4).margin({ top: 4 })
     }
   }
 }

@@ -4,17 +4,15 @@
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
-  DeepReadOutput, DeepReadGenerationStage, ReadingLink,
-  RunManagerDeps, UIMessage, AiClient, DeepReadSource,
+  DeepReadOutput, RunManagerDeps, UIMessage, AiClient,
 } from '@amber/deepread-domain';
-import {
-  STAGE_ORDER, STAGE_LABELS, statusOf, displayHeroImageUrl, run,
-} from '@amber/deepread-domain';
+import { run } from '@amber/deepread-domain';
 import { getAppContainer, getNotifier, getPrefetcher,
   getDeepReadPlaybookRepository,
 } from '../di/AppContainer.ets';
+import { ArticleRenderer } from '../components/ArticleRenderer.ets';
 import {
-  BG, SURFACE, SURFACE2, INK, INK2, INK3, INK4, LINE, ACCENT, ACCENT_LIGHT,
+  BG, INK, INK2, INK3, LINE, ACCENT,
 } from '../design/tokens.ets';
 
 const DOMAIN: number = 0x0001;
@@ -109,18 +107,6 @@ struct DeepReadArticlePage {
     }
   }
 
-  // 从 DeepReadOutput 提取 timeline 文本(事件描述)
-  private timelineText(o: DeepReadOutput): string[] {
-    if (o.timeline === null || o.timeline.length === 0) return [];
-    return o.timeline.map((e) => e.event);
-  }
-
-  // 从 DeepReadOutput 提取 corePoints 文本(point 描述)
-  private keyPointsText(o: DeepReadOutput): string[] {
-    if (o.corePoints === null || o.corePoints.length === 0) return [];
-    return o.corePoints.map((p) => p.point);
-  }
-
   build(): void {
     Column() {
       // ── 顶栏:返回 + 标题(衬线) ──
@@ -149,13 +135,13 @@ struct DeepReadArticlePage {
             .onClick(() => { this.generateArticle(); })
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
       } else if (this.output !== null) {
-        // 真实文章渲染
+        // 真实文章渲染 — ArticleRenderer 统一渲染全量块
+        //   (Hero/summary-Markdown/keyEntities/timeline/corePoints/analysis/diagram/refs)
         Scroll() {
           Column() {
-            // ── 标题:衬线大字 ──
+            // ── 标题:衬线大字(页级,非文章块) ──
             Text(this.title)
               .fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
-              .transition(TransitionEffect.OPACITY.animation({ duration: 400, curve: Curve.EaseIn }))
               .fontFamily('serif')
               .lineHeight(34).maxLines(3)
 
@@ -163,101 +149,10 @@ struct DeepReadArticlePage {
             Text(this.currentStage).fontSize(12).fontColor(INK3).margin({ top: 10 })
 
             // ── 分隔线 ──
-            Column() {}.height(1).width('100%').backgroundColor(LINE).margin({ top: 16, bottom: 20 })
+            Column() {}.height(1).width('100%').backgroundColor(LINE).margin({ top: 16, bottom: 4 })
 
-            // ── 概览 summary ──
-            if (this.output.summary.length > 0) {
-              Text(this.output.summary)
-                .transition(TransitionEffect.OPACITY.animation({ duration: 300, curve: Curve.EaseIn }))
-                .fontSize(16).fontColor(INK2)
-                .fontFamily('serif')
-                .lineHeight(26)
-                .margin({ bottom: 24 })
-            }
-
-            // ── 时间线 ──
-            if (this.timelineText(this.output).length > 0) {
-              Row() {
-                Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                Text(' 时间线').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
-              }
-              .width('100%').margin({ bottom: 10 })
-              .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100, curve: Curve.EaseIn }))
-
-              ForEach(this.timelineText(this.output), (item: string, idx: number) => {
-                Row() {
-                  Text((idx + 1) + '.').fontSize(13).fontColor(INK4).width(28)
-                  Text(item).fontSize(14).fontColor(INK2).layoutWeight(1)
-                }
-                .width('100%').padding({ top: 10, bottom: 10 })
-                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-              })
-            }
-
-            // ── 核心要点 ──
-            if (this.keyPointsText(this.output).length > 0) {
-              Row() {
-                Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                Text(' 核心要点').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
-              }
-              .width('100%').margin({ top: 24, bottom: 10 })
-
-              ForEach(this.keyPointsText(this.output), (point: string, idx: number) => {
-                Row() {
-                  Text((idx + 1) + '.').fontSize(13).fontColor(INK4).width(28)
-                  Text(point).fontSize(14).fontColor(INK2).layoutWeight(1)
-                }
-                .width('100%').padding({ top: 10, bottom: 10 })
-                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-              })
-            }
-
-            // ── 深度分析 ──
-            if (this.output.analysis.coreDispute !== null && this.output.analysis.coreDispute.length > 0) {
-              Row() {
-                Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                Text(' 核心分歧').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
-              }
-              .width('100%').margin({ top: 24, bottom: 10 })
-
-              Text(this.output.analysis.coreDispute)
-                .fontSize(15).fontColor(INK2)
-                .fontFamily('serif')
-                .lineHeight(24)
-            }
-
-            if (this.output.analysis.implications !== null && this.output.analysis.implications.length > 0) {
-              Row() {
-                Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                Text(' 影响分析').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
-              }
-              .width('100%').margin({ top: 24, bottom: 10 })
-
-              Text(this.output.analysis.implications)
-                .fontSize(15).fontColor(INK2)
-                .fontFamily('serif')
-                .lineHeight(24)
-            }
-
-            // ── 扩展阅读 ──
-            if (this.output.extendedReading.length > 0) {
-              Row() {
-                Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-                Text(' 扩展阅读').fontSize(13).fontWeight(FontWeight.Medium).fontColor(INK2)
-              }
-              .width('100%').margin({ top: 24, bottom: 10 })
-
-              ForEach(this.output.extendedReading, (ref: ReadingLink) => {
-                Row() {
-                  Text(ref.title)
-                    .fontSize(14).fontColor(ACCENT).layoutWeight(1).maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(ref.source ?? '').fontSize(11).fontColor(INK4).margin({ left: 8 })
-                }
-                .width('100%').padding({ top: 10, bottom: 10 })
-                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-              })
-            }
+            // ── 文章全量块(Hero/summary/entities/timeline/corePoints/analysis/diagram/refs) ──
+            ArticleRenderer({ output: this.output })
 
             // 底部留白
             Column() {}.height(40)
