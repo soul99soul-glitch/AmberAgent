@@ -2,6 +2,8 @@
   "src": [
     "pages/Index",
     "pages/DeepReadArticlePage",
+    "pages/DeepReadHistoryPage",
+    "pages/DeepReadTemplateWorkbenchPage",
     "pages/HistoryPage",
     "pages/CouncilPage",
     "pages/CouncilRunPage",
@@ -47,6 +49,7 @@
     "pages/SettingProviderModelTabPage",
     "pages/SettingProviderModelSettingsForm",
     "pages/SettingTTSPage",
+    "pages/SettingTTSProviderPage",
     "pages/SettingSystemAccessPage",
     "pages/SettingExperimentalPage",
     "pages/SettingSearchServiceEditorSheet",
@@ -54,16 +57,19 @@
     "pages/SettingSlidesFontPage",
     "pages/SettingExperimentalWebMountPage",
     "pages/SettingExperimentalOfficeProPage",
+    "pages/SettingExperimentalModelCouncilPageFull",
+    "pages/SettingExperimentalSubAgentPageFull",
     "pages/SkillsPage",
     "pages/SkillDetailPage",
     "pages/QuickMessagesPage",
     "pages/BoardPage",
-    "pages/DeepReadHistoryPage",
     "pages/HotListSourceSettingsPage",
     "pages/SearchPage",
     "pages/FavoritePage",
     "pages/SettingAgentMemoryPageFull",
     "pages/SettingMcpPageFull",
-    "pages/SettingAgentExtensionsPageFull"
+    "pages/SettingAgentExtensionsPageFull",
+    "pages/PromptTemplatePage",
+    "pages/AssistantListPage"
   ]
 }
