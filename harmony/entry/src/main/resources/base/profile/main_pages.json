@@ -24,6 +24,15 @@
     "pages/ChatAgentExecutionPage",
     "pages/ChatMcpSettingsPage",
     "pages/ChatAssistantMcpPage",
+    "pages/AssistantDetailPage",
+    "pages/AssistantBasicPage",
+    "pages/AssistantPromptPage",
+    "pages/AssistantRequestPage",
+    "pages/AssistantExtensionsPage",
+    "pages/AssistantMemoryPage",
+    "pages/AssistantImporter",
+    "pages/AssistantPropertyEditor",
+    "pages/AssistantBackgroundPicker",
     "pages/SettingSubAgentPage",
     "pages/SettingModelCouncilPage",
     "pages/SettingPage",
@@ -43,6 +52,14 @@
     "pages/SettingSearchListCards",
     "pages/SettingSlidesFontPage",
     "pages/SettingExperimentalWebMountPage",
-    "pages/SettingExperimentalOfficeProPage"
+    "pages/SettingExperimentalOfficeProPage",
+    "pages/SkillsPage",
+    "pages/SkillDetailPage",
+    "pages/QuickMessagesPage",
+    "pages/BoardPage",
+    "pages/DeepReadHistoryPage",
+    "pages/HotListSourceSettingsPage",
+    "pages/SearchPage",
+    "pages/FavoritePage"
   ]
 }

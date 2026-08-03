@@ -28,36 +28,40 @@ export struct Hairline {
 }
 
 // BtnInk:主操作按钮(ink 实心 + bg 字 + 15dp 圆角)
+// 注:enabled/onClick 与 CustomComponent 基类方法同名会触发 arkts 编译冲突,
+//   故重命名为 fieldEnabled / onClicked。
 @Component
 export struct BtnInk {
   text: string = '';
-  enabled: boolean = true;
-  onClick: () => void = () => {};
+  fieldEnabled: boolean = true;
+  onClicked: () => void = (): void => {};
   build(): void {
     Text(this.text)
       .fontSize(BODY).fontWeight(FontWeight.Medium)
-      .fontColor(this.enabled ? SURFACE : INK4)
+      .fontColor(this.fieldEnabled ? SURFACE : INK4)
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .borderRadius(15)
-      .backgroundColor(this.enabled ? INK : SURFACE2)
-      .onClick(() => { if (this.enabled) this.onClick(); })
+      .backgroundColor(this.fieldEnabled ? INK : SURFACE2)
+      .onClick((): void => { if (this.fieldEnabled) this.onClicked(); })
   }
 }
 
 // BtnAccent:accent 实心按钮 + accentInk 字
+// 注:enabled/onClick 与 CustomComponent 基类方法同名会触发 arkts 编译冲突,
+//   故重命名为 fieldEnabled / onClicked。
 @Component
 export struct BtnAccent {
   text: string = '';
-  enabled: boolean = true;
-  onClick: () => void = () => {};
+  fieldEnabled: boolean = true;
+  onClicked: () => void = (): void => {};
   build(): void {
     Text(this.text)
       .fontSize(BODY).fontWeight(FontWeight.Medium)
-      .fontColor(this.enabled ? SURFACE : INK4)
+      .fontColor(this.fieldEnabled ? SURFACE : INK4)
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .borderRadius(15)
-      .backgroundColor(this.enabled ? ACCENT : SURFACE2)
-      .onClick(() => { if (this.enabled) this.onClick(); })
+      .backgroundColor(this.fieldEnabled ? ACCENT : SURFACE2)
+      .onClick((): void => { if (this.fieldEnabled) this.onClicked(); })
   }
 }
 
@@ -73,15 +77,17 @@ export struct LiveDot {
 }
 
 // BlinkingCursor:闪烁终端光标(默认 accent)
+// 注:width/height 与 CustomComponent 基类方法同名会触发 arkts 编译冲突,
+//   故重命名为 cursorWidth / cursorHeight。
 @Component
 export struct BlinkingCursor {
   color: string = ACCENT;
-  width: number = 2;
-  height: number = 16;
+  cursorWidth: number = 2;
+  cursorHeight: number = 16;
   build(): void {
     Column()
-      .width(this.width)
-      .height(this.height)
+      .width(this.cursorWidth)
+      .height(this.cursorHeight)
       .backgroundColor(this.color)
   }
 }
@@ -325,11 +331,13 @@ export struct JsonTree {
 }
 
 // Tag: 标签 chip
+// 注:onClick 与 CustomComponent 基类方法同名会触发 arkts 编译冲突,
+//   故重命名为 onClicked。
 @Component
 export struct Tag {
   @Prop text: string = '';
   @Prop selected: boolean = false;
-  onClick: () => void = (): void => {};
+  onClicked: () => void = (): void => {};
   build(): void {
     Text(this.text)
       .fontSize(11)
@@ -338,7 +346,7 @@ export struct Tag {
       .borderRadius(999)
       .backgroundColor(this.selected ? ACCENT : SURFACE2)
       .border({ width: this.selected ? 0 : 1, color: LINE })
-      .onClick((): void => { this.onClick(); })
+      .onClick((): void => { this.onClicked(); })
   }
 }
 
