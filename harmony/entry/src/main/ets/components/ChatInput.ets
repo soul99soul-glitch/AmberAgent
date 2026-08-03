@@ -18,6 +18,8 @@
 
 import { INK, INK3, INK4, ACCENT, SURFACE, SURFACE2, BODY, META, LABEL } from '../design/tokens.ets';
 import { SlashCommandPanel, SlashCommand, buildSlashCommands } from './SlashCommandPanel.ets';
+import { ReasoningPicker } from './ReasoningPicker.ets';
+import type { ReasoningLevelOption } from '@amber/chat-domain';
 
 @Component
 export struct ChatInput {
@@ -27,6 +29,9 @@ export struct ChatInput {
   @Prop hasImages: boolean = false;
   @Prop subAgentEnabled: boolean = false;
   @Prop subAgentMode: string = 'roster';
+  // M2.1:推理档位段集(模型感知;空/单档 → ReasoningPicker 自身不渲染)
+  @Prop reasoningLevels: ReasoningLevelOption[] = [];
+  @Prop currentReasoningLevel: string = '';
   onTextChange: (value: string) => void = (_v: string): void => {};
   onSend: () => void = (): void => {};
   onStop: () => void = (): void => {};
@@ -36,6 +41,7 @@ export struct ChatInput {
   onClearInput: () => void = (): void => {};
   onCompactContext: () => void = (): void => {};
   onInsertText: (text: string) => void = (_t: string): void => {};
+  onReasoningLevelChange: (level: string) => void = (_l: string): void => {};
 
   // 斜杠命令可见:text 以 / 开头且非编辑态
   private isSlashVisible(): boolean {
@@ -81,6 +87,13 @@ export struct ChatInput {
         commands: this.getSlashCommands(),
         visible: this.isSlashVisible(),
         onSelect: (cmd: SlashCommand): void => { this.handleSlashCommand(cmd); },
+      })
+
+      // M2.1:推理档位段集(模型支持 reasoning 时显示;段集由 ChatPage 按模型装配)
+      ReasoningPicker({
+        levels: this.reasoningLevels,
+        currentLevel: this.currentReasoningLevel,
+        onReasoningLevelChange: (level: string): void => { this.onReasoningLevelChange(level); },
       })
 
       // 编辑取消条

@@ -361,11 +361,16 @@ export type { GoogleChatApiDeps } from './chat/google_chat_api.ts';
 
 export {
   makeAssistant, patchAssistant, makeAssistantRegex, reasoningLevelForModel,
+  withReasoningLevelForModel,
 } from './chat/assistant.ts';
 export type {
   Assistant, AssistantRegex, AssistantAffectScope, Avatar,
   LocalToolOption, MainAgentToolProfile, CustomHeader,
 } from './chat/assistant.ts';
+
+// M2.1:模型感知推理档位段集(ModelList.kt:1097-1133)
+export { reasoningLevelsForModel } from './chat/reasoning_levels.ts';
+export type { ReasoningLevelOption } from './chat/reasoning_levels.ts';
 
 export {
   serializeAssistant, parseAssistant, serializeAssistantList, parseAssistantList,

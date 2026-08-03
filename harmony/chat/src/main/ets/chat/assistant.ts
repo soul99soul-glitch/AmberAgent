@@ -159,3 +159,21 @@ export const reasoningLevelForModel = (
   if (remembered !== undefined) return remembered;
   return assistant.reasoningLevel === 'auto' ? defaultReasoningLevel : assistant.reasoningLevel;
 };
+
+// withReasoningLevelForModel(core/model/Assistant.kt:64-77)— 写侧:
+//   记忆 map 按 modelId 更新,assistant.reasoningLevel 同步置为新档位。
+//   鸿蒙 map key = modelId 字符串(对齐读侧 reasoningLevelForModel,非 Uuid)
+export const withReasoningLevelForModel = (
+  assistant: Assistant,
+  modelId: string | null,
+  level: ReasoningLevel,
+): Assistant => {
+  const remembered: Record<string, ReasoningLevel> = { ...assistant.rememberedReasoningLevelsByModelId };
+  if (modelId !== null) {
+    remembered[modelId] = level;
+  }
+  return patchAssistant(assistant, {
+    reasoningLevel: level,
+    rememberedReasoningLevelsByModelId: remembered,
+  });
+};

@@ -63,6 +63,8 @@ import {
   createMcpManagementTools, createMcpServerTools, makeAgentTool, createSkillTools,
   createWorkspaceTools, createWorkspaceArtifactTools, createDeepReadPlaybookTools,
   loadAssistants, saveAssistants, patchAssistant,
+  reasoningLevelForModel, withReasoningLevelForModel,
+  defaultReasoningLevelForModel, reasoningLevelsForModel,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
   groupMessageParts,
@@ -71,7 +73,7 @@ import {
 } from '@amber/chat-domain';
 import type {
   ThinkingStep, MessagePartBlock,
-  TopModelMenuGroup,
+  TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
@@ -540,6 +542,11 @@ struct ChatPage {
   //   的 parent base tools,不含 subagent_* 自身。subagentEnabled + 会话存在才挂载。
   private subAgentEnabled: boolean = false;
   private subAgentMode: string = 'roster';
+  // M2.1:ReasoningPicker 段集 + 当前档位(模型感知;aboutToAppear 装配,选档位时刷新)
+  @State reasoningLevels: ReasoningLevelOption[] = [];
+  @State currentReasoningLevel: string = '';
+  // 当前模型内部 id(ReasoningPicker 记忆 key;refreshReasoningPicker 设置)
+  private currentModelId: string = '';
   private baseToolsCache: AgentTool[] = [];
   private subAgentToolsCache: AgentTool[] = [];
   @State errorMsg: string = '';
@@ -684,6 +691,8 @@ struct ChatPage {
     //   回退路径 :110-111)
     resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
       this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
+      // M2.1:同步装配 ReasoningPicker 段集 + 当前档位
+      this.refreshReasoningPicker(choice);
     });
     // D-070:搜索 SDK 运行时装配(幂等)+ 搜索偏好加载(SearchTools 工具组接线)
     ensureSearchSdk();
@@ -1426,11 +1435,64 @@ struct ChatPage {
   private selectModelFromMenu(providerId: string, modelId: string): void {
     saveChatModelSelection({ providerId, modelId }).then((): void => {
       describeChatModel().then((label: string): void => { this.modelLabel = label; });
-      // contextWindowTokens 也随之刷新(aboutToAppear 同款逻辑)
+      // contextWindowTokens + ReasoningPicker 段集也随之刷新(模型变了,档位段集 + 当前档位变)
       resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
         this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
+        this.refreshReasoningPicker(choice);
       });
       this.modelMenuOpen = false;
+    });
+  }
+
+  // M2.1:ReasoningPicker 装配 — 按当前 model 的段集 + assistant 记忆的当前档位。
+  //   choice=null(无模型配置)→ 清空段集,ReasoningPicker 不渲染。
+  //   Android ChatInputComposers.kt:293-314 thinking footer 装配对应。
+  private refreshReasoningPicker(choice: ChatProviderChoice | null): void {
+    if (choice === null) {
+      this.reasoningLevels = [];
+      this.currentReasoningLevel = '';
+      return;
+    }
+    this.reasoningLevels = reasoningLevelsForModel(choice.model);
+    this.currentModelId = choice.model.id;
+    // 当前档位 = assistant 按模型记忆(无记忆 → 模型默认档位)
+    const modelId: string = choice.model.id;
+    getChatAssistants().then((assistants: Assistant[]): void => {
+      const assistantId: string = this.conversation !== null ? this.conversation.assistantId : '';
+      let picked: Assistant | null = null;
+      for (const a of assistants) {
+        if (a.id === assistantId) { picked = a; break; }
+      }
+      if (picked === null) return;
+      const a: Assistant = picked;
+      this.currentReasoningLevel = reasoningLevelForModel(
+        a, modelId, defaultReasoningLevelForModel(choice.model),
+      );
+    });
+  }
+
+  // M2.1:用户在 ReasoningPicker 选档位 → 按模型记忆持久化到 assistant
+  //   Android onSelect → assistant.withReasoningLevelForModel(model.id, level)
+  private handleReasoningLevelChange(level: string): void {
+    if (this.conversation === null) return;
+    const assistantId: string = this.conversation.assistantId;
+    const modelId: string = this.currentModelId;
+    const rl: ReasoningLevel = level as ReasoningLevel;
+    getChatAssistants().then((assistants: Assistant[]): void => {
+      let changed: Assistant | null = null;
+      const next: Assistant[] = [];
+      for (const a of assistants) {
+        if (a.id === assistantId) {
+          changed = withReasoningLevelForModel(a, modelId, rl);
+          next.push(changed);
+        } else {
+          next.push(a);
+        }
+      }
+      if (changed === null) return;
+      saveAssistants(getChatKvStore(), next).then((): void => {
+        this.currentReasoningLevel = level;
+      });
     });
   }
 
@@ -2773,6 +2835,8 @@ struct ChatPage {
         hasImages: this.pendingImages.length > 0,
         subAgentEnabled: this.subAgentEnabled,
         subAgentMode: this.subAgentMode,
+        reasoningLevels: this.reasoningLevels,
+        currentReasoningLevel: this.currentReasoningLevel,
         onTextChange: (v: string): void => { this.inputText = v; },
         onSend: (): void => { this.send(); },
         onStop: (): void => {
@@ -2790,6 +2854,7 @@ struct ChatPage {
         onClearInput: (): void => { this.inputText = ''; },
         onCompactContext: (): void => { this.compactCurrentConversation(); },
         onInsertText: (t: string): void => { this.inputText = t; },
+        onReasoningLevelChange: (level: string): void => { this.handleReasoningLevelChange(level); },
       })
     }
     .width('100%').height('100%').backgroundColor(BG)
