@@ -115,7 +115,7 @@ struct NovelBatchPolishSheet: View {
                let batchPolishBlocker = sessionViewModel.batchPolishBlocker {
                 Section {
                     Label(batchPolishBlocker.displayName, systemImage: "info.circle")
-                        .foregroundStyle(AmberTheme.accentAmber)
+                        .foregroundStyle(AmberTheme.foreground2)
                 }
             } else if unresolvedTransaction == nil,
                       let errorMessage = sessionViewModel.errorMessage {
@@ -214,7 +214,7 @@ struct NovelBatchPolishSheet: View {
                     Spacer(minLength: 8)
                     Text("\(Int((fraction * 100).rounded(.down)))%")
                         .font(.footnote.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(AmberTheme.accentAmber)
+                        .foregroundStyle(AmberTheme.foreground2)
                 }
 
                 ProgressView(value: fraction)
@@ -229,7 +229,7 @@ struct NovelBatchPolishSheet: View {
 
                 Text("已用时 \(elapsed) 秒 · 每章采用前会做一次剧情漂移校验")
                     .font(.caption)
-                    .foregroundStyle(AmberTheme.muted2)
+                    .foregroundStyle(AmberTheme.muted)
                     .monospacedDigit()
 
                 Button(role: .destructive) {
@@ -372,7 +372,7 @@ struct NovelBatchPolishSheet: View {
                         : "有一项润色检查需要处理",
                     systemImage: "exclamationmark.triangle.fill"
                 )
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
 
                 if let message = transaction.lastFailure?.message,
                    !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

@@ -41,7 +41,7 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertFalse(settings.contains("projectID:"))
     }
 
-    func testChatSendDismissesTheComposerKeyboardBeforeStartingGeneration() throws {
+    func testChatSendKeepsTheComposerKeyboardVisibleWhileStartingGeneration() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let start = try XCTUnwrap(chatView.range(of: "private func sendComposerMessage()"))
         let end = try XCTUnwrap(
@@ -49,9 +49,10 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
         let sendBody = chatView[start.lowerBound..<end.lowerBound]
 
-        XCTAssertTrue(sendBody.contains("dismissKeyboard()"))
+        XCTAssertTrue(sendBody.contains("composerInputController.committedText()"))
+        XCTAssertFalse(sendBody.contains("dismissKeyboard()"))
         XCTAssertLessThan(
-            try XCTUnwrap(sendBody.range(of: "dismissKeyboard()")?.lowerBound),
+            try XCTUnwrap(sendBody.range(of: "guard sendEnabled(for: committedText)")?.lowerBound),
             try XCTUnwrap(sendBody.range(of: "viewModel.sendMessage()")?.lowerBound)
         )
     }
@@ -77,6 +78,7 @@ final class IOSSettingsWiringTests: XCTestCase {
     func testChatMessageListRendersNativeTimelineDirectlyWithoutRoutePolicy() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let list = try source("iosApp/ChatCollectionMessageList.swift")
+        let projection = try source("iosApp/ChatMessageProjection.swift")
 
         // native timeline 已 hardcode 为唯一 Chat 列表路径：route 判定层（route enum /
         // policy / eligibility / 开关 flag）整层退役，ChatView 直接渲染 NativeChatTimelineView。
@@ -87,19 +89,26 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertFalse(chatView.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
         XCTAssertFalse(list.contains("enum ChatMessageListRoutePolicy"))
         XCTAssertFalse(list.contains("NativeChatTimelineRoutePolicy.shouldUseNativeTimeline"))
+        XCTAssertFalse(chatView.contains("NativeChatTimelineMirror"))
+        XCTAssertFalse(chatView.contains("recordNativeTimelineMirrorIfEnabled"))
+        XCTAssertFalse(projection.contains("NativeTimelineMirrorInput"))
+        XCTAssertFalse(projection.contains("NativeChatTimelineMirror"))
     }
 
-    func testNativeTimelineScrollDriverIsHardcodedOnAndConsumedByNativeTimelineView() throws {
+    func testNativeTimelineScrollDriverHasNoRetiredEnableParameterAndIsConsumedByNativeTimelineView() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let list = try source("iosApp/ChatCollectionMessageList.swift")
+        let driver = try source("iosApp/NativeTimelineScrollDriver.swift")
 
-        // 原生滚动 driver 已 hardcode 开启，不再由设置开关驱动。
-        XCTAssertTrue(chatView.contains("nativeScrollDriverEnabled: true"))
+        // 原生滚动 driver 已是唯一默认 owner，不再保留恒为 true 的迁移参数。
+        XCTAssertFalse(chatView.contains("nativeScrollDriverEnabled:"))
         XCTAssertFalse(chatView.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
         XCTAssertTrue(list.contains("@State private var scrollDriver = NativeTimelineScrollDriver()"))
-        XCTAssertTrue(list.contains("var nativeScrollDriverEnabled: Bool"))
+        XCTAssertFalse(list.contains("var nativeScrollDriverEnabled: Bool"))
         XCTAssertTrue(list.contains("scrollDriver.attach(scrollView)"))
-        XCTAssertTrue(list.contains("hasMeasuredNativeScrollGeometry && !viewportState.isAtBottom"))
+        XCTAssertFalse(list.contains("hasMeasuredNativeScrollGeometry"))
+        XCTAssertTrue(driver.contains("var isUIKitUserInteracting: Bool"))
+        XCTAssertTrue(list.contains("guard scrollDriver.isUIKitUserInteracting else { return }"))
         XCTAssertTrue(list.contains("driverPausedForUser: isNativeScrollDriverActive && scrollDriver.isPausedForUser"))
         XCTAssertTrue(list.contains("scrollDriver.submit(.streamContentGrew)"))
     }
@@ -171,6 +180,13 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertEqual(ChatTopBarLayout.toolbarButtonDiameter, 38)
     }
 
+    func testComposerReasoningLabelsAreChinesePresentationCopy() {
+        XCTAssertEqual(
+            ComposerReasoningOption.allCases.map(\.title),
+            ["关闭", "自动", "低", "中", "高", "极高", "最高"]
+        )
+    }
+
     @MainActor
     func testChatTitleIslandUsesIntrinsicWidthUpToItsCollisionLimit() {
         let shortHost = UIHostingController(
@@ -186,6 +202,58 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertLessThan(shortWidth, 150)
         XCTAssertGreaterThan(longWidth, shortWidth + 40)
         XCTAssertLessThanOrEqual(longWidth, 230.5)
+    }
+
+    @MainActor
+    func testChatActivityIslandKeepsOneStableHeightAcrossStates() {
+        let states: [ChatActivityIslandState] = [
+            .conversationTitle("Amber"),
+            .activity(
+                kind: .thinking,
+                title: "正在思考",
+                detail: "高",
+                systemImage: "brain.head.profile",
+                tint: .amber
+            ),
+            .activity(
+                kind: .tool,
+                title: "正在搜索 巫师 3 来来来",
+                detail: "关键词：巫师 3 来来来",
+                systemImage: "magnifyingglass",
+                tint: .green
+            ),
+            .activity(
+                kind: .generating,
+                title: "正在生成回复",
+                systemImage: "text.bubble",
+                tint: .accent
+            )
+        ]
+        let proposal = CGSize(width: 393, height: 100)
+        let heights = states.map {
+            UIHostingController(rootView: ChatActivityIslandView(state: $0))
+                .sizeThatFits(in: proposal)
+                .height
+        }
+
+        guard let minimumHeight = heights.min(),
+              let maximumHeight = heights.max(),
+              let firstHeight = heights.first else {
+            return XCTFail("活动岛状态样本不能为空")
+        }
+
+        XCTAssertEqual(maximumHeight, minimumHeight, accuracy: 0.5)
+        XCTAssertEqual(firstHeight, 40, accuracy: 0.5)
+    }
+
+    func testChatActivityIslandUsesOneStableVisualContentIdentity() throws {
+        let activityIsland = try source("iosApp/ChatActivityIslandView.swift")
+
+        XCTAssertTrue(activityIsland.contains("private var islandContent: some View"))
+        XCTAssertFalse(activityIsland.contains("private var activeContent: some View"))
+        XCTAssertFalse(activityIsland.contains("private var titleContent: some View"))
+        XCTAssertFalse(activityIsland.contains(".id(state.contentKey)"))
+        XCTAssertFalse(activityIsland.contains(".opacity(presentation.isSettling ? 0 : 1)"))
     }
 
     func testCustomTopBarsUseNativeSoftEdgesAndLiquidGlassControls() throws {
@@ -209,20 +277,20 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
         XCTAssertFalse(chatView.contains("edgeEffectTail"))
         XCTAssertFalse(chatView.contains("edgeEffectHeight"))
-        XCTAssertTrue(chatView.contains("GlassEffectContainer(spacing: 12)"))
+        XCTAssertFalse(chatView.contains("GlassEffectContainer(spacing: 12)"))
         XCTAssertTrue(composer.contains(".foregroundStyle(Color(uiColor: .label))"))
         XCTAssertTrue(composer.contains(".symbolRenderingMode(.monochrome)"))
-        XCTAssertTrue(chatView.contains("topBarGlyphOverlay"))
-        XCTAssertTrue(chatView.contains("showsGlyph: false"))
-        XCTAssertGreaterThanOrEqual(
-            chatView.components(separatedBy: "ZStack(alignment: .bottom)").count - 1,
-            2
-        )
-        XCTAssertTrue(chatView.contains("isBackToolbarButtonPressed"))
-        XCTAssertTrue(chatView.contains("isNewChatToolbarButtonPressed"))
-        XCTAssertTrue(chatView.contains(".scaleEffect(isPressed ? 0.9 : 1)"))
-        XCTAssertTrue(composer.contains("onPressChanged: onPressChanged"))
-        XCTAssertTrue(feedback.contains("onPressChanged?(isEnabled && isPressed)"))
+        XCTAssertFalse(chatView.contains("topBarGlyphOverlay"))
+        XCTAssertFalse(chatView.contains("showsGlyph: false"))
+        XCTAssertFalse(chatView.contains("isBackToolbarButtonPressed"))
+        XCTAssertFalse(chatView.contains("isNewChatToolbarButtonPressed"))
+        XCTAssertTrue(chatView.contains("ChatToolbarIconButton("))
+        XCTAssertTrue(composer.contains("Button(action: action)"))
+        XCTAssertTrue(composer.contains("Image(systemName: systemImage)"))
+        XCTAssertTrue(composer.contains("circleGlass"))
+        XCTAssertFalse(composer.contains("var showsGlyph"))
+        XCTAssertFalse(composer.contains("var onPressChanged"))
+        XCTAssertFalse(feedback.contains("onPressChanged?(isEnabled && isPressed)"))
         XCTAssertTrue(activityIsland.contains(".glassEffect(.regular, in: Capsule())"))
         XCTAssertTrue(activityIsland.contains("Capsule().fill(.ultraThinMaterial)"))
     }
@@ -336,23 +404,257 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(activityIsland.contains("if activityIslandEdgeGlow,"))
     }
 
-    func testSystemDynamicIslandUsesBoundedLiveStatusAndSharedChatStageCopy() throws {
+    func testSystemDynamicIslandUsesSingleAlignedSummaryAndIntentionalStaticFallback() throws {
         let widget = try source("ActivityWidget/AmberAgentActivityWidget.swift")
-        let chat = try source("iosApp/ChatView.swift")
-        let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
+        let islandStart = try XCTUnwrap(widget.range(of: "DynamicIsland {"))
+        let islandSuffix = String(widget[islandStart.lowerBound...])
+        let islandEnd = try XCTUnwrap(islandSuffix.range(of: "private struct AgentActivityCompactStatus"))
+        let islandBlock = String(islandSuffix[..<islandEnd.lowerBound])
+        let compactLeadingStart = try XCTUnwrap(widget.range(of: "} compactLeading: {"))
+        let compactLeadingSuffix = String(widget[compactLeadingStart.lowerBound...])
+        let compactLeadingEnd = try XCTUnwrap(compactLeadingSuffix.range(of: "} compactTrailing: {"))
+        let compactLeadingBlock = String(compactLeadingSuffix[..<compactLeadingEnd.lowerBound])
         let compactStart = try XCTUnwrap(widget.range(of: "} compactTrailing: {"))
         let compactSuffix = String(widget[compactStart.lowerBound...])
         let compactEnd = try XCTUnwrap(compactSuffix.range(of: "} minimal: {"))
         let compactBlock = String(compactSuffix[..<compactEnd.lowerBound])
+        let minimalStart = try XCTUnwrap(widget.range(of: "} minimal: {"))
+        let minimalSuffix = String(widget[minimalStart.lowerBound...])
+        let minimalEnd = try XCTUnwrap(minimalSuffix.range(of: ".widgetURL("))
+        let minimalBlock = String(minimalSuffix[..<minimalEnd.lowerBound])
+        let orbStart = try XCTUnwrap(widget.range(of: "private struct AgentActivityIslandOrb"))
+        let orbSuffix = String(widget[orbStart.lowerBound...])
+        let orbEnd = try XCTUnwrap(orbSuffix.range(of: "private enum AgentActivityIslandOrbMapping"))
+        let orbBlock = String(orbSuffix[..<orbEnd.lowerBound])
 
-        XCTAssertTrue(
-            widget.contains("Text(presentation.displayStage(isStale: isStale).compactTitle)")
+        XCTAssertEqual(
+            islandBlock.components(separatedBy: "DynamicIslandExpandedRegion(.leading)").count - 1,
+            0
         )
+        XCTAssertEqual(
+            islandBlock.components(separatedBy: "DynamicIslandExpandedRegion(.center)").count - 1,
+            0
+        )
+        XCTAssertEqual(
+            islandBlock.components(separatedBy: "DynamicIslandExpandedRegion(.trailing)").count - 1,
+            0
+        )
+        XCTAssertFalse(islandBlock.contains("DynamicIslandExpandedRegion(.trailing, priority:"))
+        XCTAssertEqual(
+            islandBlock.components(separatedBy: "DynamicIslandExpandedRegion(.bottom)").count - 1,
+            1
+        )
+        XCTAssertTrue(islandBlock.contains("HStack(alignment: .center, spacing: 12)"))
+        XCTAssertTrue(islandBlock.contains("minHeight: 40"))
+        XCTAssertTrue(islandBlock.contains("size: 40"))
+        XCTAssertTrue(islandBlock.contains("animates: true"))
+        XCTAssertTrue(islandBlock.contains("AgentActivityIslandHeadline("))
+        XCTAssertTrue(islandBlock.contains("startedAt: context.attributes.startedAt"))
+        XCTAssertTrue(islandBlock.contains("updatedAt: context.state.updatedAt"))
+        XCTAssertFalse(islandBlock.contains("AgentActivityGlyph("))
+        XCTAssertFalse(islandBlock.contains("AgentActivityExpandedFact("))
+        XCTAssertFalse(islandBlock.contains("AgentActivityExpandedFooter("))
+        XCTAssertFalse(islandBlock.contains(".amberAccent"))
+        XCTAssertTrue(compactLeadingBlock.contains("animates: false"))
+        XCTAssertTrue(minimalBlock.contains("animates: false"))
+        XCTAssertTrue(orbBlock.contains("if displayPhase == .running, animates"))
+        XCTAssertTrue(orbBlock.contains("presentation.displaySymbolName(isStale: isStale)"))
+        XCTAssertTrue(orbBlock.contains(".white.opacity(displayPhase == .running ? 0.9 : 0.72)"))
+        XCTAssertFalse(orbBlock.contains("displayPhase.widgetColor"))
         XCTAssertFalse(compactBlock.contains("style: .timer"))
-        XCTAssertTrue(widget.contains("if presentation.kind != .response"))
-        XCTAssertTrue(chat.contains("title: AgentActivityStage.preparing.title"))
-        XCTAssertTrue(chat.contains("title: AgentActivityStage.thinking.title"))
-        XCTAssertTrue(chat.contains("title: AgentActivityStage.generating.title"))
+        XCTAssertFalse(widget.contains(".activityBackgroundTint("))
+        XCTAssertTrue(widget.contains(".keylineTint(.white.opacity(0.12))"))
+        XCTAssertTrue(widget.contains("@Environment(\\.accessibilityReduceMotion)"))
+        XCTAssertTrue(widget.contains("if isActive, !reduceMotion, !isLuminanceReduced"))
+        XCTAssertTrue(widget.contains("agentActivityIslandAccessibilityLabel("))
+        XCTAssertTrue(widget.contains("presentation.displayStage(isStale: isStale)"))
+        XCTAssertTrue(widget.contains(
+            "case .preparing, .waitingForConfirmation, .reconnecting, .stale:\n" +
+            "            .listening"
+        ))
+        XCTAssertTrue(widget.contains("case .thinking:\n            .working"))
+        XCTAssertTrue(widget.contains("case .generating:\n            .composing"))
+        XCTAssertTrue(widget.contains("case .generatingImage:\n            .shaping"))
+        XCTAssertTrue(widget.contains(".searching, .readingSources, .readingWeb"))
+        XCTAssertTrue(widget.contains(".readingDocument, .updatingMemory, .runningTool, .organizing"))
+        XCTAssertFalse(widget.contains("AgentActivityStaticOrb(stage: .searching"))
+        XCTAssertTrue(widget.contains(".keyframeAnimator("))
+        XCTAssertTrue(widget.contains("trigger: animationTrigger"))
+        XCTAssertTrue(widget.contains("AgentActivityOrbAnimationTiming.duration("))
+        XCTAssertTrue(widget.contains(
+            "initialPhase + Double(AgentActivityOrbFrameCache.phases.count)"
+        ))
+        XCTAssertTrue(widget.contains("static let restingPhase = 0"))
+        XCTAssertFalse(widget.contains("representativePhase"))
+        XCTAssertFalse(widget.contains("AgentActivityOrbAnimationTiming.phaseAdvance("))
+        XCTAssertFalse(widget.contains("static let animationDuration: TimeInterval = 0.8"))
+        XCTAssertFalse(widget.contains("PhaseAnimator(AgentActivityOrbFrameCache.phases)"))
+        XCTAssertFalse(widget.contains("private struct AgentActivityExpandedFact"))
+        XCTAssertTrue(widget.contains("action.showsLockScreenLabel"))
+        XCTAssertEqual(
+            widget.components(separatedBy: ".widgetURL(").count - 1,
+            2,
+            "锁屏与灵动岛都必须保留整卡深链"
+        )
+        XCTAssertEqual(
+            widget.components(separatedBy: "agentActivityHeadlineText(").count - 1,
+            4,
+            "展开岛、锁屏与无障碍摘要必须共用同一套主副标题语义"
+        )
+    }
+
+    func testSystemActivityDefaultCopyIsChinese() throws {
+        let copy = try source("iosApp/AgentActivity.strings")
+
+        XCTAssertTrue(copy.contains(#""agent.activity.stage.thinking" = "正在思考";"#))
+        XCTAssertTrue(copy.contains(#""agent.activity.stage.searching" = "正在搜索";"#))
+        XCTAssertTrue(copy.contains(#""agent.activity.stage.generating" = "正在生成";"#))
+        XCTAssertTrue(copy.contains(#""agent.activity.compact.thinking" = "正在思考";"#))
+        XCTAssertTrue(copy.contains(#""agent.activity.compact.searching" = "正在搜索";"#))
+        XCTAssertTrue(copy.contains(#""agent.activity.kind.workflow" = "智能任务";"#))
+        XCTAssertFalse(copy.contains("Thinking"))
+        XCTAssertFalse(copy.contains("Generating response"))
+        XCTAssertFalse(copy.contains("Open conversation"))
+    }
+
+    func testBackgroundToolEnginePublishesLiveActivityStagesAtExecutionBoundaries() throws {
+        let coordinator = try source("iosApp/IOSChatBackgroundGenerationCoordinator.swift")
+        let engine = try source("iosApp/IOSAgentToolEngine.swift")
+        let runStart = try XCTUnwrap(coordinator.range(of: "return await engine.run("))
+        let runSuffix = String(coordinator[runStart.lowerBound...])
+        let runEnd = try XCTUnwrap(runSuffix.range(of: "case .singleToolOnly:"))
+        let runBlock = String(runSuffix[..<runEnd.lowerBound])
+
+        XCTAssertTrue(engine.contains("onToolExecutionStarted"))
+        XCTAssertTrue(engine.contains("onAssistantStage"))
+        XCTAssertTrue(runBlock.contains("onToolExecutionStarted:"))
+        XCTAssertTrue(runBlock.contains("onAssistantStage:"))
+        XCTAssertTrue(coordinator.contains("AsyncStream<AgentActivityPresentation>.makeStream()"))
+        XCTAssertTrue(runBlock.contains("presentationEvents.continuation.yield("))
+        XCTAssertFalse(runBlock.contains("await self.publishRunningPresentation("))
+        XCTAssertTrue(coordinator.contains("guard runState.allowsRunningPresentation else { return }"))
+        XCTAssertTrue(coordinator.contains("AgentActivityPresentation.runningTool(toolName: toolName)"))
+        XCTAssertGreaterThanOrEqual(
+            coordinator.components(
+                separatedBy: "stage: AgentActivityResponseStagePolicy.initialStage"
+            ).count - 1,
+            2,
+            "后台初次输出及工具后的下一轮都必须先回到准备态，再由真实 chunk 推进阶段"
+        )
+
+        let expirationStart = try XCTUnwrap(
+            coordinator.range(of: "backgroundTask.expirationHandler = { [weak self] in")
+        )
+        let expirationSuffix = String(coordinator[expirationStart.lowerBound...])
+        let expirationEnd = try XCTUnwrap(expirationSuffix.range(of: "let requestProvider: ProviderSetting"))
+        let expirationBlock = String(expirationSuffix[..<expirationEnd.lowerBound])
+        let mainActorHop = try XCTUnwrap(expirationBlock.range(of: "Task { @MainActor in"))
+        let terminalClaim = try XCTUnwrap(
+            expirationBlock.range(of: "let claim = runState.expireAndReserveTerminal()")
+        )
+
+        XCTAssertLessThan(
+            mainActorHop.lowerBound,
+            terminalClaim.lowerBound,
+            "Expiration reservation and running presentation publication must be serialized by MainActor."
+        )
+    }
+
+    func testSystemProgressCardCancellationStopsTheOwnedChatRun() throws {
+        let keepAlive = try source("iosApp/BackgroundGenerationKeepAlive.swift")
+        let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
+
+        XCTAssertTrue(keepAlive.contains("var onSystemTaskExpiration: (() -> Void)?"))
+        XCTAssertTrue(keepAlive.contains("onSystemTaskExpiration: (() -> Void)? = nil"))
+        XCTAssertTrue(keepAlive.contains("lease.onExpire?()"))
+        XCTAssertTrue(keepAlive.contains("(lease.onSystemTaskExpiration ?? lease.onExpire)?()"))
+        XCTAssertEqual(
+            coordinator.components(separatedBy: "onSystemTaskExpiration:").count - 1,
+            3,
+            "普通回复、生图与审批恢复都提交系统进度卡，取消任一张都必须停止其 owned run"
+        )
+        XCTAssertTrue(coordinator.contains("cancelRunAfterSystemKeepAliveExpiration(runId)"))
+        XCTAssertTrue(coordinator.contains("private func cancelRunAfterSystemKeepAliveExpiration"))
+    }
+
+    func testAgentActivityDeepLinkIsConsumedOnlyAfterRouteCommit() throws {
+        let shell = try source("iosApp/AppShell.swift")
+        let functionStart = try XCTUnwrap(
+            shell.range(of: "private func openPendingAgentActivityIfReady() async")
+        )
+        let functionSuffix = String(shell[functionStart.lowerBound...])
+        let functionEnd = try XCTUnwrap(functionSuffix.range(of: "@ViewBuilder"))
+        let functionBody = String(functionSuffix[..<functionEnd.lowerBound])
+        let routeCommit = try XCTUnwrap(functionBody.range(of: "rootRouter.path = [.chat]"))
+        let targetClear = try XCTUnwrap(
+            functionBody.range(of: "pendingAgentActivityTarget = nil")
+        )
+
+        XCTAssertGreaterThan(
+            targetClear.lowerBound,
+            routeCommit.lowerBound,
+            "Transient handoff or selection failures must leave the deep-link target available."
+        )
+        XCTAssertGreaterThanOrEqual(
+            functionBody.components(
+                separatedBy: "guard pendingAgentActivityTarget == target else { return }"
+            ).count - 1,
+            2,
+            "An older deep-link task must stop after either suspension point instead of routing or clearing a newer target."
+        )
+        XCTAssertTrue(
+            functionBody.contains("let conversationSelectionRevision = conversationStore.conversationSwitchedRevision")
+        )
+        XCTAssertTrue(
+            functionBody.contains(
+                "pendingAgentActivityTarget == target &&\n                    conversationStore.conversationSwitchedRevision == conversationSelectionRevision"
+            ),
+            "A later manual conversation switch must invalidate an older suspended deep-link commit."
+        )
+    }
+
+    func testConversationSelectionRechecksDeletionAfterDiskLoad() throws {
+        let store = try source("iosApp/IOSConversationStore.swift")
+        let functionStart = try XCTUnwrap(
+            store.range(of: "func selectConversationIfAvailable(")
+        )
+        let functionSuffix = String(store[functionStart.lowerBound...])
+        let functionEnd = try XCTUnwrap(functionSuffix.range(of: "/// 把当前内存里的"))
+        let functionBody = String(functionSuffix[..<functionEnd.lowerBound])
+        let load = try XCTUnwrap(
+            functionBody.range(of: "loaded = try await storage.loadConversation(id: id)")
+        )
+        let postLoadBody = String(functionBody[load.upperBound...])
+        let deletionGuard = try XCTUnwrap(
+            postLoadBody.range(of: "guard !isDeletedConversation(id) else { return false }")
+        )
+        let commit = try XCTUnwrap(postLoadBody.range(of: "if let loaded, commitIf()"))
+
+        XCTAssertLessThan(
+            deletionGuard.lowerBound,
+            commit.lowerBound,
+            "A load that raced with deletion must not restore the deleted conversation as current."
+        )
+    }
+
+    func testLiveActivityControllerOwnsRunsIndependently() throws {
+        let controller = try source("iosApp/AgentLiveActivityController.swift")
+
+        XCTAssertTrue(controller.contains("private var activitiesByRunId"))
+        XCTAssertTrue(controller.contains("AgentActivityOwnershipPolicy.retainedActivityIDs"))
+        XCTAssertFalse(
+            controller.contains("for staleActivity in existing where staleActivity.id != activity?.id")
+        )
+    }
+
+    func testChatUsesChineseStageCopy() throws {
+        let chat = try source("iosApp/ChatView.swift")
+        let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
+
+        XCTAssertTrue(chat.contains("title: \"正在连接\""))
+        XCTAssertTrue(chat.contains("title: \"正在思考\""))
+        XCTAssertTrue(chat.contains("title: \"正在生成回复\""))
+        XCTAssertFalse(chat.contains("detail: composerReasoningLabel"))
         XCTAssertEqual(
             coordinator.components(
                 separatedBy: "AgentActivityResponseStagePolicy.initialStage"

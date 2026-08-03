@@ -252,7 +252,7 @@ struct AppShell: View {
     private func openPendingAgentActivityIfReady() async {
         guard didBootstrapConversations,
               let target = pendingAgentActivityTarget else { return }
-        pendingAgentActivityTarget = nil
+        let conversationSelectionRevision = conversationStore.conversationSwitchedRevision
 
         guard let summary = conversationStore.summaries.first(where: {
             $0.id.toHexDashString().caseInsensitiveCompare(target.conversationId) == .orderedSame
@@ -266,6 +266,8 @@ struct AppShell: View {
                 runId: target.runId,
                 conversationId: target.conversationId
             )
+        guard pendingAgentActivityTarget == target else { return }
+        guard conversationStore.conversationSwitchedRevision == conversationSelectionRevision else { return }
         guard ownsRecordedRun else { return }
         if target.focus == .confirmation {
             guard chatViewModel.canOpenActivityConfirmation(runId: target.runId) else { return }
@@ -273,10 +275,18 @@ struct AppShell: View {
         guard chatViewModel.prepareForConversationChange(to: summary.id) else { return }
 
         if conversationStore.currentConversation?.id != summary.id {
-            guard await conversationStore.selectConversationIfAvailable(id: summary.id) else { return }
+            guard await conversationStore.selectConversationIfAvailable(
+                id: summary.id,
+                commitIf: {
+                    pendingAgentActivityTarget == target &&
+                    conversationStore.conversationSwitchedRevision == conversationSelectionRevision
+                }
+            ) else { return }
         }
+        guard pendingAgentActivityTarget == target else { return }
         guard conversationStore.currentConversation?.id == summary.id else { return }
         rootRouter.path = [.chat]
+        pendingAgentActivityTarget = nil
     }
 
     @ViewBuilder
@@ -408,6 +418,11 @@ final class RouterPath {
         // 防止快速连点堆叠重复页面
         guard path.last != route else { return }
         path.append(route)
+    }
+
+    func goBack() {
+        guard !path.isEmpty else { return }
+        path.removeLast()
     }
 
     func reset() {

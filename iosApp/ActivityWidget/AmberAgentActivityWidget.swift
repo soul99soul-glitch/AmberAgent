@@ -25,40 +25,33 @@ struct AmberAgentActivityWidget: Widget {
             )
         } dynamicIsland: { context in
             DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) {
-                    AgentActivityGlyph(
-                        presentation: context.state.presentation,
-                        isStale: context.isStale,
-                        size: 32
-                    )
-                    .accessibilityHidden(true)
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    AgentActivityExpandedFact(
-                        presentation: context.state.presentation,
-                        startedAt: context.attributes.startedAt,
-                        isStale: context.isStale
-                    )
-                }
-                DynamicIslandExpandedRegion(.center) {
-                    AgentActivityHeadline(
-                        conversationTitle: context.attributes.conversationTitle,
-                        presentation: context.state.presentation,
-                        isStale: context.isStale
-                    )
-                }
                 DynamicIslandExpandedRegion(.bottom) {
-                    AgentActivityExpandedFooter(
-                        attributes: context.attributes,
-                        state: context.state,
-                        isStale: context.isStale
-                    )
+                    HStack(alignment: .center, spacing: 12) {
+                        AgentActivityIslandOrb(
+                            presentation: context.state.presentation,
+                            isStale: context.isStale,
+                            size: 40,
+                            animates: true
+                        )
+                        .accessibilityHidden(true)
+
+                        AgentActivityIslandHeadline(
+                            conversationTitle: context.attributes.conversationTitle,
+                            presentation: context.state.presentation,
+                            startedAt: context.attributes.startedAt,
+                            updatedAt: context.state.updatedAt,
+                            isStale: context.isStale
+                        )
+                        .offset(y: 1)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
                 }
             } compactLeading: {
-                AgentActivityGlyph(
+                AgentActivityIslandOrb(
                     presentation: context.state.presentation,
                     isStale: context.isStale,
-                    size: 20
+                    size: 20,
+                    animates: false
                 )
                 .accessibilityHidden(true)
             } compactTrailing: {
@@ -68,19 +61,24 @@ struct AmberAgentActivityWidget: Widget {
                 )
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(
-                    context.state.presentation.accessibilitySummary(
+                    agentActivityIslandAccessibilityLabel(
+                        conversationTitle: context.attributes.conversationTitle,
+                        presentation: context.state.presentation,
                         isStale: context.isStale
                     )
                 )
             } minimal: {
-                AgentActivityGlyph(
+                AgentActivityIslandOrb(
                     presentation: context.state.presentation,
                     isStale: context.isStale,
-                    size: 17
+                    size: 17,
+                    animates: false
                 )
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(
-                    context.state.presentation.accessibilitySummary(
+                    agentActivityIslandAccessibilityLabel(
+                        conversationTitle: context.attributes.conversationTitle,
+                        presentation: context.state.presentation,
                         isStale: context.isStale
                     )
                 )
@@ -90,22 +88,215 @@ struct AmberAgentActivityWidget: Widget {
                     for: context.state.presentation.action
                 )
             )
-            .keylineTint(.amberAccent)
+            .keylineTint(.white.opacity(0.12))
         }
     }
+}
+
+private func agentActivityHeadlineText(
+    conversationTitle: String?,
+    presentation: AgentActivityPresentation,
+    isStale: Bool
+) -> (title: String, subtitle: String?) {
+    let stageTitle = presentation.displayStage(isStale: isStale).title
+    if let conversationTitle, !conversationTitle.isEmpty {
+        return (conversationTitle, stageTitle)
+    }
+    return (
+        stageTitle,
+        presentation.kind == .response ? nil : presentation.kind.title
+    )
+}
+
+private func agentActivityIslandAccessibilityLabel(
+    conversationTitle: String?,
+    presentation: AgentActivityPresentation,
+    isStale: Bool
+) -> String {
+    let headline = agentActivityHeadlineText(
+        conversationTitle: conversationTitle,
+        presentation: presentation,
+        isStale: isStale
+    )
+    if let subtitle = headline.subtitle {
+        return "\(headline.title)，\(subtitle)"
+    }
+    return headline.title
 }
 
 private struct AgentActivityCompactStatus: View {
     let presentation: AgentActivityPresentation
     let isStale: Bool
 
+    private var stage: AgentActivityStage {
+        presentation.displayStage(isStale: isStale)
+    }
+
     var body: some View {
-        Text(presentation.displayStage(isStale: isStale).compactTitle)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.9))
+        Text(stage.compactTitle)
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(0.22)
             .lineLimit(1)
-            .minimumScaleFactor(0.72)
+            .truncationMode(.tail)
+            .minimumScaleFactor(0.85)
+            .frame(height: 20, alignment: .center)
             .frame(maxWidth: 56, alignment: .trailing)
+            .modifier(AgentActivityStatusGlint(
+                isActive: presentation.displayPhase(isStale: isStale) == .running,
+                trigger: stage.rawValue,
+                baseOpacity: 0.9,
+                peakOpacity: 1.0
+            ))
+    }
+}
+
+private struct AgentActivityIslandHeadline: View {
+    let conversationTitle: String?
+    let presentation: AgentActivityPresentation
+    let startedAt: Date
+    let updatedAt: Date
+    let isStale: Bool
+
+    private var headline: (title: String, subtitle: String?) {
+        agentActivityHeadlineText(
+            conversationTitle: conversationTitle,
+            presentation: presentation,
+            isStale: isStale
+        )
+    }
+
+    private var stage: AgentActivityStage {
+        presentation.displayStage(isStale: isStale)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(headline.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .tracking(-0.15)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 8)
+
+                AgentActivityIslandElapsedTimer(
+                    startedAt: startedAt,
+                    presentation: presentation,
+                    updatedAt: updatedAt
+                )
+            }
+
+            if let subtitle = headline.subtitle {
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .tracking(0.22)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .modifier(AgentActivityStatusGlint(
+                        isActive: presentation.displayPhase(isStale: isStale) == .running,
+                        trigger: stage.rawValue,
+                        baseOpacity: 0.55,
+                        peakOpacity: 0.9
+                    ))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(agentActivityIslandAccessibilityLabel(
+            conversationTitle: conversationTitle,
+            presentation: presentation,
+            isStale: isStale
+        ))
+    }
+}
+
+private struct AgentActivityIslandElapsedTimer: View {
+    let startedAt: Date
+    let presentation: AgentActivityPresentation
+    let updatedAt: Date
+
+    private var frozenEndDate: Date? {
+        AgentActivityElapsedTimePolicy.frozenEndDate(
+            for: presentation.phase,
+            updatedAt: updatedAt
+        )
+    }
+
+    var body: some View {
+        Group {
+            if let frozenEndDate {
+                Text(Self.elapsedText(from: startedAt, to: frozenEndDate))
+            } else {
+                Text(startedAt, style: .timer)
+            }
+        }
+            .font(.system(size: 12, weight: .medium))
+            .tracking(0.24)
+            .monospacedDigit()
+            .foregroundStyle(.white.opacity(0.55))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private static func elapsedText(from startedAt: Date, to endedAt: Date) -> String {
+        let elapsed = max(0, Int(endedAt.timeIntervalSince(startedAt)))
+        let hours = elapsed / 3_600
+        let minutes = (elapsed % 3_600) / 60
+        let seconds = elapsed % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+/// WidgetKit caps Live Activity animations at two seconds. This keeps the Chat
+/// title glint's 30% text mask while playing one sweep per status update.
+private struct AgentActivityStatusGlint: ViewModifier {
+    let isActive: Bool
+    let trigger: String
+    let baseOpacity: Double
+    let peakOpacity: Double
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    private var overlayOpacity: Double {
+        (peakOpacity - baseOpacity) / (1 - baseOpacity)
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isActive, !reduceMotion, !isLuminanceReduced {
+            content
+                .foregroundStyle(.white.opacity(baseOpacity))
+                .overlay {
+                    GeometryReader { proxy in
+                        let bandWidth = max(proxy.size.width * 0.30, 14)
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: .white.opacity(overlayOpacity), location: 0.5),
+                                .init(color: .clear, location: 1)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: bandWidth)
+                        .phaseAnimator([false, true], trigger: trigger) { band, phase in
+                            band.offset(x: phase ? proxy.size.width + bandWidth : -bandWidth)
+                        } animation: { _ in
+                            .linear(duration: 2.0)
+                        }
+                    }
+                    .mask(content.foregroundStyle(.white))
+                    .allowsHitTesting(false)
+                }
+        } else {
+            content.foregroundStyle(.white.opacity(baseOpacity))
+        }
     }
 }
 
@@ -114,68 +305,49 @@ private struct AgentActivityCompactStatus: View {
 private struct AgentActivityHeadline: View {
     let conversationTitle: String?
     let presentation: AgentActivityPresentation
+    let startedAt: Date
+    let updatedAt: Date
     let isStale: Bool
 
-    private var stageTitle: String {
-        presentation.displayStage(isStale: isStale).title
+    private var headline: (title: String, subtitle: String?) {
+        agentActivityHeadlineText(
+            conversationTitle: conversationTitle,
+            presentation: presentation,
+            isStale: isStale
+        )
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            if let conversationTitle, !conversationTitle.isEmpty {
-                Text(conversationTitle)
-                    .font(.subheadline.weight(.semibold))
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(headline.title)
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .truncationMode(.tail)
 
-                Text(stageTitle)
-                    .font(.caption2.weight(.medium))
+                Spacer(minLength: 8)
+
+                AgentActivityIslandElapsedTimer(
+                    startedAt: startedAt,
+                    presentation: presentation,
+                    updatedAt: updatedAt
+                )
+            }
+
+            if let subtitle = headline.subtitle {
+                Text(subtitle)
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.58))
                     .lineLimit(1)
-            } else {
-                // 无标题（工具活动等）：回退到阶段做主标题
-                Text(stageTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-
-                if presentation.kind != .response {
-                    Text(presentation.kind.title)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.58))
-                        .lineLimit(1)
-                }
+                    .truncationMode(.tail)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct AgentActivityExpandedFact: View {
-    let presentation: AgentActivityPresentation
-    let startedAt: Date
-    let isStale: Bool
-
-    var body: some View {
-        Group {
-            if let fact = presentation.priorityFact(isStale: isStale) {
-                Text(fact)
-            } else {
-                Text(startedAt, style: .timer)
-                    .monospacedDigit()
-            }
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.white.opacity(0.88))
-        .lineLimit(1)
-        .minimumScaleFactor(0.72)
-    }
-}
-
-/// 展开态底部。只在有实质信息时显示：进度条、度量明细、可执行动作。
-/// 不重复 trailing 已经显示的计时器。
+/// 锁屏补充区只承载真实进度和必须显式处理的动作。
 private struct AgentActivityExpandedFooter: View {
     let attributes: AgentActivityAttributes
     let state: AgentActivityAttributes.ContentState
@@ -188,7 +360,7 @@ private struct AgentActivityExpandedFooter: View {
     private var hasContent: Bool {
         (displayPhase == .running && state.presentation.progressFraction != nil)
             || (displayPhase == .running && state.presentation.metric.detailText != nil)
-            || (state.presentation.action != nil
+            || (state.presentation.action?.showsLockScreenLabel == true
                 && attributes.destinationURL(for: state.presentation.action) != nil)
     }
 
@@ -214,6 +386,7 @@ private struct AgentActivityExpandedFooter: View {
                     Spacer(minLength: 8)
 
                     if let action = state.presentation.action,
+                       action.showsLockScreenLabel,
                        attributes.destinationURL(for: action) != nil {
                         Label(action.title, systemImage: "arrow.up.right")
                             .font(.caption.weight(.semibold))
@@ -232,38 +405,92 @@ private struct LockScreenAgentActivityView: View {
     let isStale: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                AgentActivityGlyph(
-                    presentation: state.presentation,
-                    isStale: isStale,
-                    size: 34
-                )
-                .accessibilityHidden(true)
+        HStack(alignment: .top, spacing: 12) {
+            AgentActivityGlyph(
+                presentation: state.presentation,
+                isStale: isStale,
+                size: 34
+            )
+            .accessibilityHidden(true)
 
+            VStack(alignment: .leading, spacing: 8) {
                 AgentActivityHeadline(
                     conversationTitle: attributes.conversationTitle,
                     presentation: state.presentation,
+                    startedAt: attributes.startedAt,
+                    updatedAt: state.updatedAt,
                     isStale: isStale
                 )
 
-                Spacer(minLength: 8)
-
-                AgentActivityExpandedFact(
-                    presentation: state.presentation,
-                    startedAt: attributes.startedAt,
+                AgentActivityExpandedFooter(
+                    attributes: attributes,
+                    state: state,
                     isStale: isStale
                 )
             }
-
-            AgentActivityExpandedFooter(
-                attributes: attributes,
-                state: state,
-                isStale: isStale
-            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+}
+
+/// 展开态运行中复用 Chat 的六态点阵；compact/minimal 与非运行相位使用明确的
+/// 单色语义图标。动效不接 token 回调，也不创建第二套 ActivityKit 更新时钟。
+private struct AgentActivityIslandOrb: View {
+    let presentation: AgentActivityPresentation
+    let isStale: Bool
+    let size: CGFloat
+    let animates: Bool
+
+    private var displayPhase: AgentActivityPhase {
+        presentation.displayPhase(isStale: isStale)
+    }
+
+    private var animationTrigger: String {
+        let phase = presentation.displayPhase(isStale: isStale)
+        let stage = presentation.displayStage(isStale: isStale)
+        return "\(phase.rawValue):\(stage.rawValue)"
+    }
+
+    var body: some View {
+        Group {
+            if displayPhase == .running, animates {
+                AgentActivityAnimatedOrb(
+                    state: AgentActivityIslandOrbMapping.state(
+                        for: presentation.displayStage(isStale: isStale)
+                    ),
+                    size: size,
+                    animates: true,
+                    animationTrigger: animationTrigger
+                )
+            } else {
+                Image(systemName: presentation.displaySymbolName(isStale: isStale))
+                    .font(.system(size: size * 0.46, weight: .semibold))
+                    .foregroundStyle(.white.opacity(displayPhase == .running ? 0.9 : 0.72))
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+private enum AgentActivityIslandOrbMapping {
+    static func state(for stage: AgentActivityStage) -> OrbState {
+        switch stage {
+        case .preparing, .waitingForConfirmation, .reconnecting, .stale:
+            .listening
+        case .thinking:
+            .working
+        case .generating:
+            .composing
+        case .searching, .readingSources, .readingWeb:
+            .searching
+        case .generatingImage:
+            .shaping
+        case .readingDocument, .updatingMemory, .runningTool, .organizing:
+            .solving
+        case .completed, .failed, .cancelled:
+            .working
+        }
     }
 }
 
@@ -274,6 +501,11 @@ private struct AgentActivityGlyph: View {
 
     private var displayPhase: AgentActivityPhase {
         presentation.displayPhase(isStale: isStale)
+    }
+
+    private var animationTrigger: String {
+        let stage = presentation.displayStage(isStale: isStale)
+        return "\(displayPhase.rawValue):\(stage.rawValue)"
     }
 
     var body: some View {
@@ -299,12 +531,16 @@ private struct AgentActivityGlyph: View {
         .frame(width: size, height: size)
     }
 
-    /// 运行中用星核静帧表示活跃；其余相位保留 SF Symbol。
-    /// 系统岛是 glance surface，不做多帧动画——系统会限频，静帧已足够传达“还在跑”。
+    /// 运行中复用对应星核动效；其余相位保留 SF Symbol。
     @ViewBuilder
     private var glyphContent: some View {
         if displayPhase == .running {
-            AgentActivityStaticOrb(stage: presentation.stage, size: size * 0.85)
+            AgentActivityAnimatedOrb(
+                state: AgentActivityIslandOrbMapping.state(for: presentation.stage),
+                size: size * 0.85,
+                animates: true,
+                animationTrigger: animationTrigger
+            )
         } else {
             Image(systemName: presentation.displaySymbolName(isStale: isStale))
                 .font(.system(size: size * 0.42, weight: .semibold))
@@ -313,45 +549,106 @@ private struct AgentActivityGlyph: View {
     }
 }
 
-/// 单帧星核标识。纯函数渲染，按 stage/state 缓存，零刷新预算。
-private struct AgentActivityStaticOrb: View {
-    let stage: AgentActivityStage
+private struct AgentActivityAnimatedOrb: View {
+    let orbState: OrbState
     let size: CGFloat
+    let animates: Bool
+    let animationTrigger: String
 
-    private var orbState: OrbState {
-        switch stage {
-        case .searching, .readingSources, .readingWeb, .readingDocument:
-            .searching
-        case .generatingImage:
-            .shaping
-        case .generating:
-            .composing
-        default:
-            .working
-        }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    init(
+        state: OrbState,
+        size: CGFloat,
+        animates: Bool,
+        animationTrigger: String
+    ) {
+        orbState = state
+        self.size = size
+        self.animates = animates
+        self.animationTrigger = animationTrigger
     }
 
+    @ViewBuilder
     var body: some View {
-        let image = AgentActivityOrbFrameCache.frame(state: orbState, size: size)
-        Image(uiImage: image)
-            .resizable()
-            .frame(width: size, height: size)
+        if animates, !reduceMotion, !isLuminanceReduced {
+            AgentActivityOrbFrame(
+                orbState: orbState,
+                size: size,
+                phase: Double(AgentActivityOrbFrameCache.restingPhase)
+            )
+                .keyframeAnimator(
+                    initialValue: Double(AgentActivityOrbFrameCache.restingPhase),
+                    trigger: animationTrigger
+                ) { _, phase in
+                    AgentActivityOrbFrame(
+                        orbState: orbState,
+                        size: size,
+                        phase: phase
+                    )
+                } keyframes: { initialPhase in
+                    LinearKeyframe(
+                        initialPhase + Double(AgentActivityOrbFrameCache.phases.count),
+                        duration: AgentActivityOrbAnimationTiming.duration(
+                            speed: orbResolvePreset(orbState, .small).speed
+                        )
+                    )
+                }
+        } else {
+            AgentActivityOrbFrame(
+                orbState: orbState,
+                size: size,
+                phase: Double(AgentActivityOrbFrameCache.restingPhase)
+            )
+        }
+    }
+}
+
+private struct AgentActivityOrbFrame: View {
+    let orbState: OrbState
+    let size: CGFloat
+    let phase: Double
+
+    var body: some View {
+        let phaseCount = AgentActivityOrbFrameCache.phases.count
+        let roundedPhase = Int(phase.rounded())
+        let normalizedPhase = (roundedPhase % phaseCount + phaseCount) % phaseCount
+        Image(uiImage: AgentActivityOrbFrameCache.frame(
+            state: orbState,
+            size: size,
+            phase: normalizedPhase
+        ))
+        .resizable()
+        .frame(width: size, height: size)
     }
 }
 
 @MainActor
 private enum AgentActivityOrbFrameCache {
+    static let phases = Array(0..<16)
+    static let restingPhase = 0
+
     private static var cache: [String: UIImage] = [:]
 
-    static func frame(state: OrbState, size: CGFloat) -> UIImage {
-        let key = "\(state.rawValue)-\(Int(size))"
+    static func frame(state: OrbState, size: CGFloat, phase: Int) -> UIImage {
+        let normalizedPhase = phase % phases.count
+        let key = "\(state.rawValue)-\(Int(size.rounded()))-\(normalizedPhase)"
         if let cached = cache[key] { return cached }
         let resolved = orbResolvePreset(state, .small)
         let format = UIGraphicsImageRendererFormat()
-        format.scale = UIScreen.main.scale
+        format.scale = 3
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size), format: format)
         let image = renderer.image { context in
-            orbDraw(resolved.mode, context.cgContext, size: Double(size), t: 0, dark: true, opts: resolved.opts)
+            let progress = Double(normalizedPhase) / Double(phases.count)
+            orbDraw(
+                resolved.mode,
+                context.cgContext,
+                size: Double(size),
+                t: progress * 2 * .pi,
+                dark: true,
+                opts: resolved.opts
+            )
         }
         cache[key] = image
         return image

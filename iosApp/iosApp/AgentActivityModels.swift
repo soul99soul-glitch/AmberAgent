@@ -15,7 +15,7 @@ struct AgentActivityAttributes: ActivityAttributes {
     let conversationTitle: String?
 }
 
-struct AgentActivityPresentation: Codable, Hashable {
+struct AgentActivityPresentation: Codable, Hashable, Sendable {
     var kind: AgentActivityKind
     var phase: AgentActivityPhase
     var stage: AgentActivityStage
@@ -37,7 +37,7 @@ struct AgentActivityPresentation: Codable, Hashable {
     }
 }
 
-enum AgentActivityKind: String, Codable, Hashable {
+enum AgentActivityKind: String, Codable, Hashable, Sendable {
     case research
     case response
     case imageGeneration
@@ -48,7 +48,7 @@ enum AgentActivityKind: String, Codable, Hashable {
     case workflow
 }
 
-enum AgentActivityPhase: String, Codable, Hashable {
+enum AgentActivityPhase: String, Codable, Hashable, Sendable {
     case running
     case reconnecting
     case waitingForUser
@@ -58,7 +58,7 @@ enum AgentActivityPhase: String, Codable, Hashable {
     case cancelled
 }
 
-enum AgentActivityStage: String, Codable, Hashable {
+public enum AgentActivityStage: String, Codable, Hashable, Sendable {
     case preparing
     case thinking
     case searching
@@ -78,14 +78,14 @@ enum AgentActivityStage: String, Codable, Hashable {
     case cancelled
 }
 
-enum AgentActivityMetricUnit: String, Codable, Hashable {
+enum AgentActivityMetricUnit: String, Codable, Hashable, Sendable {
     case source
     case file
     case image
     case item
 }
 
-enum AgentActivityMetric: Codable, Hashable {
+enum AgentActivityMetric: Codable, Hashable, Sendable {
     case none
     case count(completed: Int, unit: AgentActivityMetricUnit)
     case progress(completed: Int, total: Int, unit: AgentActivityMetricUnit)
@@ -111,7 +111,7 @@ enum AgentActivityMetric: Codable, Hashable {
     }
 }
 
-enum AgentActivityAction: String, Codable, Hashable {
+enum AgentActivityAction: String, Codable, Hashable, Sendable {
     case openTask
     case openConfirmation
     case viewResult
@@ -414,6 +414,38 @@ enum AgentActivityResponseStagePolicy {
         if hasTextDelta { return .generating }
         return nil
     }
+
+    static func nextPublishedStage(
+        current: AgentActivityStage?,
+        candidate: AgentActivityStage
+    ) -> AgentActivityStage? {
+        guard current != candidate else { return nil }
+        if current == .generating, candidate == .thinking { return nil }
+        return candidate
+    }
+}
+
+enum AgentActivityElapsedTimePolicy {
+    static func frozenEndDate(
+        for phase: AgentActivityPhase,
+        updatedAt: Date
+    ) -> Date? {
+        switch phase {
+        case .completed, .failed, .cancelled:
+            updatedAt
+        case .running, .reconnecting, .waitingForUser, .stale:
+            nil
+        }
+    }
+}
+
+enum AgentActivityOrbAnimationTiming {
+    private static let engineCycle = 2 * Double.pi
+    private static let widgetAnimationLimit: TimeInterval = 2
+
+    static func duration(speed: Double) -> TimeInterval {
+        min(widgetAnimationLimit, engineCycle / speed)
+    }
 }
 
 enum AgentActivityCopy {
@@ -485,6 +517,16 @@ extension AgentActivityStage {
 extension AgentActivityAction {
     var title: String {
         AgentActivityCopy.text("agent.activity.action.\(rawValue)")
+    }
+
+    /// 整张 Live Activity 已通过 widgetURL 打开对话，普通运行态不再重复显示 CTA。
+    var showsLockScreenLabel: Bool {
+        switch self {
+        case .openTask:
+            false
+        case .openConfirmation, .viewResult:
+            true
+        }
     }
 
     var deepLinkFocus: AgentActivityDeepLink.Focus {

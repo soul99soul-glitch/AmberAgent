@@ -115,6 +115,19 @@ final class IOSAgentToolEngineTests: XCTestCase {
         makeMessage(role: MessageRole.assistant, parts: [UIMessagePart.Text(text: text, metadata: nil)])
     }
 
+    private func assistantReasoning(_ text: String) -> UIMessage {
+        let instant = KotlinInstant.companion.fromEpochMilliseconds(epochMilliseconds: 0)
+        return makeMessage(
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Reasoning(
+                reasoning: text,
+                createdAt: instant,
+                finishedAt: nil,
+                metadata: nil
+            )]
+        )
+    }
+
     private func toolCallMessage(toolCallId: String, toolName: String, input: String) -> UIMessage {
         makeMessage(
             role: MessageRole.assistant,
@@ -361,15 +374,82 @@ final class IOSAgentToolEngineTests: XCTestCase {
         }
     }
 
+    final class AssistantStageRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [AgentActivityStage] = []
+
+        func append(_ value: AgentActivityStage) {
+            lock.lock()
+            values.append(value)
+            lock.unlock()
+        }
+
+        var snapshot: [AgentActivityStage] {
+            lock.lock()
+            defer { lock.unlock() }
+            return values
+        }
+    }
+
+    actor ToolStageGate {
+        private var entered = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func suspend() async {
+            entered = true
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+            }
+        }
+
+        func waitUntilEntered() async {
+            while !entered {
+                await Task.yield()
+            }
+        }
+
+        func resume() {
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
+    actor RecordingLedger: IOSAgentRunLedgering {
+        private var finishedOutcomes: [String] = []
+
+        func recordToolCallStarted(
+            runId: String,
+            toolCallId: String,
+            toolName: String,
+            argsDigest: String,
+            effectClass: IOSToolEffectClass
+        ) async -> Bool {
+            true
+        }
+
+        func recordToolCallFinished(runId: String, toolCallId: String, outcome: String) async {
+            finishedOutcomes.append(outcome)
+        }
+
+        func outcomes() -> [String] {
+            finishedOutcomes
+        }
+    }
+
     /// A scripted executor that returns a fixed result per tool name, and
     /// records every call so tests can assert dispatch.
     final class RecordingExecutor: IOSToolExecutor {
         let result: IOSAgentToolOutcome
+        private let events: AssistantTextRecorder?
         private(set) var calls: [(name: String, arguments: String, isUserInitiated: Bool)] = []
-        init(_ result: IOSAgentToolOutcome) { self.result = result }
+        init(_ result: IOSAgentToolOutcome, events: AssistantTextRecorder? = nil) {
+            self.result = result
+            self.events = events
+        }
 
         func execute(name: String, arguments: String, isUserInitiated: Bool) async -> IOSAgentToolOutcome {
             calls.append((name, arguments, isUserInitiated))
+            events?.append("execute:\(name)")
             return result
         }
     }
@@ -625,7 +705,7 @@ final class IOSAgentToolEngineTests: XCTestCase {
             "Background/sub-agent streaming must not snapshot+join the full accumulator on every chunk; long streams make this O(n²)."
         )
         XCTAssertTrue(
-            source.contains("appendAssistantTextDelta"),
+            source.contains("appendAssistantDelta"),
             "streamStep should maintain cumulative assistant text incrementally and publish that text without a per-chunk full snapshot."
         )
     }
@@ -670,6 +750,51 @@ final class IOSAgentToolEngineTests: XCTestCase {
 
         XCTAssertEqual(recorder.snapshot, ["Hel", "Hello", "Hello!"])
         XCTAssertEqual(result.messages.last?.toText(), "Hello!")
+    }
+
+    func testStreamingAssistantStagePublishesReasoningThenResponse() async {
+        func delta(_ message: UIMessage) -> MessageChunk {
+            MessageChunk(
+                id: UUID().uuidString,
+                model: "test-model",
+                choices: [UIMessageChoice(
+                    index: 0,
+                    delta: message,
+                    message: nil,
+                    finishReason: nil
+                )],
+                usage: nil
+            )
+        }
+        let final = MessageChunk(
+            id: "final",
+            model: "test-model",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: nil,
+                message: assistantText("答案"),
+                finishReason: "stop"
+            )],
+            usage: nil
+        )
+        let recorder = AssistantStageRecorder()
+        let engine = IOSAgentToolEngine(
+            provider: ScriptedStreamingProvider([
+                delta(assistantReasoning("先分析")),
+                delta(assistantText("答")),
+                final,
+            ]),
+            executors: [:]
+        )
+
+        _ = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("ask")],
+            params: makeParams(tools: []),
+            onAssistantStage: { recorder.append($0) }
+        )
+
+        XCTAssertEqual(recorder.snapshot, [.thinking, .generating])
     }
 
     func testStreamingOutputLimitIsSurfacedAsProviderFailure() async {
@@ -814,6 +939,108 @@ final class IOSAgentToolEngineTests: XCTestCase {
         // The model must not be asked to re-emit the tool: the provider should
         // only have been called for the single scripted final text turn.
         XCTAssertEqual(provider.callCount, 1, "engine must not re-prompt the model to regenerate an already-present tool call")
+    }
+
+    func testExecutionCallbacksBracketPreExistingAndFreshToolsInOrder() async {
+        let provider = ScriptedProvider([
+            toolCallMessage(
+                toolCallId: "search-1",
+                toolName: "search_web",
+                input: "{\"query\":\"cat care\"}"
+            ),
+            assistantText("done")
+        ])
+        let events = AssistantTextRecorder()
+        let imageExecutor = RecordingExecutor(.filled("{\"image\":true}"), events: events)
+        let searchExecutor = RecordingExecutor(.filled("{\"results\":[]}"), events: events)
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: [
+                "generate_image": imageExecutor,
+                "search_web": searchExecutor,
+            ],
+            configuration: .init(maxSteps: 4)
+        )
+        let input: [UIMessage] = [
+            userMessage("draw, then research"),
+            toolCallMessage(
+                toolCallId: "image-1",
+                toolName: "generate_image",
+                input: "{\"prompt\":\"cat\"}"
+            ),
+        ]
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: input,
+            params: makeParams(tools: ["generate_image", "search_web"]),
+            onAssistantTurnStarted: {
+                events.append("assistant")
+            },
+            onToolExecutionStarted: { toolName in
+                events.append("tool:\(toolName)")
+            }
+        )
+
+        XCTAssertEqual(
+            events.snapshot,
+            [
+                "tool:generate_image",
+                "execute:generate_image",
+                "assistant",
+                "tool:search_web",
+                "execute:search_web",
+                "assistant",
+            ]
+        )
+        XCTAssertEqual(imageExecutor.calls.count, 1)
+        XCTAssertEqual(searchExecutor.calls.count, 1)
+        XCTAssertEqual(result.messages.last?.toText(), "done")
+    }
+
+    func testCancellationDuringToolStageCallbackDoesNotStartExecutor() async {
+        let provider = ScriptedProvider([assistantText("should not run")])
+        let executor = RecordingExecutor(.filled("{\"ok\":true}"))
+        let ledger = RecordingLedger()
+        let gate = ToolStageGate()
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: ["generate_image": executor],
+            configuration: .init(maxSteps: 4),
+            ledger: ledger,
+            ledgerRunId: "cancel-before-execution"
+        )
+        let input: [UIMessage] = [
+            userMessage("draw a cat"),
+            toolCallMessage(
+                toolCallId: "image-1",
+                toolName: "generate_image",
+                input: "{\"prompt\":\"cat\"}"
+            ),
+        ]
+        let providerSetting = makeProviderSetting()
+        let params = makeParams(tools: ["generate_image"])
+        let task = Task {
+            await engine.run(
+                providerSetting: providerSetting,
+                messages: input,
+                params: params,
+                onToolExecutionStarted: { _ in
+                    await gate.suspend()
+                }
+            )
+        }
+
+        await gate.waitUntilEntered()
+        task.cancel()
+        await gate.resume()
+        let result = await task.value
+        let ledgerOutcomes = await ledger.outcomes()
+
+        XCTAssertTrue(result.wasCancelled)
+        XCTAssertEqual(executor.calls.count, 0)
+        XCTAssertEqual(provider.callCount, 0)
+        XCTAssertEqual(ledgerOutcomes, ["cancelled_before_execution"])
     }
 
     /// Guard against double execution: a pre-existing empty-output tool that the

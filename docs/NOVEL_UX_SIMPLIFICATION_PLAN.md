@@ -4,6 +4,8 @@
 > Date: 2026-07-12
 > 关系：**补充** `docs/NOVEL_CREATION_SPEC.md`（产品契约不变）与 `docs/NOVEL_CREATION_IMPLEMENTATION_PLAN.md`（Phase A-F 已完成的实现）。主体实施只做 UI/呈现层重组与默认值修复；完成后的独立 review 证明聚合人物输出无法满足独立角色页，因此仅升级 Quick Start 模型输出为向后兼容的 v3/v2 角色数组。`NovelProjectDocumentV1` 与项目包 schema 未改。
 
+> 当前实现校正（2026-07-31）：后续迭代已把工作区演进为「创作 / 正文 / 设定」三个一级入口，并加入独立的「创作模型 / 剧情同步模型」。下文“两 Tab”与单模型描述保留为本轮历史设计目标，不再代表当前运行时事实；当前契约以 `docs/NOVEL_CREATION_SPEC.md` 和 `docs/PROJECT_STATE.md` 为准。
+
 ## 背景：真实用户反馈（原话要点）
 
 1. 「我的核心诉求就是两个：跟 Agent 讨论和生成小说内容；像查项目资料一样查到角色、世界观、剧情走向，而且它们随收录进正文的内容不断更新。这两个部分要更易用、更明显。」

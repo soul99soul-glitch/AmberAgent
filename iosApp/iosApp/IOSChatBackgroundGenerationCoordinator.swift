@@ -124,6 +124,12 @@ final class IOSChatBackgroundRunState: @unchecked Sendable {
         return terminalOwner == .expiration || terminalOwner == .cancellation
     }
 
+    var allowsRunningPresentation: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return terminalOwner == nil && !terminalFinalized
+    }
+
     func expireAndReserveTerminal() -> ExpirationClaim {
         let task: Task<IOSAgentToolEngineResult, Never>?
         lock.lock()
@@ -503,6 +509,24 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
     }
 
+    private func publishRunningPresentation(
+        _ presentation: AgentActivityPresentation,
+        for job: IOSChatBackgroundRuntimeJob,
+        runState: IOSChatBackgroundRunState
+    ) async {
+        guard runState.allowsRunningPresentation else { return }
+        WatchTaskCoordinator.shared.publish(
+            runId: job.runId,
+            conversationId: job.conversationId.toHexDashString(),
+            presentation: presentation
+        )
+        await job.liveActivityController.update(
+            runId: job.runId,
+            presentation: presentation,
+            force: true
+        )
+    }
+
     private func handle(_ backgroundTask: BGContinuedProcessingTask) async {
         let mappedRunId = taskMap()[backgroundTask.identifier]
         guard let job = job(for: backgroundTask.identifier) else {
@@ -541,18 +565,16 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
         backgroundTask.expirationHandler = { [weak self] in
             guard let self else { return }
-            let claim = runState.expireAndReserveTerminal()
-            if claim == .rejected {
-                guard runState.terminalWasFinalized(by: .completion) else { return }
-                Task { @MainActor in
-                    guard runState.claimSystemTaskCompletion() else { return }
+            Task { @MainActor in
+                let claim = runState.expireAndReserveTerminal()
+                if claim == .rejected {
+                    guard runState.terminalWasFinalized(by: .completion),
+                          runState.claimSystemTaskCompletion() else { return }
                     self.finish(requestId: backgroundTask.identifier)
                     backgroundTask.setTaskCompleted(success: false)
+                    return
                 }
-                return
-            }
-            guard runState.finalizeTerminal(as: .expiration) else { return }
-            Task { @MainActor in
+                guard runState.finalizeTerminal(as: .expiration) else { return }
                 guard runState.claimSystemTaskCompletion() else { return }
                 IOSBackgroundLifecycleLog.record(
                     "bgTaskExpired(claim=\(claim))",
@@ -596,17 +618,10 @@ final class IOSChatBackgroundGenerationCoordinator {
 
         let runningPresentation = job.mode == .singleToolOnly
             ? AgentActivityPresentation.runningTool(toolName: "generate_image")
-            : AgentActivityPresentation.generatingResponse(modelName: requestParams.model.modelId)
-        WatchTaskCoordinator.shared.publish(
-            runId: job.runId,
-            conversationId: job.conversationId.toHexDashString(),
-            presentation: runningPresentation
-        )
-        await job.liveActivityController.update(
-            runId: job.runId,
-            presentation: runningPresentation,
-            force: true
-        )
+            : AgentActivityPresentation.response(
+                stage: AgentActivityResponseStagePolicy.initialStage
+            )
+        await publishRunningPresentation(runningPresentation, for: job, runState: runState)
 
         progress.completedUnitCount = 1
         backgroundTask.updateTitle(
@@ -625,6 +640,16 @@ final class IOSChatBackgroundGenerationCoordinator {
             ledger: toolLedger,
             ledgerRunId: job.runId
         )
+        let presentationEvents = AsyncStream<AgentActivityPresentation>.makeStream()
+        let presentationConsumer = Task { @MainActor in
+            for await presentation in presentationEvents.stream {
+                await self.publishRunningPresentation(
+                    presentation,
+                    for: job,
+                    runState: runState
+                )
+            }
+        }
         let operationTask = Task { () -> IOSAgentToolEngineResult in
             switch job.mode {
             case .continueModel:
@@ -634,6 +659,21 @@ final class IOSChatBackgroundGenerationCoordinator {
                     params: requestParams,
                     onAssistantTurnStarted: {
                         assistantTextSnapshot.replace(with: "")
+                        presentationEvents.continuation.yield(
+                            AgentActivityPresentation.response(
+                                stage: AgentActivityResponseStagePolicy.initialStage
+                            )
+                        )
+                    },
+                    onToolExecutionStarted: { toolName in
+                        presentationEvents.continuation.yield(
+                            AgentActivityPresentation.runningTool(toolName: toolName)
+                        )
+                    },
+                    onAssistantStage: { stage in
+                        presentationEvents.continuation.yield(
+                            AgentActivityPresentation.response(stage: stage)
+                        )
                     },
                     onAssistantText: { text in
                         assistantTextSnapshot.replace(with: text)
@@ -650,6 +690,8 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         runState.installOperationTask(operationTask)
         let result = await operationTask.value
+        presentationEvents.continuation.finish()
+        await presentationConsumer.value
         runState.clearOperationTask()
         guard runState.reserveTerminal() else { return }
 

@@ -304,12 +304,17 @@ class ParagraphUIView: UITextView {
   }
 
   private func setupView() {
-    // Only register if not already registered to prevent conflicts
-    if NSTextAttachment.textAttachmentViewProviderClass(forFileType: UTType.data.identifier) == nil {
-      NSTextAttachment.registerViewProviderClass(LatexViewProvider.self, forFileType: UTType.data.identifier)
-    }
-    if NSTextAttachment.textAttachmentViewProviderClass(forFileType: UTType.url.identifier) == nil {
-      NSTextAttachment.registerViewProviderClass(InlineCitationViewProvider.self, forFileType: UTType.url.identifier)
+    // The TextKit 1 path is selected only for attachment-free paragraphs.
+    // Avoid synchronously loading and registering attachment providers on the
+    // first plain streaming line; TextKit 2 views still register them before
+    // rendering citations or LaTeX attachments.
+    if !usesTextKit1 {
+      if NSTextAttachment.textAttachmentViewProviderClass(forFileType: UTType.data.identifier) == nil {
+        NSTextAttachment.registerViewProviderClass(LatexViewProvider.self, forFileType: UTType.data.identifier)
+      }
+      if NSTextAttachment.textAttachmentViewProviderClass(forFileType: UTType.url.identifier) == nil {
+        NSTextAttachment.registerViewProviderClass(InlineCitationViewProvider.self, forFileType: UTType.url.identifier)
+      }
     }
 
     isEditable = false

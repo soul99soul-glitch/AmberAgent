@@ -38,6 +38,27 @@ final class AgentActivityPresentationTests: XCTestCase {
             .thinking,
             "同一 delta 仍有 reasoning 内容时，应与 Chat 的 open reasoning 状态保持一致"
         )
+        XCTAssertEqual(
+            AgentActivityResponseStagePolicy.nextPublishedStage(
+                current: .preparing,
+                candidate: .thinking
+            ),
+            .thinking
+        )
+        XCTAssertEqual(
+            AgentActivityResponseStagePolicy.nextPublishedStage(
+                current: .thinking,
+                candidate: .generating
+            ),
+            .generating
+        )
+        XCTAssertNil(
+            AgentActivityResponseStagePolicy.nextPublishedStage(
+                current: .generating,
+                candidate: .thinking
+            ),
+            "交错 reasoning chunk 不得把系统状态从生成态拉回思考态"
+        )
     }
 
     func testDisplayStageNormalizesPhaseOverridesForEverySystemSurface() {
@@ -131,6 +152,12 @@ final class AgentActivityPresentationTests: XCTestCase {
         XCTAssertNil(AgentActivityPresentation.cancelled().action)
     }
 
+    func testLockScreenDoesNotDuplicateTheWholeCardOpenTaskAction() {
+        XCTAssertFalse(AgentActivityAction.openTask.showsLockScreenLabel)
+        XCTAssertTrue(AgentActivityAction.openConfirmation.showsLockScreenLabel)
+        XCTAssertTrue(AgentActivityAction.viewResult.showsLockScreenLabel)
+    }
+
     func testTerminalPresentationPreservesTheRunKind() {
         let running = AgentActivityPresentation.runningTool(toolName: "generate_image")
 
@@ -157,6 +184,19 @@ final class AgentActivityPresentationTests: XCTestCase {
             AgentActivityPresentation.completed().displayPhase(isStale: true),
             .completed
         )
+    }
+
+    func testStaticSystemMarkersDistinguishEveryNonRunningPhase() {
+        let markers = [
+            AgentActivityPresentation.reconnecting().displaySymbolName(isStale: false),
+            AgentActivityPresentation.waitingForUser().displaySymbolName(isStale: false),
+            AgentActivityPresentation.defaultRunning.displaySymbolName(isStale: true),
+            AgentActivityPresentation.completed().displaySymbolName(isStale: false),
+            AgentActivityPresentation.failed().displaySymbolName(isStale: false),
+            AgentActivityPresentation.cancelled().displaySymbolName(isStale: false)
+        ]
+
+        XCTAssertEqual(Set(markers).count, markers.count)
     }
 
     func testLifecyclePolicyMakesOnlyActiveWorkStale() {
@@ -215,6 +255,93 @@ final class AgentActivityPresentationTests: XCTestCase {
             AgentActivityLifecyclePolicy.lockScreenDismissalDelay(for: .cancelled),
             6
         )
+    }
+
+    func testElapsedTimerFreezesOnlyForTerminalPhases() {
+        let updatedAt = Date(timeIntervalSince1970: 1_120)
+
+        XCTAssertNil(
+            AgentActivityElapsedTimePolicy.frozenEndDate(
+                for: .running,
+                updatedAt: updatedAt
+            )
+        )
+        XCTAssertNil(
+            AgentActivityElapsedTimePolicy.frozenEndDate(
+                for: .waitingForUser,
+                updatedAt: updatedAt
+            )
+        )
+        XCTAssertEqual(
+            AgentActivityElapsedTimePolicy.frozenEndDate(
+                for: .completed,
+                updatedAt: updatedAt
+            ),
+            updatedAt
+        )
+        XCTAssertEqual(
+            AgentActivityElapsedTimePolicy.frozenEndDate(
+                for: .failed,
+                updatedAt: updatedAt
+            ),
+            updatedAt
+        )
+        XCTAssertEqual(
+            AgentActivityElapsedTimePolicy.frozenEndDate(
+                for: .cancelled,
+                updatedAt: updatedAt
+            ),
+            updatedAt
+        )
+    }
+
+    func testRestoreRetainsNewestActivityForEveryOwnedRun() {
+        let candidates = [
+            AgentActivityOwnershipCandidate(
+                id: "run-a-old",
+                runId: "run-a",
+                updatedAt: Date(timeIntervalSince1970: 10)
+            ),
+            AgentActivityOwnershipCandidate(
+                id: "run-a-new",
+                runId: "run-a",
+                updatedAt: Date(timeIntervalSince1970: 20)
+            ),
+            AgentActivityOwnershipCandidate(
+                id: "run-b",
+                runId: "run-b",
+                updatedAt: Date(timeIntervalSince1970: 15)
+            ),
+            AgentActivityOwnershipCandidate(
+                id: "orphan",
+                runId: "orphan-run",
+                updatedAt: Date(timeIntervalSince1970: 30)
+            ),
+        ]
+
+        XCTAssertEqual(
+            AgentActivityOwnershipPolicy.retainedActivityIDs(
+                from: candidates,
+                ownedRunIds: ["run-a", "run-b"]
+            ),
+            ["run-a-new", "run-b"]
+        )
+    }
+
+    func testOrbAnimationDurationUsesResolvedStateSpeedWithinWidgetLimit() {
+        for state in OrbState.allCases {
+            let speed = orbResolvePreset(state, .small).speed
+            let duration = AgentActivityOrbAnimationTiming.duration(speed: speed)
+
+            XCTAssertEqual(
+                duration,
+                min(2, (2 * Double.pi) / speed),
+                accuracy: 0.000_001,
+                "\(state)"
+            )
+            XCTAssertGreaterThan(duration, 0, "\(state)")
+            XCTAssertLessThanOrEqual(duration, 2, "\(state)")
+        }
     }
 
     func testNewPayloadDoesNotEncodeLegacyTextFields() throws {

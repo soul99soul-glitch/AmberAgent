@@ -257,7 +257,10 @@ final class IOSConversationStore {
     }
 
     @discardableResult
-    func selectConversationIfAvailable(id: KotlinUuid) async -> Bool {
+    func selectConversationIfAvailable(
+        id: KotlinUuid,
+        commitIf: () -> Bool = { true }
+    ) async -> Bool {
         guard !isDeletedConversation(id) else { return false }
         let loaded: Conversation?
         do {
@@ -266,7 +269,8 @@ final class IOSConversationStore {
             publishIOError(operation: "加载会话", detail: "\(id): \(error)")
             loaded = nil
         }
-        if let loaded {
+        guard !isDeletedConversation(id) else { return false }
+        if let loaded, commitIf() {
             setCurrentAsSwitch(loaded)
             return true
         }
@@ -312,6 +316,9 @@ final class IOSConversationStore {
 
         // updateCurrentMessages 已做 identity 短路：消息没变时返回同一引用，节省落盘。
         var updated = conversation.updateCurrentMessages(messages: messages)
+        if updated !== conversation {
+            updated = conversationWithNodes(updated, nodes: updated.messageNodes)
+        }
 
         // 标题派生（PLAN 阶段4的简化版，放在这里因为这是最低成本的标题来源，且与 save 同一调用点）：
         // 首条 user message 后若标题仍空，取前 30 字。后续若需小模型总结再升级。

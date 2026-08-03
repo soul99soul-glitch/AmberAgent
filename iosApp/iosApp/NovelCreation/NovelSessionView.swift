@@ -375,32 +375,6 @@ struct NovelSessionView: View {
                 dispatchFollowEvent(event)
             }
         }
-        // [TEMP-DIAG] 独立诊断采样通道:单独一个 signal,不改上面那个的触发频率。
-        .onScrollGeometryChange(for: NovelDiagnosticGeometry.self) { geo in
-            NovelDiagnosticGeometry(
-                offsetY: geo.contentOffset.y,
-                contentHeight: geo.contentSize.height,
-                distanceToBottom: max(0, geo.contentSize.height - geo.visibleRect.maxY)
-            )
-        } action: { _, geometry in
-            ChatStreamAnomalyRecorder.record(
-                offsetY: geometry.offsetY,
-                contentHeight: geometry.contentHeight,
-                distanceToBottom: geometry.distanceToBottom,
-                farFromBottom: !latestNearBottom,
-                sourceLength: ChatStreamAnomalyRecorder.novelSourceLength,
-                displayedLength: ChatStreamAnomalyRecorder.novelDisplayedLength,
-                dragging: userDragging,
-                fallback: isNativeScrollDriverActive ? "driver" : "swiftui"
-            )
-        }
-    }
-
-    // [TEMP-DIAG] 诊断专用几何快照。
-    private struct NovelDiagnosticGeometry: Equatable {
-        let offsetY: CGFloat
-        let contentHeight: CGFloat
-        let distanceToBottom: CGFloat
     }
 
     private func transcriptRow(_ row: NovelSessionRowModel) -> some View {
@@ -420,9 +394,6 @@ struct NovelSessionView: View {
             onToggleArchive: toggleArchive
         )
             .equatable()
-            // [TEMP-DIAG] 数 LazyVStack 的物化行数,与 contentHeight 突变对账。
-            .onAppear { ChatStreamAnomalyRecorder.noteRowAppeared() }
-            .onDisappear { ChatStreamAnomalyRecorder.noteRowDisappeared() }
     }
 
     private func handleAskUserAnswer(
@@ -504,7 +475,7 @@ struct NovelSessionView: View {
                         if inputText.isEmpty {
                             Text(inputPlaceholder)
                                 .font(.body)
-                                .foregroundStyle(AmberTheme.muted2)
+                                .foregroundStyle(AmberTheme.muted)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -818,7 +789,7 @@ struct NovelSessionView: View {
                     if let percent {
                         Text("\(percent)%")
                             .font(.footnote.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(AmberTheme.accentAmber)
+                            .foregroundStyle(AmberTheme.foreground2)
                     }
                 }
 
@@ -833,7 +804,7 @@ struct NovelSessionView: View {
                     elapsed: elapsed
                 ))
                 .font(.caption)
-                .foregroundStyle(AmberTheme.muted2)
+                .foregroundStyle(AmberTheme.muted)
                 .monospacedDigit()
             }
             .padding(.horizontal, 4)
@@ -968,6 +939,8 @@ struct NovelSessionView: View {
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .composerDockGlass(cornerRadius: 15)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
             .disabled(controlsDisabled)
@@ -1004,6 +977,8 @@ struct NovelSessionView: View {
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .composerDockGlass(cornerRadius: 15)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
             .disabled(controlsDisabled)

@@ -9,7 +9,8 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
-import io.ktor.utils.io.readUTF8Line
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -161,6 +162,59 @@ internal class OpenAIStreamTerminalState(
     }
 }
 
+/** Decode only after a complete byte-framed line is available, preserving UTF-8 split across network reads. */
+internal suspend fun ByteReadChannel.collectUtf8Lines(
+    onLine: suspend (String) -> Unit,
+) {
+    val readBuffer = ByteArray(8 * 1024)
+    val lineBuffer = Utf8LineBuffer()
+    var previousByteWasCarriageReturn = false
+
+    while (true) {
+        val count = readAvailable(readBuffer)
+        if (count < 0) break
+
+        for (index in 0 until count) {
+            val byte = readBuffer[index]
+            if (previousByteWasCarriageReturn) {
+                previousByteWasCarriageReturn = false
+                if (byte == '\n'.code.toByte()) continue
+            }
+
+            when (byte) {
+                '\r'.code.toByte() -> {
+                    onLine(lineBuffer.takeLine())
+                    previousByteWasCarriageReturn = true
+                }
+
+                '\n'.code.toByte() -> onLine(lineBuffer.takeLine())
+                else -> lineBuffer.append(byte)
+            }
+        }
+    }
+
+    lineBuffer.takeFinalLine()?.let { onLine(it) }
+}
+
+private class Utf8LineBuffer {
+    private var bytes = ByteArray(256)
+    private var size = 0
+
+    fun append(byte: Byte) {
+        if (size == bytes.size) bytes = bytes.copyOf(bytes.size * 2)
+        bytes[size] = byte
+        size += 1
+    }
+
+    fun takeLine(): String {
+        val line = bytes.decodeToString(startIndex = 0, endIndex = size)
+        size = 0
+        return line
+    }
+
+    fun takeFinalLine(): String? = if (size == 0) null else takeLine()
+}
+
 /**
  * Wraps Ktor's SSE client into a reactive [Flow] of [SseEvent].
  *
@@ -192,8 +246,7 @@ fun HttpClient.sseFlow(
             val channel = response.bodyAsChannel()
             val parser = OpenAISseLineParser()
 
-            while (true) {
-                val rawLine = channel.readUTF8Line() ?: break
+            channel.collectUtf8Lines { rawLine ->
                 parser.consume(rawLine)?.let { send(it) }
             }
             parser.finish()?.let { send(it) }

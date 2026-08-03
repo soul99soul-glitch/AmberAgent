@@ -372,7 +372,7 @@ struct MessageBubbleView: View {
 
     @ViewBuilder
     private var fallbackThinkingCard: some View {
-        if !isUser, isGenerating, isLastMessage, !hasReasoningPart {
+        if !isUser, isGenerating, isLastMessage, !hasVisibleAssistantContent {
             ChatReasoningCard(
                 bodyText: "",
                 isThinking: true,
@@ -383,8 +383,13 @@ struct MessageBubbleView: View {
         }
     }
 
-    private var hasReasoningPart: Bool {
-        message.parts.contains { $0 is UIMessagePart.Reasoning }
+    private var hasVisibleAssistantContent: Bool {
+        message.parts.contains { part in
+            if let text = part as? UIMessagePart.Text {
+                return !text.text.isEmpty
+            }
+            return true
+        }
     }
 
     private var nonEmptyTextPartCount: Int {

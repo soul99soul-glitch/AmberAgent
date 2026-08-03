@@ -5,10 +5,10 @@ import Shared
 @testable import SwiftStreamingMarkdown
 @testable import iosApp
 
-/// 默认路径(`ChatSwiftUIMessageList`)的执行层集成回放门禁。
+/// 默认路径(`NativeChatTimelineView`)的执行层集成回放门禁。
 ///
-/// 背景:`ChatStreamReplayTests` 全部作用于非默认的 UICollectionView 路径,
-/// 默认 SwiftUI clean-list 此前只有纯策略单测与源码字符串 canary,
+/// 背景:`ChatStreamReplayTests` 全部作用于非默认的 UICollectionView 路径；
+/// 本套件必须直驱 `ChatView` 当前使用的 Native timeline，不能让退役列表替它背书。
 /// `handleSignal` 分派、入场重试梯、真实高度增长跟随、terminal settle 等执行层
 /// 零执行覆盖。本套件把真实列表挂进带 windowScene 的 UIWindow,用公开输入面
 /// (signal + messagesProvider)驱动,断言只取自 `onViewportStateChange` 的
@@ -26,6 +26,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
     private final class HarnessModel: ObservableObject {
         @Published var signal = ChatMessageUpdateSignal(revision: 0, reason: .initialLoad)
         @Published var isGenerationActive = false
+        @Published var followGeneration = true
         @Published var scrollToBottomTrigger = 0
         var messages: [UIMessage] = []
         private(set) var viewportHistory: [ChatViewportState] = []
@@ -50,14 +51,14 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         let workspaceStore: IOSWorkspaceStore
 
         var body: some View {
-            ChatSwiftUIMessageList(
+            NativeChatTimelineView(
                 signal: model.signal,
                 configurationIssue: nil,
                 isGenerationActive: model.isGenerationActive,
                 isLoading: false,
                 isRecognizingImages: false,
                 contextCompactState: .idle,
-                followGeneration: true,
+                followGeneration: model.followGeneration,
                 displaySetting: displaySetting,
                 generativeUiSetting: generativeUiSetting,
                 reasoningLevelLabel: nil,
@@ -121,6 +122,8 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
 
     @MainActor
     private final class ScrollFrameProbe: NSObject {
+        private static let streamingMarker = "连续正文开始。"
+
         struct Sample {
             let contentHeight: CGFloat
             let distanceToBottom: CGFloat
@@ -129,30 +132,62 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             let paragraphHeight: CGFloat?
             let paragraphLength: Int?
             let paragraphUsesTextKit1: Bool?
+            let paragraphIdentity: ObjectIdentifier?
         }
 
         private weak var scrollView: UIScrollView?
         private weak var rootView: UIView?
         private var displayLink: CADisplayLink?
+        private let capturesAfterDisplayLinkCallbacks: Bool
+        private var postCallbackSamplePending = false
+        private var isRunning = false
         private(set) var samples: [Sample] = []
 
-        init(scrollView: UIScrollView, rootView: UIView) {
+        init(
+            scrollView: UIScrollView,
+            rootView: UIView,
+            capturesAfterDisplayLinkCallbacks: Bool = false
+        ) {
             self.scrollView = scrollView
             self.rootView = rootView
+            self.capturesAfterDisplayLinkCallbacks = capturesAfterDisplayLinkCallbacks
         }
 
         func start() {
+            isRunning = true
             let displayLink = CADisplayLink(target: self, selector: #selector(tick(_:)))
             displayLink.add(to: .main, forMode: .common)
             self.displayLink = displayLink
         }
 
         func stop() {
+            isRunning = false
             displayLink?.invalidate()
             displayLink = nil
         }
 
         @objc private func tick(_ displayLink: CADisplayLink) {
+            guard capturesAfterDisplayLinkCallbacks else {
+                captureSample()
+                return
+            }
+            guard !postCallbackSamplePending else { return }
+            postCallbackSamplePending = true
+            let scheduledContentHeight = scrollView?.contentSize.height
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                postCallbackSamplePending = false
+                guard isRunning else { return }
+                guard let scheduledContentHeight,
+                      let scrollView,
+                      abs(scrollView.contentSize.height - scheduledContentHeight) < 0.5 else {
+                    return
+                }
+                captureSample()
+            }
+        }
+
+        private func captureSample() {
             guard let scrollView else { return }
             let paragraph = rootView.flatMap(Self.streamingParagraph(in:))
             let visibleBottom = scrollView.contentOffset.y + scrollView.bounds.height
@@ -163,14 +198,15 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 contentOffsetX: scrollView.contentOffset.x,
                 contentOffsetY: scrollView.contentOffset.y,
                 paragraphHeight: paragraph?.frame.height,
-                paragraphLength: paragraph?.attributedText.length,
-                paragraphUsesTextKit1: paragraph?.usesTextKit1
+                paragraphLength: paragraph.flatMap(Self.streamingTextLength(in:)),
+                paragraphUsesTextKit1: paragraph?.usesTextKit1,
+                paragraphIdentity: paragraph.map(ObjectIdentifier.init)
             ))
         }
 
         static func streamingParagraph(in view: UIView) -> ParagraphUIView? {
             if let textView = view as? ParagraphUIView,
-               textView.text.hasPrefix("连续正文开始。") {
+               textView.text.contains(streamingMarker) {
                 return textView
             }
             for subview in view.subviews {
@@ -180,9 +216,31 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             }
             return nil
         }
+
+        static func streamingTextLength(in paragraph: ParagraphUIView) -> Int? {
+            let text = paragraph.attributedText.string as NSString
+            let markerRange = text.range(of: streamingMarker)
+            guard markerRange.location != NSNotFound else { return nil }
+            return text.length - markerRange.location
+        }
+
+        static func paragraph(in view: UIView, withPrefix prefix: String) -> ParagraphUIView? {
+            if let textView = view as? ParagraphUIView,
+               textView.text.hasPrefix(prefix) {
+                return textView
+            }
+            for subview in view.subviews {
+                if let paragraph = paragraph(in: subview, withPrefix: prefix) {
+                    return paragraph
+                }
+            }
+            return nil
+        }
     }
 
-    private func makeFixture() -> Fixture {
+    private func makeFixture(
+        configure: (HarnessModel) -> Void = { _ in }
+    ) -> Fixture {
         let sharedSettings = IOSSharedSettingsStore(
             userDefaults: UserDefaults(suiteName: "ChatSwiftUIStreamReplay-\(UUID().uuidString)")!
         )
@@ -191,6 +249,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 .appendingPathComponent("ChatSwiftUIStreamReplay-\(UUID().uuidString)", isDirectory: true)
         )
         let model = HarnessModel()
+        configure(model)
         let host = UIHostingController(rootView: Harness(
             model: model,
             displaySetting: sharedSettings.displaySetting,
@@ -254,6 +313,25 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 finished: true
             ))
         }
+        return messages
+    }
+
+    private func longHistoricalConversation() -> [UIMessage] {
+        var messages: [UIMessage] = []
+        for turn in 0..<2 {
+            messages.append(makeUserMessage("历史问题 \(turn)：请完整展开这一轮分析。"))
+            var text = "## 历史长回复 \(turn)\n\n"
+            for paragraph in 0..<90 {
+                text += "第 \(paragraph) 段：这一段用于稳定复现长历史消息在双向浏览时的真实布局测量。"
+                text += "滚动层只应改变可见位置，不能因为历史行重新物化而改写整条时间线的高度事实。\n\n"
+            }
+            messages.append(makeAssistantMessage(text: text, finished: true))
+        }
+        messages.append(makeUserMessage("当前问题：继续总结。"))
+        messages.append(makeAssistantMessage(
+            text: "当前回复已经完成，下面开始浏览历史内容。",
+            finished: true
+        ))
         return messages
     }
 
@@ -324,7 +402,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         }
     }
 
-    func testFixedGrowingTableFixtureReplaysThroughDefaultCleanList() throws {
+    func testFixedGrowingTableFixtureReplaysThroughNativeTimeline() throws {
         let fixture = makeFixture()
         defer { fixture.tearDown() }
 
@@ -497,7 +575,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         fixture.model.messages = longConversation(turns: 20)
         fixture.model.send(.initialLoad)
 
-        // 入场重试梯最长 350ms + LazyVStack 实例化;泵到锚定完成。
+        // Native timeline 首帧解析后泵到入场锚定完成。
         pumpUntil(timeout: 4.0) {
             fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
         }
@@ -515,6 +593,59 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         XCTAssertTrue(viewport.isAtBottom, "进入长会话必须锚定到底部(入场重试梯)")
         XCTAssertFalse(viewport.followPaused)
         XCTAssertFalse(viewport.showScrollToBottom)
+    }
+
+    func testCompletedLongHistoryKeepsStableContentHeightDuringBidirectionalBrowse() {
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.followGeneration = false
+        fixture.model.messages = longHistoricalConversation()
+        fixture.model.send(.initialLoad)
+        pumpUntil(timeout: 6.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        }
+        pump(seconds: 0.8)
+
+        guard let scrollView = fixture.scrollView else {
+            return XCTFail("Expected the default Native timeline scroll view")
+        }
+        let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
+        probe.start()
+        defer { probe.stop() }
+
+        for fraction in [0.0, 0.72, 0.18, 1.0, 0.0, 1.0] {
+            let maximumY = max(
+                -scrollView.adjustedContentInset.top,
+                scrollView.contentSize.height - scrollView.bounds.height +
+                    scrollView.adjustedContentInset.bottom
+            )
+            let minimumY = -scrollView.adjustedContentInset.top
+            scrollView.setContentOffset(
+                CGPoint(x: 0, y: minimumY + (maximumY - minimumY) * fraction),
+                animated: false
+            )
+            pump(seconds: 0.45)
+        }
+
+        let heights = probe.samples.map(\.contentHeight)
+        var maximumCollapse: CGFloat = 0
+        for index in 1..<heights.count {
+            maximumCollapse = max(maximumCollapse, heights[index - 1] - heights[index])
+        }
+        let heightRange = (heights.max() ?? 0) - (heights.min() ?? 0)
+
+        XCTAssertLessThan(
+            maximumCollapse,
+            ChatLayout.bottomStickThreshold,
+            "完成态双向浏览不能因历史行重新测量产生结构性高度塌陷：" +
+                "maxCollapse=\(maximumCollapse), range=\(heightRange)"
+        )
+        XCTAssertLessThan(
+            heightRange,
+            ChatLayout.bottomStickThreshold,
+            "完成态双向浏览不能让同一条 eager timeline 的总高度来回漂移"
+        )
     }
 
     // MARK: - 2. 流式跟随不丢底、不大幅回跳
@@ -536,15 +667,44 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         var tailText = ""
         var maxBackjump: CGFloat = 0
         var lastOffsetY = fixture.scrollView?.contentOffset.y ?? 0
+        var lastContentHeight = fixture.scrollView?.contentSize.height ?? 0
+        var lastParagraphHeight = ScrollFrameProbe.paragraph(
+            in: fixture.host.view,
+            withPrefix: "第 0 句:"
+        )?.frame.height
+        var currentChunkIndex = -1
+        var worstBackjumpContext = ""
 
         func sampleVisibleOffset() {
             guard let scrollView = fixture.scrollView else { return }
             let offsetY = scrollView.contentOffset.y
-            maxBackjump = max(maxBackjump, lastOffsetY - offsetY)
+            let contentHeight = scrollView.contentSize.height
+            let paragraph = ScrollFrameProbe.paragraph(
+                in: fixture.host.view,
+                withPrefix: "第 0 句:"
+            )
+            let backjump = lastOffsetY - offsetY
+            if backjump > maxBackjump {
+                let visibleBottom = offsetY + scrollView.bounds.height
+                    - scrollView.adjustedContentInset.bottom
+                maxBackjump = backjump
+                worstBackjumpContext =
+                    "chunk=\(currentChunkIndex) from=\(lastOffsetY) to=\(offsetY) " +
+                    "contentH=\(lastContentHeight)->\(contentHeight) " +
+                    "paragraphH=\(String(describing: lastParagraphHeight))->" +
+                    "\(String(describing: paragraph?.frame.height)) " +
+                    "paragraphLength=\(String(describing: paragraph?.attributedText.length)) " +
+                    "distance=\(max(0, contentHeight - visibleBottom)) " +
+                    "tracking=\(scrollView.isTracking) dragging=\(scrollView.isDragging) " +
+                    "decelerating=\(scrollView.isDecelerating)"
+            }
             lastOffsetY = offsetY
+            lastContentHeight = contentHeight
+            lastParagraphHeight = paragraph?.frame.height
         }
 
         for index in 0..<40 {
+            currentChunkIndex = index
             tailText += "第 \(index) 句:机制层的所有权在任一时刻只能有一个写入者,竞争必须显式分权。"
             let tail = makeAssistantMessage(id: assistantId, text: tailText, finished: false)
             if fixture.model.messages.last?.role == MessageRole.assistant {
@@ -570,7 +730,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         XCTAssertLessThan(
             maxBackjump,
             ChatLayout.bottomStickThreshold,
-            "流式期出现超过贴底语义阈值的 offset 回跳"
+            "流式期出现超过贴底语义阈值的 offset 回跳: \(worstBackjumpContext)"
         )
     }
 
@@ -605,7 +765,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         pump(seconds: 0.6)
 
         guard let scrollView = fixture.scrollView else {
-            return XCTFail("Expected the default SwiftUI list scroll view")
+            return XCTFail("Expected the default Native timeline scroll view")
         }
         let initialOffsetY = scrollView.contentOffset.y
         let initialContentHeight = scrollView.contentSize.height
@@ -661,6 +821,201 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         XCTAssertTrue(fixture.model.latestViewport.isAtBottom)
     }
 
+    func testFirstTwoStreamingLinesUseContinuousNativeBottomFollow() throws {
+        try XCTSkipIf(
+            UIAccessibility.isReduceMotionEnabled,
+            "系统 Reduce Motion 开启时，生产契约就是立即贴底"
+        )
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 8)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+
+        fixture.model.messages.append(makeUserMessage("请从第一行开始连续生成。"))
+        fixture.model.send(.userAppend)
+        pump(seconds: 0.4)
+
+        guard let scrollView = fixture.scrollView else {
+            return XCTFail("Expected the default Native timeline scroll view")
+        }
+        let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
+        let gapProbe = DisplayLinkGapProbe()
+        probe.start()
+        gapProbe.start()
+        defer { probe.stop() }
+        defer { gapProbe.stop() }
+        pump(seconds: 0.1)
+
+        let assistantID = KotlinUuid.companion.random()
+        func publishAndMeasure(_ text: String) -> (
+            contentGrew: Bool,
+            offsetAdvanced: Bool,
+            intermediateOffsetCount: Int,
+            offsetDelta: CGFloat,
+            p95GapMS: CGFloat,
+            maxGapMS: CGFloat
+        ) {
+            let initialContentHeight = scrollView.contentSize.height
+            let initialOffsetY = scrollView.contentOffset.y
+            let sampleStart = probe.samples.count
+            let gapStart = gapProbe.gaps.count
+            let message = makeAssistantMessage(id: assistantID, text: text, finished: false)
+            if fixture.model.messages.last?.role == MessageRole.assistant {
+                fixture.model.messages[fixture.model.messages.count - 1] = message
+            } else {
+                fixture.model.messages.append(message)
+            }
+            fixture.model.send(.streamDelta)
+
+            let advanced = pumpUntil(timeout: 2.0) {
+                scrollView.contentSize.height > initialContentHeight + 1 &&
+                    scrollView.contentOffset.y > initialOffsetY + 1
+            }
+            pump(seconds: 0.35)
+
+            let finalContentHeight = scrollView.contentSize.height
+            let finalOffsetY = scrollView.contentOffset.y
+            let intermediateOffsets = Set(probe.samples.dropFirst(sampleStart).compactMap { sample -> Int? in
+                guard sample.contentOffsetY > initialOffsetY + 0.5,
+                      sample.contentOffsetY < finalOffsetY - 0.5 else { return nil }
+                return Int((sample.contentOffsetY * 10).rounded())
+            })
+            return (
+                contentGrew: finalContentHeight > initialContentHeight + 1,
+                offsetAdvanced: advanced && finalOffsetY > initialOffsetY + 1,
+                intermediateOffsetCount: intermediateOffsets.count,
+                offsetDelta: finalOffsetY - initialOffsetY,
+                p95GapMS: percentile(
+                    gapProbe.gaps.dropFirst(gapStart).map { CGFloat($0 * 1_000) },
+                    percentile: 0.95
+                ),
+                maxGapMS: gapProbe.gaps.dropFirst(gapStart).map { CGFloat($0 * 1_000) }.max() ?? 0
+            )
+        }
+
+        let firstLine = publishAndMeasure("第一行。")
+        let secondLine = publishAndMeasure("第一行。\n\n第二行。")
+
+        for (label, result) in [("第一行", firstLine), ("第二行", secondLine)] {
+            XCTAssertTrue(result.contentGrew, "\(label)必须产生真实 contentHeight 增长")
+            XCTAssertTrue(result.offsetAdvanced, "\(label)必须从首次增长就推进底部")
+            XCTAssertGreaterThanOrEqual(
+                result.intermediateOffsetCount,
+                2,
+                "\(label)不能一次跳到新底部：delta=\(result.offsetDelta), " +
+                    "intermediate=\(result.intermediateOffsetCount)"
+            )
+            XCTAssertLessThanOrEqual(
+                result.p95GapMS,
+                40,
+                "\(label)早期跟随不能先丢帧再变流畅：p95=\(result.p95GapMS)ms"
+            )
+            XCTAssertLessThanOrEqual(
+                result.maxGapMS,
+                80,
+                "\(label)早期跟随不能出现肉眼可见的主线程停顿：max=\(result.maxGapMS)ms"
+            )
+        }
+    }
+
+    func testPacedStreamStartsContinuousFollowOnFirstAssistantLine() throws {
+        try XCTSkipIf(
+            UIAccessibility.isReduceMotionEnabled,
+            "系统 Reduce Motion 开启时，生产契约就是立即贴底"
+        )
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 8)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+
+        fixture.model.messages.append(makeUserMessage("请连续生成一段正文。"))
+        fixture.model.send(.userAppend)
+        pump(seconds: 0.4)
+
+        guard let scrollView = fixture.scrollView else {
+            return XCTFail("Expected the default Native timeline scroll view")
+        }
+        let assistantID = KotlinUuid.companion.random()
+        // CADisplayLink callbacks run before the frame commit and in registration order.
+        // This probe is registered before the Native driver, so synchronous reads would
+        // capture the driver's pre-write state rather than the geometry shown on screen.
+        let probe = ScrollFrameProbe(
+            scrollView: scrollView,
+            rootView: fixture.host.view,
+            capturesAfterDisplayLinkCallbacks: true
+        )
+        let gapProbe = DisplayLinkGapProbe()
+        probe.start()
+        gapProbe.start()
+        defer { probe.stop() }
+        defer { gapProbe.stop() }
+        pump(seconds: 0.1)
+        let sampleStart = probe.samples.count
+        let gapStart = gapProbe.gaps.count
+        let initialContentHeight = scrollView.contentSize.height
+        let initialOffsetY = scrollView.contentOffset.y
+        let targetText = "连续正文开始。" + String(
+            repeating: "这是用来测量真实手机行宽与首段追底节奏的中文。",
+            count: 8
+        )
+        let target = fixture.model.messages + [makeAssistantMessage(
+            id: assistantID,
+            text: targetText,
+            finished: false
+        )]
+        var current = fixture.model.messages
+
+        for _ in 1...10 {
+            let step = ChatStreamPresentationPacer.step(current: current, target: target)
+            current = step.snapshot
+            fixture.model.messages = current
+            fixture.model.send(.streamDelta)
+            pump(seconds: 0.06)
+        }
+
+        let samples = Array(probe.samples.dropFirst(sampleStart))
+        let measuredGapsMS = gapProbe.gaps.dropFirst(gapStart).map { $0 * 1_000 }
+        let maxGapMS = measuredGapsMS.max() ?? 0
+        let heightGrowthCount = zip(samples, samples.dropFirst()).reduce(into: 0) { count, pair in
+            if pair.1.contentHeight > pair.0.contentHeight + 0.5 {
+                count += 1
+            }
+        }
+        let maxBackjump = zip(samples, samples.dropFirst()).reduce(CGFloat.zero) { result, pair in
+            max(result, pair.0.contentOffsetY - pair.1.contentOffsetY)
+        }
+
+        XCTAssertGreaterThanOrEqual(measuredGapsMS.count, 10, "门禁必须真实采样首段 display-link")
+        XCTAssertGreaterThanOrEqual(heightGrowthCount, 3, "输入必须跨过多个真实行高边界")
+        XCTAssertGreaterThan(scrollView.contentSize.height, initialContentHeight + 60)
+        XCTAssertGreaterThan(scrollView.contentOffset.y, initialOffsetY + 60)
+        XCTAssertLessThan(maxBackjump, 1, "首段追底不能反向回跳")
+        XCTAssertLessThanOrEqual(
+            samples.map(\.distanceToBottom).max() ?? 0,
+            NativeTimelineScrollCore.resumeEpsilon,
+            "从首个 assistant 行开始就必须保持语义贴底"
+        )
+        XCTAssertTrue(
+            ScrollFrameProbe.streamingParagraph(in: fixture.host.view)?.usesTextKit1 == true,
+            "回放必须经过生产的无附件 TextKit 1 流式正文路径"
+        )
+        XCTAssertLessThanOrEqual(
+            maxGapMS,
+            80,
+            "首行冷启动不能先停顿再变流畅：max=\(maxGapMS)ms"
+        )
+    }
+
     func testLongProseMeasuredGrowthDoesNotPublishSeveralLinesAtOnce() {
         let blockKey = IOSDisplayPreferenceKeys.streamingBlockMarkdown
         let previousBlockSetting = UserDefaults.standard.object(forKey: blockKey)
@@ -688,8 +1043,8 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         pump(seconds: 0.2)
 
         let assistantID = KotlinUuid.companion.random()
-        // 引用定义计入长文本长度，但不会制造数百行可见内容，避免 LazyVStack
-        // 的大范围装卸干扰真实高度发布与过渡节奏采样。
+        // 引用定义计入长文本长度，但不会制造数百行可见内容，避免超长
+        // Markdown 布局成本干扰真实高度发布与过渡节奏采样。
         var text = (0..<160).map { index in
             "[cadence-\(index)]: https://example.com/\(index)\n"
         }.joined()
@@ -703,7 +1058,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         pump(seconds: 1.0)
 
         guard let scrollView = fixture.scrollView else {
-            return XCTFail("Expected the default SwiftUI list scroll view")
+            return XCTFail("Expected the default Native timeline scroll view")
         }
         let initialContentHeight = scrollView.contentSize.height
         var samples: [(time: TimeInterval, contentHeight: CGFloat, offsetY: CGFloat)] = []
@@ -834,12 +1189,13 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             guard let paragraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
                 return false
             }
-            return paragraph.usesTextKit1 && paragraph.attributedText.length == tailText.utf16.count
+            return paragraph.usesTextKit1 &&
+                ScrollFrameProbe.streamingTextLength(in: paragraph) == tailText.utf16.count
         })
         pump(seconds: 0.4)
 
         guard let scrollView = fixture.scrollView else {
-            return XCTFail("Expected the default SwiftUI list scroll view")
+            return XCTFail("Expected the default Native timeline scroll view")
         }
         let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
         probe.start()
@@ -978,12 +1334,13 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             guard let paragraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
                 return false
             }
-            return paragraph.usesTextKit1 && paragraph.attributedText.length == tailText.utf16.count
+            return paragraph.usesTextKit1 &&
+                ScrollFrameProbe.streamingTextLength(in: paragraph) == tailText.utf16.count
         })
         pump(seconds: 0.4)
 
         guard let scrollView = fixture.scrollView else {
-            return XCTFail("Expected the default SwiftUI list scroll view")
+            return XCTFail("Expected the default Native timeline scroll view")
         }
         let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
         probe.start()
@@ -1053,6 +1410,103 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
 
     // MARK: - 3. terminal settle:完成后的晚到布局仍收敛到底部
 
+    func testCompletionKeepsAlreadyRenderedFinalResponseGeometryStable() {
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 8)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+
+        fixture.model.messages.append(makeUserMessage("请连续生成一段最终正文。"))
+        fixture.model.send(.userAppend)
+        pump(seconds: 0.3)
+
+        let assistantID = KotlinUuid.companion.random()
+        let finalText = "连续正文开始。" + String(
+            repeating: "最后一个字已经上屏后，完成态只能结束生成状态，不能重新排版同一段正文。",
+            count: 10
+        )
+        let target = fixture.model.messages + [makeAssistantMessage(
+            id: assistantID,
+            text: finalText,
+            finished: true
+        )]
+        var presented = fixture.model.messages
+        while true {
+            let step = ChatStreamPresentationPacer.step(current: presented, target: target)
+            presented = step.snapshot
+            fixture.model.messages = presented
+            fixture.model.send(.streamDelta)
+            if step.isCaughtUp { break }
+            pump(seconds: 0.048)
+        }
+
+        // 与生产顺序一致：drain 的最后一拍已经带上 authoritative finishedAt，
+        // 随后只发送 stream-closed revision，消息值不再变化。
+        fixture.model.messages = target
+        fixture.model.send(.assistantStreamClosed)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            guard let paragraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
+                return false
+            }
+            return ScrollFrameProbe.streamingTextLength(in: paragraph) == finalText.utf16.count
+        })
+        pump(seconds: 0.6)
+
+        guard let scrollView = fixture.scrollView,
+              let paragraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
+            return XCTFail("Expected the fully rendered final streaming paragraph")
+        }
+        let baselineContentHeight = scrollView.contentSize.height
+        let baselineOffsetY = scrollView.contentOffset.y
+        let baselineParagraphHeight = paragraph.frame.height
+        let baselineParagraphIdentity = ObjectIdentifier(paragraph)
+
+        let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
+        probe.start()
+        fixture.model.isGenerationActive = false
+        fixture.model.send(.generationCompleted)
+        pump(seconds: 1.0)
+        probe.stop()
+
+        let terminalSamples = probe.samples.filter {
+            $0.paragraphLength == finalText.utf16.count
+        }
+        XCTAssertFalse(terminalSamples.isEmpty, "终态门禁必须真实采到最终正文")
+        XCTAssertTrue(
+            terminalSamples.allSatisfy { $0.paragraphIdentity == baselineParagraphIdentity },
+            "完成态不能重建已经显示的 ParagraphUIView"
+        )
+        let maximumParagraphShift = terminalSamples.compactMap(\.paragraphHeight)
+            .map { abs($0 - baselineParagraphHeight) }
+            .max() ?? 0
+        let maximumContentShift = terminalSamples.map {
+            abs($0.contentHeight - baselineContentHeight)
+        }.max() ?? 0
+        let maximumOffsetShift = terminalSamples.map {
+            abs($0.contentOffsetY - baselineOffsetY)
+        }.max() ?? 0
+        XCTAssertLessThanOrEqual(
+            maximumParagraphShift,
+            0.5,
+            "相同最终正文不能在 completion 后再次改变段落高度：\(maximumParagraphShift)"
+        )
+        XCTAssertLessThanOrEqual(
+            maximumContentShift,
+            0.5,
+            "相同最终正文不能在 completion 后再次改变列表高度：\(maximumContentShift)"
+        )
+        XCTAssertLessThanOrEqual(
+            maximumOffsetShift,
+            0.5,
+            "最后一个字已稳定后，completion 不能再次移动视口：\(maximumOffsetShift)"
+        )
+    }
+
     func testGenerationEndSettleConvergesAfterLateLayout() {
         let fixture = makeFixture()
         defer { fixture.tearDown() }
@@ -1116,6 +1570,136 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         // 等 quiet-window/绝对上限结束后再验一次，避免只命中中间态。
         pump(seconds: 1.05)
         XCTAssertTrue(fixture.model.latestViewport.isAtBottom, "terminal settle 收尾后必须仍在底部")
+    }
+
+    func testTerminalBeforeFirstAttachSettlesThenReleasesBottomOwnership() {
+        let assistantID = KotlinUuid.companion.random()
+        var initialMessages = longConversation(turns: 6)
+        initialMessages.append(makeUserMessage("请验证首帧前已经完成的回复。"))
+        initialMessages.append(makeAssistantMessage(
+            id: assistantID,
+            text: "首帧挂载前已经完成。",
+            finished: true
+        ))
+        let fixture = makeFixture { model in
+            model.messages = initialMessages
+            model.signal = ChatMessageUpdateSignal(revision: 1, reason: .generationCompleted)
+        }
+        defer { fixture.tearDown() }
+
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+        pump(seconds: 0.8)
+
+        guard let scrollView = fixture.scrollView else {
+            return XCTFail("Expected the default Native timeline scroll view")
+        }
+        let historyOffset = max(
+            -scrollView.adjustedContentInset.top,
+            scrollView.contentOffset.y - 420
+        )
+        scrollView.setContentOffset(CGPoint(x: 0, y: historyOffset), animated: false)
+        pump(seconds: 0.15)
+        XCTAssertEqual(scrollView.contentOffset.y, historyOffset, accuracy: 2)
+        let heightBeforeLateGrowth = scrollView.contentSize.height
+
+        var lateText = "首帧挂载前已经完成。\n\n"
+        for index in 0..<35 {
+            lateText += "挂载后迟到布局第 \(index) 段：终态窗口结束后不能重新抢回底部。\n\n"
+        }
+        fixture.model.messages[fixture.model.messages.count - 1] = makeAssistantMessage(
+            id: assistantID,
+            text: lateText,
+            finished: true
+        )
+        fixture.model.send(.settingsRefresh)
+
+        XCTAssertTrue(pumpUntil(timeout: 3.0) {
+            scrollView.contentSize.height > heightBeforeLateGrowth + 0.5
+        }, "测试必须实际观察到终态后的迟到高度增长")
+        pump(seconds: 0.5)
+        XCTAssertEqual(
+            scrollView.contentOffset.y,
+            historyOffset,
+            accuracy: 2,
+            "终态早于首帧 attach 时，settle 结束后也必须交还历史浏览位置"
+        )
+    }
+
+    func testEveryGenerationTerminalReleasesBottomOwnershipAfterLateLayoutSettle() {
+        let terminalReasons: [ChatMessageUpdateReason] = [
+            .generationCompleted,
+            .generationFailed,
+            .generationCancelled,
+            .generationHandedOffToBackground
+        ]
+
+        func assertTerminalReleases(_ terminalReason: ChatMessageUpdateReason) {
+            let fixture = makeFixture()
+            defer { fixture.tearDown() }
+
+            fixture.model.messages = longConversation(turns: 6)
+            fixture.model.messages.append(makeUserMessage("请生成一段终态测试正文。"))
+            let assistantID = KotlinUuid.companion.random()
+            fixture.model.messages.append(makeAssistantMessage(
+                id: assistantID,
+                text: "终态前正文。",
+                finished: false
+            ))
+            fixture.model.isGenerationActive = true
+            fixture.model.send(.streamDelta)
+            pumpUntil(timeout: 4.0) { fixture.model.latestViewport.isAtBottom }
+
+            fixture.model.messages[fixture.model.messages.count - 1] = makeAssistantMessage(
+                id: assistantID,
+                text: "终态前正文。",
+                finished: true
+            )
+            fixture.model.isGenerationActive = false
+            fixture.model.send(terminalReason)
+            pump(seconds: 0.75)
+
+            guard let scrollView = fixture.scrollView else {
+                return XCTFail("Expected the default Native timeline scroll view")
+            }
+            scrollView.setContentOffset(
+                CGPoint(x: 0, y: max(
+                    -scrollView.adjustedContentInset.top,
+                    scrollView.contentOffset.y - 420
+                )),
+                animated: false
+            )
+            pump(seconds: 0.15)
+            let historyOffset = scrollView.contentOffset.y
+            let heightBeforeLateGrowth = scrollView.contentSize.height
+
+            var lateText = "终态前正文。\n\n"
+            for index in 0..<35 {
+                lateText += "终态后布局第 \(index) 段：仅改变真实内容高度，不能重新取得滚动所有权。\n\n"
+            }
+            fixture.model.messages[fixture.model.messages.count - 1] = makeAssistantMessage(
+                id: assistantID,
+                text: lateText,
+                finished: true
+            )
+            fixture.model.send(.settingsRefresh)
+            XCTAssertTrue(pumpUntil(timeout: 3.0) {
+                scrollView.contentSize.height > heightBeforeLateGrowth + 0.5
+            }, "\(terminalReason) 必须实际观察到终态后的迟到高度增长")
+            pump(seconds: 0.5)
+
+            XCTAssertEqual(
+                scrollView.contentOffset.y,
+                historyOffset,
+                accuracy: 2,
+                "\(terminalReason) settle 结束后，迟到布局不能把历史浏览位置拉回底部"
+            )
+        }
+
+        for terminalReason in terminalReasons {
+            assertTerminalReleases(terminalReason)
+        }
     }
 
     // MARK: - 4. 短内容不假滚动
@@ -1218,7 +1802,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         pump(seconds: 1.1)
 
         guard let scrollView = fixture.scrollView else {
-            return XCTFail("Expected the default SwiftUI list scroll view")
+            return XCTFail("Expected the default Native timeline scroll view")
         }
         scrollView.setContentOffset(
             CGPoint(x: 0, y: -scrollView.adjustedContentInset.top),
@@ -1351,7 +1935,22 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 distanceToBottom <= ChatLayout.bottomStickThreshold &&
                 fixture.model.latestViewport.isAtBottom
         }
-        XCTAssertTrue(caughtUp, "活跃生成中的真实高度晚到后必须继续语义贴底，不能等待下一 chunk 或手势")
+        let diagnostics: String
+        if let scrollView = fixture.scrollView {
+            let visibleBottom = scrollView.contentOffset.y + scrollView.bounds.height -
+                scrollView.adjustedContentInset.bottom
+            diagnostics =
+                " offset=\(scrollView.contentOffset.y) contentH=\(scrollView.contentSize.height) " +
+                "distance=\(max(0, scrollView.contentSize.height - visibleBottom)) " +
+                "tracking=\(scrollView.isTracking) dragging=\(scrollView.isDragging) " +
+                "decelerating=\(scrollView.isDecelerating) viewport=\(fixture.model.latestViewport)"
+        } else {
+            diagnostics = " scrollView=nil viewport=\(fixture.model.latestViewport)"
+        }
+        XCTAssertTrue(
+            caughtUp,
+            "活跃生成中的真实高度晚到后必须继续语义贴底，不能等待下一 chunk 或手势。\(diagnostics)"
+        )
     }
 
     private static func visibleTextViews(in root: UIView, relativeTo scrollView: UIScrollView) -> [UITextView] {

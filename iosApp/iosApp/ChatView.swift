@@ -120,7 +120,6 @@ struct ChatView: View {
     @State private var fileImporterConversationId: String?
     @State private var photoPickerConversationId: String?
     @State private var isInputFocused = false
-    @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
     @State private var viewportState = ChatViewportState()
@@ -132,11 +131,8 @@ struct ChatView: View {
     @State private var composerBarHeight: CGFloat = 0
     @State private var composerInputController = ComposerInputController()
     @State private var chatListSummary = ChatListSummarySnapshot()
-    @State private var nativeTimelineMirror = NativeChatTimelineMirror()
     @State private var messageEditDraft: ChatMessageEditDraft?
     @State private var pendingDeleteMessageId: String?
-    @State private var isBackToolbarButtonPressed = false
-    @State private var isNewChatToolbarButtonPressed = false
     @Environment(IOSConversationStore.self) private var conversationStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -176,7 +172,6 @@ struct ChatView: View {
                     ChatScrollToBottomButton {
                         scrollToBottomSource = .button
                         scrollToBottomTrigger &+= 1
-                        recordNativeTimelineMirrorIfEnabled()
                     }
                     .padding(.bottom, max(10, composerBarHeight + 10))
                 }
@@ -318,9 +313,6 @@ struct ChatView: View {
             guard !wasFocused, isFocused else { return }
             handleComposerFocusStarted()
         }
-        .onChange(of: followGeneration) { _, _ in
-            recordNativeTimelineMirrorIfEnabled()
-        }
         .onChange(of: sharedSettings.revision) { _, _ in
             handleSharedSettingsRevisionChange()
         }
@@ -339,7 +331,6 @@ struct ChatView: View {
             viewModel.inputText = handoff.chatPrompt
             viewModel.selectedFileContextError = nil
         }
-        recordNativeTimelineMirrorIfEnabled()
     }
 
     private func handleConversationSwitch() {
@@ -381,7 +372,6 @@ struct ChatView: View {
                 signal.event == .conversationSwitched ||
                 signal.event == .branchChanged
         )
-        recordNativeTimelineMirrorIfEnabled()
         // 后台内容若在本轮前台生成期间落盘,门控当时跳过且未消费;收尾时补查上屏。
         switch signal.event {
         case .generationCompleted, .generationFailed, .generationCancelled:
@@ -404,34 +394,11 @@ struct ChatView: View {
         // entry that summary can lag behind the message list by one render pass.
         scrollToBottomSource = .composerFocus
         scrollToBottomTrigger &+= 1
-        recordNativeTimelineMirrorIfEnabled()
     }
 
     private func handleSharedSettingsRevisionChange() {
         repairCurrentChatModelIfNeeded()
         viewModel.bumpMessageRevision(reason: .settingsRefresh)
-    }
-
-    private func recordNativeTimelineMirrorIfEnabled() {
-        guard NativeChatTimelineMirrorFeatureFlags.isEnabled else { return }
-        nativeTimelineMirror.record(
-            NativeTimelineMirrorInput(
-                signal: viewModel.messageUpdateSignal,
-                messages: viewModel.messages,
-                configurationIssue: configurationIssue,
-                isGenerationActive: viewModel.isGenerationActive,
-                isLoading: viewModel.isLoading,
-                isRecognizingImages: viewModel.isRecognizingImages,
-                contextCompactState: viewModel.contextCompactState,
-                followGeneration: followGeneration,
-                displaySettingSignature: String(describing: sharedSettings.displaySetting),
-                generativeUiSettingSignature: String(describing: sharedSettings.agentRuntime.generativeUi),
-                reasoningLevelLabel: composerReasoningLabel,
-                scrollToBottomTrigger: scrollToBottomTrigger,
-                viewportState: viewportState,
-                variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) }
-            )
-        )
     }
 
     private var userVisibleErrorBinding: Binding<IOSUserVisibleError?> {
@@ -585,27 +552,6 @@ struct ChatView: View {
 
     private var topBar: some View {
         ZStack(alignment: .bottom) {
-            Group {
-                if #available(iOS 26.0, *) {
-                    GlassEffectContainer(spacing: 12) {
-                        topBarGlassContent
-                    }
-                } else {
-                    topBarGlassContent
-                }
-            }
-
-            // Glyphs intentionally live outside `GlassEffectContainer`. Liquid Glass adjusts the
-            // foreground levels of child content for vibrancy; keeping navigation glyphs in a
-            // sibling layer preserves the system label's true black/white contrast.
-            topBarGlyphOverlay
-        }
-        .padding(.horizontal, 18)
-        .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)
-    }
-
-    private var topBarGlassContent: some View {
-        ZStack(alignment: .bottom) {
             HStack {
                 backToolbarButton
 
@@ -621,39 +567,8 @@ struct ChatView: View {
                 .onAppear { syncIslandPresentation() }
                 .onChange(of: topIslandState) { _, _ in syncIslandPresentation() }
         }
-    }
-
-    private var topBarGlyphOverlay: some View {
-        HStack {
-            topBarGlyph(
-                systemImage: "chevron.left",
-                symbolSize: 18,
-                isPressed: isBackToolbarButtonPressed
-            )
-
-            Spacer()
-
-            topBarGlyph(
-                systemImage: "square.and.pencil",
-                symbolSize: 16,
-                isPressed: isNewChatToolbarButtonPressed
-            )
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    private func topBarGlyph(
-        systemImage: String,
-        symbolSize: CGFloat,
-        isPressed: Bool
-    ) -> some View {
-        ChatToolbarIconGlyph(systemImage: systemImage, symbolSize: symbolSize)
-            .scaleEffect(isPressed ? 0.9 : 1)
-            .animation(
-                reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72),
-                value: isPressed
-            )
+        .padding(.horizontal, 18)
+        .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)
     }
 
     private var topIslandState: ChatActivityIslandState {
@@ -693,7 +608,7 @@ struct ChatView: View {
         if chatListSummary.awaitingFirstAssistantChunk {
             return ChatActivityIslandState.activity(
                 kind: .waiting,
-                title: AgentActivityStage.preparing.title,
+                title: "正在连接",
                 detail: viewModel.islandModelDisplayName,
                 systemImage: "sparkles",
                 tint: .amber
@@ -704,16 +619,14 @@ struct ChatView: View {
             if chatListSummary.lastAssistantHasOpenReasoning {
                 return ChatActivityIslandState.activity(
                     kind: .thinking,
-                    title: AgentActivityStage.thinking.title,
-                    detail: composerReasoningLabel,
+                    title: "正在思考",
                     systemImage: "brain.head.profile",
                     tint: .amber
                 )
             }
             return ChatActivityIslandState.activity(
                 kind: .generating,
-                title: AgentActivityStage.generating.title,
-                detail: nil,
+                title: "正在生成回复",
                 systemImage: "text.bubble",
                 tint: .accent
             )
@@ -843,11 +756,9 @@ struct ChatView: View {
             systemImage: "chevron.left",
             accessibilityLabel: "返回",
             size: ChatTopBarLayout.toolbarButtonDiameter,
-            symbolSize: 18,
-            showsGlyph: false,
-            onPressChanged: { isBackToolbarButtonPressed = $0 }
+            symbolSize: 18
         ) {
-            dismiss()
+            router.goBack()
         }
     }
 
@@ -856,9 +767,7 @@ struct ChatView: View {
             systemImage: "square.and.pencil",
             accessibilityLabel: "新建对话",
             size: ChatTopBarLayout.toolbarButtonDiameter,
-            symbolSize: 16,
-            showsGlyph: false,
-            onPressChanged: { isNewChatToolbarButtonPressed = $0 }
+            symbolSize: 16
         ) {
             guard viewModel.prepareForConversationChange() else { return }
             Task { @MainActor in
@@ -885,7 +794,6 @@ struct ChatView: View {
             generativeUiSetting: sharedSettings.agentRuntime.generativeUi,
             reasoningLevelLabel: composerReasoningLabel,
             workspaceStore: workspaceStore,
-            nativeScrollDriverEnabled: true,
             scrollToBottomTrigger: scrollToBottomTrigger,
             scrollToBottomSource: scrollToBottomSource,
             messagesProvider: { viewModel.messages },
@@ -1218,7 +1126,6 @@ struct ChatView: View {
             viewModel.inputText = committedText
         }
         guard sendEnabled(for: committedText) else { return }
-        dismissKeyboard()
         viewportState.followPaused = false
         viewModel.sendMessage()
     }
@@ -1359,7 +1266,6 @@ struct ChatView: View {
         withTransaction(transaction) {
             viewportState = newState
         }
-        recordNativeTimelineMirrorIfEnabled()
     }
 
     private func handleChatListAction(_ action: ChatListAction) {

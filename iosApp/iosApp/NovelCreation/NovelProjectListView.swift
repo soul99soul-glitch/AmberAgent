@@ -176,7 +176,7 @@ struct NovelProjectListView: View {
         HStack(spacing: 12) {
             Label("有已提交的操作等待重新载入", systemImage: "arrow.clockwise.circle")
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button("重新载入") {
                 Task { @MainActor in
@@ -237,7 +237,7 @@ struct NovelProjectListView: View {
                let fraction = activity.displayedCompletionFraction {
                 Text("\(Int((fraction * 100).rounded(.down)))%")
                     .font(.footnote.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(AmberTheme.accentAmber)
+                    .foregroundStyle(AmberTheme.foreground2)
             }
 
             if let projectID = viewModel.selectedProjectID,
@@ -535,7 +535,7 @@ private struct NovelProjectRow: View {
                         Text(project.updatedAt, format: .relative(presentation: .named))
                         if project.isDegraded {
                             Text("只读恢复")
-                                .foregroundStyle(AmberTheme.accentAmber)
+                                .foregroundStyle(AmberTheme.foreground2)
                         }
                     }
                 }
@@ -580,6 +580,7 @@ private struct NovelProjectCreateSheet: View {
     @State private var name = ""
     @State private var genre = ""
     @State private var coreIdea = ""
+    @State private var isConfirmingDiscard = false
 
     var body: some View {
         NavigationStack {
@@ -624,8 +625,24 @@ private struct NovelProjectCreateSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if hasUnsavedChanges {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                         .disabled(viewModel.isPerforming)
+                        .confirmationDialog(
+                            "放弃新建小说？",
+                            isPresented: $isConfirmingDiscard,
+                            titleVisibility: .visible
+                        ) {
+                            Button("放弃更改", role: .destructive) { dismiss() }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: {
+                            Text("已填写的项目名称和故事种子会丢失。")
+                        }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("创建") { create() }
@@ -633,9 +650,13 @@ private struct NovelProjectCreateSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(viewModel.isPerforming)
+        .interactiveDismissDisabled(viewModel.isPerforming || hasUnsavedChanges)
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)
+    }
+
+    private var hasUnsavedChanges: Bool {
+        mode != .blank || !name.isEmpty || !genre.isEmpty || !coreIdea.isEmpty
     }
 
     private var canCreate: Bool {
@@ -791,7 +812,7 @@ struct NovelProjectImportSheet: View {
                     )
                     if preview.runningRunCount > 0 {
                         LabeledContent("未完成生成", value: "\(preview.runningRunCount)")
-                            .foregroundStyle(AmberTheme.accentAmber)
+                            .foregroundStyle(AmberTheme.foreground2)
                     }
                 }
 

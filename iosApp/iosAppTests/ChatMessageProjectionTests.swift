@@ -992,7 +992,7 @@ final class ChatMessageProjectionTests: XCTestCase {
         ])
     }
 
-    func testNativeTimelineProjectionAddsPendingOnlyForLoadingOrGeneratingAfterUserMessage() {
+    func testNativeTimelineProjectionLeavesWaitingStatusToTopIslandByDefault() {
         let user = UIMessage.companion.user(prompt: "问题")
         let assistant = UIMessage.companion.assistant(prompt: "回答")
 
@@ -1001,13 +1001,23 @@ final class ChatMessageProjectionTests: XCTestCase {
             event: .userMessageAppended,
             isLoading: true
         )
+        let explicitPendingAfterUser = NativeTimelineProjector.build(
+            messages: [user],
+            event: .userMessageAppended,
+            isLoading: true,
+            includePendingAssistant: true
+        )
         let generatingAfterAssistant = NativeTimelineProjector.build(
             messages: [assistant],
             event: .assistantStreamDelta,
             isGenerationActive: true
         )
 
-        XCTAssertEqual(loadingAfterUser.entries.map(\.kind), [.message, .pendingAssistant, .bottomAnchor])
+        XCTAssertEqual(loadingAfterUser.entries.map(\.kind), [.message, .bottomAnchor])
+        XCTAssertEqual(
+            explicitPendingAfterUser.entries.map(\.kind),
+            [.message, .pendingAssistant, .bottomAnchor]
+        )
         XCTAssertEqual(generatingAfterAssistant.entries.map(\.kind), [.message, .bottomAnchor])
     }
 
@@ -1243,234 +1253,6 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertTrue(reset.isEmpty)
     }
 
-    func testNativeTimelineMirrorDiffsWithoutScrollWritesAndKeepsStreamMemory() {
-        let mirror = NativeChatTimelineMirror()
-        let first = UIMessage.companion.assistant(prompt: "第一段")
-        let firstResult = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
-                messages: [first],
-                configurationIssue: nil,
-                isGenerationActive: true,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle
-            )
-        )
-        let messageId = ChatMessageProjector.messageId(for: first)
-
-        XCTAssertEqual(firstResult.insertedIDs, ["message-\(messageId)", ChatTimelinePlanner.bottomAnchorID])
-        XCTAssertFalse(firstResult.didProposeScrollWrite)
-        XCTAssertFalse(firstResult.followGeneration)
-        XCTAssertEqual(firstResult.scrollToBottomTrigger, 0)
-        XCTAssertEqual(firstResult.retainedStreamedMessageIDs, [messageId])
-
-        let completed = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 2, reason: .generationCompleted),
-                messages: [first],
-                configurationIssue: nil,
-                isGenerationActive: false,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle
-            )
-        )
-
-        XCTAssertFalse(completed.didProposeScrollWrite)
-        XCTAssertEqual(completed.projection.messageEntry(for: messageId)?.renderer, .streamingAssistantMarkdown)
-        XCTAssertTrue(completed.projection.messageEntry(for: messageId)?.hasEverStreamed ?? false)
-    }
-
-    func testNativeTimelineMirrorHasNoChangesForIdenticalInputAndChangesOnlyGrowingMessage() {
-        let mirror = NativeChatTimelineMirror()
-        let messageID = KotlinUuid.companion.random()
-        let short = UIMessage(
-            id: messageID,
-            role: MessageRole.assistant,
-            parts: [UIMessagePart.Text(text: "第一段", metadata: nil)],
-            annotations: [],
-            createdAt: chatNowLocalDateTime(),
-            finishedAt: nil,
-            modelId: nil,
-            usage: nil,
-            translation: nil
-        )
-        let longer = UIMessage(
-            id: messageID,
-            role: MessageRole.assistant,
-            parts: [UIMessagePart.Text(text: "第一段，继续追加", metadata: nil)],
-            annotations: [],
-            createdAt: short.createdAt,
-            finishedAt: nil,
-            modelId: nil,
-            usage: nil,
-            translation: nil
-        )
-        let shortID = ChatMessageProjector.messageId(for: short)
-        _ = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
-                messages: [short],
-                configurationIssue: nil,
-                isGenerationActive: true,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle
-            )
-        )
-        let same = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
-                messages: [short],
-                configurationIssue: nil,
-                isGenerationActive: true,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle
-            )
-        )
-        let grown = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 2, reason: .streamDelta),
-                messages: [longer],
-                configurationIssue: nil,
-                isGenerationActive: true,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle
-            )
-        )
-
-        XCTAssertTrue(same.insertedIDs.isEmpty)
-        XCTAssertTrue(same.removedIDs.isEmpty)
-        XCTAssertTrue(same.changedIDs.isEmpty)
-        XCTAssertEqual(grown.changedIDs, ["message-\(shortID)"])
-        XCTAssertFalse(grown.didProposeScrollWrite)
-    }
-
-    func testNativeTimelineMirrorStreamingMemoryEventMatrix() {
-        let rememberedReasons: [ChatMessageUpdateReason] = [
-            .streamDelta,
-            .streamFinish,
-            .toolCallStarted,
-            .toolResultAppended,
-            .awaitingToolApproval,
-            .generationCompleted,
-            .generationFailed,
-            .generationHandedOffToBackground
-        ]
-        let notRememberedReasons: [ChatMessageUpdateReason] = [
-            .generationCancelled,
-            .settingsRefresh,
-            .userAppend
-        ]
-
-        for reason in rememberedReasons {
-            let mirror = NativeChatTimelineMirror()
-            let assistant = UIMessage.companion.assistant(prompt: "内容")
-            let messageId = ChatMessageProjector.messageId(for: assistant)
-            let result = mirror.record(
-                NativeTimelineMirrorInput(
-                    signal: ChatMessageUpdateSignal(revision: 1, reason: reason),
-                    messages: [assistant],
-                    configurationIssue: nil,
-                    isGenerationActive: reason == .streamDelta,
-                    isLoading: false,
-                    isRecognizingImages: false,
-                    contextCompactState: .idle
-                )
-            )
-
-            XCTAssertEqual(result.retainedStreamedMessageIDs, [messageId], "reason=\(reason)")
-        }
-
-        for reason in notRememberedReasons {
-            let mirror = NativeChatTimelineMirror()
-            let assistant = UIMessage.companion.assistant(prompt: "内容")
-            let result = mirror.record(
-                NativeTimelineMirrorInput(
-                    signal: ChatMessageUpdateSignal(revision: 1, reason: reason),
-                    messages: [assistant],
-                    configurationIssue: nil,
-                    isGenerationActive: false,
-                    isLoading: false,
-                    isRecognizingImages: false,
-                    contextCompactState: .idle
-                )
-            )
-
-            XCTAssertTrue(result.retainedStreamedMessageIDs.isEmpty, "reason=\(reason)")
-        }
-    }
-
-    func testNativeTimelineMirrorEnvironmentChangeInvalidatesExistingEntriesButDoesNotScroll() {
-        let mirror = NativeChatTimelineMirror()
-        let assistant = UIMessage.companion.assistant(prompt: "内容")
-        let itemID = "message-\(ChatMessageProjector.messageId(for: assistant))"
-        _ = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 1, reason: .initialLoad),
-                messages: [assistant],
-                configurationIssue: nil,
-                isGenerationActive: false,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle,
-                displaySettingSignature: "display-a"
-            )
-        )
-        let changed = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 2, reason: .settingsRefresh),
-                messages: [assistant],
-                configurationIssue: nil,
-                isGenerationActive: false,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle,
-                displaySettingSignature: "display-b"
-            )
-        )
-
-        XCTAssertTrue(changed.changedIDs.contains(itemID))
-        XCTAssertFalse(changed.didProposeScrollWrite)
-    }
-
-    func testNativeTimelineMirrorViewportRenderStateChangeInvalidatesVisibleEntryOnly() {
-        let mirror = NativeChatTimelineMirror()
-        let assistant = UIMessage.companion.assistant(prompt: "正在流式生成")
-        let itemID = "message-\(ChatMessageProjector.messageId(for: assistant))"
-        _ = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
-                messages: [assistant],
-                configurationIssue: nil,
-                isGenerationActive: true,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle,
-                viewportState: ChatViewportState(liveRenderingFarFromBottom: false)
-            )
-        )
-        let farFromBottom = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
-                messages: [assistant],
-                configurationIssue: nil,
-                isGenerationActive: true,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle,
-                viewportState: ChatViewportState(liveRenderingFarFromBottom: true)
-            )
-        )
-
-        XCTAssertEqual(farFromBottom.changedIDs, [itemID])
-        XCTAssertFalse(farFromBottom.didProposeScrollWrite)
-        XCTAssertTrue(farFromBottom.viewportState.liveRenderingFarFromBottom)
-    }
-
     func testNativeTimelineProjectionUsesSharedRenderStateStoreFreezeLifecycle() {
         let assistant = UIMessage.companion.assistant(prompt: "正在流式生成")
         let messageId = ChatMessageProjector.messageId(for: assistant)
@@ -1542,74 +1324,6 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertEqual(entry?.renderHasEverStreamed, true)
         XCTAssertEqual(entry?.liveMarkdownRenderingEnabled, false)
         XCTAssertEqual(entry?.frozenMarkdownSnapshot, "冻结快照")
-    }
-
-    func testNativeTimelineMirrorAcceptsVisibleAndFreezeLifecycleEvents() {
-        let mirror = NativeChatTimelineMirror()
-        let assistant = UIMessage.companion.assistant(prompt: "正在流式生成")
-        let messageId = ChatMessageProjector.messageId(for: assistant)
-        let input = NativeTimelineMirrorInput(
-            signal: ChatMessageUpdateSignal(revision: 1, reason: .streamDelta),
-            messages: [assistant],
-            configurationIssue: nil,
-            isGenerationActive: true,
-            isLoading: false,
-            isRecognizingImages: false,
-            contextCompactState: .idle
-        )
-        let live = mirror.record(input)
-
-        mirror.freeze(messageID: messageId, latestText: "冻结快照")
-        let frozen = mirror.record(input)
-
-        mirror.markVisible(messageID: messageId)
-        let visibleAgain = mirror.record(input)
-
-        XCTAssertNotEqual(
-            live.projection.messageEntry(for: messageId)?.renderDigest,
-            frozen.projection.messageEntry(for: messageId)?.renderDigest
-        )
-        XCTAssertEqual(
-            live.projection.messageEntry(for: messageId)?.renderDigest,
-            visibleAgain.projection.messageEntry(for: messageId)?.renderDigest
-        )
-    }
-
-    func testNativeTimelineMirrorResetsOnBranchChangeAndDoesNotTreatBackgroundReloadAsScrollIntent() {
-        let mirror = NativeChatTimelineMirror()
-        let oldMessage = UIMessage.companion.assistant(prompt: "旧回复")
-        _ = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 1, reason: .initialLoad),
-                messages: [oldMessage],
-                configurationIssue: nil,
-                isGenerationActive: false,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle
-            )
-        )
-
-        let newMessage = UIMessage.companion.assistant(prompt: "后台工具回填后的回复")
-        let result = mirror.record(
-            NativeTimelineMirrorInput(
-                signal: ChatMessageUpdateSignal(revision: 2, reason: .branchChange),
-                messages: [newMessage],
-                configurationIssue: nil,
-                isGenerationActive: false,
-                isLoading: false,
-                isRecognizingImages: false,
-                contextCompactState: .idle
-            )
-        )
-
-        XCTAssertFalse(result.didProposeScrollWrite)
-        XCTAssertEqual(result.removedIDs, [])
-        XCTAssertEqual(result.insertedIDs, [
-            "message-\(ChatMessageProjector.messageId(for: newMessage))",
-            ChatTimelinePlanner.bottomAnchorID
-        ])
-        XCTAssertTrue(result.retainedStreamedMessageIDs.isEmpty)
     }
 
     private static func astNodes(for markdown: String) -> [PackedAstNode] {

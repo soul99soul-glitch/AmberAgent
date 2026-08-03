@@ -113,9 +113,9 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
             "toolCallId": toolCallId,
             "outcome": outcome,
         ])
-        // The side effect (if any) already happened by the time this is
-        // called — a failed write here can't be un-done by refusing to
-        // proceed, so unlike Started, we only log and move on.
+        // The attempt either produced an outcome or was definitively stopped
+        // before its side effect began. A failed write here can't change that
+        // fact, so unlike Started, we only log and move on.
         let ok = await insertWithFreshSeq(runId: runId) { seq in
             AgentEventEntity(
                 eventId: UUID().uuidString,

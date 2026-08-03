@@ -237,8 +237,8 @@ private final class NativeTimelineProjectionCache {
     }
 }
 
-/// Phase 3 static surface: render the shared Native projection behind a flag
-/// without taking over streaming, keyboard, or scroll ownership yet.
+/// Production Chat timeline. The native scroll driver owns normal bottom-follow;
+/// SwiftUI takes over only after an explicit driver fallback.
 struct NativeChatTimelineView: View {
     var signal: ChatMessageUpdateSignal
     var configurationIssue: ChatConfigurationIssue?
@@ -251,7 +251,6 @@ struct NativeChatTimelineView: View {
     var generativeUiSetting: GenerativeUiSetting
     var reasoningLevelLabel: String?
     var workspaceStore: IOSWorkspaceStore
-    var nativeScrollDriverEnabled: Bool
     var scrollToBottomTrigger: Int
     var scrollToBottomSource: NativeTimelineBottomIntentSource
     var messagesProvider: () -> [UIMessage]
@@ -272,12 +271,10 @@ struct NativeChatTimelineView: View {
     @State private var projectionCache = NativeTimelineProjectionCache()
     @State private var scrollDriver = NativeTimelineScrollDriver()
     @State private var nativeUserScrollActive = false
-    @State private var latestNativeScrollGeometry = ChatSwiftUIScrollGeometry()
     @State private var nativeScrollFallbackReason: NativeTimelineScrollFallbackReason?
     @State private var nativeScrollFallbackShouldReplayBottom = false
     @State private var nativeScrollFallbackReplayToken: UInt64 = 0
     @State private var isNativeScrollSurfaceVisible = false
-    @State private var hasMeasuredNativeScrollGeometry = false
 
     var body: some View {
         let messages = messagesProvider()
@@ -288,8 +285,8 @@ struct NativeChatTimelineView: View {
         )
         let renderViewportState = {
             var state = viewportState
-            // The native tail is kept outside LazyVStack. While history is visible,
-            // pause model publications instead of replacing its whole Markdown tree.
+            // Keep the eager timeline's existing Markdown tree while history is visible;
+            // pause model publications instead of replacing that tree.
             state.liveRenderingFarFromBottom = false
             return state
         }()
@@ -314,22 +311,11 @@ struct NativeChatTimelineView: View {
                 ? contentHashCache.streamingTailLayoutToken(for: row)
                 : contentHashCache.contentHash(for: row)
         }
-        let tailStartIndex = projection.entries.lastIndex(where: { $0.isLastMessage }) ?? projection.entries.endIndex
-        let historicalEntries = projection.entries.prefix(upTo: tailStartIndex)
-        let tailEntries = projection.entries.suffix(from: tailStartIndex)
-
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if !historicalEntries.isEmpty {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(historicalEntries) { entry in
-                            entryView(entry)
-                        }
-                    }
-                }
-
-                // Keep stable history lazy, but measure the dynamically growing tail exactly.
-                ForEach(tailEntries) { entry in
+                // One eager height model prevents historical estimates and the live tail
+                // from publishing conflicting content sizes into the same scroll view.
+                ForEach(projection.entries) { entry in
                     entryView(entry)
                 }
             }
@@ -371,6 +357,10 @@ struct NativeChatTimelineView: View {
             }
             switch phase {
             case .tracking, .interacting:
+                guard Self.shouldBeginNativeUserDrag(
+                    phase: phase,
+                    isUIKitUserInteracting: scrollDriver.isUIKitUserInteracting
+                ) else { return }
                 nativeUserScrollActive = true
                 onDismissKeyboard()
                 scrollDriver.submit(.userDragBegan)
@@ -380,7 +370,7 @@ struct NativeChatTimelineView: View {
                 if endedUserScroll {
                     let returnedToBottom = NativeTimelineScrollReturnPolicy.returnedToBottom(
                         liveDistanceToBottom: scrollDriver.distanceToBottomNow(),
-                        cachedNearBottom: isNativeMeasuredNearBottom(latestNativeScrollGeometry),
+                        cachedNearBottom: viewportState.isAtBottom,
                         threshold: ChatLayout.nearBottomResumeThreshold
                     )
                     scrollDriver.submit(.userDragEnded(isAtBottom: returnedToBottom))
@@ -403,8 +393,6 @@ struct NativeChatTimelineView: View {
                 contentHeight: geo.contentSize.height
             )
         } action: { previousGeometry, geometry in
-            hasMeasuredNativeScrollGeometry = true
-            latestNativeScrollGeometry = geometry
             let wasAtBottom = viewportState.isAtBottom
             let messages = messagesProvider()
             let rawViewportState = NativeStaticTimelineViewportPolicy.state(
@@ -416,8 +404,6 @@ struct NativeChatTimelineView: View {
                 driverPausedForUser: isNativeScrollDriverActive && scrollDriver.isPausedForUser
             )
             let nextViewportState = rawViewportState
-            // [TEMP-DIAG] 常驻采样,异常自动 dump 前后窗口。
-            recordStreamAnomalySample(geometry: geometry, viewportState: nextViewportState, messages: messages)
             publishViewportState(nextViewportState)
             unfreezeVisibleLiveTailIfNeeded(messages: messages, viewportState: nextViewportState)
             resumeNativeBottomFollowFromGeometryIfNeeded(
@@ -440,18 +426,11 @@ struct NativeChatTimelineView: View {
         }
         .onDisappear {
             isNativeScrollSurfaceVisible = false
-            hasMeasuredNativeScrollGeometry = false
+            nativeUserScrollActive = false
             scrollDriver.invalidate()
         }
         .onChange(of: followGeneration) { _, enabled in
             scrollDriver.setAutomaticFollowEnabled(enabled)
-        }
-        .onChange(of: nativeScrollDriverEnabled) { _, enabled in
-            if !enabled {
-                nativeScrollFallbackReason = nil
-                hasMeasuredNativeScrollGeometry = false
-                scrollDriver.invalidate()
-            }
         }
         .onChange(of: signal) { _, newSignal in
             updateRendererMemory(event: newSignal.event, messages: messagesProvider())
@@ -480,9 +459,24 @@ struct NativeChatTimelineView: View {
         isNativeScrollDriverDesired && scrollDriver.isAttached
     }
 
+    static func shouldBeginNativeUserDrag(
+        phase: ScrollPhase,
+        isUIKitUserInteracting: Bool
+    ) -> Bool {
+        switch phase {
+        case .tracking:
+            return true
+        case .interacting:
+            return isUIKitUserInteracting
+        case .idle, .decelerating, .animating:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
     private var isNativeScrollDriverDesired: Bool {
-        nativeScrollDriverEnabled &&
-            nativeScrollFallbackReason == nil &&
+        nativeScrollFallbackReason == nil &&
             isNativeScrollSurfaceVisible
     }
 
@@ -494,11 +488,28 @@ struct NativeChatTimelineView: View {
         }
         let didAttach = scrollDriver.attach(scrollView)
         guard didAttach, scrollDriver.isAttached else { return }
-        if nativeUserScrollActive || viewportState.followPaused ||
-            (hasMeasuredNativeScrollGeometry && !viewportState.isAtBottom) {
+        if nativeUserScrollActive || viewportState.followPaused {
             scrollDriver.submit(.userDragBegan)
         } else {
             scrollDriver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
+            if followGeneration, shouldSettleNativeScrollAfterAttach {
+                scrollDriver.submit(.generationTerminated)
+            }
+        }
+    }
+
+    private var shouldSettleNativeScrollAfterAttach: Bool {
+        if !isGenerationActive && !isLoading {
+            return true
+        }
+        switch signal.event {
+        case .generationCompleted, .generationFailed, .generationCancelled,
+             .generationHandedOffToBackground:
+            return true
+        case .userMessageAppended, .assistantStreamDelta, .assistantStreamClosed,
+             .toolCallStarted, .toolResultAppended, .awaitingToolApproval,
+             .conversationLoaded, .conversationSwitched, .branchChanged, .settingsRefreshed:
+            return false
         }
     }
 
@@ -668,33 +679,6 @@ struct NativeChatTimelineView: View {
         geometry.distanceToBottom <= max(ChatLayout.bottomStickThreshold, NativeTimelineScrollCore.resumeEpsilon)
     }
 
-    // [TEMP-DIAG] 采样一帧:同时记录「数据源字数」与「实际喂给渲染的字数」,
-    // 两者背离即证明尾部停在旧快照上。
-    private func recordStreamAnomalySample(
-        geometry: ChatSwiftUIScrollGeometry,
-        viewportState: ChatViewportState,
-        messages: [UIMessage]
-    ) {
-        func textLength(_ message: UIMessage) -> Int {
-            message.parts.reduce(0) { $0 + (($1 as? UIMessagePart.Text)?.text.count ?? 0) }
-        }
-        guard let lastAssistant = messages.last(where: { $0.role == MessageRole.assistant }) else { return }
-        let messageID = ChatMessageProjector.messageId(for: lastAssistant)
-        let sourceLength = textLength(lastAssistant)
-        let displayedLength = renderStateStore.existingLiveTailModel(messageID: messageID)
-            .map { textLength($0.message) } ?? sourceLength
-        ChatStreamAnomalyRecorder.record(
-            offsetY: geometry.contentHeight - geometry.distanceToBottom - geometry.visibleHeight,
-            contentHeight: geometry.contentHeight,
-            distanceToBottom: geometry.distanceToBottom,
-            farFromBottom: viewportState.liveRenderingFarFromBottom,
-            sourceLength: sourceLength,
-            displayedLength: displayedLength,
-            dragging: nativeUserScrollActive,
-            fallback: nativeScrollFallbackReason?.rawValue ?? "-"
-        )
-    }
-
     private func unfreezeVisibleLiveTailIfNeeded(messages: [UIMessage], viewportState: ChatViewportState) {
         guard !viewportState.liveRenderingFarFromBottom,
               let lastAssistantID = latestAssistantMessageID(messages: messages) else { return }
@@ -738,12 +722,7 @@ struct NativeChatTimelineView: View {
             row,
             isLiveRenderingFarFromBottom: viewportState.liveRenderingFarFromBottom
         )
-        guard renderState.liveRenderingEnabled else {
-            // [TEMP-DIAG] 渲染侧把 farFromBottom 硬钉为 false 照常画缓存模型,
-            // 而这里停止喂新内容 —— 若这个计数在闪烁时飙升,即坐实判据不一致。
-            ChatStreamAnomalyRecorder.noteLiveTailUpdateSkipped()
-            return
-        }
+        guard renderState.liveRenderingEnabled else { return }
         let liveTailModel = renderStateStore.liveTailModel(
             for: row,
             renderState: renderState,
@@ -838,7 +817,6 @@ struct NativeChatTimelineView: View {
         }
         switch event {
         case .conversationLoaded, .conversationSwitched:
-            hasMeasuredNativeScrollGeometry = false
             scrollDriver.submit(.conversationReset)
             scrollDriver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
         case .branchChanged:
@@ -849,12 +827,15 @@ struct NativeChatTimelineView: View {
             guard followGeneration else { return }
             scrollDriver.submit(.streamContentGrew)
         case .assistantStreamClosed, .toolCallStarted, .toolResultAppended,
-             .awaitingToolApproval, .generationCompleted, .generationFailed,
-             .generationCancelled, .generationHandedOffToBackground:
+             .awaitingToolApproval:
             if followGeneration,
                viewportState.isAtBottom || scrollDriver.isFollowingBottomOrKeyboardFocus || scrollDriver.isAtBottomNow() {
                 scrollDriver.submit(.streamContentGrew)
             }
+        case .generationCompleted, .generationFailed, .generationCancelled,
+             .generationHandedOffToBackground:
+            guard followGeneration else { return }
+            scrollDriver.submit(.generationTerminated)
         case .settingsRefreshed:
             break
         }
@@ -943,7 +924,6 @@ struct NativeChatTimelineView: View {
     private func resetNativeSwiftUIFallbackViewportForConversationEntry() {
         nativeScrollFallbackReplayToken &+= 1
         nativeUserScrollActive = false
-        hasMeasuredNativeScrollGeometry = false
         var next = viewportState
         next.followPaused = false
         next.userDragging = false
@@ -4475,11 +4455,6 @@ final class ChatRenderStateStore {
         )
         liveTailModelsByMessageID[row.messageId] = model
         return model
-    }
-
-    // [TEMP-DIAG] 只读取已存在的尾部模型,不创建,避免诊断本身改变行为。
-    func existingLiveTailModel(messageID: String) -> ChatLiveTailModel? {
-        liveTailModelsByMessageID[messageID]
     }
 
     /// 行进入视口即解冻并丢弃冻结快照:可见的行必须显示真实内容,

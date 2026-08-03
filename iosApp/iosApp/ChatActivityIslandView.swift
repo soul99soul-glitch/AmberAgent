@@ -23,11 +23,11 @@ struct ChatActivityIslandState: Equatable {
     /// 仅工具态：与消息内 Tool part 的稳定 id 对齐，用于失败 terminalHold 匹配。
     let toolID: String?
 
-    var contentKey: String {
+    /// 仅包含真正参与视觉切换的字段。detail 只用于无障碍，不应触发胶囊重排或动画。
+    var visualKey: String {
         [
             "\(kind)",
             title,
-            detail ?? "",
             systemImage,
             isActive ? "active" : "idle",
             "\(tint)"
@@ -65,12 +65,12 @@ struct ChatActivityIslandState: Equatable {
         )
     }
 
-    /// terminalHold 用的失败副本：工具名保留，副标题换成事实，色换红。
+    /// terminalHold 用的失败副本：失败事实必须出现在单行标题，原工具名留给无障碍摘要。
     func failedCopy() -> ChatActivityIslandState {
         ChatActivityIslandState(
             kind: kind,
-            title: title,
-            detail: "未完成",
+            title: "未完成",
+            detail: title,
             systemImage: systemImage,
             isActive: true,
             tint: .red,
@@ -327,36 +327,20 @@ struct ChatActivityIslandView: View {
     }
 
     var body: some View {
-        ZStack {
-            if state.isActive {
-                activeContent
-                    .id(state.contentKey)
-                    .transition(.chatIslandMorph)
-            } else {
-                titleContent
-                    .id(state.contentKey)
-                    .transition(.chatIslandMorph)
-            }
-        }
-        .padding(.horizontal, state.isActive ? 13 : 14)
-        .padding(.vertical, state.isActive ? 7 : 8)
-        .frame(minHeight: state.isActive ? 40 : 34)
-        .frame(maxWidth: state.isActive ? 268 : 230)
-        .fixedSize(horizontal: true, vertical: false)
-        .background { glowUnderlay }
-        .modifier(ChatActivityIslandGlass())
-        .contentShape(Capsule())
-        .opacity(presentation.isSettling ? 0 : 1)
-        .animation(
-            reduceMotion ? nil : .easeOut(duration: ChatIslandPresentationReducer.settleDuration),
-            value: presentation.isSettling
-        )
-        .animation(
-            reduceMotion ? nil : .spring(response: 0.5, dampingFraction: 0.86),
-            value: state.contentKey
-        )
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(accessibilitySummary))
+        islandContent
+            .padding(.horizontal, 13)
+            .frame(height: 40)
+            .frame(maxWidth: 268)
+            .fixedSize(horizontal: true, vertical: false)
+            .background { glowUnderlay }
+            .modifier(ChatActivityIslandGlass())
+            .contentShape(Capsule())
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 0.22),
+                value: state.visualKey
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(accessibilitySummary))
     }
 
     private var accessibilitySummary: String {
@@ -380,16 +364,7 @@ struct ChatActivityIslandView: View {
         }
     }
 
-    private var titleContent: some View {
-        Text(state.title)
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(AmberTheme.foreground)
-            .lineLimit(1)
-            .minimumScaleFactor(0.84)
-            .contentTransition(.opacity)
-    }
-
-    private var activeContent: some View {
+    private var islandContent: some View {
         HStack(spacing: 9) {
             if let orb = ChatActivityIslandMapping.orbState(
                 kind: state.kind,
@@ -403,28 +378,17 @@ struct ChatActivityIslandView: View {
                     paused: presentation.isFrozen || state.kind == .awaitingUser
                 )
                 .frame(width: 24, height: 24)
+                .transition(.opacity)
             }
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(state.title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(AmberTheme.foreground)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                    .modifier(IslandTitleGlint(isActive: glintActive))
-
-                if let detail = state.detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                }
-            }
-
-            Spacer(minLength: 0)
+            Text(state.title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AmberTheme.foreground)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .contentTransition(.opacity)
+                .modifier(IslandTitleGlint(isActive: glintActive))
         }
-        .contentTransition(.opacity)
     }
 }
 
@@ -483,16 +447,5 @@ private struct IslandTitleGlint: ViewModifier {
         } else {
             content
         }
-    }
-}
-
-// MARK: - Morph transition（退役 72° 3D 翻转：几何连续 + 内容交叉淡化）
-
-private extension AnyTransition {
-    static var chatIslandMorph: AnyTransition {
-        .asymmetric(
-            insertion: .opacity.combined(with: .offset(y: 4)),
-            removal: .opacity.combined(with: .offset(y: -4))
-        )
     }
 }

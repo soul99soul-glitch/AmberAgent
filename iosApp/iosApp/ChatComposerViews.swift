@@ -263,29 +263,11 @@ struct ComposerDockCircleGlass: ViewModifier {
     }
 }
 
-struct ChatToolbarIconGlyph: View {
-    let systemImage: String
-    let symbolSize: CGFloat
-
-    var body: some View {
-        Image(systemName: systemImage)
-            .symbolRenderingMode(.monochrome)
-            .font(.system(size: symbolSize, weight: .semibold))
-            .foregroundStyle(Color(uiColor: .label))
-            .frame(
-                width: ChatTopBarLayout.toolbarButtonDiameter,
-                height: ChatTopBarLayout.toolbarButtonDiameter
-            )
-    }
-}
-
 struct ChatToolbarIconButton: View {
     let systemImage: String
     let accessibilityLabel: String
     var size: CGFloat
     var symbolSize: CGFloat
-    var showsGlyph = true
-    var onPressChanged: ((Bool) -> Void)? = nil
     let action: () -> Void
 
     var body: some View {
@@ -293,18 +275,15 @@ struct ChatToolbarIconButton: View {
             ZStack {
                 circleGlass
 
-                if showsGlyph {
-                    ChatToolbarIconGlyph(systemImage: systemImage, symbolSize: symbolSize)
-                }
+                Image(systemName: systemImage)
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: symbolSize, weight: .semibold))
+                    .foregroundStyle(Color(uiColor: .label))
             }
             .frame(width: size, height: size)
             .contentShape(Circle())
         }
-        .buttonStyle(AmberPressFeedbackStyle(
-            pressedScale: 0.9,
-            haptic: .lightImpact,
-            onPressChanged: onPressChanged
-        ))
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .lightImpact))
         .accessibilityLabel(accessibilityLabel)
     }
 
@@ -361,13 +340,14 @@ struct ContextRingButton: View {
             }
             .frame(width: 18, height: 18)
             .frame(width: 34, height: 34)
-            .contentShape(Circle())
             .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: snapshot.contextFillFraction)
             .animation(
                 reduceMotion ? nil : .linear(duration: 1.0).repeatForever(autoreverses: false),
                 value: rotates
             )
             .modifier(ComposerDockCircleGlass(tint: nil))
+            .frame(width: 44, height: 44)
+            .contentShape(Circle())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .selection))
         .onAppear { rotates = compactState.isActive && !reduceMotion }
@@ -731,12 +711,12 @@ enum ComposerReasoningOption: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .off: "关闭"
-        case .auto: "Auto"
-        case .low: "Low"
-        case .medium: "Medium"
-        case .high: "High"
-        case .xhigh: "X High"
-        case .max: "Max"
+        case .auto: "自动"
+        case .low: "低"
+        case .medium: "中"
+        case .high: "高"
+        case .xhigh: "极高"
+        case .max: "最高"
         }
     }
 

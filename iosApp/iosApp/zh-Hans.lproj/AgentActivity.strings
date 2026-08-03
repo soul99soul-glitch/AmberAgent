@@ -5,14 +5,14 @@
 "agent.activity.kind.web" = "网页任务";
 "agent.activity.kind.memory" = "记忆更新";
 "agent.activity.kind.command" = "命令任务";
-"agent.activity.kind.workflow" = "Agent 任务";
+"agent.activity.kind.workflow" = "智能任务";
 
-"agent.activity.stage.preparing" = "连接模型";
-"agent.activity.stage.thinking" = "思考中";
-"agent.activity.stage.searching" = "正在检索";
+"agent.activity.stage.preparing" = "正在准备";
+"agent.activity.stage.thinking" = "正在思考";
+"agent.activity.stage.searching" = "正在搜索";
 "agent.activity.stage.readingSources" = "正在阅读来源";
 "agent.activity.stage.readingWeb" = "正在阅读网页";
-"agent.activity.stage.generating" = "生成回复";
+"agent.activity.stage.generating" = "正在生成";
 "agent.activity.stage.generatingImage" = "正在生成图片";
 "agent.activity.stage.organizing" = "正在整理结果";
 "agent.activity.stage.readingDocument" = "正在读取文档";
@@ -36,17 +36,17 @@
 "agent.activity.fact.failed" = "未完成";
 "agent.activity.fact.cancelled" = "已停止";
 
-"agent.activity.compact.preparing" = "连接中";
-"agent.activity.compact.thinking" = "思考中";
-"agent.activity.compact.searching" = "检索中";
-"agent.activity.compact.readingSources" = "阅读中";
-"agent.activity.compact.readingWeb" = "读网页";
-"agent.activity.compact.generating" = "回复中";
-"agent.activity.compact.generatingImage" = "绘图中";
-"agent.activity.compact.organizing" = "整理中";
-"agent.activity.compact.readingDocument" = "读文档";
-"agent.activity.compact.updatingMemory" = "记忆中";
-"agent.activity.compact.runningTool" = "处理中";
+"agent.activity.compact.preparing" = "正在准备";
+"agent.activity.compact.thinking" = "正在思考";
+"agent.activity.compact.searching" = "正在搜索";
+"agent.activity.compact.readingSources" = "正在阅读";
+"agent.activity.compact.readingWeb" = "正在读网页";
+"agent.activity.compact.generating" = "正在生成";
+"agent.activity.compact.generatingImage" = "正在绘图";
+"agent.activity.compact.organizing" = "正在整理";
+"agent.activity.compact.readingDocument" = "正在读文档";
+"agent.activity.compact.updatingMemory" = "正在记忆";
+"agent.activity.compact.runningTool" = "正在处理";
 
 "agent.activity.metric.source.count" = "已查看 %ld 个来源";
 "agent.activity.metric.source.progress" = "%ld / %ld 个来源";

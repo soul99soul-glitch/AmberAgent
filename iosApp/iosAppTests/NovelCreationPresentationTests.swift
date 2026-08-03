@@ -117,6 +117,12 @@ final class NovelCreationPresentationTests: XCTestCase {
             NovelPresentation.stateSyncFailureMessage("The model returned malformed JSON."),
             "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
         )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "The fact synchronization was cancelled and can be retried."
+            ),
+            "剧情状态同步已取消，可以重试。"
+        )
     }
 
     func testPendingPresentationDistinguishesWaitingFromStreaming() {

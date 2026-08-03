@@ -352,14 +352,12 @@ enum AmberHaptics {
 struct AmberPressFeedbackStyle: ButtonStyle {
     var pressedScale: CGFloat = 0.96
     var haptic: AmberHapticEvent? = .lightImpact
-    var onPressChanged: ((Bool) -> Void)? = nil
 
     func makeBody(configuration: Configuration) -> some View {
         AmberPressFeedbackBody(
             configuration: configuration,
             pressedScale: pressedScale,
-            haptic: haptic,
-            onPressChanged: onPressChanged
+            haptic: haptic
         )
     }
 }
@@ -368,7 +366,6 @@ private struct AmberPressFeedbackBody: View {
     let configuration: ButtonStyleConfiguration
     let pressedScale: CGFloat
     let haptic: AmberHapticEvent?
-    let onPressChanged: ((Bool) -> Void)?
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -382,7 +379,6 @@ private struct AmberPressFeedbackBody: View {
                 value: configuration.isPressed
             )
             .onChange(of: configuration.isPressed) { _, isPressed in
-                onPressChanged?(isEnabled && isPressed)
                 defer { wasPressed = isPressed }
                 guard isEnabled, isPressed, !wasPressed, let haptic else { return }
                 AmberHaptics.trigger(haptic)
@@ -741,6 +737,7 @@ struct ConversationsView: View {
     @State private var renamingConversationId: KotlinUuid?
     @State private var renameDraft: String = ""
     @State private var deletingConversationId: KotlinUuid?
+    @State private var backgroundGenerationRevision = 0
 
     private var shortcuts: [ConversationShortcut] {
         [
@@ -853,6 +850,9 @@ struct ConversationsView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        .onReceive(NotificationCenter.default.publisher(for: .amberChatBackgroundJobDidTerminate)) { _ in
+            backgroundGenerationRevision &+= 1
+        }
         .alert("重命名会话", isPresented: Binding(
             get: { renamingConversationId != nil },
             set: { if !$0 { renamingConversationId = nil } }
@@ -1019,7 +1019,13 @@ struct ConversationsView: View {
     }
 
     private var conversationList: some View {
-        ForEach(filteredSummaries, id: \.id) { summary in
+        // `isLoading` is the observable foreground transition; background jobs
+        // publish their terminal transition through `backgroundGenerationRevision`.
+        // Reading both here keeps each row derived from the current owners rather
+        // than preserving the off-screen NavigationStack snapshot.
+        _ = chatViewModel.isLoading
+        _ = backgroundGenerationRevision
+        return ForEach(filteredSummaries, id: \.id) { summary in
             ConversationSummaryRow(
                 summary: summary,
                 isCurrent: conversationStore.currentConversation?.id == summary.id,

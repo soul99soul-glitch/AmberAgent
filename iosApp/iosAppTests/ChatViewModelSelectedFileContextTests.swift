@@ -385,6 +385,74 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertTrue(store.currentMessages.last?.toText().contains("OCR failed") == true)
     }
 
+    func testReloadClosesTerminalPendingToolWithoutActiveGeneration() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatTerminalPendingToolRecovery-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        await store.saveCurrent(messages: terminalPendingSearchMessages())
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+
+        viewModel.reloadFromStore()
+
+        let recoveredTool = try XCTUnwrap(
+            viewModel.messages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        let recoveredPayload = try jsonObject(
+            recoveredTool.output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+        )
+        XCTAssertEqual(recoveredPayload["cancelled"] as? Bool, true)
+        XCTAssertEqual(
+            recoveredPayload["reason"] as? String,
+            "The previous generation ended before the tool call completed."
+        )
+
+        for _ in 0..<100 {
+            let persistedTool = store.currentMessages
+                .flatMap(\.parts)
+                .compactMap { $0 as? UIMessagePart.Tool }
+                .first
+            if persistedTool?.output.isEmpty == false { break }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let persistedTool = try XCTUnwrap(
+            store.currentMessages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        XCTAssertFalse(persistedTool.output.isEmpty)
+    }
+
+    func testReloadKeepsTerminalPendingToolWhileGenerationOwnsConversation() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ChatActivePendingToolRecoveryGate-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        await store.saveCurrent(messages: terminalPendingSearchMessages())
+        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        viewModel.conversationStore = store
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+
+        viewModel.reloadFromStore()
+        try await Task.sleep(nanoseconds: 20_000_000)
+
+        let loadedTool = try XCTUnwrap(
+            viewModel.messages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        let persistedTool = try XCTUnwrap(
+            store.currentMessages.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+        XCTAssertTrue(loadedTool.output.isEmpty)
+        XCTAssertTrue(persistedTool.output.isEmpty)
+    }
+
     func testVisionRecognitionSuccessClearsTransientPendingPrompt() {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -992,6 +1060,36 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertTrue(output.contains("Bing snippet from chat approval."))
     }
 
+    func testCancellingSearchDoesNotStartFallbackRequest() async throws {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        sharedSettings.setEnableWebSearch(true)
+        sharedSettings.addSearchProvider(name: "Bing", serviceType: "bing_local")
+        sharedSettings.setSearchBuiltinDuckDuckGoEnabled(true)
+        let transport = CancellingChatSearchTransport()
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            searchTransport: transport,
+            autoGenerateResponses: false
+        )
+        let searchTask = Task { @MainActor in
+            await viewModel.searchToolApprovalOutputForTesting(
+                toolName: "search_web",
+                input: #"{"query":"amber agent","max_results":1}"#,
+                allow: true
+            )
+        }
+
+        await transport.waitUntilRequestStarted()
+        searchTask.cancel()
+        let output = await searchTask.value
+
+        XCTAssertEqual(transport.requests.count, 1, "取消不应被当作失败后继续发起备用搜索")
+        let payload = try jsonObject(output)
+        XCTAssertEqual(payload["reason"] as? String, "User cancelled.")
+        XCTAssertEqual(payload["cancelled"] as? Bool, true)
+    }
+
     func testSearchToolOutputReportsDisabledGateWithoutNetwork() async throws {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
         sharedSettings.setEnableWebSearch(false)
@@ -1347,6 +1445,68 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(imageOutput.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(), "tool loop exhausted")
     }
 
+    func testCompletedToolBatchStillDetectsAnUnavailableUnresolvedCall() throws {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        let runtime = ChatToolRuntime(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            localToolExecutor: nil,
+            searchTransport: ChatSearchTransport(responses: []),
+            mcpManager: IOSMcpManager(serverProvider: { [] })
+        )
+        let completedSearch = UIMessagePart.Tool(
+            toolCallId: "completed-search",
+            toolName: "search_web",
+            input: #"{"query":"swift concurrency"}"#,
+            output: [UIMessagePart.Text(text: "result", metadata: nil)],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let unavailableImage = UIMessagePart.Tool(
+            toolCallId: "unavailable-image",
+            toolName: "generate_image",
+            input: #"{"prompt":"amber icon"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let seed = UIMessage.companion.assistant(prompt: "")
+        let assistant = UIMessage(
+            id: seed.id,
+            role: seed.role,
+            parts: [completedSearch, unavailableImage],
+            annotations: seed.annotations,
+            createdAt: seed.createdAt,
+            finishedAt: seed.finishedAt,
+            modelId: seed.modelId,
+            usage: seed.usage,
+            translation: seed.translation
+        )
+        let messages = [UIMessage.companion.user(prompt: "run tools"), assistant]
+
+        XCTAssertNil(runtime.nextPendingToolCall(
+            in: messages,
+            availableToolNames: ["search_web"]
+        ))
+        XCTAssertTrue(runtime.hasUnresolvedToolCall(in: messages))
+
+        let failed = runtime.messagesByFailingPendingToolCalls(
+            in: messages,
+            outputText: "tool unavailable"
+        )
+        let failedImage = try XCTUnwrap(
+            failed.flatMap(\.parts)
+                .compactMap { $0 as? UIMessagePart.Tool }
+                .first { $0.toolCallId == "unavailable-image" }
+        )
+        XCTAssertEqual(
+            failedImage.output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined(),
+            "tool unavailable"
+        )
+    }
+
     func testFailingPendingToolCallsSeesSearchToolWhenSearchGateDisabled() throws {
         let harness = makeGenerationCoordinatorHarness(
             transport: ChatSearchTransport(responses: []),
@@ -1604,6 +1764,31 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         message.parts
             .compactMap { ($0 as? UIMessagePart.Text)?.text }
             .joined(separator: "\n")
+    }
+
+    private func terminalPendingSearchMessages() -> [UIMessage] {
+        let tool = UIMessagePart.Tool(
+            toolCallId: "terminal-pending-search",
+            toolName: "search_web",
+            input: #"{"query":"amber"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let seed = UIMessage.companion.assistant(prompt: "")
+        let assistant = UIMessage(
+            id: seed.id,
+            role: seed.role,
+            parts: [tool],
+            annotations: seed.annotations,
+            createdAt: seed.createdAt,
+            finishedAt: chatNowLocalDateTime(),
+            modelId: seed.modelId,
+            usage: seed.usage,
+            translation: seed.translation
+        )
+        return [UIMessage.companion.user(prompt: "search"), assistant]
     }
 
     private func jsonObject(_ text: String) throws -> [String: Any] {
@@ -2013,6 +2198,53 @@ private final class BlockingChatSearchTransport: IOSSearchHTTPTransport {
         return try await withCheckedThrowingContinuation { continuation in
             responseContinuation = continuation
         }
+    }
+}
+
+@MainActor
+private final class CancellingChatSearchTransport: IOSSearchHTTPTransport {
+    private var didStartRequest = false
+    private var requestStartedContinuation: CheckedContinuation<Void, Never>?
+    private var responseContinuation: CheckedContinuation<(HTTPURLResponse, Data), Error>?
+    private(set) var requests: [URLRequest] = []
+
+    func waitUntilRequestStarted() async {
+        guard !didStartRequest else { return }
+        await withCheckedContinuation { continuation in
+            requestStartedContinuation = continuation
+        }
+    }
+
+    func send(_ request: URLRequest) async throws -> (HTTPURLResponse, Data) {
+        requests.append(request)
+        if requests.count > 1 {
+            let response = HTTPURLResponse(
+                url: request.url ?? URL(string: "https://example.com")!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/html; charset=utf-8"]
+            )!
+            return (response, Data("<html><body></body></html>".utf8))
+        }
+
+        didStartRequest = true
+        requestStartedContinuation?.resume()
+        requestStartedContinuation = nil
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                responseContinuation = continuation
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelFirstRequest()
+            }
+        }
+    }
+
+    private func cancelFirstRequest() {
+        guard let continuation = responseContinuation else { return }
+        responseContinuation = nil
+        continuation.resume(throwing: CancellationError())
     }
 }
 

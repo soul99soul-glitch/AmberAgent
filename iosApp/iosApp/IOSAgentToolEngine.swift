@@ -333,9 +333,15 @@ public struct IOSPendingToolApproval: Sendable {
 /// single coroutine, so there is no concurrent access despite Swift 6's
 /// (conservative) inability to prove it.
 private final class StreamStepState: @unchecked Sendable {
+    struct AssistantUpdate {
+        let text: String?
+        let stage: AgentActivityStage?
+    }
+
     let accumulator: MessageStreamAccumulator
     private let lock = NSLock()
     private var assistantText = ""
+    private var assistantStage: AgentActivityStage?
     private var finishReason: String?
     private var continuation: CheckedContinuation<MessageChunk, Error>?
     private var job: Kotlinx_coroutines_coreJob?
@@ -344,29 +350,49 @@ private final class StreamStepState: @unchecked Sendable {
 
     init(accumulator: MessageStreamAccumulator) { self.accumulator = accumulator }
 
-    func appendAssistantTextDelta(from chunk: MessageChunk) -> String? {
+    func appendAssistantDelta(from chunk: MessageChunk) -> AssistantUpdate {
         lock.lock()
         defer { lock.unlock() }
-        var changed = false
+        var textChanged = false
+        var hasReasoningDelta = false
+        var hasTextDelta = false
         for choice in chunk.choices {
             if let reason = choice.finishReason {
                 finishReason = reason
             }
             if let delta = choice.delta, delta.role == MessageRole.assistant {
+                hasReasoningDelta = hasReasoningDelta || Self.hasReasoning(in: delta)
+                hasTextDelta = hasTextDelta || Self.hasText(in: delta)
                 let deltaText = Self.text(in: delta)
                 if !deltaText.isEmpty {
                     assistantText += deltaText
-                    changed = true
+                    textChanged = true
                 }
             } else if let message = choice.message, message.role == MessageRole.assistant {
+                hasReasoningDelta = hasReasoningDelta || Self.hasReasoning(in: message)
+                hasTextDelta = hasTextDelta || Self.hasText(in: message)
                 let fullText = Self.text(in: message)
                 if !fullText.isEmpty {
                     assistantText = fullText
-                    changed = true
+                    textChanged = true
                 }
             }
         }
-        return changed && !assistantText.isEmpty ? assistantText : nil
+        var publishedStage: AgentActivityStage?
+        if let candidate = AgentActivityResponseStagePolicy.updatedStage(
+            hasReasoningDelta: hasReasoningDelta,
+            hasTextDelta: hasTextDelta
+        ), let nextStage = AgentActivityResponseStagePolicy.nextPublishedStage(
+            current: assistantStage,
+            candidate: candidate
+        ) {
+            assistantStage = nextStage
+            publishedStage = nextStage
+        }
+        return AssistantUpdate(
+            text: textChanged && !assistantText.isEmpty ? assistantText : nil,
+            stage: publishedStage
+        )
     }
 
     func terminalFinishReason() -> String? {
@@ -452,6 +478,20 @@ private final class StreamStepState: @unchecked Sendable {
     private static func text(in message: UIMessage) -> String {
         message.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
     }
+
+    private static func hasText(in message: UIMessage) -> Bool {
+        message.parts.contains {
+            guard let text = $0 as? UIMessagePart.Text else { return false }
+            return !text.text.isEmpty
+        }
+    }
+
+    private static func hasReasoning(in message: UIMessage) -> Bool {
+        message.parts.contains {
+            guard let reasoning = $0 as? UIMessagePart.Reasoning else { return false }
+            return !reasoning.reasoning.isEmpty
+        }
+    }
 }
 
 public final class IOSAgentToolEngine: @unchecked Sendable {
@@ -506,6 +546,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
+        onAssistantStage: (@Sendable (AgentActivityStage) -> Void)?,
         onAssistantText: (@Sendable (String) -> Void)?
     ) async throws -> MessageChunk {
         // Non-streaming providers (e.g. test doubles) do a single blocking
@@ -559,7 +600,11 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     params: requestParams,
                     onChunk: { chunk in
                         state.accumulator.append(chunk: chunk)
-                        if let text = state.appendAssistantTextDelta(from: chunk) {
+                        let update = state.appendAssistantDelta(from: chunk)
+                        if let stage = update.stage {
+                            onAssistantStage?(stage)
+                        }
+                        if let text = update.text {
                             onAssistantText?(text)
                         }
                     },
@@ -614,7 +659,9 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onAssistantTurnStarted: (@Sendable () -> Void)? = nil,
+        onAssistantTurnStarted: (@MainActor @Sendable () async -> Void)? = nil,
+        onToolExecutionStarted: (@MainActor @Sendable (String) async -> Void)? = nil,
+        onAssistantStage: (@Sendable (AgentActivityStage) -> Void)? = nil,
         onAssistantText: (@Sendable (String) -> Void)? = nil
     ) async -> IOSAgentToolEngineResult {
         var working = messages
@@ -640,9 +687,19 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         // already started, not a fresh reasoning round.
         let preExistingResult = await executePreExistingPendingTools(
             in: working,
-            loopGuard: &loopGuard
+            loopGuard: &loopGuard,
+            onToolExecutionStarted: onToolExecutionStarted
         )
         working = preExistingResult.messages
+        if preExistingResult.wasCancelled {
+            return IOSAgentToolEngineResult(
+                messages: working,
+                stepsExecuted: 0,
+                pendingApproval: nil,
+                hitStepLimit: false,
+                wasCancelled: true
+            )
+        }
         if preExistingResult.guardStopped {
             return IOSAgentToolEngineResult(
                 messages: working,
@@ -655,12 +712,28 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
 
         while steps < configuration.maxSteps {
             let chunk: MessageChunk
-            onAssistantTurnStarted?()
+            let cancelledBeforeProvider: Bool
+            if Task.isCancelled {
+                cancelledBeforeProvider = true
+            } else {
+                await onAssistantTurnStarted?()
+                cancelledBeforeProvider = Task.isCancelled
+            }
+            if cancelledBeforeProvider {
+                return IOSAgentToolEngineResult(
+                    messages: working,
+                    stepsExecuted: steps,
+                    pendingApproval: nil,
+                    hitStepLimit: false,
+                    wasCancelled: true
+                )
+            }
             do {
                 chunk = try await streamStep(
                     providerSetting: providerSetting,
                     messages: working,
                     params: params,
+                    onAssistantStage: onAssistantStage,
                     onAssistantText: onAssistantText
                 )
             } catch is CancellationError {
@@ -769,7 +842,22 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             // Execute every pending tool in this turn (batch), then fill all
             // of them in place before the next round — mirrors Android's
             // AgentToolDispatcher.executeBatch.
-            let batchResult = await executeBatch(pendingTools, isUserInitiated: false, loopGuard: &loopGuard)
+            let batchResult = await executeBatch(
+                pendingTools,
+                isUserInitiated: false,
+                loopGuard: &loopGuard,
+                onToolExecutionStarted: onToolExecutionStarted
+            )
+            if batchResult.wasCancelled {
+                working = applyToolOutputs(batchResult.outputs, to: working)
+                return IOSAgentToolEngineResult(
+                    messages: working,
+                    stepsExecuted: steps + 1,
+                    pendingApproval: nil,
+                    hitStepLimit: false,
+                    wasCancelled: true
+                )
+            }
             if let approval = batchResult.pendingApproval, configuration.honorApprovalPause {
                 return IOSAgentToolEngineResult(
                     messages: working,
@@ -815,7 +903,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         var loopGuard = IOSToolLoopGuard()
         return await executePreExistingPendingTools(
             in: messages,
-            loopGuard: &loopGuard
+            loopGuard: &loopGuard,
+            onToolExecutionStarted: nil
         ).messages
     }
 
@@ -863,11 +952,13 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     private struct PreExistingExecutionResult {
         let messages: [UIMessage]
         let guardStopped: Bool
+        let wasCancelled: Bool
     }
 
     private func executePreExistingPendingTools(
         in messages: [UIMessage],
-        loopGuard: inout IOSToolLoopGuard
+        loopGuard: inout IOSToolLoopGuard,
+        onToolExecutionStarted: (@MainActor @Sendable (String) async -> Void)?
     ) async -> PreExistingExecutionResult {
         let preExisting = messages.flatMap { message -> [UIMessagePart.Tool] in
             guard message.role == MessageRole.assistant else { return [] }
@@ -882,9 +973,18 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         // simply ignored.
         let executable = preExisting.filter { executors[$0.toolName] != nil }
         guard !executable.isEmpty else {
-            return PreExistingExecutionResult(messages: messages, guardStopped: false)
+            return PreExistingExecutionResult(
+                messages: messages,
+                guardStopped: false,
+                wasCancelled: false
+            )
         }
-        let batchResult = await executeBatch(executable, isUserInitiated: false, loopGuard: &loopGuard)
+        let batchResult = await executeBatch(
+            executable,
+            isUserInitiated: false,
+            loopGuard: &loopGuard,
+            onToolExecutionStarted: onToolExecutionStarted
+        )
         // honorApprovalPause is irrelevant here: pre-existing tools handed off
         // from the foreground are not user-initiated prompts, and a background
         // run cannot surface an approval card. A .needsApproval outcome is
@@ -892,7 +992,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         // where the normal loop honors approvalPause per configuration).
         return PreExistingExecutionResult(
             messages: applyToolOutputs(batchResult.outputs, to: messages),
-            guardStopped: batchResult.guardStopped
+            guardStopped: batchResult.guardStopped,
+            wasCancelled: batchResult.wasCancelled
         )
     }
 
@@ -906,12 +1007,16 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         /// explanation; remaining tools in the batch are left unfilled (same
         /// "leave the rest for the caller to decide" shape as `firstApproval`).
         let guardStopped: Bool
+        /// The task was cancelled after durable setup but before the next
+        /// executor could begin, so no further tool/model work should start.
+        let wasCancelled: Bool
     }
 
     private func executeBatch(
         _ tools: [UIMessagePart.Tool],
         isUserInitiated: Bool,
-        loopGuard: inout IOSToolLoopGuard
+        loopGuard: inout IOSToolLoopGuard,
+        onToolExecutionStarted: (@MainActor @Sendable (String) async -> Void)?
     ) async -> BatchExecutionResult {
         var outputs: [(UIMessagePart.Tool, [UIMessagePart])] = []
         var firstApproval: IOSPendingToolApproval?
@@ -992,6 +1097,30 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
 
             let executor = executors[tool.toolName]
             let result: IOSAgentToolOutcome
+            let cancelledBeforeExecution: Bool
+            if Task.isCancelled {
+                cancelledBeforeExecution = true
+            } else {
+                if executor != nil {
+                    await onToolExecutionStarted?(tool.toolName)
+                }
+                cancelledBeforeExecution = Task.isCancelled
+            }
+            if cancelledBeforeExecution {
+                if let ledger, let ledgerRunId {
+                    await ledger.recordToolCallFinished(
+                        runId: ledgerRunId,
+                        toolCallId: tool.toolCallId,
+                        outcome: "cancelled_before_execution"
+                    )
+                }
+                return BatchExecutionResult(
+                    outputs: outputs,
+                    pendingApproval: nil,
+                    guardStopped: false,
+                    wasCancelled: true
+                )
+            }
             if let executor {
                 result = await executor.execute(
                     name: tool.toolName,
@@ -1049,7 +1178,12 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             }
         }
 
-        return BatchExecutionResult(outputs: outputs, pendingApproval: firstApproval, guardStopped: guardStopped)
+        return BatchExecutionResult(
+            outputs: outputs,
+            pendingApproval: firstApproval,
+            guardStopped: guardStopped,
+            wasCancelled: false
+        )
     }
 
     /// Rebuilds the message list with tool outputs filled in place. Replaces

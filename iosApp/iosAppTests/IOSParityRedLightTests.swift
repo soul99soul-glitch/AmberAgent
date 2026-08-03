@@ -18,6 +18,111 @@ import XCTest
 @MainActor
 final class IOSParityRedLightTests: XCTestCase {
 
+    func testChatBackButtonPopsTheAppRouterPath() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let chat = try String(
+            contentsOf: appDirectory.appendingPathComponent("ChatView.swift"),
+            encoding: .utf8
+        )
+
+        guard let start = chat.range(of: "private var backToolbarButton") else {
+            return XCTFail("Expected the Chat back button")
+        }
+        let backButton = chat[start.lowerBound...]
+        XCTAssertTrue(backButton.contains("router.goBack()"))
+        XCTAssertFalse(backButton.prefix(900).contains("dismiss()"))
+    }
+
+    func testRouterPathGoBackRemovesOnlyTheTopRoute() {
+        let router = RouterPath()
+        router.path = [.chat, .settings]
+
+        router.goBack()
+
+        XCTAssertEqual(router.path, [.chat])
+    }
+
+    func testConversationListInvalidatesForForegroundAndBackgroundGenerationTermination() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let home = try String(
+            contentsOf: appDirectory.appendingPathComponent("PlaceholderViews.swift"),
+            encoding: .utf8
+        )
+
+        guard let start = home.range(of: "struct ConversationsView: View") else {
+            return XCTFail("Expected ConversationsView")
+        }
+        let conversations = home[start.lowerBound...]
+        XCTAssertTrue(conversations.contains("_ = chatViewModel.isLoading"))
+        XCTAssertTrue(conversations.contains(".amberChatBackgroundJobDidTerminate"))
+        XCTAssertTrue(conversations.contains("backgroundGenerationRevision &+= 1"))
+    }
+
+    func testForegroundToolBatchDrainsBeforeOneModelContinuationAndLimitDisablesTools() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let coordinator = try String(
+            contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        guard let start = coordinator.range(of: "private func continueAfterToolResult(") else {
+            return XCTFail("Expected one continuation owner after a tool result")
+        }
+        let continuation = coordinator[start.lowerBound...]
+        let pending = try XCTUnwrap(continuation.range(of: "toolRuntime.nextPendingToolCall("))
+        let unresolved = try XCTUnwrap(continuation.range(of: "toolRuntime.hasUnresolvedToolCall("))
+        let stream = try XCTUnwrap(continuation.range(of: "prepareAndStartStreaming("))
+        XCTAssertLessThan(pending.lowerBound, stream.lowerBound)
+        XCTAssertLessThan(pending.lowerBound, unresolved.lowerBound)
+        XCTAssertLessThan(unresolved.lowerBound, stream.lowerBound)
+        XCTAssertTrue(continuation.prefix(7000).contains("continuationParamsAfterToolExecution("))
+        XCTAssertTrue(coordinator.contains("tools: []"))
+    }
+
+    func testToolContinuationParamsDisableToolsOnlyAtTheExecutionLimit() {
+        let model = Model(
+            modelId: "test-model",
+            displayName: "Test Model",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let params = TextGenerationParams(
+            model: model,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [ToolKt.createSearchWebToolDeclaration()],
+            reasoningLevel: ReasoningLevel.off,
+            customHeaders: [],
+            customBody: []
+        )
+
+        let beforeLimit = ChatGenerationCoordinator.continuationParamsAfterToolExecution(
+            params,
+            resumeCount: 3,
+            maxResumeCount: 4
+        )
+        let atLimit = ChatGenerationCoordinator.continuationParamsAfterToolExecution(
+            params,
+            resumeCount: 4,
+            maxResumeCount: 4
+        )
+
+        XCTAssertEqual(beforeLimit.tools.map(\.name), params.tools.map(\.name))
+        XCTAssertTrue(atLimit.tools.isEmpty)
+    }
+
     // MARK: - shared fixtures
 
     /// A Claude provider as it would be constructed for a user who selected
@@ -1333,6 +1438,24 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertTrue(cancelledState.isExpired)
         XCTAssertFalse(cancelledState.reserveTerminal())
         XCTAssertFalse(cancelledState.cancelAndReserveTerminal())
+    }
+
+    func testBackgroundTerminalReservationStopsRunningPresentations() {
+        let expiredState = IOSChatBackgroundRunState()
+        let cancelledState = IOSChatBackgroundRunState()
+        let completedState = IOSChatBackgroundRunState()
+
+        XCTAssertTrue(expiredState.allowsRunningPresentation)
+        XCTAssertTrue(cancelledState.allowsRunningPresentation)
+        XCTAssertTrue(completedState.allowsRunningPresentation)
+
+        XCTAssertEqual(expiredState.expireAndReserveTerminal(), .persistFailure)
+        XCTAssertTrue(cancelledState.cancelAndReserveTerminal())
+        XCTAssertTrue(completedState.reserveTerminal())
+
+        XCTAssertFalse(expiredState.allowsRunningPresentation)
+        XCTAssertFalse(cancelledState.allowsRunningPresentation)
+        XCTAssertFalse(completedState.allowsRunningPresentation)
     }
 
     func testBackgroundCancellationCancelsTheInstalledOperationTask() {

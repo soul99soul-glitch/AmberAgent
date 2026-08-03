@@ -263,7 +263,8 @@ final class ChatViewModel {
 
     var isGenerationActiveForCurrentConversation: Bool {
         guard let currentConversationId else { return false }
-        if let activeConversationId = generationCoordinator.activeConversationId,
+        if generationCoordinator.isRunning,
+           let activeConversationId = generationCoordinator.activeConversationId,
            String(describing: currentConversationId) == String(describing: activeConversationId) {
             return true
         }
@@ -274,7 +275,8 @@ final class ChatViewModel {
 #if DEBUG
         if generationActiveOverrideForTesting?(conversationId) == true { return true }
 #endif
-        if let activeConversationId = generationCoordinator.activeConversationId,
+        if generationCoordinator.isRunning,
+           let activeConversationId = generationCoordinator.activeConversationId,
            String(describing: conversationId) == String(describing: activeConversationId) {
             return true
         }
@@ -605,10 +607,58 @@ final class ChatViewModel {
     func reloadFromStore(reason: ChatMessageUpdateReason = .initialLoad) {
         guard let store = conversationStore else { return }
         invalidateSuggestionRequest()
-        messages = store.currentMessages
+        let storedMessages = store.currentMessages
+        messages = messagesByTerminatingStaleSearches(in: storedMessages, store: store) ?? storedMessages
         contextCompactState = .idle
         bumpMessageRevision(reason: reason)
         chatSuggestions = []
+    }
+
+    private func messagesByTerminatingStaleSearches(
+        in storedMessages: [UIMessage],
+        store: IOSConversationStore
+    ) -> [UIMessage]? {
+        guard let conversationId = store.currentConversation?.id,
+              !isGenerationActive(conversationId: conversationId) else {
+            return nil
+        }
+        let pendingSearches = storedMessages.flatMap { message -> [UIMessagePart.Tool] in
+            guard message.role == MessageRole.assistant, message.finishedAt != nil else { return [] }
+            return message.parts.compactMap { $0 as? UIMessagePart.Tool }.filter {
+                IOSSearchExecutor.supportedToolNames.contains($0.toolName) && $0.output.isEmpty
+            }
+        }
+        guard !pendingSearches.isEmpty else { return nil }
+
+        let runtime = ChatToolRuntime(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettings,
+            localToolExecutor: localToolExecutor,
+            searchTransport: searchTransport,
+            mcpManager: mcpManager
+        )
+        let recoveredMessages = pendingSearches.reduce(storedMessages) { messages, toolCall in
+            runtime.messagesByFinishingToolCall(
+                toolCall,
+                outputText: ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: toolCall.toolName,
+                    reason: "The previous generation ended before the tool call completed.",
+                    cancelled: true
+                ),
+                in: messages
+            )
+        }
+        let writeBaseline = store.writeBaseline(for: conversationId)
+        Task { @MainActor [weak self, weak store] in
+            guard let self, let store,
+                  !self.isGenerationActive(conversationId: conversationId) else { return }
+            _ = await store.save(
+                messages: recoveredMessages,
+                to: conversationId,
+                ifUnchangedSince: writeBaseline
+            )
+        }
+        return recoveredMessages
     }
 
     func terminateRecoveredPendingApprovals(

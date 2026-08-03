@@ -139,8 +139,9 @@ struct NovelChapterReaderView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(width: 40, height: 40)
-                .contentShape(Circle())
                 .modifier(ComposerDockCircleGlass(tint: nil))
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .buttonBorderShape(.circle)
@@ -181,7 +182,7 @@ struct NovelChapterReaderView: View {
             HStack(spacing: 9) {
                 Label(recovery, systemImage: "exclamationmark.arrow.triangle.2.circlepath")
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(AmberTheme.accentAmber)
+                    .foregroundStyle(AmberTheme.foreground2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button("重试同步") {
                     guard let projectID = viewModel.selectedProjectID,
@@ -209,7 +210,7 @@ struct NovelChapterReaderView: View {
         } else if isCurrentChapterDiscarded {
             Label("已废弃 · 不进入后续生成上下文", systemImage: "archivebox.fill")
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 9)

@@ -1029,6 +1029,12 @@ final class ChatToolRuntime {
     }
 
     private func dispatchSearchToolCall(_ toolCall: UIMessagePart.Tool) async -> String {
+        guard sharedSettings.snapshot.enableWebSearch else {
+            return ChatToolOutputFormatter.toolFailureJSON(
+                toolName: toolCall.toolName,
+                reason: "Web search is disabled in settings."
+            )
+        }
         do {
             if toolCall.toolName == "search_web" {
                 return try await executeSearchWebWithFallback(toolCall)
@@ -1038,6 +1044,12 @@ final class ChatToolRuntime {
                 toolInput: toolCall.input,
                 settings: sharedSettings.snapshot,
                 transport: searchTransport
+            )
+        } catch is CancellationError {
+            return ChatToolOutputFormatter.toolFailureJSON(
+                toolName: toolCall.toolName,
+                reason: "User cancelled.",
+                cancelled: true
             )
         } catch {
             return ChatToolOutputFormatter.toolFailureJSON(
@@ -1079,7 +1091,10 @@ final class ChatToolRuntime {
                 results: execution.results,
                 selection: execution.selection
             )
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            try Task.checkCancellation()
             guard let fallbackSelection = chatSearchFallbackSelection(
                 after: initialSelection,
                 settings: settings,

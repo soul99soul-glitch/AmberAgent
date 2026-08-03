@@ -1,15 +1,15 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-07-31
+Last updated: 2026-08-03
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
 ## Repository
 
-- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
+- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 当前有一组尚未提交的小说创作阻塞与易用性修复，覆盖项目读取、恢复隔离、任务 owner、状态同步、批量润色、编辑器与后台生命周期及对应测试；开始新任务仍以实时 `git status` 为准。
+- Worktree: 当前为混合脏工作区，小说交互修复、OpenAI SSE UTF-8 修复与 Chat 流式滚动修复共存；三者大部分文件范围独立，开始新任务仍以实时 `git status` 和单文件 diff 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -18,9 +18,113 @@ Last updated: 2026-07-31
 
 iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三路 review 确认项已完成修复并通过自动化门禁。Quick Start 现按主要角色生成独立建议，导入/Fork/撤销/分支切换等调用链不再靠隐式状态猜成功。S4 持久化压缩等待 V2 项目 schema。iOS 真实 provider、真机交互和系统 Files 交互仍是外部运行证据缺口。
 
-默认可用路径是 `NativeChatTimelineView`（native timeline；2026-07-30 退役 route 判定层后为唯一 Chat 列表路径）。`ChatSwiftUIMessageList` 与 UIKit `ChatCollectionMessageList` 已生产不可达（仅 `#if CHAT_PERF_REPLAY` 仍编译前者），其 replay 测试现为死路径测试，不再代表默认 Chat 门禁；默认路径验证应以走 native timeline 的回放为准，各 replay 测试直驱哪个视图、强制门禁是否仍覆盖默认路径待下一切口核对。
+默认可用路径是 `NativeChatTimelineView`（native timeline；2026-07-30 退役 route 判定层后为唯一 Chat 列表路径）。`ChatSwiftUIMessageList` 与 UIKit `ChatCollectionMessageList` 已生产不可达（仅 `#if CHAT_PERF_REPLAY` 仍编译前者），不再代表默认 Chat 门禁；`ChatSwiftUIStreamReplayTests` 已改为直接挂载当前 Native timeline，`ChatStreamReplayTests` 仅保留非默认 UICollectionView 回归价值。
 
 ## Latest Completed Slices
+
+### 2026-08-03 锁屏/灵动岛布局与系统卡取消闭环（未提交）
+
+- 真机截图中的锁屏纯黑卡对应 Widget 曾显式施加的半透明黑色 `activityBackgroundTint`；现移除自定义 tint，交回系统自适应材质，锁屏根视图仍固定包含 glyph 与 headline。展开岛不再把 orb、标题和计时拆给独立系统 region，而用单一 `.bottom` HStack 将 40pt 星核、12pt 间距、标题/计时首行与阶段次行放在同一坐标系，文字列只做规格要求的 `+1pt` 光学下移；TrueDepth 顶部保留带由系统控制，代码没有额外 top padding 或 spacer。compact/minimal 在系统不给连续动画预算时改用单色语义 SF Symbol，不再展示像动效中间截帧的静态点阵；expanded/锁屏运行态仍按 stage 复用 Chat 六套星核，并以不超过 2 秒的完整一轮在 resting phase 收口。
+- subagent 调用链 review 另确认 `BGContinuedProcessingTask` 会生成独立系统 Live Activity，且用户划掉该系统卡也会进入 expiration handler。保活层现只在 UIKit 短窗口先到期时触发既有后台交接；系统卡取消/终止则走专用回调，普通回复、生图、审批恢复三条 Chat 入口都按 owned `runId` 调用 `cancel(runId:)`，不会再把用户取消反向交接/重启。`.keepalive.<runId>` 与切会话后的 `.chat.<runId>` 请求仍可能短暂重叠，属需重新界定后台 owner 寿命的独立 P2，本轮不以额外状态或 UI 补偿扩修。
+- 新系统卡取消 wiring 用例在旧实现稳定出现 6 处红灯；修复后首次合跑又捕获双可选闭包导致 trailing closure 绑定错位，调整参数顺序后 `BackgroundGenerationKeepAliveTests` 与定点 wiring 转绿。最终 `AgentActivityPresentationTests + AgentActivityDeepLinkTests + BackgroundGenerationKeepAliveTests + 5 条系统 Activity wiring` 在 iPhone 17 Pro Simulator 合跑 exit 0，`git diff --check` 通过；两路最终只读 subagent 对视觉与调用链均未发现新增 P0/P1/P2。最终 Debug 真机包通过 `codesign --verify --deep --strict`，主二进制 SHA-256 为 `3c51b71e2969e0973fe870c8dbca6e98afabd4954a03b05442a09850f39b80e9`，02:12 已无线覆盖安装到 iPhone Air 的 `85731B44-33AC-4B52-A4FC-7BFD2873D473/iosApp.app`；自动启动因设备锁屏被系统拒绝，因此最新岛体观感与真实 BGCPT cancel/expiration 回调仍需解锁后触发一次真实生成验证。
+
+### 2026-08-02 系统灵动岛灰度状态设计收敛（未提交）
+
+- ActivityKit Dynamic Island 按系统原生区域布局：compact 为 20pt orb + 单行中文短状态，minimal 为 17pt orb；expanded 由 `.leading` 的 32pt orb、`.center` 的「会话标题 + 阶段」和 `.trailing` 的等宽计时组成。锁屏卡片使用 16pt semibold 会话标题、12pt 次级阶段文案与同基线计时；运行态计时继续实时增长，completed/failed/cancelled 以该次 ContentState 的 `updatedAt` 冻结，不再在完成后继续计时。普通 `.openTask` 不重复显示「打开对话」，两处根级 `widgetURL` 仍保留整卡点击。
+- orb 继续复用 Chat 的纯绘制引擎及六态映射：等待/重连 `listening`、思考 `working`、生成 `composing`、搜索/网页读取 `searching`、图片生成 `shaping`、其他工具 `solving`。Widget 仍只播放由 `displayPhase + displayStage` 触发的有限 `KeyframeAnimator`；每次时长不超过 2 秒，低速状态改为推进部分相位而非统一强制整圈，因此六态实际角速度与 `orbResolvePreset(...).speed` 一致。没有 token 驱动、周期 `Activity.update` 或无限动画；Reduce Motion / Always-On 下保持静态，尺寸、边距和灰度样式未改。
+- `AgentLiveActivityController` 已从单一全局 activity slot 收敛为按 `runId` 独立持有，恢复时只保留每个 owned run 的最新 Activity；结束一个 run 不再误终止并发的另一个 run。后台阶段事件继续用单一 `AsyncStream` 串行发布，但 `IOSChatBackgroundRunState` 的既有 terminal owner 现同时作为运行态发布门禁；系统 expiration 的 claim/finalize 已移入 MainActor，与 Watch/Live Activity 发布线性化，cancel/expiration/completion 后排队中的 thinking/generating/tool 事件不会反向覆盖终态。
+- `widgetURL/AppShell` 深链在两个 suspension point 后均复核 target identity，并复用只在真实切会话时递增的 `conversationSwitchedRevision` 作为提交前提；会话存储在磁盘 load 完成、真正切换 current 之前再执行同一 `commitIf`。因此旧任务既不会清除新 target，也不会在用户手动切到另一会话后把 UI 抢回旧会话。subagent 另发现前台多工具批次的正交 fail-closed 缺口：已执行可用工具后若仍有未启用的空输出工具，现于续流前复用 `hasUnresolvedToolCall → failPendingToolCalls`，不会再被 provider 序列化静默丢弃；未新增工具状态或终态出口。
+- 定点测试均先红后绿；最终 `AgentActivityPresentationTests + AgentActivityDeepLinkTests + IOSAgentToolEngineTests + IOSChatBackgroundSuspensionTests + IOSConversationStoreTests + ChatViewModelSelectedFileContextTests + IOSParityRedLightTests + 5 条 wiring canary` 在 iPhone 17 Pro / iOS 26.5 Simulator 为 **208 passed / 0 failed / 0 skipped**（`Test-iosApp-2026.08.02_23-06-47-+0800.xcresult`）。前一次合跑曾有一条正交用例被系统 signal kill，隔离与完整复跑均通过；没有调整断言。`AmberAgentActivityWidget` arm64/x86_64 Simulator target 独立构建成功，三路最终只读 subagent review 未发现剩余 P0-P2。2026-08-02 23:08 最终真机 Debug 包已通过 `codesign --verify --deep --strict`，Team `89QRFX9548`，主二进制 SHA-256 为 `f0d8fa27f1b4781846466dbf77a9e8015cc6affe7018271ef04f71c76bc9fbd8`；2026-08-03 00:30 已无线覆盖安装到 iPhone Air，CoreDevice 确认容器为 `94F46CFB-7D36-4A80-8EF4-88E1B4B803BE/iosApp.app`。本次未自动启动，裁切、长按展开与动画观感仍需设备内实际触发确认。
+
+### 2026-08-02 小说 Session 同步取消文案与重试按钮尺寸（未提交）
+
+- 真机截图中的英文来自 `NovelFactTransactionLifecycle.factFailureMessage` 对取消终态写入的硬编码英文，且该文案已经持久化到待重试记录，覆盖安装后仍会继续显示。后续 review 发现真实同步取消会先被结构化执行器包装为 `code == "cancelled"`，原实现会绕过裸 `CancellationError` 分支，持久化英文或错误领域的「讨论归档已取消。」；现只在剧情同步生命周期边界按该错误码统一写入「剧情状态同步已取消，可以重试。」，其他结构化错误保持原文。展示层同时只兼容映射这一条旧英文记录，不批量重写存储，也不增加通用翻译兜底。
+- 「重新生成」变大不是 Dynamic Type，而是 44pt 点击热区被放进 `.bordered` 按钮的 `Label` 内，系统背景随标签一起被撑高。现把 44pt frame/content shape 移到按钮样式外层，视觉仍使用 `.controlSize(.small)`，禁用语义、按钮标题和可点击热区保持不变。
+- 结构化取消回归先稳定红灯，实际捕获持久化文案「讨论归档已取消。」，最小修复后转绿；同时断言非取消的结构化失败仍保留原文。`IOSNovelCreationWiringTests + NovelCreationPresentationTests + NovelFactTransactionLifecycleTests + NovelSessionReplayTests + NovelSessionBottomAnchorProbeTests + NovelCreationViewModelTests` 在 iPhone 17 Pro / iOS 26.5 Simulator **208 passed / 0 failed / 0 skipped**，`git diff --check` 通过。2026-08-02 11:52 当前混合工作区已完成 iPhone Air Debug 构建并通过 `codesign --verify --deep --strict`，主二进制 SHA-256 为 `55d75d3dfe94d89c28fe62606d958f18322f45a65d78f6365d8a0a99d6b36409`；无线覆盖安装后设备记录确认路径为 `CCA6EC67-D46A-4844-8086-B1DB4EEBEFEB/iosApp.app`，自动启动仅因设备锁屏被系统拒绝，取消横幅与按钮最终观感仍待解锁后真机触发确认。
+
+### 2026-08-01 Chat 思考正文逐词淡入与连续滚动（未提交）
+
+- 真实 `ChatReasoningCard` UIWindow 回放确认「生硬」包含两条同层根因：`ChatReasoningBodyTextView` 每个 48ms chunk 都以 `textView.text = 全文` 重建正文，新增词直接以 100% opacity 跳出；随后一次异步 `setContentOffset` 又把内层思考区整段拉到底。旧实现无任何新增词 alpha 过渡，单帧 offset 最大跳变 `248pt`，同场景 display-link p95/max 为 `16.67/92.65ms`。
+- 最小修复仍保留单个 UIKit 文本容器：纯累计更新只向 `textStorage` 追加 suffix，新增词对齐正文现有节奏，以每词 `0.5s` ease-out、同批词 `0.1s` 错峰淡入；非 append 修正直接显示权威全文，不让旧 range 动画串到新文本。一个 `CADisplayLink` 同时更新活跃词段 alpha 与内层贴底位移，每帧最多推进 `9pt`；没有按词创建 SwiftUI View、没有正文高度动画、没有 `ScrollViewReader`、第二个 offset owner 或新业务状态机。
+- `isThinking=false` 统一覆盖 completed/failed/cancelled，立即结束在途淡入并恢复完整不透明正文；Reduce Motion 走同一无动画路径。用户开始拖动时直接交还内层滚动所有权，后续 chunk 只更新权威全文、不抢回底部；回到底部后的下一次更新自然恢复跟随。动态颜色比较改为当前 trait 下的 resolved UIColor，避免每个 chunk 把同一语义色误判为样式变化并退回全文替换。
+- `ChatReasoningCardTests` 新增 suffix-only alpha、终态收口、Reduce Motion 门控、用户历史位置与逐帧 offset 契约，**8 passed / 0 failed**。最终 `ChatReasoningCardTests + ChatIslandPresentationTests + ChatSwiftUIStreamReplayTests + NativeTimelineScrollCoreTests + ChatViewportPolicyTests` 为 **140 passed / 0 failed**；联合回放中思考场景 p95/max `16.67/33.33ms`、最大单帧 offset `9pt`，长表格 canary 同次也通过。两路只读 subagent 复核调用链、display-link 生命周期与复杂度后未发现 P0-P2。2026-08-02 03:09 当前混合工作区已完成 iPhone Air Debug 构建并通过 `codesign --verify --deep --strict`，无线覆盖安装到 `2A340E77-9052-4CEC-8753-792D1CCF88A5/iosApp.app`；自动启动因设备锁屏被系统拒绝，因此逐词节奏与 120Hz 手感仍待解锁后用真实 provider 复验。
+
+### 2026-08-01 Chat 最后一个字后终态跳变修复（未提交）
+
+- 默认 `NativeChatTimelineView` 的真实 UIWindow 回放复现了完成态轻微跳变：最后正文已经完整上屏后，`ParagraphUIView` identity 与段落高度都保持不变，但列表总高度在 `generationCompleted` 时缩短 `35.67pt`。带真实 reasoning part 的对照组在同一终态链稳定，证伪了「最终 Markdown 重新解析或替换正文视图」是本次根因。
+- 根因是无 reasoning part 时，消息行内的 fallback「思考中」卡片会覆盖整个正文流式阶段，并直到 generation 结束才被移除；同时标准 Chat 顶部活动岛已经显示等待/思考/搜索状态，时间线里的 pending assistant 属于重复状态。最小修复让 fallback 只存在于首个可见 assistant 内容出现前，并让 Native timeline 默认不再投影 pending assistant；显式 `includePendingAssistant: true` 的非标准调用仍保留。`ChatGenerationCoordinator`、Markdown renderer 与 Native scroll driver 均未改动。
+- 新终态门禁按真实 `streamDelta -> assistantStreamClosed -> generationCompleted` 顺序断言最终段落 identity、段落高度、列表高度和 offset 均不再变化；旧实现稳定红灯 `35.67pt`，修复后四项变化均在 `0.5pt` 内。首行 paced 回放的采样改到同一刷新周期 Native driver 写入之后，并过滤跨帧过期样本，原 `48pt` 贴底阈值未放宽；最终候选连续 3 次通过。
+- `ChatSwiftUIStreamReplayTests + NativeTimelineScrollCoreTests + ChatViewportPolicyTests + ChatMessageProjectionTests` 联合为 **177 passed / 1 failed**；唯一失败仍是 80 行长表格性能 canary（本次 p95 `43.74ms > 40ms`），隔离复跑通过，本轮未改阈值或为其加入缓存/兜底。`ChatReasoningCardTests + ChatIslandPresentationTests` 合跑 exit 0，`git diff --check` 通过；三路只读 subagent 复核终态快照、Markdown identity 与最终调用链后未发现 P0-P2。当前证据来自 iPhone 17 Pro / iOS 26.5 Simulator，最新修复尚未重新构建安装到 iPhone Air，真机最后一拍视觉稳定性仍待触控复验。
+
+### 2026-08-01 Chat 首行流式冷启动卡顿修复（未提交）
+
+- 生产 `NativeChatTimelineView` 的真实 UIWindow 回放通过现有 `ChatStreamPresentationPacer` 从 pending 占位切入首个 assistant 正文，复现了“前几下卡、后面才顺”：冷路径 display-link 最大间隔 `210.9ms`，而预先存在同一条真实 assistant 行的对照组仅 `33.7ms`、p95 `16.7ms`。同时前 3 拍已连续产生约 `30pt` 真实高度增长，证伪了“12 字节拍不足一行”是主因；未调整 48ms/12 字节拍、滚动曲线或状态机。
+- 确定根因在 vendor `ParagraphUIView.setupView()`：普通流式正文已由 `BlockView.shouldUseTextKit1` 保证不含附件，但首个 TextKit 1 视图仍在主线程同步加载并注册 LaTeX/引用附件 provider。最小修复只让这条“明确无附件”的 TextKit 1 路径跳过无关注册；TextKit 2 仍在渲染引用/公式前按原路径注册，没有预热、隐形视图、延时切换或 fallback。同输入 A/B 修复后降为 max `37.4ms` / p95 `33.6ms`，且首拍已开始推进 offset。
+- 新增永久门禁 `testPacedStreamStartsContinuousFollowOnFirstAssistantLine`，真实跨过 pending → assistant、pacer、Markdown/TextKit 1、实测行高与 Native driver，要求首段无回跳、保持 48pt 语义贴底且不出现 `>80ms` 主线程停顿。iPhone 17 Pro / iOS 26.5 Simulator 上 Chat 必跑三套件 **105 passed / 0 failed**，vendor SwiftStreamingMarkdown 全套（含引用、附件、公式与 TextKit 回归）**103 passed / 0 failed**；`git diff --check` 通过。
+- 本轮混合工作区已用 Team `89QRFX9548` 完成 Debug 真机构建，`codesign --verify --deep --strict` 通过；22:05 无线覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`，新容器为 `5A8BAEBA-5FBC-4507-9C94-07053F26E59F/iosApp.app`。自动启动被设备锁屏以 `Locked / RequestDenied` 拒绝；因此已装机有工具证据，启动与 120Hz 首行手感仍待解锁后真机复验，不以 Simulator 帧节奏代替。
+
+### 2026-08-01 Chat 滑动跳变与终态滚动所有权闭环（未提交）
+
+- 默认 `NativeChatTimelineView` 的真实 UIWindow 回放把视频中的完成态滑动跳变收敛到一个确定根因：同一 `ScrollView` 内历史消息由 `LazyVStack` 发布估算高度，动态尾部由 eager 容器发布精确高度，双向浏览时历史行重新物化会让 `contentSize` 单帧塌陷 `3036pt`、总范围漂移 `3147pt`。生产列表现统一为一个 eager `VStack/ForEach` 高度事实；同一回放转绿，且单次用例耗时未比原混合布局增加。没有加入高度缓存、几何补偿、第二套 offset owner 或 debounce。
+- 手势与终态链分别做最小收口：`.tracking` 立即确认真实手势起点，只有缺少 tracking 的 `.interacting` 才要求 UIKit tracking/dragging/decelerating 佐证，避免程序化滚动误暂停；completed/failed/cancelled/background 四种终态不再伪装成普通内容增长，而进入复用同一 `CADisplayLink` 的 `settlingAfterTerminal`，吸收最后 `0.3s` 的真实布局变化后回到 idle。终态早于首帧 ScrollView attach 时会在入场锚定后补交 terminal；新生产视图用例实际观察迟到 `contentSize` 增长，并以 `2pt` 误差证明历史位置不被重新拉底。
+- 关闭「生成时跟随滚动」仍保留既有的首次入场定位，但所有后续 stream/layout 写入均由现有 `automaticFollowEnabled` 拦截；本轮另以红测试确认原生 driver fallback 会被旧内部状态误导为再次回底，现让 fallback 直接复用同一权威开关。三路只读 subagent 复核布局/offset owner、终态生命周期和默认测试接线后，未发现仍可达的重复写入者或未闭合终态；未把真机手势边界与纯高度稳定性混成同一个补偿机制。
+- iPhone 17 Pro / iOS 26.5 Simulator 定点门禁为 **45 passed / 0 failed**，新增 fallback 红灯修复后 `NativeTimelineScrollCoreTests` 为 **43 passed / 0 failed**。最终源码完整 `ChatSwiftUIStreamReplayTests + NativeTimelineScrollCoreTests + ChatViewportPolicyTests + ChatStructuralRetypeReplayTests` 为 **104 passed / 1 failed**；唯一失败仍是独立的 80 行长表格性能门禁，本次 p95 `40.37ms > 40ms`。同环境三次 A/B 中 eager 与临时恢复的 Lazy 都是 1 pass / 2 fail，Lazy 反而出现 max `102.40ms > 80ms`；因此未归因为本轮 eager 回归，也未放宽阈值或增加缓存层。真实惯性、rubber-band、ProMotion 和视频场景仍待真机触控复验。
+- 2026-08-01 19:35 当前混合工作区已用 Team `89QRFX9548` 完成 iPhone Air Debug 构建并通过 `codesign --verify --deep --strict`；无线覆盖安装到 `EC2F6A3B-7098-4E6E-BB10-C03E7A72B241/iosApp.app` 后成功启动 `app.amber.ios`。装机与启动已有 CoreDevice 证据，视频中的长会话滑动手感仍需设备内实际操作验证。
+
+### 2026-08-01 Chat 思考动画与流式推理解耦（未提交）
+
+- 顶部 `ThinkingOrbView` 本身没有读取 reasoning chunk，且一直由稳定的 UIKit `OrbCanvasView` + `CADisplayLink` 按媒体时间驱动；真实卡顿来自同一主线程上的推理正文：`ChatReasoningCard` 每 48ms 收到全文后，经 `ScrollViewReader -> onChange(bodyText) -> DispatchQueue.main -> scrollTo` 再触发 SwiftUI 布局/滚动反馈，挤掉动画帧。修复前真实 reasoning + orb 回放连续两次出现 p95 `3526–4890ms`、max `4805–5118ms`，并报告同帧多次状态更新。
+- 最小修复复用文件内已有 `UITextView` representable：每次仍接收并显示权威全文，仅在此前贴底时维持底部位置；短文本按内容自适应，流式态上限 `180pt`、完成态上限 `260pt`。删除 SwiftUI `ScrollViewReader` 反馈环，没有新增节流器、缓存、动画状态机或降级。Native timeline 同时删除仅用于拖动结束兜底的 `latestNativeScrollGeometry @State`，改用已有 `viewportState.isAtBottom`，避免每次滚动几何变化额外失效整页；真实 UIKit distance 仍为第一判断来源。
+- 新回归覆盖短/长正文高度、逐 chunk 全文完整性、thinking -> completed 且不自动收起时的贴底契约，以及主 RunLoop display-link cadence。修复后定点回放三轮 p95 均 `16.67ms`，max `39.35–49.26ms`；`ChatReasoningCardTests`、`ChatIslandPresentationTests`、`NativeTimelineScrollCoreTests` 联合 **69 passed / 0 failed**。三路 subagent 对动画 identity、终态调用链和 native drag fallback 复核未发现 P0-P2；其提出的完成态高度风险已由运行时断言反证，未为假阳性增加 coordinator。
+- 正交的 `ChatSwiftUIMessageList` 80 行长表格压力回放仍为 p95 `40.58–47.96ms`、max `90.54–95.56ms`，并报告 `onScrollGeometryChange` 同帧多次更新；该 `#if CHAT_PERF_REPLAY` 路径不包含本轮 Native 几何改动，也不是 reasoning 卡片根因。本轮没有借机加入通用 debounce、第二套滚动状态或放宽 `40/80ms` 门禁。
+- 当前混合工作区已用 Team `89QRFX9548` 完成 iPhone Air / iOS 27.0 Debug 构建并通过 `codesign --verify --deep --strict`，无线覆盖安装到 `B15B9A3B-153F-4EFD-861E-0D03307D8F21/iosApp.app` 后成功启动 `app.amber.ios`。CoreDevice 当前不提供截图子命令，故真机已安装/启动有工具证据，但真实 provider 长推理时的 120Hz 动画手感仍待设备内实际触发后观察。
+
+### 2026-08-01 Chat 顶部活动岛单行化与中文文案（未提交）
+
+- 两张真机截图对应同一展示层根因：顶部胶囊同时渲染 `title + detail`，思考态把推理等级 `High` 放在第二行，搜索态又把已并入标题的 query 以「关键词」重复一遍；active/idle 还使用不同高度、不同 padding、动态 `.id` 与 settle 整体透明度，状态切换会先重建内容并短暂清空胶囊。状态 owner、工具映射和 settle/terminalHold reducer 本身闭环，未改其调用链。
+- 最小修复只收紧视图：所有状态复用同一个 `HStack` 和同一个原生 Liquid Glass 外壳，固定 `40pt` 高度且只显示一行标题；`detail` 继续保留给无障碍摘要，但不再参与视觉 key、重排或动画。删除动态 `.id`、active/idle 双分支、第二行和 settle 整体淡出，只用一次 `0.22s` 内容/宽度过渡；失败 terminalHold 把「未完成」提升到可见标题，原工具名留给无障碍。Chat 阶段改为「正在连接 / 正在思考 / 正在生成回复」，推理等级显示改为「自动 / 低 / 中 / 高 / 极高 / 最高」；模型生成正文和搜索关键词中的英文不做翻译。
+- 两路只读 subagent 分别复核状态调用链与 SwiftUI 动画身份，均确认应在展示层收口而不新增状态机。6 条定点红绿测试最终 **6 passed / 0 failed**，活动岛 reducer 全类 **26 passed / 0 failed**；真实 SwiftUI 视觉探针导出在 `/private/tmp/amber-chat-island-visual-20260801.xcresult`，截图 `/private/tmp/amber-chat-island-attachments/59A8B622-4EE3-488F-8EDE-E7A593E9E59E.png`，四种状态均为单行同高。扩大到 5 个 Chat/UI 套件共执行 100 条，任务相关断言全绿；另有 1 条外部录制缺失 skip 与 3 条正交红灯（结构占位段落、长表格 p95 `41.44ms > 40ms`、既有 44pt 点击区 source canary），本轮未混入修复或放宽阈值。
+- 当前混合工作区已用 Team `89QRFX9548` 完成 iPhone Air / iOS 27.0 Debug 构建并通过 `codesign --verify --deep --strict`，覆盖安装并成功启动；新安装容器为 `3741241F-6A04-4E82-BF86-802FA88AEBD1`。无线 CoreDevice 在线，但本轮 `idevicescreenshot -n` 未发现 libimobiledevice network device；连续「思考 → 搜索 → 生成」的真机逐帧手感仍待设备上实际触发后复验。
+
+### 2026-08-01 Chat 停止搜索与终态工具恢复（未提交）
+
+- iPhone Air 无线截图与会话 JSON 回读确认两条独立断点。执行中的搜索收到 Task cancel 后，被 `executeSearchWebWithFallback` 的通用错误分支当作普通服务失败，实际又发起了第 2 个 DuckDuckGo 备用请求；当前「巫师三」会话还存在一条更早的终态残留：assistant 已有 `finishedAt`，第 2 个 `search_web` 却以 `output: []` 落盘，启动恢复因对应 run 已非 unfinished 而不会处理，顶部活动岛遂永久把历史工具当成正在搜索。
+- 最小修复只收口搜索语义：`CancellationError` 直接终止并返回结构化 `cancelled` 结果，其他真实搜索失败仍沿用原备用服务；加载会话时只在该会话没有前台/后台生成 owner 的情况下，关闭终态 assistant 中仍为空的搜索/抓取 output，并以 write baseline 回写。仍在运行的搜索和非搜索副作用工具保持原恢复链，不新增 UI 状态、重试或活动岛兜底。
+- 新测试先复现「取消后请求数从 1 变 2」及「终态空 output 冷启动不闭环」，修复后均转绿；`ChatViewModelSelectedFileContextTests` 与 `IOSSearchExecutorTests` 两个完整测试类联合运行 exit 0，`git diff --check` 通过。当前混合工作区已重新完成 Stable Debug 真机构建与深度签名校验，并覆盖安装到 iPhone Air，安装容器为 `0C0268B9-93B2-4255-B485-091B1F803284`；自动启动仅因设备锁定被拒，旧会话加载后的活动岛消失与新一轮真实搜索停止仍待设备解锁后触控验收。
+
+### 2026-08-01 Chat 发送后保持键盘（未提交）
+
+- `sendComposerMessage()` 原本在通过提交文本与发送 gate 后显式调用 `dismissKeyboard()`，同时清除 SwiftUI focus 并强制 `resignFirstResponder`，导致键盘安全区收缩和整屏位移。现仅删除发送入口的这一调用：发送前已展开的键盘保持，原本已收起时也不会被强制重新弹出；输入法组词提交、发送 gate、跟随底部与 `viewModel.sendMessage()` 顺序不变。
+- 模型 Sheet、列表/空白手势等主动收键盘路径保留，没有新增焦点状态或延时恢复。契约测试先因旧调用存在而红，修复后与 composer gate、键盘焦点滚动和流式增长 5 条定点合跑 exit 0；`git diff --check` 通过。
+- 2026-08-01 12:43 当前混合工作区已重新完成真机构建与深度签名校验，覆盖安装并启动到 iPhone Air；安装容器为 `7B48BC0A-6817-4EAD-B34D-0C40EEC72183`。发送时键盘与画面是否完全无位移仍待真机实际输入验收。
+
+### 2026-08-01 Chat 返回、工具批次与 session 终态修复（未提交）
+
+- iPhone Air 运行时取证确认三条独立问题。返回键的首轮 `dismiss()` owner 归因已被真机反证：换成 `router.goBack()` 后 iOS 27.0 Beta 仍无效，而同一当前包在 iOS 26.5 Simulator 中可由真实可访问性点击立即退出，系统边缘手势也始终可返回；差分把问题收窄为顶部 `safeAreaBar` 内「`GlassEffectContainer` 中的无 glyph Button + 独立 hit-disabled glyph overlay」在 iOS 27 真机上的命中组合。另两条根因保持成立：同一模型响应中的待执行工具被逐条回送 provider，在第 4 次上限后又收到 6 个搜索调用并全部渲染为红色失败；session 列表未观察后台 job 的终止通知，且生成 owner 的旧会话 ID 未同时受 `isRunning` 约束，导致列表保留已结束动画。旧会话显示数小时前还另有持久化根因：已有标题的会话新增消息时没有推进 `updateAt`。
+- 最小修复沿现有 owner 收口：返回 action 保持 `router.goBack()`，同时删除不参与 morph 的 `GlassEffectContainer`、透明 Button/glyph 双层和只为跨层按压同步存在的 callback/state，让玻璃、glyph、命中区和 action 回到同一个 `ChatToolbarIconButton`；同一模型批次先在本地依次排空 pending tool，再只续接一次 provider，到工具轮次上限后的最终续接传空工具表；搜索执行边界重新检查全局 Web Search 开关；列表观察现有后台终止通知和前台 loading，生成查询同时要求 coordinator 仍在运行；会话消息身份变化时刷新索引时间。没有新增并行状态机、轮询、重试或历史时间回填。
+- 定点红灯转绿后，`IOSConversationStoreTests`、`ChatViewModelSelectedFileContextTests`、`IOSToolLoopGuardTests`、`IOSAgentToolEngineTests` 与 `IOSParityRedLightTests` 均 exit 0；顶栏结构测试在简化前 8 处断言失败、简化后通过，RouterPath 两条定点与其合跑 exit 0。三路 subagent 对工具终态/审批/取消/后台链、导航/列表 owner 和最小性复核未发现可达 P0-P2；顶栏 A/B 另经导航链 review 未发现 P0-P2；`git diff --check` 通过。2026-08-01 12:10 当前混合工作区已用 Team `89QRFX9548` 构建、深度签名校验并覆盖安装到 iPhone Air，新安装容器为 `6C525FC5-C8A1-4CE0-827D-36B1E10642A6`，随后成功启动；原 session 生成环此前已由无线截图确认消失。简化后的返回按钮仍等待 iOS 27 真机再点一次闭环，新一轮真实多搜索也仍缺设备触控验收；旧索引时间不会被追溯改写。
+
+### 2026-08-01 Chat 流式跟随误暂停与长会话入场跳变修复（未提交）
+
+- 当前生产 `NativeChatTimelineView` 的真实窗口回放复现了两条确定性根因。其一，driver 用 `setContentOffset(animated: false)` 追底时，SwiftUI scroll phase 仍可能报告 `.interacting`，旧代码随即发送 `.userDragBegan` 并把无触摸生成误置为 `followPaused`；现在只有底层 `UIScrollView` 的 tracking / dragging / decelerating 任一为真时才接受该 phase 为用户接管。其二，长会话首次 attach 前若已在顶部完成一次几何测量，旧代码会用“测量过且不在底部”推断用户正在看历史；现在 attach 只尊重真实手势或已经确认的 `followPaused`，否则执行一次明确的入场回底。
+- 修复没有新增状态机、重试或高度补偿；反而删除了只服务错误推断的 `hasMeasuredNativeScrollGeometry`，以及取证结束后无产品语义的 Chat/Novel 全局 `ChatStreamAnomalyRecorder`、第二条几何监听和行出现计数。渲染器、Markdown/table 语义、真实用户上滑暂停与异常降级路径均未改；诊断清理另经 `NovelCreationPresentationTests` + `NovelSessionViewModelTests` **109 passed / 0 failed / 0 skipped**。
+- 默认路径回放已从退役 `ChatSwiftUIMessageList` 校正为直接挂载 `NativeChatTimelineView`，并继续用真实 UIWindow / UIScrollView 几何断言流式无回跳、长会话迟到高度追底、主动回底、用户暂停、终态和会话切换。iPhone 17 Pro / iOS 26.5 Simulator 上 `ChatSwiftUIStreamReplayTests`、`NativeTimelineScrollCoreTests`、`ChatViewportPolicyTests`、`ChatStreamReplayTests` 联合 **111 passed / 0 failed / 1 skipped**（`/private/tmp/amber-native-chat-regression-20260801.xcresult`）；skip 仍只是缺外部 replay fixture。更新后的 Native driver 接线 canary 定点 **1 passed / 0 failed**；`IOSSettingsWiringTests` 全类当前另有一条正交的 `testChatApprovalAndAttachmentControlsHaveRealFortyFourPointHitLayout` 红灯，本轮未修改该命中区契约。
+- 独立重复压测曾观察到长表格 display-link 最大间隔约 115–123ms，但 p95 通过；运行时 probe 已排除 append 期间 1–4ms 的 `TableLayout.makeCache` 为主要耗时，本轮未在归因不足时切换 table renderer、增加缓存层或放宽 80ms 门禁。过度设计清理后的全联合回归为 **184 passed / 1 failed / 1 skipped**，唯一失败仍是同一 max-frame 门禁（本次 95.63ms > 80ms，`/private/tmp/amber-overdesign-cleanup-regression-20260801.xcresult`）；显式排除该已知性能项后行为门禁 **184 passed / 0 failed / 1 skipped**（`/private/tmp/amber-overdesign-cleanup-behavior-20260801.xcresult`）。2026-08-01 03:11 当前混合工作区的 Stable Debug 已用 Team `89QRFX9548` 构建并通过深度签名校验，覆盖安装到 iPhone Air，设备安装容器为 `258B9D60-429E-4C25-9F58-0364E65F5E44`；首次自动启动因设备锁定被 `Locked / RequestDenied` 拒绝，解锁后第二次已成功启动 `app.amber.ios`。该偶发尖峰仍需真机/系统级 profile，真实手势、rubber-band、键盘安全区与 ProMotion 手感也仍未验收。
+- 对照 OpenMinis `9cf3a855` 后只采纳“稳定 block identity、网络累计与 UI 发布分离、用户 browse 不抢回底部”的原则，没有复制其 GPL-3.0 代码。其 iOS 实现实际包含约 4,290 行 collection coordinator + 930 行自定义 layout，以及 KVO offset、延迟高度和 UI suspend/resume，不能作为更简单的替换方案。
+- 已删除 Native 成为唯一生产列表后仍遗留的 `NativeChatTimelineMirror` 影子投影整层：`ChatView` 不再在 appear、signal、viewport、回底与 composer focus 上重复构建第二份 projection/render-state/cache；同时删除两枚默认关闭的 mirror UserDefaults flag、7 个只测试影子实现的测试、恒为 `true` 的 `nativeScrollDriverEnabled` 参数/监听，以及零生产构造的历史 fallback 枚举值。真实 driver 故障 fallback、SwiftUI 接管、replay token、live-tail、Markdown identity/cache、terminal/cancel/background 权威快照均保留。两条新接线 canary 先红后绿，最终 **2 passed / 0 failed**（`/private/tmp/amber-overdesign-cleanup-green-20260801.xcresult`）。
+
+### 2026-08-01 OpenAI SSE 流式 UTF-8 跨缓冲区乱码修复（未提交）
+
+- 真机截图中的 `�` 不是字体或 Markdown 问题：对应会话 JSON 已持久化 63 个 U+FFFD，且都来自 opencode go / DeepSeek V4 Flash 的 OpenAI-compatible Chat Completions 流。定点复现确认 Ktor 3.4.3 `readUTF8Line()` 会把跨网络缓冲区的三字节汉字按片段提前解码：`1+2` 得到 `���`，`2+1` 得到 `��`。
+- 最小修复只替换 `ai-provider-openai` 的 SSE 字节读行：先按 CR/LF/CRLF 在原始字节层组装完整行，再统一 UTF-8 解码；请求、事件解析、Swift 累积、UI 与持久化均未改动，也未新增重试或第二套状态机。旧消息已丢失原字符，不能自动还原。
+- 回归测试覆盖汉字 `1+2`、`2+1`、`1+1+1` 拆分，以及 CR/LF/CRLF 和 EOF 未终止行。`:ai-provider-openai:jvmTest` 与 `:ai-provider-openai:iosSimulatorArm64Test` 各 **19 passed / 0 failed / 0 skipped**，`git diff --check` 通过；修复已随上述混合工作区构建覆盖安装并成功启动到 iPhone Air，但尚未用真实 opencode go 流重新生成验收。
+
+### 2026-07-31 小说创作交互细节精准修复（未提交）
+
+- 草稿与阻塞说明：新建小说、Quick Start 调整方向只在用户确实输入或改变创建方式后阻止下滑关闭，取消时可明确放弃；空表单仍直接关闭。Quick Start 已有生成任务时在入口同屏说明「先停止或等待完成」，不为只读、重载等已有全局提示再造一套 blocker。
+- 触控与无障碍：模型、创作方式、上下文环和章节菜单只把外层命中区扩至 `44pt`，原有 `30/34/40pt` Liquid Glass 视觉不变。分支行补齐名称、主分支/同步/生成状态与 VoiceOver 选中 trait。
+- 颜色与文档：仅把承载信息的琥珀/三级灰小字换成现有 `foreground2`/`muted`；状态图标、进度 tint、琥珀背景和主分支星标保持原样，未新增主题 token。规格已校正为「创作 / 正文 / 设定」与「创作模型 / 剧情同步模型」，历史两 Tab 方案显式标记为非当前运行时事实。
+- 测试证据：先新增定点红灯，再转绿；与上一轮同范围的 `IOSNovelCreationWiringTests`、`NovelCreationPresentationTests`、`NovelCreationViewModelTests`、`NovelSessionViewModelTests` 在 iPhone 17 Pro / iOS 26.5 Simulator 为 **212 passed / 0 failed / 0 skipped**（`/private/tmp/amber-novel-precision-fixes/Logs/Test/Test-iosApp-2026.08.01_00-00-41-+0800.xcresult`）。共享上下文环另经 `ChatStreamReplayTests` **16 passed / 0 failed / 1 skipped**；跳过项仅因没有外部 `.jsonl` 录制。`git diff --check` 通过；交互修复已随上述构建覆盖安装并成功启动，但尚未进入小说界面目测，真实手势、Dynamic Type 与 VoiceOver 朗读仍待真机验证。
 
 ### 2026-07-31 模型议会：上传文件/图片解析后生成议题（未提交）
 
@@ -29,7 +133,7 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 - subagent 双路 review（逻辑闭环 + 调用链）初评 PASS-WITH-CAVEATS；已修：materialsPrepGeneration 门闩、openArchive/reset 作废准备态、`startPendingDiscussion` 拦 isReplay、文件解析可取消、发送/准备中自动收起附件菜单。
 - 验证：`CouncilSourceMaterialsTests` + `IOSCouncilRunnerMechanicsTests` **71 passed / 0 failed**。真机手感与真实视觉识别仍待装机；「带材料重开 / 续聊再附材料」为产品可选增强。
 
-### 2026-07-31 小说创作阻塞与易用性深挖修复（未提交）
+### 2026-07-31 小说创作阻塞与易用性深挖修复（已提交至 `cbb602b3a`）
 
 - 项目入口的两条永久等待链路均已拆除：项目清单只读取 inventory，不再为每个项目执行全局崩溃恢复和重复全文解码；打开项目时才执行 project-scoped recovery。工作区删除 0×0 UIKit appearance 观察器，由 SwiftUI `onAppear` 驱动初次选择。清单与工作区加载失败均有内联重试，已取消请求不会发布旧结果。
 - 中央“正在读取项目”玻璃胶囊已移除，改为无容器的原生轻量进度提示。项目删除、导入、重命名和重载不再假成功或复活 ghost row；损坏项目可经既有 tombstone 生命周期删除，运行中 replace import 会停止后重新预览最新 revision。
@@ -359,7 +463,7 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 - 独立对抗性 review 判定"轻拖飞出"的最强残余根因是历史行冷实例化链路：LazyVStack 首次实例化时 `ChatStableStreamingMarkdownView` 的纯文本占位把每个空行渲染成整行文本高度，与异步解析后 blockSpacing 分段布局差出百 pt 级，解析落地瞬间整章收缩造成位移。占位现按空行拆段（vendor `RenderableDocument(plainText:id:config:splittingParagraphsOnBlankLines:)` 新增 opt-in 参数，默认单段行为不变，仅 AmberAgent fallback 调用点启用；chunk id 按索引稳定，append-only 更新不重建前缀段）。review 同时证伪了两条此前嫌疑：非动画 config 下占位→解析替换不会重淡入（`ParagraphInitialFadePolicy` 已由 `configShouldAnimateText` 门控），行距也已在视图层对占位生效——均未额外修改。
 - 完成瞬间 `historyWindowLimit` 原按合并后行集裁剪，会把完成前已可见的旧行裁出视图树造成位移。`NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory` 现按快照差只吸收真正转入历史的行数（启动失败整体消失的行不扩窗），在 `activeTailID` 清除分支接线；`NovelSessionListSignal` 增加 `activeRunRowCount` 供该推导。投影层无消费者的 `activeUserMessageID` 字段已删除。
-- 静态排版增长把用户推离底部时原先完全静默（SwiftUI 回退路径无任何补偿），新增 `.staticContentGrowth` follow 事件：只按真实到底状态刷新底部按钮，不发滚动命令、不改模式，静态增长仍不拥有滚动所有权。原生 driver 底部收敛耗尽保持所有权语义不变，未到底时补一条 `bottomConvergenceExhausted` 诊断日志；对应 fallback 枚举 case 标注为无生产构造路径。
+- 静态排版增长把用户推离底部时原先完全静默（SwiftUI 回退路径无任何补偿），新增 `.staticContentGrowth` follow 事件：只按真实到底状态刷新底部按钮，不发滚动命令、不改模式，静态增长仍不拥有滚动所有权。原生 driver 底部收敛耗尽保持所有权语义不变，未到底时记录 `bottomConvergenceExhausted` 诊断日志；其无生产构造路径的同名 fallback 枚举值已在 2026-08-01 清理，日志保留。
 - 跨 speculative 模式复用 renderable 的取舍新增未闭合语法种子契约（中断/超时停在半截表格/强调时仍复用流式渲染保持连续、抑制重淡入，由立即重解析纠正）；vendor `reusingUnchangedPrefix` 补单段落增长用例（首段变化时不复用、内容取新值），占位拆段行为有默认/opt-in 双向断言。明确未修：`resolution()` 主线程 `hasPrefix` 前缀扫描（量级未采样）、`ParagraphUIView` 宽度猜测（proposal 正常路径不触发）、按钮回底动画取消瞬跳（无运行证据）。
 - `NovelSessionReplayTests`、`NovelSessionViewModelTests`、`ChatMessageProjectionTests`、`NativeTimelineScrollCoreTests` 与强制 `ChatStreamReplayTests` 合跑 211 passed、1 expected skip、0 failed；vendor `make test` 全套（含新增布局实验）81 passed、0 failed；`git diff --check` 通过。新契约测试（几何策略静态分支、窗口吸收算术、reducer 按钮语义、wiring source 断言）按构造对旧实现必红，未执行单独红跑。
 - 占位高度差已用布局级实验坐实为 E1：真实 `DocumentView` + TextKit 测高（生产等价参数 blockSpacing 8 / 行距 4 / collapsesSoftBreaks，24 段 CJK 散文、360pt 宽）下解析 1840pt、单段占位 2304pt（偏高 464pt）、拆段占位 1840pt（误差 0）；`testSplitPlaceholderTracksParsedLayoutHeightFarCloserThanLegacyPlaceholder` 以机器无关比值断言留作永久 canary。注意该差距只在生产 blockSpacing=8 下显现，vendor 默认 blockSpacing=30 与空行渲染高度相消（默认参数实测差仅 4pt），实验必须用生产参数。
@@ -1043,12 +1147,12 @@ Do not prioritize C7 multi-tool batching unless the user explicitly changes dire
 
 - `testForegroundStreamingChunksDoNotSnapshotBeforeThrottledFlush` 仍红,且是**既有**失败:它是源码字符串 canary,期望 `cancel()` 里出现 `setMessages(pendingStreamSnapshotAtCancellation)`,而 HEAD 起该处已是 `setMessages(messagesAtCancellation)`(引入 `messagesByFailingPendingToolCalls` 时改的),canary 未跟着更新。要么按新变量名更新 canary,要么改成行为断言——源码字符串 canary 会随无关重命名假红。
 - 本机没有系统 JDK,Gradle 需显式指定:`JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home ./gradlew ...`。首次跑 `:ai-core:compileKotlinJvm` 可能因增量缓存报 `MessageStreamAccumulator.kt` 类型不匹配,重跑即过。
-- `.sizeChanges` 底锚的所有权在三个表面不一致:标准 Chat 默认路径已改为 measured-geometry 唯一驱动并移除 pin,而 Council(`sizeChangesPinOwnsGrowth` 门掉 measured growth)、Novel(`followingBottom` 分支显式 `break`)与 Chat 的 native 实验路径仍依赖 pin。支撑 Novel 这一选择的 `NovelSessionBottomAnchorProbeTests` 用的是显式高度的 `Color` 块,不是真实 `ParagraphUIView` 的 UIKit 增量布局,未覆盖 Chat 上观测到 bottom debt 的条件。动手前应先把探针换成真实长 Markdown 取证。
+- 默认 Chat 的底锚由 Native scroll driver 单独拥有，SwiftUI `.sizeChanges` 只在 driver 异常降级后接管；Council 与 Novel 仍有各自的 size-change 策略。不要为表面一致强行合并三套行为，改动前先用真实长 Markdown 与设备手势证明同一失败条件。
 
 - 小说项目选择仍有两个非阻塞 P2 边界：缺少“被 busy guard 拒绝的跨项目选择不会取消已挂起 branch intent”的直接 canary；同项目 `selectProject` 当前可在任意 `isPerforming` 期间刷新并改变 selection token，若与普通 mutation 并发，可能跳过其终态 reload。现有 branch preflight race test 有意依赖同项目刷新，不能粗暴改成 busy 时全部禁止，需另行收窄契约。
 - 小说 48ms 展示缓冲已通过 burst/replacement/FIFO 门禁，但 transient tail 经 flush 后继续保留 `granularity` 目前只有代码链路证据，缺一条直接行为断言；不影响当前组合态构建与装机结论。
-- Native Timeline scroll-driver 仍缺 safe-area composer 防双算、terminal 释放、最终高度收缩、rubber-band 手势所有权和真实窗口执行层回放；这些闭环完成前保持实验开关关闭。
-- 默认 clean-list 的动态尾行已从历史 `LazyVStack` 分离，模拟器回放不再复现巨型尾行卸载或数行估算跳变；真机逐行观感与长历史滑动性能尚待当前安装包交互确认，不得用全量 `VStack` 或 offset 补偿替代该结构。
+- Native Timeline 已是默认路径，真实窗口执行层回放覆盖流式跟随、终态、最终高度变化、会话切换和长会话首次 attach；仍缺 iPhone 上的真实 drag/deceleration、rubber-band、键盘安全区和 ProMotion 手感证据。不要用 offset 魔法数或再造并行 owner 替代该结构。
+- 长表格流式门禁存在偶发 max-frame 尖峰：同一联合回归可通过，但独立重复运行曾约 115–123ms；当前仅能排除 `TableLayout.makeCache` 是 append 热点，尚未取得足以修改 renderer identity / publish owner 的主线程归因。
 - `IOS_FIX_PLAN_2026-07-08.md` still marks B3b inline math as `BLOCKED-DESIGN`.
 - B17b 的单轮累计 partial 与 expiration terminal 已有定点覆盖；仍缺“至少完成一轮 assistant/tool 后在下一轮 expiration”时完整保留既有 suffix/tool output 的端到端测试与实现。
 - 删除会话会清理后台 job/payload，但已开始运行的本地 operation task 目前没有 coordinator 级取消句柄；tombstone 会拒绝落盘，付费/副作用工具仍可能继续执行，需独立生命周期切片处理。

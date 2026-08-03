@@ -717,11 +717,15 @@ private extension DefaultNovelCreation {
     }
 
     func factFailureMessage(_ error: Error) -> String {
+        let cancellationMessage = "剧情状态同步已取消，可以重试。"
         if let failure = error as? NovelStructuredModelExecutionFailure {
+            if failure.failure.code == "cancelled" {
+                return cancellationMessage
+            }
             return failure.failure.message
         }
         if error is CancellationError {
-            return "The fact synchronization was cancelled and can be retried."
+            return cancellationMessage
         }
         if case .invalidInput(let detail) = error as? NovelError {
             return detail

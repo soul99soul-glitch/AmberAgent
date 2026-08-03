@@ -102,7 +102,7 @@ final class NativeTimelineScrollDriver: NSObject {
 
     var isFollowingBottomOrKeyboardFocus: Bool {
         switch state {
-        case .followingBottom, .keyboardFocus:
+        case .followingBottom, .settlingAfterTerminal, .keyboardFocus:
             return true
         case .idle, .pausedForUser:
             return false
@@ -114,6 +114,11 @@ final class NativeTimelineScrollDriver: NSObject {
             return true
         }
         return false
+    }
+
+    var isUIKitUserInteracting: Bool {
+        guard let scrollView else { return false }
+        return scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating
     }
 
     private func reduceAndPerform(
@@ -344,7 +349,7 @@ final class NativeTimelineScrollDriver: NSObject {
             return true
         case let .keyboardFocus(transaction):
             return transaction.token == layoutToken
-        case .idle, .pausedForUser:
+        case .idle, .pausedForUser, .settlingAfterTerminal:
             return false
         }
     }
@@ -393,12 +398,13 @@ final class NativeTimelineScrollDriver: NSObject {
     }
 
     private func shouldReplayBottomAfterFallback() -> Bool {
+        guard automaticFollowEnabled else { return false }
         if let scrollView,
            scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
             return false
         }
         switch state {
-        case .followingBottom, .keyboardFocus:
+        case .followingBottom, .settlingAfterTerminal, .keyboardFocus:
             return true
         case .idle, .pausedForUser:
             return false
@@ -528,203 +534,6 @@ private extension UIView {
             current = view.superview
         }
         return nil
-    }
-}
-
-/// [TEMP-DIAG] 临时诊断:定位「生成一段时间后整列表大幅位移 + 本条回复回退到更早内容」。
-/// 常驻采样 + 自动判定异常 + 异常时 dump 前后窗口,不依赖人眼盯屏。
-/// 根因定罪后整体删除(搜索 TEMP-DIAG)。
-@MainActor
-enum ChatStreamAnomalyRecorder {
-    struct Sample {
-        let time: Double
-        let offsetY: CGFloat
-        let contentHeight: CGFloat
-        let distanceToBottom: CGFloat
-        let farFromBottom: Bool
-        /// 数据源里这条回复的字数(真实进度)。
-        let sourceLength: Int
-        /// 实际喂给渲染的字数。与 sourceLength 背离 = 显示停在旧快照上。
-        let displayedLength: Int
-        let skips: Int
-        let dragging: Bool
-        let fallback: String
-        let rows: Int
-        let appears: Int
-        let disappears: Int
-    }
-
-    /// 判定阈值:offset 跳变按「超过半屏」算,高度塌陷按 200pt 算。
-    private static let offsetJumpThreshold: CGFloat = 300
-    private static let heightCollapseThreshold: CGFloat = 200
-    private static let windowBefore = 24
-    private static let windowAfter = 8
-
-    private static var samples: [Sample] = []
-    private static var startTime: CFAbsoluteTime?
-    private static var skipCount = 0
-    private static var pendingDump: (reason: String, atIndex: Int)?
-    private static var lastDumpIndex = -1_000
-    private static var dumpCount = 0
-
-    static func noteLiveTailUpdateSkipped() {
-        #if DEBUG
-        skipCount += 1
-        #endif
-    }
-
-    /// 物化行计数。注意:这是 Chat 与小说**共享**的全局静态,视图整体销毁时
-    /// `onDisappear` 不保证成对触发,计数会漂移——只可用于「突变时是否同时在动」
-    /// 这种相对判断,不可当作绝对行数。
-    static func noteRowAppeared() {
-        #if DEBUG
-        materializedRows += 1
-        rowAppearances += 1
-        #endif
-    }
-
-    static func noteRowDisappeared() {
-        #if DEBUG
-        materializedRows -= 1
-        rowDisappearances += 1
-        #endif
-    }
-
-    /// [TEMP-DIAG] 小说创作的呈现节奏层。`targetContent` 被整体替换时,
-    /// 若新目标不再以已显示内容为前缀,pacer 会当场跳到新目标——内容可能变短。
-    static var novelSourceLength = 0
-    static var novelDisplayedLength = 0
-    /// [TEMP-DIAG] LazyVStack 当前物化(已上屏并被测量)的行数。
-    /// 若 contentHeight 的突变每次都伴随这个数变化,即坐实「估算高度 ↔ 实测高度」震荡。
-    static var materializedRows = 0
-    static var rowAppearances = 0
-    static var rowDisappearances = 0
-
-    static func noteNovelPresentation(displayed: Int, target: Int, next: Int, prefixHeld: Bool) {
-        #if DEBUG
-        novelSourceLength = target
-        novelDisplayedLength = next
-        guard !prefixHeld || next < displayed else { return }
-        skipCount += 1
-        NSLog("%@", String(
-            format: "[AA-NOVEL] 呈现回退 displayed=%d target=%d next=%d prefixHeld=%@",
-            displayed, target, next, prefixHeld ? "YES" : "no"
-        ))
-        #endif
-    }
-
-    static func record(
-        offsetY: CGFloat,
-        contentHeight: CGFloat,
-        distanceToBottom: CGFloat,
-        farFromBottom: Bool,
-        sourceLength: Int,
-        displayedLength: Int,
-        dragging: Bool,
-        fallback: String
-    ) {
-        #if DEBUG
-        let now = CFAbsoluteTimeGetCurrent()
-        if startTime == nil { startTime = now }
-        let sample = Sample(
-            time: now - (startTime ?? now),
-            offsetY: offsetY,
-            contentHeight: contentHeight,
-            distanceToBottom: distanceToBottom,
-            farFromBottom: farFromBottom,
-            sourceLength: sourceLength,
-            displayedLength: displayedLength,
-            skips: skipCount,
-            dragging: dragging,
-            fallback: fallback,
-            rows: materializedRows,
-            appears: rowAppearances,
-            disappears: rowDisappearances
-        )
-
-        let previous = samples.last
-        samples.append(sample)
-        if samples.count > 600 {
-            // 环形截断会把所有下标左移,必须同步修正记录的绝对下标——否则
-            // pendingDump/lastDumpIndex 会变成永远追不上的未来值,异常检测
-            // 静默死掉,而心跳照常输出,日志上完全区分不出「没异常」和「检测器已死」。
-            samples.removeFirst(200)
-            lastDumpIndex -= 200
-            if let pending = pendingDump {
-                pendingDump = (pending.reason, pending.atIndex - 200)
-            }
-        }
-
-        // 心跳:证明记录器真的在跑,否则「没有异常」与「从未采样」无法区分。
-        if samples.count == 1 || samples.count % 120 == 0 {
-            NSLog("%@", String(
-                format: "[AA-HEARTBEAT] samples=%d content=%.0f rows=%d src=%d shown=%d dist=%.0f fallback=%@",
-                samples.count, contentHeight, materializedRows, sourceLength,
-                displayedLength, distanceToBottom, fallback
-            ))
-        }
-
-        // 已经在等 dump 的话,先把异常之后的窗口攒够再输出。
-        if let pending = pendingDump, samples.count - pending.atIndex >= windowAfter {
-            emit(reason: pending.reason, anomalyIndex: pending.atIndex)
-            pendingDump = nil
-            return
-        }
-
-        guard let previous, pendingDump == nil,
-              samples.count - lastDumpIndex > windowBefore else { return }
-
-        var reasons: [String] = []
-        if displayedLength < previous.displayedLength {
-            reasons.append("显示内容回退 \(previous.displayedLength)→\(displayedLength)")
-        }
-        if abs(contentHeight - previous.contentHeight) > 2000 {
-            reasons.append(String(
-                format: "高度突变 %.0f→%.0f", previous.contentHeight, contentHeight
-            ))
-        }
-        if previous.contentHeight - contentHeight > heightCollapseThreshold {
-            reasons.append(String(
-                format: "内容高度塌陷 %.0f→%.0f", previous.contentHeight, contentHeight
-            ))
-        }
-        if !dragging, abs(offsetY - previous.offsetY) > offsetJumpThreshold {
-            reasons.append(String(
-                format: "offset 跳变 %.0f→%.0f", previous.offsetY, offsetY
-            ))
-        }
-        guard !reasons.isEmpty else { return }
-        pendingDump = (reasons.joined(separator: " | "), samples.count - 1)
-        #endif
-    }
-
-    private static func emit(reason: String, anomalyIndex: Int) {
-        dumpCount += 1
-        lastDumpIndex = samples.count
-        let lower = max(0, anomalyIndex - windowBefore)
-        let upper = min(samples.count - 1, anomalyIndex + windowAfter)
-        NSLog("%@", "[AA-ANOMALY] #\(dumpCount) \(reason)")
-        NSLog("%@", "[AA-ANOMALY] t | offsetY | content | distToBottom | far | src | shown | rows | +app | -dis | drag | fallback")
-        for index in lower...upper {
-            let sample = samples[index]
-            let marker = index == anomalyIndex ? " <<< 异常" : ""
-            NSLog("%@", String(
-                format: "[AA-ANOMALY] %6.2f %8.1f %9.1f %8.1f %5@ %6d %6d %5d %5d %5d %5@ %@%@",
-                sample.time,
-                sample.offsetY,
-                sample.contentHeight,
-                sample.distanceToBottom,
-                sample.farFromBottom ? "YES" : "no",
-                sample.sourceLength,
-                sample.displayedLength,
-                sample.rows,
-                sample.appears,
-                sample.disappears,
-                sample.dragging ? "YES" : "no",
-                sample.fallback,
-                marker
-            ))
-        }
     }
 }
 

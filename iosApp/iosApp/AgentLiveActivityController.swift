@@ -5,14 +5,40 @@ enum IOSExecutionPreferenceKeys {
     static let liveActivity = "app.amber.ios.execution.liveActivity"
 }
 
+struct AgentActivityOwnershipCandidate: Equatable {
+    let id: String
+    let runId: String
+    let updatedAt: Date
+}
+
+enum AgentActivityOwnershipPolicy {
+    static func retainedActivityIDs(
+        from candidates: [AgentActivityOwnershipCandidate],
+        ownedRunIds: Set<String>
+    ) -> Set<String> {
+        var newestByRunId: [String: AgentActivityOwnershipCandidate] = [:]
+        for candidate in candidates where ownedRunIds.contains(candidate.runId) {
+            if let current = newestByRunId[candidate.runId],
+               current.updatedAt >= candidate.updatedAt {
+                continue
+            }
+            newestByRunId[candidate.runId] = candidate
+        }
+        return Set(newestByRunId.values.map(\.id))
+    }
+}
+
 @MainActor
 final class AgentLiveActivityController {
     static let shared = AgentLiveActivityController()
 
-    private var activity: Activity<AgentActivityAttributes>?
-    private var currentRunId: String?
-    private var lastPresentation: AgentActivityPresentation?
-    private var lastUpdateAt: Date?
+    private struct OwnedActivity {
+        let activity: Activity<AgentActivityAttributes>
+        var lastPresentation: AgentActivityPresentation
+        var lastUpdateAt: Date
+    }
+
+    private var activitiesByRunId: [String: OwnedActivity] = [:]
     private var endingActivityIDs: Set<String> = []
 
     private init() {}
@@ -33,8 +59,7 @@ final class AgentLiveActivityController {
             conversationId: conversationId
         )
 
-        if activity?.attributes.runId == runId {
-            currentRunId = runId
+        if activitiesByRunId[runId] != nil {
             Task {
                 await update(runId: runId, presentation: presentation, force: true)
             }
@@ -55,21 +80,20 @@ final class AgentLiveActivityController {
         force: Bool = false,
         minimumInterval: TimeInterval = 1.5
     ) async {
-        guard let activity,
-              currentRunId == runId,
-              activity.attributes.runId == runId else { return }
+        guard var owned = activitiesByRunId[runId],
+              owned.activity.attributes.runId == runId else { return }
 
         let now = Date()
         if !force,
-           let lastUpdateAt,
-           now.timeIntervalSince(lastUpdateAt) < minimumInterval,
-           presentation == lastPresentation {
+           now.timeIntervalSince(owned.lastUpdateAt) < minimumInterval,
+           presentation == owned.lastPresentation {
             return
         }
 
-        lastPresentation = presentation
-        self.lastUpdateAt = now
-        await activity.update(Self.content(presentation: presentation, now: now))
+        owned.lastPresentation = presentation
+        owned.lastUpdateAt = now
+        activitiesByRunId[runId] = owned
+        await owned.activity.update(Self.content(presentation: presentation, now: now))
     }
 
     func end(
@@ -77,43 +101,42 @@ final class AgentLiveActivityController {
         presentation: AgentActivityPresentation,
         dismissalDelay: TimeInterval? = nil
     ) async {
-        guard let activity,
-              currentRunId == runId,
-              activity.attributes.runId == runId else { return }
-        guard endingActivityIDs.insert(activity.id).inserted else { return }
+        guard let owned = activitiesByRunId[runId],
+              owned.activity.attributes.runId == runId else { return }
+        guard endingActivityIDs.insert(owned.activity.id).inserted else { return }
 
-        let terminalPresentation = presentation.preservingKind(from: lastPresentation)
-        lastPresentation = terminalPresentation
-        lastUpdateAt = Date()
-        self.activity = nil
-        currentRunId = nil
+        let terminalPresentation = presentation.preservingKind(from: owned.lastPresentation)
+        activitiesByRunId.removeValue(forKey: runId)
 
         await Self.end(
-            activity: activity,
+            activity: owned.activity,
             presentation: terminalPresentation,
             dismissalDelay: dismissalDelay ?? AgentActivityLifecyclePolicy
                 .lockScreenDismissalDelay(for: terminalPresentation.phase)
         )
-        endingActivityIDs.remove(activity.id)
+        endingActivityIDs.remove(owned.activity.id)
     }
 
     func stopCurrent(dismissalDelay: TimeInterval = 1) async {
         var activitiesToEnd = Activity<AgentActivityAttributes>.activities
-        if let activity,
-           !activitiesToEnd.contains(where: { $0.id == activity.id }) {
-            activitiesToEnd.append(activity)
+        for owned in activitiesByRunId.values where
+            !activitiesToEnd.contains(where: { $0.id == owned.activity.id }) {
+            activitiesToEnd.append(owned.activity)
         }
 
-        let cancelledPresentation = AgentActivityPresentation(
-            kind: lastPresentation?.kind ?? .response,
-            phase: .cancelled,
-            stage: .cancelled,
-            action: nil
-        )
         endingActivityIDs.formUnion(activitiesToEnd.map(\.id))
-        clearCurrentActivity()
+        let ownedActivities = activitiesByRunId
+        activitiesByRunId.removeAll()
 
         for activity in activitiesToEnd {
+            let lastPresentation = ownedActivities[activity.attributes.runId]?.lastPresentation
+                ?? activity.content.state.presentation
+            let cancelledPresentation = AgentActivityPresentation(
+                kind: lastPresentation.kind,
+                phase: .cancelled,
+                stage: .cancelled,
+                action: nil
+            )
             await Self.end(
                 activity: activity,
                 presentation: cancelledPresentation,
@@ -132,23 +155,25 @@ final class AgentLiveActivityController {
                 activityState: $0.activityState
             )
         }
-        guard let restored = candidates.max(by: {
-            $0.content.state.updatedAt < $1.content.state.updatedAt
-        }) else {
-            clearCurrentActivity()
-            for orphan in existing {
-                scheduleEnd(activity: orphan, dismissalDelay: 1)
-            }
-            return
-        }
+        let retainedIDs = AgentActivityOwnershipPolicy.retainedActivityIDs(
+            from: candidates.map(Self.ownershipCandidate),
+            ownedRunIds: ownedRunIds
+        )
 
-        activity = restored
-        currentRunId = restored.attributes.runId
-        lastPresentation = restored.content.state.presentation
-        lastUpdateAt = restored.content.state.updatedAt
+        activitiesByRunId = Dictionary(uniqueKeysWithValues: candidates.compactMap { candidate in
+            guard retainedIDs.contains(candidate.id) else { return nil }
+            return (
+                candidate.attributes.runId,
+                OwnedActivity(
+                    activity: candidate,
+                    lastPresentation: candidate.content.state.presentation,
+                    lastUpdateAt: candidate.content.state.updatedAt
+                )
+            )
+        })
 
-        for duplicate in existing where duplicate.id != restored.id {
-            scheduleEnd(activity: duplicate, dismissalDelay: 1)
+        for obsolete in existing where !retainedIDs.contains(obsolete.id) {
+            scheduleEnd(activity: obsolete, dismissalDelay: 1)
         }
     }
 
@@ -157,33 +182,46 @@ final class AgentLiveActivityController {
         runId: String,
         conversationId: String? = nil
     ) -> Bool {
-        if let activity,
-           isAdoptable(activity),
-           activity.attributes.runId == runId,
-           conversationId == nil || activity.attributes.conversationId == conversationId {
-            currentRunId = runId
+        if let owned = activitiesByRunId[runId],
+           isAdoptable(owned.activity),
+           conversationId == nil || owned.activity.attributes.conversationId == conversationId {
             return true
         }
 
-        guard let restored = Activity<AgentActivityAttributes>.activities
+        let candidates = Activity<AgentActivityAttributes>.activities
             .filter({ candidate in
                 isAdoptable(candidate) &&
                     candidate.attributes.runId == runId &&
                     (conversationId == nil || candidate.attributes.conversationId == conversationId)
             })
-            .max(by: { $0.content.state.updatedAt < $1.content.state.updatedAt }) else {
+        let retainedIDs = AgentActivityOwnershipPolicy.retainedActivityIDs(
+            from: candidates.map(Self.ownershipCandidate),
+            ownedRunIds: [runId]
+        )
+        guard let restored = candidates.first(where: { retainedIDs.contains($0.id) }) else {
             return false
         }
 
-        activity = restored
-        currentRunId = restored.attributes.runId
-        lastPresentation = restored.content.state.presentation
-        lastUpdateAt = restored.content.state.updatedAt
+        activitiesByRunId[runId] = OwnedActivity(
+            activity: restored,
+            lastPresentation: restored.content.state.presentation,
+            lastUpdateAt: restored.content.state.updatedAt
+        )
+        for duplicate in candidates where duplicate.id != restored.id {
+            scheduleEnd(activity: duplicate, dismissalDelay: 1)
+        }
         return true
     }
 
     func ownsActivity(runId: String, conversationId: String) -> Bool {
-        Activity<AgentActivityAttributes>.activities.contains {
+        if let owned = activitiesByRunId[runId],
+           !endingActivityIDs.contains(owned.activity.id),
+           isAdoptable(owned.activity),
+           owned.activity.attributes.conversationId?.caseInsensitiveCompare(conversationId)
+            == .orderedSame {
+            return true
+        }
+        return Activity<AgentActivityAttributes>.activities.contains {
             !endingActivityIDs.contains($0.id) &&
                 $0.attributes.runId == runId &&
                 $0.attributes.conversationId?.caseInsensitiveCompare(conversationId) == .orderedSame
@@ -205,17 +243,19 @@ final class AgentLiveActivityController {
         )
 
         do {
-            activity = try Activity.request(
+            let activity = try Activity.request(
                 attributes: attributes,
                 content: Self.content(presentation: presentation, now: now),
                 pushType: nil
             )
-            currentRunId = runId
-            lastPresentation = presentation
-            lastUpdateAt = now
+            activitiesByRunId[runId] = OwnedActivity(
+                activity: activity,
+                lastPresentation: presentation,
+                lastUpdateAt: now
+            )
         } catch {
             print("[LiveActivity] Failed to start Agent activity: \(error)")
-            clearCurrentActivity()
+            activitiesByRunId.removeValue(forKey: runId)
         }
     }
 
@@ -223,20 +263,34 @@ final class AgentLiveActivityController {
         for runId: String,
         conversationId: String?
     ) {
-        let existing = Activity<AgentActivityAttributes>.activities
-        activity = existing
-            .filter {
-                isAdoptable($0) &&
-                    $0.attributes.runId == runId &&
-                    $0.attributes.conversationId == conversationId
-            }
-            .max(by: { $0.content.state.updatedAt < $1.content.state.updatedAt })
-        currentRunId = activity?.attributes.runId
-        lastPresentation = activity?.content.state.presentation
-        lastUpdateAt = activity?.content.state.updatedAt
+        var sameRun = Activity<AgentActivityAttributes>.activities.filter {
+            isAdoptable($0) && $0.attributes.runId == runId
+        }
+        if let owned = activitiesByRunId[runId],
+           isAdoptable(owned.activity),
+           !sameRun.contains(where: { $0.id == owned.activity.id }) {
+            sameRun.append(owned.activity)
+        }
 
-        for staleActivity in existing where staleActivity.id != activity?.id {
-            scheduleEnd(activity: staleActivity, dismissalDelay: 1)
+        let matchingConversation = sameRun.filter {
+            $0.attributes.conversationId == conversationId
+        }
+        let retainedIDs = AgentActivityOwnershipPolicy.retainedActivityIDs(
+            from: matchingConversation.map(Self.ownershipCandidate),
+            ownedRunIds: [runId]
+        )
+        if let restored = matchingConversation.first(where: { retainedIDs.contains($0.id) }) {
+            activitiesByRunId[runId] = OwnedActivity(
+                activity: restored,
+                lastPresentation: restored.content.state.presentation,
+                lastUpdateAt: restored.content.state.updatedAt
+            )
+        } else {
+            activitiesByRunId.removeValue(forKey: runId)
+        }
+
+        for duplicate in sameRun where !retainedIDs.contains(duplicate.id) {
+            scheduleEnd(activity: duplicate, dismissalDelay: 1)
         }
     }
 
@@ -250,8 +304,9 @@ final class AgentLiveActivityController {
         dismissalDelay: TimeInterval
     ) {
         guard endingActivityIDs.insert(activity.id).inserted else { return }
-        if self.activity?.id == activity.id {
-            clearCurrentActivity()
+        let runId = activity.attributes.runId
+        if activitiesByRunId[runId]?.activity.id == activity.id {
+            activitiesByRunId.removeValue(forKey: runId)
         }
         let presentation = AgentActivityPresentation(
             kind: activity.content.state.presentation.kind,
@@ -269,11 +324,14 @@ final class AgentLiveActivityController {
         }
     }
 
-    private func clearCurrentActivity() {
-        activity = nil
-        currentRunId = nil
-        lastPresentation = nil
-        lastUpdateAt = nil
+    private static func ownershipCandidate(
+        _ activity: Activity<AgentActivityAttributes>
+    ) -> AgentActivityOwnershipCandidate {
+        AgentActivityOwnershipCandidate(
+            id: activity.id,
+            runId: activity.attributes.runId,
+            updatedAt: activity.content.state.updatedAt
+        )
     }
 
     private static func content(

@@ -108,6 +108,10 @@ struct ChatReasoningCard: View {
         text.contains { !$0.isWhitespace }
     }
 
+    static func animatesStreamingBody(isThinking: Bool, reduceMotion: Bool) -> Bool {
+        isThinking && !reduceMotion
+    }
+
     private var levelSuffix: String {
         guard let levelLabel, !levelLabel.isEmpty else { return "" }
         return " · \(levelLabel)"
@@ -217,30 +221,16 @@ struct ChatReasoningCard: View {
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: hasBodyText ? 0.98 : 1, haptic: hasBodyText ? .selection : nil))
 
             if showsBody {
-                // 自适应高度 + maxHeight 上限 + 顶部底部渐变模糊。
-                // 短文本:Text 高度 < maxHeight,ScrollView 不滚,整体高度 = 文本高度(不留白)。
-                // 长文本:超过 maxHeight,ScrollView 可滚查看。
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        Text(bodyText)
-                            .font(.caption2)
-                            .foregroundStyle(AmberTheme.muted)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.top, 2)
-                            .padding(.bottom, 10)
-
-                        Color.clear
-                            .frame(height: 1)
-                            .id("reasoning-bottom")
-                    }
-                    .onAppear {
-                        scrollReasoningToBottom(proxy)
-                    }
-                    .onChange(of: bodyText) { _, _ in
-                        scrollReasoningToBottom(proxy)
-                    }
-                }
+                // 推理正文增长不再经 SwiftUI ScrollViewReader 逐 chunk 重排并回写
+                // scrollTo。UITextView 自己维护文本与滚动位置，外层只接收真实高度。
+                ChatReasoningBodyTextView(
+                    text: bodyText,
+                    maxHeight: isThinking ? 180 : 260,
+                    animatesNewWords: Self.animatesStreamingBody(
+                        isThinking: isThinking,
+                        reduceMotion: reduceMotion
+                    )
+                )
                 .frame(maxHeight: isThinking ? 180 : 260)
                 .mask(reasoningFadeMask)
                 // 从底部滑入/滑出:展开时从下往上出现,收回时从上往下消失(底部先收)。
@@ -278,24 +268,15 @@ struct ChatReasoningCard: View {
         }
     }
 
-    private func scrollReasoningToBottom(_ proxy: ScrollViewProxy) {
-        guard isThinking, showsBody else { return }
-        DispatchQueue.main.async {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            transaction.animation = nil
-            withTransaction(transaction) {
-                proxy.scrollTo("reasoning-bottom", anchor: .bottom)
-            }
-        }
-    }
 }
 
 private struct ChatReasoningBodyTextView: UIViewRepresentable {
     let text: String
+    let maxHeight: CGFloat
+    let animatesNewWords: Bool
 
-    func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+    func makeUIView(context: Context) -> ChatReasoningTextView {
+        let textView = ChatReasoningTextView()
         textView.backgroundColor = .clear
         textView.isEditable = false
         textView.isSelectable = true
@@ -305,30 +286,332 @@ private struct ChatReasoningBodyTextView: UIViewRepresentable {
         textView.showsVerticalScrollIndicator = false
         textView.textContainerInset = UIEdgeInsets(top: 2, left: 12, bottom: 10, right: 12)
         textView.textContainer.lineFragmentPadding = 0
-        textView.font = UIFont.preferredFont(forTextStyle: .caption1)
+        textView.font = UIFont.preferredFont(forTextStyle: .caption2)
         textView.textColor = UIColor(AmberTheme.muted)
         textView.adjustsFontForContentSizeCategory = true
+        textView.alwaysBounceVertical = false
         return textView
     }
 
-    func updateUIView(_ textView: UITextView, context: Context) {
-        if textView.text != text {
-            let wasAtBottom = textView.contentSize.height <= textView.bounds.height + 1 ||
-                textView.contentOffset.y >= textView.contentSize.height - textView.bounds.height - 8
-            textView.text = text
-            textView.font = UIFont.preferredFont(forTextStyle: .caption1)
-            textView.textColor = UIColor(AmberTheme.muted)
-            if wasAtBottom {
-                DispatchQueue.main.async { [weak textView] in
-                    guard let textView else { return }
-                    let maxY = max(
-                        -textView.adjustedContentInset.top,
-                        textView.contentSize.height - textView.bounds.height + textView.adjustedContentInset.bottom
-                    )
-                    textView.setContentOffset(CGPoint(x: 0, y: maxY), animated: false)
+    func updateUIView(_ textView: ChatReasoningTextView, context: Context) {
+        textView.apply(
+            text: text,
+            font: UIFont.preferredFont(forTextStyle: .caption2),
+            color: UIColor(AmberTheme.muted),
+            animatesNewWords: animatesNewWords
+        )
+    }
+
+    static func dismantleUIView(_ uiView: ChatReasoningTextView, coordinator: Void) {
+        uiView.prepareForRemoval()
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: ChatReasoningTextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        let measured = uiView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        return CGSize(width: width, height: min(maxHeight, ceil(measured.height)))
+    }
+}
+
+@MainActor
+private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
+    private struct WordFade {
+        let startTime: CFTimeInterval
+        let range: NSRange
+    }
+
+    private static let wordFadeDuration: CFTimeInterval = 0.5
+    private static let wordStaggerWindow: CFTimeInterval = 0.1
+    private static let bottomTolerance: CGFloat = 8
+    private static let followSpeed: CGFloat = 540
+    private static let followSettleDuration: CFTimeInterval = 0.12
+
+    private var renderedText = ""
+    private var renderedFont: UIFont?
+    private var renderedColor: UIColor?
+    private var activeWordFades: [WordFade] = []
+    private var displayLink: CADisplayLink?
+    private var previousFrameTimestamp: CFTimeInterval?
+    private var followsBottom = true
+    private var smoothsFollowing = true
+    private var followSettleUntil: CFTimeInterval = 0
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        delegate = self
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        delegate = self
+    }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        super.willMove(toWindow: newWindow)
+        if newWindow == nil {
+            stopDisplayLink()
+        }
+    }
+
+    func prepareForRemoval() {
+        finishWordFades()
+        stopDisplayLink()
+    }
+
+    func apply(
+        text newText: String,
+        font newFont: UIFont,
+        color newColor: UIColor,
+        animatesNewWords: Bool
+    ) {
+        updateFollowOwnership()
+        smoothsFollowing = animatesNewWords
+
+        let resolvedColor = newColor.resolvedColor(with: traitCollection)
+        let styleChanged = renderedFont?.isEqual(newFont) != true ||
+            renderedColor?.isEqual(resolvedColor) != true
+        renderedFont = newFont
+        renderedColor = resolvedColor
+        font = newFont
+        textColor = resolvedColor
+
+        if newText == renderedText, !styleChanged {
+            if !animatesNewWords {
+                finishWordFades()
+            }
+            requestBottomFollow()
+            return
+        }
+
+        let oldText = renderedText
+        let isPureAppend = !styleChanged && newText.hasPrefix(oldText)
+        if isPureAppend {
+            let oldLength = (oldText as NSString).length
+            let newLength = (newText as NSString).length
+            if newLength > oldLength {
+                let suffix = (newText as NSString).substring(from: oldLength)
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: newFont,
+                    .foregroundColor: resolvedColor,
+                ]
+                textStorage.append(NSAttributedString(string: suffix, attributes: attributes))
+                renderedText = newText
+                if animatesNewWords {
+                    appendWordFades(in: NSRange(
+                        location: oldLength,
+                        length: newLength - oldLength
+                    ))
+                } else {
+                    finishWordFades()
                 }
             }
+        } else {
+            finishWordFades()
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: newFont,
+                .foregroundColor: resolvedColor,
+            ]
+            attributedText = NSAttributedString(string: newText, attributes: attributes)
+            renderedText = newText
+            if oldText.isEmpty, animatesNewWords, !newText.isEmpty {
+                appendWordFades(in: NSRange(location: 0, length: textStorage.length))
+            }
         }
+
+        accessibilityLabel = newText
+        followSettleUntil = CACurrentMediaTime() + Self.followSettleDuration
+        requestBottomFollow()
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        followsBottom = false
+        followSettleUntil = 0
+    }
+
+    private func updateFollowOwnership() {
+        if isTracking || isDragging || isDecelerating {
+            followsBottom = false
+        } else if isAtBottom {
+            followsBottom = true
+        } else if displayLink == nil {
+            followsBottom = false
+        }
+    }
+
+    private var bottomOffsetY: CGFloat {
+        max(
+            -adjustedContentInset.top,
+            contentSize.height - bounds.height + adjustedContentInset.bottom
+        )
+    }
+
+    private var isAtBottom: Bool {
+        contentSize.height <= bounds.height + 1 ||
+            contentOffset.y >= bottomOffsetY - Self.bottomTolerance
+    }
+
+    private func requestBottomFollow() {
+        guard followsBottom else {
+            stopDisplayLinkIfIdle()
+            return
+        }
+        if !smoothsFollowing {
+            followSettleUntil = max(
+                followSettleUntil,
+                CACurrentMediaTime() + Self.followSettleDuration
+            )
+        }
+        startDisplayLink()
+    }
+
+    private func appendWordFades(in range: NSRange) {
+        let wordRanges = Self.wordRanges(in: textStorage.string, range: range)
+        guard !wordRanges.isEmpty else { return }
+        let baseStartTime = CACurrentMediaTime()
+        let delay = Self.wordStaggerWindow / Double(wordRanges.count)
+        for (index, wordRange) in wordRanges.enumerated() {
+            activeWordFades.append(WordFade(
+                startTime: baseStartTime + Double(index) * delay,
+                range: wordRange
+            ))
+        }
+        updateWordFades(at: baseStartTime)
+        startDisplayLink()
+    }
+
+    private func finishWordFades() {
+        guard !activeWordFades.isEmpty, let renderedColor else { return }
+        textStorage.addAttribute(
+            .foregroundColor,
+            value: renderedColor,
+            range: NSRange(location: 0, length: textStorage.length)
+        )
+        activeWordFades.removeAll()
+        stopDisplayLinkIfIdle()
+    }
+
+    @objc private func displayLinkTick(_ displayLink: CADisplayLink) {
+        let now = CACurrentMediaTime()
+        updateWordFades(at: now)
+        updateBottomFollow(displayLink: displayLink, now: now)
+        stopDisplayLinkIfIdle(now: now)
+    }
+
+    private func updateWordFades(at currentTime: CFTimeInterval) {
+        guard !activeWordFades.isEmpty, let renderedColor else { return }
+        textStorage.beginEditing()
+        for fade in activeWordFades where NSMaxRange(fade.range) <= textStorage.length {
+            let elapsed = currentTime - fade.startTime
+            let progress = min(max(elapsed / Self.wordFadeDuration, 0), 1)
+            let eased = Self.easeOut(CGFloat(progress))
+            textStorage.addAttribute(
+                .foregroundColor,
+                value: renderedColor.withAlphaComponent(renderedColor.cgColor.alpha * eased),
+                range: fade.range
+            )
+        }
+        textStorage.endEditing()
+        activeWordFades.removeAll {
+            currentTime - $0.startTime >= Self.wordFadeDuration
+        }
+    }
+
+    private func updateBottomFollow(displayLink: CADisplayLink, now: CFTimeInterval) {
+        guard followsBottom else { return }
+        if isTracking || isDragging || isDecelerating {
+            followsBottom = false
+            followSettleUntil = 0
+            return
+        }
+
+        let targetY = bottomOffsetY
+        let delta = targetY - contentOffset.y
+        guard abs(delta) > 0.5 else {
+            if contentOffset.y != targetY {
+                setContentOffset(CGPoint(x: contentOffset.x, y: targetY), animated: false)
+            }
+            return
+        }
+        guard smoothsFollowing else {
+            setContentOffset(CGPoint(x: contentOffset.x, y: targetY), animated: false)
+            return
+        }
+
+        let previousTimestamp = previousFrameTimestamp ?? (displayLink.timestamp - displayLink.duration)
+        let frameDuration = min(max(displayLink.timestamp - previousTimestamp, 1.0 / 240.0), 1.0 / 60.0)
+        previousFrameTimestamp = displayLink.timestamp
+        let maximumStep = Self.followSpeed * frameDuration
+        let step = min(abs(delta), maximumStep) * (delta < 0 ? -1 : 1)
+        setContentOffset(
+            CGPoint(x: contentOffset.x, y: contentOffset.y + step),
+            animated: false
+        )
+    }
+
+    private func startDisplayLink() {
+        guard displayLink == nil else { return }
+        let displayLink = CADisplayLink(target: self, selector: #selector(displayLinkTick(_:)))
+        displayLink.preferredFrameRateRange = CAFrameRateRange(
+            minimum: 60,
+            maximum: 120,
+            preferred: 120
+        )
+        displayLink.add(to: .main, forMode: .common)
+        self.displayLink = displayLink
+    }
+
+    private func stopDisplayLinkIfIdle(now: CFTimeInterval = CACurrentMediaTime()) {
+        let followSettled = !followsBottom ||
+            (abs(bottomOffsetY - contentOffset.y) <= 0.5 && now >= followSettleUntil)
+        if activeWordFades.isEmpty, followSettled {
+            stopDisplayLink()
+        }
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
+        previousFrameTimestamp = nil
+    }
+
+    private static func wordRanges(in text: String, range: NSRange) -> [NSRange] {
+        let string = text as NSString
+        guard range.location != NSNotFound,
+              range.location >= 0,
+              NSMaxRange(range) <= string.length else {
+            return []
+        }
+
+        var ranges: [NSRange] = []
+        string.enumerateSubstrings(
+            in: range,
+            options: [.byWords, .localized, .substringNotRequired]
+        ) { _, wordRange, _, _ in
+            let gapStart = ranges.last.map(NSMaxRange) ?? range.location
+            if wordRange.location > gapStart {
+                ranges.append(NSRange(location: gapStart, length: wordRange.location - gapStart))
+            }
+            ranges.append(wordRange)
+        }
+        let trailingStart = ranges.last.map(NSMaxRange) ?? range.location
+        if trailingStart < NSMaxRange(range) {
+            ranges.append(NSRange(location: trailingStart, length: NSMaxRange(range) - trailingStart))
+        }
+        return ranges
+    }
+
+    private static func easeOut(_ progress: CGFloat) -> CGFloat {
+        let squared = progress * progress
+        let cubed = squared * progress
+        let remaining = 1 - progress
+        return 3 * remaining * remaining * progress * 0.1 +
+            3 * remaining * squared + cubed
     }
 }
 

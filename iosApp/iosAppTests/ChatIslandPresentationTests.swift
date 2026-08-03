@@ -167,7 +167,8 @@ final class ChatIslandPresentationTests: XCTestCase {
         guard case .terminalHold(let held, _, let until) = next else {
             return XCTFail("失败工具应 terminalHold 2s，得到 \(next)")
         }
-        XCTAssertEqual(held.detail, "未完成")
+        XCTAssertEqual(held.title, "未完成", "单行活动岛必须把失败事实放在可见标题中")
+        XCTAssertEqual(held.detail, "正在搜索", "原工具标题只保留给无障碍摘要")
         XCTAssertEqual(held.tint, .red)
         XCTAssertEqual(until, now + ChatIslandPresentationReducer.terminalHoldDuration)
     }

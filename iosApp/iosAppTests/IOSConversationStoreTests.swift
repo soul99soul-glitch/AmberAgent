@@ -43,6 +43,31 @@ final class IOSConversationStoreTests: XCTestCase {
         )
     }
 
+    func testSavingNewMessagesRefreshesConversationAndSummaryUpdateTime() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreUpdateTime-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "first message")])
+        let before = try XCTUnwrap(store.currentConversation?.updateAt.toEpochMilliseconds())
+        try await Task.sleep(nanoseconds: 5_000_000)
+
+        await store.saveCurrent(messages: [
+            UIMessage.companion.user(prompt: "first message"),
+            UIMessage.companion.assistant(prompt: "reply"),
+        ])
+
+        let conversationUpdate = try XCTUnwrap(store.currentConversation?.updateAt.toEpochMilliseconds())
+        let summaryUpdate = try XCTUnwrap(store.summaries.first { $0.id == conversationId }?.updateAt.toEpochMilliseconds())
+        XCTAssertGreaterThan(conversationUpdate, before)
+        XCTAssertEqual(summaryUpdate, conversationUpdate)
+    }
+
     func testImportConversationDocumentsUsesStorageOwnedBatchImport() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("IOSConversationStoreImport-\(UUID().uuidString)")
@@ -129,6 +154,29 @@ final class IOSConversationStoreTests: XCTestCase {
 
         XCTAssertFalse(didSelect)
         XCTAssertEqual(store.currentConversation?.id, originalId)
+    }
+
+    func testConditionalSelectionDoesNotCommitAfterItsOwnerBecomesStale() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreConditionalSelection-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let originalId = try XCTUnwrap(store.currentConversation?.id)
+        await store.saveCurrent(messages: [UIMessage.companion.user(prompt: "original")])
+        await store.newConversation()
+        let currentId = try XCTUnwrap(store.currentConversation?.id)
+
+        let didSelect = await store.selectConversationIfAvailable(
+            id: originalId,
+            commitIf: { false }
+        )
+
+        XCTAssertFalse(didSelect)
+        XCTAssertEqual(store.currentConversation?.id, currentId)
     }
 
     func testSaveMessagesToExplicitConversationDoesNotOverwriteCurrentConversation() async throws {

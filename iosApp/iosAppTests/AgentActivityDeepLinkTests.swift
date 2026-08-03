@@ -73,4 +73,23 @@ final class AgentActivityDeepLinkTests: XCTestCase {
 
         XCTAssertNil(attributes.destinationURL(for: .openTask))
     }
+
+    func testOpenTaskAttributesRoundTripToOwnedConversation() throws {
+        let attributes = AgentActivityAttributes(
+            runId: "run-123",
+            conversationId: "01234567-89ab-cdef-0123-456789abcdef",
+            startedAt: .now,
+            conversationTitle: "赵匡胤的打仗风格是什么？"
+        )
+
+        let url = try XCTUnwrap(attributes.destinationURL(for: .openTask))
+        XCTAssertEqual(
+            AgentActivityDeepLink.parse(url),
+            AgentActivityDeepLink.Target(
+                runId: "run-123",
+                conversationId: "01234567-89ab-cdef-0123-456789abcdef",
+                focus: .task
+            )
+        )
+    }
 }

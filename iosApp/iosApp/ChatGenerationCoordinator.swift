@@ -534,20 +534,23 @@ final class ChatGenerationCoordinator {
             initialPresentation
         )
         // 生成一开始就拿后台执行权，而不是等切后台再抢——那时进程已经在被挂起了。
-        // 执行权在手期间流自己跑，不做任何交接；只有系统把它收走才落到重跑那条路。
+        // 执行权在手期间流自己跑；短窗口在系统接管前到期才走后台交接。
+        // 系统进度卡被取消或终止则收口当前 run，不允许借交接反向重启。
         BackgroundGenerationKeepAlive.shared.begin(
             runId,
             title: "Amber 正在生成",
             subtitle: params.model.displayName,
             onExpire: { [weak self] in
                 guard let self, self.currentRunId == runId else { return }
-                // 只有「在后台失去执行权」才该交接。前台根本不需要执行权，流本来
-                // 就在正常跑；而用户从系统进度卡上把这一轮划掉同样会走到这里，
-                // 那时候去交接等于把他正看着的正文砍掉重跑一遍。
+                // 只有短窗口在系统任务接管前到期才交接；系统进度卡的取消由
+                // 专用回调收口为当前 run 的取消，不能反向重启生成。
                 guard UIApplication.shared.applicationState != .active else { return }
                 _ = self.handoffCurrentGenerationToBackground(
                     conversationStore: self.pendingBackgroundConversationStore
                 )
+            },
+            onSystemTaskExpiration: { [weak self] in
+                self?.cancelRunAfterSystemKeepAliveExpiration(runId)
             }
         )
 
@@ -645,7 +648,10 @@ final class ChatGenerationCoordinator {
         BackgroundGenerationKeepAlive.shared.begin(
             runId,
             title: "Amber 正在生成图片",
-            subtitle: params?.model.displayName ?? "图片生成"
+            subtitle: params?.model.displayName ?? "图片生成",
+            onSystemTaskExpiration: { [weak self] in
+                self?.cancelRunAfterSystemKeepAliveExpiration(runId)
+            }
         )
 
         let toolCall = toolRuntime.userInitiatedImageToolCall(input: input)
@@ -860,6 +866,10 @@ final class ChatGenerationCoordinator {
         cancel(runId: Optional(expectedRunId))
     }
 
+    private func cancelRunAfterSystemKeepAliveExpiration(_ runId: String) {
+        _ = cancel(runId: runId)
+    }
+
     @discardableResult
     private func cancel(runId expectedRunId: String?) -> Bool {
         guard let activeRunId = currentRunId,
@@ -999,8 +1009,8 @@ final class ChatGenerationCoordinator {
         honorKeepAliveLease: Bool = false
     ) -> Bool {
         // 后台执行权还在手上：流会自己跑完，砍掉它重跑是纯粹的浪费——
-        // 既烧一遍 token，又丢掉已经流出来的正文。只有执行权被系统收走
-        // （keepalive 的 onExpire）才需要真交接。
+        // 既烧一遍 token，又丢掉已经流出来的正文。只有 UIKit 短窗口的
+        // `onExpire` 在系统接管前到期才需要真交接。
         if honorKeepAliveLease,
            let runId = currentRunId,
            BackgroundGenerationKeepAlive.shared.holdsLease(runId) {
@@ -1991,37 +2001,14 @@ final class ChatGenerationCoordinator {
             guard case .completed(let resolvedMessages) = result else { return }
             bindings.setMessages(resolvedMessages)
             bindings.bumpMessageRevision(.toolResultAppended)
-            refreshBackgroundHandoff(
-                runId: runId,
-                startedAt: startedAt,
-                inputDigest: inputDigest,
-                conversationId: conversationId,
-                providerSetting: providerSetting,
-                backgroundProviderSetting: nil,
-                params: params,
-                uploadMessages: backgroundToolHandoffUploadMessages(from: resolvedMessages),
-                displayMessages: resolvedMessages
-            )
-            let generating = AgentActivityPresentation.response(stage: .generating)
-            currentLiveActivityStage = generating.stage
-            WatchTaskCoordinator.shared.publish(
-                runId: runId,
-                conversationId: conversationId?.toHexDashString(),
-                presentation: generating
-            )
-            await dependencies.liveActivityController.update(
-                runId: runId,
-                presentation: generating,
-                force: true
-            )
-            await prepareAndStartStreaming(
+            await continueAfterToolResult(
+                resolvedMessages,
                 providerSetting: providerSetting,
                 params: params,
                 runId: runId,
                 startedAt: startedAt,
                 inputDigest: inputDigest,
-                conversationId: conversationId,
-                uploadMessages: resolvedMessages
+                conversationId: conversationId
             )
             return
         }
@@ -2199,39 +2186,14 @@ final class ChatGenerationCoordinator {
             }
             bindings.setMessages(resumedMessages)
             bindings.bumpMessageRevision(.toolResultAppended)
-            refreshBackgroundHandoff(
-                runId: runId,
-                startedAt: startedAt,
-                inputDigest: inputDigest,
-                conversationId: conversationId,
-                providerSetting: providerSetting,
-                backgroundProviderSetting: nil,
-                params: params,
-                uploadMessages: backgroundToolHandoffUploadMessages(from: resumedMessages),
-                displayMessages: resumedMessages
-            )
-            let generating = AgentActivityPresentation.response(
-                stage: .generating
-            )
-            currentLiveActivityStage = generating.stage
-            WatchTaskCoordinator.shared.publish(
-                runId: runId,
-                conversationId: conversationId?.toHexDashString(),
-                presentation: generating
-            )
-            await dependencies.liveActivityController.update(
-                runId: runId,
-                presentation: generating,
-                force: true
-            )
-            await prepareAndStartStreaming(
+            await continueAfterToolResult(
+                resumedMessages,
                 providerSetting: providerSetting,
                 params: params,
                 runId: runId,
                 startedAt: startedAt,
                 inputDigest: inputDigest,
-                conversationId: conversationId,
-                uploadMessages: resumedMessages
+                conversationId: conversationId
             )
         case .waitingForApproval(let prompt):
             // Finished(paused_for_approval) was already recorded above (F10
@@ -2249,6 +2211,119 @@ final class ChatGenerationCoordinator {
             }
             await pauseForApproval(prompt, pending: pending)
         }
+    }
+
+    private func continueAfterToolResult(
+        _ resumedMessages: [UIMessage],
+        providerSetting: ProviderSetting,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?
+    ) async {
+        guard currentRunId == runId else { return }
+
+        let availableToolNames = Set(params.tools.map(\.name))
+        if let pendingToolCall = toolRuntime.nextPendingToolCall(
+            in: resumedMessages,
+            availableToolNames: availableToolNames
+        ) {
+            guard currentToolResumeCount < maxToolResumeCount else {
+                await failPendingToolCalls(
+                    snapshot: resumedMessages,
+                    failureText: "工具调用未执行：已达到本轮工具循环上限（\(maxToolResumeCount) 次）。请继续对话或拆分任务后重试。",
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId
+                )
+                return
+            }
+
+            currentToolResumeCount += 1
+            bindings.bumpMessageRevision(.toolCallStarted)
+            streamJob = nil
+            await executeToolCall(
+                pendingToolCall,
+                providerSetting: providerSetting,
+                params: params,
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                baseMessages: resumedMessages
+            )
+            return
+        }
+
+        if toolRuntime.hasUnresolvedToolCall(in: resumedMessages) {
+            await failPendingToolCalls(
+                snapshot: resumedMessages,
+                failureText: "工具调用未执行：该工具当前未启用或不可执行。请在设置中启用对应能力后重试。",
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return
+        }
+
+        let continuationParams = Self.continuationParamsAfterToolExecution(
+            params,
+            resumeCount: currentToolResumeCount,
+            maxResumeCount: maxToolResumeCount
+        )
+        refreshBackgroundHandoff(
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            providerSetting: providerSetting,
+            backgroundProviderSetting: nil,
+            params: continuationParams,
+            uploadMessages: backgroundToolHandoffUploadMessages(from: resumedMessages),
+            displayMessages: resumedMessages
+        )
+        let generating = AgentActivityPresentation.response(stage: .generating)
+        currentLiveActivityStage = generating.stage
+        WatchTaskCoordinator.shared.publish(
+            runId: runId,
+            conversationId: conversationId?.toHexDashString(),
+            presentation: generating
+        )
+        await dependencies.liveActivityController.update(
+            runId: runId,
+            presentation: generating,
+            force: true
+        )
+        await prepareAndStartStreaming(
+            providerSetting: providerSetting,
+            params: continuationParams,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId,
+            uploadMessages: resumedMessages
+        )
+    }
+
+    static func continuationParamsAfterToolExecution(
+        _ params: TextGenerationParams,
+        resumeCount: Int,
+        maxResumeCount: Int
+    ) -> TextGenerationParams {
+        guard resumeCount >= maxResumeCount, !params.tools.isEmpty else { return params }
+        return TextGenerationParams(
+            model: params.model,
+            temperature: params.temperature,
+            topP: params.topP,
+            maxTokens: params.maxTokens,
+            tools: [],
+            reasoningLevel: params.reasoningLevel,
+            customHeaders: params.customHeaders,
+            customBody: params.customBody
+        )
     }
 
     private func pauseForApproval(
@@ -2689,6 +2764,9 @@ final class ChatGenerationCoordinator {
                 _ = self.handoffCurrentGenerationToBackground(
                     conversationStore: self.pendingBackgroundConversationStore
                 )
+            },
+            onSystemTaskExpiration: { [weak self] in
+                self?.cancelRunAfterSystemKeepAliveExpiration(pending.runId)
             }
         )
     }
@@ -2739,17 +2817,6 @@ final class ChatGenerationCoordinator {
             return
         }
 
-        refreshBackgroundHandoff(
-            runId: pending.runId,
-            startedAt: pending.startedAt,
-            inputDigest: pending.inputDigest,
-            conversationId: pending.conversationId,
-            providerSetting: pending.providerSetting,
-            backgroundProviderSetting: nil,
-            params: pending.params,
-            uploadMessages: backgroundToolHandoffUploadMessages(from: resumedMessages),
-            displayMessages: resumedMessages
-        )
         bindings.setIsLoading(true)
         // 重新拿执行权：审批往往横跨退后台，pauseForApproval 已经把租约还了。
         // 手表端批准更是典型——批准时 App 就在后台，不拿回来这一轮就是裸奔的。
@@ -2765,14 +2832,14 @@ final class ChatGenerationCoordinator {
         )
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.prepareAndStartStreaming(
+            await self.continueAfterToolResult(
+                resumedMessages,
                 providerSetting: pending.providerSetting,
                 params: pending.params,
                 runId: pending.runId,
                 startedAt: pending.startedAt,
                 inputDigest: pending.inputDigest,
-                conversationId: pending.conversationId,
-                uploadMessages: resumedMessages
+                conversationId: pending.conversationId
             )
         }
     }
@@ -2992,9 +3059,12 @@ final class ChatGenerationCoordinator {
         runId: String
     ) async {
         guard currentRunId == runId,
-              currentLiveActivityStage != stage else { return }
-        currentLiveActivityStage = stage
-        let presentation = AgentActivityPresentation.response(stage: stage)
+              let publishedStage = AgentActivityResponseStagePolicy.nextPublishedStage(
+                  current: currentLiveActivityStage,
+                  candidate: stage
+              ) else { return }
+        currentLiveActivityStage = publishedStage
+        let presentation = AgentActivityPresentation.response(stage: publishedStage)
         WatchTaskCoordinator.shared.publish(
             runId: runId,
             conversationId: currentConversationIdForRun?.toHexDashString(),

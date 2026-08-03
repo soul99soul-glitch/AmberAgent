@@ -224,6 +224,9 @@ enum NovelPresentation {
         if trimmed == "The model returned malformed JSON." {
             return "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
         }
+        if trimmed == "The fact synchronization was cancelled and can be retried." {
+            return "剧情状态同步已取消，可以重试。"
+        }
         return trimmed.isEmpty ? "剧情状态同步失败，请重试。" : trimmed
     }
 

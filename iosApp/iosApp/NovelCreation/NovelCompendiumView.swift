@@ -464,14 +464,24 @@ private struct NovelCompendiumMoreView: View {
                     Label("重新生成设定建议", systemImage: "arrow.clockwise")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .disabled(
-                    !viewModel.canMutate ||
-                        viewModel.branchSnapshot?.branch.activeRunID != nil
-                )
+                .disabled(!viewModel.canMutate || quickStartRegenerationBlockReason != nil)
             } footer: {
-                Text("新一轮成功后会替换当前未处理的建议；生成失败时仍保留当前建议。")
+                VStack(alignment: .leading, spacing: 4) {
+                    if let quickStartRegenerationBlockReason {
+                        Text(quickStartRegenerationBlockReason)
+                            .foregroundStyle(AmberTheme.foreground2)
+                    }
+                    Text("新一轮成功后会替换当前未处理的建议；生成失败时仍保留当前建议。")
+                }
             }
         }
+    }
+
+    private var quickStartRegenerationBlockReason: String? {
+        let hasRunningRun = viewModel.branchSnapshot?.branch.activeRunID != nil ||
+            viewModel.projectSnapshot?.activeRuns.contains(where: { $0.status == .running }) == true
+        guard hasRunningRun else { return nil }
+        return "已有生成任务正在运行；请先停止或等待完成，再重新生成建议。"
     }
 
     private var otherMaterials: [NovelMaterialRecord] {
@@ -499,6 +509,7 @@ struct NovelQuickStartRegenerationSheet: View {
     @State private var guidance = ""
     @State private var isStarting = false
     @State private var failureMessage: String?
+    @State private var isConfirmingDiscard = false
 
     var body: some View {
         NavigationStack {
@@ -525,8 +536,24 @@ struct NovelQuickStartRegenerationSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        if hasUnsavedChanges {
+                            isConfirmingDiscard = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                         .disabled(isStarting)
+                        .confirmationDialog(
+                            "放弃调整方向？",
+                            isPresented: $isConfirmingDiscard,
+                            titleVisibility: .visible
+                        ) {
+                            Button("放弃更改", role: .destructive) { dismiss() }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: {
+                            Text("已填写的调整方向会丢失。")
+                        }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("开始") { start() }
@@ -541,9 +568,13 @@ struct NovelQuickStartRegenerationSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(isStarting)
+        .interactiveDismissDisabled(isStarting || hasUnsavedChanges)
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)
+    }
+
+    private var hasUnsavedChanges: Bool {
+        !guidance.isEmpty
     }
 
     private func start() {

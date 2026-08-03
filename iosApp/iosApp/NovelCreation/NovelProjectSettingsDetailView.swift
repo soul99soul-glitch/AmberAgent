@@ -97,7 +97,7 @@ struct NovelProjectSettingsDetailView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Label("无法读取项目", systemImage: "exclamationmark.triangle")
                             .font(.body.weight(.semibold))
-                            .foregroundStyle(AmberTheme.accentAmber)
+                            .foregroundStyle(AmberTheme.foreground2)
                         Text(projectLoadFailure)
                             .font(.footnote)
                             .foregroundStyle(AmberTheme.foreground2)

@@ -2321,14 +2321,6 @@ private extension NovelSessionViewModel {
             displayedContent: current.content,
             targetContent: buffer.targetContent
         )
-        // [TEMP-DIAG] 取证「显示内容回退」:目标被整体替换后若不再以已显示内容
-        // 为前缀,pacer 会当场跳到新目标,内容可能变短 → 高度塌陷 → 列表位移。
-        ChatStreamAnomalyRecorder.noteNovelPresentation(
-            displayed: current.content.count,
-            target: buffer.targetContent.count,
-            next: step.content.count,
-            prefixHeld: buffer.targetContent.hasPrefix(current.content)
-        )
         if step.content != current.content || current.phase != .streaming {
             updateTail(content: step.content, phase: .streaming)
         }

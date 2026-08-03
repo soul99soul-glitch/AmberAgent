@@ -35,9 +35,10 @@ final class BackgroundGenerationKeepAlive {
         var systemTask: BGContinuedProcessingTask?
         /// BG handler 挂起在这里等 `end`；nil 表示系统还没调度到这一轮。
         var waiter: CheckedContinuation<Void, Never>?
-        /// 执行权被系统收走时通知上层。这一层只管执行权，怎么收口（搬到后台
-        /// 重跑、还是转挂起等回前台续）由上层决定。
+        /// UIKit 短窗口到期时通知上层；系统任务没有专用回调时也沿用它。
         var onExpire: (() -> Void)?
+        /// 系统 continued-processing 活动被用户取消或被系统终止时通知上层。
+        var onSystemTaskExpiration: (() -> Void)?
     }
 
     private var leases: [String: Lease] = [:]
@@ -110,8 +111,10 @@ final class BackgroundGenerationKeepAlive {
 
     /// 生成开始时调用。重复 begin 同一个 id 是幂等的。
     ///
-    /// - Parameter onExpire: 执行权被系统收走时回调。上层在这里做收口
-    ///   （搬后台重跑 / 转挂起）。正常跑完不会触发。
+    /// - Parameter onExpire: UIKit 短窗口在系统任务接管前到期时回调。上层在这里
+    ///   做后台交接；正常跑完不会触发。
+    /// - Parameter onSystemTaskExpiration: 系统进度活动被取消或终止时回调。
+    ///   未提供时沿用 `onExpire`，保持既有非 Chat 调用方语义。
     /// - Parameter submitSystemTask: 是否提交系统 continued-processing task。
     ///   关闭时仍持有 UIKit 短任务，并在其到期时执行 `onExpire`。
     func begin(
@@ -119,6 +122,7 @@ final class BackgroundGenerationKeepAlive {
         title: String,
         subtitle: String,
         onExpire: (() -> Void)? = nil,
+        onSystemTaskExpiration: (() -> Void)? = nil,
         submitSystemTask: Bool = true
     ) {
         guard leases[leaseId] == nil else { return }
@@ -132,7 +136,8 @@ final class BackgroundGenerationKeepAlive {
             uiTaskId: uiTaskId,
             systemTask: nil,
             waiter: nil,
-            onExpire: onExpire
+            onExpire: onExpire,
+            onSystemTaskExpiration: onSystemTaskExpiration
         )
 
         if submitSystemTask {
@@ -266,7 +271,7 @@ final class BackgroundGenerationKeepAlive {
         }
         lease.waiter?.resume()
         IOSBackgroundLifecycleLog.record("keepAliveExpired(\(leaseId))", detail: snapshotDetail)
-        lease.onExpire?()
+        (lease.onSystemTaskExpiration ?? lease.onExpire)?()
     }
 
     /// 摘租约必须连 identifier 反查表和已提交的请求一起摘。

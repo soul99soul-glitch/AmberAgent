@@ -452,7 +452,7 @@ struct NovelCollectCandidateSheet: View {
         case .pending(let message):
             Section {
                 Label(message, systemImage: "externaldrive.badge.checkmark")
-                    .foregroundStyle(AmberTheme.accentAmber)
+                    .foregroundStyle(AmberTheme.foreground2)
                 Button("返回创作页继续") { dismiss() }
             } header: {
                 Text("正文已安全保留")
@@ -1293,7 +1293,7 @@ struct NovelManualRewriteCandidateSheet: View {
 
                     Label("这会作为剧情改写保存", systemImage: "exclamationmark.triangle.fill")
                         .font(.headline)
-                        .foregroundStyle(AmberTheme.accentAmber)
+                        .foregroundStyle(AmberTheme.foreground2)
 
                     Text("系统检测到润色候选可能改变剧情事实。保存后分支会进入待同步，正式生成前需要重新同步剧情状态。")
                         .font(.subheadline)

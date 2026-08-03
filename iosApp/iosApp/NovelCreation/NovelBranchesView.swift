@@ -61,19 +61,32 @@ struct NovelBranchesView: View {
     private var branchesSection: some View {
         Section("剧情分支") {
             ForEach(viewModel.activeBranches, id: \.id) { branch in
+                let isSelected = branch.id == viewModel.selectedBranchID
+                let isMain = branch.id == viewModel.projectSnapshot?.project.mainBranchID
                 Button {
                     onSelect(branch.id)
                 } label: {
                     NovelBranchRow(
                         branch: branch,
-                        isSelected: branch.id == viewModel.selectedBranchID,
-                        isMain: branch.id == viewModel.projectSnapshot?.project.mainBranchID
+                        isSelected: isSelected,
+                        isMain: isMain
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(isSelectionDisabled)
+                .accessibilityLabel(branch.name)
+                .accessibilityValue(branchAccessibilityValue(branch, isMain: isMain))
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
+    }
+
+    private func branchAccessibilityValue(_ branch: NovelBranchRecord, isMain: Bool) -> String {
+        var values: [String] = []
+        if isMain { values.append("主分支") }
+        values.append(branch.syncStatus.displayName)
+        if branch.activeRunID != nil { values.append("生成中") }
+        return values.joined(separator: "，")
     }
 
     @ViewBuilder
@@ -197,7 +210,7 @@ struct NovelBranchesView: View {
                     .foregroundStyle(
                         snapshot.branch.syncStatus == .synchronized
                             ? AmberTheme.foreground
-                            : AmberTheme.accentAmber
+                            : AmberTheme.foreground2
                     )
 
                 if snapshot.currentState.summary.isEmpty {
@@ -375,7 +388,7 @@ private struct NovelBranchRow: View {
                     if branch.activeRunID != nil { Text("生成中") }
                 }
                 .font(.caption)
-                .foregroundStyle(branch.syncStatus == .synchronized ? AmberTheme.muted : AmberTheme.accentAmber)
+                .foregroundStyle(branch.syncStatus == .synchronized ? AmberTheme.muted : AmberTheme.foreground2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

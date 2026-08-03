@@ -99,6 +99,93 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDisabledAutomaticFollowDoesNotReplayBottomAfterFallback() {
+        var shouldReplayBottom: Bool?
+        let driver = NativeTimelineScrollDriver()
+        driver.onFallback = { _, replayBottom in
+            shouldReplayBottom = replayBottom
+        }
+        driver.setAutomaticFollowEnabled(false)
+
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        scrollView.contentSize = CGSize(width: 390, height: 1_400)
+        driver.attach(scrollView)
+        driver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
+
+        scrollView.contentOffset.x = 12
+        driver.handleLayoutMetricsChanged()
+        scrollView.contentOffset.x = 12
+        driver.handleLayoutMetricsChanged()
+
+        XCTAssertEqual(shouldReplayBottom, false)
+    }
+
+    @MainActor
+    func testTerminalSettleFollowsLateLayoutThenReleasesBottomOwnership() async {
+        let driver = NativeTimelineScrollDriver()
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
+        scrollView.contentSize = CGSize(width: 390, height: 1_400)
+        driver.attach(scrollView)
+        driver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
+
+        driver.submit(.generationTerminated)
+        XCTAssertTrue(driver.isFollowingBottomOrKeyboardFocus)
+
+        try? await Task.sleep(for: .milliseconds(100))
+        scrollView.contentSize = CGSize(width: 390, height: 1_700)
+        driver.handleLayoutMetricsChanged()
+        XCTAssertTrue(driver.isFollowingBottomOrKeyboardFocus)
+
+        try? await Task.sleep(for: .milliseconds(450))
+        XCTAssertEqual(scrollView.contentOffset.y, 900, accuracy: 2)
+        XCTAssertFalse(
+            driver.isFollowingBottomOrKeyboardFocus,
+            "终态晚到布局收敛后必须交还滚动所有权"
+        )
+    }
+
+    func testGenerationTerminalRebasesFinalHeightAndBecomesIdleAfterQuietInterval() {
+        let following = NativeTimelineScrollState.followingBottom(
+            virtualOffset: 700,
+            target: 700,
+            lastFollowRequestAt: 1
+        )
+        let terminal = NativeTimelineScrollCore.reduce(
+            state: following,
+            intent: .generationTerminated,
+            geometry: geometry(offsetY: 520, contentHeight: 1_200, distanceToBottom: 0),
+            now: 2
+        )
+
+        XCTAssertEqual(
+            terminal.state,
+            .settlingAfterTerminal(virtualOffset: 520, target: 520, lastLayoutAt: 2)
+        )
+        XCTAssertEqual(terminal.actions, [.startFrameDriver])
+
+        let settled = NativeTimelineScrollCore.tick(
+            state: terminal.state,
+            geometry: geometry(offsetY: 520, contentHeight: 1_200, distanceToBottom: 0),
+            now: 2 + NativeTimelineScrollCore.idleStopInterval + 0.01,
+            dt: 1.0 / 120.0
+        )
+        XCTAssertEqual(settled.state, .idle)
+        XCTAssertEqual(settled.actions, [.stopFrameDriver])
+    }
+
+    func testGenerationTerminalDoesNotTakeBottomFromPausedUser() {
+        let result = NativeTimelineScrollCore.reduce(
+            state: .pausedForUser,
+            intent: .generationTerminated,
+            geometry: geometry(offsetY: 520, distanceToBottom: 0),
+            now: 2
+        )
+
+        XCTAssertEqual(result.state, .pausedForUser)
+        XCTAssertEqual(result.actions, [])
+    }
+
+    @MainActor
     func testInvalidateAndReattachPreservesExistingHistoryPosition() {
         let driver = NativeTimelineScrollDriver()
         let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 390, height: 800))
@@ -135,6 +222,29 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
                 liveDistanceToBottom: nil,
                 cachedNearBottom: true,
                 threshold: 96
+            )
+        )
+    }
+
+    @MainActor
+    func testTrackingPhaseBeginsUserDragBeforeUIKitFlagsCatchUp() {
+        XCTAssertTrue(
+            NativeChatTimelineView.shouldBeginNativeUserDrag(
+                phase: .tracking,
+                isUIKitUserInteracting: false
+            )
+        )
+        XCTAssertFalse(
+            NativeChatTimelineView.shouldBeginNativeUserDrag(
+                phase: .interacting,
+                isUIKitUserInteracting: false
+            ),
+            "程序化滚动可能报告 interacting，但没有 UIKit 手势时不能暂停跟随"
+        )
+        XCTAssertTrue(
+            NativeChatTimelineView.shouldBeginNativeUserDrag(
+                phase: .interacting,
+                isUIKitUserInteracting: true
             )
         )
     }

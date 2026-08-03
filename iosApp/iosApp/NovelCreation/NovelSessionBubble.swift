@@ -116,7 +116,7 @@ struct NovelSessionBubble: View {
     private var statusLine: some View {
         if case .some(.persistenceBlocked) = transientPhase {
             Label("回复已生成，等待重试保存", systemImage: "externaldrive.badge.exclamationmark")
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
         } else if transientPhase == .terminalAwaitingRefresh {
             Label("正在保存创作记录", systemImage: "arrow.triangle.2.circlepath")
                 .foregroundStyle(AmberTheme.muted)
@@ -139,7 +139,7 @@ struct NovelSessionBubble: View {
                 canCollect ? "生成已中断 · 可收录已生成部分" : "生成已中断",
                 systemImage: "pause.circle"
             )
-            .foregroundStyle(AmberTheme.accentAmber)
+            .foregroundStyle(AmberTheme.foreground2)
         } else {
             switch kind {
             case .proseCandidate:
@@ -198,7 +198,7 @@ struct NovelSessionBubble: View {
             if let blocker = effectiveActions.compactMap(\.blocker).first {
                 Text(blocker.displayName)
                     .font(.caption)
-                    .foregroundStyle(AmberTheme.accentAmber)
+                    .foregroundStyle(AmberTheme.foreground2)
             } else if committedChange?.branchSyncStatus == .synchronized {
                 // committedChange is only non-nil for a committed row, so this never
                 // renders on discussion/plain-message rows. See branchSyncStatus's doc
@@ -246,10 +246,10 @@ struct NovelSessionBubble: View {
                 .foregroundStyle(AmberTheme.muted)
         case .superseded:
             Label("候选已过期", systemImage: "clock.badge.exclamationmark")
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
         case .interrupted:
             Label("候选生成已中断", systemImage: "pause.circle")
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
         case .available, .adopted, nil:
             Label(proseCandidateLabel, systemImage: "doc.text")
                 .foregroundStyle(AmberTheme.muted)
@@ -297,7 +297,7 @@ struct NovelSessionBubble: View {
                 .foregroundStyle(AmberTheme.accentRed)
         case .retryable:
             Label("剧情一致性检查失败 · 可以重试", systemImage: "arrow.clockwise.circle")
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
         case .blocked:
             Label("剧情一致性检查已阻止采用", systemImage: "hand.raised.fill")
                 .foregroundStyle(AmberTheme.accentRed)
@@ -320,10 +320,10 @@ struct NovelSessionBubble: View {
                 .foregroundStyle(AmberTheme.accentGreen)
         case .superseded:
             Label("润色候选已过期", systemImage: "clock.badge.exclamationmark")
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
         case .interrupted:
             Label("润色生成已中断", systemImage: "pause.circle")
-                .foregroundStyle(AmberTheme.accentAmber)
+                .foregroundStyle(AmberTheme.foreground2)
         case .inheritedReadOnly:
             Label("继承的历史润色候选", systemImage: "clock.arrow.circlepath")
                 .foregroundStyle(AmberTheme.muted)
@@ -361,9 +361,13 @@ private struct NovelSessionActionButtons: View {
             if item.action.isPrimary {
                 actionButton(item)
                     .buttonStyle(.borderedProminent)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             } else {
                 actionButton(item)
                     .buttonStyle(.bordered)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
         }
     }
@@ -422,8 +426,6 @@ private struct NovelSessionActionButtons: View {
             )
             .font(.footnote.weight(.semibold))
             .lineLimit(1)
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
         }
         .controlSize(.small)
         .disabled(!item.isEnabled)
@@ -461,7 +463,7 @@ private struct NovelAskUserCard: View {
                 if let blocker {
                     Text(blocker.displayName)
                         .font(.caption)
-                        .foregroundStyle(AmberTheme.accentAmber)
+                        .foregroundStyle(AmberTheme.foreground2)
                 }
 
                 Button("继续讨论") {

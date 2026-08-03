@@ -930,6 +930,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
 
         let locked = try await repository.loadProject(id: scenario.command.projectID).document
         XCTAssertEqual(locked.pendingOperations.first?.manualSyncProgress?.completedChunks.count, 1)
+        XCTAssertEqual(locked.pendingOperations.first?.lastError, "Retry the next chunk.")
 
         let continuationAdapter = ScriptedNovelModelAdapter(
             resolvedModel: lockedModel,
@@ -1102,6 +1103,10 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let durable = try await repository.loadProject(id: scenario.command.projectID).document
         XCTAssertEqual(durable.pendingOperations.first?.id, scenario.command.pendingID)
         XCTAssertEqual(durable.pendingOperations.first?.status, .retryable)
+        XCTAssertEqual(
+            durable.pendingOperations.first?.lastError,
+            "剧情状态同步已取消，可以重试。"
+        )
         XCTAssertEqual(durable.branches[0].syncStatus, .needsSync)
         XCTAssertTrue(durable.checkpoints.allSatisfy { $0.kind != .manualSync })
     }

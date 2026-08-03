@@ -169,7 +169,7 @@ private struct NovelChapterRow: View {
                     if isDiscarded {
                         Text("已废弃")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(AmberTheme.accentAmber)
+                            .foregroundStyle(AmberTheme.foreground2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(AmberTheme.accentAmber.opacity(0.12), in: Capsule())
@@ -278,7 +278,7 @@ struct NovelChapterVersionsSheet: View {
                                             systemImage: "exclamationmark.triangle"
                                         )
                                         .font(.footnote.weight(.medium))
-                                        .foregroundStyle(AmberTheme.accentAmber)
+                                        .foregroundStyle(AmberTheme.foreground2)
 
                                         Button {
                                             useAsManualRewrite(version)

@@ -48,7 +48,7 @@ struct NovelContinuityAuditSection: View {
                 if report.failedChunkCount > 0 {
                     Text("有 \(report.failedChunkCount) 段正文没扫成功，这份结果不完整，可以重新检查。")
                         .font(.caption)
-                        .foregroundStyle(AmberTheme.accentAmber)
+                        .foregroundStyle(AmberTheme.foreground2)
                 }
                 Button("重新检查") {
                     viewModel.clearContinuityAudit()
@@ -92,7 +92,7 @@ struct NovelContinuityAuditSection: View {
             if isStale(report) {
                 Text("正文在这次扫描之后又改过了，结果可能已经过期。")
                     .font(.caption)
-                    .foregroundStyle(AmberTheme.accentAmber)
+                    .foregroundStyle(AmberTheme.foreground2)
             }
         }
         .padding(.vertical, 3)
@@ -197,7 +197,7 @@ extension NovelContinuityIssueSeverityV1 {
     var tint: Color {
         switch self {
         case .blocking: AmberTheme.accentRed
-        case .major: AmberTheme.accentAmber
+        case .major: AmberTheme.foreground2
         case .minor: AmberTheme.muted
         }
     }

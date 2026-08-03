@@ -218,7 +218,8 @@ final class IOSNovelCreationWiringTests: XCTestCase {
 
         XCTAssertTrue(workspace.contains("NovelWorkspaceGlassTabBar("))
         XCTAssertTrue(workspace.contains("ForEach(NovelWorkspaceSection.allCases)"))
-        XCTAssertTrue(workspace.contains(".safeAreaBar(edge: .top, spacing: 0)"))
+        XCTAssertTrue(workspace.contains("VStack(spacing: 0) {\n                    sectionPicker"))
+        XCTAssertFalse(workspace.contains(".safeAreaBar(edge: .top, spacing: 0)"))
         XCTAssertTrue(workspace.contains(".glassEffect(.regular.interactive(), in: Capsule())"))
         XCTAssertTrue(workspace.contains(".background(.ultraThinMaterial, in: Capsule())"))
         XCTAssertTrue(workspace.contains("id: \"selected-workspace-section\""))
@@ -429,6 +430,194 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(branchSheet.contains("|| !viewModel.canMutate"))
         XCTAssertTrue(viewModel.contains("func setBranchMaterialOverride("))
         XCTAssertTrue(viewModel.contains(") async -> Bool"))
+    }
+
+    func testProjectCreationAndQuickStartGuidanceProtectEnteredDrafts() throws {
+        let projectList = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
+
+        let createStart = try XCTUnwrap(projectList.range(of: "private struct NovelProjectCreateSheet"))
+        let createEnd = try XCTUnwrap(projectList.range(
+            of: "struct NovelProjectRenameSheet",
+            range: createStart.upperBound..<projectList.endIndex
+        ))
+        let createSheet = projectList[createStart.lowerBound..<createEnd.lowerBound]
+
+        XCTAssertTrue(createSheet.contains("@State private var isConfirmingDiscard = false"))
+        XCTAssertTrue(createSheet.contains("private var hasUnsavedChanges: Bool"))
+        XCTAssertTrue(createSheet.contains("if hasUnsavedChanges"))
+        XCTAssertTrue(createSheet.contains("\"放弃新建小说？\""))
+        XCTAssertTrue(createSheet.contains(
+            ".interactiveDismissDisabled(viewModel.isPerforming || hasUnsavedChanges)"
+        ))
+        XCTAssertTrue(createSheet.contains(
+            ".presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)"
+        ))
+
+        let regenerationStart = try XCTUnwrap(compendium.range(
+            of: "struct NovelQuickStartRegenerationSheet"
+        ))
+        let regenerationEnd = try XCTUnwrap(compendium.range(
+            of: "struct NovelCompendiumProposalCard",
+            range: regenerationStart.upperBound..<compendium.endIndex
+        ))
+        let regenerationSheet = compendium[
+            regenerationStart.lowerBound..<regenerationEnd.lowerBound
+        ]
+
+        XCTAssertTrue(regenerationSheet.contains("@State private var isConfirmingDiscard = false"))
+        XCTAssertTrue(regenerationSheet.contains("private var hasUnsavedChanges: Bool"))
+        XCTAssertTrue(regenerationSheet.contains("if hasUnsavedChanges"))
+        XCTAssertTrue(regenerationSheet.contains("\"放弃调整方向？\""))
+        XCTAssertTrue(regenerationSheet.contains(
+            ".interactiveDismissDisabled(isStarting || hasUnsavedChanges)"
+        ))
+        XCTAssertTrue(regenerationSheet.contains(
+            ".presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)"
+        ))
+    }
+
+    func testNovelPrimaryControlsKeepCompactGlassWith44PointHitTargets() throws {
+        let chatComposer = try source("iosApp/ChatComposerViews.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+
+        let ringStart = try XCTUnwrap(chatComposer.range(of: "struct ContextRingButton"))
+        let ringEnd = try XCTUnwrap(chatComposer.range(
+            of: "struct ComposerModelSheet",
+            range: ringStart.upperBound..<chatComposer.endIndex
+        ))
+        let ring = chatComposer[ringStart.lowerBound..<ringEnd.lowerBound]
+        XCTAssertTrue(ring.contains(".frame(width: 34, height: 34)"))
+        XCTAssertTrue(ring.contains(".frame(width: 44, height: 44)"))
+        let ringGlass = try XCTUnwrap(ring.range(of: "ComposerDockCircleGlass(tint: nil)"))
+        let ringHitTarget = try XCTUnwrap(ring.range(
+            of: ".frame(width: 44, height: 44)",
+            range: ringGlass.upperBound..<ring.endIndex
+        ))
+        XCTAssertLessThan(ringGlass.lowerBound, ringHitTarget.lowerBound)
+
+        let metaStart = try XCTUnwrap(session.range(of: "private var composerMetaControls"))
+        let metaEnd = try XCTUnwrap(session.range(
+            of: "private var controlsDisabled",
+            range: metaStart.upperBound..<session.endIndex
+        ))
+        let metaControls = session[metaStart.lowerBound..<metaEnd.lowerBound]
+        XCTAssertEqual(metaControls.components(separatedBy: ".frame(height: 30)").count - 1, 2)
+        XCTAssertEqual(metaControls.components(separatedBy: ".frame(minHeight: 44)").count - 1, 2)
+        XCTAssertEqual(metaControls.components(separatedBy: ".contentShape(Rectangle())").count - 1, 2)
+
+        let menuStart = try XCTUnwrap(reader.range(of: "private var readerActionsMenu"))
+        let menuEnd = try XCTUnwrap(reader.range(
+            of: "private var chapterStatusBanner",
+            range: menuStart.upperBound..<reader.endIndex
+        ))
+        let readerMenu = reader[menuStart.lowerBound..<menuEnd.lowerBound]
+        XCTAssertTrue(readerMenu.contains(".frame(width: 40, height: 40)"))
+        XCTAssertTrue(readerMenu.contains(".frame(width: 44, height: 44)"))
+        let readerGlass = try XCTUnwrap(readerMenu.range(of: "ComposerDockCircleGlass(tint: nil)"))
+        let readerHitTarget = try XCTUnwrap(readerMenu.range(
+            of: ".frame(width: 44, height: 44)",
+            range: readerGlass.upperBound..<readerMenu.endIndex
+        ))
+        XCTAssertLessThan(readerGlass.lowerBound, readerHitTarget.lowerBound)
+    }
+
+    func testNovelSessionRetryUsesChineseCopyAndCompactVisualControl() throws {
+        let bubble = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
+        let lifecycle = try source("iosApp/NovelCreation/NovelFactTransactionLifecycle.swift")
+
+        XCTAssertFalse(lifecycle.contains(
+            "The fact synchronization was cancelled and can be retried."
+        ))
+        XCTAssertTrue(lifecycle.contains("剧情状态同步已取消，可以重试。"))
+
+        let buttonsStart = try XCTUnwrap(bubble.range(
+            of: "private struct NovelSessionActionButtons"
+        ))
+        let buttonsEnd = try XCTUnwrap(bubble.range(
+            of: "private struct NovelAskUserCard",
+            range: buttonsStart.upperBound..<bubble.endIndex
+        ))
+        let buttons = bubble[buttonsStart.lowerBound..<buttonsEnd.lowerBound]
+        let bodyEnd = try XCTUnwrap(buttons.range(of: "private func actionButton"))
+        let body = buttons[buttons.startIndex..<bodyEnd.lowerBound]
+        let visualStyle = try XCTUnwrap(body.range(of: ".buttonStyle(.bordered)"))
+        let hitTarget = try XCTUnwrap(body.range(
+            of: ".frame(minHeight: 44)",
+            range: visualStyle.upperBound..<body.endIndex
+        ))
+        XCTAssertLessThan(visualStyle.lowerBound, hitTarget.lowerBound)
+
+        let baseButtonStart = try XCTUnwrap(buttons.range(of: "private func baseButton("))
+        let baseButton = buttons[baseButtonStart.lowerBound..<buttons.endIndex]
+        let labelEnd = try XCTUnwrap(baseButton.range(of: ".controlSize(.small)"))
+        let label = baseButton[baseButton.startIndex..<labelEnd.lowerBound]
+        XCTAssertFalse(label.contains(".frame(minHeight: 44)"))
+    }
+
+    func testBranchRowsExposeCurrentAndMainStateToVoiceOver() throws {
+        let branches = try source("iosApp/NovelCreation/NovelBranchesView.swift")
+        let sectionStart = try XCTUnwrap(branches.range(of: "private var branchesSection"))
+        let sectionEnd = try XCTUnwrap(branches.range(
+            of: "private var selectedBranchActions",
+            range: sectionStart.upperBound..<branches.endIndex
+        ))
+        let section = branches[sectionStart.lowerBound..<sectionEnd.lowerBound]
+
+        XCTAssertTrue(section.contains("let isSelected = branch.id == viewModel.selectedBranchID"))
+        XCTAssertTrue(section.contains(
+            "let isMain = branch.id == viewModel.projectSnapshot?.project.mainBranchID"
+        ))
+        XCTAssertTrue(section.contains(
+            ".accessibilityAddTraits(isSelected ? .isSelected : [])"
+        ))
+        XCTAssertTrue(section.contains(".accessibilityValue(branchAccessibilityValue("))
+        XCTAssertTrue(branches.contains("values.append(\"主分支\")"))
+        XCTAssertTrue(branches.contains("values.append(\"生成中\")"))
+    }
+
+    func testNovelStatusCopyUsesReadableInkWhileSemanticSymbolsKeepAmber() throws {
+        let projectList = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+        let batch = try source("iosApp/NovelCreation/NovelBatchPolishSheet.swift")
+        let branches = try source("iosApp/NovelCreation/NovelBranchesView.swift")
+        let bubble = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let chapters = try source("iosApp/NovelCreation/NovelChapterViews.swift")
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+        let continuity = try source("iosApp/NovelCreation/NovelContinuityAuditView.swift")
+        let settings = try source("iosApp/NovelCreation/NovelProjectSettingsDetailView.swift")
+        let sheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+
+        let reloadStart = try XCTUnwrap(projectList.range(of: "private var reloadRequirementBanner"))
+        let reloadEnd = try XCTUnwrap(projectList.range(
+            of: "private var createProjectAction",
+            range: reloadStart.upperBound..<projectList.endIndex
+        ))
+        let reloadBanner = projectList[reloadStart.lowerBound..<reloadEnd.lowerBound]
+        XCTAssertFalse(reloadBanner.contains(".foregroundStyle(AmberTheme.accentAmber)"))
+        XCTAssertTrue(reloadBanner.contains(".foregroundStyle(AmberTheme.foreground2)"))
+
+        XCTAssertFalse(session.contains(".foregroundStyle(AmberTheme.muted2)"))
+        XCTAssertFalse(batch.contains(".foregroundStyle(AmberTheme.muted2)"))
+        XCTAssertFalse(batch.contains(".foregroundStyle(AmberTheme.accentAmber)"))
+        XCTAssertFalse(bubble.contains(".foregroundStyle(AmberTheme.accentAmber)"))
+        XCTAssertFalse(workspace.contains(".foregroundStyle(AmberTheme.accentAmber)"))
+        XCTAssertFalse(chapters.contains(".foregroundStyle(AmberTheme.accentAmber)"))
+        XCTAssertFalse(reader.contains(".foregroundStyle(AmberTheme.accentAmber)"))
+        XCTAssertFalse(continuity.contains("AmberTheme.accentAmber"))
+        XCTAssertFalse(settings.contains(".foregroundStyle(AmberTheme.accentAmber)"))
+        XCTAssertFalse(sheets.contains(".foregroundStyle(AmberTheme.accentAmber)"))
+
+        XCTAssertTrue(branches.contains(
+            "branch.syncStatus == .synchronized ? AmberTheme.muted : AmberTheme.foreground2"
+        ))
+        XCTAssertTrue(projectList.contains(
+            ".foregroundStyle(project.isDegraded ? AmberTheme.accentAmber : AmberTheme.accent)"
+        ))
+        XCTAssertTrue(workspace.contains(".tint(AmberTheme.accentAmber)"))
+        XCTAssertTrue(reader.contains(".background(AmberTheme.accentAmber.opacity(0.10))"))
     }
 
     func testBranchMutationGatesMatchReducerBusySemantics() throws {
@@ -965,8 +1154,10 @@ final class IOSNovelCreationWiringTests: XCTestCase {
 
         XCTAssertTrue(viewModel.contains("let projectID: NovelProjectID"))
         XCTAssertTrue(viewModel.contains("let branchID: NovelBranchID"))
-        XCTAssertTrue(session.contains("activity.projectID == workspace.selectedProjectID"))
-        XCTAssertTrue(session.contains("activity.branchID == workspace.selectedBranchID"))
+        XCTAssertTrue(session.contains("let projectID = workspace.selectedProjectID"))
+        XCTAssertTrue(session.contains("let branchID = workspace.selectedBranchID"))
+        XCTAssertTrue(session.contains("activity.projectID == projectID"))
+        XCTAssertTrue(session.contains("activity.branchID == branchID"))
         let backgroundCheck = try XCTUnwrap(viewModel.range(
             of: "private func backgroundGenerationProbe()"
         ))
@@ -1057,6 +1248,11 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(section.contains("viewModel.projectSnapshot?.project.creationMode == .quickStart"))
         XCTAssertTrue(section.contains("重新生成设定建议"))
         XCTAssertTrue(section.contains("新一轮成功后会替换当前未处理的建议"))
+        XCTAssertTrue(section.contains("quickStartRegenerationBlockReason"))
+        XCTAssertTrue(section.contains("已有生成任务正在运行"))
+        XCTAssertTrue(section.contains(
+            ".disabled(!viewModel.canMutate || quickStartRegenerationBlockReason != nil)"
+        ))
 
         // 链条第三环: 入口实际挂载到「更多」子分段(NovelCompendiumMoreView)的 List 内,
         // 是常驻 Section,不依赖 proposals 是否为空。

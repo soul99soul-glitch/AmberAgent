@@ -224,7 +224,7 @@ struct NovelProjectWorkspaceView: View {
                 HStack(spacing: 12) {
                     Label("操作已提交，需要重新载入项目", systemImage: "arrow.clockwise.circle")
                         .font(.footnote.weight(.medium))
-                        .foregroundStyle(AmberTheme.accentAmber)
+                        .foregroundStyle(AmberTheme.foreground2)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     Button("重新载入") {
@@ -242,7 +242,7 @@ struct NovelProjectWorkspaceView: View {
                 HStack(spacing: 12) {
                     Label("已从上一个有效版本恢复，当前项目只读", systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote.weight(.medium))
-                        .foregroundStyle(AmberTheme.accentAmber)
+                        .foregroundStyle(AmberTheme.foreground2)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     Button {

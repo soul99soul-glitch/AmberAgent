@@ -22,9 +22,6 @@ enum NativeTimelineBottomIntentSource: String, Equatable {
 
 enum NativeTimelineScrollFallbackReason: String, Equatable {
     case nonFiniteOffset
-    /// 2026-07-18 起收敛耗尽不再触发 fallback（driver 保持所有权，仅记诊断日志），
-    /// 生产路径已不构造此 case；保留是为了历史日志字符串的兼容。
-    case bottomConvergenceExhausted
     case horizontalOffsetDrift
 }
 
@@ -36,6 +33,7 @@ struct NativeTimelineKeyboardFocusTransaction: Equatable {
 enum NativeTimelineScrollState: Equatable {
     case idle
     case followingBottom(virtualOffset: CGFloat, target: CGFloat, lastFollowRequestAt: TimeInterval)
+    case settlingAfterTerminal(virtualOffset: CGFloat, target: CGFloat, lastLayoutAt: TimeInterval)
     case pausedForUser
     case keyboardFocus(NativeTimelineKeyboardFocusTransaction)
 }
@@ -74,6 +72,7 @@ enum NativeTimelineScrollIntent: Equatable {
     case streamContentGrew
     case viewportChanged
     case layoutSettled(token: UInt64?)
+    case generationTerminated
     case userDragBegan
     case userDragEnded(isAtBottom: Bool)
     case conversationReset
@@ -154,6 +153,15 @@ enum NativeTimelineScrollCore {
                     state,
                     [.requestBottomAnchor(animated: false, source: .streamGrowth)]
                 )
+            case let .settlingAfterTerminal(virtualOffset, _, _):
+                return (
+                    .settlingAfterTerminal(
+                        virtualOffset: min(virtualOffset, geometry.bottomTarget),
+                        target: geometry.bottomTarget,
+                        lastLayoutAt: now
+                    ),
+                    [.startFrameDriver]
+                )
             case .idle:
                 guard geometry.isNearBottom else {
                     return (state, [])
@@ -181,11 +189,35 @@ enum NativeTimelineScrollCore {
                         ? []
                         : [.startFrameDriver]
                 )
+            case .settlingAfterTerminal:
+                return (
+                    .settlingAfterTerminal(
+                        virtualOffset: min(geometry.offsetY, geometry.bottomTarget),
+                        target: geometry.bottomTarget,
+                        lastLayoutAt: now
+                    ),
+                    [.startFrameDriver]
+                )
             case .idle, .pausedForUser:
                 return (state, [])
             }
 
         case let .layoutSettled(layoutToken):
+            if layoutToken == nil,
+               case let .settlingAfterTerminal(virtualOffset, target, lastLayoutAt) = state {
+                let targetChanged = abs(target - geometry.bottomTarget) >= arrivalEpsilon
+                guard targetChanged || !geometry.isAtBottom else {
+                    return (state, [])
+                }
+                return (
+                    .settlingAfterTerminal(
+                        virtualOffset: min(virtualOffset, geometry.bottomTarget),
+                        target: geometry.bottomTarget,
+                        lastLayoutAt: targetChanged ? now : lastLayoutAt
+                    ),
+                    [.startFrameDriver]
+                )
+            }
             guard case let .keyboardFocus(transaction) = state else {
                 guard layoutToken == nil,
                       case let .followingBottom(virtualOffset, target, _) = state
@@ -240,6 +272,24 @@ enum NativeTimelineScrollCore {
                 [.markKeyboardFocusComplete]
             )
 
+        case .generationTerminated:
+            switch state {
+            case .pausedForUser:
+                return (state, [])
+            case .idle:
+                guard geometry.isNearBottom else { return (state, []) }
+            case .followingBottom, .settlingAfterTerminal, .keyboardFocus:
+                break
+            }
+            return (
+                .settlingAfterTerminal(
+                    virtualOffset: min(geometry.offsetY, geometry.bottomTarget),
+                    target: geometry.bottomTarget,
+                    lastLayoutAt: now
+                ),
+                [.startFrameDriver]
+            )
+
         case .userDragBegan:
             return (.pausedForUser, stopFrameDriverIfNeeded(from: state))
 
@@ -267,52 +317,96 @@ enum NativeTimelineScrollCore {
         now: TimeInterval,
         dt: TimeInterval
     ) -> (state: NativeTimelineScrollState, actions: [NativeTimelineScrollAction]) {
-        guard case let .followingBottom(virtualOffset, target, lastFollowRequestAt) = state else {
-            return (state, [])
-        }
-        guard !geometry.userInteracting else {
-            return (.pausedForUser, [.stopFrameDriver])
-        }
-        guard geometry.offsetY.isFinite, geometry.bottomTarget.isFinite else {
-            return (state, [])
-        }
+        switch state {
+        case let .followingBottom(virtualOffset, target, lastFollowRequestAt):
+            guard !geometry.userInteracting else {
+                return (.pausedForUser, [.stopFrameDriver])
+            }
+            guard geometry.offsetY.isFinite, geometry.bottomTarget.isFinite else {
+                return (state, [])
+            }
 
-        let newTarget = clampedTarget(current: target, incoming: geometry.bottomTarget)
-        let externallyAdvanced = min(geometry.offsetY, newTarget)
-        let baseVirtual = max(virtualOffset, externallyAdvanced)
-        let remaining = newTarget - baseVirtual
+            let newTarget = clampedTarget(current: target, incoming: geometry.bottomTarget)
+            let externallyAdvanced = min(geometry.offsetY, newTarget)
+            let baseVirtual = max(virtualOffset, externallyAdvanced)
+            let remaining = newTarget - baseVirtual
 
-        if abs(remaining) < arrivalEpsilon {
-            if now - lastFollowRequestAt > idleStopInterval {
+            if abs(remaining) < arrivalEpsilon {
+                if now - lastFollowRequestAt > idleStopInterval {
+                    return (
+                        .followingBottom(
+                            virtualOffset: newTarget,
+                            target: newTarget,
+                            lastFollowRequestAt: now
+                        ),
+                        [.writeOffsetY(newTarget), .stopFrameDriver]
+                    )
+                }
                 return (
                     .followingBottom(
                         virtualOffset: newTarget,
                         target: newTarget,
-                        lastFollowRequestAt: now
+                        lastFollowRequestAt: lastFollowRequestAt
                     ),
-                    [.writeOffsetY(newTarget), .stopFrameDriver]
+                    abs(newTarget - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newTarget)]
                 )
             }
+
+            let alpha = 1 - exp(-max(dt, 0) / tau)
+            let newVirtual = baseVirtual + remaining * alpha
             return (
                 .followingBottom(
-                    virtualOffset: newTarget,
+                    virtualOffset: newVirtual,
                     target: newTarget,
                     lastFollowRequestAt: lastFollowRequestAt
                 ),
-                abs(newTarget - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newTarget)]
+                abs(newVirtual - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newVirtual)]
             )
-        }
 
-        let alpha = 1 - exp(-max(dt, 0) / tau)
-        let newVirtual = baseVirtual + remaining * alpha
-        return (
-            .followingBottom(
-                virtualOffset: newVirtual,
-                target: newTarget,
-                lastFollowRequestAt: lastFollowRequestAt
-            ),
-            abs(newVirtual - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newVirtual)]
-        )
+        case let .settlingAfterTerminal(virtualOffset, target, lastLayoutAt):
+            guard !geometry.userInteracting else {
+                return (.pausedForUser, [.stopFrameDriver])
+            }
+            guard geometry.offsetY.isFinite, geometry.bottomTarget.isFinite else {
+                return (state, [])
+            }
+
+            let targetChanged = abs(target - geometry.bottomTarget) >= arrivalEpsilon
+            let newTarget = geometry.bottomTarget
+            let quietSince = targetChanged ? now : lastLayoutAt
+            let baseVirtual = max(min(virtualOffset, newTarget), min(geometry.offsetY, newTarget))
+            let remaining = newTarget - baseVirtual
+
+            if abs(remaining) < arrivalEpsilon {
+                let writeActions: [NativeTimelineScrollAction] =
+                    abs(newTarget - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newTarget)]
+                guard now - quietSince >= idleStopInterval else {
+                    return (
+                        .settlingAfterTerminal(
+                            virtualOffset: newTarget,
+                            target: newTarget,
+                            lastLayoutAt: quietSince
+                        ),
+                        writeActions
+                    )
+                }
+                return (.idle, writeActions + [.stopFrameDriver])
+            }
+
+            let alpha = 1 - exp(-max(dt, 0) / tau)
+            let newVirtual = baseVirtual + remaining * alpha
+            return (
+                .settlingAfterTerminal(
+                    virtualOffset: newVirtual,
+                    target: newTarget,
+                    lastLayoutAt: quietSince
+                ),
+                abs(newVirtual - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newVirtual)]
+            )
+
+        case .idle, .pausedForUser, .keyboardFocus:
+            return (state, [])
+        }
     }
 
     private static func clampedTarget(current: CGFloat, incoming: CGFloat) -> CGFloat {
@@ -321,9 +415,11 @@ enum NativeTimelineScrollCore {
     }
 
     private static func stopFrameDriverIfNeeded(from state: NativeTimelineScrollState) -> [NativeTimelineScrollAction] {
-        if case .followingBottom = state {
+        switch state {
+        case .followingBottom, .settlingAfterTerminal:
             return [.stopFrameDriver]
+        case .idle, .pausedForUser, .keyboardFocus:
+            return []
         }
-        return []
     }
 }
