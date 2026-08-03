@@ -13,7 +13,7 @@ export struct NotionSlider {
   @Prop min: number = 0;
   @Prop max: number = 1;
   @Prop step: number = 0;
-  @Prop enabled: boolean = true;
+  @Prop fieldEnabled: boolean = true;
   @Prop labelMode: string = ''; // 'percent' | 'int' | ''(none)
   onChange: (value: number) => void = (_v: number): void => {};
 
@@ -39,7 +39,7 @@ export struct NotionSlider {
         .blockColor(ACCENT)
         .trackColor(SURFACE)
         .selectedColor(ACCENT)
-        .enabled(this.enabled)
+        .enabled(this.fieldEnabled)
         .onChange((v: number): void => { this.onChange(v); })
 
       if (this.labelMode.length > 0) {

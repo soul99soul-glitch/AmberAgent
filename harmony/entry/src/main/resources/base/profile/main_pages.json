@@ -31,6 +31,12 @@
     "pages/SettingAboutPage",
     "pages/SettingSandboxPage",
     "pages/SettingFilesPage",
-    "pages/SettingCronTasksPage"
+    "pages/SettingCronTasksPage",
+    "pages/SettingModelPage",
+    "pages/SettingProviderConfigPage",
+    "pages/SettingProviderModelTabPage",
+    "pages/SettingProviderModelSettingsForm",
+    "pages/SettingTTSPage",
+    "pages/SettingSystemAccessPage"
   ]
 }

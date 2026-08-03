@@ -3,7 +3,7 @@
 import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, BODY, META } from '../../design/tokens.ets';
 
 @Component
-export struct Select {
+export struct PillSelect {
   @Prop options: string[] = [];
   @Prop selectedIndex: number = 0;
   @State expanded: boolean = false;

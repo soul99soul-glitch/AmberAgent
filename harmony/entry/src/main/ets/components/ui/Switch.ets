@@ -11,34 +11,34 @@ export enum SwitchSize {
 @Component
 export struct AmberSwitch {
   @Prop checked: boolean = false;
-  @Prop size: SwitchSize = SwitchSize.Small;
-  @Prop enabled: boolean = true;
+  @Prop switchSize: SwitchSize = SwitchSize.Small;
+  @Prop fieldEnabled: boolean = true;
   onCheckedChange: (checked: boolean) => void = (_c: boolean): void => {};
 
   private trackWidth(): number {
-    if (this.size === SwitchSize.Small) return 34;
-    if (this.size === SwitchSize.Medium) return 38;
+    if (this.switchSize === SwitchSize.Small) return 34;
+    if (this.switchSize === SwitchSize.Medium) return 38;
     return 42;
   }
   private trackHeight(): number {
-    if (this.size === SwitchSize.Small) return 18;
-    if (this.size === SwitchSize.Medium) return 20;
+    if (this.switchSize === SwitchSize.Small) return 18;
+    if (this.switchSize === SwitchSize.Medium) return 20;
     return 22;
   }
   private thumbSize(): number {
-    if (this.size === SwitchSize.Small) return 14;
-    if (this.size === SwitchSize.Medium) return 16;
+    if (this.switchSize === SwitchSize.Small) return 14;
+    if (this.switchSize === SwitchSize.Medium) return 16;
     return 18;
   }
   private thumbOffset(): number {
     return this.checked ? this.trackWidth() - this.thumbSize() - 4 : 2;
   }
   private trackColor(): string {
-    if (!this.enabled) return SURFACE2;
+    if (!this.fieldEnabled) return SURFACE2;
     return this.checked ? ACCENT : LINE;
   }
   private thumbColor(): string {
-    if (!this.enabled) return INK4;
+    if (!this.fieldEnabled) return INK4;
     return '#FFFFFF';
   }
 
@@ -58,7 +58,7 @@ export struct AmberSwitch {
     .backgroundColor(this.trackColor())
     .alignContent(Alignment.Start)
     .onClick((): void => {
-      if (this.enabled) this.onCheckedChange(!this.checked);
+      if (this.fieldEnabled) this.onCheckedChange(!this.checked);
     })
   }
 }
