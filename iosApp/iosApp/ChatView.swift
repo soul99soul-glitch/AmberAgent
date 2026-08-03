@@ -983,6 +983,8 @@ struct ChatView: View {
                             }
                             .buttonStyle(.plain)
                             .amberGlass(cornerRadius: 13, interactive: false)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                     }
                     .padding(.horizontal, 2)
@@ -1063,6 +1065,7 @@ struct ChatView: View {
                                     .composerDockGlass(cornerRadius: 15)
                             }
                             .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
+                            .frame(minHeight: 44)
                             .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                             .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
 

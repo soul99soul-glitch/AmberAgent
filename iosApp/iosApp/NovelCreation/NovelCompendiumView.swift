@@ -537,11 +537,7 @@ struct NovelQuickStartRegenerationSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        if hasUnsavedChanges {
-                            isConfirmingDiscard = true
-                        } else {
-                            dismiss()
-                        }
+                        NovelTextInputCommitter.perform { requestDismiss() }
                     }
                         .disabled(isStarting)
                         .confirmationDialog(
@@ -556,25 +552,33 @@ struct NovelQuickStartRegenerationSheet: View {
                         }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("开始") { start() }
+                    Button("开始") {
+                        NovelTextInputCommitter.perform { start() }
+                    }
                         .disabled(isStarting || viewModel.isPerforming)
                 }
             }
             .overlay {
                 if isStarting {
                     ProgressView("正在开始生成建议")
-                        .padding(16)
-                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
-        .interactiveDismissDisabled(isStarting || hasUnsavedChanges)
+        .interactiveDismissDisabled()
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)
+        .presentationDragIndicator(.hidden)
     }
 
     private var hasUnsavedChanges: Bool {
         !guidance.isEmpty
+    }
+
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
+            dismiss()
+        }
     }
 
     private func start() {
@@ -616,8 +620,12 @@ struct NovelCompendiumProposalCard: View {
                     Task { await viewModel.resolveProposal(proposal.id, resolution: .reject) }
                 }
                 .buttonStyle(.bordered)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
                 Button("确认并写入", action: onAccept)
                     .buttonStyle(.borderedProminent)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
         }
         .padding(.vertical, 6)

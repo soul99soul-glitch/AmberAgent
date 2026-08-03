@@ -1554,6 +1554,69 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertTrue(messages[2].toText().contains("network"))
     }
 
+    func testBackgroundCompletionReconcilesPreExecutedPrefixToolOutputsIntoDisplayMessages() {
+        let user = UIMessage.companion.user(prompt: "question")
+        let seed = UIMessage.companion.assistant(prompt: "")
+        let pendingTool = UIMessagePart.Tool(
+            toolCallId: "tool-1",
+            toolName: "search_web",
+            input: #"{"query":"amber"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let completedTool = UIMessagePart.Tool(
+            toolCallId: pendingTool.toolCallId,
+            toolName: pendingTool.toolName,
+            input: pendingTool.input,
+            output: [UIMessagePart.Text(text: "completed in background", metadata: nil)],
+            approvalState: pendingTool.approvalState,
+            streamIndex: pendingTool.streamIndex,
+            metadata: nil
+        )
+        let pendingAssistant = UIMessage(
+            id: seed.id,
+            role: seed.role,
+            parts: [pendingTool],
+            annotations: seed.annotations,
+            createdAt: seed.createdAt,
+            finishedAt: seed.finishedAt,
+            modelId: seed.modelId,
+            usage: seed.usage,
+            translation: seed.translation
+        )
+        let completedAssistant = UIMessage(
+            id: seed.id,
+            role: seed.role,
+            parts: [completedTool],
+            annotations: seed.annotations,
+            createdAt: seed.createdAt,
+            finishedAt: seed.finishedAt,
+            modelId: seed.modelId,
+            usage: seed.usage,
+            translation: seed.translation
+        )
+        let runtimeSystem = UIMessage.companion.system(prompt: "runtime-only")
+        let finalAnswer = UIMessage.companion.assistant(prompt: "final answer")
+
+        let reconciled = IOSChatBackgroundGenerationCoordinator.reconciledMessagesForTesting(
+            resultMessages: [runtimeSystem, user, completedAssistant, finalAnswer],
+            uploadMessageCount: 3,
+            displayMessages: [user, pendingAssistant]
+        )
+
+        XCTAssertEqual(reconciled.count, 3)
+        XCTAssertEqual(reconciled[0].role, MessageRole.user)
+        let tool = reconciled[1].parts.compactMap { $0 as? UIMessagePart.Tool }.first
+        XCTAssertEqual(
+            tool?.output.compactMap { ($0 as? UIMessagePart.Text)?.text },
+            ["completed in background"]
+        )
+        XCTAssertEqual(reconciled[2].toText(), "final answer")
+        XCTAssertFalse(reconciled.contains { $0.toText().contains("runtime-only") })
+    }
+
     func testBackgroundSuccessBuildsWatchSummaryFromLastAssistantText() {
         let messages = [
             UIMessage.companion.user(prompt: "question"),

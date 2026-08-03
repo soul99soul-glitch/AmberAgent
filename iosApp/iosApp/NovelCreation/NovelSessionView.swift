@@ -76,6 +76,7 @@ struct NovelSessionView: View {
     @Binding var inputText: String
     @Binding var injectionOverrides: NovelInjectionOverrides
     @Binding var inputBudgetTokens: Int
+    let composerInputController: ComposerInputController
 
     let onOpenModel: () -> Void
     let onOpenCollection: (NovelCandidateID) -> Void
@@ -99,7 +100,6 @@ struct NovelSessionView: View {
     @State private var isNativeScrollSurfaceVisible = false
     @State private var composerInputHeight: CGFloat = 40
     @State private var composerBarHeight: CGFloat = 0
-    @State private var composerInputController = ComposerInputController()
     @State private var isInputFocused = false
     @State private var isContextPanelPresented = false
     @State private var pendingRecoveryAbandonTransactionIDs: [NovelPendingOperationID] = []
@@ -169,6 +169,10 @@ struct NovelSessionView: View {
             handleListSignalChange(from: oldValue, to: newValue)
         }
         .onDisappear {
+            if let committed = composerInputController.committedText(),
+               committed != inputText {
+                inputText = committed
+            }
             isNativeScrollSurfaceVisible = false
             terminalSettleTask?.cancel()
             cancelExplicitBottomAnimation()
@@ -532,6 +536,8 @@ struct NovelSessionView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
                 .disabled(
                     viewModel.isRunning || viewModel.isBusy || workspace.requiresReload ||
                         viewModel.access != .readWrite
@@ -563,6 +569,8 @@ struct NovelSessionView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
             .disabled(
                 workspace.isProjectSelectionBlocked ||
                     viewModel.isRunning ||
@@ -621,6 +629,8 @@ struct NovelSessionView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                 }
             } else {
                 Menu("处理") {
@@ -740,6 +750,8 @@ struct NovelSessionView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
         }
         .padding(.horizontal, 4)
@@ -784,6 +796,8 @@ struct NovelSessionView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
 
                     if let percent {
@@ -844,18 +858,24 @@ struct NovelSessionView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             } else if viewModel.canRetryPendingTerminal {
                 Button("重试保存") {
                     Task { @MainActor in await viewModel.retryPendingTerminal() }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             } else if viewModel.canRetryLastTerminal {
                 Button("重试") {
                     Task { @MainActor in _ = await viewModel.retryLastTerminal() }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             } else {
                 Button {
                     viewModel.clearError()
@@ -918,6 +938,8 @@ struct NovelSessionView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
             .disabled(
                 workspace.isPerforming ||
                     workspace.requiresReload ||
@@ -939,10 +961,10 @@ struct NovelSessionView: View {
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .composerDockGlass(cornerRadius: 15)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
             }
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
             .disabled(controlsDisabled)
             .accessibilityLabel("切换模型，当前 \(composerModelLabel)")
 
@@ -977,10 +999,10 @@ struct NovelSessionView: View {
                     .padding(.horizontal, 12)
                     .frame(height: 30)
                     .composerDockGlass(cornerRadius: 15)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
             }
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
             .disabled(controlsDisabled)
             .accessibilityLabel("创作方式，当前 \(currentComposerIntent.title)")
 
@@ -1136,7 +1158,11 @@ struct NovelSessionView: View {
     }
 
     private var sendEnabled: Bool {
-        NovelSessionComposerPolicy.canSubmit(canSend: viewModel.canSend, text: inputText)
+        sendEnabled(for: inputText)
+    }
+
+    private func sendEnabled(for text: String) -> Bool {
+        NovelSessionComposerPolicy.canSubmit(canSend: viewModel.canSend, text: text)
     }
 
     private var askUserBlocker: NovelSessionActionBlocker? {
@@ -1172,8 +1198,11 @@ struct NovelSessionView: View {
     }
 
     private func send() {
-        guard sendEnabled else { return }
-        guard let committed = composerInputController.committedText() else { return }
+        let committed = composerInputController.committedText() ?? inputText
+        if committed != inputText {
+            inputText = committed
+        }
+        guard sendEnabled(for: committed) else { return }
         guard !committed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let overrides = injectionOverrides
         let budget = inputBudgetTokens

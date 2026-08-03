@@ -242,6 +242,8 @@ struct NovelBatchPolishSheet: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
                 .padding(.top, 4)
                 .disabled(isStopRequested)
 

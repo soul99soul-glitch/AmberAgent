@@ -18,6 +18,7 @@ struct NovelProjectWorkspaceView: View {
     @State private var sessionInputText = ""
     @State private var sessionInjectionOverrides = NovelInjectionOverrides.none
     @State private var sessionInputBudgetTokens = 16_000
+    @State private var sessionComposerInputController = ComposerInputController()
     @State private var loadedComposerDraftOwner: NovelComposerDraftOwner?
     @State private var isConfirmingPreviousRestore = false
     @State private var branchNotice: String?
@@ -132,6 +133,7 @@ struct NovelProjectWorkspaceView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
+                saveLoadedComposerDraft()
                 Task { @MainActor in
                     await sessionViewModel.interruptBatchPolishForBackground()
                 }
@@ -155,6 +157,9 @@ struct NovelProjectWorkspaceView: View {
     private var workspaceToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             Button {
+                if let committedText = sessionComposerInputController.committedText() {
+                    sessionInputText = committedText
+                }
                 activeSheet = .writingContext
             } label: {
                 VStack(spacing: 1) {
@@ -234,6 +239,8 @@ struct NovelProjectWorkspaceView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                     .disabled(viewModel.isPerforming)
                 }
             }
@@ -253,6 +260,8 @@ struct NovelProjectWorkspaceView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
                     .disabled(viewModel.isPerforming)
                 }
             }
@@ -276,6 +285,8 @@ struct NovelProjectWorkspaceView: View {
                         viewModel.cancelContinuityAudit()
                     }
                     .font(.footnote.weight(.semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
             }
         }
@@ -306,6 +317,8 @@ struct NovelProjectWorkspaceView: View {
                             )
                         }
                         .font(.footnote.weight(.semibold))
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                 }
             }
@@ -318,6 +331,8 @@ struct NovelProjectWorkspaceView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button("重试同步", action: retryCurrentStateSync)
                         .font(.footnote.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                         .disabled(!canRetryCurrentStateSync)
                 }
             }
@@ -361,6 +376,7 @@ struct NovelProjectWorkspaceView: View {
                 inputText: $sessionInputText,
                 injectionOverrides: $sessionInjectionOverrides,
                 inputBudgetTokens: $sessionInputBudgetTokens,
+                composerInputController: sessionComposerInputController,
                 onOpenModel: { activeSheet = .modelPicker(.creation) },
                 onOpenCollection: { activeSheet = .collectCandidate($0) },
                 onOpenManualRewrite: { activeSheet = .manualRewrite($0) },
@@ -588,9 +604,13 @@ struct NovelProjectWorkspaceView: View {
 
     private func saveLoadedComposerDraft() {
         guard let owner = loadedComposerDraftOwner else { return }
+        let committedText = sessionComposerInputController.committedText()
+        if let committedText, committedText != sessionInputText {
+            sessionInputText = committedText
+        }
         viewModel.saveComposerDraft(
             NovelComposerDraft(
-                text: sessionInputText,
+                text: committedText ?? sessionInputText,
                 injectionOverrides: sessionInjectionOverrides,
                 inputBudgetTokens: sessionInputBudgetTokens
             ),

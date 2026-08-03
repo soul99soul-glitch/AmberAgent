@@ -16,6 +16,7 @@ private struct IOSChatBackgroundRuntimeJob {
     let toolRuntime: ChatToolRuntime
     let liveActivityController: AgentLiveActivityController
     let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)?
+    let messagesSnapshot: IOSChatBackgroundMessagesSnapshot
 }
 
 private struct IOSChatBackgroundDependencies {
@@ -232,6 +233,27 @@ private final class IOSChatBackgroundAssistantTextSnapshot: @unchecked Sendable 
     }
 }
 
+private final class IOSChatBackgroundMessagesSnapshot: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latestMessages: [UIMessage]
+
+    init(_ messages: [UIMessage]) {
+        latestMessages = messages
+    }
+
+    var messages: [UIMessage] {
+        lock.lock()
+        defer { lock.unlock() }
+        return latestMessages
+    }
+
+    func replace(with messages: [UIMessage]) {
+        lock.lock()
+        latestMessages = messages
+        lock.unlock()
+    }
+}
+
 struct IOSChatBackgroundJobTerminalEvent: Equatable, Sendable {
     let conversationId: String
 }
@@ -255,10 +277,6 @@ final class IOSChatBackgroundGenerationCoordinator {
     private var activeJobs: [String: IOSChatBackgroundRuntimeJob] = [:]
     private var activeRunStates: [String: IOSChatBackgroundRunState] = [:]
     private var activeBackgroundTasks: [String: BGContinuedProcessingTask] = [:]
-    /// 已重投、但系统还没把任务启动起来的那些 requestId。
-    /// 恢复次数记的是「实际被系统到期打断了几次」，不是「回前台扫了几遍」——
-    /// 没有这道闸，用户切出去瞄一眼再回来两次就能把配额烧光。
-    private var pendingResumeRequestIds: Set<String> = []
     private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
     // W1 durable ledger (I-1): background-continued tool execution accounts
     // itself against the SAME runId the foreground run already started under
@@ -417,22 +435,26 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: requestId)
         Task { @MainActor in
-            let hadUnresolvedTool = job.toolRuntime.hasUnresolvedToolCall(in: job.displayMessages)
-            let didPersistTerminal: Bool
-            if hadUnresolvedTool {
-                let cancelledMessages = job.toolRuntime.messagesByFailingPendingToolCalls(
-                    in: job.displayMessages,
+            let latestMessages = Self.reconciledMessages(
+                resultMessages: job.messagesSnapshot.messages,
+                uploadMessageCount: job.uploadMessages.count,
+                displayMessages: job.displayMessages
+            )
+            let cancelledMessages: [UIMessage]
+            if job.toolRuntime.hasUnresolvedToolCall(in: latestMessages) {
+                cancelledMessages = job.toolRuntime.messagesByFailingPendingToolCalls(
+                    in: latestMessages,
                     failureReason: "User cancelled.",
                     denied: true
                 )
-                didPersistTerminal = await job.conversationStore.saveBackgroundToolCompletion(
-                    baseMessages: job.displayMessages,
-                    completedMessages: cancelledMessages,
-                    to: job.conversationId
-                )
             } else {
-                didPersistTerminal = true
+                cancelledMessages = latestMessages
             }
+            let didPersistTerminal = await job.conversationStore.saveBackgroundToolCompletion(
+                baseMessages: job.displayMessages,
+                completedMessages: cancelledMessages,
+                to: job.conversationId
+            )
             await self.recordRun(
                 job.runId,
                 startedAt: job.startedAt,
@@ -505,7 +527,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             conversationStore: conversationStore,
             toolRuntime: toolRuntime,
             liveActivityController: liveActivityController,
-            saveMiniAppIfPresent: saveMiniAppIfPresent
+            saveMiniAppIfPresent: saveMiniAppIfPresent,
+            messagesSnapshot: IOSChatBackgroundMessagesSnapshot(handoff.uploadMessages)
         )
     }
 
@@ -547,11 +570,20 @@ final class IOSChatBackgroundGenerationCoordinator {
         let runState = activeRunStates[backgroundTask.identifier] ?? IOSChatBackgroundRunState()
         activeRunStates[backgroundTask.identifier] = runState
         activeBackgroundTasks[backgroundTask.identifier] = backgroundTask
-        // 重投的任务已经真正跑起来了，闸放开：之后再到期就该重新计一次配额。
-        pendingResumeRequestIds.remove(backgroundTask.identifier)
-        let resumeAttempt = suspensionStore?.load(requestId: backgroundTask.identifier)?.resumeCount ?? 0
+        if let suspended = suspensionStore?.load(requestId: backgroundTask.identifier) {
+            suspensionStore?.remove(requestId: backgroundTask.identifier)
+            await persistExpirationFailure(
+                job: job,
+                requestId: backgroundTask.identifier,
+                rawMessage: "后台生成已停止，可以重试。",
+                partialAssistantText: suspended.partialAssistantText
+            )
+            finish(runId: job.runId, requestId: backgroundTask.identifier)
+            backgroundTask.setTaskCompleted(success: false)
+            return
+        }
         IOSBackgroundLifecycleLog.record(
-            "bgTaskStarted(run=\(job.runId.prefix(8)),resumeAttempt=\(resumeAttempt))",
+            "bgTaskStarted(run=\(job.runId.prefix(8)))",
             detail: lifecycleSnapshotDetail
         )
         let assistantTextSnapshot = IOSChatBackgroundAssistantTextSnapshot()
@@ -582,15 +614,14 @@ final class IOSChatBackgroundGenerationCoordinator {
                 )
                 switch claim {
                 case .persistFailure:
-                    // 系统到期 ≠ 生成失败：这一轮还没开始写会话，保留 payload 与
-                    // taskMap 转入可恢复的挂起态，回到前台自动重投一次把它跑完。
-                    self.releaseRuntimeState(requestId: backgroundTask.identifier)
                     backgroundTask.setTaskCompleted(success: false)
-                    await self.suspendForResume(
+                    await self.persistExpirationFailure(
                         job: job,
                         requestId: backgroundTask.identifier,
+                        rawMessage: "后台生成已停止，可以重试。",
                         partialAssistantText: assistantTextSnapshot.text
                     )
+                    self.finish(runId: job.runId, requestId: backgroundTask.identifier)
                 case .terminateInFlightSave:
                     // 会话写入已经开始，无法原子取消；由保存结果决定最终呈现，避免双终态。
                     backgroundTask.setTaskCompleted(success: false)
@@ -677,6 +708,9 @@ final class IOSChatBackgroundGenerationCoordinator {
                     },
                     onAssistantText: { text in
                         assistantTextSnapshot.replace(with: text)
+                    },
+                    onMessagesUpdated: { messages in
+                        job.messagesSnapshot.replace(with: messages)
                     }
                 )
             case .singleToolOnly:
@@ -690,6 +724,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         runState.installOperationTask(operationTask)
         let result = await operationTask.value
+        job.messagesSnapshot.replace(with: result.messages)
         presentationEvents.continuation.finish()
         await presentationConsumer.value
         runState.clearOperationTask()
@@ -698,15 +733,21 @@ final class IOSChatBackgroundGenerationCoordinator {
         progress.completedUnitCount = 3
         backgroundTask.updateTitle("Amber 后台生成", subtitle: "正在保存结果")
 
+        let reconciledMessages = job.mode == .continueModel
+            ? Self.reconciledMessages(
+                resultMessages: result.messages,
+                uploadMessageCount: job.uploadMessages.count,
+                displayMessages: job.displayMessages
+            )
+            : result.messages
         let generatedSuffix = job.mode == .continueModel
-            ? Array(result.messages.dropFirst(job.uploadMessages.count))
+            ? Array(reconciledMessages.dropFirst(job.displayMessages.count))
             : []
         if job.mode == .continueModel, result.hitOutputLimit {
             await completeTruncatedAfterTerminalReservation(
                 job: job,
                 backgroundTask: backgroundTask,
-                runState: runState,
-                generatedSuffix: generatedSuffix
+                runState: runState
             )
             return
         }
@@ -723,9 +764,14 @@ final class IOSChatBackgroundGenerationCoordinator {
             return
         }
 
-        var finalMessages = job.mode == .singleToolOnly
-            ? result.messages
-            : job.displayMessages + generatedSuffix
+        var finalMessages = reconciledMessages
+        if job.mode == .continueModel,
+           job.toolRuntime.hasUnresolvedToolCall(in: finalMessages) {
+            finalMessages = job.toolRuntime.messagesByFailingPendingToolCalls(
+                in: finalMessages,
+                failureReason: "The tool was unavailable during background continuation."
+            )
+        }
         if job.mode == .continueModel, result.hitStepLimit {
             finalMessages.append(Self.assistantMessage("后台生成已达到工具循环上限，已保存当前结果。"))
         }
@@ -832,10 +878,13 @@ final class IOSChatBackgroundGenerationCoordinator {
     private func completeTruncatedAfterTerminalReservation(
         job: IOSChatBackgroundRuntimeJob,
         backgroundTask: BGContinuedProcessingTask,
-        runState: IOSChatBackgroundRunState,
-        generatedSuffix: [UIMessage]
+        runState: IOSChatBackgroundRunState
     ) async {
-        var finalMessages = job.displayMessages + generatedSuffix
+        var finalMessages = Self.reconciledMessages(
+            resultMessages: job.messagesSnapshot.messages,
+            uploadMessageCount: job.uploadMessages.count,
+            displayMessages: job.displayMessages
+        )
         if job.toolRuntime.hasUnresolvedToolCall(in: finalMessages) {
             finalMessages = job.toolRuntime.messagesByFailingPendingToolCalls(
                 in: finalMessages,
@@ -935,8 +984,13 @@ final class IOSChatBackgroundGenerationCoordinator {
         preservedGeneratedSuffix: [UIMessage] = [],
         partialAssistantText: String? = nil
     ) async {
+        let reconciledBase = Self.reconciledDisplayPrefix(
+            resultMessages: job.messagesSnapshot.messages,
+            uploadMessageCount: job.uploadMessages.count,
+            displayMessages: job.displayMessages
+        )
         var finalMessages = Self.failedMessages(
-            displayMessages: job.displayMessages,
+            displayMessages: reconciledBase,
             preservedGeneratedSuffix: preservedGeneratedSuffix,
             partialAssistantText: partialAssistantText,
             rawMessage: rawMessage,
@@ -1008,136 +1062,37 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
     }
 
-    /// 只释放本进程的运行时句柄，保留 payload / taskMap / activeJobs，
-    /// 让挂起的这一轮仍然算「本 App 拥有的可恢复任务」。
-    private func releaseRuntimeState(requestId: String) {
-        activeRunStates.removeValue(forKey: requestId)
-        activeBackgroundTasks.removeValue(forKey: requestId)
-    }
-
-    /// 系统到期后转入挂起态：留住 payload 与已流出的正文，把呈现改成「重连中」
-    /// 而不是失败，等回到前台再重投一次。
-    private func suspendForResume(
-        job: IOSChatBackgroundRuntimeJob,
-        requestId: String,
-        partialAssistantText: String
-    ) async {
-        let existing = suspensionStore?.load(requestId: requestId)
-        suspensionStore?.save(
-            IOSChatBackgroundSuspensionRecord(
-                requestId: requestId,
-                runId: job.runId,
-                partialAssistantText: partialAssistantText,
-                suspendedAt: Int64(Date().timeIntervalSince1970 * 1000),
-                resumeCount: existing?.resumeCount ?? 0
-            )
-        )
-        await recordRun(
-            job.runId,
-            startedAt: job.startedAt,
-            status: "interrupted",
-            inputDigest: job.inputDigest,
-            conversationId: job.conversationId,
-            interruptedReason: "background_expired"
-        )
-        let presentation = AgentActivityPresentation.reconnecting(
-            kind: job.mode == .singleToolOnly ? .imageGeneration : .response
-        )
-        WatchTaskCoordinator.shared.publish(
-            runId: job.runId,
-            conversationId: job.conversationId.toHexDashString(),
-            presentation: presentation
-        )
-        _ = job.liveActivityController.adoptExistingActivity(
-            runId: job.runId,
-            conversationId: job.conversationId.toHexDashString()
-        )
-        await job.liveActivityController.update(
-            runId: job.runId,
-            presentation: presentation,
-            force: true
-        )
-        IOSBackgroundLifecycleLog.record(
-            "suspendedForResume(run=\(job.runId.prefix(8)),partialChars=\(partialAssistantText.count))",
-            detail: lifecycleSnapshotDetail
-        )
-    }
-
-    /// 回到前台时调用：把被系统中断的后台生成重新投递一次。
-    /// 幂等——已经在飞的、payload 丢失的、超出恢复次数的分别跳过或就地了结。
-    func resumeSuspendedRunsIfNeeded() {
+    /// 旧版本可能已经留下了自动恢复记录。当前系统 API 无法区分用户 Stop 与
+    /// 系统到期，因此这些记录只落为可见的可重试终态，不再重新提交后台请求。
+    func finalizeSuspendedRunsIfNeeded() {
         guard let store = suspensionStore else { return }
         let records = store.allRecords()
         guard !records.isEmpty else { return }
         IOSBackgroundLifecycleLog.record(
-            "resumeSweep(pending=\(records.count))",
+            "suspensionFinalizeSweep(pending=\(records.count))",
             detail: lifecycleSnapshotDetail
         )
         for record in records {
-            resumeSuspendedRun(record, store: store)
-        }
-    }
-
-    private func resumeSuspendedRun(
-        _ record: IOSChatBackgroundSuspensionRecord,
-        store: IOSChatBackgroundSuspensionStore
-    ) {
-        // 已经有在飞的系统任务：这条记录属于上一轮，交给它自己走完终态。
-        guard activeBackgroundTasks[record.requestId] == nil else { return }
-        // 上一次重投还排在系统队列里没启动，别重复投、更别再扣一次配额。
-        guard !pendingResumeRequestIds.contains(record.requestId) else { return }
-        guard let job = job(for: record.requestId) else {
-            // payload 已不可用，恢复无从谈起，清掉记录避免留下孤儿文件。
             store.remove(requestId: record.requestId)
-            finish(requestId: record.requestId)
-            return
+            guard let job = job(for: record.requestId) else {
+                finish(requestId: record.requestId)
+                continue
+            }
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: record.requestId)
+            finish(runId: job.runId, requestId: record.requestId)
+            Task { @MainActor in
+                await self.persistExpirationFailure(
+                    job: job,
+                    requestId: record.requestId,
+                    rawMessage: "后台生成已停止，可以重试。",
+                    partialAssistantText: record.partialAssistantText
+                )
+                IOSBackgroundLifecycleLog.record(
+                    "suspensionFinalized(run=\(record.runId.prefix(8)))",
+                    detail: self.lifecycleSnapshotDetail
+                )
+            }
         }
-        guard record.canResume, register(requestId: record.requestId) else {
-            Task { @MainActor in await self.abandonSuspendedRun(record, job: job) }
-            return
-        }
-
-        let attempted = record.markingResumeAttempt()
-        store.save(attempted)
-
-        let request = BGContinuedProcessingTaskRequest(
-            identifier: record.requestId,
-            title: "Amber 后台生成",
-            subtitle: "继续未完成的生成"
-        )
-        request.strategy = .fail
-        do {
-            try BGTaskScheduler.shared.submit(request)
-            pendingResumeRequestIds.insert(record.requestId)
-            IOSBackgroundLifecycleLog.record(
-                "resumeSubmitted(run=\(record.runId.prefix(8))"
-                    + ",attempt=\(attempted.resumeCount)/\(IOSChatBackgroundSuspensionRecord.maxResumeAttempts))",
-                detail: lifecycleSnapshotDetail
-            )
-        } catch {
-            NSLog("[AmberChatBG] Resume submit failed for \(record.requestId): \(error)")
-            Task { @MainActor in await self.abandonSuspendedRun(attempted, job: job) }
-        }
-    }
-
-    /// 不再自动恢复：把已经流出来的正文连同一条可重试提示落盘，交回给用户。
-    private func abandonSuspendedRun(
-        _ record: IOSChatBackgroundSuspensionRecord,
-        job: IOSChatBackgroundRuntimeJob
-    ) async {
-        pendingResumeRequestIds.remove(record.requestId)
-        suspensionStore?.remove(requestId: record.requestId)
-        await persistExpirationFailure(
-            job: job,
-            requestId: record.requestId,
-            rawMessage: "后台生成被系统中断，可回到 App 后重试。",
-            partialAssistantText: record.partialAssistantText
-        )
-        finish(requestId: record.requestId)
-        IOSBackgroundLifecycleLog.record(
-            "resumeAbandoned(run=\(record.runId.prefix(8)),attempts=\(record.resumeCount))",
-            detail: lifecycleSnapshotDetail
-        )
     }
 
     private func persistExpirationFailure(
@@ -1146,8 +1101,13 @@ final class IOSChatBackgroundGenerationCoordinator {
         rawMessage: String,
         partialAssistantText: String?
     ) async {
+        let reconciledBase = Self.reconciledDisplayPrefix(
+            resultMessages: job.messagesSnapshot.messages,
+            uploadMessageCount: job.uploadMessages.count,
+            displayMessages: job.displayMessages
+        )
         var finalMessages = Self.failedMessages(
-            displayMessages: job.displayMessages,
+            displayMessages: reconciledBase,
             partialAssistantText: partialAssistantText,
             rawMessage: rawMessage,
             modelId: job.params.model.modelId
@@ -1489,6 +1449,59 @@ final class IOSChatBackgroundGenerationCoordinator {
         return finalMessages
     }
 
+    private static func reconciledDisplayPrefix(
+        resultMessages: [UIMessage],
+        uploadMessageCount: Int,
+        displayMessages: [UIMessage]
+    ) -> [UIMessage] {
+        var completedTools: [String: UIMessagePart.Tool] = [:]
+        for message in resultMessages.prefix(uploadMessageCount)
+            where message.role == MessageRole.assistant {
+            for case let tool as UIMessagePart.Tool in message.parts where !tool.output.isEmpty {
+                completedTools[chatToolCallKey(tool)] = tool
+            }
+        }
+        guard !completedTools.isEmpty else { return displayMessages }
+
+        return displayMessages.map { message in
+            guard message.role == MessageRole.assistant else { return message }
+            var didChange = false
+            let parts = message.parts.map { part -> UIMessagePart in
+                guard let tool = part as? UIMessagePart.Tool,
+                      tool.output.isEmpty,
+                      let completed = completedTools[chatToolCallKey(tool)] else {
+                    return part
+                }
+                didChange = true
+                return completed
+            }
+            guard didChange else { return message }
+            return UIMessage(
+                id: message.id,
+                role: message.role,
+                parts: parts,
+                annotations: message.annotations,
+                createdAt: message.createdAt,
+                finishedAt: message.finishedAt,
+                modelId: message.modelId,
+                usage: message.usage,
+                translation: message.translation
+            )
+        }
+    }
+
+    private static func reconciledMessages(
+        resultMessages: [UIMessage],
+        uploadMessageCount: Int,
+        displayMessages: [UIMessage]
+    ) -> [UIMessage] {
+        reconciledDisplayPrefix(
+            resultMessages: resultMessages,
+            uploadMessageCount: uploadMessageCount,
+            displayMessages: displayMessages
+        ) + Array(resultMessages.dropFirst(uploadMessageCount))
+    }
+
 #if DEBUG
     static func rehydratedParamsForTesting(
         persistedParams: TextGenerationParams,
@@ -1523,6 +1536,18 @@ final class IOSChatBackgroundGenerationCoordinator {
             modelId: modelId
         )
     }
+
+    static func reconciledMessagesForTesting(
+        resultMessages: [UIMessage],
+        uploadMessageCount: Int,
+        displayMessages: [UIMessage]
+    ) -> [UIMessage] {
+        reconciledMessages(
+            resultMessages: resultMessages,
+            uploadMessageCount: uploadMessageCount,
+            displayMessages: displayMessages
+        )
+    }
 #endif
 
     private func requestIdentifier(for runId: String) -> String {
@@ -1550,7 +1575,6 @@ final class IOSChatBackgroundGenerationCoordinator {
             }
             activeRunStates.removeValue(forKey: requestId)
             activeBackgroundTasks.removeValue(forKey: requestId)
-            pendingResumeRequestIds.remove(requestId)
             // 后台这一轮真正终结了，执行权才还回去。前台交接时不能还——
             // 那会让刚接手的后台任务立刻失去进程。
             if let ownedRunId = map.removeValue(forKey: requestId) {

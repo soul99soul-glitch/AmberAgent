@@ -37,9 +37,10 @@ struct ComposerIconButton: View {
                 .font(.system(size: symbolSize, weight: .semibold))
                 .foregroundStyle(prominent ? Color.white : tint)
                 .frame(width: size, height: size)
-                .contentShape(Circle())
                 // 与输入条/发送键统一为原生 Liquid Glass:中性按钮用无色调玻璃,prominent 时染 tint。
                 .modifier(ComposerDockCircleGlass(tint: prominent ? tint : nil))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Circle())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .selection))
         .accessibilityLabel(accessibilityLabel)
@@ -57,8 +58,9 @@ struct ChatScrollToBottomButton: View {
                 .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(width: 38, height: 38)
-                .contentShape(Circle())
                 .modifier(ComposerDockCircleGlass(tint: nil))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Circle())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .selection))
         .accessibilityLabel("回到最新消息")
@@ -109,6 +111,7 @@ struct ComposerDockSendButton: View {
     }
 }
 
+@MainActor
 final class ComposerInputController {
     weak var textView: UITextView?
 
@@ -155,7 +158,7 @@ struct ComposerInputTextView: UIViewRepresentable {
     func updateUIView(_ textView: UITextView, context: Context) {
         context.coordinator.parent = self
         controller.textView = textView
-        if textView.text != text {
+        if textView.markedTextRange == nil, textView.text != text {
             textView.text = text
         }
         textView.isEditable = isEnabled
@@ -281,6 +284,7 @@ struct ChatToolbarIconButton: View {
                     .foregroundStyle(Color(uiColor: .label))
             }
             .frame(width: size, height: size)
+            .frame(minWidth: 44, minHeight: 44)
             .contentShape(Circle())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .lightImpact))

@@ -181,11 +181,7 @@ struct NovelDiscussionArchiveSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        if hasUnsavedChanges {
-                            isConfirmingDiscard = true
-                        } else {
-                            cancelPreparationAndDismiss()
-                        }
+                        NovelTextInputCommitter.perform { requestDismiss() }
                     }
                         .disabled(isSubmitting)
                         .confirmationDialog(
@@ -206,21 +202,19 @@ struct NovelDiscussionArchiveSheet: View {
                         Button(confirmedDecisions.isEmpty
                             ? "取消归档"
                             : (submissionFailureMessage == nil ? "确认归档" : "重试保存")) {
-                            submit()
+                            NovelTextInputCommitter.perform { submit() }
                         }
-                        .disabled(!canSubmit || isSubmitting)
+                        .disabled(isSubmitting)
                     }
                 }
             }
             .overlay {
                 if isSubmitting {
                     ProgressView("正在保存归档")
-                        .padding(16)
-                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
-        .interactiveDismissDisabled(isPreparing || isSubmitting || hasUnsavedChanges)
+        .interactiveDismissDisabled()
         .onAppear { prepare() }
         .onDisappear { preparationTask?.cancel() }
     }
@@ -303,6 +297,14 @@ struct NovelDiscussionArchiveSheet: View {
         dismiss()
     }
 
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
+            cancelPreparationAndDismiss()
+        }
+    }
+
     private func submit() {
         guard let draft else { return }
         let confirmed = confirmedDecisions
@@ -310,7 +312,10 @@ struct NovelDiscussionArchiveSheet: View {
             dismiss()
             return
         }
-        guard canSubmit else { return }
+        guard canSubmit else {
+            submissionFailureMessage = "请填写完整的讨论摘要和决定内容。"
+            return
+        }
         isSubmitting = true
         submissionFailureMessage = nil
         Task { @MainActor in
@@ -412,11 +417,7 @@ struct NovelCollectCandidateSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        if shouldConfirmDiscard {
-                            isConfirmingDiscard = true
-                        } else {
-                            dismiss()
-                        }
+                        NovelTextInputCommitter.perform { requestDismiss() }
                     }
                         .disabled(isSubmitting)
                         .confirmationDialog(
@@ -431,19 +432,19 @@ struct NovelCollectCandidateSheet: View {
                         }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("收录") { collect() }
-                        .disabled(!canCollect || isSubmitting || hasDurablePending)
+                    Button("收录") {
+                        NovelTextInputCommitter.perform { collect() }
+                    }
+                        .disabled(isSubmitting || hasDurablePending)
                 }
             }
             .overlay {
                 if isSubmitting {
                     ProgressView("正在更新正文与剧情状态")
-                        .padding(16)
-                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
-        .interactiveDismissDisabled(isSubmitting || shouldConfirmDiscard)
+        .interactiveDismissDisabled()
     }
 
     @ViewBuilder
@@ -658,7 +659,10 @@ struct NovelCollectCandidateSheet: View {
     }
 
     private func collect() {
-        guard canCollect else { return }
+        guard canCollect else {
+            submissionResult = .failed(message: "请选择正文并填写完整的章节信息。")
+            return
+        }
         let orderedIDs = paragraphs
             .filter { selectedParagraphIDs.contains($0.id) }
             .map(\.id)
@@ -690,6 +694,14 @@ struct NovelCollectCandidateSheet: View {
                 onCompleted(target)
                 dismiss()
             }
+        }
+    }
+
+    private func requestDismiss() {
+        if shouldConfirmDiscard {
+            isConfirmingDiscard = true
+        } else {
+            dismiss()
         }
     }
 
@@ -770,7 +782,9 @@ struct NovelSessionForkSheet: View {
                         .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("创建") { create() }
+                    Button("创建") {
+                        NovelTextInputCommitter.perform { create() }
+                    }
                         .disabled(
                             name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                                 isSubmitting

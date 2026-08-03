@@ -3051,6 +3051,7 @@ private extension NovelSessionViewModelTests {
         @State private var inputText = ""
         @State private var injectionOverrides = NovelInjectionOverrides.none
         @State private var inputBudgetTokens = 16_000
+        @State private var composerInputController = ComposerInputController()
 
         var body: some View {
             NovelSessionView(
@@ -3060,6 +3061,7 @@ private extension NovelSessionViewModelTests {
                 inputText: $inputText,
                 injectionOverrides: $injectionOverrides,
                 inputBudgetTokens: $inputBudgetTokens,
+                composerInputController: composerInputController,
                 onOpenModel: {},
                 onOpenCollection: { _ in },
                 onOpenManualRewrite: { _ in },

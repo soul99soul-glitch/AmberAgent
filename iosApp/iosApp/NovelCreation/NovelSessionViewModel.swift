@@ -327,7 +327,7 @@ final class NovelSessionViewModel {
             return NovelCharacterIdentity(
                 materialID: material.id,
                 canonicalName: revision.title,
-                aliases: material.aliases
+                aliases: workspace.effectiveAliases(for: material)
             )
         }
         let resolver = NovelCharacterIdentityResolver(identities: identities)

@@ -140,7 +140,7 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
 
         XCTAssertEqual(waitingEarly, "正在连接模型")
-        XCTAssertTrue(waitingLate.contains("12"))
+        XCTAssertEqual(waitingLate, "模型思考中 12 秒")
         XCTAssertNotEqual(
             waitingLate,
             streaming,
@@ -150,6 +150,68 @@ final class NovelCreationPresentationTests: XCTestCase {
             waitingEarly,
             streaming,
             "waitingForFirstToken and streaming must render visibly different copy."
+        )
+    }
+
+    func testTextInputCommitterUnmarksBeforeDeferredAction() async {
+        let textField = UITextField()
+        textField.text = "赵"
+        let end = textField.endOfDocument
+        textField.selectedTextRange = textField.textRange(from: end, to: end)
+        textField.setMarkedText("大来", selectedRange: NSRange(location: 2, length: 0))
+        XCTAssertNotNil(textField.markedTextRange)
+        let action = expectation(description: "committed action runs on the next main turn")
+
+        NovelTextInputCommitter.perform(firstResponder: textField) {
+            XCTAssertNil(textField.markedTextRange)
+            XCTAssertEqual(textField.text, "赵大来")
+            action.fulfill()
+        }
+
+        XCTAssertNil(textField.markedTextRange)
+        await fulfillment(of: [action], timeout: 1)
+    }
+
+    func testPresentationUsesHistoricalCharacterNamesAsEffectiveAliases() throws {
+        var document = try NovelTestFixtures.document()
+        let materialID = NovelMaterialID()
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: NovelMaterialRevisionID(),
+            kind: .character,
+            title: "赵旧名",
+            content: "旧的人物设定。",
+            tags: [],
+            injectionMode: .smart,
+            aliases: []
+        )), to: document).document
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: NovelMaterialRevisionID(),
+            kind: .character,
+            title: "赵大来",
+            content: "当前人物设定。",
+            tags: [],
+            injectionMode: .smart,
+            aliases: []
+        )), to: document).document
+        let project = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: document,
+            access: .readWrite
+        ))
+        let material = try XCTUnwrap(document.materials.first { $0.id == materialID })
+
+        XCTAssertEqual(
+            NovelPresentation.effectiveAliases(
+                for: material,
+                project: project,
+                branch: nil
+            ),
+            ["赵旧名"]
         )
     }
 

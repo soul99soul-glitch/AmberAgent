@@ -386,7 +386,7 @@ struct MessageBubbleView: View {
     private var hasVisibleAssistantContent: Bool {
         message.parts.contains { part in
             if let text = part as? UIMessagePart.Text {
-                return !text.text.isEmpty
+                return text.text.contains { !$0.isWhitespace }
             }
             return true
         }

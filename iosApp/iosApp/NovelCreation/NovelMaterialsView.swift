@@ -464,11 +464,7 @@ struct NovelMaterialEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(isEditable || isSaving ? "取消" : "完成") {
-                        if hasUnsavedChanges {
-                            isConfirmingDiscard = true
-                        } else {
-                            dismiss()
-                        }
+                        NovelTextInputCommitter.perform { requestDismiss() }
                     }
                         .disabled(isSaving)
                         .confirmationDialog(
@@ -484,8 +480,10 @@ struct NovelMaterialEditorSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if isEditable || isSaving {
-                        Button("保存") { save() }
-                            .disabled(!canSave || isSaving)
+                        Button("保存") {
+                            NovelTextInputCommitter.perform { save() }
+                        }
+                            .disabled(isSaving)
                     } else {
                         Text("只读")
                             .font(.footnote.weight(.medium))
@@ -496,21 +494,12 @@ struct NovelMaterialEditorSheet: View {
             .overlay {
                 if isSaving {
                     ProgressView("正在保存资料")
-                        .padding(16)
-                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
-        .interactiveDismissDisabled(isSaving || hasUnsavedChanges)
+        .interactiveDismissDisabled()
         .presentationDetents([.large])
-        .presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)
-    }
-
-    private var canSave: Bool {
-        hasUnsavedChanges &&
-            !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            (kindChoice != .custom || !customKindName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .presentationDragIndicator(.hidden)
     }
 
     private var isEditable: Bool {
@@ -550,7 +539,18 @@ struct NovelMaterialEditorSheet: View {
     }
 
     private func save() {
-        guard isEditable, canSave, hasUnsavedChanges, !isSaving else { return }
+        guard isEditable, !isSaving else { return }
+        guard hasUnsavedChanges else {
+            dismiss()
+            return
+        }
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              kindChoice != .custom ||
+                !customKindName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            failureMessage = "请填写完整的资料标题和内容。"
+            return
+        }
         isSaving = true
         failureMessage = nil
         Task { @MainActor in
@@ -569,6 +569,14 @@ struct NovelMaterialEditorSheet: View {
                 failureMessage = viewModel.errorMessage ?? "资料没有保存，请稍后重试。"
                 return
             }
+            dismiss()
+        }
+    }
+
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
             dismiss()
         }
     }
@@ -623,25 +631,27 @@ struct NovelPolishPreferenceSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { requestDismiss() }
+                    Button("取消") {
+                        NovelTextInputCommitter.perform { requestDismiss() }
+                    }
                         .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .disabled(isSaving || viewModel.isPerforming || !hasUnsavedChanges)
+                    Button("保存") {
+                        NovelTextInputCommitter.perform { save() }
+                    }
+                        .disabled(isSaving || viewModel.isPerforming)
                 }
             }
             .overlay {
                 if isSaving {
                     ProgressView("正在保存润色偏好")
-                        .padding(16)
-                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
-        .interactiveDismissDisabled(isSaving || hasUnsavedChanges)
+        .interactiveDismissDisabled()
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
         .confirmationDialog(
             "放弃润色偏好修改？",
             isPresented: $isConfirmingDiscard,
@@ -666,6 +676,10 @@ struct NovelPolishPreferenceSheet: View {
 
     private func save() {
         guard !isSaving else { return }
+        guard hasUnsavedChanges else {
+            dismiss()
+            return
+        }
         isSaving = true
         failureMessage = nil
         Task { @MainActor in
@@ -691,6 +705,8 @@ struct NovelProposalAcceptanceSheet: View {
     let viewModel: NovelCreationViewModel
     let proposal: NovelSettingProposalRecord
 
+    @State private var title: String
+    @State private var content: String
     @State private var kindChoice: NovelMaterialKindChoice?
     @State private var customKindName = ""
     @State private var selectedMaterialID: NovelMaterialID?
@@ -699,10 +715,13 @@ struct NovelProposalAcceptanceSheet: View {
     @State private var injectionMode: NovelInjectionMode = .smart
     @State private var isSubmitting = false
     @State private var failureMessage: String?
+    @State private var isConfirmingDiscard = false
 
     init(viewModel: NovelCreationViewModel, proposal: NovelSettingProposalRecord) {
         self.viewModel = viewModel
         self.proposal = proposal
+        self._title = State(initialValue: proposal.title)
+        self._content = State(initialValue: proposal.content)
         self._kindChoice = State(initialValue: Self.initialKindChoice(for: proposal))
         self._selectedMaterialID = State(initialValue: Self.initialTargetMaterialID(
             for: proposal,
@@ -717,11 +736,11 @@ struct NovelProposalAcceptanceSheet: View {
         NavigationStack {
             Form {
                 Section("建议") {
-                    Text(proposal.title)
+                    TextField(titlePlaceholder, text: $title)
                         .font(.headline)
-                    Text(proposal.content)
-                        .font(.body)
-                        .textSelection(.enabled)
+                    TextEditor(text: $content)
+                        .frame(minHeight: 200)
+                        .accessibilityLabel("建议内容")
                 }
 
                 Section("写入位置") {
@@ -771,27 +790,37 @@ struct NovelProposalAcceptanceSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { requestDismiss() }
                         .disabled(isSubmitting)
+                        .confirmationDialog(
+                            "放弃建议修改？",
+                            isPresented: $isConfirmingDiscard,
+                            titleVisibility: .visible
+                        ) {
+                            Button("放弃修改", role: .destructive) { dismiss() }
+                            Button("继续编辑", role: .cancel) {}
+                        } message: {
+                            Text("尚未写入的建议修改会丢失。")
+                        }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("写入") { accept() }
-                        .disabled(!canAccept || isSubmitting || viewModel.isPerforming)
+                    Button("写入") {
+                        NovelTextInputCommitter.perform { accept() }
+                    }
+                        .disabled(isSubmitting || viewModel.isPerforming)
                 }
             }
             .overlay {
                 if isSubmitting {
                     ProgressView("正在写入设定")
-                        .padding(16)
-                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
         .onChange(of: kindChoice) { _, _ in selectedMaterialID = nil }
         .onChange(of: customKindName) { _, _ in selectedMaterialID = nil }
-        .interactiveDismissDisabled(isSubmitting)
+        .interactiveDismissDisabled()
         .presentationDetents([.large])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
     }
 
     static func initialKindChoice(
@@ -820,8 +849,38 @@ struct NovelProposalAcceptanceSheet: View {
 
     private var canAccept: Bool {
         guard let kindChoice else { return false }
-        return kindChoice != .custom ||
-            !customKindName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            (kindChoice != .custom ||
+                !customKindName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    private var hasUnsavedChanges: Bool {
+        title != proposal.title ||
+            content != proposal.content ||
+            kindChoice != Self.initialKindChoice(for: proposal) ||
+            !customKindName.isEmpty ||
+            selectedMaterialID != Self.initialTargetMaterialID(
+                for: proposal,
+                activeMaterials: viewModel.activeMaterials
+            ) ||
+            !tags.isEmpty ||
+            aliases != (proposal.suggestedCharacterAliases?.joined(separator: "，") ?? "") ||
+            injectionMode != .smart
+    }
+
+    private var titlePlaceholder: String {
+        selectedKind == .character ? "人物姓名" : "资料标题"
+    }
+
+    private func requestDismiss() {
+        NovelTextInputCommitter.perform {
+            if hasUnsavedChanges {
+                isConfirmingDiscard = true
+            } else {
+                dismiss()
+            }
+        }
     }
 
     private func materialTitle(_ material: NovelMaterialRecord) -> String {
@@ -840,7 +899,13 @@ struct NovelProposalAcceptanceSheet: View {
     }
 
     private func accept() {
-        guard let selectedKind, !isSubmitting else { return }
+        guard !isSubmitting else { return }
+        guard let selectedKind, canAccept else {
+            failureMessage = kindChoice == nil
+                ? "请选择资料类型。"
+                : "请填写完整的资料标题和内容。"
+            return
+        }
         let parsedTags = tags
             .components(separatedBy: CharacterSet(charactersIn: ",，\n"))
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -853,19 +918,21 @@ struct NovelProposalAcceptanceSheet: View {
         failureMessage = nil
         Task { @MainActor in
             viewModel.clearError()
-            await viewModel.resolveProposal(
+            let saved = await viewModel.resolveProposal(
                 proposal.id,
                 resolution: .accept(
                     materialID: selectedMaterialID ?? NovelMaterialID(),
                     revisionID: NovelMaterialRevisionID(),
                     kind: selectedKind,
+                    title: title,
+                    content: content,
                     tags: parsedTags,
                     injectionMode: injectionMode,
                     aliases: parsedAliases
                 )
             )
             isSubmitting = false
-            guard viewModel.errorMessage == nil else {
+            guard saved else {
                 failureMessage = viewModel.errorMessage ?? "设定没有写入，请稍后重试。"
                 return
             }
@@ -901,6 +968,7 @@ struct NovelInjectionPreviewSheet: View {
     @State private var budgetTokens = 16_000
     @State private var materialOverrides: [NovelMaterialID: NovelPreviewMaterialOverride] = [:]
     @State private var previewSignature: String?
+    @State private var validationMessage: String?
 
     init(viewModel: NovelCreationViewModel) {
         self.viewModel = viewModel
@@ -914,6 +982,12 @@ struct NovelInjectionPreviewSheet: View {
             List {
                 intentSection
                 materialSection
+                if let validationMessage {
+                    Section {
+                        Label(validationMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(AmberTheme.accentRed)
+                    }
+                }
                 if previewSignature == currentPreviewSignature,
                    let preview = viewModel.injectionPreview {
                     resultSection(preview)
@@ -929,8 +1003,10 @@ struct NovelInjectionPreviewSheet: View {
                     Button("关闭") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("预览") { preview() }
-                        .disabled(!canPreview || viewModel.isPerforming)
+                    Button("预览") {
+                        NovelTextInputCommitter.perform { preview() }
+                    }
+                        .disabled(!viewModel.canMutate || viewModel.isPerforming)
                 }
             }
             .overlay {
@@ -1023,10 +1099,6 @@ struct NovelInjectionPreviewSheet: View {
         }
     }
 
-    private var canPreview: Bool {
-        viewModel.canMutate && !userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
     private func overrideBinding(for materialID: NovelMaterialID) -> Binding<NovelPreviewMaterialOverride> {
         Binding(
             get: { materialOverrides[materialID] ?? .automatic },
@@ -1051,8 +1123,13 @@ struct NovelInjectionPreviewSheet: View {
     }
 
     private func preview() {
+        guard !userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            validationMessage = "请填写这次希望 Agent 完成的任务。"
+            return
+        }
         guard let projectID = viewModel.selectedProjectID,
               let branchID = viewModel.selectedBranchID else { return }
+        validationMessage = nil
         let includeIDs = materialOverrides.compactMap { key, value in value == .include ? key : nil }
         let excludeIDs = materialOverrides.compactMap { key, value in value == .exclude ? key : nil }
         let request = NovelInjectionPreviewRequest(

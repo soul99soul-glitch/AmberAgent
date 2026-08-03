@@ -173,6 +173,8 @@ struct NovelChapterReaderView: View {
                         )
                     }
                     .font(.footnote.weight(.semibold))
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                 }
             }
             .padding(.horizontal, 20)
@@ -190,6 +192,8 @@ struct NovelChapterReaderView: View {
                     viewModel.retryStateSync(projectID: projectID, branchID: branchID)
                 }
                 .font(.footnote.weight(.semibold))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
                 .disabled(!canRetryCurrentStateSync)
             }
             .padding(.horizontal, 20)
@@ -590,11 +594,7 @@ private struct NovelChapterEditSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        if hasChanges {
-                            isConfirmingDiscard = true
-                        } else {
-                            dismiss()
-                        }
+                        NovelTextInputCommitter.perform { requestDismiss() }
                     }
                         .disabled(isSaving)
                         .confirmationDialog(
@@ -609,8 +609,10 @@ private struct NovelChapterEditSheet: View {
                         }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .disabled(!canSave || isSaving)
+                    Button("保存") {
+                        NovelTextInputCommitter.perform { save() }
+                    }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -626,13 +628,7 @@ private struct NovelChapterEditSheet: View {
                 if isSaving { ProgressView("正在保存改写") }
             }
         }
-        .interactiveDismissDisabled(isSaving || hasChanges)
-    }
-
-    private var canSave: Bool {
-        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            hasChanges
+        .interactiveDismissDisabled()
     }
 
     private var hasChanges: Bool {
@@ -644,6 +640,16 @@ private struct NovelChapterEditSheet: View {
     }
 
     private func save() {
+        guard !isSaving else { return }
+        guard hasChanges else {
+            dismiss()
+            return
+        }
+        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            failureMessage = "请填写完整的章节标题和正文。"
+            return
+        }
         isSaving = true
         failureMessage = nil
         Task { @MainActor in
@@ -657,6 +663,14 @@ private struct NovelChapterEditSheet: View {
                 failureMessage = viewModel.errorMessage ?? "改写没有保存，请稍后重试。"
                 return
             }
+            dismiss()
+        }
+    }
+
+    private func requestDismiss() {
+        if hasChanges {
+            isConfirmingDiscard = true
+        } else {
             dismiss()
         }
     }

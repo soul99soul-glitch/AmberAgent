@@ -108,9 +108,22 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(list.contains("scrollDriver.attach(scrollView)"))
         XCTAssertFalse(list.contains("hasMeasuredNativeScrollGeometry"))
         XCTAssertTrue(driver.contains("var isUIKitUserInteracting: Bool"))
-        XCTAssertTrue(list.contains("guard scrollDriver.isUIKitUserInteracting else { return }"))
+        XCTAssertTrue(list.contains("Self.shouldBeginNativeUserDrag("))
         XCTAssertTrue(list.contains("driverPausedForUser: isNativeScrollDriverActive && scrollDriver.isPausedForUser"))
         XCTAssertTrue(list.contains("scrollDriver.submit(.streamContentGrew)"))
+    }
+
+    func testNativeTimelineLiveTailEqualityTracksVisualConfiguration() throws {
+        let list = try source("iosApp/ChatCollectionMessageList.swift")
+        let start = try XCTUnwrap(list.range(of: "static func == (lhs: NativeTimelineMessageBubble"))
+        let end = try XCTUnwrap(
+            list.range(of: "private var usesLiveTail", range: start.upperBound..<list.endIndex)
+        )
+        let equality = list[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(equality.contains("lhs.displaySettingSignature == rhs.displaySettingSignature"))
+        XCTAssertTrue(equality.contains("lhs.generativeUiSettingSignature == rhs.generativeUiSettingSignature"))
+        XCTAssertTrue(equality.contains("lhs.reasoningLevelLabel == rhs.reasoningLevelLabel"))
     }
 
     func testNativeTimelineScrollDriverIsSharedByEveryStreamingConversationSurface() throws {
@@ -178,6 +191,21 @@ final class IOSSettingsWiringTests: XCTestCase {
     func testChatTopBarUsesStableControlDimensions() {
         XCTAssertEqual(ChatTopBarLayout.controlsHeight, 54)
         XCTAssertEqual(ChatTopBarLayout.toolbarButtonDiameter, 38)
+    }
+
+    @MainActor
+    func testChatToolbarButtonsExposeFortyFourPointHitTarget() {
+        let host = UIHostingController(rootView: ChatToolbarIconButton(
+            systemImage: "chevron.left",
+            accessibilityLabel: "返回",
+            size: ChatTopBarLayout.toolbarButtonDiameter,
+            symbolSize: 16,
+            action: {}
+        ))
+        let size = host.sizeThatFits(in: CGSize(width: 100, height: 100))
+
+        XCTAssertGreaterThanOrEqual(size.width, 44)
+        XCTAssertGreaterThanOrEqual(size.height, 44)
     }
 
     func testComposerReasoningLabelsAreChinesePresentationCopy() {
@@ -332,10 +360,10 @@ final class IOSSettingsWiringTests: XCTestCase {
     }
 
     func testChatApprovalAndAttachmentControlsHaveRealFortyFourPointHitLayout() throws {
-        let chat = try source("iosApp/ChatView.swift")
+        let composer = try source("iosApp/ChatComposerViews.swift")
         let approvals = try source("iosApp/MemoryToolApprovalCard.swift")
 
-        XCTAssertTrue(chat.contains(".frame(width: 44, height: 44)"))
+        XCTAssertTrue(composer.contains(".frame(width: 44, height: 44)"))
         XCTAssertGreaterThanOrEqual(
             approvals.components(separatedBy: ".chatApprovalHitTarget()").count - 1,
             16
@@ -527,8 +555,11 @@ final class IOSSettingsWiringTests: XCTestCase {
 
         XCTAssertTrue(engine.contains("onToolExecutionStarted"))
         XCTAssertTrue(engine.contains("onAssistantStage"))
+        XCTAssertTrue(engine.contains("onMessagesUpdated"))
         XCTAssertTrue(runBlock.contains("onToolExecutionStarted:"))
         XCTAssertTrue(runBlock.contains("onAssistantStage:"))
+        XCTAssertTrue(runBlock.contains("onMessagesUpdated:"))
+        XCTAssertTrue(runBlock.contains("job.messagesSnapshot.replace(with: messages)"))
         XCTAssertTrue(coordinator.contains("AsyncStream<AgentActivityPresentation>.makeStream()"))
         XCTAssertTrue(runBlock.contains("presentationEvents.continuation.yield("))
         XCTAssertFalse(runBlock.contains("await self.publishRunningPresentation("))
@@ -575,6 +606,103 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
         XCTAssertTrue(coordinator.contains("cancelRunAfterSystemKeepAliveExpiration(runId)"))
         XCTAssertTrue(coordinator.contains("private func cancelRunAfterSystemKeepAliveExpiration"))
+    }
+
+    func testBackgroundHandoffExpirationStopsWithoutAutomaticResubmission() throws {
+        let coordinator = try source("iosApp/IOSChatBackgroundGenerationCoordinator.swift")
+        let appShell = try source("iosApp/AppShell.swift")
+        let start = try XCTUnwrap(
+            coordinator.range(of: "backgroundTask.expirationHandler = { [weak self] in")
+        )
+        let end = try XCTUnwrap(
+            coordinator.range(of: "let requestProvider: ProviderSetting", range: start.upperBound..<coordinator.endIndex)
+        )
+        let expiration = coordinator[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(expiration.contains("await self.persistExpirationFailure("))
+        XCTAssertTrue(expiration.contains("self.finish(runId: job.runId, requestId: backgroundTask.identifier)"))
+        XCTAssertFalse(expiration.contains("suspendForResume("))
+        XCTAssertFalse(appShell.contains("resumeSuspendedRunsIfNeeded()"))
+
+        let finalizeStart = try XCTUnwrap(
+            coordinator.range(of: "func finalizeSuspendedRunsIfNeeded()")
+        )
+        let finalizeEnd = try XCTUnwrap(
+            coordinator.range(
+                of: "private func persistExpirationFailure(",
+                range: finalizeStart.upperBound..<coordinator.endIndex
+            )
+        )
+        let finalize = coordinator[finalizeStart.lowerBound..<finalizeEnd.lowerBound]
+        let legacyFinish = try XCTUnwrap(
+            finalize.range(of: "finish(runId: job.runId, requestId: record.requestId)")
+        )
+        let persistenceTask = try XCTUnwrap(finalize.range(of: "Task { @MainActor in"))
+
+        XCTAssertTrue(finalize.contains("BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: record.requestId)"))
+        XCTAssertLessThan(legacyFinish.lowerBound, persistenceTask.lowerBound)
+        XCTAssertFalse(finalize.contains("BGTaskScheduler.shared.submit"))
+    }
+
+    func testDirectImageKeepAliveExpiresWithoutStartingASecondImageRequest() throws {
+        let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
+        let start = try XCTUnwrap(coordinator.range(of: "func runImageTool("))
+        let end = try XCTUnwrap(
+            coordinator.range(of: "private func failImageToolCallBeforeExecution(", range: start.upperBound..<coordinator.endIndex)
+        )
+        let imageRun = coordinator[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(imageRun.contains("onExpire: { [weak self] in"))
+        XCTAssertTrue(imageRun.contains("cancelRunAfterSystemKeepAliveExpiration(runId)"))
+        XCTAssertFalse(imageRun.contains("mode: .singleToolOnly"))
+    }
+
+    @MainActor
+    func testCompactChatControlsKeepFortyFourPointHitTargets() {
+        let iconHost = UIHostingController(rootView: ComposerIconButton(
+            systemImage: "brain.head.profile",
+            accessibilityLabel: "设置思考等级",
+            action: {}
+        ))
+        let scrollHost = UIHostingController(rootView: ChatScrollToBottomButton(action: {}))
+
+        let iconSize = iconHost.sizeThatFits(in: CGSize(width: 100, height: 100))
+        let scrollSize = scrollHost.sizeThatFits(in: CGSize(width: 100, height: 100))
+        XCTAssertGreaterThanOrEqual(iconSize.width, 44)
+        XCTAssertGreaterThanOrEqual(iconSize.height, 44)
+        XCTAssertGreaterThanOrEqual(scrollSize.width, 44)
+        XCTAssertGreaterThanOrEqual(scrollSize.height, 44)
+    }
+
+    func testChatCompactTextActionsKeepVisualSizeAndFortyFourPointHitLayout() throws {
+        let chat = try source("iosApp/ChatView.swift")
+        let suggestionStart = try XCTUnwrap(chat.range(of: "ForEach(viewModel.chatSuggestions.prefix(4)"))
+        let suggestionEnd = try XCTUnwrap(
+            chat.range(of: "VStack(spacing: 8)", range: suggestionStart.upperBound..<chat.endIndex)
+        )
+        let suggestions = chat[suggestionStart.lowerBound..<suggestionEnd.lowerBound]
+        let modelStart = try XCTUnwrap(chat.range(of: "Button {\n                                openComposerModelSheet()"))
+        let modelEnd = try XCTUnwrap(
+            chat.range(of: "Spacer()", range: modelStart.upperBound..<chat.endIndex)
+        )
+        let modelButton = chat[modelStart.lowerBound..<modelEnd.lowerBound]
+
+        XCTAssertTrue(suggestions.contains(".frame(height: 26)"))
+        XCTAssertTrue(suggestions.contains(".frame(minHeight: 44)"))
+        XCTAssertTrue(modelButton.contains(".frame(height: 30)"))
+        XCTAssertTrue(modelButton.contains(".frame(minHeight: 44)"))
+    }
+
+    func testReasoningExpansionAndIslandGlowHonorFrozenMotion() throws {
+        let misc = try source("iosApp/ChatMiscViews.swift")
+        let island = try source("iosApp/ChatActivityIslandView.swift")
+        let glow = try source("iosApp/IslandEdgeGlowView.swift")
+
+        XCTAssertTrue(misc.contains(".animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: showsBody)"))
+        XCTAssertTrue(misc.contains("private func setExpanded(_ expanded: Bool, duration: Double)"))
+        XCTAssertTrue(island.contains("isPaused: presentation.isFrozen"))
+        XCTAssertTrue(glow.contains("paused: isPaused, reduceMotion: reduceMotion"))
+        XCTAssertTrue(glow.contains("isAnimated && !isPaused && !isReduceMotion"))
     }
 
     func testAgentActivityDeepLinkIsConsumedOnlyAfterRouteCommit() throws {

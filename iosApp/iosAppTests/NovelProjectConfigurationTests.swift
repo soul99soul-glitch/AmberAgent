@@ -166,6 +166,8 @@ final class NovelProjectConfigurationTests: XCTestCase {
         let proposal = source.settingProposals[0]
         let materialID = NovelMaterialID()
         let revisionID = NovelMaterialRevisionID()
+        let editedTitle = "用户确认后的名称"
+        let editedContent = "用户在写入前修订后的完整设定。"
         let action = NovelAction.resolveSettingProposal(NovelResolveSettingProposalCommand(
             context: NovelTestFixtures.context(
                 projectRevision: source.project.revision,
@@ -178,6 +180,8 @@ final class NovelProjectConfigurationTests: XCTestCase {
                 materialID: materialID,
                 revisionID: revisionID,
                 kind: .world,
+                title: editedTitle,
+                content: editedContent,
                 tags: ["rule"],
                 injectionMode: .always,
                 aliases: []
@@ -188,13 +192,83 @@ final class NovelProjectConfigurationTests: XCTestCase {
 
         XCTAssertTrue(result.document.settingProposals[0].isResolved)
         XCTAssertEqual(result.document.materials[0].id, materialID)
-        XCTAssertEqual(result.document.materialRevisions[0].title, proposal.title)
-        XCTAssertEqual(result.document.materialRevisions[0].content, proposal.content)
+        XCTAssertEqual(result.document.materialRevisions[0].title, editedTitle)
+        XCTAssertEqual(result.document.materialRevisions[0].content, editedContent)
         XCTAssertEqual(result.document.project.configRevision, source.project.configRevision + 1)
         XCTAssertNoThrow(try NovelDocumentValidator.validateTransition(
             from: source,
             to: result.document
         ))
+    }
+
+    func testEditedCharacterProposalKeepsTheSuggestedNameAsAnEffectiveAlias() throws {
+        let source = try documentWithActiveProposal(
+            title: "赵旧名",
+            content: "模型最初建议的人物设定。"
+        )
+        let proposal = source.settingProposals[0]
+        let materialID = NovelMaterialID()
+        let revisionID = NovelMaterialRevisionID()
+        let result = try NovelReducer.apply(.resolveSettingProposal(
+            NovelResolveSettingProposalCommand(
+                context: NovelTestFixtures.context(
+                    projectRevision: source.project.revision,
+                    configRevision: source.project.configRevision,
+                    branchHeadRevision: source.branches[0].headRevision
+                ),
+                projectID: source.project.id,
+                proposalID: proposal.id,
+                resolution: .accept(
+                    materialID: materialID,
+                    revisionID: revisionID,
+                    kind: .character,
+                    title: "赵大来",
+                    content: "用户写入前修改后的人物设定。",
+                    tags: [],
+                    injectionMode: .smart,
+                    aliases: []
+                )
+            )
+        ), to: source).document
+
+        let effective = try NovelMaterialResolver.effectiveRevisions(
+            document: result,
+            branch: result.branches[0]
+        )
+        let character = try XCTUnwrap(effective.first { $0.material.id == materialID })
+
+        XCTAssertEqual(character.revision.title, "赵大来")
+        XCTAssertEqual(character.material.aliases, ["赵旧名"])
+    }
+
+    func testProposalAcceptanceRejectsEmptyEditedContent() throws {
+        let source = try documentWithActiveProposal()
+        let proposal = source.settingProposals[0]
+        let action = NovelAction.resolveSettingProposal(NovelResolveSettingProposalCommand(
+            context: NovelTestFixtures.context(
+                projectRevision: source.project.revision,
+                configRevision: source.project.configRevision,
+                branchHeadRevision: source.branches[0].headRevision
+            ),
+            projectID: source.project.id,
+            proposalID: proposal.id,
+            resolution: .accept(
+                materialID: NovelMaterialID(),
+                revisionID: NovelMaterialRevisionID(),
+                kind: .world,
+                title: "月亮法则",
+                content: " \n ",
+                tags: [],
+                injectionMode: .smart,
+                aliases: []
+            )
+        ))
+
+        XCTAssertThrowsError(try NovelReducer.apply(action, to: source)) { error in
+            guard case .invalidInput = error as? NovelError else {
+                return XCTFail("Expected empty proposal content to be rejected, got \(error)")
+            }
+        }
     }
 
     func testProposalRejectionDoesNotAdvanceConfigRevision() throws {
@@ -368,13 +442,16 @@ final class NovelProjectConfigurationTests: XCTestCase {
         XCTAssertEqual(projects.count, 1)
     }
 
-    private func documentWithActiveProposal() throws -> NovelProjectDocumentV1 {
+    private func documentWithActiveProposal(
+        title: String = "Moon Rule",
+        content: String = "The moon remembers every oath."
+    ) throws -> NovelProjectDocumentV1 {
         var document = try NovelTestFixtures.document()
         let proposal = NovelSettingProposalRecord(
             id: NovelProposalID(),
             branchID: document.branches[0].id,
-            title: "Moon Rule",
-            content: "The moon remembers every oath.",
+            title: title,
+            content: content,
             createdAt: document.project.updatedAt,
             isResolved: false
         )

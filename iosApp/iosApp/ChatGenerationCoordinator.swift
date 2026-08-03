@@ -643,12 +643,15 @@ final class ChatGenerationCoordinator {
             imagePresentation
         )
         // 生图也是流式生成的一部分，退后台同样要保住执行权。
-        // 这条路没有 backgroundHandoff（图是一次性 HTTP，没法接着跑），所以
-        // 执行权被收走时无处可交接，不给 onExpire——收口靠 finishStreaming。
+        // 图是一次性 HTTP，执行中无法安全搬家；短窗口未被系统接管或系统长窗口
+        // 被收走时都只取消当前 owner，不能另起一条请求造成重复扣费。
         BackgroundGenerationKeepAlive.shared.begin(
             runId,
             title: "Amber 正在生成图片",
             subtitle: params?.model.displayName ?? "图片生成",
+            onExpire: { [weak self] in
+                self?.cancelRunAfterSystemKeepAliveExpiration(runId)
+            },
             onSystemTaskExpiration: { [weak self] in
                 self?.cancelRunAfterSystemKeepAliveExpiration(runId)
             }
@@ -669,20 +672,6 @@ final class ChatGenerationCoordinator {
         ))
         bindings.setMessages(snapshot)
         bindings.bumpMessageRevision(.toolCallStarted)
-        if let conversationId, let providerSetting, let params {
-            backgroundHandoff = IOSChatBackgroundHandoff(
-                runId: runId,
-                startedAt: startedAt,
-                inputDigest: inputDigest,
-                conversationId: conversationId,
-                providerId: providerSetting.id.toHexDashString(),
-                providerSetting: providerSetting,
-                params: params,
-                uploadMessages: snapshot,
-                displayMessages: snapshot,
-                mode: .singleToolOnly
-            )
-        }
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -3042,7 +3031,7 @@ final class ChatGenerationCoordinator {
         }
         let hasTextDelta = parts.contains { part in
             guard let text = part as? UIMessagePart.Text else { return false }
-            return !text.text.isEmpty
+            return text.text.contains { !$0.isWhitespace }
         }
         let hasReasoningDelta = parts.contains { part in
             guard let reasoning = part as? UIMessagePart.Reasoning else { return false }

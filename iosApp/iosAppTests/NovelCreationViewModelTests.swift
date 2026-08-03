@@ -909,6 +909,8 @@ final class NovelCreationViewModelTests: XCTestCase {
                 materialID: NovelMaterialID(),
                 revisionID: NovelMaterialRevisionID(),
                 kind: .world,
+                title: proposal.title,
+                content: proposal.content,
                 tags: ["列车"],
                 injectionMode: .smart,
                 aliases: []

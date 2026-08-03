@@ -136,7 +136,7 @@ struct NovelCharacterPagesView: View {
         let title = materialTitle(material)
         let latest = NovelCharacterEventMatcher.events(
             for: title,
-            aliases: material.aliases,
+            aliases: viewModel.effectiveAliases(for: material),
             in: currentEvents
         ).first
         return Button {
@@ -309,7 +309,7 @@ private struct NovelCharacterDetailView: View {
         let eventIDs = Set(state.eventIDs)
         return NovelCharacterEventMatcher.events(
             for: name,
-            aliases: material?.aliases ?? [],
+            aliases: material.map { viewModel.effectiveAliases(for: $0) } ?? [],
             in: project.events.filter { eventIDs.contains($0.id) }
         )
     }

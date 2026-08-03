@@ -787,7 +787,8 @@ private extension NovelInjectionPlanner {
             }.joined(separator: "\n")
         var content = "Current summary:\n\(state.summary)\n\n" +
             "Branch outline:\n\(state.branchOutline)\n\n" +
-            "Character identity map (authoritative across branches):\n\(identityMap)\n\n" +
+            "Character identity map (authoritative across branches; " +
+            "use canonical names in new output):\n\(identityMap)\n\n" +
             "Unresolved entities:\n\(unresolved)"
         if includeUnsynchronizedWarning, branch.syncStatus == .needsSync {
             content += "\n\nWarning: the working manuscript has unsynchronized edits. " +
@@ -1003,7 +1004,11 @@ private extension NovelInjectionPlanner {
                     estimatedTokens: tokenCount
                 )
             }
-            let score = relevanceScore(source.revision, query: query)
+            let score = relevanceScore(
+                source.revision,
+                aliases: source.material.aliases,
+                query: query
+            )
             return ClassifiedMaterial(
                 source: source,
                 reason: score > 0 ? .smartMatch : .noSmartMatch,
@@ -1025,12 +1030,15 @@ private extension NovelInjectionPlanner {
 
     static func relevanceScore(
         _ revision: NovelMaterialRevisionRecord,
+        aliases: [String] = [],
         query: String
     ) -> Int {
         guard !query.isEmpty else { return 0 }
         var score = 0
-        let title = normalized(revision.title)
-        if title.count >= 2, query.contains(title) { score += 100 }
+        let identityNames = ([revision.title] + aliases)
+            .map(normalized)
+            .filter { $0.count >= 2 }
+        if identityNames.contains(where: query.contains) { score += 100 }
         let tags = Set(revision.tags.map(normalized).filter { $0.count >= 2 })
         score += tags.filter(query.contains).count * 20
 

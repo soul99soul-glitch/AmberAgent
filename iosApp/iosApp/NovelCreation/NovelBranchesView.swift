@@ -443,7 +443,9 @@ struct NovelBranchRenameSheet: View {
                         .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
+                    Button("保存") {
+                        NovelTextInputCommitter.perform { save() }
+                    }
                         .disabled(
                             name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                                 isSubmitting
@@ -536,7 +538,9 @@ struct NovelBranchForkSheet: View {
                         .disabled(isSubmitting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("创建") { fork() }
+                    Button("创建") {
+                        NovelTextInputCommitter.perform { fork() }
+                    }
                         .disabled(
                             name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                                 !lineage.contains(where: { $0.id == checkpointID }) ||
@@ -748,11 +752,7 @@ struct NovelBranchOverrideEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        if hasUnsavedChanges {
-                            isConfirmingDiscard = true
-                        } else {
-                            dismiss()
-                        }
+                        NovelTextInputCommitter.perform { requestDismiss() }
                     }
                         .disabled(isSubmitting)
                         .confirmationDialog(
@@ -767,21 +767,21 @@ struct NovelBranchOverrideEditorSheet: View {
                         }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { save() }
-                        .disabled(!canSave || isSubmitting || !viewModel.canMutate)
+                    Button("保存") {
+                        NovelTextInputCommitter.perform { save() }
+                    }
+                        .disabled(isSubmitting || !viewModel.canMutate)
                 }
             }
             .overlay {
                 if isSubmitting {
                     ProgressView("正在保存分支设定")
-                        .padding(16)
-                        .amberGlass(cornerRadius: AmberTheme.radiusLarge, interactive: false)
                 }
             }
         }
-        .interactiveDismissDisabled(isSubmitting || hasUnsavedChanges)
+        .interactiveDismissDisabled()
         .presentationDetents([.large])
-        .presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)
+        .presentationDragIndicator(.hidden)
     }
 
     private var revisions: [NovelMaterialRevisionRecord] {
@@ -833,7 +833,17 @@ struct NovelBranchOverrideEditorSheet: View {
     }
 
     private func save() {
-        guard viewModel.canMutate, canSave, hasUnsavedChanges, !isSubmitting else { return }
+        guard viewModel.canMutate, !isSubmitting else { return }
+        guard hasUnsavedChanges else {
+            dismiss()
+            return
+        }
+        guard canSave else {
+            failureMessage = mode == .existing
+                ? "请选择一个资料版本。"
+                : "请填写完整的资料标题和内容。"
+            return
+        }
         let change: NovelBranchMaterialOverrideChange
         switch mode {
         case .inherit:
@@ -863,6 +873,14 @@ struct NovelBranchOverrideEditorSheet: View {
                 failureMessage = viewModel.presentedMessage ?? "分支设定没有保存，请稍后重试。"
                 return
             }
+            dismiss()
+        }
+    }
+
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
             dismiss()
         }
     }

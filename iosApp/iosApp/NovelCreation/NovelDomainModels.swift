@@ -1197,6 +1197,7 @@ struct NovelProjectSnapshot: Equatable, Sendable {
     let pendingOperations: [NovelPendingOperationRecord]
     let activeRuns: [NovelActiveRunRecord]
     let settingProposals: [NovelSettingProposalRecord]
+    let appliedOperations: [NovelAppliedOperationRecord]
     let access: NovelProjectLoadAccess
 
     init(loaded: NovelLoadedProject) {
@@ -1221,6 +1222,7 @@ struct NovelProjectSnapshot: Equatable, Sendable {
         pendingOperations = document.pendingOperations
         activeRuns = document.activeRuns
         settingProposals = document.settingProposals
+        appliedOperations = document.appliedOperations
         access = loaded.access
     }
 }

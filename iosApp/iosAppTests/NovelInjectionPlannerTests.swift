@@ -574,6 +574,212 @@ final class NovelInjectionPlannerTests: XCTestCase {
         XCTAssertTrue(state.content.contains("Unresolved entities:\n(none)"))
     }
 
+    func testCharacterRenameUsesNewCanonicalNameAndTreatsHistoricalNameAsAlias() throws {
+        var document = try NovelTestFixtures.document()
+        let materialID = NovelMaterialID()
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision
+            ),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: NovelMaterialRevisionID(),
+            kind: .character,
+            title: "赵旧名",
+            content: "旧的人物设定。",
+            tags: [],
+            injectionMode: .always,
+            aliases: []
+        )), to: document).document
+        let stateIndex = try XCTUnwrap(document.stateSnapshots.firstIndex {
+            $0.id == document.branches[0].currentStateSnapshotID
+        })
+        let current = document.stateSnapshots[stateIndex]
+        document.stateSnapshots[stateIndex] = NovelStateSnapshotRecord(
+            id: current.id,
+            eventIDs: current.eventIDs,
+            summary: "赵旧名仍出现在既有剧情摘要里。",
+            branchOutline: current.branchOutline,
+            unresolvedEntityNames: ["赵旧名"],
+            createdAt: current.createdAt
+        )
+        let newRevisionID = NovelMaterialRevisionID()
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision
+            ),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: newRevisionID,
+            kind: .character,
+            title: "赵大来",
+            content: "用户保存后的新人物设定。",
+            tags: [],
+            injectionMode: .always,
+            aliases: []
+        )), to: document).document
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: document.branches[0].id,
+                promptKind: .discussion,
+                userText: "继续讨论这个人物。"
+            )
+        )
+        let state = try XCTUnwrap(plan.sections.first {
+            if case .currentState = $0.kind { return true }
+            return false
+        })
+        let materialSection = try XCTUnwrap(plan.sections.first {
+            $0.kind == .material(newRevisionID)
+        })
+
+        XCTAssertTrue(state.content.contains("- 赵大来 | aliases: 赵旧名"))
+        XCTAssertTrue(state.content.contains("Unresolved entities:\n(none)"))
+        XCTAssertTrue(state.content.contains("use canonical names in new output"))
+        XCTAssertTrue(materialSection.content.contains("Title: 赵大来"))
+        XCTAssertTrue(materialSection.content.contains("用户保存后的新人物设定。"))
+    }
+
+    func testSmartCharacterMaterialMatchesItsHistoricalName() throws {
+        var document = try NovelTestFixtures.document()
+        let materialID = NovelMaterialID()
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision
+            ),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: NovelMaterialRevisionID(),
+            kind: .character,
+            title: "赵旧名",
+            content: "旧的人物设定。",
+            tags: [],
+            injectionMode: .smart,
+            aliases: []
+        )), to: document).document
+        let currentRevisionID = NovelMaterialRevisionID()
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision
+            ),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: currentRevisionID,
+            kind: .character,
+            title: "赵大来",
+            content: "用户保存后的新人物设定。",
+            tags: [],
+            injectionMode: .smart,
+            aliases: []
+        )), to: document).document
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: document.branches[0].id,
+                promptKind: .discussion,
+                userText: "继续讨论赵旧名。"
+            )
+        )
+
+        let decision = try XCTUnwrap(plan.materialDecisions.first {
+            $0.materialID == materialID
+        })
+        XCTAssertTrue(decision.included)
+        XCTAssertEqual(decision.reason, .smartMatch)
+        XCTAssertTrue(plan.sections.contains { $0.kind == .material(currentRevisionID) })
+    }
+
+    func testCharacterHistoricalAliasesExcludeRetiredBranchOverrideTitles() throws {
+        var document = try NovelTestFixtures.document()
+        let materialID = NovelMaterialID()
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision
+            ),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: NovelMaterialRevisionID(),
+            kind: .character,
+            title: "赵旧名",
+            content: "旧的人物设定。",
+            tags: [],
+            injectionMode: .always
+        )), to: document).document
+
+        let branchID = document.branches[0].id
+        let branchRevisionID = NovelMaterialRevisionID()
+        document = try NovelReducer.apply(.setBranchMaterialOverride(
+            NovelSetBranchMaterialOverrideCommand(
+                context: NovelTestFixtures.context(
+                    projectRevision: document.project.revision,
+                    configRevision: document.project.configRevision,
+                    branchHeadRevision: document.branches[0].headRevision
+                ),
+                projectID: document.project.id,
+                branchID: branchID,
+                materialID: materialID,
+                change: .createRevision(
+                    revisionID: branchRevisionID,
+                    title: "仅分支称呼",
+                    content: "只属于这一条分支的设定。",
+                    tags: [],
+                    injectionMode: .always
+                )
+            )
+        ), to: document).document
+        document = try NovelReducer.apply(.setBranchMaterialOverride(
+            NovelSetBranchMaterialOverrideCommand(
+                context: NovelTestFixtures.context(
+                    projectRevision: document.project.revision,
+                    configRevision: document.project.configRevision,
+                    branchHeadRevision: document.branches[0].headRevision
+                ),
+                projectID: document.project.id,
+                branchID: branchID,
+                materialID: materialID,
+                change: .inherit
+            )
+        ), to: document).document
+
+        let currentRevisionID = NovelMaterialRevisionID()
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision
+            ),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: currentRevisionID,
+            kind: .character,
+            title: "赵大来",
+            content: "当前人物设定。",
+            tags: [],
+            injectionMode: .always
+        )), to: document).document
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: branchID,
+                promptKind: .discussion,
+                userText: "继续讨论这个人物。"
+            )
+        )
+        let state = try XCTUnwrap(plan.sections.first {
+            if case .currentState = $0.kind { return true }
+            return false
+        })
+        let materialSection = try XCTUnwrap(plan.sections.first {
+            $0.kind == .material(currentRevisionID)
+        })
+
+        XCTAssertTrue(state.content.contains("- 赵大来 | aliases: 赵旧名"))
+        XCTAssertFalse(state.content.contains("仅分支称呼"))
+        XCTAssertFalse(materialSection.content.contains("仅分支称呼"))
+    }
+
     func testSessionCursorLimitExcludesDiscussionAfterFactTransactionStarted() throws {
         var document = try NovelTestFixtures.document()
         let firstID = NovelMessageID()

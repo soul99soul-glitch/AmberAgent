@@ -326,6 +326,31 @@ final class ChatReasoningCardTests: XCTestCase {
         )
     }
 
+    func testCompletedReasoningStartsAtTopOnFirstPresentation() throws {
+        let model = StreamingReasoningModel(text: String(
+            repeating: "已完成的历史推理应从开头进入阅读。\n",
+            count: 120
+        ))
+        model.isThinking = false
+        let fixture = mountHarness(model: model)
+        defer {
+            fixture.window.isHidden = true
+            fixture.window.rootViewController = nil
+        }
+
+        pump(seconds: 0.35)
+        fixture.window.layoutIfNeeded()
+        let textView = try XCTUnwrap(firstSubview(of: UITextView.self, in: fixture.host.view))
+
+        XCTAssertGreaterThan(textView.contentSize.height, textView.bounds.height)
+        XCTAssertEqual(
+            textView.contentOffset.y,
+            -textView.adjustedContentInset.top,
+            accuracy: 1,
+            "首次展示已完成的长推理时应从正文开头开始，而不是直接跳到底部。"
+        )
+    }
+
     func testReasoningAppendDoesNotStealUserHistoryPosition() throws {
         let model = StreamingReasoningModel(text: String(
             repeating: "先保留用户正在查看的历史推理位置。\n",

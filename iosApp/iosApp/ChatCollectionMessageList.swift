@@ -279,6 +279,8 @@ struct NativeChatTimelineView: View {
     var body: some View {
         let messages = messagesProvider()
         let nativeScrollDriverDesired = isNativeScrollDriverDesired
+        let displaySettingSignature = String(describing: displaySetting)
+        let generativeUiSettingSignature = String(describing: generativeUiSetting)
         let effectiveStreamedMessageIDs = effectiveStreamedMessageIDsForRender(
             event: signal.event,
             messages: messages
@@ -299,8 +301,8 @@ struct NativeChatTimelineView: View {
             isRecognizingImages: isRecognizingImages,
             contextCompactState: contextCompactState,
             viewportState: renderViewportState,
-            displaySettingSignature: String(describing: displaySetting),
-            generativeUiSettingSignature: String(describing: generativeUiSetting),
+            displaySettingSignature: displaySettingSignature,
+            generativeUiSettingSignature: generativeUiSettingSignature,
             renderStateRevision: renderStateRevision,
             reasoningLevelLabel: reasoningLevelLabel,
             streamedMessageIDs: effectiveStreamedMessageIDs,
@@ -316,7 +318,11 @@ struct NativeChatTimelineView: View {
                 // One eager height model prevents historical estimates and the live tail
                 // from publishing conflicting content sizes into the same scroll view.
                 ForEach(projection.entries) { entry in
-                    entryView(entry)
+                    entryView(
+                        entry,
+                        displaySettingSignature: displaySettingSignature,
+                        generativeUiSettingSignature: generativeUiSettingSignature
+                    )
                 }
             }
             .padding(.horizontal, 16)
@@ -514,7 +520,11 @@ struct NativeChatTimelineView: View {
     }
 
     @ViewBuilder
-    private func entryView(_ entry: NativeTimelineEntry) -> some View {
+    private func entryView(
+        _ entry: NativeTimelineEntry,
+        displaySettingSignature: String,
+        generativeUiSettingSignature: String
+    ) -> some View {
         switch entry.kind {
         case .emptyState:
             ChatEmptyState()
@@ -545,6 +555,8 @@ struct NativeChatTimelineView: View {
                     model: model,
                     displaySetting: displaySetting,
                     generativeUiSetting: generativeUiSetting,
+                    displaySettingSignature: displaySettingSignature,
+                    generativeUiSettingSignature: generativeUiSettingSignature,
                     reasoningLevelLabel: reasoningLevelLabel,
                     onAction: onAction
                 )
@@ -3901,6 +3913,8 @@ private struct NativeTimelineMessageBubble: View, @MainActor Equatable {
     let model: ChatListMessageRenderModel
     let displaySetting: DisplaySetting
     let generativeUiSetting: GenerativeUiSetting
+    let displaySettingSignature: String
+    let generativeUiSettingSignature: String
     let reasoningLevelLabel: String?
     let onAction: (ChatListAction) -> Void
 
@@ -3929,7 +3943,10 @@ private struct NativeTimelineMessageBubble: View, @MainActor Equatable {
         else { return false }
 
         if lhs.usesLiveTail || rhs.usesLiveTail {
-            return lhs.model.liveTailModel === rhs.model.liveTailModel
+            return lhs.model.liveTailModel === rhs.model.liveTailModel &&
+                lhs.displaySettingSignature == rhs.displaySettingSignature &&
+                lhs.generativeUiSettingSignature == rhs.generativeUiSettingSignature &&
+                lhs.reasoningLevelLabel == rhs.reasoningLevelLabel
         }
 
         return lhs.renderDigest == rhs.renderDigest &&

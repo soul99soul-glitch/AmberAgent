@@ -176,6 +176,18 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertTrue(bubble.contains("ForEach(0..<display.requestedCount"))
     }
 
+    func testThinkingFallbackWaitsForVisibleAssistantText() throws {
+        let bubble = try source("iosApp/MessageBubbleView.swift")
+        let start = try XCTUnwrap(bubble.range(of: "private var hasVisibleAssistantContent"))
+        let end = try XCTUnwrap(
+            bubble.range(of: "private var nonEmptyTextPartCount", range: start.upperBound..<bubble.endIndex)
+        )
+        let visibility = bubble[start.lowerBound..<end.lowerBound]
+
+        XCTAssertTrue(visibility.contains("text.text.contains { !$0.isWhitespace }"))
+        XCTAssertFalse(visibility.contains("return !text.text.isEmpty"))
+    }
+
     func testToolDetailSelectionKeepsStableIdentityAndResolvesCurrentMessageOutput() throws {
         let bubble = try source("iosApp/MessageBubbleView.swift")
         let detail = try source("iosApp/ChatToolDetailSheet.swift")

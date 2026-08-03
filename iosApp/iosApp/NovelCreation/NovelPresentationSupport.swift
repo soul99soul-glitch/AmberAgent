@@ -1,4 +1,34 @@
 import Foundation
+import UIKit
+
+@MainActor
+enum NovelTextInputCommitter {
+    static func perform(
+        firstResponder: UIView? = nil,
+        _ action: @escaping @MainActor () -> Void
+    ) {
+        if let firstResponder {
+            (firstResponder as? UITextInput)?.unmarkText()
+            firstResponder.resignFirstResponder()
+        } else {
+            UIApplication.shared.sendAction(
+                #selector(UITextInput.unmarkText),
+                to: nil,
+                from: nil,
+                for: nil
+            )
+            UIApplication.shared.sendAction(
+                #selector(UIResponder.resignFirstResponder),
+                to: nil,
+                from: nil,
+                for: nil
+            )
+        }
+        DispatchQueue.main.async {
+            action()
+        }
+    }
+}
 
 enum NovelWorkspaceSection: String, CaseIterable, Identifiable {
     case creation
@@ -296,6 +326,25 @@ enum NovelPresentation {
             return revision
         }
         return currentRevision(for: material, in: project)
+    }
+
+    static func effectiveAliases(
+        for material: NovelMaterialRecord,
+        project: NovelProjectSnapshot,
+        branch: NovelBranchSnapshot?
+    ) -> [String] {
+        guard let revision = effectiveRevision(
+            for: material,
+            project: project,
+            branch: branch
+        ) else { return material.aliases }
+        return NovelMaterialResolver.effectiveAliases(
+            for: material,
+            effectiveRevision: revision,
+            materialRevisions: project.materialRevisions,
+            proposals: project.settingProposals,
+            appliedOperations: project.appliedOperations
+        )
     }
 
     static func checkpointLineage(

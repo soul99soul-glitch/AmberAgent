@@ -662,7 +662,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         onAssistantTurnStarted: (@MainActor @Sendable () async -> Void)? = nil,
         onToolExecutionStarted: (@MainActor @Sendable (String) async -> Void)? = nil,
         onAssistantStage: (@Sendable (AgentActivityStage) -> Void)? = nil,
-        onAssistantText: (@Sendable (String) -> Void)? = nil
+        onAssistantText: (@Sendable (String) -> Void)? = nil,
+        onMessagesUpdated: (@Sendable ([UIMessage]) -> Void)? = nil
     ) async -> IOSAgentToolEngineResult {
         var working = messages
         var steps = 0
@@ -691,6 +692,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             onToolExecutionStarted: onToolExecutionStarted
         )
         working = preExistingResult.messages
+        onMessagesUpdated?(working)
         if preExistingResult.wasCancelled {
             return IOSAgentToolEngineResult(
                 messages: working,
@@ -759,8 +761,10 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     usage: nil,
                     translation: nil
                 )
+                let failedMessages = working + [failureMessage]
+                onMessagesUpdated?(failedMessages)
                 return IOSAgentToolEngineResult(
-                    messages: working + [failureMessage],
+                    messages: failedMessages,
                     stepsExecuted: steps,
                     pendingApproval: nil,
                     hitStepLimit: false,
@@ -770,8 +774,10 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
 
             let rawAssistantMessage = assistantMessage(from: chunk)
             if Self.reachedOutputLimit(chunk) {
+                let limitedMessages = rawAssistantMessage.map { working + [$0] } ?? working
+                onMessagesUpdated?(limitedMessages)
                 return IOSAgentToolEngineResult(
-                    messages: rawAssistantMessage.map { working + [$0] } ?? working,
+                    messages: limitedMessages,
                     stepsExecuted: steps + 1,
                     pendingApproval: nil,
                     hitStepLimit: false,
@@ -807,6 +813,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             }
             if let assistantMessage {
                 working.append(assistantMessage)
+                onMessagesUpdated?(working)
             }
 
             // Only fresh pending tools remain in the retained assistant turn.
@@ -826,7 +833,10 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                 if !emittedTools.isEmpty, !hasAssistantContent {
                     // The provider only echoed calls that were already completed.
                     // Drop any whitespace-only remainder and ask for the final answer.
-                    if assistantMessage != nil { working.removeLast() }
+                    if assistantMessage != nil {
+                        working.removeLast()
+                        onMessagesUpdated?(working)
+                    }
                     steps += 1
                     continue
                 }
@@ -850,6 +860,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             )
             if batchResult.wasCancelled {
                 working = applyToolOutputs(batchResult.outputs, to: working)
+                onMessagesUpdated?(working)
                 return IOSAgentToolEngineResult(
                     messages: working,
                     stepsExecuted: steps + 1,
@@ -859,6 +870,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                 )
             }
             if let approval = batchResult.pendingApproval, configuration.honorApprovalPause {
+                working = applyToolOutputs(batchResult.outputs, to: working)
+                onMessagesUpdated?(working)
                 return IOSAgentToolEngineResult(
                     messages: working,
                     stepsExecuted: steps + 1,
@@ -867,6 +880,7 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                 )
             }
             working = applyToolOutputs(batchResult.outputs, to: working)
+            onMessagesUpdated?(working)
 
             // I-5: a repeated-signature stop ends the whole run here, mirroring
             // the maxSteps-exhausted return below — the stop output is already

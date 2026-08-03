@@ -1,15 +1,15 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-03
+Last updated: 2026-08-04
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
 ## Repository
 
-- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
+- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 2026-08-03 汇总改动已提交并推送，当前工作区干净；开始新任务仍以实时 `git status` 和单文件 diff 为准。
+- Worktree: 2026-08-04 跨链复核与小说编辑/人物上下文修复已完成并纳入当前分支发布；开始新任务仍以实时 `git status` 和单文件 diff 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,28 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `NativeChatTimelineView`（native timeline；2026-07-30 退役 route 判定层后为唯一 Chat 列表路径）。`ChatSwiftUIMessageList` 与 UIKit `ChatCollectionMessageList` 已生产不可达（仅 `#if CHAT_PERF_REPLAY` 仍编译前者），不再代表默认 Chat 门禁；`ChatSwiftUIStreamReplayTests` 已改为直接挂载当前 Native timeline，`ChatStreamReplayTests` 仅保留非默认 UICollectionView 回归价值。
 
 ## Latest Completed Slices
+
+### 2026-08-03 小说编辑、建议写入与人物上下文精准收口（已提交）
+
+- 先前固定 Sheet presentation 只修复了输入会话被重配的问题，仍遗漏“点击保存时最后一段拼音尚处于 marked text，业务动作直接读取旧 `@State`”这一独立链路。现由单一 `NovelTextInputCommitter` 先 `unmarkText`、结束第一响应者，再在下一主线程回合读取草稿；文本完整性与 dirty-state 校验也移到该提交动作之后，避免按钮先被旧状态禁用。新建/改名、快速开始、资料与建议、分支、章节、讨论归档、正文收录、上下文预览和 Ask User 等真实文本动作均接入。小说 Composer 的 UIKit controller 改由 workspace 持有，打开上下文面板、切分支、退后台或离开页面前直接读取 committed text；没有时间延迟、字符过滤或逐字段兜底。
+- 建议确认面板的标题/人物姓名与正文现可直接编辑，编辑值随 proposal resolution 一次进入 Reducer，资料修订与 proposal resolved 原子落库；空正文会在 UI 与 Reducer 两层明确拒绝，失败不会静默关闭。人物新请求以当前有效修订标题为唯一规范名，历史全局标题与“首次建议写入前被改掉的原建议姓名”只作为有效别名，供智能资料命中、状态/事实校验、人物事件和待确认身份解析复用；既有项目直接从已持久化的 proposal operation ledger 得到同一结果，无 schema 迁移，也不重写历史消息、状态快照或旧资料。分支专用 override 标题不会泄漏成其他分支别名。
+- 真机截图中的「讨论」恢复为 30pt 可视胶囊、44pt 外部命中区；等待文案缩为单行「模型思考中 N 秒」；建议写入及同类小说编辑页的忙碌态移除 16pt 方形 glass 背板，统一使用普通系统 `ProgressView`。所有长草稿 Sheet 保持固定 presentation，取消确认、提交后校验和原有业务状态不变。
+- 最终三批定点回归在 iPhone 17 Pro / iOS 26.5 Simulator 为 **317 passed / 0 failed / 0 skipped**：建议/身份/注入/UI 137 项（`Test-iosApp-2026.08.04_00-16-58-+0800.xcresult`），ViewModel/Reducer/手工编辑 143 项（`Test-iosApp-2026.08.04_00-18-16-+0800.xcresult`），文档与事实校验 37 项（`Test-iosApp-2026.08.04_00-20-47-+0800.xcresult`）。全部本批次 Swift diff 的 `swiftc -parse` 与 `git diff --check` 通过。当前最终 diff 尚未重新构建或安装真机包，分段拼音、键盘保持和最终视觉仍待真机复验；更早构建的包不代表本轮最终代码。
+
+### 2026-08-03 跨链复核问题精准收口（已提交）
+
+- 后台系统活动到期或被用户划掉后只终止当前 owner，并持久化「已停止，可以重试」终态；不再创建 suspension 后自动重投。旧版本遗留 suspension 只做一次终态迁移。直接生图继续复用原本的 KeepAlive 长窗口，但短窗口或系统长窗口到期都取消同一条 HTTP，不再准备 `.singleToolOnly` 第二次请求；兼容枚举与旧 payload 解码路径未扩拆。
+- 后台 Agent loop 在消息发生实质变化时发布线程安全快照；保存前只按稳定 tool-call key，把 upload/runtime 前缀中已经完成的工具结果回填到 display 前缀，随后拼接真正新增的模型消息。正常完成、provider 失败、输出上限与取消路径均复用这一个 reconciliation，不新增重试、第二套工具状态机或几何/时间补偿。
+- 空白文本分片不再被当成可见正文，避免「思考中」占位过早消失；思考卡自动展开/收回尊重 Reduce Motion。岛体 settling/terminal hold 独立暂停边光 DisplayLink，不借用 Reduce Motion，因此冻结时不会额外变暗。Chat 紧凑按钮、建议词、模型按钮，以及小说恢复/重试/停止/提案操作保留原视觉尺寸，只把外层布局与命中区补到至少 44pt；没有统一放大控件或改页面密度。
+- 最终受影响回归 `IOSSettingsWiringTests + ChatMessageProjectionTests + IOSParityRedLightTests + IOSNovelCreationWiringTests + ChatReasoningCardTests + IOSAgentToolEngineTests + BackgroundGenerationKeepAliveTests + IOSChatBackgroundSuspensionTests + ChatIslandPresentationTests` 在 iPhone 17 Pro / iOS 26.5 Simulator 为 **336 passed / 0 failed / 0 skipped**（`Test-iosApp-2026.08.03_12-55-14-+0800.xcresult`）；Swift 语法解析与 `git diff --check` 通过。Native Timeline 三套件合跑为 104 passed / 2 failed：连续正文 48pt 单次增长隔离复跑通过；既有 80 行表格性能 canary 隔离两次仍为 `40.64ms` 与 `74.71ms`（阈值 40ms），本轮未修改表格渲染路径、未放宽阈值或加入缓存兜底。当前没有真机触控、Dynamic Type、VoiceOver、ProMotion 或真实 BGCPT 到期证据。
+- 本批次代码在提交前已用 Team `89QRFX9548` 完成 Stable Debug arm64 真机构建，并于 2026-08-03 13:35 覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`；设备安装服务接受 `app.amber.ios`，新容器为 `5216668F-A3CF-4BCA-814F-A591063F3925/iosApp.app`，主二进制 SHA-256 为 `98cf19d8ea593a90b7c8b66c358837ac3bf37f0c4550e20aa8bf62dd55fe009c`。本机 `codesign --verify --deep --strict` 因开发证书链返回 `CSSMERR_TP_NOT_TRUSTED`，因此不记录为本地深度签名校验通过；本轮未自动启动，安装证据不等同于上述真机交互已验收。
+
+### 2026-08-03 Chat 复核缺口精准收口（已提交）
+
+- 已完成的历史长推理首次挂载不再继承“贴底”所有权，而从正文开头开始；活跃 thinking 首次挂载、Reduce Motion 下的活跃 thinking、流式追加、终态扩高和用户手动浏览仍复用原有所有权链。实现只在 UIKit 文本容器首次接收内容时读取一次 `isThinking`，没有新增滚动 owner、offset 补偿或终态状态机。
+- 同批工具在较早调用已经产出结果、较后调用请求审批时，会先把既有 batch outputs 回填到消息再暂停；待审批工具自身仍保持空输出，后续工具仍按原契约不执行。没有改变批次顺序、审批模型或加入重试/fallback。
+- Native Timeline 的 live-tail Equatable 分支现在只额外比较显示设置、Generative UI 设置和 reasoning label；没有比较随 token 变化的完整 `renderDigest`，因此设置刷新能穿透，同时保留逐 token 不重建整颗消息气泡的优化。顶部返回/新建等共用按钮继续显示 38pt 圆形，只把真实布局与命中区扩到至少 44pt。
+- 四条行为回归在旧实现上稳定红灯，最小修复后全部转绿；同时把两条源码 canary 从已退役的滚动 guard 与错误文件位置更新到当前真实 owner。最终 `ChatReasoningCardTests + IOSAgentToolEngineTests + IOSSettingsWiringTests + ChatSwiftUIStreamReplayTests + NativeTimelineScrollCoreTests + ChatViewportPolicyTests + ChatMessageProjectionTests` 在 iPhone 17 Pro / iOS 26.5 Simulator 为 **259 passed / 0 failed / 0 skipped**（`/private/tmp/amber-review-d05ec72/Logs/Test/Test-iosApp-2026.08.03_11-26-12-+0800.xcresult`）；未放宽性能阈值。当前没有真机视觉、触控或 ProMotion 证据。
 
 ### 2026-08-03 锁屏/灵动岛布局与系统卡取消闭环（已提交）
 

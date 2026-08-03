@@ -125,6 +125,17 @@ struct ChatReasoningCard: View {
         isExpanded && hasBodyText
     }
 
+    private func setExpanded(_ expanded: Bool, duration: Double) {
+        guard isExpanded != expanded else { return }
+        if reduceMotion {
+            isExpanded = expanded
+        } else {
+            withAnimation(.easeInOut(duration: duration)) {
+                isExpanded = expanded
+            }
+        }
+    }
+
     private var capsuleFill: Color {
         AmberTheme.accent.opacity(isThinking ? 0.10 : 0.08)
     }
@@ -184,7 +195,7 @@ struct ChatReasoningCard: View {
             Button {
                 guard hasBodyText else { return }
                 userToggled = true
-                withAnimation(.easeInOut(duration: 0.22)) { isExpanded.toggle() }
+                setExpanded(!isExpanded, duration: 0.22)
             } label: {
                 HStack(spacing: 7) {
                     // 思考中的时钟动画由 UIKit addSymbolEffect 驱动(视觉与 SwiftUI
@@ -219,6 +230,9 @@ struct ChatReasoningCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: hasBodyText ? 0.98 : 1, haptic: hasBodyText ? .selection : nil))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .accessibilityValue(hasBodyText ? (showsBody ? "已展开" : "已折叠") : "无思考正文")
 
             if showsBody {
                 // 推理正文增长不再经 SwiftUI ScrollViewReader 逐 chunk 重排并回写
@@ -226,6 +240,7 @@ struct ChatReasoningCard: View {
                 ChatReasoningBodyTextView(
                     text: bodyText,
                     maxHeight: isThinking ? 180 : 260,
+                    followsBottomOnFirstPresentation: isThinking,
                     animatesNewWords: Self.animatesStreamingBody(
                         isThinking: isThinking,
                         reduceMotion: reduceMotion
@@ -249,21 +264,19 @@ struct ChatReasoningCard: View {
         .clipShape(RoundedRectangle(cornerRadius: showsBody ? AmberTheme.radiusLarge : 17, style: .continuous))
         // 统一驱动所有依赖 showsBody/isExpanded 的视觉变化(圆角、chevron、高度增删),
         // 覆盖自动展开/收回路径(它们不经过 withAnimation)和用户 toggle 路径。
-        .animation(.easeInOut(duration: 0.28), value: showsBody)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: showsBody)
         .onChange(of: bodyText) { _, newValue in
             guard isThinking, !userToggled else { return }
             if Self.hasVisibleText(newValue) {
-                withAnimation(.easeInOut(duration: 0.28)) { isExpanded = true }
+                setExpanded(true, duration: 0.28)
             }
         }
         .onChange(of: isThinking) { _, nowThinking in
             guard !userToggled else { return }
             if nowThinking {
-                withAnimation(.easeInOut(duration: 0.28)) { isExpanded = hasBodyText }
+                setExpanded(hasBodyText, duration: 0.28)
             } else if autoCloseThinking {
-                withAnimation(.easeInOut(duration: 0.28)) {
-                    isExpanded = false
-                }
+                setExpanded(false, duration: 0.28)
             }
         }
     }
@@ -273,6 +286,7 @@ struct ChatReasoningCard: View {
 private struct ChatReasoningBodyTextView: UIViewRepresentable {
     let text: String
     let maxHeight: CGFloat
+    let followsBottomOnFirstPresentation: Bool
     let animatesNewWords: Bool
 
     func makeUIView(context: Context) -> ChatReasoningTextView {
@@ -298,6 +312,7 @@ private struct ChatReasoningBodyTextView: UIViewRepresentable {
             text: text,
             font: UIFont.preferredFont(forTextStyle: .caption2),
             color: UIColor(AmberTheme.muted),
+            followsBottomOnFirstPresentation: followsBottomOnFirstPresentation,
             animatesNewWords: animatesNewWords
         )
     }
@@ -338,7 +353,8 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
     private var activeWordFades: [WordFade] = []
     private var displayLink: CADisplayLink?
     private var previousFrameTimestamp: CFTimeInterval?
-    private var followsBottom = true
+    private var followsBottom = false
+    private var hasAppliedContent = false
     private var smoothsFollowing = true
     private var followSettleUntil: CFTimeInterval = 0
 
@@ -368,9 +384,15 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
         text newText: String,
         font newFont: UIFont,
         color newColor: UIColor,
+        followsBottomOnFirstPresentation: Bool,
         animatesNewWords: Bool
     ) {
-        updateFollowOwnership()
+        if hasAppliedContent {
+            updateFollowOwnership()
+        } else {
+            followsBottom = followsBottomOnFirstPresentation
+            hasAppliedContent = true
+        }
         smoothsFollowing = animatesNewWords
 
         let resolvedColor = newColor.resolvedColor(with: traitCollection)

@@ -144,6 +144,7 @@ final class IslandGlowCanvasView: UIView {
 
     private var spec = IslandGlowSpec.terminal(hex: 0x000000)
     private var effOpacity: Double = 1
+    private var isPaused = false
     private var isReduceMotion = false
     private var gradientImage: CGImage?
     private var displayLink: CADisplayLink?
@@ -157,16 +158,18 @@ final class IslandGlowCanvasView: UIView {
 
     required init?(coder: NSCoder) { nil }
 
-    func configure(spec: IslandGlowSpec, opacity: Double, reduceMotion: Bool) {
+    func configure(spec: IslandGlowSpec, opacity: Double, paused: Bool, reduceMotion: Bool) {
         let specChanged = self.spec != spec
         self.spec = spec
         effOpacity = opacity
+        let pausedChanged = isPaused != paused
+        isPaused = paused
         let motionChanged = isReduceMotion != reduceMotion
         isReduceMotion = reduceMotion
         if specChanged {
             gradientImage = IslandGlowGradientCache.image(for: spec.stops)
         }
-        if specChanged || motionChanged {
+        if specChanged || pausedChanged || motionChanged {
             updateRunning()
         }
         setNeedsDisplay()
@@ -179,7 +182,7 @@ final class IslandGlowCanvasView: UIView {
     }
 
     private func updateRunning() {
-        let shouldRun = isAnimated && !isReduceMotion && window != nil && !isHidden && alpha > 0.01
+        let shouldRun = isAnimated && !isPaused && !isReduceMotion && window != nil && !isHidden && alpha > 0.01
         if shouldRun {
             if displayLink == nil {
                 let proxy = IslandGlowLinkProxy(self)
@@ -268,16 +271,17 @@ final class IslandGlowCanvasView: UIView {
 struct IslandEdgeGlowView: UIViewRepresentable {
     let spec: IslandGlowSpec
     var opacity: Double = 1
+    var isPaused = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeUIView(context: Context) -> IslandGlowCanvasView {
         let view = IslandGlowCanvasView()
-        view.configure(spec: spec, opacity: opacity, reduceMotion: reduceMotion)
+        view.configure(spec: spec, opacity: opacity, paused: isPaused, reduceMotion: reduceMotion)
         return view
     }
 
     func updateUIView(_ view: IslandGlowCanvasView, context: Context) {
-        view.configure(spec: spec, opacity: opacity, reduceMotion: reduceMotion)
+        view.configure(spec: spec, opacity: opacity, paused: isPaused, reduceMotion: reduceMotion)
     }
 }

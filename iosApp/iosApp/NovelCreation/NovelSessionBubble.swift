@@ -440,6 +440,7 @@ private struct NovelAskUserCard: View {
 
     @State private var selectedOption: String?
     @State private var customValue = ""
+    @State private var validationMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -466,12 +467,18 @@ private struct NovelAskUserCard: View {
                         .foregroundStyle(AmberTheme.foreground2)
                 }
 
+                if let validationMessage {
+                    Text(validationMessage)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.accentRed)
+                }
+
                 Button("继续讨论") {
-                    onSubmit(answer)
+                    NovelTextInputCommitter.perform { submit() }
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity, alignment: .trailing)
-                .disabled(!canSubmit || blocker != nil)
+                .disabled(blocker != nil)
             }
         }
         .padding(16)
@@ -537,13 +544,20 @@ private struct NovelAskUserCard: View {
         return custom.isEmpty ? selectedOption ?? "" : custom
     }
 
-    private var canSubmit: Bool {
-        !answer.isEmpty
-    }
-
     private func select(_ option: String) {
         customValue = ""
         selectedOption = option
+        validationMessage = nil
+    }
+
+    private func submit() {
+        let committedAnswer = answer
+        guard !committedAnswer.isEmpty else {
+            validationMessage = "请选择一个选项或输入你的想法。"
+            return
+        }
+        validationMessage = nil
+        onSubmit(committedAnswer)
     }
 
     private var customInput: Binding<String> {
@@ -552,6 +566,9 @@ private struct NovelAskUserCard: View {
             set: {
                 customValue = $0
                 if !$0.isEmpty { selectedOption = nil }
+                if !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    validationMessage = nil
+                }
             }
         )
     }

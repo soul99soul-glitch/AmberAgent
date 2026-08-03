@@ -14,7 +14,7 @@ enum NovelSessionPendingPresentation {
         switch phase {
         case .waitingForFirstToken:
             elapsed >= 2
-                ? "正在等待模型响应 \(elapsed) 秒 · 模型可能正在思考一段时间"
+                ? "模型思考中 \(elapsed) 秒"
                 : "正在连接模型"
         case .streaming:
             // 保留跳动的秒数:quickStart 全程内容为空,若文案恒定不变,用户仍会觉得

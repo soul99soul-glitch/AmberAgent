@@ -423,6 +423,15 @@ final class NovelCreationViewModel {
         projectSnapshot?.materials.filter { !$0.isDeleted } ?? []
     }
 
+    func effectiveAliases(for material: NovelMaterialRecord) -> [String] {
+        guard let projectSnapshot else { return material.aliases }
+        return NovelPresentation.effectiveAliases(
+            for: material,
+            project: projectSnapshot,
+            branch: branchSnapshot
+        )
+    }
+
     var activeBranches: [NovelBranchRecord] {
         projectSnapshot?.branches.filter { $0.lifecycle == .active } ?? []
     }
@@ -1293,12 +1302,13 @@ final class NovelCreationViewModel {
         )))
     }
 
+    @discardableResult
     func resolveProposal(
         _ proposalID: NovelProposalID,
         resolution: NovelSettingProposalResolution
-    ) async {
-        guard let project = projectSnapshot, let branch = branchSnapshot else { return }
-        _ = await perform(.resolveSettingProposal(NovelResolveSettingProposalCommand(
+    ) async -> Bool {
+        guard let project = projectSnapshot, let branch = branchSnapshot else { return false }
+        return await perform(.resolveSettingProposal(NovelResolveSettingProposalCommand(
             context: mutationContext(
                 projectRevision: project.project.revision,
                 configRevision: project.project.configRevision,

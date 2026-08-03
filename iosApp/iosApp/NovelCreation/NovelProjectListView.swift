@@ -185,6 +185,8 @@ struct NovelProjectListView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
             .disabled(viewModel.isPerforming)
         }
         .padding(.horizontal, 16)
@@ -254,6 +256,8 @@ struct NovelProjectListView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
         }
         .padding(.horizontal, 16)
@@ -300,6 +304,8 @@ struct NovelProjectListView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
@@ -333,6 +339,8 @@ struct NovelProjectListView: View {
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                     }
                     .disabled(viewModel.isProjectSelectionBlocked)
@@ -581,6 +589,7 @@ private struct NovelProjectCreateSheet: View {
     @State private var genre = ""
     @State private var coreIdea = ""
     @State private var isConfirmingDiscard = false
+    @State private var validationMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -618,6 +627,13 @@ private struct NovelProjectCreateSheet: View {
                         Text("AI 只会生成建议，确认后才写入项目设定。")
                     }
                 }
+
+                if let validationMessage {
+                    Section {
+                        Label(validationMessage, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(AmberTheme.accentRed)
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
@@ -626,11 +642,7 @@ private struct NovelProjectCreateSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        if hasUnsavedChanges {
-                            isConfirmingDiscard = true
-                        } else {
-                            dismiss()
-                        }
+                        NovelTextInputCommitter.perform { requestDismiss() }
                     }
                         .disabled(viewModel.isPerforming)
                         .confirmationDialog(
@@ -645,14 +657,16 @@ private struct NovelProjectCreateSheet: View {
                         }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("创建") { create() }
-                        .disabled(!canCreate || viewModel.isProjectSelectionBlocked)
+                    Button("创建") {
+                        NovelTextInputCommitter.perform { create() }
+                    }
+                        .disabled(viewModel.isProjectSelectionBlocked)
                 }
             }
         }
-        .interactiveDismissDisabled(viewModel.isPerforming || hasUnsavedChanges)
+        .interactiveDismissDisabled()
         .presentationDetents([.medium, .large])
-        .presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)
+        .presentationDragIndicator(.hidden)
     }
 
     private var hasUnsavedChanges: Bool {
@@ -669,6 +683,13 @@ private struct NovelProjectCreateSheet: View {
     }
 
     private func create() {
+        guard canCreate else {
+            validationMessage = mode == .quickStart
+                ? "请填写小说名称、题材和核心想法。"
+                : "请填写小说名称。"
+            return
+        }
+        validationMessage = nil
         Task { @MainActor in
             guard let projectID = await viewModel.createProject(
                 name: name,
@@ -679,6 +700,14 @@ private struct NovelProjectCreateSheet: View {
             ) else { return }
             dismiss()
             onCreated(projectID)
+        }
+    }
+
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            isConfirmingDiscard = true
+        } else {
+            dismiss()
         }
     }
 }
@@ -756,13 +785,7 @@ struct NovelProjectRenameSheet: View {
 
     private func commitNameAndSave() {
         isNameFocused = false
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
-        DispatchQueue.main.async {
+        NovelTextInputCommitter.perform {
             save(name.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }

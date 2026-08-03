@@ -608,6 +608,62 @@ final class IOSAgentToolEngineTests: XCTestCase {
         XCTAssertFalse(result.hitStepLimit)
     }
 
+    func testApprovalPausePreservesEarlierOutputsFromSameBatch() async {
+        let mixedToolMessage = makeMessage(
+            role: MessageRole.assistant,
+            parts: [
+                UIMessagePart.Tool(
+                    toolCallId: "search",
+                    toolName: "search_web",
+                    input: "{}",
+                    output: [],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                ),
+                UIMessagePart.Tool(
+                    toolCallId: "approval",
+                    toolName: "ask_user",
+                    input: "{}",
+                    output: [],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                )
+            ]
+        )
+        let provider = ScriptedProvider([mixedToolMessage, assistantText("should-not-reach")])
+        let searchExecutor = RecordingExecutor(.filled("{\"results\":[\"source\"]}"))
+        let approvalExecutor = RecordingExecutor(.needsApproval("requires user choice"))
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: [
+                "search_web": searchExecutor,
+                "ask_user": approvalExecutor
+            ],
+            configuration: .init(maxSteps: 4, honorApprovalPause: true)
+        )
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("search, then ask")],
+            params: makeParams(tools: ["search_web", "ask_user"])
+        )
+
+        XCTAssertEqual(provider.callCount, 1)
+        XCTAssertEqual(searchExecutor.calls.count, 1)
+        XCTAssertEqual(approvalExecutor.calls.count, 1)
+        XCTAssertEqual(result.pendingApproval?.toolName, "ask_user")
+
+        let toolParts = result.messages[1].parts.compactMap { $0 as? UIMessagePart.Tool }
+        let searchOutput = toolParts
+            .first { $0.toolCallId == "search" }?
+            .output.compactMap { $0 as? UIMessagePart.Text }.first?.text
+        let approvalOutput = toolParts.first { $0.toolCallId == "approval" }?.output
+        XCTAssertEqual(searchOutput, "{\"results\":[\"source\"]}")
+        XCTAssertTrue(approvalOutput?.isEmpty == true)
+    }
+
     func testDeniedAndFailedToolsProduceHonestOutputNotApproval() async {
         let twoToolMessage = makeMessage(
             role: MessageRole.assistant,

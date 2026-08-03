@@ -227,7 +227,17 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(workspace.contains(".stroke(selectionStroke, lineWidth: 0.5)"))
         XCTAssertTrue(workspace.contains(".accessibilityAddTraits(isSelected ? .isSelected : [])"))
         XCTAssertTrue(workspace.contains(".frame(height: 44)"))
-        XCTAssertFalse(workspace.contains(".frame(minHeight: 44)"))
+        let tabBarStart = try XCTUnwrap(
+            workspace.range(of: "private struct NovelWorkspaceGlassTabBar: View {")
+        )
+        let tabBarEnd = try XCTUnwrap(
+            workspace.range(
+                of: "\nprivate enum NovelWorkspaceSheet:",
+                range: tabBarStart.upperBound..<workspace.endIndex
+            )
+        )
+        let tabBar = String(workspace[tabBarStart.lowerBound..<tabBarEnd.lowerBound])
+        XCTAssertFalse(tabBar.contains(".frame(minHeight: 44)"))
         XCTAssertTrue(workspace.contains(
             ".animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: selection)"
         ))
@@ -322,7 +332,11 @@ final class IOSNovelCreationWiringTests: XCTestCase {
 
         XCTAssertTrue(sheet.contains("hasUnsavedChanges"))
         XCTAssertTrue(sheet.contains("放弃润色偏好修改？"))
-        XCTAssertTrue(sheet.contains(".interactiveDismissDisabled(isSaving || hasUnsavedChanges)"))
+        XCTAssertTrue(sheet.contains("NovelTextInputCommitter.perform { requestDismiss() }"))
+        XCTAssertTrue(sheet.contains("NovelTextInputCommitter.perform { save() }"))
+        XCTAssertFalse(sheet.contains("!hasUnsavedChanges"))
+        XCTAssertTrue(sheet.contains(".interactiveDismissDisabled()"))
+        XCTAssertTrue(sheet.contains(".presentationDragIndicator(.hidden)"))
         XCTAssertTrue(sheet.contains("let saved = await viewModel.setPolishPreference(preference)"))
         XCTAssertTrue(sheet.contains("guard saved else"))
     }
@@ -396,18 +410,15 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(materialSheet.contains("private var hasUnsavedChanges: Bool"))
         XCTAssertTrue(materialSheet.contains("currentDraft != initialDraft"))
         XCTAssertTrue(materialSheet.contains("aliases: normalizedAliases"))
-        XCTAssertTrue(materialSheet.contains("if hasUnsavedChanges"))
+        XCTAssertTrue(materialSheet.contains("NovelTextInputCommitter.perform { requestDismiss() }"))
         XCTAssertTrue(materialSheet.contains("\"放弃资料编辑？\""))
+        XCTAssertTrue(materialSheet.contains(".interactiveDismissDisabled()"))
+        XCTAssertTrue(materialSheet.contains(".presentationDragIndicator(.hidden)"))
         XCTAssertTrue(materialSheet.contains(
-            ".interactiveDismissDisabled(isSaving || hasUnsavedChanges)"
+            "guard isEditable, !isSaving else { return }"
         ))
-        XCTAssertTrue(materialSheet.contains(
-            ".presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)"
-        ))
-        XCTAssertTrue(materialSheet.contains(
-            "guard isEditable, canSave, hasUnsavedChanges, !isSaving"
-        ))
-        XCTAssertTrue(materialSheet.contains("hasUnsavedChanges &&"))
+        XCTAssertTrue(materialSheet.contains("guard hasUnsavedChanges else"))
+        XCTAssertTrue(materialSheet.contains(".disabled(isSaving)"))
 
         XCTAssertTrue(branchSheet.contains("private var hasUnsavedChanges: Bool"))
         XCTAssertTrue(branchSheet.contains("currentDraft != initialDraft"))
@@ -415,16 +426,15 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(branchSheet.contains("case newRevision("))
         XCTAssertTrue(branchSheet.contains("if hasUnsavedChanges"))
         XCTAssertTrue(branchSheet.contains("\"放弃分支设定编辑？\""))
-        XCTAssertTrue(branchSheet.contains(
-            ".interactiveDismissDisabled(isSubmitting || hasUnsavedChanges)"
-        ))
-        XCTAssertTrue(branchSheet.contains(
-            ".presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)"
-        ))
+        XCTAssertTrue(branchSheet.contains(".interactiveDismissDisabled()"))
+        XCTAssertTrue(branchSheet.contains(".presentationDragIndicator(.hidden)"))
         XCTAssertTrue(branchSheet.contains("guard hasUnsavedChanges else { return false }"))
         XCTAssertTrue(branchSheet.contains(
-            "guard viewModel.canMutate, canSave, hasUnsavedChanges, !isSubmitting"
+            "guard viewModel.canMutate, !isSubmitting else { return }"
         ))
+        XCTAssertTrue(branchSheet.contains("guard hasUnsavedChanges else"))
+        XCTAssertTrue(branchSheet.contains("guard canSave else"))
+        XCTAssertTrue(branchSheet.contains("NovelTextInputCommitter.perform { requestDismiss() }"))
         XCTAssertTrue(branchSheet.contains("let saved = await viewModel.setBranchMaterialOverride("))
         XCTAssertTrue(branchSheet.contains("guard saved else"))
         XCTAssertTrue(branchSheet.contains("|| !viewModel.canMutate"))
@@ -445,14 +455,12 @@ final class IOSNovelCreationWiringTests: XCTestCase {
 
         XCTAssertTrue(createSheet.contains("@State private var isConfirmingDiscard = false"))
         XCTAssertTrue(createSheet.contains("private var hasUnsavedChanges: Bool"))
-        XCTAssertTrue(createSheet.contains("if hasUnsavedChanges"))
+        XCTAssertTrue(createSheet.contains("NovelTextInputCommitter.perform { requestDismiss() }"))
         XCTAssertTrue(createSheet.contains("\"放弃新建小说？\""))
-        XCTAssertTrue(createSheet.contains(
-            ".interactiveDismissDisabled(viewModel.isPerforming || hasUnsavedChanges)"
-        ))
-        XCTAssertTrue(createSheet.contains(
-            ".presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)"
-        ))
+        XCTAssertTrue(createSheet.contains("guard canCreate else"))
+        XCTAssertTrue(createSheet.contains(".disabled(viewModel.isProjectSelectionBlocked)"))
+        XCTAssertTrue(createSheet.contains(".interactiveDismissDisabled()"))
+        XCTAssertTrue(createSheet.contains(".presentationDragIndicator(.hidden)"))
 
         let regenerationStart = try XCTUnwrap(compendium.range(
             of: "struct NovelQuickStartRegenerationSheet"
@@ -468,12 +476,56 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(regenerationSheet.contains("@State private var isConfirmingDiscard = false"))
         XCTAssertTrue(regenerationSheet.contains("private var hasUnsavedChanges: Bool"))
         XCTAssertTrue(regenerationSheet.contains("if hasUnsavedChanges"))
-        XCTAssertTrue(regenerationSheet.contains("\"放弃调整方向？\""))
         XCTAssertTrue(regenerationSheet.contains(
-            ".interactiveDismissDisabled(isStarting || hasUnsavedChanges)"
+            "NovelTextInputCommitter.perform { requestDismiss() }"
         ))
-        XCTAssertTrue(regenerationSheet.contains(
-            ".presentationDragIndicator(hasUnsavedChanges ? .hidden : .visible)"
+        XCTAssertTrue(regenerationSheet.contains("\"放弃调整方向？\""))
+        XCTAssertTrue(regenerationSheet.contains(".interactiveDismissDisabled()"))
+        XCTAssertTrue(regenerationSheet.contains(".presentationDragIndicator(.hidden)"))
+    }
+
+    func testNovelTextEditorsKeepSheetPresentationStableDuringIMEComposition() throws {
+        let projectList = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
+        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+        let branches = try source("iosApp/NovelCreation/NovelBranchesView.swift")
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+        let sessionSheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+
+        func section(_ source: String, from start: String, to end: String?) throws -> Substring {
+            let startRange = try XCTUnwrap(source.range(of: start))
+            guard let end else { return source[startRange.lowerBound...] }
+            let endRange = try XCTUnwrap(
+                source.range(of: end, range: startRange.upperBound..<source.endIndex)
+            )
+            return source[startRange.lowerBound..<endRange.lowerBound]
+        }
+
+        let editors = try [
+            section(projectList, from: "private struct NovelProjectCreateSheet", to: "struct NovelProjectRenameSheet"),
+            section(compendium, from: "struct NovelQuickStartRegenerationSheet", to: "struct NovelCompendiumProposalCard"),
+            section(materials, from: "struct NovelMaterialEditorSheet", to: "struct NovelPolishPreferenceSheet"),
+            section(materials, from: "struct NovelPolishPreferenceSheet", to: "struct NovelProposalAcceptanceSheet"),
+            section(materials, from: "struct NovelProposalAcceptanceSheet", to: "struct NovelInjectionPreviewSheet"),
+            section(branches, from: "struct NovelBranchOverrideEditorSheet", to: nil),
+            section(reader, from: "private struct NovelChapterEditSheet", to: nil),
+            section(sessionSheets, from: "struct NovelDiscussionArchiveSheet", to: "struct NovelCollectCandidateSheet"),
+            section(sessionSheets, from: "struct NovelCollectCandidateSheet", to: "enum NovelCollectionTargetChoice")
+        ]
+
+        for editor in editors {
+            XCTAssertTrue(editor.contains(".interactiveDismissDisabled()"))
+            XCTAssertFalse(editor.contains(".interactiveDismissDisabled(is"))
+            XCTAssertFalse(editor.contains(".interactiveDismissDisabled(viewModel"))
+            XCTAssertFalse(editor.contains(".presentationDragIndicator(hasUnsavedChanges"))
+        }
+    }
+
+    func testSharedComposerDoesNotOverwriteMarkedIMETextDuringSwiftUIUpdates() throws {
+        let composer = try source("iosApp/ChatComposerViews.swift")
+
+        XCTAssertTrue(composer.contains(
+            "if textView.markedTextRange == nil, textView.text != text"
         ))
     }
 
@@ -504,8 +556,21 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         ))
         let metaControls = session[metaStart.lowerBound..<metaEnd.lowerBound]
         XCTAssertEqual(metaControls.components(separatedBy: ".frame(height: 30)").count - 1, 2)
-        XCTAssertEqual(metaControls.components(separatedBy: ".frame(minHeight: 44)").count - 1, 2)
-        XCTAssertEqual(metaControls.components(separatedBy: ".contentShape(Rectangle())").count - 1, 2)
+        XCTAssertEqual(
+            metaControls.components(
+                separatedBy: ".frame(minWidth: 44, minHeight: 44)"
+            ).count - 1,
+            2
+        )
+        XCTAssertEqual(
+            metaControls.components(
+                separatedBy: ".contentShape(RoundedRectangle(cornerRadius: 15, style: .continuous))"
+            ).count - 1,
+            2
+        )
+        XCTAssertFalse(metaControls.contains(
+            ".composerDockGlass(cornerRadius: 15)\n                    .frame(minHeight: 44)"
+        ))
 
         let menuStart = try XCTUnwrap(reader.range(of: "private var readerActionsMenu"))
         let menuEnd = try XCTUnwrap(reader.range(
@@ -521,6 +586,187 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             range: readerGlass.upperBound..<readerMenu.endIndex
         ))
         XCTAssertLessThan(readerGlass.lowerBound, readerHitTarget.lowerBound)
+    }
+
+    func testProposalAcceptanceEditsTheExactContentWrittenAtomically() throws {
+        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+        let actions = try source("iosApp/NovelCreation/NovelActions.swift")
+        let reducer = try source("iosApp/NovelCreation/NovelProjectConfiguration.swift")
+        let proposalStart = try XCTUnwrap(materials.range(of: "struct NovelProposalAcceptanceSheet"))
+        let previewStart = try XCTUnwrap(materials.range(
+            of: "struct NovelInjectionPreviewSheet",
+            range: proposalStart.upperBound..<materials.endIndex
+        ))
+        let sheet = materials[proposalStart.lowerBound..<previewStart.lowerBound]
+
+        XCTAssertTrue(sheet.contains("@State private var title: String"))
+        XCTAssertTrue(sheet.contains("@State private var content: String"))
+        XCTAssertTrue(sheet.contains("TextField(titlePlaceholder, text: $title)"))
+        XCTAssertTrue(sheet.contains("TextEditor(text: $content)"))
+        XCTAssertTrue(sheet.contains(".accessibilityLabel(\"建议内容\")"))
+        XCTAssertTrue(sheet.contains("title: title"))
+        XCTAssertTrue(sheet.contains("content: content"))
+        XCTAssertTrue(sheet.contains("let saved = await viewModel.resolveProposal("))
+        XCTAssertTrue(sheet.contains("if hasUnsavedChanges"))
+        XCTAssertTrue(sheet.contains("放弃建议修改？"))
+        XCTAssertTrue(sheet.contains(".interactiveDismissDisabled()"))
+        XCTAssertFalse(sheet.contains(".interactiveDismissDisabled(isSubmitting)"))
+        XCTAssertFalse(sheet.contains(".amberGlass("))
+        XCTAssertTrue(actions.contains("title: String"))
+        XCTAssertTrue(actions.contains("content: String"))
+        XCTAssertTrue(reducer.contains("title: try NovelReducer.normalizedRequired(title"))
+        XCTAssertTrue(reducer.contains(
+            "content: try NovelReducer.normalizedRequired(content, field: \"Proposal content\")"
+        ))
+    }
+
+    func testNovelDraftActionsCommitMarkedTextBeforeReadingState() throws {
+        let support = try source("iosApp/NovelCreation/NovelPresentationSupport.swift")
+        let projectList = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
+        let materials = try source("iosApp/NovelCreation/NovelMaterialsView.swift")
+        let branches = try source("iosApp/NovelCreation/NovelBranchesView.swift")
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+        let sheets = try source("iosApp/NovelCreation/NovelSessionSheets.swift")
+        let bubble = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
+
+        XCTAssertTrue(support.contains("(firstResponder as? UITextInput)?.unmarkText()"))
+        XCTAssertTrue(support.contains("DispatchQueue.main.async"))
+        for file in [projectList, compendium, materials, branches, reader, sheets, bubble] {
+            XCTAssertTrue(file.contains("NovelTextInputCommitter.perform"))
+        }
+        XCTAssertFalse(materials.contains(
+            ".disabled(isSaving || viewModel.isPerforming || !hasUnsavedChanges)"
+        ))
+        XCTAssertFalse(materials.contains(".disabled(!canPreview || viewModel.isPerforming)"))
+        XCTAssertFalse(branches.contains(
+            ".disabled(!canSave || isSubmitting || !viewModel.canMutate)"
+        ))
+        XCTAssertFalse(reader.contains(".disabled(!canSave || isSaving)"))
+        XCTAssertFalse(sheets.contains(".disabled(!canSubmit || isSubmitting)"))
+        XCTAssertFalse(sheets.contains(
+            ".disabled(!canCollect || isSubmitting || hasDurablePending)"
+        ))
+        XCTAssertFalse(bubble.contains(".disabled(!canSubmit || blocker != nil)"))
+    }
+
+    func testHistoricalCharacterIdentityFlowsThroughSessionAndCharacterSurfaces() throws {
+        let characters = try source("iosApp/NovelCreation/NovelCharacterPagesView.swift")
+        let sessionViewModel = try source("iosApp/NovelCreation/NovelSessionViewModel.swift")
+        let creationViewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
+
+        XCTAssertTrue(characters.contains("viewModel.effectiveAliases(for: material)"))
+        XCTAssertTrue(sessionViewModel.contains("workspace.effectiveAliases(for: material)"))
+        XCTAssertTrue(creationViewModel.contains("func effectiveAliases(for material:"))
+    }
+
+    func testNovelComposerDraftCommitsMarkedTextBeforeSheetAndPersistence() throws {
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        XCTAssertTrue(workspace.contains(
+            "@State private var sessionComposerInputController = ComposerInputController()"
+        ))
+        XCTAssertTrue(workspace.contains(
+            "composerInputController: sessionComposerInputController"
+        ))
+        XCTAssertGreaterThanOrEqual(
+            workspace.components(
+                separatedBy: "sessionComposerInputController.committedText()"
+            ).count - 1,
+            2
+        )
+        XCTAssertTrue(workspace.contains("if phase == .background {\n                saveLoadedComposerDraft()"))
+        XCTAssertTrue(session.contains("let composerInputController: ComposerInputController"))
+        XCTAssertTrue(session.contains(
+            "let committed = composerInputController.committedText() ?? inputText"
+        ))
+        XCTAssertTrue(session.contains("guard sendEnabled(for: committed) else { return }"))
+        XCTAssertTrue(session.contains(".onDisappear {\n            if let committed"))
+        XCTAssertFalse(session.contains(
+            "@State private var composerInputController = ComposerInputController()"
+        ))
+    }
+
+    func testNovelRecoveryRetryAndStopActionsExposeFortyFourPointHitLayout() throws {
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+        let projectList = try source("iosApp/NovelCreation/NovelProjectListView.swift")
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        let reader = try source("iosApp/NovelCreation/NovelChapterReaderView.swift")
+        let compendium = try source("iosApp/NovelCreation/NovelCompendiumView.swift")
+        let batchPolish = try source("iosApp/NovelCreation/NovelBatchPolishSheet.swift")
+
+        func section(_ source: String, from start: String, to end: String) throws -> Substring {
+            let startRange = try XCTUnwrap(source.range(of: start))
+            let endRange = try XCTUnwrap(
+                source.range(of: end, range: startRange.upperBound..<source.endIndex)
+            )
+            return source[startRange.lowerBound..<endRange.lowerBound]
+        }
+        func hitTargetCount(_ source: Substring) -> Int {
+            source.components(separatedBy: "minHeight: 44").count - 1
+        }
+
+        let privateVar = "private var "
+        let privateFunc = "private func "
+        let expectations: [(source: String, start: String, end: String, count: Int)] = [
+            (session, privateVar + "synchronizationBanner", privateFunc + "automaticStateSyncFailureBanner", 1),
+            (session, privateFunc + "automaticStateSyncFailureBanner", privateFunc + "polishRecoveryBanner", 1),
+            (session, privateFunc + "polishRecoveryBanner", privateVar + "recoveryAbandonConfirmationBinding", 2),
+            (session, privateFunc + "stateSyncLightweightBanner", privateFunc + "stateSyncProgressBanner", 1),
+            (session, privateFunc + "stateSyncProgressBanner", privateFunc + "stateSyncProgressDetail", 1),
+            (session, privateFunc + "errorBanner", privateFunc + "quickStartRecovery", 3),
+            (session, privateFunc + "quickStartRecoveryBanner", privateVar + "composerMetaControls", 1),
+            (projectList, privateVar + "reloadRequirementBanner", privateVar + "createProjectAction", 1),
+            (projectList, privateVar + "stateSyncSelectionBanner", privateVar + "isCurrentStateSyncStopping", 1),
+            (projectList, privateVar + "continuityOperationBanner", privateVar + "projectList", 1),
+            (projectList, privateVar + "projectList", privateVar + "emptyState", 1),
+            (workspace, privateVar + "accessBanner", privateVar + "continuityOperationBanner", 2),
+            (workspace, privateVar + "continuityOperationBanner", privateVar + "stateSyncBanner", 1),
+            (workspace, privateVar + "stateSyncBanner", privateVar + "content", 2),
+            (reader, privateVar + "chapterStatusBanner", privateVar + "reader", 2),
+            (batchPolish, privateVar + "runningPhase", privateVar + "reportPhase", 1)
+        ]
+        for expectation in expectations {
+            let scopedSource = try section(
+                expectation.source,
+                from: expectation.start,
+                to: expectation.end
+            )
+            XCTAssertEqual(
+                hitTargetCount(scopedSource),
+                expectation.count,
+                "\(expectation.start) → \(expectation.end)"
+            )
+        }
+
+        let workspaceContinuity = try section(
+            workspace,
+            from: privateVar + "continuityOperationBanner",
+            to: privateVar + "stateSyncBanner"
+        )
+        let workspaceStateSync = try section(
+            workspace,
+            from: privateVar + "stateSyncBanner",
+            to: privateVar + "content"
+        )
+        let readerStatus = try section(
+            reader,
+            from: privateVar + "chapterStatusBanner",
+            to: privateVar + "reader"
+        )
+        XCTAssertEqual(
+            [workspaceContinuity, workspaceStateSync, readerStatus]
+                .map { $0.components(separatedBy: ".frame(minWidth: 44, minHeight: 44)").count - 1 },
+            [1, 1, 1]
+        )
+
+        let proposalStart = try XCTUnwrap(
+            compendium.range(of: "struct NovelCompendiumProposalCard")
+        )
+        let proposal = compendium[proposalStart.lowerBound...]
+        XCTAssertEqual(hitTargetCount(proposal), 2)
+        XCTAssertTrue(batchPolish.contains("isStopRequested ? \"正在停止…\" : \"停止批量润色\""))
     }
 
     func testNovelSessionRetryUsesChineseCopyAndCompactVisualControl() throws {
@@ -718,7 +964,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(archiveSheet.contains("if hasUnsavedChanges"))
         XCTAssertTrue(archiveSheet.contains("isConfirmingDiscard = true"))
         XCTAssertTrue(archiveSheet.contains("\"放弃归档调整？\""))
-        XCTAssertTrue(archiveSheet.contains(".interactiveDismissDisabled(isPreparing || isSubmitting || hasUnsavedChanges)"))
+        XCTAssertTrue(archiveSheet.contains(".interactiveDismissDisabled()"))
         XCTAssertTrue(sheets.contains(".onDisappear { preparationTask?.cancel() }"))
         XCTAssertTrue(sheets.contains("Button(\"重新整理\") { prepare() }"))
         XCTAssertTrue(sheets.contains("submissionFailureMessage == nil ? \"确认归档\" : \"重试保存\""))
@@ -819,8 +1065,8 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(list.contains(".font(.system(size: 18, weight: .semibold))"))
         XCTAssertTrue(list.contains(".frame(width: 36, height: 36)"))
         XCTAssertTrue(list.contains("private func commitNameAndSave()"))
-        XCTAssertTrue(list.contains("#selector(UIResponder.resignFirstResponder)"))
-        XCTAssertTrue(list.contains("DispatchQueue.main.async"))
+        XCTAssertTrue(list.contains("NovelTextInputCommitter.perform"))
+        XCTAssertFalse(list.contains("#selector(UIResponder.resignFirstResponder)"))
     }
 
     func testProjectListStartsNativePushBeforeLoadingTheWorkspace() throws {

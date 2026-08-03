@@ -358,7 +358,10 @@ struct ChatActivityIslandView: View {
             for: state,
             terminalHold: presentation.isTerminalHold
         ) {
-            IslandEdgeGlowView(spec: spec)
+            IslandEdgeGlowView(
+                spec: spec,
+                isPaused: presentation.isFrozen
+            )
                 .padding(-IslandGlowCanvasView.canvasMargin)
                 .allowsHitTesting(false)
         }

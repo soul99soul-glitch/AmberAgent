@@ -94,6 +94,8 @@ enum NovelSettingProposalResolution: Codable, Equatable, Sendable {
         materialID: NovelMaterialID,
         revisionID: NovelMaterialRevisionID,
         kind: NovelMaterialKind,
+        title: String,
+        content: String,
         tags: [String],
         injectionMode: NovelInjectionMode,
         aliases: [String]
