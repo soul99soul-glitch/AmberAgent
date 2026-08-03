@@ -10,6 +10,7 @@ import { createNewsNowProvider } from '../platform_impl/NewsNowProvider.ets';
 import type { NewsNowProvider, HotItem, SourceSection } from '../platform_impl/NewsNowProvider.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { router } from '@kit.ArkUI';
+import { greetingMessage } from '../components/ui/Greeting.ets';
 import {
   MOCK_COMBINED, MOCK_SECTIONS, MOCK_ARTICLE,
 } from '../design/mock_data.ets';
@@ -134,6 +135,7 @@ struct DeepReadHomePage {
         Text('DeepRead')
           .fontSize(26).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif')
+        Text(greetingMessage()).fontSize(12).fontColor(INK3).margin({ top: 2 })
         Blank()
         Text('对话').fontSize(13).fontColor(ACCENT).margin({ right: 20 })
           .onClick(() => { router.pushUrl({ url: 'pages/ChatListPage' }); })
