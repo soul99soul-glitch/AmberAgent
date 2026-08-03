@@ -211,7 +211,7 @@ Android 源码目录：`app/src/main/java/app/amber/feature/ui/components/`
 | ChatInputUsage.kt | 663 | 上下文用量指示器 | **缺**（ChatPage 有基本指示） |
 | ModelList.kt | 1260 | 模型选择器+列表+分组 | 有独立页（非可复用组件） |
 | AssistantPicker.kt | 246 | 助手选择器 sheet | 有独立页 |
-| TopModelMenu.kt | 274 | 顶部模型菜单 | **缺** |
+| TopModelMenu.kt | 274 | 顶部模型菜单 | **已移植**（69daef7ad；手风琴下拉 + 内联选择） |
 | ReasoningPicker.kt | 303 | 推理深度选择器 | **缺** |
 | ExtensionContent.kt | 194 | 模式注入/Lorebook/Skills 内容 | 有独立页 |
 | CompressContextDialog.kt | 175 | 压缩上下文对话框 | **缺** |

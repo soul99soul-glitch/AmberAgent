@@ -1,13 +1,45 @@
 # AmberAgent 鸿蒙迁移 — 前端消息渲染层工作进度
 
-> 更新时间：2026-07-31
+> 更新时间：2026-08-03
 > 分支：`harmony-preview`
-> 仓库 HEAD：`483112715`
-> 前一个 HEAD：`bc6ac7a87`（D-132c state-pointer）
-> 本批提交数：30 个（`bc6ac7a87..483112715`）
+> 仓库 HEAD：`69daef7ad`（TopModelMenu 顶部模型快速切换下拉）
+> 前一个 HEAD：`483112715`（前端消息渲染层收尾）
 > 前端 audit 文档：`docs/harmony-frontend-gap-audit.md`
 
 ---
+
+## 增量更新（2026-08-03，`483112715..69daef7ad`）
+
+### TopModelMenu — 顶部模型快速切换下拉
+
+Android `TopModelMenu.kt`（275 行）→ 鸿蒙 ArkTS 移植。聊天页顶部模型标签点击从「跳全页选择器」升级为「内联手风琴下拉」：provider 分组可折叠，当前 provider 自动展开，点模型即切换并关闭；选中态仅 accent 色（对齐 Android）。
+
+| 文件 | 行 | 功能 |
+|---|---|---|
+| `harmony/chat/.../top_model_menu.ts` | 96 | `buildTopModelMenuGroups` 纯逻辑（过滤 hasUsableAuth + ModelType + selected 标记）|
+| `harmony/chat/src/test/top_model_menu.test.ts` | — | 17 测试（auth 过滤/type 过滤/selected/空态/混合场景）|
+| `harmony/entry/.../components/TopModelMenu.ets` | 155 | 自含 dimmed scrim + 贴顶面板 + provider 分组手风琴 + 空态 + 全页入口 |
+| `harmony/entry/.../pages/ChatPage.ets` | +50 | header chevron 触发 + Stack overlay + toggleModelMenu（重入守卫）+ selectModelFromMenu |
+
+**数据流闭环**：toggleModelMenu（async loadProviders+getChatModelSelection → buildTopModelMenuGroups → 装配 → open）→ 点模型 → selectModelFromMenu（saveChatModelSelection + describeChatModel 刷新标签 + contextWindowTokens 刷新 → close）。
+
+**与 Android 的对齐与差异**：
+- ✅ accent-only selection / 自动展开当前 provider / 空态 / scrim 关闭 — 全对齐
+- 差异：选择层复用既有 Preferences 契约（非 uuid 化，与 ChatModelPickerPage 一致）；backdrop 由组件自拥（dim 28% 黑 ≈ Android sheetBackdrop）；底部加「全部模型 / 管理」入口到全页选择器（Android 无此行，鸿蒙保留既有页不浪费）
+
+**review 纪律**（subagent 四维 review）：
+- 修 3 项：① [DEAD-CODE] onClose prop 从未被调用 → backdrop 从父级移入组件内部（对齐 Android 结构，onClose 现有意义）② [UX] 透明 backdrop → 加 dimmed scrim（28% 黑）③ [LOGIC] toggleModelMenu 无重入守卫 → 加 modelMenuLoading 门
+- 驳 1 项：[UX] chevron 仅 async 后翻 = 本地 KV/Preferences 单帧读取，加 loading 态弊大于利
+
+**组件数**：22 → **23**；chat 域逻辑 629 → **725 行**（+top_model_menu.ts 96）；新测试 51 → **68**（+17）。
+
+**门禁**：chat 1628/1628 + tsc clean / deepread 610 + tsc clean / assembleHar+assembleHap SUCCESS / diff --check clean。
+
+---
+
+## 历史快照（2026-07-31，HEAD `483112715`）
+
+> 以下为 `483112715` 时的完整进度记录，保留作历史基准。
 
 ## 0. 本次工作范围
 
