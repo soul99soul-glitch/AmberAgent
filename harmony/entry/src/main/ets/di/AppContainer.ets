@@ -43,6 +43,7 @@ import {
   loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
   hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
+  saveProviders, makeProviderSettingOpenAIVariant, makeProviderModel, newId,
   makeTextGenerationParams, toChatModel, defaultReasoningLevelForModel,
   resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
@@ -551,8 +552,36 @@ let chatKv: KeyValueStore | null = null;
 export const getChatKvStore = (): KeyValueStore => {
   if (chatKv === null) {
     chatKv = createChatKvStore(getAppContainer().storage);
+    // DEBUG 预置:首次启动无 Provider 时注入 DeepSeek 测试配置
+    seedDebugProvider();
   }
   return chatKv;
+};
+
+// DEBUG: 注入 DeepSeek 测试 Provider(设备验证用,上线前删除)
+let debugSeeded = false;
+const seedDebugProvider = async (): Promise<void> => {
+  if (debugSeeded) return;
+  debugSeeded = true;
+  try {
+    const existing = await loadProviders(chatKv!);
+    if (existing !== null && existing.length > 0) return;
+    const provider = makeProviderSettingOpenAIVariant({
+      id: newId(),
+      name: 'DeepSeek',
+      apiKey: 'sk-bd402b35619b42ec85233a467274d7b2',
+      baseUrl: 'https://api.deepseek.com/v1',
+      models: [
+        makeProviderModel({ modelId: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', type: 'chat' }),
+      ],
+    });
+    await saveProviders(chatKv!, [provider]);
+    // 同时设置默认选中
+    await chatKv!.put('chat_selected_provider_id', provider.id);
+    await chatKv!.put('chat_selected_model_id', 'deepseek-v4-flash');
+  } catch (_e) {
+    // 静默失败(不影响应用启动)
+  }
 };
 
 let chatRepo: ConversationRepository | null = null;

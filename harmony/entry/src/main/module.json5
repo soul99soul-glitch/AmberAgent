@@ -43,24 +43,25 @@
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET", "reason": "$string:reason_internet" },
       { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
-      { "name": "ohos.permission.READ_CONTACTS", "reason": "$string:reason_contacts",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      { "name": "ohos.permission.WRITE_CONTACTS", "reason": "$string:reason_contacts",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      { "name": "ohos.permission.READ_CALENDAR", "reason": "$string:reason_calendar",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      { "name": "ohos.permission.WRITE_CALENDAR", "reason": "$string:reason_calendar",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       { "name": "ohos.permission.MICROPHONE", "reason": "$string:reason_microphone",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:reason_location",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      { "name": "ohos.permission.LOCATION", "reason": "$string:reason_location",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      { "name": "ohos.permission.ACCESS_BLUETOOTH", "reason": "$string:reason_bluetooth",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      { "name": "ohos.permission.ACTIVITY_MOTION", "reason": "$string:reason_activity_motion",
         "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } }
+      // 以下权限需要 debug profile ACL 包含,模拟器暂注释(Accessibility/通知功能 P2 恢复):
+      // { "name": "ohos.permission.READ_CONTACTS", "reason": "$string:reason_contacts",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // { "name": "ohos.permission.WRITE_CONTACTS", "reason": "$string:reason_contacts",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // { "name": "ohos.permission.READ_CALENDAR", "reason": "$string:reason_calendar",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // { "name": "ohos.permission.WRITE_CALENDAR", "reason": "$string:reason_calendar",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:reason_location",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // { "name": "ohos.permission.LOCATION", "reason": "$string:reason_location",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // { "name": "ohos.permission.ACCESS_BLUETOOTH", "reason": "$string:reason_bluetooth",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      // { "name": "ohos.permission.ACTIVITY_MOTION", "reason": "$string:reason_activity_motion",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } }
     ]
   }
 }
