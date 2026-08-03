@@ -78,7 +78,9 @@ describe('markdownToHtml code blocks', () => {
     const html = markdownToHtml('```python\nprint("hello")\n```');
     assert.ok(html.includes('<pre>'));
     assert.ok(html.includes('<code>'));
-    assert.ok(html.includes('print('));
+    // M2.3:有 lang → 语法高亮 print 关键字 + "hello" 字符串(各自独立 span)
+    assert.ok(html.includes('>print<'));
+    assert.ok(html.includes('hello'));
     assert.ok(html.includes('</code>'));
     assert.ok(html.includes('</pre>'));
   });
@@ -157,7 +159,9 @@ describe('markdownToHtml mixed content', () => {
     assert.ok(html.includes('<h1>Title</h1>'));
     assert.ok(html.includes('<strong>bold</strong>'));
     assert.ok(html.includes('<pre>'));
-    assert.ok(html.includes('const x = 1;'));
+    // M2.3:有 lang → 语法高亮(const 关键字 span + x 标识符 + 1 数字)
+    assert.ok(html.includes('>const<'));
+    assert.ok(html.includes('>1<'));
     assert.ok(html.includes('<ul>'));
     assert.ok(html.includes('<li>item 1</li>'));
   });

@@ -372,6 +372,10 @@ export type {
 export { reasoningLevelsForModel } from './chat/reasoning_levels.ts';
 export type { ReasoningLevelOption } from './chat/reasoning_levels.ts';
 
+// M2.3:代码块语法高亮(HighlightCodeBlock.kt)
+export { highlightCode, tokenizeCode, HIGHLIGHT_COLORS } from './chat/code_highlight.ts';
+export type { HighlightToken, HighlightTokenType } from './chat/code_highlight.ts';
+
 export {
   serializeAssistant, parseAssistant, serializeAssistantList, parseAssistantList,
 } from './chat/assistant_serialize.ts';

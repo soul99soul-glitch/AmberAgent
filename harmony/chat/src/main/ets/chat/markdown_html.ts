@@ -14,6 +14,8 @@
 //
 // 纯域逻辑,零 SDK 依赖,可 node test。RichText 渲染组件在 entry 层(MarkdownRichText.ets)。
 
+import { highlightCode } from './code_highlight.ts';
+
 // ===== HTML 转义 =====
 
 const escapeHtml = (text: string): string =>
@@ -158,7 +160,12 @@ export const markdownToHtml = (markdown: string): string => {
   for (let i: number = codeBlocks.length - 1; i >= 0; i--) {
     const block: CodeBlock = codeBlocks[i];
     const placeholder: string = `\x00CODEBLOCK_${i}\x00`;
-    placeholders[i] = `<pre><code>${escapeHtml(block.content)}</code></pre>`;
+    // M2.3:有 lang 标记 → 语法高亮(highlightCode 内部含 escapeHtml);
+    //   无 lang → 纯 escapeHtml(不伪高亮)
+    const codeHtml: string = block.lang.length > 0
+      ? highlightCode(block.content, block.lang)
+      : escapeHtml(block.content);
+    placeholders[i] = `<pre><code>${codeHtml}</code></pre>`;
     work = work.substring(0, block.start) + placeholder + work.substring(block.end);
   }
 

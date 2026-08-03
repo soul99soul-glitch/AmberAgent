@@ -110,6 +110,7 @@ import { SubAgentRunSheet } from '../components/SubAgentRunSheet.ets';
 import { ChatMessageCopySheet } from '../components/ChatMessageCopySheet.ets';
 import { ChatMessageToolPreviewSheet } from '../components/ChatMessageToolPreviewSheet.ets';
 import { TopModelMenu } from '../components/TopModelMenu.ets';
+import { ContentAttachmentChip, urlBasename } from '../components/ContentAttachmentChip.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -426,12 +427,14 @@ struct MessageRow {
         } else if (block.kind === 'content') {
           if (block.part.type === 'text') {
             if (this.message.role === 'user') {
-              Text(block.part.text)
-                .fontSize(15).fontColor(INK)
-                .padding(10)
-                .backgroundColor(SURFACE2)
-                .borderRadius(8)
-                .margin({ bottom: 4 })
+              // M2.2:user 消息也支持 Markdown 渲染(对齐 Android MarkdownBlock)
+              Column() {
+                MarkdownRichText({ content: block.part.text, fontSize: 15, fontColor: INK })
+              }
+              .padding(10)
+              .backgroundColor(SURFACE2)
+              .borderRadius(8)
+              .margin({ bottom: 4 })
             } else {
               Column() {
                 MarkdownRichText({ content: block.part.text, fontSize: 15, fontColor: INK })
@@ -448,13 +451,47 @@ struct MessageRow {
               .borderRadius(8)
               .margin({ bottom: 4 })
           } else if (block.part.type === 'video') {
-            Text('[视频]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+            // M2.2:占位文本 → 真实附件 chip(图标 + 文件名/mime)
+            ContentAttachmentChip({
+              icon: '🎬',
+              label: urlBasename(block.part.url).length > 0 ? urlBasename(block.part.url) : '视频',
+              sublabel: block.part.mime,
+            })
           } else if (block.part.type === 'audio') {
-            Text('[音频]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+            ContentAttachmentChip({
+              icon: '🎵',
+              label: block.part.fileName.length > 0 ? block.part.fileName : (urlBasename(block.part.url).length > 0 ? urlBasename(block.part.url) : '音频'),
+              sublabel: block.part.mime,
+            })
           } else if (block.part.type === 'document') {
-            Text('[文档]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+            ContentAttachmentChip({
+              icon: '📄',
+              label: block.part.fileName.length > 0 ? block.part.fileName : (urlBasename(block.part.url).length > 0 ? urlBasename(block.part.url) : '文档'),
+              sublabel: block.part.mime,
+            })
           } else if (block.part.type === 'mini_app') {
-            Text('[MiniApp]').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+            // M2.2:占位文本 → 诚实 mini_app 卡(title + description + emoji)
+            Column() {
+              Row() {
+                if (block.part.iconEmoji !== null) {
+                  Text(block.part.iconEmoji).fontSize(16).margin({ right: 6 })
+                }
+                Text(block.part.title.length > 0 ? block.part.title : 'Mini App')
+                  .fontSize(13).fontColor(INK2).layoutWeight(1)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .width('100%')
+              if (block.part.description.length > 0) {
+                Text(block.part.description)
+                  .fontSize(11).fontColor(INK3).margin({ top: 3 })
+                  .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+            .backgroundColor(SURFACE2)
+            .borderRadius(8)
+            .margin({ bottom: 4 })
           }
         } else if (block.kind === 'subagent') {
           ChatMessageSubAgentStep({
