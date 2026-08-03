@@ -2,9 +2,46 @@
 
 > 更新时间：2026-08-03
 > 分支：`harmony-preview`
-> 仓库 HEAD：`69daef7ad`（TopModelMenu 顶部模型快速切换下拉）
-> 前一个 HEAD：`483112715`（前端消息渲染层收尾）
+> 仓库 HEAD：`f3a8bef36`（M3.2+M3.3 per-role override + Council 席位编辑）
+> 前一个 HEAD：`69daef7ad`（TopModelMenu）
 > 前端 audit 文档：`docs/harmony-frontend-gap-audit.md`
+
+---
+
+## 大阶段:前端补齐 source-only 收敛（2026-08-03，`69daef7ad..f3a8bef36`，5 commits）
+
+> 统一 goal:聊天内容可读可控 + 设置生态完整闭环 + DeepRead 渲染就绪。全部 source-only,不依赖设备。
+
+### M1:DeepRead 渲染就绪（`580329a47`）
+- DeepReadArticlePage 从内联 5 块裸 Text → 接入 ArticleRenderer 组件(统一渲染全量块)
+- ArticleRenderer 从死代码 → 活跃:修复缺失 DiagramNode import + 硬编码 Material-blue 色 → 应用 token + summary/coreDispute/implications 裸 Text → MarkdownRichText
+- 补全 hero 图/关键实体/perspectives/quotes/references 渲染(原全不可见)
+- 净效果:-159 行内联 + 删死方法;diagram 降级列节点(Canvas/SVG = 设备验证项)
+
+### M2:聊天内容与交互闭环（`689eb7f95` + `3c85c2328`）
+- **ReasoningPicker**(M2.1):withReasoningLevelForModel(写侧)+ reasoningLevelsForModel(模型感知段集)域逻辑 + 17 测试 → ReasoningPicker 组件 → ChatInput 接线 + ChatPage 装配(模型能力门 + patchAssistant 持久化)
+- **part 诚实化**(M2.2):video/audio/document 占位文本 → ContentAttachmentChip(图标+文件名);mini_app → 诚实卡;user text 裸 Text → MarkdownRichText
+- **代码块语法高亮**(M2.3):code_highlight.ts(+180 行,6 语言轻量 tokenizer)+ 19 测试 → markdown_html 注入(有 lang 高亮 / 无 lang 纯文本降级)
+
+### M3:设置生态闭环（`c317cb808` + `f3a8bef36`）
+- **SettingPage 索引页**(M3.1):4 分组(通用/Agent 运行/模型与服务/数据)+ ChatListPage 散落 10 链接收口为 1 入口 + 路由注册
+- **per-role override 编辑**(M3.2):6 内置角色展开卡(systemPrompt TextArea + 恢复默认)+ overrides Record↔Map 转换
+- **Council 席位编辑**(M3.3):席位展开卡(name + systemPrompt + 删除/核心席不可删)+ 添加视角席(LENS_PRESETS 菜单,maxSeats 门控)
+
+### 量化指标
+| 维度 | Goal 开始 | 当前 | 变化 |
+|---|---|---|---|
+| 前端组件 | 23 | **25** | +ReasoningPicker + ContentAttachmentChip |
+| 页面 | 26 | **27** | +SettingPage |
+| chat 域逻辑 | 725 行 | **~1200 行** | +reasoning_levels + code_highlight + withReasoningLevelForModel |
+| chat 测试 | 1664 | **1664** | (+36 新增,被 markdown_html 测试更新抵消净额;实际 +17 reasoning + 19 code_highlight) |
+| 文件改动 | — | 19 files | +1279 / -207 |
+
+### 门禁
+```
+chat 1664/1664 + tsc clean / deepread 610/610 + tsc clean
+assembleHar + assembleHap BUILD SUCCESSFUL / git diff --check clean
+```
 
 ---
 

@@ -189,7 +189,7 @@ Android 源码目录：`app/src/main/java/app/amber/feature/ui/components/`
 |---|---|---|---|
 | Markdown.kt | 3476 | 主 Markdown 渲染器（AST→Compose） | **缺** |
 | MarkdownNew.kt | 1555 | HTML-based Markdown 渲染 | **缺** |
-| HighlightCodeBlock.kt | 517 | 代码块高亮+行号+复制 | **缺** |
+| HighlightCodeBlock.kt | 517 | 代码块高亮+行号+复制 | **已移植**（3c85c2328；code_highlight.ts 6 语言轻量 tokenizer） |
 | Mermaid.kt | 448 | Mermaid 图表渲染（WebView） | **缺** |
 | LatexText.kt | 120 | LaTeX 公式渲染 | **缺** |
 | MathBlock.kt | 53 | 行内/块级数学公式 | **缺** |
@@ -212,7 +212,7 @@ Android 源码目录：`app/src/main/java/app/amber/feature/ui/components/`
 | ModelList.kt | 1260 | 模型选择器+列表+分组 | 有独立页（非可复用组件） |
 | AssistantPicker.kt | 246 | 助手选择器 sheet | 有独立页 |
 | TopModelMenu.kt | 274 | 顶部模型菜单 | **已移植**（69daef7ad；手风琴下拉 + 内联选择） |
-| ReasoningPicker.kt | 303 | 推理深度选择器 | **缺** |
+| ReasoningPicker.kt | 303 | 推理深度选择器 | **已移植**（689eb7f95；模型感知段集 + 按模型记忆） |
 | ExtensionContent.kt | 194 | 模式注入/Lorebook/Skills 内容 | 有独立页 |
 | CompressContextDialog.kt | 175 | 压缩上下文对话框 | **缺** |
 | MentionRoles.kt | 66 | @ 角色提及项 | **缺** |
