@@ -25,6 +25,7 @@
     "pages/ChatMcpSettingsPage",
     "pages/ChatAssistantMcpPage",
     "pages/SettingSubAgentPage",
-    "pages/SettingModelCouncilPage"
+    "pages/SettingModelCouncilPage",
+    "pages/SettingPage"
   ]
 }
