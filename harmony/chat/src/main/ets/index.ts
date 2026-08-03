@@ -376,6 +376,13 @@ export type { ReasoningLevelOption } from './chat/reasoning_levels.ts';
 export { highlightCode, tokenizeCode, HIGHLIGHT_COLORS } from './chat/code_highlight.ts';
 export type { HighlightToken, HighlightTokenType } from './chat/code_highlight.ts';
 
+// G1-S4:@mention 角色逻辑(MentionRoles.kt + ChatInputComposers.kt mention 段)
+export {
+  buildMentionRoleItems, filterMentionRoleItems,
+  detectMentionContext, replaceMention,
+} from './chat/mention_roles.ts';
+export type { MentionRoleItem, MentionRoleKind, MentionContext } from './chat/mention_roles.ts';
+
 export {
   serializeAssistant, parseAssistant, serializeAssistantList, parseAssistantList,
 } from './chat/assistant_serialize.ts';
