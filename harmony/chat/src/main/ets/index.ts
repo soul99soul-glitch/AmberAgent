@@ -383,6 +383,15 @@ export {
 } from './chat/mention_roles.ts';
 export type { MentionRoleItem, MentionRoleKind, MentionContext } from './chat/mention_roles.ts';
 
+// G2-S1:流式文本显示 pacing/buffer/safe-slice 纯逻辑(StreamingDisplay.kt + StreamingCharReveal.kt)
+export {
+  StreamingCharRevealClock,
+  streamingDisplayTargetSpeed, streamingDisplayMaxCharsPerEmit,
+  streamingDisplayBacklogCatchUpEnd, safeStreamingDisplayEnd,
+  safeStreamingTerminalEnd, streamingImmediateDisplayText,
+  streamingTailActiveWhen,
+} from './chat/streaming_display.ts';
+
 export {
   serializeAssistant, parseAssistant, serializeAssistantList, parseAssistantList,
 } from './chat/assistant_serialize.ts';
