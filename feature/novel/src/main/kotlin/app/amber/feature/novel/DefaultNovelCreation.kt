@@ -4,6 +4,7 @@ import app.amber.feature.novel.domain.NovelBranchReducer
 import app.amber.feature.novel.domain.NovelCollectCommand
 import app.amber.feature.novel.domain.NovelCollectionReducer
 import app.amber.feature.novel.domain.NovelCreateProjectCommand
+import app.amber.feature.novel.domain.NovelDeleteMaterialCommand
 import app.amber.feature.novel.domain.NovelError
 import app.amber.feature.novel.domain.NovelGenerationReducer
 import app.amber.feature.novel.domain.NovelDocumentValidator
@@ -21,8 +22,12 @@ import app.amber.feature.novel.domain.NovelSetModelPolicyCommand
 import app.amber.feature.novel.domain.NovelSetPolishPreferenceCommand
 import app.amber.feature.novel.domain.NovelStructuredOutputDecoder
 import app.amber.feature.novel.model.NovelBranchId
+import app.amber.feature.novel.model.NovelBranchLifecycle
+import app.amber.feature.novel.model.NovelBranchSyncStatus
 import app.amber.feature.novel.model.NovelCandidateId
+import app.amber.feature.novel.model.NovelChapterId
 import app.amber.feature.novel.model.NovelCheckpointId
+import app.amber.feature.novel.model.NovelCollectionTarget
 import app.amber.feature.novel.model.NovelFailure
 import app.amber.feature.novel.model.NovelGenerationGranularity
 import app.amber.feature.novel.model.NovelGenerationReceiptRecord
@@ -33,6 +38,7 @@ import app.amber.feature.novel.model.NovelMessageId
 import app.amber.feature.novel.model.NovelOperationId
 import app.amber.feature.novel.model.NovelOutcome
 import app.amber.feature.novel.model.NovelProjectId
+import app.amber.feature.novel.model.NovelProjectModelPolicy
 import app.amber.feature.novel.model.NovelProjectSummary
 import app.amber.feature.novel.model.NovelReceiptId
 import app.amber.feature.novel.model.NovelRunId
@@ -40,7 +46,9 @@ import app.amber.feature.novel.model.NovelRunInterruptionReason
 import app.amber.feature.novel.model.NovelRunKind
 import app.amber.feature.novel.model.NovelRunStatus
 import app.amber.feature.novel.model.NovelSessionId
+import app.amber.feature.novel.model.NovelSessionMessageKind
 import app.amber.feature.novel.model.NovelSessionMode
+import app.amber.feature.novel.model.NovelSessionRole
 import app.amber.feature.novel.model.NovelStateSnapshotId
 import app.amber.feature.novel.persistence.NovelFileProjectRepository
 import app.amber.feature.novel.persistence.NovelProjectPersisting
@@ -52,6 +60,7 @@ import app.amber.feature.novel.runtime.NovelModelParameters
 import app.amber.feature.novel.runtime.NovelModelPurpose
 import app.amber.feature.novel.runtime.NovelModelRequest
 import app.amber.feature.novel.runtime.NovelModelRunning
+import app.amber.feature.novel.runtime.NovelPromptCatalog
 import app.amber.feature.novel.runtime.NovelPromptKind
 import app.amber.feature.novel.serialization.NovelPackageCodec
 import app.amber.feature.novel.serialization.sha256HexOfUtf8
@@ -144,15 +153,20 @@ class DefaultNovelCreation(
                     is NovelIntent.DeleteProject -> deleteProject(intent)
                     is NovelIntent.RestorePrevious -> restorePrevious(intent)
                     is NovelIntent.SetModelPolicy -> setModelPolicy(intent)
+                    is NovelIntent.ClearStateSyncModelPolicy -> clearStateSyncModelPolicy(intent)
                     is NovelIntent.SetPolishPreference -> setPolishPreference(intent)
                     is NovelIntent.ResolveProposal -> resolveProposal(intent)
                     is NovelIntent.ForkBranch -> forkBranch(intent)
                     is NovelIntent.UndoHead -> undoHead(intent)
+                    is NovelIntent.RestoreChapterVersion -> restoreChapterVersion(intent)
+                    is NovelIntent.ArchiveDiscussion -> archiveDiscussion(intent)
                     is NovelIntent.SaveManualEdit -> saveManualEdit(intent)
                     is NovelIntent.RenameBranch -> renameBranch(intent)
                     is NovelIntent.SetMainBranch -> setMainBranch(intent)
                     is NovelIntent.ReviseMaterial -> reviseMaterial(intent)
+                    is NovelIntent.DeleteMaterial -> deleteMaterial(intent)
                     is NovelIntent.ImportPackage -> importPackage(intent)
+                    is NovelIntent.SetChapterDiscarded -> setChapterDiscarded(intent)
                     is NovelIntent.RetryTerminal ->
                         throw NovelError.InvalidInput("RetryTerminal not needed for completed runs")
                     is NovelIntent.CollectCandidate,
@@ -335,6 +349,7 @@ class DefaultNovelCreation(
 
         val kind = when {
             request.kind == NovelRunKindRequest.Polish -> NovelRunKind.Polish
+            request.kind == NovelRunKindRequest.Regenerate -> NovelRunKind.Regenerate
             request.kind == NovelRunKindRequest.QuickStart ||
                 (doc.project.creationMode == app.amber.feature.novel.model.NovelProjectCreationMode.QuickStart &&
                     doc.settingProposals.none { !it.isResolved } &&
@@ -347,7 +362,26 @@ class DefaultNovelCreation(
         if (kind == NovelRunKind.Polish && request.sourceChapterVersionId == null) {
             throw NovelError.InvalidInput("Polish requires sourceChapterVersionId")
         }
+        if (kind == NovelRunKind.Regenerate && request.sourceChapterVersionId == null) {
+            throw NovelError.InvalidInput("Regenerate requires sourceChapterVersionId")
+        }
+        // Prose must not carry a rewrite source — that would falsely enable replaceChapter.
+        if (kind == NovelRunKind.Prose && request.sourceChapterVersionId != null) {
+            throw NovelError.InvalidInput("Prose runs must not set sourceChapterVersionId")
+        }
+        if (kind == NovelRunKind.Regenerate) {
+            val sourceId = request.sourceChapterVersionId!!
+            val source = doc.chapterVersions.firstOrNull { it.id == sourceId }
+                ?: throw NovelError.InvalidInput("Source chapter version not found for regenerate")
+            val onBranch = branch.workingChapterSelections.any {
+                it.chapterID == source.chapterID && it.versionID == sourceId
+            }
+            if (!onBranch) {
+                throw NovelError.InvalidInput("Regenerate source is not the current head of that chapter")
+            }
+        }
         val granularity = when {
+            kind == NovelRunKind.Regenerate -> NovelGenerationGranularity.WholeChapter
             kind != NovelRunKind.Prose -> null
             request.granularity != null -> request.granularity.toModel()
             else -> doc.project.lastGenerationGranularity
@@ -360,11 +394,12 @@ class DefaultNovelCreation(
                 else -> NovelPromptKind.ProseContinuation
             }
             NovelRunKind.Polish -> NovelPromptKind.WholeChapterPolish
+            NovelRunKind.Regenerate -> NovelPromptKind.WholeChapterRegeneration
         }
         val purpose = when (kind) {
             NovelRunKind.QuickStart -> NovelModelPurpose.QuickStart
             NovelRunKind.Discussion -> NovelModelPurpose.Discussion
-            NovelRunKind.Prose -> NovelModelPurpose.Prose
+            NovelRunKind.Prose, NovelRunKind.Regenerate -> NovelModelPurpose.Prose
             NovelRunKind.Polish -> NovelModelPurpose.Polish
         }
 
@@ -374,13 +409,18 @@ class DefaultNovelCreation(
             branchId = branchId,
             promptKind = promptKind,
             userText = request.userText,
+            sourceChapterVersionId = request.sourceChapterVersionId,
         )
         val injectionReceiptId = NovelReceiptId.generate()
         val generationReceiptId = NovelReceiptId.generate()
         val operationId = NovelOperationId.generate()
         val userMessageId = NovelMessageId.generate()
         val assistantMessageId = NovelMessageId.generate()
-        val candidateId = if (kind == NovelRunKind.Prose || kind == NovelRunKind.Polish) {
+        val candidateId = if (
+            kind == NovelRunKind.Prose ||
+            kind == NovelRunKind.Polish ||
+            kind == NovelRunKind.Regenerate
+        ) {
             NovelCandidateId.generate()
         } else null
         val now = Instant.ofEpochMilli(System.currentTimeMillis())
@@ -393,18 +433,34 @@ class DefaultNovelCreation(
             model = model,
             createdAt = now,
         )
+        val regenerateUserText = if (kind == NovelRunKind.Regenerate) {
+            val source = doc.chapterVersions.first { it.id == request.sourceChapterVersionId }
+            buildString {
+                appendLine("请完整重写本章（可改剧情事实，消除矛盾；不要续写后续章）。")
+                if (request.userText.isNotBlank()) {
+                    appendLine()
+                    appendLine("作者补充：")
+                    appendLine(request.userText.trim())
+                }
+                appendLine()
+                appendLine("—— 原章标题：${source.title} ——")
+                append(source.content)
+            }
+        } else {
+            request.userText
+        }
         val modelRequest = NovelModelRequest(
             runID = runId,
             model = model,
             purpose = purpose,
             messages = listOf(
                 NovelModelMessage(NovelModelMessage.Role.System, plan.prompt.systemText + "\n\n" + plan.contextText),
-                NovelModelMessage(NovelModelMessage.Role.User, request.userText),
+                NovelModelMessage(NovelModelMessage.Role.User, regenerateUserText),
             ),
             parameters = NovelModelParameters(),
         )
         val requestPayload = sha256HexOfUtf8(
-            listOf(runId.rawValue, branchId.rawValue, kind.name, request.userText).joinToString("|"),
+            listOf(runId.rawValue, branchId.rawValue, kind.name, regenerateUserText).joinToString("|"),
         )
         val generationReceipt = NovelGenerationReceiptRecord(
             id = generationReceiptId,
@@ -426,11 +482,11 @@ class DefaultNovelCreation(
             branchID = branchId,
             kind = kind,
             mode = when (kind) {
-                NovelRunKind.Prose, NovelRunKind.Polish -> NovelSessionMode.WriteProse
+                NovelRunKind.Prose, NovelRunKind.Polish, NovelRunKind.Regenerate -> NovelSessionMode.WriteProse
                 else -> NovelSessionMode.DiscussPlan
             },
             granularity = granularity,
-            userText = request.userText,
+            userText = regenerateUserText,
             userMessageID = userMessageId,
             assistantMessageID = assistantMessageId,
             candidateID = candidateId,
@@ -601,6 +657,28 @@ class DefaultNovelCreation(
                 ),
                 projectID = intent.projectId,
                 policy = intent.policy,
+                purpose = intent.purpose,
+            ),
+            loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
+    private suspend fun clearStateSyncModelPolicy(
+        intent: NovelIntent.ClearStateSyncModelPolicy,
+    ): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        val reduced = NovelReducer.clearStateSyncModelPolicy(
+            NovelSetModelPolicyCommand(
+                context = NovelMutationContext(
+                    operationID = NovelOperationId.generate(),
+                    expectedProjectRevision = loaded.document.project.revision,
+                    expectedConfigRevision = loaded.document.project.configRevision,
+                ),
+                projectID = intent.projectId,
+                // Placeholder — clear path ignores policy value and writes null.
+                policy = NovelProjectModelPolicy.Global,
+                purpose = app.amber.feature.novel.domain.NovelModelPolicyPurpose.StateSync,
             ),
             loaded.document,
         )
@@ -637,14 +715,26 @@ class DefaultNovelCreation(
                     intent.selectedText,
                 )
             } else null
-            loaded.document.project.modelPolicy to plan
+            loaded.document.project.effectiveStateSyncModelPolicy() to plan
         }
 
+        // Provider await is outside the write lock. Manuscript collect still proceeds if
+        // state-delta fails — prose must not be lost (P0-A soft-fail policy).
         var stateDelta: app.amber.feature.novel.domain.NovelStateDeltaV1? = null
-        if (intent.runStateDelta && planSeed != null) {
+        val deltaRequested = intent.runStateDelta
+        if (deltaRequested && planSeed != null) {
             try {
                 val model = modelRunning.resolveModel(policy)
                 val runId = NovelRunId.generate()
+                val deltaUserText = when (val t = intent.target) {
+                    is NovelCollectionTarget.ReplaceChapter -> buildString {
+                        appendLine("【替换收录】以下正文将整章替换目标章（chapterID=${t.chapterID.rawValue}），不是追加。")
+                        appendLine("请提取因替换产生的状态变化；旧章事实若被推翻，用 summary/events 体现新状态，不要假装旧事实仍成立。")
+                        appendLine()
+                        append(intent.selectedText)
+                    }
+                    else -> intent.selectedText
+                }
                 val req = NovelModelRequest(
                     runID = runId,
                     model = model,
@@ -654,7 +744,7 @@ class DefaultNovelCreation(
                             NovelModelMessage.Role.System,
                             planSeed.prompt.systemText + "\n\n" + planSeed.contextText,
                         ),
-                        NovelModelMessage(NovelModelMessage.Role.User, intent.selectedText),
+                        NovelModelMessage(NovelModelMessage.Role.User, deltaUserText),
                     ),
                 )
                 val text = buildString {
@@ -670,12 +760,16 @@ class DefaultNovelCreation(
                     }
                 }
                 if (text.isNotBlank()) {
-                    stateDelta = NovelStructuredOutputDecoder.decodeStateDelta(text)
+                    stateDelta = runCatching {
+                        NovelStructuredOutputDecoder.decodeStateDelta(text)
+                    }.getOrNull()
                 }
             } catch (_: Exception) {
                 stateDelta = null
             }
         }
+        // Soft-fail: keep manuscript, mark needsSync so「同步状态」can rebuild living state.
+        val markNeedsSync = deltaRequested && stateDelta == null
 
         return writeMutex.withLock {
             val current = repository.loadProject(intent.projectId)
@@ -691,6 +785,7 @@ class DefaultNovelCreation(
                     expectedBranchHeadRevision = current.document.branches
                         .first { it.id == intent.branchId }.headRevision,
                     stateDelta = stateDelta,
+                    markNeedsSync = markNeedsSync,
                 ),
                 current.document,
             )
@@ -743,51 +838,120 @@ class DefaultNovelCreation(
         return reduced.outcome
     }
 
+    private suspend fun restoreChapterVersion(intent: NovelIntent.RestoreChapterVersion): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        assertNotBusy(loaded)
+        val branch = loaded.document.branches.first { it.id == intent.branchId }
+        val reduced = NovelPolishReducer.restoreChapterVersion(
+            projectId = intent.projectId,
+            branchId = intent.branchId,
+            targetChapterVersionId = intent.targetChapterVersionId,
+            expectedProjectRevision = loaded.document.project.revision,
+            expectedBranchHeadRevision = branch.headRevision,
+            document = loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
+    private suspend fun archiveDiscussion(intent: NovelIntent.ArchiveDiscussion): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        assertNotBusy(loaded)
+        val branch = loaded.document.branches.first { it.id == intent.branchId }
+        val reduced = NovelBranchReducer.archiveDiscussion(
+            projectId = intent.projectId,
+            branchId = intent.branchId,
+            summary = intent.summary,
+            decisions = intent.decisions.map { row ->
+                NovelBranchReducer.ArchiveDecision(
+                    topic = row.topic,
+                    decision = row.decision,
+                    relatedMaterialId = row.relatedMaterialId,
+                )
+            },
+            throughSequence = intent.throughSequence,
+            chapterId = intent.chapterId,
+            expectedProjectRevision = loaded.document.project.revision,
+            expectedBranchHeadRevision = branch.headRevision,
+            document = loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
     private suspend fun syncManualEdits(intent: NovelIntent.SyncManualEdits): NovelOutcome {
-        val (policy, manuscript, planSeed, headRev, projRev) = writeMutex.withLock {
+        val (policy, chunks, planSeed) = writeMutex.withLock {
             val loaded = repository.loadProject(intent.projectId)
             assertNotBusy(loaded)
             val branch = loaded.document.branches.first { it.id == intent.branchId }
-            val manuscript = NovelManualSyncReducer.workingManuscript(loaded.document, intent.branchId)
+            val chunks = NovelManualSyncReducer.workingManuscriptChunks(
+                loaded.document,
+                intent.branchId,
+            )
+            val fullManuscript = chunks.joinToString("\n\n")
             val plan = if (intent.runStateDelta) {
                 NovelInjectionPlanner.plan(
                     loaded.document,
                     intent.branchId,
                     NovelPromptKind.ManualSyncV1,
-                    manuscript,
+                    // Plan context uses a short seed; per-chunk model input carries the body.
+                    fullManuscript.take(4_000),
                 )
             } else null
-            SyncSeed(loaded.document.project.modelPolicy, manuscript, plan, branch.headRevision, loaded.document.project.revision)
+            Triple(
+                loaded.document.project.effectiveStateSyncModelPolicy(),
+                chunks,
+                plan,
+            )
         }
         var stateDelta: app.amber.feature.novel.domain.NovelStateDeltaV1? = null
-        if (intent.runStateDelta && planSeed != null) {
+        var modelRebuildAttempted = false
+        var successfulChunkCount = 0
+        if (intent.runStateDelta && planSeed != null && chunks.isNotEmpty()) {
+            modelRebuildAttempted = true
             try {
                 val model = modelRunning.resolveModel(policy)
-                val text = buildString {
-                    modelRunning.start(
-                        NovelModelRequest(
-                            runID = NovelRunId.generate(),
-                            model = model,
-                            purpose = NovelModelPurpose.StateRebuild,
-                            messages = listOf(
-                                NovelModelMessage(
-                                    NovelModelMessage.Role.System,
-                                    planSeed.prompt.systemText + "\n\n" + planSeed.contextText,
+                val chunkDeltas = mutableListOf<app.amber.feature.novel.domain.NovelStateDeltaV1>()
+                chunks.forEachIndexed { index, chunk ->
+                    val text = buildString {
+                        modelRunning.start(
+                            NovelModelRequest(
+                                runID = NovelRunId.generate(),
+                                model = model,
+                                purpose = NovelModelPurpose.StateRebuild,
+                                messages = listOf(
+                                    NovelModelMessage(
+                                        NovelModelMessage.Role.System,
+                                        planSeed.prompt.systemText + "\n\n" + planSeed.contextText,
+                                    ),
+                                    NovelModelMessage(
+                                        NovelModelMessage.Role.User,
+                                        NovelManualSyncReducer.modelInputForChunk(
+                                            chunk = chunk,
+                                            index = index,
+                                            total = chunks.size,
+                                        ),
+                                    ),
                                 ),
-                                NovelModelMessage(NovelModelMessage.Role.User, manuscript),
                             ),
-                        ),
-                    ).collect { ev ->
-                        when (ev) {
-                            is NovelModelEvent.TextDelta -> append(ev.text)
-                            is NovelModelEvent.TextReplacement -> {
-                                clear(); append(ev.text)
+                        ).collect { ev ->
+                            when (ev) {
+                                is NovelModelEvent.TextDelta -> append(ev.text)
+                                is NovelModelEvent.TextReplacement -> {
+                                    clear(); append(ev.text)
+                                }
+                                else -> Unit
                             }
-                            else -> Unit
+                        }
+                    }
+                    if (text.isNotBlank()) {
+                        runCatching {
+                            NovelStructuredOutputDecoder.decodeStateDelta(text)
+                        }.getOrNull()?.let {
+                            chunkDeltas += it
+                            successfulChunkCount++
                         }
                     }
                 }
-                if (text.isNotBlank()) stateDelta = NovelStructuredOutputDecoder.decodeStateDelta(text)
+                stateDelta = NovelManualSyncReducer.mergeChunkDeltas(chunkDeltas)
             } catch (_: Exception) {
                 stateDelta = null
             }
@@ -796,26 +960,34 @@ class DefaultNovelCreation(
             val current = repository.loadProject(intent.projectId)
             assertNotBusy(current)
             val branch = current.document.branches.first { it.id == intent.branchId }
+            // Formalize manuscript always (needsSync must clear), but if a model rebuild was
+            // requested and produced nothing, leave a visible incomplete summary rather than
+            // silently reusing stale living state as "success".
+            val commitDelta = when {
+                stateDelta != null -> stateDelta
+                modelRebuildAttempted -> app.amber.feature.novel.domain.NovelStateDeltaV1(
+                    schemaVersion = 1,
+                    stateSummary = "Synced after manual edit (model rebuild incomplete).",
+                    events = emptyList(),
+                    unresolvedEntityNames = emptyList(),
+                    settingProposals = emptyList(),
+                )
+                else -> null
+            }
             val reduced = NovelManualSyncReducer.sync(
                 projectId = intent.projectId,
                 branchId = intent.branchId,
                 expectedProjectRevision = current.document.project.revision,
                 expectedBranchHeadRevision = branch.headRevision,
-                stateDelta = stateDelta,
+                stateDelta = commitDelta,
                 document = current.document,
             )
             repository.commitProject(reduced.document, expectedRevision = current.document.project.revision)
+            // Partial rebuild is visible via state summary "model rebuild incomplete";
+            // manuscript formalization still commits so NeedsSync clears.
             reduced.outcome
         }
     }
-
-    private data class SyncSeed(
-        val policy: app.amber.feature.novel.model.NovelProjectModelPolicy,
-        val manuscript: String,
-        val plan: app.amber.feature.novel.runtime.NovelInjectionPlan?,
-        val headRev: Long,
-        val projRev: Long,
-    )
 
     private suspend fun adoptPolish(intent: NovelIntent.AdoptPolishCandidate): NovelOutcome {
         // Drift check outside lock when not rewrite
@@ -949,6 +1121,23 @@ class DefaultNovelCreation(
         return commitIfChanged(loaded, reduced)
     }
 
+    private suspend fun deleteMaterial(intent: NovelIntent.DeleteMaterial): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        val reduced = NovelReducer.deleteMaterial(
+            NovelDeleteMaterialCommand(
+                context = NovelMutationContext(
+                    operationID = NovelOperationId.generate(),
+                    expectedProjectRevision = loaded.document.project.revision,
+                    expectedConfigRevision = loaded.document.project.configRevision,
+                ),
+                projectID = intent.projectId,
+                materialID = intent.materialId,
+            ),
+            loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
     private fun maybeFlushRecovery(live: LiveRun?, force: Boolean = false) {
         if (live == null || recoveryStore == null) return
         val partial = live.partial
@@ -991,12 +1180,25 @@ class DefaultNovelCreation(
     }
 
     private suspend fun importPackage(intent: NovelIntent.ImportPackage): NovelOutcome {
-        val document = NovelPackageCodec.decode(intent.bytes)
+        val decoded = NovelPackageCodec.decode(intent.bytes)
         val replaceId = intent.replaceProjectId
+        val existingList = repository.listProjects()
+        val sameIdExists = existingList.any { it.id == decoded.project.id }
+        // keep-both: remap project id only (matches iOS NovelProjectIdentityRemapper simplification).
+        val document = if (intent.keepBoth && sameIdExists && replaceId == null) {
+            val newId = NovelProjectId.generate()
+            decoded.copy(
+                project = decoded.project.copy(id = newId),
+                injectionReceipts = decoded.injectionReceipts.map { r ->
+                    r.copy(projectID = newId)
+                },
+            )
+        } else {
+            decoded
+        }
         val existingToReplace = if (replaceId != null) {
             val existing = repository.loadProject(replaceId)
             assertNotBusy(existing)
-            // Cancel any live in-memory runs for the project about to be replaced.
             interrupt(
                 NovelInterruptRequest(
                     projectId = replaceId,
@@ -1007,22 +1209,15 @@ class DefaultNovelCreation(
         } else {
             null
         }
-        // If same id exists without replace, keep-both by rejecting
-        val existingList = repository.listProjects()
-        if (existingList.any { it.id == document.project.id } && replaceId == null) {
+        if (existingList.any { it.id == document.project.id } && replaceId == null && !intent.keepBoth) {
             throw NovelError.ProjectAlreadyExists(document.project.id)
         }
-        // Create-first, then delete old project so a failed create never destroys the replace target.
-        // When replace id == package id, delete only after create would collide — use temp delete
-        // of old only after the new document is fully validated in memory, then create; on create
-        // failure, compensate by re-writing the previously loaded document.
         if (existingToReplace != null && replaceId == document.project.id) {
             val oldRevision = existingToReplace.document.project.revision
             repository.deleteProject(replaceId, oldRevision)
             try {
                 repository.createProject(document)
             } catch (error: Exception) {
-                // Best-effort restore of the previous document so replace is not a double-loss.
                 runCatching { repository.createProject(existingToReplace.document) }
                 throw error
             }
@@ -1034,18 +1229,202 @@ class DefaultNovelCreation(
                 }
             }
         }
+        val disposition = when {
+            replaceId != null -> app.amber.feature.novel.model.NovelProjectImportDisposition.Replaced
+            intent.keepBoth && sameIdExists ->
+                app.amber.feature.novel.model.NovelProjectImportDisposition.KeptBoth
+            else -> app.amber.feature.novel.model.NovelProjectImportDisposition.Created
+        }
         return NovelOutcome.ProjectImported(
-            sourceProjectID = document.project.id,
+            sourceProjectID = decoded.project.id,
             projectID = document.project.id,
-            disposition = if (replaceId != null) {
-                app.amber.feature.novel.model.NovelProjectImportDisposition.Replaced
-            } else {
-                app.amber.feature.novel.model.NovelProjectImportDisposition.Created
-            },
+            disposition = disposition,
             interruptedRunCount = document.activeRuns.count {
                 it.status == NovelRunStatus.Interrupted
             },
             revision = document.project.revision,
+        )
+    }
+
+    private suspend fun setChapterDiscarded(intent: NovelIntent.SetChapterDiscarded): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        assertNotBusy(loaded)
+        val branch = loaded.document.branches.first { it.id == intent.branchId }
+        val reduced = NovelBranchReducer.setChapterDiscarded(
+            projectId = intent.projectId,
+            branchId = intent.branchId,
+            chapterId = intent.chapterId,
+            discarded = intent.discarded,
+            expectedProjectRevision = loaded.document.project.revision,
+            expectedBranchHeadRevision = branch.headRevision,
+            document = loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
+    override suspend fun continuityAudit(
+        projectId: NovelProjectId,
+        branchId: NovelBranchId,
+    ): app.amber.feature.novel.domain.NovelContinuityAuditV1 {
+        val loaded = repository.loadProject(projectId)
+        if (loaded.access != app.amber.feature.novel.model.NovelProjectLoadAccess.ReadWrite) {
+            throw NovelError.DegradedReadOnly(projectId)
+        }
+        assertNotBusy(loaded)
+        val doc = loaded.document
+        val branch = doc.branches.firstOrNull { it.id == branchId }
+            ?: throw NovelError.BranchNotFound(branchId)
+        if (branch.syncStatus == NovelBranchSyncStatus.NeedsSync) {
+            throw NovelError.InvalidInput("Synchronize the working manuscript before continuity audit.")
+        }
+        val manuscript = branch.workingChapterSelections.mapIndexed { index, sel ->
+            val version = doc.chapterVersions.firstOrNull { it.id == sel.versionID }
+            val title = version?.title.orEmpty().ifBlank { "第${index + 1}章" }
+            val body = version?.content.orEmpty()
+            "# Chapter ${index + 1}: $title\n\n$body"
+        }.joinToString("\n\n")
+        if (manuscript.isBlank()) {
+            throw NovelError.InvalidInput("No manuscript chapters to audit.")
+        }
+        val model = modelRunning.resolveModel(doc.project.modelPolicy)
+        val prompt = NovelPromptCatalog.template(NovelPromptKind.ContinuityAuditV1)
+        val text = buildString {
+            modelRunning.start(
+                NovelModelRequest(
+                    runID = NovelRunId.generate(),
+                    model = model,
+                    purpose = NovelModelPurpose.ContinuityAudit,
+                    messages = listOf(
+                        NovelModelMessage(NovelModelMessage.Role.System, prompt.systemText),
+                        NovelModelMessage(NovelModelMessage.Role.User, manuscript),
+                    ),
+                ),
+            ).collect { ev ->
+                when (ev) {
+                    is NovelModelEvent.TextDelta -> append(ev.text)
+                    is NovelModelEvent.TextReplacement -> {
+                        clear()
+                        append(ev.text)
+                    }
+                    else -> Unit
+                }
+            }
+        }
+        return NovelStructuredOutputDecoder.decodeContinuityAudit(text)
+    }
+
+    override suspend fun distillDiscussionArchive(
+        projectId: NovelProjectId,
+        branchId: NovelBranchId,
+        chapterId: NovelChapterId?,
+    ): NovelDiscussionArchiveDraft {
+        val loaded = repository.loadProject(projectId)
+        if (loaded.access != app.amber.feature.novel.model.NovelProjectLoadAccess.ReadWrite) {
+            throw NovelError.DegradedReadOnly(projectId)
+        }
+        assertNotBusy(loaded)
+        val doc = loaded.document
+        val branch = doc.branches.firstOrNull {
+            it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active
+        } ?: throw NovelError.BranchNotFound(branchId)
+        if (branch.activeRunID != null) throw NovelError.ProjectBusy(projectId)
+        if (branch.syncStatus == NovelBranchSyncStatus.NeedsSync) {
+            throw NovelError.InvalidInput("Synchronize the working manuscript before archiving discussion.")
+        }
+        val session = doc.sessions.firstOrNull {
+            it.id == branch.sessionID && it.branchID == branch.id
+        } ?: throw NovelError.SessionNotFound(branch.sessionID)
+        if (chapterId != null && doc.chapters.none { it.id == chapterId }) {
+            throw NovelError.InvalidInput("Discussion archive references a missing chapter.")
+        }
+        val previousSequence = when (val c = session.archiveCursor) {
+            is app.amber.feature.novel.model.NovelSessionCursor.Through -> c.sequence
+            else -> -1L
+        }
+        val discussionMessages = session.messages.filter {
+            it.sequence > previousSequence &&
+                it.mode == NovelSessionMode.DiscussPlan &&
+                (
+                    it.kind == NovelSessionMessageKind.UserInput ||
+                        it.kind == NovelSessionMessageKind.Discussion
+                    )
+        }
+        val throughSequence = discussionMessages.maxOfOrNull { it.sequence }
+            ?: throw NovelError.InvalidInput("当前没有可归档的新讨论。")
+
+        val effectiveMaterials = doc.materials.filter { !it.isDeleted }.mapNotNull { material ->
+            val revision = doc.materialRevisions.firstOrNull { it.id == material.currentRevisionID }
+                ?: return@mapNotNull null
+            material to revision
+        }
+        val materialLines = effectiveMaterials.map { (material, revision) ->
+            "${material.id} | ${revision.title}"
+        }
+        val messageLines = discussionMessages.map { message ->
+            val role = when (message.role) {
+                NovelSessionRole.User -> "USER"
+                NovelSessionRole.Assistant -> "ASSISTANT"
+                NovelSessionRole.System -> "SYSTEM"
+            }
+            "[${message.sequence}] $role\n${message.content}"
+        }
+        val discussionInput = buildString {
+            append("AVAILABLE MATERIALS\n")
+            append(if (materialLines.isEmpty()) "(none)" else materialLines.joinToString("\n"))
+            append("\n\nDISCUSSION\n")
+            append(messageLines.joinToString("\n\n"))
+        }
+
+        val model = modelRunning.resolveModel(doc.project.modelPolicy)
+        val prompt = NovelPromptCatalog.template(NovelPromptKind.DiscussionArchiveV1)
+        val text = buildString {
+            modelRunning.start(
+                NovelModelRequest(
+                    runID = NovelRunId.generate(),
+                    model = model,
+                    purpose = NovelModelPurpose.DiscussionArchive,
+                    messages = listOf(
+                        NovelModelMessage(NovelModelMessage.Role.System, prompt.systemText),
+                        NovelModelMessage(NovelModelMessage.Role.User, discussionInput),
+                    ),
+                ),
+            ).collect { ev ->
+                when (ev) {
+                    is NovelModelEvent.TextDelta -> append(ev.text)
+                    is NovelModelEvent.TextReplacement -> {
+                        clear()
+                        append(ev.text)
+                    }
+                    else -> Unit
+                }
+            }
+        }
+        val archive = NovelStructuredOutputDecoder.decodeDiscussionArchive(text)
+        val availableMaterialIds = effectiveMaterials.map { it.first.id }.toSet()
+        val decisions = archive.decisions.map { item ->
+            val related = item.relatedMaterialID?.let { raw ->
+                val materialId = runCatching { NovelMaterialId.parse(raw) }.getOrElse {
+                    throw NovelError.InvalidInput("讨论归档引用了无效的资料 ID。")
+                }
+                if (materialId !in availableMaterialIds) {
+                    throw NovelError.InvalidInput("讨论归档引用了当前项目中不存在的资料。")
+                }
+                materialId
+            }
+            NovelDiscussionArchiveDraftDecision(
+                topic = item.topic,
+                decision = item.decision,
+                relatedMaterialId = related,
+            )
+        }
+        return NovelDiscussionArchiveDraft(
+            projectId = projectId,
+            branchId = branchId,
+            sessionId = session.id,
+            throughSequence = throughSequence,
+            chapterId = chapterId,
+            summary = archive.summary,
+            decisions = decisions,
         )
     }
 

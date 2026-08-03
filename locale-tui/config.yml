@@ -73,10 +73,3 @@ translation:
 
     Respond with a JSON object mapping the same keys to translated values.
     Only output the JSON, no other text.
-
-# 显示设置
-display:
-  column_widths:
-    key: 30
-    translation: 25
-  page_size: 50

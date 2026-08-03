@@ -24,15 +24,6 @@ data class S3Config(
     val isHttps: Boolean
         get() = endpoint.startsWith("https://")
 
-    fun bucketUrl(): String {
-        return if (pathStyle) {
-            "${endpoint.trimEnd('/')}/$bucket"
-        } else {
-            val scheme = if (isHttps) "https://" else "http://"
-            "$scheme$bucket.$host"
-        }
-    }
-
     @Serializable
     enum class BackupItem {
         DATABASE,

@@ -185,8 +185,8 @@ fun ChatInput(
     onUpdateAssistant: (Assistant) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     onCancelClick: () -> Unit,
-    onSendClick: (PendingUserMessageMode) -> Unit,
-    onLongSendClick: (PendingUserMessageMode) -> Unit,
+    onSendClick: (PendingUserMessageMode, List<UIMessagePart>) -> Unit,
+    onLongSendClick: (PendingUserMessageMode, List<UIMessagePart>) -> Unit,
     onOpenQueue: () -> Unit = {},
     onCompactContext: () -> Unit = {},
 ) {
@@ -246,9 +246,10 @@ fun ChatInput(
                 preSendLatestMessageId = conversation.currentMessages.lastOrNull()?.id?.toString(),
             )
             coroutineScope.launch {
+                val parts = state.getContents()
                 val blockingIssue = withContext(Dispatchers.IO) {
                     ImageAttachmentValidator.firstBlockingIssueForSend(
-                        parts = state.getContents(),
+                        parts = parts,
                         settings = settings,
                         providerManager = providerManager,
                     )
@@ -256,7 +257,7 @@ fun ChatInput(
                 if (blockingIssue != null) {
                     toaster.show(blockingIssue.message, type = ToastType.Error)
                 } else {
-                    onSendClick(PendingUserMessageMode.FOLLOWUP)
+                    onSendClick(PendingUserMessageMode.FOLLOWUP, parts)
                     hideKeyboardAfterSend()
                 }
             }
@@ -275,9 +276,10 @@ fun ChatInput(
                 preSendLatestMessageId = conversation.currentMessages.lastOrNull()?.id?.toString(),
             )
             coroutineScope.launch {
+                val parts = state.getContents()
                 val blockingIssue = withContext(Dispatchers.IO) {
                     ImageAttachmentValidator.firstBlockingIssueForSend(
-                        parts = state.getContents(),
+                        parts = parts,
                         settings = settings,
                         providerManager = providerManager,
                     )
@@ -285,7 +287,7 @@ fun ChatInput(
                 if (blockingIssue != null) {
                     toaster.show(blockingIssue.message, type = ToastType.Error)
                 } else {
-                    onLongSendClick(queueMode)
+                    onLongSendClick(queueMode, parts)
                     hideKeyboardAfterSend()
                 }
             }

@@ -18,7 +18,3 @@ zip.workspace = true
 calamine.workspace = true
 thiserror.workspace = true
 log.workspace = true
-
-[dev-dependencies]
-# Used by integration tests to compare against JVM-equivalent outputs
-similar = "2"

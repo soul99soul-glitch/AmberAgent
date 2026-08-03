@@ -26,9 +26,19 @@ data class NovelProjectRecord(
     val configRevision: Long,
     val mainBranchID: NovelBranchId,
     val modelPolicy: NovelProjectModelPolicy,
+    /**
+     * Optional model used for state-delta / manual-sync extraction.
+     * Null means fall back to [modelPolicy] (writing model) so single-model projects
+     * keep working without a second setting. Distinct from iOS which falls back to Global
+     * when null (iOS has a separate preferences store).
+     */
+    val stateSyncModelPolicy: NovelProjectModelPolicy? = null,
     val lastGenerationGranularity: NovelGenerationGranularity,
     val polishPreference: String,
-)
+) {
+    fun effectiveStateSyncModelPolicy(): NovelProjectModelPolicy =
+        stateSyncModelPolicy ?: modelPolicy
+}
 
 @Serializable
 data class NovelMaterialRecord(
@@ -101,11 +111,26 @@ data class NovelSessionMessageRecord(
 )
 
 @Serializable
+data class NovelDiscussionArchiveRecord(
+    val id: NovelMessageId,
+    val checkpointID: NovelCheckpointId,
+    val throughSequence: Long,
+    val messageCount: Int,
+    val chapterID: NovelChapterId? = null,
+    val summary: String,
+    @Serializable(with = NovelSwiftDateSerializer::class)
+    val createdAt: Instant,
+)
+
+@Serializable
 data class NovelSessionRecord(
     val id: NovelSessionId,
     val branchID: NovelBranchId,
     val revision: Long,
     val messages: List<NovelSessionMessageRecord> = emptyList(),
+    /** Messages with sequence ≤ cursor are considered archived out of injection window. */
+    val archiveCursor: NovelSessionCursor? = null,
+    val discussionArchives: List<NovelDiscussionArchiveRecord> = emptyList(),
 )
 
 @Serializable
@@ -131,6 +156,9 @@ data class NovelChapterRecord(
     val id: NovelChapterId,
     @Serializable(with = NovelSwiftDateSerializer::class)
     val createdAt: Instant,
+    /** When set, chapter is discarded from the active manuscript (iOS-aligned). */
+    @Serializable(with = NovelSwiftDateSerializer::class)
+    val discardedAt: Instant? = null,
 )
 
 @Serializable

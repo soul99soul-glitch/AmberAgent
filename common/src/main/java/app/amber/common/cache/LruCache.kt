@@ -79,35 +79,6 @@ class LruCache<K, V>(
         }
     }
 
-    fun remove(key: K) {
-        lock.withLock { map.remove(key) }
-        try {
-            store.remove(key)
-        } catch (_: Exception) {
-        }
-    }
-
-    fun clear() {
-        lock.withLock { map.clear() }
-        try {
-            store.clear()
-        } catch (_: Exception) {
-        }
-    }
-
-    fun containsKey(key: K): Boolean {
-        val inMem = lock.withLock { map[key]?.let { !it.isExpired(now()) } ?: false }
-        if (inMem) return true
-        val entry = store.loadEntry(key)
-        if (entry != null && !entry.isExpired(now())) return true
-        if (entry != null) runCatching { store.remove(key) }
-        return false
-    }
-
-    fun size(): Int = lock.withLock { map.size }
-
-    fun keysInMemory(): Set<K> = lock.withLock { map.filterValues { !it.isExpired(now()) }.keys.toSet() }
 }
 
 private fun now(): Long = System.currentTimeMillis()
-

@@ -16,12 +16,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,7 +27,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -49,12 +45,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.BtnAccent
 import app.amber.feature.ui.components.ds.BtnInk
 import app.amber.feature.ui.components.ds.LiveDot
 import app.amber.feature.ui.components.ds.pressable
-import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -191,6 +185,25 @@ fun NovelEmptyState(
     }
 }
 
+/**
+ * Shared novel control metrics — keep primary / ghost / quiet / chip on one grid so
+ * paired actions never look different sizes at the same hierarchy.
+ */
+object NovelControl {
+    val RadiusCompact = 12.dp
+    val RadiusPrimary = 15.dp
+    val ChipRadius = 999.dp
+    val CompactHPad = 14.dp
+    val CompactVPad = 8.dp
+    val QuietHPad = 10.dp
+    val QuietVPad = 8.dp
+    val ChipHPad = 14.dp
+    val ChipVPad = 8.dp
+    val IconTap = 36.dp
+    val IconGlyph = 18.dp
+    val MinTouch = 36.dp
+}
+
 @Composable
 fun NovelBanner(
     text: String,
@@ -226,10 +239,10 @@ fun NovelBanner(
                 modifier = Modifier.weight(1f),
             )
             if (actionLabel != null && onAction != null) {
-                NovelChipButton(
+                NovelPrimaryButton(
                     text = actionLabel,
-                    selected = true,
                     onClick = onAction,
+                    accent = true,
                     compact = true,
                 )
             }
@@ -237,41 +250,7 @@ fun NovelBanner(
     }
 }
 
-@Composable
-fun NovelSectionCard(
-    title: String,
-    modifier: Modifier = Modifier,
-    meta: String? = null,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    val workspace = workspaceColors()
-    val type = LocalAmberType.current
-    AmberCard(modifier = modifier.fillMaxWidth()) {
-        Column(
-            Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = title,
-                    style = type.sessionTitle,
-                    color = workspace.ink,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (meta != null) {
-                    WorkspaceStatusPill(text = meta, tone = WorkspaceTone.Neutral)
-                }
-            }
-            content()
-        }
-    }
-}
-
+/** Segmented / filter chip — fixed vertical padding so sibling chips align. */
 @Composable
 fun NovelChipButton(
     text: String,
@@ -284,7 +263,7 @@ fun NovelChipButton(
     val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
-    val shape = RoundedCornerShape(999.dp)
+    val shape = RoundedCornerShape(NovelControl.ChipRadius)
     val targetBg = when {
         !enabled -> workspace.row.copy(alpha = 0.5f)
         selected -> tokens.ink
@@ -296,6 +275,7 @@ fun NovelChipButton(
         else -> workspace.ink
     }
     val targetBorder = when {
+        !enabled -> workspace.hairline.copy(alpha = 0.6f)
         selected -> tokens.ink
         else -> workspace.hairline
     }
@@ -316,13 +296,14 @@ fun NovelChipButton(
     )
     Box(
         modifier = modifier
+            .heightIn(min = NovelControl.MinTouch)
             .clip(shape)
             .background(bg)
             .border(1.dp, borderColor, shape)
             .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
             .padding(
-                horizontal = if (compact) 10.dp else 14.dp,
-                vertical = if (compact) 6.dp else 8.dp,
+                horizontal = if (compact) 12.dp else NovelControl.ChipHPad,
+                vertical = if (compact) 6.dp else NovelControl.ChipVPad,
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -336,21 +317,125 @@ fun NovelChipButton(
     }
 }
 
+/** Borderless muted action — 取消 / 全选 / 清空 / TopBar text actions. */
 @Composable
-fun NovelChipRow(
+fun NovelQuietButton(
+    text: String,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit,
+    enabled: Boolean = true,
+    danger: Boolean = false,
 ) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    val fg = when {
+        !enabled -> workspace.faint
+        danger -> workspace.red
+        else -> workspace.muted
+    }
+    Box(
+        modifier = modifier
+            .heightIn(min = NovelControl.MinTouch)
+            .clip(RoundedCornerShape(NovelControl.RadiusCompact))
+            .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
+            .padding(horizontal = NovelControl.QuietHPad, vertical = NovelControl.QuietVPad),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+            color = fg,
+            maxLines = 1,
+        )
+    }
+}
+
+/** Square icon hit target used in cards / reader chrome. */
+@Composable
+fun NovelIconButton(
+    icon: ImageVector,
+    contentDescription: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    tint: Color? = null,
+) {
+    val workspace = workspaceColors()
+    val resolved = (tint ?: workspace.muted).copy(alpha = if (enabled) 1f else 0.4f)
+    Box(
+        modifier = modifier
+            .size(NovelControl.IconTap)
+            .clip(RoundedCornerShape(10.dp))
+            .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = resolved,
+            modifier = Modifier.size(NovelControl.IconGlyph),
+        )
+    }
+}
+
+/** Checkbox row for sheet options (replaces unicode ☑/☐). */
+@Composable
+fun NovelCheckRow(
+    checked: Boolean,
+    title: String,
+    subtitle: String,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .clip(RoundedCornerShape(12.dp))
+            .then(if (enabled) Modifier.pressable(onClick = onToggle) else Modifier)
+            .padding(vertical = 6.dp, horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        val boxShape = RoundedCornerShape(6.dp)
+        Box(
+            Modifier
+                .size(20.dp)
+                .clip(boxShape)
+                .background(if (checked) tokens.ink else workspace.paper)
+                .border(
+                    1.dp,
+                    if (checked) tokens.ink else workspace.hairline,
+                    boxShape,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (checked) {
+                Text(
+                    "✓",
+                    color = tokens.bg,
+                    style = type.meta.copy(fontWeight = FontWeight.Bold),
+                )
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = type.secondary.copy(fontWeight = FontWeight.SemiBold),
+                color = if (enabled) workspace.ink else workspace.faint,
+            )
+            Text(
+                text = subtitle,
+                style = type.meta,
+                color = workspace.muted,
+            )
+        }
+    }
 }
+
 
 @Composable
 fun NovelSegmentedTabs(
@@ -424,8 +509,8 @@ fun NovelGhostButton(
     val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
-    // Compact secondary — same footprint as compact primary (e.g. 确认 / 忽略 pair).
-    val shape = RoundedCornerShape(12.dp)
+    // Same footprint as compact primary — pairs never misalign.
+    val shape = RoundedCornerShape(NovelControl.RadiusCompact)
     val fg = when {
         !enabled -> workspace.faint
         danger -> workspace.red
@@ -433,17 +518,33 @@ fun NovelGhostButton(
     }
     Box(
         modifier = modifier
+            .heightIn(min = NovelControl.MinTouch)
             .clip(shape)
-            .border(1.dp, if (danger) workspace.red.copy(alpha = 0.35f) else workspace.hairline, shape)
-            .background(if (danger) workspace.redContainer else workspace.paper)
+            .border(
+                1.dp,
+                when {
+                    !enabled -> workspace.hairline.copy(alpha = 0.55f)
+                    danger -> workspace.red.copy(alpha = 0.35f)
+                    else -> workspace.hairline
+                },
+                shape,
+            )
+            .background(
+                when {
+                    !enabled -> workspace.paper.copy(alpha = 0.7f)
+                    danger -> workspace.redContainer
+                    else -> workspace.paper
+                },
+            )
             .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .padding(horizontal = NovelControl.CompactHPad, vertical = NovelControl.CompactVPad),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = text,
             style = type.meta.copy(fontWeight = FontWeight.SemiBold),
             color = fg,
+            maxLines = 1,
         )
     }
 }
@@ -455,14 +556,17 @@ fun NovelPrimaryButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     accent: Boolean = false,
-    /** Smaller chip used next to [NovelGhostButton] (设定确认 / 收录次级操作). */
+    /**
+     * Compact footprint matches [NovelGhostButton] (action bars, proposal cards, dialogs).
+     * Full size uses design-system BtnInk/BtnAccent (sheet confirm, fork hero).
+     */
     compact: Boolean = false,
 ) {
     val tokens = LocalAmberTokens.current
     val workspace = workspaceColors()
     val type = LocalAmberType.current
     if (compact) {
-        val shape = RoundedCornerShape(12.dp)
+        val shape = RoundedCornerShape(NovelControl.RadiusCompact)
         val bg = when {
             !enabled -> workspace.row
             accent -> tokens.accent
@@ -475,29 +579,38 @@ fun NovelPrimaryButton(
         }
         Box(
             modifier = modifier
+                .heightIn(min = NovelControl.MinTouch)
                 .clip(shape)
                 .background(bg)
                 .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .padding(horizontal = NovelControl.CompactHPad, vertical = NovelControl.CompactVPad),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = text,
                 color = fg,
                 style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
             )
         }
         return
     }
+    // Full primary — same radius/padding as BtnInk/BtnAccent whether enabled or not.
+    val shape = RoundedCornerShape(NovelControl.RadiusPrimary)
     if (!enabled) {
         Box(
             modifier = modifier
-                .clip(RoundedCornerShape(15.dp))
+                .clip(shape)
                 .background(workspace.row)
                 .padding(horizontal = 18.dp, vertical = 12.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text, color = workspace.faint, style = type.body.copy(fontWeight = FontWeight.SemiBold))
+            Text(
+                text,
+                color = workspace.faint,
+                style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                maxLines = 1,
+            )
         }
         return
     }
@@ -573,8 +686,5 @@ fun NovelBodyText(
     )
 }
 
-val NovelListContentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)
-val NovelComposerShape = RoundedCornerShape(18.dp)
 val NovelBubbleShapeUser = RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)
 val NovelBubbleShapeAssistant = RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp)
-

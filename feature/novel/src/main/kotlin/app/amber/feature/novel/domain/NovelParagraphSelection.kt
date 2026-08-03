@@ -10,18 +10,32 @@ object NovelParagraphSelection {
         val text: String,
     )
 
+    /**
+     * Align with iOS [NovelParagraphParser]: blank / whitespace-only lines separate paragraphs;
+     * consecutive non-blank lines stay in one paragraph (joined with single `\n`).
+     */
     fun splitParagraphs(content: String): List<Paragraph> {
         if (content.isEmpty()) return emptyList()
-        val parts = content.split(Regex("\\n\\s*\\n"))
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        return parts.mapIndexed { index, text ->
-            Paragraph(
+        val normalized = content.replace("\r\n", "\n").replace('\r', '\n')
+        val result = ArrayList<Paragraph>()
+        val lines = ArrayList<String>()
+        fun flush() {
+            if (lines.isEmpty()) return
+            val text = lines.joinToString("\n").trim()
+            lines.clear()
+            if (text.isEmpty()) return
+            val index = result.size
+            result += Paragraph(
                 id = "p-${index + 1}-${stableHash(text)}",
                 index = index,
                 text = text,
             )
         }
+        for (line in normalized.split('\n')) {
+            if (line.trim().isEmpty()) flush() else lines += line
+        }
+        flush()
+        return result
     }
 
     fun defaultSelectedIds(paragraphs: List<Paragraph>): Set<String> =

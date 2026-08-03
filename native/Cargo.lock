@@ -366,7 +366,6 @@ dependencies = [
  "jni",
  "jni-common",
  "log",
- "thiserror 2.0.18",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-css",
@@ -601,7 +600,6 @@ dependencies = [
  "jni-common",
  "log",
  "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -652,8 +650,6 @@ dependencies = [
  "log",
  "pulldown-cmark",
  "regex",
- "similar",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -664,7 +660,6 @@ dependencies = [
  "jni-common",
  "log",
  "regex",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -749,7 +744,6 @@ dependencies = [
  "jni-common",
  "log",
  "quick-xml 0.36.2",
- "similar",
  "thiserror 2.0.18",
  "zip",
 ]
@@ -1000,12 +994,8 @@ dependencies = [
 name = "reader-extractor"
 version = "0.1.0"
 dependencies = [
- "android_logger",
  "jni",
- "jni-common",
- "log",
  "readability",
- "thiserror 2.0.18",
  "url",
 ]
 
@@ -1192,12 +1182,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "703d5c7ef118737c72f1af64ad2f6f8c5e1921f818cdcb97b8fe6fc69bf66214"
 
 [[package]]
-name = "similar"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
-
-[[package]]
 name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1282,7 +1266,6 @@ dependencies = [
  "jni-common",
  "log",
  "ring",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1377,11 +1360,7 @@ dependencies = [
 name = "tokenizer"
 version = "0.1.0"
 dependencies = [
- "android_logger",
  "jni",
- "jni-common",
- "log",
- "thiserror 2.0.18",
  "tiktoken-rs",
 ]
 

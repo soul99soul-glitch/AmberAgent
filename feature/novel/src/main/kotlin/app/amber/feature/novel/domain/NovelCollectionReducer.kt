@@ -50,6 +50,11 @@ data class NovelCollectCommand(
     val newCheckpointId: NovelCheckpointId = NovelCheckpointId.generate(),
     val newStateSnapshotId: NovelStateSnapshotId = NovelStateSnapshotId.generate(),
     val stateDelta: NovelStateDeltaV1? = null,
+    /**
+     * When true, manuscript is committed but branch stays [NovelBranchSyncStatus.NeedsSync]
+     * so the user can retry state extraction via the existing「同步状态」path (P0-A soft-fail).
+     */
+    val markNeedsSync: Boolean = false,
 )
 
 object NovelCollectionReducer {
@@ -75,8 +80,14 @@ object NovelCollectionReducer {
         val candidateIndex = document.candidates.indexOfFirst { it.id == command.candidateId }
         if (candidateIndex < 0) throw NovelError.InvalidInput("Candidate not found")
         val candidate = document.candidates[candidateIndex]
-        if (candidate.status != NovelCandidateStatus.Available) {
+        // Available = normal complete; Interrupted = user stopped mid-stream but partial is usable.
+        val collectable = candidate.status == NovelCandidateStatus.Available ||
+            candidate.status == NovelCandidateStatus.Interrupted
+        if (!collectable) {
             throw NovelError.InvalidInput("Candidate is not available for collection")
+        }
+        if (candidate.kind != app.amber.feature.novel.model.NovelCandidateKind.Prose) {
+            throw NovelError.InvalidInput("Only prose candidates can be collected into the manuscript")
         }
         if (command.selectedText.isBlank()) throw NovelError.InvalidInput("Selected text is empty")
 
@@ -93,6 +104,7 @@ object NovelCollectionReducer {
                     title = existingVersion.title,
                     content = NovelChapterText.appending(text, existingVersion.content),
                     factCompatibilityID = UUID.randomUUID(),
+                    sourceChapterVersionID = existingVersion.id,
                     sourceCandidateID = candidate.id,
                     createdAt = now,
                     operationID = command.operationId,
@@ -125,6 +137,40 @@ object NovelCollectionReducer {
                     newSelections,
                     newVersion.id,
                 )
+            }
+            is NovelCollectionTarget.ReplaceChapter -> {
+                val existingSel = branch.workingChapterSelections.firstOrNull { it.chapterID == target.chapterID }
+                    ?: throw NovelError.InvalidInput("The replace target is not in the current manuscript.")
+                val existingVersion = document.chapterVersions.firstOrNull {
+                    it.id == existingSel.versionID && it.chapterID == target.chapterID
+                } ?: throw NovelError.InvalidInput("The replace target is not in the current manuscript.")
+                // Replace is only valid for a candidate that rewrote this chapter.
+                val sourceVersionId = candidate.sourceChapterVersionID
+                    ?: throw NovelError.InvalidInput("The candidate did not rewrite this chapter.")
+                val sourceVersion = document.chapterVersions.firstOrNull { it.id == sourceVersionId }
+                    ?: throw NovelError.InvalidInput("The candidate did not rewrite this chapter.")
+                if (sourceVersion.chapterID != target.chapterID) {
+                    throw NovelError.InvalidInput("The candidate did not rewrite this chapter.")
+                }
+                val newVersion = NovelChapterVersionRecord(
+                    id = command.newChapterVersionId,
+                    chapterID = target.chapterID,
+                    kind = NovelChapterVersionKind.Collected,
+                    title = existingVersion.title,
+                    content = text,
+                    // New fact compatibility: regenerate may change story facts.
+                    factCompatibilityID = UUID.randomUUID(),
+                    sourceChapterVersionID = existingVersion.id,
+                    sourceCandidateID = candidate.id,
+                    createdAt = now,
+                    operationID = command.operationId,
+                )
+                val newSelections = branch.workingChapterSelections.map {
+                    if (it.chapterID == target.chapterID) {
+                        NovelChapterSelection(target.chapterID, newVersion.id)
+                    } else it
+                }
+                Tuple4(document.chapters, document.chapterVersions + newVersion, newSelections, newVersion.id)
             }
         }
 
@@ -194,7 +240,9 @@ object NovelCollectionReducer {
                     status = NovelCandidateStatus.Collected,
                     collectedCheckpointID = checkpoint.id,
                 )
-                c.branchID == command.branchId && c.status == NovelCandidateStatus.Available ->
+                c.branchID == command.branchId &&
+                    (c.status == NovelCandidateStatus.Available ||
+                        c.status == NovelCandidateStatus.Interrupted) ->
                     c.copy(status = NovelCandidateStatus.Superseded)
                 else -> c
             }
@@ -205,7 +253,11 @@ object NovelCollectionReducer {
             currentStateSnapshotID = newState.id,
             headRevision = branch.headRevision + 1,
             workingRevision = branch.workingRevision + 1,
-            syncStatus = NovelBranchSyncStatus.Synchronized,
+            syncStatus = if (command.markNeedsSync) {
+                NovelBranchSyncStatus.NeedsSync
+            } else {
+                NovelBranchSyncStatus.Synchronized
+            },
             workingChapterSelections = selections,
             updatedAt = now,
         )

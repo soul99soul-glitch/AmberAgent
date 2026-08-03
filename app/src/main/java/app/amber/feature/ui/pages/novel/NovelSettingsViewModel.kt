@@ -31,6 +31,7 @@ data class NovelSettingsUiState(
     val selectedBranchId: NovelBranchId? = null,
     val busy: Boolean = false,
     val errorMessage: String? = null,
+    val statusMessage: String? = null,
 )
 
 class NovelSettingsViewModel(
@@ -129,9 +130,21 @@ class NovelSettingsViewModel(
             )
             if (outcome is app.amber.feature.novel.model.NovelOutcome.BranchForked) {
                 uiSession.setSelectedBranch(projectId.rawValue, outcome.branchID)
-                _state.value = _state.value.copy(selectedBranchId = outcome.branchID)
+                _state.value = _state.value.copy(
+                    selectedBranchId = outcome.branchID,
+                    statusMessage = "已切换到分支「$name」",
+                    errorMessage = null,
+                )
             }
         }
+    }
+
+    fun reportError(message: String) {
+        _state.value = _state.value.copy(errorMessage = message, statusMessage = null)
+    }
+
+    fun reportStatus(message: String) {
+        _state.value = _state.value.copy(statusMessage = message, errorMessage = null)
     }
 
     fun undoHead() {
@@ -141,9 +154,19 @@ class NovelSettingsViewModel(
         }
     }
 
-    fun setModelPolicy(policy: NovelProjectModelPolicy) {
+    fun setModelPolicy(
+        policy: NovelProjectModelPolicy,
+        purpose: app.amber.feature.novel.domain.NovelModelPolicyPurpose =
+            app.amber.feature.novel.domain.NovelModelPolicyPurpose.Creation,
+    ) {
         mutate {
-            novelCreation.perform(NovelIntent.SetModelPolicy(projectId, policy))
+            novelCreation.perform(NovelIntent.SetModelPolicy(projectId, policy, purpose))
+        }
+    }
+
+    fun clearStateSyncModelPolicy() {
+        mutate {
+            novelCreation.perform(NovelIntent.ClearStateSyncModelPolicy(projectId))
         }
     }
 
@@ -156,14 +179,16 @@ class NovelSettingsViewModel(
     fun exportMarkdown(onResult: (String, String) -> Unit) {
         val branchId = _state.value.selectedBranchId ?: return
         viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
             runCatching {
                 when (val snap = novelCreation.snapshot(NovelQuery.BranchMarkdown(projectId, branchId))) {
                     is NovelSnapshot.Markdown -> onResult(snap.fileName, snap.content)
-                    else -> Unit
+                    else -> _state.value = _state.value.copy(errorMessage = "导出失败")
                 }
             }.onFailure { e ->
                 _state.value = _state.value.copy(errorMessage = humanizeNovelError(null, e.message))
             }
+            _state.value = _state.value.copy(busy = false)
         }
     }
 

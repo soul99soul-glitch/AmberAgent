@@ -64,9 +64,6 @@ fun DeepReadOutput.statusOf(stage: DeepReadGenerationStage): DeepReadSectionStat
 fun DeepReadOutput.errorOf(stage: DeepReadGenerationStage): String? =
     sectionStates[stage]?.errorMessage
 
-fun DeepReadOutput.qualityOf(stage: DeepReadGenerationStage): DeepReadSectionQuality? =
-    sectionQualities[stage]
-
 fun DeepReadOutput.withSectionStatus(
     stage: DeepReadGenerationStage,
     status: DeepReadSectionStatus,
@@ -294,13 +291,6 @@ data class DeepReadPlaybookSnapshot(
     val markdown: String,
     @SerialName("updated_at")
     val updatedAt: Long,
-)
-
-data class DeepReadState(
-    val isLoading: Boolean = false,
-    val output: DeepReadOutput? = null,
-    val cached: Boolean = false,
-    val error: String? = null,
 )
 
 fun DeepReadOutput.hasReadableArticle(): Boolean {

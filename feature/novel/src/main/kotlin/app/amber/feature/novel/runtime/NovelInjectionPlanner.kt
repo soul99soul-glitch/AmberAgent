@@ -51,6 +51,7 @@ object NovelInjectionPlanner {
         recentMessages: Int = NovelInjectionDefaults.RECENT_SESSION_MESSAGES,
         forceIncludeMaterialIDs: Set<String> = emptySet(),
         forceExcludeMaterialIDs: Set<String> = emptySet(),
+        sourceChapterVersionId: app.amber.feature.novel.model.NovelChapterVersionId? = null,
     ): NovelInjectionPlan {
         val branch = document.branches.firstOrNull { it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active }
             ?: throw NovelError.BranchNotFound(branchId)
@@ -120,7 +121,36 @@ object NovelInjectionPlanner {
         }
 
         val selections = branch.workingChapterSelections
-        if (selections.isNotEmpty() && promptKind != NovelPromptKind.QuickStart) {
+        if (promptKind == NovelPromptKind.WholeChapterRegeneration ||
+            promptKind == NovelPromptKind.WholeChapterPolish
+        ) {
+            val source = sourceChapterVersionId?.let { id ->
+                document.chapterVersions.firstOrNull { it.id == id }
+            }
+            if (source != null) {
+                add(
+                    NovelInjectionSectionKind.ChapterContext(source.id),
+                    "Chapter to rewrite/polish: ${source.title}",
+                    source.content,
+                    NovelInjectionSelectionReason.RequiredCurrentState,
+                )
+            }
+            // Also inject a short tail of previous chapter for continuity, if any.
+            val idx = selections.indexOfFirst { it.versionID == sourceChapterVersionId }
+            if (idx > 0) {
+                val prev = document.chapterVersions.firstOrNull {
+                    it.id == selections[idx - 1].versionID
+                }
+                if (prev != null) {
+                    add(
+                        NovelInjectionSectionKind.ChapterContext(prev.id),
+                        "Previous chapter tail: ${prev.title}",
+                        prev.content.takeLast(chapterTailChars),
+                        NovelInjectionSelectionReason.CurrentChapterTail,
+                    )
+                }
+            }
+        } else if (selections.isNotEmpty() && promptKind != NovelPromptKind.QuickStart) {
             val last = selections.last()
             val version = document.chapterVersions.firstOrNull { it.id == last.versionID }
             if (version != null) {
@@ -135,14 +165,21 @@ object NovelInjectionPlanner {
         }
 
         val session = document.sessions.firstOrNull { it.id == branch.sessionID }
-        session?.messages?.takeLast(recentMessages)?.forEach { msg ->
-            add(
-                NovelInjectionSectionKind.SessionMessage(msg.id),
-                "Session ${msg.role}",
-                msg.content,
-                NovelInjectionSelectionReason.RecentSession,
-            )
+        val archiveFloor = when (val c = session?.archiveCursor) {
+            is app.amber.feature.novel.model.NovelSessionCursor.Through -> c.sequence
+            else -> -1L
         }
+        session?.messages
+            ?.filter { it.sequence > archiveFloor }
+            ?.takeLast(recentMessages)
+            ?.forEach { msg ->
+                add(
+                    NovelInjectionSectionKind.SessionMessage(msg.id),
+                    "Session ${msg.role}",
+                    msg.content,
+                    NovelInjectionSelectionReason.RecentSession,
+                )
+            }
 
         val materialDecisions = mutableListOf<NovelMaterialInjectionDecision>()
         for (material in document.materials.filter { !it.isDeleted }) {
@@ -151,9 +188,17 @@ object NovelInjectionPlanner {
             val idRaw = material.id.rawValue
             val forcedIn = idRaw in forceIncludeMaterialIDs
             val forcedOut = idRaw in forceExcludeMaterialIDs
+            val isDecisionLog =
+                material.kind is app.amber.feature.novel.model.NovelMaterialKind.DecisionLog
+            // DecisionLogs created by discussion archive live on branch.overrideRevisionIDs.
+            // Requiring membership means undo (which rewinds overrides) stops injecting orphans.
+            val decisionOnBranch =
+                isDecisionLog && revision.id in branch.overrideRevisionIDs
             val include = when {
                 forcedOut -> false
                 forcedIn -> true
+                decisionOnBranch -> true
+                isDecisionLog -> false
                 revision.injectionMode == NovelInjectionMode.Always -> true
                 revision.injectionMode == NovelInjectionMode.Off -> false
                 else -> false // smart without embedding: skip unless forced

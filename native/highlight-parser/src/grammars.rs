@@ -49,31 +49,6 @@ pub struct Grammar {
     pub config: HighlightConfiguration,
 }
 
-/// Public: list of language identifiers we accept. Order is stable for the
-/// JNI `supportedLanguages()` API.
-pub fn supported_languages() -> &'static [&'static str] {
-    &[
-        "rust",
-        // "kotlin" disabled — tree-sitter-kotlin-ng has no bundled highlight query.
-        "java",
-        "python",
-        "javascript",
-        "typescript",
-        "tsx",
-        "go",
-        "bash",
-        "shell",
-        "json",
-        "yaml",
-        "yml",
-        "markdown",
-        "md",
-        "html",
-        "css",
-        "sql",
-    ]
-}
-
 /// Run highlight over the given source for the given grammar and collect
 /// events. The Highlighter is created per-call to keep the JNI surface
 /// stateless; tree-sitter parser internal state is small relative to the

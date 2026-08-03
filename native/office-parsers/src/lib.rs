@@ -143,16 +143,3 @@ pub extern "system" fn Java_app_amber_document_nativebridge_OfficeParserNative_p
     };
     safe_parse(&mut env, "XLSX", || xlsx::parse_to_markdown(&path_str))
 }
-
-#[cfg(test)]
-mod tests {
-    // Integration tests live alongside corpus fixtures in
-    // `native/office-parsers/tests/corpus/` and `tests/equivalence.rs`.
-    // The library-level lib.rs only exercises JNI plumbing helpers when
-    // possible; the JNI entry symbols cannot be invoked from host tests
-    // because they require a live JVM. cargo-ndk + Gradle drives the
-    // device-side execution.
-    // Integration test coverage now lives in each module's own #[cfg(test)]
-    // block (docx::tests, pptx::tests, epub::tests). The 2+2 sanity test
-    // that lived here was dropped in the P3 sweep.
-}

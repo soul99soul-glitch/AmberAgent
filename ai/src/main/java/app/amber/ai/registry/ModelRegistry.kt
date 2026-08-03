@@ -265,10 +265,6 @@ object ModelRegistry {
         contextWindow(1_000_000)
     }
 
-    private val DEEPSEEK_V3 = defineGroup {
-        add(DEEPSEEK_V3_MODEL, DEEPSEEK_CHAT)
-    }
-
     private val DEEPSEEK_R1_MODEL = defineModel {
         tokens("deepseek", "r", "1")
         toolReasoningAbility()

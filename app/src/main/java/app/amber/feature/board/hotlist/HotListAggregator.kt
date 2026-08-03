@@ -1,6 +1,5 @@
 package app.amber.feature.board.hotlist
 
-import java.security.MessageDigest
 import java.util.Locale
 
 class HotListAggregator(
@@ -192,9 +191,3 @@ class HotListAggregator(
         )
     }
 }
-
-internal fun stableHotId(input: String): String =
-    MessageDigest.getInstance("SHA-256")
-        .digest(input.toByteArray())
-        .joinToString("") { "%02x".format(it) }
-        .take(32)

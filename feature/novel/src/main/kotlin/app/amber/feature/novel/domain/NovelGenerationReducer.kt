@@ -197,7 +197,7 @@ object NovelGenerationReducer {
 
         val messageKind = when (run.kind) {
             NovelRunKind.QuickStart, NovelRunKind.Discussion -> NovelSessionMessageKind.Discussion
-            NovelRunKind.Prose -> NovelSessionMessageKind.ProseCandidate
+            NovelRunKind.Prose, NovelRunKind.Regenerate -> NovelSessionMessageKind.ProseCandidate
             NovelRunKind.Polish -> NovelSessionMessageKind.PolishCandidate
         }
         // QuickStart expects strict JSON; if the model returns free text, keep the message
@@ -236,7 +236,11 @@ object NovelGenerationReducer {
             next = next.copy(
                 candidates = next.candidates + NovelCandidateRecord(
                     id = candidateId,
-                    kind = if (run.kind == NovelRunKind.Polish) NovelCandidateKind.Polish else NovelCandidateKind.Prose,
+                    kind = if (run.kind == NovelRunKind.Polish) {
+                        NovelCandidateKind.Polish
+                    } else {
+                        NovelCandidateKind.Prose
+                    },
                     branchID = run.branchID,
                     sessionID = run.sessionID,
                     sourceMessageID = run.messageID,
@@ -293,6 +297,30 @@ object NovelGenerationReducer {
             )
             next = next.copy(sessions = sessions)
             messageSnap = NovelMessageSnapshot(next.project.id, run.branchID, message)
+
+            // Persist an Interrupted prose/regenerate candidate so partial text can still be collected.
+            // Polish keeps adopt-only semantics and does not create a collectable candidate here.
+            val candidateId = run.candidateID
+            if (candidateId != null &&
+                (run.kind == NovelRunKind.Prose || run.kind == NovelRunKind.Regenerate) &&
+                next.candidates.none { it.id == candidateId }
+            ) {
+                next = next.copy(
+                    candidates = next.candidates + NovelCandidateRecord(
+                        id = candidateId,
+                        kind = NovelCandidateKind.Prose,
+                        branchID = run.branchID,
+                        sessionID = run.sessionID,
+                        sourceMessageID = run.messageID,
+                        baseCheckpointID = run.baseCheckpointID,
+                        baseHeadRevision = run.baseHeadRevision,
+                        status = NovelCandidateStatus.Interrupted,
+                        content = partialContent,
+                        sourceChapterVersionID = run.sourceChapterVersionID,
+                        createdAt = now,
+                    ),
+                )
+            }
         }
         next = finishRun(
             next, runIndex, branchIndex, NovelRunStatus.Interrupted,
@@ -392,12 +420,15 @@ object NovelGenerationReducer {
     }
 
     private fun toQuickStartMarkdown(s: NovelQuickStartSuggestionsV1): String {
+        val characterBlocks = s.characters.joinToString("\n\n") { item ->
+            "## 人物：${item.title}\n\n${item.content}"
+        }
         val body = listOf(
-            "世界观" to s.world,
-            "人物" to s.characters,
-            "总剧情大纲" to s.masterOutline,
-            "写作要求" to s.writingRequirements,
-        ).joinToString("\n\n") { (h, item) -> "## $h：${item.title}\n\n${item.content}" }
+            "## 世界观：${s.world.title}\n\n${s.world.content}",
+            characterBlocks,
+            "## 总剧情大纲：${s.masterOutline.title}\n\n${s.masterOutline.content}",
+            "## 写作要求：${s.writingRequirements.title}\n\n${s.writingRequirements.content}",
+        ).joinToString("\n\n")
         return "# 创作建议\n\n${s.overview}\n\n$body"
     }
 
@@ -406,12 +437,15 @@ object NovelGenerationReducer {
         run: NovelActiveRunRecord,
         now: Instant,
     ): List<NovelSettingProposalRecord> {
-        val items = listOf(
+        val singles = listOf(
             Triple("world", NovelMaterialKind.World, s.world),
-            Triple("characters", NovelMaterialKind.Character, s.characters),
             Triple("master-outline", NovelMaterialKind.MasterOutline, s.masterOutline),
             Triple("writing-requirements", NovelMaterialKind.WritingRequirements, s.writingRequirements),
         )
+        val characterItems = s.characters.mapIndexed { index, suggestion ->
+            Triple("character-$index", NovelMaterialKind.Character, suggestion)
+        }
+        val items = singles + characterItems
         return items.map { (stable, kind, suggestion) ->
             NovelSettingProposalRecord(
                 id = NovelProposalId(deterministicProposalId(run.operationID, stable)),

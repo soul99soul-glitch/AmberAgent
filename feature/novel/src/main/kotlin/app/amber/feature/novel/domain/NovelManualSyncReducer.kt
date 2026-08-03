@@ -139,10 +139,78 @@ object NovelManualSyncReducer {
     }
 
     fun workingManuscript(document: NovelProjectDocumentV1, branchId: app.amber.feature.novel.model.NovelBranchId): String {
+        return workingManuscriptChunks(document, branchId).joinToString("\n\n")
+    }
+
+    /**
+     * Split working manuscript into chapter-sized chunks for multi-pass state rebuild.
+     * Single empty chapter still yields one empty chunk so callers see length ≥ 1 when
+     * there is at least a working selection.
+     */
+    fun workingManuscriptChunks(
+        document: NovelProjectDocumentV1,
+        branchId: app.amber.feature.novel.model.NovelBranchId,
+        maxChunkChars: Int = DEFAULT_MAX_CHUNK_CHARS,
+    ): List<String> {
         val branch = document.branches.first { it.id == branchId }
-        return branch.workingChapterSelections.joinToString("\n\n") { sel ->
+        if (branch.workingChapterSelections.isEmpty()) return emptyList()
+        val chapterTexts = branch.workingChapterSelections.map { sel ->
             val version = document.chapterVersions.firstOrNull { it.id == sel.versionID }
             "## ${version?.title.orEmpty()}\n\n${version?.content.orEmpty()}"
         }
+        // Prefer one chapter per chunk; if a single chapter exceeds budget, hard-split.
+        val chunks = mutableListOf<String>()
+        for (chapter in chapterTexts) {
+            if (chapter.length <= maxChunkChars) {
+                chunks += chapter
+            } else {
+                var offset = 0
+                while (offset < chapter.length) {
+                    val end = (offset + maxChunkChars).coerceAtMost(chapter.length)
+                    chunks += chapter.substring(offset, end)
+                    offset = end
+                }
+            }
+        }
+        return chunks
     }
+
+    fun modelInputForChunk(chunk: String, index: Int, total: Int): String = buildString {
+        appendLine("MANUAL SYNC CHUNK ${index + 1}/$total")
+        appendLine(
+            "Extract only story-state changes evidenced in CURRENT MANUSCRIPT CHUNK. " +
+                "Do not invent facts from prior chunks.",
+        )
+        appendLine()
+        append(chunk)
+    }
+
+    /**
+     * Merge multi-chunk state deltas into one commit-ready delta.
+     * Last non-blank summary/outline wins; events & proposals are concatenated.
+     */
+    fun mergeChunkDeltas(deltas: List<NovelStateDeltaV1>): NovelStateDeltaV1? {
+        if (deltas.isEmpty()) return null
+        if (deltas.size == 1) return deltas.single()
+        val summary = deltas.map { it.stateSummary.trim() }.lastOrNull { it.isNotEmpty() }.orEmpty()
+            .ifBlank { deltas.last().stateSummary }
+        val outline = deltas.mapNotNull { it.branchOutlinePatch?.trim()?.takeIf { p -> p.isNotEmpty() } }
+            .lastOrNull()
+        val events = deltas.flatMap { it.events }
+        val proposals = deltas.flatMap { it.settingProposals }
+        val unresolved = deltas.flatMap { it.unresolvedEntityNames }.distinct()
+        return NovelStateDeltaV1(
+            schemaVersion = 1,
+            stateSummary = summary.ifBlank { "Synced after manual edit." },
+            events = events,
+            characterChanges = deltas.flatMap { it.characterChanges },
+            relationshipChanges = deltas.flatMap { it.relationshipChanges },
+            foreshadowingChanges = deltas.flatMap { it.foreshadowingChanges },
+            unresolvedEntityNames = unresolved,
+            branchOutlinePatch = outline,
+            settingProposals = proposals,
+        )
+    }
+
+    const val DEFAULT_MAX_CHUNK_CHARS: Int = 12_000
 }

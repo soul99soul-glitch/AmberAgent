@@ -159,6 +159,16 @@ sealed class NovelOutcome {
         val revision: Long,
     ) : NovelOutcome()
 
+    data class DiscussionArchived(
+        val projectID: NovelProjectId,
+        val branchID: NovelBranchId,
+        val archiveID: NovelMessageId,
+        val checkpointID: NovelCheckpointId,
+        val decisionRevisionIDs: List<NovelMaterialRevisionId>,
+        val projectRevision: Long,
+        val configRevision: Long,
+    ) : NovelOutcome()
+
     data class RunStarted(
         val projectID: NovelProjectId,
         val branchID: NovelBranchId,
@@ -565,6 +575,28 @@ sealed class NovelOutcome {
                         put("revision", value.revision)
                     },
                 )
+                is DiscussionArchived -> swiftAssociatedObject(
+                    "discussionArchived",
+                    buildJsonObject {
+                        put("projectID", json.json.encodeToJsonElement(NovelProjectId.Serializer, value.projectID))
+                        put("branchID", json.json.encodeToJsonElement(NovelBranchId.Serializer, value.branchID))
+                        put("archiveID", json.json.encodeToJsonElement(NovelMessageId.Serializer, value.archiveID))
+                        put(
+                            "checkpointID",
+                            json.json.encodeToJsonElement(NovelCheckpointId.Serializer, value.checkpointID),
+                        )
+                        put(
+                            "decisionRevisionIDs",
+                            kotlinx.serialization.json.JsonArray(
+                                value.decisionRevisionIDs.map {
+                                    json.json.encodeToJsonElement(NovelMaterialRevisionId.Serializer, it)
+                                },
+                            ),
+                        )
+                        put("projectRevision", value.projectRevision)
+                        put("configRevision", value.configRevision)
+                    },
+                )
                 else -> error("Unhandled NovelOutcome serialization: ${value::class.simpleName}")
             }
 
@@ -834,6 +866,26 @@ sealed class NovelOutcome {
                         associated.getValue("chapterVersionID"),
                     ),
                     revision = associated.getValue("revision").jsonPrimitive.long,
+                )
+                "discussionArchived" -> DiscussionArchived(
+                    projectID = projectId(),
+                    branchID = branchId(),
+                    archiveID = json.json.decodeFromJsonElement(
+                        NovelMessageId.Serializer,
+                        associated.getValue("archiveID"),
+                    ),
+                    checkpointID = json.json.decodeFromJsonElement(
+                        NovelCheckpointId.Serializer,
+                        associated.getValue("checkpointID"),
+                    ),
+                    decisionRevisionIDs = associated.getValue("decisionRevisionIDs")
+                        .let { el ->
+                            (el as? kotlinx.serialization.json.JsonArray)?.map {
+                                json.json.decodeFromJsonElement(NovelMaterialRevisionId.Serializer, it)
+                            }.orEmpty()
+                        },
+                    projectRevision = associated.getValue("projectRevision").jsonPrimitive.long,
+                    configRevision = associated.getValue("configRevision").jsonPrimitive.long,
                 )
                 else -> throw IllegalArgumentException("Unknown NovelOutcome case: $caseName")
             }

@@ -12,14 +12,14 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Assistant
 import app.amber.core.model.Avatar
-import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
+import app.amber.core.service.ChatService
 
 class AssistantVM(
     private val settingsStore: SettingsAggregator,
     private val memoryRepository: MemoryRepository,
-    private val conversationRepo: ConversationRepository,
     private val filesManager: FilesManager,
+    private val chatService: ChatService,
 ) : ViewModel() {
     val settings: StateFlow<Settings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, Settings.dummy())
@@ -55,7 +55,7 @@ class AssistantVM(
                 )
             )
             memoryRepository.deleteMemoriesOfAssistant(assistant.id.toString())
-            conversationRepo.deleteConversationOfAssistant(assistant.id)
+            chatService.deleteConversationsOfAssistant(assistant.id)
         }
     }
 

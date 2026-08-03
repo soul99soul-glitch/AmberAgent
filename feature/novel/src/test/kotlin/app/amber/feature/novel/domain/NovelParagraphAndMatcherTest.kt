@@ -21,6 +21,17 @@ class NovelParagraphAndMatcherTest {
     }
 
     @Test
+    fun splitParagraphs_blankLineSeparators_keepIntraParagraphNewlines() {
+        val paragraphs = NovelParagraphSelection.splitParagraphs(
+            "第一行\n第一段续\n\n第二段\n\n  \n第三段",
+        )
+        assertEquals(3, paragraphs.size)
+        assertEquals("第一行\n第一段续", paragraphs[0].text)
+        assertEquals("第二段", paragraphs[1].text)
+        assertEquals("第三段", paragraphs[2].text)
+    }
+
+    @Test
     fun suggestTarget_defaults() {
         assertEquals(
             NovelParagraphSelection.SuggestedTarget.CreateFirstChapter,

@@ -13,6 +13,5 @@ export const useAppStore = create<AppStoreState>()((...args) => ({
 
 export const useSettingsStore = useAppStore;
 export const useChatInputStore = useAppStore;
-export const useClockStore = useAppStore;
 
 export type { AppStoreState, ChatInputSlice, ClockSlice, Draft, SettingsSlice } from "~/stores/slices/types";

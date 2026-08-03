@@ -61,8 +61,3 @@ class AgentTaskRecoveryManager(
         }
     }
 }
-
-interface TaskRecoveryAdapter {
-    val type: String
-    fun canRetry(snapshot: AgentTaskSnapshot): Boolean
-}

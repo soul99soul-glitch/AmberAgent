@@ -39,9 +39,16 @@ class AmberAgentToolDefaultsTest {
     }
 
     @Test
-    fun currentAssistantPrefersApplicationLevelAmberAgent() {
-        val legacyAssistantId = DEFAULT_ASSISTANTS.first { it.id != DEFAULT_ASSISTANT_ID }.id
-        val settings = Settings(assistantId = legacyAssistantId)
+    fun currentAssistantPrefersSelectedAssistant() {
+        val selectedAssistantId = DEFAULT_ASSISTANTS.first { it.id != DEFAULT_ASSISTANT_ID }.id
+        val settings = Settings(assistantId = selectedAssistantId)
+
+        assertEquals(selectedAssistantId, settings.getCurrentAssistant().id)
+    }
+
+    @Test
+    fun currentAssistantFallsBackToDefaultWhenSelectionMissing() {
+        val settings = Settings(assistantId = kotlin.uuid.Uuid.random())
 
         assertEquals(DEFAULT_ASSISTANT_ID, settings.getCurrentAssistant().id)
     }

@@ -1,6 +1,5 @@
 package app.amber.feature.novel.runtime
 
-import app.amber.feature.novel.domain.NovelError
 import app.amber.feature.novel.model.NovelProjectModelPolicy
 import app.amber.feature.novel.model.NovelRunId
 import kotlinx.coroutines.flow.Flow
@@ -44,16 +43,4 @@ class ScriptedNovelModelAdapter(
     override fun cancel(runId: NovelRunId) {
         cancelled += runId.rawValue
     }
-}
-
-class UnavailableNovelModelAdapter : NovelModelRunning {
-    override suspend fun resolveModel(policy: NovelProjectModelPolicy): NovelResolvedModel {
-        throw NovelError.ModelUnavailable("No model configured")
-    }
-
-    override fun start(request: NovelModelRequest): Flow<NovelModelEvent> = flow {
-        emit(NovelModelEvent.Failed("model_unavailable", "No model configured", false))
-    }
-
-    override fun cancel(runId: NovelRunId) = Unit
 }

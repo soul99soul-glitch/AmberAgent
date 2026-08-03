@@ -44,10 +44,6 @@ data class Conversation(
             return messageNodes.mapNotNull { node -> node.messages.getOrNull(node.selectIndex) }
         }
 
-    fun getMessageNodeByMessage(message: UIMessage): MessageNode? {
-        return messageNodes.firstOrNull { node -> node.messages.contains(message) }
-    }
-
     fun getMessageNodeByMessageId(messageId: Uuid): MessageNode? {
         return messageNodes.firstOrNull { node -> node.messages.any { it.id == messageId } }
     }

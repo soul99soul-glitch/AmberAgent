@@ -60,12 +60,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -73,6 +74,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -115,10 +117,15 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.novel.NovelGenerationGranularityRequest
 import app.amber.feature.novel.NovelSessionModeRequest
 import app.amber.feature.novel.domain.NovelCharacterEventMatcher
+import app.amber.feature.novel.domain.NovelParagraphSelection
 import app.amber.feature.novel.model.NovelBranchSyncStatus
 import app.amber.feature.novel.model.NovelCandidateKind
+import app.amber.feature.novel.model.NovelCandidateStatus
 import app.amber.feature.novel.model.NovelChapterId
 import app.amber.feature.novel.model.NovelChapterVersionId
+import app.amber.feature.novel.model.NovelChapterVersionKind
+import app.amber.feature.novel.model.NovelChapterVersionRecord
+import app.amber.feature.novel.model.NovelMaterialId
 import app.amber.feature.novel.model.NovelMaterialKind
 import app.amber.feature.novel.model.NovelProjectLoadAccess
 import app.amber.feature.novel.model.NovelSessionMessageKind
@@ -209,17 +216,14 @@ fun NovelWorkspacePage(
                 navigationIcon = { BackButton() },
                 colors = CustomColors.topBarColors,
                 actions = {
-                    IconButton(
+                    NovelIconButton(
+                        icon = HugeIcons.Settings03,
+                        contentDescription = "小说设置",
                         onClick = {
                             navController.navigate(Screen.NovelSettings(projectId))
                         },
-                    ) {
-                        Icon(
-                            HugeIcons.Settings03,
-                            contentDescription = "小说设置",
-                            tint = workspace.ink,
-                        )
-                    }
+                        tint = workspace.ink,
+                    )
                 },
             )
         },
@@ -316,6 +320,24 @@ fun NovelWorkspacePage(
                                     NovelWorkspaceTab.Living -> NovelLivingTab(viewModel, state)
                                 }
                             }
+                        }
+
+                        val collectSheet = state.collectSheet
+                        if (collectSheet != null) {
+                            NovelCollectCandidateSheet(
+                                sheet = collectSheet,
+                                busy = state.busy,
+                                busyPhase = state.busyPhase,
+                                onDismiss = viewModel::dismissCollectSheet,
+                                onConfirm = { selectedText, appendToCurrent, runStateDelta, replaceTarget ->
+                                    viewModel.confirmCollect(
+                                        selectedText = selectedText,
+                                        appendToCurrent = appendToCurrent,
+                                        runStateDelta = runStateDelta,
+                                        replaceTarget = replaceTarget,
+                                    )
+                                },
+                            )
                         }
                     }
                 }
@@ -437,6 +459,7 @@ private fun NovelChatTab(
                             onClick = { viewModel.startQuickStartSuggestions() },
                             enabled = state.access == NovelProjectLoadAccess.ReadWrite,
                             accent = true,
+                            compact = true,
                         )
                     }
                 }
@@ -455,6 +478,7 @@ private fun NovelChatTab(
                     },
                     enabled = state.access == NovelProjectLoadAccess.ReadWrite,
                     accent = true,
+                    compact = true,
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
@@ -463,8 +487,7 @@ private fun NovelChatTab(
                 key(message.id.rawValue) {
                     val isUser = message.role == NovelSessionRole.User
                     val candidateId = message.candidateID
-                    val candidate = viewModel.availableCandidates()
-                        .firstOrNull { it.id == candidateId }
+                    val candidate = viewModel.proseCandidateForMessage(candidateId)
                     val discussionAsk = remember(message.content) {
                         if (!isUser &&
                             (message.kind == NovelSessionMessageKind.Discussion ||
@@ -506,12 +529,97 @@ private fun NovelChatTab(
                         if (!isUser && candidateId != null && candidate != null) {
                             when (candidate.kind) {
                                 NovelCandidateKind.Prose -> {
-                                    NovelCandidateActionBar(
-                                        primaryLabel = if (state.busy) "收录中…" else "收录到正文",
-                                        targetHint = viewModel.collectTargetHint(),
-                                        enabled = !state.busy && !state.generating,
-                                        onPrimary = { viewModel.collectCandidate(candidateId) },
-                                    )
+                                    val interrupted =
+                                        candidate.status == NovelCandidateStatus.Interrupted
+                                    val collectedHead = viewModel.isCollectHeadCandidate(candidate)
+                                    val blockReason = viewModel.collectBlockReason(candidate)
+                                    val collectable = blockReason == null
+                                    val phase = state.busyPhase
+                                    when {
+                                        collectedHead -> {
+                                            var undoConfirm by remember(candidateId.rawValue) {
+                                                mutableStateOf(false)
+                                            }
+                                            NovelCandidateActionBar(
+                                                primaryLabel = if (state.busy) "处理中…" else "撤销收录",
+                                                targetHint = "这是当前分支最近一次收录 · 可撤销回退正文",
+                                                enabled = !state.busy && !state.generating,
+                                                onPrimary = { undoConfirm = true },
+                                            )
+                                            if (undoConfirm) {
+                                                AlertDialog(
+                                                    onDismissRequest = {
+                                                        if (!state.busy) undoConfirm = false
+                                                    },
+                                                    title = { Text("撤销这次收录？") },
+                                                    text = {
+                                                        Text("正文将回退到收录前；候选不会被物理删除，但分支 head 会后移。")
+                                                    },
+                                                    confirmButton = {
+                                                        TextButton(
+                                                            onClick = {
+                                                                viewModel.undoHead {
+                                                                    undoConfirm = false
+                                                                }
+                                                            },
+                                                            enabled = !state.busy,
+                                                        ) {
+                                                            Text(
+                                                                if (state.busy) "撤销中…" else "撤销",
+                                                                color = workspace.red,
+                                                            )
+                                                        }
+                                                    },
+                                                    dismissButton = {
+                                                        TextButton(
+                                                            onClick = { undoConfirm = false },
+                                                            enabled = !state.busy,
+                                                        ) { Text("取消") }
+                                                    },
+                                                    containerColor = workspace.paper,
+                                                )
+                                            }
+                                        }
+                                        else -> {
+                                            val primaryLabel = when {
+                                                state.busy && phase != null -> phase
+                                                state.busy -> "收录中…"
+                                                interrupted -> "收录已生成部分"
+                                                else -> "收录到正文"
+                                            }
+                                            val hint = blockReason
+                                                ?: viewModel.collectTargetHint(
+                                                    candidate = candidate,
+                                                    isWholeChapter = viewModel
+                                                        .isWholeChapterCollectDefault(candidate),
+                                                    isInterrupted = interrupted,
+                                                )
+                                            NovelCandidateActionBar(
+                                                primaryLabel = primaryLabel,
+                                                targetHint = hint,
+                                                enabled = collectable &&
+                                                    !state.busy &&
+                                                    !state.generating,
+                                                onPrimary = {
+                                                    viewModel.openCollectSheet(candidateId)
+                                                },
+                                                secondaryLabel = if (
+                                                    interrupted &&
+                                                    !state.busy &&
+                                                    !state.generating
+                                                ) {
+                                                    "重新生成"
+                                                } else {
+                                                    null
+                                                },
+                                                onSecondary = if (interrupted) {
+                                                    { viewModel.resendFromCandidate(candidateId) }
+                                                } else {
+                                                    null
+                                                },
+                                            )
+                                        }
+                                    }
                                 }
                                 NovelCandidateKind.Polish -> {
                                     NovelCandidateActionBar(
@@ -617,6 +725,31 @@ private fun NovelChatTab(
                 )
             }
 
+            var showInjectionPanel by remember { mutableStateOf(false) }
+            val injectionReceipt = viewModel.latestInjectionReceipt()
+            val archivable = viewModel.discussionArchivableMessages()
+            val branchNeedsSync = viewModel.currentBranch()?.syncStatus ==
+                NovelBranchSyncStatus.NeedsSync
+            val archiveSheet = state.archiveSheet
+
+            NovelInjectionContextStrip(
+                receipt = injectionReceipt,
+                expanded = showInjectionPanel,
+                onToggle = { showInjectionPanel = !showInjectionPanel },
+                canArchive = archivable.isNotEmpty() &&
+                    !state.busy &&
+                    !state.generating &&
+                    archiveSheet == null &&
+                    !branchNeedsSync &&
+                    state.access == NovelProjectLoadAccess.ReadWrite,
+                archiveHint = when {
+                    archivable.isEmpty() -> "没有可归档的新讨论"
+                    branchNeedsSync -> "请先同步状态"
+                    else -> null
+                },
+                onArchive = { viewModel.openArchiveSheet() },
+            )
+
             NovelComposerBar(
                 draft = state.draft,
                 onDraftChange = viewModel::updateDraft,
@@ -643,6 +776,26 @@ private fun NovelChatTab(
                     else -> "接下去怎么写，或直接说「继续」…"
                 },
             )
+
+            if (archiveSheet != null) {
+                NovelDiscussionArchiveSheet(
+                    messages = archivable,
+                    sheet = archiveSheet,
+                    busy = state.busy,
+                    onDismiss = {
+                        // Allow cancel during distill; block only while confirm-save is in flight.
+                        if (!state.busy || archiveSheet.distilling) {
+                            viewModel.dismissArchiveSheet()
+                        }
+                    },
+                    onRetryDistill = viewModel::retryArchiveDistill,
+                    onSummaryChange = viewModel::updateArchiveSummary,
+                    onDecisionsChange = viewModel::updateArchiveDecisions,
+                    onConfirm = { summary, decisions ->
+                        viewModel.archiveDiscussion(summary, decisions)
+                    },
+                )
+            }
         }
     }
 }
@@ -698,6 +851,304 @@ private fun NovelChatAskUserHost(
     }
 }
 
+/**
+ * Collect sheet: choose append vs new chapter, multi-select paragraphs, then confirm.
+ * Defaults match iOS: whole-chapter → create next; continuation → append current.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NovelCollectCandidateSheet(
+    sheet: NovelCollectSheetState,
+    busy: Boolean,
+    busyPhase: String?,
+    onDismiss: () -> Unit,
+    onConfirm: (
+        selectedText: String,
+        appendToCurrent: Boolean,
+        runStateDelta: Boolean,
+        replaceTarget: Boolean,
+    ) -> Unit,
+) {
+    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val paragraphs = remember(sheet.content) {
+        NovelParagraphSelection.splitParagraphs(sheet.content)
+    }
+    var selectedIds by remember(sheet.candidateId.rawValue, paragraphs) {
+        mutableStateOf(NovelParagraphSelection.defaultSelectedIds(paragraphs))
+    }
+    val canAppend = sheet.chapterCount > 0 && sheet.currentChapterId != null
+    val canReplace = sheet.replaceChapterId != null
+    // Target: replace (regenerate) | append | createNext
+    var targetMode by remember(
+        sheet.candidateId.rawValue,
+        sheet.isWholeChapterDefault,
+        canAppend,
+        canReplace,
+    ) {
+        mutableStateOf(
+            when {
+                canReplace -> 2
+                canAppend && !sheet.isWholeChapterDefault -> 1
+                else -> 0
+            },
+        )
+    }
+    // Default on: update living state. Advanced users can skip for speed.
+    var runStateDelta by remember(sheet.candidateId.rawValue) { mutableStateOf(true) }
+    val selectedText = remember(paragraphs, selectedIds) {
+        NovelParagraphSelection.joinSelected(paragraphs, selectedIds)
+    }
+    val canConfirm = selectedText.isNotBlank() && !busy
+    val confirmLabel = when {
+        busy && busyPhase != null -> busyPhase
+        busy -> "收录中…"
+        targetMode == 2 && canReplace -> {
+            val title = sheet.replaceChapterTitle?.takeIf { it.isNotBlank() }
+            if (title != null) "收录并替换「$title」" else "收录并替换目标章"
+        }
+        targetMode == 1 && canAppend -> "收录并并入当前章"
+        sheet.chapterCount <= 0 -> "收录并创建第 1 章"
+        else -> "收录并新开第 ${sheet.chapterCount + 1} 章"
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = { if (!busy) onDismiss() },
+        sheetState = sheetState,
+        containerColor = workspace.paper,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = when {
+                        canReplace && !sheet.isInterrupted -> "收录重写 · 替换原文"
+                        sheet.isInterrupted -> "收录已生成部分"
+                        else -> "收录到正文"
+                    },
+                    style = type.sessionTitle,
+                    color = workspace.ink,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = when {
+                        canReplace ->
+                            "将替换目标章正文；旧版本保留在数据层（版本历史后续可浏览）。默认会尝试更新剧情状态。"
+                        sheet.isInterrupted ->
+                            "生成已中断 · 可只收录仍想保留的段落；默认会尝试更新剧情状态"
+                        else ->
+                            "选择写入目标与段落；正文会立即写入，并尽量更新剧情 / 设定"
+                    },
+                    style = type.meta,
+                    color = workspace.muted,
+                )
+            }
+
+            NovelCheckRow(
+                checked = runStateDelta,
+                title = "同时更新剧情状态",
+                subtitle = if (runStateDelta) {
+                    "推荐 · 失败时正文仍保留，可到「正文」同步重试"
+                } else {
+                    "快速收录 · 跳过状态更新（设定可能落后）"
+                },
+                onToggle = { runStateDelta = !runStateDelta },
+                enabled = !busy,
+            )
+
+            // Target — full-width choice chips so stacked options share one width.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "写入目标",
+                    style = type.meta,
+                    color = workspace.muted,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (canReplace) {
+                    val replaceLabel = sheet.replaceChapterTitle
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { "替换「$it」" }
+                        ?: "替换目标章"
+                    NovelChipButton(
+                        text = "$replaceLabel · 推荐",
+                        selected = targetMode == 2,
+                        onClick = { targetMode = 2 },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (canAppend && !canReplace) {
+                    val currentLabel = sheet.currentChapterTitle
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { "并入「$it」" }
+                        ?: "并入当前章"
+                    NovelChipButton(
+                        text = currentLabel,
+                        selected = targetMode == 1,
+                        onClick = { targetMode = 1 },
+                        enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                NovelChipButton(
+                    text = if (sheet.chapterCount <= 0) {
+                        "创建第 1 章"
+                    } else {
+                        "新开第 ${sheet.chapterCount + 1} 章"
+                    },
+                    selected = targetMode == 0,
+                    onClick = { targetMode = 0 },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            // Paragraphs
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = buildString {
+                            append("段落 · 已选 ${selectedIds.size}/${paragraphs.size.coerceAtLeast(1)}")
+                            append(" · ${selectedText.length} 字")
+                        },
+                        style = type.meta,
+                        color = workspace.muted,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        NovelQuietButton(
+                            text = "全选",
+                            onClick = {
+                                selectedIds = NovelParagraphSelection.defaultSelectedIds(paragraphs)
+                            },
+                            enabled = !busy && paragraphs.isNotEmpty(),
+                        )
+                        NovelQuietButton(
+                            text = "清空",
+                            onClick = { selectedIds = emptySet() },
+                            enabled = !busy && selectedIds.isNotEmpty(),
+                        )
+                    }
+                }
+                if (paragraphs.isEmpty()) {
+                    Text(
+                        text = "无法分段，将收录全部正文。",
+                        style = type.secondary,
+                        color = workspace.muted,
+                    )
+                } else {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        paragraphs.forEach { paragraph ->
+                            val selected = paragraph.id in selectedIds
+                            val shape = RoundedCornerShape(12.dp)
+                            val markShape = RoundedCornerShape(6.dp)
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(shape)
+                                    .border(
+                                        1.dp,
+                                        if (selected) tokens.ink else workspace.hairline,
+                                        shape,
+                                    )
+                                    .background(
+                                        if (selected) {
+                                            tokens.ink.copy(alpha = 0.06f)
+                                        } else {
+                                            workspace.canvas
+                                        },
+                                    )
+                                    .clickable(enabled = !busy) {
+                                        selectedIds = if (selected) {
+                                            selectedIds - paragraph.id
+                                        } else {
+                                            selectedIds + paragraph.id
+                                        }
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(20.dp)
+                                        .clip(markShape)
+                                        .background(if (selected) tokens.ink else workspace.paper)
+                                        .border(
+                                            1.dp,
+                                            if (selected) tokens.ink else workspace.hairline,
+                                            markShape,
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (selected) {
+                                        Text(
+                                            "✓",
+                                            color = tokens.bg,
+                                            style = type.meta.copy(fontWeight = FontWeight.Bold),
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = paragraph.text,
+                                    style = type.secondary,
+                                    color = workspace.ink,
+                                    maxLines = 6,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (selectedText.isBlank() && paragraphs.isNotEmpty()) {
+                Text(
+                    text = "请至少选择一段正文",
+                    style = type.meta,
+                    color = workspace.red,
+                )
+            }
+
+            NovelPrimaryButton(
+                text = confirmLabel,
+                onClick = {
+                    val text = if (paragraphs.isEmpty()) sheet.content.trim() else selectedText
+                    onConfirm(
+                        text,
+                        targetMode == 1 && canAppend,
+                        runStateDelta,
+                        targetMode == 2 && canReplace,
+                    )
+                },
+                enabled = canConfirm || (paragraphs.isEmpty() && sheet.content.isNotBlank() && !busy),
+                accent = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
 /** Collect / adopt CTAs sit under the assistant bubble, not inside it. */
 @Composable
 private fun NovelCandidateActionBar(
@@ -738,6 +1189,7 @@ private fun NovelCandidateActionBar(
             onClick = onPrimary,
             enabled = enabled,
             accent = true,
+            compact = true,
         )
     }
 }
@@ -840,6 +1292,262 @@ private fun NovelMessageBubble(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NovelInjectionContextStrip(
+    receipt: app.amber.feature.novel.model.NovelInjectionReceiptRecord?,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    canArchive: Boolean,
+    archiveHint: String? = null,
+    onArchive: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NovelQuietButton(
+                text = if (expanded) "收起上下文" else "本次上下文",
+                onClick = onToggle,
+            )
+            Column(horizontalAlignment = Alignment.End) {
+                NovelQuietButton(
+                    text = "归档讨论",
+                    onClick = onArchive,
+                    enabled = canArchive,
+                )
+                if (!canArchive && !archiveHint.isNullOrBlank()) {
+                    Text(
+                        archiveHint,
+                        style = type.meta,
+                        color = workspace.muted,
+                    )
+                }
+            }
+        }
+        if (expanded) {
+            if (receipt == null) {
+                Text(
+                    "尚无生成注入记录。发送讨论或正文后，这里会显示模型实际用到的上下文片段。",
+                    style = type.meta,
+                    color = workspace.muted,
+                )
+            } else {
+                val includedMats = receipt.materialDecisions.count { it.included }
+                val excludedMats = receipt.materialDecisions.count { !it.included }
+                Text(
+                    text = buildString {
+                        append(receipt.promptVersion)
+                        append(" · 预估 ")
+                        append(receipt.estimatedInputTokens)
+                        append(" tokens · 片段 ")
+                        append(receipt.sections.size)
+                        append(" · 资料 +")
+                        append(includedMats)
+                        append(" / -")
+                        append(excludedMats)
+                    },
+                    style = type.meta,
+                    color = workspace.muted,
+                )
+                receipt.sections.take(12).forEach { section ->
+                    Text(
+                        text = "· ${section.label}  (~${section.estimatedTokens})",
+                        style = type.meta,
+                        color = workspace.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (receipt.sections.size > 12) {
+                    Text(
+                        "… 另有 ${receipt.sections.size - 12} 段",
+                        style = type.meta,
+                        color = workspace.muted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NovelDiscussionArchiveSheet(
+    messages: List<app.amber.feature.novel.model.NovelSessionMessageRecord>,
+    sheet: NovelArchiveSheetUi,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onRetryDistill: () -> Unit,
+    onSummaryChange: (String) -> Unit,
+    onDecisionsChange: (List<Pair<String, String>>) -> Unit,
+    onConfirm: (summary: String, decisions: List<Pair<String, String>>) -> Unit,
+) {
+    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val summary = sheet.summary
+    val decisions = sheet.decisions
+    val fieldsEnabled = !busy && !sheet.distilling
+    val canConfirm = summary.isNotBlank() &&
+        decisions.any { it.first.isNotBlank() && it.second.isNotBlank() } &&
+        fieldsEnabled
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = tokens.accent,
+        unfocusedBorderColor = workspace.hairline,
+        focusedContainerColor = workspace.paper,
+        unfocusedContainerColor = workspace.paper,
+        cursorColor = tokens.accent,
+        focusedTextColor = workspace.ink,
+        unfocusedTextColor = workspace.ink,
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = workspace.paper,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                "归档讨论",
+                style = type.sessionTitle,
+                color = workspace.ink,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                buildString {
+                    if (messages.isNotEmpty()) {
+                        append("将最近 ${messages.size} 条讨论蒸馏为「决定」资料；")
+                    } else {
+                        append("将本轮讨论蒸馏为「决定」资料；")
+                    }
+                    append("请确认后再写入，归档后这些消息不再进入注入窗口。")
+                },
+                style = type.meta,
+                color = workspace.muted,
+            )
+            if (sheet.distilling) {
+                Text(
+                    "正在提炼本轮讨论…",
+                    style = type.meta,
+                    color = tokens.accent,
+                )
+            }
+            if (!sheet.distillError.isNullOrBlank()) {
+                Text(sheet.distillError, style = type.meta, color = workspace.red)
+                NovelQuietButton(
+                    text = "重新提炼",
+                    onClick = onRetryDistill,
+                    enabled = fieldsEnabled,
+                )
+                Text(
+                    "也可直接手动填写下方摘要与决定。",
+                    style = type.meta,
+                    color = workspace.muted,
+                )
+            } else if (sheet.draft != null) {
+                Text(
+                    "已自动提炼 ${sheet.draft.decisions.size} 条，可编辑后确认。",
+                    style = type.meta,
+                    color = workspace.green,
+                )
+            }
+            OutlinedTextField(
+                value = summary,
+                onValueChange = { if (it.length <= 300) onSummaryChange(it) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("摘要（≤300 字）") },
+                enabled = fieldsEnabled,
+                colors = fieldColors,
+                minLines = 2,
+            )
+            Text(
+                "决定（至少 1 条）",
+                style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                color = workspace.muted,
+            )
+            decisions.forEachIndexed { index, pair ->
+                OutlinedTextField(
+                    value = pair.first,
+                    onValueChange = { v ->
+                        onDecisionsChange(
+                            decisions.toMutableList().also {
+                                it[index] = v to it[index].second
+                            },
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("主题 ${index + 1}") },
+                    enabled = fieldsEnabled,
+                    singleLine = true,
+                    colors = fieldColors,
+                )
+                OutlinedTextField(
+                    value = pair.second,
+                    onValueChange = { v ->
+                        onDecisionsChange(
+                            decisions.toMutableList().also {
+                                it[index] = it[index].first to v
+                            },
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("决定内容") },
+                    enabled = fieldsEnabled,
+                    colors = fieldColors,
+                    minLines = 2,
+                )
+            }
+            NovelQuietButton(
+                text = "添加决定",
+                onClick = {
+                    onDecisionsChange(decisions + ("" to ""))
+                },
+                enabled = fieldsEnabled && decisions.size < 12,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            ) {
+                NovelGhostButton(
+                    text = "取消",
+                    onClick = onDismiss,
+                    enabled = !busy || sheet.distilling,
+                )
+                NovelPrimaryButton(
+                    text = when {
+                        busy && !sheet.distilling -> "归档中…"
+                        sheet.distilling -> "提炼中…"
+                        else -> "确认归档"
+                    },
+                    onClick = { onConfirm(summary, decisions) },
+                    enabled = canConfirm,
+                    accent = true,
+                    compact = true,
+                )
             }
         }
     }
@@ -1267,13 +1975,20 @@ private fun NovelManuscriptTab(
     // null = 目录；非空 = 全屏阅读（从该章起连续向下）
     var openIndex by remember { mutableStateOf<Int?>(null) }
     var editingIndex by remember { mutableStateOf<Int?>(null) }
+    var historyChapterId by remember {
+        mutableStateOf<NovelChapterId?>(null)
+    }
 
-    BackHandler(enabled = openIndex != null || editingIndex != null) {
+    BackHandler(enabled = openIndex != null || editingIndex != null || historyChapterId != null) {
         when {
+            historyChapterId != null -> historyChapterId = null
             editingIndex != null -> editingIndex = null
             openIndex != null -> openIndex = null
         }
     }
+
+    var showBatchPolish by remember { mutableStateOf(false) }
+    var batchSelected by remember { mutableStateOf(setOf<NovelChapterVersionId>()) }
 
     // TOC under workspace tabs; reading is a true fullscreen Dialog (covers project bar + tabs).
     NovelChapterToc(
@@ -1285,7 +2000,45 @@ private fun NovelManuscriptTab(
         onPolish = { idx ->
             chapters.getOrNull(idx)?.let { viewModel.polishChapter(it.versionId) }
         },
+        onRegenerate = { idx ->
+            chapters.getOrNull(idx)?.let { viewModel.regenerateChapter(it.versionId) }
+        },
+        onVersionHistory = { idx ->
+            chapters.getOrNull(idx)?.let { historyChapterId = it.chapterId }
+        },
+        onDiscard = { idx ->
+            chapters.getOrNull(idx)?.let { viewModel.setChapterDiscarded(it.chapterId, true) }
+        },
+        onBatchPolish = {
+            batchSelected = chapters.map { it.versionId }.toSet()
+            showBatchPolish = true
+        },
+        onContinuityAudit = viewModel::runContinuityAudit,
+        continuityConsistent = state.continuityConsistent,
+        continuityIssues = state.continuityIssues,
+        onClearContinuity = viewModel::clearContinuityAudit,
+        batchPolishResults = state.batchPolishResults,
+        batchPolishRunning = state.batchPolishRunning,
+        onCancelBatch = viewModel::cancelBatchPolish,
+        onClearBatchResults = viewModel::clearBatchPolishResults,
     )
+
+    if (showBatchPolish) {
+        NovelBatchPolishSheet(
+            chapters = chapters,
+            selected = batchSelected,
+            onToggle = { id ->
+                batchSelected = if (id in batchSelected) batchSelected - id else batchSelected + id
+            },
+            busy = state.busy || state.batchPolishRunning,
+            onDismiss = { if (!state.batchPolishRunning) showBatchPolish = false },
+            onStart = {
+                val ordered = chapters.map { it.versionId }.filter { it in batchSelected }
+                showBatchPolish = false
+                viewModel.startBatchPolish(ordered)
+            },
+        )
+    }
 
     val reading = openIndex
     if (reading != null && chapters.isNotEmpty()) {
@@ -1300,6 +2053,15 @@ private fun NovelManuscriptTab(
             onPolish = { polishIdx ->
                 chapters.getOrNull(polishIdx)?.let { viewModel.polishChapter(it.versionId) }
             },
+            onRegenerate = { regenIdx ->
+                chapters.getOrNull(regenIdx)?.let { viewModel.regenerateChapter(it.versionId) }
+            },
+            onVersionHistory = { histIdx ->
+                chapters.getOrNull(histIdx)?.let {
+                    openIndex = null
+                    historyChapterId = it.chapterId
+                }
+            },
         )
     }
 
@@ -1308,10 +2070,29 @@ private fun NovelManuscriptTab(
         NovelChapterEditor(
             chapter = ch,
             busy = state.busy,
-            onCancel = { editingIndex = null },
+            errorMessage = state.errorMessage,
+            onCancel = { if (!state.busy) editingIndex = null },
             onSave = { title, body ->
-                viewModel.saveManualEdit(ch.chapterId, title, body)
-                editingIndex = null
+                viewModel.saveManualEdit(ch.chapterId, title, body) {
+                    editingIndex = null
+                }
+            },
+        )
+    }
+
+    historyChapterId?.let { chapterId ->
+        val versions = viewModel.chapterVersionsFor(chapterId)
+        val headId = branch?.workingChapterSelections
+            ?.firstOrNull { it.chapterID == chapterId }
+            ?.versionID
+        NovelChapterVersionsSheet(
+            versions = versions,
+            headVersionId = headId,
+            busy = state.busy,
+            errorMessage = state.errorMessage,
+            onDismiss = { historyChapterId = null },
+            onRestore = { versionId ->
+                viewModel.restoreChapterVersion(versionId)
             },
         )
     }
@@ -1325,6 +2106,18 @@ private fun NovelChapterToc(
     onOpen: (Int) -> Unit,
     onEdit: (Int) -> Unit,
     onPolish: (Int) -> Unit,
+    onRegenerate: (Int) -> Unit,
+    onVersionHistory: (Int) -> Unit,
+    onDiscard: (Int) -> Unit,
+    onBatchPolish: () -> Unit,
+    onContinuityAudit: () -> Unit,
+    continuityConsistent: Boolean?,
+    continuityIssues: List<NovelContinuityUiIssue>?,
+    onClearContinuity: () -> Unit,
+    batchPolishResults: List<NovelBatchPolishResult>,
+    batchPolishRunning: Boolean,
+    onCancelBatch: () -> Unit,
+    onClearBatchResults: () -> Unit,
 ) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
@@ -1348,6 +2141,64 @@ private fun NovelChapterToc(
             }
         }
 
+        if (batchPolishRunning) {
+            item {
+                NovelBanner(
+                    text = "批量润色进行中…",
+                    tone = WorkspaceTone.Warning,
+                    actionLabel = "取消",
+                    onAction = onCancelBatch,
+                )
+            }
+        } else if (batchPolishResults.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("批量润色报告", style = type.meta.copy(fontWeight = FontWeight.SemiBold), color = workspace.ink)
+                        NovelQuietButton(text = "清除", onClick = onClearBatchResults)
+                    }
+                    batchPolishResults.forEach { r ->
+                        Text("· ${r.title}：${r.outcome}", style = type.meta, color = workspace.muted)
+                    }
+                }
+            }
+        }
+
+        if (continuityIssues != null) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            if (continuityConsistent == true) "一致性：通过" else "一致性：有问题",
+                            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                            color = workspace.ink,
+                        )
+                        NovelQuietButton(text = "关闭", onClick = onClearContinuity)
+                    }
+                    if (continuityIssues.isEmpty()) {
+                        Text("未发现可证实的矛盾。", style = type.meta, color = workspace.muted)
+                    } else {
+                        continuityIssues.forEach { issue ->
+                            Text(
+                                "[${issue.severity}] ${issue.summary}",
+                                style = type.meta,
+                                color = workspace.ink,
+                            )
+                            issue.references.take(3).forEach { ref ->
+                                Text("  · $ref", style = type.meta, color = workspace.muted, maxLines = 2)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
@@ -1364,6 +2215,12 @@ private fun NovelChapterToc(
                     style = type.meta,
                     color = workspace.muted,
                 )
+                if (chapters.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        NovelQuietButton(text = "批量润色", onClick = onBatchPolish)
+                        NovelQuietButton(text = "一致性审计", onClick = onContinuityAudit)
+                    }
+                }
             }
         }
 
@@ -1409,17 +2266,11 @@ private fun NovelChapterToc(
                         )
                     }
                     Box {
-                        IconButton(
+                        NovelIconButton(
+                            icon = HugeIcons.MoreVertical,
+                            contentDescription = "章节操作",
                             onClick = { menuOpen = true },
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                HugeIcons.MoreVertical,
-                                contentDescription = "章节操作",
-                                tint = workspace.muted,
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
+                        )
                         DropdownMenu(
                             expanded = menuOpen,
                             onDismissRequest = { menuOpen = false },
@@ -1445,6 +2296,27 @@ private fun NovelChapterToc(
                                     onPolish(index)
                                 },
                             )
+                            DropdownMenuItem(
+                                text = { Text("重写本章") },
+                                onClick = {
+                                    menuOpen = false
+                                    onRegenerate(index)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("版本历史") },
+                                onClick = {
+                                    menuOpen = false
+                                    onVersionHistory(index)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("废弃本章") },
+                                onClick = {
+                                    menuOpen = false
+                                    onDiscard(index)
+                                },
+                            )
                         }
                     }
                 }
@@ -1452,6 +2324,174 @@ private fun NovelChapterToc(
         }
         item { Spacer(Modifier.height(28.dp)) }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NovelBatchPolishSheet(
+    chapters: List<NovelChapterItem>,
+    selected: Set<NovelChapterVersionId>,
+    onToggle: (NovelChapterVersionId) -> Unit,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onStart: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = workspace.paper,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("批量整章润色", style = type.sessionTitle, color = workspace.ink, fontWeight = FontWeight.SemiBold)
+            Text(
+                "按目录顺序串行润色并尝试采用；若事实漂移则跳过该章（不改原文）。",
+                style = type.meta,
+                color = workspace.muted,
+            )
+            chapters.forEach { ch ->
+                NovelCheckRow(
+                    checked = ch.versionId in selected,
+                    title = ch.displayTitle,
+                    subtitle = "约 ${ch.charCount} 字",
+                    onToggle = { onToggle(ch.versionId) },
+                    enabled = !busy,
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            ) {
+                NovelGhostButton(text = "取消", onClick = onDismiss, enabled = !busy)
+                NovelPrimaryButton(
+                    text = "开始（${selected.size}）",
+                    onClick = onStart,
+                    enabled = !busy && selected.isNotEmpty(),
+                    accent = true,
+                    compact = true,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NovelChapterVersionsSheet(
+    versions: List<NovelChapterVersionRecord>,
+    headVersionId: NovelChapterVersionId?,
+    busy: Boolean,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onRestore: (NovelChapterVersionId) -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var preview by remember(versions) { mutableStateOf(versions.firstOrNull()) }
+
+    ModalBottomSheet(
+        onDismissRequest = { if (!busy) onDismiss() },
+        sheetState = sheetState,
+        containerColor = workspace.paper,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "版本历史",
+                style = type.sessionTitle,
+                color = workspace.ink,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "仅可恢复与当前 head 同一事实兼容链的版本（通常为整章润色或同链恢复）。手改 / 替换收录 / 追加会换事实链，不可一键恢复。",
+                style = type.meta,
+                color = workspace.muted,
+            )
+            if (!errorMessage.isNullOrBlank()) {
+                Text(errorMessage, style = type.meta, color = workspace.red)
+            }
+            if (versions.isEmpty()) {
+                Text("暂无版本记录", style = type.body, color = workspace.muted)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    versions.forEach { version ->
+                        val isHead = version.id == headVersionId
+                        val selected = preview?.id == version.id
+                        NovelChipButton(
+                            text = buildString {
+                                append(chapterVersionKindLabel(version.kind))
+                                append(" · ")
+                                append(version.content.length)
+                                append(" 字")
+                                if (isHead) append(" · 当前")
+                            },
+                            selected = selected,
+                            onClick = { preview = version },
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                val shown = preview
+                if (shown != null) {
+                    Text(
+                        text = shown.title.ifBlank { "（无标题）" },
+                        style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                        color = workspace.ink,
+                    )
+                    Text(
+                        text = shown.content.ifBlank { "（空）" },
+                        style = type.body,
+                        color = workspace.ink,
+                        maxLines = 12,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val isHead = shown.id == headVersionId
+                    NovelPrimaryButton(
+                        text = when {
+                            busy -> "恢复中…"
+                            isHead -> "已是当前版本"
+                            else -> "恢复为此版本"
+                        },
+                        onClick = { onRestore(shown.id) },
+                        enabled = !busy && !isHead,
+                        accent = true,
+                        compact = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            NovelGhostButton(
+                text = "关闭",
+                onClick = onDismiss,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+private fun chapterVersionKindLabel(kind: NovelChapterVersionKind): String = when (kind) {
+    NovelChapterVersionKind.Collected -> "收录"
+    NovelChapterVersionKind.ManualEdit -> "手改"
+    NovelChapterVersionKind.Polish -> "润色"
+    NovelChapterVersionKind.Restore -> "恢复"
 }
 
 /**
@@ -1500,6 +2540,8 @@ private fun NovelFullscreenReader(
     onBackToToc: () -> Unit,
     onEdit: (Int) -> Unit,
     onPolish: (Int) -> Unit,
+    onRegenerate: (Int) -> Unit,
+    onVersionHistory: (Int) -> Unit,
 ) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
@@ -1582,13 +2624,11 @@ private fun NovelFullscreenReader(
                         .padding(top = 2.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(onClick = { dismissWithAnim() }) {
-                        Icon(
-                            HugeIcons.ArrowLeft01,
-                            contentDescription = "返回目录",
-                            tint = workspace.muted,
-                        )
-                    }
+                    NovelIconButton(
+                        icon = HugeIcons.ArrowLeft01,
+                        contentDescription = "返回目录",
+                        onClick = { dismissWithAnim() },
+                    )
                     Column(
                         Modifier
                             .weight(1f)
@@ -1624,13 +2664,11 @@ private fun NovelFullscreenReader(
                         )
                     }
                     Box {
-                        IconButton(onClick = { menuOpen = true }) {
-                            Icon(
-                                HugeIcons.MoreVertical,
-                                contentDescription = "菜单",
-                                tint = workspace.muted,
-                            )
-                        }
+                        NovelIconButton(
+                            icon = HugeIcons.MoreVertical,
+                            contentDescription = "菜单",
+                            onClick = { menuOpen = true },
+                        )
                         DropdownMenu(
                             expanded = menuOpen,
                             onDismissRequest = { menuOpen = false },
@@ -1654,6 +2692,20 @@ private fun NovelFullscreenReader(
                                 onClick = {
                                     menuOpen = false
                                     onPolish(currentIndex)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("重写本章") },
+                                onClick = {
+                                    menuOpen = false
+                                    onRegenerate(currentIndex)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("版本历史") },
+                                onClick = {
+                                    menuOpen = false
+                                    onVersionHistory(currentIndex)
                                 },
                             )
                         }
@@ -1759,6 +2811,7 @@ private fun NovelFullscreenReader(
 private fun NovelChapterEditor(
     chapter: NovelChapterItem,
     busy: Boolean,
+    errorMessage: String? = null,
     onCancel: () -> Unit,
     onSave: (title: String, body: String) -> Unit,
 ) {
@@ -1773,30 +2826,193 @@ private fun NovelChapterEditor(
     )
     var title by remember(chapter.versionId.rawValue) { mutableStateOf(chapter.title) }
     var body by remember(chapter.versionId.rawValue) { mutableStateOf(chapter.content) }
+    var showFindReplace by remember(chapter.versionId.rawValue) { mutableStateOf(false) }
+    var findQuery by remember(chapter.versionId.rawValue) { mutableStateOf("") }
+    var replaceWith by remember(chapter.versionId.rawValue) { mutableStateOf("") }
+    // -1 = no active match yet; first "下一个" lands on index 0.
+    var matchIndex by remember(chapter.versionId.rawValue) { mutableStateOf(-1) }
+    var statusHint by remember(chapter.versionId.rawValue) { mutableStateOf<String?>(null) }
+
+    fun matchStarts(haystack: String, needle: String): List<Int> {
+        if (needle.isEmpty()) return emptyList()
+        val starts = mutableListOf<Int>()
+        var from = 0
+        while (from <= haystack.length) {
+            val at = haystack.indexOf(needle, startIndex = from, ignoreCase = false)
+            if (at < 0) break
+            starts += at
+            from = at + needle.length.coerceAtLeast(1)
+        }
+        return starts
+    }
+
+    fun findNext(forward: Boolean = true) {
+        val starts = matchStarts(body, findQuery)
+        if (starts.isEmpty()) {
+            matchIndex = -1
+            statusHint = if (findQuery.isEmpty()) "输入要查找的内容" else "未找到「$findQuery」"
+            return
+        }
+        val next = when {
+            matchIndex < 0 -> if (forward) 0 else starts.lastIndex
+            forward -> (matchIndex + 1).mod(starts.size)
+            else -> (matchIndex - 1).mod(starts.size)
+        }
+        matchIndex = next
+        statusHint = "第 ${next + 1}/${starts.size} 处"
+    }
+
+    fun replaceCurrent() {
+        val starts = matchStarts(body, findQuery)
+        if (starts.isEmpty() || findQuery.isEmpty()) {
+            statusHint = if (findQuery.isEmpty()) "输入要查找的内容" else "未找到「$findQuery」"
+            return
+        }
+        // If user never navigated, replace the first match.
+        val idx = if (matchIndex < 0) 0 else matchIndex.coerceIn(0, starts.lastIndex)
+        val at = starts[idx]
+        body = body.replaceRange(at, at + findQuery.length, replaceWith)
+        // After replace, re-scan and advance to next remaining match at same ordinal.
+        val nextStarts = matchStarts(body, findQuery)
+        matchIndex = if (nextStarts.isEmpty()) -1 else idx.coerceAtMost(nextStarts.lastIndex)
+        statusHint = if (nextStarts.isEmpty()) {
+            "已替换 · 无更多匹配"
+        } else {
+            "已替换 · 第 ${matchIndex + 1}/${nextStarts.size} 处"
+        }
+    }
+
+    fun replaceAll() {
+        if (findQuery.isEmpty()) {
+            statusHint = "输入要查找的内容"
+            return
+        }
+        val starts = matchStarts(body, findQuery)
+        if (starts.isEmpty()) {
+            statusHint = "未找到「$findQuery」"
+            return
+        }
+        // Replace from the end so earlier offsets stay valid.
+        var next = body
+        for (at in starts.asReversed()) {
+            next = next.replaceRange(at, at + findQuery.length, replaceWith)
+        }
+        body = next
+        matchIndex = -1
+        statusHint = "已全部替换 ${starts.size} 处"
+    }
 
     Column(
         Modifier
             .fillMaxSize()
             .navigationBarsPadding()
+            .imePadding()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onCancel) {
-                Text("取消", color = workspace.muted)
-            }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            NovelQuietButton(
+                text = "取消",
+                onClick = onCancel,
+                enabled = !busy,
+            )
             Text(
                 text = "编辑 · ${chapter.ordinalLabel}",
                 style = type.body.copy(fontWeight = FontWeight.SemiBold),
                 color = workspace.ink,
                 modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            NovelQuietButton(
+                text = if (showFindReplace) "收起" else "查找",
+                onClick = {
+                    showFindReplace = !showFindReplace
+                    if (!showFindReplace) statusHint = null
+                },
+                enabled = !busy,
             )
             NovelPrimaryButton(
                 text = if (busy) "保存中…" else "保存",
                 onClick = { onSave(title.trim(), body) },
                 enabled = !busy,
                 accent = true,
+                compact = true,
             )
+        }
+        if (!errorMessage.isNullOrBlank()) {
+            Text(errorMessage, style = type.meta, color = workspace.red)
+        }
+        if (showFindReplace) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = workspace.paper,
+                border = BorderStroke(1.dp, workspace.hairline),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(
+                    Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = findQuery,
+                        onValueChange = {
+                            findQuery = it
+                            matchIndex = -1
+                            statusHint = null
+                        },
+                        label = { Text("查找") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        enabled = !busy,
+                        colors = fieldColors,
+                    )
+                    OutlinedTextField(
+                        value = replaceWith,
+                        onValueChange = { replaceWith = it },
+                        label = { Text("替换为") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        enabled = !busy,
+                        colors = fieldColors,
+                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NovelQuietButton(
+                            text = "上一个",
+                            onClick = { findNext(forward = false) },
+                            enabled = !busy && findQuery.isNotEmpty(),
+                        )
+                        NovelQuietButton(
+                            text = "下一个",
+                            onClick = { findNext(forward = true) },
+                            enabled = !busy && findQuery.isNotEmpty(),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        NovelQuietButton(
+                            text = "替换",
+                            onClick = { replaceCurrent() },
+                            enabled = !busy && findQuery.isNotEmpty(),
+                        )
+                        NovelPrimaryButton(
+                            text = "全部",
+                            onClick = { replaceAll() },
+                            enabled = !busy && findQuery.isNotEmpty(),
+                            accent = false,
+                            compact = true,
+                        )
+                    }
+                    if (!statusHint.isNullOrBlank()) {
+                        Text(statusHint!!, style = type.meta, color = workspace.muted)
+                    }
+                }
+            }
         }
         OutlinedTextField(
             value = title,
@@ -1806,16 +3022,25 @@ private fun NovelChapterEditor(
             shape = RoundedCornerShape(12.dp),
             colors = fieldColors,
             singleLine = true,
+            enabled = !busy,
         )
         OutlinedTextField(
             value = body,
-            onValueChange = { body = it },
+            onValueChange = {
+                body = it
+                // Manual body edits invalidate match position.
+                if (matchIndex >= 0) {
+                    matchIndex = -1
+                    statusHint = null
+                }
+            },
             label = { Text("正文") },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             shape = RoundedCornerShape(12.dp),
             colors = fieldColors,
+            enabled = !busy,
         )
     }
 }
@@ -1835,6 +3060,18 @@ private data class LivingDetail(
     val title: String,
     val body: String,
     val footer: String? = null,
+    val materialId: NovelMaterialId? = null,
+    val kind: NovelMaterialKind? = null,
+) {
+    val editable: Boolean get() = materialId != null && kind != null
+}
+
+private data class LivingMaterialDraft(
+    val materialId: NovelMaterialId? = null,
+    val kind: NovelMaterialKind,
+    val title: String,
+    val content: String,
+    val kindLocked: Boolean = false,
 )
 
 @Composable
@@ -1845,6 +3082,7 @@ private fun NovelLivingTab(
     val document = state.document ?: return
     val workspace = workspaceColors()
     val type = LocalAmberType.current
+    val tokens = LocalAmberTokens.current
 
     val characters = document.materials.filter {
         !it.isDeleted && it.kind is NovelMaterialKind.Character
@@ -1852,16 +3090,26 @@ private fun NovelLivingTab(
     val worlds = document.materials.filter {
         !it.isDeleted && it.kind is NovelMaterialKind.World
     }
-    val outline = document.materials.firstOrNull {
+    val outlineMaterial = document.materials.firstOrNull {
         !it.isDeleted && it.kind is NovelMaterialKind.MasterOutline
-    }?.let { m ->
-        document.materialRevisions.firstOrNull { it.id == m.currentRevisionID }?.content
-    }.orEmpty()
-    val requirements = document.materials.firstOrNull {
+    }
+    val outlineRevision = outlineMaterial?.let { m ->
+        document.materialRevisions.firstOrNull { it.id == m.currentRevisionID }
+    }
+    val outline = outlineRevision?.content.orEmpty()
+    val requirementsMaterial = document.materials.firstOrNull {
         !it.isDeleted && it.kind is NovelMaterialKind.WritingRequirements
-    }?.let { m ->
-        document.materialRevisions.firstOrNull { it.id == m.currentRevisionID }?.content
-    }.orEmpty()
+    }
+    val requirementsRevision = requirementsMaterial?.let { m ->
+        document.materialRevisions.firstOrNull { it.id == m.currentRevisionID }
+    }
+    val requirements = requirementsRevision?.content.orEmpty()
+    val decisions = document.materials.filter {
+        !it.isDeleted && it.kind is NovelMaterialKind.DecisionLog
+    }
+    val customs = document.materials.filter {
+        !it.isDeleted && it.kind is NovelMaterialKind.Custom
+    }
     val branch = viewModel.currentBranch()
     val snap = document.stateSnapshots.firstOrNull { it.id == branch?.currentStateSnapshotID }
     val branchEvents = snap?.eventIDs
@@ -1871,8 +3119,103 @@ private fun NovelLivingTab(
 
     var section by remember { mutableStateOf(LivingSection.Characters) }
     var detail by remember { mutableStateOf<LivingDetail?>(null) }
+    var editor by remember { mutableStateOf<LivingMaterialDraft?>(null) }
+    var pendingDelete by remember { mutableStateOf<LivingDetail?>(null) }
 
-    BackHandler(enabled = detail != null) { detail = null }
+    // Keep open detail in sync after save/delete (document revision bump).
+    LaunchedEffect(document.project.revision, detail?.materialId) {
+        val open = detail ?: return@LaunchedEffect
+        val mid = open.materialId ?: return@LaunchedEffect
+        val material = document.materials.firstOrNull { it.id == mid && !it.isDeleted }
+        if (material == null) {
+            detail = null
+            return@LaunchedEffect
+        }
+        val revision = document.materialRevisions.firstOrNull { it.id == material.currentRevisionID }
+            ?: return@LaunchedEffect
+        val title = revision.title
+        val body = revision.content.ifBlank { "（空）" }
+        val footer = if (material.kind is NovelMaterialKind.Character) {
+            val matches = NovelCharacterEventMatcher.matchExperiences(
+                characterTitle = title,
+                events = branchEvents,
+            )
+            if (matches.isNotEmpty()) {
+                matches.take(5).joinToString("\n") { "· ${it.event.summary}" }
+            } else {
+                null
+            }
+        } else {
+            open.footer
+        }
+        if (title != open.title || body != open.body || footer != open.footer || material.kind != open.kind) {
+            detail = open.copy(
+                title = title,
+                body = body,
+                footer = footer,
+                kind = material.kind,
+            )
+        }
+    }
+
+    BackHandler(enabled = detail != null && editor == null) { detail = null }
+
+    editor?.let { draft ->
+        LivingMaterialEditorSheet(
+            draft = draft,
+            busy = state.busy,
+            errorMessage = state.errorMessage,
+            onDismiss = { if (!state.busy) editor = null },
+            onSave = { kind, title, content ->
+                viewModel.reviseMaterial(
+                    // When kind is locked, never remap DecisionLog → Custom via free-create chips.
+                    kind = if (draft.kindLocked) draft.kind else kind,
+                    title = title,
+                    content = content.trim(),
+                    materialId = draft.materialId,
+                    onSuccess = { editor = null },
+                )
+            },
+        )
+    }
+
+    pendingDelete?.let { target ->
+        val mid = target.materialId
+        if (mid != null) {
+            AlertDialog(
+                onDismissRequest = { if (!state.busy) pendingDelete = null },
+                title = { Text("删除资料？") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("「${target.title}」将从设定列表移除。已关联的事件引用会保留 ID，但资料不再展示。")
+                        state.errorMessage?.takeIf { it.isNotBlank() }?.let { err ->
+                            Text(err, color = workspace.red, style = type.meta)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            viewModel.deleteMaterial(mid) {
+                                pendingDelete = null
+                                detail = null
+                            }
+                        },
+                        enabled = !state.busy,
+                    ) {
+                        Text(if (state.busy) "删除中…" else "删除", color = workspace.red)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { pendingDelete = null },
+                        enabled = !state.busy,
+                    ) { Text("取消") }
+                },
+                containerColor = workspace.paper,
+            )
+        }
+    }
 
     // Single AnimatedContent owns list↔detail so open/close share a continuous push/pop.
     AnimatedContent(
@@ -1892,7 +3235,23 @@ private fun NovelLivingTab(
         if (currentDetail != null) {
             LivingDetailPane(
                 detail = currentDetail,
+                busy = state.busy,
                 onBack = { detail = null },
+                onEdit = {
+                    val mid = currentDetail.materialId
+                    val kind = currentDetail.kind
+                    if (mid != null && kind != null) {
+                        editor = LivingMaterialDraft(
+                            materialId = mid,
+                            kind = kind,
+                            title = currentDetail.title,
+                            content = currentDetail.body.takeUnless { it == "（空）" }.orEmpty(),
+                            // DecisionLog / fixed kinds must stay immutable on save.
+                            kindLocked = true,
+                        )
+                    }
+                },
+                onDelete = { pendingDelete = currentDetail },
             )
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -1902,7 +3261,7 @@ private fun NovelLivingTab(
                         LivingSection.Characters to characters.size,
                         LivingSection.World to worlds.size,
                         LivingSection.Plot to (1 + if (events.isNotEmpty()) 1 else 0),
-                        LivingSection.More to 1,
+                        LivingSection.More to (1 + decisions.size + customs.size),
                     ),
                     onSelect = { section = it },
                     modifier = Modifier
@@ -1933,19 +3292,32 @@ private fun NovelLivingTab(
                                 Text(msg, color = workspace.red, style = type.meta)
                             }
                         }
+                        state.statusMessage?.let { msg ->
+                            item {
+                                Text(msg, color = tokens.accent, style = type.meta)
+                            }
+                        }
 
                         when (sec) {
                             LivingSection.Characters -> {
                                 item {
-                                    Text(
-                                        "角色",
-                                        style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                                        color = workspace.muted,
+                                    LivingSectionHeader(
+                                        title = "角色",
+                                        actionLabel = "新建",
+                                        onAction = {
+                                            editor = LivingMaterialDraft(
+                                                kind = NovelMaterialKind.Character,
+                                                title = "",
+                                                content = "",
+                                                kindLocked = true,
+                                            )
+                                        },
+                                        enabled = !state.busy,
                                     )
                                 }
                                 if (characters.isEmpty()) {
                                     item {
-                                        LivingEmptyHint("还没有人物档案。确认设定建议后会出现在这里。")
+                                        LivingEmptyHint("还没有人物档案。确认设定建议或点「新建」添加。")
                                     }
                                 } else {
                                     item {
@@ -1982,6 +3354,8 @@ private fun NovelLivingTab(
                                                             } else {
                                                                 null
                                                             },
+                                                            materialId = material.id,
+                                                            kind = material.kind,
                                                         )
                                                     },
                                                 )
@@ -1993,14 +3367,22 @@ private fun NovelLivingTab(
 
                             LivingSection.World -> {
                                 item {
-                                    Text(
-                                        "世界观",
-                                        style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                                        color = workspace.muted,
+                                    LivingSectionHeader(
+                                        title = "世界观",
+                                        actionLabel = "新建",
+                                        onAction = {
+                                            editor = LivingMaterialDraft(
+                                                kind = NovelMaterialKind.World,
+                                                title = "",
+                                                content = "",
+                                                kindLocked = true,
+                                            )
+                                        },
+                                        enabled = !state.busy,
                                     )
                                 }
                                 if (worlds.isEmpty()) {
-                                    item { LivingEmptyHint("还没有世界观资料。") }
+                                    item { LivingEmptyHint("还没有世界观资料。点「新建」添加。") }
                                 } else {
                                     item {
                                         LivingListCard {
@@ -2019,6 +3401,8 @@ private fun NovelLivingTab(
                                                         detail = LivingDetail(
                                                             title = title,
                                                             body = body.ifBlank { "（空）" },
+                                                            materialId = material.id,
+                                                            kind = material.kind,
                                                         )
                                                     },
                                                 )
@@ -2030,23 +3414,51 @@ private fun NovelLivingTab(
 
                             LivingSection.Plot -> {
                                 item {
-                                    Text(
-                                        "剧情",
-                                        style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                                        color = workspace.muted,
+                                    LivingSectionHeader(
+                                        title = "剧情",
+                                        actionLabel = if (outlineMaterial == null) "新建总纲" else null,
+                                        onAction = if (outlineMaterial == null) {
+                                            {
+                                                editor = LivingMaterialDraft(
+                                                    kind = NovelMaterialKind.MasterOutline,
+                                                    title = "总纲",
+                                                    content = "",
+                                                    kindLocked = true,
+                                                )
+                                            }
+                                        } else {
+                                            null
+                                        },
+                                        enabled = !state.busy,
                                     )
                                 }
                                 item {
                                     LivingListCard {
                                         LivingListRow(
-                                            title = "总纲",
-                                            subtitle = if (outline.isBlank()) "（空）" else outline.take(40),
+                                            title = outlineRevision?.title ?: "总纲",
+                                            subtitle = if (outline.isBlank()) {
+                                                if (outlineMaterial == null) "（空）· 点按新建" else "（空）"
+                                            } else {
+                                                outline.take(40)
+                                            },
                                             showDivider = true,
                                             onClick = {
-                                                detail = LivingDetail(
-                                                    "总纲",
-                                                    outline.ifBlank { "（空）" },
-                                                )
+                                                val material = outlineMaterial
+                                                if (material == null) {
+                                                    editor = LivingMaterialDraft(
+                                                        kind = NovelMaterialKind.MasterOutline,
+                                                        title = "总纲",
+                                                        content = "",
+                                                        kindLocked = true,
+                                                    )
+                                                } else {
+                                                    detail = LivingDetail(
+                                                        title = outlineRevision?.title ?: "总纲",
+                                                        body = outline.ifBlank { "（空）" },
+                                                        materialId = material.id,
+                                                        kind = material.kind,
+                                                    )
+                                                }
                                             },
                                         )
                                         LivingListRow(
@@ -2094,29 +3506,97 @@ private fun NovelLivingTab(
 
                             LivingSection.More -> {
                                 item {
-                                    Text(
-                                        "更多",
-                                        style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                                        color = workspace.muted,
+                                    LivingSectionHeader(
+                                        title = "更多",
+                                        actionLabel = "新建",
+                                        onAction = {
+                                            editor = LivingMaterialDraft(
+                                                kind = NovelMaterialKind.Custom("自定义"),
+                                                title = "",
+                                                content = "",
+                                                kindLocked = false,
+                                            )
+                                        },
+                                        enabled = !state.busy,
                                     )
                                 }
                                 item {
                                     LivingListCard {
                                         LivingListRow(
-                                            title = "写作要求",
+                                            title = requirementsRevision?.title ?: "写作要求",
                                             subtitle = if (requirements.isBlank()) {
-                                                "（空）"
+                                                if (requirementsMaterial == null) {
+                                                    "（空）· 点按新建"
+                                                } else {
+                                                    "（空）"
+                                                }
                                             } else {
                                                 requirements.take(40)
                                             },
-                                            showDivider = false,
+                                            showDivider = decisions.isNotEmpty() || customs.isNotEmpty(),
                                             onClick = {
-                                                detail = LivingDetail(
-                                                    "写作要求",
-                                                    requirements.ifBlank { "（空）" },
-                                                )
+                                                val material = requirementsMaterial
+                                                if (material == null) {
+                                                    editor = LivingMaterialDraft(
+                                                        kind = NovelMaterialKind.WritingRequirements,
+                                                        title = "写作要求",
+                                                        content = "",
+                                                        kindLocked = true,
+                                                    )
+                                                } else {
+                                                    detail = LivingDetail(
+                                                        title = requirementsRevision?.title
+                                                            ?: "写作要求",
+                                                        body = requirements.ifBlank { "（空）" },
+                                                        materialId = material.id,
+                                                        kind = material.kind,
+                                                    )
+                                                }
                                             },
                                         )
+                                        decisions.forEachIndexed { i, material ->
+                                            val revision = document.materialRevisions
+                                                .firstOrNull { it.id == material.currentRevisionID }
+                                            val title = revision?.title ?: "决定"
+                                            val body = revision?.content.orEmpty()
+                                            LivingListRow(
+                                                title = "决定 · $title",
+                                                subtitle = body.lineSequence().firstOrNull {
+                                                    it.isNotBlank()
+                                                }?.trim()?.take(40) ?: "查看",
+                                                showDivider = i < decisions.lastIndex ||
+                                                    customs.isNotEmpty(),
+                                                onClick = {
+                                                    detail = LivingDetail(
+                                                        title = title,
+                                                        body = body.ifBlank { "（空）" },
+                                                        materialId = material.id,
+                                                        kind = material.kind,
+                                                    )
+                                                },
+                                            )
+                                        }
+                                        customs.forEachIndexed { i, material ->
+                                            val revision = document.materialRevisions
+                                                .firstOrNull { it.id == material.currentRevisionID }
+                                            val title = revision?.title ?: "自定义"
+                                            val body = revision?.content.orEmpty()
+                                            LivingListRow(
+                                                title = title,
+                                                subtitle = body.lineSequence().firstOrNull {
+                                                    it.isNotBlank()
+                                                }?.trim()?.take(40) ?: "查看",
+                                                showDivider = i < customs.lastIndex,
+                                                onClick = {
+                                                    detail = LivingDetail(
+                                                        title = title,
+                                                        body = body.ifBlank { "（空）" },
+                                                        materialId = material.id,
+                                                        kind = material.kind,
+                                                    )
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -2131,15 +3611,41 @@ private fun NovelLivingTab(
 }
 
 @Composable
+private fun LivingSectionHeader(
+    title: String,
+    actionLabel: String?,
+    onAction: (() -> Unit)?,
+    enabled: Boolean,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+            color = workspace.muted,
+        )
+        if (actionLabel != null && onAction != null) {
+            NovelQuietButton(
+                text = actionLabel,
+                onClick = onAction,
+                enabled = enabled,
+            )
+        }
+    }
+}
+
+@Composable
 private fun LivingSectionFilters(
     selected: LivingSection,
     counts: Map<LivingSection, Int>,
     onSelect: (LivingSection) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val workspace = workspaceColors()
-    val type = LocalAmberType.current
-    val tokens = LocalAmberTokens.current
     Row(
         modifier = modifier.horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2153,38 +3659,12 @@ private fun LivingSectionFilters(
             } else {
                 sec.label
             }
-            val fill by animateColorAsState(
-                targetValue = if (isOn) tokens.ink else Color.Transparent,
-                animationSpec = tween(NovelMotion.FastMs, easing = FastOutSlowInEasing),
-                label = "livingChipFill",
+            NovelChipButton(
+                text = label,
+                selected = isOn,
+                onClick = { onSelect(sec) },
+                compact = true,
             )
-            val stroke by animateColorAsState(
-                targetValue = if (isOn) tokens.ink else workspace.hairline,
-                animationSpec = tween(NovelMotion.FastMs, easing = FastOutSlowInEasing),
-                label = "livingChipStroke",
-            )
-            val labelColor by animateColorAsState(
-                targetValue = if (isOn) tokens.bg else workspace.muted,
-                animationSpec = tween(NovelMotion.FastMs, easing = FastOutSlowInEasing),
-                label = "livingChipLabel",
-            )
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(fill)
-                    .border(1.dp, stroke, RoundedCornerShape(999.dp))
-                    .clickable { onSelect(sec) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = label,
-                    style = type.meta.copy(
-                        fontWeight = if (isOn) FontWeight.SemiBold else FontWeight.Medium,
-                    ),
-                    color = labelColor,
-                )
-            }
         }
     }
 }
@@ -2302,7 +3782,10 @@ private fun LivingEmptyHint(text: String) {
 @Composable
 private fun LivingDetailPane(
     detail: LivingDetail,
+    busy: Boolean,
     onBack: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
 ) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
@@ -2318,13 +3801,12 @@ private fun LivingDetailPane(
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    HugeIcons.ArrowLeft01,
-                    contentDescription = "返回",
-                    tint = workspace.ink,
-                )
-            }
+            NovelIconButton(
+                icon = HugeIcons.ArrowLeft01,
+                contentDescription = "返回",
+                onClick = onBack,
+                tint = workspace.ink,
+            )
             Text(
                 text = detail.title,
                 style = type.body.copy(fontWeight = FontWeight.SemiBold),
@@ -2333,6 +3815,19 @@ private fun LivingDetailPane(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (detail.editable) {
+                NovelQuietButton(
+                    text = "编辑",
+                    onClick = onEdit,
+                    enabled = !busy,
+                )
+                NovelQuietButton(
+                    text = "删除",
+                    onClick = onDelete,
+                    enabled = !busy,
+                    danger = true,
+                )
+            }
         }
         Column(
             Modifier
@@ -2359,9 +3854,210 @@ private fun LivingDetailPane(
                     color = workspace.muted,
                 )
             }
+            if (!detail.editable) {
+                Text(
+                    text = "此条为只读剧情摘要，不可直接编辑。",
+                    style = type.meta,
+                    color = workspace.muted,
+                )
+            }
             Spacer(Modifier.height(32.dp))
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LivingMaterialEditorSheet(
+    draft: LivingMaterialDraft,
+    busy: Boolean,
+    errorMessage: String? = null,
+    onDismiss: () -> Unit,
+    onSave: (kind: NovelMaterialKind, title: String, content: String) -> Unit,
+) {
+    val workspace = workspaceColors()
+    val tokens = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var title by remember(draft.materialId, draft.title) { mutableStateOf(draft.title) }
+    var content by remember(draft.materialId, draft.content) { mutableStateOf(draft.content) }
+    var kindChoice by remember(draft.materialId, draft.kind) {
+        mutableStateOf(livingKindChoiceOf(draft.kind))
+    }
+    var customKindLabel by remember(draft.materialId, draft.kind) {
+        mutableStateOf(
+            (draft.kind as? NovelMaterialKind.Custom)?.value?.takeIf { it.isNotBlank() } ?: "自定义",
+        )
+    }
+    val resolvedKind = livingKindFromChoice(kindChoice, customKindLabel)
+    val canSave = title.isNotBlank() && !busy
+    val isCreate = draft.materialId == null
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = tokens.accent,
+        unfocusedBorderColor = workspace.hairline,
+        focusedContainerColor = workspace.paper,
+        unfocusedContainerColor = workspace.paper,
+        cursorColor = tokens.accent,
+        focusedTextColor = workspace.ink,
+        unfocusedTextColor = workspace.ink,
+        focusedPlaceholderColor = workspace.muted,
+        unfocusedPlaceholderColor = workspace.muted,
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = workspace.paper,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = if (isCreate) "新建资料" else "编辑资料",
+                style = type.sessionTitle,
+                color = workspace.ink,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (!errorMessage.isNullOrBlank()) {
+                Text(
+                    text = errorMessage,
+                    style = type.meta,
+                    color = workspace.red,
+                )
+            }
+            if (!draft.kindLocked) {
+                Text(
+                    text = "类型",
+                    style = type.meta,
+                    color = workspace.muted,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                // Free create: avoid spawning hidden duplicate MasterOutline / WritingRequirements
+                // (those have dedicated Plot / More rows that only show firstOrNull).
+                val freeChoices = listOf(
+                    LivingKindChoice.Character,
+                    LivingKindChoice.World,
+                    LivingKindChoice.Custom,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                ) {
+                    freeChoices.forEach { choice ->
+                        NovelChipButton(
+                            text = choice.label,
+                            selected = kindChoice == choice,
+                            onClick = { kindChoice = choice },
+                            enabled = !busy,
+                            compact = true,
+                        )
+                    }
+                }
+                if (kindChoice == LivingKindChoice.Custom) {
+                    OutlinedTextField(
+                        value = customKindLabel,
+                        onValueChange = { customKindLabel = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("自定义类型名") },
+                        enabled = !busy,
+                        colors = fieldColors,
+                    )
+                }
+            } else {
+                Text(
+                    text = "类型 · ${livingKindLabel(draft.kind)}",
+                    style = type.meta,
+                    color = workspace.muted,
+                )
+            }
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("标题") },
+                enabled = !busy,
+                colors = fieldColors,
+            )
+            OutlinedTextField(
+                value = content,
+                onValueChange = { content = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 160.dp),
+                label = { Text("正文") },
+                enabled = !busy,
+                colors = fieldColors,
+                minLines = 6,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NovelGhostButton(
+                    text = "取消",
+                    onClick = onDismiss,
+                    enabled = !busy,
+                )
+                NovelPrimaryButton(
+                    text = if (busy) "保存中…" else if (isCreate) "创建" else "保存",
+                    onClick = {
+                        if (canSave) {
+                            onSave(resolvedKind, title.trim(), content)
+                        }
+                    },
+                    enabled = canSave,
+                    accent = true,
+                    compact = true,
+                )
+            }
+        }
+    }
+}
+
+private enum class LivingKindChoice(val label: String) {
+    Character("角色"),
+    World("世界观"),
+    MasterOutline("总纲"),
+    WritingRequirements("写作要求"),
+    Custom("自定义"),
+}
+
+private fun livingKindChoiceOf(kind: NovelMaterialKind): LivingKindChoice = when (kind) {
+    is NovelMaterialKind.Character -> LivingKindChoice.Character
+    is NovelMaterialKind.World -> LivingKindChoice.World
+    is NovelMaterialKind.MasterOutline -> LivingKindChoice.MasterOutline
+    is NovelMaterialKind.WritingRequirements -> LivingKindChoice.WritingRequirements
+    is NovelMaterialKind.DecisionLog -> LivingKindChoice.Custom
+    is NovelMaterialKind.Custom -> LivingKindChoice.Custom
+}
+
+private fun livingKindFromChoice(choice: LivingKindChoice, customLabel: String): NovelMaterialKind =
+    when (choice) {
+        LivingKindChoice.Character -> NovelMaterialKind.Character
+        LivingKindChoice.World -> NovelMaterialKind.World
+        LivingKindChoice.MasterOutline -> NovelMaterialKind.MasterOutline
+        LivingKindChoice.WritingRequirements -> NovelMaterialKind.WritingRequirements
+        LivingKindChoice.Custom -> NovelMaterialKind.Custom(
+            customLabel.trim().ifBlank { "自定义" },
+        )
+    }
+
+private fun livingKindLabel(kind: NovelMaterialKind): String = when (kind) {
+    is NovelMaterialKind.Character -> "角色"
+    is NovelMaterialKind.World -> "世界观"
+    is NovelMaterialKind.MasterOutline -> "总纲"
+    is NovelMaterialKind.WritingRequirements -> "写作要求"
+    is NovelMaterialKind.DecisionLog -> "讨论决定"
+    is NovelMaterialKind.Custom -> kind.value.ifBlank { "自定义" }
 }
 
 // endregion

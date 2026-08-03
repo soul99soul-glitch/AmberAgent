@@ -26,13 +26,6 @@ data class ConversationSizeInfo(
     val showWarning: Boolean
 )
 
-private val DefaultSizeInfo = ConversationSizeInfo(
-    nodeCount = 0,
-    lastAssistantInputTokens = 0,
-    exceedNodeCountThreshold = false,
-    exceedInputTokenThreshold = false,
-    showWarning = false
-)
 
 @Composable
 fun rememberConversationSizeInfo(conversation: Conversation): ConversationSizeInfo {

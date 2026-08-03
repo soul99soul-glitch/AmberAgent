@@ -1,50 +1,31 @@
 package app.amber.feature.ui.components.ai
 
 import android.content.Context
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.fastForEach
-import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
-import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.providers.openai.OpenAICodexUsageStatus
 import app.amber.ai.provider.providers.openai.OpenAICodexUsageWindow
@@ -217,144 +198,6 @@ private fun OpenAICodexUsageWindow.toComposerUsageMetric(context: Context): Comp
     )
 }
 
-@Composable
-internal fun ReasoningLevelChip(
-    reasoningLevel: ReasoningLevel,
-    model: Model?,
-    provider: ProviderSetting?,
-    onUpdateReasoningLevel: (ReasoningLevel) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val workspace = workspaceColors()
-    val options = remember(model?.modelId, model?.abilities, provider.providerRoutingKey()) {
-        model.reasoningOptions(provider)
-    }
-    val selectedLevel = remember(reasoningLevel, options) {
-        reasoningLevel.coerceToReasoningOptions(options)
-    }
-
-    LaunchedEffect(selectedLevel, reasoningLevel, options) {
-        if (selectedLevel != reasoningLevel) {
-            onUpdateReasoningLevel(selectedLevel)
-        }
-    }
-
-    Box(modifier = modifier) {
-        ComposerStatusChip(
-            text = options.labelFor(selectedLevel),
-            accent = selectedLevel.isEnabled,
-            onClick = { expanded = true },
-        )
-
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier
-                .width(232.dp)
-                .background(workspace.paper, RoundedCornerShape(10.dp)),
-        ) {
-            Column(
-                modifier = Modifier.padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text = "Reasoning",
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    color = workspace.muted,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-                options.chunked(3).fastForEach { row ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    ) {
-                        row.fastForEach { option ->
-                            ReasoningLevelMenuCell(
-                                label = option.label,
-                                selected = option.level == selectedLevel,
-                                onClick = {
-                                    onUpdateReasoningLevel(option.level)
-                                    expanded = false
-                                },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        repeat(3 - row.size) {
-                            Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ReasoningLevelMenuCell(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val workspace = workspaceColors()
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-        Surface(
-            onClick = onClick,
-            modifier = modifier.height(30.dp),
-            shape = RoundedCornerShape(6.dp),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            color = if (selected) workspace.blueContainer else Color.Transparent,
-            contentColor = if (selected) workspace.blue else workspace.ink,
-        ) {
-            Box(
-                modifier = Modifier.padding(horizontal = 8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun ComposerStatusChip(
-    text: String,
-    modifier: Modifier = Modifier,
-    accent: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val workspace = workspaceColors()
-    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
-        Surface(
-            onClick = onClick,
-            modifier = modifier.height(32.dp),
-            shape = RoundedCornerShape(8.dp),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
-            color = if (accent) workspace.blueContainer else workspace.paper,
-            contentColor = if (accent) workspace.blue else workspace.ink,
-            border = BorderStroke(1.dp, if (accent) workspace.blue.copy(alpha = 0.18f) else workspace.hairline),
-        ) {
-            Box(
-                modifier = Modifier.padding(horizontal = 10.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
 
 @Composable
 internal fun ComposerUsageSheet(
@@ -474,174 +317,6 @@ private fun Long.formatUsageResetDetail(context: Context): String {
     return context.getString(R.string.chat_input_usage_reset_detail, timeText, relative)
 }
 
-private fun ReasoningLevel.composerLabel(): String = when (this) {
-    ReasoningLevel.OFF -> "off"
-    ReasoningLevel.AUTO -> "auto"
-    ReasoningLevel.LOW -> "low"
-    ReasoningLevel.MEDIUM -> "medium"
-    ReasoningLevel.HIGH -> "high"
-    ReasoningLevel.XHIGH -> "xhigh"
-    ReasoningLevel.MAX -> "max"
-}
-
-private data class ReasoningOption(
-    val level: ReasoningLevel,
-    val label: String = level.composerLabel(),
-)
-
-private enum class ReasoningFamily {
-    CLAUDE_OPUS_47,
-    CLAUDE_MAX,
-    CLAUDE_HIGH,
-    OPENAI_XHIGH,
-    OPENAI,
-    DEEPSEEK,
-    BINARY,
-    GEMINI,
-    GENERIC,
-    NONE,
-}
-
-private fun List<ReasoningOption>.labelFor(level: ReasoningLevel): String {
-    return firstOrNull { it.level == level }?.label ?: level.composerLabel()
-}
-
-private fun reasoningOptionsOf(vararg levels: ReasoningLevel): List<ReasoningOption> {
-    return levels.map { ReasoningOption(it) }
-}
-
-private fun ReasoningLevel.coerceToReasoningOptions(options: List<ReasoningOption>): ReasoningLevel {
-    if (options.any { it.level == this }) return this
-    if (this == ReasoningLevel.AUTO) {
-        return options.firstOrNull { it.level == ReasoningLevel.MEDIUM }?.level
-            ?: options.firstOrNull { it.level == ReasoningLevel.HIGH }?.level
-            ?: options.firstOrNull()?.level
-            ?: ReasoningLevel.OFF
-    }
-    if ((this == ReasoningLevel.XHIGH || this == ReasoningLevel.MAX) && options.any { it.level == ReasoningLevel.MAX }) {
-        return ReasoningLevel.MAX
-    }
-    if (isEnabled && options.any { it.level == ReasoningLevel.AUTO }) {
-        return ReasoningLevel.AUTO
-    }
-    return options.firstOrNull()?.level ?: ReasoningLevel.OFF
-}
-
-private fun Model?.reasoningOptions(provider: ProviderSetting?): List<ReasoningOption> {
-    if (this == null) {
-        return reasoningOptionsOf(
-            ReasoningLevel.OFF,
-            ReasoningLevel.AUTO,
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-            ReasoningLevel.XHIGH,
-        )
-    }
-    return when (reasoningFamily(provider)) {
-        ReasoningFamily.CLAUDE_OPUS_47 -> reasoningOptionsOf(
-            ReasoningLevel.OFF,
-            ReasoningLevel.AUTO,
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-            ReasoningLevel.XHIGH,
-            ReasoningLevel.MAX,
-        )
-
-        ReasoningFamily.CLAUDE_MAX -> reasoningOptionsOf(
-            ReasoningLevel.OFF,
-            ReasoningLevel.AUTO,
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-            ReasoningLevel.MAX,
-        )
-
-        ReasoningFamily.CLAUDE_HIGH -> reasoningOptionsOf(
-            ReasoningLevel.OFF,
-            ReasoningLevel.AUTO,
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-        )
-
-        ReasoningFamily.OPENAI_XHIGH -> reasoningOptionsOf(
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-            ReasoningLevel.XHIGH,
-        )
-
-        ReasoningFamily.OPENAI -> reasoningOptionsOf(
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-            ReasoningLevel.XHIGH,
-        )
-
-        ReasoningFamily.GEMINI -> reasoningOptionsOf(
-            ReasoningLevel.OFF,
-            ReasoningLevel.AUTO,
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-        )
-
-        ReasoningFamily.DEEPSEEK -> listOf(
-            ReasoningOption(ReasoningLevel.OFF),
-            ReasoningOption(ReasoningLevel.HIGH),
-            ReasoningOption(ReasoningLevel.MAX),
-        )
-
-        ReasoningFamily.BINARY -> reasoningOptionsOf(
-            ReasoningLevel.OFF,
-            ReasoningLevel.AUTO,
-        )
-
-        ReasoningFamily.GENERIC -> reasoningOptionsOf(
-            ReasoningLevel.OFF,
-            ReasoningLevel.AUTO,
-            ReasoningLevel.LOW,
-            ReasoningLevel.MEDIUM,
-            ReasoningLevel.HIGH,
-            ReasoningLevel.XHIGH,
-        )
-
-        ReasoningFamily.NONE -> reasoningOptionsOf(ReasoningLevel.OFF)
-    }
-}
-
-private fun Model.reasoningFamily(provider: ProviderSetting?): ReasoningFamily {
-    val id = modelId.lowercase()
-    val providerKey = provider.providerRoutingKey()
-    return when {
-        "claude" in id || provider is ProviderSetting.Claude -> when {
-            id.contains("opus") && id.contains("4") && id.contains("7") -> ReasoningFamily.CLAUDE_OPUS_47
-            id.contains("mythos") -> ReasoningFamily.CLAUDE_MAX
-            id.contains("opus") && id.contains("4") && (id.contains("5") || id.contains("6")) -> ReasoningFamily.CLAUDE_MAX
-            id.contains("sonnet") && id.contains("4") && id.contains("6") -> ReasoningFamily.CLAUDE_HIGH
-            else -> ReasoningFamily.GENERIC
-        }
-
-        "deepseek" in id || providerKey == "deepseek" -> ReasoningFamily.DEEPSEEK
-        "kimi" in id || "moonshot" in id || providerKey == "kimi" -> ReasoningFamily.BINARY
-        "glm" in id || "zhipu" in id || providerKey == "zhipu" -> ReasoningFamily.BINARY
-        "mimo" in id -> ReasoningFamily.BINARY
-        id.isQwenPlusBinaryReasoningModel() -> ReasoningFamily.BINARY
-        provider is ProviderSetting.Google || providerKey == "gemini" -> ReasoningFamily.GEMINI
-        id.contains("gpt-5.5") || id.contains("gpt-5.4") -> ReasoningFamily.OPENAI_XHIGH
-        id.contains("gpt-5") || id.contains("codex") || Regex("\\bo\\d+").containsMatchIn(id) -> ReasoningFamily.OPENAI
-        ModelAbility.REASONING in abilities -> ReasoningFamily.GENERIC
-        else -> ReasoningFamily.NONE
-    }
-}
-
-private fun String.isQwenPlusBinaryReasoningModel(): Boolean {
-    if (!contains("qwen") || !contains("plus")) return false
-    return Regex("""(^|[^0-9])3[._-]?5([^0-9]|$)""").containsMatchIn(this) ||
-        Regex("""(^|[^0-9])3[._-]?6([^0-9]|$)""").containsMatchIn(this)
-}
 
 internal fun ProviderSetting?.providerRoutingKey(): String {
     return when (this) {

@@ -5,12 +5,11 @@
 //! faster, AES-256-GCM streaming is 2-4x faster, SHA-256 of a multi-MB blob
 //! is 3-5x faster.
 //!
-//! JNI surface — 5 primitives, narrow contract:
+//! JNI surface — 4 primitives, narrow contract:
 //!   - `pbkdf2HmacSha256Native(passphrase, salt, iterations, keySizeBytes) -> ByteArray`
 //!   - `aesGcmEncryptNative(plaintext, key, iv) -> ByteArray` (ciphertext || 16B tag)
 //!   - `aesGcmDecryptNative(ciphertext, key, iv) -> ByteArray?` (null on auth fail)
 //!   - `sha256Native(bytes) -> ByteArray` (32 raw bytes — caller hex-encodes)
-//!   - `hmacSha256Native(key, message) -> ByteArray` (32 raw bytes)
 //!
 //! Kotlin adapter `SyncCryptoNative.kt` does the feature-flag dispatch (flag
 //! on → these natives; flag off → javax.crypto). Caller is responsible for
@@ -28,7 +27,6 @@ use jni::sys::{jbyteArray, jint};
 use jni::JNIEnv;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use ring::digest::{digest, SHA256};
-use ring::hmac;
 use ring::pbkdf2;
 use std::num::NonZeroU32;
 
@@ -290,51 +288,6 @@ pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_sha256Nati
     }
 }
 
-/// `hmacSha256Native(key: ByteArray, message: ByteArray): ByteArray`
-///
-/// 32-byte HMAC tag. Adapter uses for chunk integrity stamps.
-#[no_mangle]
-pub extern "system" fn Java_app_amber_core_sync_core_SyncCryptoNative_hmacSha256Native<'local>(
-    mut env: JNIEnv<'local>,
-    _class: JClass<'local>,
-    key: JByteArray<'local>,
-    message: JByteArray<'local>,
-) -> jbyteArray {
-    jni_common::init_logger_once!("RustSyncCrypto");
-
-    let key_bytes = match env.convert_byte_array(&key) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(hmac key) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-    let msg_bytes = match env.convert_byte_array(&message) {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("sync-crypto: convert_byte_array(hmac message) failed: {}", e);
-            return std::ptr::null_mut();
-        }
-    };
-
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let signing_key = hmac::Key::new(hmac::HMAC_SHA256, &key_bytes);
-        let tag = hmac::sign(&signing_key, &msg_bytes);
-        tag.as_ref().to_vec()
-    }));
-
-    match result {
-        Ok(tag_bytes) => to_jbyte_array(&mut env, &tag_bytes),
-        Err(panic) => {
-            log::error!(
-                "sync-crypto: hmac panic: {}",
-                jni_common::panic_to_string(&panic)
-            );
-            std::ptr::null_mut()
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -353,6 +306,7 @@ fn to_jbyte_array(env: &mut JNIEnv, src: &[u8]) -> jbyteArray {
 mod tests {
     use super::*;
     use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+    use ring::hmac;
 
     #[test]
     fn pbkdf2_known_answer() {

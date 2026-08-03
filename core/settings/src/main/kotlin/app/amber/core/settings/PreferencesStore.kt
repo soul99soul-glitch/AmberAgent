@@ -481,8 +481,8 @@ fun Settings.resolveTaskChatModel(modelId: Uuid): Model? {
 }
 
 fun Settings.getCurrentAssistant(): Assistant {
-    return this.assistants.find { it.id == DEFAULT_ASSISTANT_ID }
-        ?: this.assistants.find { it.id == assistantId }
+    return this.assistants.find { it.id == assistantId }
+        ?: this.assistants.find { it.id == DEFAULT_ASSISTANT_ID }
         ?: this.assistants.first()
 }
 

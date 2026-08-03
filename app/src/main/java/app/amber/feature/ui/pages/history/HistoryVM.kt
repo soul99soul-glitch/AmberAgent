@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.cachedIn
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -15,6 +16,7 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
+import app.amber.core.service.ChatService
 import kotlin.uuid.Uuid
 
 private const val TAG = "HistoryVM"
@@ -22,6 +24,7 @@ private const val TAG = "HistoryVM"
 class HistoryVM(
     private val conversationRepo: ConversationRepository,
     private val settingsStore: SettingsAggregator,
+    private val chatService: ChatService,
 ) : ViewModel() {
     val assistant = settingsStore.settingsFlow
         .map { it.getCurrentAssistant() }
@@ -38,16 +41,22 @@ class HistoryVM(
         }
         .cachedIn(viewModelScope)
 
+    /** 在途删除任务：Undo/purge 必须先 join，避免在途 delete 把刚恢复的会话再次删掉。 */
+    private val deleteJobs = mutableMapOf<Uuid, Job>()
+
     fun deleteConversation(conversation: Conversation) {
-        viewModelScope.launch {
+        val job = viewModelScope.launch {
             // Cleanup is deferred so the snackbar Undo can restore the
             // conversation with attachments/images/favorites intact.
-            conversationRepo.deleteConversation(conversation, deferCleanup = true)
+            chatService.deleteConversation(conversation, deferCleanup = true)
         }
+        deleteJobs[conversation.id] = job
+        job.invokeOnCompletion { deleteJobs.remove(conversation.id, job) }
     }
 
     fun purgeDeletedConversation(conversation: Conversation) {
         viewModelScope.launch {
+            deleteJobs[conversation.id]?.join()
             conversationRepo.cleanupDeletedConversation(conversation)
         }
     }
@@ -55,7 +64,7 @@ class HistoryVM(
     fun deleteAllConversations() {
         val assistant = assistant.value ?: return
         viewModelScope.launch {
-            conversationRepo.deleteConversationOfAssistant(assistant.id)
+            chatService.deleteConversationsOfAssistant(assistant.id)
         }
     }
 
@@ -67,6 +76,8 @@ class HistoryVM(
 
     fun restoreConversation(conversation: Conversation) {
         viewModelScope.launch {
+            deleteJobs[conversation.id]?.join()
+            chatService.markConversationRestored(conversation.id)
             conversationRepo.insertConversation(conversation)
         }
     }

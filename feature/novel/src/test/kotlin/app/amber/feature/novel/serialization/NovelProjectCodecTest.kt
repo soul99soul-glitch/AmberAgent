@@ -26,6 +26,9 @@ class NovelProjectCodecTest {
         assertEquals("Minimal Blank", doc.project.name)
         assertEquals(NovelProjectCreationMode.Blank, doc.project.creationMode)
         assertEquals(NovelProjectModelPolicy.Global, doc.project.modelPolicy)
+        // Pre-S3 documents omit stateSyncModelPolicy → null → fall back to writing model.
+        assertEquals(null, doc.project.stateSyncModelPolicy)
+        assertEquals(doc.project.modelPolicy, doc.project.effectiveStateSyncModelPolicy())
         assertEquals(NovelGenerationGranularity.WholeChapter, doc.project.lastGenerationGranularity)
         assertEquals(1, doc.branches.size)
         assertEquals(1, doc.checkpoints.size)
@@ -93,6 +96,31 @@ class NovelProjectCodecTest {
         val reencoded = NovelSwiftCompatibleJson.encodeProjectDocument(original)
         val roundTripped = NovelSwiftCompatibleJson.decodeProjectDocument(reencoded)
         assertEquals(original, roundTripped)
+    }
+
+    @Test
+    fun roundTripPreservesStateSyncModelPolicy() {
+        val original = NovelSwiftCompatibleJson.decodeProjectDocument(
+            readResourceBytes("novel-v1/projects/minimal-blank.project.json"),
+        )
+        val withSync = original.copy(
+            project = original.project.copy(
+                stateSyncModelPolicy = NovelProjectModelPolicy.Fixed("provider-sync", "model-sync"),
+            ),
+        )
+        val roundTripped = NovelSwiftCompatibleJson.decodeProjectDocument(
+            NovelSwiftCompatibleJson.encodeProjectDocument(withSync),
+        )
+        assertEquals(
+            NovelProjectModelPolicy.Fixed("provider-sync", "model-sync"),
+            roundTripped.project.stateSyncModelPolicy,
+        )
+        assertEquals(
+            NovelProjectModelPolicy.Fixed("provider-sync", "model-sync"),
+            roundTripped.project.effectiveStateSyncModelPolicy(),
+        )
+        // Writing model must remain independent.
+        assertEquals(original.project.modelPolicy, roundTripped.project.modelPolicy)
     }
 
     @Test

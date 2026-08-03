@@ -20,11 +20,28 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+data class NovelImportConflict(
+    val bytes: ByteArray,
+    val existingProjectId: NovelProjectId,
+    val existingName: String,
+) {
+    override fun equals(other: Any?): Boolean =
+        other is NovelImportConflict &&
+            existingProjectId == other.existingProjectId &&
+            existingName == other.existingName &&
+            bytes.contentEquals(other.bytes)
+
+    override fun hashCode(): Int =
+        31 * (31 * existingProjectId.hashCode() + existingName.hashCode()) + bytes.contentHashCode()
+}
+
 data class NovelProjectsUiState(
     val projects: List<NovelProjectSummary> = emptyList(),
     val loading: Boolean = true,
     val errorMessage: String? = null,
+    val statusMessage: String? = null,
     val busy: Boolean = false,
+    val importConflict: NovelImportConflict? = null,
 )
 
 class NovelProjectsViewModel(
@@ -105,31 +122,75 @@ class NovelProjectsViewModel(
     }
 
     fun reportError(message: String) {
-        _state.value = _state.value.copy(errorMessage = message)
+        _state.value = _state.value.copy(errorMessage = message, statusMessage = null, busy = false)
+    }
+
+    fun reportStatus(message: String) {
+        _state.value = _state.value.copy(statusMessage = message, errorMessage = null)
+    }
+
+    fun beginImportRead() {
+        _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
+    }
+
+    fun endImportRead() {
+        // importPackage will set busy again; only clear if not already importing.
+        if (_state.value.importConflict == null) {
+            _state.value = _state.value.copy(busy = false)
+        }
+    }
+
+    fun clearMessages() {
+        _state.value = _state.value.copy(errorMessage = null, statusMessage = null)
+    }
+
+    fun dismissImportConflict() {
+        _state.value = _state.value.copy(importConflict = null)
     }
 
     fun importPackage(bytes: ByteArray, replaceProjectId: NovelProjectId? = null) {
         viewModelScope.launch {
-            _state.value = _state.value.copy(busy = true, errorMessage = null)
+            _state.value = _state.value.copy(
+                busy = true,
+                errorMessage = null,
+                statusMessage = null,
+                importConflict = null,
+            )
             try {
                 val outcome = novelCreation.perform(
                     NovelIntent.ImportPackage(bytes = bytes, replaceProjectId = replaceProjectId),
                 )
                 if (outcome is NovelOutcome.ProjectImported) {
+                    val label = when (outcome.disposition) {
+                        app.amber.feature.novel.model.NovelProjectImportDisposition.Replaced ->
+                            "已替换并打开项目"
+                        app.amber.feature.novel.model.NovelProjectImportDisposition.Created ->
+                            "已导入并打开项目"
+                        app.amber.feature.novel.model.NovelProjectImportDisposition.KeptBoth ->
+                            "已导入为新项目"
+                    }
+                    _state.value = _state.value.copy(statusMessage = label)
                     _openProjectId.tryEmit(outcome.projectID.rawValue)
                 }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 val msg = error.message.orEmpty()
-                if (replaceProjectId == null && msg.contains("already exists", ignoreCase = true)) {
-                    // Offer replace: parse project id from package via re-import with first list match is weak;
-                    // surface actionable error instead of silent fail.
+                val existingId = extractExistingProjectId(error)
+                if (replaceProjectId == null && existingId != null) {
+                    val name = _state.value.projects.firstOrNull { it.id == existingId }?.name
+                        ?: "同 ID 项目"
                     _state.value = _state.value.copy(
-                        errorMessage = "项目已存在。请先删除同 id 项目，或在导入时选择覆盖（暂用：删除后重导）。$msg",
+                        importConflict = NovelImportConflict(
+                            bytes = bytes,
+                            existingProjectId = existingId,
+                            existingName = name,
+                        ),
                     )
                 } else {
-                    _state.value = _state.value.copy(errorMessage = error.message)
+                    _state.value = _state.value.copy(
+                        errorMessage = humanizeNovelError(null, msg.ifBlank { error.toString() }),
+                    )
                 }
             } finally {
                 _state.value = _state.value.copy(busy = false)
@@ -137,32 +198,104 @@ class NovelProjectsViewModel(
         }
     }
 
-    suspend fun exportPackage(projectId: NovelProjectId): Pair<String, ByteArray>? {
-        return try {
-            when (val snap = novelCreation.snapshot(NovelQuery.ProjectPackage(projectId))) {
-                is NovelSnapshot.PackageBytes -> snap.fileName to snap.bytes
-                else -> null
+    fun confirmReplaceImport() {
+        val conflict = _state.value.importConflict ?: return
+        importPackage(conflict.bytes, replaceProjectId = conflict.existingProjectId)
+    }
+
+    fun confirmKeepBothImport() {
+        val conflict = _state.value.importConflict ?: return
+        viewModelScope.launch {
+            _state.value = _state.value.copy(
+                busy = true,
+                errorMessage = null,
+                statusMessage = null,
+                importConflict = null,
+            )
+            try {
+                val outcome = novelCreation.perform(
+                    NovelIntent.ImportPackage(
+                        bytes = conflict.bytes,
+                        keepBoth = true,
+                    ),
+                )
+                if (outcome is NovelOutcome.ProjectImported) {
+                    _state.value = _state.value.copy(statusMessage = "已保留两份并打开新项目")
+                    _openProjectId.tryEmit(outcome.projectID.rawValue)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = humanizeNovelError(null, error.message),
+                )
+            } finally {
+                _state.value = _state.value.copy(busy = false)
             }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            _state.value = _state.value.copy(errorMessage = error.message)
-            null
         }
     }
 
-    suspend fun exportMarkdown(projectId: NovelProjectId, branchId: app.amber.feature.novel.model.NovelBranchId): Pair<String, String>? {
-        return try {
-            when (val snap = novelCreation.snapshot(NovelQuery.BranchMarkdown(projectId, branchId))) {
-                is NovelSnapshot.Markdown -> snap.fileName to snap.content
-                else -> null
+    fun exportPackage(projectId: NovelProjectId, onResult: (String, ByteArray) -> Unit) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
+            try {
+                when (val snap = novelCreation.snapshot(NovelQuery.ProjectPackage(projectId))) {
+                    is NovelSnapshot.PackageBytes -> {
+                        // Status is reported only after SAF write succeeds (caller).
+                        onResult(snap.fileName, snap.bytes)
+                    }
+                    else -> _state.value = _state.value.copy(errorMessage = "导出失败")
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = humanizeNovelError(null, error.message),
+                )
+            } finally {
+                _state.value = _state.value.copy(busy = false)
             }
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            _state.value = _state.value.copy(errorMessage = error.message)
-            null
         }
+    }
+
+    fun exportMarkdown(project: NovelProjectSummary, onResult: (String, String) -> Unit) {
+        val branchId = project.mainBranchID
+        if (branchId == null) {
+            _state.value = _state.value.copy(errorMessage = "项目没有主分支，无法导出 Markdown")
+            return
+        }
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
+            try {
+                when (val snap = novelCreation.snapshot(NovelQuery.BranchMarkdown(project.id, branchId))) {
+                    is NovelSnapshot.Markdown -> {
+                        // List export is main branch; status after SAF write.
+                        onResult(snap.fileName, snap.content)
+                    }
+                    else -> _state.value = _state.value.copy(errorMessage = "导出失败")
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = humanizeNovelError(null, error.message),
+                )
+            } finally {
+                _state.value = _state.value.copy(busy = false)
+            }
+        }
+    }
+
+    private fun extractExistingProjectId(error: Exception): NovelProjectId? {
+        // NovelError.ProjectAlreadyExists(message includes id) or typed error.
+        val typed = error as? app.amber.feature.novel.domain.NovelError.ProjectAlreadyExists
+        if (typed != null) return typed.projectId
+        val msg = error.message.orEmpty()
+        // Fallback: "... project <uuid> already exists"
+        val match = Regex(
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        ).find(msg) ?: return null
+        return runCatching { NovelProjectId.parse(match.value) }.getOrNull()
     }
 
     private fun create(

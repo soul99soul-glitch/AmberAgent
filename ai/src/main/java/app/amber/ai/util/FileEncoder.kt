@@ -11,15 +11,6 @@ import app.amber.ai.ui.UIMessagePart
 import java.io.ByteArrayOutputStream
 import java.io.File
 
-private val supportedTypes = setOf(
-    "image/jpeg",
-    "image/png",
-    "image/gif",
-    "image/webp",
-    "image/heic",
-    "image/avif",
-)
-
 /** ISO BMFF ftyp brands for HEIC/HEIF containers (HEVC codec, Android 9+ / API 28). */
 private val HEIF_BRANDS = setOf(
     "heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs",

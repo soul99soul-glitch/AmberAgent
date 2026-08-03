@@ -34,11 +34,6 @@ export interface AssistantAvatar {
   [key: string]: unknown;
 }
 
-export interface AssistantQuickMessage {
-  title: string;
-  content: string;
-}
-
 export interface QuickMessage {
   id: string;
   title: string;

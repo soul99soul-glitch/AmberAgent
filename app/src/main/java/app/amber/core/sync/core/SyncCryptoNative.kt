@@ -128,13 +128,6 @@ internal object SyncCryptoNative {
         }
     }
 
-    /** HMAC-SHA256 → 32 raw bytes. */
-    fun hmacSha256(key: ByteArray, message: ByteArray): ByteArray? {
-        return callNative("hmac_sha256") {
-            hmacSha256Native(key, message)
-        }
-    }
-
     private inline fun callNative(stage: String, block: () -> ByteArray?): ByteArray? {
         val cfg = config
         if (!cfg.enabled() || !checkAvailability(cfg)) return null
@@ -172,6 +165,4 @@ internal object SyncCryptoNative {
     @JvmStatic
     private external fun sha256Native(bytes: ByteArray): ByteArray?
 
-    @JvmStatic
-    private external fun hmacSha256Native(key: ByteArray, message: ByteArray): ByteArray?
 }

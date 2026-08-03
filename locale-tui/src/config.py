@@ -42,10 +42,6 @@ class Config:
     translation_prompt: str
     batch_size: int
 
-    # Display configuration
-    column_widths: dict[str, int]
-    page_size: int
-
     @classmethod
     def load(cls, config_path: Path) -> "Config":
         """Load configuration from file."""
@@ -81,9 +77,6 @@ class Config:
         # Translation configuration
         trans_config = data.get("translation", {})
 
-        # Display configuration
-        display_config = data.get("display", {})
-
         return cls(
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
@@ -93,10 +86,6 @@ class Config:
             translation_model=trans_config.get("model", "gpt-4o-mini"),
             translation_prompt=trans_config.get("prompt_template", ""),
             batch_size=trans_config.get("batch_size", 10),
-            column_widths=display_config.get(
-                "column_widths", {"key": 30, "translation": 25}
-            ),
-            page_size=display_config.get("page_size", 50),
         )
 
     def get_language_name(self, code: str) -> str:

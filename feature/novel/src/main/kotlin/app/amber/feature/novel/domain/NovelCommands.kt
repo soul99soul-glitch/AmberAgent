@@ -40,10 +40,20 @@ data class NovelRenameProjectCommand(
     val name: String,
 )
 
+/** Which project model slot [NovelSetModelPolicyCommand] mutates. */
+enum class NovelModelPolicyPurpose {
+    /** Writing / generation model → [app.amber.feature.novel.model.NovelProjectRecord.modelPolicy]. */
+    Creation,
+
+    /** Collect / manual-sync state extraction → [app.amber.feature.novel.model.NovelProjectRecord.stateSyncModelPolicy]. */
+    StateSync,
+}
+
 data class NovelSetModelPolicyCommand(
     val context: NovelMutationContext,
     val projectID: NovelProjectId,
     val policy: NovelProjectModelPolicy,
+    val purpose: NovelModelPolicyPurpose = NovelModelPolicyPurpose.Creation,
 )
 
 data class NovelReviseMaterialCommand(
@@ -56,6 +66,12 @@ data class NovelReviseMaterialCommand(
     val content: String,
     val tags: List<String> = emptyList(),
     val injectionMode: NovelInjectionMode = NovelInjectionMode.Smart,
+)
+
+data class NovelDeleteMaterialCommand(
+    val context: NovelMutationContext,
+    val projectID: NovelProjectId,
+    val materialID: NovelMaterialId,
 )
 
 data class NovelSetPolishPreferenceCommand(

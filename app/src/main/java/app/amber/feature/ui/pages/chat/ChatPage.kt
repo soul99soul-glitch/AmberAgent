@@ -661,38 +661,40 @@ private fun ChatPageContent(
                         queuePanelOpen = true
                     },
                     suggestionFillPulseKey = suggestionFillPulseKey,
-                    onSendClick = { queueMode ->
-                        val parts = inputState.getContents()
+                    onSendClick = { queueMode, parts ->
                         val canRouteWithoutChatModel = !inputState.isEditing() && canSendWithoutChatModel(parts)
                         if (currentChatModel == null && !canRouteWithoutChatModel) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                             return@ChatInput
                         }
-                        if (inputState.isEditing()) {
+                        val accepted = if (inputState.isEditing()) {
                             vm.handleMessageEdit(
-                                parts = inputState.getContents(),
+                                parts = parts,
                                 messageId = inputState.editingMessage!!,
                             )
+                            true
                         } else {
                             vm.handleMessageSend(
                                 content = parts,
                                 queueMode = queueMode,
                             )
                         }
-                        inputState.clearInput()
+                        if (accepted) {
+                            inputState.clearInput()
+                        }
                     },
-                    onLongSendClick = { queueMode ->
-                        val parts = inputState.getContents()
+                    onLongSendClick = { queueMode, parts ->
                         val canRouteWithoutChatModel = !inputState.isEditing() && canSendWithoutChatModel(parts)
                         if (currentChatModel == null && !canRouteWithoutChatModel) {
                             toaster.show("请先选择模型", type = ToastType.Error)
                             return@ChatInput
                         }
-                        if (inputState.isEditing()) {
+                        val accepted = if (inputState.isEditing()) {
                             vm.handleMessageEdit(
                                 parts = parts,
                                 messageId = inputState.editingMessage!!,
                             )
+                            true
                         } else {
                             vm.handleMessageSend(
                                 content = parts,
@@ -700,7 +702,9 @@ private fun ChatPageContent(
                                 queueMode = queueMode,
                             )
                         }
-                        inputState.clearInput()
+                        if (accepted) {
+                            inputState.clearInput()
+                        }
                     },
                     onCompactContext = {
                         vm.handleCompressContext(

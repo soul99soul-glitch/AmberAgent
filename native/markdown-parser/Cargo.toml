@@ -15,8 +15,4 @@ jni.workspace = true
 jni-common.workspace = true
 pulldown-cmark.workspace = true
 regex.workspace = true
-thiserror.workspace = true
 log.workspace = true
-
-[dev-dependencies]
-similar = "2"

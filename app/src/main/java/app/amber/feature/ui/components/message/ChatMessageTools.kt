@@ -2,16 +2,11 @@ package app.amber.feature.ui.components.message
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -48,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,9 +91,6 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.core.utils.jsonPrimitiveOrNull
 import org.koin.compose.koinInject
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
 
 internal object ToolNames {
     const val MEMORY = "memory_tool"
@@ -545,40 +536,6 @@ private fun V3ToolStatusBadge(
     }
 }
 
-@Composable
-private fun RunningToolSpinner(
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    val transition = rememberInfiniteTransition(label = "toolRunningSpinner")
-    val rotation by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = LinearEasing),
-        ),
-        label = "toolRunningSpinnerRotation",
-    )
-    Canvas(
-        modifier = modifier.graphicsLayer { rotationZ = rotation }
-    ) {
-        val dotCount = 8
-        val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
-        val radius = size.minDimension * 0.36f
-        val dotRadius = size.minDimension * 0.07f
-        for (index in 0 until dotCount) {
-            val angle = (2.0 * PI * index / dotCount).toFloat()
-            drawCircle(
-                color = color.copy(alpha = 0.22f + 0.68f * (index + 1) / dotCount),
-                radius = dotRadius,
-                center = androidx.compose.ui.geometry.Offset(
-                    x = center.x + cos(angle) * radius,
-                    y = center.y + sin(angle) * radius,
-                ),
-            )
-        }
-    }
-}
 
 @Composable
 private fun toolDisplayTitle(

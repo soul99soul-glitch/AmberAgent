@@ -58,6 +58,10 @@
   <uses-feature
     android:name="android.hardware.camera.autofocus"
     android:required="false" />
+  <!-- SMS/CALL_PHONE 等仅是可选 Agent 工具能力，不应让 Play 推断 telephony 为必需 -->
+  <uses-feature
+    android:name="android.hardware.telephony"
+    android:required="false" />
 
   <queries>
     <package android:name="com.termux" />

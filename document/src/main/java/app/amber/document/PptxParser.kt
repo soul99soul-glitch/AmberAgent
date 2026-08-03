@@ -416,7 +416,6 @@ object PptxParser {
     private fun isNotesTextShape(parser: XmlPullParser): Boolean {
         // Notes text typically has ph type="body"
         val currentDepth = parser.depth
-        val originalPosition = parser
 
         while (parser.next() != XmlPullParser.END_DOCUMENT) {
             when (parser.eventType) {

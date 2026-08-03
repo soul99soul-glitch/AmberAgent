@@ -8,7 +8,10 @@ enum class NovelPromptKind {
     StateDeltaV1,
     ManualSyncV1,
     WholeChapterPolish,
+    WholeChapterRegeneration,
     PolishDriftV1,
+    ContinuityAuditV1,
+    DiscussionArchiveV1,
 }
 
 data class NovelPromptTemplate(
@@ -31,13 +34,18 @@ object NovelPromptCatalog {
                 - 只返回恰好一个 JSON 对象；不要 Markdown、不要代码围栏、不要 JSON 以外的说明文字。
                 - 所有字符串必须非空；使用用户的语言（中文种子就用中文）。
                 - 每一项都是「提案」，需要用户确认后才算生效。不要写成已经发生的事件，不要声称已写入项目资料。
+                - 「人物」必须按人拆分：characters 是数组，每人一条 {title, content}；禁止把多人合写进同一条 content。
+                - 至少给出 1 个核心人物；通常 2–5 人（主角、关键配角）；title 用人物姓名/称呼，便于后续经历匹配。
 
                 对象必须包含且仅包含这些字段：
                 {
                   "schemaVersion": 1,
                   "overview": "一句话到一段话的方向总览",
                   "world": {"title": "世界观标题", "content": "具体世界规则、约束与氛围"},
-                  "characters": {"title": "人物标题", "content": "核心人物档案、动机与关系（可多人，写在 content 里）"},
+                  "characters": [
+                    {"title": "人物姓名", "content": "该人档案、动机、关系与弧光"},
+                    {"title": "另一人物", "content": "该人档案、动机、关系与弧光"}
+                  ],
                   "masterOutline": {"title": "大纲标题", "content": "清晰的主线剧情大纲（起承转合/卷章骨架）"},
                   "writingRequirements": {"title": "文风标题", "content": "叙事人称、节奏、文风与禁忌"}
                 }
@@ -147,12 +155,68 @@ object NovelPromptCatalog {
                 merge, or split story events. Append a final line containing exactly $POLISH_COMPLETION_SENTINEL.
             """.trimIndent(),
         )
+        NovelPromptKind.WholeChapterRegeneration -> NovelPromptTemplate(
+            kind = kind,
+            version = NovelPromptVersions.WHOLE_CHAPTER_REGENERATION,
+            systemText = """
+                Rewrite the supplied chapter completely. Unlike polishing, you MAY change story facts: events,
+                chronology, relationships, motivations, secrets, and outcomes are all open, so long as the result
+                reads as a coherent part of the same manuscript. Use the rewrite to remove contradictions,
+                repetition, or continuity errors between this chapter and the rest of the story. Keep the chapter's
+                role in the overall structure. Do not summarise, do not comment on the changes, and do not continue
+                past the end of this chapter. Return the complete rewritten chapter as one response. It remains a
+                draft candidate until the writer collects it.
+            """.trimIndent(),
+        )
         NovelPromptKind.PolishDriftV1 -> NovelPromptTemplate(
             kind = kind,
             version = NovelPromptVersions.POLISH_DRIFT,
             systemText = """
                 Compare source and polished chapter for story-fact compatibility. Return JSON:
                 {"schemaVersion":1,"compatible":true|false,"differences":[]}
+            """.trimIndent(),
+        )
+        NovelPromptKind.ContinuityAuditV1 -> NovelPromptTemplate(
+            kind = kind,
+            version = NovelPromptVersions.CONTINUITY_AUDIT,
+            systemText = """
+                Audit the manuscript for internal story inconsistencies. Report only conflicts that the manuscript
+                itself proves; never speculate and never rewrite the prose.
+                Look for: duplicated plot, contradictions, identity drift, chronology errors, status conflicts.
+                Deliberate devices (flashback, dream, unreliable narrator) are not defects.
+                Return exactly one JSON object (no fences):
+                {"schemaVersion":1,"consistent":true,"issues":[]}
+                issues item:
+                {"id":"stable-id","category":"duplicatedPlot|contradiction|identityDrift|chronology|statusConflict|other",
+                 "severity":"blocking|major|minor","summary":"...",
+                 "references":[{"chapterOrdinal":1,"chapterTitle":"...","evidence":"..."},
+                               {"chapterOrdinal":2,"chapterTitle":"...","evidence":"..."}]}
+                If consistent is true, issues must be empty. Every issue needs ≥2 references.
+                chapterOrdinal is N from "# Chapter N:" headings (1-based).
+            """.trimIndent(),
+        )
+        NovelPromptKind.DiscussionArchiveV1 -> NovelPromptTemplate(
+            kind = kind,
+            version = NovelPromptVersions.DISCUSSION_ARCHIVE,
+            systemText = """
+                Distill only decisions that the supplied novel-planning discussion explicitly settled or made
+                reliably unambiguous. Do not invent decisions, story events, or manuscript facts. The input does
+                not include full prose candidates. Use the discussion's language.
+
+                Return exactly one raw JSON object with no Markdown fence, comment, or trailing prose:
+                {
+                  "schemaVersion": 1,
+                  "decisions": [
+                    {
+                      "topic": "non-empty decision topic",
+                      "decision": "non-empty confirmed decision",
+                      "relatedMaterialID": null
+                    }
+                  ],
+                  "summary": "non-empty discussion summary, at most 300 characters"
+                }
+                decisions must be non-empty. relatedMaterialID is either null or a UUID explicitly supplied in
+                the discussion input. Do not add unknown keys.
             """.trimIndent(),
         )
     }

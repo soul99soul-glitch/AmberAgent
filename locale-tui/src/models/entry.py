@@ -30,11 +30,3 @@ class TranslationEntry:
             if code != "values" and not self.translations.get(code):
                 return True
         return False
-
-    def get_missing_languages(self, lang_codes: list[str]) -> list[str]:
-        """Get list of languages with missing translations."""
-        missing = []
-        for code in lang_codes:
-            if code != "values" and not self.translations.get(code):
-                missing.append(code)
-        return missing

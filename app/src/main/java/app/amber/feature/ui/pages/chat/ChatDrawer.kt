@@ -27,7 +27,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -45,7 +44,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -71,7 +69,6 @@ import me.rerere.hugeicons.stroke.PencilEdit01
 import me.rerere.hugeicons.stroke.Search01
 import me.rerere.hugeicons.stroke.ServerStack01
 import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.TransactionHistory
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.Settings
@@ -80,11 +77,8 @@ import app.amber.core.settings.findModelById
 import app.amber.feature.modelcouncil.toCouncilParticipant
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.components.ui.Greeting
-import app.amber.feature.ui.components.ui.Tooltip
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.components.ui.WorkspaceDivider
-import app.amber.feature.ui.components.ui.WorkspaceTone
-import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.hooks.EditStateContent
@@ -405,102 +399,6 @@ fun ChatDrawerContent(
 
 }
 
-@Composable
-private fun DrawerActions(navController: Navigator, todayBoardEnabled: Boolean = false) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        DrawerNavRow(
-            icon = HugeIcons.Search01,
-            label = stringResource(R.string.chat_page_search_chats),
-            onClick = { navController.navigate(Screen.MessageSearch) },
-            tone = WorkspaceTone.Accent,
-        )
-        DrawerNavRow(
-            icon = HugeIcons.TransactionHistory,
-            label = stringResource(R.string.chat_page_history),
-            onClick = { navController.navigate(Screen.History) },
-        )
-        if (todayBoardEnabled) {
-            DrawerNavRow(
-                icon = HugeIcons.News01,
-                label = "今日看板",
-                onClick = { navController.navigate(Screen.TodayBoard) },
-            )
-        }
-        DrawerNavRow(
-            icon = HugeIcons.DashboardSquare01,
-            label = "小应用",
-            onClick = { navController.navigate(Screen.MiniAppList) },
-        )
-    }
-}
-
-@Composable
-private fun DrawerNavRow(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    tone: WorkspaceTone = WorkspaceTone.Neutral,
-) {
-    val workspace = workspaceColors()
-    val tint = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.muted
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(6.dp),
-        color = if (tone == WorkspaceTone.Accent) workspace.blueContainer else Color.Transparent,
-        contentColor = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = tint,
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-private fun DrawerAction(
-    modifier: Modifier = Modifier,
-    icon: @Composable () -> Unit,
-    label: @Composable () -> Unit,
-    onClick: () -> Unit,
-    tone: WorkspaceTone = WorkspaceTone.Neutral,
-) {
-    val workspace = workspaceColors()
-    Tooltip(
-        tooltip = { label() }
-    ) {
-        Surface(
-            onClick = onClick,
-            modifier = modifier.size(44.dp),
-            color = if (tone == WorkspaceTone.Accent) workspace.blueContainer else workspace.paper,
-            shape = RoundedCornerShape(9.dp),
-            contentColor = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
-            border = workspaceBorder(),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Box(modifier = Modifier.size(22.dp)) { icon() }
-            }
-        }
-    }
-}
 
 /**
  * 抽屉滚动头 (3)-(6)：主导航行 → 快捷钮 → 分隔线 → 最近标签。
@@ -684,4 +582,3 @@ private fun V3QuickBtn(
         )
     }
 }
-

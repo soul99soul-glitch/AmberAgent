@@ -15,7 +15,6 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -1016,48 +1015,6 @@ class GenerationHandler(
         """.trimIndent()
     }
 
-    private fun buildLocalSlidesFallbackWidget(labels: List<String>): String {
-        val safeLabels = labels.ifEmpty { listOf("需求", "结构", "要点", "结论") }.take(4)
-        val slides = buildJsonArray {
-            add(
-                buildJsonObject {
-                    put("layout", "cover")
-                    put("title", safeLabels.first())
-                    put("subtitle", "AmberAgent deck fallback")
-                    put("content", buildJsonArray {
-                        safeLabels.drop(1).forEach { add(JsonPrimitive(it)) }
-                    })
-                }
-            )
-            safeLabels.drop(1).forEach { label ->
-                add(
-                    buildJsonObject {
-                        put("layout", "section")
-                        put("title", label)
-                        put("content", buildJsonArray { add(JsonPrimitive(label)) })
-                    }
-                )
-            }
-        }
-        val widget = buildJsonObject {
-            put("title", safeLabels.first().take(20).ifBlank { "演示预览" })
-            put("renderer", "slides")
-            put(
-                "spec",
-                buildJsonObject {
-                    put("schemaVersion", 2)
-                    put("style", "swiss")
-                    put("accent", "#1F5EFF")
-                    put("slides", slides)
-                }
-            )
-        }
-        return """
-        ```show-widget
-        $widget
-        ```
-        """.trimIndent()
-    }
 
     private fun buildLocalFullHtmlDeckFallbackWidget(labels: List<String>): String {
         val safeLabels = labels.ifEmpty { listOf("演示预览", "结构", "要点", "结论") }.take(4)

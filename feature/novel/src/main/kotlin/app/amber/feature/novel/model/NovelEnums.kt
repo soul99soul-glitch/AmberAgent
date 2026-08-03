@@ -89,6 +89,9 @@ enum class NovelCheckpointKind {
 
     @SerialName("restore")
     Restore,
+
+    @SerialName("discussionArchive")
+    DiscussionArchive,
 }
 
 @Serializable
@@ -251,6 +254,10 @@ enum class NovelRunKind {
 
     @SerialName("polish")
     Polish,
+
+    /** Whole-chapter rewrite; produces a prose candidate for replaceChapter collect. */
+    @SerialName("regenerate")
+    Regenerate,
 }
 
 @Serializable
@@ -305,6 +312,9 @@ enum class NovelOperationKind {
 
     @SerialName("restoreChapterVersion")
     RestoreChapterVersion,
+
+    @SerialName("archiveDiscussion")
+    ArchiveDiscussion,
 
     @SerialName("startRun")
     StartRun,
@@ -473,6 +483,7 @@ sealed class NovelMaterialKind {
     data object Character : NovelMaterialKind()
     data object MasterOutline : NovelMaterialKind()
     data object WritingRequirements : NovelMaterialKind()
+    data object DecisionLog : NovelMaterialKind()
     data class Custom(val value: String) : NovelMaterialKind()
 
     object Serializer : KSerializer<NovelMaterialKind> {
@@ -486,6 +497,7 @@ sealed class NovelMaterialKind {
                 Character -> swiftAssociatedObject("character")
                 MasterOutline -> swiftAssociatedObject("masterOutline")
                 WritingRequirements -> swiftAssociatedObject("writingRequirements")
+                DecisionLog -> swiftAssociatedObject("decisionLog")
                 is Custom -> swiftAssociatedObject(
                     "custom",
                     buildJsonObject { put("_0", value.value) },
@@ -502,6 +514,7 @@ sealed class NovelMaterialKind {
                 "character" -> Character
                 "masterOutline" -> MasterOutline
                 "writingRequirements" -> WritingRequirements
+                "decisionLog" -> DecisionLog
                 "custom" -> Custom(associated.getValue("_0").jsonPrimitive.content)
                 else -> throw IllegalArgumentException("Unknown material kind: $caseName")
             }
@@ -550,6 +563,9 @@ sealed class NovelCollectionTarget {
         val title: String,
     ) : NovelCollectionTarget()
 
+    /** Replace the working head of an existing chapter (regenerate collect default). */
+    data class ReplaceChapter(val chapterID: NovelChapterId) : NovelCollectionTarget()
+
     object Serializer : KSerializer<NovelCollectionTarget> {
         override val descriptor: SerialDescriptor =
             buildClassSerialDescriptor("NovelCollectionTarget")
@@ -568,6 +584,12 @@ sealed class NovelCollectionTarget {
                     buildJsonObject {
                         put("chapterID", json.json.encodeToJsonElement(NovelChapterId.Serializer, value.chapterID))
                         put("title", value.title)
+                    },
+                )
+                is ReplaceChapter -> swiftAssociatedObject(
+                    "replaceChapter",
+                    buildJsonObject {
+                        put("_0", json.json.encodeToJsonElement(NovelChapterId.Serializer, value.chapterID))
                     },
                 )
             }
@@ -590,6 +612,12 @@ sealed class NovelCollectionTarget {
                         associated.getValue("chapterID"),
                     ),
                     title = associated.getValue("title").jsonPrimitive.content,
+                )
+                "replaceChapter" -> ReplaceChapter(
+                    json.json.decodeFromJsonElement(
+                        NovelChapterId.Serializer,
+                        associated.getValue("_0"),
+                    ),
                 )
                 else -> throw IllegalArgumentException("Unknown collection target: $caseName")
             }

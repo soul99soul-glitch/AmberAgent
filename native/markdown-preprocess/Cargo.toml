@@ -14,5 +14,4 @@ crate-type = ["cdylib", "rlib"]
 jni.workspace = true
 jni-common.workspace = true
 regex.workspace = true
-thiserror.workspace = true
 log.workspace = true

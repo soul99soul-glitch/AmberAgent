@@ -13,7 +13,6 @@ from config import Config
 from app import LocaleTuiApp
 from services.xml_parser import StringsXmlParser
 from services.translator import AITranslator
-from models.entry import TranslationEntry
 
 
 def load_config() -> Config:
@@ -121,9 +120,6 @@ def add(key: str, value: str, module: str, skip_translate: bool):
 
         click.echo(f"开始翻译到 {len(target_languages)} 种语言...")
 
-        # Create entry for translation
-        entry = TranslationEntry(key=key, translations={"values": value})
-
         async def translate_async():
             translator = AITranslator(config)
 
@@ -138,8 +134,6 @@ def add(key: str, value: str, module: str, skip_translate: bool):
 
                     if key in translations:
                         translated_value = translations[key]
-                        entry.set_translation(lang_code, translated_value)
-
                         # Save to file
                         target_file = res_dir / lang_code / "strings.xml"
                         StringsXmlParser.update_entry(target_file, key, translated_value)

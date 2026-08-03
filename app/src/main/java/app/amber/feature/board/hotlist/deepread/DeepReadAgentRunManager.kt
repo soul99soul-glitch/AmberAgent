@@ -1082,12 +1082,6 @@ internal fun DeepReadOutput.withSectionRetryRunning(stage: DeepReadGenerationSta
     ).withSectionStatus(stage, DeepReadSectionStatus.RUNNING)
 }
 
-private fun DeepReadGenerationStage.promptSourceLimit(): Int = when (this) {
-    DeepReadGenerationStage.OVERVIEW -> 6
-    DeepReadGenerationStage.NARRATIVE -> 9
-    DeepReadGenerationStage.ANALYSIS -> 8
-    DeepReadGenerationStage.EXTENDED_READING -> 12
-}
 
 private fun DeepReadGenerationStage.promptExcerptLimit(): Int = when (this) {
     DeepReadGenerationStage.OVERVIEW -> 1_000

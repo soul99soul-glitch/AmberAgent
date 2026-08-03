@@ -22,33 +22,42 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.ai.provider.ModelType
 import app.amber.core.settings.findProvider
 import app.amber.core.utils.plus
+import app.amber.feature.novel.model.NovelBranchLifecycle
+import app.amber.feature.novel.model.NovelBranchRecord
 import app.amber.feature.novel.model.NovelProjectModelPolicy
 import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
+import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.hooks.rememberUserSettingsState
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -72,9 +81,43 @@ fun NovelSettingsPage(
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     var undoConfirm by remember { mutableStateOf(false) }
+    var forkDialog by remember { mutableStateOf(false) }
+    var renameBranchTarget by remember { mutableStateOf<NovelBranchRecord?>(null) }
+    var pendingMarkdown by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val createMarkdownDoc = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown"),
+    ) { uri ->
+        val payload = pendingMarkdown
+        pendingMarkdown = null
+        if (uri == null) {
+            viewModel.reportError("已取消导出")
+            return@rememberLauncherForActivityResult
+        }
+        if (payload == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use {
+                        it.write(payload.second.toByteArray(Charsets.UTF_8))
+                    } ?: error("无法打开输出流")
+                }.isSuccess
+            }
+            if (ok) viewModel.reportStatus("已保存 ${payload.first}")
+            else viewModel.reportError("写入 Markdown 失败")
+        }
+    }
     val savedPolish = document?.project?.polishPreference.orEmpty()
     var polishPref by remember(savedPolish) { mutableStateOf(savedPolish) }
     val polishDirty = polishPref != savedPolish
+    val branches = remember(document?.branches) {
+        document?.branches
+            ?.filter { it.lifecycle == NovelBranchLifecycle.Active }
+            ?.sortedBy { it.name }
+            .orEmpty()
+    }
+    val mainBranchId = document?.project?.mainBranchID
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = tokens.accent,
@@ -94,6 +137,26 @@ fun NovelSettingsPage(
             ?: settings.chatModelId
     }
     val followingGlobal = fixedPolicy == null
+    val stateSyncPolicy = document?.project?.stateSyncModelPolicy
+    val stateSyncFixed = stateSyncPolicy as? NovelProjectModelPolicy.Fixed
+    val stateSyncFollowingWriting = stateSyncPolicy == null
+    val stateSyncFollowingGlobal = stateSyncPolicy is NovelProjectModelPolicy.Global
+    val selectedStateSyncModelId = remember(
+        stateSyncFixed?.modelID,
+        fixedPolicy?.modelID,
+        settings.chatModelId,
+        stateSyncFollowingWriting,
+        stateSyncFollowingGlobal,
+    ) {
+        when {
+            stateSyncFixed != null ->
+                runCatching { Uuid.parse(stateSyncFixed.modelID) }.getOrNull()
+            stateSyncFollowingWriting && fixedPolicy != null ->
+                runCatching { Uuid.parse(fixedPolicy.modelID) }.getOrNull()
+                    ?: settings.chatModelId
+            else -> settings.chatModelId
+        }
+    }
     val projectName = document?.project?.name?.ifBlank { null }
 
     Scaffold(
@@ -112,6 +175,17 @@ fun NovelSettingsPage(
             contentPadding = innerPadding + PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
+            state.statusMessage?.let { msg ->
+                item("status-top") {
+                    NovelBanner(text = msg, tone = WorkspaceTone.Success)
+                }
+            }
+            state.errorMessage?.let { msg ->
+                item("error-top") {
+                    NovelBanner(text = msg, tone = WorkspaceTone.Danger)
+                }
+            }
+
             // One writing card: model + polish
             item("writing") {
                 SectionLabel(
@@ -183,6 +257,65 @@ fun NovelSettingsPage(
 
                         HorizontalDivider(color = tokens.line, thickness = 1.dp)
 
+                        // —— 状态同步模型 ——
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "状态同步模型",
+                                    style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                                    color = workspace.ink,
+                                )
+                                NovelModelScopePill(
+                                    followingGlobal = stateSyncFollowingWriting || stateSyncFollowingGlobal,
+                                    followingLabel = when {
+                                        stateSyncFollowingWriting -> "跟随写作"
+                                        stateSyncFollowingGlobal -> "跟随全局"
+                                        else -> "已固定"
+                                    },
+                                )
+                            }
+                            ModelSelector(
+                                modelId = selectedStateSyncModelId,
+                                providers = settings.providers,
+                                type = ModelType.CHAT,
+                                inline = true,
+                                allowClear = !stateSyncFollowingWriting,
+                                emptyLabel = "选择模型",
+                                clearContentDescription = "改回跟随写作模型",
+                                modifier = Modifier.fillMaxWidth(),
+                                onClear = { viewModel.clearStateSyncModelPolicy() },
+                                onSelect = { model ->
+                                    val provider = model.findProvider(settings.providers)
+                                        ?: return@ModelSelector
+                                    viewModel.setModelPolicy(
+                                        NovelProjectModelPolicy.Fixed(
+                                            providerID = provider.id.toString(),
+                                            modelID = model.id.toString(),
+                                        ),
+                                        purpose = app.amber.feature.novel.domain.NovelModelPolicyPurpose.StateSync,
+                                    )
+                                },
+                            )
+                            Text(
+                                text = when {
+                                    stateSyncFollowingWriting ->
+                                        "收录/同步剧情时默认用写作模型；点上方可单独指定"
+                                    stateSyncFollowingGlobal ->
+                                        "已设为跟随全局聊天模型（与写作模型可能不同）"
+                                    else ->
+                                        "已固定状态同步模型；点清除可改回跟随写作模型"
+                                },
+                                style = type.meta,
+                                color = workspace.muted,
+                            )
+                        }
+
+                        HorizontalDivider(color = tokens.line, thickness = 1.dp)
+
                         // —— 润色 ——
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
@@ -223,6 +356,7 @@ fun NovelSettingsPage(
                                         onClick = { viewModel.setPolishPreference(polishPref) },
                                         enabled = !state.busy,
                                         accent = true,
+                                        compact = true,
                                     )
                                 } else {
                                     Text(
@@ -233,6 +367,130 @@ fun NovelSettingsPage(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Branches
+            item("branches") {
+                SectionLabel(
+                    text = "分支",
+                    modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
+                )
+                AmberCard(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (branches.isEmpty()) {
+                            Text(
+                                "暂无活动分支",
+                                style = type.meta,
+                                color = workspace.muted,
+                            )
+                        } else {
+                            branches.forEach { branch ->
+                                val isMain = branch.id == mainBranchId
+                                val isSelected = branch.id == state.selectedBranchId
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(
+                                            if (isSelected) tokens.ink.copy(alpha = 0.06f)
+                                            else workspace.canvas,
+                                        )
+                                        .border(1.dp, workspace.hairline, RoundedCornerShape(12.dp))
+                                        .clickable(enabled = !state.busy) {
+                                            viewModel.selectBranch(branch.id)
+                                        }
+                                        .padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = branch.name.ifBlank { "未命名分支" },
+                                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                                            color = workspace.ink,
+                                        )
+                                        Text(
+                                            text = buildString {
+                                                if (isMain) append("主分支")
+                                                if (isMain && isSelected) append(" · ")
+                                                if (isSelected) append("当前")
+                                            },
+                                            style = type.meta,
+                                            color = workspace.muted,
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        NovelGhostButton(
+                                            text = "重命名",
+                                            onClick = { renameBranchTarget = branch },
+                                            enabled = !state.busy,
+                                        )
+                                        if (!isMain) {
+                                            NovelGhostButton(
+                                                text = "设为主分支",
+                                                onClick = { viewModel.setMainBranch(branch.id) },
+                                                enabled = !state.busy,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        NovelPrimaryButton(
+                            text = if (state.busy) "处理中…" else "从当前 head Fork 分支",
+                            onClick = { forkDialog = true },
+                            enabled = !state.busy && state.selectedBranchId != null,
+                            accent = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = "Fork 会从当前检查点复制一份剧情线，并自动切换过去。",
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
+                    }
+                }
+            }
+
+            // Export
+            item("export") {
+                SectionLabel(
+                    text = "导出",
+                    modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(workspace.paper)
+                        .border(1.dp, workspace.hairline, RoundedCornerShape(14.dp))
+                        .clickable(enabled = !state.busy) {
+                            viewModel.exportMarkdown { name, content ->
+                                pendingMarkdown = name to content
+                                createMarkdownDoc.launch(name)
+                            }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "导出当前分支 Markdown",
+                            style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                            color = workspace.ink,
+                        )
+                        Text(
+                            text = "按当前选中分支的章节顺序导出正文",
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
                     }
                 }
             }
@@ -267,17 +525,6 @@ fun NovelSettingsPage(
                 }
             }
 
-            state.errorMessage?.let { msg ->
-                item("error") {
-                    Text(
-                        msg,
-                        color = workspace.red,
-                        style = type.meta,
-                        modifier = Modifier.padding(horizontal = 4.dp),
-                    )
-                }
-            }
-
             item { Spacer(Modifier.height(28.dp)) }
         }
     }
@@ -297,29 +544,126 @@ fun NovelSettingsPage(
                 )
             },
             confirmButton = {
-                TextButton(
+                NovelPrimaryButton(
+                    text = "撤销",
                     onClick = {
                         viewModel.undoHead()
                         undoConfirm = false
                     },
-                ) {
-                    Text("撤销", color = workspace.red, fontWeight = FontWeight.SemiBold)
-                }
+                    accent = true,
+                    compact = true,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { undoConfirm = false }) {
-                    Text("取消", color = workspace.muted)
+                NovelQuietButton(
+                    text = "取消",
+                    onClick = { undoConfirm = false },
+                )
+            },
+        )
+    }
+
+    if (forkDialog) {
+        var forkName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { if (!state.busy) forkDialog = false },
+            containerColor = workspace.paper,
+            title = {
+                Text("Fork 分支", fontWeight = FontWeight.SemiBold, color = workspace.ink)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "从当前 head 复制一条新剧情线。",
+                        style = type.secondary,
+                        color = workspace.muted,
+                    )
+                    OutlinedTextField(
+                        value = forkName,
+                        onValueChange = { forkName = it },
+                        singleLine = true,
+                        placeholder = { Text("分支名称") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = fieldColors,
+                    )
                 }
+            },
+            confirmButton = {
+                NovelPrimaryButton(
+                    text = "创建",
+                    onClick = {
+                        val name = forkName.trim()
+                        if (name.isNotEmpty()) {
+                            viewModel.forkFromHead(name)
+                            forkDialog = false
+                        }
+                    },
+                    enabled = !state.busy && forkName.isNotBlank(),
+                    accent = true,
+                    compact = true,
+                )
+            },
+            dismissButton = {
+                NovelQuietButton(
+                    text = "取消",
+                    onClick = { forkDialog = false },
+                    enabled = !state.busy,
+                )
+            },
+        )
+    }
+
+    renameBranchTarget?.let { branch ->
+        var name by remember(branch.id.rawValue) { mutableStateOf(branch.name) }
+        AlertDialog(
+            onDismissRequest = { if (!state.busy) renameBranchTarget = null },
+            containerColor = workspace.paper,
+            title = {
+                Text("重命名分支", fontWeight = FontWeight.SemiBold, color = workspace.ink)
+            },
+            text = {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = fieldColors,
+                )
+            },
+            confirmButton = {
+                NovelPrimaryButton(
+                    text = "保存",
+                    onClick = {
+                        val trimmed = name.trim()
+                        if (trimmed.isNotEmpty()) {
+                            viewModel.renameBranch(branch.id, trimmed)
+                            renameBranchTarget = null
+                        }
+                    },
+                    enabled = !state.busy && name.isNotBlank(),
+                    accent = true,
+                    compact = true,
+                )
+            },
+            dismissButton = {
+                NovelQuietButton(
+                    text = "取消",
+                    onClick = { renameBranchTarget = null },
+                    enabled = !state.busy,
+                )
             },
         )
     }
 }
 
 @Composable
-private fun NovelModelScopePill(followingGlobal: Boolean) {
+private fun NovelModelScopePill(
+    followingGlobal: Boolean,
+    followingLabel: String = "全局",
+) {
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
-    val label = if (followingGlobal) "全局" else "固定"
+    val label = if (followingGlobal) followingLabel else "固定"
     val bg = if (followingGlobal) tokens.surface2 else tokens.accent.copy(alpha = 0.12f)
     val fg = if (followingGlobal) tokens.ink3 else tokens.accent
     Box(

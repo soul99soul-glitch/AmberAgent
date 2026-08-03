@@ -568,11 +568,6 @@ internal fun ProviderSetting.providerAuthLabel(): String = when (this) {
     is ProviderSetting.Claude -> if (apiKey.isBlank()) "—" else "key"
 }
 
-internal fun ProviderSetting.providerProtocolLabel(): String = when (this) {
-    is ProviderSetting.OpenAI -> "OpenAI"
-    is ProviderSetting.Google -> "Google"
-    is ProviderSetting.Claude -> "Claude"
-}
 
 internal fun ProviderSetting.convertTo(type: KClass<out ProviderSetting>): ProviderSetting {
     if (this::class == type) {

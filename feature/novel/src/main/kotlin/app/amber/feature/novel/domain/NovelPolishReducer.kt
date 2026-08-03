@@ -269,4 +269,133 @@ object NovelPolishReducer {
         NovelDocumentValidator.validateTransition(document, next)
         return NovelReduceResult(next, outcome)
     }
+
+    /**
+     * Restore a prior chapter version as the working head (compatible fact lineage only).
+     * Creates a new [NovelChapterVersionKind.Restore] version + restore checkpoint; state snapshot unchanged.
+     */
+    fun restoreChapterVersion(
+        projectId: app.amber.feature.novel.model.NovelProjectId,
+        branchId: app.amber.feature.novel.model.NovelBranchId,
+        targetChapterVersionId: NovelChapterVersionId,
+        expectedProjectRevision: Long,
+        expectedBranchHeadRevision: Long,
+        document: NovelProjectDocumentV1,
+        operationId: NovelOperationId = NovelOperationId.generate(),
+        proposedChapterVersionId: NovelChapterVersionId = NovelChapterVersionId.generate(),
+        checkpointId: NovelCheckpointId = NovelCheckpointId.generate(),
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        if (projectId != document.project.id) throw NovelError.ProjectNotFound(projectId)
+        if (expectedProjectRevision != document.project.revision) {
+            throw NovelError.StaleProjectRevision(expectedProjectRevision, document.project.revision)
+        }
+        val branchIndex = document.branches.indexOfFirst { it.id == branchId }
+        if (branchIndex < 0) throw NovelError.BranchNotFound(branchId)
+        val branch = document.branches[branchIndex]
+        if (branch.headRevision != expectedBranchHeadRevision) {
+            throw NovelError.StaleBranchHeadRevision(expectedBranchHeadRevision, branch.headRevision)
+        }
+        if (branch.activeRunID != null) throw NovelError.ProjectBusy(projectId)
+        if (branch.syncStatus == NovelBranchSyncStatus.NeedsSync) {
+            throw NovelError.InvalidInput("Sync required before restoring a chapter version.")
+        }
+        val target = document.chapterVersions.firstOrNull { it.id == targetChapterVersionId }
+            ?: throw NovelError.InvalidInput("The chapter version cannot be restored on this branch.")
+        val currentSelection = branch.workingChapterSelections.firstOrNull {
+            it.chapterID == target.chapterID
+        } ?: throw NovelError.InvalidInput("The chapter version cannot be restored on this branch.")
+        val current = document.chapterVersions.firstOrNull { it.id == currentSelection.versionID }
+            ?: throw NovelError.InvalidInput("The chapter version cannot be restored on this branch.")
+        if (current.id == target.id) {
+            throw NovelError.InvalidInput("This version is already the current head.")
+        }
+        if (current.factCompatibilityID != target.factCompatibilityID) {
+            throw NovelError.InvalidInput(
+                "This chapter version may change story facts and must be restored as a manual edit.",
+            )
+        }
+        if (document.chapterVersions.any { it.id == proposedChapterVersionId }) {
+            throw NovelError.ImmutableRecordConflict("chapter version $proposedChapterVersionId")
+        }
+        if (document.checkpoints.any { it.id == checkpointId }) {
+            throw NovelError.ImmutableRecordConflict("checkpoint $checkpointId")
+        }
+        val session = document.sessions.firstOrNull { it.id == branch.sessionID }
+            ?: throw NovelError.SessionNotFound(branch.sessionID)
+        val restored = NovelChapterVersionRecord(
+            id = proposedChapterVersionId,
+            chapterID = target.chapterID,
+            kind = NovelChapterVersionKind.Restore,
+            title = target.title,
+            content = target.content,
+            factCompatibilityID = target.factCompatibilityID,
+            sourceChapterVersionID = target.id,
+            sourceCandidateID = null,
+            createdAt = now,
+            operationID = operationId,
+        )
+        val selections = branch.workingChapterSelections.map {
+            if (it.chapterID == target.chapterID) {
+                NovelChapterSelection(target.chapterID, restored.id)
+            } else it
+        }
+        val cursor = if (session.messages.isEmpty()) {
+            NovelSessionCursor.Empty
+        } else {
+            NovelSessionCursor.Through(session.messages.maxOf { it.sequence })
+        }
+        val checkpoint = NovelBranchCheckpointRecord(
+            id = checkpointId,
+            kind = NovelCheckpointKind.Restore,
+            createdOnBranchID = branch.id,
+            parentCheckpointID = branch.headCheckpointID,
+            chapterSelections = selections,
+            stateSnapshotID = branch.currentStateSnapshotID,
+            sessionCursor = cursor,
+            branchOverrideRevisionIDs = branch.overrideRevisionIDs,
+            sourceCandidateID = null,
+            baseHeadRevision = branch.headRevision,
+            operationID = operationId,
+            createdAt = now,
+        )
+        val branches = document.branches.toMutableList()
+        branches[branchIndex] = branch.copy(
+            headCheckpointID = checkpoint.id,
+            headRevision = branch.headRevision + 1,
+            workingRevision = branch.workingRevision + 1,
+            workingChapterSelections = selections,
+            syncStatus = NovelBranchSyncStatus.Synchronized,
+            updatedAt = now,
+        )
+        val project = document.project.copy(
+            revision = document.project.revision + 1,
+            updatedAt = now,
+        )
+        val outcome = NovelOutcome.ChapterVersionRestored(
+            projectID = projectId,
+            branchID = branchId,
+            checkpointID = checkpoint.id,
+            chapterVersionID = restored.id,
+            revision = project.revision,
+        )
+        val next = document.copy(
+            project = project,
+            branches = branches,
+            chapterVersions = document.chapterVersions + restored,
+            checkpoints = document.checkpoints + checkpoint,
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = operationId,
+                kind = NovelOperationKind.RestoreChapterVersion,
+                payloadSHA256 = sha256HexOfUtf8(
+                    "restoreChapter:${targetChapterVersionId.rawValue}:${proposedChapterVersionId.rawValue}",
+                ),
+                outcome = outcome,
+                appliedProjectRevision = project.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
 }

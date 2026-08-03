@@ -30,10 +30,6 @@ interface ChainOfThoughtStepBaseProps {
   isLast?: boolean;
 }
 
-interface ChainOfThoughtStepProps extends ChainOfThoughtStepBaseProps {
-  defaultExpanded?: boolean;
-}
-
 interface ControlledChainOfThoughtStepProps extends ChainOfThoughtStepBaseProps {
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
@@ -95,22 +91,6 @@ function ChainOfThought<T>({
         ))}
       </div>
     </Card>
-  );
-}
-
-function ChainOfThoughtStep({
-  defaultExpanded = false,
-  contentVisible,
-  ...props
-}: ChainOfThoughtStepProps) {
-  const [expanded, setExpanded] = React.useState(defaultExpanded);
-  return (
-    <ChainOfThoughtStepContent
-      {...props}
-      expanded={expanded}
-      onExpandedChange={setExpanded}
-      contentVisible={contentVisible ?? expanded}
-    />
   );
 }
 
@@ -237,6 +217,6 @@ function ChainOfThoughtStepContent({
   );
 }
 
-export { ChainOfThought, ChainOfThoughtStep, ControlledChainOfThoughtStep };
+export { ChainOfThought, ControlledChainOfThoughtStep };
 
-export type { ChainOfThoughtProps, ChainOfThoughtStepProps, ControlledChainOfThoughtStepProps };
+export type { ChainOfThoughtProps, ControlledChainOfThoughtStepProps };

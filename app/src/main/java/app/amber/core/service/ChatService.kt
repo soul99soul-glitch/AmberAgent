@@ -238,6 +238,9 @@ class ChatService(
     private val trustedRunToolNames = ConcurrentHashMap<Uuid, Set<String>>()
     private val generationCheckpointAt = ConcurrentHashMap<Uuid, Long>()
     private val timelineLoadMutexes = ConcurrentHashMap<Uuid, Mutex>()
+    private val conversationInitMutexes = ConcurrentHashMap<Uuid, Mutex>()
+    /** 已删除会话的 tombstone：阻止 checkpoint / saveConversation 等后台写者把会话重新插入。 */
+    private val deletedConversationIds = ConcurrentHashMap.newKeySet<Uuid>()
     private val pendingMessageStoreOps = Channel<PendingMessageStoreOp>(Channel.UNLIMITED)
     private val pendingMessagePersistRevisions = ConcurrentHashMap<Uuid, AtomicLong>()
     private val pendingMessagePersistLocks = ConcurrentHashMap<Uuid, Mutex>()
@@ -353,6 +356,7 @@ class ChatService(
         }
         if (sessions.remove(conversationId, session)) {
             timelineLoadMutexes.remove(conversationId)
+            conversationInitMutexes.remove(conversationId)
             pendingMessagePersistRevisions.remove(conversationId)
             pendingMessagePersistLocks.remove(conversationId)
             session.cleanup()
@@ -544,45 +548,49 @@ class ChatService(
 
     suspend fun initializeConversation(conversationId: Uuid) {
         val session = getOrCreateSession(conversationId) // 确保 session 存在
-        if (session.timelineLoadState.value.initialized) {
-            launchPendingMessageLoopIfNeeded(conversationId, session)
-            return
-        }
+        // 按 conversationId single-flight：新会话首发时 UI init 与发送路径可能并发进入，
+        // 较晚返回的空状态会覆盖已写入的首条消息。
+        val mutex = conversationInitMutexes.computeIfAbsent(conversationId) { Mutex() }
+        mutex.withLock {
+            if (session.timelineLoadState.value.initialized) {
+                return@withLock
+            }
 
-        val window = conversationRepo.getConversationTailById(conversationId, INITIAL_TIMELINE_NODE_COUNT)
-        if (window != null) {
-            updateConversation(conversationId, window.conversation)
-            session.setTimelineLoadState(
-                ConversationTimelineLoadState(
-                    initialized = true,
-                    totalNodeCount = window.totalNodeCount,
-                    loadedNodeCount = window.conversation.messageNodes.size,
-                    oldestLoadedIndex = window.oldestLoadedIndex,
-                    isFullyLoaded = window.oldestLoadedIndex == 0,
-                    prefetchingOlder = false,
+            val window = conversationRepo.getConversationTailById(conversationId, INITIAL_TIMELINE_NODE_COUNT)
+            if (window != null) {
+                updateConversation(conversationId, window.conversation)
+                session.setTimelineLoadState(
+                    ConversationTimelineLoadState(
+                        initialized = true,
+                        totalNodeCount = window.totalNodeCount,
+                        loadedNodeCount = window.conversation.messageNodes.size,
+                        oldestLoadedIndex = window.oldestLoadedIndex,
+                        isFullyLoaded = window.oldestLoadedIndex == 0,
+                        prefetchingOlder = false,
+                    )
                 )
-            )
-            settingsStore.updateAssistant(window.conversation.assistantId)
-        } else {
-            // 新建对话, 并添加预设消息
-            val currentSettings = settingsStore.settingsFlow.filterNot { it.init }.first()
-            val assistant = currentSettings.getCurrentAssistant()
-            val newConversation = Conversation.ofId(
-                id = conversationId,
-                assistantId = assistant.id,
-                newConversation = true
-            ).updateCurrentMessages(assistant.presetMessages)
-            updateConversation(conversationId, newConversation)
-            session.setTimelineLoadState(
-                ConversationTimelineLoadState(
-                    initialized = true,
-                    totalNodeCount = newConversation.messageNodes.size,
-                    loadedNodeCount = newConversation.messageNodes.size,
-                    oldestLoadedIndex = 0,
-                    isFullyLoaded = true,
-                    prefetchingOlder = false,
+                settingsStore.updateAssistant(window.conversation.assistantId)
+            } else {
+                // 新建对话, 并添加预设消息
+                val currentSettings = settingsStore.settingsFlow.filterNot { it.init }.first()
+                val assistant = currentSettings.getCurrentAssistant()
+                val newConversation = Conversation.ofId(
+                    id = conversationId,
+                    assistantId = assistant.id,
+                    newConversation = true
+                ).updateCurrentMessages(assistant.presetMessages)
+                updateConversation(conversationId, newConversation)
+                session.setTimelineLoadState(
+                    ConversationTimelineLoadState(
+                        initialized = true,
+                        totalNodeCount = newConversation.messageNodes.size,
+                        loadedNodeCount = newConversation.messageNodes.size,
+                        oldestLoadedIndex = 0,
+                        isFullyLoaded = true,
+                        prefetchingOlder = false,
+                    )
                 )
-            )
+            }
         }
         launchPendingMessageLoopIfNeeded(conversationId, session)
     }
@@ -1884,6 +1892,7 @@ class ChatService(
         conversation: Conversation,
         indexFts: Boolean,
     ) {
+        if (conversationId in deletedConversationIds) return
         val exists = conversationRepo.existsConversationById(conversation.id)
         if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
             return
@@ -1966,6 +1975,7 @@ class ChatService(
     }
 
     override suspend fun saveConversation(conversationId: Uuid, conversation: Conversation) {
+        if (conversationId in deletedConversationIds) return
         val exists = conversationRepo.existsConversationById(conversation.id)
         if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
             return // 新会话且为空时不保存
@@ -2132,8 +2142,17 @@ class ChatService(
 
         if (!edited) return
 
+        // 编辑旧消息后，下游回答对应的是旧提问；保留下游会形成从未发生的混合上下文，
+        // 并随下次发送进入模型上下文。与 regenerateAtMessage 语义一致：截断到被编辑节点。
+        val editedIndex = updatedNodes.indexOfFirst { node -> node.messages.any { it.id == messageId } }
+        val finalNodes = if (editedIndex >= 0 && editedIndex < updatedNodes.lastIndex) {
+            updatedNodes.subList(0, editedIndex + 1)
+        } else {
+            updatedNodes
+        }
+
         contextEngine.invalidateCompacts(conversationId, "message_edited")
-        saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
+        saveConversation(conversationId, currentConversation.copy(messageNodes = finalNodes))
     }
 
     suspend fun forkConversationAtMessage(
@@ -2202,8 +2221,17 @@ class ChatService(
             }
         }
 
+        // 切换旧节点的 alternative 后，下游回答对应的是之前选中的分支；
+        // 保留下游会形成混合上下文。截断到被切换的节点（最后一个节点无下游，不受影响）。
+        val targetIndex = currentConversation.messageNodes.indexOfFirst { it.id == nodeId }
+        val finalNodes = if (targetIndex >= 0 && targetIndex < updatedNodes.lastIndex) {
+            updatedNodes.subList(0, targetIndex + 1)
+        } else {
+            updatedNodes
+        }
+
         contextEngine.invalidateCompacts(conversationId, "message_branch_changed")
-        saveConversation(conversationId, currentConversation.copy(messageNodes = updatedNodes))
+        saveConversation(conversationId, currentConversation.copy(messageNodes = finalNodes))
     }
 
     suspend fun deleteMessage(
@@ -2464,6 +2492,68 @@ class ChatService(
         "short_term" -> MemoryRepository.SHORT_TERM_MEMORY_ID
         "long_term" -> MemoryRepository.LONG_TERM_MEMORY_ID
         else -> MemoryRepository.LONG_TERM_MEMORY_ID
+    }
+
+    /**
+     * 统一删除入口：tombstone → 取消并等待生成任务 → 清队列 → repository delete。
+     * 直接走 repository 删除时，生成中的流式 checkpoint / saveConversation 会在删除后
+     * 把会话重新插入（复活），且复活时会话引用的附件可能已被清理。
+     */
+    suspend fun deleteConversation(conversation: Conversation, deferCleanup: Boolean = false) {
+        val conversationId = conversation.id
+        deletedConversationIds.add(conversationId)
+        sessions[conversationId]?.let { session ->
+            session.getJob()?.let { job ->
+                job.cancel()
+                runCatching { job.join() }
+            }
+            if (session.pendingUserMessages.value.isNotEmpty()) {
+                session.clearPendingUserMessages()
+            }
+        }
+        stopGenerationKeepAlive(conversationId)
+        cancelLiveUpdateNotification(conversationId)
+        try {
+            conversationRepo.deleteConversation(conversation, deferCleanup = deferCleanup)
+        } catch (t: Throwable) {
+            deletedConversationIds.remove(conversationId)
+            throw t
+        }
+    }
+
+    /** 删除被撤销（如 History 的 Undo）后解除 tombstone，恢复该会话的持久化通道。 */
+    fun markConversationRestored(conversationId: Uuid) {
+        deletedConversationIds.remove(conversationId)
+    }
+
+    /**
+     * 批量删除（清空某助手全部会话）的统一入口：与单条删除相同的 tombstone + 取消生成语义，
+     * 否则生成中的会话会被后续 checkpoint 复活。
+     */
+    suspend fun deleteConversationsOfAssistant(assistantId: Uuid) {
+        val conversations = conversationRepo.getConversationsOfAssistant(assistantId).first()
+        val tombstoned = mutableListOf<Uuid>()
+        try {
+            conversations.forEach { conversation ->
+                deletedConversationIds.add(conversation.id)
+                tombstoned.add(conversation.id)
+                sessions[conversation.id]?.let { session ->
+                    session.getJob()?.let { job ->
+                        job.cancel()
+                        runCatching { job.join() }
+                    }
+                    if (session.pendingUserMessages.value.isNotEmpty()) {
+                        session.clearPendingUserMessages()
+                    }
+                }
+                stopGenerationKeepAlive(conversation.id)
+                cancelLiveUpdateNotification(conversation.id)
+            }
+            conversationRepo.deleteConversationOfAssistant(assistantId)
+        } catch (t: Throwable) {
+            tombstoned.forEach(deletedConversationIds::remove)
+            throw t
+        }
     }
 
     // 停止当前会话生成任务（不清理会话缓存）

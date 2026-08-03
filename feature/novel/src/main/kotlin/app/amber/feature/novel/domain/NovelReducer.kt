@@ -118,6 +118,7 @@ object NovelReducer {
             configRevision = 1,
             mainBranchID = command.branchID,
             modelPolicy = NovelProjectModelPolicy.Global,
+            stateSyncModelPolicy = null,
             lastGenerationGranularity = NovelGenerationGranularity.WholeChapter,
             polishPreference = "",
         )
@@ -227,10 +228,15 @@ object NovelReducer {
     ): NovelReduceResult {
         val now = wireNow(now)
         requireProjectId(command.projectID, document)
+        val purposeWire = when (command.purpose) {
+            NovelModelPolicyPurpose.Creation -> "creation"
+            NovelModelPolicyPurpose.StateSync -> "stateSync"
+        }
         val payloadSHA256 = canonicalPayloadSha(
             buildJsonObject {
                 put("kind", "setModelPolicy")
                 put("projectID", command.projectID.rawValue)
+                put("purpose", purposeWire)
                 put(
                     "policy",
                     NovelSwiftCompatibleJson.json.encodeToJsonElement(
@@ -244,8 +250,72 @@ object NovelReducer {
             ?.let { return NovelReduceResult(document, it) }
         requireConfigRevision(command.context, document)
 
+        val nextProject = when (command.purpose) {
+            NovelModelPolicyPurpose.Creation -> document.project.copy(
+                modelPolicy = command.policy,
+                revision = document.project.revision + 1,
+                configRevision = document.project.configRevision + 1,
+                updatedAt = now,
+            )
+            NovelModelPolicyPurpose.StateSync -> document.project.copy(
+                // Store as-is: Global means follow chat global; Fixed pins a model.
+                // UI uses ClearStateSyncModelPolicy / clearStateSyncModelPolicy for null
+                // (follow writing model) — distinct from Global.
+                stateSyncModelPolicy = command.policy,
+                revision = document.project.revision + 1,
+                configRevision = document.project.configRevision + 1,
+                updatedAt = now,
+            )
+        }
+        val outcome = NovelOutcome.ModelPolicyChanged(
+            projectID = command.projectID,
+            projectRevision = nextProject.revision,
+            configRevision = nextProject.configRevision,
+        )
+        val next = document.copy(
+            project = nextProject,
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = command.context.operationID,
+                kind = NovelOperationKind.SetModelPolicy,
+                payloadSHA256 = payloadSHA256,
+                outcome = outcome,
+                appliedProjectRevision = nextProject.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validate(next)
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
+
+    /**
+     * Clear [NovelProjectRecord.stateSyncModelPolicy] so resolve falls back to writing [modelPolicy].
+     * Uses a dedicated op payload so it is distinct from setting Global (follow chat model).
+     */
+    fun clearStateSyncModelPolicy(
+        command: NovelSetModelPolicyCommand,
+        document: NovelProjectDocumentV1,
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        require(command.purpose == NovelModelPolicyPurpose.StateSync) {
+            "clearStateSyncModelPolicy requires StateSync purpose"
+        }
+        val now = wireNow(now)
+        requireProjectId(command.projectID, document)
+        val payloadSHA256 = canonicalPayloadSha(
+            buildJsonObject {
+                put("kind", "setModelPolicy")
+                put("projectID", command.projectID.rawValue)
+                put("purpose", "stateSync")
+                put("policy", "clear")
+            },
+        )
+        replayIfPresent(command.context, NovelOperationKind.SetModelPolicy, payloadSHA256, document)
+            ?.let { return NovelReduceResult(document, it) }
+        requireConfigRevision(command.context, document)
+
         val nextProject = document.project.copy(
-            modelPolicy = command.policy,
+            stateSyncModelPolicy = null,
             revision = document.project.revision + 1,
             configRevision = document.project.configRevision + 1,
             updatedAt = now,
@@ -356,6 +426,63 @@ object NovelReducer {
             appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
                 operationID = command.context.operationID,
                 kind = NovelOperationKind.ReviseMaterial,
+                payloadSHA256 = payloadSHA256,
+                outcome = outcome,
+                appliedProjectRevision = nextProject.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validate(next)
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
+
+    fun deleteMaterial(
+        command: NovelDeleteMaterialCommand,
+        document: NovelProjectDocumentV1,
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        val now = wireNow(now)
+        requireProjectId(command.projectID, document)
+        val payloadSHA256 = canonicalPayloadSha(
+            buildJsonObject {
+                put("kind", "deleteMaterial")
+                put("projectID", command.projectID.rawValue)
+                put("materialID", command.materialID.rawValue)
+            },
+        )
+        replayIfPresent(command.context, NovelOperationKind.DeleteMaterial, payloadSHA256, document)
+            ?.let { return NovelReduceResult(document, it) }
+        requireConfigRevision(command.context, document)
+
+        val existingIndex = document.materials.indexOfFirst { it.id == command.materialID }
+        if (existingIndex < 0) {
+            throw NovelError.InvalidInput("Material ${command.materialID} not found.")
+        }
+        val material = document.materials[existingIndex]
+        if (material.isDeleted) {
+            // Fresh delete ops are not auto-idempotent; only exact operationID replay is.
+            throw NovelError.InvalidInput("Material ${command.materialID} is already deleted.")
+        }
+        val materials = document.materials.toMutableList()
+        materials[existingIndex] = material.copy(isDeleted = true)
+        val nextProject = document.project.copy(
+            revision = document.project.revision + 1,
+            configRevision = document.project.configRevision + 1,
+            updatedAt = now,
+        )
+        val outcome = NovelOutcome.MaterialDeleted(
+            projectID = command.projectID,
+            materialID = command.materialID,
+            projectRevision = nextProject.revision,
+            configRevision = nextProject.configRevision,
+        )
+        val next = document.copy(
+            project = nextProject,
+            materials = materials,
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = command.context.operationID,
+                kind = NovelOperationKind.DeleteMaterial,
                 payloadSHA256 = payloadSHA256,
                 outcome = outcome,
                 appliedProjectRevision = nextProject.revision,

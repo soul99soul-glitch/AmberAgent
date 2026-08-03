@@ -1,5 +1,8 @@
 package app.amber.feature.ui.pages.novel
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -28,27 +31,28 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.Screen
 import app.amber.feature.novel.model.NovelProjectSummary
+import app.amber.feature.novel.serialization.NovelSwiftWireContract
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
@@ -59,6 +63,9 @@ import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.hugeicons.stroke.BookOpen01
@@ -79,10 +86,109 @@ fun NovelProjectsPage(
     val workspace = workspaceColors()
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var showCreate by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<NovelProjectSummary?>(null) }
     var deleteTarget by remember { mutableStateOf<NovelProjectSummary?>(null) }
+    var pendingExport by remember {
+        mutableStateOf<Pair<String, ByteArray>?>(null)
+    }
+    var pendingMarkdown by remember {
+        mutableStateOf<Pair<String, String>?>(null)
+    }
+
+    val openImport = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        viewModel.beginImportRead()
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        val limit = NovelSwiftWireContract.MAX_ENVELOPE_BYTES
+                        val out = java.io.ByteArrayOutputStream(minOf(64 * 1024, limit))
+                        val chunk = ByteArray(64 * 1024)
+                        var total = 0
+                        while (true) {
+                            val read = input.read(chunk)
+                            if (read < 0) break
+                            total += read
+                            if (total > limit) return@use null // oversize sentinel
+                            out.write(chunk, 0, read)
+                        }
+                        out.toByteArray()
+                    }
+                }
+            }
+            viewModel.endImportRead()
+            result.fold(
+                onSuccess = { bytes ->
+                    when {
+                        bytes == null -> viewModel.reportError("导入包超过上限（约 140MB）或无法打开")
+                        bytes.isEmpty() -> viewModel.reportError("导入文件为空")
+                        else -> viewModel.importPackage(bytes)
+                    }
+                },
+                onFailure = {
+                    viewModel.reportError("无法读取导入文件：${it.message}")
+                },
+            )
+        }
+    }
+
+    val createPackageDoc = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri: Uri? ->
+        val payload = pendingExport
+        pendingExport = null
+        if (uri == null) {
+            viewModel.reportError("已取消导出")
+            return@rememberLauncherForActivityResult
+        }
+        if (payload == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(payload.second) }
+                        ?: error("无法打开输出流")
+                }.isSuccess
+            }
+            if (ok) {
+                viewModel.reportStatus("已保存项目包 ${payload.first}")
+            } else {
+                viewModel.reportError("写入导出文件失败")
+            }
+        }
+    }
+
+    val createMarkdownDoc = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown"),
+    ) { uri: Uri? ->
+        val payload = pendingMarkdown
+        pendingMarkdown = null
+        if (uri == null) {
+            viewModel.reportError("已取消导出")
+            return@rememberLauncherForActivityResult
+        }
+        if (payload == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use {
+                        it.write(payload.second.toByteArray(Charsets.UTF_8))
+                    } ?: error("无法打开输出流")
+                }.isSuccess
+            }
+            if (ok) {
+                viewModel.reportStatus("已保存 ${payload.first}")
+            } else {
+                viewModel.reportError("写入 Markdown 失败")
+            }
+        }
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.openProjectId.collect { projectId ->
@@ -107,6 +213,15 @@ fun NovelProjectsPage(
                 },
                 navigationIcon = { BackButton() },
                 colors = CustomColors.topBarColors,
+                actions = {
+                    NovelQuietButton(
+                        text = "导入",
+                        onClick = {
+                            openImport.launch(arrayOf("application/json", "application/*", "*/*"))
+                        },
+                        enabled = !state.busy,
+                    )
+                },
             )
         },
         floatingActionButton = {
@@ -133,6 +248,17 @@ fun NovelProjectsPage(
                 NovelBanner(
                     text = state.errorMessage.orEmpty(),
                     tone = WorkspaceTone.Danger,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+            AnimatedVisibility(
+                visible = state.statusMessage != null && state.errorMessage == null,
+                enter = fadeIn(tween(NovelMotion.FastMs)) + expandVertically(tween(NovelMotion.MediumMs)),
+                exit = fadeOut(tween(NovelMotion.FastMs)) + shrinkVertically(tween(NovelMotion.FastMs)),
+            ) {
+                NovelBanner(
+                    text = state.statusMessage.orEmpty(),
+                    tone = WorkspaceTone.Success,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
@@ -180,6 +306,7 @@ fun NovelProjectsPage(
                             items(state.projects, key = { it.id.rawValue }) { project ->
                                 NovelProjectCard(
                                     project = project,
+                                    busy = state.busy,
                                     onOpen = {
                                         navController.navigate(
                                             Screen.NovelWorkspace(project.id.rawValue),
@@ -187,6 +314,18 @@ fun NovelProjectsPage(
                                     },
                                     onRename = { renameTarget = project },
                                     onDelete = { deleteTarget = project },
+                                    onExportPackage = {
+                                        viewModel.exportPackage(project.id) { name, bytes ->
+                                            pendingExport = name to bytes
+                                            createPackageDoc.launch(name)
+                                        }
+                                    },
+                                    onExportMarkdown = {
+                                        viewModel.exportMarkdown(project) { name, content ->
+                                            pendingMarkdown = name to content
+                                            createMarkdownDoc.launch(name)
+                                        }
+                                    },
                                     modifier = Modifier.animateItem(
                                         fadeInSpec = tween(NovelMotion.MediumMs),
                                         fadeOutSpec = tween(NovelMotion.FastMs),
@@ -236,15 +375,63 @@ fun NovelProjectsPage(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.delete(target.id)
-                    deleteTarget = null
-                }) {
-                    Text("删除", color = workspace.red, fontWeight = FontWeight.SemiBold)
+                NovelGhostButton(
+                    text = "删除",
+                    onClick = {
+                        viewModel.delete(target.id)
+                        deleteTarget = null
+                    },
+                    danger = true,
+                )
+            },
+            dismissButton = {
+                NovelQuietButton(text = "取消", onClick = { deleteTarget = null })
+            },
+            containerColor = workspace.paper,
+        )
+    }
+
+    state.importConflict?.let { conflict ->
+        AlertDialog(
+            onDismissRequest = { if (!state.busy) viewModel.dismissImportConflict() },
+            title = { Text("项目已存在", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "导入包与「${conflict.existingName}」是同一项目 ID。",
+                        style = type.secondary,
+                        color = workspace.muted,
+                    )
+                    Text(
+                        "替换：覆盖本地旧数据。保留两份：以新 ID 另存为独立项目。",
+                        style = type.meta,
+                        color = workspace.muted,
+                    )
+                }
+            },
+            confirmButton = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    NovelGhostButton(
+                        text = "替换现有",
+                        onClick = { viewModel.confirmReplaceImport() },
+                        enabled = !state.busy,
+                        danger = true,
+                    )
+                    NovelPrimaryButton(
+                        text = "保留两份",
+                        onClick = { viewModel.confirmKeepBothImport() },
+                        enabled = !state.busy,
+                        accent = true,
+                        compact = true,
+                    )
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+                NovelQuietButton(
+                    text = "取消",
+                    onClick = { viewModel.dismissImportConflict() },
+                    enabled = !state.busy,
+                )
             },
             containerColor = workspace.paper,
         )
@@ -257,9 +444,12 @@ private enum class ProjectsPhase { Loading, Empty, List }
 @Composable
 private fun NovelProjectCard(
     project: NovelProjectSummary,
+    busy: Boolean,
     onOpen: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    onExportPackage: () -> Unit,
+    onExportMarkdown: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val workspace = workspaceColors()
@@ -284,7 +474,7 @@ private fun NovelProjectCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             NovelIconCircle(icon = HugeIcons.BookOpen01)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = project.name.ifBlank { "未命名项目" },
                     style = type.sessionTitle,
@@ -302,23 +492,34 @@ private fun NovelProjectCard(
                 }
             }
             Box {
-                IconButton(
+                NovelIconButton(
+                    icon = HugeIcons.MoreVertical,
+                    contentDescription = "更多操作",
                     onClick = { menuExpanded = true },
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        HugeIcons.MoreVertical,
-                        contentDescription = "更多操作",
-                        tint = workspace.muted,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
+                )
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                 ) {
                     DropdownMenuItem(
+                        text = { Text("导出项目包") },
+                        enabled = !busy,
+                        onClick = {
+                            menuExpanded = false
+                            onExportPackage()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("导出 Markdown") },
+                        enabled = !busy,
+                        onClick = {
+                            menuExpanded = false
+                            onExportMarkdown()
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { Text("重命名") },
+                        enabled = !busy,
                         onClick = {
                             menuExpanded = false
                             onRename()
@@ -329,6 +530,7 @@ private fun NovelProjectCard(
                     )
                     DropdownMenuItem(
                         text = { Text("删除", color = workspace.red) },
+                        enabled = !busy,
                         onClick = {
                             menuExpanded = false
                             onDelete()
@@ -458,12 +660,15 @@ private fun NovelCreateProjectDialog(
                 },
                 enabled = canSubmit,
                 accent = true,
+                compact = true,
             )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !busy) {
-                Text("取消", color = workspace.muted)
-            }
+            NovelQuietButton(
+                text = "取消",
+                onClick = onDismiss,
+                enabled = !busy,
+            )
         },
     )
 }
@@ -500,10 +705,11 @@ private fun NovelNameDialog(
                 onClick = { onConfirm(name) },
                 enabled = name.isNotBlank(),
                 accent = true,
+                compact = true,
             )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消", color = workspace.muted) }
+            NovelQuietButton(text = "取消", onClick = onDismiss)
         },
     )
 }

@@ -168,21 +168,3 @@ export const MessageParts = React.memo(({
     </>
   );
 });
-
-interface MessagePartProps {
-  part: UIMessagePart;
-  loading?: boolean;
-  onToolApproval?: (toolCallId: string, approved: boolean, reason: string, answer?: string) => void | Promise<void>;
-  onClickCitation?: (id: string) => void;
-}
-
-export function MessagePart({ part, loading, onToolApproval, onClickCitation }: MessagePartProps) {
-  return (
-    <MessageParts
-      parts={[part]}
-      loading={loading}
-      onToolApproval={onToolApproval}
-      onClickCitation={onClickCitation}
-    />
-  );
-}

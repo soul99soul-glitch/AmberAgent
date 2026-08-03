@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.infra.AppScope
@@ -32,11 +31,8 @@ import app.amber.core.settings.SeedRoutingQuickMessages
 import app.amber.core.settings.SeedSvgQuickMessageId
 import app.amber.core.settings.Settings
 import app.amber.core.settings.PreferencesKeys
-import app.amber.core.settings.defaultReasoningLevelForModel
-import app.amber.core.settings.findModelById
 import app.amber.core.settings.withAmberAgentAssistantBranding
 import app.amber.core.agent.utils.JsonInstant
-import app.amber.core.model.withChatModelReasoningMemory
 import app.amber.core.settings.toMutableStateFlow
 import kotlin.uuid.Uuid
 
@@ -209,84 +205,6 @@ class SettingsAggregator(
         }
     }
 
-    suspend fun updateAssistantModel(assistantId: Uuid, modelId: Uuid) {
-        update { settings ->
-            settings.copy(
-                assistants = settings.assistants.map { assistant ->
-                    if (assistant.id == assistantId) {
-                        val selectedModel = settings.findModelById(modelId)
-                        if (selectedModel == null) {
-                            assistant.copy(chatModelId = modelId)
-                        } else {
-                            val currentModelId = assistant.chatModelId ?: settings.chatModelId
-                            val currentModel = settings.findModelById(currentModelId)
-                            assistant.withChatModelReasoningMemory(
-                                currentModelId = currentModelId,
-                                currentDefaultReasoningLevel = currentModel
-                                    ?.let { settings.defaultReasoningLevelForModel(it) }
-                                    ?: settings.defaultReasoningLevelForModel(selectedModel),
-                                selectedModelId = modelId,
-                                selectedDefaultReasoningLevel = settings.defaultReasoningLevelForModel(selectedModel),
-                            )
-                        }
-                    } else {
-                        assistant
-                    }
-                }
-            )
-        }
-    }
-
-    suspend fun updateAssistantReasoningLevel(assistantId: Uuid, reasoningLevel: ReasoningLevel) {
-        update { settings ->
-            settings.copy(
-                assistants = settings.assistants.map { assistant ->
-                    if (assistant.id == assistantId) {
-                        assistant.copy(reasoningLevel = reasoningLevel)
-                    } else {
-                        assistant
-                    }
-                }
-            )
-        }
-    }
-
-    suspend fun updateAssistantMcpServers(assistantId: Uuid, mcpServers: Set<Uuid>) {
-        update { settings ->
-            settings.copy(
-                assistants = settings.assistants.map { assistant ->
-                    if (assistant.id == assistantId) {
-                        assistant.copy(mcpServers = mcpServers)
-                    } else {
-                        assistant
-                    }
-                }
-            )
-        }
-    }
-
-    suspend fun updateAssistantInjections(
-        assistantId: Uuid,
-        modeInjectionIds: Set<Uuid>,
-        lorebookIds: Set<Uuid>,
-        quickMessageIds: Set<Uuid> = emptySet(),
-    ) {
-        update { settings ->
-            settings.copy(
-                assistants = settings.assistants.map { assistant ->
-                    if (assistant.id == assistantId) {
-                        assistant.copy(
-                            modeInjectionIds = modeInjectionIds,
-                            lorebookIds = lorebookIds,
-                            quickMessageIds = quickMessageIds,
-                        )
-                    } else {
-                        assistant
-                    }
-                }
-            )
-        }
-    }
 }
 
 /**

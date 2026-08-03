@@ -163,8 +163,6 @@ object ICloudDriveWebEndpoints {
 
 const val ICLOUD_GLOBAL_LOGIN_URL = "https://www.icloud.com/iclouddrive"
 const val ICLOUD_CHINA_LOGIN_URL = "https://www.icloud.com.cn/iclouddrive"
-const val ICLOUD_LOGIN_URL = ICLOUD_GLOBAL_LOGIN_URL
-const val ICLOUD_SETUP_ENDPOINT = "https://setup.icloud.com/setup/ws/1"
 const val ICLOUD_ROOT_DRIVEWS_ID = "FOLDER::com.apple.CloudDocs::root"
 const val ICLOUD_CLIENT_BUILD_NUMBER = "2534Project66"
 const val ICLOUD_CLIENT_MASTERING_NUMBER = "2534B22"

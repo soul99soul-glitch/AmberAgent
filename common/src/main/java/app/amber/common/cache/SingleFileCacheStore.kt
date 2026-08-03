@@ -46,8 +46,6 @@ class SingleFileCacheStore<K : Any, V : Any>(
 
     override fun loadAllEntries(): Map<K, CacheEntry<V>> = lock.withLock { safeReadMap() }
 
-    override fun keys(): Set<K> = lock.withLock { safeReadMap().keys }
-
     private fun safeReadMap(): Map<K, CacheEntry<V>> {
         try {
             if (!file.exists()) return emptyMap()
@@ -70,4 +68,3 @@ class SingleFileCacheStore<K : Any, V : Any>(
         atomicWrite(file, text)
     }
 }
-

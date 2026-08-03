@@ -11,11 +11,3 @@ val Context.appTempFolder: File
         }
         return dir
     }
-
-fun Context.getCacheDirectory(namespace: String): File {
-    val dir = File(cacheDir, "disk_cache/$namespace")
-    if (!dir.exists()) {
-        dir.mkdirs()
-    }
-    return dir
-}

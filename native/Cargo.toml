@@ -40,7 +40,6 @@ jni = "0.21"
 
 # Common error / log
 thiserror = "2"
-anyhow = "1"
 log = "0.4"
 android_logger = "0.14"
 
@@ -103,11 +102,7 @@ tree-sitter-css = "0.25"
 # crates.io `tree-sitter-sql` stops at 0.0.2; the maintained fork is `tree-sitter-sequel`.
 tree-sitter-sequel = "0.3"
 
-# Component #8 — tokenizer
-tiktoken-rs = "0.6"
-
 # Component #9 — reader-extractor
-readability = "0.3"
 scraper = "0.22"
 
 [profile.release]

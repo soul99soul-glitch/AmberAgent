@@ -316,10 +316,6 @@ object GenerativeUiPlanner {
         return explicitDelegation.any { it in lower }
     }
 
-    private fun isGuizangDeckRequest(text: String): Boolean {
-        val lower = text.lowercase()
-        return GUIZANG_DECK_KEYWORDS.any { it in lower }
-    }
 
     // ----------------------------------------------------------------------
     // Keyword tables. Kept private so the boundaries are tweakable in one

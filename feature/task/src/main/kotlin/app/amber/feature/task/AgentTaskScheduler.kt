@@ -95,9 +95,3 @@ data class AgentRuntimeStatus(
     val interrupted: Int,
     val byType: Map<String, Int>,
 )
-
-interface AgentTaskAdapter {
-    val type: String
-    val maxConcurrency: Int
-    suspend fun cancel(taskId: String): Boolean
-}

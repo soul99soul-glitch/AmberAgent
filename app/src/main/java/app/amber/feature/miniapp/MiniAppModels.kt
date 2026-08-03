@@ -28,7 +28,6 @@ val MiniAppV3Permissions = MiniAppV2Permissions + setOf(
     "location",
     "clipboard.read",
 )
-val MiniAppV1Permissions = MiniAppV3Permissions
 val MiniAppCategories = setOf("tool", "game", "info", "custom")
 
 val MiniAppPermissionAliases = mapOf(
