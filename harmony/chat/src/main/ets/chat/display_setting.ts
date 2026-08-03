@@ -1,0 +1,95 @@
+// display_setting — 显示偏好设置(core/settings/PreferencesStore.kt:315-355)
+//
+// Android 基准: DisplaySetting data class(~30 字段),序列化到 Preferences DataStore
+// 鸿蒙: 同字段接口 + KV JSON 持久化(loadDisplaySetting/saveDisplaySetting)
+//
+// 纯数据 + 序列化:零 UI/零 IO(KV store 是注入的)
+
+export interface DisplaySetting {
+  showAssistantBubble: boolean;
+  showModelIcon: boolean;
+  showModelName: boolean;
+  showDateBelowName: boolean;
+  showThinkingContent: boolean;
+  autoCloseThinking: boolean;
+  showUpdates: boolean;
+  showMessageJumper: boolean;
+  messageJumperOnLeft: boolean;
+  fontSizeRatio: number;
+  enableMessageGenerationHapticEffect: boolean;
+  skipCropImage: boolean;
+  enableNotificationOnMessageGeneration: boolean;
+  enableLiveUpdateNotification: boolean;
+  codeBlockAutoWrap: boolean;
+  codeBlockAutoCollapse: boolean;
+  showLineNumbers: boolean;
+  ttsOnlyReadQuoted: boolean;
+  autoPlayTTSAfterGeneration: boolean;
+  pasteLongTextAsFile: boolean;
+  pasteLongTextThreshold: number;
+  sendOnEnter: boolean;
+  enableAutoScroll: boolean;
+  showBottomFollowAnimation: boolean;
+  enableLatexRendering: boolean;
+  enableBlurEffect: boolean;
+  chatFontFamily: string;   // 'DEFAULT' | 'SERIF' | 'MONO'
+  enableVolumeKeyScroll: boolean;
+  volumeKeyScrollRatio: number;
+  chatThemeChoice: string;  // 'WHISPER' etc
+  amberBaseFamily: string;  // 'WARM' | 'SAGE'
+  accentColor: string;      // hex
+}
+
+export const DISPLAY_SETTING_KEY: string = 'display_setting';
+
+export const makeDisplaySetting = (opts: Partial<DisplaySetting> = {}): DisplaySetting => ({
+  showAssistantBubble: opts.showAssistantBubble ?? false,
+  showModelIcon: opts.showModelIcon ?? true,
+  showModelName: opts.showModelName ?? true,
+  showDateBelowName: opts.showDateBelowName ?? false,
+  showThinkingContent: opts.showThinkingContent ?? true,
+  autoCloseThinking: opts.autoCloseThinking ?? true,
+  showUpdates: opts.showUpdates ?? true,
+  showMessageJumper: opts.showMessageJumper ?? true,
+  messageJumperOnLeft: opts.messageJumperOnLeft ?? false,
+  fontSizeRatio: opts.fontSizeRatio ?? 1.0,
+  enableMessageGenerationHapticEffect: opts.enableMessageGenerationHapticEffect ?? false,
+  skipCropImage: opts.skipCropImage ?? false,
+  enableNotificationOnMessageGeneration: opts.enableNotificationOnMessageGeneration ?? false,
+  enableLiveUpdateNotification: opts.enableLiveUpdateNotification ?? false,
+  codeBlockAutoWrap: opts.codeBlockAutoWrap ?? false,
+  codeBlockAutoCollapse: opts.codeBlockAutoCollapse ?? false,
+  showLineNumbers: opts.showLineNumbers ?? false,
+  ttsOnlyReadQuoted: opts.ttsOnlyReadQuoted ?? false,
+  autoPlayTTSAfterGeneration: opts.autoPlayTTSAfterGeneration ?? false,
+  pasteLongTextAsFile: opts.pasteLongTextAsFile ?? false,
+  pasteLongTextThreshold: opts.pasteLongTextThreshold ?? 1000,
+  sendOnEnter: opts.sendOnEnter ?? false,
+  enableAutoScroll: opts.enableAutoScroll ?? true,
+  showBottomFollowAnimation: opts.showBottomFollowAnimation ?? true,
+  enableLatexRendering: opts.enableLatexRendering ?? true,
+  enableBlurEffect: opts.enableBlurEffect ?? false,
+  chatFontFamily: opts.chatFontFamily ?? 'DEFAULT',
+  enableVolumeKeyScroll: opts.enableVolumeKeyScroll ?? false,
+  volumeKeyScrollRatio: opts.volumeKeyScrollRatio ?? 1.0,
+  chatThemeChoice: opts.chatThemeChoice ?? 'WHISPER',
+  amberBaseFamily: opts.amberBaseFamily ?? 'WARM',
+  accentColor: opts.accentColor ?? '#B8623A',
+});
+
+import type { KeyValueStore } from './kv_store.ts';
+
+export const loadDisplaySetting = async (store: KeyValueStore): Promise<DisplaySetting> => {
+  const raw: string | null = await store.get(DISPLAY_SETTING_KEY);
+  if (raw === null) return makeDisplaySetting();
+  try {
+    const parsed: Partial<DisplaySetting> = JSON.parse(raw);
+    return makeDisplaySetting(parsed);
+  } catch (_e) {
+    return makeDisplaySetting();
+  }
+};
+
+export const saveDisplaySetting = async (store: KeyValueStore, setting: DisplaySetting): Promise<void> => {
+  await store.put(DISPLAY_SETTING_KEY, JSON.stringify(setting));
+};

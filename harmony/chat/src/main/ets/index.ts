@@ -399,6 +399,12 @@ export {
 } from './chat/reasoning_family.ts';
 export type { ReasoningFamily, ReasoningOption } from './chat/reasoning_family.ts';
 
+// G3-S1:显示偏好设置(PreferencesStore.kt:315-355)
+export {
+  makeDisplaySetting, loadDisplaySetting, saveDisplaySetting, DISPLAY_SETTING_KEY,
+} from './chat/display_setting.ts';
+export type { DisplaySetting } from './chat/display_setting.ts';
+
 export {
   serializeAssistant, parseAssistant, serializeAssistantList, parseAssistantList,
 } from './chat/assistant_serialize.ts';
