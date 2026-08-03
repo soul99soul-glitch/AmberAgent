@@ -392,6 +392,13 @@ export {
   streamingTailActiveWhen,
 } from './chat/streaming_display.ts';
 
+// G2-S3:模型推理能力推断(ChatInputUsage.kt:509-660)
+export {
+  reasoningFamilyOf, reasoningOptionsForModel, coerceToReasoningOptions,
+  providerRoutingKey,
+} from './chat/reasoning_family.ts';
+export type { ReasoningFamily, ReasoningOption } from './chat/reasoning_family.ts';
+
 export {
   serializeAssistant, parseAssistant, serializeAssistantList, parseAssistantList,
 } from './chat/assistant_serialize.ts';
