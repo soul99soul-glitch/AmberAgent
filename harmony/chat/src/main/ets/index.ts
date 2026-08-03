@@ -1049,3 +1049,23 @@ export { groupMessageParts } from './chat/message_grouping.ts';
 
 // ===== 阶段 B:Markdown→HTML 转换器(audit 1.1, ArkUI RichText + HTML 路径) =====
 export { markdownToHtml } from './chat/markdown_html.ts';
+
+// ===== P0:Markdown→block AST(替代 RichText,原生 ArkUI 渲染) =====
+export { parseMarkdown, parseInline } from './chat/markdown_blocks.ts';
+export type {
+  MarkdownBlock,
+  MarkdownBlockHeading,
+  MarkdownBlockParagraph,
+  MarkdownBlockCode,
+  MarkdownBlockList,
+  MarkdownBlockBlockquote,
+  MarkdownBlockTable,
+  MarkdownBlockHr,
+  InlineToken,
+  InlineTextToken,
+  InlineBoldToken,
+  InlineItalicToken,
+  InlineCodeToken,
+  InlineLinkToken,
+  InlineImageToken,
+} from './chat/markdown_blocks.ts';

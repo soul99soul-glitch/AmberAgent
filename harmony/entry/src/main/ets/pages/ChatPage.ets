@@ -97,7 +97,7 @@ import {
 } from '../platform_impl/ArtifactPorts.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
-import { MarkdownRichText } from '../components/MarkdownRichText.ets';
+import { MarkdownText } from '../components/MarkdownText.ets';
 import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
 import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
@@ -429,7 +429,7 @@ struct MessageRow {
             if (this.message.role === 'user') {
               // M2.2:user 消息也支持 Markdown 渲染(对齐 Android MarkdownBlock)
               Column() {
-                MarkdownRichText({ content: block.part.text, fontSize: 15, fontColor: INK })
+                MarkdownText({ content: block.part.text, fontSize: 15, fontColor: INK })
               }
               .padding(10)
               .backgroundColor(SURFACE2)
@@ -437,7 +437,7 @@ struct MessageRow {
               .margin({ bottom: 4 })
             } else {
               Column() {
-                MarkdownRichText({ content: block.part.text, fontSize: 15, fontColor: INK })
+                MarkdownText({ content: block.part.text, fontSize: 15, fontColor: INK })
               }
               .padding(10)
               .backgroundColor(SURFACE)

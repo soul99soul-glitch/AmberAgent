@@ -10,7 +10,7 @@ import type { UIMessagePartTool, JsonValue } from '@amber/chat-domain';
 import { toolInputAsJson } from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
 import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE, BODY, META, LABEL } from '../design/tokens.ets';
-import { MarkdownRichText } from './MarkdownRichText.ets';
+import { MarkdownText } from './MarkdownText.ets';
 
 @Component
 export struct SubAgentRunSheet {
@@ -40,10 +40,10 @@ export struct SubAgentRunSheet {
 
       Divider().color(LINE).strokeWidth(0.5)
 
-      // 实时/最终文本(MarkdownRichText 渲染)
+      // 实时/最终文本(MarkdownText 原生渲染)
       Scroll() {
         if (this.liveText.length > 0) {
-          MarkdownRichText({ content: this.liveText, fontSize: 13, fontColor: INK2 })
+          MarkdownText({ content: this.liveText, fontSize: 13, fontColor: INK2 })
         } else {
           Text('等待子代理输出…').fontSize(LABEL).fontColor(INK3)
             .padding(16)

@@ -1,7 +1,7 @@
 // ArticleRenderer — DeepRead 文章渲染组件(杂志风)
 // Android 基准: feature/ui/pages/board/DeepReadScreen.kt(2076 行,杂志风多帧布局)
 //   鸿蒙 MVP:用 ArticleRenderer 统一渲染 DeepReadOutput 全量块;
-//   文本块经 MarkdownRichText(markdown→html→RichText)渲染,对齐聊天 assistant 文本路径。
+//   文本块经 MarkdownText(原生 ArkUI 组件树)渲染,对齐聊天 assistant 文本路径。
 //
 // 覆盖块:Hero 图 / summary(Markdown)/ keyEntities chips / timeline / corePoints /
 //   analysis(coreDispute + perspectives + implications + quotes)/ diagram / extendedReading / references
@@ -14,7 +14,7 @@ import type {
   Perspective, Quote, DeepReadDiagram, DiagramNode,
 } from '@amber/deepread-domain';
 import { displayHeroImageUrl, displayHeroCaption } from '@amber/deepread-domain';
-import { MarkdownRichText } from './MarkdownRichText.ets';
+import { MarkdownText } from './MarkdownText.ets';
 import {
   INK, INK2, INK3, INK4, ACCENT, ACCENT_LIGHT, SURFACE, SURFACE2, LINE, BODY, META,
 } from '../design/tokens.ets';
@@ -40,7 +40,7 @@ export struct ArticleRenderer {
 
       // ── 概览 summary(Markdown 富文本) ──
       if (this.output.summary.trim().length > 0) {
-        MarkdownRichText({ content: this.output.summary, fontSize: 16, fontColor: INK2 })
+        MarkdownText({ content: this.output.summary, fontSize: 16, fontColor: INK2 })
           .margin({ top: 12, bottom: 8 })
       }
 
@@ -131,7 +131,7 @@ export struct ArticleRenderer {
     // 核心分歧(Markdown)
     if (o.analysis.coreDispute !== null && o.analysis.coreDispute.length > 0) {
       this.SectionTitle('核心分歧')
-      MarkdownRichText({ content: o.analysis.coreDispute, fontSize: BODY, fontColor: INK2 })
+      MarkdownText({ content: o.analysis.coreDispute, fontSize: BODY, fontColor: INK2 })
     }
     // 各方立场
     if (o.analysis.perspectives.length > 0) {
@@ -148,7 +148,7 @@ export struct ArticleRenderer {
     // 影响分析(Markdown)
     if (o.analysis.implications !== null && o.analysis.implications.length > 0) {
       Text('影响分析').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 4 })
-      MarkdownRichText({ content: o.analysis.implications, fontSize: BODY, fontColor: INK2 })
+      MarkdownText({ content: o.analysis.implications, fontSize: BODY, fontColor: INK2 })
     }
     // 引述
     if (o.analysis.quotes.length > 0) {
