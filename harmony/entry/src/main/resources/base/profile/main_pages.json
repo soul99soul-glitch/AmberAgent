@@ -26,6 +26,11 @@
     "pages/ChatAssistantMcpPage",
     "pages/SettingSubAgentPage",
     "pages/SettingModelCouncilPage",
-    "pages/SettingPage"
+    "pages/SettingPage",
+    "pages/SettingDisplayPage",
+    "pages/SettingAboutPage",
+    "pages/SettingSandboxPage",
+    "pages/SettingFilesPage",
+    "pages/SettingCronTasksPage"
   ]
 }

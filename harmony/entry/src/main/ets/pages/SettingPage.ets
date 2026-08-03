@@ -77,6 +77,8 @@ struct SettingPage {
           this.SectionHeader('通用')
           this.Section([
             { label: '助手', page: 'pages/ChatAssistantsPage', danger: false },
+            { label: '显示设置', page: 'pages/SettingDisplayPage', danger: false },
+            { label: '关于', page: 'pages/SettingAboutPage', danger: false },
           ])
 
           // agentRuntime
@@ -101,6 +103,9 @@ struct SettingPage {
           // data
           this.SectionHeader('数据')
           this.Section([
+            { label: '沙盒设置', page: 'pages/SettingSandboxPage', danger: false },
+            { label: '文件管理', page: 'pages/SettingFilesPage', danger: false },
+            { label: '定时任务', page: 'pages/SettingCronTasksPage', danger: false },
             { label: '删除全部会话', page: 'pages/HistoryPage', danger: true },
           ])
 
