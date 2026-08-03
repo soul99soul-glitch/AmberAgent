@@ -20,6 +20,7 @@ import {
   makeProviderSettingGoogle, makeProviderSettingClaude, makeProviderModel,
 } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
+import { FlatTextField } from '../components/ui/FlatTextField.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -247,16 +248,15 @@ struct ChatProviderSettingsPage {
   }
 
   @Builder
-  field(label: string, placeholder: string, value: string, onChange: (v: string) => void, obscure: boolean) {
-    Column() {
-      Text(label).fontSize(12).fontColor(INK3).margin({ bottom: 4 })
-      TextInput({ text: value, placeholder: placeholder })
-        .fontSize(14).padding(10)
-        .backgroundColor(SURFACE).borderRadius(8)
-        .type(obscure ? InputType.Password : InputType.Normal)
-        .onChange(onChange)
-    }
-    .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 14 })
+  field(label: string, placeholder: string, value: string, onChange: (v: string) => void, obscure: boolean, mono: boolean = false) {
+    FlatTextField({
+      value: value,
+      label: label,
+      placeholder: placeholder,
+      mono: mono,
+      obscure: obscure,
+      onChange: onChange,
+    })
   }
 
   @Builder
@@ -337,22 +337,22 @@ struct ChatProviderSettingsPage {
               this.switchRow('启用', this.providerEnabled,
                 (v: boolean): void => { this.providerEnabled = v; })
               this.field('名称', 'Provider', this.name,
-                (v: string): void => { this.name = v; }, false)
+                (v: string): void => { this.name = v; }, false, false)
 
               // apiKey:google vertex+serviceAccount 时隐藏(Android :456)
               if (!(this.selectedType === 'google' && this.vertexAI && this.useServiceAccount)) {
                 this.field('API Key',
                   this.selectedType === 'claude' ? 'sk-ant-…' : 'sk-…',
-                  this.apiKey, (v: string): void => { this.apiKey = v; }, true)
+                  this.apiKey, (v: string): void => { this.apiKey = v; }, true, true)
               }
 
               if (this.selectedType === 'openai') {
                 // OpenAIEndpointFields(:531-561)
                 this.field('Base URL', 'https://api.openai.com/v1', this.baseUrl,
-                  (v: string): void => { this.baseUrl = v; }, false)
+                  (v: string): void => { this.baseUrl = v; }, false, true)
                 if (!this.useResponseApi) {
                   this.field('API Path', '/chat/completions', this.chatPath,
-                    (v: string): void => { this.chatPath = v; }, false)
+                    (v: string): void => { this.chatPath = v; }, false, true)
                 }
                 this.switchRow('使用 Response API', this.useResponseApi,
                   (v: boolean): void => { this.useResponseApi = v; })
@@ -366,22 +366,22 @@ struct ChatProviderSettingsPage {
                 }
                 if (!this.vertexAI) {
                   this.field('Base URL', 'https://generativelanguage.googleapis.com/v1beta',
-                    this.baseUrl, (v: string): void => { this.baseUrl = v; }, false)
+                    this.baseUrl, (v: string): void => { this.baseUrl = v; }, false, true)
                 } else if (this.useServiceAccount) {
                   this.field('Service Account Email', 'name@project.iam.gserviceaccount.com',
                     this.serviceAccountEmail,
-                    (v: string): void => { this.serviceAccountEmail = v; }, false)
+                    (v: string): void => { this.serviceAccountEmail = v; }, false, true)
                   this.field('Private Key', '-----BEGIN PRIVATE KEY-----…',
-                    this.privateKey, (v: string): void => { this.privateKey = v; }, true)
+                    this.privateKey, (v: string): void => { this.privateKey = v; }, true, true)
                   this.field('Location', 'us-central1', this.location,
-                    (v: string): void => { this.location = v; }, false)
+                    (v: string): void => { this.location = v; }, false, true)
                   this.field('Project ID', 'my-gcp-project', this.projectId,
-                    (v: string): void => { this.projectId = v; }, false)
+                    (v: string): void => { this.projectId = v; }, false, true)
                 }
               } else if (this.selectedType === 'claude') {
                 // ClaudeEndpointFields(:625-642)
                 this.field('Base URL', 'https://api.anthropic.com/v1', this.baseUrl,
-                  (v: string): void => { this.baseUrl = v; }, false)
+                  (v: string): void => { this.baseUrl = v; }, false, true)
                 this.switchRow('Prompt Caching', this.promptCaching,
                   (v: boolean): void => { this.promptCaching = v; })
               }

@@ -8,6 +8,7 @@ import { router } from '@kit.ArkUI';
 import type { Conversation, ConversationSummary } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
+import { SearchField } from '../components/ui/SearchField.ets';
 
 const BG: string = '#F4F2EC';
 const SURFACE: string = '#FAF9F5';
@@ -204,15 +205,15 @@ struct ChatListPage {
       }
       .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
 
-      TextInput({ text: this.searchText, placeholder: '搜索对话标题…' })
-        .fontSize(14)
-        .height(40)
-        .margin({ left: 16, right: 16, bottom: 8 })
-        .backgroundColor(SURFACE)
-        .onChange((v: string): void => {
+      SearchField({
+        value: this.searchText,
+        placeholder: '搜索对话标题…',
+        onChange: (v: string): void => {
           this.searchText = v;
           this.refresh();
-        })
+        },
+      })
+        .margin({ left: 16, right: 16, bottom: 8 })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
