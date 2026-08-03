@@ -496,6 +496,11 @@ export {
   serializeProviderSettingList, parseProviderSettingList,
 } from './chat/provider_settings_serialize.ts';
 
+// D-133:TopModelMenu 顶部模型快速切换菜单的数据装配纯逻辑
+//   (Android feature/ui/components/ai/TopModelMenu.kt)
+export { buildTopModelMenuGroups } from './chat/top_model_menu.ts';
+export type { TopModelMenuModel, TopModelMenuGroup } from './chat/top_model_menu.ts';
+
 export {
   SYSTEM_PROMPT_CACHE_CONTROL_METADATA, SYSTEM_PROMPT_CACHE_DISABLED, SYSTEM_PROMPT_CACHE_EPHEMERAL,
   buildStaticSystemPromptParts, buildToolSystemPrompt, assembleInternalMessages,

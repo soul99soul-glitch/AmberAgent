@@ -66,14 +66,18 @@ import {
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
   groupMessageParts,
+  buildTopModelMenuGroups,
+  loadProviders,
 } from '@amber/chat-domain';
 import type {
   ThinkingStep, MessagePartBlock,
+  TopModelMenuGroup,
 } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
   getChatKvStore, getCompactStore, getSessionGrantStore,
-  resolveChatProviderChoice, ChatProviderChoice,
+  getChatModelSelection, saveChatModelSelection,
+  resolveChatProviderChoice, ChatProviderChoice, ChatModelSelection,
   buildProviderApi, currentChatModelUuid, loadTaskModelIds, resolveTaskChatModelChoice,
   resolveTaskModelChain, loadTaskPrompts, TaskPrompts,
   getMcpManager, initMcpManager, getToolActivityStore, getSkillManager,
@@ -103,6 +107,7 @@ import { ChatMessageActionFooter, resolveActionFooterMode } from '../components/
 import { SubAgentRunSheet } from '../components/SubAgentRunSheet.ets';
 import { ChatMessageCopySheet } from '../components/ChatMessageCopySheet.ets';
 import { ChatMessageToolPreviewSheet } from '../components/ChatMessageToolPreviewSheet.ets';
+import { TopModelMenu } from '../components/TopModelMenu.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -547,6 +552,13 @@ struct ChatPage {
   @State compactActiveCount: number = 0;
   @State title: string = '新对话';
   @State modelLabel: string = '';
+  // TopModelMenu:顶部模型快速切换下拉(Android TopModelMenu.kt)
+  @State modelMenuOpen: boolean = false;
+  // 打开重入守卫:async 装配期间阻止重复触发(避免连点产生多条 loadProviders 链)
+  @State modelMenuLoading: boolean = false;
+  @State modelMenuGroups: TopModelMenuGroup[] = [];
+  @State modelMenuCurrentProvider: string = '';
+  @State modelMenuCurrentModel: string = '';
   @State editingNodeId: string = '';
   @State editingMessageId: string = '';
   @State editingTitle: boolean = false;
@@ -1378,6 +1390,48 @@ struct ChatPage {
 
   private closeToolPreview(): void {
     this.toolPreviewSheetOpen = false;
+  }
+
+  // TopModelMenu:打开/关闭下拉。打开 = 装配 groups(过滤 hasUsableAuth + chat 类型),
+  //   复用 buildTopModelMenuGroups 域纯逻辑;关闭 = 仅翻 bool。装配完成后再置 open=true,
+  //   避免空 groups 闪烁(KV/Preferences 本地读取,用户感知不到延迟)。
+  //   Android ChatPage.kt:985-996 装配 + 992 挂载 的鸿蒙对应。
+  //   嵌套 .then(对齐 ChatModelPickerPage 既有装配范式,避开 Promise.all 元组推断)
+  private toggleModelMenu(): void {
+    if (this.modelMenuOpen) {
+      this.modelMenuOpen = false;
+      return;
+    }
+    // 重入守卫:装配期间连点忽略(KV/Preferences 本地读取快,但避免重复链)
+    if (this.modelMenuLoading) return;
+    this.modelMenuLoading = true;
+    loadProviders(getChatKvStore()).then((providers: ProviderSetting[] | null): void => {
+      getChatModelSelection().then((sel: ChatModelSelection | null): void => {
+        const currentProvider: string = sel !== null ? sel.providerId : '';
+        const currentModel: string = sel !== null ? sel.modelId : '';
+        this.modelMenuGroups = buildTopModelMenuGroups(
+          providers, 'chat', currentProvider, currentModel,
+        );
+        this.modelMenuCurrentProvider = currentProvider;
+        this.modelMenuCurrentModel = currentModel;
+        this.modelMenuLoading = false;
+        this.modelMenuOpen = true;
+      });
+    });
+  }
+
+  // 下拉内选中模型:持久化 + 刷新标签 + 关闭。
+  //   对齐 Android onSelect → vm.setChatModel;Harmony 选择层 = Preferences 键
+  //   (chat_selected_provider_id/model_id),resolveChatRuntime 消费。
+  private selectModelFromMenu(providerId: string, modelId: string): void {
+    saveChatModelSelection({ providerId, modelId }).then((): void => {
+      describeChatModel().then((label: string): void => { this.modelLabel = label; });
+      // contextWindowTokens 也随之刷新(aboutToAppear 同款逻辑)
+      resolveChatProviderChoice().then((choice: ChatProviderChoice | null): void => {
+        this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
+      });
+      this.modelMenuOpen = false;
+    });
   }
 
   // 斜杠命令 /compact:手动触发上下文压缩(失效 compacts,下次发送时重新压缩)
@@ -2501,15 +2555,25 @@ struct ChatPage {
             .fontSize(17).fontWeight(FontWeight.Medium).fontColor(INK)
             .onClick((): void => this.startEditTitle())
         }
-        Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型 — 点我选择')
-          .fontSize(11)
-          .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
-          .margin({ top: 2 })
+        Row() {
+          Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型 — 点我选择')
+            .fontSize(11)
+            .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          Text(this.modelMenuOpen ? '▴' : '▾')
+            .fontSize(9)
+            .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
+            .margin({ left: 4 })
+        }
+        .width('100%')
+        .margin({ top: 2 })
       }
       .padding({ top: 16, bottom: 8 })
       .onClick((): void => {
         if (!this.editingTitle) {
-          router.pushUrl({ url: 'pages/ChatModelPickerPage' });
+          this.toggleModelMenu();
         }
       })
 
@@ -2729,6 +2793,29 @@ struct ChatPage {
       })
     }
     .width('100%').height('100%').backgroundColor(BG)
+
+    // TopModelMenu 覆盖层(Android TopModelMenu.kt:Box { scrim; AnimatedVisibility(panel) })
+    //   Stack 子节点序:主 Column(底) → 本覆盖层 → deny-dialog(顶,确保拒绝弹窗压在菜单之上)。
+    //   组件自含全屏 dimmed scrim(28% 黑,点击 = onClose)+ 贴顶面板。
+    if (this.modelMenuOpen) {
+      TopModelMenu({
+        groups: this.modelMenuGroups,
+        currentProviderId: this.modelMenuCurrentProvider,
+        currentModelId: this.modelMenuCurrentModel,
+        onSelect: (providerId: string, modelId: string): void => {
+          this.selectModelFromMenu(providerId, modelId);
+        },
+        onClose: (): void => { this.modelMenuOpen = false; },
+        onOpenFullPicker: (): void => {
+          this.modelMenuOpen = false;
+          router.pushUrl({ url: 'pages/ChatModelPickerPage' });
+        },
+        onOpenProviderSettings: (): void => {
+          this.modelMenuOpen = false;
+          router.pushUrl({ url: 'pages/ChatProviderSettingsPage' });
+        },
+      })
+    }
 
     // ===== D-108:拒绝理由弹窗(ToolDenyReasonDialog :428-461 逐字) =====
     //   title '拒绝工具执行'/hint '原因（可选）'/confirm '拒绝'/dismiss '取消'
