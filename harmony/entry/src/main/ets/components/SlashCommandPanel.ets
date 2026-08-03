@@ -26,25 +26,35 @@ export struct SlashCommandPanel {
   onSelect: (cmd: SlashCommand) => void = (_cmd: SlashCommand): void => {};
 
   build(): void {
-    if (this.visible && this.commands.length > 0) {
+    if (this.visible) {
       Column() {
-        ForEach(this.commands, (cmd: SlashCommand, i: number) => {
+        if (this.commands.length > 0) {
+          ForEach(this.commands, (cmd: SlashCommand, i: number) => {
+            Row() {
+              Text(`/${cmd.title}`)
+                .fontSize(BODY).fontColor(cmd.accent ? ACCENT : INK)
+                .fontWeight(FontWeight.Medium)
+              Text(cmd.description)
+                .fontSize(LABEL).fontColor(INK3)
+                .layoutWeight(1).margin({ left: 8 })
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            }
+            .width('100%')
+            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+            .onClick((): void => { this.onSelect(cmd); })
+            if (i < this.commands.length - 1) {
+              Divider().color(LINE).strokeWidth(0.5)
+            }
+          }, (cmd: SlashCommand, i: number): string => `slash-${cmd.id}`)
+        } else {
+          // G2-S4:空匹配行(对齐 Android SlashCommandEmptyRow)
           Row() {
-            Text(`/${cmd.title}`)
-              .fontSize(BODY).fontColor(cmd.accent ? ACCENT : INK)
-              .fontWeight(FontWeight.Medium)
-            Text(cmd.description)
+            Text('无匹配命令')
               .fontSize(LABEL).fontColor(INK3)
-              .layoutWeight(1).margin({ left: 8 })
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           .width('100%')
-          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-          .onClick((): void => { this.onSelect(cmd); })
-          if (i < this.commands.length - 1) {
-            Divider().color(LINE).strokeWidth(0.5)
-          }
-        }, (cmd: SlashCommand, i: number): string => `slash-${cmd.id}`)
+          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        }
       }
       .width('100%')
       .backgroundColor(SURFACE)
@@ -55,10 +65,11 @@ export struct SlashCommandPanel {
   }
 }
 
-// 构建斜杠命令列表(MVP,不含 quickMessages/skills)
+// 构建斜杠命令列表(core + skills)
 export const buildSlashCommands = (
   subAgentEnabled: boolean,
   subAgentMode: string,
+  enabledSkills: SlashCommand[] = [],
 ): SlashCommand[] => {
   const commands: SlashCommand[] = [
     { id: 'core.clear', title: 'clear', description: '清空当前输入框', accent: false },
@@ -72,6 +83,10 @@ export const buildSlashCommands = (
       description: '引导 Agent 灵活使用 SubAgent',
       accent: false,
     });
+  }
+  // G2-S4:动态 skill 命令(由调用方从 SkillManager.listSkills() 装配传入)
+  for (const skill of enabledSkills) {
+    commands.push(skill);
   }
   return commands;
 };

@@ -29,6 +29,8 @@ export struct ChatInput {
   @Prop hasImages: boolean = false;
   @Prop subAgentEnabled: boolean = false;
   @Prop subAgentMode: string = 'roster';
+  // G2-S4:动态 skill 斜杠命令(由 ChatPage 从 SkillManager 装配)
+  @Prop skillCommands: SlashCommand[] = [];
   // M2.1:推理档位段集(模型感知;空/单档 → ReasoningPicker 自身不渲染)
   @Prop reasoningLevels: ReasoningLevelOption[] = [];
   @Prop currentReasoningLevel: string = '';
@@ -53,7 +55,7 @@ export struct ChatInput {
 
   // 过滤匹配当前输入的命令(输入 /c → 匹配 clear/compact)
   private getSlashCommands(): SlashCommand[] {
-    const all: SlashCommand[] = buildSlashCommands(this.subAgentEnabled, this.subAgentMode);
+    const all: SlashCommand[] = buildSlashCommands(this.subAgentEnabled, this.subAgentMode, this.skillCommands);
     if (!this.isSlashVisible()) return [];
     // 去掉前导 / 或 ／ 得到查询
     const query: string = this.text.substring(1).toLowerCase();
@@ -71,12 +73,15 @@ export struct ChatInput {
     } else if (cmd.id === 'core.deepread') {
       this.onInsertText('/deepread ');
     } else if (cmd.id === 'core.subagent') {
-      // 根据 mode 插入引导文本
       if (this.subAgentMode === 'smart_dynamic') {
         this.onInsertText('请根据这个任务的复杂度，判断是否需要用 custom_subagent 临时创建 SubAgent，不要使用 subagent_id；名称可省略由应用分配英文名；纯创作或无需外部读取时设 tool_profile=none，需要资料时再选择只读 profile，写清楚 prompt、边界和输出格式，等待返回后再综合结论：');
       } else {
         this.onInsertText('请根据这个任务的复杂度，主动拆分并灵活调用合适的 subagent 并行处理；等待它们返回后，再综合成一个可执行的结论：');
       }
+    } else if (cmd.id.startsWith('skill.')) {
+      // G2-S4:/skill-* → 插入 use_skill 引导(ChatInputComposers.kt:895-899)
+      const skillId: string = cmd.id.substring('skill.'.length);
+      this.onInsertText(`请先调用 use_skill(skill_id="${skillId}") 执行技能，然后根据结果回答：`);
     }
   }
 
