@@ -37,6 +37,12 @@
     "pages/SettingProviderModelTabPage",
     "pages/SettingProviderModelSettingsForm",
     "pages/SettingTTSPage",
-    "pages/SettingSystemAccessPage"
+    "pages/SettingSystemAccessPage",
+    "pages/SettingExperimentalPage",
+    "pages/SettingSearchServiceEditorSheet",
+    "pages/SettingSearchListCards",
+    "pages/SettingSlidesFontPage",
+    "pages/SettingExperimentalWebMountPage",
+    "pages/SettingExperimentalOfficeProPage"
   ]
 }
