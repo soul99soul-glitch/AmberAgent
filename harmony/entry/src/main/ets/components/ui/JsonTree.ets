@@ -32,10 +32,12 @@ const buildNode = (key: string, value: object): JsonNodeData => {
     return { key, type: 'string', value: value, children: [], childCount: 0 } as JsonNodeData;
   }
   if (typeof value === 'number') {
-    return { key, type: 'number', value: value.toString(), children: [], childCount: 0 } as JsonNodeData;
+    const numVal: number = value as number;
+    return { key, type: 'number', value: `${numVal}`, children: [], childCount: 0 } as JsonNodeData;
   }
   if (typeof value === 'boolean') {
-    return { key, type: 'boolean', value: value.toString(), children: [], childCount: 0 } as JsonNodeData;
+    const boolVal: boolean = value as boolean;
+    return { key, type: 'boolean', value: boolVal ? 'true' : 'false', children: [], childCount: 0 } as JsonNodeData;
   }
   if (Array.isArray(value)) {
     const children: JsonNodeData[] = [];

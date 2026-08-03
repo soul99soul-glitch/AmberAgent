@@ -5,14 +5,14 @@ import { ACCENT } from '../../design/tokens.ets';
 @Component
 export struct DotLoading {
   @Prop color: string = ACCENT;
-  @Prop size: number = 16;
+  @Prop dotSize: number = 16;
   @State alpha: number = 0.3;
 
   build(): void {
     Text('')
-      .width(this.size)
-      .height(this.size)
-      .borderRadius(this.size / 2)
+      .width(this.dotSize)
+      .height(this.dotSize)
+      .borderRadius(this.dotSize / 2)
       .backgroundColor(this.color)
       .opacity(this.alpha)
   }

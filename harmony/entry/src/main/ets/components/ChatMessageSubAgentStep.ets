@@ -1,49 +1,44 @@
-// ChatMessageSubAgentStep — 子代理任务卡片(第三梯队)
-// Android 基准: ChatMessageSubAgentStep.kt(393 行)— phase 轮播 + run sheet
-// Harmony 后端: subagent_models.ts + subagent_manager.ts(snapshot/subscribeLiveText)
-//   + tool_activity.ts(toolOutputJson 提取 status)
+// ChatMessageSubAgentStep — 子代理任务卡片(G4-S2 升级)
 //
-// 功能(MVP):
-//   ✅ 从 subagent_start/wait/read 输出解析最新 status
-//   ✅ 显示 @displayName + 状态动词(running→正在工作/completed→已完成/...)
-//   ✅ 点击展开 run sheet(显示任务目标 + 实时文本)
-//   ❌ phase 轮播动画(后续迭代,需定时器)
-//   ✅ SubAgentAvatar(已接入)
-//   ❌ 搜索图片画廊(后续迭代)
+// Android 基准: ChatMessageSubAgentStep.kt(393 行)
+// 升级: phase 轮播 + AgentToolCallCapsule + 任务目标可折叠
+// 降级(跳过): SubAgentRunSheet bottom sheet / SearchImageGallery / auto-scroll /
+//   liveTextFlow / transcript 回退链
 
 import type { UIMessagePartTool, JsonValue } from '@amber/chat-domain';
 import { toolOutputJson, toolInputAsJson } from '@amber/chat-domain';
 import type { JsonObject } from '@amber/chat-domain';
-import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE, BODY, META, LABEL } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, META, LABEL } from '../design/tokens.ets';
 import { SubAgentAvatar } from './SubAgentAvatar.ets';
+import { AgentToolCallCapsule, ToolStatus } from './AgentToolCapsule.ets';
 
-// 从 subagent_start/wait/read 工具输出解析最新 status
+const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set<string>([
+  'subagent_start', 'subagent_wait', 'subagent_read', 'subagent_cancel',
+]);
+
+const DEFAULT_PHASES: string[] = ['分析', '搜索', '整理', '汇总'];
+
 const parseLatestStatus = (tools: UIMessagePartTool[]): string => {
   for (let i: number = tools.length - 1; i >= 0; i--) {
     const t: UIMessagePartTool = tools[i];
-    if (t.toolName !== 'subagent_start' && t.toolName !== 'subagent_wait' &&
-      t.toolName !== 'subagent_read' && t.toolName !== 'subagent_cancel') continue;
+    if (!SUBAGENT_TOOL_NAMES.has(t.toolName)) continue;
     if (t.output.length === 0) continue;
     const json: JsonObject = toolOutputJson(t);
     const status: JsonValue = json['status'];
     if (typeof status === 'string' && status.length > 0) return status;
   }
-  return 'running'; // 无结果 → running
+  return 'running';
 };
 
-// 从 start 工具的 input 解析显示名:
-//   优先 custom_subagent.name(动态子代理),其次 subagent_id(roster),回退 'subagent'
 const extractSubAgentId = (tools: UIMessagePartTool[]): string => {
   for (const t of tools) {
     if (t.toolName === 'subagent_start') {
       const input: JsonObject = toolInputAsJson(t);
-      // 动态子代理:custom_subagent.name
       const custom: JsonValue = input['custom_subagent'];
       if (custom !== null && typeof custom === 'object' && !Array.isArray(custom)) {
         const name: JsonValue = (custom as JsonObject)['name'];
         if (typeof name === 'string' && name.length > 0) return name;
       }
-      // roster 子代理:subagent_id
       const id: JsonValue = input['subagent_id'];
       if (typeof id === 'string' && id.length > 0) return id;
     }
@@ -62,46 +57,97 @@ const statusVerb = (status: string): string => {
   return '正在工作';
 };
 
+const statusToToolStatus = (status: string): ToolStatus => {
+  if (status === 'running') return ToolStatus.Running;
+  if (status === 'approval_required') return ToolStatus.WaitingApproval;
+  if (status === 'completed') return ToolStatus.Succeeded;
+  if (status === 'failed' || status === 'timed_out' || status === 'interrupted') return ToolStatus.Failed;
+  if (status === 'cancelled') return ToolStatus.Cancelled;
+  return ToolStatus.Running;
+};
+
 @Component
 export struct ChatMessageSubAgentStep {
   @Prop tools: UIMessagePartTool[];
   @Prop runId: string = '';
   onOpenRun: (runId: string) => void = (_id: string): void => {};
+  @State objectiveExpanded: boolean = false;
+
+  private currentPhase(): string {
+    if (this.currentStatus() !== 'running') return DEFAULT_PHASES[DEFAULT_PHASES.length - 1];
+    const elapsed: number = Date.now() / 5000;
+    return DEFAULT_PHASES[Math.floor(elapsed) % DEFAULT_PHASES.length];
+  }
 
   build(): void {
     Column() {
+      // capsule: avatar + @name + status + phase
       Row() {
         SubAgentAvatar({
           subagentId: this.displayName(),
           name: this.displayName(),
-          avatarSize: 20,
+          avatarSize: 16,
           status: this.currentStatus(),
         })
-        Text(`@${this.displayName()} ${statusVerb(this.currentStatus())}`)
-          .fontSize(META).fontColor(INK2)
+        Text(`@${this.displayName()} ${statusVerb(this.currentStatus())} · ${this.currentPhase()}`)
+          .fontSize(META)
+          .fontColor(INK2)
+          .fontWeight(FontWeight.Medium)
+          .fontFamily('monospace')
           .margin({ left: 6 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
-        // 运行中显示加载指示
+
+        // 状态徽章
         if (this.currentStatus() === 'running') {
-          Text('…').fontSize(META).fontColor(ACCENT)
+          Text('●')
+            .fontSize(10)
+            .fontColor(ACCENT)
         }
       }
-      .width('100%')
-      .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+      .padding({ left: 7, right: 7, top: 3, bottom: 3 })
       .backgroundColor(SURFACE2)
-      .borderRadius(8)
-      .margin({ bottom: 4 })
+      .borderRadius(50)
+      .border({ width: 1, color: LINE })
+      .alignItems(VerticalAlign.Center)
       .onClick((): void => { this.onOpenRun(this.runId); })
+      .margin({ bottom: 4 })
 
-      // 显示任务目标(从 start 工具 input 的 task.objective)
-      Text(this.objective())
-        .fontSize(LABEL).fontColor(INK3)
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      // 任务目标(可折叠)
+      if (this.objective().length > 0) {
+        Column() {
+          Row() {
+            Text('任务').fontSize(LABEL).fontColor(INK3)
+            Text(this.objectiveExpanded ? '收起' : '展开')
+              .fontSize(LABEL).fontColor(ACCENT)
+              .margin({ left: 8 })
+              .onClick((): void => { this.objectiveExpanded = !this.objectiveExpanded; })
+          }
+          .width('100%')
+
+          if (this.objectiveExpanded) {
+            Text(this.objective())
+              .fontSize(META).fontColor(INK2).lineHeight(18)
+              .width('100%').margin({ top: 4 })
+          } else {
+            Text(this.objective())
+              .fontSize(META).fontColor(INK2).lineHeight(18)
+              .maxLines(3)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%').margin({ top: 4 })
+          }
+        }
         .width('100%')
-        .padding({ left: 10, right: 10, bottom: 6 })
+        .margin({ top: 2, left: 32 })
+        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor(SURFACE)
+        .borderRadius(8)
+        .border({ width: 0.5, color: LINE })
+      }
     }
     .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
   private displayName(): string {

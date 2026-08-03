@@ -14,7 +14,7 @@ import {
   AskUserQuestion, parseAskUserQuestions, parseAskedAnswers,
   askAnswerDisplayText, isAskUserSubmittable, hasAnyAskAnswer,
 } from '@amber/chat-domain';
-import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE } from '../design/tokens.ets';
+import { INK, INK2, INK3, ACCENT, ACCENT_LIGHT, SURFACE, SURFACE2, LINE } from '../design/tokens.ets';
 
 // Record<string, string> — ArkTS 允许 Record 类型
 type AnswerMap = Record<string, string>;
@@ -55,25 +55,31 @@ export struct ChatMessageAskUserStep {
             if (q.options.length > 0) {
               Flex({ wrap: FlexWrap.Wrap }) {
                 ForEach(q.options, (opt: string) => {
-                  Text(opt)
-                    .fontSize(11)
-                    .fontColor(this.isOptionSelected(q, opt) ? '#FFFFFF' : INK2)
-                    .padding({ left: 12, right: 12, top: 5, bottom: 5 })
-                    .margin({ right: 6, top: 4 })
-                    .borderRadius(999)
-                    .backgroundColor(this.isOptionSelected(q, opt) ? ACCENT : SURFACE2)
-                    .border({
-                      width: this.isOptionSelected(q, opt) ? 0 : 1,
-                      color: LINE,
-                    })
-                    .onClick((): void => {
-                      if (q.selectionType === 'multi') {
-                        this.onToggleMulti(q.id, opt);
-                      } else {
-                        this.onAnswer(q.id, opt);
-                      }
-                    })
-                }, (opt: string): string => opt)
+                  Row() {
+                    if (this.isOptionSelected(q, opt)) {
+                      Text('✓').fontSize(11).fontColor('#FFFFFF').margin({ right: 4 })
+                    }
+                    Text(opt)
+                      .fontSize(11)
+                      .fontColor(this.isOptionSelected(q, opt) ? '#FFFFFF' : INK2)
+                      .fontWeight(this.isOptionSelected(q, opt) ? FontWeight.Medium : FontWeight.Normal)
+                  }
+                  .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                  .margin({ right: 8, top: 6 })
+                  .borderRadius(999)
+                  .backgroundColor(this.isOptionSelected(q, opt) ? ACCENT : SURFACE2)
+                  .border({
+                    width: this.isOptionSelected(q, opt) ? 0 : 1,
+                    color: LINE,
+                  })
+                  .onClick((): void => {
+                    if (q.selectionType === 'multi') {
+                      this.onToggleMulti(q.id, opt);
+                    } else {
+                      this.onAnswer(q.id, opt);
+                    }
+                  })
+                }, (opt: string, oi: number): string => `opt-${qi}-${oi}`)
               }
               .width('100%')
             }
@@ -88,22 +94,27 @@ export struct ChatMessageAskUserStep {
                 })
             }
           } else if (this.part.approvalState.type === 'answered') {
-            // 已应答 → 'A' 标记 + 展示文本
+            // 已应答 → 'A' 标记(等宽 accent) + 答案文本(顶对齐)
             Row() {
               Text('A')
-                .fontSize(10).fontColor(ACCENT)
-                .padding({ left: 5, right: 5, top: 1, bottom: 1 })
-                .backgroundColor('#1FB8623A')
-                .borderRadius(4)
+                .fontSize(10)
+                .fontColor(ACCENT)
+                .fontFamily('monospace')
+                .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+                .backgroundColor(ACCENT_LIGHT)
+                .borderRadius(5)
               Text(this.answeredText(q.id))
-                .fontSize(12).fontColor(INK)
+                .fontSize(12)
+                .fontColor(INK)
                 .layoutWeight(1)
+                .margin({ left: 8 })
             }
             .width('100%')
-            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .alignItems(VerticalAlign.Top)
+            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
             .margin({ top: 4 })
             .backgroundColor(SURFACE2)
-            .borderRadius(8)
+            .borderRadius(10)
             .border({ width: 1, color: LINE })
           }
         }

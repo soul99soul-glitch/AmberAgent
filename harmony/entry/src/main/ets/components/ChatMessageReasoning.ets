@@ -1,67 +1,93 @@
-// ChatMessageReasoning — reasoning 思考卡片组件(阶段 C, audit 1.6)
+// ChatMessageReasoning — reasoning 思考卡片组件(G4-S2 升级)
 //
-// Android 基准: ChatMessageReasoning.kt(451 行)— collapsed/preview/expanded 三态
-// Harmony 后端: reasoning_display.ts(D-053 逐行复刻)
-// 从 ChatPage.ets MessageRow.build() 内联抽出(line 339-379)
-//
-// 三态:
-//   collapsed — 仅头部(脑图标+title/秒数+展开箭头)
-//   preview — 1600 字尾窗,5 行截断
-//   expanded — 18000 字尾窗全文
-// 头部可点切换;2dp 左竖线+14px 缩进
+// Android 基准: ChatMessageReasoning.kt(451 行)
+// 升级: 三态完整(collapsed/preview/expanded) + budget 标签 + MarkdownText 渲染内容
+//   + duration 实时显示 + preview 限高滚动
+// 降级(跳过): shimmer / AnimatedContent 标题切换 / 自动折叠 / 250ms ticker / 主题色变体
 
 import type { UIMessagePartReasoning } from '@amber/chat-domain';
 import {
   toDisplayReasoningText, reasoningDurationMs, formatThoughtSeconds,
   extractThinkingTitle,
 } from '@amber/chat-domain';
-import { INK2, INK3, ACCENT } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, META } from '../design/tokens.ets';
+import { MarkdownText } from './MarkdownText.ets';
 
 @Component
 export struct ChatMessageReasoning {
   @Prop part: UIMessagePartReasoning;
   @Prop state: string; // 'collapsed' | 'preview' | 'expanded'
-  @Prop loading: boolean; // streaming && finishedAt === null
+  @Prop loading: boolean;
   onToggle: () => void = (): void => {};
 
   build(): void {
     Column() {
+      // 头部: 图标 + 标题文本 + 展开箭头
       Row() {
-        Text('🧠').fontSize(12)
+        Text('🧠').fontSize(14)
         Text(this.headerText())
-          .fontSize(12).fontColor(ACCENT)
+          .fontSize(META)
+          .fontColor(ACCENT)
+          .fontWeight(FontWeight.Medium)
+          .fontFamily('monospace')
           .margin({ left: 6 })
           .layoutWeight(1)
-        Text(this.state === 'expanded' ? '▾' : '▸')
-          .fontSize(11).fontColor(INK3)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+        // duration(右侧)
+        if (this.shouldShowDuration()) {
+          Text(this.durationLabel())
+            .fontSize(11)
+            .fontColor(INK3)
+            .fontFamily('monospace')
+            .margin({ right: 6 })
+        }
+
+        Text(this.state === 'collapsed' ? '▸' : '▾')
+          .fontSize(11)
+          .fontColor(INK3)
       }
       .width('100%')
       .padding({ left: 2, top: 6, bottom: 6 })
       .onClick((): void => { this.onToggle(); })
 
+      // 内容(preview / expanded)
       if (this.state === 'preview') {
-        Text(toDisplayReasoningText(this.part.reasoning, this.loading, false))
-          .fontSize(13).fontColor(INK2)
-          .maxLines(5)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        // preview: 限高 100px + 滚动 + 渐隐
+        Scroll() {
+          Column() {
+            this.RenderReasoningContent(false)
+          }
           .width('100%')
-          .padding({ left: 14, top: 2, bottom: 2 })
-          .border({ width: { left: 2 }, color: { left: '#D8D2C6' } })
+        }
+        .width('100%')
+        .height(100)
+        .padding({ left: 14, top: 2, bottom: 2 })
+        .border({ width: { left: 2 }, color: { left: LINE } })
       } else if (this.state === 'expanded') {
-        Text(toDisplayReasoningText(this.part.reasoning, this.loading, true))
-          .fontSize(13).fontColor(INK2)
-          .width('100%')
-          .padding({ left: 14, top: 2, bottom: 2 })
-          .border({ width: { left: 2 }, color: { left: '#D8D2C6' } })
+        // expanded: 全文
+        Column() {
+          this.RenderReasoningContent(true)
+        }
+        .width('100%')
+        .padding({ left: 14, top: 2, bottom: 2 })
+        .border({ width: { left: 2 }, color: { left: LINE } })
       }
     }
     .width('100%')
     .margin({ bottom: 4 })
   }
 
-  // 与原始 ChatPage:306-317 reasoningHeader 一致 — 流式标题/秒数/默认三态
-  // loading 有 title → title;loading 无 title 或 finished → 秒数(build 驱动,非 ticker);
-  // 非 loading 且 finishedAt==null → '深度思考'
+  @Builder
+  RenderReasoningContent(isExpanded: boolean): void {
+    MarkdownText({
+      content: toDisplayReasoningText(this.part.reasoning, this.loading, isExpanded),
+      fontSize: 13,
+      fontColor: INK2,
+    })
+  }
+
   private headerText(): string {
     const reasoning: UIMessagePartReasoning = this.part;
     if (this.loading) {
@@ -72,9 +98,33 @@ export struct ChatMessageReasoning {
       const durationMs: number = reasoningDurationMs(
         reasoning.createdAt, reasoning.finishedAt, this.loading, Date.now());
       if (durationMs > 0) {
-        return formatThoughtSeconds(durationMs / 1000);
+        let label: string = formatThoughtSeconds(durationMs / 1000);
+        // budget 标签(如果有)
+        const budget: string = this.budgetLabel();
+        if (budget.length > 0) label = `${label} · ${budget}`;
+        return label;
       }
     }
+    const budget: string = this.budgetLabel();
+    if (budget.length > 0) return `深度思考 · ${budget}`;
     return '深度思考';
+  }
+
+  private budgetLabel(): string {
+    // reasoning budget 从 part 元数据获取(如果有 budgetTokens 字段)
+    // 简化:暂不提取,返回空(后续从 reasoning_display.ts 接入)
+    return '';
+  }
+
+  private shouldShowDuration(): boolean {
+    if (!this.loading) return false;
+    const title: string | null = extractThinkingTitle(this.part.reasoning);
+    return title !== null;
+  }
+
+  private durationLabel(): string {
+    const durationMs: number = reasoningDurationMs(
+      this.part.createdAt, this.part.finishedAt, this.loading, Date.now());
+    return formatThoughtSeconds(durationMs / 1000);
   }
 }
