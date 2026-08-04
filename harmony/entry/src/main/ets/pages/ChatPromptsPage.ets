@@ -19,6 +19,7 @@
 //   - ModalBottomSheet/AlertDialog → 全屏 overlay(D-094 先例;条目编辑为二级 overlay)
 //   - 导入/导出文件 picker + ExportDialog 未移植(外部目录 picker 未移植先例,P1 登记)
 //   - int 输入:toIntOrNull()?.let 语义 = 草稿串 + 确认时解析失败回退最后有效值
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { makeLorebook, makeModeInjection, makeRegexInjection } from '@amber/chat-domain';
 import type {
   InjectionPosition, InjectionRole, Lorebook, PromptInjection, RegexInjection,
@@ -27,13 +28,8 @@ import { getChatKvStore } from '../di/AppContainer.ets';
 import { loadLorebooks, loadModeInjections, updateLorebooks, updateModeInjections }
   from '../platform_impl/ExtensionPrefs.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 const DANGER: string = '#B5473A';
+
 
 const POSITIONS: InjectionPosition[] = [
   'before_system_prompt', 'after_system_prompt', 'top_of_chat',
@@ -781,7 +777,7 @@ struct ChatPromptsPage {
       Column() {
         Row() {
           Text('提示词注入')
-            .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+            .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
         }
         .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 4 })
 

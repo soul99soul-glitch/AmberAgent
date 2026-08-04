@@ -21,6 +21,7 @@
 //   green6/red6 → #34A853/#EA4335 近似;placement 同 '运行' 先例(顶栏入口,
 //   harmony 无设置索引页);滑动删除无撤销(Android 本页即无撤销,区别于 D-096)
 
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import {
   parseMcpServersFromJson, cloneMcpServerConfig, makeMcpStreamableHttpServer,
@@ -30,13 +31,7 @@ import type { McpServerConfig, McpStatus, McpTool, McpCommonOptions } from '@amb
 import { getMcpManager, initMcpManager } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
 const ROW: string = '#EFECE4';
-const INK: string = '#1B1A17';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 const GREEN: string = '#34A853';
 const RED: string = '#EA4335';
 
@@ -584,11 +579,11 @@ struct ChatMcpSettingsPage {
     Column() {
       // 顶栏(:126-147)— 返回 + MCP + 导入/添加
       Row() {
-        Text('‹').fontSize(24).fontColor(INK)
+        Text('←').fontSize(24).fontColor(INK)
           .margin({ right: 12 })
           .onClick((): void => { router.back(); })
         Text('MCP')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .layoutWeight(1)
         Text('导入').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => {

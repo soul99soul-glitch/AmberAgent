@@ -97,7 +97,7 @@ struct SettingSearchListCards {
     Column() {
       // 标题栏:返回 + 标题 + 新建
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('搜索源').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)

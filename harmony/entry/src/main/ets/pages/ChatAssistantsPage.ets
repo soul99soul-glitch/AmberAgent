@@ -8,6 +8,7 @@
 //   (AssistantBasicPage.kt:496-501 toIntOrNull()?.takeIf { it > 0 })
 // 请求自定义语义(Android PropertyEditor.kt 忠实):header name/value trim;
 //   body value = JSON,逐键解析,非法 JSON 行内报错并保留旧值(:160-176)
+import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import type {
   Assistant, ReasoningLevel, CustomHeader, CustomBody, JsonValue, MainAgentToolProfile,
@@ -26,13 +27,6 @@ const TOOL_PROFILE_LABELS: string[] = ['完整', '最小', '网页只读', '文�
 const REASONING_LEVELS: ReasoningLevel[] = ['auto', 'off', 'low', 'medium', 'high', 'xhigh', 'max'];
 const REASONING_LABELS: string[] = ['自动', '关闭', '低', '中', '高', '超高', '最大'];
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 @Entry
 @Component
@@ -280,7 +274,7 @@ struct ChatAssistantsPage {
       },
       secondaryButton: {
         value: '删除',
-        fontColor: '#B43A3A',
+        fontColor: 'ERROR',
         action: (): void => {
           loadAssistants(getChatKvStore()).then((loaded: Assistant[] | null): void => {
             const current: Assistant[] = loaded !== null && loaded.length > 0 ? loaded : this.items;
@@ -306,7 +300,7 @@ struct ChatAssistantsPage {
     Column() {
       Row() {
         Text('助手')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
         Blank()
         Text('提示词注入').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatPromptsPage' }); })
@@ -368,7 +362,7 @@ struct ChatAssistantsPage {
                     .margin({ right: 14 })
                     .onClick((): void => this.copyAssistant(a))
                   Text('删除')
-                    .fontSize(12).fontColor('#B43A3A')
+                    .fontSize(12).fontColor('ERROR')
                     .onClick((): void => this.confirmDelete(a))
                 }
                 .width('100%')
@@ -480,7 +474,7 @@ struct ChatAssistantsPage {
                 .layoutWeight(1).margin({ left: 8 })
                 .onChange((v: string): void => this.setHeaderValue(i, v))
               Text('删除')
-                .fontSize(12).fontColor('#B43A3A')
+                .fontSize(12).fontColor('ERROR')
                 .padding({ left: 10 })
                 .onClick((): void => this.removeHeader(i))
             }
@@ -503,7 +497,7 @@ struct ChatAssistantsPage {
                   .layoutWeight(1)
                   .onChange((v: string): void => this.setBodyKey(i, v))
                 Text('删除')
-                  .fontSize(12).fontColor('#B43A3A')
+                  .fontSize(12).fontColor('ERROR')
                   .padding({ left: 10 })
                   .onClick((): void => this.removeBody(i))
               }
@@ -514,7 +508,7 @@ struct ChatAssistantsPage {
                 .onChange((v: string): void => this.setBodyValueText(i, v))
               if (this.editBodyErrors[i] !== undefined && this.editBodyErrors[i].length > 0) {
                 Text(this.editBodyErrors[i])
-                  .fontSize(11).fontColor('#B43A3A')
+                  .fontSize(11).fontColor('ERROR')
                   .width('100%').margin({ top: 4 })
               }
             }

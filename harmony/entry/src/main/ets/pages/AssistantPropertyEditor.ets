@@ -52,7 +52,7 @@ struct AssistantPropertyEditor {
     Column() {
       // 标题栏
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text(this.titleText()).fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)

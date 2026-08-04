@@ -1,19 +1,11 @@
 // CouncilRunPage — 议会运行面板:按席位分页查看逐字流式输出 + 综合裁决 + 结果
+import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2 } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { getCouncilManager } from '../di/AppContainer.ets';
 import type { ModelCouncilManager } from '@amber/deepread-domain';
 import { SYNTHESIZER_SEAT_KEY, isRunningStatus } from '@amber/deepread-domain';
 import type { ModelCouncilRun, ModelCouncilTurn } from '@amber/deepread-domain';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const SURFACE2: string = '#EFECE4';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const INK4: string = '#B6B1A4';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 const PHASES: string[] = ['听证', '辩论', '权衡', '裁决'];
 

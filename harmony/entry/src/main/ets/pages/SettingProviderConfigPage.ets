@@ -2,7 +2,7 @@
 // 编辑单个 Provider:name / baseUrl / apiKey(掩码) / enabled / 模型列表
 // 测试连接(占位) + 保存。占位持久化,接入 chat-domain 后替换 load/save
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, ERROR } from '../design/tokens.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 import { AmberSwitch, SwitchSize } from '../components/ui/Switch.ets';
 
@@ -129,7 +129,7 @@ struct SettingProviderConfigPage {
     Column() {
       // 标题栏:返回 + 标题 + 保存
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('Provider 配置').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
@@ -179,7 +179,7 @@ struct SettingProviderConfigPage {
                   Row() {
                     Text(id).fontSize(BODY).fontColor(INK).layoutWeight(1)
                       .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text('移除').fontSize(META).fontColor('#C0392B')
+                    Text('移除').fontSize(META).fontColor('ERROR')
                       .padding({ left: 8, right: 4, top: 4, bottom: 4 })
                       .onClick((): void => {
                         const idx: number = this.config.models.indexOf(id);

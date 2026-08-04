@@ -1,22 +1,17 @@
-// SettingPage — 设置入口索引页(M3.1)
-// Android 基准: feature/ui/pages/setting/SettingPage.kt(363 行)— 4 分组索引
-//   鸿蒙:收口 ChatListPage 散落 10 链接为统一索引页;路由 + 既有页面复用。
+// SettingPage — 设置入口索引页(G7 重构)
 //
-// 分组(对齐 Android):
-//   general:助手
-//   agentRuntime:记忆 / 权限 / 运行 / MCP / 子代理 / Council
-//   modelServices:Provider / 任务模型 / 搜索
-//   data:删除全部(DANGER 色)
-import { router } from '@kit.ArkUI';
-import {
-  BG, SURFACE, INK, INK2, INK3, INK4, LINE, ACCENT, ERROR, BODY, META,
-} from '../design/tokens.ets';
+// 对齐 Android SettingPage.kt 4 分组:
+//   1. 通用: 助手 / 显示设置 / 关于
+//   2. Agent 运行: 记忆 / 扩展 / 执行 / 权限 / MCP / 实验功能
+//   3. 模型与服务: Provider / 模型 / 搜索 / TTS
+//   4. 数据: 沙盒 / 文件 / 定时任务 / 删除全部
+//
+// 删除重复入口: 不再有 "权限策略"+"权限设置" 并列
+// 实验功能归入 Agent 运行分组下,不与常规设置平铺
 
-interface SettingEntry {
-  label: string;
-  page: string;
-  danger: boolean;
-}
+import { router } from '@kit.ArkUI';
+import { BG, SURFACE, INK, INK2, INK3, INK4, LINE, ACCENT, ERROR, BODY, META } from '../design/tokens.ets';
+import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
 
 @Entry
 @Component
@@ -25,139 +20,52 @@ struct SettingPage {
     router.pushUrl({ url: page });
   }
 
-  @Builder
-  SectionHeader(title: string): void {
-    Text(title)
-      .fontSize(META).fontColor(INK3)
-      .width('100%')
-      .padding({ left: 16, top: 20, bottom: 6 })
-  }
-
-  @Builder
-  EntryRow(entry: SettingEntry): void {
-    Row() {
-      Text(entry.label).fontSize(BODY).fontColor(entry.danger ? ERROR : INK).layoutWeight(1)
-      Text('›').fontSize(BODY).fontColor(INK4)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-    .onClick((): void => { this.go(entry.page); })
-  }
-
-  @Builder
-  Section(entries: SettingEntry[]): void {
-    Column() {
-      ForEach(entries, (e: SettingEntry): void => {
-        this.EntryRow(e)
-      }, (e: SettingEntry): string => e.page)
-    }
-    .width('100%')
-    .backgroundColor(SURFACE)
-    .border({ width: 1, color: LINE })
-    .borderRadius(0)
-  }
-
   build(): void {
     Column() {
-      // 顶栏
-      Row() {
-        Text('←').fontSize(18).fontColor(INK3)
-          .onClick((): void => { router.back(); })
-        Text('设置').fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 12 }).layoutWeight(1)
-      }
-      .width('100%').height(56).padding({ left: 24, right: 24 })
-      .backgroundColor(BG)
+      PageTitleBar({ title: '设置' })
 
       Scroll() {
         Column() {
-          // general
-          this.SectionHeader('通用')
-          this.Section([
-            { label: '助手', page: 'pages/ChatAssistantsPage', danger: false },
-            { label: '助手列表', page: 'pages/AssistantListPage', danger: false },
-            { label: '显示设置', page: 'pages/SettingDisplayPage', danger: false },
-            { label: '主题', page: 'pages/SettingDisplayPage', danger: false },
-            { label: '关于', page: 'pages/SettingAboutPage', danger: false },
-          ])
+          // ── 1. 通用 ──
+          SectionHeader({ label: '通用' })
+          NavRow({ label: '助手', onRowClick: (): void => { this.go('pages/ChatAssistantsPage'); } })
+          NavRow({ label: '显示设置', onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
+          NavRow({ label: '关于', onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
 
-          // agentRuntime
-          this.SectionHeader('Agent 运行')
-          this.Section([
-            { label: '记忆', page: 'pages/MemoryPage', danger: false },
-            { label: '记忆设置', page: 'pages/SettingAgentMemoryPageFull', danger: false },
-            { label: '权限策略', page: 'pages/ChatAgentPermissionsPage', danger: false },
-            { label: '权限设置', page: 'pages/SettingAgentPermissionsPageFull', danger: false },
-            { label: '执行参数', page: 'pages/ChatAgentExecutionPage', danger: false },
-            { label: '执行设置', page: 'pages/SettingAgentExecutionPageFull', danger: false },
-            { label: '扩展管理', page: 'pages/SettingAgentExtensionsPageFull', danger: false },
-            { label: 'MCP', page: 'pages/ChatMcpSettingsPage', danger: false },
-            { label: 'MCP 设置', page: 'pages/SettingMcpPageFull', danger: false },
-            { label: '子代理(实验)', page: 'pages/SettingSubAgentPage', danger: false },
-            { label: '子代理设置', page: 'pages/SettingExperimentalSubAgentPageFull', danger: false },
-            { label: 'Council(实验)', page: 'pages/SettingModelCouncilPage', danger: false },
-            { label: 'Council 设置', page: 'pages/SettingExperimentalModelCouncilPageFull', danger: false },
-          ])
+          // ── 2. Agent 运行 ──
+          SectionHeader({ label: 'Agent 运行' })
+          NavRow({ label: '记忆', onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
+          NavRow({ label: '扩展', onRowClick: (): void => { this.go('pages/SettingAgentExtensionsPageFull'); } })
+          NavRow({ label: '执行参数', onRowClick: (): void => { this.go('pages/SettingAgentExecutionPageFull'); } })
+          NavRow({ label: '权限策略', onRowClick: (): void => { this.go('pages/SettingAgentPermissionsPageFull'); } })
+          NavRow({ label: 'MCP 服务器', onRowClick: (): void => { this.go('pages/SettingMcpPageFull'); } })
+          NavRow({ label: '实验功能', onRowClick: (): void => { this.go('pages/SettingExperimentalPage'); } })
 
-          // modelServices
-          this.SectionHeader('模型与服务')
-          this.Section([
-            { label: 'Provider', page: 'pages/ChatProviderSettingsPage', danger: false },
-            { label: 'Provider 列表', page: 'pages/SettingProviderListPage', danger: false },
-            { label: 'Provider 详情', page: 'pages/SettingProviderDetailPageFull', danger: false },
-            { label: '模型管理', page: 'pages/SettingModelPage', danger: false },
-            { label: '任务模型', page: 'pages/ChatTaskModelsPage', danger: false },
-            { label: '搜索', page: 'pages/ChatSearchSettingsPage', danger: false },
-            { label: '搜索源列表', page: 'pages/SettingSearchListCards', danger: false },
-            { label: 'TTS 设置', page: 'pages/SettingTTSPage', danger: false },
-            { label: 'TTS Provider', page: 'pages/SettingTTSProviderPage', danger: false },
-          ])
+          // ── 3. 模型与服务 ──
+          SectionHeader({ label: '模型与服务' })
+          NavRow({ label: 'Provider', onRowClick: (): void => { this.go('pages/SettingProviderListPage'); } })
+          NavRow({ label: '模型管理', onRowClick: (): void => { this.go('pages/SettingModelPage'); } })
+          NavRow({ label: '任务模型', onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
+          NavRow({ label: '搜索', onRowClick: (): void => { this.go('pages/SettingSearchListCards'); } })
+          NavRow({ label: 'TTS', onRowClick: (): void => { this.go('pages/SettingTTSProviderPage'); } })
 
-          // experimental
-          this.SectionHeader('实验功能')
-          this.Section([
-            { label: '实验功能入口', page: 'pages/SettingExperimentalPage', danger: false },
-            { label: 'Web 挂载', page: 'pages/SettingExperimentalWebMountPage', danger: false },
-            { label: 'Office Pro', page: 'pages/SettingExperimentalOfficeProPage', danger: false },
-            { label: '字体设置', page: 'pages/SettingSlidesFontPage', danger: false },
-          ])
+          // ── 4. 数据 ──
+          SectionHeader({ label: '数据' })
+          NavRow({ label: '沙盒设置', onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
+          NavRow({ label: '文件管理', onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
+          NavRow({ label: '定时任务', onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
+          NavRow({ label: '删除全部会话', danger: true, onRowClick: (): void => { this.go('pages/HistoryPage'); } })
 
-          // deepread
-          this.SectionHeader('深度阅读')
-          this.Section([
-            { label: '模板设置', page: 'pages/DeepReadTemplateSettingsPage', danger: false },
-            { label: '模板工作台', page: 'pages/DeepReadTemplateWorkbenchPage', danger: false },
-            { label: '热榜源设置', page: 'pages/HotListSourceSettingsPage', danger: false },
-          ])
-
-          // extensions
-          this.SectionHeader('扩展')
-          this.Section([
-            { label: '技能', page: 'pages/SkillsPage', danger: false },
-            { label: '提示词模板', page: 'pages/PromptTemplatePage', danger: false },
-            { label: '快捷消息', page: 'pages/QuickMessagesPage', danger: false },
-            { label: '系统权限', page: 'pages/SettingSystemAccessPage', danger: false },
-          ])
-
-          // data
-          this.SectionHeader('数据')
-          this.Section([
-            { label: '沙盒设置', page: 'pages/SettingSandboxPage', danger: false },
-            { label: '文件管理', page: 'pages/SettingFilesPage', danger: false },
-            { label: '定时任务', page: 'pages/SettingCronTasksPage', danger: false },
-            { label: '删除全部会话', page: 'pages/HistoryPage', danger: true },
-          ])
-
-          Column() {}.height(40)
+          PageSpacer()
         }
         .width('100%')
       }
       .layoutWeight(1)
       .backgroundColor(BG)
     }
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 }

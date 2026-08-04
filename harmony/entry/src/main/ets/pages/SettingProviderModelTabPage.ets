@@ -2,7 +2,7 @@
 // 两个 tab:模型(列表 + 选择 + 增删) / 高级(占位开关)
 // 占位持久化;接入 chat-domain 后替换 load/save
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, ERROR } from '../design/tokens.ets';
 import { AmberSwitch, SwitchSize } from '../components/ui/Switch.ets';
 
 interface ModelRow {
@@ -115,7 +115,7 @@ struct SettingProviderModelTabPage {
     Column() {
       // 标题栏:返回 + 标题 + 完成
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('Provider 模型').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
@@ -151,7 +151,7 @@ struct SettingProviderModelTabPage {
                 if (r.id === this.selectedId) {
                   Text('✓').fontSize(BODY).fontColor(ACCENT).margin({ right: 8 })
                 }
-                Text('移除').fontSize(META).fontColor('#C0392B')
+                Text('移除').fontSize(META).fontColor('ERROR')
                   .padding({ left: 8, right: 4, top: 4, bottom: 4 })
                   .onClick((): void => { this.removeModel(r.id); })
               }

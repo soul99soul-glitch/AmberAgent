@@ -98,7 +98,7 @@ struct AssistantPromptPage {
     Column() {
       // 标题栏
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('提示词').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)

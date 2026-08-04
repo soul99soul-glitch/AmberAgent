@@ -154,7 +154,7 @@ struct SettingAgentExecutionPageFull {
     Column() {
       // 标题栏:返回 + 标题 + 保存
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('Agent 执行').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)

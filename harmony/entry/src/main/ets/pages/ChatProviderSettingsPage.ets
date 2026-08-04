@@ -10,6 +10,7 @@
 //   - brand 编辑/useResponseApi 以外的 openai account 区(余额等)= P1
 //   - service account JSON 导入按钮 = P1(手填 email/privateKey 字段保留)
 //   - 编辑中切换选中会丢弃未保存修改(MVP 草稿语义)
+import { ACCENT,BG,INK,INK2,INK3,SURFACE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import type {
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingGoogle,
@@ -22,12 +23,6 @@ import {
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const ACCENT: string = '#B8623A';
 
 interface ProviderRow {
   id: string;
@@ -230,7 +225,7 @@ struct ChatProviderSettingsPage {
       },
       secondaryButton: {
         value: '删除',
-        fontColor: '#C0392B',
+        fontColor: 'ERROR',
         action: (): void => {
           this.all = this.all.filter((p: ProviderSetting): boolean => p.id !== id);
           saveProviders(getChatKvStore(), this.all).then((): void => {
@@ -422,7 +417,7 @@ struct ChatProviderSettingsPage {
               }
 
               Row() {
-                Text('删除此 Provider').fontSize(13).fontColor('#C0392B')
+                Text('删除此 Provider').fontSize(13).fontColor('ERROR')
                   .onClick((): void => this.removeSelected())
                 Blank()
                 if (this.savedMsg.length > 0) {

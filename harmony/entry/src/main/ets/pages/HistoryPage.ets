@@ -1,4 +1,5 @@
 // SettingsPage — 杂志风设置页(AI 配置 + 热榜源开关 + 搜索源配置面板)
+import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getAppContainer, getModelRegistry } from '../di/AppContainer.ets';
@@ -10,15 +11,6 @@ import type { NewsNowPreset } from '../platform_impl/NewsNowProvider.ets';
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Settings';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const SURFACE2: string = '#EFECE4';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const INK4: string = '#B6B1A4';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 interface SourceToggle {
   id: string;
@@ -190,7 +182,7 @@ struct HistoryPage {
         Text('←').fontSize(18).fontColor(INK3)
           .onClick(() => { router.back(); })
         Text('设置')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif')
           .margin({ left: 12 })
       }

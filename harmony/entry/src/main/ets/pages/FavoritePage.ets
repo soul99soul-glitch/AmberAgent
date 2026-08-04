@@ -2,9 +2,9 @@
 // 收藏的消息/会话列表(标题 + 预览 + 日期),点击打开,滑动取消收藏;空状态
 // Android 基准: feature/ui/pages/favorite/FavoritePage.kt
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, ERROR } from '../design/tokens.ets';
 
-const DANGER: string = '#B43A3A';
+const DANGER: string = 'ERROR';
 
 interface FavoriteItem {
   id: string;

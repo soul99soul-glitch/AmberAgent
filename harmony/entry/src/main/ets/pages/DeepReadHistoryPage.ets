@@ -2,9 +2,9 @@
 // 列出已生成的 DeepRead 文章(标题 + 日期 + 状态),点击重新打开;空状态
 // Android 基准: feature/ui/pages/deepread/DeepReadHistoryPage.kt
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, ERROR } from '../design/tokens.ets';
 
-const DANGER: string = '#B43A3A';
+const DANGER: string = 'ERROR';
 
 interface HistoryEntry {
   id: string;

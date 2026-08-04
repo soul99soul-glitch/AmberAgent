@@ -1,6 +1,7 @@
 // DeepReadHomePage — 高端杂志排版(细节精修版)
 // 设计原则:大量留白 / 衬线标题 / 清晰层级 / hairline 节奏 / 铁锈橙 accent
 
+import { ACCENT,ACCENT_LIGHT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2 } from '../design/tokens.ets';
 import {
   createTopicIdWithRuntime, normalizeUrlArkTs, run,
 } from '@amber/deepread-domain';
@@ -19,17 +20,7 @@ const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Index';
 
 // ── 配色(照搬 Android AmberTokens AmberLight) ──
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const SURFACE2: string = '#EFECE4';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const INK4: string = '#B6B1A4';
-const LINE: string = '#E4E0D6';
 const LINE2: string = '#D6D1C4';
-const ACCENT: string = '#B8623A';
-const ACCENT_LIGHT: string = '#FFF5F0';
 
 const arktsTopicRuntime: TopicIdRuntime = {
   normalizeUrlInput: (url: string): string => normalizeUrlArkTs(url),

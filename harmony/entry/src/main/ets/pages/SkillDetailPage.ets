@@ -3,9 +3,9 @@
 // Android 基准: feature/ui/pages/skill/SkillDetailPage.kt
 import { router } from '@kit.ArkUI';
 import { AmberSwitch } from '../design/components.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, ERROR } from '../design/tokens.ets';
 
-const DANGER: string = '#B43A3A';
+const DANGER: string = 'ERROR';
 
 interface SkillDetail {
   id: string;

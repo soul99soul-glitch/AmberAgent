@@ -110,7 +110,7 @@ struct AssistantListPage {
       },
       secondaryButton: {
         value: '删除',
-        fontColor: '#B43A3A',
+        fontColor: 'ERROR',
         action: (): void => {
           loadAssistants(getChatKvStore()).then((loaded: Assistant[] | null): void => {
             const current: Assistant[] = loaded !== null && loaded.length > 0 ? loaded : this.items;
@@ -206,7 +206,7 @@ struct AssistantListPage {
     Column() {
       // 标题栏
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('助手列表').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)

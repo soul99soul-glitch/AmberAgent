@@ -179,7 +179,7 @@ struct SettingAgentMemoryPageFull {
     Column() {
       // 标题栏:返回 + 标题 + 完成
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('记忆设置').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)

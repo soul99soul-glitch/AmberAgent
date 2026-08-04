@@ -1,4 +1,5 @@
 // CouncilPage — 模型议会配置页:议题 / 模式 / 轮数 / 视角席 → 发起运行
+import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getModelRegistry, prepareCouncilManager } from '../di/AppContainer.ets';
@@ -8,15 +9,6 @@ import type { ModelConfig, ModelCouncilRolePreset, CouncilTaskInput, ModelCounci
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Council';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const SURFACE2: string = '#EFECE4';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const INK4: string = '#B6B1A4';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 const ROUND_OPTIONS: number[] = [2, 3, 4, 5];
 
@@ -94,7 +86,7 @@ struct CouncilPage {
       // 顶栏
       Row() {
         Text('←').fontSize(18).fontColor(INK3).onClick(() => { router.back(); })
-        Text('模型议会').fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+        Text('模型议会').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif').margin({ left: 12 })
       }
       .width('100%').height(56).padding({ left: 24, right: 24 })

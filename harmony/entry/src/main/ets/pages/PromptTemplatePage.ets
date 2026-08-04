@@ -298,7 +298,7 @@ struct PromptTemplatePage {
     Column() {
       // 标题栏
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => {
             if (this.mode === 'edit') this.backFromEdit(); else router.back();
           })

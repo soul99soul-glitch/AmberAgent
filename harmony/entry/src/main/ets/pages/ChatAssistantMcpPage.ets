@@ -16,6 +16,7 @@
 //   Card → SURFACE 圆角卡(设置面惯例);AssistantDetailVM.mcpServerConfigs →
 //   McpSettingsStore 订阅(同一数据源)
 
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadAssistants, saveAssistants, patchAssistant,
@@ -24,12 +25,6 @@ import type { Assistant, McpServerConfig, McpStatus, McpTool } from '@amber/chat
 import { getChatKvStore, getMcpManager, initMcpManager } from '../di/AppContainer.ets';
 import { getMcpSettingsStore } from '../platform_impl/McpSettingsStore.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 const RED: string = '#EA4335';
 
 interface RouterParams {
@@ -180,12 +175,12 @@ struct ChatAssistantMcpPage {
   build() {
     Column() {
       Row() {
-        Text('‹').fontSize(24).fontColor(INK)
+        Text('←').fontSize(24).fontColor(INK)
           .margin({ right: 12 })
           .onClick((): void => { router.back(); })
         // values-zh:132 'MCP' 逐字
         Text('MCP')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
       }
       .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
 

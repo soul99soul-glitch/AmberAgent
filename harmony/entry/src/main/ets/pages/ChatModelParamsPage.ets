@@ -16,6 +16,7 @@
 //     持久化结果等价;显示态 raw 保留
 //   - 高级设置 tab 的 ProviderOverwriteSettings(:251-257)/内置工具 tab
 //     (:275-283)未移植(P1 已登),本页仅 customHeaders/customBodies 两节
+import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import type {
   CustomBody, CustomHeader, JsonValue, ProviderModel, ProviderSetting,
@@ -23,14 +24,6 @@ import type {
 import { loadProviders, saveProviders } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const INK4: string = '#B6B1A4';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 interface RouterParams {
   providerId?: string;
@@ -230,7 +223,7 @@ struct ChatModelParamsPage {
                     .fontSize(11).fontColor(INK3).fontWeight(FontWeight.Medium)
                   Blank()
                   Text('删除')
-                    .fontSize(12).fontColor('#B43A3A')
+                    .fontSize(12).fontColor('ERROR')
                     .padding({ left: 10, right: 4, top: 4, bottom: 4 })
                     .onClick((): void => { this.removeHeader(i); })
                 }
@@ -265,7 +258,7 @@ struct ChatModelParamsPage {
                     .fontSize(11).fontColor(INK3).fontWeight(FontWeight.Medium)
                   Blank()
                   Text('删除')
-                    .fontSize(12).fontColor('#B43A3A')
+                    .fontSize(12).fontColor('ERROR')
                     .padding({ left: 10, right: 4, top: 4, bottom: 4 })
                     .onClick((): void => { this.removeBody(i); })
                 }

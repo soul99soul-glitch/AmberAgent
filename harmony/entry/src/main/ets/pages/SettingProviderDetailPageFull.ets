@@ -159,7 +159,7 @@ struct SettingProviderDetailPageFull {
     Column() {
       // 标题栏:返回 + 标题 + 保存
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('Provider 详情').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
@@ -263,10 +263,10 @@ struct SettingProviderDetailPageFull {
             this.sectionHeader('危险操作')
 
             Row() {
-              Text('删除该 Provider').fontSize(BODY).fontColor('#C0392B').layoutWeight(1)
+              Text('删除该 Provider').fontSize(BODY).fontColor('ERROR').layoutWeight(1)
               Text('删除').fontSize(BODY).fontColor('#FFFFFF')
                 .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-                .backgroundColor('#C0392B').borderRadius(50)
+                .backgroundColor('ERROR').borderRadius(50)
                 .onClick((): void => { this.confirmDelete(); })
             }
             .width('100%')
@@ -306,7 +306,7 @@ struct SettingProviderDetailPageFull {
         Text('取消').fontSize(BODY).fontColor(INK3)
           .padding({ left: 16, right: 16, top: 8, bottom: 8 })
           .onClick((): void => { this.showDeleteConfirm = false; })
-        Text('删除').fontSize(BODY).fontColor('#C0392B')
+        Text('删除').fontSize(BODY).fontColor('ERROR')
           .padding({ left: 16, right: 16, top: 8, bottom: 8 })
           .onClick((): void => { this.executeDelete(); })
       }

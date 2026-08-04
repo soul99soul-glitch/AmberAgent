@@ -1,17 +1,9 @@
 // NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区
+import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import type { NovelProject } from '@amber/deepread-domain';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const SURFACE2: string = '#EFECE4';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const INK4: string = '#B6B1A4';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 @Entry
 @Component
@@ -86,7 +78,7 @@ struct NovelProjectsPage {
         // 顶栏
         Row() {
           Text('←').fontSize(18).fontColor(INK3).onClick(() => { router.back(); })
-          Text('小说创作').fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          Text('小说创作').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
             .fontFamily('serif').margin({ left: 12 })
           Blank()
           Text('新建').fontSize(13).fontColor(ACCENT)

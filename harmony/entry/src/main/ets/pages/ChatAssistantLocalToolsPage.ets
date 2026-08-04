@@ -12,6 +12,7 @@
 //   - 平台专属工具(terminal/screen/system_access/webview/icloud/webmount 系)
 //     在 harmony 无实现,开关仅落 localTools 配置(Android 同为纯配置面;
 //     工具实体缺失时目录自然不含)
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadAssistants, saveAssistants, patchAssistant,
@@ -19,12 +20,6 @@ import {
 import type { Assistant, LocalToolOption } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 interface RouterParams {
   assistantId?: string;
@@ -159,7 +154,7 @@ struct ChatAssistantLocalToolsPage {
           .padding({ left: 8, right: 8, top: 4, bottom: 4 })
           .onClick((): void => { router.back(); })
         Text('本地工具')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 8 })
       }
       .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 12 })

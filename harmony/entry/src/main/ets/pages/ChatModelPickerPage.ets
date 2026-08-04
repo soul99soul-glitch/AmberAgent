@@ -2,19 +2,13 @@
 // 列出 hasUsableAuth 且非空 models 的 provider(openai/google/claude)及其模型;
 // 点选持久化到 Preferences(chat_selected_provider_id/model_id),
 // resolveChatRuntime 优先消费。
+import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { loadProviders, hasUsableAuth } from '@amber/chat-domain';
 import {
   getChatKvStore, getChatModelSelection, saveChatModelSelection, ChatModelSelection,
 } from '../di/AppContainer.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 interface ModelRow {
   providerId: string;
@@ -73,7 +67,7 @@ struct ChatModelPickerPage {
     Column() {
       Row() {
         Text('选择模型')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
       }
       .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 12 })
 

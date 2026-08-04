@@ -6,6 +6,7 @@
 // D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
+import { ACCENT,BG,INK,INK2,INK3,LABEL,LINE,META,SURFACE,SURFACE2 } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
@@ -126,16 +127,6 @@ import {
   getMemoryExtractionStoreOps, getMemoryReadRepository, getMemoryToolDeps,
 } from '../platform_impl/MemoryStore.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const SURFACE2: string = '#EFECE4';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
-const META: number = 12;
-const LABEL: number = 10;
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 const ROW: string = '#EFECE4';
 
@@ -883,7 +874,7 @@ struct ChatPage {
   private contextRingColor(): string {
     if (this.compactActiveCount > 0) return '#4EA6FF';
     const r: number = this.contextUsageRatio();
-    if (r >= 0.7) return '#B43A3A';
+    if (r >= 0.7) return 'ERROR';
     if (r >= 0.5) return '#C08A2D';
     return '#8F8B80';
   }
@@ -1246,7 +1237,7 @@ struct ChatPage {
       },
       secondaryButton: {
         value: '删除',
-        fontColor: '#B43A3A',
+        fontColor: 'ERROR',
         action: (): void => {
           if (this.conversation === null) return;
           const updated: Conversation = deleteMessage(this.conversation, row.message.id, false);
@@ -2946,7 +2937,7 @@ struct ChatPage {
               .padding({ left: 20, right: 20, top: 8, bottom: 8 })
               .onClick((): void => { this.dismissDenyDialog(); })
             Text('拒绝')
-              .fontSize(14).fontColor('#B43A3A')
+              .fontSize(14).fontColor('ERROR')
               .padding({ left: 20, right: 8, top: 8, bottom: 8 })
               .onClick((): void => { this.confirmDenyDialog(); })
           }

@@ -2,7 +2,7 @@
 // 多模型合议:席位管理(名称/模型/权重) + 阶段标签编辑 + 综合模型 + 运行参数
 // 占位持久化(本地草稿);后续接入 chat-domain 后替换 load/save
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT, BODY, META, LABEL, TITLE, ERROR } from '../design/tokens.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 import { AmberSwitch, SwitchSize } from '../components/ui/Switch.ets';
 import { PillSelect } from '../components/ui/Select.ets';
@@ -207,7 +207,7 @@ struct SettingExperimentalModelCouncilPageFull {
       Row() {
         Text(seat.name.length > 0 ? seat.name : '未命名席位')
           .fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK).layoutWeight(1)
-        Text('删除').fontSize(META).fontColor('#C0392B')
+        Text('删除').fontSize(META).fontColor('ERROR')
           .padding({ left: 8, right: 4, top: 4, bottom: 4 })
           .onClick((): void => { this.removeSeat(seat.id); })
       }
@@ -267,7 +267,7 @@ struct SettingExperimentalModelCouncilPageFull {
     Column() {
       // 标题栏:返回 + 标题 + 保存
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('Model Council').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)

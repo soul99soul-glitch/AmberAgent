@@ -11,6 +11,7 @@
 //     存储/Skills 子系统未移植,P1 登记)→ 本页仅 2 tab
 //   - HorizontalPager+SecondaryTabRow → 顶部二 tab 行(语义等价)
 //   - Set<Uuid> ± id → string[] Set 语义(toggle 去重)
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadAssistants, saveAssistants, patchAssistant,
@@ -19,12 +20,6 @@ import type { Assistant, Lorebook, PromptInjection } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 interface RouterParams {
   assistantId?: string;
@@ -113,7 +108,7 @@ struct ChatAssistantExtensionsPage {
     Column() {
       Row() {
         Text('扩展管理')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
       }
       .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 4 })
 

@@ -4,21 +4,16 @@
 //   滑动删除 = 立即删(deferCleanup)+ 4s snackbar('对话已删除'/'撤销');
 //   撤销 → insertConversation 恢复;超时/被顶替 → purge(cleanupDeletedConversation
 //   → deleteChatFiles,PD-007 清理接线同步落地)
+import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import type { Conversation, ConversationSummary } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { SearchField } from '../components/ui/SearchField.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 const DANGER: string = '#B43A3A';
 const SNACK_BG: string = '#32302B';
+
 
 // SnackbarDuration.Short ≈ 4s(showSnackbar 默认时长)
 const SNACK_DURATION_MS: number = 4000;
@@ -189,7 +184,7 @@ struct ChatListPage {
       Column() {
       Row() {
         Text('对话')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
         Blank()
         // 快捷入口
         Text('📋').fontSize(16).margin({ right: 12 })

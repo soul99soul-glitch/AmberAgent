@@ -2,7 +2,7 @@
 // 维护可用模型列表:名称 / 上下文窗口 / 最大输出 tokens / 采样温度
 // 占位持久化(本地草稿);后续接入 chat-domain 模型库后替换 load/save
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, ERROR } from '../design/tokens.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 
 interface ModelItem {
@@ -116,7 +116,7 @@ struct SettingModelPage {
     Column() {
       // 标题栏:返回 + 标题 + 完成
       Row() {
-        Text('‹').fontSize(22).fontColor(INK3)
+        Text('←').fontSize(TITLE).fontColor(INK3)
           .onClick((): void => { router.back(); })
         Text('模型管理').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
@@ -143,7 +143,7 @@ struct SettingModelPage {
                   Text(m.name.length > 0 ? m.name : '未命名模型')
                     .fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
                     .layoutWeight(1)
-                  Text('删除').fontSize(META).fontColor('#C0392B')
+                  Text('删除').fontSize(META).fontColor('ERROR')
                     .padding({ left: 8, right: 4, top: 4, bottom: 4 })
                     .onClick((): void => { this.removeModel(m.id); })
                 }

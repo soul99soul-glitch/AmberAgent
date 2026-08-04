@@ -5,6 +5,7 @@
 //   worker → updateMemoryWorkerModels{modelId = it.id, followCompressModel = false}(:631-641)
 //   daydream → 同构 {daydreamModelId, daydreamFollowCompressModel = false}(:684-697)
 // 与 ChatModelPickerPage 区别:任务模型按模型 uuid(m.id)存储,非 (providerId, modelId) 对。
+import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
 import type { ProviderModel } from '@amber/chat-domain';
@@ -17,13 +18,6 @@ import {
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getOcrModelId, saveOcrModelId } from '../platform_impl/OcrSupport.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 interface TaskModelRow {
   providerName: string;
@@ -134,7 +128,7 @@ struct ChatTaskModelPickerPage {
     Column() {
       Row() {
         Text(TASK_TITLES[this.task] ?? '选择模型')
-          .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
       }
       .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 12 })
 

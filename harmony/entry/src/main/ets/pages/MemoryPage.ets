@@ -14,6 +14,7 @@
 //   SettingAgentMemoryVM.kt:68-74(updateAgentRuntime)/:77-93(add/update/delete)
 // 裁剪(P1 登记):Overview 导航/toolbar
 //   '立即运行一次'(依附 workScheduler 调度环)/记忆库?'信息'图标视觉(以文字 '?' 代)。
+import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE } from '../design/tokens.ets';
 import { promptAction, router } from '@kit.ArkUI';
 import { Context } from '@kit.AbilityKit';
 import type {
@@ -51,13 +52,6 @@ import {
   logMemoryDreamOpFailure,
 } from '../platform_impl/MemoryDreamOps.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK2: string = '#57544C';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 
 // 候选卡 meta 行(Page :947-953 逐字:标签 + confidence %.2f + 高置信后缀)
 const candidateMetaText = (c: MemoryCandidate): string => {

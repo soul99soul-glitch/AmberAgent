@@ -14,6 +14,7 @@
 //   - ModalBottomSheet → 全屏 overlay(同 ChatTaskModelsPage overlay 先例)
 //   - StepperNumberField 直输 → 仅 −/＋ 按钮(clamp 1..50 语义保留)
 //   - 每 provider Description() composable 未移植(P1 既有登记)
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import {
   defaultSearchPrefs, loadSearchPrefs, updateSearchPrefs,
@@ -25,13 +26,8 @@ import type {
 } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 
-const BG: string = '#F4F2EC';
-const SURFACE: string = '#FAF9F5';
-const INK: string = '#1B1A17';
-const INK3: string = '#8F8B80';
-const LINE: string = '#E4E0D6';
-const ACCENT: string = '#B8623A';
 const DANGER: string = '#B5473A';
+
 
 // TYPES LinkedHashMap 插入序(SEARCH_SERVICE_TYPES 声明序逐字)
 const SEARCH_TYPE_ORDER: SearchServiceOptionsType[] = [
@@ -769,7 +765,7 @@ struct ChatSearchSettingsPage {
       Column() {
         Row() {
           Text('搜索服务')
-            .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
+            .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           Blank()
           Text('＋')
             .fontSize(20).fontColor(ACCENT)
