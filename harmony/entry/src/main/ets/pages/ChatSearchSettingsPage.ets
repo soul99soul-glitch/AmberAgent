@@ -14,7 +14,8 @@
 //   - ModalBottomSheet → 全屏 overlay(同 ChatTaskModelsPage overlay 先例)
 //   - StepperNumberField 直输 → 仅 −/＋ 按钮(clamp 1..50 语义保留)
 //   - 每 provider Description() composable 未移植(P1 既有登记)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
   defaultSearchPrefs, loadSearchPrefs, updateSearchPrefs,
@@ -763,16 +764,7 @@ struct ChatSearchSettingsPage {
   build() {
     Stack() {
       Column() {
-        Row() {
-          Text('搜索服务')
-            .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          Blank()
-          Text('＋')
-            .fontSize(20).fontColor(ACCENT)
-            .padding({ left: 10, right: 10, top: 2, bottom: 2 })
-            .onClick((): void => { this.openAdd(); })
-        }
-        .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 4 })
+        PageTitleBar({ title: '搜索设置', actionText: '＋', onAction: (): void => { this.openAdd(); } })
 
         if (!this.loaded) {
           Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

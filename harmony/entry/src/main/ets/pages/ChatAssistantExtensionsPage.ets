@@ -11,7 +11,8 @@
 //     存储/Skills 子系统未移植,P1 登记)→ 本页仅 2 tab
 //   - HorizontalPager+SecondaryTabRow → 顶部二 tab 行(语义等价)
 //   - Set<Uuid> ± id → string[] Set 语义(toggle 去重)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadAssistants, saveAssistants, patchAssistant,
@@ -106,11 +107,7 @@ struct ChatAssistantExtensionsPage {
 
   build() {
     Column() {
-      Row() {
-        Text('扩展管理')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 4 })
+      PageTitleBar({ title: '扩展' })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

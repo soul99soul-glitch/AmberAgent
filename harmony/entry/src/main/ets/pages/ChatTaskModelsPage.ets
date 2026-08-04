@@ -8,7 +8,8 @@
 //     follows = followCompressModel && findModelById(modelId) == null →
 //     '跟随压缩模型' + '当前跟随压缩模型：X';onClear → AUTO + follow=true;
 //     onSelect → id + follow=false
-import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID,
@@ -312,11 +313,7 @@ struct ChatTaskModelsPage {
   build() {
     Stack() {
       Column() {
-        Row() {
-          Text('辅助任务')
-            .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-        }
-        .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 4 })
+        PageTitleBar({ title: '任务模型' })
 
         if (!this.loaded) {
           Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

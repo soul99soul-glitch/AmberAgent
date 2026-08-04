@@ -6,7 +6,8 @@ import { router } from '@kit.ArkUI';
 import { loadDisplaySetting, saveDisplaySetting, makeDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL, TITLE, ACCENT } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
+import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL, ACCENT } from '../design/tokens.ets';
 
 @Entry
 @Component
@@ -90,12 +91,7 @@ struct SettingDisplayPage {
 
   build(): void {
     Column() {
-      Row() {
-        Text('←').fontSize(24).fontColor(INK).onClick((): void => { router.back(); })
-        Text('显示设置').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 12 }).layoutWeight(1)
-      }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      PageTitleBar({ title: '显示设置' })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })

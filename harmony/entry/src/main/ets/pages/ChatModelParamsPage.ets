@@ -17,6 +17,7 @@
 //   - 高级设置 tab 的 ProviderOverwriteSettings(:251-257)/内置工具 tab
 //     (:275-283)未移植(P1 已登),本页仅 customHeaders/customBodies 两节
 import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import type {
   CustomBody, CustomHeader, JsonValue, ProviderModel, ProviderSetting,
@@ -193,19 +194,11 @@ struct ChatModelParamsPage {
 
   build() {
     Column() {
-      Row() {
-        Text('取消').fontSize(14).fontColor(INK3)
-          .padding({ left: 4, right: 12, top: 6, bottom: 6 })
-          .onClick((): void => { router.back(); })
-        Blank()
-        Text(`模型参数 · ${this.modelLabel}`)
-          .fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK)
-        Blank()
-        Text('确定').fontSize(14).fontColor(ACCENT)
-          .padding({ left: 12, right: 4, top: 6, bottom: 6 })
-          .onClick((): void => { this.confirm(); })
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 12 })
+      PageTitleBar({
+        title: `模型参数 · ${this.modelLabel}`,
+        actionText: '确定',
+        onAction: (): void => { this.confirm(); },
+      })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

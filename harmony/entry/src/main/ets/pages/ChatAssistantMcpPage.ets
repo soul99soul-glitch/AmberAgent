@@ -16,7 +16,8 @@
 //   Card → SURFACE 圆角卡(设置面惯例);AssistantDetailVM.mcpServerConfigs →
 //   McpSettingsStore 订阅(同一数据源)
 
-import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadAssistants, saveAssistants, patchAssistant,
@@ -174,15 +175,7 @@ struct ChatAssistantMcpPage {
 
   build() {
     Column() {
-      Row() {
-        Text('←').fontSize(24).fontColor(INK)
-          .margin({ right: 12 })
-          .onClick((): void => { router.back(); })
-        // values-zh:132 'MCP' 逐字
-        Text('MCP')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
+      PageTitleBar({ title: 'MCP 服务器' })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

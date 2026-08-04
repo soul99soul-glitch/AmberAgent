@@ -299,9 +299,10 @@ struct ChatAssistantsPage {
   build() {
     Column() {
       Row() {
+        Text('←').fontSize(24).fontColor(INK).onClick((): void => { router.back(); })
         Text('助手')
           .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-        Blank()
+          .margin({ left: 8 }).layoutWeight(1)
         Text('提示词注入').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatPromptsPage' }); })
         Text('+ 新助手')
@@ -309,7 +310,9 @@ struct ChatAssistantsPage {
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
           .onClick((): void => this.startCreate())
       }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
+      .backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

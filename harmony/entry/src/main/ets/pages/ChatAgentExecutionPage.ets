@@ -16,7 +16,8 @@
 //   实时状态卡 enableLiveStatusNotification/hideSensitiveLiveStatus(:155-199);
 //   Live 伴随卡 liveMode 五行(:201-318);
 //   后台保活 keepGenerationAliveInBackground(:372-390)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import {
   loadAgentRuntimeSnapshot, updateAgentRuntimeExecution,
 } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -177,12 +178,7 @@ struct ChatAgentExecutionPage {
 
   build() {
     Column() {
-      Row() {
-        // values-zh:643 逐字
-        Text('运行与显示')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 4 })
+      PageTitleBar({ title: '执行参数' })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

@@ -22,6 +22,7 @@
 //   harmony 无设置索引页);滑动删除无撤销(Android 本页即无撤销,区别于 D-096)
 
 import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
   parseMcpServersFromJson, cloneMcpServerConfig, makeMcpStreamableHttpServer,
@@ -577,13 +578,13 @@ struct ChatMcpSettingsPage {
 
   build() {
     Column() {
-      // 顶栏(:126-147)— 返回 + MCP + 导入/添加
+      // 顶栏(:126-147)— 返回 + MCP 设置 + 导入/添加(双 trailing → 保留 inline,对齐 PageTitleBar 样式)
       Row() {
         Text('←').fontSize(24).fontColor(INK)
-          .margin({ right: 12 })
           .onClick((): void => { router.back(); })
-        Text('MCP')
+        Text('MCP 设置')
           .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
+          .margin({ left: 8 })
           .layoutWeight(1)
         Text('导入').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => {
@@ -594,7 +595,9 @@ struct ChatMcpSettingsPage {
         Text('＋').fontSize(20).fontColor(INK)
           .onClick((): void => { this.openCreate(); })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
+      .backgroundColor(BG)
 
       // 下拉刷新 syncAll(:157-165)
       Refresh({ refreshing: $$this.refreshing }) {

@@ -12,7 +12,8 @@
 //   - 平台专属工具(terminal/screen/system_access/webview/icloud/webmount 系)
 //     在 harmony 无实现,开关仅落 localTools 配置(Android 同为纯配置面;
 //     工具实体缺失时目录自然不含)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadAssistants, saveAssistants, patchAssistant,
@@ -149,15 +150,7 @@ struct ChatAssistantLocalToolsPage {
 
   build() {
     Column() {
-      Row() {
-        Text('←').fontSize(18).fontColor(INK3)
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .onClick((): void => { router.back(); })
-        Text('本地工具')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 8 })
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 12 })
+      PageTitleBar({ title: '本地工具' })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

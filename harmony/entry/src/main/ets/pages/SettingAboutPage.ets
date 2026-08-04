@@ -1,19 +1,14 @@
 // SettingAboutPage — 关于页(G3-S4)
 // Android 基准: SettingAboutPage.kt(181 行)— 版本/构建/开源链接
-import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL, TITLE, ACCENT } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL, ACCENT } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 
 @Entry
 @Component
 struct SettingAboutPage {
   build(): void {
     Column() {
-      Row() {
-        Text('←').fontSize(18).fontColor(INK3).onClick((): void => { router.back(); })
-        Text('关于').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 12 }).layoutWeight(1)
-      }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      PageTitleBar({ title: '关于' })
 
       Scroll() {
         Column() {

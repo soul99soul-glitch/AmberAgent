@@ -1,5 +1,6 @@
 // SettingsPage — 杂志风设置页(AI 配置 + 热榜源开关 + 搜索源配置面板)
-import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2 } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getAppContainer, getModelRegistry } from '../di/AppContainer.ets';
@@ -177,17 +178,8 @@ struct HistoryPage {
 
   build(): void {
     Column() {
-      // ── 顶栏:返回 + 衬线标题 ──
-      Row() {
-        Text('←').fontSize(18).fontColor(INK3)
-          .onClick(() => { router.back(); })
-        Text('设置')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .fontFamily('serif')
-          .margin({ left: 12 })
-      }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
-      .backgroundColor(BG)
+      // ── 顶栏 ──
+      PageTitleBar({ title: '历史记录' })
 
       List({ space: 0 }) {
         // ── AI 配置分组 ──

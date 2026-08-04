@@ -14,7 +14,8 @@
 //   - 推测执行开关 Android 居于扩展/运行任务页(该页任务调度列表未移植),
 //     此处并入'权限与批准'第二卡(placement 偏差登记)
 //   - maxConcurrentTools 无 Android UI(恒 4),同不暴露
-import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { PageTitleBar } from '../components/PageTemplate.ets';
 import {
   loadAgentRuntimeSnapshot, updateAgentRuntimePermissions,
 } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -121,11 +122,7 @@ struct ChatAgentPermissionsPage {
 
   build() {
     Column() {
-      Row() {
-        Text('权限与批准')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 4 })
+      PageTitleBar({ title: '权限策略' })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
