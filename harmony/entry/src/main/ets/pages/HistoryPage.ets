@@ -186,7 +186,7 @@ struct HistoryPage {
           .fontFamily('serif')
           .margin({ left: 12 })
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 })
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
       .backgroundColor(BG)
 
       List({ space: 0 }) {
@@ -259,7 +259,7 @@ struct HistoryPage {
                   .padding({ left: 12, top: 4, bottom: 4 })
                   .onClick(() => { this.deleteModel(m.id); })
               }
-              .width('100%').padding({ top: 12, bottom: 12 })
+              .width('100%').padding({ top: 14, bottom: 14 })
               .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
             }, (m: ModelConfig) => m.id)
 
@@ -320,7 +320,7 @@ struct HistoryPage {
                   .selectedColor(ACCENT)
                   .onChange(() => { this.toggleHotlist(t.id); })
               }
-              .width('100%').padding({ top: 12, bottom: 12 })
+              .width('100%').padding({ top: 14, bottom: 14 })
               .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
             })
           }
@@ -359,7 +359,7 @@ struct HistoryPage {
                   Row() {
                     Text(s.displayName).fontSize(14).fontColor(s.id === this.selectedSource ? ACCENT : INK2)
                   }
-                  .width('100%').padding({ top: 12, bottom: 12, left: 14, right: 14 })
+                  .width('100%').padding({ top: 14, bottom: 14, left: 14, right: 14 })
                   .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
                   .onClick(() => {
                     this.selectSource(s.id);

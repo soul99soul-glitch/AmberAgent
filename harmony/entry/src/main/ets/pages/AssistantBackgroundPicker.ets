@@ -70,7 +70,7 @@ struct AssistantBackgroundPicker {
         Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT)
           .onClick((): void => { this.save(); })
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
@@ -101,7 +101,7 @@ struct AssistantBackgroundPicker {
               ForEach(this.swatches, (c: string, i: number): void => {
                 Stack() {
                   Text('')
-                    .width(56).height(56).borderRadius(12)
+                    .width(56).borderRadius(12)
                     .backgroundColor(c)
                     .border({
                       width: this.selectedColor === c ? 3 : 1,

@@ -441,7 +441,7 @@ struct ChatSearchSettingsPage {
         Text(`${this.enabledCount()} / ${this.s.searchServices.length + 6} 个服务已启用 · 多源召回`)
           .fontSize(12).fontColor(INK3)
       }
-      .width('100%').padding({ left: 18, right: 18, top: 12, bottom: 12 })
+      .width('100%').padding({ left: 18, right: 18, top: 14, bottom: 14 })
     }
     .width('100%').backgroundColor(SURFACE).borderRadius(14)
     .border({ width: 1, color: LINE })

@@ -192,7 +192,7 @@ struct AssistantListPage {
       }
       .width('100%')
     }
-    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE).borderRadius(12)
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
     .onClick((): void => this.gotoDetail(a))
@@ -220,7 +220,7 @@ struct AssistantListPage {
           .backgroundColor(ACCENT_LIGHT).borderRadius(8)
           .onClick((): void => { this.importFromClipboard(); })
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       // 搜索栏
       Row() {

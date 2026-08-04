@@ -10,11 +10,11 @@ struct SettingFilesPage {
   build(): void {
     Column() {
       Row() {
-        Text('←').fontSize(18).fontColor(INK3).onClick((): void => { router.back(); })
+        Text('←').fontSize(24).fontColor(INK).onClick((): void => { router.back(); })
         Text('文件管理').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       Scroll() {
         Column() {

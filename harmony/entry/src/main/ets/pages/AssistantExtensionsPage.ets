@@ -53,7 +53,7 @@ struct AssistantExtensionsPage {
         Text('扩展').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       // 说明条
       Row() {
@@ -75,7 +75,7 @@ struct AssistantExtensionsPage {
               .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 12 })
               Text('›').fontSize(18).fontColor(INK3)
             }
-            .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .backgroundColor(SURFACE)
             .onClick((): void => { this.goto(c.target); })
           }

@@ -373,7 +373,7 @@ struct ChatAssistantsPage {
                 }
               }
               .width('100%').alignItems(HorizontalAlign.Start)
-              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .onClick((): void => this.startEdit(a))
             }

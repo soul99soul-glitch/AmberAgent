@@ -74,7 +74,7 @@ struct SettingSlidesFontPage {
       })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
@@ -95,7 +95,7 @@ struct SettingSlidesFontPage {
       }).margin({ top: 6 })
     }
     .width('100%').alignItems(HorizontalAlign.Start)
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
@@ -111,7 +111,7 @@ struct SettingSlidesFontPage {
         Text('完成').fontSize(BODY).fontColor(ACCENT)
           .onClick((): void => { this.done(); })
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })

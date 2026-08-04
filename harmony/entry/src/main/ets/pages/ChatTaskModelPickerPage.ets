@@ -160,7 +160,7 @@ struct ChatTaskModelPickerPage {
                 }
               }
               .width('100%')
-              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .onClick((): void => this.pick(row))
             }

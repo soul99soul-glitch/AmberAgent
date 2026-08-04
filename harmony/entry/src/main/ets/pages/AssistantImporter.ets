@@ -114,7 +114,7 @@ struct AssistantImporter {
         Text('导入助手').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       Scroll() {
         Column() {

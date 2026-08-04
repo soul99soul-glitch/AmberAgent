@@ -289,7 +289,7 @@ struct PromptTemplatePage {
         .width('100%')
     }
     .width('100%').alignItems(HorizontalAlign.Start)
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE).borderRadius(12)
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
   }
@@ -305,7 +305,7 @@ struct PromptTemplatePage {
         Text('提示词模板').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).margin({ top: 32 })

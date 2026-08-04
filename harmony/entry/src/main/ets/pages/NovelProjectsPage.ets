@@ -77,14 +77,14 @@ struct NovelProjectsPage {
       Column() {
         // 顶栏
         Row() {
-          Text('←').fontSize(18).fontColor(INK3).onClick(() => { router.back(); })
+          Text('←').fontSize(24).fontColor(INK).onClick(() => { router.back(); })
           Text('小说创作').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
             .fontFamily('serif').margin({ left: 12 })
           Blank()
           Text('新建').fontSize(13).fontColor(ACCENT)
             .onClick(() => { this.openNew(); })
         }
-        .width('100%').height(56).padding({ left: 24, right: 24 })
+        .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
         .backgroundColor(BG)
 
         if (this.loading) {

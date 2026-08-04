@@ -625,7 +625,7 @@ struct NovelWorkspacePage {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.busy) LoadingProgress().width(16).height(16).color(ACCENT)
         }
-        .width('100%').height(56).padding({ left: 24, right: 24 })
+        .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
         .backgroundColor(BG)
 
         // 页签

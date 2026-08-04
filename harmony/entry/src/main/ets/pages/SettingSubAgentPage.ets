@@ -177,7 +177,7 @@ struct SettingSubAgentPage {
         .onChange((_v: boolean): void => { onToggle(); })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
@@ -193,7 +193,7 @@ struct SettingSubAgentPage {
       Text(this.mode === 'smart_dynamic' ? '智能动态' : '名册').fontSize(META).fontColor(ACCENT)
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => {
@@ -215,7 +215,7 @@ struct SettingSubAgentPage {
         .onChange((v: number): void => { onChange(v); })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
@@ -226,7 +226,7 @@ struct SettingSubAgentPage {
       Text(valueText).fontSize(META).fontColor(ACCENT)
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { onClick(); })
@@ -245,7 +245,7 @@ struct SettingSubAgentPage {
         Text(this.expandedRoleId === def.id ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
       .backgroundColor(SURFACE)
       .onClick((): void => {
         // M3.2:折叠时保存(展开 → 折叠 = 提交编辑)

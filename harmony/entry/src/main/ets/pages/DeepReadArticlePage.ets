@@ -188,7 +188,7 @@ struct DeepReadArticlePage {
           .borderRadius(8)
           .backgroundColor(SURFACE2)
         }
-        .width('100%').height(56).padding({ left: 24, right: 24 })
+        .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
         .backgroundColor(BG)
 
         // ── 内容区 ──
@@ -257,7 +257,7 @@ struct DeepReadArticlePage {
               .margin({ top: 24, bottom: 40 })
               .onClick((): void => { this.showRegenerateDialog = true; })
             }
-            .width('100%').padding({ left: 24, right: 24 })
+            .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
           }
           .layoutWeight(1)
           .backgroundColor(BG)

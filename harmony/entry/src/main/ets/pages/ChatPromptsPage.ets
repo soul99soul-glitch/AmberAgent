@@ -453,7 +453,7 @@ struct ChatPromptsPage {
           .padding({ left: 6, right: 6, top: 4, bottom: 4 })
           .onClick((): void => { this.deleteModeInjection(mi); })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
     }
     .width('100%').backgroundColor(SURFACE).borderRadius(12)
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
@@ -503,7 +503,7 @@ struct ChatPromptsPage {
           .padding({ left: 6, right: 6, top: 4, bottom: 4 })
           .onClick((): void => { this.deleteLorebook(lb); })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
     }
     .width('100%').backgroundColor(SURFACE).borderRadius(12)
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })

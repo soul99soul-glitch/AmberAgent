@@ -56,7 +56,7 @@ struct DeepReadHistoryPage {
         Text('深度阅读历史').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
@@ -84,7 +84,7 @@ struct DeepReadHistoryPage {
                 .width('100%').margin({ top: 6 })
               }
               .width('100%').alignItems(HorizontalAlign.Start)
-              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .onClick((): void => { this.reopen(item); })
             }

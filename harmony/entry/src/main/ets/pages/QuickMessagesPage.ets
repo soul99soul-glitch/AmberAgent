@@ -115,7 +115,7 @@ struct QuickMessagesPage {
             .onClick((): void => { this.startNew(); })
         }
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (this.editing) {
         // 内联编辑器
@@ -144,12 +144,12 @@ struct QuickMessagesPage {
             Row() {
               Text('取消').fontSize(BODY).fontColor(INK3)
                 .layoutWeight(1).textAlign(TextAlign.Center)
-                .padding({ top: 12, bottom: 12 })
+                .padding({ top: 14, bottom: 14 })
                 .backgroundColor(SURFACE).border({ width: 1, color: LINE }).borderRadius(12)
                 .onClick((): void => { this.cancelEdit(); })
               Text('保存').fontSize(BODY).fontColor(SURFACE)
                 .layoutWeight(1).textAlign(TextAlign.Center)
-                .padding({ top: 12, bottom: 12 })
+                .padding({ top: 14, bottom: 14 })
                 .backgroundColor(ACCENT).borderRadius(12)
                 .margin({ left: 12 })
                 .onClick((): void => { this.saveEdit(); })
@@ -179,7 +179,7 @@ struct QuickMessagesPage {
                   .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               }
               .width('100%').alignItems(HorizontalAlign.Start)
-              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .onClick((): void => { this.startEdit(item); })
             }

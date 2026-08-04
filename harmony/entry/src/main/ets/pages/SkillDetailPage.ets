@@ -105,11 +105,11 @@ struct SkillDetailPage {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(18).fontColor(INK3).onClick((): void => { router.back(); })
+        Text('←').fontSize(24).fontColor(INK).onClick((): void => { router.back(); })
         Text(this.skillId.length > 0 ? '编辑技能' : '新技能').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
@@ -169,12 +169,12 @@ struct SkillDetailPage {
             Row() {
               Text(this.saving ? '保存中…' : '保存').fontSize(BODY).fontColor(SURFACE)
                 .layoutWeight(1).textAlign(TextAlign.Center)
-                .padding({ top: 12, bottom: 12 })
+                .padding({ top: 14, bottom: 14 })
                 .backgroundColor(ACCENT).borderRadius(12)
                 .onClick((): void => { this.save(); })
               Text('删除').fontSize(BODY).fontColor(DANGER)
                 .layoutWeight(1).textAlign(TextAlign.Center)
-                .padding({ top: 12, bottom: 12 })
+                .padding({ top: 14, bottom: 14 })
                 .backgroundColor(SURFACE).border({ width: 1, color: LINE }).borderRadius(12)
                 .margin({ left: 12 })
                 .onClick((): void => { this.deleteSkill(); })

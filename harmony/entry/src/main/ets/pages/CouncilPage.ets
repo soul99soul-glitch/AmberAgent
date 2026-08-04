@@ -89,7 +89,7 @@ struct CouncilPage {
         Text('模型议会').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif').margin({ left: 12 })
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 })
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
       .backgroundColor(BG)
 
       Scroll() {

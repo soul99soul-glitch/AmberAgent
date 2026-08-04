@@ -250,7 +250,7 @@ struct ChatTaskModelsPage {
       .width('100%').margin({ top: 10 })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .borderRadius(12)
     .margin({ left: 16, right: 16, top: 12 })

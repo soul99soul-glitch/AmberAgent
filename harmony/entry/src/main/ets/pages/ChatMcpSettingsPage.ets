@@ -271,7 +271,7 @@ struct ChatMcpSettingsPage {
         .width(38).height(38).textAlign(TextAlign.Center)
         .onClick((): void => { this.openEdit(config); })
     }
-    .width('100%').padding({ left: 14, right: 14, top: 12, bottom: 12 })
+    .width('100%').padding({ left: 14, right: 14, top: 14, bottom: 14 })
     .backgroundColor(SURFACE).borderRadius(10)
     .border({ width: 1, color: LINE })
   }
@@ -530,7 +530,7 @@ struct ChatMcpSettingsPage {
         Button('保存')
           .fontSize(14)
           .backgroundColor(ACCENT).fontColor('#FFFFFF')
-          .padding({ left: 24, right: 24 })
+          .padding({ left: 14, right: 14, top: 2, bottom: 11 })
           .onClick((): void => { this.confirmDraft(); })
       }
       .width('100%').justifyContent(FlexAlign.End).padding({ top: 8 })

@@ -156,7 +156,7 @@ struct SettingModelCouncilPage {
                 Text(this.showAddSeatMenu ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
               }
               .width('100%')
-              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .onClick((): void => { this.showAddSeatMenu = !this.showAddSeatMenu; })
 
@@ -200,7 +200,7 @@ struct SettingModelCouncilPage {
         .onChange((_v: boolean): void => { onToggle(); })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
@@ -217,7 +217,7 @@ struct SettingModelCouncilPage {
         .onChange((v: number): void => { onChange(v); })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
@@ -228,7 +228,7 @@ struct SettingModelCouncilPage {
       Text(valueText).fontSize(META).fontColor(ACCENT)
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { onClick(); })
@@ -248,7 +248,7 @@ struct SettingModelCouncilPage {
         Text(this.expandedSeatId === seat.seatId ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
       .backgroundColor(SURFACE)
       .onClick((): void => {
         if (this.expandedSeatId === seat.seatId) {

@@ -91,7 +91,7 @@ struct AssistantDetailPage {
         Text('助手详情').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
@@ -101,7 +101,7 @@ struct AssistantDetailPage {
         // 顶部助手卡:头像 + 名称
         Row() {
           Text(this.displayAvatar())
-            .fontSize(28).width(56).height(56).textAlign(TextAlign.Center)
+            .fontSize(28).width(56).textAlign(TextAlign.Center)
             .backgroundColor(SURFACE2).borderRadius(28)
           Column() {
             Text(this.displayName())

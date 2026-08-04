@@ -164,7 +164,7 @@ struct CouncilRunPage {
           Text(this.statusText).fontSize(12).fontColor(ACCENT)
         }
       }
-      .width('100%').height(56).padding({ left: 24, right: 24 })
+      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
       .backgroundColor(BG)
 
       if (this.errorMsg.length > 0) {
@@ -193,7 +193,7 @@ struct CouncilRunPage {
                 .onClick(() => { this.currentIndex = idx; })
             }, (key: string) => key)
           }
-          .padding({ left: 24, right: 24 })
+          .padding({ left: 14, right: 14, top: 2, bottom: 11 })
         }
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
