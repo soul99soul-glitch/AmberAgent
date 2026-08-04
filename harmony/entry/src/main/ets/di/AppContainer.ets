@@ -570,7 +570,9 @@ const seedDebugProvider = async (): Promise<void> => {
       id: newId(),
       name: 'DeepSeek',
       apiKey: 'sk-bd402b35619b42ec85233a467274d7b2',
-      baseUrl: 'https://api.deepseek.com/v1',
+      // DEBUG: 模拟器走宿主机反向代理(绕过 Clash fake-ip DNS)
+      //   正式环境用 https://api.deepseek.com/v1
+      baseUrl: 'http://10.0.2.2:8080/v1',
       models: [
         makeProviderModel({ modelId: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', type: 'chat' }),
       ],

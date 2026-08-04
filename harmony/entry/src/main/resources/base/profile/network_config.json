@@ -1,0 +1,12 @@
+{
+  "network-security-config": {
+    "domain-config": [
+      {
+        "cleartextTrafficPermitted": true,
+        "domains": [
+          { "include-subdomains": false, "name": "10.0.2.2" }
+        ]
+      }
+    ]
+  }
+}

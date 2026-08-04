@@ -27,6 +27,12 @@ interface StreamOpts {
   signal?: AbortSignalLike;
 }
 
+// DEBUG: URL 重写结果(绕过 Clash fake-ip)
+interface UrlRewriteResult {
+  url: string;
+  host: string | null;
+}
+
 class OhosHttpClient implements HttpClient {
   async fetch(req: HttpRequest): Promise<HttpResponse> {
     const url: string = req.url;
@@ -43,6 +49,8 @@ class OhosHttpClient implements HttpClient {
       connectTimeout: 15000,
       readTimeout: 20000,
       usingCache: false,
+      // DEBUG: 模拟器代理(绕过 Clash fake-ip DNS;正式环境删除 usingProxy)
+      usingProxy: debugProxy,
     };
 
     // body:POST/PUT 时带 body
