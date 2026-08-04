@@ -6,7 +6,7 @@ import { router } from '@kit.ArkUI';
 import { loadDisplaySetting, saveDisplaySetting, makeDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+import { PageTitleBar, SectionHeader } from '../components/PageTemplate.ets';
 import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL, ACCENT } from '../design/tokens.ets';
 
 @Entry
@@ -99,12 +99,7 @@ struct SettingDisplayPage {
         Scroll() {
           Column() {
             // 输入
-            Row() {
-              Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 输入').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
-            }
-            .width('100%').padding({ left: 16, top: 20, bottom: 6 })
-
+            SectionHeader({ label: '输入' })
             this.toggleRow('回车发送', '按 Enter 键发送消息(而非换行)', this.setting.sendOnEnter,
               (): void => { this.update({ sendOnEnter: !this.setting.sendOnEnter }); })
 
@@ -113,11 +108,7 @@ struct SettingDisplayPage {
               (): void => { this.update({ pasteLongTextAsFile: !this.setting.pasteLongTextAsFile }); })
 
             // 消息显示
-            Row() {
-              Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 消息显示').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
-            }
-            .width('100%').padding({ left: 16, top: 20, bottom: 6 })
+            SectionHeader({ label: '消息显示' })
 
             this.toggleRow('助手气泡', '为助手消息显示气泡背景', this.setting.showAssistantBubble,
               (): void => { this.update({ showAssistantBubble: !this.setting.showAssistantBubble }); })
@@ -132,11 +123,7 @@ struct SettingDisplayPage {
               (): void => { this.update({ enableAutoScroll: !this.setting.enableAutoScroll }); })
 
             // 代码块
-            Row() {
-              Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 代码块').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
-            }
-            .width('100%').padding({ left: 16, top: 20, bottom: 6 })
+            SectionHeader({ label: '代码块' })
 
             this.toggleRow('自动折叠长代码', '超过 10 行的代码块自动折叠', this.setting.codeBlockAutoCollapse,
               (): void => { this.update({ codeBlockAutoCollapse: !this.setting.codeBlockAutoCollapse }); })

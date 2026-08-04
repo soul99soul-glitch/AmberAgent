@@ -78,9 +78,7 @@ struct SettingPage {
           .backgroundColor(SURFACE2).borderRadius(13)
           .margin({ top: 4 })
 
-          Text('ACCENT')
-            .fontSize(LABEL).fontWeight(FontWeight.Bold).fontColor(INK3).fontFamily('monospace')
-            .margin({ left: 6, top: 16, bottom: 9 })
+          SectionHeader({ label: 'ACCENT' })
 
           Row() {
             ForEach(['#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A'], (color: string, idx: number): void => {

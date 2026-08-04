@@ -222,7 +222,7 @@ export struct SessionRowItem {
         .margin({ left: 11, top: 2 })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 13, bottom: 13 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { this.onRowClick(); })

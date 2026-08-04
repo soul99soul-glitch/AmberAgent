@@ -1,6 +1,6 @@
 // BoardPage — 今日看板(G7 杂志风重构)
 //
-// 结构: PageHeader(← + 今日看板 + 🕐/⚙) + BoardTabs(大看板/任务流) + 内容
+// 结构: PageHeader(← + 今日看板) + BoardTabs(大看板/任务流) + 内容
 //   大看板: RubricHead + LeadStory(rank 1) + IndexRow(rank 2-7) + Footer
 //   任务流: TaskRow(状态点 + 标题 + 时间 + ›)
 // 点击条目 → router.pushUrl 到 DeepReadArticlePage
@@ -107,11 +107,6 @@ struct BoardPage {
         .fontColor(INK)
         .layoutWeight(1)
         .margin({ left: 8 })
-        .fontSize(21)
-        .fontColor(INK2)
-        .fontSize(21)
-        .fontColor(INK2)
-        .margin({ left: 14 })
     }
     .width('100%')
     .padding({ left: 14, right: 14, top: 2, bottom: 11 })
