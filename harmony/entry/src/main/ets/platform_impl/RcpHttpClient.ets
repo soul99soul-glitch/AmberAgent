@@ -133,8 +133,21 @@ class OhosHttpClient implements HttpClient {
     return new Promise<HttpResponse>((resolve, reject) => {
       let status: number = 0;
 
+      let chunkCount: number = 0;
+      let totalBytes: number = 0;
+
       httpRequest.on('dataReceive', (data: ArrayBuffer) => {
         if (settled) return;
+        chunkCount++;
+        totalBytes += data.byteLength;
+        if (chunkCount <= 3) {
+          // 前 3 个 chunk 打日志,确认 SSE 数据确实到达
+          const preview: string = Array.from(new Uint8Array(data.slice(0, 80)))
+            .map((b: number): string => String.fromCharCode(b))
+            .join('');
+          hilog.info(DOMAIN, TAG, 'fetchStream chunk#%{public}d: %{public}d bytes preview=%{public}s',
+            chunkCount, data.byteLength, preview);
+        }
         opts.onChunk(data, false);
       });
 
@@ -142,9 +155,13 @@ class OhosHttpClient implements HttpClient {
         if (settled) return;
         settled = true;
         opts.onChunk(new ArrayBuffer(0), true);
-        hilog.info(DOMAIN, TAG, 'fetchStream done: %{public}s status=%{public}d', url, status);
+        // status=0 时说明 requestInStream 的 .then 尚未回调或返回 0;
+        //   但 dataEnd 已触发 = 流正常结束,用 200 兜底(对齐 dataReceive 驱动的语义)
+        const finalStatus: number = status > 0 ? status : 200;
+        hilog.info(DOMAIN, TAG, 'fetchStream done: %{public}s status=%{public}d chunks=%{public}d bytes=%{public}d',
+          url, finalStatus, chunkCount, totalBytes);
         httpRequest.destroy();
-        const result: HttpResponse = { status: status, headers: {}, body: '' };
+        const result: HttpResponse = { status: finalStatus, headers: {}, body: '' };
         resolve(result);
       });
 

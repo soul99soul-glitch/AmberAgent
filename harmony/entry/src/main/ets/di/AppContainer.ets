@@ -574,13 +574,15 @@ const seedDebugProvider = async (): Promise<void> => {
       //   正式环境用 https://api.deepseek.com/v1
       baseUrl: 'http://10.0.2.2:8080/v1',
       models: [
-        makeProviderModel({ modelId: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', type: 'chat' }),
+        // modelId 必须匹配 API 接受的值;deepseek-chat 是请求参数,
+        // API 服务端映射到 deepseek-v4-flash(见 response.model)
+        makeProviderModel({ modelId: 'deepseek-chat', displayName: 'DeepSeek V4 Flash', type: 'chat' }),
       ],
     });
     await saveProviders(chatKv!, [provider]);
     // 同时设置默认选中
     await chatKv!.put('chat_selected_provider_id', provider.id);
-    await chatKv!.put('chat_selected_model_id', 'deepseek-v4-flash');
+    await chatKv!.put('chat_selected_model_id', 'deepseek-chat');
   } catch (_e) {
     // 静默失败(不影响应用启动)
   }
