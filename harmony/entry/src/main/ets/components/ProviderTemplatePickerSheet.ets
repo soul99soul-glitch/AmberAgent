@@ -11,6 +11,7 @@ import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, BG, LINE, ACCENT,
   BODY, META, LABEL,
 } from '../design/tokens.ets';
+import { Icon } from './ui/Icon.ets';
 
 // Provider 模板接口(供 onPick 回调传递)
 export interface ProviderTemplate {
@@ -146,7 +147,7 @@ export struct ProviderTemplatePickerSheet {
 
           // 搜索栏
           Row() {
-            Text('🔍').fontSize(BODY).fontColor(INK3).margin({ right: 10 })
+            Icon({ name: 'search', iconSize: BODY, color: INK3 }).margin({ right: 10 })
             TextInput({ text: this.searchText, placeholder: '搜索模板...' })
               .fontSize(BODY)
               .fontColor(INK)

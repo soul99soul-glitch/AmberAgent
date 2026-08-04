@@ -23,6 +23,7 @@
 
 import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import {
   parseMcpServersFromJson, cloneMcpServerConfig, makeMcpStreamableHttpServer,
@@ -267,10 +268,12 @@ struct ChatMcpSettingsPage {
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 12 })
       // 编辑 gear(:331-343)
-      Text('⚙')
-        .fontSize(18).fontColor(INK3)
-        .width(38).height(38).textAlign(TextAlign.Center)
-        .onClick((): void => { this.openEdit(config); })
+      Column() {
+        Icon({ name: 'gear', iconSize: 18, color: INK3 })
+      }
+      .width(38).height(38)
+      .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
+      .onClick((): void => { this.openEdit(config); })
     }
     .width('100%').padding({ left: 14, right: 14, top: 14, bottom: 14 })
     .backgroundColor(SURFACE).borderRadius(10)

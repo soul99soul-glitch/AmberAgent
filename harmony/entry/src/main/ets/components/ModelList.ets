@@ -22,6 +22,7 @@ import {
 import { FlatTextField } from './ui/FlatTextField.ets';
 import { AmberSwitch, SwitchSize } from './ui/Switch.ets';
 import { Tag, TagType } from './ui/Tag.ets';
+import { Icon } from './ui/Icon.ets';
 import { formatNumberInt } from '@amber/chat-domain';
 
 // 模型信息(与父页共享;导出供 pages 引用)
@@ -375,7 +376,7 @@ export struct ModelList {
         Column() {
           if (this.visibleModels.length === 0) {
             Column() {
-              Text('🔍').fontSize(28).fontColor(INK4)
+              Icon({ name: 'search', iconSize: 28, color: INK4 })
               Text(this.models.length === 0 ? '暂无模型,点下方添加' : '无匹配模型')
                 .fontSize(BODY).fontColor(INK3).margin({ top: 8 })
             }

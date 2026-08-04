@@ -2,6 +2,7 @@
 // Android 基准: ToggleSurface 按钮 → ModalBottomSheet(内置搜索开关 / 服务列表)
 // ArkUI MVP: 触发行(当前服务名)→ bindSheet(服务列表 toggle)
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BODY, META, LABEL } from '../../design/tokens.ets';
+import { Icon } from './Icon.ets';
 
 export interface SearchServiceItem {
   id: string;
@@ -20,7 +21,7 @@ export struct SearchPicker {
 
   build(): void {
     Row() {
-      Text('🔍').fontSize(BODY).margin({ right: 8 })
+      Icon({ name: 'search', iconSize: BODY, color: INK3 }).margin({ right: 8 })
       Text(this.searchEnabled ? '搜索已启用' : '搜索已关闭')
         .fontSize(BODY)
         .fontColor(this.searchEnabled ? ACCENT : INK3)

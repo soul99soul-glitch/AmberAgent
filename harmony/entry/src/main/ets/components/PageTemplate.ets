@@ -13,6 +13,7 @@ import {
   TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY,
   PAD_CARD, PAD_ITEM, RADIUS, RADIUS_PILL, GUTTER,
 } from '../design/tokens.ets';
+import { Icon } from './ui/Icon.ets';
 
 // ===== Page Header (对齐 PageHeader / SettingsHeader) =====
 @Component
@@ -182,7 +183,7 @@ export struct SessionRowItem {
       Column() {
         Row() {
           if (this.pinned) {
-            Text('📌').fontSize(13).margin({ right: 7 })
+            Icon({ name: 'pin', iconSize: 13, color: ACCENT }).margin({ right: 7 })
           }
           Text(this.title.length > 0 ? this.title : '未命名对话')
             .fontSize(BODY)

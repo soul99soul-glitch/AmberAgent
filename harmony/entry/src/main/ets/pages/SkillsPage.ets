@@ -13,6 +13,7 @@ import {
   ACCENT, ACCENT_INK, ACCENT_LIGHT, SIGNAL, ERROR,
   TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY,
 } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
 
 // ── 数据模型 ──
 interface SkillItem {
@@ -150,9 +151,7 @@ struct SkillsPage {
       // 图标 + 标题
       Row() {
         Column() {
-          Text('🧩')
-            .fontSize(22)
-            .fontColor(BG)
+          Icon({ name: 'puzzle', iconSize: 22, color: BG })
         }
         .width(42)
         .height(42)
@@ -279,9 +278,7 @@ struct SkillsPage {
     Row() {
       // 图标盒(on: ACCENT_LIGHT/ACCENT, off: SURFACE2/INK4)
       Column() {
-        Text('🧩')
-          .fontSize(20)
-          .fontColor(item.enabled ? ACCENT : INK4)
+        Icon({ name: 'puzzle', iconSize: 20, color: item.enabled ? ACCENT : INK4 })
       }
       .width(38)
       .height(38)

@@ -19,6 +19,7 @@ import {
   TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY,
 } from '../design/tokens.ets';
 import { AmberSwitch, SwitchSize } from '../components/ui/Switch.ets';
+import { Icon } from '../components/ui/Icon.ets';
 
 interface ProviderModel {
   id: string;
@@ -277,9 +278,7 @@ struct SettingProviderDetailPageFull {
         .fontColor(INK3)
         .margin({ left: 10 })
         .onClick((): void => { this.toggleKeyReveal(); })
-      Text('📋')
-        .fontSize(13)
-        .fontColor(INK3)
+      Icon({ name: 'clipboard', iconSize: 13, color: INK3 })
         .margin({ left: 10 })
         .onClick((): void => { this.copyApiKey(); })
     }

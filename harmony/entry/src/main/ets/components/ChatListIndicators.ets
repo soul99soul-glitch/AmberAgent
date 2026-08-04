@@ -5,6 +5,7 @@
 //   未读计数徽标(ACCENT 背景)
 // ArkUI: 脉冲用 animateTo iterations:-1(scale + opacity);图标用 Unicode/Text 代替矢量
 import { ACCENT, INK3, SIGNAL } from '../design/tokens.ets';
+import { Icon } from './ui/Icon.ets';
 
 // ConversationRunningIndicator — 脉冲圆点(运行中会话)
 //   Android: Box(22dp) { ring(16dp scale+alpha) + dot(6dp) }
@@ -51,18 +52,19 @@ export struct RunningIndicator {
 
 // PinnedIndicator — 置顶图标(15dp)
 //   Android: HugeIcons.Pin 15dp,tint = workspace.faint(INK3)
-//   ArkUI: 无矢量图,用 Unicode 📌 文本代替(对齐 HugeIcons.Pin 语义)
+//   ArkUI: SymbolGlyph 单色符号(Icon.pin),对齐 HugeIcons.Pin 语义
 @Component
 export struct PinnedIndicator {
   @Prop tint: string = INK3;
 
   build(): void {
-    Text('📌')
-      .fontSize(13)
-      .fontColor(this.tint)
-      .width(15)
-      .height(15)
-      .textAlign(TextAlign.Center)
+    Column() {
+      Icon({ name: 'pin', iconSize: 13, color: this.tint })
+    }
+    .width(15)
+    .height(15)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
   }
 }
 

@@ -13,6 +13,7 @@ import {
   ACCENT, ACCENT_INK, ACCENT_LIGHT, SIGNAL, ERROR,
   TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY,
 } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
 
 // ── 数据模型 ──
 interface MemoryItem {
@@ -174,9 +175,7 @@ struct MemoryPage {
           .fontColor(INK)
           .lineHeight(21)
           .layoutWeight(1)
-        Text('📌')
-          .fontSize(14)
-          .fontColor(item.pinned ? ACCENT : INK4)
+        Icon({ name: 'pin', iconSize: 14, color: item.pinned ? ACCENT : INK4 })
           .margin({ left: 10 })
           .onClick((): void => { this.togglePin(item); })
       }

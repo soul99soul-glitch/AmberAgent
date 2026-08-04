@@ -151,6 +151,8 @@ struct SettingPage {
             NavRow({ label: '文件管理', onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
             NavRow({ label: '定时任务', onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
             NavRow({ label: '历史记录', onRowClick: (): void => { this.go('pages/HistoryPage'); } })
+            NavRow({ label: '今日看板', onRowClick: (): void => { this.go('pages/BoardPage'); } })
+            NavRow({ label: '收藏', onRowClick: (): void => { this.go('pages/FavoritePage'); } })
             NavRow({ label: '关于', onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)

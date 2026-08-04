@@ -3,6 +3,7 @@
 // Android 基准: feature/ui/pages/search/SearchPage.kt
 import { router } from '@kit.ArkUI';
 import { WorkspaceSearchField } from '../components/ui/WorkspaceSearchField.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 
 interface SearchResult {
@@ -91,7 +92,7 @@ struct SearchPage {
         }.margin({ top: 64 })
       } else if (!this.searched) {
         Column() {
-          Text('🔍').fontSize(34).fontColor(INK4)
+          Icon({ name: 'search', iconSize: 34, color: INK4 })
           Text('输入关键词开始搜索').fontSize(BODY).fontColor(INK3).margin({ top: 12 })
         }.margin({ top: 64 })
       } else {
