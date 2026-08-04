@@ -6,7 +6,7 @@
 // D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
-import { ACCENT,BG,INK,INK2,INK3,LABEL,LINE,META,SURFACE,SURFACE2 } from '../design/tokens.ets';
+import { ACCENT,ACCENT_INK,BG,BODY,HEADER,INK,INK2,INK3,INK4,LABEL,LINE,LINE2,META,MONO_SMALL,SURFACE,SURFACE2 } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
@@ -857,6 +857,11 @@ struct ChatPage {
       currentMessages(this.conversation), this.contextCompacts);
     const r: number = used / w;
     return r < 0 ? 0 : (r > 1 ? 1 : r);
+  }
+
+  // Amber Redesign ContextMeter:5 段柱填充数(ceil(ratio*5),0..5)
+  private contextFilledBars(): number {
+    return Math.ceil(this.contextUsageRatio() * 5);
   }
 
   // :150-160 — 文案:压缩中 → '正在压缩上下文'(zh :225 逐字);
@@ -2632,47 +2637,90 @@ struct ChatPage {
   build() {
     Stack() {
     Column() {
-      Column() {
-        if (this.editingTitle) {
-          Row() {
+      // Amber Redesign ChatHeader — Row[left ←/☰ | center title+model | right ctx-meter+✎]
+      Row() {
+        // Left:返回箭头(有会话 ← 24/INK)或菜单(根 ☰ 22/INK2)
+        Text(this.conversation !== null ? '←' : '☰')
+          .fontSize(this.conversation !== null ? 24 : 22)
+          .fontColor(this.conversation !== null ? INK : INK2)
+          .onClick((): void => {
+            if (this.conversation !== null) router.back();
+          })
+
+        // Center:标题 + 模型行(flex 1, margin-left 2)
+        Column() {
+          if (this.editingTitle) {
             TextInput({ text: this.titleInput, placeholder: '会话标题' })
-              .fontSize(15).layoutWeight(1).height(36)
+              .fontSize(HEADER).fontWeight(FontWeight.Bold)
+              .layoutWeight(1).height(36)
               .backgroundColor(SURFACE)
               .onChange((v: string): void => { this.titleInput = v; })
-            Text('保存').fontSize(13).fontColor(ACCENT)
-              .padding({ left: 10, right: 4 })
+          } else {
+            Text(this.title)
+              .fontSize(HEADER).fontWeight(FontWeight.Bold).fontColor(INK)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
+          // 模型行:mono/META(12)/INK3 + ▾ 11/INK4
+          Row() {
+            Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型')
+              .fontSize(META).fontFamily('monospace')
+              .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .layoutWeight(1)
+            Text(this.modelMenuOpen ? '▴' : '▾')
+              .fontSize(11).fontColor(INK4)
+              .margin({ left: 4 })
+          }
+          .width('100%')
+          .margin({ top: 1 })
+        }
+        .layoutWeight(1)
+        .margin({ left: 2 })
+        .onClick((): void => {
+          if (!this.editingTitle) {
+            this.toggleModelMenu();
+          }
+        })
+
+        // Right:ContextMeter(5 段柱) + % + ✎(或编辑态 保存/取消)
+        if (this.editingTitle) {
+          Row() {
+            Text('保存').fontSize(META).fontColor(ACCENT)
+              .padding({ left: 8, right: 4 })
               .onClick((): void => this.saveTitle())
-            Text('取消').fontSize(13).fontColor(INK3)
-              .padding({ left: 10, right: 4 })
+            Text('取消').fontSize(META).fontColor(INK3)
+              .padding({ left: 8, right: 0 })
               .onClick((): void => { this.editingTitle = false; })
           }
-          .padding({ left: 16, right: 16 })
         } else {
-          Text(this.title)
-            .fontSize(17).fontWeight(FontWeight.Medium).fontColor(INK)
-            .onClick((): void => this.startEditTitle())
+          Row() {
+            // ContextMeter:5 段柱(2.5x9,gap 2,accent 填充/LINE2 空)
+            Row() {
+              Column() {}.width(2.5).height(9)
+                .backgroundColor(this.contextFilledBars() >= 1 ? ACCENT : LINE2).borderRadius(1)
+              Column() {}.width(2.5).height(9).margin({ left: 2 })
+                .backgroundColor(this.contextFilledBars() >= 2 ? ACCENT : LINE2).borderRadius(1)
+              Column() {}.width(2.5).height(9).margin({ left: 2 })
+                .backgroundColor(this.contextFilledBars() >= 3 ? ACCENT : LINE2).borderRadius(1)
+              Column() {}.width(2.5).height(9).margin({ left: 2 })
+                .backgroundColor(this.contextFilledBars() >= 4 ? ACCENT : LINE2).borderRadius(1)
+              Column() {}.width(2.5).height(9).margin({ left: 2 })
+                .backgroundColor(this.contextFilledBars() >= 5 ? ACCENT : LINE2).borderRadius(1)
+            }
+            Text(`${Math.round(this.contextUsageRatio() * 100)}%`)
+              .fontSize(MONO_SMALL).fontFamily('monospace').fontColor(INK3)
+              .margin({ left: 4 })
+            Text('✎').fontSize(21).fontColor(INK2)
+              .margin({ left: 8 })
+              .onClick((): void => this.startEditTitle())
+          }
         }
-        Row() {
-          Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型 — 点我选择')
-            .fontSize(11)
-            .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .layoutWeight(1)
-          Text(this.modelMenuOpen ? '▴' : '▾')
-            .fontSize(9)
-            .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
-            .margin({ left: 4 })
-        }
-        .width('100%')
-        .margin({ top: 2 })
       }
-      .padding({ top: 16, bottom: 8 })
-      .onClick((): void => {
-        if (!this.editingTitle) {
-          this.toggleModelMenu();
-        }
-      })
+      .width('100%')
+      .padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
+      .backgroundColor(BG)
 
       // cachedCount 预渲染可见区外 5 项,改善滚动流畅度
       // LazyForEach 替换 ForEach 需 IDataSource 重构(涉及 18+ 处 rows 赋值),
@@ -2846,21 +2894,7 @@ struct ChatPage {
         this.sandboxStrip(this.sandboxTimeline())
       }
 
-      // D-110:ContextUsageIndicator(:127-161)— 10dp 环(轨道 faint 0.24 +
-      //   弧 ringColor,ProgressType.Ring 适配)+ 10sp 文案(muted 0.72)
-      Row() {
-        Progress({ value: this.contextUsageRatio() * 100, total: 100, type: ProgressType.Ring })
-          .width(10).height(10)
-          .color(this.contextRingColor())
-          .backgroundColor('#3DB6B1A4')
-          .style({ strokeWidth: 1.6 })
-        Text(this.contextUsageText())
-          .fontSize(10).fontColor('#B88F8B80')
-          .maxLines(1)
-          .margin({ left: 4 })
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, bottom: 2 })
+      // D-110:ContextUsageIndicator 已上移至 ChatHeader(ContextMeter 5 段柱 + %)
 
       // 第二梯队 E:ChatInput 组件替换内联输入行
       ChatInput({

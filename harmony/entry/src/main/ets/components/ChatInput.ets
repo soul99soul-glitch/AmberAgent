@@ -16,7 +16,7 @@
 //   ❌ +→× 形变动画(后续迭代)
 //   ❌ 用量面板(后续迭代)
 
-import { INK, INK3, INK4, ACCENT, SURFACE, SURFACE2, BODY, META, LABEL } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, ACCENT, ACCENT_INK, SURFACE, SURFACE2, BODY, META, LABEL, LINE } from '../design/tokens.ets';
 import { SlashCommandPanel, SlashCommand, buildSlashCommands } from './SlashCommandPanel.ets';
 import { ReasoningPicker } from './ReasoningPicker.ets';
 import type { ReasoningLevelOption } from '@amber/chat-domain';
@@ -113,59 +113,86 @@ export struct ChatInput {
         .onClick((): void => { this.onCancelEdit(); })
       }
 
+      // Amber Redesign InputBar — border-top LINE, bg SURFACE, pill-style input
       Row() {
-        // 左:图片附件按钮(sending 态灰显视觉反馈)
-        Text('📎').fontSize(18)
-          .width(36).height(36)
-          .textAlign(TextAlign.Center)
-          .opacity(this.sending ? 0.4 : 1)
-          .onClick((): void => { if (!this.sending) this.onPickImage(); })
+        // Attach capsule:48x48, radius 999, bg SURFACE2, border 1px LINE, + 22/INK2
+        Row() {
+          Text('+').fontSize(22).fontColor(INK2)
+        }
+        .width(48).height(48)
+        .borderRadius(999)
+        .backgroundColor(SURFACE2)
+        .border({ width: 1, color: LINE })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .opacity(this.sending ? 0.4 : 1)
+        .margin({ right: 9 })
+        .onClick((): void => { if (!this.sending) this.onPickImage(); })
 
-        // 中:多行文本输入(编辑态切换 placeholder)
-        TextArea({ text: this.text,
-          placeholder: this.editing ? '编辑消息,发送将重发…' : '输入消息…' })
-          .layoutWeight(1)
-          .fontSize(BODY).fontColor(INK)
-          .backgroundColor(SURFACE)
-          .borderRadius(20)
-          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-          .margin({ left: 6, right: 6 })
-          .maxLines(4)
-          .onChange((v: string): void => { this.onTextChange(v); })
+        // Center pill:flex 1, radius 26, min-height 48, bg SURFACE2, border 1px LINE
+        Row() {
+          TextArea({ text: this.text,
+            placeholder: this.editing ? '编辑消息,发送将重发…' : '输入消息…' })
+            .layoutWeight(1)
+            .fontSize(BODY).fontColor(INK)
+            .placeholderColor(INK4)
+            .placeholderFont({ size: BODY })
+            .backgroundColor('#00000000')
+            .borderRadius(26)
+            .padding({ top: 8, bottom: 8 })
+            .maxLines(4)
+            .lineHeight(21)
+            .onChange((v: string): void => { this.onTextChange(v); })
+        }
+        .layoutWeight(1)
+        .borderRadius(26)
+        .backgroundColor(SURFACE2)
+        .border({ width: 1, color: LINE })
+        .padding({ left: 18, right: 18 })
+        .constraintSize({ minHeight: 48 })
+        .alignItems(VerticalAlign.Center)
+        .margin({ right: 9 })
 
-        // 右:发送/停止
+        // Send/Stop button:48x48, radius 999
         if (this.sending) {
-          Text('⏹').fontSize(16)
-            .width(36).height(36)
-            .textAlign(TextAlign.Center)
-            .fontColor(SURFACE)
-            .backgroundColor(INK)
-            .borderRadius(18)
-            .onClick((): void => { this.onStop(); })
-            .gesture(
-              LongPressGesture()
-                .onAction((): void => { this.onSendWithoutAnswer(); })
-            )
+          Row() {
+            Text('⏹').fontSize(16).fontColor(SURFACE)
+          }
+          .width(48).height(48)
+          .borderRadius(999)
+          .backgroundColor(INK)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => { this.onStop(); })
+          .gesture(
+            LongPressGesture()
+              .onAction((): void => { this.onSendWithoutAnswer(); })
+          )
         } else {
-          Text('↑').fontSize(18).fontWeight(FontWeight.Bold)
-            .width(36).height(36)
-            .textAlign(TextAlign.Center)
-            .fontColor(this.canSend() ? SURFACE : INK4)
-            .backgroundColor(this.canSend() ? ACCENT : SURFACE2)
-            .borderRadius(18)
-            .onClick((): void => {
-              if (this.canSend()) this.onSend();
-            })
-            .gesture(
-              LongPressGesture()
-                .onAction((): void => { this.onSendWithoutAnswer(); })
-            )
+          Row() {
+            Text('↑').fontSize(21).fontWeight(FontWeight.Bold)
+              .fontColor(this.canSend() ? ACCENT_INK : INK4)
+          }
+          .width(48).height(48)
+          .borderRadius(999)
+          .backgroundColor(this.canSend() ? ACCENT : SURFACE2)
+          .border({ width: 1, color: this.canSend() ? ACCENT : LINE })
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => {
+            if (this.canSend()) this.onSend();
+          })
+          .gesture(
+            LongPressGesture()
+              .onAction((): void => { this.onSendWithoutAnswer(); })
+          )
         }
       }
       .width('100%')
-      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-      .backgroundColor(SURFACE2)
-      .borderRadius(24)
+      .border({ width: { top: 1 }, color: { top: LINE } })
+      .backgroundColor(SURFACE)
+      .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+      .alignItems(VerticalAlign.Bottom)
     }
     .width('100%')
   }
