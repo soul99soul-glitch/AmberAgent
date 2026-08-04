@@ -966,6 +966,67 @@ final class NovelCreationViewModelTests: XCTestCase {
         }
     }
 
+    func testLateQuickStartBackgroundCallbackDoesNotCancelTheCurrentRun() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "provider",
+                ownerProviderID: "provider",
+                modelID: "model",
+                wireModelID: "model-wire",
+                displayName: "Model",
+                contextWindowTokens: 32_000
+            ),
+            scripts: [
+                NovelModelScript(steps: [.delta(quickStartSuggestionsJSON), .complete]),
+                NovelModelScript(steps: [.pause])
+            ]
+        )
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        )
+        let createdProjectID = await viewModel.createProject(
+            name: "雾海列车",
+            mode: .quickStart,
+            genre: "奇幻悬疑",
+            coreIdea: "一列火车只在失去记忆的人面前出现。"
+        )
+        let projectID = try XCTUnwrap(createdProjectID)
+
+        let firstRunFinished = await eventually {
+            viewModel.projectSnapshot?.settingProposals.count == 4 &&
+                viewModel.quickStartStatus == .idle
+        }
+        XCTAssertTrue(firstRunFinished)
+        let firstRequests = await adapter.requests
+        let firstRunID = try XCTUnwrap(firstRequests.first?.runID)
+
+        let startedRunID = await viewModel.startQuickStartSuggestions(guidance: "换一套设定")
+        let currentRunID = try XCTUnwrap(startedRunID)
+        let currentRunStarted = await eventually {
+            (await adapter.requests).count == 2 &&
+                viewModel.quickStartStatus == .generating(runID: currentRunID)
+        }
+        XCTAssertTrue(currentRunStarted)
+
+        await viewModel.interruptSessionForBackground(
+            projectID: projectID,
+            runID: firstRunID,
+            deadline: Date()
+        )
+
+        XCTAssertEqual(viewModel.quickStartStatus, .generating(runID: currentRunID))
+        let cancelledRunIDs = await adapter.cancelledRunIDs
+        XCTAssertFalse(cancelledRunIDs.contains(currentRunID))
+
+        // 收掉本测试刻意暂停的当前 run，避免把全局后台租约带进后续用例。
+        await viewModel.interruptSessionForBackground(
+            projectID: projectID,
+            runID: currentRunID,
+            deadline: Date().addingTimeInterval(2)
+        )
+    }
+
     func testQuickStartCanBeRegeneratedWithGuidanceAfterAllProposalsAreRejected() async throws {
         let repository = InMemoryNovelProjectRepository()
         let adapter = ScriptedNovelModelAdapter(
@@ -1275,7 +1336,17 @@ final class NovelCreationViewModelTests: XCTestCase {
 
         XCTAssertTrue(failureBecameVisible)
         XCTAssertFalse(viewModel.isProjectSelectionBlocked)
-        XCTAssertNotNil(viewModel.errorMessage)
+        XCTAssertEqual(
+            viewModel.automaticStateSyncFailureMessage(
+                projectID: edited.project.id,
+                branchID: branch.id
+            ),
+            "项目保存失败，请稍后重试。"
+        )
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            "项目保存失败，请稍后重试。"
+        )
         viewModel.retryAutomaticStateSync(
             projectID: edited.project.id,
             branchID: branch.id
@@ -1524,6 +1595,10 @@ final class NovelCreationViewModelTests: XCTestCase {
             return !requests.isEmpty
         }
         XCTAssertTrue(requestStarted)
+        let stateSyncLeaseID = BackgroundGenerationKeepAlive.shared.activeLeaseIds.first(where: {
+            $0.hasPrefix("novel-state-sync-")
+        })
+        XCTAssertNotNil(stateSyncLeaseID)
         let cancelledAfterWrongTarget = await adapter.cancelledRunIDs
         XCTAssertTrue(cancelledAfterWrongTarget.isEmpty)
 
@@ -1557,6 +1632,9 @@ final class NovelCreationViewModelTests: XCTestCase {
             projectID: document.project.id,
             branchID: branchID
         ))
+        if let stateSyncLeaseID {
+            XCTAssertFalse(BackgroundGenerationKeepAlive.shared.holdsLease(stateSyncLeaseID))
+        }
     }
 
     func testManualStateSyncRetryCanRestartAfterCancel() async throws {

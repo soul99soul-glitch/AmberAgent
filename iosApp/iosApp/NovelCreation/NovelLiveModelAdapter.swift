@@ -37,25 +37,59 @@ struct NovelLiveTransportRequest: @unchecked Sendable {
 
 struct NovelLiveTransportCallbacks: @unchecked Sendable {
     let onChunk: @Sendable (MessageChunk) -> Void
+    let onCheckpoint: @Sendable (NovelResponsesResumeCursor) -> Void
     let onAskUser: @Sendable (NovelAskUserPrompt, String) -> Void
     let onComplete: @Sendable () -> Void
     let onFailure: @Sendable (NovelModelFailure) -> Void
+    let onDisconnected: @Sendable (NovelModelFailure) -> Void
+
+    init(
+        onChunk: @escaping @Sendable (MessageChunk) -> Void,
+        onCheckpoint: @escaping @Sendable (NovelResponsesResumeCursor) -> Void = { _ in },
+        onAskUser: @escaping @Sendable (NovelAskUserPrompt, String) -> Void,
+        onComplete: @escaping @Sendable () -> Void,
+        onFailure: @escaping @Sendable (NovelModelFailure) -> Void,
+        onDisconnected: @escaping @Sendable (NovelModelFailure) -> Void = { _ in }
+    ) {
+        self.onChunk = onChunk
+        self.onCheckpoint = onCheckpoint
+        self.onAskUser = onAskUser
+        self.onComplete = onComplete
+        self.onFailure = onFailure
+        self.onDisconnected = onDisconnected
+    }
 }
 
 struct NovelLiveCancellationHandle: @unchecked Sendable {
     private let action: @Sendable () -> Void
+    private let remoteAction: @Sendable () -> Void
 
-    init(_ action: @escaping @Sendable () -> Void) {
+    init(
+        _ action: @escaping @Sendable () -> Void,
+        remoteAction: @escaping @Sendable () -> Void = {}
+    ) {
         self.action = action
+        self.remoteAction = remoteAction
     }
 
     func cancel() {
         action()
     }
+
+    func cancelRemote() {
+        remoteAction()
+    }
 }
 
 typealias NovelLiveTransport = @Sendable (
     NovelLiveTransportRequest,
+    NovelLiveTransportCallbacks
+) -> NovelLiveCancellationHandle?
+
+typealias NovelDurableResumeTransport = @Sendable (
+    NovelModelResumeRequest,
+    ProviderSetting,
+    [CustomHeader],
     NovelLiveTransportCallbacks
 ) -> NovelLiveCancellationHandle?
 
@@ -89,7 +123,7 @@ struct NovelLiveCodexHooks: @unchecked Sendable {
 /// The production bridge from the Novel domain request to the existing provider
 /// runtimes. It owns only transport state; prompts, persistence, and terminal
 /// project mutations remain in the Novel module.
-actor NovelLiveModelAdapter: NovelModelRunning {
+actor NovelLiveModelAdapter: NovelDurableModelRunning {
     private struct Route: @unchecked Sendable {
         let provider: ProviderSetting
         let model: Model
@@ -97,14 +131,20 @@ actor NovelLiveModelAdapter: NovelModelRunning {
     }
 
     private struct ActiveRun {
+        let attemptID: UUID
         let continuation: AsyncStream<NovelModelEvent>.Continuation
         var cancellationHandle: NovelLiveCancellationHandle?
         var handleInstalled: Bool
+        var isDurable: Bool
+        var pendingResponseChunks: [MessageChunk]
+        var latestResponseCursor: NovelResponsesResumeCursor?
     }
 
     private let catalogProvider: @Sendable () async -> NovelLiveModelCatalog
     private let kmpTransport: NovelLiveTransport
     private let discussionTransport: NovelLiveTransport?
+    private let durableStartTransport: NovelLiveTransport?
+    private let durableResumeTransport: NovelDurableResumeTransport?
     private let discussionSearchEnabled: @Sendable () async -> Bool
     private let grokTransport: NovelLiveTransport
     private let codex: NovelLiveCodexHooks
@@ -113,6 +153,7 @@ actor NovelLiveModelAdapter: NovelModelRunning {
     private var seenRunIDs: Set<NovelRunID> = []
     private var cancelledBeforeStart: Set<NovelRunID> = []
     private var terminalBeforeHandleInstall: Set<NovelRunID> = []
+    private var detachedCancellationHandles: [NovelRunID: NovelLiveCancellationHandle] = [:]
 
     @MainActor
     init(
@@ -126,6 +167,8 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             await settingsSource.catalog()
         }
         self.kmpTransport = Self.kmpTransport(using: streamingProvider)
+        self.durableStartTransport = Self.backgroundStartTransport()
+        self.durableResumeTransport = Self.backgroundResumeTransport()
         self.discussionTransport = toolRuntime.map { runtime in
             Self.discussionSearchTransport(
                 using: streamingProvider,
@@ -143,6 +186,8 @@ actor NovelLiveModelAdapter: NovelModelRunning {
         catalogProvider: @escaping @Sendable () async -> NovelLiveModelCatalog,
         kmpTransport: @escaping NovelLiveTransport,
         discussionTransport: NovelLiveTransport? = nil,
+        durableStartTransport: NovelLiveTransport? = nil,
+        durableResumeTransport: NovelDurableResumeTransport? = nil,
         discussionSearchEnabled: @escaping @Sendable () async -> Bool = { true },
         grokTransport: NovelLiveTransport? = nil,
         codex: NovelLiveCodexHooks = .passthrough
@@ -150,6 +195,8 @@ actor NovelLiveModelAdapter: NovelModelRunning {
         self.catalogProvider = catalogProvider
         self.kmpTransport = kmpTransport
         self.discussionTransport = discussionTransport
+        self.durableStartTransport = durableStartTransport
+        self.durableResumeTransport = durableResumeTransport
         self.discussionSearchEnabled = discussionSearchEnabled
         self.grokTransport = grokTransport ?? Self.isolatedGrokUnavailableTransport
         self.codex = codex
@@ -170,14 +217,19 @@ actor NovelLiveModelAdapter: NovelModelRunning {
         }
 
         let pair = AsyncStream<NovelModelEvent>.makeStream(bufferingPolicy: .unbounded)
+        let attemptID = UUID()
         pair.continuation.onTermination = { [weak self] termination in
             guard case .cancelled = termination else { return }
             Task { await self?.cancel(runID: request.runID) }
         }
         activeRuns[request.runID] = ActiveRun(
+            attemptID: attemptID,
             continuation: pair.continuation,
             cancellationHandle: nil,
-            handleInstalled: false
+            handleInstalled: false,
+            isDurable: false,
+            pendingResponseChunks: [],
+            latestResponseCursor: nil
         )
 
         do {
@@ -217,13 +269,16 @@ actor NovelLiveModelAdapter: NovelModelRunning {
 
             let callbackSink = NovelLiveCallbackSink(
                 runID: request.runID,
+                attemptID: attemptID,
                 owner: self
             )
             let callbacks = NovelLiveTransportCallbacks(
                 onChunk: { callbackSink.send(.chunk($0)) },
+                onCheckpoint: { callbackSink.send(.checkpoint($0)) },
                 onAskUser: { callbackSink.send(.askUser($0, preface: $1)) },
                 onComplete: { callbackSink.send(.completed) },
-                onFailure: { callbackSink.send(.failed($0)) }
+                onFailure: { callbackSink.send(.failed($0)) },
+                onDisconnected: { callbackSink.send(.disconnected($0)) }
             )
             let transportRequest = NovelLiveTransportRequest(
                 providerSetting: effectiveProvider,
@@ -234,14 +289,23 @@ actor NovelLiveModelAdapter: NovelModelRunning {
                     searchEnabled: searchEnabled
                 ) : nil
             )
+            let useDurableTransport = Self.usesBackgroundResponses(
+                provider: effectiveProvider,
+                purpose: request.purpose
+            ) && durableStartTransport != nil
             let transport: NovelLiveTransport
             if isGrokWeb {
                 transport = grokTransport
             } else if (request.purpose == .discussion || request.purpose == .quickStart),
                       let discussionTransport {
                 transport = discussionTransport
+            } else if useDurableTransport, let durableStartTransport {
+                transport = durableStartTransport
             } else {
                 transport = kmpTransport
+            }
+            if useDurableTransport {
+                activeRuns[request.runID]?.isDurable = true
             }
             let handle = transport(
                 transportRequest,
@@ -255,10 +319,137 @@ actor NovelLiveModelAdapter: NovelModelRunning {
         }
     }
 
+    func resume(_ request: NovelModelResumeRequest) async throws -> AsyncStream<NovelModelEvent> {
+        guard activeRuns[request.runID] == nil else {
+            throw NovelModelAdapterError.duplicateRunID(request.runID)
+        }
+        guard cancelledBeforeStart.remove(request.runID) == nil else {
+            throw Self.cancelledFailure
+        }
+        guard request.purpose == .prose || request.purpose == .polish else {
+            throw Self.failure(
+                code: "background_resume_unsupported_purpose",
+                message: "当前小说任务类型不能恢复后台 Responses。"
+            )
+        }
+        guard durableResumeTransport != nil else {
+            throw Self.failure(
+                code: "background_resume_unavailable",
+                message: "当前模型运行时不支持后台 Responses 恢复。",
+                isRetryable: true
+            )
+        }
+
+        seenRunIDs.insert(request.runID)
+        let pair = AsyncStream<NovelModelEvent>.makeStream(bufferingPolicy: .unbounded)
+        let attemptID = UUID()
+        pair.continuation.onTermination = { [weak self] termination in
+            guard case .cancelled = termination else { return }
+            Task { await self?.cancel(runID: request.runID) }
+        }
+        activeRuns[request.runID] = ActiveRun(
+            attemptID: attemptID,
+            continuation: pair.continuation,
+            cancellationHandle: nil,
+            handleInstalled: false,
+            isDurable: true,
+            pendingResponseChunks: [],
+            latestResponseCursor: request.cursor
+        )
+
+        do {
+            let route = try await route(for: .fixed(
+                providerID: request.model.ownerProviderID,
+                modelID: request.model.modelID
+            ))
+            try ensureRoute(route, stillMatches: request.model)
+            guard Self.usesBackgroundResponses(
+                provider: route.provider,
+                purpose: request.purpose
+            ) else {
+                throw Self.failure(
+                    code: "background_resume_unsupported_provider",
+                    message: "当前固定模型不是官方 OpenAI Responses，无法恢复该后台响应。"
+                )
+            }
+            try ensureRunStillActive(request.runID)
+
+            let callbackSink = NovelLiveCallbackSink(
+                runID: request.runID,
+                attemptID: attemptID,
+                owner: self
+            )
+            let callbacks = NovelLiveTransportCallbacks(
+                onChunk: { callbackSink.send(.chunk($0)) },
+                onCheckpoint: { callbackSink.send(.checkpoint($0)) },
+                onAskUser: { callbackSink.send(.askUser($0, preface: $1)) },
+                onComplete: { callbackSink.send(.completed) },
+                onFailure: { callbackSink.send(.failed($0)) },
+                onDisconnected: { callbackSink.send(.disconnected($0)) }
+            )
+            guard let durableResumeTransport else {
+                throw Self.failure(
+                    code: "background_resume_unavailable",
+                    message: "当前模型运行时不支持后台 Responses 恢复。",
+                    isRetryable: true
+                )
+            }
+            let handle = durableResumeTransport(
+                request,
+                route.provider,
+                route.model.customHeaders,
+                callbacks
+            )
+            try install(handle, for: request.runID)
+            if handle != nil {
+                detachedCancellationHandles[request.runID] = nil
+            }
+            return pair.stream
+        } catch {
+            abandonRun(request.runID)
+            throw error
+        }
+    }
+
     func cancel(runID: NovelRunID) async {
-        cancelledBeforeStart.insert(runID)
+        if let active = activeRuns.removeValue(forKey: runID) {
+            cancelledBeforeStart.insert(runID)
+            let detached = detachedCancellationHandles.removeValue(forKey: runID)
+            active.continuation.finish()
+            // The transport-side cursor box is updated before the callback is
+            // drained into this actor. Invoke the remote action for every durable
+            // run; it is a no-op until that box has a response ID, avoiding a
+            // race where cancel arrives between checkpoint receipt and actor
+            // processing. During resume setup, the prior detached handle remains
+            // the only remote owner until the replacement handle is installed.
+            if active.isDurable {
+                if let handle = active.cancellationHandle {
+                    handle.cancelRemote()
+                } else {
+                    detached?.cancelRemote()
+                }
+            }
+            active.cancellationHandle?.cancel()
+            return
+        }
+        if let detached = detachedCancellationHandles.removeValue(forKey: runID) {
+            cancelledBeforeStart.insert(runID)
+            detached.cancelRemote()
+            return
+        }
+        if !seenRunIDs.contains(runID) {
+            cancelledBeforeStart.insert(runID)
+        }
+    }
+
+    func detach(runID: NovelRunID) async {
         guard let active = activeRuns.removeValue(forKey: runID) else { return }
+        if active.isDurable, let handle = active.cancellationHandle {
+            detachedCancellationHandles[runID] = handle
+        }
         active.continuation.finish()
+        // Detach only closes the local SSE job. The server-side response stays
+        // stored and can be resumed from the last atomic frame.
         active.cancellationHandle?.cancel()
     }
 
@@ -392,19 +583,43 @@ actor NovelLiveModelAdapter: NovelModelRunning {
         active.cancellationHandle?.cancel()
     }
 
-    fileprivate func receive(_ frame: NovelLiveCallbackFrame, runID: NovelRunID) {
-        guard let active = activeRuns[runID] else { return }
+    fileprivate func receive(
+        _ frame: NovelLiveCallbackFrame,
+        runID: NovelRunID,
+        attemptID: UUID
+    ) {
+        guard var active = activeRuns[runID], active.attemptID == attemptID else { return }
 
         switch frame {
         case .chunk(let chunk):
+            if active.isDurable {
+                active.pendingResponseChunks.append(chunk)
+                activeRuns[runID] = active
+                return
+            }
             for event in Self.events(from: chunk) {
                 active.continuation.yield(event)
             }
             if let failure = Self.outputLimitFailure(in: chunk) {
-                receive(.failed(failure), runID: runID)
+                receive(.failed(failure), runID: runID, attemptID: attemptID)
+            }
+        case .checkpoint(let cursor):
+            guard active.isDurable else { return }
+            let chunks = active.pendingResponseChunks
+            active.pendingResponseChunks.removeAll(keepingCapacity: true)
+            active.latestResponseCursor = cursor
+            activeRuns[runID] = active
+            let frameEvents = Self.frameEvents(from: chunks)
+            active.continuation.yield(.responseFrame(NovelModelResponseFrame(
+                cursor: cursor,
+                events: frameEvents
+            )))
+            if let failure = chunks.compactMap(Self.outputLimitFailure(in:)).first {
+                receive(.failed(failure), runID: runID, attemptID: attemptID)
             }
         case .completed:
             activeRuns.removeValue(forKey: runID)
+            detachedCancellationHandles[runID] = nil
             if !active.handleInstalled {
                 terminalBeforeHandleInstall.insert(runID)
             }
@@ -412,17 +627,37 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             active.continuation.finish()
         case .askUser(let prompt, let preface):
             activeRuns.removeValue(forKey: runID)
+            detachedCancellationHandles[runID] = nil
             if !active.handleInstalled {
                 terminalBeforeHandleInstall.insert(runID)
             }
             active.continuation.yield(.askUser(prompt, preface: preface))
             active.continuation.finish()
         case .failed(let failure):
+            let detachedHandle = detachedCancellationHandles.removeValue(forKey: runID)
+            if active.isDurable, active.latestResponseCursor != nil {
+                (active.cancellationHandle ?? detachedHandle)?.cancelRemote()
+            }
             activeRuns.removeValue(forKey: runID)
             if !active.handleInstalled {
                 terminalBeforeHandleInstall.insert(runID)
             }
             active.continuation.yield(.failed(failure))
+            active.continuation.finish()
+        case .disconnected(let failure):
+            activeRuns.removeValue(forKey: runID)
+            if !active.handleInstalled {
+                terminalBeforeHandleInstall.insert(runID)
+            }
+            if active.isDurable, active.latestResponseCursor != nil {
+                if let handle = active.cancellationHandle {
+                    detachedCancellationHandles[runID] = handle
+                }
+                active.continuation.yield(.responseDisconnected(failure))
+            } else {
+                detachedCancellationHandles[runID] = nil
+                active.continuation.yield(.failed(failure))
+            }
             active.continuation.finish()
         }
     }
@@ -518,6 +753,186 @@ private extension NovelLiveModelAdapter {
                 box.cancel()
             }
         }
+    }
+
+    /// First-party Responses background mode is deliberately opt-in and
+    /// limited to prose routes that can be resumed from a stored
+    /// response. Quick Start and discussion keep their existing tool paths.
+    static func usesBackgroundResponses(
+        provider: ProviderSetting,
+        purpose: NovelModelPurpose
+    ) -> Bool {
+        guard purpose == .prose || purpose == .polish,
+              let openAI = provider as? ProviderSetting.OpenAI,
+              openAI.useResponseApi,
+              let url = URL(string: openAI.baseUrl),
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "api.openai.com",
+              url.port == nil,
+              url.user == nil,
+              url.password == nil else {
+            return false
+        }
+        return true
+    }
+
+    static func backgroundStartTransport() -> NovelLiveTransport {
+        let transport = OpenAIResponsesBackgroundTransport()
+        return { request, callbacks in
+            guard let openAI = request.providerSetting as? ProviderSetting.OpenAI else {
+                callbacks.onFailure(failure(
+                    code: "background_provider_invalid",
+                    message: "后台 Responses 请求的服务商配置无效。",
+                    isRetryable: false
+                ))
+                return nil
+            }
+
+            let cursorBox = NovelResponsesCursorBox()
+            let job: Kotlinx_coroutines_coreJob?
+            do {
+                job = try transport.startBackground(
+                    providerSetting: openAI,
+                    messages: request.messages,
+                    params: request.parameters,
+                    onChunk: callbacks.onChunk,
+                    onCheckpoint: { responseID, sequenceNumber in
+                        let cursor = NovelResponsesResumeCursor(
+                            responseID: responseID,
+                            sequenceNumber: sequenceNumber.int64Value
+                        )
+                        cursorBox.set(cursor)
+                        callbacks.onCheckpoint(cursor)
+                    },
+                    onComplete: callbacks.onComplete,
+                    onDisconnected: { error in
+                        callbacks.onDisconnected(Self.backgroundFailure(error))
+                    },
+                    onFailure: { error in
+                        callbacks.onFailure(Self.backgroundFailure(error, disconnected: false))
+                    }
+                )
+            } catch {
+                callbacks.onFailure(Self.backgroundFailure(error, disconnected: false))
+                return nil
+            }
+
+            guard let job else {
+                callbacks.onFailure(Self.failure(
+                    code: "background_transport_unavailable",
+                    message: "后台 Responses 运行时未能启动。",
+                    isRetryable: true
+                ))
+                return nil
+            }
+            let localBox = NovelKotlinJobBox(job)
+            return NovelLiveCancellationHandle(
+                {
+                    localBox.cancel()
+                },
+                remoteAction: {
+                    guard let cursor = cursorBox.value else { return }
+                    _ = try? transport.cancelBackground(
+                        providerSetting: openAI,
+                        responseId: cursor.responseID,
+                        customHeaders: request.parameters.customHeaders,
+                        onComplete: {},
+                        onError: { _ in }
+                    )
+                }
+            )
+        }
+    }
+
+    static func backgroundResumeTransport() -> NovelDurableResumeTransport {
+        let transport = OpenAIResponsesBackgroundTransport()
+        return { request, provider, customHeaders, callbacks in
+            guard let openAI = provider as? ProviderSetting.OpenAI else {
+                callbacks.onFailure(failure(
+                    code: "background_provider_invalid",
+                    message: "后台 Responses 恢复的服务商配置无效。",
+                    isRetryable: false
+                ))
+                return nil
+            }
+
+            let cursorBox = NovelResponsesCursorBox(request.cursor)
+            let job: Kotlinx_coroutines_coreJob?
+            do {
+                job = try transport.resumeBackground(
+                    providerSetting: openAI,
+                    responseId: request.cursor.responseID,
+                    startingAfter: request.cursor.sequenceNumber,
+                    customHeaders: customHeaders,
+                    onChunk: callbacks.onChunk,
+                    onCheckpoint: { responseID, sequenceNumber in
+                        let cursor = NovelResponsesResumeCursor(
+                            responseID: responseID,
+                            sequenceNumber: sequenceNumber.int64Value
+                        )
+                        cursorBox.set(cursor)
+                        callbacks.onCheckpoint(cursor)
+                    },
+                    onComplete: callbacks.onComplete,
+                    onDisconnected: { error in
+                        callbacks.onDisconnected(Self.backgroundFailure(error))
+                    },
+                    onFailure: { error in
+                        callbacks.onFailure(Self.backgroundFailure(error, disconnected: false))
+                    }
+                )
+            } catch {
+                callbacks.onFailure(Self.backgroundFailure(error, disconnected: false))
+                return nil
+            }
+
+            guard let job else {
+                callbacks.onFailure(Self.failure(
+                    code: "background_transport_unavailable",
+                    message: "后台 Responses 恢复运行时未能启动。",
+                    isRetryable: true
+                ))
+                return nil
+            }
+            let localBox = NovelKotlinJobBox(job)
+            return NovelLiveCancellationHandle(
+                {
+                    localBox.cancel()
+                },
+                remoteAction: {
+                    guard let cursor = cursorBox.value else { return }
+                    _ = try? transport.cancelBackground(
+                        providerSetting: openAI,
+                        responseId: cursor.responseID,
+                        customHeaders: customHeaders,
+                        onComplete: {},
+                        onError: { _ in }
+                    )
+                }
+            )
+        }
+    }
+
+    private static func backgroundFailure(
+        _ error: Error,
+        disconnected: Bool = true
+    ) -> NovelModelFailure {
+        NovelModelFailure(
+            code: disconnected ? "provider_background_disconnected" : "provider_background_failed",
+            message: (error as NSError).localizedDescription,
+            isRetryable: disconnected
+        )
+    }
+
+    private static func backgroundFailure(
+        _ error: KotlinThrowable,
+        disconnected: Bool = true
+    ) -> NovelModelFailure {
+        NovelModelFailure(
+            code: disconnected ? "provider_background_disconnected" : "provider_background_failed",
+            message: error.message ?? String(describing: error),
+            isRetryable: disconnected
+        )
     }
 }
 
@@ -755,11 +1170,15 @@ private extension NovelLiveModelAdapter {
                 let text = text(in: delta)
                 if !text.isEmpty {
                     events.append(.textDelta(text))
+                } else if hasReasoningActivity(in: delta) {
+                    events.append(.activity)
                 }
             } else if let message = choice.message {
                 let text = text(in: message)
                 if !text.isEmpty {
                     events.append(.textReplacement(text))
+                } else if hasReasoningActivity(in: message) {
+                    events.append(.activity)
                 }
             }
         }
@@ -772,6 +1191,38 @@ private extension NovelLiveModelAdapter {
             )))
         }
         return events
+    }
+
+    static func frameEvents(from chunks: [MessageChunk]) -> [NovelModelFrameEvent] {
+        chunks.flatMap { chunk in
+            var events: [NovelModelFrameEvent] = []
+            for choice in chunk.choices {
+                if let delta = choice.delta {
+                    let text = text(in: delta)
+                    if !text.isEmpty {
+                        events.append(.textDelta(text))
+                    } else if hasReasoningActivity(in: delta) {
+                        events.append(.activity)
+                    }
+                } else if let message = choice.message {
+                    let text = text(in: message)
+                    if !text.isEmpty {
+                        events.append(.textReplacement(text))
+                    } else if hasReasoningActivity(in: message) {
+                        events.append(.activity)
+                    }
+                }
+            }
+            if let usage = chunk.usage {
+                events.append(.usage(NovelModelUsage(
+                    promptTokens: Int(usage.promptTokens),
+                    completionTokens: Int(usage.completionTokens),
+                    cachedTokens: Int(usage.cachedTokens),
+                    totalTokens: Int(usage.totalTokens)
+                )))
+            }
+            return events
+        }
     }
 
     static func outputLimitFailure(in chunk: MessageChunk) -> NovelModelFailure? {
@@ -788,6 +1239,13 @@ private extension NovelLiveModelAdapter {
 
     static func text(in message: UIMessage) -> String {
         message.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+    }
+
+    static func hasReasoningActivity(in message: UIMessage) -> Bool {
+        message.parts.contains {
+            guard let reasoning = $0 as? UIMessagePart.Reasoning else { return false }
+            return !reasoning.reasoning.isEmpty
+        }
     }
 
     static func joinedAssistantText(in messages: [UIMessage]) -> String {
@@ -879,21 +1337,25 @@ private extension NovelLiveModelAdapter {
 
 fileprivate enum NovelLiveCallbackFrame: @unchecked Sendable {
     case chunk(MessageChunk)
+    case checkpoint(NovelResponsesResumeCursor)
     case askUser(NovelAskUserPrompt, preface: String)
     case completed
     case failed(NovelModelFailure)
+    case disconnected(NovelModelFailure)
 }
 
 private final class NovelLiveCallbackSink: @unchecked Sendable {
     private let lock = NSLock()
     private let runID: NovelRunID
+    private let attemptID: UUID
     private weak var owner: NovelLiveModelAdapter?
     private var frames: [NovelLiveCallbackFrame] = []
     private var frameHead = 0
     private var isDraining = false
 
-    init(runID: NovelRunID, owner: NovelLiveModelAdapter) {
+    init(runID: NovelRunID, attemptID: UUID, owner: NovelLiveModelAdapter) {
         self.runID = runID
+        self.attemptID = attemptID
         self.owner = owner
     }
 
@@ -914,7 +1376,7 @@ private final class NovelLiveCallbackSink: @unchecked Sendable {
 
     private func drain() async {
         while let frame = popFirst() {
-            await owner?.receive(frame, runID: runID)
+            await owner?.receive(frame, runID: runID, attemptID: attemptID)
         }
     }
 
@@ -946,6 +1408,27 @@ private final class NovelKotlinJobBox: @unchecked Sendable {
 
     func cancel() {
         job.cancel(cause: nil)
+    }
+}
+
+private final class NovelResponsesCursorBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cursor: NovelResponsesResumeCursor?
+
+    init(_ initial: NovelResponsesResumeCursor? = nil) {
+        cursor = initial
+    }
+
+    var value: NovelResponsesResumeCursor? {
+        lock.lock()
+        defer { lock.unlock() }
+        return cursor
+    }
+
+    func set(_ next: NovelResponsesResumeCursor) {
+        lock.lock()
+        cursor = next
+        lock.unlock()
     }
 }
 

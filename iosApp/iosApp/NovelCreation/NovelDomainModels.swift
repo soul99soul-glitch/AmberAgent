@@ -838,6 +838,40 @@ struct NovelRecoverySidecarV1: Codable, Equatable, Sendable {
     let partialContent: String
     let partialSHA256: String
     let updatedAt: Date
+    /// First-party OpenAI Responses cursor. Both values are either present
+    /// together or absent; older sidecars decode as the non-resumable form.
+    let responseID: String?
+    let responseSequenceNumber: Int64?
+
+    init(
+        schemaVersion: Int,
+        projectID: NovelProjectID,
+        runID: NovelRunID,
+        branchID: NovelBranchID,
+        sessionID: NovelSessionID,
+        messageID: NovelMessageID,
+        baseProjectRevision: Int64,
+        sequence: Int64,
+        partialContent: String,
+        partialSHA256: String,
+        updatedAt: Date,
+        responseID: String? = nil,
+        responseSequenceNumber: Int64? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.projectID = projectID
+        self.runID = runID
+        self.branchID = branchID
+        self.sessionID = sessionID
+        self.messageID = messageID
+        self.baseProjectRevision = baseProjectRevision
+        self.sequence = sequence
+        self.partialContent = partialContent
+        self.partialSHA256 = partialSHA256
+        self.updatedAt = updatedAt
+        self.responseID = responseID
+        self.responseSequenceNumber = responseSequenceNumber
+    }
 }
 
 struct NovelPendingOperationRecord: Codable, Equatable, Sendable {

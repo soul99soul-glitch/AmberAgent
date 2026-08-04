@@ -535,6 +535,31 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         XCTAssertTrue(requests.isEmpty)
     }
 
+    func testLateBackgroundInterruptionDoesNotTombstoneCompletedRun() async throws {
+        let document = try NovelTestFixtures.document()
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.delta("Finished"), .complete])]
+        )
+        let request = makeRequest(document: document, kind: .discussion)
+
+        let events = await capturedEvents(try await harness.creation.start(request).events)
+        guard case .completed = events.last else {
+            return XCTFail("Expected the run to complete before the late callback.")
+        }
+
+        await harness.creation.interruptForBackground(
+            projectID: request.projectID,
+            deadline: Date().addingTimeInterval(5),
+            runID: request.id
+        )
+
+        let replayEvents = await capturedEvents(try await harness.creation.start(request).events)
+        guard case .completed = replayEvents.last else {
+            return XCTFail("A late background callback must not cancel a completed replay.")
+        }
+    }
+
     func testIgnoreCancelDuplicateAndLateProviderCallbacksCannotRewriteFirstTerminal() async throws {
         let document = try NovelTestFixtures.document()
         let lateFailure = NovelModelFailure(code: "late", message: "late", isRetryable: false)
@@ -614,6 +639,541 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         let documentAfterSecondSnapshot = try await harness.repository.document(request.projectID)
         XCTAssertEqual(documentAfterSecondSnapshot, recovered)
         await harness.adapter.resume(runID: request.id)
+    }
+
+    func testResponsesFramePersistsPartialAndCursorAsOneRecoveryRecord() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let adapter = DurableNovelModelAdapter()
+        let creation = DefaultNovelCreation(
+            repository: repository,
+            modelRunner: adapter,
+            generationPolicy: NovelGenerationPolicy(
+                sidecarByteThreshold: 1,
+                sidecarInterval: 10_000,
+                chapterTailCharacterLimit: 6_000,
+                maximumRecentSessionMessages: 12
+            )
+        )
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let run = try await creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        _ = await iterator.next()
+
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_atomic", sequenceNumber: 0),
+                events: []
+            )),
+            runID: request.id
+        )
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_atomic", sequenceNumber: 1),
+                events: [.textDelta("中文正文")]
+            )),
+            runID: request.id
+        )
+        guard case .delta("中文正文")? = await iterator.next() else {
+            return XCTFail("Expected the response frame text")
+        }
+
+        let wrotePair = await eventually {
+            await repository.sidecarWrites().contains {
+                $0.runID == request.id &&
+                    $0.partialContent == "中文正文" &&
+                    $0.responseID == "resp_atomic" &&
+                    $0.responseSequenceNumber == 1
+            }
+        }
+        XCTAssertTrue(wrotePair)
+        await adapter.yieldInitial(.completed, runID: request.id, finish: true)
+        guard case .completed? = await iterator.next() else {
+            return XCTFail("Expected completion")
+        }
+    }
+
+    func testRestartResumesStoredResponseWithoutPostingPromptAgain() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let firstAdapter = DurableNovelModelAdapter()
+        let policy = NovelGenerationPolicy(
+            sidecarByteThreshold: 1,
+            sidecarInterval: 10_000,
+            chapterTailCharacterLimit: 6_000,
+            maximumRecentSessionMessages: 12
+        )
+        let first = DefaultNovelCreation(
+            repository: repository,
+            modelRunner: firstAdapter,
+            generationPolicy: policy
+        )
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let originalRun = try await first.start(request)
+        var originalIterator = originalRun.events.makeAsyncIterator()
+        _ = await originalIterator.next()
+        await firstAdapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_restart", sequenceNumber: 4),
+                events: [.textDelta("前半段")]
+            )),
+            runID: request.id
+        )
+        _ = await originalIterator.next()
+        let wroteRestartCursor = await eventually {
+            await repository.sidecarWrites().contains {
+                $0.runID == request.id && $0.responseSequenceNumber == 4
+            }
+        }
+        XCTAssertTrue(wroteRestartCursor)
+
+        let resumedAdapter = DurableNovelModelAdapter()
+        let restarted = DefaultNovelCreation(
+            repository: repository,
+            modelRunner: resumedAdapter,
+            generationPolicy: policy
+        )
+        await restarted.resumeDetachedGenerationRuns()
+        let didResume = await eventually {
+            await resumedAdapter.resumeRequests.count == 1
+        }
+        XCTAssertTrue(didResume)
+        let recordedResumeRequests = await resumedAdapter.resumeRequests
+        let resumeRequest = try XCTUnwrap(recordedResumeRequests.first)
+        XCTAssertEqual(resumeRequest.cursor.responseID, "resp_restart")
+        XCTAssertEqual(resumeRequest.cursor.sequenceNumber, 4)
+        let restartedStartRequests = await resumedAdapter.startRequests
+        XCTAssertTrue(restartedStartRequests.isEmpty)
+
+        let observed = try await restarted.start(request)
+        var iterator = observed.events.makeAsyncIterator()
+        guard case .started? = await iterator.next(),
+              case .replaced("前半段")? = await iterator.next() else {
+            return XCTFail("Expected the recovered partial to replay on attach")
+        }
+        await resumedAdapter.yieldResumed(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_restart", sequenceNumber: 5),
+                events: [.textDelta("后半段")]
+            )),
+            runID: request.id
+        )
+        guard case .delta("后半段")? = await iterator.next() else {
+            return XCTFail("Expected resumed text")
+        }
+        await resumedAdapter.yieldResumed(.completed, runID: request.id, finish: true)
+        guard case .completed(let snapshot)? = await iterator.next() else {
+            return XCTFail("Expected resumed completion")
+        }
+        XCTAssertEqual(snapshot.message.content, "前半段后半段")
+    }
+
+    func testBackgroundExpirationDetachesResponseAndForegroundResumeUsesCursor() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let adapter = DurableNovelModelAdapter()
+        let creation = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let run = try await creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        _ = await iterator.next()
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_detach", sequenceNumber: 2),
+                events: [.textDelta("保留")]
+            )),
+            runID: request.id
+        )
+        _ = await iterator.next()
+
+        await creation.interruptForBackground(
+            projectID: request.projectID,
+            deadline: Date.distantPast,
+            runID: request.id
+        )
+        let afterExpiration = try await repository.document(request.projectID)
+        XCTAssertEqual(afterExpiration.activeRuns.first?.status, .running)
+        let detachedRunIDs = await adapter.detachedRunIDs
+        let cancelledRunIDs = await adapter.cancelledRunIDs
+        XCTAssertEqual(detachedRunIDs, [request.id])
+        XCTAssertTrue(cancelledRunIDs.isEmpty)
+
+        await creation.resumeDetachedGenerationRuns()
+        let didResume = await eventually { await adapter.resumeRequests.count == 1 }
+        XCTAssertTrue(didResume)
+        let resumeRequests = await adapter.resumeRequests
+        XCTAssertEqual(resumeRequests.first?.cursor.responseID, "resp_detach")
+        await adapter.yieldResumed(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_detach", sequenceNumber: 3),
+                events: [.textDelta("续写")]
+            )),
+            runID: request.id
+        )
+        guard case .delta("续写")? = await iterator.next() else {
+            return XCTFail("Expected foreground resume delta")
+        }
+        await adapter.yieldResumed(.completed, runID: request.id, finish: true)
+        guard case .completed(let snapshot)? = await iterator.next() else {
+            return XCTFail("Expected completion after foreground resume")
+        }
+        XCTAssertEqual(snapshot.message.content, "保留续写")
+    }
+
+    func testForegroundResumeKeepsReplacementStreamWhenDetachReturnsLate() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let adapter = DurableNovelModelAdapter()
+        let creation = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let run = try await creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        _ = await iterator.next()
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_late_detach", sequenceNumber: 1),
+                events: [.textDelta("前段")]
+            )),
+            runID: request.id
+        )
+        _ = await iterator.next()
+
+        await adapter.blockNextDetach()
+        let interruption = Task {
+            await creation.interruptForBackground(
+                projectID: request.projectID,
+                deadline: .distantPast,
+                runID: request.id
+            )
+        }
+        let detachBlocked = await eventually { await adapter.detachIsBlocked() }
+        XCTAssertTrue(detachBlocked)
+
+        await creation.resumeDetachedGenerationRuns()
+        let didResume = await eventually { await adapter.resumeRequests.count == 1 }
+        XCTAssertTrue(didResume)
+        await adapter.resumeBlockedDetach()
+        await interruption.value
+
+        await adapter.yieldResumed(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_late_detach", sequenceNumber: 2),
+                events: [.textDelta("后段")]
+            )),
+            runID: request.id
+        )
+        guard case .delta("后段")? = await iterator.next() else {
+            return XCTFail("The foreground replacement stream must survive the older detach call")
+        }
+        await adapter.yieldResumed(.completed, runID: request.id, finish: true)
+        guard case .completed(let snapshot)? = await iterator.next() else {
+            return XCTFail("Expected the replacement stream to complete")
+        }
+        XCTAssertEqual(snapshot.message.content, "前段后段")
+    }
+
+    func testExpirationDuringResumeLeaseHopDoesNotStartReplacementStream() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let adapter = DurableNovelModelAdapter()
+        let creation = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let run = try await creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        _ = await iterator.next()
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_lease_race", sequenceNumber: 1),
+                events: [.textDelta("已保存")]
+            )),
+            runID: request.id
+        )
+        _ = await iterator.next()
+        await creation.interruptForBackground(
+            projectID: request.projectID,
+            deadline: .distantPast,
+            runID: request.id
+        )
+        let initialDetachCount = await adapter.detachedRunIDs.count
+        XCTAssertEqual(initialDetachCount, 1)
+
+        let mainActorEntered = expectation(description: "Recovered lease hop is suspended")
+        let releaseMainActor = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async {
+            mainActorEntered.fulfill()
+            releaseMainActor.wait()
+        }
+        await fulfillment(of: [mainActorEntered], timeout: 1)
+
+        let resumeTask = Task(priority: .high) {
+            await creation.resumeDetachedGenerationRuns()
+        }
+        let resumeClaimedOwner = await eventually {
+            await creation.generationRuntimes[request.id]?.isDetachedForBackground == false
+        }
+        guard resumeClaimedOwner else {
+            releaseMainActor.signal()
+            await resumeTask.value
+            return XCTFail("Resume did not reach the blocked lease hop")
+        }
+        let expirationTask = Task {
+            await creation.interruptForBackground(
+                projectID: request.projectID,
+                deadline: .distantPast,
+                runID: request.id
+            )
+        }
+        let detachedAgain = await eventually {
+            await adapter.detachedRunIDs.count == 2
+        }
+        releaseMainActor.signal()
+        await resumeTask.value
+        await expirationTask.value
+
+        XCTAssertTrue(detachedAgain)
+        let resumeRequests = await adapter.resumeRequests
+        XCTAssertTrue(resumeRequests.isEmpty)
+        let final = try await repository.document(request.projectID)
+        XCTAssertEqual(final.activeRuns.first?.status, .running)
+    }
+
+    func testLateDetachCannotResurrectAConcurrentlyInterruptedRuntime() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let adapter = DurableNovelModelAdapter()
+        let creation = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let run = try await creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        _ = await iterator.next()
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_no_ghost", sequenceNumber: 1),
+                events: [.textDelta("保留正文")]
+            )),
+            runID: request.id
+        )
+        _ = await iterator.next()
+
+        await adapter.blockNextDetach()
+        let backgroundInterruption = Task {
+            await creation.interruptForBackground(
+                projectID: request.projectID,
+                deadline: .distantPast,
+                runID: request.id
+            )
+        }
+        let detachBlocked = await eventually { await adapter.detachIsBlocked() }
+        XCTAssertTrue(detachBlocked)
+
+        try await creation.interruptRun(NovelCancelRunCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: nil,
+                expectedConfigRevision: nil,
+                expectedBranchHeadRevision: nil
+            ),
+            projectID: request.projectID,
+            runID: request.id,
+            reason: .routeExit
+        ))
+        await adapter.resumeBlockedDetach()
+        await backgroundInterruption.value
+        await creation.resumeDetachedGenerationRuns()
+
+        let resumeRequests = await adapter.resumeRequests
+        XCTAssertTrue(resumeRequests.isEmpty)
+        let final = try await repository.document(request.projectID)
+        XCTAssertEqual(final.activeRuns.first?.status, .interrupted)
+        XCTAssertEqual(final.activeRuns.first?.interruptionReason, .routeExit)
+    }
+
+    func testFailedForcedSidecarWriteInterruptsInsteadOfDetaching() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let adapter = DurableNovelModelAdapter()
+        let creation = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let run = try await creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        _ = await iterator.next()
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_sidecar_failure", sequenceNumber: 1),
+                events: [.textDelta("已生成正文")]
+            )),
+            runID: request.id
+        )
+        _ = await iterator.next()
+        let wroteInitialCursor = await eventually {
+            await repository.sidecarWrites().contains {
+                $0.runID == request.id && $0.responseSequenceNumber == 1
+            }
+        }
+        XCTAssertTrue(wroteInitialCursor)
+        await repository.failNextSidecarWrites(1)
+
+        await creation.interruptForBackground(
+            projectID: request.projectID,
+            deadline: Date().addingTimeInterval(2),
+            runID: request.id
+        )
+
+        let final = try await repository.document(request.projectID)
+        XCTAssertEqual(final.activeRuns.first?.status, .interrupted)
+        XCTAssertEqual(final.activeRuns.first?.interruptionReason, .background)
+        let detachedRunIDs = await adapter.detachedRunIDs
+        XCTAssertTrue(detachedRunIDs.isEmpty)
+        let cancelledProvider = await eventually {
+            await adapter.cancelledRunIDs.contains(request.id)
+        }
+        XCTAssertTrue(cancelledProvider)
+    }
+
+    func testTransportDisconnectAutomaticallyResumesOnlyOncePerRun() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let adapter = DurableNovelModelAdapter()
+        let creation = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let failure = NovelModelFailure(
+            code: "provider_background_disconnected",
+            message: "network dropped",
+            isRetryable: true
+        )
+        let run = try await creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        _ = await iterator.next()
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_one_retry", sequenceNumber: 1),
+                events: [.textDelta("第一段")]
+            )),
+            runID: request.id
+        )
+        _ = await iterator.next()
+        await adapter.yieldInitial(.responseDisconnected(failure), runID: request.id, finish: true)
+        let firstReconnect = await eventually { await adapter.resumeRequests.count == 1 }
+        XCTAssertTrue(firstReconnect)
+
+        await adapter.yieldResumed(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_one_retry", sequenceNumber: 2),
+                events: [.textDelta("第二段")]
+            )),
+            runID: request.id
+        )
+        guard case .delta("第二段")? = await iterator.next() else {
+            return XCTFail("Expected text from the first reconnect")
+        }
+        await adapter.yieldResumed(.responseDisconnected(failure), runID: request.id, finish: true)
+
+        guard case .failed(let terminalFailure)? = await iterator.next() else {
+            return XCTFail("The second disconnect must fail the run")
+        }
+        XCTAssertEqual(terminalFailure.code, failure.code)
+        let resumeRequests = await adapter.resumeRequests
+        XCTAssertEqual(resumeRequests.count, 1)
+        let cancelledRemoteOwner = await eventually {
+            await adapter.cancelledRunIDs.contains(request.id)
+        }
+        XCTAssertTrue(cancelledRemoteOwner)
+    }
+
+    func testResponseFrameCursorCannotBeLostToConcurrentBackgroundDetach() async throws {
+        let document = try NovelTestFixtures.document()
+        let repository = ObservingNovelRepository()
+        try await repository.seed(document)
+        let adapter = DurableNovelModelAdapter()
+        let creation = DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        let request = makeRequest(
+            document: document,
+            kind: .prose,
+            granularity: .wholeChapter
+        )
+        let run = try await creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        _ = await iterator.next()
+
+        let mainActorEntered = expectation(description: "MainActor lease update is suspended")
+        let releaseMainActor = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async {
+            mainActorEntered.fulfill()
+            releaseMainActor.wait()
+        }
+        await fulfillment(of: [mainActorEntered], timeout: 1)
+
+        await adapter.yieldInitial(
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_interleave", sequenceNumber: 1),
+                events: [.textDelta("原子帧")]
+            )),
+            runID: request.id
+        )
+        guard case .delta("原子帧")? = await iterator.next() else {
+            releaseMainActor.signal()
+            return XCTFail("Expected frame text before lease update resumes")
+        }
+
+        let expiration = Task {
+            await creation.interruptForBackground(
+                projectID: request.projectID,
+                deadline: .distantPast,
+                runID: request.id
+            )
+        }
+        let didDetach = await eventually {
+            await adapter.detachedRunIDs.contains(request.id)
+        }
+        releaseMainActor.signal()
+        await expiration.value
+
+        XCTAssertTrue(didDetach)
+        await creation.resumeDetachedGenerationRuns()
+        let didResume = await eventually {
+            await adapter.resumeRequests.contains { $0.runID == request.id }
+        }
+        XCTAssertTrue(didResume)
     }
 
     func testMaterialRevisionWhileProviderAwaitsIsPreservedWithCandidateTerminal() async throws {
@@ -1577,6 +2137,7 @@ private actor ObservingNovelRepository: NovelProjectPersisting {
     private var removedSidecarRunIDs: [NovelRunID] = []
     private var remainingCommitFailures = 0
     private var failingCommitProjectIDs: Set<NovelProjectID> = []
+    private var remainingSidecarWriteFailures = 0
     private var remainingSidecarRemovalFailures = 0
     private var forcedAccess: [NovelProjectID: NovelProjectLoadAccess] = [:]
     private var omittedSummaryProjectIDs: Set<NovelProjectID> = []
@@ -1613,6 +2174,9 @@ private actor ObservingNovelRepository: NovelProjectPersisting {
     }
     func failNextSidecarRemovals(_ count: Int) {
         remainingSidecarRemovalFailures = count
+    }
+    func failNextSidecarWrites(_ count: Int) {
+        remainingSidecarWriteFailures = count
     }
     func setLoadAccess(_ access: NovelProjectLoadAccess?, projectID: NovelProjectID) {
         forcedAccess[projectID] = access
@@ -1696,6 +2260,10 @@ private actor ObservingNovelRepository: NovelProjectPersisting {
     }
 
     func writeRecoverySidecar(_ sidecar: NovelRecoverySidecarV1) async throws {
+        if remainingSidecarWriteFailures > 0 {
+            remainingSidecarWriteFailures -= 1
+            throw NovelError.repositoryFailure("Injected sidecar write failure.")
+        }
         try await base.writeRecoverySidecar(sidecar)
         writtenSidecars.append(sidecar)
     }
@@ -1830,5 +2398,110 @@ private actor BlockingStartNovelModelAdapter: NovelModelRunning {
         let continuation = startContinuation
         startContinuation = nil
         continuation?.resume()
+    }
+}
+
+private actor DurableNovelModelAdapter: NovelDurableModelRunning {
+    private let model = NovelResolvedModel(
+        providerID: "provider-id",
+        ownerProviderID: "provider-id",
+        modelID: "model-uuid",
+        wireModelID: "novel-model-v1",
+        displayName: "Novel Model",
+        contextWindowTokens: 128_000
+    )
+    private var initialContinuations: [
+        NovelRunID: AsyncStream<NovelModelEvent>.Continuation
+    ] = [:]
+    private var resumedContinuations: [
+        NovelRunID: AsyncStream<NovelModelEvent>.Continuation
+    ] = [:]
+    private var shouldBlockNextDetach = false
+    private var blockedDetachContinuation: CheckedContinuation<Void, Never>?
+
+    private(set) var startRequests: [NovelModelRequest] = []
+    private(set) var resumeRequests: [NovelModelResumeRequest] = []
+    private(set) var detachedRunIDs: [NovelRunID] = []
+    private(set) var cancelledRunIDs: [NovelRunID] = []
+
+    func resolveModel(for policy: NovelProjectModelPolicy) async throws -> NovelResolvedModel {
+        _ = policy
+        return model
+    }
+
+    func start(_ request: NovelModelRequest) async throws -> AsyncStream<NovelModelEvent> {
+        startRequests.append(request)
+        let pair = AsyncStream<NovelModelEvent>.makeStream(bufferingPolicy: .unbounded)
+        pair.continuation.onTermination = { [weak self] termination in
+            guard case .cancelled = termination else { return }
+            Task { await self?.cancel(runID: request.runID) }
+        }
+        initialContinuations[request.runID] = pair.continuation
+        return pair.stream
+    }
+
+    func resume(_ request: NovelModelResumeRequest) async throws -> AsyncStream<NovelModelEvent> {
+        resumeRequests.append(request)
+        let pair = AsyncStream<NovelModelEvent>.makeStream(bufferingPolicy: .unbounded)
+        pair.continuation.onTermination = { [weak self] termination in
+            guard case .cancelled = termination else { return }
+            Task { await self?.cancel(runID: request.runID) }
+        }
+        resumedContinuations[request.runID] = pair.continuation
+        return pair.stream
+    }
+
+    func cancel(runID: NovelRunID) async {
+        cancelledRunIDs.append(runID)
+        initialContinuations.removeValue(forKey: runID)?.finish()
+        resumedContinuations.removeValue(forKey: runID)?.finish()
+    }
+
+    func detach(runID: NovelRunID) async {
+        detachedRunIDs.append(runID)
+        initialContinuations.removeValue(forKey: runID)?.finish()
+        resumedContinuations.removeValue(forKey: runID)?.finish()
+        if shouldBlockNextDetach {
+            shouldBlockNextDetach = false
+            await withCheckedContinuation { continuation in
+                blockedDetachContinuation = continuation
+            }
+        }
+    }
+
+    func blockNextDetach() {
+        shouldBlockNextDetach = true
+    }
+
+    func detachIsBlocked() -> Bool {
+        blockedDetachContinuation != nil
+    }
+
+    func resumeBlockedDetach() {
+        let continuation = blockedDetachContinuation
+        blockedDetachContinuation = nil
+        continuation?.resume()
+    }
+
+    func yieldInitial(
+        _ event: NovelModelEvent,
+        runID: NovelRunID,
+        finish: Bool = false
+    ) {
+        initialContinuations[runID]?.yield(event)
+        if finish {
+            initialContinuations.removeValue(forKey: runID)?.finish()
+        }
+    }
+
+    func yieldResumed(
+        _ event: NovelModelEvent,
+        runID: NovelRunID,
+        finish: Bool = false
+    ) {
+        resumedContinuations[runID]?.yield(event)
+        if finish {
+            resumedContinuations.removeValue(forKey: runID)?.finish()
+        }
     }
 }

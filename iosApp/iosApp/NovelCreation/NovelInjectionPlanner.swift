@@ -700,6 +700,16 @@ enum NovelInjectionPlanner {
             budgetExcludedItemCount: budgetExcludedItemCount
         )
     }
+
+    static func pendingStateContent(
+        _ projectedState: String,
+        identityClarifications: [NovelCharacterIdentityClarificationRecord]
+    ) -> String {
+        projectedState + "\n\n" +
+            "Author character identity clarifications (authoritative; do not list these " +
+            "mentions as unresolved unless the author changes the decision):\n" +
+            characterIdentityClarificationText(identityClarifications)
+    }
 }
 
 private extension NovelPromptKind {
@@ -824,17 +834,16 @@ private extension NovelInjectionPlanner {
         _ pendingState: NovelPendingStateInjection,
         identityClarifications: [NovelCharacterIdentityClarificationRecord]
     ) -> NovelInjectionSection {
-        let clarificationText = characterIdentityClarificationText(identityClarifications)
         return makeSection(
             kind: .pendingManualState(
                 pendingState.pendingID,
                 chunkIndex: pendingState.chunkIndex
             ),
             label: "PROJECTED MANUAL-SYNC STATE",
-            content: pendingState.content + "\n\n" +
-                "Author character identity clarifications (authoritative; do not list these " +
-                "mentions as unresolved unless the author changes the decision):\n" +
-                clarificationText,
+            content: pendingStateContent(
+                pendingState.content,
+                identityClarifications: identityClarifications
+            ),
             reason: .requiredCurrentState
         )
     }

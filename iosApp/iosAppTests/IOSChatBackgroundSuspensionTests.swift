@@ -109,3 +109,39 @@ final class IOSChatBackgroundSuspensionTests: XCTestCase {
         XCTAssertNotEqual(store.url(for: requestId).lastPathComponent, payloadName)
     }
 }
+
+final class IOSChatBackgroundStaleSweepTests: XCTestCase {
+    private let taskMapKey = "\(Bundle.main.bundleIdentifier ?? "app.amber.ios").chat.backgroundTaskMap"
+    private var originalTaskMap: Any?
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        originalTaskMap = UserDefaults.standard.object(forKey: taskMapKey)
+        UserDefaults.standard.removeObject(forKey: taskMapKey)
+    }
+
+    override func tearDownWithError() throws {
+        if let originalTaskMap {
+            UserDefaults.standard.set(originalTaskMap, forKey: taskMapKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: taskMapKey)
+        }
+        try super.tearDownWithError()
+    }
+
+    @MainActor
+    func testColdStartSweepRemovesPersistedOwnerWithoutSubmittingAnotherRequest() {
+        let requestId = "\(Bundle.main.bundleIdentifier ?? "app.amber.ios").chat.stale-run"
+        UserDefaults.standard.set([requestId: "stale-run"], forKey: taskMapKey)
+
+        let coordinator = IOSChatBackgroundGenerationCoordinator.shared
+        coordinator.finalizeStalePersistedJobsIfNeeded()
+        coordinator.finalizeStalePersistedJobsIfNeeded()
+
+        XCTAssertTrue(
+            UserDefaults.standard
+                .dictionary(forKey: taskMapKey)?[requestId] == nil,
+            "冷启动扫尾后不能保留会触发下一次后台提交的 task map owner"
+        )
+    }
+}

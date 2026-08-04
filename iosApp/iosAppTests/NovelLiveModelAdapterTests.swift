@@ -234,6 +234,45 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(request.messages.map { $0.toText() }, ["仅使用小说上下文。", "继续写。"])
     }
 
+    func testReasoningOnlyChunkPublishesHeartbeatActivityWithoutVisibleText() async throws {
+        let chunk = Self.reasoningChunk("正在梳理人物关系")
+        let foregroundFixture = makeFixture(apiKey: "test-key", reasoning: true)
+        let foregroundAdapter = NovelLiveModelAdapter(
+            catalogProvider: { foregroundFixture.catalog },
+            kmpTransport: { _, callbacks in
+                callbacks.onChunk(chunk)
+                callbacks.onComplete()
+                return nil
+            }
+        )
+        let foregroundModel = try await foregroundAdapter.resolveModel(for: .global)
+        let foregroundEvents = await Self.collect(
+            try await foregroundAdapter.start(makeRequest(model: foregroundModel))
+        )
+        XCTAssertEqual(foregroundEvents, [.activity, .completed])
+
+        let durableFixture = makeResponsesFixture()
+        let cursor = NovelResponsesResumeCursor(responseID: "resp_reasoning", sequenceNumber: 1)
+        let durableAdapter = NovelLiveModelAdapter(
+            catalogProvider: { durableFixture.catalog },
+            kmpTransport: { _, _ in XCTFail("Unexpected foreground transport"); return nil },
+            durableStartTransport: { _, callbacks in
+                callbacks.onChunk(chunk)
+                callbacks.onCheckpoint(cursor)
+                callbacks.onComplete()
+                return nil
+            }
+        )
+        let durableModel = try await durableAdapter.resolveModel(for: .global)
+        let durableEvents = await Self.collect(
+            try await durableAdapter.start(makeRequest(model: durableModel))
+        )
+        XCTAssertEqual(durableEvents, [
+            .responseFrame(NovelModelResponseFrame(cursor: cursor, events: [.activity])),
+            .completed,
+        ])
+    }
+
     func testKMPOutputLimitDoesNotBecomeSuccessfulCompletion() async throws {
         let fixture = makeFixture(apiKey: "test-key")
         let adapter = NovelLiveModelAdapter(
@@ -675,6 +714,292 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(cancelCalls.value, 1)
     }
 
+    func testBackgroundResponsesPublishAtomicFramesOnlyAfterCheckpoint() async throws {
+        let fixture = makeResponsesFixture()
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in
+                XCTFail("Official Responses prose must use the durable transport.")
+                return nil
+            },
+            durableStartTransport: { _, callbacks in
+                callbacks.onChunk(Self.deltaChunk("第一段"))
+                callbacks.onCheckpoint(NovelResponsesResumeCursor(
+                    responseID: "resp_1",
+                    sequenceNumber: 1
+                ))
+                callbacks.onChunk(Self.deltaChunk("第二段"))
+                callbacks.onCheckpoint(NovelResponsesResumeCursor(
+                    responseID: "resp_1",
+                    sequenceNumber: 2
+                ))
+                callbacks.onComplete()
+                return nil
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        let events = await Self.collect(try await adapter.start(makeRequest(model: resolved)))
+
+        XCTAssertEqual(events, [
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_1", sequenceNumber: 1),
+                events: [.textDelta("第一段")]
+            )),
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_1", sequenceNumber: 2),
+                events: [.textDelta("第二段")]
+            )),
+            .completed,
+        ])
+    }
+
+    func testBackgroundDisconnectAfterCursorIsResumableNotTerminalFailure() async throws {
+        let fixture = makeResponsesFixture()
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in XCTFail("Unexpected foreground transport"); return nil },
+            durableStartTransport: { _, callbacks in
+                callbacks.onCheckpoint(NovelResponsesResumeCursor(
+                    responseID: "resp_1",
+                    sequenceNumber: 4
+                ))
+                callbacks.onDisconnected(NovelModelFailure(
+                    code: "provider_background_disconnected",
+                    message: "network dropped",
+                    isRetryable: true
+                ))
+                return nil
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        let events = await Self.collect(try await adapter.start(makeRequest(model: resolved)))
+
+        XCTAssertEqual(events, [
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_1", sequenceNumber: 4),
+                events: []
+            )),
+            .responseDisconnected(NovelModelFailure(
+                code: "provider_background_disconnected",
+                message: "network dropped",
+                isRetryable: true
+            )),
+        ])
+    }
+
+    func testBackgroundTerminalFailureDoesNotEnterReconnectPath() async throws {
+        let fixture = makeResponsesFixture()
+        let failure = NovelModelFailure(
+            code: "provider_background_failed",
+            message: "response.failed",
+            isRetryable: false
+        )
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in XCTFail("Unexpected foreground transport"); return nil },
+            durableStartTransport: { _, callbacks in
+                callbacks.onFailure(failure)
+                return nil
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        let events = await Self.collect(try await adapter.start(makeRequest(model: resolved)))
+
+        XCTAssertEqual(events, [.failed(failure)])
+    }
+
+    func testResumeUsesFixedReceiptRouteAndStartsAfterPersistedCursor() async throws {
+        let fixture = makeResponsesFixture()
+        let captured = LockedBox<(NovelModelResumeRequest, String, [CustomHeader])?>(nil)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in XCTFail("Resume must not use foreground transport"); return nil },
+            durableResumeTransport: { request, provider, headers, callbacks in
+                captured.set((request, provider.id.description(), headers))
+                callbacks.onChunk(Self.deltaChunk("恢复内容"))
+                callbacks.onCheckpoint(NovelResponsesResumeCursor(
+                    responseID: request.cursor.responseID,
+                    sequenceNumber: request.cursor.sequenceNumber + 1
+                ))
+                callbacks.onComplete()
+                return nil
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+        let request = NovelModelResumeRequest(
+            runID: NovelRunID(),
+            model: resolved,
+            purpose: .polish,
+            cursor: NovelResponsesResumeCursor(responseID: "resp_99", sequenceNumber: 18)
+        )
+
+        let events = await Self.collect(try await adapter.resume(request))
+
+        XCTAssertEqual(events, [
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(responseID: "resp_99", sequenceNumber: 19),
+                events: [.textDelta("恢复内容")]
+            )),
+            .completed,
+        ])
+        XCTAssertEqual(captured.value?.0, request)
+        XCTAssertEqual(captured.value?.1, fixture.provider.id.description())
+        XCTAssertEqual(captured.value?.2.map(\.name), ["X-Novel"])
+    }
+
+    func testLateCallbacksFromDetachedAttemptCannotTerminateResumedStream() async throws {
+        let fixture = makeResponsesFixture()
+        let initialCallbacks = LockedBox<NovelLiveTransportCallbacks?>(nil)
+        let resumedCallbacks = LockedBox<NovelLiveTransportCallbacks?>(nil)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in XCTFail("Unexpected foreground transport"); return nil },
+            durableStartTransport: { _, callbacks in
+                initialCallbacks.set(callbacks)
+                return NovelLiveCancellationHandle {}
+            },
+            durableResumeTransport: { _, _, _, callbacks in
+                resumedCallbacks.set(callbacks)
+                return NovelLiveCancellationHandle {}
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+        let request = makeRequest(model: resolved)
+        let initialStream = try await adapter.start(request)
+        var initialIterator = initialStream.makeAsyncIterator()
+        let cursor = NovelResponsesResumeCursor(responseID: "resp_attempt", sequenceNumber: 1)
+        initialCallbacks.value?.onCheckpoint(cursor)
+        initialCallbacks.value?.onDisconnected(NovelModelFailure(
+            code: "provider_background_disconnected",
+            message: "network dropped",
+            isRetryable: true
+        ))
+        guard case .responseFrame? = await initialIterator.next(),
+              case .responseDisconnected? = await initialIterator.next() else {
+            return XCTFail("Expected the first attempt to detach with a cursor")
+        }
+
+        let resumedStream = try await adapter.resume(NovelModelResumeRequest(
+            runID: request.runID,
+            model: resolved,
+            purpose: .prose,
+            cursor: cursor
+        ))
+        initialCallbacks.value?.onChunk(Self.deltaChunk("旧流迟到内容"))
+        initialCallbacks.value?.onCheckpoint(NovelResponsesResumeCursor(
+            responseID: cursor.responseID,
+            sequenceNumber: 2
+        ))
+        initialCallbacks.value?.onComplete()
+        await Task.yield()
+        await Task.yield()
+
+        resumedCallbacks.value?.onChunk(Self.deltaChunk("恢复内容"))
+        resumedCallbacks.value?.onCheckpoint(NovelResponsesResumeCursor(
+            responseID: cursor.responseID,
+            sequenceNumber: 2
+        ))
+        resumedCallbacks.value?.onComplete()
+
+        let events = await Self.collect(resumedStream)
+        XCTAssertEqual(events, [
+            .responseFrame(NovelModelResponseFrame(
+                cursor: NovelResponsesResumeCursor(
+                    responseID: cursor.responseID,
+                    sequenceNumber: 2
+                ),
+                events: [.textDelta("恢复内容")]
+            )),
+            .completed,
+        ])
+    }
+
+    func testDurableResumeFailureCancelsKnownRemoteResponse() async throws {
+        let fixture = makeResponsesFixture()
+        let callbackBox = LockedBox<NovelLiveTransportCallbacks?>(nil)
+        let remoteCancels = LockedBox(0)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in XCTFail("Unexpected foreground transport"); return nil },
+            durableResumeTransport: { _, _, _, callbacks in
+                callbackBox.set(callbacks)
+                return NovelLiveCancellationHandle(
+                    {},
+                    remoteAction: { remoteCancels.mutate { $0 += 1 } }
+                )
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+        let cursor = NovelResponsesResumeCursor(responseID: "resp_http_failure", sequenceNumber: 7)
+        let stream = try await adapter.resume(NovelModelResumeRequest(
+            runID: NovelRunID(),
+            model: resolved,
+            purpose: .prose,
+            cursor: cursor
+        ))
+        let failure = NovelModelFailure(
+            code: "provider_background_failed",
+            message: "HTTP 429",
+            isRetryable: false
+        )
+
+        callbackBox.value?.onFailure(failure)
+
+        let events = await Self.collect(stream)
+        XCTAssertEqual(events, [.failed(failure)])
+        XCTAssertEqual(remoteCancels.value, 1)
+    }
+
+    func testCancelWithCursorCallsRemoteCancelButDetachOnlyClosesLocalStream() async throws {
+        let fixture = makeResponsesFixture()
+        let callbackBox = LockedBox<NovelLiveTransportCallbacks?>(nil)
+        let localCancels = LockedBox(0)
+        let remoteCancels = LockedBox(0)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in XCTFail("Unexpected foreground transport"); return nil },
+            durableStartTransport: { _, callbacks in
+                callbackBox.set(callbacks)
+                return NovelLiveCancellationHandle(
+                    { localCancels.mutate { $0 += 1 } },
+                    remoteAction: { remoteCancels.mutate { $0 += 1 } }
+                )
+            }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        let cancelRequest = makeRequest(model: resolved)
+        _ = try await adapter.start(cancelRequest)
+        callbackBox.value?.onCheckpoint(NovelResponsesResumeCursor(
+            responseID: "resp_cancel",
+            sequenceNumber: 3
+        ))
+        await Task.yield()
+        await adapter.cancel(runID: cancelRequest.runID)
+
+        XCTAssertEqual(localCancels.value, 1)
+        XCTAssertEqual(remoteCancels.value, 1)
+
+        let detachRequest = makeRequest(model: resolved)
+        _ = try await adapter.start(detachRequest)
+        await adapter.detach(runID: detachRequest.runID)
+
+        XCTAssertEqual(localCancels.value, 2)
+        XCTAssertEqual(remoteCancels.value, 1)
+
+        await adapter.cancel(runID: detachRequest.runID)
+
+        XCTAssertEqual(localCancels.value, 2)
+        XCTAssertEqual(
+            remoteCancels.value,
+            2,
+            "An explicit cancel after detaching must still stop the stored server response."
+        )
+    }
+
     private struct Fixture: @unchecked Sendable {
         let model: Model
         let provider: ProviderSetting.OpenAI
@@ -696,6 +1021,31 @@ final class NovelLiveModelAdapterTests: XCTestCase {
             baseUrl: "https://example.test/v1",
             chatCompletionsPath: "/chat/completions",
             useResponseApi: false,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+        return Fixture(
+            model: model,
+            provider: provider,
+            catalog: NovelLiveModelCatalog(currentModel: model, providers: [provider])
+        )
+    }
+
+    private func makeResponsesFixture() -> Fixture {
+        let model = makeModel()
+        let provider = ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "OpenAI Responses",
+            models: [model],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "test-key",
+            baseUrl: "https://api.openai.com/v1",
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: true,
             authMode: OpenAIAuthMode.apiKey,
             brand: OpenAIBrand.generic
         )
@@ -782,6 +1132,45 @@ final class NovelLiveModelAdapterTests: XCTestCase {
                 delta: nil,
                 message: UIMessage.companion.assistant(prompt: text),
                 finishReason: "stop"
+            )],
+            usage: nil
+        )
+    }
+
+    private static func reasoningChunk(_ text: String) -> MessageChunk {
+        let createdAt = KotlinInstant.companion.fromEpochMilliseconds(epochMilliseconds: 0)
+        let message = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Reasoning(
+                reasoning: text,
+                createdAt: createdAt,
+                finishedAt: nil,
+                metadata: nil
+            )],
+            annotations: [],
+            createdAt: Kotlinx_datetimeLocalDateTime(
+                year: 2026,
+                month: 8,
+                day: 4,
+                hour: 0,
+                minute: 0,
+                second: 0,
+                nanosecond: 0
+            ),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        return MessageChunk(
+            id: UUID().uuidString,
+            model: "novel-live",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: message,
+                message: nil,
+                finishReason: nil
             )],
             usage: nil
         )

@@ -1385,6 +1385,9 @@ protocol NovelCreation: Sendable {
         deadline: Date,
         runID: NovelRunID?
     ) async
+    /// Reconnects only server-backed runs that were locally detached when iOS
+    /// reclaimed background execution time. Non-resumable providers are ignored.
+    func resumeDetachedGenerationRuns() async
     func retryPendingTerminal(runID: NovelRunID) async throws
     /// Cancels in-flight fact-sync mutations for a project so UI Stop can interrupt
     /// long model work instead of only cancelling the outer awaiter.
@@ -1408,6 +1411,10 @@ protocol NovelCreation: Sendable {
 }
 
 extension NovelCreation {
+    func resumeDetachedGenerationRuns() async {
+        // Test doubles and non-live runtimes do not own resumable provider jobs.
+    }
+
     func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
         // Default no-op for test doubles that never schedule background mutations.
     }

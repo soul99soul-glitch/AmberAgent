@@ -1543,6 +1543,68 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         )
     }
 
+    func testKeepAliveHandoffFailureCancelsCurrentRunAndPersistsTerminalState() async throws {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        let runId = "run-keepalive-handoff-failed"
+        harness.coordinator.installRunMetadataForTesting(
+            runId: runId,
+            startedAt: 1,
+            inputDigest: "keepalive-digest"
+        )
+        harness.state.isLoading = true
+        let terminal = expectation(description: "cancel terminal persisted")
+        harness.state.onRecordRun = { terminal.fulfill() }
+
+        XCTAssertFalse(
+            harness.coordinator.keepAliveExpirationForTesting(
+                runId: runId,
+                didHandoff: false
+            )
+        )
+
+        await fulfillment(of: [terminal], timeout: 2)
+        XCTAssertFalse(harness.coordinator.isRunning)
+        XCTAssertFalse(harness.state.isLoading)
+        XCTAssertEqual(harness.state.recordedRunStatuses.last, "interrupted")
+        XCTAssertTrue(harness.state.persistenceEvents.contains("persist-snapshot"))
+        XCTAssertTrue(harness.state.persistenceEvents.contains("record-run"))
+    }
+
+    func testPendingApprovalKeepAliveHandoffFailureUsesTheSameCancellationOwner() async throws {
+        let transport = BlockingChatSearchTransport(response: .html(
+            "<html><body><a class='result-link' href='https://example.com'>Result</a></body></html>"
+        ))
+        let harness = makeGenerationCoordinatorHarness(transport: transport)
+        await harness.coordinator.installPendingSearchApprovalForTesting(
+            pending: harness.pending,
+            request: harness.request
+        )
+
+        let approvalTask = Task { @MainActor in
+            await harness.coordinator.approvePendingSearchTool()
+        }
+        await transport.waitUntilRequestStarted()
+        XCTAssertTrue(harness.state.isLoading)
+        let terminal = expectation(description: "approved search cancel terminal persisted")
+        harness.state.onRecordRun = { terminal.fulfill() }
+
+        XCTAssertFalse(
+            harness.coordinator.keepAliveExpirationForTesting(
+                runId: harness.pending.runId,
+                didHandoff: false
+            )
+        )
+        transport.complete()
+        await approvalTask.value
+        await fulfillment(of: [terminal], timeout: 2)
+
+        XCTAssertFalse(harness.coordinator.isRunning)
+        XCTAssertFalse(harness.state.isLoading)
+        XCTAssertEqual(harness.state.recordedRunStatuses.last, "interrupted")
+    }
+
     func testBackgroundCancellationClosesPendingToolWithoutLosingForegroundMessage() async throws {
         let baseDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("BackgroundCancellationToolClosure-")

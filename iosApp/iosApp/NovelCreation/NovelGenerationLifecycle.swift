@@ -99,10 +99,23 @@ struct NovelRunRuntime: Sendable {
     var sidecarSequence: Int64
     var lastSidecarAt: Date
     var lastSidecarByteCount: Int
+    let resumeModel: NovelResolvedModel
+    let resumePurpose: NovelModelPurpose
+    var responseCursor: NovelResponsesResumeCursor?
+    var isDetachedForBackground: Bool
+    var didAutoReconnectAfterDisconnect: Bool
     var terminalClaim: NovelRunTerminalClaim?
 }
 
 extension DefaultNovelCreation {
+    func resumeDetachedGenerationRuns() async {
+        // A fresh process has no in-memory runtimes. Reuse the existing global
+        // recovery barrier so persisted response cursors are reconstructed
+        // before the detached-runtime scan below.
+        try? await recoverGenerationStateIfNeeded()
+        await resumeAllDetachedGenerationRuns()
+    }
+
     func startGeneration(_ request: NovelRunRequest) async throws -> NovelRun {
         if let interruption = preStartInterruptions[request.id] {
             guard interruption.projectID == request.projectID else {
@@ -175,7 +188,7 @@ extension DefaultNovelCreation {
         }
 
         let loaded = try await loadCommittedProject(id: request.projectID)
-        if let replay = try replayOrObserve(request, document: loaded.document) {
+        if let replay = try await replayOrObserve(request, document: loaded.document) {
             return replay
         }
         guard loaded.access == .readWrite else {
@@ -407,7 +420,7 @@ extension DefaultNovelCreation {
 
     private func observeStartedRun(_ request: NovelRunRequest) async throws -> NovelRun {
         let loaded = try await loadCommittedProject(id: request.projectID)
-        guard let replay = try replayOrObserve(request, document: loaded.document) else {
+        guard let replay = try await replayOrObserve(request, document: loaded.document) else {
             throw NovelError.storageIndeterminate(request.projectID)
         }
         return replay
@@ -489,12 +502,34 @@ extension DefaultNovelCreation {
                 runID: runID,
                 reason: reason
             )
-            try? registerPreStartInterruption(command)
+            // An expiration callback can arrive after the run already reached
+            // a durable terminal state. Consult storage before creating a
+            // tombstone, otherwise a later replay of this run would be
+            // cancelled before it can observe its terminal record.
+            var durableRun: NovelActiveRunRecord?
+            var didLoadDurableState = false
+            if let loaded = try? await repository.loadProject(id: projectID) {
+                durableRun = loaded.document.activeRuns.first { $0.id == runID }
+                didLoadDurableState = true
+            }
+            if didLoadDurableState {
+                switch durableRun?.status {
+                case .some(.running):
+                    _ = try? await interruptRun(command)
+                case .some(.completed), .some(.failed), .some(.interrupted):
+                    break
+                case nil:
+                    try? registerPreStartInterruption(command)
+                }
+            }
         }
+        // A lease callback with an explicit run ID belongs to that run only;
+        // the project-wide scan is reserved for the legacy runID == nil path.
         let preDurableCommands = generationStartReservations.compactMap {
-            runID, reservation -> NovelCancelRunCommand? in
-            guard reservation.projectID == projectID,
-                  generationRuntimes[runID] == nil else { return nil }
+            candidateRunID, reservation -> NovelCancelRunCommand? in
+            guard (runID == nil || candidateRunID == runID),
+                  reservation.projectID == projectID,
+                  generationRuntimes[candidateRunID] == nil else { return nil }
             return NovelCancelRunCommand(
                 context: NovelMutationContext(
                     operationID: NovelOperationID(),
@@ -503,7 +538,7 @@ extension DefaultNovelCreation {
                     expectedBranchHeadRevision: nil
                 ),
                 projectID: projectID,
-                runID: runID,
+                runID: candidateRunID,
                 reason: reason
             )
         }
@@ -518,37 +553,46 @@ extension DefaultNovelCreation {
             }
         }
         var claimedRunIDs: [NovelRunID] = []
-        let mutationTasks = cancelInFlightBackgroundMutationTasks(
-            projectID: projectID,
-            includePolishAdoption: true
-        )
-        for runID in generationRuntimes.keys.sorted(by: {
+        let mutationTasks: [Task<NovelOutcome, Error>]
+        if runID == nil {
+            mutationTasks = cancelInFlightBackgroundMutationTasks(
+                projectID: projectID,
+                includePolishAdoption: true
+            )
+        } else {
+            mutationTasks = []
+        }
+        for candidateRunID in generationRuntimes.keys.sorted(by: {
             $0.description < $1.description
         }) {
-            guard let runtime = generationRuntimes[runID],
+            guard (runID == nil || candidateRunID == runID),
+                  let runtime = generationRuntimes[candidateRunID],
                   runtime.projectID == projectID else {
+                continue
+            }
+            if await detachResumableRunForBackground(candidateRunID) {
                 continue
             }
             if let claim = runtime.terminalClaim {
                 if case .interrupted(let existingReason, _) = claim.intent,
                    existingReason == .background || existingReason == .expiration,
                    claim.persistenceState != .persisting {
-                    claimedRunIDs.append(runID)
+                    claimedRunIDs.append(candidateRunID)
                 }
                 continue
             }
             guard claimTerminal(
-                runID: runID,
+                runID: candidateRunID,
                 intent: .interrupted(reason: reason, command: nil)
             ) else {
                 continue
             }
-            claimedRunIDs.append(runID)
-            cancelProviderWithoutWaiting(runID: runID)
-            if let reservation = generationStartReservations[runID] {
+            claimedRunIDs.append(candidateRunID)
+            cancelProviderWithoutWaiting(runID: candidateRunID)
+            if let reservation = generationStartReservations[candidateRunID] {
                 reservation.task.cancel()
                 clearGenerationStartReservation(
-                    runID: runID,
+                    runID: candidateRunID,
                     projectID: reservation.projectID,
                     operationID: reservation.operationID
                 )
@@ -692,6 +736,12 @@ extension DefaultNovelCreation {
             }
             for run in loaded.document.activeRuns {
                 if run.status == .running {
+                    // A live runtime is already the authoritative owner in this
+                    // process. Global cold-start recovery must not reinterpret
+                    // its durable marker as an orphan before the detached scan.
+                    if generationRuntimes[run.id] != nil {
+                        continue
+                    }
                     guard loaded.access == .readWrite else {
                         // A degraded snapshot is not authoritative for writes.
                         // Keep its recovery sidecar until a writable primary is
@@ -713,6 +763,14 @@ extension DefaultNovelCreation {
                                 $0.baseProjectRevision == startRevision
                         }
                         .max { $0.sequence < $1.sequence }
+                    if let sidecar,
+                       await resumeRecoveredRunIfPossible(
+                           run,
+                           sidecar: sidecar,
+                           document: loaded.document
+                       ) {
+                        continue
+                    }
                     // An identity mismatch never contributes text to a run. The
                     // durable marker is the only safe fallback.
                     let partial = sidecar?.partialContent ?? run.partialContent
@@ -855,6 +913,80 @@ extension DefaultNovelCreation {
 }
 
 private extension DefaultNovelCreation {
+    func resumeRecoveredRunIfPossible(
+        _ run: NovelActiveRunRecord,
+        sidecar: NovelRecoverySidecarV1,
+        document: NovelProjectDocumentV1
+    ) async -> Bool {
+        guard generationRuntimes[run.id] == nil,
+              let responseID = sidecar.responseID,
+              let responseSequenceNumber = sidecar.responseSequenceNumber,
+              let purpose = resumablePurpose(for: run.kind),
+              modelRunner is any NovelDurableModelRunning,
+              let receipt = document.generationReceipts.first(where: {
+                  $0.id == run.receiptID && $0.runID == run.id
+              }) else {
+            return false
+        }
+        let model = NovelResolvedModel(
+            providerID: receipt.providerID,
+            ownerProviderID: receipt.ownerProviderID,
+            modelID: receipt.modelID,
+            wireModelID: receipt.wireModelID,
+            displayName: receipt.wireModelID,
+            contextWindowTokens: nil
+        )
+        generationRuntimes[run.id] = NovelRunRuntime(
+            projectID: document.project.id,
+            branchID: run.branchID,
+            kind: run.kind,
+            startProjectRevision: sidecar.baseProjectRevision,
+            partialContent: sidecar.partialContent,
+            usage: nil,
+            subscribers: [:],
+            modelTask: nil,
+            sidecarSequence: sidecar.sequence,
+            lastSidecarAt: now(),
+            lastSidecarByteCount: sidecar.partialContent.utf8.count,
+            resumeModel: model,
+            resumePurpose: purpose,
+            responseCursor: NovelResponsesResumeCursor(
+                responseID: responseID,
+                sequenceNumber: responseSequenceNumber
+            ),
+            isDetachedForBackground: true,
+            didAutoReconnectAfterDisconnect: false,
+            terminalClaim: nil
+        )
+        do {
+            try await resumeDetachedRun(run.id)
+            return true
+        } catch {
+            await modelRunner.cancel(runID: run.id)
+            guard let runtime = generationRuntimes[run.id] else {
+                return true
+            }
+            guard runtime.terminalClaim == nil else {
+                return true
+            }
+            runtime.modelTask?.cancel()
+            generationRuntimes.removeValue(forKey: run.id)
+            await endBackgroundLease(for: run.id)
+            return false
+        }
+    }
+
+    func resumablePurpose(for kind: NovelRunKind) -> NovelModelPurpose? {
+        switch kind {
+        case .prose, .regenerate:
+            .prose
+        case .polish:
+            .polish
+        case .quickStart, .discussion:
+            nil
+        }
+    }
+
     func resumeDurablyStartedRun(
         _ request: NovelRunRequest,
         modelRequest: NovelModelRequest,
@@ -863,7 +995,7 @@ private extension DefaultNovelCreation {
         guard let runRecord = loaded.document.activeRuns.first(where: {
             $0.id == request.id && $0.status == .running
         }) else {
-            if let replay = try replayOrObserve(request, document: loaded.document) {
+            if let replay = try await replayOrObserve(request, document: loaded.document) {
                 return replay
             }
             throw NovelError.storageIndeterminate(request.projectID)
@@ -872,7 +1004,8 @@ private extension DefaultNovelCreation {
         let run = makeRuntimeAndStream(
             run: runRecord,
             projectID: request.projectID,
-            startProjectRevision: loaded.document.project.revision
+            startProjectRevision: loaded.document.project.revision,
+            modelRequest: modelRequest
         )
         broadcast(
             .started(NovelRunReceipt(
@@ -884,26 +1017,16 @@ private extension DefaultNovelCreation {
             runID: request.id
         )
 
+        // The durable marker is in place and the provider is about to start.
+        await updateBackgroundLease(
+            runID: request.id,
+            completed: 1,
+            subtitle: "等待模型响应"
+        )
+
         do {
             let modelEvents = try await modelRunner.start(modelRequest)
-            let task = Task { [weak self] in
-                var transportTerminal = false
-                for await event in modelEvents {
-                    if case .completed = event { transportTerminal = true }
-                    if case .askUser = event { transportTerminal = true }
-                    if case .failed = event { transportTerminal = true }
-                    await self?.consumeModelEvent(event, runID: request.id)
-                }
-                await self?.modelStreamEnded(
-                    runID: request.id,
-                    hadTransportTerminal: transportTerminal
-                )
-            }
-            if generationRuntimes[request.id] != nil {
-                generationRuntimes[request.id]?.modelTask = task
-            } else {
-                task.cancel()
-            }
+            installModelStream(modelEvents, runID: request.id)
         } catch is CancellationError {
             // Reservation cancellation is owned by interruptRun/background.
             // Those paths claim and persist interruption before cancelling this
@@ -917,10 +1040,32 @@ private extension DefaultNovelCreation {
         return run
     }
 
+    private func updateBackgroundLease(
+        runID: NovelRunID,
+        completed: Int64,
+        subtitle: String
+    ) async {
+        await MainActor.run {
+            BackgroundGenerationKeepAlive.shared.updateProgress(
+                novelRunBackgroundLeaseID(for: runID),
+                completed: completed,
+                total: 4,
+                subtitle: subtitle
+            )
+        }
+    }
+
+    private func endBackgroundLease(for runID: NovelRunID) async {
+        let leaseID = novelRunBackgroundLeaseID(for: runID)
+        await MainActor.run {
+            BackgroundGenerationKeepAlive.shared.end(leaseID)
+        }
+    }
+
     func replayOrObserve(
         _ request: NovelRunRequest,
         document: NovelProjectDocumentV1
-    ) throws -> NovelRun? {
+    ) async throws -> NovelRun? {
         guard let operation = document.appliedOperations.first(where: {
             $0.operationID == request.operationID
         }) else {
@@ -950,13 +1095,15 @@ private extension DefaultNovelCreation {
         )))
         yieldReplayTerminal(run, document: document, to: pair.continuation)
         pair.continuation.finish()
+        await endBackgroundLease(for: run.id)
         return NovelRun(id: run.id, events: pair.stream)
     }
 
     func makeRuntimeAndStream(
         run: NovelActiveRunRecord,
         projectID: NovelProjectID,
-        startProjectRevision: Int64
+        startProjectRevision: Int64,
+        modelRequest: NovelModelRequest
     ) -> NovelRun {
         let pair = AsyncStream<NovelRunEvent>.makeStream(bufferingPolicy: .unbounded)
         let subscriberID = UUID()
@@ -975,9 +1122,176 @@ private extension DefaultNovelCreation {
             sidecarSequence: 0,
             lastSidecarAt: now(),
             lastSidecarByteCount: run.partialContent.utf8.count,
+            resumeModel: modelRequest.model,
+            resumePurpose: modelRequest.purpose,
+            responseCursor: nil,
+            isDetachedForBackground: false,
+            didAutoReconnectAfterDisconnect: false,
             terminalClaim: nil
         )
         return NovelRun(id: run.id, events: pair.stream)
+    }
+
+    func installModelStream(
+        _ events: AsyncStream<NovelModelEvent>,
+        runID: NovelRunID
+    ) {
+        let task = Task { [weak self] in
+            guard let self else { return }
+            var transportTerminal = false
+            var disconnectedFailure: NovelModelFailure?
+            for await event in events {
+                if case .completed = event { transportTerminal = true }
+                if case .askUser = event { transportTerminal = true }
+                if case .failed = event { transportTerminal = true }
+                if case .responseDisconnected(let failure) = event {
+                    transportTerminal = true
+                    disconnectedFailure = failure
+                }
+                await consumeModelEvent(event, runID: runID)
+            }
+            await modelStreamEnded(
+                runID: runID,
+                hadTransportTerminal: transportTerminal
+            )
+            if let disconnectedFailure {
+                await reconnectAfterTransportDisconnect(
+                    runID: runID,
+                    failure: disconnectedFailure
+                )
+            }
+        }
+        guard generationRuntimes[runID] != nil else {
+            task.cancel()
+            return
+        }
+        generationRuntimes[runID]?.modelTask?.cancel()
+        generationRuntimes[runID]?.modelTask = task
+    }
+
+    func resumeAllDetachedGenerationRuns() async {
+        let runIDs = generationRuntimes.compactMap { runID, runtime in
+            runtime.isDetachedForBackground && runtime.terminalClaim == nil ? runID : nil
+        }.sorted { $0.description < $1.description }
+        for runID in runIDs {
+            do {
+                try await resumeDetachedRun(runID)
+            } catch {
+                await modelRunner.cancel(runID: runID)
+                await failRun(
+                    runID,
+                    failure: failure(from: error, fallbackCode: "provider_resume_failed")
+                )
+            }
+        }
+    }
+
+    private func resumeDetachedRun(_ runID: NovelRunID) async throws {
+        guard var runtime = generationRuntimes[runID],
+              runtime.terminalClaim == nil,
+              runtime.isDetachedForBackground,
+              runtime.responseCursor != nil,
+              let durableRunner = modelRunner as? any NovelDurableModelRunning else {
+            return
+        }
+        runtime.isDetachedForBackground = false
+        generationRuntimes[runID] = runtime
+        await beginRecoveredBackgroundLease(
+            projectID: runtime.projectID,
+            runID: runID
+        )
+        guard let resumedRuntime = generationRuntimes[runID],
+              resumedRuntime.terminalClaim == nil,
+              !resumedRuntime.isDetachedForBackground,
+              let resumedCursor = resumedRuntime.responseCursor else {
+            await endBackgroundLease(for: runID)
+            return
+        }
+        do {
+            let events = try await durableRunner.resume(NovelModelResumeRequest(
+                runID: runID,
+                model: resumedRuntime.resumeModel,
+                purpose: resumedRuntime.resumePurpose,
+                cursor: resumedCursor
+            ))
+            installModelStream(events, runID: runID)
+        } catch {
+            if generationRuntimes[runID]?.terminalClaim == nil {
+                generationRuntimes[runID]?.isDetachedForBackground = true
+            }
+            await endBackgroundLease(for: runID)
+            throw error
+        }
+    }
+
+    private func reconnectAfterTransportDisconnect(
+        runID: NovelRunID,
+        failure transportFailure: NovelModelFailure
+    ) async {
+        guard var runtime = generationRuntimes[runID],
+              runtime.terminalClaim == nil,
+              runtime.isDetachedForBackground else { return }
+        guard !runtime.didAutoReconnectAfterDisconnect else {
+            await modelRunner.cancel(runID: runID)
+            await failRun(
+                runID,
+                failure: NovelFailure(
+                    code: transportFailure.code,
+                    message: transportFailure.message,
+                    isRetryable: true
+                )
+            )
+            return
+        }
+        runtime.didAutoReconnectAfterDisconnect = true
+        generationRuntimes[runID] = runtime
+        do {
+            try await resumeDetachedRun(runID)
+        } catch {
+            await modelRunner.cancel(runID: runID)
+            await failRun(
+                runID,
+                failure: failure(from: error, fallbackCode: "provider_resume_failed")
+            )
+        }
+    }
+
+    private func beginRecoveredBackgroundLease(
+        projectID: NovelProjectID,
+        runID: NovelRunID
+    ) async {
+        await MainActor.run {
+            let leaseID = novelRunBackgroundLeaseID(for: runID)
+            BackgroundGenerationKeepAlive.shared.begin(
+                leaseID,
+                title: "Amber 小说创作中",
+                subtitle: "恢复后台生成",
+                onExpire: { [weak self] in
+                    Task {
+                        await self?.interruptForBackground(
+                            projectID: projectID,
+                            deadline: Date(),
+                            runID: runID
+                        )
+                    }
+                },
+                onSystemTaskExpiration: { [weak self] in
+                    Task {
+                        await self?.interruptForBackground(
+                            projectID: projectID,
+                            deadline: Date(),
+                            runID: runID
+                        )
+                    }
+                }
+            )
+            BackgroundGenerationKeepAlive.shared.updateProgress(
+                leaseID,
+                completed: 1,
+                total: 4,
+                subtitle: "恢复模型响应"
+            )
+        }
     }
 
     func attachSubscriber(to run: NovelActiveRunRecord) -> NovelRun {
@@ -1076,26 +1390,141 @@ private extension DefaultNovelCreation {
         }
     }
 
+    func detachResumableRunForBackground(_ runID: NovelRunID) async -> Bool {
+        guard let runtime = generationRuntimes[runID],
+              runtime.terminalClaim == nil,
+              runtime.responseCursor != nil,
+              let durableRunner = modelRunner as? any NovelDurableModelRunning else {
+            return false
+        }
+        if runtime.isDetachedForBackground {
+            await endBackgroundLease(for: runID)
+            return true
+        }
+        // Persist the last accepted partial/cursor pair before closing the local
+        // stream. The server response remains alive and is resumed on foreground.
+        guard await flushRecoverySidecar(runID: runID, force: true),
+              var current = generationRuntimes[runID],
+              current.terminalClaim == nil else {
+            return false
+        }
+        current.isDetachedForBackground = true
+        generationRuntimes[runID] = current
+        // Finish the adapter stream first so its AsyncStream terminates as
+        // `.finished`. Cancelling the consumer first would surface as
+        // `.cancelled` and the adapter's termination hook would cancel the
+        // still-running server response.
+        await durableRunner.detach(runID: runID)
+        guard var detached = generationRuntimes[runID],
+              detached.terminalClaim == nil else {
+            return true
+        }
+        // Foreground recovery may have installed a replacement stream while
+        // the cross-actor detach call was suspended. That new owner wins.
+        guard detached.isDetachedForBackground else { return true }
+        detached.modelTask?.cancel()
+        detached.modelTask = nil
+        generationRuntimes[runID] = detached
+        await endBackgroundLease(for: runID)
+        return true
+    }
+
     func consumeModelEvent(_ event: NovelModelEvent, runID: NovelRunID) async {
         guard var runtime = generationRuntimes[runID],
               runtime.terminalClaim == nil else {
             return
         }
         switch event {
+        case .activity:
+            break
         case .textDelta(let text):
             guard !text.isEmpty else { return }
+            let isFirstVisibleContent = runtime.partialContent.isEmpty
             runtime.partialContent += text
             generationRuntimes[runID] = runtime
+            if isFirstVisibleContent {
+                await updateBackgroundLease(
+                    runID: runID,
+                    completed: 2,
+                    subtitle: "正在生成正文"
+                )
+            }
             broadcast(.delta(text), runID: runID)
-            await flushRecoverySidecar(runID: runID, force: false)
+            _ = await flushRecoverySidecar(runID: runID, force: false)
         case .textReplacement(let text):
+            let isFirstVisibleContent = runtime.partialContent.isEmpty && !text.isEmpty
             runtime.partialContent = text
             generationRuntimes[runID] = runtime
+            if isFirstVisibleContent {
+                await updateBackgroundLease(
+                    runID: runID,
+                    completed: 2,
+                    subtitle: "正在生成正文"
+                )
+            }
             broadcast(.replaced(text), runID: runID)
-            await flushRecoverySidecar(runID: runID, force: false)
+            _ = await flushRecoverySidecar(runID: runID, force: false)
         case .usage(let usage):
             runtime.usage = usage
             generationRuntimes[runID] = runtime
+        case .responseFrame(let frame):
+            let mustPersistFirstCursor = runtime.responseCursor == nil
+            if let current = runtime.responseCursor {
+                guard current.responseID == frame.cursor.responseID else {
+                    await failRun(
+                        runID,
+                        failure: NovelFailure(
+                            code: "provider_response_changed",
+                            message: "远端生成标识发生变化，请重试。",
+                            isRetryable: true
+                        )
+                    )
+                    return
+                }
+                guard frame.cursor.sequenceNumber > current.sequenceNumber else { return }
+            }
+            var presentationEvents: [NovelRunEvent] = []
+            var shouldUpdateVisibleLease = false
+            for frameEvent in frame.events {
+                switch frameEvent {
+                case .activity:
+                    break
+                case .textDelta(let text):
+                    guard !text.isEmpty else { continue }
+                    shouldUpdateVisibleLease = shouldUpdateVisibleLease || runtime.partialContent.isEmpty
+                    runtime.partialContent += text
+                    presentationEvents.append(.delta(text))
+                case .textReplacement(let text):
+                    shouldUpdateVisibleLease = shouldUpdateVisibleLease ||
+                        (runtime.partialContent.isEmpty && !text.isEmpty)
+                    runtime.partialContent = text
+                    presentationEvents.append(.replaced(text))
+                case .usage(let usage):
+                    runtime.usage = usage
+                }
+            }
+            // Commit content, usage, cursor and attachment state together before
+            // the first await. Background expiration may interleave at the lease
+            // update below and must observe the complete resumable frame.
+            runtime.responseCursor = frame.cursor
+            runtime.isDetachedForBackground = false
+            generationRuntimes[runID] = runtime
+            presentationEvents.forEach { broadcast($0, runID: runID) }
+            if shouldUpdateVisibleLease {
+                await updateBackgroundLease(
+                    runID: runID,
+                    completed: 2,
+                    subtitle: "正在生成正文"
+                )
+            }
+            // The partial and its remote cursor move in one sidecar record. The
+            // first response ID is forced immediately; later frames use the
+            // existing byte/time throttle so streaming does not write per token.
+            _ = await flushRecoverySidecar(runID: runID, force: mustPersistFirstCursor)
+        case .responseDisconnected:
+            runtime.isDetachedForBackground = true
+            generationRuntimes[runID] = runtime
+            _ = await flushRecoverySidecar(runID: runID, force: true)
         case .askUser(let prompt, let preface):
             await awaitUser(runID, prompt: prompt, preface: preface)
         case .completed:
@@ -1114,7 +1543,8 @@ private extension DefaultNovelCreation {
 
     func modelStreamEnded(runID: NovelRunID, hadTransportTerminal: Bool) async {
         guard !hadTransportTerminal,
-              generationRuntimes[runID]?.terminalClaim == nil else {
+              generationRuntimes[runID]?.terminalClaim == nil,
+              generationRuntimes[runID]?.isDetachedForBackground != true else {
             return
         }
         await failRun(
@@ -1235,7 +1665,13 @@ private extension DefaultNovelCreation {
         runtime.terminalClaim = claim
         generationRuntimes[runID] = runtime
 
-        await flushRecoverySidecar(runID: runID, force: true)
+        await updateBackgroundLease(
+            runID: runID,
+            completed: 3,
+            subtitle: "保存结果"
+        )
+
+        _ = await flushRecoverySidecar(runID: runID, force: true)
         do {
             let waitForMutations: Bool
             if case .interrupted(_, let command) = claim.intent, command != nil {
@@ -1257,7 +1693,13 @@ private extension DefaultNovelCreation {
                 projectID: runtime.projectID,
                 runID: runID
             )
+            await updateBackgroundLease(
+                runID: runID,
+                completed: 4,
+                subtitle: "已保存"
+            )
             finishRuntime(runID: runID, event: committed.event)
+            await endBackgroundLease(for: runID)
             return committed
         } catch {
             let persistenceFailure = failure(
@@ -1273,6 +1715,7 @@ private extension DefaultNovelCreation {
                 generationRuntimes[runID] = current
                 broadcast(.persistenceBlocked(persistenceFailure), runID: runID)
             }
+            await endBackgroundLease(for: runID)
             throw error
         }
     }
@@ -1483,15 +1926,15 @@ private extension DefaultNovelCreation {
         )
     }
 
-    func flushRecoverySidecar(runID: NovelRunID, force: Bool) async {
-        guard var runtime = generationRuntimes[runID] else { return }
+    func flushRecoverySidecar(runID: NovelRunID, force: Bool) async -> Bool {
+        guard var runtime = generationRuntimes[runID] else { return false }
         let timestamp = now()
         let byteCount = runtime.partialContent.utf8.count
         let bytesAdded = max(0, byteCount - runtime.lastSidecarByteCount)
         guard force ||
             bytesAdded >= generationPolicy.sidecarByteThreshold ||
             timestamp.timeIntervalSince(runtime.lastSidecarAt) >= generationPolicy.sidecarInterval else {
-            return
+            return true
         }
 
         runtime.sidecarSequence += 1
@@ -1500,7 +1943,7 @@ private extension DefaultNovelCreation {
         generationRuntimes[runID] = runtime
         guard let loaded = try? await loadCommittedProject(id: runtime.projectID),
               let run = loaded.document.activeRuns.first(where: { $0.id == runID }) else {
-            return
+            return false
         }
         let sidecar = NovelRecoverySidecarV1(
             schemaVersion: NovelRecoverySidecarV1.currentSchemaVersion,
@@ -1513,7 +1956,9 @@ private extension DefaultNovelCreation {
             sequence: runtime.sidecarSequence,
             partialContent: runtime.partialContent,
             partialSHA256: NovelDocumentValidator.sha256(runtime.partialContent),
-            updatedAt: timestamp
+            updatedAt: timestamp,
+            responseID: runtime.responseCursor?.responseID,
+            responseSequenceNumber: runtime.responseCursor?.sequenceNumber
         )
         do {
             try await repository.writeRecoverySidecar(sidecar)
@@ -1523,9 +1968,11 @@ private extension DefaultNovelCreation {
                     runID: runID
                 )
             }
+            return true
         } catch {
             // The project terminal remains authoritative. A later forced flush
             // or startup recovery retries without publishing false durability.
+            return false
         }
     }
 

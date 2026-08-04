@@ -258,7 +258,19 @@ enum NovelPresentation {
         if trimmed == "The fact synchronization was cancelled and can be retried." {
             return "剧情状态同步已取消，可以重试。"
         }
-        return trimmed.isEmpty ? "剧情状态同步失败，请重试。" : trimmed
+        if trimmed.isEmpty {
+            return "剧情状态同步失败，请重试。"
+        }
+        let containsChinese = trimmed.unicodeScalars.contains {
+            (0x4E00...0x9FFF).contains($0.value)
+        }
+        let containsASCIILetter = trimmed.unicodeScalars.contains {
+            (0x41...0x5A).contains($0.value) || (0x61...0x7A).contains($0.value)
+        }
+        if containsChinese, !containsASCIILetter {
+            return trimmed
+        }
+        return "剧情状态同步失败，请重试。"
     }
 
     private static func chapterHeadingTitle(from content: String) -> String? {

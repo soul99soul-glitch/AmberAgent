@@ -219,10 +219,9 @@ actor DefaultNovelCreation: NovelCreation {
         generationPolicy: NovelGenerationPolicy = .standard,
         // 「连续无输出」阈值,不是总耗时上限:任何有效增量都会刷新计时。
         //
-        // 2026-07-25 真机取证:deepseek-v4-pro 这类推理模型在思考阶段**不产出任何
-        // 文本增量**(本层的事件枚举只有 textDelta/textReplacement/usage,推理 token
-        // 在更下层就被丢弃了),心跳因此完全得不到刷新。原值 60s 会把一个正在正常
-        // 思考的模型判成「持续无输出」而掐断——状态同步反复失败的直接原因。
+        // 2026-07-25 真机取证:deepseek-v4-pro 这类推理模型在思考阶段可能长时间不产出
+        // 正文。适配层会把非空 reasoning 映射成只刷新心跳的 activity 事件；它不会
+        // 混入结构化 JSON。原值 60s 仍会对完全没有任何活动的慢启动模型过于激进。
         //
         // 提到 240s:对推理模型给足思考空间,同时仍能在真正卡死(连续 4 分钟一个字
         // 都没有)时收口。这是放宽「判定卡死的耐心」,不是给模型的产出设上限。

@@ -123,6 +123,16 @@ final class NovelCreationPresentationTests: XCTestCase {
             ),
             "剧情状态同步已取消，可以重试。"
         )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "Manual-sync receipt input evidence is incomplete."
+            ),
+            "剧情状态同步失败，请重试。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage("请求失败：upstream timeout"),
+            "剧情状态同步失败，请重试。"
+        )
     }
 
     func testPendingPresentationDistinguishesWaitingFromStreaming() {

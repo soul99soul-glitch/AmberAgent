@@ -289,7 +289,7 @@ struct NovelStructuredModelExecutor: Sendable {
         } catch is CancellationError {
             throw NovelStructuredModelExecutionFailure(
                 code: "cancelled",
-                message: "The structured model request was cancelled.",
+                message: "模型任务已取消，可以重试。",
                 isRetryable: true
             )
         } catch {
@@ -368,7 +368,7 @@ struct NovelStructuredModelExecutor: Sendable {
             timeoutTask.cancel()
             latch.resolve(.failed(NovelStructuredModelExecutionFailure(
                 code: "cancelled",
-                message: "讨论归档已取消。",
+                message: "模型任务已取消，可以重试。",
                 isRetryable: true
             )))
             Task { await modelRunner.cancel(runID: invocation.executionRequest.runID) }
@@ -521,6 +521,8 @@ struct NovelStructuredModelExecutor: Sendable {
                 )
             }
             switch event {
+            case .activity:
+                onTextOutput?()
             case .textDelta(let delta):
                 if !delta.isEmpty { onTextOutput?() }
                 text += delta
@@ -529,6 +531,27 @@ struct NovelStructuredModelExecutor: Sendable {
                 text = replacement
             case .usage:
                 break
+            case .responseFrame(let frame):
+                for frameEvent in frame.events {
+                    switch frameEvent {
+                    case .activity:
+                        onTextOutput?()
+                    case .textDelta(let delta):
+                        if !delta.isEmpty { onTextOutput?() }
+                        text += delta
+                    case .textReplacement(let replacement):
+                        if !replacement.isEmpty { onTextOutput?() }
+                        text = replacement
+                    case .usage:
+                        break
+                    }
+                }
+            case .responseDisconnected(let failure):
+                throw NovelStructuredModelExecutionFailure(
+                    code: failure.code,
+                    message: failure.message,
+                    isRetryable: true
+                )
             case .askUser:
                 throw NovelStructuredModelExecutionFailure(
                     code: "unexpected_ask_user",

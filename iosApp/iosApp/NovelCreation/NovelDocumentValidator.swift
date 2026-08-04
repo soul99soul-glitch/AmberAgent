@@ -42,6 +42,19 @@ enum NovelDocumentValidator {
         guard sidecar.partialSHA256.lowercased() == sha256(sidecar.partialContent) else {
             throw NovelError.invalidRecovery("Partial content does not match its SHA-256 hash.")
         }
+        switch (sidecar.responseID, sidecar.responseSequenceNumber) {
+        case (nil, nil):
+            break
+        case (.some(let responseID), .some(let sequenceNumber)):
+            guard !responseID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw NovelError.invalidRecovery("Response ID must not be empty.")
+            }
+            guard sequenceNumber >= 0 else {
+                throw NovelError.invalidRecovery("Response sequence must be non-negative.")
+            }
+        default:
+            throw NovelError.invalidRecovery("Response cursor is incomplete.")
+        }
     }
 
     static func validateTransition(
@@ -738,6 +751,18 @@ enum NovelDocumentValidator {
         }
         for run in document.activeRuns where
             run.kind == .quickStart && run.status == .completed {
+            let outputMessage = document.sessions
+                .first(where: { $0.id == run.sessionID })?
+                .messages
+                .first(where: { $0.id == run.messageID })
+            if case .some(.askUser(_)) = outputMessage?.interaction {
+                if !(quickStartProposalsByRun[run.id] ?? []).isEmpty {
+                    issues.append(
+                        "Quick-start Ask User run \(run.id) unexpectedly owns setting proposals."
+                    )
+                }
+                continue
+            }
             let counts = quickStartKindCountsByRun[run.id] ?? [:]
             if counts["world"] != 1 ||
                 counts["masterOutline"] != 1 ||

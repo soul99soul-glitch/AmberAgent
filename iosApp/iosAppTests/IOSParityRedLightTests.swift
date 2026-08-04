@@ -1500,6 +1500,46 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertFalse(savingState.terminalWasFinalized(by: .completion))
     }
 
+    func testBackgroundGuardStoppedStatusSurvivesExpirationDuringSave() {
+        let savingState = IOSChatBackgroundRunState()
+        XCTAssertTrue(savingState.reserveTerminal())
+        XCTAssertEqual(savingState.expireAndReserveTerminal(), .terminateInFlightSave)
+        XCTAssertTrue(savingState.finalizeTerminal(as: .expiration))
+
+        XCTAssertEqual(
+            IOSChatBackgroundGenerationCoordinator.backgroundTerminalStatusForTesting(
+                didSave: true,
+                singleToolFailureReason: nil,
+                guardStopped: true
+            ),
+            "guard_stopped"
+        )
+        XCTAssertEqual(
+            IOSChatBackgroundGenerationCoordinator.backgroundTerminalStatusForTesting(
+                didSave: true,
+                singleToolFailureReason: "tool failed",
+                guardStopped: true
+            ),
+            "guard_stopped"
+        )
+        XCTAssertEqual(
+            IOSChatBackgroundGenerationCoordinator.backgroundTerminalStatusForTesting(
+                didSave: true,
+                singleToolFailureReason: "tool failed",
+                guardStopped: false
+            ),
+            "failed"
+        )
+        XCTAssertEqual(
+            IOSChatBackgroundGenerationCoordinator.backgroundTerminalStatusForTesting(
+                didSave: false,
+                singleToolFailureReason: nil,
+                guardStopped: true
+            ),
+            "recovery_pending"
+        )
+    }
+
     func testBackgroundSystemTaskCompletionCanOnlyBeClaimedOnce() {
         let state = IOSChatBackgroundRunState()
 

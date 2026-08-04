@@ -783,7 +783,13 @@ enum NovelGenerationDocumentValidator {
         case .polish: .polishCandidate
         }
         let expectedContent: String
-        if run.kind == .quickStart {
+        let isAskUserCompletion: Bool
+        if case .some(.askUser(_)) = message.interaction {
+            isAskUserCompletion = true
+        } else {
+            isAskUserCompletion = false
+        }
+        if run.kind == .quickStart && !isAskUserCompletion {
             if let suggestions = try? NovelStructuredOutputDecoder.decodeQuickStartSuggestions(
                 from: run.partialContent
             ) {

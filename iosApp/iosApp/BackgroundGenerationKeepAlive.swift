@@ -33,6 +33,11 @@ final class BackgroundGenerationKeepAlive {
     private struct Lease {
         var uiTaskId: UIBackgroundTaskIdentifier
         var systemTask: BGContinuedProcessingTask?
+        let title: String
+        var subtitle: String
+        let submitSystemTask: Bool
+        var progressTotalUnitCount: Int64?
+        var progressCompletedUnitCount: Int64
         /// BG handler 挂起在这里等 `end`；nil 表示系统还没调度到这一轮。
         var waiter: CheckedContinuation<Void, Never>?
         /// UIKit 短窗口到期时通知上层；系统任务没有专用回调时也沿用它。
@@ -135,6 +140,11 @@ final class BackgroundGenerationKeepAlive {
         leases[leaseId] = Lease(
             uiTaskId: uiTaskId,
             systemTask: nil,
+            title: title,
+            subtitle: subtitle,
+            submitSystemTask: submitSystemTask,
+            progressTotalUnitCount: nil,
+            progressCompletedUnitCount: 0,
             waiter: nil,
             onExpire: onExpire,
             onSystemTaskExpiration: onSystemTaskExpiration
@@ -158,6 +168,88 @@ final class BackgroundGenerationKeepAlive {
         lease.waiter?.resume()
         lease.systemTask?.setTaskCompleted(success: true)
         IOSBackgroundLifecycleLog.record("keepAliveEnd(\(leaseId))", detail: snapshotDetail)
+    }
+
+    /// 更新这一轮系统继续处理任务的真实阶段进度。
+    ///
+    /// 进度可能在系统真正接管前就产生，所以先保存在租约里；接管时再一次性
+    /// 写入 `BGContinuedProcessingTask.progress`。已报告的进度只会前进，不用
+    /// 时间估算去伪造一个百分比。
+    func updateProgress(
+        _ leaseId: String,
+        completed: Int64,
+        total: Int64? = nil,
+        subtitle: String? = nil
+    ) {
+        guard var lease = leases[leaseId] else { return }
+        if let total {
+            lease.progressTotalUnitCount = max(1, total)
+            lease.progressCompletedUnitCount = min(
+                lease.progressCompletedUnitCount,
+                lease.progressTotalUnitCount ?? 1
+            )
+        }
+        if let subtitle {
+            lease.subtitle = subtitle
+        }
+        let boundedCompleted: Int64
+        if let total = lease.progressTotalUnitCount {
+            boundedCompleted = min(max(0, completed), total)
+        } else {
+            boundedCompleted = max(0, completed)
+        }
+        lease.progressCompletedUnitCount = max(
+            lease.progressCompletedUnitCount,
+            boundedCompleted
+        )
+        if let total = lease.progressTotalUnitCount {
+            lease.progressCompletedUnitCount = min(
+                lease.progressCompletedUnitCount,
+                total
+            )
+        }
+        if let systemTask = lease.systemTask {
+            if let total = lease.progressTotalUnitCount {
+                systemTask.progress.totalUnitCount = total
+            }
+            systemTask.progress.completedUnitCount = lease.progressCompletedUnitCount
+            systemTask.updateTitle(lease.title, subtitle: lease.subtitle)
+        }
+        leases[leaseId] = lease
+    }
+
+    /// 将前台流的通用租约显式交给专用后台协调器。
+    ///
+    /// 专用 request 提交前先结束旧租约，避免同一 run 同时挂着 `.keepalive.*`
+    /// 与 `.chat.*` 两张系统卡。专用提交失败时按原参数恢复旧租约，调用方可以
+    /// 保留前台流，不会因为一次交接失败丢掉最后的执行权。
+    @discardableResult
+    func transfer(_ leaseId: String, to start: () -> Bool) -> Bool {
+        guard let previousLease = leases[leaseId] else {
+            return start()
+        }
+
+        end(leaseId)
+        let didStart = start()
+        guard !didStart else { return true }
+
+        begin(
+            leaseId,
+            title: previousLease.title,
+            subtitle: previousLease.subtitle,
+            onExpire: previousLease.onExpire,
+            onSystemTaskExpiration: previousLease.onSystemTaskExpiration,
+            submitSystemTask: previousLease.submitSystemTask
+        )
+        if previousLease.progressTotalUnitCount != nil || previousLease.progressCompletedUnitCount > 0 {
+            updateProgress(
+                leaseId,
+                completed: previousLease.progressCompletedUnitCount,
+                total: previousLease.progressTotalUnitCount,
+                subtitle: previousLease.subtitle
+            )
+        }
+        return false
     }
 
     // MARK: - 内部
@@ -225,6 +317,13 @@ final class BackgroundGenerationKeepAlive {
             Task { @MainActor in self?.handleSystemExpiration(leaseId) }
         }
         leases[leaseId]?.systemTask = task
+        if let lease = leases[leaseId] {
+            if let total = lease.progressTotalUnitCount {
+                task.progress.totalUnitCount = total
+            }
+            task.progress.completedUnitCount = lease.progressCompletedUnitCount
+            task.updateTitle(lease.title, subtitle: lease.subtitle)
+        }
         // 系统接管了，第一条腿就该还回去，不白占 30 秒配额。
         releaseUITask(leaseId)
         IOSBackgroundLifecycleLog.record("keepAliveAdopted(\(leaseId))", detail: snapshotDetail)

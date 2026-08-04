@@ -1,5 +1,24 @@
 import Foundation
 import Observation
+import UIKit
+
+func novelRunBackgroundLeaseID(for runID: NovelRunID) -> String {
+    "novel-run-\(runID)"
+}
+
+func novelStateSyncBackgroundLeaseID(for ownerID: UUID) -> String {
+    "novel-state-sync-\(ownerID.uuidString)"
+}
+
+func novelContinuityBackgroundLeaseID(for ownerID: UUID) -> String {
+    "novel-continuity-\(ownerID.uuidString)"
+}
+
+func isProtectedNovelBackgroundLeaseID(_ leaseID: String) -> Bool {
+    leaseID.hasPrefix("novel-run-") ||
+        leaseID.hasPrefix("novel-state-sync-") ||
+        leaseID.hasPrefix("novel-continuity-")
+}
 
 enum NovelProjectImportChoice: Equatable, Sendable {
     case reject
@@ -176,6 +195,7 @@ final class NovelCreationViewModel {
     private(set) var continuityAuditReport: NovelContinuityAuditReport?
     private var continuityAuditPlanStorage: NovelContinuityAuditPlan?
     private var continuityAuditFailureStorage: NovelContinuityAuditFailure?
+    @ObservationIgnored private var continuityAuditExpirationOwnerID: UUID?
     private(set) var isPlanningContinuity = false
     private(set) var isAuditingContinuity = false
     @ObservationIgnored private var continuityAuditTask: Task<Void, Never>?
@@ -364,11 +384,9 @@ final class NovelCreationViewModel {
             queuedAutomaticStateSyncTarget = nil
         }
         if stateSyncActivity?.projectID == projectID,
-           stateSyncActivity?.branchID == branchID {
-            stateSyncActivityTask?.cancel()
-            stateSyncActivityTask = nil
-            stateSyncActivityOwnerID = nil
-            stateSyncActivity = nil
+           stateSyncActivity?.branchID == branchID,
+           let activityOwnerID = stateSyncActivityOwnerID {
+            stopStateSyncActivity(ownerID: activityOwnerID)
         }
 
         // Outer Task.cancel alone does not stop `perform` / model streaming. Cancel the
@@ -574,6 +592,10 @@ final class NovelCreationViewModel {
                 )
             }
         }
+    }
+
+    func resumeDetachedBackgroundGeneration() async {
+        await creation.resumeDetachedGenerationRuns()
     }
 
     func interruptSessionForBackground(deadline: Date) async {
@@ -982,8 +1004,12 @@ final class NovelCreationViewModel {
         quickStartStartingRun = placeholder
         cancelledQuickStartRunIDs.remove(request.id)
         quickStartStatuses[owner] = .starting(run: placeholder)
+        if let previousRunID = quickStartTaskRunIDs[owner] {
+            endBackgroundGeneration(for: previousRunID)
+        }
         quickStartTasks[owner]?.cancel()
         quickStartTaskRunIDs[owner] = request.id
+        beginBackgroundGeneration(for: request)
         quickStartTasks[owner] = Task { @MainActor [weak self] in
             await self?.runQuickStart(request, owner: owner)
         }
@@ -993,7 +1019,10 @@ final class NovelCreationViewModel {
     private func runQuickStart(_ request: NovelRunRequest, owner: NovelQuickStartOwner) async {
         guard !Task.isCancelled,
               quickStartTaskRunIDs[owner] == request.id,
-              !cancelledQuickStartRunIDs.contains(request.id) else { return }
+              !cancelledQuickStartRunIDs.contains(request.id) else {
+            endBackgroundGeneration(for: request.id)
+            return
+        }
         let run: NovelRun
         quickStartCreationStartRunIDs.insert(request.id)
         do {
@@ -1002,6 +1031,7 @@ final class NovelCreationViewModel {
         } catch {
             quickStartCreationStartRunIDs.remove(request.id)
             guard quickStartTaskRunIDs[owner] == request.id else { return }
+            endBackgroundGeneration(for: request.id)
             if cancelledQuickStartRunIDs.contains(request.id) {
                 quickStartStatuses[owner] = .failed(
                     message: "建议生成已中断，可以重新生成。"
@@ -1020,7 +1050,10 @@ final class NovelCreationViewModel {
             return
         }
         guard quickStartTaskRunIDs[owner] == request.id,
-              !cancelledQuickStartRunIDs.contains(request.id) else { return }
+              !cancelledQuickStartRunIDs.contains(request.id) else {
+            endBackgroundGeneration(for: request.id)
+            return
+        }
         quickStartStatuses[owner] = .generating(runID: run.id)
         do {
             try await refreshCurrentSelection(projectID: owner.projectID)
@@ -1041,6 +1074,7 @@ final class NovelCreationViewModel {
         releasesStartingBusy: Bool = false
     ) {
         guard quickStartTaskRunIDs[owner] == runID else { return }
+        endBackgroundGeneration(for: runID)
         quickStartTasks[owner] = nil
         quickStartTaskRunIDs[owner] = nil
         if quickStartStartingRun?.id == runID {
@@ -1589,7 +1623,52 @@ final class NovelCreationViewModel {
     }
 
     func startSessionRun(_ request: NovelRunRequest) async throws -> NovelRun {
-        try await creation.start(request)
+        beginBackgroundGeneration(for: request)
+        do {
+            return try await creation.start(request)
+        } catch {
+            endBackgroundGeneration(for: request.id)
+            throw error
+        }
+    }
+
+    /// 在已经取得 session 单写者之后、第一次 await 之前提交系统继续处理任务。
+    /// 页面订阅只是观察者；后台到期回调走同一条可持久化中断路径。
+    func beginBackgroundGeneration(for request: NovelRunRequest) {
+        let leaseID = novelRunBackgroundLeaseID(for: request.id)
+        BackgroundGenerationKeepAlive.shared.begin(
+            leaseID,
+            title: "Amber 小说创作中",
+            subtitle: "后台生成",
+            onExpire: { [weak self] in
+                Task { @MainActor [weak self] in
+                    await self?.interruptSessionForBackground(
+                        projectID: request.projectID,
+                        runID: request.id,
+                        deadline: Date()
+                    )
+                }
+            },
+            onSystemTaskExpiration: { [weak self] in
+                Task { @MainActor [weak self] in
+                    await self?.interruptSessionForBackground(
+                        projectID: request.projectID,
+                        runID: request.id,
+                        deadline: Date()
+                    )
+                }
+            }
+        )
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            leaseID,
+            completed: 0,
+            total: 4,
+            subtitle: "准备生成"
+        )
+    }
+
+    func endBackgroundGeneration(for runID: NovelRunID) {
+        BackgroundGenerationKeepAlive.shared.end(novelRunBackgroundLeaseID(for: runID))
     }
 
     func performSessionAction(_ action: NovelAction) async throws -> NovelOutcome {
@@ -1677,7 +1756,8 @@ final class NovelCreationViewModel {
         deadline: Date
     ) async {
         let quickStartOwner = quickStartTaskRunIDs.keys.first(where: {
-            $0.projectID == projectID
+            $0.projectID == projectID &&
+                (runID == nil || quickStartTaskRunIDs[$0] == runID)
         })
         let quickStartRunID = quickStartOwner.flatMap { quickStartTaskRunIDs[$0] }
         let effectiveRunID = runID ?? quickStartRunID
@@ -1697,6 +1777,12 @@ final class NovelCreationViewModel {
                 owner: quickStartOwner,
                 runID: quickStartRunID
             )
+        }
+        // Foreground recovery can race ahead of the expiration callback and
+        // scan before this method has detached the response. Re-scan only when
+        // the app is actually active after the interruption finishes.
+        if UIApplication.shared.applicationState == .active {
+            await creation.resumeDetachedGenerationRuns()
         }
     }
 
@@ -1745,6 +1831,7 @@ final class NovelCreationViewModel {
         status: NovelQuickStartStatus?
     ) {
         guard quickStartTaskRunIDs[owner] == runID else { return }
+        endBackgroundGeneration(for: runID)
         quickStartTasks[owner]?.cancel()
         quickStartTasks[owner] = nil
         quickStartTaskRunIDs[owner] = nil
@@ -2022,8 +2109,18 @@ final class NovelCreationViewModel {
             return
         }
         isAuditingContinuity = true
+        beginContinuityBackgroundLease(
+            ownerID: ownerID,
+            target: target
+        )
         defer {
             isAuditingContinuity = false
+            if continuityAuditExpirationOwnerID == ownerID {
+                continuityAuditExpirationOwnerID = nil
+            }
+            BackgroundGenerationKeepAlive.shared.end(
+                novelContinuityBackgroundLeaseID(for: ownerID)
+            )
             releaseOperation(ownerID: ownerID)
         }
         do {
@@ -2038,15 +2135,31 @@ final class NovelCreationViewModel {
             }
             errorMessage = nil
         } catch is CancellationError {
-            // 用户自己按的停止,不是故障,不必弹错误。
-            if continuityAuditFailureStorage?.target == target {
+            if continuityAuditExpirationOwnerID == ownerID {
+                continuityAuditFailureStorage = NovelContinuityAuditFailure(
+                    target: target,
+                    message: "后台执行时间已结束，请重新检查。"
+                )
+            } else if continuityAuditFailureStorage?.target == target {
+                // 用户自己按的停止,不是故障,不必弹错误。
                 continuityAuditFailureStorage = nil
             }
         } catch {
-            continuityAuditFailureStorage = NovelContinuityAuditFailure(
-                target: target,
-                message: errorDescription(error)
-            )
+            if continuityAuditExpirationOwnerID == ownerID {
+                continuityAuditFailureStorage = NovelContinuityAuditFailure(
+                    target: target,
+                    message: "后台执行时间已结束，请重新检查。"
+                )
+            } else if Task.isCancelled {
+                if continuityAuditFailureStorage?.target == target {
+                    continuityAuditFailureStorage = nil
+                }
+            } else {
+                continuityAuditFailureStorage = NovelContinuityAuditFailure(
+                    target: target,
+                    message: errorDescription(error)
+                )
+            }
         }
     }
 
@@ -2338,6 +2451,7 @@ final class NovelCreationViewModel {
             pendingID: pendingID,
             startedAt: startedAt
         )
+        beginStateSyncBackgroundLease(ownerID: ownerID, projectID: projectID)
         stateSyncActivityTask?.cancel()
         stateSyncActivityTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2361,10 +2475,73 @@ final class NovelCreationViewModel {
 
     private func stopStateSyncActivity(ownerID: UUID) {
         guard stateSyncActivityOwnerID == ownerID else { return }
+        BackgroundGenerationKeepAlive.shared.end(
+            novelStateSyncBackgroundLeaseID(for: ownerID)
+        )
         stateSyncActivityTask?.cancel()
         stateSyncActivityTask = nil
         stateSyncActivityOwnerID = nil
         stateSyncActivity = nil
+    }
+
+    private func beginStateSyncBackgroundLease(
+        ownerID: UUID,
+        projectID: NovelProjectID
+    ) {
+        let leaseID = novelStateSyncBackgroundLeaseID(for: ownerID)
+        let expire: () -> Void = { [weak self] in
+            Task { @MainActor [weak self] in
+                await self?.expireStateSyncBackgroundLease(
+                    ownerID: ownerID,
+                    projectID: projectID
+                )
+            }
+        }
+        BackgroundGenerationKeepAlive.shared.begin(
+            leaseID,
+            title: "Amber 小说创作中",
+            subtitle: "剧情同步",
+            onExpire: expire,
+            onSystemTaskExpiration: expire
+        )
+    }
+
+    private func expireStateSyncBackgroundLease(
+        ownerID: UUID,
+        projectID: NovelProjectID
+    ) async {
+        guard stateSyncActivityOwnerID == ownerID else { return }
+        queuedAutomaticStateSyncTarget = nil
+        manualStateSyncTask?.cancel()
+        automaticStateSyncTask?.cancel()
+        await creation.cancelInFlightBackgroundMutations(projectID: projectID)
+    }
+
+    private func beginContinuityBackgroundLease(
+        ownerID: UUID,
+        target: NovelAutomaticStateSyncTarget
+    ) {
+        let leaseID = novelContinuityBackgroundLeaseID(for: ownerID)
+        let expire: () -> Void = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      self.operationOwnerID == ownerID,
+                      self.isAuditingContinuity else { return }
+                self.continuityAuditExpirationOwnerID = ownerID
+                self.continuityAuditFailureStorage = NovelContinuityAuditFailure(
+                    target: target,
+                    message: "后台执行时间已结束，请重新检查。"
+                )
+                self.continuityAuditTask?.cancel()
+            }
+        }
+        BackgroundGenerationKeepAlive.shared.begin(
+            leaseID,
+            title: "Amber 小说创作中",
+            subtitle: "剧情矛盾检查",
+            onExpire: expire,
+            onSystemTaskExpiration: expire
+        )
     }
 
     private func startAutomaticStateSync(_ target: NovelAutomaticStateSyncTarget) {
@@ -2432,7 +2609,9 @@ final class NovelCreationViewModel {
             } catch {
                 guard !Task.isCancelled,
                       !userSuppressedStateSyncTargets.contains(target) else { return }
-                let message = "自动剧情同步准备失败：\(errorDescription(error))"
+                let message = NovelPresentation.stateSyncFailureMessage(
+                    errorDescription(error)
+                )
                 automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
                     target: target,
                     message: message

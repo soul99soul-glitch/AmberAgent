@@ -171,6 +171,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
         let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
         let appShell = try source("iosApp/AppShell.swift")
+        let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
 
         XCTAssertTrue(workspace.contains(".onDisappear"))
         XCTAssertTrue(workspace.contains("sessionViewModel.detachConsumer()"))
@@ -186,6 +187,97 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(appShell.contains("waitForBackgroundGeneration"))
         XCTAssertTrue(appShell.contains("interruptSessionForBackground"))
         XCTAssertTrue(appShell.contains("novelLifecycleCoordinator.enterForeground()"))
+        XCTAssertTrue(viewModel.contains("UIApplication.shared.applicationState == .active"))
+        XCTAssertTrue(viewModel.contains("await creation.resumeDetachedGenerationRuns()"))
+    }
+
+    func testNovelGenerationOwnsTheSystemLeaseFromRuntimeStartToTerminal() throws {
+        let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
+        let lifecycle = try source("iosApp/NovelCreation/NovelGenerationLifecycle.swift")
+        let workspaceLifecycle = try source(
+            "iosApp/NovelCreation/NovelWorkspaceLifecycleCoordinator.swift"
+        )
+
+        XCTAssertTrue(viewModel.contains("BackgroundGenerationKeepAlive.shared.begin"))
+        XCTAssertTrue(viewModel.contains("onSystemTaskExpiration:"))
+        XCTAssertTrue(viewModel.contains("beginBackgroundGeneration(for: request)"))
+        XCTAssertTrue(viewModel.contains("return try await creation.start(request)"))
+        let sessionStart = try XCTUnwrap(viewModel.range(of: "func startSessionRun("))
+        let sessionStartBody = viewModel[sessionStart.lowerBound..<viewModel.endIndex]
+        let beginOffset = try XCTUnwrap(sessionStartBody.range(
+            of: "beginBackgroundGeneration(for: request)"
+        ))
+        let firstAwaitOffset = try XCTUnwrap(sessionStartBody.range(of: "try await creation.start"))
+        XCTAssertLessThan(
+            beginOffset.lowerBound,
+            firstAwaitOffset.lowerBound,
+            "The lease must be submitted before the first suspension in the start entry."
+        )
+        XCTAssertTrue(lifecycle.contains("BackgroundGenerationKeepAlive.shared.end"))
+        XCTAssertTrue(workspaceLifecycle.contains("hasProtectedGenerationLease"))
+
+        let replayStart = try XCTUnwrap(lifecycle.range(of: "func replayOrObserve("))
+        let replayEnd = try XCTUnwrap(lifecycle.range(
+            of: "\n    func makeRuntimeAndStream(",
+            range: replayStart.upperBound..<lifecycle.endIndex
+        ))
+        let replay = lifecycle[replayStart.lowerBound..<replayEnd.lowerBound]
+        XCTAssertTrue(replay.contains(") async throws -> NovelRun?"))
+        let replayTerminal = try XCTUnwrap(replay.range(of: "yieldReplayTerminal("))
+        let replayEndLease = try XCTUnwrap(replay.range(
+            of: "await endBackgroundLease(for: run.id)",
+            range: replayTerminal.upperBound..<replay.endIndex
+        ))
+        let replayReturn = try XCTUnwrap(replay.range(
+            of: "return NovelRun(id: run.id, events: pair.stream)",
+            range: replayEndLease.upperBound..<replay.endIndex
+        ))
+        XCTAssertLessThan(
+            replayEndLease.lowerBound,
+            replayReturn.lowerBound,
+            "A terminal idempotency replay must release its per-run lease before returning."
+        )
+    }
+
+    func testScenePhaseCycleDoesNotCompeteWithAnActiveNovelGenerationLease() async {
+        var beginCount = 0
+        let coordinator = NovelWorkspaceLifecycleCoordinator(
+            beginKeepAlive: { _, _ in beginCount += 1 },
+            hasProtectedGenerationLease: { true }
+        )
+
+        coordinator.enterBackground(
+            waitForCompletion: {},
+            interrupt: { _ in }
+        )
+        await Task.yield()
+
+        XCTAssertEqual(beginCount, 0)
+    }
+
+    func testLateProtectedLeaseSupersedesTheLegacySceneCycleBeforeExpiration() async {
+        var expirationHandler: (() -> Void)?
+        var protectedLeaseIsActive = false
+        var endedLeaseIds: [String] = []
+        var interruptionCount = 0
+        let completionGate = NovelWorkspaceLifecycleTestGate()
+        let coordinator = NovelWorkspaceLifecycleCoordinator(
+            beginKeepAlive: { _, onExpire in expirationHandler = onExpire },
+            endKeepAlive: { endedLeaseIds.append($0) },
+            hasProtectedGenerationLease: { protectedLeaseIsActive }
+        )
+
+        coordinator.enterBackground(
+            waitForCompletion: { await completionGate.wait() },
+            interrupt: { _ in interruptionCount += 1 }
+        )
+        protectedLeaseIsActive = true
+        expirationHandler?()
+
+        let didEndLegacyLease = await eventually { endedLeaseIds.count == 1 }
+        XCTAssertTrue(didEndLegacyLease)
+        XCTAssertEqual(interruptionCount, 0)
+        await completionGate.open()
     }
 
     func testNovelCreationUsesNativePushNavigationAndChatKeyboardDismissal() throws {

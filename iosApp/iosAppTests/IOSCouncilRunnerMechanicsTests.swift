@@ -23,7 +23,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertTrue(shell.contains("@State private var councilChatViewModel: CouncilChatViewModel"))
         XCTAssertTrue(shell.contains("councilChatViewModel: councilChatViewModel"))
         XCTAssertTrue(shell.contains("councilChatViewModel.runtimeWillEnterBackground()"))
-        XCTAssertTrue(shell.contains("councilChatViewModel.runtimeDidBecomeActive()"))
+        XCTAssertFalse(shell.contains("councilChatViewModel.runtimeDidBecomeActive()"))
         XCTAssertEqual(
             shell.components(separatedBy: "viewModel: councilChatViewModel").count - 1,
             1,
@@ -1132,7 +1132,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(task.metadata["room_mode"], IOSCouncilRoomRunMode.freeChat.rawValue)
     }
 
-    func testRoomRunnerDoesNotInventAnAskUserQuestion() async {
+    func testRoomRunnerUsesOnlyTheConfiguredCouncilStages() async {
         let runner = IOSCouncilRoomRunner(
             streamer: ScriptedCouncilStreamer([
                 .success("最终议题"),
@@ -1143,24 +1143,15 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             researcher: StaticCouncilResearcher(),
             taskStore: IOSAdvancedTaskStore(userDefaults: isolatedDefaults(), storageKey: "tasks")
         )
-        var askedQuestions: [String] = []
 
         let outcome = await runner.run(
             request: roomRequest(
                 settings: compactRoomSettings(defaultRounds: 1),
                 researchConsent: .unavailable
-            ),
-            onAskUser: { question in
-                askedQuestions.append(question)
-                return nil
-            }
+            )
         )
 
         XCTAssertEqual(outcome.status, .completed)
-        XCTAssertTrue(
-            askedQuestions.isEmpty,
-            "The runtime must only pause for a concrete model-authored question, never a generic UI instruction."
-        )
     }
 
     func testRoomRunnerTimeoutMeasuresLackOfOutputInsteadOfTotalGenerationTime() async {
@@ -1474,15 +1465,123 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
 
         let firstRun = Task { await runner.run(request: request) }
         await fulfillment(of: [firstStreamStarted], timeout: 1)
+        let firstTaskID = try XCTUnwrap(taskStore.recent(kind: .modelCouncil, limit: 1).first?.id)
         runner.cancel()
 
-        let replacement = await runner.run(request: request)
         let cancelled = await firstRun.value
+        // A late terminal callback from the cancelled owner must not mutate its
+        // task after cancel has cleared the runner's active task identity.
+        runner.markActiveTaskTerminal(
+            status: .interrupted,
+            summary: "不应改写旧轮",
+            retryable: true
+        )
+        let replacement = await runner.run(request: request)
 
         XCTAssertEqual(cancelled.status, .cancelled)
         XCTAssertEqual(replacement.status, .completed)
+        XCTAssertEqual(
+            taskStore.tasks.first(where: { $0.id == firstTaskID })?.status,
+            .cancelled,
+            "The cancelled run must remain terminal after a late callback."
+        )
         XCTAssertEqual(streamer.callCount, 5)
         XCTAssertEqual(streamer.cancelCount, 1)
+    }
+
+    func testExplicitContinuationCancelRemainsCancelledInTaskLedger() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let baseTask = taskStore.startTask(
+            kind: .modelCouncil,
+            title: "既有议会",
+            objective: "原始议题"
+        )
+        _ = taskStore.updateTask(id: baseTask.id, status: .completed, resultSummary: "既有结论")
+        let firstStreamStarted = expectation(description: "continuation stream started")
+        let runner = IOSCouncilRoomRunner(
+            streamer: RestartableCouncilStreamer(firstStreamStarted: firstStreamStarted),
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+        var request = roomRequest(
+            settings: compactRoomSettings(defaultRounds: 1),
+            researchConsent: .unavailable
+        )
+        request.continuation = IOSCouncilRoomContinuation(
+            taskId: baseTask.id,
+            originalObjective: "原始议题",
+            finalTopic: "既有最终议题",
+            priorTranscript: "[主持人] 既有结论",
+            speakers: [
+                IOSCouncilRoomSpeaker(
+                    id: "host",
+                    name: "主持人",
+                    rolePrompt: "主持与综合",
+                    modelId: "gpt-host",
+                    reasoning: .off,
+                    prompt: "",
+                    isHost: true
+                ),
+                roomSpeaker(id: "engineering", name: "工程", modelId: "gpt-main"),
+                roomSpeaker(id: "risk", name: "风险", modelId: "gpt-main")
+            ],
+            nextRound: 2
+        )
+
+        // Before the continuation runner creates its task, the reused task ID
+        // still belongs to the completed prior round and must not be cancelled.
+        runner.markActiveTaskTerminal(
+            taskId: baseTask.id,
+            status: .cancelled,
+            summary: "不应改写上一轮",
+            retryable: true
+        )
+        XCTAssertEqual(taskStore.tasks.first(where: { $0.id == baseTask.id })?.status, .completed)
+
+        let run = Task { await runner.run(request: request) }
+        await fulfillment(of: [firstStreamStarted], timeout: 1)
+        runner.markActiveTaskTerminal(
+            taskId: baseTask.id,
+            status: .cancelled,
+            summary: "本轮议会已停止。",
+            retryable: true
+        )
+        runner.cancel()
+
+        let summary = await run.value
+        XCTAssertEqual(summary.status, .cancelled)
+        XCTAssertEqual(
+            taskStore.tasks.first(where: { $0.id == baseTask.id })?.status,
+            .cancelled,
+            "An explicit continuation cancel must not be rewritten as completed by the catch path."
+        )
+    }
+
+    func testRunnerKeepsPersistedTerminalStatusAvailableAfterRunReturns() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let runner = IOSCouncilRoomRunner(
+            streamer: ScriptedCouncilStreamer([
+                .success("最终议题"),
+                .success("工程发言"),
+                .success("风险发言"),
+                .success("主持总结")
+            ]),
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+
+        let summary = await runner.run(
+            request: roomRequest(
+                settings: compactRoomSettings(defaultRounds: 1),
+                researchConsent: .unavailable
+            )
+        )
+
+        XCTAssertEqual(summary.status, .completed)
+        XCTAssertEqual(runner.taskStatus(taskId: summary.taskId), .completed)
+        XCTAssertNil(runner.taskStatus(taskId: "missing-task"))
     }
 
     func testViewModelCancelClosesStreamingTailAndRejectsOldRunEventsAfterRestart() async throws {
@@ -1555,9 +1654,6 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         viewModel.inputText = "第二轮"
         viewModel.send()
         for _ in 0..<200 where viewModel.isRunning {
-            if viewModel.pendingAskUser != nil {
-                viewModel.skipAskUser()
-            }
             try await Task.sleep(nanoseconds: 5_000_000)
         }
 
@@ -1570,7 +1666,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(viewModel.messages.last(where: { $0.kind == .host })?.body, "主持总结")
     }
 
-    func testDetachedCouncilRuntimeSkipsMandatoryAskAndFinishesInBackground() async throws {
+    func testDetachedCouncilRuntimeFinishesWithoutCancellingTheOwner() async throws {
         let streamer = ScriptedCouncilStreamer([
             .success("最终议题"),
             .success("工程发言"),
@@ -1579,7 +1675,6 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         ])
         let harness = try makeViewModelHarness(streamer: streamer)
 
-        harness.viewModel.runtimeDidAppear()
         harness.viewModel.inputText = "离页后继续完成"
         harness.viewModel.send()
         harness.viewModel.runtimeDidDisappear()
@@ -1589,8 +1684,107 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         }
 
         XCTAssertFalse(harness.viewModel.isRunning)
-        XCTAssertNil(harness.viewModel.pendingAskUser)
         XCTAssertEqual(harness.viewModel.messages.last(where: { $0.kind == .host })?.body, "主持总结")
+    }
+
+    func testSubmittedCouncilInputIsPersistedBeforeRunnerTaskStarts() throws {
+        let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([]))
+
+        harness.viewModel.inputText = "进程启动前也要保留的议题"
+        harness.viewModel.send()
+
+        let transcript = try XCTUnwrap(CouncilTranscriptStore.load(defaults: harness.defaults))
+        XCTAssertEqual(transcript.messages.last?.body, "进程启动前也要保留的议题")
+        XCTAssertTrue(transcript.messages.last?.kind == CouncilMessageKind.user.rawKey)
+
+        // Avoid leaving the test-owned foreground task alive after the synchronous assertion.
+        harness.viewModel.cancelDiscussion()
+    }
+
+    func testCouncilBackgroundContractStartsKeepAliveWithTheForegroundRunWithoutAnUnreachableAskUserSurface() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let runtime = try String(
+            contentsOf: testDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            runtime.contains("beginBackgroundKeepAlive(for: discussionID)"),
+            "Council must submit continued processing when the foreground run starts."
+        )
+        XCTAssertTrue(
+            runtime.contains("private func keepAliveLeaseId(for discussionID: UUID)"),
+            "The system task must be bound to this discussion round, not a fixed Council lease."
+        )
+        XCTAssertTrue(
+            runtime.contains("BackgroundGenerationKeepAlive.shared.updateProgress"),
+            "Council must report real generation phases to continued processing."
+        )
+        XCTAssertTrue(
+            runtime.contains("runner.markActiveTaskTerminal"),
+            "Expiration and cancellation must close the task ledger as a retryable terminal."
+        )
+        XCTAssertFalse(
+            runtime.contains("skipAskUser"),
+            "Council no longer exposes an unreachable ask_user pause surface."
+        )
+        XCTAssertFalse(
+            runtime.contains("submitAskUserAnswer"),
+            "Council no longer exposes an unreachable ask_user resume surface."
+        )
+        XCTAssertFalse(runtime.contains("pendingAskUser"))
+        XCTAssertFalse(runtime.contains("onAskUser"))
+    }
+
+    func testCouncilExpirationCheckpointsBeforeReleasingItsBackgroundLease() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let runtime = try String(
+            contentsOf: testDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
+            encoding: .utf8
+        )
+        guard let stopStart = runtime.range(of: "private func stopAndCheckpointActiveDiscussion("),
+              let stopEnd = runtime.range(of: "\n    private func stopActiveDiscussion", range: stopStart.upperBound..<runtime.endIndex) else {
+            return XCTFail("Expected the Council terminal checkpoint path")
+        }
+        let stopSource = String(runtime[stopStart.lowerBound..<stopEnd.lowerBound])
+        let stopOffset = { (needle: String) -> String.Index? in stopSource.range(of: needle)?.lowerBound }
+
+        guard let cancelOffset = stopOffset("stopActiveDiscussion(releaseBackgroundLease: false)"),
+              let persistOffset = stopOffset("persistTranscript()"),
+              let archiveOffset = stopOffset("archiveCurrentRoom()"),
+              let releaseOffset = stopOffset("endBackgroundKeepAlive(for: discussionID)") else {
+            return XCTFail("Expected cancel, checkpoint, and lease release in one terminal path")
+        }
+        XCTAssertLessThan(cancelOffset, persistOffset)
+        XCTAssertLessThan(persistOffset, archiveOffset)
+        XCTAssertLessThan(archiveOffset, releaseOffset)
+    }
+
+    func testSpeakingPartialTailIsCheckpointedByTheExistingThrottle() async throws {
+        let partialPublished = expectation(description: "partial seat tail published")
+        let streamer = DelayedPartialCouncilStreamer(partialPublished: partialPublished)
+        let harness = try makeViewModelHarness(streamer: streamer)
+
+        harness.viewModel.inputText = "中途发言也要保留"
+        harness.viewModel.send()
+        await fulfillment(of: [partialPublished], timeout: 2)
+        try await Task.sleep(nanoseconds: 350_000_000)
+        await harness.archiveStore.flushDeferred()
+
+        let taskID = try XCTUnwrap(
+            harness.taskStore.recent(kind: .modelCouncil, limit: 1).first?.id
+        )
+        let archive = try XCTUnwrap(harness.archiveStore.load(taskId: taskID))
+        XCTAssertTrue(
+            archive.messages.contains { $0.body == DelayedPartialCouncilStreamer.partialTail },
+            "A speaking update must reach the existing throttled archive checkpoint."
+        )
+
+        harness.viewModel.cancelDiscussion()
     }
 
     func testSecondSendContinuesCurrentCouncilAsFollowUpRound() async throws {
@@ -2231,7 +2425,8 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         viewModel: CouncilChatViewModel,
         archiveStore: CouncilRoomArchiveStore,
         taskStore: IOSAdvancedTaskStore,
-        sharedSettings: IOSSharedSettingsStore
+        sharedSettings: IOSSharedSettingsStore,
+        defaults: UserDefaults
     ) {
         let defaults = isolatedDefaults()
         let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
@@ -2286,7 +2481,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             transcriptDefaults: defaults,
             archiveStore: archiveStore
         )
-        return (viewModel, archiveStore, taskStore, sharedSettings)
+        return (viewModel, archiveStore, taskStore, sharedSettings, defaults)
     }
 
     private func isolatedDefaults() -> UserDefaults {
@@ -2429,6 +2624,49 @@ private final class ProgressingFinalCouncilStreamer: IOSCouncilTextStreaming {
         onUpdate("第一段第二段")
         try await Task.sleep(nanoseconds: 100_000_000)
         return "第一段第二段"
+    }
+
+    func cancel() {}
+}
+
+@MainActor
+private final class DelayedPartialCouncilStreamer: IOSCouncilTextStreaming {
+    static let partialTail = "工程发言已生成到这里。"
+    private let partialPublished: XCTestExpectation
+    private var callCount = 0
+
+    init(partialPublished: XCTestExpectation) {
+        self.partialPublished = partialPublished
+    }
+
+    func streamText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onUpdate: @escaping @MainActor (String) -> Void
+    ) async throws -> String {
+        callCount += 1
+        switch callCount {
+        case 1:
+            onUpdate("最终议题")
+            return "最终议题"
+        case 2:
+            // Let the placeholder's first checkpoint land, then publish a speaking
+            // tail and hold long enough for a second throttled checkpoint.
+            try await Task.sleep(nanoseconds: 450_000_000)
+            onUpdate(Self.partialTail)
+            partialPublished.fulfill()
+            try await Task.sleep(nanoseconds: 450_000_000)
+            return Self.partialTail
+        case 3:
+            onUpdate("风险发言")
+            return "风险发言"
+        case 4:
+            onUpdate("主持总结")
+            return "主持总结"
+        default:
+            throw CouncilTestError.unexpectedCall
+        }
     }
 
     func cancel() {}

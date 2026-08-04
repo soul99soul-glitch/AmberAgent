@@ -26,6 +26,7 @@ struct AppShell: View {
     @State private var pendingAgentActivityTarget: AgentActivityDeepLink.Target?
     @State private var didBootstrapConversations = false
     @State private var didRunStartupRecovery = false
+    @State private var didFinalizeStaleBackgroundJobs = false
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.system.rawValue
 
@@ -192,6 +193,10 @@ struct AppShell: View {
                 // 冷启动路径：收口旧版本遗留的自动恢复记录，避免用户已经停止的
                 // 系统后台活动在升级后再次启动。
                 IOSChatBackgroundGenerationCoordinator.shared.finalizeSuspendedRunsIfNeeded()
+                finalizeStaleBackgroundJobsIfNeeded()
+                if scenePhase == .active, let novelCreationViewModel {
+                    await novelCreationViewModel.resumeDetachedBackgroundGeneration()
+                }
             } else {
                 await conversationStore.bootstrap()
                 didBootstrapConversations = true
@@ -232,14 +237,28 @@ struct AppShell: View {
                 }
             )
         case .active:
-            councilChatViewModel.runtimeDidBecomeActive()
             novelLifecycleCoordinator.enterForeground()
+            if let novelCreationViewModel {
+                Task {
+                    await novelCreationViewModel.resumeDetachedBackgroundGeneration()
+                }
+            }
             IOSChatBackgroundGenerationCoordinator.shared.finalizeSuspendedRunsIfNeeded()
+            finalizeStaleBackgroundJobsIfNeeded()
         case .inactive:
             break
         @unknown default:
             break
         }
+    }
+
+    /// App Switcher 强制关闭不会触发 continued-processing 的到期回调。
+    /// 只在本进程首次进入前台时扫一次；系统为真实后台任务唤起 App 时
+    /// scene 仍在 background，不会被这里误判成 stale。
+    private func finalizeStaleBackgroundJobsIfNeeded() {
+        guard scenePhase == .active, !didFinalizeStaleBackgroundJobs else { return }
+        didFinalizeStaleBackgroundJobs = true
+        IOSChatBackgroundGenerationCoordinator.shared.finalizeStalePersistedJobsIfNeeded()
     }
 
     private func enqueueAgentActivityURL(_ url: URL) {

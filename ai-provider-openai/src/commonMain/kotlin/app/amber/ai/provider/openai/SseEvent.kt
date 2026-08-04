@@ -25,8 +25,8 @@ import kotlinx.serialization.json.contentOrNull
  * Represents events in an SSE connection.
  *
  * Adapted from `common/src/main/java/app/amber/common/http/SSE.kt` for the KMP
- * OpenAI provider. Error handling is simplified — the HTTP status/body is left
- * on the original Ktor exception rather than being enriched here.
+ * OpenAI provider. HTTP failures carry a typed status so callers can distinguish
+ * them from a transport interruption.
  */
 sealed class SseEvent {
     data object Open : SseEvent()
@@ -36,6 +36,26 @@ sealed class SseEvent {
     data object Closed : SseEvent()
 
     data class Failure(val throwable: Throwable?) : SseEvent()
+}
+
+/** HTTP failures are not transport interruptions and must not be retried as a disconnect. */
+internal class OpenAISseHttpFailure(
+    val statusCode: Int,
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)
+
+internal fun openAISseHttpFailure(
+    statusCode: Int,
+    body: String,
+    cause: Throwable? = null,
+): OpenAISseHttpFailure {
+    val detail = if (body.isBlank()) {
+        "HTTP $statusCode"
+    } else {
+        "HTTP $statusCode: ${body.take(1200)}"
+    }
+    return OpenAISseHttpFailure(statusCode, detail, cause)
 }
 
 /**
@@ -220,7 +240,9 @@ private class Utf8LineBuffer {
  *
  * Ktor's SSE plugin is flaky with Darwin in this app: successful HTTP 200
  * streams can be surfaced as SSEClientException with a buffered body, which
- * destroys real-time streaming. Read the response channel directly instead.
+ * destroys real-time streaming. Read the response channel directly instead;
+ * non-success responses retain a typed status so callers can distinguish them
+ * from a transport interruption.
  */
 fun HttpClient.sseFlow(
     url: String,
@@ -234,12 +256,7 @@ fun HttpClient.sseFlow(
         }.execute { response ->
             if (!response.status.isSuccess()) {
                 val body = runCatching { response.bodyAsText() }.getOrDefault("")
-                val detail = if (body.isBlank()) {
-                    "HTTP ${response.status.value}"
-                } else {
-                    "HTTP ${response.status.value}: ${body.take(1200)}"
-                }
-                send(SseEvent.Failure(Exception(detail)))
+                send(SseEvent.Failure(openAISseHttpFailure(response.status.value, body)))
                 return@execute
             }
 
@@ -256,8 +273,7 @@ fun HttpClient.sseFlow(
     } catch (e: ResponseException) {
         val status = e.response.status.value
         val body = runCatching { e.response.bodyAsText() }.getOrDefault("")
-        val detail = if (body.isBlank()) "HTTP $status" else "HTTP $status: ${body.take(1200)}"
-        send(SseEvent.Failure(Exception(detail, e)))
+        send(SseEvent.Failure(openAISseHttpFailure(status, body, e)))
         close()
         return@callbackFlow
     } catch (e: Exception) {

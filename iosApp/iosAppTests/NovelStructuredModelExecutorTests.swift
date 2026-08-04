@@ -92,6 +92,69 @@ final class NovelStructuredModelExecutorTests: XCTestCase {
         _ = await executionTask.result
     }
 
+    func testReasoningActivityRefreshesHeartbeatWithoutEnteringStructuredJSON() async throws {
+        let archiveJSON = """
+        {"schemaVersion":1,"decisions":[{"topic":"既定方案","decision":"继续沿用。","relatedMaterialID":null}],"summary":"继续沿用既定方案。"}
+        """
+        let adapter = makeAdapter(scripts: [NovelModelScript(steps: [
+            .activity,
+            .pause,
+            .activity,
+            .pause,
+            .delta(archiveJSON),
+            .complete,
+        ])])
+        let executor = NovelStructuredModelExecutor(modelRunner: adapter)
+        let runID = NovelRunID()
+        let executionTask = Task {
+            try await executor.executeWithEvidence(.init(
+                runID: runID,
+                modelPolicy: .global,
+                task: .discussionArchive(discussion: "用户：继续沿用既定方案。")
+            ), noOutputTimeout: 0.2)
+        }
+
+        try await Task.sleep(nanoseconds: 120_000_000)
+        await adapter.resume(runID: runID)
+        try await Task.sleep(nanoseconds: 120_000_000)
+        await adapter.resume(runID: runID)
+
+        let execution = try await executionTask.value
+        guard case .discussionArchive(let archive) = execution.output else {
+            return XCTFail("Expected a discussion archive")
+        }
+        XCTAssertEqual(archive.summary, "继续沿用既定方案。")
+    }
+
+    func testStructuredCancellationUsesTaskNeutralChineseMessage() async throws {
+        let adapter = makeAdapter(scripts: [NovelModelScript(steps: [.pause])])
+        let executor = NovelStructuredModelExecutor(modelRunner: adapter)
+        let runID = NovelRunID()
+        let executionTask = Task {
+            try await executor.executeWithEvidence(.init(
+                runID: runID,
+                modelPolicy: .global,
+                task: .continuityAudit(priorFindings: "", manuscript: "第一章正文")
+            ), noOutputTimeout: 5)
+        }
+        for _ in 0..<100 {
+            if await adapter.requests.count == 1 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let requestCount = await adapter.requests.count
+        XCTAssertEqual(requestCount, 1)
+
+        executionTask.cancel()
+
+        do {
+            _ = try await executionTask.value
+            XCTFail("Expected cancellation")
+        } catch let failure as NovelStructuredModelExecutionFailure {
+            XCTAssertEqual(failure.failure.code, "cancelled")
+            XCTAssertEqual(failure.failure.message, "模型任务已取消，可以重试。")
+        }
+    }
+
     func testStateDeltaRunsVersionedPromptThroughProviderAndStrictDecoder() async throws {
         let adapter = makeAdapter(scripts: [NovelModelScript(steps: [
             .delta(String(validStateDelta.prefix(80))),

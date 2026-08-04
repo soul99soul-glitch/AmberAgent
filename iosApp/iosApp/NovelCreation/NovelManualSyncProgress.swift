@@ -435,6 +435,7 @@ enum NovelManualSyncProgressReducer {
             pending: pending,
             selection: selection,
             preparation: preparation,
+            identityClarifications: input.baseStateSnapshot.characterIdentityClarifications,
             document: document
         )
 
@@ -648,6 +649,7 @@ enum NovelManualSyncProgressReducer {
         pending: NovelPendingOperationRecord,
         selection: NovelManualSyncChunkSelection,
         preparation: NovelStructuredModelPreparation,
+        identityClarifications: [NovelCharacterIdentityClarificationRecord],
         document: NovelProjectDocumentV1
     ) throws {
         let injection = artifacts.injectionReceipt
@@ -678,9 +680,13 @@ enum NovelManualSyncProgressReducer {
             }
             return nil
         }
+        let expectedProjectedStateContent = NovelInjectionPlanner.pendingStateContent(
+            selection.projectedStateContext,
+            identityClarifications: identityClarifications
+        )
         guard userInputHashes == [NovelDocumentValidator.sha256(selection.modelInput)],
               projectedStateHashes == [
-                NovelDocumentValidator.sha256(selection.projectedStateContext)
+                NovelDocumentValidator.sha256(expectedProjectedStateContent)
               ] else {
             throw NovelError.invalidInput("Manual-sync receipt input evidence is incomplete.")
         }
@@ -810,8 +816,16 @@ enum NovelManualSyncProgressValidator {
                 baseState: input.baseStateSnapshot,
                 accumulated: accumulated
             )
+            let projectedReceiptContent = projected.map {
+                NovelInjectionPlanner.pendingStateContent(
+                    $0,
+                    identityClarifications: input.baseStateSnapshot.characterIdentityClarifications
+                )
+            }
             if userHashes != [chunk.modelInputSHA256] ||
-                projectedHashes != projected.map({ [NovelDocumentValidator.sha256($0)] }) {
+                projectedHashes != projectedReceiptContent.map({
+                    [NovelDocumentValidator.sha256($0)]
+                }) {
                 issues.append("Pending manual synchronization \(pending.id) has mismatched chunk input receipts.")
             }
             let hasAttemptEvidence = chunk.attemptOperationID == pending.operationID ||

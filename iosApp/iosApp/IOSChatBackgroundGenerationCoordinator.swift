@@ -490,11 +490,14 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         guard !registeredRequestIds.contains(requestId) else { return true }
 
-        let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: requestId, using: nil) { task in
+        let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: requestId, using: nil) { @MainActor [weak self] task in
             guard let task = task as? BGContinuedProcessingTask else {
                 task.setTaskCompleted(success: false)
                 return
             }
+            // queue=nil 走主队列；在把工作排进 async handler 前先登记，冷启动
+            // sweep 才不会把刚被系统唤起的 request 当成 stale。
+            self?.activeBackgroundTasks[task.identifier] = task
             Task { @MainActor in
                 await IOSChatBackgroundGenerationCoordinator.shared.handle(task)
             }
@@ -552,6 +555,10 @@ final class IOSChatBackgroundGenerationCoordinator {
 
     private func handle(_ backgroundTask: BGContinuedProcessingTask) async {
         let mappedRunId = taskMap()[backgroundTask.identifier]
+        // 先标记“系统已经把这一轮交回来了”，再做 payload 解码。冷启动扫尾
+        // 可能和 handler 同时被调度；只要 handler 已经到达这里，就不能把它误判
+        // 成 App Switcher 强杀留下的 stale request。
+        activeBackgroundTasks[backgroundTask.identifier] = backgroundTask
         guard let job = job(for: backgroundTask.identifier) else {
             backgroundTask.updateTitle("Amber 后台生成", subtitle: "无法恢复任务")
             if let mappedRunId {
@@ -569,7 +576,6 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         let runState = activeRunStates[backgroundTask.identifier] ?? IOSChatBackgroundRunState()
         activeRunStates[backgroundTask.identifier] = runState
-        activeBackgroundTasks[backgroundTask.identifier] = backgroundTask
         if let suspended = suspensionStore?.load(requestId: backgroundTask.identifier) {
             suspensionStore?.remove(requestId: backgroundTask.identifier)
             await persistExpirationFailure(
@@ -596,25 +602,37 @@ final class IOSChatBackgroundGenerationCoordinator {
             conversationId: job.conversationId.toHexDashString()
         )
         backgroundTask.expirationHandler = { [weak self] in
-            guard let self else { return }
-            Task { @MainActor in
-                let claim = runState.expireAndReserveTerminal()
-                if claim == .rejected {
-                    guard runState.terminalWasFinalized(by: .completion),
-                          runState.claimSystemTaskCompletion() else { return }
+            guard let self else {
+                backgroundTask.setTaskCompleted(success: false)
+                return
+            }
+
+            // `expirationHandler` is the last synchronous callback before iOS may
+            // terminate the process. Reserve the terminal owner and claim the
+            // system task here, before hopping to MainActor for persistence/UI
+            // cleanup. Waiting for the hop can leave BGTask uncompleted at the
+            // deadline, especially while the app is suspended.
+            let claim = runState.expireAndReserveTerminal()
+            if claim == .rejected {
+                guard runState.terminalWasFinalized(by: .completion),
+                      runState.claimSystemTaskCompletion() else { return }
+                backgroundTask.setTaskCompleted(success: false)
+                Task { @MainActor in
                     self.finish(requestId: backgroundTask.identifier)
-                    backgroundTask.setTaskCompleted(success: false)
-                    return
                 }
+                return
+            }
+            guard runState.claimSystemTaskCompletion() else { return }
+            backgroundTask.setTaskCompleted(success: false)
+
+            Task { @MainActor in
                 guard runState.finalizeTerminal(as: .expiration) else { return }
-                guard runState.claimSystemTaskCompletion() else { return }
                 IOSBackgroundLifecycleLog.record(
                     "bgTaskExpired(claim=\(claim))",
                     detail: self.lifecycleSnapshotDetail
                 )
                 switch claim {
                 case .persistFailure:
-                    backgroundTask.setTaskCompleted(success: false)
                     await self.persistExpirationFailure(
                         job: job,
                         requestId: backgroundTask.identifier,
@@ -624,10 +642,9 @@ final class IOSChatBackgroundGenerationCoordinator {
                     self.finish(runId: job.runId, requestId: backgroundTask.identifier)
                 case .terminateInFlightSave:
                     // 会话写入已经开始，无法原子取消；由保存结果决定最终呈现，避免双终态。
-                    backgroundTask.setTaskCompleted(success: false)
+                    break
                 case .rejected:
                     self.finish(requestId: backgroundTask.identifier)
-                    backgroundTask.setTaskCompleted(success: false)
                 }
             }
         }
@@ -825,6 +842,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                     requestId: backgroundTask.identifier,
                     didSave: didSave,
                     singleToolFailureReason: singleToolFailureReason,
+                    guardStoppedNotice: guardStoppedNotice,
                     summary: watchSummary
                 )
             }
@@ -839,8 +857,12 @@ final class IOSChatBackgroundGenerationCoordinator {
             )
             return
         }
-        let succeeded = singleToolFailureReason == nil && guardStoppedNotice == nil
-        let runStatus = guardStoppedNotice != nil ? "guard_stopped" : (succeeded ? "completed" : "failed")
+        let runStatus = Self.backgroundTerminalStatus(
+            didSave: didSave,
+            singleToolFailureReason: singleToolFailureReason,
+            guardStopped: guardStoppedNotice != nil
+        )
+        let succeeded = runStatus == "completed"
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
@@ -1095,6 +1117,62 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
     }
 
+    /// 冷启动时收口 App Switcher 强杀留下的后台 request。
+    ///
+    /// `BGContinuedProcessingTask` 被用户上划关闭时，系统不会调用应用的
+    /// expiration handler；因此 payload 和 task map 会停在“running”。这个入口
+    /// 只清理没有正在执行 handler 的持久化 request，不重新提交模型请求。调用方
+    /// 应在普通 UI 冷启动完成后调用；实际已被系统唤起的 handler 会先登记到
+    /// `activeBackgroundTasks`，从而保留给 `handle` 继续处理。重复调用是幂等的。
+    func finalizeStalePersistedJobsIfNeeded() {
+        let persisted = taskMap()
+        guard !persisted.isEmpty else { return }
+
+        IOSBackgroundLifecycleLog.record(
+            "staleBackgroundSweep(pending=\(persisted.count))",
+            detail: lifecycleSnapshotDetail
+        )
+        for (requestId, mappedRunId) in persisted {
+            guard activeBackgroundTasks[requestId] == nil else {
+                continue
+            }
+
+            // `.queue`/遗留 request 不会因应用被杀而自行消失；先撤掉它，防止
+            // 扫尾后系统又唤起一张已经被标记停止的后台卡。
+            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: requestId)
+
+            guard let job = job(for: requestId) else {
+                // payload 已不可恢复时，至少把 agent_run 从 running 收口；不留
+                // 一个下次启动仍会被当作后台 owner 的 map 条目。
+                finish(requestId: requestId)
+                let controller = dependencies?.liveActivityController ?? .shared
+                _ = controller.adoptExistingActivity(runId: mappedRunId)
+                Task { @MainActor in
+                    await controller.end(runId: mappedRunId, presentation: .failed())
+                    await self.markRunInterrupted(
+                        runId: mappedRunId,
+                        reason: "app_terminated"
+                    )
+                }
+                continue
+            }
+
+            // 先摘掉 task map、内存 job 和 payload，让重复扫尾及重新挂载 UI
+            // 都立即看见“已停止”；下面只用内存快照写一条可重试终态。
+            finish(runId: job.runId, requestId: requestId)
+            Task { @MainActor in
+                // 没有可重放的 cursor；把 handoff 快照收口为一次明确的可重试
+                // 失败。request owner 已在上面摘除，这里不创建新的后台提交。
+                await self.persistExpirationFailure(
+                    job: job,
+                    requestId: requestId,
+                    rawMessage: "后台生成已停止，可以重试。",
+                    partialAssistantText: nil
+                )
+            }
+        }
+    }
+
     private func persistExpirationFailure(
         job: IOSChatBackgroundRuntimeJob,
         requestId: String,
@@ -1146,16 +1224,22 @@ final class IOSChatBackgroundGenerationCoordinator {
         requestId: String,
         didSave: Bool,
         singleToolFailureReason: String?,
+        guardStoppedNotice: String?,
         summary: String?
     ) async {
-        let succeeded = didSave && singleToolFailureReason == nil
+        let runStatus = Self.backgroundTerminalStatus(
+            didSave: didSave,
+            singleToolFailureReason: singleToolFailureReason,
+            guardStopped: guardStoppedNotice != nil
+        )
+        let succeeded = runStatus == "completed"
         if didSave {
             removePayload(requestId: requestId)
         }
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: didSave ? (succeeded ? "completed" : "failed") : "recovery_pending",
+            status: runStatus,
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -1169,7 +1253,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             WatchTaskCoordinator.shared.publish(
                 runId: job.runId,
                 conversationId: job.conversationId.toHexDashString(),
-                presentation: .failed()
+                presentation: .failed(),
+                summary: guardStoppedNotice.flatMap { WatchTaskText.clipped($0, maxLength: 200) }
             )
         }
         await job.liveActivityController.end(
@@ -1390,6 +1475,16 @@ final class IOSChatBackgroundGenerationCoordinator {
         return WatchTaskText.clipped(text, maxLength: 280)
     }
 
+    private static func backgroundTerminalStatus(
+        didSave: Bool,
+        singleToolFailureReason: String?,
+        guardStopped: Bool
+    ) -> String {
+        guard didSave else { return "recovery_pending" }
+        if guardStopped { return "guard_stopped" }
+        return singleToolFailureReason == nil ? "completed" : "failed"
+    }
+
     private static func rehydratedParams(
         persistedParams: TextGenerationParams,
         providerSetting: ProviderSetting,
@@ -1519,6 +1614,18 @@ final class IOSChatBackgroundGenerationCoordinator {
 
     static func backgroundSummaryForTesting(messages: [UIMessage]) -> String? {
         backgroundSummary(from: messages)
+    }
+
+    static func backgroundTerminalStatusForTesting(
+        didSave: Bool,
+        singleToolFailureReason: String?,
+        guardStopped: Bool
+    ) -> String {
+        backgroundTerminalStatus(
+            didSave: didSave,
+            singleToolFailureReason: singleToolFailureReason,
+            guardStopped: guardStopped
+        )
     }
 
     static func failedMessagesForTesting(

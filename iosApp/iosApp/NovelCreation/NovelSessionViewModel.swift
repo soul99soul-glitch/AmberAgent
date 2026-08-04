@@ -1345,13 +1345,6 @@ final class NovelSessionViewModel {
         batchPolishTask?.cancel()
     }
 
-    func interruptBatchPolishForBackground() async {
-        guard let task = batchPolishTask else { return }
-        batchPolishCancellationReason = .background
-        task.cancel()
-        await task.value
-    }
-
     private func cancelBatchPolishForBindingChange(
         from expectedBinding: NovelSessionBinding?
     ) async {

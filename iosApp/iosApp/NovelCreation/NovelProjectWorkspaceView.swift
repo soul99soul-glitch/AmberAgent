@@ -134,9 +134,6 @@ struct NovelProjectWorkspaceView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background {
                 saveLoadedComposerDraft()
-                Task { @MainActor in
-                    await sessionViewModel.interruptBatchPolishForBackground()
-                }
                 return
             }
             guard phase == .active,

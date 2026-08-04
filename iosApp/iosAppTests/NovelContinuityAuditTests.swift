@@ -917,6 +917,10 @@ final class NovelContinuityAuditViewModelTests: XCTestCase {
         viewModel.startContinuityAudit()
         let auditStarted = await eventually { await runtime.hasStartedAudit }
         XCTAssertTrue(auditStarted)
+        let continuityLeaseID = BackgroundGenerationKeepAlive.shared.activeLeaseIds.first(where: {
+            $0.hasPrefix("novel-continuity-")
+        })
+        XCTAssertNotNil(continuityLeaseID)
         viewModel.cancelContinuityAudit()
         await runtime.resumeAudit(NovelContinuityAuditReport(
             projectID: fixture.project.id,
@@ -933,6 +937,9 @@ final class NovelContinuityAuditViewModelTests: XCTestCase {
         let auditStopped = await eventually { !viewModel.isContinuityOperationRunning }
         XCTAssertTrue(auditStopped)
         XCTAssertNil(viewModel.continuityAudit)
+        if let continuityLeaseID {
+            XCTAssertFalse(BackgroundGenerationKeepAlive.shared.holdsLease(continuityLeaseID))
+        }
     }
 
     func testContinuityFailureIsHiddenAfterSelectionMovesToAnotherProject() async throws {

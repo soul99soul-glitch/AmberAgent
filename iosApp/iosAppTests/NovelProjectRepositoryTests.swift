@@ -257,6 +257,61 @@ final class NovelProjectRepositoryTests: XCTestCase {
         XCTAssertEqual(remainingSidecars, [])
     }
 
+    func testRecoverySidecarPersistsCompleteResponsesCursorAndRejectsHalfCursor() async throws {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        let base = recovery(
+            projectID: NovelProjectID(),
+            runID: NovelRunID(),
+            sequence: 3,
+            content: "已保存正文"
+        )
+        let resumable = NovelRecoverySidecarV1(
+            schemaVersion: base.schemaVersion,
+            projectID: base.projectID,
+            runID: base.runID,
+            branchID: base.branchID,
+            sessionID: base.sessionID,
+            messageID: base.messageID,
+            baseProjectRevision: base.baseProjectRevision,
+            sequence: base.sequence,
+            partialContent: base.partialContent,
+            partialSHA256: base.partialSHA256,
+            updatedAt: base.updatedAt,
+            responseID: "resp_123",
+            responseSequenceNumber: 17
+        )
+
+        try await repository.writeRecoverySidecar(resumable)
+        let restored = try await NovelFileProjectRepository(rootDirectory: root)
+            .listRecoverySidecars()
+        XCTAssertEqual(restored, [resumable])
+
+        let incomplete = NovelRecoverySidecarV1(
+            schemaVersion: base.schemaVersion,
+            projectID: NovelProjectID(),
+            runID: NovelRunID(),
+            branchID: base.branchID,
+            sessionID: base.sessionID,
+            messageID: base.messageID,
+            baseProjectRevision: base.baseProjectRevision,
+            sequence: base.sequence,
+            partialContent: base.partialContent,
+            partialSHA256: base.partialSHA256,
+            updatedAt: base.updatedAt,
+            responseID: "resp_missing_sequence"
+        )
+        await NovelXCTAssertThrowsErrorAsync(
+            try await repository.writeRecoverySidecar(incomplete)
+        ) { error in
+            guard let novelError = error as? NovelError,
+                  case .invalidRecovery = novelError else {
+                return XCTFail("Expected invalidRecovery, got \(error)")
+            }
+        }
+    }
+
     func testRecoveryRejectsHashMismatchAndEqualSequenceConflict() async throws {
         let root = try NovelTestFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

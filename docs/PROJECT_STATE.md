@@ -9,7 +9,7 @@ Last updated: 2026-08-04
 - Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 2026-08-04 跨链复核与小说编辑/人物上下文修复已完成并纳入当前分支发布；开始新任务仍以实时 `git status` 和单文件 diff 为准。
+- Worktree: 2026-08-04 当前分支已包含 iOS 26 后台流式续跑第一阶段、第二阶段 Phase 2A、剧情同步收据/中文错误收口与同步后台韧性修复；是否存在后续未提交变更仍以实时 `git status` 和单文件 diff 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,37 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `NativeChatTimelineView`（native timeline；2026-07-30 退役 route 判定层后为唯一 Chat 列表路径）。`ChatSwiftUIMessageList` 与 UIKit `ChatCollectionMessageList` 已生产不可达（仅 `#if CHAT_PERF_REPLAY` 仍编译前者），不再代表默认 Chat 门禁；`ChatSwiftUIStreamReplayTests` 已改为直接挂载当前 Native timeline，`ChatStreamReplayTests` 仅保留非默认 UICollectionView 回归价值。
 
 ## Latest Completed Slices
+
+### 2026-08-04 剧情同步后台韧性与推理心跳收口
+
+- 手工/自动剧情同步和剧情矛盾检查现在从真实操作入口各自取得 `BGContinuedProcessingTask` 租约，而不是只依赖进入后台时创建的短 scenePhase 租约；正常完成、失败和取消沿原有 owner/defer 释放，系统到期分别进入既有可持久化 mutation 取消与 audit 取消路径。scenePhase 短租约到期前会重新检查保护租约，解决「进入后台后任务才刚启动」时旧回调误杀新任务的竞态，没有新增恢复队列或自动重试。
+- provider 仅返回 reasoning chunk 时，适配器发布不带正文的 activity 事件；结构化执行器只用它刷新连续无输出计时，不拼入 JSON，普通小说正文也不会把思考内容展示或持久化。剧情同步/连续性扫描因此不会在模型仍持续推理时被误判为卡死。确认无生产调用点的旧 `.stateDelta + absolute timeout` 私有事务函数保持不动，避免把修复扩到死代码。
+- 剧情同步展示边界不再透出纯英文或中英混合底层错误；已知格式/取消错误仍保留具体中文，其余统一为可重试中文。结构化模型取消文案改成任务中性的「模型任务已取消，可以重试。」，避免连续性检查等非归档任务显示错误业务名称。
+- iPhone 17 Pro / iOS 26.5 Simulator 上，`BackgroundGenerationKeepAliveTests`、小说 wiring/ViewModel/连续性/结构化执行器/live adapter/展示层/生成 lifecycle 与 parity 共 **326 passed / 0 failed / 0 skipped**（`/Users/mi/Library/Developer/Xcode/DerivedData/AmberAgent-gfeldsdglrkbjmebgswcebkbpeiy/Logs/Test/Test-iosApp-2026.08.04_20-35-09-+0800.xcresult`）；`:ai-provider-openai:jvmTest` 最终复跑 `BUILD SUCCESSFUL`，本轮相关 Swift 文件 `swiftc -frontend -parse` 与 `git diff --check` 通过。真实系统调度、到期回调和进度卡仍需真机后台停留验证。
+
+### 2026-08-04 剧情同步收据与中文错误收口
+
+- 人物身份说明加入 manual-sync 的 projected-state 注入后，收据生成会对追加了说明语义的完整 section 计算哈希，但首次 chunk 提交校验与持久化文档复核仍按旧的纯 projected state 计算，导致模型正常返回也稳定报 `Manual-sync receipt input evidence is incomplete.` 或 `mismatched chunk input receipts`。现由注入规划器提供唯一的 pending-state 内容构造，两个完整性校验点复用同一内容；没有放宽收据、事实证据或状态转换约束，也没有增加自动重试。
+- 剧情同步展示层继续保留已知格式错误、取消和中文业务错误的具体文案；其余内部英文统一显示「剧情状态同步失败，请重试。」，自动同步准备阶段也进入同一展示边界，不再把底层英文拼到 UI。人物身份确认仍是成功同步后可独立处理的剧情结果，不被当作失败或自动忽略。
+- 现有端到端同步用例修复前稳定红灯，完整修复后 `NovelFactTransactionLifecycleTests + NovelManualEditSyncTests + NovelInjectionPlannerTests + NovelCreationPresentationTests`，以及自动同步准备失败和人物说明注入两条定点，共 **96 passed / 0 failed / 0 skipped**（`/private/tmp/amber-sync-receipt-red/Logs/Test/Test-iosApp-2026.08.04_19-57-24-+0800.xcresult`）；相关 Swift 文件 parse 与 `git diff --check` 通过。最新混合工作区完成 iPhone Air Debug arm64 构建并通过 Xcode 嵌入签名校验，主 Debug dylib SHA-256 为 `534172bb8264d90daab1b1c57f58804d258d46b2d8e8536cca9975ee96c36a88`；20:01 已覆盖安装到 `A0B5596D-740B-442A-A0F6-D06359F2272E/iosApp.app`，自动启动仅因设备锁定被系统拒绝。原项目中的 retryable manual-sync 记录会保留，解锁后需在真机点击一次「重试同步」验证真实 provider 恢复。
+
+### 2026-08-04 iOS 26 后台流式续跑第二阶段 Phase 2A
+
+- 仅对官方 `https://api.openai.com` 且启用 Responses API 的小说正文、重新生成和单章润色启用服务端 background response；兼容服务商、Quick Start、讨论工具循环、模型议会和 Chat 不伪装成可远端续传。KMP 传输负责 `background + store + stream` 启动、按 `responseID + sequenceNumber` 恢复和显式远端取消，并保持 chunk 先于 checkpoint 交付。
+- 小说 recovery sidecar 将可见 partial 与远端 cursor 作为同一记录推进。iOS 短执行权到期时只有在强制落盘成功后才关闭本地 SSE、保留服务端 response；落盘失败沿用原中断终态，不伪造可恢复状态。回到前台或 App 冷启动时通过现有全局恢复屏障重建固定 provider/model 路由，直接从 cursor 续接，不重发原 prompt。用户主动取消和 durable resume 的 HTTP 终态失败都会取消已知远端 response；连接/EOF 断流只自动续接一次，第二次断流终止本轮。
+- response frame 的正文、usage、cursor 和 attach 状态现在会在第一次 suspension 前原子提交；detach、恢复 lease 的 MainActor 跳转和冷启动恢复之后都会重新核对当前 runtime owner，过期回调不能复活已终止 runtime，也不能覆盖较新的恢复流。每次 start/resume 另有独立 attempt token，旧 SSE 的迟到回调不能终止新流；前台扫描早于 detach 完成的竞态会在中断回调返回后补扫一次。AppShell 首次启动会触发小说全局恢复，不再要求用户先打开对应项目。
+- 模型议会仍使用本地 best-effort provider 流，但已补齐本阶段可证实的持久化边界：用户议题在 runner 创建前落库，speaking 尾部沿用 300ms 归档节流，系统到期先 checkpoint transcript/task ledger 再释放 lease。没有为 Council 引入假的服务端 job 或第二套队列。
+- KMP 传输不再把恢复流的裸 `[DONE]` 当作完成：没有显式 response terminal 时归为断线；非 2xx 使用 typed HTTP failure，避免被 EOF/连接错误误分流。`:ai-provider-openai:jvmTest` 与 `compileKotlinIosSimulatorArm64` 通过；generic iOS `build-for-testing` 通过。最终复跑 `IOSNovelCreationWiringTests + NovelGenerationLifecycleTests + NovelLiveModelAdapterTests + NovelGenerationReducerTests` 为 **177 passed / 0 failed / 2 skipped**，两条 skip 均为 Simulator keychain 不可用。复跑还定位并修正了 Quick Start `ask_user` 完成态被旧校验器错误强制要求结构化建议、导致终态持久化阻塞的问题；对应 3 条定点回归通过。`swiftc -frontend -parse` 与 `git diff --check` 通过。
+- 2026-08-04 19:12，最新混合工作区完成 iPhone Air Debug arm64 构建，Xcode 的嵌入签名校验通过；Amber `app.amber.ios` 1.0 (1) 已由 CoreDevice 覆盖安装并成功启动，新容器为 `99B6EF95-A992-4CF8-BB07-722E7C6926A3/iosApp.app`，主 Debug dylib SHA-256 为 `365949382ffe3c20a0df7bd19081bd04e350472c903ab919a11ba92e77676543`。设备侧接受该签名，但本机独立 `codesign --verify --deep --strict` 因开发证书信任链返回 `CSSMERR_TP_NOT_TRUSTED`（`security find-identity` 当前显示 0 个有效身份）；不得把设备安装成功误记为本机严格信任校验通过。
+- 当前边界：进程在收到并落盘首个 `response.created` cursor 前被杀时没有 response ID，无法恢复；恢复能力还受 OpenAI 服务端 background response 的保留窗口与账户数据策略约束。批量润色的批次队列、Quick Start/讨论工具循环、模型议会、Chat 和其他 provider 的远端持久任务仍未进入本阶段。尚未用真实 OpenAI 账号和真机系统 expiration/强杀/重启完成端到端验证。
+
+### 2026-08-04 iOS 26 本地后台流式续跑第一阶段
+
+- Chat、小说创作和模型议会都在用户发起生成时按本轮 run/discussion 取得现有 `BackgroundGenerationKeepAlive` 的 continued-processing 执行权，而不是等页面消失或 scene 进入后台后再补救。页面退出只解除 UI 订阅，App 级 owner、provider 流和持久化终态继续运行；三个入口按已有真实阶段上报进度，没有新增轮询、第二套生成引擎或服务端依赖。
+- Chat 从通用 `.keepalive.*` 交给专用 `.chat.*` request 时先释放旧 owner，专用提交失败才恢复原租约；若 UIKit 短腿已经到期且专用交接仍失败，则立即复用既有 `cancel(runId:)` 保存 partial snapshot 并记录 `interrupted`，不再留下“仍运行但没有执行权”的 run。专用任务到期会在跳回 MainActor 前同步认领系统终态并 `setTaskCompleted(false)`，保存竞态仍保留 `guard_stopped` 等真实终态。冷启动只收口没有活跃 handler 的遗留 request，不自动重投模型请求。
+- 小说的 expiration callback 按显式 `runID` 认领 owner：旧 Quick Start 回调不会取消同项目的新 run，已持久化 completed/failed/interrupted 的 run 不会再生成 pre-start tombstone；退后台不再主动取消批量润色。议会删除了从未被 runner 调用的伪 `ask_user` 暂停面，取消/系统到期先写当前 task ledger 再撤 provider 和租约，continuation 的显式 cancelled/interrupted 不会被 catch 改回 completed，roster 进度也不再覆盖阶段 subtitle。
+- generic iOS `build-for-testing` 已通过，证明 App 与全部测试源码可编译；本轮 20 个 Swift 文件 `swiftc -frontend -parse` 和 `git diff --check` 通过。iPhone 17 Pro / iOS 26.5 Simulator 上，本轮新增/修订定点门禁 **32 passed / 0 failed**，Chat/后台整类回归 **155 passed / 0 failed**，Council 整类回归 **68 passed / 0 failed**。小说两条新增竞态行为用例已包含在 32 项定点门禁中并通过；小说整类复跑两次都在测试宿主启动前卡于 Xcode `_IDEInstalliPhoneSimulatorWorker` 的 `waiting for workers to materialize`，设备内没有 `iosAppTests` 进程，已停止无效等待，不能计为执行通过。真实 `BGContinuedProcessingTask` 的系统接管、进度卡、到期和用户划卡仍需真机触发验证。
+- 这一阶段仍是 iOS best-effort：系统决定是否调度和何时终止，用户从 App Switcher 强制结束后本地 SSE 不可能继续；若未来要求强杀、重启或跨设备后仍保证完成，才需要独立的服务端 durable job，本轮刻意没有扩入。
 
 ### 2026-08-04 小说人物身份确认卡退出路径（未提交）
 

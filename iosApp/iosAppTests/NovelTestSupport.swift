@@ -12,6 +12,7 @@ extension NovelScriptedModelError: LocalizedError {
 }
 
 enum NovelModelScriptStep: Equatable, Sendable {
+    case activity
     case delta(String)
     case replacement(String)
     case usage(NovelModelUsage)
@@ -128,6 +129,8 @@ actor ScriptedNovelModelAdapter: NovelModelRunning {
             }
 
             switch step {
+            case .activity:
+                continuation.yield(.activity)
             case .delta(let text):
                 continuation.yield(.textDelta(text))
             case .replacement(let text):

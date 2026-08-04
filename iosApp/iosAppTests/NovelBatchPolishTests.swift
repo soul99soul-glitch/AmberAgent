@@ -483,36 +483,6 @@ final class NovelBatchPolishTests: XCTestCase {
         XCTAssertNotEqual(stoppedRun.status, .running)
     }
 
-    func testBackgroundCancelsBatchAndDoesNotContinueNextChapter() async throws {
-        let fixture = try documentWithChapters(2)
-        let harness = try await makeHarness(
-            document: fixture.document,
-            scripts: [
-                NovelModelScript(steps: [.delta("partial"), .pause]),
-                polishGenScript("must not start"),
-            ]
-        )
-
-        harness.session.startBatchPolish(chapterIDs: fixture.chapterIDs)
-        let didStart = await eventually { harness.session.activeRunID != nil }
-        XCTAssertTrue(didStart)
-        let ownedRunID = try XCTUnwrap(harness.session.activeRunID)
-
-        await harness.session.interruptBatchPolishForBackground()
-
-        let didStop = await eventually {
-            harness.session.batchPolishProgress?.phase == .cancelled &&
-                harness.session.activeRunID == nil
-        }
-        XCTAssertTrue(didStop)
-        try await Task.sleep(for: .milliseconds(100))
-        let requestCount = await harness.adapter.requests.count
-        XCTAssertEqual(requestCount, 1, "进入后台后不能继续发起下一章")
-        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
-        let stoppedRun = try XCTUnwrap(persisted.activeRuns.first { $0.id == ownedRunID })
-        XCTAssertEqual(stoppedRun.interruptionReason, .background)
-    }
-
     func testAllDiscardedChaptersCannotStartBatchPolish() async throws {
         var fixture = try documentWithChapters(2)
         for index in fixture.document.chapters.indices {

@@ -432,8 +432,6 @@ enum IOSCouncilRoomEvent: Equatable {
     case roster([IOSCouncilRoomSpeaker], activeSpeakerId: String?, failedSpeakerIds: Set<String>)
     case append(IOSCouncilRoomMessageEvent)
     case updateMessage(id: UUID, body: String, status: IOSCouncilRoomMessageStatus)
-    /// 主持人/任意阶段向用户提问，暂停议会等用户回答。
-    case askUser(question: String)
 }
 
 struct IOSCouncilRoomContinuation {
@@ -945,6 +943,7 @@ final class IOSCouncilRoomRunner {
     private let timeoutUnitNanoseconds: UInt64
     private var runGeneration: UInt64 = 0
     private var activeRunGeneration: UInt64?
+    private var activeTaskId: String?
 
     init(
         streamer: any IOSCouncilTextStreaming = IOSCouncilTextStreamer(),
@@ -963,13 +962,45 @@ final class IOSCouncilRoomRunner {
     func cancel() {
         runGeneration &+= 1
         activeRunGeneration = nil
+        activeTaskId = nil
         streamer.cancel()
+    }
+
+    /// Reads the persisted status for the run currently shown by the room.
+    /// The ViewModel still owns the lifecycle; this read only closes the narrow
+    /// handoff window after `run()` has returned and before its caller releases
+    /// the background lease.
+    func taskStatus(taskId: String?) -> IOSAdvancedTaskStatus? {
+        guard let taskId else { return nil }
+        return taskStore.tasks.first(where: { $0.id == taskId })?.status
+    }
+
+    /// 由 ViewModel 在取消/系统执行权到期时写入任务终态；runner 本身仍只负责
+    /// 取消 provider，避免把页面生命周期和 provider 流程混成第二套状态机。
+    func markActiveTaskTerminal(
+        taskId: String? = nil,
+        status: IOSAdvancedTaskStatus,
+        summary: String,
+        retryable: Bool
+    ) {
+        guard let activeTaskId,
+              (taskId == nil || taskId == activeTaskId) else { return }
+        _ = taskStore.updateTask(
+            id: activeTaskId,
+            status: status,
+            resultSummary: summary,
+            error: "",
+            retryable: retryable,
+            cancelCapability: false,
+            metadata: status == .interrupted
+                ? ["interruption_reason": "background_execution_expired"]
+                : nil
+        )
     }
 
     func run(
         request: IOSCouncilRoomRunRequest,
-        onEvent: @escaping @MainActor (IOSCouncilRoomEvent) -> Void = { _ in },
-        onAskUser: ((String) async -> String?)? = nil
+        onEvent: @escaping @MainActor (IOSCouncilRoomEvent) -> Void = { _ in }
     ) async -> IOSCouncilRoomRunSummary {
         runGeneration &+= 1
         let currentRunGeneration = runGeneration
@@ -980,6 +1011,7 @@ final class IOSCouncilRoomRunner {
         defer {
             if activeRunGeneration == currentRunGeneration {
                 activeRunGeneration = nil
+                activeTaskId = nil
             }
         }
         let objective = request.objective.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1037,6 +1069,7 @@ final class IOSCouncilRoomRunner {
                 metadata: metadata
             )
         }
+        activeTaskId = task.id
         onEvent(.taskStarted(task.id))
 
         guard !objective.isEmpty else {
@@ -1633,6 +1666,22 @@ final class IOSCouncilRoomRunner {
                 transcript: finalTranscript
             )
         } catch {
+            // System execution expiry is recorded by the owner before cancelling
+            // the provider. Preserve that explicit interrupted terminal instead
+            // of letting the generic cancellation catch overwrite it as cancelled.
+            if let terminalRecord = taskStore.tasks.first(where: { $0.id == task.id }),
+               terminalRecord.status == .interrupted || terminalRecord.status == .cancelled {
+                return IOSCouncilRoomRunSummary(
+                    taskId: task.id,
+                    status: terminalRecord.status,
+                    finalTopic: "",
+                    finalAnswer: "",
+                    failureReason: terminalRecord.resultSummary,
+                    seatNames: activeSeats.map(\.name),
+                    failedSeats: activeSeats.filter { failedSeatIds.contains($0.id) }.map(\.name),
+                    transcript: clippedTranscript(transcript, budget: 24_000)
+                )
+            }
             let isCancel = activeRunGeneration != currentRunGeneration
                 || error is CancellationError
                 || (error as? IOSCouncilRoomRunnerError) == .cancelled
@@ -2459,19 +2508,6 @@ final class IOSCouncilRoomRunner {
             }
             throw IOSCouncilRoomRunnerError.cancelled
         }
-    }
-
-    /// 主持人向用户提问。发出 `.askUser` 事件，暂停议会，等用户回答。
-    /// 返回用户的回答；若用户跳过或取消则返回 nil（议会继续，视为"无补充"）。
-    @MainActor
-    private func askUser(
-        _ question: String,
-        onEvent: @escaping @MainActor (IOSCouncilRoomEvent) -> Void,
-        onAskUser: ((String) async -> String?)?
-    ) async -> String? {
-        guard let onAskUser else { return nil }
-        onEvent(.askUser(question: question))
-        return await onAskUser(question)
     }
 
     private func dividerMessage(_ body: String) -> IOSCouncilRoomMessageEvent {

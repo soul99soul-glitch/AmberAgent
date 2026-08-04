@@ -88,6 +88,30 @@ struct NovelModelUsage: Codable, Equatable, Sendable {
     let totalTokens: Int
 }
 
+/// The cursor that makes a stored OpenAI Responses stream resumable without
+/// replaying the original prompt. `sequenceNumber` is the last event that was
+/// durably handed to the Novel runtime.
+struct NovelResponsesResumeCursor: Codable, Equatable, Sendable {
+    let responseID: String
+    let sequenceNumber: Int64
+}
+
+enum NovelModelFrameEvent: Equatable, Sendable {
+    case activity
+    case textDelta(String)
+    case textReplacement(String)
+    case usage(NovelModelUsage)
+}
+
+/// An atomic response frame: the chunks received since the previous cursor
+/// are published together with the checkpoint that follows them on the wire.
+/// This prevents a crash between a visible chunk and its sequence checkpoint
+/// from advancing the durable cursor past content that was never persisted.
+struct NovelModelResponseFrame: Equatable, Sendable {
+    let cursor: NovelResponsesResumeCursor
+    let events: [NovelModelFrameEvent]
+}
+
 struct NovelModelFailure: Error, Codable, Equatable, Sendable {
     let code: String
     let message: String
@@ -99,18 +123,38 @@ extension NovelModelFailure: LocalizedError {
 }
 
 enum NovelModelEvent: Equatable, Sendable {
+    case activity
     case textDelta(String)
     case textReplacement(String)
     case usage(NovelModelUsage)
+    case responseFrame(NovelModelResponseFrame)
+    case responseDisconnected(NovelModelFailure)
     case askUser(NovelAskUserPrompt, preface: String)
     case completed
     case failed(NovelModelFailure)
+}
+
+/// Minimal durable-resume input. The original prompt is intentionally absent:
+/// OpenAI resumes a stored response with GET /responses/{id}, so reconstructing
+/// or POSTing the prompt here would create a second server response.
+struct NovelModelResumeRequest: Codable, Equatable, Sendable {
+    let runID: NovelRunID
+    let model: NovelResolvedModel
+    let purpose: NovelModelPurpose
+    let cursor: NovelResponsesResumeCursor
 }
 
 protocol NovelModelRunning: Sendable {
     func resolveModel(for policy: NovelProjectModelPolicy) async throws -> NovelResolvedModel
     func start(_ request: NovelModelRequest) async throws -> AsyncStream<NovelModelEvent>
     func cancel(runID: NovelRunID) async
+}
+
+protocol NovelDurableModelRunning: NovelModelRunning {
+    func resume(_ request: NovelModelResumeRequest) async throws -> AsyncStream<NovelModelEvent>
+    /// Detach the local consumer and stream. This must not call a provider
+    /// cancel endpoint; a later foreground entry may resume from the cursor.
+    func detach(runID: NovelRunID) async
 }
 
 enum NovelModelAdapterError: Error, Equatable, Sendable {

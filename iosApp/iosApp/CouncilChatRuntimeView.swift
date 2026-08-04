@@ -130,7 +130,6 @@ struct CouncilChatRuntimeView: View {
             // 重新进入页面时清除上一次的 fallback 粘连，给原生滚动 driver 一次重试机会；
             // 开关移除后已无手动恢复入口，否则一次 fallback 会让 driver 对该视图实例永久禁用。
             nativeScrollFallbackReason = nil
-            viewModel.runtimeDidAppear()
         }
         // 离开页面(返回/切走)时立即存一份当前 transcript,避免运行中退出导致刚流式出的内容
         // 在下次进入前丢失(运行任务仍会在后台跑完并再存一次,以更完整的为准)。
@@ -232,48 +231,6 @@ struct CouncilChatRuntimeView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(item: $viewModel.pendingAskUser) { state in
-            askUserSheet(state)
-        }
-    }
-
-    /// 主持人提问 sheet：用户输入回答或跳过，恢复议会。
-    private func askUserSheet(_ state: IOSCouncilAskUserState) -> some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Label("主持人提问", systemImage: "questionmark.bubble")
-                    .font(.headline)
-                    .foregroundStyle(AmberTheme.accent)
-
-                Text(state.question)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                TextEditor(text: Binding(
-                    get: { viewModel.pendingAskUser?.answerDraft ?? "" },
-                    set: { viewModel.pendingAskUser?.answerDraft = $0 }
-                ))
-                .font(.body)
-                .frame(minHeight: 80)
-                .padding(8)
-                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-            }
-            .padding(16)
-            .navigationTitle("议会暂停")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("跳过") { viewModel.skipAskUser() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("回答") { viewModel.submitAskUserAnswer() }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
-        .interactiveDismissDisabled(true)
     }
 
     private var header: some View {
@@ -1510,21 +1467,6 @@ enum CouncilRuntimeSheet: Identifiable {
     }
 }
 
-/// 议会暂停等用户回答时的状态。持有 continuation，用户回答/跳过后 resume。
-struct IOSCouncilAskUserState: Identifiable {
-    let id = UUID()
-    let question: String
-    /// 用户的回答输入草稿。
-    var answerDraft: String = ""
-    fileprivate let continuation: CheckedContinuation<String?, Never>
-
-    /// 用户确认回答（或留空跳过）后调用，恢复议会。
-    func resume() {
-        let trimmed = answerDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        continuation.resume(returning: trimmed.isEmpty ? nil : trimmed)
-    }
-}
-
 @MainActor
 @Observable
 final class CouncilChatViewModel {
@@ -1533,8 +1475,6 @@ final class CouncilChatViewModel {
     var messages: [CouncilChatMessage]
     var isRunning = false
     var activeSheet: CouncilRuntimeSheet?
-    /// 主持人向用户提问时的暂停状态（非 nil = 议会暂停中，等用户回答）。
-    var pendingAskUser: IOSCouncilAskUserState?
     var participants: [CouncilParticipant] = []
     var failedSpeakerIds: Set<String> = []
     var archiveErrorMessage: String?
@@ -1561,13 +1501,9 @@ final class CouncilChatViewModel {
     @ObservationIgnored private var materialsPreparationTask: Task<Void, Never>?
     /// Bumped on cancel / reset / openArchive so late file/vision completions cannot start a discussion.
     @ObservationIgnored private var materialsPrepGeneration: UInt64 = 0
-    /// 同一时刻只有一场议会，租约 id 固定即可。
-    private static let keepAliveLeaseId = "council"
     /// 后台期间等讨论跑完、跑完就还执行权的那个任务。
     @ObservationIgnored private var keepAliveReleaseTask: Task<Void, Never>?
     @ObservationIgnored private var activeDiscussionID: UUID?
-    @ObservationIgnored private var isRuntimeAttached = false
-    @ObservationIgnored private var isApplicationActive = true
     @ObservationIgnored private var currentObjective = ""
     @ObservationIgnored private var currentFinalTopic = ""
     @ObservationIgnored private var currentTaskId: String?
@@ -1631,13 +1567,7 @@ final class CouncilChatViewModel {
         )
     }
 
-    func runtimeDidAppear() {
-        isRuntimeAttached = true
-    }
-
     func runtimeDidDisappear() {
-        isRuntimeAttached = false
-        skipAskUser()
         // 离开议会界面时做一次离主线程检查点,让「最近讨论」尽快看到当前进度;
         // 先取消节流任务,避免它在切走后再次触发写入。
         cancelScheduledArchive()
@@ -1645,8 +1575,6 @@ final class CouncilChatViewModel {
     }
 
     func runtimeWillEnterBackground() {
-        isApplicationActive = false
-        skipAskUser()
         persistTranscript()
         // 落盘是终止路径:取消节流任务并同步落盘,同步写会使在途延迟写失效。
         // 但讨论本身不再终止——下面拿后台执行权让它自己跑完。
@@ -1655,24 +1583,32 @@ final class CouncilChatViewModel {
         beginBackgroundKeepAliveIfRunning()
     }
 
-    func runtimeDidBecomeActive() {
-        isApplicationActive = true
-        // 回到前台就不需要后台执行权了；讨论没跑完也不影响，前台本来就能跑。
-        endBackgroundKeepAlive()
+    /// 讨论还在跑就拿后台执行权，跑完自动还回去。
+    /// 议会没有「后台重跑」那一路，执行权被系统收走时取消当前 owner 并保留可重试快照。
+    private func beginBackgroundKeepAliveIfRunning() {
+        guard let discussionID = activeDiscussionID else { return }
+        beginBackgroundKeepAlive(for: discussionID)
     }
 
-    /// 讨论还在跑就拿后台执行权，跑完自动还回去。
-    /// 议会没有「后台重跑」那一路，执行权被系统收走时只能做一次检查点。
-    private func beginBackgroundKeepAliveIfRunning() {
-        guard isRunning, let discussionTask else { return }
+    private func keepAliveLeaseId(for discussionID: UUID) -> String {
+        "council-\(discussionID.uuidString)"
+    }
+
+    private func beginBackgroundKeepAlive(for discussionID: UUID) {
+        guard isRunning,
+              activeDiscussionID == discussionID,
+              let discussionTask else { return }
+        let leaseId = keepAliveLeaseId(for: discussionID)
         keepAliveReleaseTask?.cancel()
         BackgroundGenerationKeepAlive.shared.begin(
-            Self.keepAliveLeaseId,
+            leaseId,
             title: "Amber 议会讨论中",
             subtitle: currentObjective.isEmpty ? "模型议会" : currentObjective,
             onExpire: { [weak self] in
-                self?.persistTranscript()
-                self?.archiveCurrentRoom()
+                self?.handleBackgroundKeepAliveExpiration(for: discussionID)
+            },
+            onSystemTaskExpiration: { [weak self] in
+                self?.handleBackgroundKeepAliveExpiration(for: discussionID)
             }
         )
         keepAliveReleaseTask = Task { @MainActor [weak self] in
@@ -1681,14 +1617,42 @@ final class CouncilChatViewModel {
             // 这个任务照样会醒过来。醒来时租约可能已经属于新一轮讨论了——
             // 没这道 guard，旧任务会把新一轮的执行权还掉，新讨论在后台静默断流。
             guard !Task.isCancelled else { return }
-            self?.endBackgroundKeepAlive()
+            guard let self, self.activeDiscussionID == discussionID else { return }
+            self.endBackgroundKeepAlive(for: discussionID)
         }
     }
 
-    private func endBackgroundKeepAlive() {
+    private func endBackgroundKeepAlive(for discussionID: UUID?) {
+        guard let discussionID else { return }
         keepAliveReleaseTask?.cancel()
         keepAliveReleaseTask = nil
-        BackgroundGenerationKeepAlive.shared.end(Self.keepAliveLeaseId)
+        BackgroundGenerationKeepAlive.shared.end(keepAliveLeaseId(for: discussionID))
+    }
+
+    private func updateBackgroundProgress(completed: Int64, subtitle: String? = nil) {
+        guard let discussionID = activeDiscussionID else { return }
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            keepAliveLeaseId(for: discussionID),
+            completed: completed,
+            total: 4,
+            subtitle: subtitle
+        )
+    }
+
+    private func handleBackgroundKeepAliveExpiration(for discussionID: UUID) {
+        guard activeDiscussionID == discussionID, isRunning else { return }
+        // `run()` may already have returned and cleared its private activeTaskId
+        // while this ViewModel is still between the summary and lease-release
+        // statements. A terminal ledger means the generation won; only release
+        // the stale lease and let the summary path finish.
+        if runner.taskStatus(taskId: currentTaskId)?.isTerminal == true {
+            endBackgroundKeepAlive(for: discussionID)
+            return
+        }
+        stopAndCheckpointActiveDiscussion(
+            taskStatus: .interrupted,
+            terminalMessage: "后台执行已停止，可以重试。"
+        )
     }
 
     var hasPendingMaterials: Bool {
@@ -1717,21 +1681,6 @@ final class CouncilChatViewModel {
             return "补充说明（可选），或直接发送从材料生成议题"
         }
         return "输入议题开始，或上传文件/图片"
-    }
-
-    /// 用户提交对主持人提问的回答，恢复议会。
-    func submitAskUserAnswer() {
-        guard var pending = pendingAskUser else { return }
-        pendingAskUser = nil
-        pending.resume()
-    }
-
-    /// 用户跳过提问，恢复议会（视为无补充）。
-    func skipAskUser() {
-        guard var pending = pendingAskUser else { return }
-        pendingAskUser = nil
-        pending.answerDraft = ""
-        pending.resume()
     }
 
     var currentModelId: String {
@@ -2039,6 +1988,10 @@ final class CouncilChatViewModel {
         let discussionID = UUID()
         activeDiscussionID = discussionID
         isRunning = true
+        // 先保存用户已经提交的议题，再把 runner 交给异步任务；进程若在
+        // `.taskStarted` 之前被终止，重载仍能看到这条输入。
+        persistTranscript()
+        archiveCurrentRoom()
         discussionTask = Task { [weak self] in
             await self?.runDiscussion(
                 objective: text,
@@ -2049,11 +2002,19 @@ final class CouncilChatViewModel {
                 researchObjective: continuation == nil ? researchObjective : nil
             )
         }
+        // 用户点击开始时就提交 continued processing；等 scenePhase 切到后台再提交已太晚。
+        beginBackgroundKeepAlive(for: discussionID)
     }
 
     func cancelDiscussion() {
         // 用户主动停止也是终止路径:取消节流任务,尾部同步写会使在途延迟写失效。
         cancelScheduledArchive()
+        runner.markActiveTaskTerminal(
+            taskId: currentTaskId,
+            status: .cancelled,
+            summary: "本轮议会已停止。",
+            retryable: true
+        )
         stopActiveDiscussion()
         finishStreamingMessages(as: .failed)
         activeSpeakerId = nil
@@ -2216,6 +2177,7 @@ final class CouncilChatViewModel {
                 subtitle: "配置阻塞",
                 status: .failed
             )
+            endBackgroundKeepAlive(for: discussionID)
             isRunning = false
             activeDiscussionID = nil
             discussionTask = nil
@@ -2242,18 +2204,6 @@ final class CouncilChatViewModel {
         let summary = await runner.run(request: request, onEvent: { [weak self] event in
             guard let self, self.activeDiscussionID == discussionID else { return }
             self.handle(event)
-        }, onAskUser: { [weak self] question in
-            // 暂停议会，等用户回答。用户回答后恢复；跳过则返回 nil。
-            guard let self,
-                  self.activeDiscussionID == discussionID,
-                  self.isRuntimeAttached,
-                  self.isApplicationActive else { return nil }
-            return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
-                self.pendingAskUser = IOSCouncilAskUserState(
-                    question: question,
-                    continuation: continuation
-                )
-            }
         })
         guard activeDiscussionID == discussionID else { return }
         if currentTaskId == nil {
@@ -2265,6 +2215,11 @@ final class CouncilChatViewModel {
         finishStreamingMessages(as: summary.status == .completed ? .completed : .failed)
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
+        updateBackgroundProgress(
+            completed: summary.status == .completed ? 4 : 3,
+            subtitle: summary.status == .completed ? "议会已完成" : summary.status.title
+        )
+        endBackgroundKeepAlive(for: discussionID)
         isRunning = false
         activeDiscussionID = nil
         discussionTask = nil
@@ -2366,17 +2321,33 @@ final class CouncilChatViewModel {
         switch event {
         case .taskStarted(let id):
             currentTaskId = id
+            updateBackgroundProgress(completed: 0, subtitle: "准备议会")
             persistTranscript()
             archiveCurrentRoom()
         case .state(let state):
             roomStateOverride = state
             updateDetail(status: state)
+            let lowercased = state.lowercased()
+            let completed: Int64
+            if state == "就绪" {
+                completed = 4
+            } else if lowercased.contains("总结") {
+                completed = 3
+            } else if lowercased.contains("发言") || lowercased.contains("点评") {
+                completed = 2
+            } else {
+                completed = 1
+            }
+            updateBackgroundProgress(completed: completed, subtitle: state)
         case .roster(let speakers, let activeId, let failedIds):
             participants = speakers.map(CouncilParticipant.init(speaker:))
             activeSpeakerId = activeId
             failedSpeakerIds = failedIds
             invitedSpeakerIds = Set(speakers.filter { !$0.isHost }.map(\.id))
             updateDetail(status: roomStateOverride ?? selectedMode.runningState)
+            updateBackgroundProgress(
+                completed: 1
+            )
             scheduleArchive()
         case .append(let event):
             appendMessage(event)
@@ -2384,12 +2355,9 @@ final class CouncilChatViewModel {
         case .updateMessage(let id, let body, let status):
             let mapped = CouncilMessageStatus(status)
             updateMessage(id, body: body, status: mapped)
-            // 仅在席位发言完结/失败时归档,流式中途(speaking)不写,避免逐 token 落盘。
-            // 中段完结走节流合并,密集发言时不会每条都触发一次离主线程写入。
-            if mapped != .speaking { scheduleArchive() }
-        case .askUser:
-            // 实际的暂停/恢复由 onAskUser 回调驱动，这里不做额外处理。
-            break
+            // 流式中途也按既有 300ms 窗口归档最新尾部；不做逐 token 同步写，
+            // 但进程在席位发言中断时仍能恢复最近一段已接受正文。
+            scheduleArchive()
         }
     }
 
@@ -2591,35 +2559,62 @@ final class CouncilChatViewModel {
         }
     }
 
-    private func stopAndCheckpointActiveDiscussion() {
+    private func stopAndCheckpointActiveDiscussion(
+        taskStatus: IOSAdvancedTaskStatus = .cancelled,
+        terminalMessage: String? = nil
+    ) {
         // 取消即终止路径:无论是否要 checkpoint 都先取消节流任务,避免切走后再次写入。
         cancelScheduledArchive()
         let shouldCheckpoint = activeDiscussionID != nil || isRunning
-        stopActiveDiscussion()
+        let discussionID = activeDiscussionID
+        if shouldCheckpoint {
+            runner.markActiveTaskTerminal(
+                taskId: currentTaskId,
+                status: taskStatus,
+                summary: terminalMessage ?? taskStatus.title,
+                retryable: taskStatus == .interrupted || taskStatus == .cancelled
+            )
+        }
+        // 到期/切换页时先把取消后的内存尾部写入快照，再释放后台执行权；系统
+        // 可能在租约结束后立即终止进程，不能让 archive 落盘排在 lease 之后。
+        stopActiveDiscussion(releaseBackgroundLease: false)
         guard shouldCheckpoint else { return }
 
         finishStreamingMessages(as: .failed)
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         isRunning = false
-        roomStateOverride = "已取消"
-        updateDetail(status: "已取消")
+        roomStateOverride = taskStatus.title
+        updateDetail(status: taskStatus.title)
+        if let terminalMessage {
+            appendMessage(
+                kind: .system,
+                author: "议会",
+                body: terminalMessage,
+                systemImage: "pause.circle",
+                tint: AmberTheme.accentRed,
+                subtitle: taskStatus.title,
+                status: .failed
+            )
+        }
         persistTranscript()
         archiveCurrentRoom()
+        endBackgroundKeepAlive(for: discussionID)
     }
 
-    private func stopActiveDiscussion() {
+    private func stopActiveDiscussion(releaseBackgroundLease: Bool = true) {
         discussionTask?.cancel()
         // The concrete streamer synchronously drains accepted FIFO chunks here.
         // Keep ownership valid until that exact tail has reached the current bubble.
         runner.cancel()
+        let discussionID = activeDiscussionID
+        keepAliveReleaseTask?.cancel()
+        keepAliveReleaseTask = nil
+        if releaseBackgroundLease {
+            endBackgroundKeepAlive(for: discussionID)
+        }
         activeDiscussionID = nil
         discussionTask = nil
-        if var pending = pendingAskUser {
-            pendingAskUser = nil
-            pending.answerDraft = ""
-            pending.resume()
-        }
     }
 }
 

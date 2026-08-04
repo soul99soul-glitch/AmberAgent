@@ -481,6 +481,33 @@ final class ChatGenerationCoordinator {
         currentRunId == runId && hasPendingToolApproval
     }
 
+    /// KeepAlive 短腿到期后的唯一收口：交接失败时立即走取消的持久化终态，
+    /// 不能留下仍在运行但已没有任何后台 owner 的 currentRunId。
+    @discardableResult
+    private func handleKeepAliveExpiration(
+        runId: String,
+        handoff: () -> Bool
+    ) -> Bool {
+        guard currentRunId == runId,
+              UIApplication.shared.applicationState != .active else {
+            return false
+        }
+        let didHandoff = handoff()
+        return finishKeepAliveExpiration(runId: runId, didHandoff: didHandoff)
+    }
+
+    @discardableResult
+    private func finishKeepAliveExpiration(runId: String, didHandoff: Bool) -> Bool {
+        // 成功交接会在返回前清空前台 currentRunId；此时不能再用前台 owner
+        // 判定交接结果，否则会把真实成功误报为 false。
+        guard !didHandoff else { return true }
+        guard currentRunId == runId else { return false }
+        // KeepAlive 在回调前已经摘掉短腿租约；失败时取消是这一轮唯一剩下的
+        // owner，沿用已有 cancel() 持久化 partial/终态，不引入重试状态机。
+        _ = cancel(runId: runId)
+        return false
+    }
+
     private var hasPendingToolApproval: Bool {
         pendingMemoryToolApproval != nil ||
             pendingSearchToolApproval != nil ||
@@ -544,14 +571,24 @@ final class ChatGenerationCoordinator {
                 guard let self, self.currentRunId == runId else { return }
                 // 只有短窗口在系统任务接管前到期才交接；系统进度卡的取消由
                 // 专用回调收口为当前 run 的取消，不能反向重启生成。
-                guard UIApplication.shared.applicationState != .active else { return }
-                _ = self.handoffCurrentGenerationToBackground(
-                    conversationStore: self.pendingBackgroundConversationStore
+                _ = self.handleKeepAliveExpiration(
+                    runId: runId,
+                    handoff: {
+                        self.handoffCurrentGenerationToBackground(
+                            conversationStore: self.pendingBackgroundConversationStore
+                        )
+                    }
                 )
             },
             onSystemTaskExpiration: { [weak self] in
                 self?.cancelRunAfterSystemKeepAliveExpiration(runId)
             }
+        )
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            runId,
+            completed: 0,
+            total: 4,
+            subtitle: "准备上下文"
         )
 
         Task { @MainActor [weak self] in
@@ -655,6 +692,12 @@ final class ChatGenerationCoordinator {
             onSystemTaskExpiration: { [weak self] in
                 self?.cancelRunAfterSystemKeepAliveExpiration(runId)
             }
+        )
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            runId,
+            completed: 0,
+            total: 3,
+            subtitle: "准备图片请求"
         )
 
         let toolCall = toolRuntime.userInitiatedImageToolCall(input: input)
@@ -1040,8 +1083,9 @@ final class ChatGenerationCoordinator {
                 }
             )
         }
-        let didStart = streamEventSink?.transitionToBackgroundIfNoTerminal(startBackground)
-            ?? startBackground()
+        let didStart = streamEventSink?.transitionToBackgroundIfNoTerminal {
+            BackgroundGenerationKeepAlive.shared.transfer(handoff.runId, to: startBackground)
+        } ?? BackgroundGenerationKeepAlive.shared.transfer(handoff.runId, to: startBackground)
         guard didStart else { return false }
 
         streamJob?.cancel(cause: nil)
@@ -1354,6 +1398,12 @@ final class ChatGenerationCoordinator {
         backgroundProviderSetting: ProviderSetting? = nil
     ) {
         let displayMessages = bindings.getMessages()
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            runId,
+            completed: 1,
+            total: 4,
+            subtitle: "正在生成回复"
+        )
         refreshBackgroundHandoff(
             runId: runId,
             startedAt: startedAt,
@@ -1956,6 +2006,12 @@ final class ChatGenerationCoordinator {
         conversationId: KotlinUuid?,
         baseMessages: [UIMessage]
     ) async {
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            runId,
+            completed: 2,
+            total: 4,
+            subtitle: "正在执行工具"
+        )
         // F11 fix (I-2 must gate ahead of I-5/I-1, not just inside
         // `ChatToolRuntime.execute`'s own per-kind dispatch): a tool call
         // whose `input` fails `parseInputStrict()` never actually executes —
@@ -2749,9 +2805,13 @@ final class ChatGenerationCoordinator {
             subtitle: pending.params.model.displayName,
             onExpire: { [weak self] in
                 guard let self, self.currentRunId == pending.runId else { return }
-                guard UIApplication.shared.applicationState != .active else { return }
-                _ = self.handoffCurrentGenerationToBackground(
-                    conversationStore: self.pendingBackgroundConversationStore
+                _ = self.handleKeepAliveExpiration(
+                    runId: pending.runId,
+                    handoff: {
+                        self.handoffCurrentGenerationToBackground(
+                            conversationStore: self.pendingBackgroundConversationStore
+                        )
+                    }
                 )
             },
             onSystemTaskExpiration: { [weak self] in
@@ -3102,6 +3162,13 @@ final class ChatGenerationCoordinator {
         await pauseForApproval(.search(request), pending: pending)
     }
 
+    /// 模拟系统已通过 application-state gate 后收到的短腿到期结果；测试用它
+    /// 注入交接失败，直接验证真实 cancel() 收口，而不是检查 source 字符串。
+    @discardableResult
+    func keepAliveExpirationForTesting(runId: String, didHandoff: Bool) -> Bool {
+        finishKeepAliveExpiration(runId: runId, didHandoff: didHandoff)
+    }
+
     func backgroundToolHandoffUploadMessagesForTesting(_ baseMessages: [UIMessage]) -> [UIMessage] {
         backgroundToolHandoffUploadMessages(from: baseMessages)
     }
@@ -3118,6 +3185,18 @@ final class ChatGenerationCoordinator {
     func installRunSnapshotForTesting(runId: String, snapshot: ChatRunSnapshot?) {
         currentRunId = runId
         currentRunSnapshot = snapshot
+    }
+
+    func installRunMetadataForTesting(
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid? = nil
+    ) {
+        currentRunId = runId
+        currentStartedAt = startedAt
+        currentInputDigest = inputDigest
+        currentConversationIdForRun = conversationId
     }
 
     func currentRunSnapshotForTesting() -> ChatRunSnapshot? {

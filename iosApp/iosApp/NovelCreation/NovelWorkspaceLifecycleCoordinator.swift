@@ -14,6 +14,7 @@ final class NovelWorkspaceLifecycleCoordinator {
         _ onExpire: @escaping () -> Void
     ) -> Void
     typealias EndKeepAlive = @MainActor (_ leaseId: String) -> Void
+    typealias HasProtectedGenerationLease = @MainActor () -> Bool
 
     private struct Cycle {
         let id: UUID
@@ -27,6 +28,7 @@ final class NovelWorkspaceLifecycleCoordinator {
     private let now: @MainActor () -> Date
     private let beginKeepAlive: BeginKeepAlive
     private let endKeepAlive: EndKeepAlive
+    private let hasProtectedGenerationLease: HasProtectedGenerationLease
     private var cycle: Cycle?
 
     init(
@@ -42,11 +44,17 @@ final class NovelWorkspaceLifecycleCoordinator {
         },
         endKeepAlive: @escaping EndKeepAlive = { leaseId in
             BackgroundGenerationKeepAlive.shared.end(leaseId)
+        },
+        hasProtectedGenerationLease: @escaping HasProtectedGenerationLease = {
+            BackgroundGenerationKeepAlive.shared.activeLeaseIds.contains(
+                where: isProtectedNovelBackgroundLeaseID
+            )
         }
     ) {
         self.now = now
         self.beginKeepAlive = beginKeepAlive
         self.endKeepAlive = endKeepAlive
+        self.hasProtectedGenerationLease = hasProtectedGenerationLease
     }
 
     func enterBackground(
@@ -54,6 +62,12 @@ final class NovelWorkspaceLifecycleCoordinator {
         interrupt: @escaping BackgroundInterruption
     ) {
         guard cycle == nil else { return }
+
+        // Generation acquires its own continued-processing lease while the user
+        // action starts. Do not create the legacy scene-phase short lease beside it:
+        // that second lease would expire after roughly 30 seconds and interrupt a
+        // run that already has a valid system task.
+        guard !hasProtectedGenerationLease() else { return }
 
         let cycleID = UUID()
         let leaseId = "novel-\(cycleID.uuidString)"
@@ -95,6 +109,13 @@ final class NovelWorkspaceLifecycleCoordinator {
         guard var current = cycle,
               current.id == cycleID,
               !current.isExpiring else { return }
+        // A protected operation may start just after scenePhase entered background.
+        // In that race the late continued-processing lease supersedes this short
+        // scene lease; expiring the short lease must not cancel the protected work.
+        guard !hasProtectedGenerationLease() else {
+            finish(cycleID: cycleID)
+            return
+        }
         current.isExpiring = true
         current.completionTask?.cancel()
         current.completionTask = nil

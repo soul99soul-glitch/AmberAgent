@@ -16,6 +16,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         var submittedRequests: [BGContinuedProcessingTaskRequest] = []
         var cancelledIdentifiers: [String] = []
         var registeredIdentifiers: [String] = []
+        var events: [String] = []
         /// 按 begin 顺序保存的到期回调，测试用它模拟 30 秒到点。
         var expirationHandlers: [() -> Void] = []
 
@@ -27,6 +28,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
             BackgroundGenerationKeepAlive(
                 beginBackgroundTask: { [self] name, expiration in
                     begunNames.append(name)
+                    events.append("begin")
                     expirationHandlers.append(expiration)
                     let identifier = UIBackgroundTaskIdentifier(rawValue: nextTaskId)
                     nextTaskId += 1
@@ -34,9 +36,11 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
                 },
                 endBackgroundTask: { [self] identifier in
                     endedTaskIds.append(identifier)
+                    events.append("end")
                 },
                 submitTaskRequest: { [self] request in
                     if let submitError { throw submitError }
+                    events.append("submit")
                     submittedRequests.append(request)
                 },
                 cancelTaskRequest: { [self] identifier in
@@ -112,6 +116,39 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
         XCTAssertEqual(spy.begunNames.count, 1)
         XCTAssertEqual(spy.submittedRequests.count, 1)
+    }
+
+    func testTransferReleasesGenericLeaseBeforeStartingDedicatedRequest() {
+        let spy = SystemSpy()
+        let keepAlive = spy.makeKeepAlive()
+        keepAlive.begin("run-1", title: "t", subtitle: "s")
+
+        let didStart = keepAlive.transfer("run-1") {
+            spy.events.append("dedicated-submit")
+            return true
+        }
+
+        XCTAssertTrue(didStart)
+        XCTAssertFalse(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(spy.events, ["begin", "submit", "end", "dedicated-submit"])
+    }
+
+    func testTransferRestoresGenericLeaseWhenDedicatedRequestFails() {
+        let spy = SystemSpy()
+        let keepAlive = spy.makeKeepAlive()
+        keepAlive.begin("run-1", title: "t", subtitle: "s")
+
+        let didStart = keepAlive.transfer("run-1") {
+            spy.events.append("dedicated-submit")
+            return false
+        }
+
+        XCTAssertFalse(didStart)
+        XCTAssertTrue(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(
+            spy.events,
+            ["begin", "submit", "end", "dedicated-submit", "begin", "submit"]
+        )
     }
 
     func testConcurrentLeasesAreTrackedIndependently() {
