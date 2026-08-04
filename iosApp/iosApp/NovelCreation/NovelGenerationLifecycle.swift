@@ -1129,7 +1129,7 @@ private extension DefaultNovelCreation {
 
     func completeRun(_ runID: NovelRunID) async {
         guard var runtime = generationRuntimes[runID] else { return }
-        if runtime.kind == .discussion,
+        if (runtime.kind == .discussion || runtime.kind == .quickStart),
            let prompt = try? Self.decodeAskUserFallback(runtime.partialContent) {
             runtime.partialContent = ""
             generationRuntimes[runID] = runtime

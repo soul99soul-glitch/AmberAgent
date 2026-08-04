@@ -427,6 +427,17 @@ extension NovelOutcome {
                 projectRevision: projectRevision,
                 configRevision: configRevision
             )
+        case .characterIdentityClarified(
+            _, let branchID, let mention, let checkpointID, let stateSnapshotID, let revision
+        ):
+            return .characterIdentityClarified(
+                projectID: projectID,
+                branchID: branchID,
+                mention: mention,
+                checkpointID: checkpointID,
+                stateSnapshotID: stateSnapshotID,
+                revision: revision
+            )
         case .branchForked(_, let sourceBranchID, let branchID, let checkpointID, let revision):
             return .branchForked(
                 projectID: projectID,

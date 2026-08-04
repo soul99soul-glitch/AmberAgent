@@ -778,6 +778,122 @@ extension NovelReducer {
         try NovelDocumentValidator.validateTransition(from: document, to: next)
         return (next, outcome)
     }
+
+    static func clarifyCharacterIdentity(
+        _ command: NovelClarifyCharacterIdentityCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        let branchIndex = try requireBranchMutation(
+            command.context,
+            branchID: command.branchID,
+            in: document
+        )
+        let branch = document.branches[branchIndex]
+        try requireIdleBranch(branch, in: document)
+        guard branch.syncStatus == .synchronized else {
+            throw NovelError.projectBusy(command.projectID)
+        }
+        let mention = try normalizedRequired(command.mention, field: "Character mention")
+        let clarification = try normalizedRequired(
+            command.clarification,
+            field: "Character identity clarification"
+        )
+        guard mention.count <= 200 else {
+            throw NovelError.invalidInput("Character mention is too long.")
+        }
+        guard clarification.count <= 1_000 else {
+            throw NovelError.invalidInput("Character identity clarification is too long.")
+        }
+        guard let state = document.stateSnapshots.first(where: {
+            $0.id == branch.currentStateSnapshotID
+        }) else {
+            throw NovelError.stateSnapshotNotFound(branch.currentStateSnapshotID)
+        }
+        let mentionKey = NovelCharacterIdentityResolver.normalize(mention)
+        guard state.unresolvedEntityNames.contains(where: {
+            NovelCharacterIdentityResolver.normalize($0) == mentionKey
+        }) else {
+            throw NovelError.invalidInput("The character identity question is no longer active.")
+        }
+        guard !state.characterIdentityClarifications.contains(where: {
+            NovelCharacterIdentityResolver.normalize($0.mention) == mentionKey
+        }) else {
+            throw NovelError.invalidInput("The character identity question was already answered.")
+        }
+        guard document.stateSnapshots.allSatisfy({ $0.id != command.stateSnapshotID }),
+              document.checkpoints.allSatisfy({ $0.id != command.checkpointID }) else {
+            throw NovelError.immutableRecordConflict("character identity clarification")
+        }
+        guard let baseCheckpoint = document.checkpoints.first(where: {
+            $0.id == branch.headCheckpointID
+        }) else {
+            throw NovelError.checkpointNotFound(branch.headCheckpointID)
+        }
+
+        let record = NovelCharacterIdentityClarificationRecord(
+            mention: mention,
+            clarification: clarification,
+            operationID: command.context.operationID,
+            createdAt: now
+        )
+        let stateSnapshot = NovelStateSnapshotRecord(
+            id: command.stateSnapshotID,
+            eventIDs: state.eventIDs,
+            summary: state.summary,
+            branchOutline: state.branchOutline,
+            unresolvedEntityNames: state.unresolvedEntityNames.filter {
+                NovelCharacterIdentityResolver.normalize($0) != mentionKey
+            },
+            createdAt: now,
+            settingProposalIDs: state.settingProposalIDs,
+            characterIdentityClarifications: state.characterIdentityClarifications + [record]
+        )
+        let checkpoint = NovelBranchCheckpointRecord(
+            id: command.checkpointID,
+            kind: .identityClarification,
+            createdOnBranchID: branch.id,
+            parentCheckpointID: baseCheckpoint.id,
+            chapterSelections: baseCheckpoint.chapterSelections,
+            stateSnapshotID: stateSnapshot.id,
+            sessionCursor: baseCheckpoint.sessionCursor,
+            branchOverrideRevisionIDs: baseCheckpoint.branchOverrideRevisionIDs,
+            sourceCandidateID: nil,
+            baseHeadRevision: branch.headRevision,
+            operationID: command.context.operationID,
+            createdAt: now
+        )
+
+        var next = document
+        next.stateSnapshots.append(stateSnapshot)
+        try appendCheckpoint(
+            checkpoint,
+            to: &next,
+            expectedHeadRevision: branch.headRevision,
+            advancesWorkingRevision: false,
+            now: now
+        )
+        next.project.revision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.characterIdentityClarified(
+            projectID: command.projectID,
+            branchID: command.branchID,
+            mention: mention,
+            checkpointID: checkpoint.id,
+            stateSnapshotID: stateSnapshot.id,
+            revision: next.project.revision
+        )
+        recordApplied(
+            command.context,
+            kind: .clarifyCharacterIdentity,
+            payloadSHA256: try NovelAction.clarifyCharacterIdentity(command).canonicalPayloadSHA256(),
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validateTransition(from: document, to: next)
+        return (next, outcome)
+    }
 }
 
 private extension NovelReducer {

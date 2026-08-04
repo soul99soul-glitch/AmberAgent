@@ -248,7 +248,7 @@ enum NovelPolishDocumentValidator {
                 issues.append("Restore checkpoint \(checkpoint.id) crosses fact compatibility.")
                 return
             }
-        case .initial, .collection, .manualSync, .discussionArchive:
+        case .initial, .collection, .manualSync, .discussionArchive, .identityClarification:
             break
         }
     }

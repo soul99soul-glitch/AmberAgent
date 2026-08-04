@@ -190,6 +190,8 @@ enum NovelReducer {
             return try undoBranchHead(command, in: document, now: now)
         case .archiveDiscussion(let command):
             return try archiveDiscussion(command, in: document, now: now)
+        case .clarifyCharacterIdentity(let command):
+            return try clarifyCharacterIdentity(command, in: document, now: now)
         case .cloneCandidate(let command):
             return try cloneCandidate(command, in: document, now: now)
         case .restoreChapterVersion(let command):

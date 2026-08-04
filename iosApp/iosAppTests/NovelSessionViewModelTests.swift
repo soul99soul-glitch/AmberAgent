@@ -236,6 +236,78 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(session.durableMessages, document.sessions.first?.messages)
     }
 
+    func testIgnoringIncidentalCharacterIdentityMentionClosesItDurably() async throws {
+        let document = try documentWithUnresolvedCharacterMention("瘦子")
+        let repository = InMemoryNovelProjectRepository()
+        let harness = try await makeHarness(
+            repository: repository,
+            document: document,
+            scripts: []
+        )
+        XCTAssertEqual(harness.session.pendingCharacterIdentityMentions.map(\.name), ["瘦子"])
+
+        let ignored = await harness.session.ignoreCharacterIdentityMention("瘦子")
+
+        XCTAssertTrue(ignored)
+        XCTAssertTrue(harness.session.pendingCharacterIdentityMentions.isEmpty)
+
+        let reloadedWorkspace = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        await reloadedWorkspace.loadProjects(selecting: document.project.id)
+        let reloadedSession = NovelSessionViewModel(workspace: reloadedWorkspace)
+        await reloadedSession.bindToCurrentSelection()
+        XCTAssertTrue(reloadedSession.pendingCharacterIdentityMentions.isEmpty)
+    }
+
+    func testCustomCharacterIdentityClarificationClosesItAndPersistsTheAnswer() async throws {
+        let document = try documentWithUnresolvedCharacterMention("瘦子")
+        let repository = InMemoryNovelProjectRepository()
+        let harness = try await makeHarness(
+            repository: repository,
+            document: document,
+            scripts: []
+        )
+        let clarification = "这是一次性出现的路人，不需要建立人物档案。"
+
+        let clarified = await harness.session.clarifyCharacterIdentityMention(
+            "瘦子",
+            clarification: clarification
+        )
+
+        XCTAssertTrue(clarified)
+        XCTAssertTrue(harness.session.pendingCharacterIdentityMentions.isEmpty)
+        let persisted = try await repository.loadProject(id: document.project.id).document
+        let branch = try XCTUnwrap(persisted.branches.first)
+        let state = try XCTUnwrap(persisted.stateSnapshots.first(where: {
+            $0.id == branch.currentStateSnapshotID
+        }))
+        XCTAssertTrue(state.unresolvedEntityNames.isEmpty)
+        XCTAssertEqual(state.characterIdentityClarifications.map(\.mention), ["瘦子"])
+        XCTAssertEqual(
+            state.characterIdentityClarifications.map(\.clarification),
+            [clarification]
+        )
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: persisted,
+            request: NovelInjectionPlanningRequest(
+                branchID: branch.id,
+                promptKind: .discussion,
+                userText: "继续讨论剧情。"
+            )
+        )
+        XCTAssertTrue(plan.contextText.contains("瘦子: \(clarification)"))
+        XCTAssertFalse(plan.contextText.contains("Unresolved entities:\n瘦子"))
+
+        let projectedState = try NovelManualSyncChunker.projectedStateContext(
+            baseState: state,
+            accumulated: nil
+        )
+        XCTAssertTrue(projectedState.contains(clarification))
+        XCTAssertTrue(projectedState.contains("\"unresolvedEntityNames\":[]"))
+    }
+
     func testStartingRunKeepsLongSessionLayoutResponsive() async throws {
         var document = try NovelTestFixtures.document()
         let longMarkdown = "# 第一章\n\n" + String(repeating: "破庙里的风裹着雨气，众人压低声音商议下一步。\n\n", count: 180)
@@ -434,6 +506,48 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(harness.session.durableMessages.count, 4)
         XCTAssertEqual(harness.session.durableMessages[2].content, "家人")
         XCTAssertEqual(harness.session.durableMessages[3].content, "那就先强化他保护家人的选择。")
+    }
+
+    func testAskUserAnswerStartsTheNextQuickStartTurn() async throws {
+        let prompt = NovelAskUserPrompt(
+            question: "这座城市最核心的代价是什么？",
+            options: ["失去记忆", "失去时间"]
+        )
+        let harness = try await makeHarness(
+            document: try quickStartDocument(),
+            scripts: [
+                NovelModelScript(steps: [.askUser(prompt, preface: "先确定世界规则。")]),
+                NovelModelScript(steps: [.delta(quickStartSuggestionsJSON), .complete]),
+            ]
+        )
+
+        let startedRunID = await harness.workspace.startQuickStartSuggestions()
+        let firstRunID = try XCTUnwrap(startedRunID)
+        await harness.session.bindToCurrentSelection()
+        let didAsk = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.first(where: {
+                $0.id == firstRunID
+            })?.status == .completed && !harness.session.isRunning
+        }
+        XCTAssertTrue(didAsk)
+        let promptMessage = try XCTUnwrap(harness.session.durableMessages.last)
+        XCTAssertEqual(promptMessage.interaction, .askUser(prompt))
+        XCTAssertEqual(
+            harness.workspace.quickStartStatus,
+            .awaitingUser(promptMessageID: promptMessage.id)
+        )
+
+        let didAnswer = await harness.session.answerAskUser(
+            promptMessageID: promptMessage.id,
+            answer: "失去记忆"
+        )
+        XCTAssertTrue(didAnswer)
+        let didFinish = await eventually {
+            harness.workspace.projectSnapshot?.settingProposals.count == 4 &&
+                !harness.session.isRunning
+        }
+        XCTAssertTrue(didFinish)
+        XCTAssertEqual(harness.session.durableMessages[2].content, "失去记忆")
     }
 
     func testWholeChapterUsesOneMonotonicTransientTailThenPersistsCandidate() async throws {
@@ -1639,11 +1753,12 @@ final class NovelSessionViewModelTests: XCTestCase {
             harness.session.transientTail?.phase == .streaming
         }
         XCTAssertTrue(receivedDelta)
-        XCTAssertEqual(harness.session.transientTail?.content, "")
+        XCTAssertTrue(harness.session.transientTail?.content.contains("# 创作建议") == true)
+        XCTAssertFalse(harness.session.transientTail?.content.contains("schemaVersion") == true)
         await harness.session.stop()
     }
 
-    func testQuickStartHiddenDeltasPublishStreamingPhaseOnlyOnce() async throws {
+    func testQuickStartDeltasPublishUserFacingStreamingPreview() async throws {
         let hiddenDeltas = quickStartSuggestionsJSON
             .components(separatedBy: "\n")
             .map { NovelModelScriptStep.delta($0 + "\n") }
@@ -1664,17 +1779,17 @@ final class NovelSessionViewModelTests: XCTestCase {
         await harness.session.bindToCurrentSelection()
 
         await harness.adapter.resume(runID: runID)
-        let receivedHiddenOutput = await eventually {
-            harness.session.transientTail?.phase == .streaming
+        let receivedVisibleOutput = await eventually {
+            harness.session.transientTail?.phase == .streaming &&
+                harness.session.transientTail?.content.contains("# 创作建议") == true
         }
-        XCTAssertTrue(receivedHiddenOutput, "The first hidden delta must publish the streaming phase.")
+        XCTAssertTrue(receivedVisibleOutput)
         try? await Task.sleep(for: .milliseconds(100))
-        XCTAssertEqual(harness.session.transientTail?.content, "")
-        XCTAssertEqual(
-            harness.session.transientTail?.renderRevision,
-            1,
-            "Hidden structured output should not invalidate the empty Quick Start bubble per chunk."
-        )
+        let content = try XCTUnwrap(harness.session.transientTail?.content)
+        XCTAssertTrue(content.contains("## 世界观"))
+        XCTAssertTrue(content.contains("## 人物"))
+        XCTAssertFalse(content.contains("schemaVersion"))
+        XCTAssertFalse(content.contains("aliases"))
         await harness.session.stop()
     }
 
@@ -3327,6 +3442,32 @@ private extension NovelSessionViewModelTests {
             ).document
         }
         return (document, materialIDs)
+    }
+
+    func documentWithUnresolvedCharacterMention(
+        _ mention: String
+    ) throws -> NovelProjectDocumentV1 {
+        var document = try NovelTestFixtures.document()
+        let baseState = document.stateSnapshots[0]
+        let event = NovelStoryEventRecord(
+            id: NovelEventID(),
+            sequence: 0,
+            kind: "character.appearance",
+            summary: "\(mention)短暂出现。",
+            entityReferences: [mention],
+            createdAt: baseState.createdAt
+        )
+        document.events.append(event)
+        document.stateSnapshots[0] = NovelStateSnapshotRecord(
+            id: baseState.id,
+            eventIDs: [event.id],
+            summary: event.summary,
+            branchOutline: event.summary,
+            unresolvedEntityNames: [mention],
+            createdAt: baseState.createdAt
+        )
+        try NovelDocumentValidator.validate(document)
+        return document
     }
 
     func quickStartDocument() throws -> NovelProjectDocumentV1 {

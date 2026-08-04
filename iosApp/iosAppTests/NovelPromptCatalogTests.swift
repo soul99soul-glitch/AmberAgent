@@ -20,13 +20,14 @@ final class NovelPromptCatalogTests: XCTestCase {
         // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
         XCTAssertEqual(
             sha256(snapshot),
-            "f9d4662c3bd537ff52a03054ee4545987453f53bf9bafe2dd1fa9747082bafc5"
+            "2f2ee4a729b02d5ff56caec9676659db0737923b245539113689b76e0e50070f"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
 
     func testUserVisiblePromptsPreserveDomainBoundaries() {
         let discussion = NovelPromptCatalog.template(for: .discussion).systemText
+        let quickStart = NovelPromptCatalog.template(for: .quickStart).systemText
         let continuation = NovelPromptCatalog.template(for: .proseContinuation).systemText
         let wholeChapter = NovelPromptCatalog.template(for: .proseWholeChapter).systemText
         let polish = NovelPromptCatalog.template(for: .wholeChapterPolish).systemText
@@ -36,6 +37,10 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertTrue(discussion.contains("Ask one focused decision"))
         XCTAssertTrue(discussion.contains("recommended direction first"))
         XCTAssertTrue(discussion.contains("options array when free input"))
+        XCTAssertTrue(discussion.contains("you may ask one next material decision"))
+        XCTAssertTrue(quickStart.contains("use ask_user"))
+        XCTAssertTrue(quickStart.contains("putting your recommended direction first"))
+        XCTAssertTrue(quickStart.contains("you may ask one next material decision"))
         XCTAssertTrue(continuation.contains("does not become canonical"))
         XCTAssertTrue(continuation.contains("one focused scene or passage"))
         XCTAssertTrue(continuation.contains("Do not close the chapter"))
@@ -78,6 +83,11 @@ final class NovelPromptCatalogTests: XCTestCase {
 
         let plain = "季遥扫了眼账单数字。"
         XCTAssertEqual(NovelPromptCatalog.normalizedCandidateProse(plain), plain)
+        XCTAssertEqual(NovelPromptCatalog.normalizedStreamingCandidateProse(plain), plain)
+        XCTAssertEqual(
+            NovelPromptCatalog.normalizedStreamingCandidateProse(incomplete),
+            "季遥扫了眼账单数字。"
+        )
 
         let sentinel = NovelPromptCatalog.polishCompletionSentinel
         let polishOutput = """
@@ -120,6 +130,14 @@ final class NovelPromptCatalogTests: XCTestCase {
             version: "novel.quick-start.v3"
         ))
         XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .quickStart,
+            version: "novel.quick-start.v4"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: "novel.discussion.v4"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .proseContinuation,
             version: "novel.prose-continuation.v1"
         ))
@@ -154,7 +172,7 @@ final class NovelPromptCatalogTests: XCTestCase {
                 "Quick Start Prompt is missing \(field)"
             )
         }
-        XCTAssertEqual(NovelPromptCatalog.template(for: .quickStart).version, "novel.quick-start.v4")
+        XCTAssertEqual(NovelPromptCatalog.template(for: .quickStart).version, "novel.quick-start.v5")
         XCTAssertNoThrow(
             try NovelStructuredOutputDecoder.decodeQuickStartSuggestions(from: quickStartExample)
         )

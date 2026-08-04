@@ -266,15 +266,29 @@ struct NovelSessionView: View {
                         NovelCharacterIdentityQuestionCard(
                             mention: mention,
                             choices: viewModel.characterIdentityChoices,
-                            isDisabled: viewModel.isBusy || viewModel.isRunning
-                        ) { materialID in
-                            Task { @MainActor in
-                                _ = await viewModel.associateCharacterAlias(
-                                    mention.name,
-                                    with: materialID
-                                )
+                            isDisabled: viewModel.isBusy || viewModel.isRunning,
+                            onSelect: { materialID in
+                                Task { @MainActor in
+                                    _ = await viewModel.associateCharacterAlias(
+                                        mention.name,
+                                        with: materialID
+                                    )
+                                }
+                            },
+                            onIgnore: {
+                                Task { @MainActor in
+                                    _ = await viewModel.ignoreCharacterIdentityMention(mention.name)
+                                }
+                            },
+                            onClarify: { clarification in
+                                Task { @MainActor in
+                                    _ = await viewModel.clarifyCharacterIdentityMention(
+                                        mention.name,
+                                        clarification: clarification
+                                    )
+                                }
                             }
-                        }
+                        )
                     }
                 }
 
@@ -908,7 +922,7 @@ struct NovelSessionView: View {
         case .persistenceBlocked(let runID, let message):
             let hasDurableRow = listModel?.rows.contains(where: { $0.runID == runID }) == true
             return hasDurableRow ? nil : .retryPersistence(runID: runID, message: message)
-        case .idle, .starting, .generating:
+        case .idle, .starting, .generating, .awaitingUser:
             return nil
         }
     }
@@ -1704,6 +1718,16 @@ private struct NovelCharacterIdentityQuestionCard: View {
     let choices: [(material: NovelMaterialRecord, title: String)]
     let isDisabled: Bool
     let onSelect: (NovelMaterialID) -> Void
+    let onIgnore: () -> Void
+    let onClarify: (String) -> Void
+
+    @State private var isClarificationFieldPresented = false
+    @State private var clarification = ""
+    @FocusState private var isClarificationFocused: Bool
+
+    private var normalizedClarification: String {
+        clarification.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1739,6 +1763,69 @@ private struct NovelCharacterIdentityQuestionCard: View {
                     .buttonStyle(.plain)
                     .disabled(isDisabled)
                 }
+            }
+
+            HStack(spacing: 10) {
+                Button(action: onIgnore) {
+                    Label("忽略此人物", systemImage: "person.crop.circle.badge.xmark")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(AmberTheme.surface, in: Capsule())
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isClarificationFieldPresented.toggle()
+                    }
+                    isClarificationFocused = isClarificationFieldPresented
+                } label: {
+                    Label("补充说明", systemImage: "square.and.pencil")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(AmberTheme.accent.opacity(0.10), in: Capsule())
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isDisabled)
+
+            if isClarificationFieldPresented {
+                VStack(alignment: .trailing, spacing: 8) {
+                    TextField(
+                        "例如：一次性路人，不需要建档",
+                        text: $clarification,
+                        axis: .vertical
+                    )
+                    .lineLimit(2 ... 4)
+                    .focused($isClarificationFocused)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+
+                    Button {
+                        NovelTextInputCommitter.perform {
+                            onClarify(normalizedClarification)
+                            isClarificationFocused = false
+                        }
+                    } label: {
+                        Label("确认说明", systemImage: "checkmark")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AmberTheme.accent)
+                            .frame(minHeight: 44)
+                            .padding(.horizontal, 14)
+                            .background(AmberTheme.accent.opacity(0.10), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDisabled)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            if isDisabled {
+                Text("停止当前同步后，即可关联、忽略或补充说明。")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
             }
         }
         .padding(16)

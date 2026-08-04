@@ -312,6 +312,7 @@ struct NovelBranchesView: View {
         case .polish: "撤销上一次润色"
         case .manualSync: "撤销上一次同步"
         case .discussionArchive: "撤销上一次讨论归档"
+        case .identityClarification: "撤销上一次人物说明"
         case .restore: "撤销上一次恢复"
         case .initial: "撤销上一次操作"
         }
@@ -571,6 +572,7 @@ struct NovelBranchForkSheet: View {
         case .polish: chapterNumber.map { "第 \($0) 章润色后" } ?? "正文润色后"
         case .manualSync: "剧情同步后"
         case .discussionArchive: chapterNumber.map { "第 \($0) 章讨论归档后" } ?? "讨论归档后"
+        case .identityClarification: "人物说明后"
         case .restore: chapterNumber.map { "第 \($0) 章恢复后" } ?? "章节恢复后"
         case .initial: "项目开始"
         }

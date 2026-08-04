@@ -1023,6 +1023,63 @@ final class NovelCreationViewModelTests: XCTestCase {
         _ = projectID
     }
 
+    func testQuickStartRegenerationUsesEditedCoreIdeaForCurrentRunWithoutMutatingSeed() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "provider",
+                ownerProviderID: "provider",
+                modelID: "model",
+                wireModelID: "model-wire",
+                displayName: "Model",
+                contextWindowTokens: 32_000
+            ),
+            scripts: [
+                NovelModelScript(steps: [.delta(quickStartSuggestionsJSON), .complete]),
+                NovelModelScript(steps: [.delta(quickStartSuggestionsJSON), .complete])
+            ]
+        )
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository, modelRunner: adapter)
+        )
+        let originalCoreIdea = "一列火车只在失去记忆的人面前出现。"
+        let editedCoreIdea =
+            "一列火车只在主动舍弃记忆的人面前出现，主角必须找回被自己删除的名字。"
+        let createdID = await viewModel.createProject(
+            name: "雾海列车",
+            mode: .quickStart,
+            genre: "奇幻悬疑",
+            coreIdea: originalCoreIdea
+        )
+        let projectID = try XCTUnwrap(createdID)
+        for _ in 0..<100 where viewModel.branchSnapshot?.activeSettingProposals.count != 4 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let regeneratedRunID = await viewModel.startQuickStartSuggestions(
+            coreIdeaOverride: editedCoreIdea
+        )
+        let runID = try XCTUnwrap(regeneratedRunID)
+        for _ in 0..<100 where (viewModel.projectSnapshot?.settingProposals.count ?? 0) != 8 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        var requests = await adapter.requests
+        for _ in 0..<100 where !requests.contains(where: { $0.runID == runID }) {
+            try await Task.sleep(for: .milliseconds(10))
+            requests = await adapter.requests
+        }
+        let regenerationRequest = try XCTUnwrap(requests.last { $0.runID == runID })
+        let regenerationText = regenerationRequest.messages.map(\.content).joined(separator: "\n")
+        XCTAssertTrue(regenerationText.contains("本轮核心想法（仅本次有效）"))
+        XCTAssertTrue(regenerationText.contains(editedCoreIdea))
+        XCTAssertTrue(regenerationText.contains("以本轮内容为准"))
+
+        let loaded = try await repository.loadProject(id: projectID).document
+        XCTAssertEqual(loaded.project.quickStartSeed?.coreIdea, originalCoreIdea)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testQuickStartRegenerationSupersedesCurrentProposalsOnlyAfterSuccess() async throws {
         let repository = InMemoryNovelProjectRepository()
         let adapter = ScriptedNovelModelAdapter(

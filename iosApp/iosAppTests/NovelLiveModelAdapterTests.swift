@@ -405,6 +405,33 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertTrue(captured.value?.parameters.model.tools.isEmpty == true)
     }
 
+    func testQuickStartAdvertisesAskUserWithoutSearchTools() async throws {
+        let fixture = makeFixture(apiKey: "test-key")
+        let captured = LockedBox<NovelLiveTransportRequest?>(nil)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, _ in
+                XCTFail("Quick Start Ask User must use the tool transport.")
+                return nil
+            },
+            discussionTransport: { request, callbacks in
+                captured.set(request)
+                callbacks.onComplete()
+                return nil
+            },
+            discussionSearchEnabled: { true }
+        )
+        let resolved = try await adapter.resolveModel(for: .global)
+
+        _ = await Self.collect(try await adapter.start(makeRequest(
+            model: resolved,
+            purpose: .quickStart
+        )))
+
+        XCTAssertEqual(captured.value?.parameters.tools.map(\.name), ["ask_user"])
+        XCTAssertTrue(captured.value?.parameters.model.tools.isEmpty == true)
+    }
+
     func testCodexPreparationOrderIsResolveThenAugmentThenDiagnostic() async throws {
         let fixture = makeFixture(apiKey: "test-key")
         let order = LockedBox<[String]>([])

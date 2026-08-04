@@ -22,12 +22,33 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 
 ## Latest Completed Slices
 
+### 2026-08-04 小说人物身份确认卡退出路径（未提交）
+
+- 「确认人物身份」不是通用 `ask_user`，而是剧情状态里的未解析人物入口。卡片在既有「关联角色」之外新增「忽略此人物」和「补充说明」：前者把该称呼记录为无需建档的一次性路人，后者展开可编辑输入框保存作者自己的身份说明；确认前复用 `NovelTextInputCommitter` 提交中文输入法 marked text，避免漏掉最后一段拼音组词。同步进行中保持单写入门禁，并在卡片内明确提示先停止当前同步后再处理，不暗中取消生成。
+- 作者说明以新的 immutable state snapshot + `identityClarification` checkpoint 落库，同时从 `unresolvedEntityNames` 移除该称呼；撤销和从历史 checkpoint Fork 会自然回到对应历史状态。普通注入和手动同步都携带作者说明，后续事实校验允许事件继续引用该路人，但拒绝模型把已裁决称呼重新列为未解析人物。旧项目缺少该字段时按空数组解码，keep-both import 会同步重映射 operation outcome 的 project ID。
+- 两条 ViewModel 契约覆盖忽略后的重载不再出现、补充说明的持久化/普通注入/手动同步上下文，另有 UI wiring canary。当前 generic iOS `build-for-testing` 已成功，证明应用和全部测试源码可编译；`git diff --check` 通过。XCTest 运行仍被本机失联的 CoreSimulatorService 阻塞，不能把编译成功表述为测试运行通过。最新混合工作区已用 Team `89QRFX9548` 完成 iPhone Air Debug arm64 构建，`codesign --verify --deep --strict` 通过，主 Debug dylib SHA-256 为 `781e7ecce95b099a4b291949c8868ef8ccef1a0b138e8bc6e81db560a6b24488`；09:22 已覆盖安装到 `94918570-0680-5B93-8E38-7E6B355D4426` 的 `EB66C6DF-9BA4-4E0F-B625-C188AF73F88C/iosApp.app`，09:23 成功启动 `app.amber.ios`。最终视觉、长篇流式手感与真实 provider 多轮交互仍需设备内人工触发验收。
+
+### 2026-08-04 小说流式生成、Ask User 与阅读器顶部视觉收口（未提交）
+
+- 章节阅读器现在显式以 `AmberTheme.background` 接管 navigation bar 背景并保持可见，顶部工具栏与正文不再由系统导航栏材质产生异色。普通小说流式正文保留既有稳定 tail、48ms pacer 和单一原生滚动 owner，只把逐帧整篇 `trim/split/map` 归一化改成轻量前缀检查；只有疑似代码围栏时才进入完整清理，避免正文越长每帧工作量越大。
+- Quick Start 的 provider/lifecycle 原本已经接收流式 JSON，但 ViewModel 丢弃 delta、只在终态一次性展示。现将未完成结构化输出解析成仅含概览、世界观、角色、主线和写作要求的临时 Markdown，并沿用会话 pacer 渐进更新；原始 JSON 键与括号不展示，待确认建议仍只在终态严格解码成功后原子写入，失败或中断不会把半成品当成正式建议。
+- Quick Start 和讨论均明确鼓励在关键、高影响且信息不足时使用 `ask_user`：Quick Start 原生暴露 `ask_user` 工具并兼容结构化 fallback，问题和回答各自作为同一 Session 中可恢复的独立 run；回答会启动下一轮 Quick Start，可继续追问多个真正影响方案的决策。讨论继续支持同样的多轮选择；共用提交文案改为「确认选择」。Agent 已被约束为题意足够时直接产出，不为形式感盘问用户。
+- 新增/更新结构化流式解析、Quick Start Ask User lifecycle/reducer/adapter/ViewModel、提示词历史兼容、流式正文归一化和导航栏 wiring 契约测试。iPhone 17 Pro / iOS 26.5 arm64 Simulator 的 `build-for-testing` 已成功，证明当前应用和全部测试源码可编译；`NovelStructuredOutputTests.testQuickStartStreamingPresentationRevealsOnlyUserFacingFields` 单条运行通过。其余 XCTest 运行被本机 Xcode/CoreSimulator 的 `_IDEInstalliPhoneSimulatorWorker` 长时间无法 materialize 阻塞，未把编译成功或既有 317 项回归误报为本轮全部运行通过。
+- 当前混合工作区已用 Team `89QRFX9548` 完成 Debug arm64 真机构建，`codesign --verify --deep --strict` 通过，主 Debug dylib SHA-256 为 `ea9ee3da48776799966010bde092210a5080bde78c2b96e07bfc68d50929728c`。02:15 已覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`，CoreDevice 确认 Amber `app.amber.ios` 1.0 (1)，新容器为 `D4C50C4E-3824-4F5B-A888-727E8C3FAF29/iosApp.app`；自动启动仅因设备锁屏被系统拒绝。阅读器真实色彩、长篇流式稳定性、Quick Start 可读流式和真实 provider 多轮 Ask User 仍需解锁后在设备内触发验证。
+
+### 2026-08-04 Quick Start 原始想法取回与重新生成入口重排（未提交）
+
+- 小说「设定 → 更多」里原先孤立的「重新生成设定建议」文字行改为独立的「设定建议」操作卡片：44pt 强调色图标、主标题「重新生成建议」、用途副标题和右侧进入箭头共用整行点击区；卡片使用现有 `AmberTheme` 表面、柔和边框与本地强调色，没有改全局主题或其他资料列表。生成被占用时仍沿用既有门禁，并在卡片副标题中显示阻塞原因。
+- 重新生成面板新增 6 字按钮「载入核心想法」。它从项目持久化的 `quickStartSeed.coreIdea` 取回快速开始原文并填入编辑框；已有草稿时先确认替换。载入后可编辑，发送时作为仅本轮有效的核心想法覆盖；项目最初保存的 seed 不变。未载入时仍是既有「调整方向」语义，留空仍按原题材和原核心想法生成；覆盖内容与原文相同时不会重复加入请求。
+- 新增 ViewModel 契约测试证明编辑后的核心想法进入本轮模型请求且持久化 seed 未被改写，并更新生产入口/输入保护 wiring canary。`NovelCreationViewModelTests + IOSNovelCreationWiringTests` 在 iPhone 17 Pro / iOS 26.5 Simulator 为 **112 passed / 0 failed / 0 skipped**（`Test-iosApp-2026.08.04_01-16-18-+0800.xcresult`）；最终说明文案收口后 3 条定点为 **3 passed / 0 failed / 0 skipped**（`Test-iosApp-2026.08.04_01-24-34-+0800.xcresult`）。四个本轮 Swift 文件 `swiftc -parse` 与 `git diff --check` 通过。
+- 当前混合工作区已用 Team `89QRFX9548` 完成 Debug arm64 真机构建，`codesign --verify --deep --strict` 通过，主 Debug dylib SHA-256 为 `71eba08843b666d6c7aa87456e6751112e3362dd76e0dfccae563e6961e5f22d`。01:26 已覆盖安装并成功启动到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`，新容器为 `1E90C7A0-6A14-4216-A525-5247BA3CC09C/iosApp.app`。设备安装/启动已有 CoreDevice 证据；卡片最终观感、载入后的长文本编辑和键盘手感仍需用户在真机进入现有 Quick Start 项目目测。
+
 ### 2026-08-03 小说编辑、建议写入与人物上下文精准收口（已提交）
 
 - 先前固定 Sheet presentation 只修复了输入会话被重配的问题，仍遗漏“点击保存时最后一段拼音尚处于 marked text，业务动作直接读取旧 `@State`”这一独立链路。现由单一 `NovelTextInputCommitter` 先 `unmarkText`、结束第一响应者，再在下一主线程回合读取草稿；文本完整性与 dirty-state 校验也移到该提交动作之后，避免按钮先被旧状态禁用。新建/改名、快速开始、资料与建议、分支、章节、讨论归档、正文收录、上下文预览和 Ask User 等真实文本动作均接入。小说 Composer 的 UIKit controller 改由 workspace 持有，打开上下文面板、切分支、退后台或离开页面前直接读取 committed text；没有时间延迟、字符过滤或逐字段兜底。
 - 建议确认面板的标题/人物姓名与正文现可直接编辑，编辑值随 proposal resolution 一次进入 Reducer，资料修订与 proposal resolved 原子落库；空正文会在 UI 与 Reducer 两层明确拒绝，失败不会静默关闭。人物新请求以当前有效修订标题为唯一规范名，历史全局标题与“首次建议写入前被改掉的原建议姓名”只作为有效别名，供智能资料命中、状态/事实校验、人物事件和待确认身份解析复用；既有项目直接从已持久化的 proposal operation ledger 得到同一结果，无 schema 迁移，也不重写历史消息、状态快照或旧资料。分支专用 override 标题不会泄漏成其他分支别名。
 - 真机截图中的「讨论」恢复为 30pt 可视胶囊、44pt 外部命中区；等待文案缩为单行「模型思考中 N 秒」；建议写入及同类小说编辑页的忙碌态移除 16pt 方形 glass 背板，统一使用普通系统 `ProgressView`。所有长草稿 Sheet 保持固定 presentation，取消确认、提交后校验和原有业务状态不变。
-- 最终三批定点回归在 iPhone 17 Pro / iOS 26.5 Simulator 为 **317 passed / 0 failed / 0 skipped**：建议/身份/注入/UI 137 项（`Test-iosApp-2026.08.04_00-16-58-+0800.xcresult`），ViewModel/Reducer/手工编辑 143 项（`Test-iosApp-2026.08.04_00-18-16-+0800.xcresult`），文档与事实校验 37 项（`Test-iosApp-2026.08.04_00-20-47-+0800.xcresult`）。全部本批次 Swift diff 的 `swiftc -parse` 与 `git diff --check` 通过。当前最终 diff 尚未重新构建或安装真机包，分段拼音、键盘保持和最终视觉仍待真机复验；更早构建的包不代表本轮最终代码。
+- 最终三批定点回归在 iPhone 17 Pro / iOS 26.5 Simulator 为 **317 passed / 0 failed / 0 skipped**：建议/身份/注入/UI 137 项（`Test-iosApp-2026.08.04_00-16-58-+0800.xcresult`），ViewModel/Reducer/手工编辑 143 项（`Test-iosApp-2026.08.04_00-18-16-+0800.xcresult`），文档与事实校验 37 项（`Test-iosApp-2026.08.04_00-20-47-+0800.xcresult`）。全部本批次 Swift diff 的 `swiftc -parse` 与 `git diff --check` 通过。2026-08-04 当前 `db7371fcb0a52579d2f2bc7088d3c799675b2edb` 已用 Team `89QRFX9548` 完成 iPhone Air Debug arm64 构建，Xcode 与 KMP framework 均成功，`codesign --verify --deep --strict` 通过，主 Debug dylib SHA-256 为 `d6feaa5741d1f9189ea82ed95a929530368f6e04ca613043a22fb429f96968e0`；CoreDevice 已覆盖安装 Amber `app.amber.ios` 1.0 (1)，新容器为 `375BF389-5B59-4956-B4CF-31C475C5261D/iosApp.app`。本次未自动启动，分段拼音、键盘保持和最终视觉仍待设备内人工触发复验。
 
 ### 2026-08-03 跨链复核问题精准收口（已提交）
 

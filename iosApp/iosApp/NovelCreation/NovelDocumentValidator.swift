@@ -613,6 +613,23 @@ enum NovelDocumentValidator {
             issues.append("Story event history is not strictly increasing.")
         }
         for snapshot in document.stateSnapshots {
+            let clarificationKeys = snapshot.characterIdentityClarifications.map {
+                NovelCharacterIdentityResolver.normalize($0.mention)
+            }
+            if clarificationKeys.contains(where: { $0.isEmpty }) ||
+                Set(clarificationKeys).count != clarificationKeys.count {
+                issues.append("State snapshot \(snapshot.id) has invalid identity clarification names.")
+            }
+            for clarification in snapshot.characterIdentityClarifications {
+                if clarification.mention.count > 200 ||
+                    clarification.clarification.trimmingCharacters(
+                        in: .whitespacesAndNewlines
+                    ).isEmpty ||
+                    clarification.clarification.count > 1_000 ||
+                    !operationIDs.contains(clarification.operationID) {
+                    issues.append("State snapshot \(snapshot.id) has invalid identity clarification data.")
+                }
+            }
             if Set(snapshot.eventIDs).count != snapshot.eventIDs.count {
                 issues.append("State snapshot \(snapshot.id) repeats an event.")
             }
@@ -855,10 +872,20 @@ enum NovelDocumentValidator {
                 if checkpoint.kind == .polish && candidate.kind != .polish {
                     issues.append("Polish checkpoint \(checkpoint.id) has a non-polish candidate.")
                 }
-            case .initial, .manualSync, .discussionArchive, .restore:
+            case .initial, .manualSync, .discussionArchive, .identityClarification, .restore:
                 if checkpoint.sourceCandidateID != nil {
                     issues.append("Checkpoint \(checkpoint.id) unexpectedly has a source candidate.")
                 }
+            }
+            if checkpoint.kind == .identityClarification,
+               let parentID = checkpoint.parentCheckpointID,
+               let parent = checkpointByID[parentID] {
+                validateIdentityClarificationCheckpoint(
+                    checkpoint,
+                    parent: parent,
+                    document: document,
+                    issues: &issues
+                )
             }
             if checkpoint.kind == .polish || checkpoint.kind == .restore,
                let parentID = checkpoint.parentCheckpointID,
@@ -889,6 +916,41 @@ enum NovelDocumentValidator {
             initialCheckpoint: initialCheckpoints.first,
             issues: &issues
         )
+    }
+
+    private static func validateIdentityClarificationCheckpoint(
+        _ checkpoint: NovelBranchCheckpointRecord,
+        parent: NovelBranchCheckpointRecord,
+        document: NovelProjectDocumentV1,
+        issues: inout [String]
+    ) {
+        guard let state = document.stateSnapshots.first(where: {
+            $0.id == checkpoint.stateSnapshotID
+        }), let parentState = document.stateSnapshots.first(where: {
+            $0.id == parent.stateSnapshotID
+        }), let clarification = state.characterIdentityClarifications.last else {
+            issues.append("Identity clarification checkpoint \(checkpoint.id) has no state decision.")
+            return
+        }
+
+        let mentionKey = NovelCharacterIdentityResolver.normalize(clarification.mention)
+        let expectedUnresolved = parentState.unresolvedEntityNames.filter {
+            NovelCharacterIdentityResolver.normalize($0) != mentionKey
+        }
+        if checkpoint.chapterSelections != parent.chapterSelections ||
+            checkpoint.sessionCursor != parent.sessionCursor ||
+            checkpoint.branchOverrideRevisionIDs != parent.branchOverrideRevisionIDs ||
+            state.eventIDs != parentState.eventIDs ||
+            state.summary != parentState.summary ||
+            state.branchOutline != parentState.branchOutline ||
+            state.settingProposalIDs != parentState.settingProposalIDs ||
+            state.characterIdentityClarifications.dropLast() !=
+                parentState.characterIdentityClarifications[...] ||
+            clarification.operationID != checkpoint.operationID ||
+            expectedUnresolved == parentState.unresolvedEntityNames ||
+            state.unresolvedEntityNames != expectedUnresolved {
+            issues.append("Identity clarification checkpoint \(checkpoint.id) rewrites unrelated state.")
+        }
     }
 
     private static func validateCandidates(
@@ -1468,6 +1530,29 @@ enum NovelDocumentValidator {
                     configRevision > document.project.configRevision {
                     issues.append(
                         "Polish-preference operation \(operation.operationID) has invalid outcome data."
+                    )
+                }
+            case let (
+                .clarifyCharacterIdentity,
+                .characterIdentityClarified(
+                    _, branchID, mention, checkpointID, stateSnapshotID, revision
+                )
+            ):
+                let checkpoint = document.checkpoints.first(where: {
+                    $0.id == checkpointID &&
+                        $0.createdOnBranchID == branchID &&
+                        $0.kind == .identityClarification &&
+                        $0.stateSnapshotID == stateSnapshotID &&
+                        $0.operationID == operation.operationID
+                })
+                let clarification = document.stateSnapshots
+                    .first(where: { $0.id == stateSnapshotID })?
+                    .characterIdentityClarifications
+                    .first(where: { $0.operationID == operation.operationID })
+                if revision != operation.appliedProjectRevision ||
+                    checkpoint == nil || clarification?.mention != mention {
+                    issues.append(
+                        "Character identity clarification \(operation.operationID) has invalid outcome data."
                     )
                 }
             case let (
@@ -2480,6 +2565,7 @@ extension NovelOutcome {
         case .branchMaterialOverrideChanged(let projectID, _, _, _, _, _): projectID
         case .mainBranchChanged(let projectID, _, _): projectID
         case .polishPreferenceChanged(let projectID, _, _): projectID
+        case .characterIdentityClarified(let projectID, _, _, _, _, _): projectID
         case .branchForked(let projectID, _, _, _, _): projectID
         case .branchRenamed(let projectID, _, _): projectID
         case .branchDeleted(let projectID, _, _): projectID
@@ -2510,6 +2596,7 @@ extension NovelOutcome {
              .branchRenamed(_, let branchID, _),
              .branchDeleted(_, let branchID, _),
              .branchHeadMoved(_, let branchID, _, _, _, _),
+             .characterIdentityClarified(_, let branchID, _, _, _, _),
              .discussionArchived(_, let branchID, _, _, _, _, _),
              .candidateCloned(_, let branchID, _, _, _),
              .chapterDiscardStateChanged(_, let branchID, _, _, _),

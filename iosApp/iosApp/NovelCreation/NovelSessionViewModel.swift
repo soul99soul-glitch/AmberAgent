@@ -256,6 +256,9 @@ final class NovelSessionViewModel {
     @ObservationIgnored private(set) var fullProjectionBuildCountForTesting = 0
 #endif
     @ObservationIgnored private var presentationBuffer: NovelSessionPresentationBuffer?
+    /// Quick Start keeps its structured transport text separate from the user-facing tail.
+    /// Only the strict terminal decoder is allowed to commit proposal records.
+    @ObservationIgnored private var quickStartStructuredContent: String?
     @ObservationIgnored private var presentationFlushTask: Task<Void, Never>?
     /// 终态 tail 的延迟退役任务:完成后保留 tail 一个静窗再清空,避免完成瞬间整屏一跳。
     @ObservationIgnored private var terminalTailRetirementTask: Task<Void, Never>?
@@ -331,6 +334,11 @@ final class NovelSessionViewModel {
             )
         }
         let resolver = NovelCharacterIdentityResolver(identities: identities)
+        let clarifiedKeys = Set(
+            state.characterIdentityClarifications.map {
+                NovelCharacterIdentityResolver.normalize($0.mention)
+            }
+        )
         let unresolvedByKey = Dictionary(
             state.unresolvedEntityNames.map {
                 (NovelCharacterIdentityResolver.normalize($0), $0)
@@ -342,7 +350,9 @@ final class NovelSessionViewModel {
         for event in project.events where eventIDs.contains(event.id) && event.kind.hasPrefix("character.") {
             for reference in event.entityReferences {
                 let key = NovelCharacterIdentityResolver.normalize(reference)
-                guard let unresolved = unresolvedByKey[key], !resolver.isKnown(reference) else { continue }
+                guard let unresolved = unresolvedByKey[key],
+                      !resolver.isKnown(reference),
+                      !clarifiedKeys.contains(key) else { continue }
                 namesByKey[key] = unresolved
             }
         }
@@ -671,6 +681,19 @@ final class NovelSessionViewModel {
             promptMessageID: promptMessageID,
             answer: answer
         )
+        if let promptRunID = promptMessage.runID,
+           workspace.projectSnapshot?.activeRuns.first(where: {
+               $0.id == promptRunID
+           })?.kind == .quickStart {
+            guard let runID = await workspace.startQuickStartSuggestions(
+                exactUserText: answer,
+                askUserResponse: response
+            ) else { return false }
+            operationErrorMessage = nil
+            refreshErrorMessage = nil
+            await bindToCurrentSelection()
+            return activeRunID == runID
+        }
         let draft = NovelSessionRunDraft(
             kind: .discussion,
             mode: .discussPlan,
@@ -709,6 +732,33 @@ final class NovelSessionViewModel {
         operationErrorMessage = workspace.errorMessage
         _ = await refreshDurable(binding: binding, token: bindingToken)
         return workspace.errorMessage == nil
+    }
+
+    @discardableResult
+    func ignoreCharacterIdentityMention(_ mention: String) async -> Bool {
+        await clarifyCharacterIdentityMention(
+            mention,
+            clarification: "这是一次性出现的路人，不需要建立人物档案。"
+        )
+    }
+
+    @discardableResult
+    func clarifyCharacterIdentityMention(
+        _ mention: String,
+        clarification: String
+    ) async -> Bool {
+        let normalized = clarification.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            operationErrorMessage = "请先输入人物身份说明。"
+            return false
+        }
+        let succeeded = await workspace.clarifyCharacterIdentity(
+            mention: mention,
+            clarification: normalized
+        )
+        operationErrorMessage = workspace.errorMessage
+        _ = await refreshDurable(binding: binding, token: bindingToken)
+        return succeeded && workspace.errorMessage == nil
     }
 
     func stop(reason: NovelRunInterruptionReason = .user) async {
@@ -1932,13 +1982,13 @@ private extension NovelSessionViewModel {
             adoptDurableRunRecord(runID: runID)
         case .delta(let text):
             if draft.kind == .quickStart {
-                publishQuickStartStreamingPhaseIfNeeded(runID: runID, token: token)
+                appendQuickStartStructuredDelta(text, runID: runID, token: token)
             } else {
                 enqueuePresentationDelta(text, runID: runID, token: token)
             }
         case .replaced(let text):
             if draft.kind == .quickStart {
-                publishQuickStartStreamingPhaseIfNeeded(runID: runID, token: token)
+                replaceQuickStartStructuredContent(text, runID: runID, token: token)
             } else {
                 enqueuePresentationReplacement(text, runID: runID, token: token)
             }
@@ -2018,7 +2068,9 @@ private extension NovelSessionViewModel {
             return
         }
         let expectedBinding = binding
-        let initialContent = run.kind == .quickStart ? "" : run.partialContent
+        let initialContent = run.kind == .quickStart
+            ? NovelQuickStartStreamingPresentation.markdown(from: run.partialContent)
+            : run.partialContent
         installTail(
             run: run,
             content: initialContent,
@@ -2348,6 +2400,40 @@ private extension NovelSessionViewModel {
         updateTail(content: "", phase: .streaming)
     }
 
+    func appendQuickStartStructuredDelta(
+        _ text: String,
+        runID: NovelRunID,
+        token: UUID
+    ) {
+        guard !text.isEmpty,
+              bindingToken == token,
+              transientTail?.runID == runID else { return }
+        quickStartStructuredContent = (quickStartStructuredContent ?? "") + text
+        publishQuickStartPresentation(runID: runID, token: token)
+    }
+
+    func replaceQuickStartStructuredContent(
+        _ text: String,
+        runID: NovelRunID,
+        token: UUID
+    ) {
+        guard bindingToken == token,
+              transientTail?.runID == runID else { return }
+        quickStartStructuredContent = text
+        publishQuickStartPresentation(runID: runID, token: token)
+    }
+
+    func publishQuickStartPresentation(runID: NovelRunID, token: UUID) {
+        let markdown = NovelQuickStartStreamingPresentation.markdown(
+            from: quickStartStructuredContent ?? ""
+        )
+        if markdown.isEmpty {
+            publishQuickStartStreamingPhaseIfNeeded(runID: runID, token: token)
+        } else {
+            enqueuePresentationReplacement(markdown, runID: runID, token: token)
+        }
+    }
+
     func publishTerminalPresentation(
         runID: NovelRunID,
         token: UUID,
@@ -2397,6 +2483,7 @@ private extension NovelSessionViewModel {
         terminalTailRetirementTask?.cancel()
         terminalTailRetirementTask = nil
         cancelPendingPresentation()
+        quickStartStructuredContent = run.kind == .quickStart ? run.partialContent : nil
         transientRunRecord = run
         transientTail = NovelSessionTransientTail(
             run: run,
@@ -2436,6 +2523,7 @@ private extension NovelSessionViewModel {
         terminalTailRetirementTask?.cancel()
         terminalTailRetirementTask = nil
         cancelPendingPresentation()
+        quickStartStructuredContent = nil
         transientTail = nil
         transientRunRecord = nil
         terminalAwaitingRefresh = false

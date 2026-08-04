@@ -457,27 +457,70 @@ private struct NovelCompendiumMoreView: View {
     @ViewBuilder
     private var quickStartRegenerationSection: some View {
         if viewModel.projectSnapshot?.project.creationMode == .quickStart {
-            Section {
+            Section("设定建议") {
                 Button {
                     isPresentingQuickStartRegeneration = true
                 } label: {
-                    Label("重新生成设定建议", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .disabled(!viewModel.canMutate || quickStartRegenerationBlockReason != nil)
-            } footer: {
-                VStack(alignment: .leading, spacing: 4) {
-                    if let quickStartRegenerationBlockReason {
-                        Text(quickStartRegenerationBlockReason)
-                            .foregroundStyle(AmberTheme.foreground2)
+                    HStack(spacing: 14) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AmberTheme.accent)
+                            .frame(width: 44, height: 44)
+                            .background(AmberTheme.accentTint, in: RoundedRectangle(
+                                cornerRadius: 13,
+                                style: .continuous
+                            ))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("重新生成建议")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text(quickStartRegenerationSubtitle)
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.foreground2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AmberTheme.muted2)
                     }
-                    Text("新一轮成功后会替换当前未处理的建议；生成失败时仍保留当前建议。")
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AmberTheme.surface, in: RoundedRectangle(
+                        cornerRadius: AmberTheme.radiusXLarge,
+                        style: .continuous
+                    ))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
+                            .stroke(AmberTheme.borderSoft, lineWidth: 1)
+                    }
+                    .contentShape(RoundedRectangle(
+                        cornerRadius: AmberTheme.radiusXLarge,
+                        style: .continuous
+                    ))
                 }
+                .buttonStyle(.plain)
+                .listRowInsets(.init(top: 6, leading: 16, bottom: 6, trailing: 16))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .disabled(!viewModel.canMutate || quickStartRegenerationBlockReason != nil)
+                .opacity(viewModel.canMutate && quickStartRegenerationBlockReason == nil ? 1 : 0.55)
+                .accessibilityLabel("重新生成建议")
+                .accessibilityHint(quickStartRegenerationSubtitle)
             }
         }
     }
 
+    private var quickStartRegenerationSubtitle: String {
+        quickStartRegenerationBlockReason ?? "调整本轮想法，生成一套新的设定建议"
+    }
+
     private var quickStartRegenerationBlockReason: String? {
+        if case .awaitingUser = viewModel.quickStartStatus {
+            return "请先回答创作页中的规划问题，再重新生成建议。"
+        }
         let hasRunningRun = viewModel.branchSnapshot?.branch.activeRunID != nil ||
             viewModel.projectSnapshot?.activeRuns.contains(where: { $0.status == .running }) == true
         guard hasRunningRun else { return nil }
@@ -502,25 +545,55 @@ private struct NovelCompendiumMoreView: View {
     }
 }
 
+private enum NovelQuickStartRegenerationDraftMode {
+    case guidance
+    case coreIdea
+}
+
 struct NovelQuickStartRegenerationSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let viewModel: NovelCreationViewModel
-    @State private var guidance = ""
+    @State private var draft = ""
+    @State private var draftMode = NovelQuickStartRegenerationDraftMode.guidance
     @State private var isStarting = false
     @State private var failureMessage: String?
     @State private var isConfirmingDiscard = false
+    @State private var isConfirmingCoreIdeaLoad = false
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextEditor(text: $guidance)
+                    TextEditor(text: $draft)
                         .frame(minHeight: 160)
+                        .accessibilityLabel(editorTitle)
                 } header: {
-                    Text("调整方向（可选）")
+                    HStack(spacing: 12) {
+                        Text(editorTitle)
+                        Spacer(minLength: 8)
+                        if originalCoreIdea != nil {
+                            Button {
+                                requestCoreIdeaLoad()
+                            } label: {
+                                Text("载入核心想法")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.foreground)
+                                    .padding(.horizontal, 11)
+                                    .frame(height: 32)
+                                    .background(AmberTheme.surface2, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .frame(minHeight: 44)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .accessibilityHint(
+                                "将快速开始时保存的核心想法填入编辑框，不会立即生成"
+                            )
+                        }
+                    }
+                    .textCase(nil)
                 } footer: {
-                    Text("题材和核心创意不会改变，只是把这段说明并入本次生成请求，让模型知道应该往哪个方向调整。留空则按原方式重新生成。")
+                    Text(editorFooter)
                 }
                 if let failureMessage {
                     Section {
@@ -532,7 +605,7 @@ struct NovelQuickStartRegenerationSheet: View {
             .disabled(isStarting)
             .scrollContentBackground(.hidden)
             .background(AmberTheme.background)
-            .navigationTitle("重新生成设定建议")
+            .navigationTitle("重新生成建议")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -541,18 +614,18 @@ struct NovelQuickStartRegenerationSheet: View {
                     }
                         .disabled(isStarting)
                         .confirmationDialog(
-                            "放弃调整方向？",
+                            "放弃本轮编辑？",
                             isPresented: $isConfirmingDiscard,
                             titleVisibility: .visible
                         ) {
                             Button("放弃更改", role: .destructive) { dismiss() }
                             Button("继续编辑", role: .cancel) {}
                         } message: {
-                            Text("已填写的调整方向会丢失。")
+                            Text("输入框中尚未发送的内容会丢失。")
                         }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("开始") {
+                    Button("生成") {
                         NovelTextInputCommitter.perform { start() }
                     }
                         .disabled(isStarting || viewModel.isPerforming)
@@ -563,14 +636,47 @@ struct NovelQuickStartRegenerationSheet: View {
                     ProgressView("正在开始生成建议")
                 }
             }
+            .confirmationDialog(
+                "载入最初的核心想法？",
+                isPresented: $isConfirmingCoreIdeaLoad,
+                titleVisibility: .visible
+            ) {
+                Button("替换当前内容") { loadOriginalCoreIdea() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("编辑框中尚未发送的内容会被替换，最初保存的内容不会改变。")
+            }
         }
         .interactiveDismissDisabled()
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }
 
+    private var originalCoreIdea: String? {
+        viewModel.projectSnapshot?.project.quickStartSeed?.coreIdea
+    }
+
+    private var editorTitle: String {
+        switch draftMode {
+        case .guidance:
+            "调整方向（可选）"
+        case .coreIdea:
+            "本轮核心想法"
+        }
+    }
+
+    private var editorFooter: String {
+        let outcome = "成功后替换当前未处理建议；失败时保留。"
+        switch draftMode {
+        case .guidance:
+            return "补充本轮调整方向；留空会按最初的题材和核心想法重新生成。\(outcome)"
+        case .coreIdea:
+            return "可以在最初输入上修改；只影响本轮建议，不会覆盖最初保存的内容。\(outcome)"
+        }
+    }
+
     private var hasUnsavedChanges: Bool {
-        !guidance.isEmpty
+        !draft.isEmpty
     }
 
     private func requestDismiss() {
@@ -579,6 +685,22 @@ struct NovelQuickStartRegenerationSheet: View {
         } else {
             dismiss()
         }
+    }
+
+    private func requestCoreIdeaLoad() {
+        guard let originalCoreIdea else { return }
+        if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           draft != originalCoreIdea {
+            isConfirmingCoreIdeaLoad = true
+        } else {
+            loadOriginalCoreIdea()
+        }
+    }
+
+    private func loadOriginalCoreIdea() {
+        guard let originalCoreIdea else { return }
+        draft = originalCoreIdea
+        draftMode = .coreIdea
     }
 
     private func start() {
@@ -590,7 +712,10 @@ struct NovelQuickStartRegenerationSheet: View {
             // startQuickStartSuggestions 的守卫(正在执行/已有活跃 run/需重载)
             // 会静默返回 nil。此时不能关闭 sheet——否则用户以为已经开始生成,
             // 实际什么都没发生。留在原地让用户可以重试。
-            let runID = await viewModel.startQuickStartSuggestions(guidance: guidance)
+            let runID = await viewModel.startQuickStartSuggestions(
+                guidance: draftMode == .guidance ? draft : nil,
+                coreIdeaOverride: draftMode == .coreIdea ? draft : nil
+            )
             isStarting = false
             guard viewModel.errorMessage == nil, runID != nil else {
                 failureMessage = viewModel.errorMessage ?? "建议生成没有开始，请稍后重试。"

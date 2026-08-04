@@ -75,7 +75,8 @@ extension NovelFactTransactionReducer {
             unresolvedEntityNames: accumulated?.unresolvedEntityNames ??
                 baseState.unresolvedEntityNames,
             createdAt: baseState.createdAt,
-            settingProposalIDs: baseState.settingProposalIDs
+            settingProposalIDs: baseState.settingProposalIDs,
+            characterIdentityClarifications: baseState.characterIdentityClarifications
         )
         let sanitized = try sanitizedManualRebuild(
             validated,
@@ -130,6 +131,7 @@ extension NovelFactTransactionReducer {
             unresolved: value.unresolvedEntityNames,
             branch: branch,
             baseUnresolved: effectiveBaseState.unresolvedEntityNames,
+            identityClarifications: effectiveBaseState.characterIdentityClarifications,
             in: document
         )
     }
@@ -179,6 +181,7 @@ extension NovelFactTransactionReducer {
         let unresolved = try sanitizedUnresolvedEntityNames(
             base: baseState.unresolvedEntityNames,
             referenced: referenced,
+            identityClarifications: baseState.characterIdentityClarifications,
             branch: branch,
             document: document
         )
@@ -231,6 +234,7 @@ extension NovelFactTransactionReducer {
             unresolved: value.unresolvedEntityNames,
             branch: branch,
             baseUnresolved: effectiveBaseState.unresolvedEntityNames,
+            identityClarifications: effectiveBaseState.characterIdentityClarifications,
             in: document
         )
     }
@@ -279,6 +283,7 @@ extension NovelFactTransactionReducer {
         let unresolved = try sanitizedUnresolvedEntityNames(
             base: baseState.unresolvedEntityNames,
             referenced: referenced,
+            identityClarifications: baseState.characterIdentityClarifications,
             branch: branch,
             document: document
         )
@@ -451,6 +456,7 @@ extension NovelFactTransactionReducer {
         let unresolved = try sanitizedUnresolvedEntityNames(
             base: state.unresolvedEntityNames,
             referenced: [],
+            identityClarifications: state.characterIdentityClarifications,
             branch: branch,
             document: document
         )
@@ -462,7 +468,8 @@ extension NovelFactTransactionReducer {
             branchOutline: state.branchOutline,
             unresolvedEntityNames: unresolved,
             createdAt: state.createdAt,
-            settingProposalIDs: state.settingProposalIDs
+            settingProposalIDs: state.settingProposalIDs,
+            characterIdentityClarifications: state.characterIdentityClarifications
         )
     }
 
@@ -639,6 +646,7 @@ extension NovelFactTransactionReducer {
     private static func sanitizedUnresolvedEntityNames(
         base: [String],
         referenced: [String],
+        identityClarifications: [NovelCharacterIdentityClarificationRecord],
         branch: NovelBranchRecord,
         document: NovelProjectDocumentV1
     ) throws -> [String] {
@@ -654,12 +662,16 @@ extension NovelFactTransactionReducer {
             )
         }
         let known = knownEntityNames(in: effective)
+        let clarified = Set(identityClarifications.map {
+            normalizedEntity($0.mention)
+        })
         var unresolved: [String] = []
         var unresolvedKeys: Set<String> = []
         for name in base + referenced {
             let key = normalizedEntity(name)
             guard !key.isEmpty,
                   !known.contains(key),
+                  !clarified.contains(key),
                   unresolvedKeys.insert(key).inserted else { continue }
             unresolved.append(name)
         }
@@ -673,6 +685,7 @@ extension NovelFactTransactionReducer {
         unresolved: [String],
         branch: NovelBranchRecord,
         baseUnresolved: [String],
+        identityClarifications: [NovelCharacterIdentityClarificationRecord],
         in document: NovelProjectDocumentV1
     ) throws {
         let effective: [NovelEffectiveMaterialRevision]
@@ -687,6 +700,10 @@ extension NovelFactTransactionReducer {
             )
         }
         let known = knownEntityNames(in: effective)
+        let clarified = Set(identityClarifications.map {
+            normalizedEntity($0.mention)
+        })
+        let resolved = known.union(clarified)
         let unresolvedKeys = Set(unresolved.map(normalizedEntity))
         let baseUnresolvedKeys = Set(baseUnresolved.map(normalizedEntity))
         let referenced = eventReferences + characterNames + relationshipNames
@@ -697,19 +714,19 @@ extension NovelFactTransactionReducer {
                 "A newly unresolved entity is not referenced by an evidence-backed fact."
             )
         }
-        guard unresolvedKeys.isDisjoint(with: known) else {
+        guard unresolvedKeys.isDisjoint(with: resolved) else {
             throw NovelError.invalidInput(
-                "A known project material cannot be listed as an unresolved entity."
+                "A known or author-clarified entity cannot be listed as unresolved."
             )
         }
-        guard baseUnresolvedKeys.subtracting(known).isSubset(of: unresolvedKeys) else {
+        guard baseUnresolvedKeys.subtracting(resolved).isSubset(of: unresolvedKeys) else {
             throw NovelError.invalidInput(
                 "An unresolved entity disappeared without a matching project material."
             )
         }
         for name in referenced {
             let key = normalizedEntity(name)
-            guard known.contains(key) || unresolvedKeys.contains(key) else {
+            guard resolved.contains(key) || unresolvedKeys.contains(key) else {
                 throw NovelError.invalidInput(
                     "Unknown entity '\(name)' must be listed as unresolved."
                 )

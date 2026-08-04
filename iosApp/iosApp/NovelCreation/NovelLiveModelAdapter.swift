@@ -203,7 +203,7 @@ actor NovelLiveModelAdapter: NovelModelRunning {
                 request.parameters,
                 model: route.model,
                 includeSearchTools: searchEnabled && !isGrokWeb,
-                includeAskUserTool: request.purpose == .discussion &&
+                includeAskUserTool: (request.purpose == .discussion || request.purpose == .quickStart) &&
                     discussionTransport != nil &&
                     !isGrokWeb
             )
@@ -237,7 +237,8 @@ actor NovelLiveModelAdapter: NovelModelRunning {
             let transport: NovelLiveTransport
             if isGrokWeb {
                 transport = grokTransport
-            } else if request.purpose == .discussion, let discussionTransport {
+            } else if (request.purpose == .discussion || request.purpose == .quickStart),
+                      let discussionTransport {
                 transport = discussionTransport
             } else {
                 transport = kmpTransport

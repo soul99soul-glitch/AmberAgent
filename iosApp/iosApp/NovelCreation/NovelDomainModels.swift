@@ -106,6 +106,7 @@ enum NovelCheckpointKind: String, Codable, CaseIterable, Sendable {
     case collection
     case manualSync
     case discussionArchive
+    case identityClarification
     case polish
     case restore
 }
@@ -338,6 +339,13 @@ struct NovelMaterialRevisionRecord: Codable, Equatable, Sendable {
 struct NovelForkOrigin: Codable, Equatable, Sendable {
     let parentBranchID: NovelBranchID
     let checkpointID: NovelCheckpointID
+}
+
+struct NovelCharacterIdentityClarificationRecord: Codable, Equatable, Sendable {
+    let mention: String
+    let clarification: String
+    let operationID: NovelOperationID
+    let createdAt: Date
 }
 
 struct NovelBranchRecord: Codable, Equatable, Sendable {
@@ -625,6 +633,7 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
     let summary: String
     let branchOutline: String
     let unresolvedEntityNames: [String]
+    let characterIdentityClarifications: [NovelCharacterIdentityClarificationRecord]
     let settingProposalIDs: [NovelProposalID]
     let createdAt: Date
 
@@ -635,13 +644,15 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         branchOutline: String,
         unresolvedEntityNames: [String],
         createdAt: Date,
-        settingProposalIDs: [NovelProposalID] = []
+        settingProposalIDs: [NovelProposalID] = [],
+        characterIdentityClarifications: [NovelCharacterIdentityClarificationRecord] = []
     ) {
         self.id = id
         self.eventIDs = eventIDs
         self.summary = summary
         self.branchOutline = branchOutline
         self.unresolvedEntityNames = unresolvedEntityNames
+        self.characterIdentityClarifications = characterIdentityClarifications
         self.settingProposalIDs = settingProposalIDs
         self.createdAt = createdAt
     }
@@ -652,6 +663,7 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         case summary
         case branchOutline
         case unresolvedEntityNames
+        case characterIdentityClarifications
         case settingProposalIDs
         case createdAt
     }
@@ -666,6 +678,10 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
             [String].self,
             forKey: .unresolvedEntityNames
         )
+        characterIdentityClarifications = try container.decodeIfPresent(
+            [NovelCharacterIdentityClarificationRecord].self,
+            forKey: .characterIdentityClarifications
+        ) ?? []
         settingProposalIDs = try container.decodeIfPresent(
             [NovelProposalID].self,
             forKey: .settingProposalIDs
@@ -680,6 +696,10 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         try container.encode(summary, forKey: .summary)
         try container.encode(branchOutline, forKey: .branchOutline)
         try container.encode(unresolvedEntityNames, forKey: .unresolvedEntityNames)
+        try container.encode(
+            characterIdentityClarifications,
+            forKey: .characterIdentityClarifications
+        )
         try container.encode(settingProposalIDs, forKey: .settingProposalIDs)
         try container.encode(createdAt, forKey: .createdAt)
     }
@@ -945,6 +965,7 @@ enum NovelOperationKind: String, Codable, Sendable {
     case deleteBranch
     case undoBranchHead
     case archiveDiscussion
+    case clarifyCharacterIdentity
     case cloneCandidate
     case adoptPolishCandidate
     case abandonPolishTransaction

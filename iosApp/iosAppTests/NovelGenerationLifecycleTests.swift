@@ -126,6 +126,56 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         XCTAssertEqual(snapshot.message.interaction, .askUser(prompt))
     }
 
+    func testQuickStartAskUserEndsTheRunWithoutCommittingProposals() async throws {
+        let prompt = NovelAskUserPrompt(
+            question: "世界观更强调哪种代价？",
+            options: ["失去记忆", "失去时间"]
+        )
+        let document = try quickStartDocument()
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [
+                .askUser(prompt, preface: "这个决定会改变人物动机和主线。")
+            ])]
+        )
+
+        let events = await capturedEvents(try await harness.creation.start(
+            makeRequest(document: document, kind: .quickStart)
+        ).events)
+        guard case .completed(let snapshot) = events.last else {
+            return XCTFail("Expected Quick Start Ask User to persist as a completed turn.")
+        }
+        let persisted = try await harness.repository.document(document.project.id)
+
+        XCTAssertEqual(snapshot.message.interaction, .askUser(prompt))
+        XCTAssertTrue(persisted.settingProposals.isEmpty)
+        XCTAssertNil(persisted.branches[0].activeRunID)
+    }
+
+    func testQuickStartAskUserFallbackCompletesAsAnAnswerableMessage() async throws {
+        let prompt = NovelAskUserPrompt(
+            question: "主角应先失去什么？",
+            options: ["名字", "亲人"]
+        )
+        let document = try quickStartDocument()
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [
+                .replacement(#"{"amberAskUser":{"question":"主角应先失去什么？","options":["名字","亲人"]}}"#),
+                .complete,
+            ])]
+        )
+
+        let events = await capturedEvents(try await harness.creation.start(
+            makeRequest(document: document, kind: .quickStart)
+        ).events)
+
+        guard case .completed(let snapshot) = events.last else {
+            return XCTFail("Expected Quick Start fallback Ask User to complete.")
+        }
+        XCTAssertEqual(snapshot.message.interaction, .askUser(prompt))
+    }
+
     func testDiscussionProseGranularitiesAndPolishCompleteWithoutChangingCanonicalState() async throws {
         let cases: [CompletionCase] = [
             CompletionCase(kind: .discussion, granularity: nil, content: "Delay the reveal.", expectedMessage: .discussion),

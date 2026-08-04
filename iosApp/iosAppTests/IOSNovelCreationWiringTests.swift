@@ -4,6 +4,16 @@ import XCTest
 
 @MainActor
 final class IOSNovelCreationWiringTests: XCTestCase {
+    func testCharacterIdentityQuestionHasIgnoreAndCustomAnswerPaths() throws {
+        let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
+
+        XCTAssertTrue(session.contains("忽略此人物"))
+        XCTAssertTrue(session.contains("补充说明"))
+        XCTAssertTrue(session.contains("onIgnore"))
+        XCTAssertTrue(session.contains("onClarify"))
+        XCTAssertTrue(session.contains("NovelTextInputCommitter.perform"))
+    }
+
     func testSessionShortcutAndAppRoutesExposeNovelCreationWithoutRemovingSettingsMemory() throws {
         let projectID = NovelProjectID()
         let routes: [Route] = [.novelCreation, .novelProject(id: projectID)]
@@ -188,6 +198,10 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertFalse(workspace.contains(".navigationBarBackButtonHidden(true)"))
         XCTAssertTrue(workspace.contains("case .manuscript:"))
         XCTAssertTrue(reader.contains(".toolbar { readerToolbar }"))
+        XCTAssertTrue(reader.contains(
+            ".toolbarBackground(AmberTheme.background, for: .navigationBar)"
+        ))
+        XCTAssertTrue(reader.contains(".toolbarBackground(.visible, for: .navigationBar)"))
         XCTAssertTrue(reader.contains(".safeAreaInset(edge: .bottom"))
         XCTAssertTrue(reader.contains("ComposerDockCircleGlass(tint: nil)"))
         XCTAssertTrue(reader.contains(".buttonBorderShape(.circle)"))
@@ -479,7 +493,9 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(regenerationSheet.contains(
             "NovelTextInputCommitter.perform { requestDismiss() }"
         ))
-        XCTAssertTrue(regenerationSheet.contains("\"放弃调整方向？\""))
+        XCTAssertTrue(regenerationSheet.contains("\"放弃本轮编辑？\""))
+        XCTAssertTrue(regenerationSheet.contains("isConfirmingCoreIdeaLoad"))
+        XCTAssertTrue(regenerationSheet.contains("\"替换当前内容\""))
         XCTAssertTrue(regenerationSheet.contains(".interactiveDismissDisabled()"))
         XCTAssertTrue(regenerationSheet.contains(".presentationDragIndicator(.hidden)"))
     }
@@ -1492,8 +1508,11 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         ))
         let section = compendium[sectionStart.lowerBound..<sectionEnd.lowerBound]
         XCTAssertTrue(section.contains("viewModel.projectSnapshot?.project.creationMode == .quickStart"))
-        XCTAssertTrue(section.contains("重新生成设定建议"))
-        XCTAssertTrue(section.contains("新一轮成功后会替换当前未处理的建议"))
+        XCTAssertTrue(section.contains("Section(\"设定建议\")"))
+        XCTAssertTrue(section.contains("重新生成建议"))
+        XCTAssertTrue(section.contains("调整本轮想法，生成一套新的设定建议"))
+        XCTAssertTrue(section.contains("AmberTheme.accentTint"))
+        XCTAssertTrue(section.contains(".listRowBackground(Color.clear)"))
         XCTAssertTrue(section.contains("quickStartRegenerationBlockReason"))
         XCTAssertTrue(section.contains("已有生成任务正在运行"))
         XCTAssertTrue(section.contains(
@@ -1513,13 +1532,17 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(moreView.contains("NovelQuickStartRegenerationSheet(viewModel: viewModel)"))
 
         XCTAssertTrue(compendium.contains("struct NovelQuickStartRegenerationSheet"))
-        XCTAssertTrue(compendium.contains("await viewModel.startQuickStartSuggestions(guidance: guidance)"))
-        XCTAssertTrue(compendium.contains("TextEditor(text: $guidance)"))
+        XCTAssertTrue(compendium.contains("TextEditor(text: $draft)"))
+        XCTAssertTrue(compendium.contains("载入核心想法"))
+        XCTAssertTrue(compendium.contains("coreIdeaOverride: draftMode == .coreIdea ? draft : nil"))
+        XCTAssertTrue(compendium.contains("不会覆盖最初保存的内容"))
+        XCTAssertTrue(compendium.contains("成功后替换当前未处理建议；失败时保留"))
 
         // 2026-07-25 按证据更新:签名新增 `exactUserText`(见下方重试契约),原先锁整行
         // 字面量的断言随之过时。改为断言构成契约的各个要素,避免再被无关的格式变化绊倒。
         XCTAssertTrue(viewModel.contains("func startQuickStartSuggestions("))
         XCTAssertTrue(viewModel.contains("guidance: String? = nil"))
+        XCTAssertTrue(viewModel.contains("coreIdeaOverride: String? = nil"))
         XCTAssertTrue(viewModel.contains("exactUserText: String? = nil"))
     }
 

@@ -412,7 +412,12 @@ enum NovelInjectionPlanner {
             branch: branch,
             request: request
         )
-        let stateSection = request.pendingState.map(makePendingStateSection) ?? makeStateSection(
+        let stateSection = request.pendingState.map {
+            makePendingStateSection(
+                $0,
+                identityClarifications: state.characterIdentityClarifications
+            )
+        } ?? makeStateSection(
             state: state,
             branch: branch,
             characterIdentities: characterIdentities,
@@ -773,10 +778,21 @@ private extension NovelInjectionPlanner {
         includeUnsynchronizedWarning: Bool
     ) -> NovelInjectionSection {
         let identityResolver = NovelCharacterIdentityResolver(identities: characterIdentities)
-        let effectiveUnresolved = state.unresolvedEntityNames.filter { !identityResolver.isKnown($0) }
+        let clarifiedKeys = Set(
+            state.characterIdentityClarifications.map {
+                NovelCharacterIdentityResolver.normalize($0.mention)
+            }
+        )
+        let effectiveUnresolved = state.unresolvedEntityNames.filter {
+            !identityResolver.isKnown($0) &&
+                !clarifiedKeys.contains(NovelCharacterIdentityResolver.normalize($0))
+        }
         let unresolved = effectiveUnresolved.isEmpty
             ? "(none)"
             : effectiveUnresolved.map { "- \($0)" }.joined(separator: "\n")
+        let clarifications = characterIdentityClarificationText(
+            state.characterIdentityClarifications
+        )
         let identityMap = characterIdentities.isEmpty
             ? "(none)"
             : characterIdentities.map { identity in
@@ -789,6 +805,8 @@ private extension NovelInjectionPlanner {
             "Branch outline:\n\(state.branchOutline)\n\n" +
             "Character identity map (authoritative across branches; " +
             "use canonical names in new output):\n\(identityMap)\n\n" +
+            "Author character identity clarifications (authoritative; do not list these " +
+            "mentions as unresolved unless the author changes the decision):\n\(clarifications)\n\n" +
             "Unresolved entities:\n\(unresolved)"
         if includeUnsynchronizedWarning, branch.syncStatus == .needsSync {
             content += "\n\nWarning: the working manuscript has unsynchronized edits. " +
@@ -803,17 +821,31 @@ private extension NovelInjectionPlanner {
     }
 
     static func makePendingStateSection(
-        _ pendingState: NovelPendingStateInjection
+        _ pendingState: NovelPendingStateInjection,
+        identityClarifications: [NovelCharacterIdentityClarificationRecord]
     ) -> NovelInjectionSection {
-        makeSection(
+        let clarificationText = characterIdentityClarificationText(identityClarifications)
+        return makeSection(
             kind: .pendingManualState(
                 pendingState.pendingID,
                 chunkIndex: pendingState.chunkIndex
             ),
             label: "PROJECTED MANUAL-SYNC STATE",
-            content: pendingState.content,
+            content: pendingState.content + "\n\n" +
+                "Author character identity clarifications (authoritative; do not list these " +
+                "mentions as unresolved unless the author changes the decision):\n" +
+                clarificationText,
             reason: .requiredCurrentState
         )
+    }
+
+    static func characterIdentityClarificationText(
+        _ clarifications: [NovelCharacterIdentityClarificationRecord]
+    ) -> String {
+        guard !clarifications.isEmpty else { return "(none)" }
+        return clarifications.map {
+            "- \($0.mention): \($0.clarification)"
+        }.joined(separator: "\n")
     }
 
     static func makeQuickStartSeedSection(

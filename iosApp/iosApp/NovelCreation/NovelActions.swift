@@ -192,6 +192,16 @@ struct NovelArchiveDiscussionCommand: Equatable, Sendable {
     let decisions: [NovelConfirmedDiscussionDecision]
 }
 
+struct NovelClarifyCharacterIdentityCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let checkpointID: NovelCheckpointID
+    let stateSnapshotID: NovelStateSnapshotID
+    let mention: String
+    let clarification: String
+}
+
 struct NovelCloneCandidateCommand: Equatable, Sendable {
     let context: NovelMutationContext
     let projectID: NovelProjectID
@@ -350,6 +360,7 @@ enum NovelAction: Equatable, Sendable {
     case deleteBranch(NovelDeleteBranchCommand)
     case undoBranchHead(NovelUndoBranchHeadCommand)
     case archiveDiscussion(NovelArchiveDiscussionCommand)
+    case clarifyCharacterIdentity(NovelClarifyCharacterIdentityCommand)
     case cloneCandidate(NovelCloneCandidateCommand)
     case adoptPolishCandidate(NovelAdoptPolishCandidateCommand)
     case abandonPolishTransaction(NovelAbandonPolishTransactionCommand)
@@ -381,6 +392,7 @@ enum NovelAction: Equatable, Sendable {
         case .deleteBranch(let command): command.projectID
         case .undoBranchHead(let command): command.projectID
         case .archiveDiscussion(let command): command.projectID
+        case .clarifyCharacterIdentity(let command): command.projectID
         case .cloneCandidate(let command): command.projectID
         case .adoptPolishCandidate(let command): command.projectID
         case .abandonPolishTransaction(let command): command.projectID
@@ -414,6 +426,7 @@ enum NovelAction: Equatable, Sendable {
         case .deleteBranch(let command): command.context
         case .undoBranchHead(let command): command.context
         case .archiveDiscussion(let command): command.context
+        case .clarifyCharacterIdentity(let command): command.context
         case .cloneCandidate(let command): command.context
         case .adoptPolishCandidate(let command): command.context
         case .abandonPolishTransaction(let command): command.context
@@ -447,6 +460,7 @@ enum NovelAction: Equatable, Sendable {
         case .deleteBranch: .deleteBranch
         case .undoBranchHead: .undoBranchHead
         case .archiveDiscussion: .archiveDiscussion
+        case .clarifyCharacterIdentity: .clarifyCharacterIdentity
         case .cloneCandidate: .cloneCandidate
         case .adoptPolishCandidate: .adoptPolishCandidate
         case .abandonPolishTransaction: .abandonPolishTransaction
@@ -581,6 +595,15 @@ enum NovelAction: Equatable, Sendable {
                 chapterID: command.chapterID,
                 summary: command.summary,
                 decisions: command.decisions
+            ))
+        case .clarifyCharacterIdentity(let command):
+            payload = .clarifyCharacterIdentity(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                checkpointID: command.checkpointID,
+                stateSnapshotID: command.stateSnapshotID,
+                mention: command.mention,
+                clarification: command.clarification
             ))
         case .cloneCandidate(let command):
             payload = .cloneCandidate(.init(
@@ -826,6 +849,15 @@ private enum NovelCanonicalActionPayload: Codable {
         let decisions: [NovelConfirmedDiscussionDecision]
     }
 
+    struct ClarifyCharacterIdentity: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let checkpointID: NovelCheckpointID
+        let stateSnapshotID: NovelStateSnapshotID
+        let mention: String
+        let clarification: String
+    }
+
     struct CloneCandidate: Codable {
         let projectID: NovelProjectID
         let branchID: NovelBranchID
@@ -938,6 +970,7 @@ private enum NovelCanonicalActionPayload: Codable {
     case deleteBranch(DeleteBranch)
     case undoBranchHead(UndoBranchHead)
     case archiveDiscussion(ArchiveDiscussion)
+    case clarifyCharacterIdentity(ClarifyCharacterIdentity)
     case cloneCandidate(CloneCandidate)
     case adoptPolishCandidate(AdoptPolishCandidate)
     case abandonPolishTransaction(AbandonPolishTransaction)
@@ -1028,6 +1061,14 @@ enum NovelOutcome: Codable, Equatable, Sendable {
         decisionRevisionIDs: [NovelMaterialRevisionID],
         projectRevision: Int64,
         configRevision: Int64
+    )
+    case characterIdentityClarified(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        mention: String,
+        checkpointID: NovelCheckpointID,
+        stateSnapshotID: NovelStateSnapshotID,
+        revision: Int64
     )
     case candidateCloned(
         projectID: NovelProjectID,

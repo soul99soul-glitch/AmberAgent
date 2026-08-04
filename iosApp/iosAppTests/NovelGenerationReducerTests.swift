@@ -161,6 +161,39 @@ final class NovelGenerationReducerTests: XCTestCase {
         XCTAssertEqual(resumed.branches[0].activeRunID, answerRun.id)
     }
 
+    func testAskUserQuestionAndAnswerCanContinueAcrossQuickStartRuns() throws {
+        let original = try quickStartDocument()
+        let questionRun = makeRequest(document: original, kind: .quickStart)
+        let started = try begin(questionRun, in: original)
+        let prompt = NovelAskUserPrompt(
+            question: "世界规则更偏向哪一种？",
+            options: ["代价明确", "保持神秘"]
+        )
+        let awaiting = try NovelGenerationReducer.completeAwaitingUser(
+            runID: questionRun.id,
+            prompt: prompt,
+            preface: "这个选择会改变整套设定建议。",
+            in: started,
+            now: terminalTime
+        ).document
+
+        let response = NovelAskUserResponse(
+            promptMessageID: questionRun.assistantMessageID,
+            answer: "代价明确"
+        )
+        let answerRun = makeRequest(
+            document: awaiting,
+            kind: .quickStart,
+            askUserResponse: response
+        )
+        let resumed = try begin(answerRun, in: awaiting)
+
+        XCTAssertEqual(awaiting.sessions[0].messages.last?.interaction, .askUser(prompt))
+        XCTAssertEqual(resumed.sessions[0].messages.last?.interaction, .askUserAnswer(response))
+        XCTAssertEqual(resumed.activeRuns.last?.kind, .quickStart)
+        XCTAssertEqual(resumed.branches[0].activeRunID, answerRun.id)
+    }
+
     func testPolishCompletionBindsCandidateToCurrentSourceVersion() throws {
         let fixture = try documentWithChapter()
         let request = makeRequest(

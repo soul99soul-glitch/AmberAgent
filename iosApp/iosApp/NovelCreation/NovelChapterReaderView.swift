@@ -39,25 +39,27 @@ struct NovelChapterReaderView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 chapterNavigation
             }
-        .background(AmberTheme.background.ignoresSafeArea())
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { readerToolbar }
-        .sheet(item: $activeSheet) { sheet in
-            switch sheet {
-            case .versions(let selection):
-                NovelChapterVersionsSheet(viewModel: viewModel, selection: selection)
-            case .edit(let version):
-                NovelChapterEditSheet(viewModel: viewModel, version: version)
+            .background(AmberTheme.background.ignoresSafeArea())
+            .toolbarBackground(AmberTheme.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { readerToolbar }
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .versions(let selection):
+                    NovelChapterVersionsSheet(viewModel: viewModel, selection: selection)
+                case .edit(let version):
+                    NovelChapterEditSheet(viewModel: viewModel, version: version)
+                }
             }
-        }
-        .alert("操作未完成", isPresented: Binding(
-            get: { failureMessage != nil },
-            set: { if !$0 { failureMessage = nil } }
-        )) {
-            Button("好") { failureMessage = nil }
-        } message: {
-            Text(failureMessage ?? "请稍后重试。")
-        }
+            .alert("操作未完成", isPresented: Binding(
+                get: { failureMessage != nil },
+                set: { if !$0 { failureMessage = nil } }
+            )) {
+                Button("好") { failureMessage = nil }
+            } message: {
+                Text(failureMessage ?? "请稍后重试。")
+            }
     }
 
     @ToolbarContentBuilder

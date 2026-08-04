@@ -143,7 +143,12 @@ enum NovelGenerationReducer {
 
         let session = document.sessions[sessionIndex]
         if let response = request.askUserResponse {
-            try validateAskUserResponse(response, in: session)
+            try validateAskUserResponse(
+                response,
+                requestKind: request.kind,
+                in: session,
+                document: document
+            )
         }
         let userMessage = NovelSessionMessageRecord(
             id: request.userMessageID,
@@ -375,7 +380,7 @@ enum NovelGenerationReducer {
             )
         }
         guard existingRun.status == .running,
-              existingRun.kind == .discussion else {
+              existingRun.kind == .discussion || existingRun.kind == .quickStart else {
             return (document, nil)
         }
         let branchIndex = try branchIndex(for: existingRun.branchID, in: document)
@@ -801,8 +806,7 @@ private extension NovelGenerationReducer {
                   request.mode == .discussPlan,
                   request.granularity == nil,
                   request.candidateID == nil,
-                  request.sourceChapterVersionID == nil,
-                  request.askUserResponse == nil else {
+                  request.sourceChapterVersionID == nil else {
                 throw NovelError.invalidInput("The quick-start run shape is invalid.")
             }
         case .discussion:
@@ -874,12 +878,18 @@ private extension NovelGenerationReducer {
 
     static func validateAskUserResponse(
         _ response: NovelAskUserResponse,
-        in session: NovelSessionRecord
+        requestKind: NovelRunKind,
+        in session: NovelSessionRecord,
+        document: NovelProjectDocumentV1
     ) throws {
         guard let promptMessage = session.messages.first(where: {
             $0.id == response.promptMessageID && $0.role == .assistant
         }), case .some(.askUser(let prompt)) = promptMessage.interaction else {
             throw NovelError.invalidInput("The Ask User prompt no longer belongs to this session.")
+        }
+        guard let promptRunID = promptMessage.runID,
+              document.activeRuns.first(where: { $0.id == promptRunID })?.kind == requestKind else {
+            throw NovelError.invalidInput("The Ask User answer must continue the same run kind.")
         }
         guard !session.messages.contains(where: { message in
             guard case .some(.askUserAnswer(let existing)) = message.interaction else {

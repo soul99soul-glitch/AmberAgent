@@ -139,6 +139,34 @@ final class NovelStructuredOutputTests: XCTestCase {
         XCTAssertEqual(decoded.characters[0].aliases, ["朱重八", "朱重九"])
     }
 
+    func testQuickStartStreamingPresentationRevealsOnlyUserFacingFields() {
+        let partial = #"{"schemaVersion":3,"overview":"雾城会保存每一次证词。","world":{"title":"证词之城","content":"记忆可被交易，但每次交易都会留下空白。"},"characters":[{"title":"赵大来","content":"他想找回被抹去的名字。","aliases":["#
+
+        let presentation = NovelQuickStartStreamingPresentation.markdown(from: partial)
+
+        XCTAssertEqual(
+            presentation,
+            "# 创作建议\n\n雾城会保存每一次证词。\n\n" +
+                "## 世界观：证词之城\n\n记忆可被交易，但每次交易都会留下空白。\n\n" +
+                "## 人物：赵大来\n\n他想找回被抹去的名字。"
+        )
+        XCTAssertFalse(presentation.contains("schemaVersion"))
+        XCTAssertFalse(presentation.contains("aliases"))
+        XCTAssertFalse(presentation.contains("{"))
+    }
+
+    func testQuickStartStreamingPresentationDecodesEscapesAndKeepsGrowingPrefix() {
+        let earlier = #"{"schemaVersion":3,"overview":"第一行\n第二"#
+        let later = earlier + #"行","world":{"title":"雾城","content":"规则"#
+
+        let first = NovelQuickStartStreamingPresentation.markdown(from: earlier)
+        let second = NovelQuickStartStreamingPresentation.markdown(from: later)
+
+        XCTAssertEqual(first, "# 创作建议\n\n第一行\n第二")
+        XCTAssertTrue(second.hasPrefix(first))
+        XCTAssertEqual(second, first + "行\n\n## 世界观：雾城\n\n规则")
+    }
+
     func testStateDeltaDecodesCompleteVersionedPayload() throws {
         let decoded = try NovelStructuredOutputDecoder.decodeStateDelta(
             from: try data(deltaObject())

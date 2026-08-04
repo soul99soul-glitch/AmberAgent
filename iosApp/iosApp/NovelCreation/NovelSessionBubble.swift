@@ -47,7 +47,9 @@ struct NovelSessionBubble: View {
     ) -> String {
         switch kind {
         case .proseCandidate, .polishCandidate, .interruptedDraft:
-            return NovelPromptCatalog.normalizedCandidateProse(content)
+            return isStreaming
+                ? NovelPromptCatalog.normalizedStreamingCandidateProse(content)
+                : NovelPromptCatalog.normalizedCandidateProse(content)
         case .discussion, .userInput, .error:
             return content
         }
@@ -473,7 +475,7 @@ private struct NovelAskUserCard: View {
                         .foregroundStyle(AmberTheme.accentRed)
                 }
 
-                Button("继续讨论") {
+                Button("确认选择") {
                     NovelTextInputCommitter.perform { submit() }
                 }
                 .buttonStyle(.borderedProminent)

@@ -140,6 +140,7 @@ extension NovelCheckpointKind {
         case .collection: "正文收录"
         case .manualSync: "手动同步"
         case .discussionArchive: "讨论归档"
+        case .identityClarification: "人物说明"
         case .polish: "整章润色"
         case .restore: "版本恢复"
         }

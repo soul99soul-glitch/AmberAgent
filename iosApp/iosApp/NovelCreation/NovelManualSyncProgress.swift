@@ -88,6 +88,7 @@ enum NovelManualSyncChunker {
         let stateSummary: String
         let branchOutline: String
         let unresolvedEntityNames: [String]
+        let characterIdentityClarifications: [NovelCharacterIdentityClarificationRecord]
         let eventCount: Int
         let eventIDsSHA256: String
     }
@@ -114,6 +115,7 @@ enum NovelManualSyncChunker {
             stateSummary: baseState.summary,
             branchOutline: baseState.branchOutline,
             unresolvedEntityNames: baseState.unresolvedEntityNames,
+            characterIdentityClarifications: baseState.characterIdentityClarifications,
             eventCount: baseState.eventIDs.count,
             eventIDsSHA256: NovelDocumentValidator.sha256(
                 baseState.eventIDs.map(\.description).joined(separator: "\n")

@@ -520,7 +520,8 @@ enum NovelFactTransactionReducer {
             branchOutline: validatedDelta.branchOutlinePatch ?? baseState.branchOutline,
             unresolvedEntityNames: validatedDelta.unresolvedEntityNames,
             createdAt: now,
-            settingProposalIDs: baseState.settingProposalIDs + proposals.map(\.id)
+            settingProposalIDs: baseState.settingProposalIDs + proposals.map(\.id),
+            characterIdentityClarifications: baseState.characterIdentityClarifications
         )
 
         var chapterSelections = branch.workingChapterSelections
@@ -992,7 +993,8 @@ enum NovelFactTransactionReducer {
             branchOutline: validatedRebuild.branchOutline,
             unresolvedEntityNames: validatedRebuild.unresolvedEntityNames,
             createdAt: now,
-            settingProposalIDs: input.baseStateSnapshot.settingProposalIDs + proposals.map(\.id)
+            settingProposalIDs: input.baseStateSnapshot.settingProposalIDs + proposals.map(\.id),
+            characterIdentityClarifications: input.baseStateSnapshot.characterIdentityClarifications
         )
         let finalRevision = document.project.revision + 1
         let outcome = NovelOutcome.manualSyncCommitted(
@@ -1097,6 +1099,7 @@ enum NovelFactTransactionReducer {
         let summary: String
         let branchOutline: String
         let unresolvedEntityNames: [String]
+        let characterIdentityClarifications: [NovelCharacterIdentityClarificationRecord]
         let events: [NovelStoryEventRecord]
     }
 
@@ -1687,6 +1690,7 @@ enum NovelFactTransactionReducer {
             summary: snapshot.summary,
             branchOutline: snapshot.branchOutline,
             unresolvedEntityNames: snapshot.unresolvedEntityNames,
+            characterIdentityClarifications: snapshot.characterIdentityClarifications,
             events: events
         ))
         guard let value = String(data: data, encoding: .utf8) else {
@@ -1720,11 +1724,12 @@ private extension NovelBranchCheckpointRecord {
     /// 这个检查点的 stateSnapshot 是否恰好描述它自己那份 chapterSelections。
     ///
     /// `.initial` 是空选集配空状态;`.manualSync` 的快照由该次重建产出,覆盖
-    /// 「基线 + suffix」= 自身选集。其余 kind 都只是把分支当前快照原样带下来,
+    /// 「基线 + suffix」= 自身选集;`.identityClarification` 不改变正文选集，只在
+    /// 同一份派生状态上追加作者裁决。其余 kind 都只是把分支当前快照原样带下来，
     /// 快照落后于选集,不能用作重建基线。
     var stateSnapshotDescribesOwnSelections: Bool {
         switch kind {
-        case .initial, .manualSync:
+        case .initial, .manualSync, .identityClarification:
             true
         case .collection, .discussionArchive, .polish, .restore:
             false
