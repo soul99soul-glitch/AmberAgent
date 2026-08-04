@@ -1,18 +1,20 @@
-// PageTemplate — 全站共享页面骨架(G7 风格统一)
+// PageTemplate — 全站共享页面骨架(G7 对齐 Amber Redesign)
 //
-// 提取自 SettingDisplayPage 的设计模式:
-//   - Title bar: height(56) + padding(24) + BG + ←/18/INK3 + 标题/TITLE/Bold/INK
-//   - Section: // ACCENT/Bold/META + ' Label' INK3/Medium/META, padding(16,20,6)
-//   - Row: flat, padding(16,12,12) + SURFACE + bottom 0.5 LINE hairline
-//   - Body: Scroll > Column(无水平padding) + 尾部 height(40) spacer
-//
-// 用法: 页面 import { PageScaffold, SectionHeader, NavRow, ToggleRow, SelectRow } from './PageTemplate.ets'
+// 设计来源: oc-amber.css + aa-pages.jsx + aa-settings.jsx
+// 关键规则:
+//   - mono = 机器信息(模型名/时间/eyebrow), sans = 人类文字
+//   - flat & hairline first, shadow 仅用于 overlay
+//   - 触摸目标 ≥ 44px
 
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ERROR, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import {
+  INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, LINE2, BG,
+  ACCENT, ACCENT_INK, ACCENT_LIGHT, SIGNAL, ERROR, CODE_BG,
+  TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY,
+  PAD_CARD, PAD_ITEM, RADIUS, RADIUS_PILL, GUTTER,
+} from '../design/tokens.ets';
 
-// ===== Title Bar =====
-
+// ===== Page Header (对齐 PageHeader / SettingsHeader) =====
 @Component
 export struct PageTitleBar {
   @Prop title: string = '';
@@ -25,15 +27,15 @@ export struct PageTitleBar {
     Row() {
       if (this.showBack) {
         Text('←')
-          .fontSize(18)
-          .fontColor(INK3)
+          .fontSize(24)
+          .fontColor(INK)
           .onClick((): void => { this.onBack(); })
       }
       Text(this.title)
         .fontSize(TITLE)
         .fontWeight(FontWeight.Bold)
         .fontColor(INK)
-        .margin({ left: this.showBack ? 12 : 0 })
+        .margin({ left: this.showBack ? 8 : 0 })
         .layoutWeight(1)
       if (this.actionText.length > 0) {
         Text(this.actionText)
@@ -43,36 +45,34 @@ export struct PageTitleBar {
       }
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 24, right: 24 })
+    .padding({ left: 14, right: 14, top: 2, bottom: 11 })
+    .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .backgroundColor(BG)
   }
 }
 
-// ===== Section Header =====
-
+// ===== Section Label (对齐 SectionLabel) =====
 @Component
 export struct SectionHeader {
   @Prop label: string = '';
   build(): void {
     Row() {
       Text('//')
-        .fontSize(META)
+        .fontSize(LABEL)
         .fontColor(ACCENT)
         .fontWeight(FontWeight.Bold)
-      Text(` ${this.label}`)
-        .fontSize(META)
-        .fontWeight(FontWeight.Medium)
+      Text(` ${this.label.toUpperCase()}`)
+        .fontSize(LABEL)
+        .fontWeight(FontWeight.Bold)
         .fontColor(INK3)
     }
     .width('100%')
-    .padding({ left: 16, top: 20, bottom: 6 })
+    .padding({ left: 6, top: 20, bottom: 4 })
   }
 }
 
 // ===== Flat Rows =====
 
-// 导航行: label + › chevron, 点击导航
 @Component
 export struct NavRow {
   @Prop label: string = '';
@@ -84,12 +84,14 @@ export struct NavRow {
     Row() {
       Text(this.label)
         .fontSize(BODY)
+        .fontWeight(FontWeight.Medium)
         .fontColor(this.danger ? ERROR : INK)
         .layoutWeight(1)
       if (this.valueText.length > 0) {
         Text(this.valueText)
-          .fontSize(META)
+          .fontSize(BODY2)
           .fontColor(this.danger ? ERROR : INK3)
+          .fontFamily('monospace')
           .margin({ right: 8 })
       }
       Text('›')
@@ -97,14 +99,13 @@ export struct NavRow {
         .fontColor(INK4)
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { this.onRowClick(); })
   }
 }
 
-// 开关行: label + desc + Toggle
 @Component
 export struct ToggleRow {
   @Prop label: string = '';
@@ -117,10 +118,11 @@ export struct ToggleRow {
       Column() {
         Text(this.label)
           .fontSize(BODY)
+          .fontWeight(FontWeight.Medium)
           .fontColor(INK)
         if (this.desc.length > 0) {
           Text(this.desc)
-            .fontSize(LABEL)
+            .fontSize(BODY2)
             .fontColor(INK3)
             .margin({ top: 2 })
         }
@@ -129,16 +131,16 @@ export struct ToggleRow {
       .layoutWeight(1)
 
       Toggle({ type: ToggleType.Switch, isOn: this.checked })
+        .selectedColor(this.checked ? ACCENT : LINE2)
         .onChange((_v: boolean): void => { this.onToggle(); })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
 }
 
-// 选择行: label + 当前值(ACCENT), 点击
 @Component
 export struct SelectRow {
   @Prop label: string = '';
@@ -149,39 +151,81 @@ export struct SelectRow {
     Row() {
       Text(this.label)
         .fontSize(BODY)
+        .fontWeight(FontWeight.Medium)
         .fontColor(INK)
         .layoutWeight(1)
       Text(this.valueText)
-        .fontSize(META)
-        .fontColor(ACCENT)
+        .fontSize(BODY2)
+        .fontColor(INK3)
+        .fontFamily('monospace')
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { this.onRowClick(); })
   }
 }
 
-// 文本行: label + 可编辑文本值(只读展示)
+// 会话行(对齐 SessionRow): title + snippet + modelId + time
 @Component
-export struct TextRow {
-  @Prop label: string = '';
-  @Prop valueText: string = '';
+export struct SessionRowItem {
+  @Prop title: string = '';
+  @Prop snippet: string = '';
+  @Prop modelId: string = '';
+  @Prop timeText: string = '';
+  @Prop pinned: boolean = false;
+  onRowClick: () => void = (): void => {};
+
   build(): void {
     Row() {
-      Text(this.label)
-        .fontSize(BODY)
-        .fontColor(INK3)
-        .layoutWeight(1)
-      Text(this.valueText)
-        .fontSize(BODY)
-        .fontColor(INK)
+      Column() {
+        Row() {
+          if (this.pinned) {
+            Text('📌').fontSize(13).margin({ right: 7 })
+          }
+          Text(this.title.length > 0 ? this.title : '未命名对话')
+            .fontSize(BODY)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+        }
+        .width('100%')
+
+        if (this.snippet.length > 0) {
+          Text(this.snippet)
+            .fontSize(BODY2)
+            .fontColor(INK3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 3 })
+            .width('100%')
+        }
+
+        if (this.modelId.length > 0) {
+          Text(this.modelId)
+            .fontSize(TINY)
+            .fontColor(INK4)
+            .fontFamily('monospace')
+            .margin({ top: 6 })
+        }
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text(this.timeText)
+        .fontSize(LABEL)
+        .fontColor(INK4)
+        .fontFamily('monospace')
+        .margin({ left: 11, top: 2 })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .padding({ left: 6, right: 6, top: 13, bottom: 13 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+    .onClick((): void => { this.onRowClick(); })
   }
 }
 
