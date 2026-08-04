@@ -877,11 +877,11 @@ struct ChatPage {
 
   // :120-125 — 环色:压缩中 blue;≥0.7 red;≥0.5 amber;否则 muted
   private contextRingColor(): string {
-    if (this.compactActiveCount > 0) return '#4EA6FF';
+    if (this.compactActiveCount > 0) return '#4F86D6';
     const r: number = this.contextUsageRatio();
     if (r >= 0.7) return ERROR;
-    if (r >= 0.5) return '#C08A2D';
-    return '#8F8B80';
+    if (r >= 0.5) return '#D19A66';
+    return INK3;
   }
 
   private switchBranch(nodeId: string, idx: number): void {
@@ -2457,7 +2457,7 @@ struct ChatPage {
   sandboxStatusIcon(status: string) {
     if (status === 'failed') {
       Text('✕').fontSize(9).fontColor('#FFFFFF').textAlign(TextAlign.Center)
-        .width(16).height(16).backgroundColor('#E45A5A').borderRadius(8)
+        .width(16).height(16).backgroundColor(ERROR).borderRadius(8)
     } else if (status === 'cancelled') {
       Text('✕').fontSize(9).fontColor('#FFFFFF').textAlign(TextAlign.Center)
         .width(16).height(16).backgroundColor(INK3).borderRadius(8)
@@ -2472,7 +2472,7 @@ struct ChatPage {
   sandboxArrow(left: boolean, enabled: boolean, onTap: () => void) {
     Text(left ? '‹' : '›')
       .fontSize(13)
-      .fontColor(enabled ? INK : '#C9C5BA')
+      .fontColor(enabled ? INK : INK4)
       .padding({ left: 4, right: 4 })
       .onClick((): void => {
         if (enabled) onTap();

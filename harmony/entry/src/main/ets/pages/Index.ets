@@ -44,9 +44,25 @@ struct Index {
   @State inputText: string = '';
   @State recentItems: ConversationSummary[] = [];
   @State loaded: boolean = false;
+  @State cursorVisible: boolean = true;
+  private cursorTimer: number = -1;
 
   aboutToAppear(): void {
     this.loadRecent();
+    this.startCursorBlink();
+  }
+
+  aboutToDisappear(): void {
+    if (this.cursorTimer >= 0) {
+      clearInterval(this.cursorTimer);
+      this.cursorTimer = -1;
+    }
+  }
+
+  private startCursorBlink(): void {
+    this.cursorTimer = setInterval((): void => {
+      this.cursorVisible = !this.cursorVisible;
+    }, 525);
   }
 
   private loadRecent(): void {
@@ -136,10 +152,11 @@ struct Index {
               .fontFamily('monospace')
             Text('')
               .width(8)
-              .height(20)
+              .height(24)
               .backgroundColor(ACCENT)
               .borderRadius(1)
               .margin({ left: 2 })
+              .opacity(this.cursorVisible ? 1 : 0)
           }
 
           // 问候语

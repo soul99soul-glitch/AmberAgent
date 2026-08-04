@@ -249,7 +249,7 @@ struct ChatListPage {
             .onClick((): void => { this.showDeleteAllConfirm(); })
         }
         .width('100%')
-        .padding({ left: 24, right: 24, top: 4, bottom: 4 })
+        .padding({ left: 14, right: 14, top: 4, bottom: 4 })
         .backgroundColor(BG)
 
         // 搜索栏
