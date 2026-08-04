@@ -546,6 +546,7 @@ interface PendingChipRow {
 @Entry
 @Component
 struct ChatPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @State rows: MsgRow[] = [];
   @State streamingTail: UIMessage[] = [];
   @State suggestions: string[] = [];
@@ -2722,7 +2723,7 @@ struct ChatPage {
         }
       }
       .width('100%')
-      .padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
 

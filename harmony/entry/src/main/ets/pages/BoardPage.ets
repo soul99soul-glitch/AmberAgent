@@ -64,6 +64,7 @@ function placeholderTasks(): TaskItem[] {
 @Entry
 @Component
 struct BoardPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @State stories: BoardStory[] = [];
   @State tasks: TaskItem[] = [];
   @State tab: number = 0; // 0=大看板 1=任务流
@@ -109,7 +110,7 @@ struct BoardPage {
         .margin({ left: 8 })
     }
     .width('100%')
-    .padding({ left: 14, right: 14, top: 2, bottom: 11 })
+    .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
     .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .backgroundColor(BG)
   }

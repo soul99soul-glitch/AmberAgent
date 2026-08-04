@@ -60,6 +60,10 @@ export default class EntryAbility extends UIAbility {
       win.setWindowLayoutFullScreen(true);
       win.setWindowBackgroundColor('#F4F2EC'); // = BG token
       win.setWindowSystemBarEnable(['status', 'navigation']);
+      // 全屏后内容顶到 y=0, 需避开状态栏: 存状态栏高度(vp)供页面顶部内边距使用
+      const avoid: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
+      const topPx: number = avoid.topRect.height;
+      AppStorage.setOrCreate<number>('statusBarHeight', px2vp(topPx));
       win.setWindowSystemBarProperties({
         statusBarColor: '#00000000', // 透明, 露出窗口背景 BG
         statusBarContentColor: '#1B1A17', // 深色状态栏图标(BG 浅色)

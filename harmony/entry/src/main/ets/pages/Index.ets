@@ -41,6 +41,7 @@ const SUGGESTIONS: string[] = [
 @Entry
 @Component
 struct Index {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   @State inputText: string = '';
   @State recentItems: ConversationSummary[] = [];
   @State loaded: boolean = false;
@@ -129,7 +130,7 @@ struct Index {
           .onClick((): void => { this.newConversation(); })
       }
       .width('100%')
-      .padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
 

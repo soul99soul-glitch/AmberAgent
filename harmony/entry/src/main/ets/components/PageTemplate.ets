@@ -21,6 +21,7 @@ export struct PageTitleBar {
   @Prop title: string = '';
   @Prop showBack: boolean = true;
   @Prop actionText: string = '';
+  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
   onAction: () => void = (): void => {};
   onBack: () => void = (): void => { router.back(); };
 
@@ -46,7 +47,7 @@ export struct PageTitleBar {
       }
     }
     .width('100%')
-    .padding({ left: 14, right: 14, top: 2, bottom: 11 })
+    .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
     .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .backgroundColor(BG)
   }
