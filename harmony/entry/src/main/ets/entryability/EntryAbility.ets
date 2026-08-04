@@ -52,6 +52,24 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
+    // 沉浸式: 全屏布局 + 透明状态栏/导航条 + 深色图标 + 窗口背景=BG
+    //   让页面 BG 延伸到状态栏/导航条区域, 消除白色分界(顶部/底部沉浸)
+    windowStage.getMainWindow().then((win: window.Window): void => {
+      // 不全屏布局(避免头部顶到状态栏后); 窗口背景=BG 使状态栏/导航条区域无缝
+      win.setWindowBackgroundColor('#F4F2EC'); // = BG token
+      win.setWindowSystemBarEnable(['status', 'navigation']);
+      win.setWindowSystemBarProperties({
+        statusBarColor: '#00000000',
+        statusBarContentColor: '#1B1A17', // 深色状态栏图标(BG 浅色)
+        navigationBarColor: '#00000000',
+        navigationBarContentColor: '#1B1A17',
+      }).catch((e: BusinessError): void => {
+        hilog.warn(DOMAIN, TAG, 'setWindowSystemBarProperties failed: %{public}s', String(e));
+      });
+    }).catch((e: BusinessError): void => {
+      hilog.warn(DOMAIN, TAG, 'getMainWindow failed: %{public}s', String(e));
+    });
+
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code !== 0) {
         hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
