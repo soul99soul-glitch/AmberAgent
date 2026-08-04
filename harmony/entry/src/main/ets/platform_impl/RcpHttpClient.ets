@@ -14,6 +14,13 @@ import type { HttpClient, HttpRequest, HttpResponse, AbortSignalLike } from '@am
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Http';
 
+// DEBUG: 模拟器代理(绕过 Clash fake-ip DNS;正式环境删除)
+const debugProxy: http.HttpProxy = {
+  host: '10.0.2.2',
+  port: 7897,
+  exclusionList: [],
+};
+
 // fetchStream 回调选项(对齐 HttpClient.fetchStream 的内联类型)
 interface StreamOpts {
   onChunk: (chunk: ArrayBuffer, end: boolean) => void;

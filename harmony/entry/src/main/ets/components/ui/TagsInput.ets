@@ -5,7 +5,7 @@
 // 升级 (G6-S3): 内联编辑(tap chip 改名) / 上下重排(▲▼) / 上限告警 / 去重 / 建议下拉(自动补全)
 //
 // ArkUI 差异: FlowRow → Flex({ wrap: FlexWrap.Wrap }); AlertDialog → bindSheet
-import { INK, INK2, INK3, ACCENT, SURFACE, SURFACE2, LINE, ERROR, SIGNAL, BODY, META, LABEL } from '../../design/tokens.ets';
+import { INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, ERROR, SIGNAL, BODY, META, LABEL } from '../../design/tokens.ets';
 
 export interface AmberTag {
   id: string;
@@ -219,7 +219,7 @@ export struct TagsInput {
         .padding({ left: 10, right: 8, top: 2, bottom: 2 })
         .width(120)
         .onChange((v: string): void => { this.editingName = v; this.editError = false; })
-        .onSubmit((_v: string): void => { this.commitEdit(); })
+        .onSubmit((_enterKey: EnterKeyType): void => { this.commitEdit(); })
       Text('✓').fontSize(LABEL).fontColor(SIGNAL).margin({ left: 4 })
         .onClick((): void => { this.commitEdit(); })
       Text('✕').fontSize(LABEL).fontColor(INK3).margin({ left: 2 })
