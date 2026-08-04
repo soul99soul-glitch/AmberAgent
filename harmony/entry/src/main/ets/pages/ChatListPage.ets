@@ -197,7 +197,7 @@ struct ChatListPage {
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
-        // 统一 title bar (对齐 PageTitleBar 规范)
+        // 统一 title bar (对齐 SessionsView 设计: ← + 标题 + 右侧图标按钮)
         Row() {
           Text('←')
             .fontSize(24)
@@ -209,47 +209,38 @@ struct ChatListPage {
             .fontColor(INK)
             .margin({ left: 8 })
             .layoutWeight(1)
-          // 单一 trailing action: 新对话
+          // 右侧图标按钮: 看板 / 收藏 / 设置
+          Text('📋')
+            .fontSize(19)
+            .fontColor(INK2)
+            .width(36).height(36)
+            .textAlign(TextAlign.Center)
+            .borderRadius(999)
+            .onClick((): void => { router.pushUrl({ url: 'pages/BoardPage' }); })
+          Text('⭐')
+            .fontSize(19)
+            .fontColor(INK2)
+            .width(36).height(36)
+            .textAlign(TextAlign.Center)
+            .borderRadius(999)
+            .onClick((): void => { router.pushUrl({ url: 'pages/FavoritePage' }); })
+          Text('⚙')
+            .fontSize(20)
+            .fontColor(INK2)
+            .width(36).height(36)
+            .textAlign(TextAlign.Center)
+            .borderRadius(999)
+            .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
+          // 新对话
           Text('+ 新对话')
             .fontSize(BODY)
             .fontColor(ACCENT)
+            .margin({ left: 4 })
             .onClick((): void => { this.newConversation(); })
         }
         .width('100%')
         .padding({ left: 14, right: 14, top: 2, bottom: 11 })
         .border({ width: { bottom: 1 }, color: { bottom: LINE } })
-        .backgroundColor(BG)
-
-        // 快捷入口行(独立一行,不挤在 title bar)
-        Row() {
-          Text('看板')
-            .fontSize(META)
-            .fontColor(INK3)
-            .margin({ right: 16 })
-            .onClick((): void => { router.pushUrl({ url: 'pages/BoardPage' }); })
-          Text('搜索')
-            .fontSize(META)
-            .fontColor(INK3)
-            .margin({ right: 16 })
-            .onClick((): void => { router.pushUrl({ url: 'pages/SearchPage' }); })
-          Text('收藏')
-            .fontSize(META)
-            .fontColor(INK3)
-            .margin({ right: 16 })
-            .onClick((): void => { router.pushUrl({ url: 'pages/FavoritePage' }); })
-          Blank()
-          Text('设置')
-            .fontSize(META)
-            .fontColor(INK3)
-            .margin({ right: 16 })
-            .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
-          Text('删除全部')
-            .fontSize(META)
-            .fontColor(ERROR)
-            .onClick((): void => { this.showDeleteAllConfirm(); })
-        }
-        .width('100%')
-        .padding({ left: 14, right: 14, top: 4, bottom: 4 })
         .backgroundColor(BG)
 
         // 搜索栏
@@ -288,6 +279,23 @@ struct ChatListPage {
               ForEach(this.items, (item: ConversationSummary): void => {
                 this.ConversationRow(item)
               }, (item: ConversationSummary): string => item.id)
+
+              // 删除全部(danger,列表底部,不挤在头部)
+              Row() {
+                Text('删除全部对话')
+                  .fontSize(BODY)
+                  .fontColor(ERROR)
+                Blank()
+                Text('›')
+                  .fontSize(BODY)
+                  .fontColor(INK4)
+              }
+              .width('100%')
+              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+              .backgroundColor(SURFACE)
+              .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+              .margin({ top: 24 })
+              .onClick((): void => { this.showDeleteAllConfirm(); })
             }
 
             PageSpacer()
