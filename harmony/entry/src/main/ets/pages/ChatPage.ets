@@ -546,7 +546,7 @@ interface PendingChipRow {
 @Entry
 @Component
 struct ChatPage {
-  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State rows: MsgRow[] = [];
   @State streamingTail: UIMessage[] = [];
   @State suggestions: string[] = [];

@@ -41,7 +41,7 @@ const SUGGESTIONS: string[] = [
 @Entry
 @Component
 struct Index {
-  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State inputText: string = '';
   @State recentItems: ConversationSummary[] = [];
   @State loaded: boolean = false;

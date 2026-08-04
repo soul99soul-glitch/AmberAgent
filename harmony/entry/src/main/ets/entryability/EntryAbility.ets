@@ -4,7 +4,7 @@
 // 对照设计 §6.5
 
 import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
-import { window } from '@kit.ArkUI';
+import { window, display } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { getSkillManager, rescheduleCronTasksOnStartup } from '../di/AppContainer.ets';
@@ -56,14 +56,19 @@ export default class EntryAbility extends UIAbility {
     //   全屏布局使状态栏后面=窗口背景; 窗口背景=BG; 状态栏透明 → 无缝
     try {
       const win: window.Window = windowStage.getMainWindowSync();
+      // 先读 avoid area(全屏前), 再全屏; 全屏后 TYPE_SYSTEM 可能返回 0
+      const avoidBefore: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
       win.setWindowLayoutFullScreen(true);
+      const avoidAfter: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
       win.setWindowBackgroundColor('#F4F2EC'); // = BG token
       win.setWindowSystemBarEnable(['status', 'navigation']);
-      // 全屏后内容顶到 y=0, 需避开状态栏: 存状态栏高度(vp)供页面顶部内边距
-      const avoid: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-      const topVp: number = px2vp(avoid.topRect.height);
+      // 取非零值; px2vp 在 Ability 上下文不可用 → 用窗口 density 手动换算; 仍为0兜底44vp
+      let density: number = 3;
+      try { density = display.getDefaultDisplaySync().densityPixels; } catch (_e) { density = 3; }
+      let topPx: number = avoidBefore.topRect.height > 0 ? avoidBefore.topRect.height : avoidAfter.topRect.height;
+      let topVp: number = topPx > 0 ? Math.round(topPx / density) : 44;
       AppStorage.setOrCreate<number>('statusBarHeight', topVp);
-      hilog.info(DOMAIN, TAG, 'statusBarHeight vp=%{public}d', topVp);
+      hilog.info(DOMAIN, TAG, 'statusBar px=%{public}d density=%{public}f vp=%{public}d', topPx, density, topVp);
       win.setWindowSystemBarProperties({
         statusBarColor: '#00000000',
         statusBarContentColor: '#1B1A17',

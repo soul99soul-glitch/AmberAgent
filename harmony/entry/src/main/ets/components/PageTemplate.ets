@@ -21,7 +21,7 @@ export struct PageTitleBar {
   @Prop title: string = '';
   @Prop showBack: boolean = true;
   @Prop actionText: string = '';
-  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   onAction: () => void = (): void => {};
   onBack: () => void = (): void => { router.back(); };
 

@@ -64,7 +64,7 @@ function placeholderTasks(): TaskItem[] {
 @Entry
 @Component
 struct BoardPage {
-  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State stories: BoardStory[] = [];
   @State tasks: TaskItem[] = [];
   @State tab: number = 0; // 0=大看板 1=任务流

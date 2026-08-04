@@ -21,7 +21,7 @@ const SNACK_DURATION_MS: number = 4000;
 @Entry
 @Component
 struct ChatListPage {
-  @StorageProp('statusBarHeight') statusBarHeight: number = 0;
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State items: ConversationSummary[] = [];
   @State loaded: boolean = false;
   @State searchText: string = '';
