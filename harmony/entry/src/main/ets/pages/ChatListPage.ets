@@ -1,21 +1,22 @@
-// ChatListPage — 会话列表(pinned 优先 + 更新时间倒序,语义来自 chat-domain repository)
-// D-022:搜索(title LIKE,repo.search) + 滑动操作(置顶切换/删除)
-// D-096:删除改撤销窗(HistoryPage.kt:124-153 SwipeableConversationItem 逐字语义)—
-//   滑动删除 = 立即删(deferCleanup)+ 4s snackbar('对话已删除'/'撤销');
-//   撤销 → insertConversation 恢复;超时/被顶替 → purge(cleanupDeletedConversation
-//   → deleteChatFiles,PD-007 清理接线同步落地)
-import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+// ChatListPage — 会话列表(G7 重构)
+//
+// 对齐 SettingDisplayPage 风格:
+//   - PageTitleBar(height 56/padding 24/BG)
+//   - flat hairline 行(不用 List+divider)
+//   - tokens 从 tokens.ets 导入(无本地重定义)
+//   - 快捷入口移入 title bar 的 trailing action(不挤)
+//
+// 保留真实数据逻辑: repo.list/search/删除/撤销/置顶/删除全部
+
 import { router } from '@kit.ArkUI';
 import type { Conversation, ConversationSummary } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { SearchField } from '../components/ui/SearchField.ets';
+import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ERROR, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 
-const DANGER: string = '#B43A3A';
 const SNACK_BG: string = '#32302B';
-
-
-// SnackbarDuration.Short ≈ 4s(showSnackbar 默认时长)
 const SNACK_DURATION_MS: number = 4000;
 
 @Entry
@@ -24,7 +25,6 @@ struct ChatListPage {
   @State items: ConversationSummary[] = [];
   @State loaded: boolean = false;
   @State searchText: string = '';
-  // D-096:撤销窗(单条待决;新删除顶替旧 = 旧 dismissed → purge)
   @State snackVisible: boolean = false;
   private pendingDeleted: Conversation | null = null;
   private snackTimer: number = -1;
@@ -63,12 +63,7 @@ struct ChatListPage {
     });
   }
 
-  // HistoryPage.kt:129-144 onDelete —
-  //   先取完整会话(含 messageNodes)→ deleteConversation(deferCleanup=true)
-  //   → snackbar;ActionPerformed → restoreConversation(insert);
-  //   否则 → purgeDeletedConversation(cleanup)
   private onDelete(item: ConversationSummary): void {
-    // 新 snackbar 顶替旧 → 旧 result = Dismissed → purge 旧条
     if (this.snackVisible && this.pendingDeleted !== null) {
       const stale: Conversation = this.pendingDeleted;
       this.pendingDeleted = null;
@@ -96,7 +91,6 @@ struct ChatListPage {
     }
   }
 
-  // SnackbarResult.ActionPerformed → vm.restoreConversation(insertConversation)
   private undoDelete(): void {
     const full: Conversation | null = this.pendingDeleted;
     this.pendingDeleted = null;
@@ -107,7 +101,6 @@ struct ChatListPage {
     }
   }
 
-  // 超时/关闭 → purge(cleanupDeletedConversation;favorites/chat_images 未移植登记)
   private dismissSnack(): void {
     const full: Conversation | null = this.pendingDeleted;
     this.pendingDeleted = null;
@@ -118,13 +111,6 @@ struct ChatListPage {
     }
   }
 
-  // ===== D-106:delete-all =====
-  // HistoryPage.kt:99-105 toolbar 删除全部入口 → :155-178 AlertDialog(title/
-  //   desc/删除/取消 zh 逐字)→ HistoryVM.kt:55-60 →
-  //   ConversationRepository.kt:449-453:逐会话 deleteConversation
-  //   (deferCleanup=false → FTS 删 + DB 删 + 立即 cleanup,无撤销窗)
-  // 域偏差登记:Android 域 = 当前助手(settings.getCurrentAssistant);harmony
-  //   无当前助手设置(D-019 首助手解析),本页列表即全域 → 删除全部列出会话
   private deleteAllConversations(): void {
     const repo = getChatRepository();
     repo.list().then((all: ConversationSummary[]): void => {
@@ -141,142 +127,201 @@ struct ChatListPage {
     });
   }
 
-  // HistoryPage.kt:155-178 — AlertDialog(title/desc/删除/取消 zh 逐字:
-  //   strings.xml:312/:311/:309/:307);确认 → deleteAllConversations
   private showDeleteAllConfirm(): void {
     AlertDialog.show({
       title: '删除全部对话',
       message: '确定要删除所有对话吗？此操作无法撤销。',
-      primaryButton: {
-        value: '取消',
-        action: (): void => {},
-      },
+      primaryButton: { value: '取消', action: (): void => {} },
       secondaryButton: {
         value: '删除',
-        fontColor: DANGER,
-        action: (): void => {
-          this.deleteAllConversations();
-        },
+        fontColor: ERROR,
+        action: (): void => { this.deleteAllConversations(); },
       },
     });
   }
 
   @Builder
-  swipeActions(item: ConversationSummary) {
-    Row() {
-      Text(item.isPinned ? '取消置顶' : '置顶')
-        .fontSize(13).fontColor(Color.White)
-        .textAlign(TextAlign.Center)
-        .width(72).height('100%')
-        .backgroundColor(ACCENT)
-        .onClick((): void => this.togglePin(item))
-      Text('删除')
-        .fontSize(13).fontColor(Color.White)
-        .textAlign(TextAlign.Center)
-        .width(64).height('100%')
-        .backgroundColor(DANGER)
-        .onClick((): void => this.onDelete(item))
+  ConversationRow(item: ConversationSummary): void {
+    Column() {
+      Row() {
+        if (item.isPinned) {
+          Text('置顶')
+            .fontSize(LABEL)
+            .fontColor(ACCENT)
+            .margin({ right: 6 })
+        }
+        Text(item.title.length > 0 ? item.title : '未命名对话')
+          .fontSize(BODY)
+          .fontColor(INK)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        Text(item.updateAt.length > 10 ? item.updateAt.substring(0, 10) : item.updateAt)
+          .fontSize(LABEL)
+          .fontColor(INK3)
+      }
+      .width('100%')
+
+      // 滑动操作按钮(内联,不用 swipeAction)
+      Row() {
+        Text(item.isPinned ? '取消置顶' : '置顶')
+          .fontSize(META)
+          .fontColor(Color.White)
+          .textAlign(TextAlign.Center)
+          .width(72)
+          .height(36)
+          .backgroundColor(ACCENT)
+          .borderRadius(6)
+          .margin({ right: 8 })
+          .onClick((): void => { this.togglePin(item); })
+        Text('删除')
+          .fontSize(META)
+          .fontColor(Color.White)
+          .textAlign(TextAlign.Center)
+          .width(64)
+          .height(36)
+          .backgroundColor(ERROR)
+          .borderRadius(6)
+          .onClick((): void => { this.onDelete(item); })
+      }
+      .margin({ top: 6 })
     }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .backgroundColor(SURFACE)
+    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+    .onClick((): void => { this.openConversation(item.id); })
   }
 
-  build() {
+  build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
-      Row() {
-        Text('对话')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-        Blank()
-        // 快捷入口
-        Text('📋').fontSize(16).margin({ right: 12 })
-          .onClick((): void => { router.pushUrl({ url: 'pages/BoardPage' }); })
-        Text('🔍').fontSize(16).margin({ right: 12 })
-          .onClick((): void => { router.pushUrl({ url: 'pages/SearchPage' }); })
-        Text('⭐').fontSize(16).margin({ right: 12 })
-          .onClick((): void => { router.pushUrl({ url: 'pages/FavoritePage' }); })
-        // M3.1:设置入口收口到 SettingPage 索引页(原散落 10 链接 → 1 入口)
-        Text('设置').fontSize(13).fontColor(INK3).margin({ right: 16 })
-          .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
-        // D-106:删除全部入口(HistoryPage.kt:99-105 Delete01 IconButton;
-        //   contentDescription '删除全部' zh 逐字)
-        Text('删除全部').fontSize(13).fontColor(DANGER).margin({ right: 16 })
-          .onClick((): void => { this.showDeleteAllConfirm(); })
-        Text('+ 新对话')
-          .fontSize(14).fontColor(ACCENT)
-          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-          .onClick((): void => this.newConversation())
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
-
-      SearchField({
-        value: this.searchText,
-        placeholder: '搜索对话标题…',
-        onChange: (v: string): void => {
-          this.searchText = v;
-          this.refresh();
-        },
-      })
-        .margin({ left: 16, right: 16, bottom: 8 })
-
-      if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
-      } else if (this.items.length === 0) {
-        Column() {
-          Text(this.searchText.trim().length > 0 ? '没有匹配的对话' : '还没有对话')
-            .fontSize(15).fontColor(INK2)
-          if (this.searchText.trim().length === 0) {
-            Text('点右上角开始新对话').fontSize(12).fontColor(INK3).margin({ top: 8 })
-          }
-        }.margin({ top: 64 })
-      } else {
-        List() {
-          ForEach(this.items, (item: ConversationSummary): void => {
-            ListItem() {
-              Column() {
-                Row() {
-                  if (item.isPinned) {
-                    Text('置顶').fontSize(10).fontColor(ACCENT).margin({ right: 6 })
-                  }
-                  Text(item.title.length > 0 ? item.title : '未命名对话')
-                    .fontSize(15).fontColor(INK).maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .layoutWeight(1)
-                }
-                Text(item.updateAt)
-                  .fontSize(11).fontColor(INK3).margin({ top: 4 })
-              }
-              .width('100%').alignItems(HorizontalAlign.Start)
-              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-              .backgroundColor(SURFACE)
-              .onClick((): void => this.openConversation(item.id))
-            }
-            .swipeAction({ end: this.swipeActions(item) })
-          }, (item: ConversationSummary): string => item.id)
+        // 统一 title bar
+        Row() {
+          Text('←')
+            .fontSize(18)
+            .fontColor(INK3)
+            .onClick((): void => { router.back(); })
+          Text('对话')
+            .fontSize(TITLE)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(INK)
+            .margin({ left: 12 })
+            .layoutWeight(1)
+          // 单一 trailing action: 新对话
+          Text('+ 新对话')
+            .fontSize(BODY)
+            .fontColor(ACCENT)
+            .onClick((): void => { this.newConversation(); })
         }
-        .width('100%').layoutWeight(1)
-        .divider({ strokeWidth: 1, color: LINE })
-      }
-    }
-    .width('100%').height('100%')
+        .width('100%')
+        .height(56)
+        .padding({ left: 24, right: 24 })
+        .backgroundColor(BG)
 
-    // D-096:撤销 snackbar(HistoryPage.kt SnackbarHost;'对话已删除'/'撤销' 逐字,
-    //   strings.xml:308/:320)
-    if (this.snackVisible) {
-      Row() {
-        Text('对话已删除')
-          .fontSize(13).fontColor(Color.White)
-        Blank()
-        Text('撤销')
-          .fontSize(13).fontColor(ACCENT)
-          .padding({ left: 16, top: 6, bottom: 6 })
-          .onClick((): void => this.undoDelete())
+        // 快捷入口行(独立一行,不挤在 title bar)
+        Row() {
+          Text('看板')
+            .fontSize(META)
+            .fontColor(INK3)
+            .margin({ right: 16 })
+            .onClick((): void => { router.pushUrl({ url: 'pages/BoardPage' }); })
+          Text('搜索')
+            .fontSize(META)
+            .fontColor(INK3)
+            .margin({ right: 16 })
+            .onClick((): void => { router.pushUrl({ url: 'pages/SearchPage' }); })
+          Text('收藏')
+            .fontSize(META)
+            .fontColor(INK3)
+            .margin({ right: 16 })
+            .onClick((): void => { router.pushUrl({ url: 'pages/FavoritePage' }); })
+          Blank()
+          Text('设置')
+            .fontSize(META)
+            .fontColor(INK3)
+            .margin({ right: 16 })
+            .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
+          Text('删除全部')
+            .fontSize(META)
+            .fontColor(ERROR)
+            .onClick((): void => { this.showDeleteAllConfirm(); })
+        }
+        .width('100%')
+        .padding({ left: 24, right: 24, top: 4, bottom: 4 })
+        .backgroundColor(BG)
+
+        // 搜索栏
+        SearchField({
+          value: this.searchText,
+          placeholder: '搜索对话标题…',
+          onChange: (v: string): void => {
+            this.searchText = v;
+            this.refresh();
+          },
+        })
+          .margin({ left: 16, right: 16, bottom: 8 })
+
+        // 列表区
+        Scroll() {
+          Column() {
+            if (!this.loaded) {
+              Text('加载中…')
+                .fontSize(BODY)
+                .fontColor(INK3)
+                .padding({ top: 40 })
+            } else if (this.items.length === 0) {
+              Column() {
+                Text(this.searchText.trim().length > 0 ? '没有匹配的对话' : '还没有对话')
+                  .fontSize(BODY)
+                  .fontColor(INK2)
+                if (this.searchText.trim().length === 0) {
+                  Text('点右上角开始新对话')
+                    .fontSize(LABEL)
+                    .fontColor(INK3)
+                    .margin({ top: 8 })
+                }
+              }
+              .margin({ top: 64 })
+            } else {
+              ForEach(this.items, (item: ConversationSummary): void => {
+                this.ConversationRow(item)
+              }, (item: ConversationSummary): string => item.id)
+            }
+
+            PageSpacer()
+          }
+          .width('100%')
+        }
+        .layoutWeight(1)
+        .backgroundColor(BG)
       }
-      .width('92%')
-      .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-      .backgroundColor(SNACK_BG)
-      .borderRadius(8)
-      .margin({ bottom: 24 })
+      .width('100%')
+      .height('100%')
+
+      // 撤销 snackbar
+      if (this.snackVisible) {
+        Row() {
+          Text('对话已删除')
+            .fontSize(META)
+            .fontColor(Color.White)
+          Blank()
+          Text('撤销')
+            .fontSize(META)
+            .fontColor(ACCENT)
+            .padding({ left: 16, top: 6, bottom: 6 })
+            .onClick((): void => { this.undoDelete(); })
+        }
+        .width('92%')
+        .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+        .backgroundColor(SNACK_BG)
+        .borderRadius(8)
+        .margin({ bottom: 24 })
+      }
     }
-  }
-  .width('100%').height('100%').backgroundColor(BG)
+    .width('100%')
+    .height('100%')
+    .backgroundColor(BG)
   }
 }
