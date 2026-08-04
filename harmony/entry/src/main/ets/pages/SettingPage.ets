@@ -54,7 +54,7 @@ struct SettingPage {
           NavRow({ label: '沙盒设置', onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
           NavRow({ label: '文件管理', onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
           NavRow({ label: '定时任务', onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
-          NavRow({ label: '删除全部会话', danger: true, onRowClick: (): void => { this.go('pages/HistoryPage'); } })
+          NavRow({ label: '历史记录', onRowClick: (): void => { this.go('pages/HistoryPage'); } })
 
           PageSpacer()
         }

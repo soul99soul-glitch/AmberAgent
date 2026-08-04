@@ -102,7 +102,7 @@ struct BoardPage {
         .fontColor(INK)
         .onClick((): void => { router.back(); })
       Text('今日看板')
-        .fontSize(18.5)
+        .fontSize(TITLE)
         .fontWeight(700)
         .fontColor(INK)
         .layoutWeight(1)

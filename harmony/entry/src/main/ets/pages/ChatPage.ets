@@ -6,7 +6,7 @@
 // D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
-import { ACCENT,ACCENT_INK,BG,BODY,HEADER,INK,INK2,INK3,INK4,LABEL,LINE,LINE2,META,MONO_SMALL,SURFACE,SURFACE2 } from '../design/tokens.ets';
+import { ACCENT,ACCENT_INK,BG,BODY,ERROR,HEADER,INK,INK2,INK3,INK4,LABEL,LINE,LINE2,META,MONO_SMALL,SURFACE,SURFACE2 } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
@@ -128,7 +128,7 @@ import {
 } from '../platform_impl/MemoryStore.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
-const ROW: string = '#EFECE4';
+const ROW: string = SURFACE2;
 
 const HILOG_DOMAIN: number = 0x0001;
 const HILOG_TAG: string = 'DeepRead.ChatPage';
@@ -879,7 +879,7 @@ struct ChatPage {
   private contextRingColor(): string {
     if (this.compactActiveCount > 0) return '#4EA6FF';
     const r: number = this.contextUsageRatio();
-    if (r >= 0.7) return 'ERROR';
+    if (r >= 0.7) return ERROR;
     if (r >= 0.5) return '#C08A2D';
     return '#8F8B80';
   }
@@ -1242,7 +1242,7 @@ struct ChatPage {
       },
       secondaryButton: {
         value: '删除',
-        fontColor: 'ERROR',
+        fontColor: ERROR,
         action: (): void => {
           if (this.conversation === null) return;
           const updated: Conversation = deleteMessage(this.conversation, row.message.id, false);
@@ -2774,7 +2774,7 @@ struct ChatPage {
 
       if (this.errorMsg.length > 0) {
         Text(this.errorMsg)
-          .fontSize(12).fontColor('#B33A3A')
+          .fontSize(12).fontColor(ERROR)
           .padding({ left: 16, right: 16, top: 4, bottom: 4 })
       }
 
@@ -2971,7 +2971,7 @@ struct ChatPage {
               .padding({ left: 20, right: 20, top: 8, bottom: 8 })
               .onClick((): void => { this.dismissDenyDialog(); })
             Text('拒绝')
-              .fontSize(14).fontColor('ERROR')
+              .fontSize(14).fontColor(ERROR)
               .padding({ left: 20, right: 8, top: 8, bottom: 8 })
               .onClick((): void => { this.confirmDenyDialog(); })
           }

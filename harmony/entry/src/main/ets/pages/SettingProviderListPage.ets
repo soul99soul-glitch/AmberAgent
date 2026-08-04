@@ -182,7 +182,7 @@ struct SettingProviderListPage {
           .fontColor(INK)
           .onClick((): void => { router.back(); })
         Text('提供商')
-          .fontSize(18.5)
+          .fontSize(TITLE)
           .fontWeight(FontWeight.Bold)
           .fontColor(INK)
           .margin({ left: 8 })
@@ -311,7 +311,7 @@ struct SettingProviderListPage {
             }
             .width('100%')
             .padding({ top: 11, right: 12, bottom: 11, left: 10 })
-            .border({ width: { top: 1 }, color: { top: LINE } })
+            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
             .onClick((): void => { this.openDetail(p); })
           }, (p: ProviderItem): string => p.id)
 
@@ -362,7 +362,7 @@ struct SettingProviderListPage {
             .width('100%')
             .opacity(0.62)
             .padding({ top: 11, right: 12, bottom: 11, left: 10 })
-            .border({ width: { top: 1 }, color: { top: LINE } })
+            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
             .onClick((): void => { this.openDetail(p); })
           }, (p: ProviderItem): string => p.id)
 

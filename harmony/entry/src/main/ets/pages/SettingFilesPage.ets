@@ -1,6 +1,7 @@
 // SettingFilesPage — 文件管理设置(G3-S4)
 // Android 基准: SettingFilesPage.kt(274 行)— 工作区文件管理
 import { router } from '@kit.ArkUI';
+import { promptAction } from '@kit.ArkUI';
 import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL, TITLE, ACCENT } from '../design/tokens.ets';
 
 @Entry
@@ -44,7 +45,7 @@ struct SettingFilesPage {
           }
           .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
           .backgroundColor(SURFACE).border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-          .onClick((): void => {})
+          .onClick((): void => { promptAction.showToast({ message: '功能开发中', duration: 1500 }); })
 
           Column() {}.height(40)
         }

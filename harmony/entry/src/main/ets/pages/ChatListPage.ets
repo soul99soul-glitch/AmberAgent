@@ -197,17 +197,17 @@ struct ChatListPage {
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
-        // 统一 title bar
+        // 统一 title bar (对齐 PageTitleBar 规范)
         Row() {
           Text('←')
-            .fontSize(18)
-            .fontColor(INK3)
+            .fontSize(24)
+            .fontColor(INK)
             .onClick((): void => { router.back(); })
-          Text('对话')
+          Text('对话历史')
             .fontSize(TITLE)
             .fontWeight(FontWeight.Bold)
             .fontColor(INK)
-            .margin({ left: 12 })
+            .margin({ left: 8 })
             .layoutWeight(1)
           // 单一 trailing action: 新对话
           Text('+ 新对话')
@@ -216,8 +216,8 @@ struct ChatListPage {
             .onClick((): void => { this.newConversation(); })
         }
         .width('100%')
-        .height(56)
-        .padding({ left: 24, right: 24 })
+        .padding({ left: 14, right: 14, top: 2, bottom: 11 })
+        .border({ width: { bottom: 1 }, color: { bottom: LINE } })
         .backgroundColor(BG)
 
         // 快捷入口行(独立一行,不挤在 title bar)
