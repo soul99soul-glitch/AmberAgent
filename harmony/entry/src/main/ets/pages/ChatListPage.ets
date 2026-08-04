@@ -191,6 +191,13 @@ struct ChatListPage {
         Text('对话')
           .fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
         Blank()
+        // 快捷入口
+        Text('📋').fontSize(16).margin({ right: 12 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/BoardPage' }); })
+        Text('🔍').fontSize(16).margin({ right: 12 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/SearchPage' }); })
+        Text('⭐').fontSize(16).margin({ right: 12 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/FavoritePage' }); })
         // M3.1:设置入口收口到 SettingPage 索引页(原散落 10 链接 → 1 入口)
         Text('设置').fontSize(13).fontColor(INK3).margin({ right: 16 })
           .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })

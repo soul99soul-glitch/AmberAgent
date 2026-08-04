@@ -828,6 +828,13 @@ struct ChatPage {
         this.conversation = seedConversationWithPresets(fresh, picked);
         this.rows = buildRows(this.conversation);
         this.suggestions = this.conversation.chatSuggestions;
+        // DEBUG: 自动发送测试消息(设备验证用,上线前删除)
+        //   原因:uitest uiInput text 不触发 ArkUI TextArea.onChange,
+        //   导致无法通过 UI 自动化输入发送消息。直接调 send() 绕过。
+        setTimeout((): void => {
+          this.inputText = '你好,请用markdown格式简单介绍一下你自己';
+          this.send();
+        }, 500);
       });
     }
   }

@@ -149,6 +149,28 @@ struct AssistantDetailPage {
               .width('100%').padding({ left: 16, right: 16 })
               .maxLines(6).textOverflow({ overflow: TextOverflow.Ellipsis })
 
+            // 额外编辑入口
+            Row() {
+              Text('🎨 背景设置')
+                .fontSize(META).fontColor(INK3)
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor(SURFACE2).borderRadius(8)
+                .margin({ right: 8 })
+                .onClick((): void => {
+                  const params: RouterParams = { assistantId: this.assistantId };
+                  router.pushUrl({ url: 'pages/AssistantBackgroundPicker', params: params });
+                })
+              Text('⚙️ 属性编辑')
+                .fontSize(META).fontColor(INK3)
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor(SURFACE2).borderRadius(8)
+                .onClick((): void => {
+                  const params: RouterParams = { assistantId: this.assistantId };
+                  router.pushUrl({ url: 'pages/AssistantPropertyEditor', params: params });
+                })
+            }
+            .width('100%').padding({ left: 16, top: 16 })
+
             Column() {}.height(40)
           }
           .width('100%')

@@ -77,7 +77,9 @@ struct SettingPage {
           this.SectionHeader('通用')
           this.Section([
             { label: '助手', page: 'pages/ChatAssistantsPage', danger: false },
+            { label: '助手列表', page: 'pages/AssistantListPage', danger: false },
             { label: '显示设置', page: 'pages/SettingDisplayPage', danger: false },
+            { label: '主题', page: 'pages/SettingDisplayPage', danger: false },
             { label: '关于', page: 'pages/SettingAboutPage', danger: false },
           ])
 
@@ -85,19 +87,58 @@ struct SettingPage {
           this.SectionHeader('Agent 运行')
           this.Section([
             { label: '记忆', page: 'pages/MemoryPage', danger: false },
+            { label: '记忆设置', page: 'pages/SettingAgentMemoryPageFull', danger: false },
             { label: '权限策略', page: 'pages/ChatAgentPermissionsPage', danger: false },
+            { label: '权限设置', page: 'pages/SettingAgentPermissionsPageFull', danger: false },
             { label: '执行参数', page: 'pages/ChatAgentExecutionPage', danger: false },
+            { label: '执行设置', page: 'pages/SettingAgentExecutionPageFull', danger: false },
+            { label: '扩展管理', page: 'pages/SettingAgentExtensionsPageFull', danger: false },
             { label: 'MCP', page: 'pages/ChatMcpSettingsPage', danger: false },
+            { label: 'MCP 设置', page: 'pages/SettingMcpPageFull', danger: false },
             { label: '子代理(实验)', page: 'pages/SettingSubAgentPage', danger: false },
+            { label: '子代理设置', page: 'pages/SettingExperimentalSubAgentPageFull', danger: false },
             { label: 'Council(实验)', page: 'pages/SettingModelCouncilPage', danger: false },
+            { label: 'Council 设置', page: 'pages/SettingExperimentalModelCouncilPageFull', danger: false },
           ])
 
           // modelServices
           this.SectionHeader('模型与服务')
           this.Section([
             { label: 'Provider', page: 'pages/ChatProviderSettingsPage', danger: false },
+            { label: 'Provider 列表', page: 'pages/SettingProviderListPage', danger: false },
+            { label: 'Provider 详情', page: 'pages/SettingProviderDetailPageFull', danger: false },
+            { label: '模型管理', page: 'pages/SettingModelPage', danger: false },
             { label: '任务模型', page: 'pages/ChatTaskModelsPage', danger: false },
             { label: '搜索', page: 'pages/ChatSearchSettingsPage', danger: false },
+            { label: '搜索源列表', page: 'pages/SettingSearchListCards', danger: false },
+            { label: 'TTS 设置', page: 'pages/SettingTTSPage', danger: false },
+            { label: 'TTS Provider', page: 'pages/SettingTTSProviderPage', danger: false },
+          ])
+
+          // experimental
+          this.SectionHeader('实验功能')
+          this.Section([
+            { label: '实验功能入口', page: 'pages/SettingExperimentalPage', danger: false },
+            { label: 'Web 挂载', page: 'pages/SettingExperimentalWebMountPage', danger: false },
+            { label: 'Office Pro', page: 'pages/SettingExperimentalOfficeProPage', danger: false },
+            { label: '字体设置', page: 'pages/SettingSlidesFontPage', danger: false },
+          ])
+
+          // deepread
+          this.SectionHeader('深度阅读')
+          this.Section([
+            { label: '模板设置', page: 'pages/DeepReadTemplateSettingsPage', danger: false },
+            { label: '模板工作台', page: 'pages/DeepReadTemplateWorkbenchPage', danger: false },
+            { label: '热榜源设置', page: 'pages/HotListSourceSettingsPage', danger: false },
+          ])
+
+          // extensions
+          this.SectionHeader('扩展')
+          this.Section([
+            { label: '技能', page: 'pages/SkillsPage', danger: false },
+            { label: '提示词模板', page: 'pages/PromptTemplatePage', danger: false },
+            { label: '快捷消息', page: 'pages/QuickMessagesPage', danger: false },
+            { label: '系统权限', page: 'pages/SettingSystemAccessPage', danger: false },
           ])
 
           // data
