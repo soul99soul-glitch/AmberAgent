@@ -16,6 +16,7 @@ import {
 } from '../design/tokens.ets';
 import { type WorkspaceFileInfo, extOf, formatFileSize } from './WorkspaceFileVM.ets';
 import { MarkdownText } from './MarkdownText.ets';
+import { Icon } from './ui/Icon.ets';
 
 // 预览内容类别(对齐 Android sealed PreviewContent)
 type PreviewKind = 'markdown' | 'plaintext' | 'image' | 'pdf' | 'unsupported';
@@ -164,7 +165,7 @@ export struct WorkspaceFilePreview {
   @Builder
   Placeholder(msg: string): void {
     Column() {
-      Text('🚫').fontSize(36).fontColor(INK4)
+      Icon({ name: 'ban', iconSize: 36, color: INK4 })
       Text(msg)
         .fontSize(BODY)
         .fontColor(INK3)

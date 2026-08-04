@@ -98,7 +98,7 @@ struct SkillsPage {
           .fontColor(INK3)
           .fontFamily('monospace')
         Text('技能')
-          .fontSize(18.5)
+          .fontSize(TITLE)
           .fontWeight(700)
           .fontColor(INK)
           .margin({ top: 1 })
@@ -326,7 +326,7 @@ struct SkillsPage {
         .onClick((): void => { this.toggleSkill(item); })
     }
     .width('100%')
-    .padding({ left: 15, right: 15, top: 15, bottom: 15 })
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .border({ width: { bottom: last ? 0 : 1 }, color: { bottom: LINE } })
     .alignItems(VerticalAlign.Center)
     .onClick((): void => { this.openDetail(item); })

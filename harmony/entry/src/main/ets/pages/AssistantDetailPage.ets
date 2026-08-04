@@ -6,6 +6,7 @@ import { loadAssistants } from '@amber/chat-domain';
 import type { Assistant, Avatar } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
 
 interface RouterParams {
   assistantId?: string;
@@ -151,23 +152,27 @@ struct AssistantDetailPage {
 
             // 额外编辑入口
             Row() {
-              Text('🎨 背景设置')
-                .fontSize(META).fontColor(INK3)
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(SURFACE2).borderRadius(8)
-                .margin({ right: 8 })
-                .onClick((): void => {
-                  const params: RouterParams = { assistantId: this.assistantId };
-                  router.pushUrl({ url: 'pages/AssistantBackgroundPicker', params: params });
-                })
-              Text('⚙️ 属性编辑')
-                .fontSize(META).fontColor(INK3)
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(SURFACE2).borderRadius(8)
-                .onClick((): void => {
-                  const params: RouterParams = { assistantId: this.assistantId };
-                  router.pushUrl({ url: 'pages/AssistantPropertyEditor', params: params });
-                })
+              Row() {
+                Icon({ name: 'palette', iconSize: META, color: INK3 })
+                Text(' 背景设置').fontSize(META).fontColor(INK3)
+              }
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .backgroundColor(SURFACE2).borderRadius(8)
+              .margin({ right: 8 })
+              .onClick((): void => {
+                const params: RouterParams = { assistantId: this.assistantId };
+                router.pushUrl({ url: 'pages/AssistantBackgroundPicker', params: params });
+              })
+              Row() {
+                Icon({ name: 'gear', iconSize: META, color: INK3 })
+                Text(' 属性编辑').fontSize(META).fontColor(INK3)
+              }
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .backgroundColor(SURFACE2).borderRadius(8)
+              .onClick((): void => {
+                const params: RouterParams = { assistantId: this.assistantId };
+                router.pushUrl({ url: 'pages/AssistantPropertyEditor', params: params });
+              })
             }
             .width('100%').padding({ left: 16, top: 16 })
 

@@ -2,6 +2,7 @@
 // Android 基准: AsyncImage 加载 favicone.com 远程图标 + fallback Link01 icon
 // ArkUI: Image(url) + fallback 文字图标;FaviconRow 叠加布局
 import { INK3, SURFACE, LINE } from '../../design/tokens.ets';
+import { Icon } from './Icon.ets';
 
 export const faviconUrl = (url: string): string => {
   try {
@@ -25,14 +26,14 @@ export struct Favicon {
         .backgroundColor(SURFACE)
         .border({ width: 0.5, color: LINE })
         .objectFit(ImageFit.Cover)
-        .alt('🔗')
     } else {
-      Text('🔗')
-        .fontSize(this.iconSize * 0.6).fontColor(INK3)
-        .width(this.iconSize).height(this.iconSize)
-        .textAlign(TextAlign.Center)
-        .backgroundColor(SURFACE)
-        .borderRadius(this.iconSize / 4)
+      Column() {
+        Icon({ name: 'link', iconSize: this.iconSize * 0.6, color: INK3 })
+      }
+      .width(this.iconSize).height(this.iconSize)
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor(SURFACE)
+      .borderRadius(this.iconSize / 4)
     }
   }
 }

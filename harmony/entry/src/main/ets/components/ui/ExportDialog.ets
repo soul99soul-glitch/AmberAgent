@@ -2,6 +2,7 @@
 // Android 基准: AlertDialog 两选项(导出到文件 / 导出并分享)+ 取消
 // ArkUI: bindSheet 含两个选项行 + 回调(exportToFile/exportAndShare 由调用方实现)
 import { INK2, INK3, SURFACE, LINE, BODY, LABEL } from '../../design/tokens.ets';
+import { Icon } from './Icon.ets';
 
 @Component
 export struct ExportDialog {
@@ -19,7 +20,7 @@ export struct ExportDialog {
         .width('100%').padding({ left: 20, top: 20, bottom: 12 })
 
       Row() {
-        Text('📄').fontSize(BODY).margin({ right: 10 })
+        Icon({ name: 'doc', iconSize: BODY, color: INK2 }).margin({ right: 10 })
         Column() {
           Text('导出到文件').fontSize(BODY).fontColor(INK2)
           Text('保存到本地存储').fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
@@ -32,7 +33,7 @@ export struct ExportDialog {
       .onClick((): void => { this.onExportToFile(); this.onDismiss(); })
 
       Row() {
-        Text('📤').fontSize(BODY).margin({ right: 10 })
+        Icon({ name: 'share', iconSize: BODY, color: INK2 }).margin({ right: 10 })
         Column() {
           Text('导出并分享').fontSize(BODY).fontColor(INK2)
           Text('导出后打开分享面板').fontSize(LABEL).fontColor(INK3).margin({ top: 2 })

@@ -6,6 +6,7 @@
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, BG, LINE, ACCENT, ACCENT_LIGHT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 import { WorkspaceSearchField } from './ui/WorkspaceSearchField.ets';
 import { UIAvatar } from './UIAvatar.ets';
+import { Icon } from './ui/Icon.ets';
 
 // 抽屉导航项
 interface DrawerNavItem {
@@ -61,7 +62,7 @@ export struct ChatDrawer {
 
           // "最近" 标签
           Row() {
-            Text('🕐').fontSize(14).margin({ right: 6 })
+            Icon({ name: 'history', iconSize: 14, color: ACCENT }).margin({ right: 6 })
             Text('最近').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(ACCENT)
           }
           .width('100%')
@@ -92,9 +93,7 @@ export struct ChatDrawer {
               .layoutWeight(1)
               .margin({ left: 12 })
               .onClick((): void => { /* TODO: 昵称编辑弹窗 */ })
-            Text('⚙️')
-              .fontSize(18)
-              .fontColor(INK3)
+            Icon({ name: 'gear', iconSize: 18, color: INK3 })
               .onClick((): void => { this.onOpenSettings(); })
           }
           .width('100%')

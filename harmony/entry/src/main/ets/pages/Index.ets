@@ -107,31 +107,24 @@ struct Index {
           .fontColor(INK2)
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatListPage' }); })
 
-        // 中: 标题 + 模型(可点击 → 模型选择)
+        // 中: 标题 + 模型(信息展示, 不可点击)
         Column() {
           Text('新会话')
             .fontSize(HEADER)
             .fontWeight(FontWeight.Bold)
             .fontColor(INK)
-          Row() {
-            Text('deepseek-v4-flash')
-              .fontSize(META)
-              .fontColor(INK3)
-              .fontFamily('monospace')
-            Text('▾')
-              .fontSize(11)
-              .fontColor(INK4)
-              .margin({ left: 4 })
-          }
-          .margin({ top: 1 })
+          Text('deepseek-v4-flash')
+            .fontSize(META)
+            .fontColor(INK3)
+            .fontFamily('monospace')
+            .margin({ top: 1 })
         }
         .alignItems(HorizontalAlign.Center)
         .layoutWeight(1)
-        .margin({ left: 10 })
 
         // 右: edit icon
         Text('✎')
-          .fontSize(21)
+          .fontSize(22)
           .fontColor(INK2)
           .onClick((): void => { this.newConversation(); })
       }
@@ -222,12 +215,13 @@ struct Index {
             }
             .width('100%')
             .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+            .backgroundColor(SURFACE)
+            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
             .onClick((): void => { router.pushUrl({ url: 'pages/ChatListPage' }); })
 
             PageSpacer()
           }
           .width('100%')
-          .padding({ left: 12, right: 12 })
         }
         .layoutWeight(1)
         .backgroundColor(BG)

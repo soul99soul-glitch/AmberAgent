@@ -79,6 +79,7 @@ export struct NavRow {
   @Prop label: string = '';
   @Prop valueText: string = '';
   @Prop danger: boolean = false;
+  @Prop isLast: boolean = false;
   onRowClick: () => void = (): void => {};
 
   build(): void {
@@ -102,7 +103,7 @@ export struct NavRow {
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+    .border(this.isLast ? { width: 0 } : { width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { this.onRowClick(); })
   }
 }

@@ -100,7 +100,7 @@ struct SettingPage {
           Column() {
             NavRow({ label: '默认模型', valueText: 'Claude Sonnet 4.5', onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
             NavRow({ label: '核心记忆', valueText: '14 条', onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
-            NavRow({ label: '技能', valueText: '6 个已启用', onRowClick: (): void => { this.go('pages/SkillsPage'); } })
+            NavRow({ label: '技能', valueText: '6 个已启用', isLast: true, onRowClick: (): void => { this.go('pages/SkillsPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
@@ -110,7 +110,7 @@ struct SettingPage {
           Column() {
             NavRow({ label: '联网搜索', valueText: '自动', onRowClick: (): void => { this.go('pages/SettingSearchListCards'); } })
             NavRow({ label: '服务商与密钥', valueText: '3 个', onRowClick: (): void => { this.go('pages/SettingProviderListPage'); } })
-            NavRow({ label: '隐私与数据', onRowClick: (): void => { this.go('pages/SettingAgentPermissionsPageFull'); } })
+            NavRow({ label: '隐私与数据', isLast: true, onRowClick: (): void => { this.go('pages/SettingAgentPermissionsPageFull'); } })
           }
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
@@ -119,7 +119,7 @@ struct SettingPage {
           SectionHeader({ label: 'ABOUT' })
           Column() {
             NavRow({ label: '版本', valueText: '2.4.0 (128)' })
-            NavRow({ label: '通知' })
+            NavRow({ label: '通知', isLast: true })
           }
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
@@ -128,7 +128,7 @@ struct SettingPage {
 
           // ── 退出 ──
           Column() {
-            NavRow({ label: '退出登录', danger: true })
+            NavRow({ label: '退出登录', danger: true, isLast: true })
           }
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
@@ -153,7 +153,7 @@ struct SettingPage {
             NavRow({ label: '定时任务', onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
             NavRow({ label: '历史记录', onRowClick: (): void => { this.go('pages/HistoryPage'); } })
             NavRow({ label: '今日看板', onRowClick: (): void => { this.go('pages/BoardPage'); } })
-            NavRow({ label: '收藏', onRowClick: (): void => { this.go('pages/FavoritePage'); } })
+            NavRow({ label: '收藏', isLast: true, onRowClick: (): void => { this.go('pages/FavoritePage'); } })
             NavRow({ label: '关于', onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)

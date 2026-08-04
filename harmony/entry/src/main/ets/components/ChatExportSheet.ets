@@ -5,6 +5,7 @@
 //   图片导出降级为"功能入口"(提示需设备支持),Markdown 导出完整实现
 import type { UIMessage, Conversation } from '@amber/chat-domain';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BODY, META, LABEL } from '../design/tokens.ets';
+import { Icon } from './ui/Icon.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
 
@@ -69,7 +70,7 @@ export struct ChatExportSheet {
 
           // Markdown 导出卡片
           Row() {
-            Text('📄').fontSize(20).margin({ right: 12 })
+            Icon({ name: 'doc', iconSize: 20, color: INK2 }).margin({ right: 12 })
             Column() {
               Text('Markdown').fontSize(BODY).fontColor(INK).fontWeight(FontWeight.Medium)
               Text('复制为 Markdown 文本到剪贴板').fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
@@ -88,7 +89,7 @@ export struct ChatExportSheet {
           // 图片导出卡片(降级:提示)
           Column() {
             Row() {
-              Text('🖼️').fontSize(20).margin({ right: 12 })
+              Icon({ name: 'image', iconSize: 20, color: INK2 }).margin({ right: 12 })
               Column() {
                 Text('图片').fontSize(BODY).fontColor(INK).fontWeight(FontWeight.Medium)
                 Text('导出为图片分享(需设备支持)').fontSize(LABEL).fontColor(INK3).margin({ top: 2 })

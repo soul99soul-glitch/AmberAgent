@@ -13,6 +13,7 @@
 //   - Set<Uuid> ± id → string[] Set 语义(toggle 去重)
 import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadAssistants, saveAssistants, patchAssistant,
@@ -97,10 +98,13 @@ struct ChatAssistantExtensionsPage {
   emptyState(message: string) {
     Column() {
       Text(message).fontSize(13).fontColor(INK3)
-      Text('🔗 前往提示词管理')
-        .fontSize(13).fontColor(ACCENT).margin({ top: 12 })
-        .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-        .onClick((): void => { this.gotoPrompts(); })
+      Row() {
+        Icon({ name: 'link', iconSize: 13, color: ACCENT })
+        Text(' 前往提示词管理').fontSize(13).fontColor(ACCENT)
+      }
+      .margin({ top: 12 })
+      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+      .onClick((): void => { this.gotoPrompts(); })
     }
     .width('100%').padding(32).margin({ top: 60 })
   }

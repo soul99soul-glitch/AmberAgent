@@ -12,6 +12,7 @@ import {
 } from '@amber/chat-domain';
 import { INK, INK2, INK3, INK4, ACCENT, SURFACE, SURFACE2, LINE, META } from '../design/tokens.ets';
 import { MarkdownText } from './MarkdownText.ets';
+import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatMessageReasoning {
@@ -24,7 +25,7 @@ export struct ChatMessageReasoning {
     Column() {
       // 头部: 图标 + 标题文本 + 展开箭头
       Row() {
-        Text('🧠').fontSize(14)
+        Icon({ name: 'brain', iconSize: 14, color: ACCENT })
         Text(this.headerText())
           .fontSize(META)
           .fontColor(ACCENT)

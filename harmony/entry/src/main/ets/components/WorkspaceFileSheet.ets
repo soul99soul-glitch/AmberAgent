@@ -18,6 +18,7 @@ import {
   type WorkspaceFileInfo, type WorkspaceFileSortKey,
   searchFiles, sortFiles, formatFileSize, formatFileTime, extOf,
 } from './WorkspaceFileVM.ets';
+import { Icon } from './ui/Icon.ets';
 
 // 文件类型图标(对齐 Android File02 + extColor;HarmonyOS 用 emoji 占位)
 function fileIcon(name: string): string {
@@ -245,7 +246,7 @@ export struct WorkspaceFileSheet {
   @Builder
   EmptyState(): void {
     Column() {
-      Text('📁').fontSize(40).fontColor(INK4)
+      Icon({ name: 'folder', iconSize: 40, color: INK4 })
       Text(this.files.length === 0 ? '还没有 workspace 文件' : '无匹配文件')
         .fontSize(BODY)
         .fontColor(INK3)
@@ -331,12 +332,15 @@ export struct WorkspaceFileSheet {
 
           // 上传按钮(占位:无真实文件选择器)
           Row() {
-            Text('⬆ 上传文件(占位)')
-              .fontSize(BODY)
-              .fontColor(INK3)
-              .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-              .backgroundColor(SURFACE2)
-              .borderRadius(50)
+            Row() {
+              Icon({ name: 'upload', iconSize: BODY, color: INK3 })
+              Text(' 上传文件(占位)')
+                .fontSize(BODY)
+                .fontColor(INK3)
+            }
+            .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+            .backgroundColor(SURFACE2)
+            .borderRadius(50)
           }
           .width('100%')
           .justifyContent(FlexAlign.Center)

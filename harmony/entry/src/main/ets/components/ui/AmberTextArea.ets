@@ -13,6 +13,7 @@
 //
 // ArkUI 规则:无 as unknown / 无对象展开 / 无 any/unknown;@Prop 无保留字
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, BODY, META, LABEL } from '../../design/tokens.ets';
+import { Icon } from './Icon.ets';
 
 @Component
 export struct AmberTextArea {
@@ -62,7 +63,7 @@ export struct AmberTextArea {
                 this.fullScreenOpen = true;
               })
           }
-          Text('📂').fontSize(BODY).fontColor(INK3).margin({ left: 12 })
+          Icon({ name: 'folder', iconSize: BODY, color: INK3 }).margin({ left: 12 })
             .onClick((): void => { this.onImportFile(); })
         }
         .width('100%')

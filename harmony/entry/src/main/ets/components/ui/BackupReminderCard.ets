@@ -3,6 +3,7 @@
 //   到期 → Card(icon + title + subtitle + dismiss);未到期 → 不渲染
 // ArkUI: config 作为 @Prop 传入;dismiss 为本地 @State(非持久,对齐 Android)
 import { INK2, INK3, SURFACE, LINE, BODY, LABEL } from '../../design/tokens.ets';
+import { Icon } from './Icon.ets';
 
 export interface BackupConfig {
   enabled: boolean;
@@ -33,7 +34,7 @@ export struct BackupReminderCard {
   build(): void {
     if (isBackupDue(this.config) && !this.dismissed) {
       Row() {
-        Text('💾').fontSize(BODY).margin({ right: 10 })
+        Icon({ name: 'save', iconSize: BODY, color: INK2 }).margin({ right: 10 })
         Column() {
           Text('备份你的数据').fontSize(BODY).fontColor(INK2)
           Text(backupSubtitle(this.config))

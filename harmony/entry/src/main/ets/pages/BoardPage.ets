@@ -127,7 +127,7 @@ struct BoardPage {
         Column()
           .width(40)
           .height(2.5)
-          .backgroundColor(this.tab === 0 ? ACCENT : '#00000000')
+          .backgroundColor(this.tab === 0 ? ACCENT : Color.Transparent)
       }
       .layoutWeight(1)
       .onClick((): void => { this.tab = 0; })
@@ -142,7 +142,7 @@ struct BoardPage {
         Column()
           .width(40)
           .height(2.5)
-          .backgroundColor(this.tab === 1 ? ACCENT : '#00000000')
+          .backgroundColor(this.tab === 1 ? ACCENT : Color.Transparent)
       }
       .layoutWeight(1)
       .onClick((): void => { this.tab = 1; })
@@ -249,6 +249,7 @@ struct BoardPage {
       .margin({ left: 13 })
     }
     .width('100%')
+    .alignItems(VerticalAlign.Top)
     .padding({ left: 0, right: 0, top: 14, bottom: 14 })
     .border({ width: { bottom: last ? 0 : 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { this.openArticle(story); })

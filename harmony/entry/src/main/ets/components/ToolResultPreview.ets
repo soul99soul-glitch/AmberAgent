@@ -19,6 +19,7 @@ import type { JsonObject, JsonValue } from '@amber/chat-domain';
 import {
   INK, INK2, INK3, SURFACE, LINE, ACCENT, ERROR, LABEL,
 } from '../design/tokens.ets';
+import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ToolResultPreview {
@@ -191,14 +192,16 @@ export struct ToolResultPreview {
   RenderLabelRow(): void {
     if (this.isSearchWeb()) {
       Row() {
-        Text('🔍 搜索结果').fontSize(LABEL).fontColor(INK3)
+        Icon({ name: 'search', iconSize: LABEL, color: INK3 })
+        Text(' 搜索结果').fontSize(LABEL).fontColor(INK3)
         Blank()
         Text(`${this.searchResultCount()} 条`).fontSize(LABEL).fontColor(ACCENT)
       }
       .width('100%').margin({ top: 4, left: 32, bottom: 2 })
     } else if (this.isScrapeWeb()) {
       Row() {
-        Text('🌐 抓取').fontSize(LABEL).fontColor(INK3)
+        Icon({ name: 'globe', iconSize: LABEL, color: INK3 })
+        Text(' 抓取').fontSize(LABEL).fontColor(INK3)
         if (this.scrapeUrl().length > 0) {
           Text(this.scrapeUrl())
             .fontSize(LABEL).fontColor(INK3)
@@ -208,12 +211,15 @@ export struct ToolResultPreview {
       }
       .width('100%').margin({ top: 4, left: 32, bottom: 2 })
     } else if (this.isMemoryTool()) {
-      Text('✍️ 记忆')
-        .fontSize(LABEL).fontColor(INK3)
-        .width('100%').margin({ top: 4, left: 32, bottom: 2 })
+      Row() {
+        Icon({ name: 'edit', iconSize: LABEL, color: INK3 })
+        Text(' 记忆').fontSize(LABEL).fontColor(INK3)
+      }
+      .width('100%').margin({ top: 4, left: 32, bottom: 2 })
     } else if (this.isFileTool()) {
       Row() {
-        Text('📄 文件').fontSize(LABEL).fontColor(INK3)
+        Icon({ name: 'doc', iconSize: LABEL, color: INK3 })
+        Text(' 文件').fontSize(LABEL).fontColor(INK3)
         if (this.fileFilename().length > 0) {
           Text(this.fileFilename())
             .fontSize(LABEL).fontColor(INK2)

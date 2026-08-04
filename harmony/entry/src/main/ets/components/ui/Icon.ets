@@ -9,11 +9,13 @@
 //   (size?: SizeOptions),@Prop size 会与之冲突(编译错误 10505001)。
 //   symbol 名以本 SDK(toolchains/id_defined.json type=symbol)实存为准。
 
+import { INK2 } from '../../design/tokens.ets';
+
 @Component
 export struct Icon {
   @Prop name: string = 'search';
   @Prop iconSize: number = 20;
-  @Prop color: string = '#57544C'; // INK2
+  @Prop color: string = INK2;
 
   private symbol(): Resource {
     if (this.name === 'search') return $r('sys.symbol.magnifyingglass');
@@ -50,6 +52,18 @@ export struct Icon {
     if (this.name === 'box') return $r('sys.symbol.storagebox');
     if (this.name === 'key') return $r('sys.symbol.key');
     if (this.name === 'history') return $r('sys.symbol.arrow_counterclockwise_clock');
+    if (this.name === 'folder') return $r('sys.symbol.folder');
+    if (this.name === 'share') return $r('sys.symbol.share');
+    if (this.name === 'speaker') return $r('sys.symbol.speaker_wave_2');
+    if (this.name === 'money') return $r('sys.symbol.moneybag');
+    if (this.name === 'plug') return $r('sys.symbol.powercord');
+    if (this.name === 'ban') return $r('sys.symbol.nosign');
+    if (this.name === 'doc') return $r('sys.symbol.doc_text');
+    if (this.name === 'upload') return $r('sys.symbol.upload');
+    if (this.name === 'save') return $r('sys.symbol.save');
+    if (this.name === 'palette') return $r('sys.symbol.paintpalette');
+    if (this.name === 'clock') return $r('sys.symbol.clock');
+    if (this.name === 'arrow_up') return $r('sys.symbol.arrow_up');
     return $r('sys.symbol.circle');
   }
 

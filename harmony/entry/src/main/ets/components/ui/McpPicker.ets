@@ -2,6 +2,7 @@
 // Android 基准: ToggleSurface + 状态指示 + BadgedBox → ModalBottomSheet(server 列表 toggle)
 // ArkUI MVP: 触发行(server 数量)→ bindSheet(server 状态 + toggle)
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BODY, META, LABEL } from '../../design/tokens.ets';
+import { Icon } from './Icon.ets';
 
 export interface McpServerItem {
   id: string;
@@ -23,7 +24,7 @@ export struct McpPicker {
 
   build(): void {
     Row() {
-      Text('🔌').fontSize(BODY).margin({ right: 8 })
+      Icon({ name: 'plug', iconSize: BODY, color: INK2 }).margin({ right: 8 })
       Text(`MCP (${this.enabledCount()}/${this.servers.length})`)
         .fontSize(BODY).fontColor(INK2).layoutWeight(1)
       Text('▾').fontSize(LABEL).fontColor(INK3)

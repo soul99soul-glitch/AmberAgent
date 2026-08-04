@@ -1,10 +1,9 @@
 // ChatListPage — 会话列表(G7 重构)
 //
-// 对齐 SettingDisplayPage 风格:
-//   - PageTitleBar(height 56/padding 24/BG)
+// 对齐 PageTitleBar 风格(inline header, 因需两个 trailing action):
+//   - header padding 14/2/11 + border-bottom 1px LINE + bg BG + ←24/INK
 //   - flat hairline 行(不用 List+divider)
 //   - tokens 从 tokens.ets 导入(无本地重定义)
-//   - 快捷入口移入 title bar 的 trailing action(不挤)
 //
 // 保留真实数据逻辑: repo.list/search/删除/撤销/置顶/删除全部
 
@@ -13,7 +12,7 @@ import type { Conversation, ConversationSummary } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { SearchField } from '../components/ui/SearchField.ets';
-import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
+import { PageSpacer } from '../components/PageTemplate.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ERROR, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 
 const SNACK_BG: string = '#32302B';

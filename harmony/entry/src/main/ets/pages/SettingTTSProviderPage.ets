@@ -19,6 +19,7 @@ import {
   BODY, META, LABEL, TITLE,
 } from '../design/tokens.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { AmberSwitch, SwitchSize } from '../components/ui/Switch.ets';
 import { PillSelect } from '../components/ui/Select.ets';
 import { NotionSlider } from '../components/ui/NotionSlider.ets';
@@ -366,7 +367,7 @@ struct SettingTTSProviderPage {
 
               if (this.rows.length === 0) {
                 Column() {
-                  Text('🔊').fontSize(28).fontColor(INK4)
+                  Icon({ name: 'speaker', iconSize: 28, color: INK4 })
                   Text('暂无 TTS 提供商,点下方添加').fontSize(BODY).fontColor(INK3)
                     .margin({ top: 8 })
                 }
