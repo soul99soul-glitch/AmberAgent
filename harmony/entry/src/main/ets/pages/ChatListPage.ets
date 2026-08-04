@@ -234,7 +234,7 @@ struct ChatListPage {
             this.refresh();
           },
         })
-          .margin({ left: 16, right: 16, bottom: 8 })
+          .margin({ left: 16, right: 16, top: 12, bottom: 8 })
 
         // 列表区
         Scroll() {

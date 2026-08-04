@@ -1,6 +1,7 @@
 // WorkspaceSearchField — 带图标/清除的搜索框(对齐 Android WorkspaceSearchField.kt)
 // 左侧搜索图标 + 输入区 + 右侧清除按钮(有文本时显示)
 import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, ACCENT, BODY, META } from '../../design/tokens.ets';
+import { Icon } from './Icon.ets';
 
 @Component
 export struct WorkspaceSearchField {
@@ -11,8 +12,7 @@ export struct WorkspaceSearchField {
   build(): void {
     Row() {
       // 搜索图标
-      Text('🔍')
-        .fontSize(14)
+      Icon({ name: 'search', iconSize: 14, color: INK3 })
         .margin({ right: 8 })
 
       // 输入区

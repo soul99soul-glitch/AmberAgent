@@ -4,6 +4,7 @@
 //
 // ArkUI 差异: BasicTextField → TextInput;无 focusRequester → 外层 onClick 聚焦用 focusOnTouch
 import { INK, INK3, SURFACE, SURFACE2, LINE, ACCENT, BODY, LABEL } from '../../design/tokens.ets';
+import { Icon } from './Icon.ets';
 
 @Component
 export struct SearchField {
@@ -14,7 +15,7 @@ export struct SearchField {
 
   build(): void {
     Row() {
-      Text('🔍').fontSize(BODY).fontColor(INK3).margin({ right: 10 })
+      Icon({ name: 'search', iconSize: BODY, color: INK3 }).margin({ right: 10 })
 
       TextInput({ text: this.value, placeholder: this.placeholder })
         .fontSize(BODY).fontColor(INK)

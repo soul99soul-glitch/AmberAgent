@@ -242,6 +242,7 @@ struct Index {
           .placeholderColor(INK4)
           .backgroundColor(SURFACE2)
           .borderRadius(26)
+          .constraintSize({ minHeight: 48 })
           .border({ width: 1, color: LINE })
           .padding({ left: 18, right: 18, top: 14, bottom: 14 })
           .layoutWeight(1)

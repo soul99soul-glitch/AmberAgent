@@ -112,9 +112,7 @@ struct MemoryPage {
   @Builder
   autoCard() {
     Row() {
-      Text('🧠')
-        .fontSize(20)
-        .fontColor(ACCENT)
+      Icon({ name: 'brain', iconSize: 20, color: ACCENT })
       Column() {
         Text('自动记忆')
           .fontSize(14.5)
@@ -129,6 +127,7 @@ struct MemoryPage {
       .layoutWeight(1)
       .margin({ left: 13 })
       Toggle({ type: ToggleType.Switch, isOn: this.autoMemory })
+        .selectedColor(ACCENT)
         .onChange((v: boolean): void => { this.autoMemory = v; })
     }
     .width('100%')
@@ -195,9 +194,7 @@ struct MemoryPage {
           .fontSize(15)
           .fontColor(INK4)
           .onClick((): void => { this.editMemory(item); })
-        Text('🗑')
-          .fontSize(15)
-          .fontColor(INK4)
+        Icon({ name: 'trash', iconSize: 15, color: INK4 })
           .margin({ left: 8 })
           .onClick((): void => { this.deleteMemory(item); })
       }

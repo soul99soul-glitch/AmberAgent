@@ -83,7 +83,7 @@ struct SettingPage {
           Row() {
             ForEach(['#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A'], (color: string, idx: number): void => {
               Text(this.accentColor === color ? '✓' : '')
-                .fontSize(18).fontColor('#FFFFFF')
+                .fontSize(18).fontColor(ACCENT_INK)
                 .width(38).height(38).borderRadius(11)
                 .backgroundColor(color)
                 .border({ width: this.accentColor === color ? 2 : 0, color: INK })
@@ -92,6 +92,7 @@ struct SettingPage {
                 .onClick((): void => { this.accentColor = color; })
             }, (color: string, idx: number): string => `swatch-${idx}`)
           }
+          .width('100%')
           .padding({ left: 6, bottom: 4 })
 
           // ── AGENT ──

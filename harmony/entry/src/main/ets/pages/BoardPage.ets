@@ -213,6 +213,7 @@ struct BoardPage {
         .margin({ left: 13 })
       }
       .width('100%')
+      .alignItems(VerticalAlign.Top)
     }
     .width('100%')
     .padding({ left: 0, right: 0, top: 16, bottom: 18 })
@@ -273,6 +274,7 @@ struct BoardPage {
     Row() {
       Circle({ width: 7, height: 7 })
         .fill(this.statusColor(task.status))
+        .margin({ top: 5 })
       Column() {
         Text(task.title)
           .fontSize(15)
@@ -294,6 +296,7 @@ struct BoardPage {
         .fontColor(INK4)
     }
     .width('100%')
+    .alignItems(VerticalAlign.Top)
     .padding({ left: 0, right: 0, top: 14, bottom: 14 })
     .border({ width: { bottom: last ? 0 : 1 }, color: { bottom: LINE } })
     .onClick((): void => { this.openTask(task); })
