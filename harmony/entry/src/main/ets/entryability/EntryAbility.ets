@@ -55,11 +55,13 @@ export default class EntryAbility extends UIAbility {
     // 沉浸式: 全屏布局 + 透明状态栏/导航条 + 深色图标 + 窗口背景=BG
     //   让页面 BG 延伸到状态栏/导航条区域, 消除白色分界(顶部/底部沉浸)
     windowStage.getMainWindow().then((win: window.Window): void => {
-      // 不全屏布局(避免头部顶到状态栏后); 窗口背景=BG 使状态栏/导航条区域无缝
+      // 沉浸式: 全屏布局使状态栏后面=窗口背景; 窗口背景=BG; 状态栏透明 → 无缝
+      //   ArkUI 默认内容避开安全区(在状态栏下方), 不会顶到状态栏后
+      win.setWindowLayoutFullScreen(true);
       win.setWindowBackgroundColor('#F4F2EC'); // = BG token
       win.setWindowSystemBarEnable(['status', 'navigation']);
       win.setWindowSystemBarProperties({
-        statusBarColor: '#00000000',
+        statusBarColor: '#00000000', // 透明, 露出窗口背景 BG
         statusBarContentColor: '#1B1A17', // 深色状态栏图标(BG 浅色)
         navigationBarColor: '#00000000',
         navigationBarContentColor: '#1B1A17',
