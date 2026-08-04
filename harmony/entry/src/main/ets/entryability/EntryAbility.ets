@@ -52,29 +52,27 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
-    // 沉浸式: 全屏布局 + 透明状态栏/导航条 + 深色图标 + 窗口背景=BG
-    //   让页面 BG 延伸到状态栏/导航条区域, 消除白色分界(顶部/底部沉浸)
-    windowStage.getMainWindow().then((win: window.Window): void => {
-      // 沉浸式: 全屏布局使状态栏后面=窗口背景; 窗口背景=BG; 状态栏透明 → 无缝
-      //   ArkUI 默认内容避开安全区(在状态栏下方), 不会顶到状态栏后
+    // 沉浸式(同步, 必须在 loadContent 前完成, 否则页面首帧读到 statusBarHeight=0):
+    //   全屏布局使状态栏后面=窗口背景; 窗口背景=BG; 状态栏透明 → 无缝
+    try {
+      const win: window.Window = windowStage.getMainWindowSync();
       win.setWindowLayoutFullScreen(true);
       win.setWindowBackgroundColor('#F4F2EC'); // = BG token
       win.setWindowSystemBarEnable(['status', 'navigation']);
-      // 全屏后内容顶到 y=0, 需避开状态栏: 存状态栏高度(vp)供页面顶部内边距使用
+      // 全屏后内容顶到 y=0, 需避开状态栏: 存状态栏高度(vp)供页面顶部内边距
       const avoid: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-      const topPx: number = avoid.topRect.height;
-      AppStorage.setOrCreate<number>('statusBarHeight', px2vp(topPx));
+      const topVp: number = px2vp(avoid.topRect.height);
+      AppStorage.setOrCreate<number>('statusBarHeight', topVp);
+      hilog.info(DOMAIN, TAG, 'statusBarHeight vp=%{public}d', topVp);
       win.setWindowSystemBarProperties({
-        statusBarColor: '#00000000', // 透明, 露出窗口背景 BG
-        statusBarContentColor: '#1B1A17', // 深色状态栏图标(BG 浅色)
+        statusBarColor: '#00000000',
+        statusBarContentColor: '#1B1A17',
         navigationBarColor: '#00000000',
         navigationBarContentColor: '#1B1A17',
-      }).catch((e: BusinessError): void => {
-        hilog.warn(DOMAIN, TAG, 'setWindowSystemBarProperties failed: %{public}s', String(e));
       });
-    }).catch((e: BusinessError): void => {
-      hilog.warn(DOMAIN, TAG, 'getMainWindow failed: %{public}s', String(e));
-    });
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'immersive setup failed: %{public}s', String(e));
+    }
 
     windowStage.loadContent('pages/Index', (err: BusinessError) => {
       if (err.code !== 0) {
