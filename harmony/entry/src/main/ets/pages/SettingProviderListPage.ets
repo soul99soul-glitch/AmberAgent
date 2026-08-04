@@ -310,7 +310,7 @@ struct SettingProviderListPage {
               .alignItems(HorizontalAlign.End)
             }
             .width('100%')
-            .padding({ top: 11, right: 12, bottom: 11, left: 10 })
+            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
             .onClick((): void => { this.openDetail(p); })
           }, (p: ProviderItem): string => p.id)
@@ -361,7 +361,7 @@ struct SettingProviderListPage {
             }
             .width('100%')
             .opacity(0.62)
-            .padding({ top: 11, right: 12, bottom: 11, left: 10 })
+            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
             .onClick((): void => { this.openDetail(p); })
           }, (p: ProviderItem): string => p.id)

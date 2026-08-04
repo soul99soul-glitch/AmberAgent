@@ -301,7 +301,7 @@ struct BoardPage {
         .fontColor(INK4)
     }
     .width('100%')
-    .padding({ left: 0, right: 0, top: 15, bottom: 15 })
+    .padding({ left: 0, right: 0, top: 14, bottom: 14 })
     .border({ width: { bottom: last ? 0 : 1 }, color: { bottom: LINE } })
     .onClick((): void => { this.openTask(task); })
   }
