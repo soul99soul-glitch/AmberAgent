@@ -16,7 +16,7 @@
 //   ❌ +→× 形变动画(后续迭代)
 //   ❌ 用量面板(后续迭代)
 
-import { INK, INK2, INK3, INK4, ACCENT, ACCENT_INK, SURFACE, SURFACE2, BODY, META, LABEL, LINE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, ACCENT, ACCENT_INK, SURFACE, SURFACE2, RAISED, BODY, META, LABEL, LINE } from '../design/tokens.ets';
 import { SlashCommandPanel, SlashCommand, buildSlashCommands } from './SlashCommandPanel.ets';
 import { ReasoningPicker } from './ReasoningPicker.ets';
 import type { ReasoningLevelOption } from '@amber/chat-domain';
@@ -190,7 +190,7 @@ export struct ChatInput {
       }
       .width('100%')
       .border({ width: { top: 1 }, color: { top: LINE } })
-      .backgroundColor(SURFACE)
+      .backgroundColor(RAISED)
       .padding({ left: 14, right: 14, top: 10, bottom: 14 })
       .alignItems(VerticalAlign.Bottom)
     }

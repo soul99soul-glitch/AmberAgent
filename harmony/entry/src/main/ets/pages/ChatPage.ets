@@ -2670,22 +2670,21 @@ struct ChatPage {
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
           }
-          // 模型行:mono/META(12)/INK3 + ▾ 11/INK4
+          // 模型行(1:1 参考图): 模型名 mono + ⌄ 紧跟其后, 整体左对齐(不推到右)
           Row() {
             Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型')
               .fontSize(META).fontFamily('monospace')
               .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
-            Text(this.modelMenuOpen ? '▴' : '▾')
+            Text(this.modelMenuOpen ? '⌃' : '⌄')
               .fontSize(11).fontColor(INK4)
-              .margin({ left: 4 })
+              .margin({ left: 6 })
           }
-          .width('100%')
           .margin({ top: 1 })
         }
         .layoutWeight(1)
-        .margin({ left: 2 })
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 10 })
         .onClick((): void => {
           if (!this.editingTitle) {
             this.toggleModelMenu();
