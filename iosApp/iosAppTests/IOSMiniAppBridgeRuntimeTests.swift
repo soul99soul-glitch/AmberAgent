@@ -331,8 +331,9 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
 
         XCTAssertTrue(owner.resolve(allow: true))
         let sameResult = try await secondSame
+        let firstResult = try await first
         XCTAssertTrue(sameResult)
-        XCTAssertTrue(try await first)
+        XCTAssertTrue(firstResult)
 
         while owner.pendingPrompt == nil {
             await Task.yield()
@@ -343,7 +344,8 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
             return XCTFail("expected network grant prompt after storage resolved")
         }
         XCTAssertTrue(owner.resolve(allow: false))
-        XCTAssertFalse(try await thirdDifferent)
+        let thirdResult = try await thirdDifferent
+        XCTAssertFalse(thirdResult)
         XCTAssertNil(owner.pendingPrompt)
     }
 

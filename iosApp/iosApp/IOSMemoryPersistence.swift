@@ -68,12 +68,22 @@ enum IOSMemoryToolExecutor {
             return nil
         }
 
+        let targetId = int(args["id"])
+        let requestedContent = nonEmptyString(args["content"]).map { previewText($0) }
+        let storedContent: String? = if ["delete", "remove"].contains(action), let targetId {
+            IosMemoryFactory.shared.getAllRecords()
+                .first(where: { Int($0.id) == targetId })
+                .map { previewText($0.content) }
+        } else {
+            nil
+        }
+
         return IOSMemoryToolApprovalPreview(
             action: action,
             scope: nonEmptyString(args["scope"] ?? args["type"]),
             kind: nonEmptyString(args["kind"]),
-            contentPreview: nonEmptyString(args["content"]).map { previewText($0) },
-            targetId: int(args["id"])
+            contentPreview: requestedContent ?? storedContent,
+            targetId: targetId
         )
     }
 
@@ -120,19 +130,25 @@ enum IOSMemoryToolExecutor {
             )
             return json(["ok": false, "tool": "memory_tool", "action": "create", "error": "content is required"])
         }
-        let scope = memoryScope(from: (args["scope"] ?? args["type"]) as? String)
+        guard let scope = memoryScope(from: (args["scope"] ?? args["type"]) as? String) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "create", status: "failed", reason: "invalid memory scope")
+            return json(["ok": false, "tool": "memory_tool", "action": "create", "error": "invalid memory scope"])
+        }
         guard isScopeEnabled(scope, runtime: runtime) else {
             IOSMemoryWriteAuditStore.shared.record(
                 action: "create",
                 status: "failed",
                 reason: "memory scope is disabled",
-                scope: scope.wireName,
-                contentPreview: previewText(content)
+                scope: scope.wireName
             )
             return disabledScopeResult(scope, action: "create")
         }
 
-        let kind = memoryKind(from: args["kind"] as? String)
+        guard let kind = memoryKind(from: args["kind"] as? String) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "create", status: "failed", reason: "invalid memory kind")
+            return json(["ok": false, "tool": "memory_tool", "action": "create", "error": "invalid memory kind"])
+        }
+        let previousRecords = IosMemoryFactory.shared.snapshotRecords()
         let record = IosMemoryFactory.shared.addDetailedMemory(
             scope: scope,
             kind: kind,
@@ -146,7 +162,10 @@ enum IOSMemoryToolExecutor {
             pinned: bool(args["pinned"]) ?? false,
             archived: false
         )
-        IOSMemoryPersistence.shared.persist()
+        guard IOSMemoryPersistence.shared.persist(previousRecords: previousRecords) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "create", status: "failed", reason: "persistence failed")
+            return json(["ok": false, "tool": "memory_tool", "action": "create", "error": "persistence failed"])
+        }
         IOSMemoryWriteAuditStore.shared.record(
             action: "create",
             status: "approved",
@@ -179,7 +198,8 @@ enum IOSMemoryToolExecutor {
             IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "id is required")
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "id is required"])
         }
-        guard let existing = IosMemoryFactory.shared.getAllRecords().first(where: { Int($0.id) == id }) else {
+        let previousRecords = IosMemoryFactory.shared.snapshotRecords()
+        guard let existing = previousRecords.first(where: { Int($0.id) == id }) else {
             IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "memory not found", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "memory not found", "id": id])
         }
@@ -188,20 +208,29 @@ enum IOSMemoryToolExecutor {
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "content is required"])
         }
 
-        let scope = ((args["scope"] ?? args["type"]) as? String).map(memoryScope) ?? existing.scope
+        let requestedScope = (args["scope"] ?? args["type"]) as? String
+        guard requestedScope == nil || memoryScope(from: requestedScope) != nil else {
+            IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "invalid memory scope", memoryId: id)
+            return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "invalid memory scope", "id": id])
+        }
+        let scope = requestedScope.flatMap(memoryScope) ?? existing.scope
         guard isScopeEnabled(scope, runtime: runtime) else {
             IOSMemoryWriteAuditStore.shared.record(
                 action: "edit",
                 status: "failed",
                 reason: "memory scope is disabled",
                 memoryId: id,
-                scope: scope.wireName,
-                contentPreview: previewText(content)
+                scope: scope.wireName
             )
             return disabledScopeResult(scope, action: "edit")
         }
 
-        let kind = (args["kind"] as? String).map(memoryKind) ?? existing.kind
+        let requestedKind = args["kind"] as? String
+        guard requestedKind == nil || memoryKind(from: requestedKind) != nil else {
+            IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "invalid memory kind", memoryId: id)
+            return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "invalid memory kind", "id": id])
+        }
+        let kind = requestedKind.flatMap(memoryKind) ?? existing.kind
         let sourceMessageIds = args.keys.contains("sourceMessageIds")
             ? stringArray(args["sourceMessageIds"])
             : existing.sourceMessageIds
@@ -228,14 +257,17 @@ enum IOSMemoryToolExecutor {
             archived: existing.archived,
             createdAt: existing.createdAt,
             updatedAt: updatedAt,
-            lastUsedAt: KotlinLong(value: updatedAt)
+            lastUsedAt: existing.lastUsedAt
         )
 
         guard let saved = IosMemoryFactory.shared.updateRecord(record: updated) else {
             IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "memory not found", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "memory not found", "id": id])
         }
-        IOSMemoryPersistence.shared.persist()
+        guard IOSMemoryPersistence.shared.persist(previousRecords: previousRecords) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "persistence failed", memoryId: id)
+            return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "persistence failed", "id": id])
+        }
         IOSMemoryWriteAuditStore.shared.record(
             action: "edit",
             status: "approved",
@@ -264,13 +296,18 @@ enum IOSMemoryToolExecutor {
             IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "failed", reason: "id is required")
             return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "id is required"])
         }
-        let existed = IosMemoryFactory.shared.getAllRecords().contains { Int($0.id) == id }
+        let previousRecords = IosMemoryFactory.shared.snapshotRecords()
+        let existing = previousRecords.first { Int($0.id) == id }
+        let existed = existing != nil
         guard existed else {
             IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "failed", reason: "memory not found", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "memory not found", "id": id])
         }
         IosMemoryFactory.shared.deleteMemory(id: Int32(id))
-        IOSMemoryPersistence.shared.persist()
+        guard IOSMemoryPersistence.shared.persist(previousRecords: previousRecords) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "failed", reason: "persistence failed", memoryId: id)
+            return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "persistence failed", "id": id])
+        }
         IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "approved", memoryId: id)
         return json([
             "ok": true,
@@ -342,8 +379,7 @@ enum IOSMemoryToolExecutor {
             reason: reason,
             memoryId: int(args["id"]),
             scope: nonEmptyString(args["scope"] ?? args["type"]),
-            kind: nonEmptyString(args["kind"]),
-            contentPreview: nonEmptyString(args["content"]).map { previewText($0) }
+            kind: nonEmptyString(args["kind"])
         )
     }
 
@@ -364,18 +400,20 @@ enum IOSMemoryToolExecutor {
         return false
     }
 
-    private static func memoryScope(from wireName: String?) -> MemoryScope {
+    private static func memoryScope(from wireName: String?) -> MemoryScope? {
         switch wireName {
         case "core":
             MemoryScope.core
         case "short_term":
             MemoryScope.shortTerm
-        default:
+        case "long_term", nil:
             MemoryScope.longTerm
+        default:
+            nil
         }
     }
 
-    private static func memoryKind(from wireName: String?) -> MemoryKind {
+    private static func memoryKind(from wireName: String?) -> MemoryKind? {
         switch wireName {
         case "user":
             MemoryKind.user
@@ -387,8 +425,10 @@ enum IOSMemoryToolExecutor {
             MemoryKind.reference
         case "routine":
             MemoryKind.routine
-        default:
+        case "note", nil:
             MemoryKind.note
+        default:
+            nil
         }
     }
 
@@ -530,18 +570,35 @@ enum IOSMemoryToolExecutor {
 /// fields and the `MemoryScope`/`MemoryKind` enums (serialized by their
 /// serialName to stay compatible with Android/KMP's @Serializable form).
 ///
-/// HONESTY: This is real file persistence. A write failure is logged but does
-/// not crash — the in-memory store stays correct for the session, and the next
-/// successful mutation rewrites the whole file.
+/// A write failure rolls the KMP store back to the caller-provided snapshot so
+/// memory state never claims a mutation that was not durably written.
 @Observable
 @MainActor
 final class IOSMemoryPersistence {
+
+    enum LoadState: Equatable {
+        case notLoaded
+        case loaded
+        case missing
+        case unreadable
+    }
 
     static let shared = IOSMemoryPersistence()
 
     private let fileURL: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private(set) var records: [MemoryRecord] = []
+    private(set) var revision: Int = 0
+    private(set) var loadState: LoadState = .notLoaded
+    private(set) var lastErrorMessage: String?
+
+    init(fileURL: URL, encoder: JSONEncoder = JSONEncoder(), decoder: JSONDecoder = JSONDecoder()) {
+        self.fileURL = fileURL
+        self.encoder = encoder
+        self.decoder = decoder
+        records = IosMemoryFactory.shared.getAllRecords()
+    }
 
     private init() {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
@@ -550,22 +607,52 @@ final class IOSMemoryPersistence {
             .appendingPathComponent("memories.json", isDirectory: false)
         encoder = JSONEncoder()
         decoder = JSONDecoder()
+        records = IosMemoryFactory.shared.getAllRecords()
     }
 
     /// Load persisted records into the KMP store. Call once at app startup.
-    /// Missing/corrupt file → no-op (store keeps its seed/empty state).
+    /// A missing file starts an empty library. An unreadable file is preserved
+    /// and blocks later writes until a subsequent load succeeds.
     func load() {
-        guard FileManager.default.fileExists(atPath: fileURL.path),
-              let data = try? Data(contentsOf: fileURL),
-              let persisted = try? decoder.decode([PersistedMemoryRecord].self, from: data) else {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            IosMemoryFactory.shared.replaceAll(records: [])
+            loadState = .missing
+            lastErrorMessage = nil
+            refresh()
             return
         }
-        let kmpRecords = persisted.map { $0.toKmp() }
-        IosMemoryFactory.shared.replaceAll(records: kmpRecords)
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let persisted = try decoder.decode([PersistedMemoryRecord].self, from: data)
+            let kmpRecords = persisted.map { $0.toKmp() }
+            IosMemoryFactory.shared.replaceAll(records: kmpRecords)
+            records = kmpRecords
+            revision += 1
+            loadState = .loaded
+            lastErrorMessage = nil
+        } catch {
+            loadState = .unreadable
+            lastErrorMessage = "无法读取现有记忆，已停止写入以保护原文件。"
+        }
+    }
+
+    func refresh() {
+        records = IosMemoryFactory.shared.getAllRecords()
+        revision += 1
     }
 
     /// Write the current KMP records to disk. Call after each mutation.
-    func persist() {
+    @discardableResult
+    func persist(previousRecords: [MemoryRecord]) -> Bool {
+        guard loadState != .notLoaded else {
+            lastErrorMessage = "记忆尚未加载，无法安全写入。"
+            rollback(to: previousRecords)
+            return false
+        }
+        guard loadState != .unreadable else {
+            rollback(to: previousRecords)
+            return false
+        }
         let snapshot = IosMemoryFactory.shared.snapshotRecords()
         let persisted = snapshot.map { PersistedMemoryRecord.from($0) }
         do {
@@ -577,10 +664,23 @@ final class IOSMemoryPersistence {
             // .atomic writes via a temp file + rename, so a crash mid-write
             // can't corrupt the existing store.
             try data.write(to: fileURL, options: [.atomic])
+            records = snapshot
+            revision += 1
+            loadState = .loaded
+            lastErrorMessage = nil
+            return true
         } catch {
-            // Don't crash the UI; the in-memory store still works this session.
             print("[IOSMemoryPersistence] persist failed: \(error.localizedDescription)")
+            lastErrorMessage = "无法写入记忆，请检查设备存储空间后重试。"
+            rollback(to: previousRecords)
+            return false
         }
+    }
+
+    private func rollback(to previousRecords: [MemoryRecord]) {
+        IosMemoryFactory.shared.replaceAll(records: previousRecords)
+        records = previousRecords
+        revision += 1
     }
 }
 
@@ -605,6 +705,70 @@ private struct PersistedMemoryRecord: Codable {
     var createdAt: Int64
     var updatedAt: Int64
     var lastUsedAt: Int64?
+
+    init(
+        id: Int,
+        content: String,
+        scope: String,
+        kind: String,
+        assistantId: String,
+        sourceConversationId: String?,
+        sourceMessageIds: [String],
+        supersedesIds: [Int],
+        expiresAt: Int64?,
+        confidence: Double,
+        pinned: Bool,
+        archived: Bool,
+        createdAt: Int64,
+        updatedAt: Int64,
+        lastUsedAt: Int64?
+    ) {
+        self.id = id
+        self.content = content
+        self.scope = scope
+        self.kind = kind
+        self.assistantId = assistantId
+        self.sourceConversationId = sourceConversationId
+        self.sourceMessageIds = sourceMessageIds
+        self.supersedesIds = supersedesIds
+        self.expiresAt = expiresAt
+        self.confidence = confidence
+        self.pinned = pinned
+        self.archived = archived
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.lastUsedAt = lastUsedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, content, scope, kind, assistantId, sourceConversationId, sourceMessageIds
+        case supersedesIds, expiresAt, confidence, pinned, archived, createdAt, updatedAt, lastUsedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        content = try c.decode(String.self, forKey: .content)
+        scope = try c.decode(String.self, forKey: .scope)
+        kind = try c.decode(String.self, forKey: .kind)
+        assistantId = try c.decode(String.self, forKey: .assistantId)
+        guard memoryScopeByName(scope) != nil else {
+            throw DecodingError.dataCorruptedError(forKey: .scope, in: c, debugDescription: "Unknown memory scope")
+        }
+        guard memoryKindByName(kind) != nil else {
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "Unknown memory kind")
+        }
+        sourceConversationId = try c.decodeIfPresent(String.self, forKey: .sourceConversationId)
+        sourceMessageIds = try c.decodeIfPresent([String].self, forKey: .sourceMessageIds) ?? []
+        supersedesIds = try c.decodeIfPresent([Int].self, forKey: .supersedesIds) ?? []
+        expiresAt = try c.decodeIfPresent(Int64.self, forKey: .expiresAt)
+        confidence = try c.decodeIfPresent(Double.self, forKey: .confidence) ?? 1
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+        archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        createdAt = try c.decodeIfPresent(Int64.self, forKey: .createdAt) ?? 0
+        updatedAt = try c.decodeIfPresent(Int64.self, forKey: .updatedAt) ?? createdAt
+        lastUsedAt = try c.decodeIfPresent(Int64.self, forKey: .lastUsedAt)
+    }
 
     static func from(_ record: MemoryRecord) -> PersistedMemoryRecord {
         PersistedMemoryRecord(

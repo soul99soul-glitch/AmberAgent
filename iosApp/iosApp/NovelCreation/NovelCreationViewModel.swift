@@ -999,7 +999,8 @@ final class NovelCreationViewModel {
             startedAt: Date(),
             terminalAt: nil,
             interruptionReason: nil,
-            terminalFailure: nil
+            terminalFailure: nil,
+            chapterPlanDigest: nil
         )
         quickStartStartingProjectID = projectID
         quickStartStartingRun = placeholder
@@ -1385,12 +1386,13 @@ final class NovelCreationViewModel {
         )))
     }
 
+    @discardableResult
     func setModelPolicy(
         _ policy: NovelProjectModelPolicy,
         for purpose: NovelModelRole = .creation
-    ) async {
-        guard let snapshot = projectSnapshot else { return }
-        _ = await perform(.setModelPolicy(NovelSetModelPolicyCommand(
+    ) async -> Bool {
+        guard let snapshot = projectSnapshot else { return false }
+        return await perform(.setModelPolicy(NovelSetModelPolicyCommand(
             context: mutationContext(configRevision: snapshot.project.configRevision),
             projectID: snapshot.project.id,
             purpose: purpose,
@@ -1405,6 +1407,113 @@ final class NovelCreationViewModel {
             context: mutationContext(configRevision: snapshot.project.configRevision),
             projectID: snapshot.project.id,
             preference: preference
+        )))
+    }
+
+    func ghostwriteReadinessIssues(
+        requireChapterPlan: Bool = false
+    ) -> [NovelGhostwriteReadinessIssue] {
+        guard let project = projectSnapshot,
+              let branchID = selectedBranchID else { return [.branchNeedsSync] }
+        return NovelGhostwriteReadiness.issues(
+            materials: project.materials,
+            materialRevisions: project.materialRevisions,
+            branches: project.branches,
+            pendingOperations: project.pendingOperations,
+            polishTransactions: project.polishTransactions,
+            activeRuns: project.activeRuns,
+            chapterPlans: project.chapterPlans,
+            mainBranchID: project.project.mainBranchID,
+            branchID: branchID,
+            requireChapterPlan: requireChapterPlan
+        )
+    }
+
+    @discardableResult
+    func setCollaborationMode(_ mode: NovelCollaborationMode) async -> Bool {
+        guard let project = projectSnapshot,
+              let branchID = selectedBranchID else { return false }
+        return await perform(.setCollaborationMode(NovelSetCollaborationModeCommand(
+            context: mutationContext(configRevision: project.project.configRevision),
+            projectID: project.project.id,
+            branchID: branchID,
+            mode: mode
+        )))
+    }
+
+    func setPauseGhostwriteOnBlockingContinuity(_ enabled: Bool) async -> Bool {
+        guard let project = projectSnapshot else { return false }
+        return await perform(.setPauseGhostwriteOnBlockingContinuity(
+            NovelSetPauseGhostwriteOnBlockingContinuityCommand(
+                context: mutationContext(configRevision: project.project.configRevision),
+                projectID: project.project.id,
+                enabled: enabled
+            )
+        ))
+    }
+
+    @discardableResult
+    func upsertChapterPlan(
+        planID: NovelChapterPlanID? = nil,
+        status: NovelChapterPlanStatus,
+        outlinePlacement: String,
+        goalAndConflict: String,
+        mustHappen: [String],
+        mustNotHappen: [String],
+        endingHook: String,
+        visibleFacts: [String]
+    ) async -> Bool {
+        guard let project = projectSnapshot,
+              let branchID = selectedBranchID else { return false }
+        let resolvedPlanID = planID
+            ?? project.chapterPlan(for: branchID)?.id
+            ?? NovelChapterPlanID()
+        return await perform(.upsertChapterPlan(NovelUpsertChapterPlanCommand(
+            context: mutationContext(configRevision: project.project.configRevision),
+            projectID: project.project.id,
+            branchID: branchID,
+            planID: resolvedPlanID,
+            status: status,
+            outlinePlacement: outlinePlacement,
+            goalAndConflict: goalAndConflict,
+            mustHappen: mustHappen,
+            mustNotHappen: mustNotHappen,
+            endingHook: endingHook,
+            visibleFacts: visibleFacts
+        )))
+    }
+
+    @discardableResult
+    func clearChapterPlan(branchID: NovelBranchID? = nil) async -> Bool {
+        guard let project = projectSnapshot,
+              let branchID = branchID ?? selectedBranchID else { return false }
+        return await perform(.clearChapterPlan(NovelClearChapterPlanCommand(
+            context: mutationContext(configRevision: project.project.configRevision),
+            projectID: project.project.id,
+            branchID: branchID
+        )))
+    }
+
+    @discardableResult
+    func upsertUpcomingArc(beats: [String], branchID: NovelBranchID? = nil) async -> Bool {
+        guard let project = projectSnapshot,
+              let branchID = branchID ?? selectedBranchID else { return false }
+        return await perform(.upsertUpcomingArc(NovelUpsertUpcomingArcCommand(
+            context: mutationContext(configRevision: project.project.configRevision),
+            projectID: project.project.id,
+            branchID: branchID,
+            beats: beats
+        )))
+    }
+
+    @discardableResult
+    func clearUpcomingArc(branchID: NovelBranchID? = nil) async -> Bool {
+        guard let project = projectSnapshot,
+              let branchID = branchID ?? selectedBranchID else { return false }
+        return await perform(.clearUpcomingArc(NovelClearUpcomingArcCommand(
+            context: mutationContext(configRevision: project.project.configRevision),
+            projectID: project.project.id,
+            branchID: branchID
         )))
     }
 
@@ -1707,6 +1816,30 @@ final class NovelCreationViewModel {
             projectID: projectID,
             branchID: branchID,
             chapterID: chapterID
+        )
+    }
+
+    func acceptChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID
+    ) async throws -> NovelChapterPlanAcceptanceV1 {
+        try await creation.acceptChapterPlan(
+            projectID: projectID,
+            branchID: branchID,
+            candidateID: candidateID
+        )
+    }
+
+    func auditContinuityIncludingCandidate(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID
+    ) async throws -> NovelContinuityAuditReport {
+        try await creation.auditContinuityIncludingCandidate(
+            projectID: projectID,
+            branchID: branchID,
+            candidateID: candidateID
         )
     }
 

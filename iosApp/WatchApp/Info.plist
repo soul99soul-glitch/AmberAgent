@@ -23,7 +23,7 @@
     <key>WKApplication</key>
     <true/>
     <key>WKCompanionAppBundleIdentifier</key>
-    <string>$(AMBER_COMPANION_APP_BUNDLE_IDENTIFIER)</string>
+    <string>app.amber.ios</string>
     <key>WKRunsIndependentlyOfCompanionApp</key>
     <false/>
     <key>UISupportedInterfaceOrientations</key>

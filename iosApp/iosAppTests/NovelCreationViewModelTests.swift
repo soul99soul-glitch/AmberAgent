@@ -576,7 +576,10 @@ final class NovelCreationViewModelTests: XCTestCase {
         )
         let materialID = try XCTUnwrap(viewModel.activeMaterials.first?.id)
 
-        await viewModel.setModelPolicy(.fixed(providerID: "provider-1", modelID: "model-1"))
+        let savedModelPolicy = await viewModel.setModelPolicy(
+            .fixed(providerID: "provider-1", modelID: "model-1")
+        )
+        XCTAssertTrue(savedModelPolicy)
         await viewModel.deleteMaterial(materialID)
 
         let loaded = try await repository.loadProject(id: projectID)
@@ -587,6 +590,18 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(loaded.document.materials.first).isDeleted)
         XCTAssertFalse(loaded.document.materialRevisions.isEmpty)
         XCTAssertTrue(viewModel.activeMaterials.isEmpty)
+    }
+
+    func testSetModelPolicyReportsFailureWithoutSelectedProject() async {
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: InMemoryNovelProjectRepository())
+        )
+
+        let saved = await viewModel.setModelPolicy(
+            .fixed(providerID: "provider-1", modelID: "model-1")
+        )
+
+        XCTAssertFalse(saved)
     }
 
     func testFailedInjectionPreviewDoesNotReuseThePreviousResult() async throws {

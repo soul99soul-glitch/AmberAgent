@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-05
+Last updated: 2026-08-06
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
@@ -18,9 +18,52 @@ Last updated: 2026-08-05
 - 当前工作主线是原生 iOS + KMP 共享能力。`app/` 是 Android 应用，不代表 iOS 运行时。
 - 默认且唯一生产 Chat 列表路径是 `NativeChatTimelineView`。`ChatSwiftUIMessageList` 只在 `CHAT_PERF_REPLAY` 下保留，UICollectionView 路径只作非默认回归。
 - 小说创作已经具备创作 / 正文 / 设定三入口、独立创作与剧情同步模型、Quick Start、资料建议、收录、编辑、剧情同步、分支/Fork、整章润色、导入导出和中断恢复。小说项目文档是领域权威，普通 Chat/Memory/Workspace 不是小说存储。
+- 共创模式现已与规格对齐：`needsSync` 时仍可讨论，但正式正文生成、整章重写、润色和对应 retry 均失败闭锁。共创 / 代笔双模式计划见 `docs/NOVEL_COCREATION_GHOSTWRITE_PLAN.md`（Active；Phase 0–3c 完成，下一刀真机验收）。
 - Chat、小说和模型议会在页面退出后由 App 级 owner 继续持有运行；iOS 本地后台仍受系统调度约束，不等于无限后台。
 - 只有官方 OpenAI Responses API 的小说正文、重新生成和单章润色已接入服务端 background response + cursor 恢复。Quick Start、讨论工具循环、Chat、模型议会及其他 provider 仍是本地 best-effort。
 - Live Activity、锁屏卡和 continued-processing task 按 `runId` 独立管理；旧 run 的完成、取消、深链和系统移除回调不得作用于新 run。
+
+## Novel Collaboration Mode Phase 0 / 1 / 2
+
+- Phase 0：`canStart(.prose)`、`NovelGenerationReducer`、injection planner 与 prose retry 投影均要求分支 `synchronized`；同步横幅与写正文占位对齐；精确重试同步 composer mode/granularity。
+- Phase 1：项目 `collaborationMode`；分支级 `NovelChapterPlanRecord`（草稿/确认 + digest）；顶栏「项目控制」面板可切共创/代笔（切代笔做策划包就绪检查，不强制本章合同）；确认合同注入整章 prose；代笔写整章无确认合同则 UI/`canStart`/reducer/retry 挡；收录仍人手。
+- Phase 2（验收深度 B）：候选/run 绑定 `chapterPlanDigest`；收录 digest 不匹配则拒；`systemAutoCollect` 来源；结构化 `chapterPlanAcceptance`（stateSync 模型）；SessionViewModel 单章 pipeline（写→验收→自动收录→同步→暂停）；面板开始/暂停/继续；进行中硬切共创挡。
+- Phase 2 review 修复：复用候选只认 `progress.candidateID`；收录成功即清合同；继续按钮严格按 `canStart`；代笔中禁用合同编辑与模式 Picker；合同错误提示就近显示；清除需确认；合同字段常驻标签。
+- Review 修复：协作模式/清除合同的历史账本校验不再断言当前态；`canStart` 按 run 粒度判断；面板 sheet 改为 large、合同按钮 44pt、IME commit、Picker 本地回滚。
+- 完成计划后的生产 review 修复：代笔开始时重新校验策划包、本章合同与当前主分支；项目级模型 Picker 等待持久化成功后再关闭，失败留在原位并提示；小说 composer 输入命中区不低于 44pt；元信息切换遵循 Reduce Motion。
+- Watch `WKCompanionAppBundleIdentifier` 改为字面量 `app.amber.ios`；`IOSMiniAppBridgeRuntimeTests` 的 `async let` 断言改为先 await 再 XCTAssert。
+
+### Phase 3a — 跨章防复读（薄回执）
+
+- Snapshot 携带有界 `recentWrittenHighlights`；收录后的 `finalizeCollection` / 手动同步 finalize 用新事件 summary 合并截断；旧文档缺字段 decode 为空。
+- 整章 prose 注入 `RECENT WRITTEN BEATS`（计入 required 预算预检）；续写不注入。
+- 验收 prompt `novel.chapter-plan-acceptance.v2`：必填 `obviousRepetition`；decoder 兼容 schemaVersion 1。
+- Pipeline：合同通过但 `obviousRepetition` 非空 → 暂停不自动收录，继续时重写不复用同稿；收录后按 binding 清合同，失败则停；完成后 detail 提示已记入要点条数。
+- Review 修复：失败 detail 用红色 Label；代笔中合同字段禁用；workspace 清合同后字段回填；代笔按钮补 contentShape。
+
+### Phase 3b — 连续性软门
+
+- 项目偏好 `pauseGhostwriteOnBlockingContinuity`（默认 true；旧文档缺字段 decode 为 true）；面板 Toggle「连续性出现「严重」问题时暂停」。
+- 代笔：合同验收通过且无复读后、自动收录前调用 `auditContinuityIncludingCandidate`（已有正文 + 候选下一章）。
+- 仅 `blocking`（界面「严重」）暂停不收录；`failedChunkCount > 0` 亦暂停（审计未结论不得放行）；`major`/`minor` 不挡。
+- 继续：同 binding 保留 `autoCollectedCandidateIDs` 与可复用候选；复读/严重连续性强制重写；已 collected 同 digest 不再写第二遍。
+- Review 修复：`ghostwriteProgressStorage` 可观察；owned-run 取消；blocker 文案与 Toggle 错误就近显示；`.cancelled` 非红错。
+
+### Phase 3c — 审稿模型 / 下一弧 / 代笔看板（薄可交付）
+
+- `NovelModelRole.review`：项目 `reviewModelPolicy` + App 默认偏好；设置页与项目设置暴露「审稿模型」；合同验收与连续性审计走 `.review`。
+- 分支级 `NovelUpcomingArcRecord`（最多 8 条）；整章 prose 注入 `UPCOMING ARC`；面板「下一弧」保存/清除；续写不注入。
+- 面板拆「代笔看板」（只读回执）与「代笔推进」（Toggle/按钮）；审稿显示走 effectivePolicy + displayName；步骤回执用短码，暂停原因只在 detail。
+
+### Verification
+
+- `NovelCollaborationModeTests` **22/22 PASSED**（含下一弧 upsert/clear、整章注入、看板步骤回执）。
+- `NovelProjectConfigurationTests` 审稿模型独立持久化 + 偏好三角色、相关 wiring 两项 **PASSED**。
+- `NovelPromptCatalogTests/testCatalogSnapshot` 已随 acceptance v2 更新哈希。
+- 完成后 review 定点与配置/协作回归 **158/158 PASSED**；Session、reducer、注入、连续性、生命周期、恢复、文档与 prompt 扩大回归 **296/296 PASSED**，两组共 **454 passed / 0 failed**。
+- 最新 Simulator Debug 包已重新安装并成功启动；当前自动化无法稳定进入小说深层页面，且随后 CoreSimulatorService 连接失效，因此这里不把启动或静态读码当成深层视觉验收。
+- 真机：代笔单章闭环、审稿模型生效、下一弧注入、看板回执 — 仍待设备验收。
+- 下一刀：真机 Phase 2/3a/3b/3c 验收。
 
 ## Current Review Fixes
 
@@ -28,11 +71,10 @@ Last updated: 2026-08-05
 - Workspace artifact 改为 conversation 首次保存成功后再同步；同步失败会保留可运行的 MiniApp 与已落盘聊天卡片，并在当前消息中显示失败原因后尝试补存提示。
 - MiniApp 卡片导出缺失记录或临时文件写入失败时显示 alert；操作按钮保持原 bordered 视觉，提供 44pt 命中区，并在横向空间不足时切换纵向布局。
 - SVG“保存”胶囊保持 28pt 视觉，只把交互命中形状扩大到 44pt。
-
-### Verification
-
-- 最终 Swift parse、`git diff --check`、generic iOS App 构建和两组自包含 MiniApp 测试包编译通过；独立 Swift rollback harness 已真实运行通过。
-- 全量 iOS 测试包仍被范围外 `IOSMiniAppBridgeRuntimeTests` 的 Swift 6 `async let`/XCTest autoclosure 编译错误阻断；CoreSimulatorService 与 CoreDeviceService 当前不可用，因此本轮没有声明 Simulator、真机或 XCTest 运行通过。
+- iOS 核心记忆在 `AppShell` 首次渲染前同步加载；损坏文件会保留原件并停止写入，缺失文件清空内存态，所有新增/编辑/删除在原子写失败时回滚完整快照并返回失败。
+- Chat 召回统一使用运行时 `maxItems` / `maxPromptChars`、scope、归档/过期与相关性策略；实际进入 provider 请求的记录会只更新 `lastUsedAt` 并持久化，不再把编辑时间误当使用时间。
+- 模型写入审批会区分保存、编辑、删除；删除展示目标正文并使用 destructive 语义，被拒绝或 scope 禁用的正文不落审批历史。记忆页补齐可观察刷新、陈旧编辑保护、错误反馈、审批历史清除和 44pt 交互区域。
+- 核心记忆专用测试 **14 passed / 0 failed**，工具写入/审批链路定点 **5 passed / 0 failed**；iPhone 17 Pro Simulator 已实屏核对记忆主页首屏，审批卡真实触发态与真机 Dynamic Type 仍待设备验收。
 
 ## Generative UI Current State
 
@@ -100,7 +142,8 @@ Last updated: 2026-08-05
 2. 完成当前流式实现的真机长文手感验收；若仍跳变，记录发生阶段、是否触摸屏幕、是否终态以及可见内容变化，再沿现有 owner 定位。
 3. 只在真实复现支持时继续调整 pacer、终态排空或 Native Timeline 手势判定，不加第二套状态机或 offset 补偿。
 4. 后台能力下一步优先补真实 OpenAI 账号下的 expiration / 强杀 / 冷启动恢复证据；其他 provider 不伪装成服务端 durable job。
-5. Android 小说复刻属于 Android 主仓；本仓的 `NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md` 仅是跨仓草案。
+5. 小说共创 / 代笔：Phase 0–3c 已落地；下一刀真机验收（单章闭环、审稿模型、下一弧注入、看板回执）。
+6. Android 小说复刻属于 Android 主仓；本仓的 `NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md` 仅是跨仓草案。
 
 ## Known Risks
 
@@ -125,6 +168,7 @@ Last updated: 2026-08-05
 - 小说产品与领域：`docs/NOVEL_CREATION_SPEC.md`、`CONTEXT.md`
 - 小说所有权 ADR：`docs/adr/0007-novel-creation-owns-project-state.md`
 - 小说实现基线：`docs/NOVEL_CREATION_IMPLEMENTATION_PLAN.md`
+- 共创 / 代笔计划：`docs/NOVEL_COCREATION_GHOSTWRITE_PLAN.md`
 - Live Activity 视觉：`docs/ACTIVITY_ISLAND_REDESIGN.md`
 
 ## Update Contract

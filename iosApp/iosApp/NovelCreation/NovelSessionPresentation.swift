@@ -210,6 +210,8 @@ enum NovelSessionActionBlocker: String, Hashable, Sendable {
     case reloadRequired
     case branchInactive
     case branchNeedsSync
+    case chapterPlanRequired
+    case ghostwriteRequirementsMissing
     case generationRunning
     case pendingOperation
     case transactionInProgress
@@ -396,6 +398,8 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
     let stateSnapshots: [NovelStateSnapshotRecord]
     let events: [NovelStoryEventRecord]
     let settingProposals: [NovelSettingProposalRecord]
+    let collaborationMode: NovelCollaborationMode
+    let hasConfirmedChapterPlan: Bool
     let access: NovelProjectLoadAccess
     let expandedArchiveIDs: Set<NovelMessageID>
     let transientTail: NovelSessionTransientTail?
@@ -412,6 +416,8 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
         stateSnapshots: [NovelStateSnapshotRecord] = [],
         events: [NovelStoryEventRecord] = [],
         settingProposals: [NovelSettingProposalRecord] = [],
+        collaborationMode: NovelCollaborationMode = .cocreation,
+        hasConfirmedChapterPlan: Bool = false,
         access: NovelProjectLoadAccess,
         expandedArchiveIDs: Set<NovelMessageID> = [],
         transientTail: NovelSessionTransientTail?
@@ -427,6 +433,8 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
         self.stateSnapshots = stateSnapshots
         self.events = events
         self.settingProposals = settingProposals
+        self.collaborationMode = collaborationMode
+        self.hasConfirmedChapterPlan = hasConfirmedChapterPlan
         self.access = access
         self.expandedArchiveIDs = expandedArchiveIDs
         self.transientTail = transientTail
@@ -455,6 +463,8 @@ struct NovelSessionProjectionInput: Equatable, Sendable {
             stateSnapshots: project.stateSnapshots,
             events: project.events,
             settingProposals: branch.activeSettingProposals,
+            collaborationMode: project.project.collaborationMode,
+            hasConfirmedChapterPlan: project.confirmedChapterPlan(for: branch.branch.id) != nil,
             access: project.access,
             expandedArchiveIDs: expandedArchiveIDs,
             transientTail: transientTail
@@ -1404,17 +1414,24 @@ private extension NovelSessionPresentation {
         ) {
             return blocker
         }
-        if run.kind == .polish || run.kind == .regenerate {
+        if run.kind == .polish || run.kind == .regenerate || run.kind == .prose {
             if input.branch.syncStatus == .needsSync {
                 return .branchNeedsSync
             }
-            if let blocker = index.pendingOperationBlocker(excluding: nil) {
-                return blocker
+            if run.kind == .prose,
+               run.granularity == .wholeChapter,
+               input.collaborationMode == .ghostwrite,
+               !input.hasConfirmedChapterPlan {
+                return .chapterPlanRequired
             }
-            if index.hasBlockingPolishTransaction(excluding: nil) { return .pendingOperation }
-        } else if run.kind == .prose,
-                  !index.branchProseBlockingPendingOperationIDs.isEmpty {
-            return .pendingOperation
+            if run.kind == .polish || run.kind == .regenerate {
+                if let blocker = index.pendingOperationBlocker(excluding: nil) {
+                    return blocker
+                }
+                if index.hasBlockingPolishTransaction(excluding: nil) { return .pendingOperation }
+            } else if !index.branchProseBlockingPendingOperationIDs.isEmpty {
+                return .pendingOperation
+            }
         }
         if run.kind == .prose || run.kind == .polish || run.kind == .regenerate {
             if input.branch.headCheckpointID != run.baseCheckpointID ||
@@ -1454,8 +1471,14 @@ private extension NovelSessionPresentation {
             return blocker
         }
         if tail.kind == .proseCandidate || tail.kind == .polishCandidate {
-            if tail.kind == .polishCandidate, input.branch.syncStatus == .needsSync {
+            if input.branch.syncStatus == .needsSync {
                 return .branchNeedsSync
+            }
+            if tail.kind == .proseCandidate,
+               tail.granularity == .wholeChapter,
+               input.collaborationMode == .ghostwrite,
+               !input.hasConfirmedChapterPlan {
+                return .chapterPlanRequired
             }
             if !index.branchProseBlockingPendingOperationIDs.isEmpty {
                 return .pendingOperation

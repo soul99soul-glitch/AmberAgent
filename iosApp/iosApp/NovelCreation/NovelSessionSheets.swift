@@ -820,6 +820,8 @@ struct NovelWritingContextSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let workspace: NovelCreationViewModel
+    let session: NovelSessionViewModel
+    let sharedSettings: IOSSharedSettingsStore
     let mode: NovelSessionMode
     let granularity: NovelGenerationGranularity
     let userText: String
@@ -831,9 +833,28 @@ struct NovelWritingContextSheet: View {
     @State private var budgetTokens: Int
     @State private var materialChoices: [NovelMaterialID: MaterialChoice]
     @State private var previewSignature: String?
+    @State private var selectedMode: NovelCollaborationMode
+    @State private var pauseOnBlockingContinuity: Bool
+    @State private var planPlacement: String
+    @State private var planGoal: String
+    @State private var planMustHappen: String
+    @State private var planMustNotHappen: String
+    @State private var planEndingHook: String
+    @State private var planVisibleFacts: String
+    @State private var upcomingArcBeats: String
+    @State private var modeSwitchMessage: String?
+    @State private var pauseToggleMessage: String?
+    @State private var planMessage: String?
+    @State private var planMessageIsError = false
+    @State private var arcMessage: String?
+    @State private var arcMessageIsError = false
+    @State private var confirmClearPlan = false
+    @State private var confirmClearArc = false
 
     init(
         workspace: NovelCreationViewModel,
+        session: NovelSessionViewModel,
+        sharedSettings: IOSSharedSettingsStore,
         mode: NovelSessionMode,
         granularity: NovelGenerationGranularity,
         userText: String,
@@ -844,6 +865,8 @@ struct NovelWritingContextSheet: View {
         onApply: @escaping (NovelInjectionOverrides, Int) -> Void
     ) {
         self.workspace = workspace
+        self.session = session
+        self.sharedSettings = sharedSettings
         self.mode = mode
         self.granularity = granularity
         self.userText = userText
@@ -860,12 +883,39 @@ struct NovelWritingContextSheet: View {
         }
         self._materialChoices = State(initialValue: choices)
         self._previewSignature = State(initialValue: nil)
+        let existingMode = workspace.projectSnapshot?.project.collaborationMode ?? .cocreation
+        self._selectedMode = State(initialValue: existingMode)
+        self._pauseOnBlockingContinuity = State(
+            initialValue: workspace.projectSnapshot?.project.pauseGhostwriteOnBlockingContinuity ?? true
+        )
+        let existingPlan = workspace.selectedBranchID.flatMap {
+            workspace.projectSnapshot?.chapterPlan(for: $0)
+        }
+        self._planPlacement = State(initialValue: existingPlan?.outlinePlacement ?? "")
+        self._planGoal = State(initialValue: existingPlan?.goalAndConflict ?? "")
+        self._planMustHappen = State(
+            initialValue: existingPlan?.mustHappen.joined(separator: "\n") ?? ""
+        )
+        self._planMustNotHappen = State(
+            initialValue: existingPlan?.mustNotHappen.joined(separator: "\n") ?? ""
+        )
+        self._planEndingHook = State(initialValue: existingPlan?.endingHook ?? "")
+        self._planVisibleFacts = State(
+            initialValue: existingPlan?.visibleFacts.joined(separator: "\n") ?? ""
+        )
+        let existingArc = workspace.selectedBranchID.flatMap {
+            workspace.projectSnapshot?.upcomingArc(for: $0)
+        }
+        self._upcomingArcBeats = State(
+            initialValue: existingArc?.beats.joined(separator: "\n") ?? ""
+        )
+        self._modeSwitchMessage = State(initialValue: nil)
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("创作设置", selection: $selectedTab) {
+                Picker("项目控制", selection: $selectedTab) {
                     ForEach(SheetTab.allCases) { tab in
                         Text(tab.title).tag(tab)
                     }
@@ -882,7 +932,7 @@ struct NovelWritingContextSheet: View {
                 }
             }
             .background(AmberTheme.background)
-            .navigationTitle("创作设置")
+            .navigationTitle("项目控制")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: ContextRoute.self) { route in
                 switch route {
@@ -913,10 +963,341 @@ struct NovelWritingContextSheet: View {
             }
         }
         .interactiveDismissDisabled(workspace.isPerforming)
+        .confirmationDialog(
+            "清除本章合同？",
+            isPresented: $confirmClearPlan,
+            titleVisibility: .visible
+        ) {
+            Button("清除合同", role: .destructive) {
+                NovelTextInputCommitter.perform {
+                    Task { await clearChapterPlan() }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("清除后需重新填写并确认，才能继续代笔写整章。")
+        }
+        .confirmationDialog(
+            "清除下一弧？",
+            isPresented: $confirmClearArc,
+            titleVisibility: .visible
+        ) {
+            Button("清除下一弧", role: .destructive) {
+                NovelTextInputCommitter.perform {
+                    Task { await clearUpcomingArc() }
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("清除后整章生成将不再注入下一弧软方向。")
+        }
     }
 
     private var preferencesList: some View {
-        List {
+        let blockers = ghostwriteSwitchBlockers
+        return List {
+            Section {
+                Picker("创作模式", selection: $selectedMode) {
+                    ForEach(NovelCollaborationMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!workspace.canMutate || workspace.isPerforming || session.isGhostwriting)
+                .onChange(of: selectedMode) { _, newMode in
+                    Task { await selectCollaborationMode(newMode) }
+                }
+                .onChange(of: collaborationMode) { _, newMode in
+                    if selectedMode != newMode {
+                        selectedMode = newMode
+                    }
+                }
+
+                if session.isGhostwriting {
+                    Text("代笔进行中，暂停后可切回共创。")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+
+                if let modeSwitchMessage, !modeSwitchMessage.isEmpty {
+                    Label(modeSwitchMessage, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(AmberTheme.accentRed)
+                }
+
+                if collaborationMode == .cocreation, !blockers.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("切入代笔还需：")
+                            .font(.footnote.weight(.semibold))
+                        ForEach(blockers, id: \.self) { issue in
+                            Text("· \(issue.displayName)")
+                                .font(.footnote)
+                        }
+                    }
+                    .foregroundStyle(AmberTheme.muted)
+                }
+            } header: {
+                Text("创作模式")
+            } footer: {
+                Text(modeSectionFooter)
+            }
+
+            if collaborationMode == .ghostwrite {
+                Section {
+                    if let progress = session.ghostwriteProgress {
+                        LabeledContent("相位", value: progress.statusLabel)
+                        LabeledContent("步骤回执") {
+                            Text(progress.boardStepSummary)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        LabeledContent("本章合同", value: planStatusLabel)
+                        LabeledContent(
+                            "本轮已收录",
+                            value: "\(progress.autoCollectedCandidateIDs.count) 章"
+                        )
+                        LabeledContent("审稿模型", value: reviewModelLabel)
+                        LabeledContent("下一弧", value: upcomingArcStatusLabel)
+                        if let detail = progress.detailMessage, !detail.isEmpty {
+                            let detailIsError = progress.phase == .failed
+                                || (
+                                    progress.phase == .paused
+                                        && progress.pauseReason != .userPaused
+                                        && progress.pauseReason != .cancelled
+                                )
+                            if detailIsError {
+                                Label(detail, systemImage: "exclamationmark.triangle")
+                                    .font(.footnote)
+                                    .foregroundStyle(AmberTheme.accentRed)
+                            } else {
+                                Text(detail)
+                                    .font(.footnote)
+                                    .foregroundStyle(AmberTheme.muted)
+                            }
+                        }
+                    } else {
+                        LabeledContent("本章合同", value: planStatusLabel)
+                        LabeledContent("审稿模型", value: reviewModelLabel)
+                        LabeledContent("下一弧", value: upcomingArcStatusLabel)
+                        Text("确认本章合同后可开始代笔。")
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                } header: {
+                    Text("代笔看板")
+                } footer: {
+                    Text("只读回执；无 token 收据时不显示成本。")
+                }
+
+                Section {
+                    Toggle("连续性出现「严重」问题时暂停", isOn: $pauseOnBlockingContinuity)
+                        .disabled(!workspace.canMutate || workspace.isPerforming || session.isGhostwriting)
+                        .onChange(of: pauseOnBlockingContinuity) { _, enabled in
+                            Task { await setPauseOnBlockingContinuity(enabled) }
+                        }
+                        .onChange(of: storedPauseOnBlockingContinuity) { _, enabled in
+                            if pauseOnBlockingContinuity != enabled {
+                                pauseOnBlockingContinuity = enabled
+                            }
+                        }
+                    if let pauseToggleMessage, !pauseToggleMessage.isEmpty {
+                        Label(pauseToggleMessage, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.accentRed)
+                    }
+
+                    if !session.isGhostwriting,
+                       let blocker = session.ghostwriteBlocker,
+                       !session.canStartGhostwriteChapter {
+                        Text(session.ghostwriteReadinessIssue?.displayName ?? blocker.displayName)
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+
+                    HStack(spacing: 12) {
+                        if session.isGhostwriting {
+                            Button("暂停") {
+                                session.pauseGhostwrite()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                        } else if session.ghostwriteProgress?.phase == .waitingUser ||
+                                    session.ghostwriteProgress?.phase == .paused ||
+                                    session.ghostwriteProgress?.phase == .failed {
+                            Button("继续代笔") {
+                                _ = session.continueGhostwriteChapter()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                            .disabled(!session.canStartGhostwriteChapter)
+                        } else {
+                            Button("开始代笔本章") {
+                                _ = session.startGhostwriteChapter()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                            .disabled(!session.canStartGhostwriteChapter)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                } header: {
+                    Text("代笔推进")
+                } footer: {
+                    Text("单章有界：收录并同步后暂停；继续前须确认下一章合同。")
+                }
+            }
+
+            Section {
+                LabeledContent("当前合同", value: planStatusLabel)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("与总纲的位置").font(.footnote).foregroundStyle(AmberTheme.muted)
+                    TextField("例如：第 3 章", text: $planPlacement)
+                        .disabled(!canEditChapterPlan)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("目标与冲突").font(.footnote).foregroundStyle(AmberTheme.muted)
+                    TextField("本章要解决什么", text: $planGoal, axis: .vertical)
+                        .lineLimit(3...8)
+                        .disabled(!canEditChapterPlan)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("必发生（每行一条）").font(.footnote).foregroundStyle(AmberTheme.muted)
+                    TextField("至少一条", text: $planMustHappen, axis: .vertical)
+                        .lineLimit(2...8)
+                        .disabled(!canEditChapterPlan)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("禁止发生（每行一条）").font(.footnote).foregroundStyle(AmberTheme.muted)
+                    TextField("可空", text: $planMustNotHappen, axis: .vertical)
+                        .lineLimit(2...6)
+                        .disabled(!canEditChapterPlan)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("章末钩子").font(.footnote).foregroundStyle(AmberTheme.muted)
+                    TextField("可空", text: $planEndingHook, axis: .vertical)
+                        .lineLimit(2...4)
+                        .disabled(!canEditChapterPlan)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("POV 可见要点（每行一条）").font(.footnote).foregroundStyle(AmberTheme.muted)
+                    TextField("可空", text: $planVisibleFacts, axis: .vertical)
+                        .lineLimit(2...6)
+                        .disabled(!canEditChapterPlan)
+                }
+
+                if let planMessage, !planMessage.isEmpty {
+                    Label(
+                        planMessage,
+                        systemImage: planMessageIsError
+                            ? "exclamationmark.triangle"
+                            : "checkmark.circle.fill"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(planMessageIsError ? AmberTheme.accentRed : AmberTheme.muted)
+                }
+
+                HStack(spacing: 12) {
+                    Button("保存草稿") {
+                        NovelTextInputCommitter.perform {
+                            Task { await saveChapterPlan(status: .draft) }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .disabled(!canEditChapterPlan)
+
+                    Button("确认合同") {
+                        NovelTextInputCommitter.perform {
+                            Task { await saveChapterPlan(status: .confirmed) }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .disabled(!canEditChapterPlan)
+
+                    Spacer(minLength: 0)
+
+                    if currentChapterPlan != nil {
+                        Button("清除", role: .destructive) {
+                            confirmClearPlan = true
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                        .disabled(!canEditChapterPlan)
+                    }
+                }
+            } header: {
+                Text("本章合同")
+            } footer: {
+                Text(
+                    collaborationMode == .ghostwrite
+                        ? "代笔写整章前必须确认合同；代笔进行中不可改合同。"
+                        : "共创写整章时可先拟合同；确认后会在整章生成时注入。"
+                )
+            }
+
+            Section {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("后续几章要点（每行一条）").font(.footnote).foregroundStyle(AmberTheme.muted)
+                    TextField("例如：使者身份曝光", text: $upcomingArcBeats, axis: .vertical)
+                        .lineLimit(3...10)
+                        .disabled(!canEditUpcomingArc)
+                }
+
+                if let arcMessage, !arcMessage.isEmpty {
+                    Label(
+                        arcMessage,
+                        systemImage: arcMessageIsError
+                            ? "exclamationmark.triangle"
+                            : "checkmark.circle.fill"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(arcMessageIsError ? AmberTheme.accentRed : AmberTheme.muted)
+                }
+
+                HStack(spacing: 12) {
+                    Button("保存下一弧") {
+                        NovelTextInputCommitter.perform {
+                            Task { await saveUpcomingArc() }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .disabled(!canEditUpcomingArc)
+
+                    Spacer(minLength: 0)
+
+                    if currentUpcomingArc != nil {
+                        Button("清除", role: .destructive) {
+                            confirmClearArc = true
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                        .disabled(!canEditUpcomingArc)
+                    }
+                }
+            } header: {
+                Text("下一弧")
+            } footer: {
+                Text("有界软方向：最多 \(NovelUpcomingArcRecord.maxBeats) 条；写整章时注入，不替代本章合同。")
+            }
+
             Section("写作偏好") {
                 Button {
                     applyDraftBeforeTransition(onEditWritingRequirements)
@@ -948,6 +1329,218 @@ struct NovelWritingContextSheet: View {
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(AmberTheme.background)
+        .onChange(of: chapterPlanFieldSyncToken) { _, _ in
+            reloadPlanFieldsFromWorkspace()
+        }
+        .onChange(of: upcomingArcFieldSyncToken) { _, _ in
+            reloadUpcomingArcFromWorkspace()
+        }
+    }
+
+    private var collaborationMode: NovelCollaborationMode {
+        workspace.projectSnapshot?.project.collaborationMode ?? .cocreation
+    }
+
+    private var storedPauseOnBlockingContinuity: Bool {
+        workspace.projectSnapshot?.project.pauseGhostwriteOnBlockingContinuity ?? true
+    }
+
+    /// Workspace 合同身份变化时（清除 / 换稿）驱动本地字段回填。
+    private var chapterPlanFieldSyncToken: String {
+        guard let plan = currentChapterPlan else { return "none" }
+        return "\(plan.id.rawValue.uuidString)|\(plan.contentDigest)|\(plan.status.rawValue)"
+    }
+
+    private var modeSectionFooter: String {
+        var parts = [collaborationMode.shortSummary]
+        if collaborationMode == .ghostwrite {
+            parts.append("可用「代笔推进」自动写整章并验收收录；也可仍人手操作。")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    private var currentChapterPlan: NovelChapterPlanRecord? {
+        workspace.selectedBranchID.flatMap { workspace.projectSnapshot?.chapterPlan(for: $0) }
+    }
+
+    private var currentUpcomingArc: NovelUpcomingArcRecord? {
+        workspace.selectedBranchID.flatMap { workspace.projectSnapshot?.upcomingArc(for: $0) }
+    }
+
+    private var planStatusLabel: String {
+        guard let plan = currentChapterPlan else { return "未创建" }
+        switch plan.status {
+        case .draft: return "草稿"
+        case .confirmed: return "已确认"
+        }
+    }
+
+    private var upcomingArcStatusLabel: String {
+        guard let arc = currentUpcomingArc, !arc.beats.isEmpty else { return "未设置" }
+        return "\(arc.beats.count) 条"
+    }
+
+    private var reviewModelLabel: String {
+        _ = sharedSettings.revision
+        let configured = workspace.projectSnapshot?.project.configuredModelPolicy(for: .review)
+            ?? .global
+        let effective: NovelProjectModelPolicy = {
+            if case .global = configured {
+                return NovelCreationModelPreferences.shared.policy(for: .review)
+            }
+            return configured
+        }()
+        let name = NovelPresentation.modelDisplayName(
+            for: effective,
+            sharedSettings: sharedSettings
+        )
+        if case .global = configured {
+            return "小说默认 · \(name)"
+        }
+        return name
+    }
+
+    private var upcomingArcFieldSyncToken: String {
+        guard let arc = currentUpcomingArc else { return "none" }
+        return "\(arc.branchID.rawValue.uuidString)|\(arc.beats.joined(separator: "|"))|\(arc.updatedAt.timeIntervalSince1970)"
+    }
+
+    private var ghostwriteSwitchBlockers: [NovelGhostwriteReadinessIssue] {
+        workspace.ghostwriteReadinessIssues(requireChapterPlan: false)
+    }
+
+    private var canEditChapterPlan: Bool {
+        workspace.canMutate && !workspace.isPerforming && !session.isGhostwriting
+    }
+
+    private var canEditUpcomingArc: Bool {
+        workspace.canMutate && !workspace.isPerforming && !session.isGhostwriting
+    }
+
+    private func reloadPlanFieldsFromWorkspace() {
+        let plan = currentChapterPlan
+        planPlacement = plan?.outlinePlacement ?? ""
+        planGoal = plan?.goalAndConflict ?? ""
+        planMustHappen = plan?.mustHappen.joined(separator: "\n") ?? ""
+        planMustNotHappen = plan?.mustNotHappen.joined(separator: "\n") ?? ""
+        planEndingHook = plan?.endingHook ?? ""
+        planVisibleFacts = plan?.visibleFacts.joined(separator: "\n") ?? ""
+    }
+
+    private func reloadUpcomingArcFromWorkspace() {
+        upcomingArcBeats = currentUpcomingArc?.beats.joined(separator: "\n") ?? ""
+    }
+
+    private func selectCollaborationMode(_ mode: NovelCollaborationMode) async {
+        guard mode != collaborationMode else { return }
+        modeSwitchMessage = nil
+        if mode == .cocreation, session.isGhostwriting {
+            selectedMode = collaborationMode
+            modeSwitchMessage = "代笔进行中，请先暂停再切回共创。"
+            return
+        }
+        if mode == .ghostwrite, !ghostwriteSwitchBlockers.isEmpty {
+            selectedMode = collaborationMode
+            modeSwitchMessage = "无法切入代笔，请先补齐下方缺项。"
+            return
+        }
+        let saved = await workspace.setCollaborationMode(mode)
+        if saved {
+            selectedMode = mode
+        } else {
+            selectedMode = collaborationMode
+            modeSwitchMessage = workspace.errorMessage ?? "模式切换失败，请重试。"
+        }
+    }
+
+    private func setPauseOnBlockingContinuity(_ enabled: Bool) async {
+        guard enabled != storedPauseOnBlockingContinuity else { return }
+        pauseToggleMessage = nil
+        let saved = await workspace.setPauseGhostwriteOnBlockingContinuity(enabled)
+        if !saved {
+            pauseOnBlockingContinuity = storedPauseOnBlockingContinuity
+            pauseToggleMessage = workspace.errorMessage ?? "未能更新连续性暂停设置。"
+        }
+    }
+
+    private func saveChapterPlan(status: NovelChapterPlanStatus) async {
+        planMessage = nil
+        planMessageIsError = false
+        let saved = await workspace.upsertChapterPlan(
+            status: status,
+            outlinePlacement: planPlacement,
+            goalAndConflict: planGoal,
+            mustHappen: planLines(from: planMustHappen),
+            mustNotHappen: planLines(from: planMustNotHappen),
+            endingHook: planEndingHook,
+            visibleFacts: planLines(from: planVisibleFacts)
+        )
+        if saved {
+            planMessage = status == .confirmed ? "合同已确认。" : "草稿已保存。"
+            planMessageIsError = false
+        } else {
+            planMessage = workspace.errorMessage ?? "本章合同保存失败。"
+            planMessageIsError = true
+        }
+    }
+
+    private func clearChapterPlan() async {
+        planMessage = nil
+        planMessageIsError = false
+        let cleared = await workspace.clearChapterPlan()
+        if cleared {
+            planPlacement = ""
+            planGoal = ""
+            planMustHappen = ""
+            planMustNotHappen = ""
+            planEndingHook = ""
+            planVisibleFacts = ""
+            planMessage = "合同已清除。"
+            planMessageIsError = false
+        } else {
+            planMessage = workspace.errorMessage ?? "清除本章合同失败。"
+            planMessageIsError = true
+        }
+    }
+
+    private func saveUpcomingArc() async {
+        arcMessage = nil
+        arcMessageIsError = false
+        let beats = planLines(from: upcomingArcBeats)
+        guard !beats.isEmpty else {
+            arcMessage = "请至少填写一条下一弧要点。"
+            arcMessageIsError = true
+            return
+        }
+        let saved = await workspace.upsertUpcomingArc(beats: beats)
+        if saved {
+            arcMessage = "下一弧已保存。"
+            arcMessageIsError = false
+        } else {
+            arcMessage = workspace.errorMessage ?? "下一弧保存失败。"
+            arcMessageIsError = true
+        }
+    }
+
+    private func clearUpcomingArc() async {
+        arcMessage = nil
+        arcMessageIsError = false
+        let cleared = await workspace.clearUpcomingArc()
+        if cleared {
+            upcomingArcBeats = ""
+            arcMessage = "下一弧已清除。"
+            arcMessageIsError = false
+        } else {
+            arcMessage = workspace.errorMessage ?? "清除下一弧失败。"
+            arcMessageIsError = true
+        }
+    }
+
+    private func planLines(from text: String) -> [String] {
+        text
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private func applyDraftBeforeTransition(_ transition: () -> Void) {
@@ -1236,7 +1829,7 @@ struct NovelWritingContextSheet: View {
 
         var title: String {
             switch self {
-            case .preferences: "写作偏好"
+            case .preferences: "模式与偏好"
             case .context: "上下文注入"
             }
         }

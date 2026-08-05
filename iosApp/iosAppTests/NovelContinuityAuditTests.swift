@@ -73,6 +73,66 @@ final class NovelContinuityAuditTests: XCTestCase {
         XCTAssertEqual(report.droppedIssueCount, 0)
     }
 
+    func testAuditIncludingCandidateAppendsProvisionalNextChapter() async throws {
+        var fixture = try documentWithChapters([
+            ("渡口", firstChapterContent),
+            ("雨夜", secondChapterContent),
+            ("茶馆", thirdChapterContent),
+        ])
+        let branch = fixture.document.branches[0]
+        let candidateID = NovelCandidateID()
+        let messageID = NovelMessageID()
+        let candidateBody = "林岸第三次来到渡口，苏未晚已经在船头等他。"
+        var session = fixture.document.sessions[0]
+        session.messages.append(NovelSessionMessageRecord(
+            id: messageID,
+            sequence: Int64(session.messages.count),
+            role: .assistant,
+            mode: .writeProse,
+            kind: .proseCandidate,
+            content: candidateBody,
+            createdAt: now,
+            runID: NovelRunID(),
+            candidateID: candidateID
+        ))
+        session.revision += 1
+        fixture.document.sessions[0] = session
+        fixture.document.candidates.append(NovelCandidateRecord(
+            id: candidateID,
+            kind: .prose,
+            branchID: branch.id,
+            sessionID: session.id,
+            sourceMessageID: messageID,
+            baseCheckpointID: branch.headCheckpointID,
+            baseHeadRevision: branch.headRevision,
+            status: .available,
+            content: candidateBody,
+            sourceChapterVersionID: nil,
+            collectedCheckpointID: nil,
+            createdAt: now
+        ))
+        try NovelDocumentValidator.validate(fixture.document)
+
+        let harness = try await makeHarness(
+            fixture: fixture,
+            scripts: [script(consistentJSON)],
+            model: resolvedModel
+        )
+        let report = try await harness.creation.auditContinuityIncludingCandidate(
+            projectID: harness.projectID,
+            branchID: harness.branchID,
+            candidateID: candidateID
+        )
+
+        XCTAssertEqual(report.scannedChapterCount, 4)
+        XCTAssertEqual(report.chunkCount, 1)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 1)
+        let user = try XCTUnwrap(requests[0].messages.first { $0.role == .user }?.content)
+        XCTAssertTrue(user.contains("# Chapter 4: 候选下一章"))
+        XCTAssertTrue(user.contains(candidateBody))
+    }
+
     /// 模型有权引用块里的章节标头(提示词说的是「本块正文任一连续片段」),
     /// 而标头不在正文字符串里——证据源必须覆盖标头,否则引用标题的条目会被冤枉丢掉。
     func testAuditKeepsIssuesThatQuoteTheChapterHeading() async throws {

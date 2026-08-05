@@ -24,6 +24,7 @@ struct NovelProjectWorkspaceView: View {
     @State private var branchNotice: String?
     @State private var hasCompletedInitialNavigation = false
     @State private var routedProjectLoadFailure: String?
+    @State private var modelPolicyFailure: String?
     @State private var sheetTransitionTask: Task<Void, Never>?
     @State private var sheetTransitionToken: UUID?
 
@@ -178,7 +179,7 @@ struct NovelProjectWorkspaceView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("写作偏好与上下文")
+            .accessibilityLabel("项目控制")
             .disabled(!hasLoadedRoutedProject || isSessionTransitionBusy)
         }
 
@@ -414,6 +415,8 @@ struct NovelProjectWorkspaceView: View {
         case .writingContext:
             NovelWritingContextSheet(
                 workspace: viewModel,
+                session: sessionViewModel,
+                sharedSettings: sharedSettings,
                 mode: sessionViewModel.mode,
                 granularity: sessionViewModel.granularity,
                 userText: sessionInputText,
@@ -428,7 +431,7 @@ struct NovelProjectWorkspaceView: View {
                     sessionInputBudgetTokens = budget
                 }
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
 
         case .modelPicker(let purpose):
@@ -439,12 +442,24 @@ struct NovelProjectWorkspaceView: View {
                 fallbackTitle: "跟随小说默认",
                 onFallback: {
                     selectModelPolicy(.global, for: purpose)
-                }
+                },
+                dismissesAfterFallback: false
             ) { option in
                 selectFixedModel(option, for: purpose)
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            .alert(
+                "无法更新模型",
+                isPresented: Binding(
+                    get: { modelPolicyFailure != nil },
+                    set: { if !$0 { modelPolicyFailure = nil } }
+                )
+            ) {
+                Button("知道了", role: .cancel) { modelPolicyFailure = nil }
+            } message: {
+                Text(modelPolicyFailure ?? "模型设置未能保存，请重试。")
+            }
 
         case .materialEditor(let material, let suggestedKind):
             NovelMaterialEditorSheet(
@@ -760,9 +775,13 @@ struct NovelProjectWorkspaceView: View {
 
     private var headerSubtitle: String {
         guard hasLoadedRoutedProject else { return "读取项目" }
+        let mode: String = switch viewModel.projectSnapshot?.project.collaborationMode {
+        case .ghostwrite: "代笔"
+        case .cocreation, nil: "共创"
+        }
         let branch = viewModel.branchSnapshot?.branch.name ?? "读取分支"
         let model = modelDisplayName(for: .creation)
-        return "\(branch) · \(model)"
+        return "\(mode) · \(branch) · \(model)"
     }
 
     private func selectedModelID(for purpose: NovelModelRole) -> String {
@@ -803,9 +822,13 @@ struct NovelProjectWorkspaceView: View {
     }
 
     private func selectModelPolicy(_ policy: NovelProjectModelPolicy, for purpose: NovelModelRole) {
-        activeSheet = nil
+        modelPolicyFailure = nil
         Task { @MainActor in
-            await viewModel.setModelPolicy(policy, for: purpose)
+            if await viewModel.setModelPolicy(policy, for: purpose) {
+                activeSheet = nil
+            } else {
+                modelPolicyFailure = viewModel.errorMessage ?? "模型设置未能保存，请重试。"
+            }
         }
     }
 

@@ -142,6 +142,52 @@ struct NovelSetPolishPreferenceCommand: Equatable, Sendable {
     let preference: String
 }
 
+struct NovelSetCollaborationModeCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let mode: NovelCollaborationMode
+}
+
+struct NovelSetPauseGhostwriteOnBlockingContinuityCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let enabled: Bool
+}
+
+struct NovelUpsertChapterPlanCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let planID: NovelChapterPlanID
+    let status: NovelChapterPlanStatus
+    let outlinePlacement: String
+    let goalAndConflict: String
+    let mustHappen: [String]
+    let mustNotHappen: [String]
+    let endingHook: String
+    let visibleFacts: [String]
+}
+
+struct NovelClearChapterPlanCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+}
+
+struct NovelUpsertUpcomingArcCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let beats: [String]
+}
+
+struct NovelClearUpcomingArcCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+}
+
 struct NovelForkBranchCommand: Equatable, Sendable {
     let context: NovelMutationContext
     let projectID: NovelProjectID
@@ -261,6 +307,11 @@ struct NovelCancelRunCommand: Equatable, Sendable {
     let reason: NovelRunInterruptionReason
 }
 
+enum NovelCollectionSource: String, Codable, Equatable, Sendable {
+    case user
+    case systemAutoCollect
+}
+
 struct NovelCollectCandidateCommand: Equatable, Sendable {
     let context: NovelMutationContext
     let projectID: NovelProjectID
@@ -273,6 +324,9 @@ struct NovelCollectCandidateCommand: Equatable, Sendable {
     let checkpointID: NovelCheckpointID
     let stateSnapshotID: NovelStateSnapshotID
     let factCompatibilityID: UUID
+    /// Who initiated collect. Defaults to `.user` for sheets; ghostwrite pipeline uses
+    /// `.systemAutoCollect` and requires a matching chapter-plan digest.
+    var source: NovelCollectionSource = .user
 }
 
 struct NovelSaveManualEditCommand: Equatable, Sendable {
@@ -355,6 +409,12 @@ enum NovelAction: Equatable, Sendable {
     case setBranchMaterialOverride(NovelSetBranchMaterialOverrideCommand)
     case setMainBranch(NovelSetMainBranchCommand)
     case setPolishPreference(NovelSetPolishPreferenceCommand)
+    case setCollaborationMode(NovelSetCollaborationModeCommand)
+    case setPauseGhostwriteOnBlockingContinuity(NovelSetPauseGhostwriteOnBlockingContinuityCommand)
+    case upsertChapterPlan(NovelUpsertChapterPlanCommand)
+    case clearChapterPlan(NovelClearChapterPlanCommand)
+    case upsertUpcomingArc(NovelUpsertUpcomingArcCommand)
+    case clearUpcomingArc(NovelClearUpcomingArcCommand)
     case forkBranch(NovelForkBranchCommand)
     case renameBranch(NovelRenameBranchCommand)
     case deleteBranch(NovelDeleteBranchCommand)
@@ -387,6 +447,12 @@ enum NovelAction: Equatable, Sendable {
         case .setBranchMaterialOverride(let command): command.projectID
         case .setMainBranch(let command): command.projectID
         case .setPolishPreference(let command): command.projectID
+        case .setCollaborationMode(let command): command.projectID
+        case .setPauseGhostwriteOnBlockingContinuity(let command): command.projectID
+        case .upsertChapterPlan(let command): command.projectID
+        case .clearChapterPlan(let command): command.projectID
+        case .upsertUpcomingArc(let command): command.projectID
+        case .clearUpcomingArc(let command): command.projectID
         case .forkBranch(let command): command.projectID
         case .renameBranch(let command): command.projectID
         case .deleteBranch(let command): command.projectID
@@ -421,6 +487,12 @@ enum NovelAction: Equatable, Sendable {
         case .setBranchMaterialOverride(let command): command.context
         case .setMainBranch(let command): command.context
         case .setPolishPreference(let command): command.context
+        case .setCollaborationMode(let command): command.context
+        case .setPauseGhostwriteOnBlockingContinuity(let command): command.context
+        case .upsertChapterPlan(let command): command.context
+        case .clearChapterPlan(let command): command.context
+        case .upsertUpcomingArc(let command): command.context
+        case .clearUpcomingArc(let command): command.context
         case .forkBranch(let command): command.context
         case .renameBranch(let command): command.context
         case .deleteBranch(let command): command.context
@@ -455,6 +527,12 @@ enum NovelAction: Equatable, Sendable {
         case .setBranchMaterialOverride: .setBranchMaterialOverride
         case .setMainBranch: .setMainBranch
         case .setPolishPreference: .setPolishPreference
+        case .setCollaborationMode: .setCollaborationMode
+        case .setPauseGhostwriteOnBlockingContinuity: .setPauseGhostwriteOnBlockingContinuity
+        case .upsertChapterPlan: .upsertChapterPlan
+        case .clearChapterPlan: .clearChapterPlan
+        case .upsertUpcomingArc: .upsertUpcomingArc
+        case .clearUpcomingArc: .clearUpcomingArc
         case .forkBranch: .forkBranch
         case .renameBranch: .renameBranch
         case .deleteBranch: .deleteBranch
@@ -560,6 +638,46 @@ enum NovelAction: Equatable, Sendable {
                 projectID: command.projectID,
                 preference: command.preference
             ))
+        case .setCollaborationMode(let command):
+            payload = .setCollaborationMode(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                mode: command.mode
+            ))
+        case .setPauseGhostwriteOnBlockingContinuity(let command):
+            payload = .setPauseGhostwriteOnBlockingContinuity(.init(
+                projectID: command.projectID,
+                enabled: command.enabled
+            ))
+        case .upsertChapterPlan(let command):
+            payload = .upsertChapterPlan(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                planID: command.planID,
+                status: command.status,
+                outlinePlacement: command.outlinePlacement,
+                goalAndConflict: command.goalAndConflict,
+                mustHappen: command.mustHappen,
+                mustNotHappen: command.mustNotHappen,
+                endingHook: command.endingHook,
+                visibleFacts: command.visibleFacts
+            ))
+        case .clearChapterPlan(let command):
+            payload = .clearChapterPlan(.init(
+                projectID: command.projectID,
+                branchID: command.branchID
+            ))
+        case .upsertUpcomingArc(let command):
+            payload = .upsertUpcomingArc(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                beats: command.beats
+            ))
+        case .clearUpcomingArc(let command):
+            payload = .clearUpcomingArc(.init(
+                projectID: command.projectID,
+                branchID: command.branchID
+            ))
         case .forkBranch(let command):
             payload = .forkBranch(.init(
                 projectID: command.projectID,
@@ -664,7 +782,8 @@ enum NovelAction: Equatable, Sendable {
                 proposedChapterVersionID: command.proposedChapterVersionID,
                 checkpointID: command.checkpointID,
                 stateSnapshotID: command.stateSnapshotID,
-                factCompatibilityID: command.factCompatibilityID
+                factCompatibilityID: command.factCompatibilityID,
+                source: command.source
             ))
         case .saveManualEdit(let command):
             payload = .saveManualEdit(.init(
@@ -813,6 +932,46 @@ private enum NovelCanonicalActionPayload: Codable {
         let preference: String
     }
 
+    struct SetCollaborationMode: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let mode: NovelCollaborationMode
+    }
+
+    struct SetPauseGhostwriteOnBlockingContinuity: Codable {
+        let projectID: NovelProjectID
+        let enabled: Bool
+    }
+
+    struct UpsertChapterPlan: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let planID: NovelChapterPlanID
+        let status: NovelChapterPlanStatus
+        let outlinePlacement: String
+        let goalAndConflict: String
+        let mustHappen: [String]
+        let mustNotHappen: [String]
+        let endingHook: String
+        let visibleFacts: [String]
+    }
+
+    struct ClearChapterPlan: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+    }
+
+    struct UpsertUpcomingArc: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let beats: [String]
+    }
+
+    struct ClearUpcomingArc: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+    }
+
     struct ForkBranch: Codable {
         let projectID: NovelProjectID
         let sourceBranchID: NovelBranchID
@@ -911,6 +1070,51 @@ private enum NovelCanonicalActionPayload: Codable {
         let checkpointID: NovelCheckpointID
         let stateSnapshotID: NovelStateSnapshotID
         let factCompatibilityID: UUID
+        let source: NovelCollectionSource
+
+        init(
+            projectID: NovelProjectID,
+            branchID: NovelBranchID,
+            pendingID: NovelPendingOperationID,
+            candidateID: NovelCandidateID,
+            selection: NovelParagraphSelection,
+            target: NovelCollectionTarget,
+            proposedChapterVersionID: NovelChapterVersionID,
+            checkpointID: NovelCheckpointID,
+            stateSnapshotID: NovelStateSnapshotID,
+            factCompatibilityID: UUID,
+            source: NovelCollectionSource = .user
+        ) {
+            self.projectID = projectID
+            self.branchID = branchID
+            self.pendingID = pendingID
+            self.candidateID = candidateID
+            self.selection = selection
+            self.target = target
+            self.proposedChapterVersionID = proposedChapterVersionID
+            self.checkpointID = checkpointID
+            self.stateSnapshotID = stateSnapshotID
+            self.factCompatibilityID = factCompatibilityID
+            self.source = source
+        }
+
+        init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            projectID = try values.decode(NovelProjectID.self, forKey: .projectID)
+            branchID = try values.decode(NovelBranchID.self, forKey: .branchID)
+            pendingID = try values.decode(NovelPendingOperationID.self, forKey: .pendingID)
+            candidateID = try values.decode(NovelCandidateID.self, forKey: .candidateID)
+            selection = try values.decode(NovelParagraphSelection.self, forKey: .selection)
+            target = try values.decode(NovelCollectionTarget.self, forKey: .target)
+            proposedChapterVersionID = try values.decode(
+                NovelChapterVersionID.self,
+                forKey: .proposedChapterVersionID
+            )
+            checkpointID = try values.decode(NovelCheckpointID.self, forKey: .checkpointID)
+            stateSnapshotID = try values.decode(NovelStateSnapshotID.self, forKey: .stateSnapshotID)
+            factCompatibilityID = try values.decode(UUID.self, forKey: .factCompatibilityID)
+            source = try values.decodeIfPresent(NovelCollectionSource.self, forKey: .source) ?? .user
+        }
     }
 
     struct SaveManualEdit: Codable {
@@ -965,6 +1169,12 @@ private enum NovelCanonicalActionPayload: Codable {
     case setBranchMaterialOverride(SetBranchMaterialOverride)
     case setMainBranch(SetMainBranch)
     case setPolishPreference(SetPolishPreference)
+    case setCollaborationMode(SetCollaborationMode)
+    case setPauseGhostwriteOnBlockingContinuity(SetPauseGhostwriteOnBlockingContinuity)
+    case upsertChapterPlan(UpsertChapterPlan)
+    case clearChapterPlan(ClearChapterPlan)
+    case upsertUpcomingArc(UpsertUpcomingArc)
+    case clearUpcomingArc(ClearUpcomingArc)
     case forkBranch(ForkBranch)
     case renameBranch(RenameBranch)
     case deleteBranch(DeleteBranch)
@@ -1033,6 +1243,46 @@ enum NovelOutcome: Codable, Equatable, Sendable {
     case mainBranchChanged(projectID: NovelProjectID, branchID: NovelBranchID, revision: Int64)
     case polishPreferenceChanged(
         projectID: NovelProjectID,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case collaborationModeChanged(
+        projectID: NovelProjectID,
+        mode: NovelCollaborationMode,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case pauseGhostwriteOnBlockingContinuityChanged(
+        projectID: NovelProjectID,
+        enabled: Bool,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case chapterPlanUpserted(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        planID: NovelChapterPlanID,
+        status: NovelChapterPlanStatus,
+        contentDigest: String,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case chapterPlanCleared(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case upcomingArcUpserted(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        beatCount: Int,
+        projectRevision: Int64,
+        configRevision: Int64
+    )
+    case upcomingArcCleared(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
         projectRevision: Int64,
         configRevision: Int64
     )
@@ -1414,6 +1664,18 @@ protocol NovelCreation: Sendable {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) async throws -> NovelContinuityAuditReport
+    /// 代笔软门：把尚未收录的整章候选当作下一章，与已有正文一并做连续性检查。不写盘。
+    func auditContinuityIncludingCandidate(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID
+    ) async throws -> NovelContinuityAuditReport
+    /// 代笔验收：用剧情同步模型核对候选是否满足已确认本章合同。结果不写进项目文档。
+    func acceptChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID
+    ) async throws -> NovelChapterPlanAcceptanceV1
 }
 
 extension NovelCreation {
@@ -1445,6 +1707,22 @@ extension NovelCreation {
         branchID: NovelBranchID
     ) async throws -> NovelContinuityAuditReport {
         throw NovelError.invalidInput("This novel runtime cannot audit story continuity.")
+    }
+
+    func auditContinuityIncludingCandidate(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID
+    ) async throws -> NovelContinuityAuditReport {
+        throw NovelError.invalidInput("This novel runtime cannot audit story continuity.")
+    }
+
+    func acceptChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID
+    ) async throws -> NovelChapterPlanAcceptanceV1 {
+        throw NovelError.invalidInput("This novel runtime cannot accept chapter-plan candidates.")
     }
 
     func interruptRun(_ command: NovelCancelRunCommand) async throws {

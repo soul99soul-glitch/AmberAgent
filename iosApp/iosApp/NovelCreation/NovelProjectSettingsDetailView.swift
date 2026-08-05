@@ -56,6 +56,7 @@ struct NovelProjectSettingsDetailView: View {
     @State private var isExportingProject = false
     @State private var isLoadingProject = true
     @State private var projectLoadFailure: String?
+    @State private var modelPolicyFailure: String?
     @State private var pendingBranchSelection: NovelBranchID?
 
     var body: some View {
@@ -63,6 +64,7 @@ struct NovelProjectSettingsDetailView: View {
             Section {
                 modelRow(for: .creation)
                 modelRow(for: .stateSync)
+                modelRow(for: .review)
             } header: {
                 Text("项目模型覆盖")
             } footer: {
@@ -184,12 +186,24 @@ struct NovelProjectSettingsDetailView: View {
                 currentModel: selectedModelID(for: purpose),
                 title: purpose.pickerTitle,
                 fallbackTitle: "跟随小说默认",
-                onFallback: { setModelPolicy(.global, for: purpose) }
+                onFallback: { setModelPolicy(.global, for: purpose) },
+                dismissesAfterFallback: false
             ) { option in
                 setFixedModel(option, for: purpose)
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            .alert(
+                "无法更新模型",
+                isPresented: Binding(
+                    get: { modelPolicyFailure != nil },
+                    set: { if !$0 { modelPolicyFailure = nil } }
+                )
+            ) {
+                Button("知道了", role: .cancel) { modelPolicyFailure = nil }
+            } message: {
+                Text(modelPolicyFailure ?? "模型设置未能保存，请重试。")
+            }
 
         case .renameProject:
             if let project = currentProject {
@@ -284,9 +298,13 @@ struct NovelProjectSettingsDetailView: View {
     }
 
     private func setModelPolicy(_ policy: NovelProjectModelPolicy, for purpose: NovelModelRole) {
-        activeSheet = nil
+        modelPolicyFailure = nil
         Task { @MainActor in
-            await viewModel.setModelPolicy(policy, for: purpose)
+            if await viewModel.setModelPolicy(policy, for: purpose) {
+                activeSheet = nil
+            } else {
+                modelPolicyFailure = viewModel.errorMessage ?? "模型设置未能保存，请重试。"
+            }
         }
     }
 

@@ -256,6 +256,7 @@ extension NovelReducer {
                 content: candidate.content,
                 sourceChapterVersionID: candidate.sourceChapterVersionID,
                 collectedCheckpointID: nil,
+                chapterPlanDigest: candidate.chapterPlanDigest,
                 createdAt: candidate.createdAt
             )
         }.sorted { $0.sourceMessageID.description < $1.sourceMessageID.description }
@@ -748,6 +749,7 @@ extension NovelReducer {
             sourceChapterVersionID: source.sourceChapterVersionID,
             clonedFromCandidateID: source.id,
             collectedCheckpointID: nil,
+            chapterPlanDigest: source.chapterPlanDigest,
             createdAt: now
         )
         guard let sessionIndex = document.sessions.firstIndex(where: {
@@ -847,7 +849,8 @@ extension NovelReducer {
             },
             createdAt: now,
             settingProposalIDs: state.settingProposalIDs,
-            characterIdentityClarifications: state.characterIdentityClarifications + [record]
+            characterIdentityClarifications: state.characterIdentityClarifications + [record],
+            recentWrittenHighlights: state.recentWrittenHighlights
         )
         let checkpoint = NovelBranchCheckpointRecord(
             id: command.checkpointID,

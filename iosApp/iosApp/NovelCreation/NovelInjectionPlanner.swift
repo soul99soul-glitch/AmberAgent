@@ -69,6 +69,9 @@ struct NovelInjectionPlanningRequest: Equatable, Sendable {
 enum NovelInjectionSectionKind: Codable, Equatable, Sendable {
     case fixedPrompt
     case polishPreference
+    case chapterPlan(NovelChapterPlanID)
+    case recentWrittenHighlights(NovelStateSnapshotID)
+    case upcomingArc(NovelBranchID)
     case currentState(NovelStateSnapshotID)
     case pendingManualState(NovelPendingOperationID, chunkIndex: Int)
     case quickStartSeed
@@ -83,6 +86,9 @@ enum NovelInjectionSectionKind: Codable, Equatable, Sendable {
 enum NovelInjectionSelectionReason: String, Codable, Equatable, Sendable {
     case requiredPrompt
     case requiredPolishPreference
+    case confirmedChapterPlan
+    case recentWrittenHighlights
+    case upcomingArc
     case requiredUserInput
     case requiredCurrentState
     case requiredQuickStartSeed
@@ -437,6 +443,45 @@ enum NovelInjectionPlanner {
         } else {
             polishPreferenceSection = nil
         }
+        let chapterPlanSection: NovelInjectionSection?
+        if request.promptKind == .proseWholeChapter,
+           let plan = document.confirmedChapterPlan(for: branch.id) {
+            chapterPlanSection = makeSection(
+                kind: .chapterPlan(plan.id),
+                label: "CONFIRMED CHAPTER PLAN - BINDING OBLIGATIONS FOR THIS CHAPTER",
+                content: plan.injectionText(),
+                reason: .confirmedChapterPlan
+            )
+        } else {
+            chapterPlanSection = nil
+        }
+        let recentHighlightsSection: NovelInjectionSection?
+        if request.promptKind == .proseWholeChapter {
+            let highlights = state.injectionHighlightsText()
+            recentHighlightsSection = highlights.isEmpty
+                ? nil
+                : makeSection(
+                    kind: .recentWrittenHighlights(state.id),
+                    label: "RECENT WRITTEN BEATS - DO NOT REHASH AS FRESH PLOT",
+                    content: highlights,
+                    reason: .recentWrittenHighlights
+                )
+        } else {
+            recentHighlightsSection = nil
+        }
+        let upcomingArcSection: NovelInjectionSection?
+        if request.promptKind == .proseWholeChapter,
+           let arc = document.upcomingArc(for: branch.id),
+           !arc.beats.isEmpty {
+            upcomingArcSection = makeSection(
+                kind: .upcomingArc(branch.id),
+                label: "UPCOMING ARC - SOFT DIRECTION FOR THE NEXT FEW CHAPTERS",
+                content: arc.injectionText(),
+                reason: .upcomingArc
+            )
+        } else {
+            upcomingArcSection = nil
+        }
         let promptSection = makeSection(
             kind: .fixedPrompt,
             label: "SYSTEM PROMPT",
@@ -470,6 +515,9 @@ enum NovelInjectionPlanner {
 
         var requiredSections = [promptSection]
         if let polishPreferenceSection { requiredSections.append(polishPreferenceSection) }
+        if let chapterPlanSection { requiredSections.append(chapterPlanSection) }
+        if let recentHighlightsSection { requiredSections.append(recentHighlightsSection) }
+        if let upcomingArcSection { requiredSections.append(upcomingArcSection) }
         requiredSections.append(stateSection)
         if let seedSection { requiredSections.append(seedSection) }
         if let chapterSection { requiredSections.append(chapterSection) }
@@ -542,6 +590,9 @@ enum NovelInjectionPlanner {
             let proposed = orderedSections(
                 prompt: promptSection,
                 polishPreference: polishPreferenceSection,
+                chapterPlan: chapterPlanSection,
+                recentHighlights: recentHighlightsSection,
+                upcomingArc: upcomingArcSection,
                 state: stateSection,
                 seed: seedSection,
                 chapter: chapterSection,
@@ -566,6 +617,9 @@ enum NovelInjectionPlanner {
             let proposed = orderedSections(
                 prompt: promptSection,
                 polishPreference: polishPreferenceSection,
+                chapterPlan: chapterPlanSection,
+                recentHighlights: recentHighlightsSection,
+                upcomingArc: upcomingArcSection,
                 state: stateSection,
                 seed: seedSection,
                 chapter: chapterSection,
@@ -590,6 +644,9 @@ enum NovelInjectionPlanner {
             let proposed = orderedSections(
                 prompt: promptSection,
                 polishPreference: polishPreferenceSection,
+                chapterPlan: chapterPlanSection,
+                recentHighlights: recentHighlightsSection,
+                upcomingArc: upcomingArcSection,
                 state: stateSection,
                 seed: seedSection,
                 chapter: chapterSection,
@@ -613,6 +670,9 @@ enum NovelInjectionPlanner {
             let proposed = orderedSections(
                 prompt: promptSection,
                 polishPreference: polishPreferenceSection,
+                chapterPlan: chapterPlanSection,
+                recentHighlights: recentHighlightsSection,
+                upcomingArc: upcomingArcSection,
                 state: stateSection,
                 seed: seedSection,
                 chapter: chapterSection,
@@ -631,6 +691,9 @@ enum NovelInjectionPlanner {
         let sections = orderedSections(
             prompt: promptSection,
             polishPreference: polishPreferenceSection,
+            chapterPlan: chapterPlanSection,
+            recentHighlights: recentHighlightsSection,
+            upcomingArc: upcomingArcSection,
             state: stateSection,
             seed: seedSection,
             chapter: chapterSection,
@@ -729,13 +792,15 @@ enum NovelInjectionPlanner {
 private extension NovelPromptKind {
     var requiresSynchronizedBranch: Bool {
         switch self {
-        case .wholeChapterPolish, .wholeChapterRegeneration:
+        case .wholeChapterPolish, .wholeChapterRegeneration,
+             .proseContinuation, .proseWholeChapter:
             true
         // 矛盾检查只读正文逐字原文,不读分支状态摘要,所以不要求状态已同步 ——
         // 否则「状态没同步」会挡住一次纯粹的正文自查。
-        case .quickStart, .characterProposal, .discussion, .proseContinuation, .proseWholeChapter,
+        // 讨论规划不推进正史,needsSync 时仍可聊,但注入会带 stale 警告。
+        case .quickStart, .characterProposal, .discussion,
              .stateDeltaV1, .manualSyncV1, .discussionArchiveV1, .polishDriftV1,
-             .continuityAuditV1:
+             .continuityAuditV1, .chapterPlanAcceptanceV1:
             false
         }
     }
@@ -747,13 +812,15 @@ private extension NovelPromptKind {
              .continuityAuditV1:
             true
         case .quickStart, .characterProposal, .discussion, .stateDeltaV1, .manualSyncV1,
-             .discussionArchiveV1, .polishDriftV1:
+             .discussionArchiveV1, .polishDriftV1, .chapterPlanAcceptanceV1:
             false
         }
     }
 
     var allowsRetryableManualSync: Bool {
-        self == .proseContinuation || self == .proseWholeChapter
+        // Formal prose now requires a synchronized branch, so retryable manual-sync
+        // pending work no longer unlocks prose injection while state is stale.
+        false
     }
 }
 
@@ -1276,6 +1343,9 @@ private extension NovelInjectionPlanner {
     static func orderedSections(
         prompt: NovelInjectionSection,
         polishPreference: NovelInjectionSection?,
+        chapterPlan: NovelInjectionSection? = nil,
+        recentHighlights: NovelInjectionSection? = nil,
+        upcomingArc: NovelInjectionSection? = nil,
         state: NovelInjectionSection,
         seed: NovelInjectionSection?,
         chapter: NovelInjectionSection?,
@@ -1286,6 +1356,9 @@ private extension NovelInjectionPlanner {
     ) -> [NovelInjectionSection] {
         var result = [prompt]
         if let polishPreference { result.append(polishPreference) }
+        if let chapterPlan { result.append(chapterPlan) }
+        if let recentHighlights { result.append(recentHighlights) }
+        if let upcomingArc { result.append(upcomingArc) }
         result.append(state)
         if let seed { result.append(seed) }
         if let chapter { result.append(chapter) }

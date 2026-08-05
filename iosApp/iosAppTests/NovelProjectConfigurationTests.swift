@@ -66,6 +66,38 @@ final class NovelProjectConfigurationTests: XCTestCase {
         XCTAssertEqual(result.project.configRevision, document.project.configRevision + 1)
     }
 
+    func testReviewModelPolicyPersistsIndependentlyAndDefaultsMissingToGlobal() throws {
+        let document = try NovelTestFixtures.document()
+        let action = NovelAction.setModelPolicy(NovelSetModelPolicyCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            purpose: .review,
+            policy: .fixed(providerID: "review-provider", modelID: "review-model")
+        ))
+
+        let result = try NovelReducer.apply(action, to: document).document
+        XCTAssertEqual(result.project.modelPolicy, document.project.modelPolicy)
+        XCTAssertEqual(result.project.stateSyncModelPolicy, document.project.stateSyncModelPolicy)
+        XCTAssertEqual(
+            result.project.reviewModelPolicy,
+            .fixed(providerID: "review-provider", modelID: "review-model")
+        )
+        XCTAssertEqual(
+            result.project.configuredModelPolicy(for: .review),
+            .fixed(providerID: "review-provider", modelID: "review-model")
+        )
+
+        let data = try JSONEncoder().encode(result)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var project = try XCTUnwrap(object["project"] as? [String: Any])
+        project.removeValue(forKey: "reviewModelPolicy")
+        object["project"] = project
+        let legacyData = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let decoded = try JSONDecoder().decode(NovelProjectDocumentV1.self, from: legacyData)
+        XCTAssertNil(decoded.project.reviewModelPolicy)
+        XCTAssertEqual(decoded.project.configuredModelPolicy(for: .review), .global)
+    }
+
     func testOlderProjectPayloadDefaultsMissingStateSyncModelToGlobal() throws {
         let document = try NovelTestFixtures.document()
         let data = try JSONEncoder().encode(document)
@@ -81,7 +113,7 @@ final class NovelProjectConfigurationTests: XCTestCase {
         XCTAssertEqual(decoded.project.configuredModelPolicy(for: .stateSync), .global)
     }
 
-    func testNovelModelPreferencesPersistBothRoleDefaults() {
+    func testNovelModelPreferencesPersistRoleDefaultsIncludingReview() {
         let suite = "NovelModelPreferencesTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -95,6 +127,10 @@ final class NovelProjectConfigurationTests: XCTestCase {
             .fixed(providerID: "sync-provider", modelID: "sync-model"),
             for: .stateSync
         )
+        preferences.set(
+            .fixed(providerID: "review-provider", modelID: "review-model"),
+            for: .review
+        )
 
         let reloaded = NovelCreationModelPreferences(userDefaults: defaults)
         XCTAssertEqual(
@@ -104,6 +140,10 @@ final class NovelProjectConfigurationTests: XCTestCase {
         XCTAssertEqual(
             reloaded.policy(for: .stateSync),
             .fixed(providerID: "sync-provider", modelID: "sync-model")
+        )
+        XCTAssertEqual(
+            reloaded.policy(for: .review),
+            .fixed(providerID: "review-provider", modelID: "review-model")
         )
     }
 

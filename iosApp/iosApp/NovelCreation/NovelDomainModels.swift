@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct NovelIdentifier<Tag: Sendable>: RawRepresentable, Codable, Hashable, Sendable, CustomStringConvertible {
@@ -31,6 +32,7 @@ enum NovelRunIDTag: Sendable {}
 enum NovelPendingOperationIDTag: Sendable {}
 enum NovelReceiptIDTag: Sendable {}
 enum NovelProposalIDTag: Sendable {}
+enum NovelChapterPlanIDTag: Sendable {}
 
 typealias NovelProjectID = NovelIdentifier<NovelProjectIDTag>
 typealias NovelBranchID = NovelIdentifier<NovelBranchIDTag>
@@ -49,10 +51,218 @@ typealias NovelRunID = NovelIdentifier<NovelRunIDTag>
 typealias NovelPendingOperationID = NovelIdentifier<NovelPendingOperationIDTag>
 typealias NovelReceiptID = NovelIdentifier<NovelReceiptIDTag>
 typealias NovelProposalID = NovelIdentifier<NovelProposalIDTag>
+typealias NovelChapterPlanID = NovelIdentifier<NovelChapterPlanIDTag>
 
 enum NovelProjectCreationMode: String, Codable, CaseIterable, Sendable {
     case blank
     case quickStart
+}
+
+/// Project-level collaboration style. Ghostwrite auto-pipeline arrives in Phase 2;
+/// Phase 1 persists the mode, enforces readiness, and requires a chapter plan.
+enum NovelCollaborationMode: String, Codable, CaseIterable, Sendable {
+    case cocreation
+    case ghostwrite
+
+    var displayName: String {
+        switch self {
+        case .cocreation: "共创模式"
+        case .ghostwrite: "代笔模式"
+        }
+    }
+
+    var shortSummary: String {
+        switch self {
+        case .cocreation: "一起商量，你点收录才进书"
+        case .ghostwrite: "先定规矩再按章推进；验收通过后自动收录"
+        }
+    }
+}
+
+enum NovelChapterPlanStatus: String, Codable, CaseIterable, Sendable {
+    case draft
+    case confirmed
+}
+
+struct NovelChapterPlanRecord: Codable, Equatable, Sendable {
+    let id: NovelChapterPlanID
+    let branchID: NovelBranchID
+    var status: NovelChapterPlanStatus
+    /// Short placement note such as "第 3 章 · 中段转折".
+    var outlinePlacement: String
+    var goalAndConflict: String
+    var mustHappen: [String]
+    var mustNotHappen: [String]
+    var endingHook: String
+    /// Facts the POV is allowed to know in this chapter.
+    var visibleFacts: [String]
+    var contentDigest: String
+    var updatedAt: Date
+    var confirmedAt: Date?
+
+    var isConfirmed: Bool { status == .confirmed }
+
+    func canonicalDigestPayload() -> String {
+        let must = mustHappen.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        let mustNot = mustNotHappen.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        let visible = visibleFacts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+        return [
+            outlinePlacement.trimmingCharacters(in: .whitespacesAndNewlines),
+            goalAndConflict.trimmingCharacters(in: .whitespacesAndNewlines),
+            must,
+            mustNot,
+            endingHook.trimmingCharacters(in: .whitespacesAndNewlines),
+            visible,
+        ].joined(separator: "\n---\n")
+    }
+
+    func injectionText() -> String {
+        var lines = [
+            "Status: \(status.rawValue)",
+            "Digest: \(contentDigest)",
+            "Placement: \(outlinePlacement)",
+            "Goal and conflict:\n\(goalAndConflict)",
+        ]
+        if !mustHappen.isEmpty {
+            lines.append("Must happen:\n" + mustHappen.map { "- \($0)" }.joined(separator: "\n"))
+        }
+        if !mustNotHappen.isEmpty {
+            lines.append("Must not happen:\n" + mustNotHappen.map { "- \($0)" }.joined(separator: "\n"))
+        }
+        if !endingHook.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("Ending hook:\n\(endingHook)")
+        }
+        if !visibleFacts.isEmpty {
+            lines.append(
+                "POV-visible facts:\n" + visibleFacts.map { "- \($0)" }.joined(separator: "\n")
+            )
+        }
+        return lines.joined(separator: "\n\n")
+    }
+
+    static func digest(forCanonicalPayload payload: String) -> String {
+        SHA256.hash(data: Data(payload.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func normalizedLines(_ lines: [String]) -> [String] {
+        lines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
+enum NovelGhostwriteReadinessIssue: String, Equatable, Hashable, Sendable, CaseIterable {
+    case mainBranchRequired
+    case missingMasterOutline
+    case missingCharacter
+    case missingWritingRequirements
+    case branchNeedsSync
+    case pendingOperations
+    case activeRun
+    case missingChapterPlan
+
+    var displayName: String {
+        switch self {
+        case .mainBranchRequired: "代笔仅支持当前主分支"
+        case .missingMasterOutline: "缺少总剧情大纲"
+        case .missingCharacter: "至少需要一名人物档案"
+        case .missingWritingRequirements: "缺少写作要求"
+        case .branchNeedsSync: "当前分支资料待同步"
+        case .pendingOperations: "仍有未完成的正文或同步操作"
+        case .activeRun: "当前还有进行中的生成"
+        case .missingChapterPlan: "还没有确认的本章合同"
+        }
+    }
+}
+
+enum NovelGhostwriteReadiness {
+    static func issues(
+        in document: NovelProjectDocumentV1,
+        branchID: NovelBranchID,
+        requireChapterPlan: Bool
+    ) -> [NovelGhostwriteReadinessIssue] {
+        issues(
+            materials: document.materials,
+            materialRevisions: document.materialRevisions,
+            branches: document.branches,
+            pendingOperations: document.pendingOperations,
+            polishTransactions: document.polishTransactions,
+            activeRuns: document.activeRuns,
+            chapterPlans: document.chapterPlans,
+            mainBranchID: document.project.mainBranchID,
+            branchID: branchID,
+            requireChapterPlan: requireChapterPlan
+        )
+    }
+
+    static func issues(
+        materials: [NovelMaterialRecord],
+        materialRevisions: [NovelMaterialRevisionRecord],
+        branches: [NovelBranchRecord],
+        pendingOperations: [NovelPendingOperationRecord],
+        polishTransactions: [NovelPendingPolishTransactionRecord],
+        activeRuns: [NovelActiveRunRecord],
+        chapterPlans: [NovelChapterPlanRecord],
+        mainBranchID: NovelBranchID,
+        branchID: NovelBranchID,
+        requireChapterPlan: Bool
+    ) -> [NovelGhostwriteReadinessIssue] {
+        var issues: [NovelGhostwriteReadinessIssue] = []
+        if branchID != mainBranchID {
+            issues.append(.mainBranchRequired)
+        }
+        let activeMaterials = materials.filter { !$0.isDeleted }
+        let revisionByID = Dictionary(
+            uniqueKeysWithValues: materialRevisions.map { ($0.id, $0) }
+        )
+        func hasNonEmptyMaterial(kind: NovelMaterialKind) -> Bool {
+            activeMaterials.contains { material in
+                guard material.kind == kind,
+                      let revision = revisionByID[material.currentRevisionID] else { return false }
+                return !revision.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
+        if !hasNonEmptyMaterial(kind: .masterOutline) {
+            issues.append(.missingMasterOutline)
+        }
+        if !hasNonEmptyMaterial(kind: .character) {
+            issues.append(.missingCharacter)
+        }
+        if !hasNonEmptyMaterial(kind: .writingRequirements) {
+            issues.append(.missingWritingRequirements)
+        }
+        guard let branch = branches.first(where: { $0.id == branchID }) else {
+            issues.append(.branchNeedsSync)
+            return issues
+        }
+        if branch.syncStatus != .synchronized {
+            issues.append(.branchNeedsSync)
+        }
+        if pendingOperations.contains(where: { $0.branchID == branchID }) ||
+            polishTransactions.contains(where: {
+                $0.branchID == branchID &&
+                    ($0.status == .pending || $0.status == .retryable || $0.status == .blocked)
+            }) {
+            issues.append(.pendingOperations)
+        }
+        if branch.activeRunID != nil ||
+            activeRuns.contains(where: {
+                $0.branchID == branchID && $0.status == .running
+            }) {
+            issues.append(.activeRun)
+        }
+        if requireChapterPlan,
+           chapterPlans.first(where: { $0.branchID == branchID && $0.isConfirmed }) == nil {
+            issues.append(.missingChapterPlan)
+        }
+        return issues
+    }
 }
 
 enum NovelGenerationGranularity: String, Codable, CaseIterable, Sendable {
@@ -69,11 +279,63 @@ enum NovelProjectModelPolicy: Codable, Equatable, Sendable {
 enum NovelModelRole: String, Codable, CaseIterable, Sendable {
     case creation
     case stateSync
+    /// 代笔合同验收与连续性软门；缺省跟随 App 默认（通常为 global）。
+    case review
 }
 
 struct NovelQuickStartSeed: Codable, Equatable, Sendable {
     let genre: String
     let coreIdea: String
+}
+
+/// 分支级「下一弧」有界要点：软上下文，跨多章保留，直到用户改写或清除。
+struct NovelUpcomingArcRecord: Codable, Equatable, Sendable {
+    static let maxBeats = 8
+    static let maxBeatCharacterCount = 160
+
+    let branchID: NovelBranchID
+    var beats: [String]
+    var updatedAt: Date
+
+    init(branchID: NovelBranchID, beats: [String], updatedAt: Date) {
+        self.branchID = branchID
+        self.beats = Self.normalizedBeats(beats)
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        branchID = try values.decode(NovelBranchID.self, forKey: .branchID)
+        beats = Self.normalizedBeats(try values.decode([String].self, forKey: .beats))
+        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case branchID
+        case beats
+        case updatedAt
+    }
+
+    static func normalizedBeats(_ raw: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for item in raw {
+            let trimmed = item.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let clipped = trimmed.count > maxBeatCharacterCount
+                ? String(trimmed.prefix(maxBeatCharacterCount))
+                : trimmed
+            let key = clipped.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            result.append(clipped)
+            if result.count >= maxBeats { break }
+        }
+        return result
+    }
+
+    func injectionText() -> String {
+        beats.map { "- \($0)" }.joined(separator: "\n")
+    }
 }
 
 enum NovelMaterialKind: Codable, Equatable, Sendable {
@@ -216,13 +478,131 @@ struct NovelProjectRecord: Codable, Equatable, Sendable {
     var mainBranchID: NovelBranchID
     var modelPolicy: NovelProjectModelPolicy
     var stateSyncModelPolicy: NovelProjectModelPolicy?
+    var reviewModelPolicy: NovelProjectModelPolicy?
     var lastGenerationGranularity: NovelGenerationGranularity
     var polishPreference: String
+    var collaborationMode: NovelCollaborationMode
+    /// 代笔：连续性检查出现 blocking（界面「严重」）时暂停自动收录。默认开启。
+    var pauseGhostwriteOnBlockingContinuity: Bool
+
+    init(
+        id: NovelProjectID,
+        name: String,
+        creationMode: NovelProjectCreationMode,
+        quickStartSeed: NovelQuickStartSeed?,
+        createdAt: Date,
+        updatedAt: Date,
+        revision: Int64,
+        configRevision: Int64,
+        mainBranchID: NovelBranchID,
+        modelPolicy: NovelProjectModelPolicy,
+        stateSyncModelPolicy: NovelProjectModelPolicy?,
+        lastGenerationGranularity: NovelGenerationGranularity,
+        polishPreference: String,
+        collaborationMode: NovelCollaborationMode = .cocreation,
+        pauseGhostwriteOnBlockingContinuity: Bool = true,
+        reviewModelPolicy: NovelProjectModelPolicy? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.creationMode = creationMode
+        self.quickStartSeed = quickStartSeed
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.revision = revision
+        self.configRevision = configRevision
+        self.mainBranchID = mainBranchID
+        self.modelPolicy = modelPolicy
+        self.stateSyncModelPolicy = stateSyncModelPolicy
+        self.reviewModelPolicy = reviewModelPolicy
+        self.lastGenerationGranularity = lastGenerationGranularity
+        self.polishPreference = polishPreference
+        self.collaborationMode = collaborationMode
+        self.pauseGhostwriteOnBlockingContinuity = pauseGhostwriteOnBlockingContinuity
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case creationMode
+        case quickStartSeed
+        case createdAt
+        case updatedAt
+        case revision
+        case configRevision
+        case mainBranchID
+        case modelPolicy
+        case stateSyncModelPolicy
+        case reviewModelPolicy
+        case lastGenerationGranularity
+        case polishPreference
+        case collaborationMode
+        case pauseGhostwriteOnBlockingContinuity
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(NovelProjectID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        creationMode = try values.decode(NovelProjectCreationMode.self, forKey: .creationMode)
+        quickStartSeed = try values.decodeIfPresent(NovelQuickStartSeed.self, forKey: .quickStartSeed)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
+        revision = try values.decode(Int64.self, forKey: .revision)
+        configRevision = try values.decode(Int64.self, forKey: .configRevision)
+        mainBranchID = try values.decode(NovelBranchID.self, forKey: .mainBranchID)
+        modelPolicy = try values.decode(NovelProjectModelPolicy.self, forKey: .modelPolicy)
+        stateSyncModelPolicy = try values.decodeIfPresent(
+            NovelProjectModelPolicy.self,
+            forKey: .stateSyncModelPolicy
+        )
+        reviewModelPolicy = try values.decodeIfPresent(
+            NovelProjectModelPolicy.self,
+            forKey: .reviewModelPolicy
+        )
+        lastGenerationGranularity = try values.decode(
+            NovelGenerationGranularity.self,
+            forKey: .lastGenerationGranularity
+        )
+        polishPreference = try values.decode(String.self, forKey: .polishPreference)
+        collaborationMode = try values.decodeIfPresent(
+            NovelCollaborationMode.self,
+            forKey: .collaborationMode
+        ) ?? .cocreation
+        pauseGhostwriteOnBlockingContinuity = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .pauseGhostwriteOnBlockingContinuity
+        ) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(name, forKey: .name)
+        try values.encode(creationMode, forKey: .creationMode)
+        try values.encodeIfPresent(quickStartSeed, forKey: .quickStartSeed)
+        try values.encode(createdAt, forKey: .createdAt)
+        try values.encode(updatedAt, forKey: .updatedAt)
+        try values.encode(revision, forKey: .revision)
+        try values.encode(configRevision, forKey: .configRevision)
+        try values.encode(mainBranchID, forKey: .mainBranchID)
+        try values.encode(modelPolicy, forKey: .modelPolicy)
+        try values.encodeIfPresent(stateSyncModelPolicy, forKey: .stateSyncModelPolicy)
+        try values.encodeIfPresent(reviewModelPolicy, forKey: .reviewModelPolicy)
+        try values.encode(lastGenerationGranularity, forKey: .lastGenerationGranularity)
+        try values.encode(polishPreference, forKey: .polishPreference)
+        try values.encode(collaborationMode, forKey: .collaborationMode)
+        try values.encode(
+            pauseGhostwriteOnBlockingContinuity,
+            forKey: .pauseGhostwriteOnBlockingContinuity
+        )
+    }
 
     func configuredModelPolicy(for purpose: NovelModelRole) -> NovelProjectModelPolicy {
         switch purpose {
         case .creation: modelPolicy
         case .stateSync: stateSyncModelPolicy ?? .global
+        case .review: reviewModelPolicy ?? .global
         }
     }
 }
@@ -438,6 +818,9 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
     let sourceChapterVersionID: NovelChapterVersionID?
     let clonedFromCandidateID: NovelCandidateID?
     var collectedCheckpointID: NovelCheckpointID?
+    /// Digest of the confirmed chapter plan bound when this prose candidate was generated.
+    /// Nil for legacy candidates and non-prose kinds. Collect rejects a mismatch.
+    let chapterPlanDigest: String?
     let createdAt: Date
 
     init(
@@ -453,6 +836,7 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
         sourceChapterVersionID: NovelChapterVersionID?,
         clonedFromCandidateID: NovelCandidateID? = nil,
         collectedCheckpointID: NovelCheckpointID?,
+        chapterPlanDigest: String? = nil,
         createdAt: Date
     ) {
         self.id = id
@@ -467,6 +851,7 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
         self.sourceChapterVersionID = sourceChapterVersionID
         self.clonedFromCandidateID = clonedFromCandidateID
         self.collectedCheckpointID = collectedCheckpointID
+        self.chapterPlanDigest = chapterPlanDigest
         self.createdAt = createdAt
     }
 
@@ -483,6 +868,7 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
         case sourceChapterVersionID
         case clonedFromCandidateID
         case collectedCheckpointID
+        case chapterPlanDigest
         case createdAt
     }
 
@@ -509,6 +895,7 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
             NovelCheckpointID.self,
             forKey: .collectedCheckpointID
         )
+        chapterPlanDigest = try values.decodeIfPresent(String.self, forKey: .chapterPlanDigest)
         createdAt = try values.decode(Date.self, forKey: .createdAt)
     }
 }
@@ -631,6 +1018,11 @@ struct NovelStoryEventRecord: Codable, Equatable, Sendable {
 }
 
 struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
+    /// Cap for cross-chapter anti-repeat highlights carried on each snapshot.
+    static let maxRecentWrittenHighlights = 24
+    /// Cap each highlight line so injection stays beat-sized, not a second manuscript.
+    static let maxHighlightCharacterCount = 160
+
     let id: NovelStateSnapshotID
     let eventIDs: [NovelEventID]
     let summary: String
@@ -638,6 +1030,8 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
     let unresolvedEntityNames: [String]
     let characterIdentityClarifications: [NovelCharacterIdentityClarificationRecord]
     let settingProposalIDs: [NovelProposalID]
+    /// Bounded beat list derived from recent story-event summaries for anti-repeat injection.
+    let recentWrittenHighlights: [String]
     let createdAt: Date
 
     init(
@@ -648,7 +1042,8 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         unresolvedEntityNames: [String],
         createdAt: Date,
         settingProposalIDs: [NovelProposalID] = [],
-        characterIdentityClarifications: [NovelCharacterIdentityClarificationRecord] = []
+        characterIdentityClarifications: [NovelCharacterIdentityClarificationRecord] = [],
+        recentWrittenHighlights: [String] = []
     ) {
         self.id = id
         self.eventIDs = eventIDs
@@ -657,6 +1052,7 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         self.unresolvedEntityNames = unresolvedEntityNames
         self.characterIdentityClarifications = characterIdentityClarifications
         self.settingProposalIDs = settingProposalIDs
+        self.recentWrittenHighlights = Self.normalizedHighlights(recentWrittenHighlights)
         self.createdAt = createdAt
     }
 
@@ -668,6 +1064,7 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         case unresolvedEntityNames
         case characterIdentityClarifications
         case settingProposalIDs
+        case recentWrittenHighlights
         case createdAt
     }
 
@@ -689,6 +1086,9 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
             [NovelProposalID].self,
             forKey: .settingProposalIDs
         ) ?? []
+        recentWrittenHighlights = Self.normalizedHighlights(
+            try container.decodeIfPresent([String].self, forKey: .recentWrittenHighlights) ?? []
+        )
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 
@@ -704,7 +1104,43 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
             forKey: .characterIdentityClarifications
         )
         try container.encode(settingProposalIDs, forKey: .settingProposalIDs)
+        try container.encode(recentWrittenHighlights, forKey: .recentWrittenHighlights)
         try container.encode(createdAt, forKey: .createdAt)
+    }
+
+    /// Merge prior highlights with new event summaries; keep the newest capped window.
+    static func mergedHighlights(
+        prior: [String],
+        newEventSummaries: [String]
+    ) -> [String] {
+        normalizedHighlights(prior + newEventSummaries)
+    }
+
+    static func normalizedHighlights(_ raw: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for item in raw {
+            let trimmed = item.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let clipped: String
+            if trimmed.count > maxHighlightCharacterCount {
+                clipped = String(trimmed.prefix(maxHighlightCharacterCount))
+            } else {
+                clipped = trimmed
+            }
+            let key = clipped.lowercased()
+            guard seen.insert(key).inserted else { continue }
+            result.append(clipped)
+        }
+        if result.count > maxRecentWrittenHighlights {
+            return Array(result.suffix(maxRecentWrittenHighlights))
+        }
+        return result
+    }
+
+    func injectionHighlightsText() -> String {
+        guard !recentWrittenHighlights.isEmpty else { return "" }
+        return recentWrittenHighlights.map { "- \($0)" }.joined(separator: "\n")
     }
 }
 
@@ -828,6 +1264,9 @@ struct NovelActiveRunRecord: Codable, Equatable, Sendable {
     var terminalAt: Date?
     var interruptionReason: NovelRunInterruptionReason?
     var terminalFailure: NovelFailure?
+    /// Confirmed chapter-plan digest captured at run begin for whole-chapter prose.
+    /// Bound onto the resulting candidate so collect can reject stale drafts.
+    let chapterPlanDigest: String?
 }
 
 struct NovelRecoverySidecarV1: Codable, Equatable, Sendable {
@@ -1005,6 +1444,12 @@ enum NovelOperationKind: String, Codable, Sendable {
     case setBranchMaterialOverride
     case setMainBranch
     case setPolishPreference
+    case setCollaborationMode
+    case setPauseGhostwriteOnBlockingContinuity
+    case upsertChapterPlan
+    case clearChapterPlan
+    case upsertUpcomingArc
+    case clearUpcomingArc
     case forkBranch
     case renameBranch
     case deleteBranch
@@ -1061,6 +1506,8 @@ struct NovelProjectDocumentV1: Codable, Equatable, Sendable {
     var pendingOperations: [NovelPendingOperationRecord]
     var activeRuns: [NovelActiveRunRecord]
     var settingProposals: [NovelSettingProposalRecord]
+    var chapterPlans: [NovelChapterPlanRecord] = []
+    var upcomingArcs: [NovelUpcomingArcRecord] = []
     var appliedOperations: [NovelAppliedOperationRecord]
 }
 
@@ -1087,6 +1534,8 @@ extension NovelProjectDocumentV1 {
         case pendingOperations
         case activeRuns
         case settingProposals
+        case chapterPlans
+        case upcomingArcs
         case appliedOperations
     }
 
@@ -1149,6 +1598,14 @@ extension NovelProjectDocumentV1 {
             [NovelSettingProposalRecord].self,
             forKey: .settingProposals
         )
+        chapterPlans = try values.decodeIfPresent(
+            [NovelChapterPlanRecord].self,
+            forKey: .chapterPlans
+        ) ?? []
+        upcomingArcs = try values.decodeIfPresent(
+            [NovelUpcomingArcRecord].self,
+            forKey: .upcomingArcs
+        ) ?? []
         appliedOperations = try values.decode(
             [NovelAppliedOperationRecord].self,
             forKey: .appliedOperations
@@ -1178,11 +1635,25 @@ extension NovelProjectDocumentV1 {
         try values.encode(pendingOperations, forKey: .pendingOperations)
         try values.encode(activeRuns, forKey: .activeRuns)
         try values.encode(settingProposals, forKey: .settingProposals)
+        try values.encode(chapterPlans, forKey: .chapterPlans)
+        try values.encode(upcomingArcs, forKey: .upcomingArcs)
         try values.encode(appliedOperations, forKey: .appliedOperations)
     }
 }
 
 extension NovelProjectDocumentV1 {
+    func chapterPlan(for branchID: NovelBranchID) -> NovelChapterPlanRecord? {
+        chapterPlans.first(where: { $0.branchID == branchID })
+    }
+
+    func confirmedChapterPlan(for branchID: NovelBranchID) -> NovelChapterPlanRecord? {
+        chapterPlan(for: branchID).flatMap { $0.isConfirmed ? $0 : nil }
+    }
+
+    func upcomingArc(for branchID: NovelBranchID) -> NovelUpcomingArcRecord? {
+        upcomingArcs.first(where: { $0.branchID == branchID })
+    }
+
     func activeSettingProposals(for branchID: NovelBranchID) -> [NovelSettingProposalRecord] {
         guard let branch = branches.first(where: { $0.id == branchID }),
               let state = stateSnapshots.first(where: {
@@ -1255,6 +1726,8 @@ struct NovelProjectSnapshot: Equatable, Sendable {
     let stateSnapshots: [NovelStateSnapshotRecord]
     let checkpoints: [NovelBranchCheckpointRecord]
     let candidates: [NovelCandidateRecord]
+    let chapterPlans: [NovelChapterPlanRecord]
+    let upcomingArcs: [NovelUpcomingArcRecord]
     let injectionReceipts: [NovelInjectionReceiptRecord]
     let generationReceipts: [NovelGenerationReceiptRecord]
     let factAttempts: [NovelFactAttemptRecord]
@@ -1280,6 +1753,8 @@ struct NovelProjectSnapshot: Equatable, Sendable {
         stateSnapshots = document.stateSnapshots
         checkpoints = document.checkpoints
         candidates = document.candidates
+        chapterPlans = document.chapterPlans
+        upcomingArcs = document.upcomingArcs
         injectionReceipts = document.injectionReceipts
         generationReceipts = document.generationReceipts
         factAttempts = document.factAttempts
@@ -1291,6 +1766,18 @@ struct NovelProjectSnapshot: Equatable, Sendable {
         settingProposals = document.settingProposals
         appliedOperations = document.appliedOperations
         access = loaded.access
+    }
+
+    func chapterPlan(for branchID: NovelBranchID) -> NovelChapterPlanRecord? {
+        chapterPlans.first(where: { $0.branchID == branchID })
+    }
+
+    func confirmedChapterPlan(for branchID: NovelBranchID) -> NovelChapterPlanRecord? {
+        chapterPlan(for: branchID).flatMap { $0.isConfirmed ? $0 : nil }
+    }
+
+    func upcomingArc(for branchID: NovelBranchID) -> NovelUpcomingArcRecord? {
+        upcomingArcs.first(where: { $0.branchID == branchID })
     }
 }
 

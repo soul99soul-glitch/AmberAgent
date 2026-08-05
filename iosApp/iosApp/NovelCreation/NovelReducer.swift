@@ -71,7 +71,10 @@ enum NovelReducer {
             modelPolicy: .global,
             stateSyncModelPolicy: nil,
             lastGenerationGranularity: .wholeChapter,
-            polishPreference: ""
+            polishPreference: "",
+            collaborationMode: .cocreation,
+            pauseGhostwriteOnBlockingContinuity: true,
+            reviewModelPolicy: nil
         )
         let outcome = NovelOutcome.projectCreated(
             projectID: command.projectID,
@@ -121,6 +124,8 @@ enum NovelReducer {
             pendingOperations: [],
             activeRuns: [],
             settingProposals: [],
+            chapterPlans: [],
+            upcomingArcs: [],
             appliedOperations: [applied]
         )
         try NovelDocumentValidator.validate(document)
@@ -180,6 +185,18 @@ enum NovelReducer {
             return try setMainBranch(command, in: document, now: now)
         case .setPolishPreference(let command):
             return try setPolishPreference(command, in: document, now: now)
+        case .setCollaborationMode(let command):
+            return try setCollaborationMode(command, in: document, now: now)
+        case .setPauseGhostwriteOnBlockingContinuity(let command):
+            return try setPauseGhostwriteOnBlockingContinuity(command, in: document, now: now)
+        case .upsertChapterPlan(let command):
+            return try upsertChapterPlan(command, in: document, now: now)
+        case .clearChapterPlan(let command):
+            return try clearChapterPlan(command, in: document, now: now)
+        case .upsertUpcomingArc(let command):
+            return try upsertUpcomingArc(command, in: document, now: now)
+        case .clearUpcomingArc(let command):
+            return try clearUpcomingArc(command, in: document, now: now)
         case .forkBranch(let command):
             return try forkBranch(command, in: document, now: now)
         case .renameBranch(let command):
@@ -492,6 +509,304 @@ enum NovelReducer {
             command.context,
             kind: .setPolishPreference,
             payloadSHA256: try NovelAction.setPolishPreference(command).canonicalPayloadSHA256(),
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validate(next)
+        return (next, outcome)
+    }
+
+    private static func setCollaborationMode(
+        _ command: NovelSetCollaborationModeCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        try requireConfigRevision(command.context, document: document)
+        guard document.branches.contains(where: {
+            $0.id == command.branchID && $0.lifecycle == .active
+        }) else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        if command.mode == document.project.collaborationMode {
+            throw NovelError.invalidInput("The project is already in \(command.mode.displayName).")
+        }
+        if command.mode == .ghostwrite {
+            let issues = NovelGhostwriteReadiness.issues(
+                in: document,
+                branchID: command.branchID,
+                requireChapterPlan: false
+            )
+            if !issues.isEmpty {
+                let detail = issues.map(\.displayName).joined(separator: "；")
+                throw NovelError.invalidInput("无法切入代笔模式：\(detail)")
+            }
+        }
+
+        var next = document
+        next.project.collaborationMode = command.mode
+        next.project.revision += 1
+        next.project.configRevision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.collaborationModeChanged(
+            projectID: command.projectID,
+            mode: command.mode,
+            projectRevision: next.project.revision,
+            configRevision: next.project.configRevision
+        )
+        recordApplied(
+            command.context,
+            kind: .setCollaborationMode,
+            payloadSHA256: try NovelAction.setCollaborationMode(command).canonicalPayloadSHA256(),
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validate(next)
+        return (next, outcome)
+    }
+
+    private static func setPauseGhostwriteOnBlockingContinuity(
+        _ command: NovelSetPauseGhostwriteOnBlockingContinuityCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        try requireConfigRevision(command.context, document: document)
+        if command.enabled == document.project.pauseGhostwriteOnBlockingContinuity {
+            throw NovelError.invalidInput(
+                command.enabled
+                    ? "连续性「严重」暂停已是开启状态。"
+                    : "连续性「严重」暂停已是关闭状态。"
+            )
+        }
+
+        var next = document
+        next.project.pauseGhostwriteOnBlockingContinuity = command.enabled
+        next.project.revision += 1
+        next.project.configRevision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.pauseGhostwriteOnBlockingContinuityChanged(
+            projectID: command.projectID,
+            enabled: command.enabled,
+            projectRevision: next.project.revision,
+            configRevision: next.project.configRevision
+        )
+        recordApplied(
+            command.context,
+            kind: .setPauseGhostwriteOnBlockingContinuity,
+            payloadSHA256: try NovelAction.setPauseGhostwriteOnBlockingContinuity(command)
+                .canonicalPayloadSHA256(),
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validate(next)
+        return (next, outcome)
+    }
+
+    private static func upsertChapterPlan(
+        _ command: NovelUpsertChapterPlanCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        try requireConfigRevision(command.context, document: document)
+        guard document.branches.contains(where: {
+            $0.id == command.branchID && $0.lifecycle == .active
+        }) else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+
+        let outlinePlacement = command.outlinePlacement.trimmingCharacters(in: .whitespacesAndNewlines)
+        let goalAndConflict = command.goalAndConflict.trimmingCharacters(in: .whitespacesAndNewlines)
+        let endingHook = command.endingHook.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mustHappen = NovelChapterPlanRecord.normalizedLines(command.mustHappen)
+        let mustNotHappen = NovelChapterPlanRecord.normalizedLines(command.mustNotHappen)
+        let visibleFacts = NovelChapterPlanRecord.normalizedLines(command.visibleFacts)
+        guard outlinePlacement.count <= 500 else {
+            throw NovelError.invalidInput("The chapter-plan placement note is too long.")
+        }
+        guard !goalAndConflict.isEmpty else {
+            throw NovelError.invalidInput("The chapter plan needs a goal and conflict.")
+        }
+        guard goalAndConflict.count <= 8_000 else {
+            throw NovelError.invalidInput("The chapter-plan goal is too long.")
+        }
+        guard endingHook.count <= 4_000 else {
+            throw NovelError.invalidInput("The chapter-plan ending hook is too long.")
+        }
+        guard mustHappen.count <= 32, mustNotHappen.count <= 32, visibleFacts.count <= 32 else {
+            throw NovelError.invalidInput("The chapter plan has too many checklist items.")
+        }
+        if command.status == .confirmed, mustHappen.isEmpty {
+            throw NovelError.invalidInput("Confirming a chapter plan requires at least one must-happen item.")
+        }
+
+        var draft = NovelChapterPlanRecord(
+            id: command.planID,
+            branchID: command.branchID,
+            status: command.status,
+            outlinePlacement: outlinePlacement,
+            goalAndConflict: goalAndConflict,
+            mustHappen: mustHappen,
+            mustNotHappen: mustNotHappen,
+            endingHook: endingHook,
+            visibleFacts: visibleFacts,
+            contentDigest: "",
+            updatedAt: now,
+            confirmedAt: command.status == .confirmed ? now : nil
+        )
+        draft.contentDigest = NovelChapterPlanRecord.digest(forCanonicalPayload: draft.canonicalDigestPayload())
+
+        if let existing = document.chapterPlan(for: command.branchID),
+           existing.id != command.planID {
+            throw NovelError.invalidInput("The branch already has a chapter plan with a different ID.")
+        }
+
+        var next = document
+        if let index = next.chapterPlans.firstIndex(where: { $0.branchID == command.branchID }) {
+            next.chapterPlans[index] = draft
+        } else {
+            next.chapterPlans.append(draft)
+        }
+        next.project.revision += 1
+        next.project.configRevision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.chapterPlanUpserted(
+            projectID: command.projectID,
+            branchID: command.branchID,
+            planID: draft.id,
+            status: draft.status,
+            contentDigest: draft.contentDigest,
+            projectRevision: next.project.revision,
+            configRevision: next.project.configRevision
+        )
+        recordApplied(
+            command.context,
+            kind: .upsertChapterPlan,
+            payloadSHA256: try NovelAction.upsertChapterPlan(command).canonicalPayloadSHA256(),
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validate(next)
+        return (next, outcome)
+    }
+
+    private static func clearChapterPlan(
+        _ command: NovelClearChapterPlanCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        try requireConfigRevision(command.context, document: document)
+        guard document.branches.contains(where: {
+            $0.id == command.branchID && $0.lifecycle == .active
+        }) else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        guard document.chapterPlan(for: command.branchID) != nil else {
+            throw NovelError.invalidInput("There is no chapter plan to clear on this branch.")
+        }
+
+        var next = document
+        next.chapterPlans.removeAll { $0.branchID == command.branchID }
+        next.project.revision += 1
+        next.project.configRevision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.chapterPlanCleared(
+            projectID: command.projectID,
+            branchID: command.branchID,
+            projectRevision: next.project.revision,
+            configRevision: next.project.configRevision
+        )
+        recordApplied(
+            command.context,
+            kind: .clearChapterPlan,
+            payloadSHA256: try NovelAction.clearChapterPlan(command).canonicalPayloadSHA256(),
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validate(next)
+        return (next, outcome)
+    }
+
+    private static func upsertUpcomingArc(
+        _ command: NovelUpsertUpcomingArcCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        try requireConfigRevision(command.context, document: document)
+        guard document.branches.contains(where: {
+            $0.id == command.branchID && $0.lifecycle == .active
+        }) else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        let beats = NovelUpcomingArcRecord.normalizedBeats(command.beats)
+        guard !beats.isEmpty else {
+            throw NovelError.invalidInput("下一弧至少需要一条要点。")
+        }
+        let record = NovelUpcomingArcRecord(
+            branchID: command.branchID,
+            beats: beats,
+            updatedAt: now
+        )
+        var next = document
+        if let index = next.upcomingArcs.firstIndex(where: { $0.branchID == command.branchID }) {
+            next.upcomingArcs[index] = record
+        } else {
+            next.upcomingArcs.append(record)
+        }
+        next.project.revision += 1
+        next.project.configRevision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.upcomingArcUpserted(
+            projectID: command.projectID,
+            branchID: command.branchID,
+            beatCount: record.beats.count,
+            projectRevision: next.project.revision,
+            configRevision: next.project.configRevision
+        )
+        recordApplied(
+            command.context,
+            kind: .upsertUpcomingArc,
+            payloadSHA256: try NovelAction.upsertUpcomingArc(command).canonicalPayloadSHA256(),
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validate(next)
+        return (next, outcome)
+    }
+
+    private static func clearUpcomingArc(
+        _ command: NovelClearUpcomingArcCommand,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        try requireConfigRevision(command.context, document: document)
+        guard document.branches.contains(where: {
+            $0.id == command.branchID && $0.lifecycle == .active
+        }) else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        guard document.upcomingArc(for: command.branchID) != nil else {
+            throw NovelError.invalidInput("当前分支没有下一弧可清除。")
+        }
+        var next = document
+        next.upcomingArcs.removeAll { $0.branchID == command.branchID }
+        next.project.revision += 1
+        next.project.configRevision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.upcomingArcCleared(
+            projectID: command.projectID,
+            branchID: command.branchID,
+            projectRevision: next.project.revision,
+            configRevision: next.project.configRevision
+        )
+        recordApplied(
+            command.context,
+            kind: .clearUpcomingArc,
+            payloadSHA256: try NovelAction.clearUpcomingArc(command).canonicalPayloadSHA256(),
             outcome: outcome,
             in: &next,
             now: now

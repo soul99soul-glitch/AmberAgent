@@ -374,6 +374,7 @@ struct ComposerModelSheet: View {
     let title: String
     let fallbackTitle: String?
     let onFallback: (() -> Void)?
+    let dismissesAfterFallback: Bool
     let onPick: (ComposerModelOption) -> Void
 
     @State private var expandedProviderIDs: Set<String>
@@ -389,6 +390,7 @@ struct ComposerModelSheet: View {
         title: String = "选择模型",
         fallbackTitle: String? = nil,
         onFallback: (() -> Void)? = nil,
+        dismissesAfterFallback: Bool = true,
         onPick: @escaping (ComposerModelOption) -> Void
     ) {
         self.sharedSettings = sharedSettings
@@ -396,6 +398,7 @@ struct ComposerModelSheet: View {
         self.title = title
         self.fallbackTitle = fallbackTitle
         self.onFallback = onFallback
+        self.dismissesAfterFallback = dismissesAfterFallback
         self.onPick = onPick
         let selectedProviderID = Self.selectedProviderID(
             for: currentModel,
@@ -437,7 +440,9 @@ struct ComposerModelSheet: View {
                 if let fallbackTitle, let onFallback {
                     Button {
                         onFallback()
-                        dismiss()
+                        if dismissesAfterFallback {
+                            dismiss()
+                        }
                     } label: {
                         Label(fallbackTitle, systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
                             .font(.subheadline.weight(.medium))

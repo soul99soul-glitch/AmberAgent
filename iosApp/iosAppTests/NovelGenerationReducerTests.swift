@@ -449,7 +449,7 @@ final class NovelGenerationReducerTests: XCTestCase {
         }
     }
 
-    func testStaleRevisionsFailButNeedsSyncStillAllowsProse() throws {
+    func testStaleRevisionsFailAndNeedsSyncBlocksProse() throws {
         let document = try NovelTestFixtures.document()
         let stale = makeRequest(
             document: document,
@@ -484,16 +484,33 @@ final class NovelGenerationReducerTests: XCTestCase {
             kind: .prose,
             granularity: .continuation
         )
-        let started = try NovelGenerationReducer.begin(
+        // Live start plans injection against the current document, so needsSync
+        // fails closed before the reducer. Keep a reducer-level guard for any
+        // path that reuses artifacts prepared against an older synchronized snapshot.
+        XCTAssertThrowsError(try makeArtifacts(document: needsSync, request: prose)) { error in
+            XCTAssertEqual(
+                error as? NovelInjectionPlanningError,
+                .branchRequiresSync(needsSync.branches[0].id)
+            )
+        }
+        let synchronizedPlanArtifacts = try makeArtifacts(
+            document: needsSync,
+            request: prose,
+            planningDocument: document
+        )
+        XCTAssertThrowsError(try NovelGenerationReducer.begin(
             prose,
-            artifacts: makeArtifacts(document: needsSync, request: prose),
+            artifacts: synchronizedPlanArtifacts,
             in: needsSync,
             now: startTime
-        )
+        )) { error in
+            XCTAssertEqual(
+                error as? NovelError,
+                .invalidInput("The branch must be synchronized before writing prose.")
+            )
+        }
         XCTAssertTrue(needsSync.sessions[0].messages.isEmpty)
         XCTAssertTrue(needsSync.activeRuns.isEmpty)
-        XCTAssertEqual(started.document.activeRuns.map(\.id), [prose.id])
-        XCTAssertEqual(started.document.branches[0].syncStatus, .needsSync)
     }
 
     func testInterruptionPersistsOptionalDraftAndLateTerminalsAreNoOps() throws {
@@ -1220,7 +1237,8 @@ private extension NovelGenerationReducerTests {
             startedAt: run.startedAt,
             terminalAt: run.terminalAt,
             interruptionReason: run.interruptionReason,
-            terminalFailure: run.terminalFailure
+            terminalFailure: run.terminalFailure,
+            chapterPlanDigest: run.chapterPlanDigest
         )
     }
 

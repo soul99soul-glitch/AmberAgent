@@ -9,6 +9,11 @@ final class NovelPromptCatalogTests: XCTestCase {
             "\($0.kind.rawValue)\n\($0.version)\n\($0.systemText)"
         }.joined(separator: "\n---\n")
 
+        // 2026-08-06 显式更新(第二次):`.chapterPlanAcceptanceV1` 升至 schemaVersion 2 /
+        // `novel.chapter-plan-acceptance.v2`（增加 obviousRepetition 软门）。
+        //
+        // 2026-08-06 显式更新(第一次):新增 `.chapterPlanAcceptanceV1`（代笔本章合同结构化验收）。
+        //
         // 2026-08-05 显式更新:新增 `.characterProposal` 模板，为正文中新出现的人物
         // 生成一组须确认的人物、关系、世界观和剧情建议。
         //
@@ -23,7 +28,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
         XCTAssertEqual(
             sha256(snapshot),
-            "dd8eb45f34787fc7439f267483b1d8c0b4a7b82e53053daf2c7f98b9aedbffd4"
+            "c5ea661d891fc6164ace170d02632cb808429e252e9f8da5a38c9b15b3164d88"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }

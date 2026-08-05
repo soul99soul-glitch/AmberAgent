@@ -810,11 +810,13 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
     }
 
     func testMemoryToolCreateEditDeletePersistsAndFeedsPrompt() throws {
+        IOSMemoryPersistence.shared.load()
         let originalRecords = IosMemoryFactory.shared.getAllRecords()
         IosMemoryFactory.shared.replaceAll(records: [])
         defer {
+            let testRecords = IosMemoryFactory.shared.snapshotRecords()
             IosMemoryFactory.shared.replaceAll(records: originalRecords)
-            IOSMemoryPersistence.shared.persist()
+            IOSMemoryPersistence.shared.persist(previousRecords: testRecords)
         }
 
         let sharedSettings = memorySettings(core: true, shortTerm: true, longTerm: true)
@@ -828,6 +830,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
 
         var record = try XCTUnwrap(IosMemoryFactory.shared.getAllRecords().first)
         let id = Int(record.id)
+        let lastUsedAtBeforeEdit = record.lastUsedAt?.int64Value
         XCTAssertEqual(record.scope, MemoryScope.longTerm)
         XCTAssertEqual(record.kind, MemoryKind.user)
         XCTAssertTrue(record.pinned)
@@ -847,6 +850,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(record.scope, MemoryScope.shortTerm)
         XCTAssertEqual(record.kind, MemoryKind.project)
         XCTAssertFalse(record.pinned)
+        XCTAssertEqual(record.lastUsedAt?.int64Value, lastUsedAtBeforeEdit)
 
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -891,6 +895,73 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(payload["ok"] as? Bool, false)
         XCTAssertEqual(payload["scope"] as? String, "core")
         XCTAssertTrue(IosMemoryFactory.shared.getAllRecords().isEmpty)
+    }
+
+    func testMemoryToolRejectsUnknownScopeAndKind() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer { IosMemoryFactory.shared.replaceAll(records: originalRecords) }
+        let runtime = memorySettings(core: true, shortTerm: true, longTerm: true).agentRuntime
+
+        let scopePayload = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"create","scope":"unknown","content":"must not save"}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        let kindPayload = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"create","scope":"core","kind":"unknown","content":"must not save"}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+
+        XCTAssertEqual(scopePayload["error"] as? String, "invalid memory scope")
+        XCTAssertEqual(kindPayload["error"] as? String, "invalid memory kind")
+        XCTAssertTrue(IosMemoryFactory.shared.getAllRecords().isEmpty)
+    }
+
+    func testDeleteApprovalPreviewShowsStoredTargetContent() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        defer { IosMemoryFactory.shared.replaceAll(records: originalRecords) }
+        let record = MemoryRecord(
+            id: 77,
+            content: "删除前必须展示的记忆正文",
+            scope: .core,
+            kind: .note,
+            assistantId: IosMemoryFactory.shared.GLOBAL_MEMORY_ID,
+            sourceConversationId: nil,
+            sourceMessageIds: [],
+            supersedesIds: [],
+            expiresAt: nil,
+            confidence: 1,
+            pinned: false,
+            archived: false,
+            createdAt: 1,
+            updatedAt: 1,
+            lastUsedAt: nil
+        )
+        IosMemoryFactory.shared.replaceAll(records: [record])
+
+        let preview = try XCTUnwrap(IOSMemoryToolExecutor.approvalPreview(
+            input: #"{"action":"delete","id":77}"#
+        ))
+
+        XCTAssertEqual(preview.targetId, 77)
+        XCTAssertEqual(preview.contentPreview, "删除前必须展示的记忆正文")
+    }
+
+    func testDeniedMemoryWriteAuditDoesNotPersistContentPreview() {
+        let auditStore = IOSMemoryWriteAuditStore.shared
+        auditStore.clear()
+        defer { auditStore.clear() }
+
+        _ = IOSMemoryToolExecutor.execute(
+            input: #"{"action":"create","scope":"core","content":"sensitive denied content"}"#,
+            runtime: memorySettings(core: true, shortTerm: true, longTerm: true).agentRuntime,
+            writePolicy: .deniedByUser("user denied")
+        )
+
+        XCTAssertEqual(auditStore.records.first?.status, "denied_by_user")
+        XCTAssertNil(auditStore.records.first?.contentPreview)
     }
 
     func testMemoryToolWritePolicyBlocksMutationButAllowsList() throws {
@@ -963,10 +1034,13 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
     }
 
     func testMemoryToolApprovalAllowWritesAndDenyDoesNotWrite() throws {
+        IOSMemoryPersistence.shared.load()
         let originalRecords = IosMemoryFactory.shared.getAllRecords()
         IosMemoryFactory.shared.replaceAll(records: [])
         defer {
+            let testRecords = IosMemoryFactory.shared.snapshotRecords()
             IosMemoryFactory.shared.replaceAll(records: originalRecords)
+            IOSMemoryPersistence.shared.persist(previousRecords: testRecords)
         }
 
         let executor = IOSLocalToolExecutor(

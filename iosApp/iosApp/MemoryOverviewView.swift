@@ -7,18 +7,20 @@ struct MemoryOverviewView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
 
-    @State private var records: [MemoryRecord] = []
+    @State private var persistence = IOSMemoryPersistence.shared
     @State private var query = ""
     @State private var scopeFilter: IOSMemoryScopeFilter = .all
     @State private var auditStore = IOSMemoryWriteAuditStore.shared
     @State private var pendingDeleteRecord: MemoryRecord?
+    @State private var operationError: String?
+    @State private var showClearAuditConfirmation = false
 
     private var filteredRecords: [MemoryRecord] {
-        IOSMemoryLibrary.filteredRecords(records: records, query: query, scopeFilter: scopeFilter)
+        IOSMemoryLibrary.filteredRecords(records: persistence.records, query: query, scopeFilter: scopeFilter)
     }
 
     private var recallRecords: [MemoryRecord] {
-        IOSMemoryLibrary.recallCandidates(records: records, runtime: sharedSettings.agentRuntime)
+        IOSMemoryLibrary.recallCandidates(records: persistence.records, runtime: sharedSettings.agentRuntime)
     }
 
     private var recallRecordIds: Set<Int32> {
@@ -33,6 +35,7 @@ struct MemoryOverviewView: View {
                 VStack(spacing: 0) {
                     header
                     intro
+                    loadStatusSection
                     runtimeSection
                     searchSection
                     recallSection
@@ -46,6 +49,14 @@ struct MemoryOverviewView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear(perform: refresh)
+        .alert("无法修改记忆", isPresented: Binding(
+            get: { operationError != nil },
+            set: { if !$0 { operationError = nil } }
+        )) {
+            Button("好") { operationError = nil }
+        } message: {
+            Text(operationError ?? "未知错误")
+        }
         .confirmationDialog(
             "删除这条记忆？",
             isPresented: Binding(
@@ -64,6 +75,18 @@ struct MemoryOverviewView: View {
         } message: {
             Text("删除后不可恢复。")
         }
+        .confirmationDialog(
+            "清除写入审批记录？",
+            isPresented: $showClearAuditConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("清除记录", role: .destructive) {
+                auditStore.clear()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只会清除审批历史，不会删除已保存的记忆。")
+        }
     }
 
     private var header: some View {
@@ -78,7 +101,7 @@ struct MemoryOverviewView: View {
                 Text("核心记忆")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(AmberTheme.foreground)
-                Text("\(records.count) 条本地记忆")
+                Text("\(persistence.records.count) 条本地记忆")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -95,10 +118,37 @@ struct MemoryOverviewView: View {
             ) {
                 router.navigate(to: .memoryEdit(recordId: nil, text: "", scope: "核心", pinned: false))
             }
+            .disabled(persistence.loadState == .unreadable)
         }
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 18)
+    }
+
+    @ViewBuilder
+    private var loadStatusSection: some View {
+        if persistence.loadState == .unreadable {
+            AmberFormGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("现有记忆无法读取", systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AmberTheme.accentRed)
+                    Text(persistence.lastErrorMessage ?? "已停止写入以保护原文件。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.foreground2)
+                    Button("重新读取") {
+                        persistence.load()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(minHeight: 44)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+            .padding(.top, 14)
+        }
     }
 
     private var intro: some View {
@@ -152,6 +202,7 @@ struct MemoryOverviewView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(AmberTheme.muted)
+                        .accessibilityHidden(true)
                     TextField("搜索内容、来源或标签", text: $query)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -163,6 +214,9 @@ struct MemoryOverviewView: View {
                                 .foregroundStyle(AmberTheme.muted2)
                         }
                         .buttonStyle(.plain)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel("清除搜索")
                     }
                 }
                 .font(.body)
@@ -174,21 +228,25 @@ struct MemoryOverviewView: View {
                         .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
                 }
 
-                HStack(spacing: 8) {
-                    ForEach(IOSMemoryScopeFilter.allCases) { filter in
-                        Button {
-                            scopeFilter = filter
-                        } label: {
-                            MemoryScopeFilterChip(
-                                title: filter.title,
-                                isSelected: scopeFilter == filter
-                            )
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(IOSMemoryScopeFilter.allCases) { filter in
+                            Button {
+                                scopeFilter = filter
+                            } label: {
+                                MemoryScopeFilterChip(
+                                    title: filter.title,
+                                    isSelected: scopeFilter == filter
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                            .accessibilityAddTraits(scopeFilter == filter ? .isSelected : [])
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(scopeFilter == filter ? .isSelected : [])
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .scrollIndicators(.hidden)
             }
             .padding(.horizontal, 16)
         }
@@ -208,12 +266,13 @@ struct MemoryOverviewView: View {
                                 .foregroundStyle(recallRecords.isEmpty ? AmberTheme.muted2 : AmberTheme.accentCyan)
                         }
                         .frame(width: 32, height: 32)
+                        .accessibilityHidden(true)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("\(recallRecords.count) 条会进入当前聊天候选")
+                            Text("\(recallRecords.count) 条当前可参与召回")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(AmberTheme.foreground)
-                            Text(IOSMemoryLibrary.recallExplanation(records: records, runtime: sharedSettings.agentRuntime))
+                            Text(IOSMemoryLibrary.recallExplanation(records: persistence.records, runtime: sharedSettings.agentRuntime))
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -243,7 +302,7 @@ struct MemoryOverviewView: View {
             AmberSectionLabel(text: "记忆库")
             if filteredRecords.isEmpty {
                 AmberFormGroup {
-                    MemoryEmptyState(isSearching: !records.isEmpty)
+                    MemoryEmptyState(isSearching: !persistence.records.isEmpty)
                 }
             } else {
                 AmberFormGroup {
@@ -278,31 +337,51 @@ struct MemoryOverviewView: View {
             AmberSectionLabel(text: "写入审批记录")
             AmberFormGroup {
                 if auditStore.records.isEmpty {
-                    Text("暂无模型写入审批记录。聊天里的新增、修改或删除记忆请求会在前台确认后记录在这里。")
+                    Text("暂无模型写入审批记录。聊天里的新增、修改或删除请求会记录在这里；需要确认时会在聊天中提示。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 12)
                 } else {
-                    ForEach(Array(auditStore.records.prefix(5).enumerated()), id: \.element.id) { index, record in
+                    ForEach(Array(auditStore.records.prefix(5))) { record in
                         MemoryAuditRow(record: record)
-                        if index < min(auditStore.records.count, 5) - 1 {
-                            MemoryDivider(leading: 14)
-                        }
+                        MemoryDivider(leading: 14)
                     }
+
+                    Button(role: .destructive) {
+                        showClearAuditConfirmation = true
+                    } label: {
+                        Text("清除审批记录")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(AmberTheme.accentRed)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minHeight: 44)
+                            .padding(.horizontal, 14)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
     }
 
     private func refresh() {
-        records = IosMemoryFactory.shared.getAllRecords()
+        persistence.refresh()
     }
 
     private func delete(_ record: MemoryRecord) {
+        guard persistence.records.contains(where: { $0.id == record.id && $0.updatedAt == record.updatedAt }) else {
+            operationError = "这条记忆已在其他地方更新或删除，请重试。"
+            persistence.refresh()
+            return
+        }
+        let previousRecords = persistence.records
         IosMemoryFactory.shared.deleteMemory(id: record.id)
-        IOSMemoryPersistence.shared.persist()
+        guard persistence.persist(previousRecords: previousRecords) else {
+            operationError = persistence.lastErrorMessage ?? "无法写入记忆。"
+            return
+        }
         IOSMemoryWriteAuditStore.shared.record(
             action: "delete",
             status: "user_deleted",
@@ -344,6 +423,8 @@ private struct MemoryRecordRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("编辑记忆")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
 
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash")
@@ -352,6 +433,8 @@ private struct MemoryRecordRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("删除记忆")
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
                 }
             }
 
@@ -379,12 +462,13 @@ private struct MemoryAuditRow: View {
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: statusIcon)
+                .accessibilityHidden(true)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(statusColor)
                 .frame(width: 28, height: 28)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("\(record.action) · \(statusTitle)")
+                Text("\(IOSMemoryLibrary.actionDisplay(record.action)) · \(statusTitle)")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground)
                 Text(detail)
@@ -401,8 +485,8 @@ private struct MemoryAuditRow: View {
     private var detail: String {
         var parts: [String] = []
         if let memoryId = record.memoryId { parts.append("#\(memoryId)") }
-        if let scope = record.scope { parts.append(scope) }
-        if let kind = record.kind { parts.append(kind) }
+        if let scope = record.scope { parts.append(IOSMemoryLibrary.scopeDisplay(scope)) }
+        if let kind = record.kind { parts.append(IOSMemoryLibrary.kindDisplay(kind)) }
         if let contentPreview = record.contentPreview { parts.append(contentPreview) }
         if parts.isEmpty, !record.reason.isEmpty { return record.reason }
         return parts.joined(separator: " · ")
@@ -502,6 +586,7 @@ private struct MemoryEmptyState: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 30, weight: .medium))
                     .foregroundStyle(AmberTheme.muted2)
+                    .accessibilityHidden(true)
             }
             .frame(width: 58, height: 58)
 
@@ -536,7 +621,7 @@ private struct MemoryPresetRow: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 

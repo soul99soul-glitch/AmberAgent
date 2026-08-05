@@ -285,7 +285,10 @@ enum NovelProjectIdentityRemapper {
             modelPolicy: project.modelPolicy,
             stateSyncModelPolicy: project.stateSyncModelPolicy,
             lastGenerationGranularity: project.lastGenerationGranularity,
-            polishPreference: project.polishPreference
+            polishPreference: project.polishPreference,
+            collaborationMode: project.collaborationMode,
+            pauseGhostwriteOnBlockingContinuity: project.pauseGhostwriteOnBlockingContinuity,
+            reviewModelPolicy: project.reviewModelPolicy
         )
         next.injectionReceipts = document.injectionReceipts.map {
             $0.remappingProjectID(to: projectID)
@@ -424,6 +427,56 @@ extension NovelOutcome {
         case .polishPreferenceChanged(_, let projectRevision, let configRevision):
             return .polishPreferenceChanged(
                 projectID: projectID,
+                projectRevision: projectRevision,
+                configRevision: configRevision
+            )
+        case .collaborationModeChanged(_, let mode, let projectRevision, let configRevision):
+            return .collaborationModeChanged(
+                projectID: projectID,
+                mode: mode,
+                projectRevision: projectRevision,
+                configRevision: configRevision
+            )
+        case .pauseGhostwriteOnBlockingContinuityChanged(
+            _, let enabled, let projectRevision, let configRevision
+        ):
+            return .pauseGhostwriteOnBlockingContinuityChanged(
+                projectID: projectID,
+                enabled: enabled,
+                projectRevision: projectRevision,
+                configRevision: configRevision
+            )
+        case .chapterPlanUpserted(
+            _, let branchID, let planID, let status, let contentDigest, let projectRevision, let configRevision
+        ):
+            return .chapterPlanUpserted(
+                projectID: projectID,
+                branchID: branchID,
+                planID: planID,
+                status: status,
+                contentDigest: contentDigest,
+                projectRevision: projectRevision,
+                configRevision: configRevision
+            )
+        case .chapterPlanCleared(_, let branchID, let projectRevision, let configRevision):
+            return .chapterPlanCleared(
+                projectID: projectID,
+                branchID: branchID,
+                projectRevision: projectRevision,
+                configRevision: configRevision
+            )
+        case .upcomingArcUpserted(_, let branchID, let beatCount, let projectRevision, let configRevision):
+            return .upcomingArcUpserted(
+                projectID: projectID,
+                branchID: branchID,
+                beatCount: beatCount,
+                projectRevision: projectRevision,
+                configRevision: configRevision
+            )
+        case .upcomingArcCleared(_, let branchID, let projectRevision, let configRevision):
+            return .upcomingArcCleared(
+                projectID: projectID,
+                branchID: branchID,
                 projectRevision: projectRevision,
                 configRevision: configRevision
             )

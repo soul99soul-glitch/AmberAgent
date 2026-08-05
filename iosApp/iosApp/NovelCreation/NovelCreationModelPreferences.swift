@@ -6,6 +6,7 @@ final class NovelCreationModelPreferences: @unchecked Sendable {
     private enum Keys {
         static let creation = "novel.creation.default-model-policy"
         static let stateSync = "novel.creation.state-sync-model-policy"
+        static let review = "novel.creation.review-model-policy"
     }
 
     private let lock = NSLock()
@@ -41,6 +42,7 @@ final class NovelCreationModelPreferences: @unchecked Sendable {
         switch purpose {
         case .creation: Keys.creation
         case .stateSync: Keys.stateSync
+        case .review: Keys.review
         }
     }
 }

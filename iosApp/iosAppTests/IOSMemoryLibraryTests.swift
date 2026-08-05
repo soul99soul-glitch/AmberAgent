@@ -55,7 +55,7 @@ final class IOSMemoryLibraryTests: XCTestCase {
         XCTAssertEqual(candidates.map(\.id), [1, 3])
         let explanation = IOSMemoryLibrary.recallExplanation(records: [shortTerm, longTerm, core], runtime: store.agentRuntime)
         XCTAssertTrue(explanation.contains("核心、长期"))
-        XCTAssertTrue(explanation.contains("置顶优先"))
+        XCTAssertTrue(explanation.contains("置顶"))
     }
 
     func testSourceSummaryAndPreviewAreStable() {

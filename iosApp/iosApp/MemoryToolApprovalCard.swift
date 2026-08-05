@@ -15,14 +15,13 @@ struct MemoryToolApprovalCard: View {
                     .background(AmberTheme.accentAmber.opacity(0.12), in: Circle())
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(request.title)
+                    Text(cardTitle)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
 
                     Text(request.reason)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -32,7 +31,6 @@ struct MemoryToolApprovalCard: View {
             Text(bodyPreview)
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.foreground2)
-                .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -42,11 +40,18 @@ struct MemoryToolApprovalCard: View {
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous)
                 )
 
-            HStack(spacing: 6) {
-                ForEach(detailChips) { chip in
-                    MemoryToolApprovalChip(chip: chip)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(detailChips) { chip in
+                        MemoryToolApprovalChip(chip: chip)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(detailChips) { chip in
+                        MemoryToolApprovalChip(chip: chip)
+                    }
+                }
             }
 
             HStack(spacing: 8) {
@@ -65,27 +70,33 @@ struct MemoryToolApprovalCard: View {
                 .accessibilityLabel("拒绝记忆写入")
 
                 Button(action: onApprove) {
-                    Label("批准", systemImage: "checkmark")
+                    Label(approveLabel, systemImage: approveSystemImage)
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 13)
                         .frame(height: 32)
-                        .background(AmberTheme.accent, in: Capsule())
+                        .background(approveColor, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .chatApprovalHitTarget()
-                .accessibilityLabel("批准记忆写入")
+                .accessibilityLabel(approveLabel)
             }
         }
         .padding(12)
         .amberGlass(cornerRadius: 18)
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(AmberTheme.accentAmber.opacity(0.34), lineWidth: 0.7)
+                .stroke(cardTint.opacity(0.34), lineWidth: 0.7)
         }
     }
 
     private var bodyPreview: String {
+        if isDestructive {
+            if let targetId = request.targetId {
+                return "将永久删除 ID 为 \(targetId) 的已保存记忆。\n\(request.contentPreview ?? "此操作不可撤销。")"
+            }
+            return "将永久删除这条已保存记忆。\n\(request.contentPreview ?? "此操作不可撤销。")"
+        }
         if let contentPreview = request.contentPreview {
             return contentPreview
         }
@@ -97,7 +108,7 @@ struct MemoryToolApprovalCard: View {
 
     private var detailChips: [MemoryToolApprovalChipModel] {
         var chips: [MemoryToolApprovalChipModel] = [
-            MemoryToolApprovalChipModel(systemImage: "bolt.horizontal", title: request.action)
+            MemoryToolApprovalChipModel(systemImage: "bolt.horizontal", title: actionLabel)
         ]
         if let scope = request.scope {
             chips.append(MemoryToolApprovalChipModel(systemImage: "tray.full", title: scopeLabel(scope)))
@@ -110,6 +121,39 @@ struct MemoryToolApprovalCard: View {
         }
         return chips
     }
+
+    private var isDestructive: Bool {
+        ["delete", "remove"].contains(request.action.lowercased())
+    }
+
+    private var isEdit: Bool {
+        ["edit", "update"].contains(request.action.lowercased())
+    }
+
+    private var actionLabel: String {
+        switch request.action.lowercased() {
+        case "create", "add", "write": "保存"
+        case "edit", "update": "编辑"
+        case "delete", "remove": "删除"
+        default: request.action
+        }
+    }
+
+    private var cardTitle: String {
+        if isDestructive { return "删除记忆" }
+        if isEdit { return "编辑记忆" }
+        return request.title
+    }
+
+    private var approveLabel: String {
+        if isDestructive { return "删除" }
+        if isEdit { return "保存修改" }
+        return "保存"
+    }
+
+    private var approveSystemImage: String { isDestructive ? "trash" : "checkmark" }
+    private var approveColor: Color { isDestructive ? AmberTheme.accentRed : AmberTheme.accent }
+    private var cardTint: Color { isDestructive ? AmberTheme.accentRed : AmberTheme.accentAmber }
 
     private func scopeLabel(_ value: String) -> String {
         switch value {

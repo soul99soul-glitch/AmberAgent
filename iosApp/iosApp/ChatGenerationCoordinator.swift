@@ -417,6 +417,8 @@ struct ChatGenerationBindings {
     let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?
     let messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
     let userFacingGenerationError: (String, String?) -> String
+    var memoryRecordIdsForRuntimeContext: ([UIMessage]) -> [Int32] = { _ in [] }
+    var recordMemoryUsage: @MainActor ([Int32]) -> Void = { _ in }
     var generationSucceeded: @MainActor () -> Void = {}
 }
 
@@ -1515,6 +1517,7 @@ final class ChatGenerationCoordinator {
             params: effectiveParams
         )
         let runtimePreparedMessages = bindings.messagesByInjectingRuntimeContext(promptedUploadMessages)
+        let selectedMemoryIds = bindings.memoryRecordIdsForRuntimeContext(promptedUploadMessages)
         let finalizedUploadMessages: [UIMessage]
         do {
             finalizedUploadMessages = try IOSContextCompactionCoordinator.shared.finalizedMessagesForRequest(
@@ -1537,6 +1540,7 @@ final class ChatGenerationCoordinator {
             return
         }
         let finalUploadMessages = ChatRuntimeContextBuilder.coalescingSystemMessages(finalizedUploadMessages)
+        bindings.recordMemoryUsage(selectedMemoryIds)
         startStreaming(
             providerSetting: effectiveProvider,
             params: effectiveParams,

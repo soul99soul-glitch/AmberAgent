@@ -9,6 +9,7 @@ struct MemoryEditView: View {
     @State private var text: String
     @State private var scope: MemoryEditScope
     @State private var pinned: Bool
+    @State private var persistence = IOSMemoryPersistence.shared
     @State private var existingRecord: MemoryRecord?
     @State private var showDeleteInfo = false
     @State private var saveError: String?
@@ -182,6 +183,9 @@ struct MemoryEditView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("置顶")
+                .accessibilityValue(pinned ? "已置顶" : "未置顶")
+                .accessibilityAddTraits(.isButton)
             }
 
             MemoryEditNote(text.isEmpty ? "待保存 · 空内容" : "待保存 · \(scope.title) · \(pinned ? "置顶" : "未置顶")")
@@ -228,7 +232,9 @@ struct MemoryEditView: View {
     }
 
     private var canSave: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        persistence.loadState != .unreadable &&
+            (recordId == nil || existingRecord != nil) &&
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var deleteTitle: String {
@@ -240,8 +246,13 @@ struct MemoryEditView: View {
     }
 
     private func loadRecordIfNeeded() {
+        guard persistence.loadState != .unreadable else {
+            saveError = persistence.lastErrorMessage
+            return
+        }
         guard let recordId else { return }
-        guard let record = IosMemoryFactory.shared.getAllRecords().first(where: { Int($0.id) == recordId }) else {
+        persistence.refresh()
+        guard let record = persistence.records.first(where: { Int($0.id) == recordId }) else {
             saveError = "这条记忆不存在，可能已经被删除。"
             return
         }
@@ -258,32 +269,45 @@ struct MemoryEditView: View {
             saveError = "内容不能为空。"
             return
         }
+        guard recordId == nil || existingRecord != nil else {
+            saveError = "保存失败：这条记忆不存在，可能已经被删除。"
+            return
+        }
 
         if let existingRecord {
+            guard let current = persistence.records.first(where: { $0.id == existingRecord.id }),
+                  current.updatedAt == existingRecord.updatedAt else {
+                saveError = "保存失败：这条记忆已在其他地方更新，请返回后重新打开。"
+                return
+            }
             let updatedAt = nowMillis()
             let updated = MemoryRecord(
                 id: existingRecord.id,
                 content: trimmed,
                 scope: scope.memoryScope,
-                kind: existingRecord.kind,
+                kind: current.kind,
                 assistantId: scope.bucket,
-                sourceConversationId: existingRecord.sourceConversationId,
-                sourceMessageIds: existingRecord.sourceMessageIds,
-                supersedesIds: existingRecord.supersedesIds,
-                expiresAt: existingRecord.expiresAt,
-                confidence: existingRecord.confidence,
+                sourceConversationId: current.sourceConversationId,
+                sourceMessageIds: current.sourceMessageIds,
+                supersedesIds: current.supersedesIds,
+                expiresAt: current.expiresAt,
+                confidence: current.confidence,
                 pinned: pinned,
-                archived: existingRecord.archived,
-                createdAt: existingRecord.createdAt,
+                archived: current.archived,
+                createdAt: current.createdAt,
                 updatedAt: updatedAt,
-                lastUsedAt: KotlinLong(value: updatedAt)
+                lastUsedAt: current.lastUsedAt
             )
+            let previousRecords = persistence.records
             guard let saved = IosMemoryFactory.shared.updateRecord(record: updated) else {
                 saveError = "保存失败：这条记忆不存在。"
                 IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "memory not found", memoryId: Int(existingRecord.id))
                 return
             }
-            IOSMemoryPersistence.shared.persist()
+            guard persistence.persist(previousRecords: previousRecords) else {
+                saveError = persistence.lastErrorMessage ?? "保存失败：无法写入记忆。"
+                return
+            }
             IOSMemoryWriteAuditStore.shared.record(
                 action: "edit",
                 status: "user_saved",
@@ -293,6 +317,7 @@ struct MemoryEditView: View {
                 contentPreview: IOSMemoryLibrary.preview(saved.content)
             )
         } else {
+            let previousRecords = persistence.records
             let record = IosMemoryFactory.shared.addDetailedMemory(
                 scope: scope.memoryScope,
                 kind: scope.memoryScope == MemoryScope.shortTerm ? MemoryKind.project : MemoryKind.note,
@@ -306,7 +331,10 @@ struct MemoryEditView: View {
                 pinned: pinned,
                 archived: false
             )
-            IOSMemoryPersistence.shared.persist()
+            guard persistence.persist(previousRecords: previousRecords) else {
+                saveError = persistence.lastErrorMessage ?? "保存失败：无法写入记忆。"
+                return
+            }
             IOSMemoryWriteAuditStore.shared.record(
                 action: "create",
                 status: "user_saved",
@@ -321,8 +349,18 @@ struct MemoryEditView: View {
 
     private func deleteCurrentRecord() {
         guard let recordId else { return }
+        persistence.refresh()
+        guard let current = persistence.records.first(where: { Int($0.id) == recordId }),
+              existingRecord?.updatedAt == current.updatedAt else {
+            saveError = "删除失败：这条记忆已在其他地方更新，请返回后重新打开。"
+            return
+        }
+        let previousRecords = persistence.records
         IosMemoryFactory.shared.deleteMemory(id: Int32(recordId))
-        IOSMemoryPersistence.shared.persist()
+        guard persistence.persist(previousRecords: previousRecords) else {
+            saveError = persistence.lastErrorMessage ?? "删除失败：无法写入记忆。"
+            return
+        }
         IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "user_deleted", memoryId: recordId)
         dismiss()
     }
@@ -424,6 +462,7 @@ private struct MemoryValueRow: View {
 
 private struct MemoryEditSwitch: View {
     let isOn: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Capsule()
@@ -436,7 +475,7 @@ private struct MemoryEditSwitch: View {
                     .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
                     .padding(2)
             }
-            .animation(.snappy(duration: 0.18), value: isOn)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: isOn)
     }
 }
 
@@ -502,6 +541,8 @@ private struct MemoryDraftCloseButton: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Capsule())
         .amberGlass(cornerRadius: AmberTheme.radiusPill)
         .accessibilityLabel("关闭")
     }

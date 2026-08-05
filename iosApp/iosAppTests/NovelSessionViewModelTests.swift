@@ -2383,39 +2383,34 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertFalse(harness.workspace.isPerforming)
     }
 
-    func testRetryableManualSyncDoesNotBlockGeneratingANewProseCandidate() async throws {
+    func testRetryableManualSyncBlocksGeneratingANewProseCandidate() async throws {
         let fixture = try persistedManualSync(status: .retryable)
         let harness = try await makeHarness(
             document: fixture.document,
             scripts: [NovelModelScript(steps: [
-                .delta("Mara pushed open the archive door."),
+                .delta("我们可以先确认这段改写对后续伏笔的影响。"),
                 .complete,
             ])]
         )
         harness.session.mode = .writeProse
         harness.session.granularity = .continuation
 
-        XCTAssertTrue(harness.session.canSend)
+        XCTAssertEqual(harness.workspace.branchSnapshot?.branch.syncStatus, .needsSync)
+        XCTAssertFalse(harness.session.canSend)
         let didStart = await harness.session.send(text: "继续写她进入档案馆")
-        XCTAssertTrue(didStart)
-        let completed = await eventually {
-            !harness.session.availableProseCandidates.isEmpty && !harness.session.isRunning
-        }
-        XCTAssertTrue(completed)
+        XCTAssertFalse(didStart)
 
-        let candidate = try XCTUnwrap(harness.session.availableProseCandidates.first)
-        let paragraphs = harness.session.paragraphs(candidateID: candidate.id)
-        let collected = await harness.session.collectCandidate(
-            candidate.id,
-            selection: NovelParagraphSelection(paragraphIDs: paragraphs.map(\.id)),
-            target: .appendToChapter(try XCTUnwrap(fixture.document.chapters.first?.id))
-        )
-        XCTAssertFalse(collected)
+        harness.session.mode = .discussPlan
+        XCTAssertTrue(harness.session.canSend)
+        let didStartDiscussion = await harness.session.send(text: "我们先聊聊这段改写")
+        XCTAssertTrue(didStartDiscussion)
+        let discussionSettled = await eventually { !harness.session.isRunning }
+        XCTAssertTrue(discussionSettled)
 
         let persisted = try await harness.repository.loadProject(id: harness.projectID).document
         XCTAssertEqual(persisted.pendingOperations.first?.id, fixture.pendingID)
         XCTAssertEqual(persisted.pendingOperations.first?.status, .retryable)
-        XCTAssertEqual(persisted.candidates.first?.status, .available)
+        XCTAssertTrue(persisted.candidates.isEmpty)
     }
 
     func testRetryableManualSyncCandidateCanBeCollectedAfterSuccessfulRetry() async throws {
@@ -2424,13 +2419,22 @@ final class NovelSessionViewModelTests: XCTestCase {
         let harness = try await makeHarness(
             document: fixture.document,
             scripts: [
-                NovelModelScript(steps: [.delta(prose), .complete]),
                 NovelModelScript(steps: [.delta(validRebuildJSON), .complete]),
+                NovelModelScript(steps: [.delta(prose), .complete]),
                 NovelModelScript(steps: [.delta(validRebuildJSON), .complete]),
             ]
         )
         harness.session.mode = .writeProse
         harness.session.granularity = .continuation
+
+        // Formal prose stays blocked until the stale branch state is synchronized.
+        XCTAssertFalse(harness.session.canSend)
+        await harness.workspace.retryPending(fixture.pendingID)
+        let synchronized = await eventually {
+            harness.workspace.projectSnapshot?.pendingOperations.isEmpty == true &&
+                harness.workspace.branchSnapshot?.branch.syncStatus == .synchronized
+        }
+        XCTAssertTrue(synchronized)
 
         let didStart = await harness.session.send(text: "继续写她进入档案馆")
         XCTAssertTrue(didStart)
@@ -2439,13 +2443,6 @@ final class NovelSessionViewModelTests: XCTestCase {
         }
         XCTAssertTrue(generated)
         let candidate = try XCTUnwrap(harness.session.availableProseCandidates.first)
-
-        await harness.workspace.retryPending(fixture.pendingID)
-        let synchronized = await eventually {
-            harness.workspace.projectSnapshot?.pendingOperations.isEmpty == true &&
-                harness.workspace.branchSnapshot?.branch.syncStatus == .synchronized
-        }
-        XCTAssertTrue(synchronized)
 
         let project = try XCTUnwrap(harness.workspace.projectSnapshot)
         let branch = try XCTUnwrap(harness.workspace.branchSnapshot)

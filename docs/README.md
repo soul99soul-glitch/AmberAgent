@@ -26,11 +26,14 @@
 | 小说状态所有权 | [`adr/0007-novel-creation-owns-project-state.md`](adr/0007-novel-creation-owns-project-state.md) | 小说项目为何是权威来源 |
 | 小说实现基线 | [`NOVEL_CREATION_IMPLEMENTATION_PLAN.md`](NOVEL_CREATION_IMPLEMENTATION_PLAN.md) | 已完成架构和仍受 schema 约束的工作 |
 | Live Activity 视觉 | [`ACTIVITY_ISLAND_REDESIGN.md`](ACTIVITY_ISLAND_REDESIGN.md) | 灵动岛/锁屏视觉规范 |
+| iOS 首页 / Liquid Glass 调研建议 | [`IOS_HOME_DESIGN_RESEARCH_AND_RECOMMENDATIONS.md`](IOS_HOME_DESIGN_RESEARCH_AND_RECOMMENDATIONS.md) | 首页诊断、蓝图与参考仓库/Skills（Proposed） |
+| iOS Liquid Glass 设计系统稿 | [`ios-port/IOS_LIQUID_GLASS_DESIGN_SYSTEM.md`](ios-port/IOS_LIQUID_GLASS_DESIGN_SYSTEM.md) | 玻璃/原生结构原则；与首页调研配套 |
 | iOS 终端能力 | [`ios-terminal-runtime.md`](ios-terminal-runtime.md) | iSH/终端运行时边界 |
 | Android Agent Kernel 历史基线 | [`architecture.md`](architecture.md) | 仅解释 Android 模块化背景，不代表当前 iOS 运行时 |
 
 ## 仍开放但不是默认任务
 
+- [`NOVEL_COCREATION_GHOSTWRITE_PLAN.md`](NOVEL_COCREATION_GHOSTWRITE_PLAN.md)：共创 / 代笔双模式 Proposed 计划；含共创补洞与代笔自动收录 MVP，实施前需再核对实时代码。
 - [`NOVEL_SESSION_MEMORY_PLAN_2026-07-19.md`](NOVEL_SESSION_MEMORY_PLAN_2026-07-19.md)：S1-S3 已完成，S4-S7 暂停，需真实 provider/真机证据后再决定。
 - [`IOS_AGENT_HARDENING_PLAN_2026-07-29.md`](IOS_AGENT_HARDENING_PLAN_2026-07-29.md)：iOS Agent 不变量补强设计稿；开始前必须重新核对当前代码是否已部分落地。
 - [`NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md`](NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md)：跨仓 Android 草案，不得在本 iOS 仓直接开工。

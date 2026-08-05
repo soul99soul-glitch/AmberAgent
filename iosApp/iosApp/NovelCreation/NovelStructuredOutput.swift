@@ -459,6 +459,54 @@ struct NovelPolishDriftV1: Codable, Equatable, Sendable {
     let differences: [NovelPolishDifferenceV1]
 }
 
+struct NovelChapterPlanAcceptanceV1: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 2
+    static let legacySchemaVersion = 1
+
+    let schemaVersion: Int
+    let accepted: Bool
+    let missingMustHappen: [String]
+    let forbiddenViolations: [String]
+    /// Soft gate: beats that clearly rehash recent written highlights. May be non-empty even when accepted.
+    let obviousRepetition: [String]
+    let summary: String
+
+    init(
+        schemaVersion: Int = currentSchemaVersion,
+        accepted: Bool,
+        missingMustHappen: [String],
+        forbiddenViolations: [String],
+        obviousRepetition: [String] = [],
+        summary: String
+    ) {
+        self.schemaVersion = schemaVersion
+        self.accepted = accepted
+        self.missingMustHappen = missingMustHappen
+        self.forbiddenViolations = forbiddenViolations
+        self.obviousRepetition = obviousRepetition
+        self.summary = summary
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case accepted
+        case missingMustHappen
+        case forbiddenViolations
+        case obviousRepetition
+        case summary
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        accepted = try container.decode(Bool.self, forKey: .accepted)
+        missingMustHappen = try container.decode([String].self, forKey: .missingMustHappen)
+        forbiddenViolations = try container.decode([String].self, forKey: .forbiddenViolations)
+        obviousRepetition = try container.decodeIfPresent([String].self, forKey: .obviousRepetition) ?? []
+        summary = try container.decode(String.self, forKey: .summary)
+    }
+}
+
 enum NovelContinuityIssueCategoryV1: String, Codable, CaseIterable, Sendable {
     /// 同一件事被写了两遍。
     case duplicatedPlot
@@ -620,6 +668,21 @@ enum NovelStructuredOutputDecoder {
         let root = try StrictJSON.rootObject(from: data)
         try StrictJSON.validatePolishDrift(root.object)
         let value: NovelPolishDriftV1 = try decode(NovelPolishDriftV1.self, from: root.data)
+        try NovelStructuredOutputValidation.validate(value)
+        return value
+    }
+
+    static func decodeChapterPlanAcceptance(from text: String) throws -> NovelChapterPlanAcceptanceV1 {
+        try decodeChapterPlanAcceptance(from: Data(text.utf8))
+    }
+
+    static func decodeChapterPlanAcceptance(from data: Data) throws -> NovelChapterPlanAcceptanceV1 {
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validateChapterPlanAcceptance(root.object)
+        let value: NovelChapterPlanAcceptanceV1 = try decode(
+            NovelChapterPlanAcceptanceV1.self,
+            from: root.data
+        )
         try NovelStructuredOutputValidation.validate(value)
         return value
     }
@@ -847,6 +910,42 @@ private enum NovelStructuredOutputValidation {
                 .invalidValue,
                 path: "$.differences",
                 message: "An incompatible polish result must describe at least one difference."
+            )
+        }
+    }
+
+    static func validate(_ value: NovelChapterPlanAcceptanceV1) throws {
+        guard value.schemaVersion == NovelChapterPlanAcceptanceV1.legacySchemaVersion ||
+            value.schemaVersion == NovelChapterPlanAcceptanceV1.currentSchemaVersion else {
+            throw failure(
+                .unsupportedVersion,
+                path: "$.schemaVersion",
+                message: "The model returned schema version \(value.schemaVersion); version \(NovelChapterPlanAcceptanceV1.currentSchemaVersion) is required."
+            )
+        }
+        try required(value.summary, path: "$.summary")
+        for (index, item) in value.missingMustHappen.enumerated() {
+            try required(item, path: "$.missingMustHappen[\(index)]")
+        }
+        for (index, item) in value.forbiddenViolations.enumerated() {
+            try required(item, path: "$.forbiddenViolations[\(index)]")
+        }
+        for (index, item) in value.obviousRepetition.enumerated() {
+            try required(item, path: "$.obviousRepetition[\(index)]")
+        }
+        let hasViolation = !value.missingMustHappen.isEmpty || !value.forbiddenViolations.isEmpty
+        if value.accepted && hasViolation {
+            throw failure(
+                .invalidValue,
+                path: "$",
+                message: "An accepted chapter-plan result cannot list contract violations."
+            )
+        }
+        if !value.accepted && !hasViolation {
+            throw failure(
+                .invalidValue,
+                path: "$",
+                message: "A rejected chapter-plan result must list at least one violation."
             )
         }
     }
@@ -1362,6 +1461,56 @@ private enum StrictJSON {
             try string(item["summary"], path: path + ".summary")
             try string(item["sourceEvidence"], path: path + ".sourceEvidence")
             try string(item["candidateEvidence"], path: path + ".candidateEvidence")
+        }
+    }
+
+    static func validateChapterPlanAcceptance(_ object: Object) throws {
+        guard let number = object["schemaVersion"] as? NSNumber,
+              floor(number.doubleValue) == number.doubleValue else {
+            throw typeFailure(path: "$.schemaVersion", expected: "an integer")
+        }
+        let version = number.intValue
+        guard version == NovelChapterPlanAcceptanceV1.legacySchemaVersion ||
+            version == NovelChapterPlanAcceptanceV1.currentSchemaVersion else {
+            throw NovelStructuredOutputFailure(
+                category: .unsupportedVersion,
+                path: "$.schemaVersion",
+                message: "The model returned schema version \(version); version \(NovelChapterPlanAcceptanceV1.currentSchemaVersion) is required."
+            )
+        }
+        if version == NovelChapterPlanAcceptanceV1.currentSchemaVersion {
+            try keys(
+                object,
+                path: "$",
+                required: [
+                    "schemaVersion",
+                    "accepted",
+                    "missingMustHappen",
+                    "forbiddenViolations",
+                    "obviousRepetition",
+                    "summary",
+                ]
+            )
+        } else {
+            try keys(
+                object,
+                path: "$",
+                required: [
+                    "schemaVersion",
+                    "accepted",
+                    "missingMustHappen",
+                    "forbiddenViolations",
+                    "summary",
+                ],
+                optional: ["obviousRepetition"]
+            )
+        }
+        try boolean(object["accepted"], path: "$.accepted")
+        try string(object["summary"], path: "$.summary")
+        try stringArray(object["missingMustHappen"], path: "$.missingMustHappen")
+        try stringArray(object["forbiddenViolations"], path: "$.forbiddenViolations")
+        if object["obviousRepetition"] != nil {
+            try stringArray(object["obviousRepetition"], path: "$.obviousRepetition")
         }
     }
 

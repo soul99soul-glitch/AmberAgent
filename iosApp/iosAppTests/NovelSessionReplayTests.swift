@@ -1305,6 +1305,42 @@ final class NovelSessionReplayTests: XCTestCase {
         }
     }
 
+    func testProseRetryRespectsNeedsSyncLikeStartingANewRun() throws {
+        let fixture = try makeFixture()
+        let run = terminalRun(
+            makeRun(fixture: fixture, kind: .prose, candidateID: NovelCandidateID()),
+            status: .interrupted
+        )
+        var session = fixture.session
+        session.messages = [makeMessage(
+            id: run.messageID,
+            sequence: 0,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .interruptedDraft,
+            content: "保留的正文草稿",
+            runID: run.id,
+            candidateID: run.candidateID
+        )]
+
+        var needsSyncBranch = fixture.branch
+        needsSyncBranch.syncStatus = .needsSync
+        let needsSync = NovelSessionPresentation.project(makeInput(
+            fixture: fixture,
+            branch: needsSyncBranch,
+            session: session,
+            runs: [run]
+        ))
+        XCTAssertEqual(
+            needsSync.rows[0].actions.first(where: {
+                if case .retryGeneration = $0.action { return true }
+                return false
+            })?.blocker,
+            .branchNeedsSync,
+            "Prose retry must not bypass the start gate for an unsynchronized branch."
+        )
+    }
+
     func testInterruptedProseRowsExposeCollectBesideRetryAndKeepSyncBlocker() throws {
         let fixture = try makeFixture()
         let candidateID = NovelCandidateID()
@@ -2099,7 +2135,8 @@ private extension NovelSessionReplayTests {
             startedAt: Self.now,
             terminalAt: nil,
             interruptionReason: nil,
-            terminalFailure: nil
+            terminalFailure: nil,
+            chapterPlanDigest: nil
         )
     }
 
@@ -2130,7 +2167,8 @@ private extension NovelSessionReplayTests {
             startedAt: run.startedAt,
             terminalAt: Self.now,
             interruptionReason: status == .interrupted ? .user : nil,
-            terminalFailure: failure
+            terminalFailure: failure,
+            chapterPlanDigest: run.chapterPlanDigest
         )
     }
 

@@ -506,7 +506,8 @@ final class NovelDocumentValidationTests: XCTestCase {
             startedAt: Date(),
             terminalAt: nil,
             interruptionReason: nil,
-            terminalFailure: nil
+            terminalFailure: nil,
+            chapterPlanDigest: nil
         ))
         document.branches[0].activeRunID = runID
 

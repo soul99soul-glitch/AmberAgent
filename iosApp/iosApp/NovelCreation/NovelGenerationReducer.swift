@@ -62,6 +62,7 @@ enum NovelGenerationReducer {
                 content: run.partialContent,
                 sourceChapterVersionID: run.sourceChapterVersionID,
                 collectedCheckpointID: nil,
+                chapterPlanDigest: run.chapterPlanDigest,
                 createdAt: message.createdAt
             ))
             candidateIDs.insert(candidateID)
@@ -162,6 +163,12 @@ enum NovelGenerationReducer {
             candidateID: nil,
             interaction: request.askUserResponse.map(NovelSessionInteraction.askUserAnswer)
         )
+        let boundPlanDigest: String?
+        if request.kind == .prose, request.granularity == .wholeChapter {
+            boundPlanDigest = document.confirmedChapterPlan(for: branch.id)?.contentDigest
+        } else {
+            boundPlanDigest = nil
+        }
         let activeRun = NovelActiveRunRecord(
             id: request.id,
             operationID: request.operationID,
@@ -184,7 +191,8 @@ enum NovelGenerationReducer {
             startedAt: now,
             terminalAt: nil,
             interruptionReason: nil,
-            terminalFailure: nil
+            terminalFailure: nil,
+            chapterPlanDigest: boundPlanDigest
         )
 
         var next = document
@@ -346,6 +354,7 @@ enum NovelGenerationReducer {
                 content: content,
                 sourceChapterVersionID: run.sourceChapterVersionID,
                 collectedCheckpointID: nil,
+                chapterPlanDigest: run.chapterPlanDigest,
                 createdAt: now
             ))
         }
@@ -848,6 +857,7 @@ private extension NovelGenerationReducer {
                     // 「新开一章」,在书尾造出与原章重复的正文。
                     sourceChapterVersionID: run.sourceChapterVersionID,
                     collectedCheckpointID: nil,
+                    chapterPlanDigest: run.chapterPlanDigest,
                     createdAt: now
                 ))
             }
@@ -955,6 +965,11 @@ private extension NovelGenerationReducer {
                 throw NovelError.invalidInput("The discussion run shape is invalid.")
             }
         case .prose:
+            guard branch.syncStatus == .synchronized else {
+                throw NovelError.invalidInput(
+                    "The branch must be synchronized before writing prose."
+                )
+            }
             guard !document.pendingOperations.contains(where: {
                 $0.branchID == branch.id && $0.blocksProseGeneration
             }) else {
@@ -968,6 +983,13 @@ private extension NovelGenerationReducer {
                   request.sourceChapterVersionID == nil,
                   request.askUserResponse == nil else {
                 throw NovelError.invalidInput("The prose run shape is invalid.")
+            }
+            if document.project.collaborationMode == .ghostwrite,
+               request.granularity == .wholeChapter,
+               document.confirmedChapterPlan(for: branch.id) == nil {
+                throw NovelError.invalidInput(
+                    "代笔模式下写整章前需要先确认本章合同。"
+                )
             }
         case .regenerate:
             guard branch.syncStatus == .synchronized else {

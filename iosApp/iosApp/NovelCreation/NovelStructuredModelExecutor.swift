@@ -6,6 +6,7 @@ enum NovelStructuredModelTaskKind: String, Codable, Equatable, CaseIterable, Sen
     case discussionArchive
     case polishDrift
     case continuityAudit
+    case chapterPlanAcceptance
 }
 
 enum NovelStructuredModelTask: Equatable, Sendable {
@@ -16,6 +17,7 @@ enum NovelStructuredModelTask: Equatable, Sendable {
     /// 剧情矛盾检查。`priorFindings` 是前几块已报出的问题摘要,让后一块能与前文对照;
     /// 首块传空串。`manuscript` 是本块正文,含 `# Chapter N: 标题` 标头。
     case continuityAudit(priorFindings: String, manuscript: String)
+    case chapterPlanAcceptance(plan: String, candidate: String, recentHighlights: String)
 }
 
 struct NovelStructuredModelExecutionRequest: Equatable, Sendable {
@@ -30,6 +32,7 @@ enum NovelStructuredModelOutput: Equatable, Sendable {
     case discussionArchive(NovelDiscussionArchiveV1)
     case polishDrift(NovelPolishDriftV1)
     case continuityAudit(NovelContinuityAuditV1)
+    case chapterPlanAcceptance(NovelChapterPlanAcceptanceV1)
 }
 
 struct NovelStructuredModelExecutionEvidence: Equatable, Sendable {
@@ -606,6 +609,7 @@ private extension NovelStructuredModelTask {
         case .discussionArchive: .discussionArchive
         case .polishDrift: .polishDrift
         case .continuityAudit: .continuityAudit
+        case .chapterPlanAcceptance: .chapterPlanAcceptance
         }
     }
 
@@ -616,6 +620,7 @@ private extension NovelStructuredModelTask {
         case .discussionArchive: .discussionArchiveV1
         case .polishDrift: .polishDriftV1
         case .continuityAudit: .continuityAuditV1
+        case .chapterPlanAcceptance: .chapterPlanAcceptanceV1
         }
     }
 
@@ -626,6 +631,8 @@ private extension NovelStructuredModelTask {
         case .discussionArchive: .stateExtraction
         case .polishDrift: .driftCheck
         case .continuityAudit: .continuityAudit
+        // Reuse state-extraction purpose tagging; runtime model policy is `.review`.
+        case .chapterPlanAcceptance: .stateExtraction
         }
     }
 
@@ -668,6 +675,18 @@ private extension NovelStructuredModelTask {
                 .init(role: .system, content: system),
                 .init(role: .user, content: "MANUSCRIPT UNDER AUDIT\n" + manuscript)
             ]
+        case .chapterPlanAcceptance(let plan, let candidate, let recentHighlights):
+            let beats = recentHighlights.trimmingCharacters(in: .whitespacesAndNewlines)
+            return [
+                .init(role: .system, content: prompt.systemText),
+                .init(
+                    role: .user,
+                    content: "RECENT WRITTEN BEATS\n" +
+                        (beats.isEmpty ? "(none)" : beats) +
+                        "\n\nCONFIRMED CHAPTER PLAN\n" + plan +
+                        "\n\nWHOLE-CHAPTER CANDIDATE\n" + candidate
+                ),
+            ]
         }
     }
 
@@ -687,6 +706,10 @@ private extension NovelStructuredModelTask {
             .polishDrift(try NovelStructuredOutputDecoder.decodePolishDrift(from: text))
         case .continuityAudit:
             .continuityAudit(try NovelStructuredOutputDecoder.decodeContinuityAudit(from: text))
+        case .chapterPlanAcceptance:
+            .chapterPlanAcceptance(
+                try NovelStructuredOutputDecoder.decodeChapterPlanAcceptance(from: text)
+            )
         }
     }
 }
@@ -701,7 +724,9 @@ extension NovelStructuredModelTaskKind {
     var outputReservationTokens: Int {
         switch self {
         case .stateRebuild: 8_192
-        case .stateDelta, .discussionArchive, .polishDrift, .continuityAudit: 4_096
+        case .stateDelta, .discussionArchive, .polishDrift, .continuityAudit,
+             .chapterPlanAcceptance:
+            4_096
         }
     }
 
@@ -716,7 +741,7 @@ extension NovelStructuredModelTaskKind {
                 maxOutputTokens: nil,
                 reasoningLevel: .automatic
             )
-        case .polishDrift, .continuityAudit:
+        case .polishDrift, .continuityAudit, .chapterPlanAcceptance:
             .init(
                 temperature: 0,
                 topP: 1,

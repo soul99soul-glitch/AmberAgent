@@ -546,7 +546,7 @@ struct NovelSessionView: View {
                             controller: composerInputController,
                             onSubmit: send
                         )
-                        .frame(height: composerInputHeight)
+                        .frame(height: max(44, composerInputHeight))
 
                         if inputText.isEmpty {
                             Text(inputPlaceholder)
@@ -555,7 +555,7 @@ struct NovelSessionView: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                    .frame(minHeight: 40)
+                    .frame(minHeight: 44)
                 }
                 .padding(.leading, 18)
                 .padding(.trailing, 18)
@@ -573,7 +573,11 @@ struct NovelSessionView: View {
 
             if showsComposerMeta {
                 composerMetaControls
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(
+                        accessibilityReduceMotion
+                            ? .identity
+                            : .move(edge: .top).combined(with: .opacity)
+                    )
             }
         }
         .padding(.horizontal, 16)
@@ -587,7 +591,10 @@ struct NovelSessionView: View {
             )
             .ignoresSafeArea()
         }
-        .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showsComposerMeta)
+        .animation(
+            accessibilityReduceMotion ? nil : .spring(response: 0.26, dampingFraction: 0.86),
+            value: showsComposerMeta
+        )
     }
 
     private var synchronizationBanner: some View {
@@ -1247,6 +1254,15 @@ struct NovelSessionView: View {
 
     private var inputPlaceholder: String {
         if viewModel.mode == .discussPlan { return "想聊哪段剧情、人物或设定？" }
+        if workspace.projectSnapshot?.project.collaborationMode == .ghostwrite,
+           viewModel.granularity == .wholeChapter,
+           let branchID = viewModel.binding?.branchID,
+           workspace.projectSnapshot?.confirmedChapterPlan(for: branchID) == nil {
+            return "代笔写整章前，请先在标题面板确认本章合同"
+        }
+        if viewModel.needsSync {
+            return "请先同步剧情状态，再写正文"
+        }
         return viewModel.granularity == .wholeChapter
             ? "描述下一章的目标或关键事件"
             : "描述接下来发生什么"
@@ -1258,15 +1274,15 @@ struct NovelSessionView: View {
             if let failure, !failure.isEmpty {
                 let reason = NovelPresentation.stateSyncFailureMessage(failure)
                 if pending.kind == .manualSync {
-                    return "\(reason) 仍可继续讨论或生成正文；收录前请重试。"
+                    return "\(reason) 可继续讨论；写正文前请先重试同步。"
                 }
                 return reason
             }
             return pending.kind == .collection
                 ? "旧版收录的剧情状态同步未完成"
-                : "上次剧情同步未完成。仍可继续讨论或生成正文；收录前请重试。"
+                : "上次剧情同步未完成。可继续讨论；写正文前请先重试同步。"
         }
-        return "剧情状态同步尚未完成"
+        return "剧情状态同步尚未完成。可继续讨论；写正文前请先完成同步。"
     }
 
     private func send() {

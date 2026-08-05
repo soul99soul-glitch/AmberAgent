@@ -105,10 +105,10 @@ struct AppShell: View {
             }
         )
         IOSDeepReadRecoveryOnce.run()
-        // [Slice 6] Load persisted memories (Documents/memories/memories.json)
-        // into the IosMemoryFactory store before any view reads it. Missing or
-        // corrupt file is a no-op (store keeps its seed/empty state).
-        Task { @MainActor in IOSMemoryPersistence.shared.load() }
+        // Load before ChatViewModel can prepare its first provider request.
+        // AppShell is MainActor-isolated, so this synchronous file read cannot
+        // race the first view render or an early memory mutation.
+        IOSMemoryPersistence.shared.load()
     }
 
     var body: some View {

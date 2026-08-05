@@ -13,6 +13,7 @@ enum NovelPromptKind: String, Codable, CaseIterable, Sendable {
     case wholeChapterRegeneration
     case polishDriftV1
     case continuityAuditV1
+    case chapterPlanAcceptanceV1
 }
 
 struct NovelPromptTemplate: Codable, Equatable, Sendable {
@@ -69,7 +70,8 @@ enum NovelPromptCatalog {
                 "novel.whole-chapter-regeneration.v1",
                 "novel.whole-chapter-regeneration.v2",
             ])
-        case .characterProposal, .discussionArchiveV1, .polishDriftV1, .continuityAuditV1:
+        case .characterProposal, .discussionArchiveV1, .polishDriftV1, .continuityAuditV1,
+             .chapterPlanAcceptanceV1:
             break
         }
         return versions
@@ -342,6 +344,26 @@ enum NovelPromptCatalog {
                 \(evidenceIntegrityConstraint)
 
                 \(continuityAuditJSONContract)
+                """
+            )
+
+        case .chapterPlanAcceptanceV1:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.chapter-plan-acceptance.v2",
+                systemText: """
+                Decide whether a whole-chapter prose candidate satisfies the confirmed chapter plan contract.
+                Fail closed: if evidence is ambiguous, mark accepted false.
+                Check that every must-happen beat is present as a clear event in the candidate, and that no
+                must-not-happen beat clearly occurs. Ending hook and POV-visible facts are soft guidance —
+                omit them from violation lists unless the candidate contradicts them outright.
+                Also compare the candidate against RECENT WRITTEN BEATS. List only clear, same-beat rehashes
+                in obviousRepetition; necessary callbacks or deliberate callbacks are not repetition.
+                Contract acceptance and obviousRepetition are independent: accepted may stay true while
+                obviousRepetition is non-empty.
+                Do not rewrite the prose. Return only the JSON object.
+
+                \(chapterPlanAcceptanceJSONContract)
                 """
             )
         }
@@ -804,5 +826,24 @@ private extension NovelPromptCatalog {
         Every issue must cite at least two references, because a contradiction always has two sides. Cite the
         earliest passage first. chapterOrdinal is the number N from the "# Chapter N:" heading that precedes the
         cited passage, counting from 1.
+        """
+
+    static let chapterPlanAcceptanceJSONContract = """
+        Output contract: NovelChapterPlanAcceptanceV1, schemaVersion 2.
+        Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
+        Every key shown below is required. Do not add unknown keys at any level.
+        Root shape:
+        {
+          "schemaVersion":2,
+          "accepted":true,
+          "missingMustHappen":[],
+          "forbiddenViolations":[],
+          "obviousRepetition":[],
+          "summary":"non-empty string"
+        }
+        missingMustHappen and forbiddenViolations are arrays of non-empty strings copied or closely paraphrased
+        from the contract. If accepted is true, both arrays must be empty. If accepted is false, at least one
+        of the two arrays must be non-empty.
+        obviousRepetition lists clear rehashes of RECENT WRITTEN BEATS; use an empty array when none.
         """
 }

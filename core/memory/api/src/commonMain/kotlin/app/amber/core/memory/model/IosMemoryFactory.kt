@@ -110,6 +110,15 @@ object IosMemoryFactory {
         return record
     }
 
+    /** Updates usage metadata only; content/update timestamps remain unchanged. */
+    fun touchMemories(ids: List<Int>, timestamp: Long) {
+        if (ids.isEmpty()) return
+        val wanted = ids.toSet()
+        _records.value = _records.value.map { record ->
+            if (record.id in wanted) record.copy(lastUsedAt = timestamp) else record
+        }
+    }
+
     fun deleteMemory(id: Int) {
         _records.value = _records.value.filterNot { it.id == id }
     }

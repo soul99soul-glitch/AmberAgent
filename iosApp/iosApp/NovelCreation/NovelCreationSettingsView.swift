@@ -23,10 +23,11 @@ struct NovelCreationSettingsView: View {
             Section {
                 modelRow(for: .creation)
                 modelRow(for: .stateSync)
+                modelRow(for: .review)
             } header: {
                 Text("默认模型")
             } footer: {
-                Text("创作模型优先考虑长文、文风和创造力；剧情同步模型优先考虑稳定、便宜和结构化输出。")
+                Text("创作偏长文与文风；剧情同步偏稳定与结构化输出；审稿用于合同验收与连续性检查。")
             }
 
             if let viewModel {
@@ -150,6 +151,7 @@ extension NovelModelRole: Identifiable {
         switch self {
         case .creation: "创作模型"
         case .stateSync: "剧情同步模型"
+        case .review: "审稿模型"
         }
     }
 
@@ -157,6 +159,7 @@ extension NovelModelRole: Identifiable {
         switch self {
         case .creation: "优先选择擅长长文与创意写作的模型"
         case .stateSync: "优先选择稳定、便宜、结构化输出可靠的模型"
+        case .review: "用于代笔合同验收与连续性检查"
         }
     }
 

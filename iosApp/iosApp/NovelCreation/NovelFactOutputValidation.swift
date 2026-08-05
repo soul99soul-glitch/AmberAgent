@@ -76,7 +76,8 @@ extension NovelFactTransactionReducer {
                 baseState.unresolvedEntityNames,
             createdAt: baseState.createdAt,
             settingProposalIDs: baseState.settingProposalIDs,
-            characterIdentityClarifications: baseState.characterIdentityClarifications
+            characterIdentityClarifications: baseState.characterIdentityClarifications,
+            recentWrittenHighlights: baseState.recentWrittenHighlights
         )
         let sanitized = try sanitizedManualRebuild(
             validated,
@@ -469,7 +470,8 @@ extension NovelFactTransactionReducer {
             unresolvedEntityNames: unresolved,
             createdAt: state.createdAt,
             settingProposalIDs: state.settingProposalIDs,
-            characterIdentityClarifications: state.characterIdentityClarifications
+            characterIdentityClarifications: state.characterIdentityClarifications,
+            recentWrittenHighlights: state.recentWrittenHighlights
         )
     }
 

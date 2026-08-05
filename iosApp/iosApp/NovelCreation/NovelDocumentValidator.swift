@@ -273,6 +273,11 @@ enum NovelDocumentValidator {
             modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append("Fixed state-sync model policy has an empty stable ID.")
         }
+        if case .fixed(let providerID, let modelID) = project.reviewModelPolicy,
+           providerID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            modelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append("Fixed review model policy has an empty stable ID.")
+        }
 
         appendDuplicateIssue(document.branches, key: \.id, label: "branch", issues: &issues)
         appendDuplicateIssue(document.sessions, key: \.id, label: "Session", issues: &issues)
@@ -296,6 +301,47 @@ enum NovelDocumentValidator {
         appendDuplicateIssue(document.activeRuns, key: \.id, label: "active run", issues: &issues)
         appendDuplicateIssue(document.settingProposals, key: \.id, label: "setting proposal", issues: &issues)
         appendDuplicateIssue(document.appliedOperations, key: \.operationID, label: "operation", issues: &issues)
+        appendDuplicateIssue(document.chapterPlans, key: \.id, label: "chapter plan", issues: &issues)
+        appendDuplicateIssue(document.chapterPlans, key: \.branchID, label: "chapter plan branch", issues: &issues)
+        for plan in document.chapterPlans {
+            if !document.branches.contains(where: { $0.id == plan.branchID }) {
+                issues.append("Chapter plan \(plan.id) references a missing branch.")
+            }
+            let expectedDigest = NovelChapterPlanRecord.digest(
+                forCanonicalPayload: plan.canonicalDigestPayload()
+            )
+            if plan.contentDigest != expectedDigest {
+                issues.append("Chapter plan \(plan.id) digest does not match its content.")
+            }
+            if plan.status == .confirmed {
+                if plan.confirmedAt == nil {
+                    issues.append("Confirmed chapter plan \(plan.id) is missing confirmedAt.")
+                }
+                if plan.mustHappen.isEmpty {
+                    issues.append("Confirmed chapter plan \(plan.id) has no must-happen items.")
+                }
+            }
+            if plan.goalAndConflict.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                issues.append("Chapter plan \(plan.id) is missing a goal and conflict.")
+            }
+        }
+        appendDuplicateIssue(
+            document.upcomingArcs,
+            key: \.branchID,
+            label: "upcoming arc branch",
+            issues: &issues
+        )
+        for arc in document.upcomingArcs {
+            if !document.branches.contains(where: { $0.id == arc.branchID }) {
+                issues.append("Upcoming arc references a missing branch \(arc.branchID).")
+            }
+            if arc.beats.isEmpty {
+                issues.append("Upcoming arc for branch \(arc.branchID) has no beats.")
+            }
+            if arc.beats != NovelUpcomingArcRecord.normalizedBeats(arc.beats) {
+                issues.append("Upcoming arc for branch \(arc.branchID) is not normalized.")
+            }
+        }
     }
 
     private static func validateMaterials(
@@ -1629,6 +1675,84 @@ enum NovelDocumentValidator {
                     )
                 }
             case let (
+                .setCollaborationMode,
+                .collaborationModeChanged(_, _, projectRevision, configRevision)
+            ):
+                // Mode is mutable; older ledger rows must not assert against the current mode.
+                if projectRevision != operation.appliedProjectRevision ||
+                    configRevision < 1 ||
+                    configRevision > document.project.configRevision {
+                    issues.append(
+                        "Collaboration-mode operation \(operation.operationID) has invalid outcome data."
+                    )
+                }
+            case let (
+                .setPauseGhostwriteOnBlockingContinuity,
+                .pauseGhostwriteOnBlockingContinuityChanged(_, _, projectRevision, configRevision)
+            ):
+                if projectRevision != operation.appliedProjectRevision ||
+                    configRevision < 1 ||
+                    configRevision > document.project.configRevision {
+                    issues.append(
+                        "Ghostwrite continuity-pause operation \(operation.operationID) has invalid outcome data."
+                    )
+                }
+            case let (
+                .upsertChapterPlan,
+                .chapterPlanUpserted(
+                    _, branchID, _, _, contentDigest, projectRevision, configRevision
+                )
+            ):
+                // Plans are mutable replace-in-place, so older upsert outcomes are historical
+                // ledger rows and need not equal the current plan status/digest.
+                if projectRevision != operation.appliedProjectRevision ||
+                    configRevision < 1 ||
+                    configRevision > document.project.configRevision ||
+                    !document.branches.contains(where: { $0.id == branchID }) ||
+                    contentDigest.count != 64 {
+                    issues.append(
+                        "Chapter-plan upsert \(operation.operationID) has invalid outcome data."
+                    )
+                }
+            case let (
+                .clearChapterPlan,
+                .chapterPlanCleared(_, branchID, projectRevision, configRevision)
+            ):
+                // Clear is historical; a later upsert may recreate a plan on the same branch.
+                if projectRevision != operation.appliedProjectRevision ||
+                    configRevision < 1 ||
+                    configRevision > document.project.configRevision ||
+                    !document.branches.contains(where: { $0.id == branchID }) {
+                    issues.append(
+                        "Chapter-plan clear \(operation.operationID) has invalid outcome data."
+                    )
+                }
+            case let (
+                .upsertUpcomingArc,
+                .upcomingArcUpserted(_, branchID, beatCount, projectRevision, configRevision)
+            ):
+                if projectRevision != operation.appliedProjectRevision ||
+                    configRevision < 1 ||
+                    configRevision > document.project.configRevision ||
+                    beatCount < 1 ||
+                    !document.branches.contains(where: { $0.id == branchID }) {
+                    issues.append(
+                        "Upcoming-arc upsert \(operation.operationID) has invalid outcome data."
+                    )
+                }
+            case let (
+                .clearUpcomingArc,
+                .upcomingArcCleared(_, branchID, projectRevision, configRevision)
+            ):
+                if projectRevision != operation.appliedProjectRevision ||
+                    configRevision < 1 ||
+                    configRevision > document.project.configRevision ||
+                    !document.branches.contains(where: { $0.id == branchID }) {
+                    issues.append(
+                        "Upcoming-arc clear \(operation.operationID) has invalid outcome data."
+                    )
+                }
+            case let (
                 .clarifyCharacterIdentity,
                 .characterIdentityClarified(
                     _, branchID, mention, checkpointID, stateSnapshotID, revision
@@ -2661,6 +2785,12 @@ extension NovelOutcome {
         case .branchMaterialOverrideChanged(let projectID, _, _, _, _, _): projectID
         case .mainBranchChanged(let projectID, _, _): projectID
         case .polishPreferenceChanged(let projectID, _, _): projectID
+        case .collaborationModeChanged(let projectID, _, _, _): projectID
+        case .pauseGhostwriteOnBlockingContinuityChanged(let projectID, _, _, _): projectID
+        case .chapterPlanUpserted(let projectID, _, _, _, _, _, _): projectID
+        case .chapterPlanCleared(let projectID, _, _, _): projectID
+        case .upcomingArcUpserted(let projectID, _, _, _, _): projectID
+        case .upcomingArcCleared(let projectID, _, _, _): projectID
         case .characterIdentityClarified(let projectID, _, _, _, _, _): projectID
         case .branchForked(let projectID, _, _, _, _): projectID
         case .branchRenamed(let projectID, _, _): projectID
@@ -2692,6 +2822,10 @@ extension NovelOutcome {
              .branchRenamed(_, let branchID, _),
              .branchDeleted(_, let branchID, _),
              .branchHeadMoved(_, let branchID, _, _, _, _),
+             .chapterPlanUpserted(_, let branchID, _, _, _, _, _),
+             .chapterPlanCleared(_, let branchID, _, _),
+             .upcomingArcUpserted(_, let branchID, _, _, _),
+             .upcomingArcCleared(_, let branchID, _, _),
              .characterIdentityClarified(_, let branchID, _, _, _, _),
              .discussionArchived(_, let branchID, _, _, _, _, _),
              .candidateCloned(_, let branchID, _, _, _),
@@ -2714,6 +2848,8 @@ extension NovelOutcome {
              .settingProposalAccepted,
              .settingProposalRejected,
              .polishPreferenceChanged,
+             .collaborationModeChanged,
+             .pauseGhostwriteOnBlockingContinuityChanged,
              .runInterrupted,
              .projectImported,
              .previousProjectRestored,

@@ -215,7 +215,7 @@ final class NovelInjectionPlannerTests: XCTestCase {
         XCTAssertNotEqual(wholeChapter.prompt.version, polish.prompt.version)
     }
 
-    func testNeedsSyncAllowsDiscussionAndProseButStillBlocksPolish() throws {
+    func testNeedsSyncAllowsDiscussionButBlocksProseAndPolish() throws {
         var document = try NovelTestFixtures.document()
         document.branches[0].syncStatus = .needsSync
         let branchID = document.branches[0].id
@@ -230,15 +230,19 @@ final class NovelInjectionPlannerTests: XCTestCase {
         )
         XCTAssertTrue(discussion.contextText.contains("potentially stale"))
 
-        let prose = try NovelInjectionPlanner.plan(
+        XCTAssertThrowsError(try NovelInjectionPlanner.plan(
             document: document,
             request: NovelInjectionPlanningRequest(
                 branchID: branchID,
                 promptKind: .proseWholeChapter,
                 userText: "Write more."
             )
-        )
-        XCTAssertTrue(prose.contextText.contains("potentially stale"))
+        )) {
+            XCTAssertEqual(
+                $0 as? NovelInjectionPlanningError,
+                .branchRequiresSync(branchID)
+            )
+        }
 
         XCTAssertThrowsError(try NovelInjectionPlanner.plan(
             document: document,
@@ -1023,7 +1027,8 @@ final class NovelInjectionPlannerTests: XCTestCase {
                 code: "invalid_quick_start_output",
                 message: "invalid",
                 isRetryable: true
-            )
+            ),
+            chapterPlanDigest: nil
         )]
 
         let plan = try NovelInjectionPlanner.plan(

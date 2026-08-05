@@ -17,6 +17,9 @@
 - completed、interrupted、failed 和 persistence-blocked 都必须先收拢可见 partial，再落到对应 durable terminal/retry 入口。终态排空期间不可继续显示可用的 Stop，也不可放开下一次 mutation。
 - cancel、background expiration、恢复、重试和旧回调都要核对 project/session/run identity；旧 run 不得结束或覆盖新 run。
 - Quick Start、讨论、正文、润色、剧情同步和连续性检查不是同一种输出协议。只在对应路径使用结构化 decoder、工具循环、远端 background response 或 fact transaction。
+- `needsSync` 时允许讨论规划，禁止正式正文生成、整章重写和润色；注入层与 reducer/`canStart`/retry 门禁必须一致，不能只靠 UI 文案劝阻。
+- 项目 `collaborationMode`（共创/代笔）与分支本章合同经 reducer 落盘；切代笔前查 `NovelGhostwriteReadiness`（可不强制合同）；代笔写整章必须已确认合同；有确认合同时整章注入绑定 digest。代笔自动收录须走既有 collect 事务；合同验收与连续性审计走 `NovelModelRole.review`。
+- 分支「下一弧」是有界软方向（最多 8 条），只注入整章 prose；不得做成完整离屏世界模拟器。代笔看板只读回执留在项目控制面板内，不新建独立页。
 - provider 返回的推理心跳只刷新无输出计时，不得混入正文或结构化 JSON。
 
 ## Input And Presentation

@@ -581,6 +581,12 @@ final class ChatViewModel {
                 userFacingGenerationError: { rawMessage, modelId in
                     ChatViewModel.userFacingGenerationError(rawMessage, modelId: modelId)
                 },
+                memoryRecordIdsForRuntimeContext: { [weak self] messages in
+                    self?.memoryRecordIdsForRuntimeContext(messages) ?? []
+                },
+                recordMemoryUsage: { [weak self] ids in
+                    self?.recordMemoryUsage(ids)
+                },
                 generationSucceeded: { [weak self] in
                     self?.onGenerationCompleted()
                 }
@@ -2114,6 +2120,26 @@ final class ChatViewModel {
             miniAppRuntimeEnabled: isMiniAppRuntimeEnabled
         ).injectingRuntimeContext(into: uploadableMessages, coalesceSystemMessages: false)
         return replacingImagesForNonVisionModel(withContext)
+    }
+
+    private func memoryRecordIdsForRuntimeContext(_ messages: [UIMessage]) -> [Int32] {
+        let uploadableMessages = messages.filter { !Self.isLocalGenerationError($0) }
+        return ChatRuntimeContextBuilder(
+            sharedSettings: sharedSettings,
+            mcpTools: mcpManager.tools,
+            miniAppRepository: miniAppRepository,
+            miniAppRuntimeEnabled: isMiniAppRuntimeEnabled
+        ).memoryRecallResult(for: uploadableMessages).ids
+    }
+
+    private func recordMemoryUsage(_ ids: [Int32]) {
+        guard !ids.isEmpty else { return }
+        let previousRecords = IosMemoryFactory.shared.snapshotRecords()
+        IosMemoryFactory.shared.touchMemories(
+            ids: ids.map { KotlinInt(value: $0) },
+            timestamp: Int64(Date().timeIntervalSince1970 * 1_000)
+        )
+        IOSMemoryPersistence.shared.persist(previousRecords: previousRecords)
     }
 
     private static func isLocalGenerationError(_ message: UIMessage) -> Bool {

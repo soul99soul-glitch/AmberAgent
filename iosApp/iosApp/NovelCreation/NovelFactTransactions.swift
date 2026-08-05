@@ -278,6 +278,18 @@ enum NovelFactTransactionReducer {
               candidate.collectedCheckpointID == nil else {
             throw NovelError.invalidInput("The candidate is not collectable prose for this branch.")
         }
+        if let boundDigest = candidate.chapterPlanDigest {
+            let currentDigest = document.confirmedChapterPlan(for: branch.id)?.contentDigest
+            guard currentDigest == boundDigest else {
+                throw NovelError.invalidInput(
+                    "The candidate no longer matches the confirmed chapter plan."
+                )
+            }
+        } else if command.source == .systemAutoCollect {
+            throw NovelError.invalidInput(
+                "Automatic collection requires a candidate bound to a confirmed chapter plan."
+            )
+        }
         guard NovelCandidateSemantics.collectionBaseMatches(
             candidate,
             targetCheckpointID: branch.headCheckpointID,
@@ -521,7 +533,11 @@ enum NovelFactTransactionReducer {
             unresolvedEntityNames: validatedDelta.unresolvedEntityNames,
             createdAt: now,
             settingProposalIDs: baseState.settingProposalIDs + proposals.map(\.id),
-            characterIdentityClarifications: baseState.characterIdentityClarifications
+            characterIdentityClarifications: baseState.characterIdentityClarifications,
+            recentWrittenHighlights: NovelStateSnapshotRecord.mergedHighlights(
+                prior: baseState.recentWrittenHighlights,
+                newEventSummaries: newEvents.map(\.summary)
+            )
         )
 
         var chapterSelections = branch.workingChapterSelections
@@ -994,7 +1010,11 @@ enum NovelFactTransactionReducer {
             unresolvedEntityNames: validatedRebuild.unresolvedEntityNames,
             createdAt: now,
             settingProposalIDs: input.baseStateSnapshot.settingProposalIDs + proposals.map(\.id),
-            characterIdentityClarifications: input.baseStateSnapshot.characterIdentityClarifications
+            characterIdentityClarifications: input.baseStateSnapshot.characterIdentityClarifications,
+            recentWrittenHighlights: NovelStateSnapshotRecord.mergedHighlights(
+                prior: input.baseStateSnapshot.recentWrittenHighlights,
+                newEventSummaries: newEvents.map(\.summary)
+            )
         )
         let finalRevision = document.project.revision + 1
         let outcome = NovelOutcome.manualSyncCommitted(

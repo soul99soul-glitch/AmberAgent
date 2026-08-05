@@ -26,6 +26,47 @@ extension DefaultNovelCreation {
             projectID: projectID,
             branchID: branchID
         )
+        return try await runPreparedContinuityAudit(
+            prepared,
+            projectID: projectID,
+            branchID: branchID
+        )
+    }
+
+    func auditContinuityIncludingCandidate(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID
+    ) async throws -> NovelContinuityAuditReport {
+        let prepared = try await prepareContinuityAuditIncludingCandidate(
+            projectID: projectID,
+            branchID: branchID,
+            candidateID: candidateID
+        )
+        return try await runPreparedContinuityAudit(
+            prepared,
+            projectID: projectID,
+            branchID: branchID
+        )
+    }
+}
+
+private extension DefaultNovelCreation {
+    struct PreparedContinuityAudit {
+        let branch: NovelBranchRecord
+        /// 扫描覆盖的章节清单(含正文为空的章),过期判断按它比对。
+        let auditedSelections: [NovelChapterSelection]
+        let chapters: [NovelContinuityAuditChapter]
+        let chunks: [NovelContinuityAuditChunk]
+        let preparation: NovelStructuredModelPreparation
+        let ledgerBudgetTokens: Int
+    }
+
+    func runPreparedContinuityAudit(
+        _ prepared: PreparedContinuityAudit,
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelContinuityAuditReport {
         let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
         let promptVersion = NovelPromptCatalog.template(for: .continuityAuditV1).version
 
@@ -75,18 +116,6 @@ extension DefaultNovelCreation {
             createdAt: now()
         )
     }
-}
-
-private extension DefaultNovelCreation {
-    struct PreparedContinuityAudit {
-        let branch: NovelBranchRecord
-        /// 扫描覆盖的章节清单(含正文为空的章),过期判断按它比对。
-        let auditedSelections: [NovelChapterSelection]
-        let chapters: [NovelContinuityAuditChapter]
-        let chunks: [NovelContinuityAuditChunk]
-        let preparation: NovelStructuredModelPreparation
-        let ledgerBudgetTokens: Int
-    }
 
     func runContinuityAuditChunk(
         _ chunk: NovelContinuityAuditChunk,
@@ -127,6 +156,81 @@ private extension DefaultNovelCreation {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) async throws -> PreparedContinuityAudit {
+        let loaded = try await loadContinuityAuditContext(
+            projectID: projectID,
+            branchID: branchID
+        )
+        let chapters = try continuityAuditChapters(
+            branch: loaded.branch,
+            discardedChapterIDs: loaded.discardedChapterIDs,
+            document: loaded.document
+        )
+        guard !chapters.isEmpty else {
+            throw NovelError.invalidInput("当前分支还没有正文可供检查。")
+        }
+        return try await finalizePreparedContinuityAudit(
+            branch: loaded.branch,
+            document: loaded.document,
+            chapters: chapters,
+            auditedSelections: loaded.auditedSelections
+        )
+    }
+
+    func prepareContinuityAuditIncludingCandidate(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        candidateID: NovelCandidateID
+    ) async throws -> PreparedContinuityAudit {
+        let loaded = try await loadContinuityAuditContext(
+            projectID: projectID,
+            branchID: branchID
+        )
+        guard let candidate = loaded.document.candidates.first(where: {
+            $0.id == candidateID && $0.branchID == branchID
+        }) else {
+            throw NovelError.invalidInput("找不到用于连续性检查的候选。")
+        }
+        guard candidate.kind == .prose, candidate.status == .available else {
+            throw NovelError.invalidInput("只有可用的正文候选才能做代笔连续性检查。")
+        }
+        let content = candidate.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else {
+            throw NovelError.invalidInput("候选正文为空，无法做连续性检查。")
+        }
+
+        var chapters = try continuityAuditChapters(
+            branch: loaded.branch,
+            discardedChapterIDs: loaded.discardedChapterIDs,
+            document: loaded.document
+        )
+        let placement = loaded.document.confirmedChapterPlan(for: branchID)?
+            .outlinePlacement
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        chapters.append(NovelContinuityAuditChapter(
+            chapterID: NovelChapterID(),
+            ordinal: loaded.branch.workingChapterSelections.count + 1,
+            title: placement.isEmpty ? "候选下一章" : placement,
+            content: candidate.content
+        ))
+        return try await finalizePreparedContinuityAudit(
+            branch: loaded.branch,
+            document: loaded.document,
+            chapters: chapters,
+            auditedSelections: loaded.auditedSelections
+        )
+    }
+
+    struct ContinuityAuditLoadContext {
+        let document: NovelProjectDocumentV1
+        let branch: NovelBranchRecord
+        let discardedChapterIDs: Set<NovelChapterID>
+        let auditedSelections: [NovelChapterSelection]
+    }
+
+    func loadContinuityAuditContext(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> ContinuityAuditLoadContext {
         try await recoverGenerationStateIfNeeded(requiredProjectID: projectID)
         let loaded = try await loadCommittedProject(id: projectID)
         guard let branch = loaded.document.branches.first(where: {
@@ -147,18 +251,23 @@ private extension DefaultNovelCreation {
             in: branch,
             discardedChapterIDs: discarded
         )
-        let chapters = try continuityAuditChapters(
+        return ContinuityAuditLoadContext(
+            document: loaded.document,
             branch: branch,
             discardedChapterIDs: discarded,
-            document: loaded.document
+            auditedSelections: auditedSelections
         )
-        guard !chapters.isEmpty else {
-            throw NovelError.invalidInput("当前分支还没有正文可供检查。")
-        }
+    }
 
+    func finalizePreparedContinuityAudit(
+        branch: NovelBranchRecord,
+        document: NovelProjectDocumentV1,
+        chapters: [NovelContinuityAuditChapter],
+        auditedSelections: [NovelChapterSelection]
+    ) async throws -> PreparedContinuityAudit {
         let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
         let preparation = try await executor.prepare(
-            modelPolicy: modelPolicy(for: .stateSync, in: loaded.document),
+            modelPolicy: modelPolicy(for: .review, in: document),
             taskKind: .continuityAudit,
             requestedInputBudgetTokens: NovelStructuredModelExecutor
                 .maximumInternalInputBudgetTokens

@@ -58,18 +58,14 @@ enum IOSMemoryLibrary {
     static func recallCandidates(
         records: [MemoryRecord],
         runtime: AgentRuntimeSetting,
-        limit: Int = 20,
         nowMillis: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
     ) -> [MemoryRecord] {
-        let visible = records.filter { isMemoryScopeEnabled($0.scope, runtime: runtime) }
-        return Array(visible
-            .filter { !$0.archived }
-            .filter { record in
-                guard let expiresAt = record.expiresAt?.int64Value else { return true }
-                return expiresAt > nowMillis
-            }
-            .sorted(by: memorySort)
-            .prefix(limit))
+        ChatMemoryContextBuilder.contextPromptResult(
+            records: ChatMemoryContextBuilder.recordsForPrompt(records: records, runtime: runtime),
+            runtime: runtime,
+            queryText: "",
+            now: nowMillis
+        ).records
     }
 
     static func recallExplanation(
@@ -88,7 +84,9 @@ enum IOSMemoryLibrary {
             }
             return "已启用 \(enabledScopes.joined(separator: "、"))，但没有可召回的未归档、未过期记忆。"
         }
-        return "聊天会从 \(enabledScopes.joined(separator: "、")) 中选择未归档、未过期的记忆，置顶优先，再按更新时间排序，最多注入前 \(min(20, candidates.count)) 条。"
+        let maxItems = min(max(Int(runtime.memoryRecall.maxItems), 1), 40)
+        let maxChars = min(max(Int(runtime.memoryRecall.maxPromptChars), 256), 12_000)
+        return "聊天会从 \(enabledScopes.joined(separator: "、")) 中按当前问题相关性、置顶和记忆类型选择，单轮最多 \(maxItems) 条、\(maxChars) 字符。"
     }
 
     static func scopeTitle(_ scope: MemoryScope) -> String {
@@ -106,6 +104,36 @@ enum IOSMemoryLibrary {
         case "reference": "资料"
         case "routine": "习惯"
         default: "笔记"
+        }
+    }
+
+    static func scopeDisplay(_ raw: String) -> String {
+        switch raw {
+        case "core": "核心"
+        case "short_term": "短期"
+        case "long_term": "长期"
+        default: raw
+        }
+    }
+
+    static func kindDisplay(_ raw: String) -> String {
+        switch raw {
+        case "user": "用户"
+        case "feedback": "反馈"
+        case "project": "项目"
+        case "reference": "资料"
+        case "routine": "习惯"
+        case "note": "笔记"
+        default: raw
+        }
+    }
+
+    static func actionDisplay(_ raw: String) -> String {
+        switch raw {
+        case "create", "add", "write": "新增"
+        case "edit", "update": "修改"
+        case "delete", "remove": "删除"
+        default: raw
         }
     }
 
@@ -135,13 +163,6 @@ enum IOSMemoryLibrary {
         if lhs.pinned != rhs.pinned { return lhs.pinned && !rhs.pinned }
         if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
         return lhs.id < rhs.id
-    }
-
-    private static func isMemoryScopeEnabled(_ scope: MemoryScope, runtime: AgentRuntimeSetting) -> Bool {
-        if scope == MemoryScope.core { return runtime.enableCoreMemory }
-        if scope == MemoryScope.shortTerm { return runtime.enableShortTermMemory }
-        if scope == MemoryScope.longTerm { return runtime.enableLongTermMemory }
-        return false
     }
 }
 

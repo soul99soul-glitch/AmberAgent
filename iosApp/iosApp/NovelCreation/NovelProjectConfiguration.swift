@@ -53,6 +53,8 @@ enum NovelProjectConfigurationReducer {
             next.project.modelPolicy = policy
         case .stateSync:
             next.project.stateSyncModelPolicy = policy
+        case .review:
+            next.project.reviewModelPolicy = policy
         }
         advanceConfigurationRevision(in: &next, now: now)
         let outcome = NovelOutcome.modelPolicyChanged(
