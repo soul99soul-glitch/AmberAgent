@@ -52,6 +52,26 @@ struct NovelQuickStartSuggestionsV2: Codable, Equatable, Sendable {
     }
 }
 
+enum NovelCharacterRelatedSuggestionKind: String, Codable, CaseIterable, Sendable {
+    case relationship
+    case world
+    case plot
+}
+
+struct NovelCharacterRelatedSuggestionV1: Codable, Equatable, Sendable {
+    let kind: NovelCharacterRelatedSuggestionKind
+    let title: String
+    let content: String
+}
+
+struct NovelCharacterProposalV1: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
+    let character: NovelQuickStartSuggestionV1
+    let relatedSuggestions: [NovelCharacterRelatedSuggestionV1]
+}
+
 /// Converts the incomplete Quick Start JSON stream into the same user-facing
 /// section order used by the durable completion message. It never creates
 /// proposal records; the full strict decoder remains the only commit gate.
@@ -59,7 +79,12 @@ enum NovelQuickStartStreamingPresentation {
     static func markdown(from partialJSON: String) -> String {
         let overview = stringValue(for: "overview", in: partialJSON)
         let world = section(for: "world", heading: "世界观", in: partialJSON)
-        let characters = objectRanges(inArrayFor: "characters", in: partialJSON)
+        var characterRanges = objectRanges(inArrayFor: "characters", in: partialJSON)
+        if characterRanges.isEmpty,
+           let legacyCharacter = objectRange(for: "characters", in: partialJSON) {
+            characterRanges = [legacyCharacter]
+        }
+        let characters = characterRanges
             .compactMap { section(heading: "人物", in: partialJSON, range: $0) }
         let outline = section(for: "masterOutline", heading: "总剧情大纲", in: partialJSON)
         let requirements = section(
@@ -75,6 +100,33 @@ enum NovelQuickStartStreamingPresentation {
         blocks.append(contentsOf: [world].compactMap { $0 })
         blocks.append(contentsOf: characters)
         blocks.append(contentsOf: [outline, requirements].compactMap { $0 })
+        return blocks.joined(separator: "\n\n")
+    }
+
+    static func characterProposalMarkdown(from partialJSON: String) -> String {
+        var blocks: [String] = []
+        if let range = objectRange(for: "character", in: partialJSON) {
+            let title = stringValue(for: "title", in: partialJSON, searchRange: range) ?? ""
+            let content = stringValue(for: "content", in: partialJSON, searchRange: range) ?? ""
+            if !title.isEmpty || !content.isEmpty {
+                let heading = title.isEmpty ? "# 人物建议" : "# 人物建议：\(title)"
+                blocks.append(content.isEmpty ? heading : heading + "\n\n" + content)
+            }
+        }
+        for range in objectRanges(inArrayFor: "relatedSuggestions", in: partialJSON) {
+            let kind = stringValue(for: "kind", in: partialJSON, searchRange: range) ?? ""
+            let title = stringValue(for: "title", in: partialJSON, searchRange: range) ?? ""
+            let content = stringValue(for: "content", in: partialJSON, searchRange: range) ?? ""
+            guard !title.isEmpty || !content.isEmpty else { continue }
+            let label = switch kind {
+            case "relationship": "人物关系"
+            case "world": "世界观"
+            case "plot": "剧情"
+            default: "相关设定"
+            }
+            let heading = title.isEmpty ? "## \(label)" : "## 相关\(label)：\(title)"
+            blocks.append(content.isEmpty ? heading : heading + "\n\n" + content)
+        }
         return blocks.joined(separator: "\n\n")
     }
 
@@ -502,6 +554,21 @@ enum NovelPolishDriftVerdict: Equatable, Sendable {
 }
 
 enum NovelStructuredOutputDecoder {
+    static func decodeCharacterProposal(from text: String) throws -> NovelCharacterProposalV1 {
+        try decodeCharacterProposal(from: Data(text.utf8))
+    }
+
+    static func decodeCharacterProposal(from data: Data) throws -> NovelCharacterProposalV1 {
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validateCharacterProposal(root.object)
+        let value: NovelCharacterProposalV1 = try decode(
+            NovelCharacterProposalV1.self,
+            from: root.data
+        )
+        try NovelStructuredOutputValidation.validate(value)
+        return value
+    }
+
     static func decodeQuickStartSuggestions(
         from text: String
     ) throws -> NovelQuickStartSuggestionsV2 {
@@ -654,6 +721,37 @@ enum NovelStructuredOutputDecoder {
 }
 
 private enum NovelStructuredOutputValidation {
+    static func validate(_ value: NovelCharacterProposalV1) throws {
+        try schemaVersion(
+            value.schemaVersion,
+            expected: NovelCharacterProposalV1.currentSchemaVersion
+        )
+        try required(value.character.title, path: "$.character.title")
+        try required(value.character.content, path: "$.character.content")
+        let aliases = NovelCharacterIdentityResolver.normalizedAliases(
+            value.character.aliases ?? []
+        )
+        guard aliases.count == value.character.aliases?.count else {
+            throw failure(
+                .invalidValue,
+                path: "$.character.aliases",
+                message: "Character aliases must be unique non-empty strings."
+            )
+        }
+        guard value.relatedSuggestions.count <= NovelCharacterRelatedSuggestionKind.allCases.count,
+              Set(value.relatedSuggestions.map(\.kind)).count == value.relatedSuggestions.count else {
+            throw failure(
+                .invalidValue,
+                path: "$.relatedSuggestions",
+                message: "Related setting suggestions may contain each supported kind at most once."
+            )
+        }
+        for (index, suggestion) in value.relatedSuggestions.enumerated() {
+            try required(suggestion.title, path: "$.relatedSuggestions[\(index)].title")
+            try required(suggestion.content, path: "$.relatedSuggestions[\(index)].content")
+        }
+    }
+
     static func validate(_ value: NovelQuickStartSuggestionsV2) throws {
         guard value.schemaVersion == NovelQuickStartSuggestionsV2.legacySchemaVersion ||
                 value.schemaVersion == NovelQuickStartSuggestionsV2.previousSchemaVersion ||
@@ -1104,10 +1202,18 @@ private enum StrictJSON {
             try keys(
                 suggestion,
                 path: "$.\(key)",
-                required: ["title", "content"]
+                required: ["title", "content"],
+                optional: ["title_cn"]
             )
             try string(suggestion["title"], path: "$.\(key).title")
             try string(suggestion["content"], path: "$.\(key).content")
+            if let translationHint = suggestion["title_cn"], !(translationHint is NSNull) {
+                throw NovelStructuredOutputFailure(
+                    category: .invalidValue,
+                    path: "$.\(key).title_cn",
+                    message: "Quick Start only accepts an empty title translation hint."
+                )
+            }
         }
         let characters: [Object]
         if version == NovelQuickStartSuggestionsV2.legacySchemaVersion {
@@ -1140,12 +1246,60 @@ private enum StrictJSON {
             let requiredKeys: Set<String> = version == NovelQuickStartSuggestionsV2.currentSchemaVersion
                 ? ["title", "content", "aliases"]
                 : ["title", "content"]
-            try keys(character, path: path, required: requiredKeys)
+            try keys(
+                character,
+                path: path,
+                required: requiredKeys,
+                optional: ["title_cn"]
+            )
             try string(character["title"], path: path + ".title")
             try string(character["content"], path: path + ".content")
+            if let translationHint = character["title_cn"], !(translationHint is NSNull) {
+                throw NovelStructuredOutputFailure(
+                    category: .invalidValue,
+                    path: path + ".title_cn",
+                    message: "Quick Start only accepts an empty title translation hint."
+                )
+            }
             if version == NovelQuickStartSuggestionsV2.currentSchemaVersion {
                 try stringArray(character["aliases"], path: path + ".aliases")
             }
+        }
+    }
+
+    static func validateCharacterProposal(_ object: Object) throws {
+        try keys(
+            object,
+            path: "$",
+            required: ["schemaVersion", "character", "relatedSuggestions"]
+        )
+        try schemaVersion(
+            object["schemaVersion"],
+            expected: NovelCharacterProposalV1.currentSchemaVersion
+        )
+        guard let character = object["character"] as? Object else {
+            throw typeFailure(path: "$.character", expected: "an object")
+        }
+        try keys(
+            character,
+            path: "$.character",
+            required: ["title", "content", "aliases"]
+        )
+        try string(character["title"], path: "$.character.title")
+        try string(character["content"], path: "$.character.content")
+        try stringArray(character["aliases"], path: "$.character.aliases")
+        try objectArray(
+            object["relatedSuggestions"],
+            path: "$.relatedSuggestions",
+            requiredKeys: ["kind", "title", "content"]
+        ) { item, path in
+            try enumString(
+                item["kind"],
+                path: path + ".kind",
+                allowed: Set(NovelCharacterRelatedSuggestionKind.allCases.map(\.rawValue))
+            )
+            try string(item["title"], path: path + ".title")
+            try string(item["content"], path: path + ".content")
         }
     }
 

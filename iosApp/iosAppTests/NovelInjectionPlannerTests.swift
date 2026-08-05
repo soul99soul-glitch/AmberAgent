@@ -967,6 +967,81 @@ final class NovelInjectionPlannerTests: XCTestCase {
         XCTAssertTrue(plan.contextText.contains("UNARCHIVED_RAW_MESSAGE"))
     }
 
+    func testQuickStartRetryExcludesFailedStructuredDraftFromModelContext() throws {
+        var document = try NovelTestFixtures.document()
+        let runID = NovelRunID()
+        let userMessageID = NovelMessageID()
+        let assistantMessageID = NovelMessageID()
+        document.sessions[0].messages = [
+            NovelSessionMessageRecord(
+                id: userMessageID,
+                sequence: 0,
+                role: .user,
+                mode: .discussPlan,
+                kind: .userInput,
+                content: "现代社畜青年",
+                createdAt: document.project.updatedAt,
+                runID: runID,
+                candidateID: nil
+            ),
+            NovelSessionMessageRecord(
+                id: assistantMessageID,
+                sequence: 1,
+                role: .assistant,
+                mode: .discussPlan,
+                kind: .interruptedDraft,
+                content: "INVALID_QUICK_START_DRAFT_THAT_POISONS_RETRY",
+                createdAt: document.project.updatedAt,
+                runID: runID,
+                candidateID: nil
+            )
+        ]
+        document.sessions[0].revision = 2
+        document.activeRuns = [NovelActiveRunRecord(
+            id: runID,
+            operationID: NovelOperationID(),
+            requestPayloadSHA256: NovelTestFixtures.hashA,
+            branchID: document.branches[0].id,
+            sessionID: document.sessions[0].id,
+            kind: .quickStart,
+            mode: .discussPlan,
+            granularity: nil,
+            userMessageID: userMessageID,
+            messageID: assistantMessageID,
+            candidateID: nil,
+            sourceChapterVersionID: nil,
+            contextualCharacterMention: nil,
+            baseCheckpointID: document.branches[0].headCheckpointID,
+            baseHeadRevision: document.branches[0].headRevision,
+            status: .failed,
+            partialContent: "INVALID_QUICK_START_DRAFT_THAT_POISONS_RETRY",
+            receiptID: NovelReceiptID(),
+            startedAt: document.project.updatedAt,
+            terminalAt: document.project.updatedAt,
+            interruptionReason: nil,
+            terminalFailure: NovelFailure(
+                code: "invalid_quick_start_output",
+                message: "invalid",
+                isRetryable: true
+            )
+        )]
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: document.branches[0].id,
+                promptKind: .quickStart,
+                userText: "现代社畜青年"
+            )
+        )
+
+        XCTAssertFalse(plan.contextText.contains("INVALID_QUICK_START_DRAFT_THAT_POISONS_RETRY"))
+        XCTAssertFalse(plan.sections.contains { section in
+            if case .sessionMessage = section.kind { return true }
+            return false
+        })
+    }
+
     private func chapterSection(in plan: NovelInjectionPlan) -> NovelInjectionSection? {
         plan.sections.first {
             if case .chapterContext = $0.kind { return true }

@@ -7,7 +7,11 @@ final class IOSNovelCreationWiringTests: XCTestCase {
     func testCharacterIdentityQuestionHasIgnoreAndCustomAnswerPaths() throws {
         let session = try source("iosApp/NovelCreation/NovelSessionView.swift")
 
-        XCTAssertTrue(session.contains("忽略此人物"))
+        XCTAssertTrue(session.contains("新建人物"))
+        XCTAssertTrue(session.contains("生成建议"))
+        XCTAssertTrue(session.contains("startCharacterProposal"))
+        XCTAssertTrue(session.contains("onAcceptSettingProposal(activeProposal)"))
+        XCTAssertTrue(session.contains("忽略"))
         XCTAssertTrue(session.contains("补充说明"))
         XCTAssertTrue(session.contains("onIgnore"))
         XCTAssertTrue(session.contains("onClarify"))
@@ -1221,6 +1225,13 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             "@AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true"
         ))
         XCTAssertTrue(session.contains("followEnabled: followGeneration"))
+        XCTAssertTrue(session.contains("ChatSwiftUIStreamingTailRenderPolicy.shouldSuspend("))
+        XCTAssertTrue(session.contains("NovelSessionStreamingTailVisibilityModifier("))
+        XCTAssertTrue(session.contains("suspendedStreamingTailRow"))
+        XCTAssertTrue(session.contains(".fixedSize(horizontal: false, vertical: true)"))
+        XCTAssertTrue(session.contains(".transaction(value: listSignal.activeTailDigest)"))
+        XCTAssertFalse(session.contains(".frame(height: viewModel.isRunning"))
+        XCTAssertTrue(session.contains("scrollDriver.submit(.userDragBegan)"))
         // 2026-07-26 撤锚更正:`.defaultScrollAnchor(.bottom, for: .sizeChanges)` 曾
         // 被当作流式底部锚点的唯一所有者,但真机录屏坐实生产 ParagraphUIView 的异步
         // 增量 TextKit 布局路径下它不能同步吸收增长(−390px 结构性跳变)。生产已撤锚,

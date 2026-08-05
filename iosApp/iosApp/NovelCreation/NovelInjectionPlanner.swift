@@ -496,10 +496,20 @@ enum NovelInjectionPlanner {
         }
 
         var selectedSessionSections: [NovelInjectionSection] = []
+        let discardedQuickStartRunIDs: Set<NovelRunID> = request.promptKind == .quickStart
+            ? Set(document.activeRuns.compactMap { run in
+                guard run.kind == .quickStart,
+                      run.status == .failed || run.status == .interrupted else { return nil }
+                return run.id
+            })
+            : []
         let cursorEligibleMessages: [NovelSessionMessageRecord]
         switch request.sessionCursorLimit {
         case nil:
-            cursorEligibleMessages = session.messages
+            cursorEligibleMessages = session.messages.filter { message in
+                guard let runID = message.runID else { return true }
+                return !discardedQuickStartRunIDs.contains(runID)
+            }
         case .some(.empty):
             cursorEligibleMessages = []
         case .some(.through(let sequence)):
@@ -508,7 +518,11 @@ enum NovelInjectionPlanner {
                     "The Session cursor limit is outside the branch Session."
                 )
             }
-            cursorEligibleMessages = session.messages.filter { $0.sequence <= sequence }
+            cursorEligibleMessages = session.messages.filter { message in
+                guard message.sequence <= sequence else { return false }
+                guard let runID = message.runID else { return true }
+                return !discardedQuickStartRunIDs.contains(runID)
+            }
         }
         let archivedThroughSequence = archiveSections.compactMap { section -> Int64? in
             guard case .discussionArchive(_, let sequence) = section.kind else { return nil }
@@ -719,7 +733,7 @@ private extension NovelPromptKind {
             true
         // 矛盾检查只读正文逐字原文,不读分支状态摘要,所以不要求状态已同步 ——
         // 否则「状态没同步」会挡住一次纯粹的正文自查。
-        case .quickStart, .discussion, .proseContinuation, .proseWholeChapter,
+        case .quickStart, .characterProposal, .discussion, .proseContinuation, .proseWholeChapter,
              .stateDeltaV1, .manualSyncV1, .discussionArchiveV1, .polishDriftV1,
              .continuityAuditV1:
             false
@@ -732,7 +746,7 @@ private extension NovelPromptKind {
         case .proseContinuation, .proseWholeChapter, .wholeChapterPolish, .wholeChapterRegeneration,
              .continuityAuditV1:
             true
-        case .quickStart, .discussion, .stateDeltaV1, .manualSyncV1,
+        case .quickStart, .characterProposal, .discussion, .stateDeltaV1, .manualSyncV1,
              .discussionArchiveV1, .polishDriftV1:
             false
         }
@@ -1306,6 +1320,7 @@ private extension NovelInjectionPlanner {
         switch kind {
         case .world: "world"
         case .character: "character"
+        case .relationship: "relationship-plan"
         case .masterOutline: "master-outline"
         case .writingRequirements: "writing-requirements"
         case .decisionLog: "decision-log"
@@ -1317,10 +1332,11 @@ private extension NovelInjectionPlanner {
         switch kind {
         case .world: 0
         case .character: 1
-        case .masterOutline: 2
-        case .writingRequirements: 3
-        case .decisionLog: 4
-        case .custom: 5
+        case .relationship: 2
+        case .masterOutline: 3
+        case .writingRequirements: 4
+        case .decisionLog: 5
+        case .custom: 6
         }
     }
 

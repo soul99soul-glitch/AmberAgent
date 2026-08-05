@@ -379,6 +379,7 @@ struct NovelProjectWorkspaceView: View {
                 onOpenManualRewrite: { activeSheet = .manualRewrite($0) },
                 onFork: { activeSheet = .forkCheckpoint($0) },
                 onOpenSettingProposals: openSettingProposals,
+                onAcceptSettingProposal: { activeSheet = .proposal($0) },
                 onArchiveDiscussion: { activeSheet = .discussionArchive(nil) }
             )
         case .manuscript:

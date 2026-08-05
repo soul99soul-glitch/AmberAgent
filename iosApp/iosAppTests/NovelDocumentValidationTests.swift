@@ -497,6 +497,7 @@ final class NovelDocumentValidationTests: XCTestCase {
             messageID: NovelMessageID(),
             candidateID: nil,
             sourceChapterVersionID: nil,
+            contextualCharacterMention: nil,
             baseCheckpointID: branch.headCheckpointID,
             baseHeadRevision: branch.headRevision,
             status: .running,

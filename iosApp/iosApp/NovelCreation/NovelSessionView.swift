@@ -83,6 +83,7 @@ struct NovelSessionView: View {
     let onOpenManualRewrite: (NovelCandidateID) -> Void
     let onFork: (NovelCheckpointID) -> Void
     let onOpenSettingProposals: (NovelSettingProposalRoute) -> Void
+    let onAcceptSettingProposal: (NovelSettingProposalRecord) -> Void
     let onArchiveDiscussion: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -107,6 +108,8 @@ struct NovelSessionView: View {
     @State private var pendingUndo: NovelPendingCommittedUndo?
     @State private var historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
     @State private var expandedArchiveIDs: Set<NovelMessageID> = []
+    @State private var streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState()
+    @State private var suspendedStreamingTailRow: NovelSessionRowModel?
 
     var body: some View {
         let listModel = projectedListModel()
@@ -120,6 +123,7 @@ struct NovelSessionView: View {
                 VStack {
                     Spacer()
                     ChatScrollToBottomButton {
+                        releaseSuspendedStreamingTail()
                         dispatchFollowEvent(.explicitBottomRequested)
                     }
                     .padding(.bottom, max(10, composerBarHeight + 10))
@@ -253,19 +257,24 @@ struct NovelSessionView: View {
                     if !visibleHistoricalRows.isEmpty {
                         LazyVStack(alignment: .leading, spacing: 14) {
                             ForEach(visibleHistoricalRows) { row in
-                                transcriptRow(row)
+                                transcriptRow(row, activeTailID: listModel?.activeTailID)
                             }
                         }
                     }
 
                     ForEach(activeRunRows) { row in
-                        transcriptRow(row)
+                        transcriptRow(row, activeTailID: listModel?.activeTailID)
                     }
 
                     ForEach(viewModel.pendingCharacterIdentityMentions) { mention in
+                        let activeProposal = viewModel.activeCharacterProposal(for: mention.name)
                         NovelCharacterIdentityQuestionCard(
                             mention: mention,
                             choices: viewModel.characterIdentityChoices,
+                            activeProposal: activeProposal,
+                            relatedProposalCount: viewModel.relatedCharacterProposalCount(
+                                for: mention.name
+                            ),
                             isDisabled: viewModel.isBusy || viewModel.isRunning,
                             onSelect: { materialID in
                                 Task { @MainActor in
@@ -287,15 +296,26 @@ struct NovelSessionView: View {
                                         clarification: clarification
                                     )
                                 }
+                            },
+                            onGenerate: { guidance in
+                                Task { @MainActor in
+                                    _ = await viewModel.startCharacterProposal(
+                                        for: mention.name,
+                                        guidance: guidance
+                                    )
+                                }
+                            },
+                            onOpenProposal: {
+                                if let activeProposal {
+                                    onAcceptSettingProposal(activeProposal)
+                                }
                             }
                         )
                     }
                 }
 
                 Color.clear
-                    .frame(height: viewModel.isRunning
-                        ? Self.followBottomGap
-                        : ChatLayout.bottomRestGap)
+                    .frame(height: ChatLayout.bottomRestGap)
                     .id(Self.bottomAnchorID)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
@@ -361,6 +381,9 @@ struct NovelSessionView: View {
                 if isNativeScrollDriverActive {
                     scrollDriver.submit(.userDragEnded(isAtBottom: returnedToBottom))
                 }
+                if returnedToBottom {
+                    releaseSuspendedStreamingTail()
+                }
                 dispatchFollowEvent(.userDragEnded(isAtBottom: returnedToBottom))
             case .animating, .decelerating:
                 break
@@ -393,11 +416,32 @@ struct NovelSessionView: View {
                 dispatchFollowEvent(event)
             }
         }
+        .transaction(value: listSignal.activeTailDigest) { transaction in
+            if isLiveTailPhase(listSignal.activeTailPhase) {
+                transaction.animation = nil
+            }
+        }
     }
 
-    private func transcriptRow(_ row: NovelSessionRowModel) -> some View {
-        NovelSessionRowView(
-            row: row,
+    private func transcriptRow(
+        _ row: NovelSessionRowModel,
+        activeTailID: NovelMessageID?
+    ) -> some View {
+        let messageID = row.id.description
+        let tracksStreamingTail = row.id == activeTailID ||
+            streamingTailVisibility.messageID == messageID
+        let updatesSuspended = ChatSwiftUIStreamingTailRenderPolicy.shouldSuspend(
+            isLastAssistant: tracksStreamingTail && row.role == .assistant,
+            hasEverStreamed: tracksStreamingTail,
+            messageID: messageID,
+            visibility: streamingTailVisibility
+        )
+        let renderedRow = updatesSuspended && suspendedStreamingTailRow?.id == row.id
+            ? suspendedStreamingTailRow ?? row
+            : row
+
+        return NovelSessionRowView(
+            row: renderedRow,
             adoptingPolishCandidateID: viewModel.adoptingPolishCandidateID,
             askUserBlocker: askUserBlocker,
             runtimeActionBlocker: NovelSessionComposerPolicy.runtimeActionBlocker(
@@ -412,6 +456,14 @@ struct NovelSessionView: View {
             onToggleArchive: toggleArchive
         )
             .equatable()
+            .fixedSize(horizontal: false, vertical: true)
+            .id(row.id)
+            .modifier(NovelSessionStreamingTailVisibilityModifier(
+                active: tracksStreamingTail,
+                onVisibilityChanged: { isVisible in
+                    updateStreamingTailVisibility(row: row, isVisible: isVisible)
+                }
+            ))
     }
 
     private func handleAskUserAnswer(
@@ -1297,6 +1349,7 @@ struct NovelSessionView: View {
         to newValue: NovelSessionListSignal
     ) {
         guard oldValue.sessionID == newValue.sessionID else {
+            releaseSuspendedStreamingTail(resetIdentity: true)
             historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
             expandedArchiveIDs.removeAll()
             if isNativeScrollDriverActive {
@@ -1305,6 +1358,16 @@ struct NovelSessionView: View {
             dispatchFollowEvent(.reset)
             dispatchFollowEvent(.initialRowsPresented(hasRows: newValue.rowCount > 0))
             return
+        }
+        if let activeTailID = newValue.activeTailID,
+           streamingTailVisibility.messageID != activeTailID.description {
+            streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState(
+                messageID: activeTailID.description,
+                isVisible: nil
+            )
+            suspendedStreamingTailRow = nil
+        } else if newValue.activeTailID == nil, suspendedStreamingTailRow == nil {
+            streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState()
         }
         // 无条件吸收:贴底与否不改变「已渲染的行不得中途被窗口踢出」这条不变量。
         // 口径必须与 `startIndex` 一致——那里用的是 **historicalRows**。若用含活动
@@ -1355,6 +1418,10 @@ struct NovelSessionView: View {
         totalCount: Int,
         preserving anchorID: NovelMessageID?
     ) {
+        if isNativeScrollDriverActive {
+            scrollDriver.submit(.userDragBegan)
+        }
+        dispatchFollowEvent(.userDragBegan(isAtBottom: false))
         historyWindowLimit = NovelSessionHistoryWindowPolicy.expandedLimit(
             currentLimit: historyWindowLimit,
             totalCount: totalCount
@@ -1548,10 +1615,33 @@ struct NovelSessionView: View {
 
     private static let bottomAnchorID = "novel-session-bottom-anchor"
 
-    /// 生成时尾部停靠留白。小说独立于 `ChatLayout.followBottomGap`(96):
-    /// 那个常量同时是 `nearBottomResumeThreshold`,改它会一起动跟随判据。
-    /// 这里只降停靠留白,让流式尾部更贴近屏幕底部,不碰任何阈值。
-    private static let followBottomGap: CGFloat = 44
+    private func updateStreamingTailVisibility(
+        row: NovelSessionRowModel,
+        isVisible: Bool
+    ) {
+        let messageID = row.id.description
+        streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState(
+            messageID: messageID,
+            isVisible: isVisible
+        )
+        if isVisible {
+            suspendedStreamingTailRow = nil
+        } else if suspendedStreamingTailRow?.id != row.id {
+            suspendedStreamingTailRow = row
+        }
+    }
+
+    private func releaseSuspendedStreamingTail(resetIdentity: Bool = false) {
+        suspendedStreamingTailRow = nil
+        if resetIdentity {
+            streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState()
+        } else if let messageID = streamingTailVisibility.messageID {
+            streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState(
+                messageID: messageID,
+                isVisible: nil
+            )
+        }
+    }
 
     /// 文案必须区分「重写」与「续写/整章」:重新生成的候选默认收录方式是
     /// **替换原章**,若沿用整章文案会显示「收录后成为新章」,与实际行为相反。
@@ -1684,6 +1774,30 @@ private struct NovelSessionRowView: View, Equatable {
     }
 }
 
+private struct NovelSessionStreamingTailVisibilityModifier: ViewModifier {
+    let active: Bool
+    let onVisibilityChanged: (Bool) -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if active {
+            content
+                .onGeometryChange(for: Bool?.self) { proxy in
+                    guard let viewportBounds = proxy.bounds(of: .scrollView) else { return nil }
+                    return proxy.frame(in: .local).intersects(viewportBounds)
+                } action: { isVisible in
+                    guard let isVisible else { return }
+                    onVisibilityChanged(isVisible)
+                }
+                .onDisappear {
+                    onVisibilityChanged(false)
+                }
+        } else {
+            content
+        }
+    }
+}
+
 private struct NovelDiscussionArchiveCard: View {
     let archive: NovelDiscussionArchivePresentation
     let onToggle: () -> Void
@@ -1716,14 +1830,21 @@ private struct NovelDiscussionArchiveCard: View {
 private struct NovelCharacterIdentityQuestionCard: View {
     let mention: NovelCharacterIdentityMention
     let choices: [(material: NovelMaterialRecord, title: String)]
+    let activeProposal: NovelSettingProposalRecord?
+    let relatedProposalCount: Int
     let isDisabled: Bool
     let onSelect: (NovelMaterialID) -> Void
     let onIgnore: () -> Void
     let onClarify: (String) -> Void
+    let onGenerate: (String) -> Void
+    let onOpenProposal: () -> Void
 
     @State private var isClarificationFieldPresented = false
+    @State private var isProposalFieldPresented = false
     @State private var clarification = ""
+    @State private var proposalGuidance = ""
     @FocusState private var isClarificationFocused: Bool
+    @FocusState private var isProposalGuidanceFocused: Bool
 
     private var normalizedClarification: String {
         clarification.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1731,20 +1852,55 @@ private struct NovelCharacterIdentityQuestionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("确认人物身份", systemImage: "person.crop.circle.badge.questionmark")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AmberTheme.accent)
+            HStack(spacing: 10) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(width: 36, height: 36)
+                    .background(AmberTheme.accent.opacity(0.10), in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("确认人物身份")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text("关联已有角色，或为新人物生成建议")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+            }
 
             Text("正文中的“\(mention.name)”对应哪位角色？确认后，已有经历会自动归入同一人物。")
                 .font(.body)
                 .foregroundStyle(AmberTheme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if choices.isEmpty {
-                Text("请先在“设定”中建立角色档案。")
-                    .font(.footnote)
-                    .foregroundStyle(AmberTheme.muted)
-            } else {
+            if let activeProposal {
+                Button(action: onOpenProposal) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(AmberTheme.accent)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(activeProposal.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text(relatedProposalCount == 0
+                                ? "人物建议已生成，确认后才会建档"
+                                : "另有 \(relatedProposalCount) 条关系、世界观或剧情建议")
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+                    .background(AmberTheme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .disabled(isDisabled)
+            } else if !choices.isEmpty {
                 ForEach(choices, id: \.material.id) { choice in
                     Button {
                         onSelect(choice.material.id)
@@ -1765,9 +1921,26 @@ private struct NovelCharacterIdentityQuestionCard: View {
                 }
             }
 
+            if activeProposal == nil {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isProposalFieldPresented.toggle()
+                    }
+                    isProposalGuidanceFocused = isProposalFieldPresented
+                } label: {
+                    Label("新建人物", systemImage: "person.crop.circle.badge.plus")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Color.white)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(AmberTheme.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isDisabled)
+            }
+
             HStack(spacing: 10) {
                 Button(action: onIgnore) {
-                    Label("忽略此人物", systemImage: "person.crop.circle.badge.xmark")
+                    Label("忽略", systemImage: "person.crop.circle.badge.xmark")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AmberTheme.muted)
                         .frame(maxWidth: .infinity, minHeight: 44)
@@ -1789,6 +1962,38 @@ private struct NovelCharacterIdentityQuestionCard: View {
             }
             .buttonStyle(.plain)
             .disabled(isDisabled)
+
+            if isProposalFieldPresented && activeProposal == nil {
+                VStack(alignment: .trailing, spacing: 8) {
+                    TextField(
+                        "可选：补充身份、关系或剧情方向",
+                        text: $proposalGuidance,
+                        axis: .vertical
+                    )
+                    .lineLimit(2 ... 5)
+                    .focused($isProposalGuidanceFocused)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+
+                    Button {
+                        NovelTextInputCommitter.perform {
+                            onGenerate(proposalGuidance)
+                            isProposalGuidanceFocused = false
+                        }
+                    } label: {
+                        Label("生成建议", systemImage: "arrow.up")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(Color.white)
+                            .frame(minHeight: 44)
+                            .padding(.horizontal, 16)
+                            .background(AmberTheme.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDisabled)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             if isClarificationFieldPresented {
                 VStack(alignment: .trailing, spacing: 8) {
@@ -1823,7 +2028,7 @@ private struct NovelCharacterIdentityQuestionCard: View {
             }
 
             if isDisabled {
-                Text("停止当前同步后，即可关联、忽略或补充说明。")
+                Text("停止或等待当前任务完成后，即可处理人物身份。")
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
             }

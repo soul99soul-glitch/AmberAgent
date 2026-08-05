@@ -121,6 +121,21 @@ enum NovelProjectConfigurationReducer {
             let injectionMode,
             let aliases
         ):
+            let contextualSourceMention: String? = {
+                guard case .some(.contextualCharacter(_, let sourceMention, .character)) =
+                    proposal.origin else { return nil }
+                return sourceMention
+            }()
+            if contextualSourceMention != nil, kind != .character {
+                throw NovelError.invalidInput(
+                    "A contextual character proposal must be accepted as a character material."
+                )
+            }
+            let acceptedAliases = kind == .character
+                ? NovelCharacterIdentityResolver.normalizedAliases(
+                    aliases + [contextualSourceMention].compactMap { $0 }
+                )
+                : []
             guard next.materialRevisions.allSatisfy({ $0.id != revisionID }) else {
                 throw NovelError.immutableRecordConflict("material revision \(revisionID)")
             }
@@ -152,7 +167,7 @@ enum NovelProjectConfigurationReducer {
                 next.materials[materialIndex].revisionIDs.append(revisionID)
                 if kind == .character {
                     next.materials[materialIndex].aliases = NovelCharacterIdentityResolver
-                        .normalizedAliases(next.materials[materialIndex].aliases + aliases)
+                        .normalizedAliases(next.materials[materialIndex].aliases + acceptedAliases)
                 }
             } else {
                 next.materials.append(NovelMaterialRecord(
@@ -160,7 +175,7 @@ enum NovelProjectConfigurationReducer {
                     kind: kind,
                     currentRevisionID: revisionID,
                     revisionIDs: [revisionID],
-                    aliases: kind == .character ? aliases : []
+                    aliases: acceptedAliases
                 ))
             }
             advanceConfigurationRevision(in: &next, now: now)

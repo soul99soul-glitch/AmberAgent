@@ -94,7 +94,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         mode = run.mode
         granularity = run.granularity
         kind = switch run.kind {
-        case .quickStart, .discussion: .discussion
+        case .quickStart, .characterProposal, .discussion: .discussion
         case .prose, .regenerate: .proseCandidate
         case .polish: .polishCandidate
         }
@@ -181,7 +181,7 @@ enum NovelSettingProposalRoute: Hashable, Sendable {
         self = switch kind {
         case .character: .characters
         case .world: .world
-        case .masterOutline: .story
+        case .relationship, .masterOutline: .story
         case .writingRequirements, .decisionLog, .custom, nil: .more
         }
     }

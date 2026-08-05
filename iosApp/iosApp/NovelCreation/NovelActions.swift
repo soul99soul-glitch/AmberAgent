@@ -1180,6 +1180,7 @@ enum NovelSnapshot: Equatable, Sendable {
 
 enum NovelRunKind: String, Codable, Sendable {
     case quickStart
+    case characterProposal
     case discussion
     case prose
     case polish
@@ -1197,7 +1198,7 @@ enum NovelRunKind: String, Codable, Sendable {
     var outputReservationTokens: Int {
         switch self {
         case .prose, .polish, .regenerate: 8_192
-        case .quickStart, .discussion: 4_096
+        case .quickStart, .characterProposal, .discussion: 4_096
         }
     }
 }
@@ -1218,6 +1219,7 @@ struct NovelRunRequest: Equatable, Sendable {
     let injectionReceiptID: NovelReceiptID
     let sourceChapterVersionID: NovelChapterVersionID?
     let askUserResponse: NovelAskUserResponse?
+    let contextualCharacterMention: String?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
     let expectedProjectRevision: Int64
@@ -1240,6 +1242,7 @@ struct NovelRunRequest: Equatable, Sendable {
         injectionReceiptID: NovelReceiptID,
         sourceChapterVersionID: NovelChapterVersionID?,
         askUserResponse: NovelAskUserResponse? = nil,
+        contextualCharacterMention: String? = nil,
         injectionOverrides: NovelInjectionOverrides = .none,
         inputBudgetTokens: Int = 16_000,
         expectedProjectRevision: Int64,
@@ -1261,6 +1264,7 @@ struct NovelRunRequest: Equatable, Sendable {
         self.injectionReceiptID = injectionReceiptID
         self.sourceChapterVersionID = sourceChapterVersionID
         self.askUserResponse = askUserResponse
+        self.contextualCharacterMention = contextualCharacterMention
         self.injectionOverrides = NovelInjectionOverrides(
             forceIncludeMaterialIDs: Array(Set(injectionOverrides.forceIncludeMaterialIDs)).sorted {
                 $0.description < $1.description
@@ -1293,6 +1297,7 @@ struct NovelRunRequest: Equatable, Sendable {
             injectionReceiptID: injectionReceiptID,
             sourceChapterVersionID: sourceChapterVersionID,
             askUserResponse: askUserResponse,
+            contextualCharacterMention: contextualCharacterMention,
             injectionOverrides: injectionOverrides,
             inputBudgetTokens: inputBudgetTokens
         )
@@ -1318,6 +1323,7 @@ private struct NovelCanonicalRunPayload: Codable {
     let injectionReceiptID: NovelReceiptID
     let sourceChapterVersionID: NovelChapterVersionID?
     let askUserResponse: NovelAskUserResponse?
+    let contextualCharacterMention: String?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
 }

@@ -532,7 +532,7 @@ private struct NovelCompendiumMoreView: View {
             switch $0.kind {
             case .writingRequirements, .custom:
                 return true
-            case .world, .character, .masterOutline, .decisionLog:
+            case .world, .character, .relationship, .masterOutline, .decisionLog:
                 return false
             }
         }
@@ -783,8 +783,13 @@ private struct NovelCompendiumMaterialDeleteCandidate: Identifiable {
 
 extension NovelSettingProposalRecord {
     var suggestedMaterialKind: NovelMaterialKind? {
-        guard case .some(.quickStart(_, let suggestedKind)) = origin else { return nil }
-        return suggestedKind
+        switch origin {
+        case .some(.quickStart(_, let suggestedKind)),
+             .some(.contextualCharacter(_, _, let suggestedKind)):
+            return suggestedKind
+        case .some(.derivedState), nil:
+            return nil
+        }
     }
 }
 
@@ -792,6 +797,7 @@ private extension NovelMaterialKind {
     func matchesCategory(_ category: NovelMaterialKind) -> Bool {
         switch (self, category) {
         case (.world, .world), (.character, .character),
+             (.relationship, .relationship),
              (.masterOutline, .masterOutline), (.writingRequirements, .writingRequirements):
             true
         case (.custom, .custom):

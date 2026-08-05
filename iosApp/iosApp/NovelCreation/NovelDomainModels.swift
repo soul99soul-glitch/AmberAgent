@@ -79,6 +79,9 @@ struct NovelQuickStartSeed: Codable, Equatable, Sendable {
 enum NovelMaterialKind: Codable, Equatable, Sendable {
     case world
     case character
+    /// Author-approved relationship planning. Runtime relationship facts remain
+    /// in `NovelStateSnapshotRecord` and are still derived from manuscript evidence.
+    case relationship
     case masterOutline
     case writingRequirements
     case decisionLog
@@ -813,6 +816,9 @@ struct NovelActiveRunRecord: Codable, Equatable, Sendable {
     let messageID: NovelMessageID
     let candidateID: NovelCandidateID?
     let sourceChapterVersionID: NovelChapterVersionID?
+    /// The unresolved surface name owned by a contextual character-proposal run.
+    /// Nil for every legacy run kind and for documents written before this field existed.
+    let contextualCharacterMention: String?
     let baseCheckpointID: NovelCheckpointID
     let baseHeadRevision: Int64
     var status: NovelRunStatus
@@ -948,6 +954,11 @@ struct NovelPendingOperationRecord: Codable, Equatable, Sendable {
 enum NovelSettingProposalOrigin: Codable, Equatable, Sendable {
     case derivedState
     case quickStart(runID: NovelRunID, suggestedKind: NovelMaterialKind)
+    case contextualCharacter(
+        runID: NovelRunID,
+        sourceMention: String,
+        suggestedKind: NovelMaterialKind
+    )
 }
 
 struct NovelSettingProposalRecord: Codable, Equatable, Sendable {
@@ -1186,6 +1197,7 @@ extension NovelProjectDocumentV1 {
                   proposal.supersededByRunID == nil else { return false }
             if activeIDs.contains(proposal.id) { return true }
             if case .some(.quickStart) = proposal.origin { return true }
+            if case .some(.contextualCharacter) = proposal.origin { return true }
             return false
         }
     }

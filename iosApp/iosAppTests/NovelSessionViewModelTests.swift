@@ -524,12 +524,18 @@ final class NovelSessionViewModelTests: XCTestCase {
         let startedRunID = await harness.workspace.startQuickStartSuggestions()
         let firstRunID = try XCTUnwrap(startedRunID)
         await harness.session.bindToCurrentSelection()
-        let didAsk = await eventually {
+        let firstRunCompleted = await eventually {
             harness.workspace.projectSnapshot?.activeRuns.first(where: {
                 $0.id == firstRunID
-            })?.status == .completed && !harness.session.isRunning
+            })?.status == .completed
         }
-        XCTAssertTrue(didAsk)
+        XCTAssertTrue(firstRunCompleted)
+        await harness.session.bindToCurrentSelection()
+        let didAsk = !harness.session.isRunning
+        XCTAssertTrue(
+            didAsk,
+            "run=\(String(describing: harness.workspace.projectSnapshot?.activeRuns.first(where: { $0.id == firstRunID })?.status)) isRunning=\(harness.session.isRunning) tailPhase=\(String(describing: harness.session.transientTail?.phase)) startingRun=\(String(describing: harness.workspace.quickStartStartingRun?.id)) workspaceError=\(String(describing: harness.workspace.errorMessage))"
+        )
         let promptMessage = try XCTUnwrap(harness.session.durableMessages.last)
         XCTAssertEqual(promptMessage.interaction, .askUser(prompt))
         XCTAssertEqual(
@@ -542,11 +548,16 @@ final class NovelSessionViewModelTests: XCTestCase {
             answer: "失去记忆"
         )
         XCTAssertTrue(didAnswer)
-        let didFinish = await eventually {
-            harness.workspace.projectSnapshot?.settingProposals.count == 4 &&
-                !harness.session.isRunning
+        let proposalsCompleted = await eventually {
+            harness.workspace.projectSnapshot?.settingProposals.count == 4
         }
-        XCTAssertTrue(didFinish)
+        XCTAssertTrue(proposalsCompleted)
+        await harness.session.bindToCurrentSelection()
+        let didFinish = !harness.session.isRunning
+        XCTAssertTrue(
+            didFinish,
+            "proposalCount=\(harness.workspace.projectSnapshot?.settingProposals.count ?? -1) isRunning=\(harness.session.isRunning) tailPhase=\(String(describing: harness.session.transientTail?.phase)) startingRun=\(String(describing: harness.workspace.quickStartStartingRun?.id)) workspaceError=\(String(describing: harness.workspace.errorMessage))"
+        )
         XCTAssertEqual(harness.session.durableMessages[2].content, "失去记忆")
     }
 
@@ -1784,10 +1795,12 @@ final class NovelSessionViewModelTests: XCTestCase {
                 harness.session.transientTail?.content.contains("# 创作建议") == true
         }
         XCTAssertTrue(receivedVisibleOutput)
-        try? await Task.sleep(for: .milliseconds(100))
+        let receivedCharacterSection = await eventually {
+            harness.session.transientTail?.content.contains("## 人物") == true
+        }
         let content = try XCTUnwrap(harness.session.transientTail?.content)
+        XCTAssertTrue(receivedCharacterSection, "streaming preview: \(content)")
         XCTAssertTrue(content.contains("## 世界观"))
-        XCTAssertTrue(content.contains("## 人物"))
         XCTAssertFalse(content.contains("schemaVersion"))
         XCTAssertFalse(content.contains("aliases"))
         await harness.session.stop()
@@ -3182,6 +3195,7 @@ private extension NovelSessionViewModelTests {
                 onOpenManualRewrite: { _ in },
                 onFork: { _ in },
                 onOpenSettingProposals: { _ in },
+                onAcceptSettingProposal: { _ in },
                 onArchiveDiscussion: {}
             )
         }

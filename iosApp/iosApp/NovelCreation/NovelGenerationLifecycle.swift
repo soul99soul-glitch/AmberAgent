@@ -849,7 +849,7 @@ extension DefaultNovelCreation {
         switch request.kind {
         case .prose, .polish, .regenerate:
             candidateID = NovelCandidateID()
-        case .quickStart, .discussion:
+        case .quickStart, .characterProposal, .discussion:
             candidateID = nil
         }
         let synthetic = NovelRunRequest(
@@ -982,7 +982,7 @@ private extension DefaultNovelCreation {
             .prose
         case .polish:
             .polish
-        case .quickStart, .discussion:
+        case .quickStart, .characterProposal, .discussion:
             nil
         }
     }
@@ -1379,7 +1379,7 @@ private extension DefaultNovelCreation {
                 return completed
             }
             return NovelPromptCatalog.normalizedCandidateProse(partialContent)
-        case .quickStart, .discussion:
+        case .quickStart, .characterProposal, .discussion:
             return nil
         }
     }
@@ -1590,6 +1590,23 @@ private extension DefaultNovelCreation {
                     failure: NovelFailure(
                         code: "invalid_quick_start_output",
                         message: "The quick-start suggestions were not valid structured output.",
+                        isRetryable: true
+                    )
+                )
+                return
+            }
+        }
+        if runtime.kind == .characterProposal {
+            do {
+                _ = try NovelStructuredOutputDecoder.decodeCharacterProposal(
+                    from: runtime.partialContent
+                )
+            } catch {
+                await failRun(
+                    runID,
+                    failure: NovelFailure(
+                        code: "invalid_character_proposal_output",
+                        message: "人物建议不是有效的结构化结果。",
                         isRetryable: true
                     )
                 )
@@ -2046,6 +2063,7 @@ private extension DefaultNovelCreation {
     func promptKind(for request: NovelRunRequest) -> NovelPromptKind {
         switch request.kind {
         case .quickStart: .quickStart
+        case .characterProposal: .characterProposal
         case .discussion: .discussion
         case .prose:
             request.granularity == .continuation ? .proseContinuation : .proseWholeChapter
@@ -2057,6 +2075,7 @@ private extension DefaultNovelCreation {
     func modelPurpose(for request: NovelRunRequest) -> NovelModelPurpose {
         switch request.kind {
         case .quickStart: .quickStart
+        case .characterProposal: .characterProposal
         case .discussion: .discussion
         case .prose, .regenerate: .prose
         case .polish: .polish
@@ -2079,6 +2098,13 @@ private extension DefaultNovelCreation {
         case .quickStart:
             NovelModelParameters(
                 temperature: 0.7,
+                topP: 0.95,
+                maxOutputTokens: nil,
+                reasoningLevel: .automatic
+            )
+        case .characterProposal:
+            NovelModelParameters(
+                temperature: 0.65,
                 topP: 0.95,
                 maxOutputTokens: nil,
                 reasoningLevel: .automatic

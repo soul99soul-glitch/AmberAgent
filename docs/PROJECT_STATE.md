@@ -1,15 +1,15 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 本文件只记录当前可操作事实。开始任务时先结合真实 git 状态核对；状态变化后原地更新，不为普通 session 继续新增 handoff。
 
 ## Repository
 
-- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
+- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
 - Remote tracking: `origin/feat/ios-provider-parity-claude`
-- Worktree: 2026-08-04 当前分支已包含 iOS 26 后台流式续跑第一阶段、第二阶段 Phase 2A、剧情同步收据/中文错误收口与同步后台韧性修复；是否存在后续未提交变更仍以实时 `git status` 和单文件 diff 为准。
+- Worktree: 2026-08-05 当前有未提交的小说 Quick Start、上下文人物建议和流式滚动修复；具体文件范围以实时 `git status` 和单文件 diff 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Focus
@@ -21,6 +21,14 @@ iOS Phase A-F 与架构精简 S1-S3 仍是领域基线；UX 简化 S1-S7 的三�
 默认可用路径是 `NativeChatTimelineView`（native timeline；2026-07-30 退役 route 判定层后为唯一 Chat 列表路径）。`ChatSwiftUIMessageList` 与 UIKit `ChatCollectionMessageList` 已生产不可达（仅 `#if CHAT_PERF_REPLAY` 仍编译前者），不再代表默认 Chat 门禁；`ChatSwiftUIStreamReplayTests` 已改为直接挂载当前 Native timeline，`ChatStreamReplayTests` 仅保留非默认 UICollectionView 回归价值。
 
 ## Latest Completed Slices
+
+### 2026-08-05 小说 Quick Start、上下文人物建议与流式滚动修复（未提交）
+
+- 真机项目回读确认 Quick Start 连续失败并非模型没有返回建议：DeepSeek 已返回完整结构化 JSON，但夹带英文前言/代码围栏和无害的 `title_cn: null`；旧严格解码因此整轮拒绝。失败原始响应随后又作为 interrupted draft 注入重试上下文，使后续模型转而输出确认文字或章节正文。现仅兼容值为 `null` 的可选 `title_cn`，其他未知字段仍严格拒绝；新 Quick Start 会排除失败/中断 Quick Start 的模型草稿，不影响成功建议、讨论和正文历史。
+- 人物身份卡新增「新建人物」路径，可针对正文中新出现的郭威一类人物生成可确认的人物建议，并可同时生成关系、世界观和剧情资料；各建议独立确认，只有人物建议被接受后才解除对应身份问题，失败或取消不会伪造已处理。既有「关联角色」「忽略此人物」「补充说明」仍保留。
+- 小说页复用 Chat 的屏外流式尾部冻结策略：用户上滑离开底部后，不再让不可见的整篇 Markdown 随每个 chunk 重排并持续改变内容高度；回到底部后一次显示累计内容。流式行同时采用稳定 ID、等价渲染、固定纵向尺寸和禁用隐式动画。展开更早记录前先进入浏览态并暂停原生跟随，底部留白改为固定值，避免历史锚点与原生 driver 争抢、以及终态切换引入额外高度跳变。Quick Start 流式预览另补齐 legacy schema 的角色对象解析，避免角色区只在终态突然出现。
+- 受影响的 13 个小说套件在 iPhone 17 Pro / iOS 26.5 Simulator 上 **439 passed / 0 failed / 0 skipped**（`/Users/arquiel/Library/Developer/Xcode/DerivedData/AmberAgent-bjiohjyzqxbgaocvnuyszcwtjbyd/Logs/Test/Test-iosApp-2026.08.05_01-58-36-+0800.xcresult`）。全量 iOS 测试仍有本轮范围外的既有红灯，包括 Chat 长表格性能阈值、DocumentAccessStore 大文件/中文解码、Settings wiring 源码顺序和若干无法挂载 UIKit probe 的小说性能/滚动探针；不能表述为全量绿灯。`git diff --check` 通过。
+- 最新混合工作区已用 Team `89QRFX9548` 完成 iPhone Air Debug arm64 构建并通过 `codesign --verify --deep --strict`；主 Debug dylib SHA-256 为 `6c693f4cf49ef0f7d4826c789ce8793b088a73bd7b8bcccdc42db1c57d8a1a3d`。02:05 已覆盖安装到 `94918570-0680-5B93-8E38-7E6B355D4426` 的 `11957E1A-F78D-4845-A1AD-82EAA2EDCB8B/iosApp.app`，未卸载且应保留原有 App 数据；自动启动仅因设备锁定被系统拒绝。流式生成中的真实手势、rubber-band、ProMotion 手感和 Quick Start 真实 provider 重试仍需设备解锁后人工触发验收。
 
 ### 2026-08-04 剧情同步后台韧性与推理心跳收口
 

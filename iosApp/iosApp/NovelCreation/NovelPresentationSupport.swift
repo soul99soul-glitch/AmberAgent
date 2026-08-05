@@ -78,6 +78,7 @@ extension NovelMaterialKind {
         switch self {
         case .world: "世界观"
         case .character: "人物档案"
+        case .relationship: "人物关系"
         case .masterOutline: "总剧情大纲"
         case .writingRequirements: "写作要求"
         case .decisionLog: "讨论决定"
@@ -89,6 +90,7 @@ extension NovelMaterialKind {
         switch self {
         case .world: "globe.asia.australia"
         case .character: "person.text.rectangle"
+        case .relationship: "person.line.dotted.person"
         case .masterOutline: "point.3.connected.trianglepath.dotted"
         case .writingRequirements: "text.badge.checkmark"
         case .decisionLog: "checklist"

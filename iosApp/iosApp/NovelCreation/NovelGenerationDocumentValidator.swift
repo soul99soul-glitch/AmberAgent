@@ -700,6 +700,8 @@ enum NovelGenerationDocumentValidator {
         switch run.kind {
         case .quickStart:
             .quickStart
+        case .characterProposal:
+            .characterProposal
         case .discussion:
             .discussion
         case .prose:
@@ -717,12 +719,17 @@ enum NovelGenerationDocumentValidator {
         issues: inout [String]
     ) {
         switch run.kind {
-        case .quickStart, .discussion:
+        case .quickStart, .discussion, .characterProposal:
             if run.mode != .discussPlan ||
                 run.granularity != nil ||
                 run.candidateID != nil ||
                 run.sourceChapterVersionID != nil {
                 issues.append("Run \(run.id) has an invalid discussion shape.")
+            }
+            if run.kind == .characterProposal,
+               run.contextualCharacterMention?
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                issues.append("Run \(run.id) has no contextual character mention.")
             }
         case .prose:
             if run.mode != .writeProse ||
@@ -778,7 +785,7 @@ enum NovelGenerationDocumentValidator {
             return
         }
         let expectedKind: NovelSessionMessageKind = switch run.kind {
-        case .quickStart, .discussion: .discussion
+        case .quickStart, .characterProposal, .discussion: .discussion
         case .prose, .regenerate: .proseCandidate
         case .polish: .polishCandidate
         }
@@ -796,6 +803,17 @@ enum NovelGenerationDocumentValidator {
                 expectedContent = NovelGenerationReducer.quickStartMarkdown(suggestions)
             } else {
                 issues.append("Completed quick-start run \(run.id) has invalid structured output.")
+                expectedContent = run.partialContent
+            }
+        } else if run.kind == .characterProposal {
+            if let proposal = try? NovelStructuredOutputDecoder.decodeCharacterProposal(
+                from: run.partialContent
+            ) {
+                expectedContent = NovelGenerationReducer.characterProposalMarkdown(proposal)
+            } else {
+                issues.append(
+                    "Completed character-proposal run \(run.id) has invalid structured output."
+                )
                 expectedContent = run.partialContent
             }
         } else {

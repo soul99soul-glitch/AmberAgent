@@ -990,6 +990,7 @@ final class NovelCreationViewModel {
             messageID: request.assistantMessageID,
             candidateID: nil,
             sourceChapterVersionID: nil,
+            contextualCharacterMention: nil,
             baseCheckpointID: branch.branch.headCheckpointID,
             baseHeadRevision: branch.branch.headRevision,
             status: .running,

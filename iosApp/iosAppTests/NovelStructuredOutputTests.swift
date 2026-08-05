@@ -139,6 +139,32 @@ final class NovelStructuredOutputTests: XCTestCase {
         XCTAssertEqual(decoded.characters[0].aliases, ["朱重八", "朱重九"])
     }
 
+    func testQuickStartDecoderAcceptsCapturedNullTranslationHintsFromDeepSeek() throws {
+        let captured = """
+        Suggestions are ready:
+        ```json
+        {
+          "schemaVersion": 3,
+          "overview": "完整方向",
+          "world": {"title":"五代末世","content":"后周至宋初。","title_cn":null},
+          "characters": [
+            {"title":"沈越","content":"现代社畜。","aliases":[]},
+            {"title":"赵匡胤","content":"年轻游侠。","aliases":["赵大"]}
+          ],
+          "masterOutline": {"title":"从江湖到朝堂","content":"五幕结构。","title_cn":null},
+          "writingRequirements": {"title":"温情喜剧","content":"活泼幽默。","title_cn":null}
+        }
+        ```
+        """
+
+        let decoded = try NovelStructuredOutputDecoder.decodeQuickStartSuggestions(
+            from: captured
+        )
+
+        XCTAssertEqual(decoded.characters.map(\.title), ["沈越", "赵匡胤"])
+        XCTAssertEqual(decoded.masterOutline.title, "从江湖到朝堂")
+    }
+
     func testQuickStartStreamingPresentationRevealsOnlyUserFacingFields() {
         let partial = #"{"schemaVersion":3,"overview":"雾城会保存每一次证词。","world":{"title":"证词之城","content":"记忆可被交易，但每次交易都会留下空白。"},"characters":[{"title":"赵大来","content":"他想找回被抹去的名字。","aliases":["#
 
@@ -165,6 +191,65 @@ final class NovelStructuredOutputTests: XCTestCase {
         XCTAssertEqual(first, "# 创作建议\n\n第一行\n第二")
         XCTAssertTrue(second.hasPrefix(first))
         XCTAssertEqual(second, first + "行\n\n## 世界观：雾城\n\n规则")
+    }
+
+    func testQuickStartStreamingPresentationIncludesLegacyObjectCharacter() {
+        let legacy = #"{"schemaVersion":1,"overview":"方向","world":{"title":"城","content":"规则"},"characters":{"title":"林遥","content":"调查员。"},"masterOutline":{"title":"总纲","content":"追查真相。"},"writingRequirements":{"title":"要求","content":"克制。"}}"#
+
+        let presentation = NovelQuickStartStreamingPresentation.markdown(from: legacy)
+
+        XCTAssertTrue(presentation.contains("## 人物：林遥"))
+        XCTAssertTrue(presentation.contains("调查员。"))
+    }
+
+    func testCharacterProposalDecoderKeepsCharacterAndRelatedSuggestionsTyped() throws {
+        let output = try NovelStructuredOutputDecoder.decodeCharacterProposal(from: """
+        {
+          "schemaVersion": 1,
+          "character": {
+            "title": "郭威",
+            "content": "后汉枢密使，连接柴荣与赵匡胤的关键人物。",
+            "aliases": ["郭雀儿"]
+          },
+          "relatedSuggestions": [
+            {
+              "kind": "relationship",
+              "title": "郭威与柴荣",
+              "content": "养父子关系既是权力继承，也是情感牵引。"
+            },
+            {
+              "kind": "world",
+              "title": "后汉军政格局",
+              "content": "枢密使掌握的军权决定朝局走向。"
+            },
+            {
+              "kind": "plot",
+              "title": "后周权力交接",
+              "content": "郭威、柴荣、赵匡胤的故事线应依次推进。"
+            }
+          ]
+        }
+        """)
+
+        XCTAssertEqual(output.character.title, "郭威")
+        XCTAssertEqual(output.character.aliases, ["郭雀儿"])
+        XCTAssertEqual(
+            output.relatedSuggestions.map(\.kind),
+            [.relationship, .world, .plot]
+        )
+
+        assertFailure(
+            category: .invalidValue,
+            try NovelStructuredOutputDecoder.decodeCharacterProposal(from: """
+            {
+              "schemaVersion": 1,
+              "character": {"title":"郭威","content":"人物设定","aliases":[]},
+              "relatedSuggestions": [
+                {"kind":"style","title":"文风","content":"沉稳"}
+              ]
+            }
+            """)
+        )
     }
 
     func testStateDeltaDecodesCompleteVersionedPayload() throws {

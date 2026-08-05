@@ -9,6 +9,9 @@ final class NovelPromptCatalogTests: XCTestCase {
             "\($0.kind.rawValue)\n\($0.version)\n\($0.systemText)"
         }.joined(separator: "\n---\n")
 
+        // 2026-08-05 显式更新:新增 `.characterProposal` 模板，为正文中新出现的人物
+        // 生成一组须确认的人物、关系、世界观和剧情建议。
+        //
         // 2026-07-31 显式更新:散文/润色/重写提示词禁止 Markdown 代码围栏
         // (```html 等会让 Chat markdown 把正文渲成绿字代码卡)。
         //
@@ -20,7 +23,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
         XCTAssertEqual(
             sha256(snapshot),
-            "2f2ee4a729b02d5ff56caec9676659db0737923b245539113689b76e0e50070f"
+            "dd8eb45f34787fc7439f267483b1d8c0b4a7b82e53053daf2c7f98b9aedbffd4"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -28,6 +31,8 @@ final class NovelPromptCatalogTests: XCTestCase {
     func testUserVisiblePromptsPreserveDomainBoundaries() {
         let discussion = NovelPromptCatalog.template(for: .discussion).systemText
         let quickStart = NovelPromptCatalog.template(for: .quickStart).systemText
+        let normalizedQuickStart = quickStart.split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
         let continuation = NovelPromptCatalog.template(for: .proseContinuation).systemText
         let wholeChapter = NovelPromptCatalog.template(for: .proseWholeChapter).systemText
         let polish = NovelPromptCatalog.template(for: .wholeChapterPolish).systemText
@@ -39,7 +44,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertTrue(discussion.contains("options array when free input"))
         XCTAssertTrue(discussion.contains("you may ask one next material decision"))
         XCTAssertTrue(quickStart.contains("use ask_user"))
-        XCTAssertTrue(quickStart.contains("putting your recommended direction first"))
+        XCTAssertTrue(normalizedQuickStart.contains("putting your recommended direction first"))
         XCTAssertTrue(quickStart.contains("you may ask one next material decision"))
         XCTAssertTrue(continuation.contains("does not become canonical"))
         XCTAssertTrue(continuation.contains("one focused scene or passage"))

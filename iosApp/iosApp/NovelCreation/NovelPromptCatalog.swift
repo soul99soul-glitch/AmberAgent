@@ -2,6 +2,7 @@ import Foundation
 
 enum NovelPromptKind: String, Codable, CaseIterable, Sendable {
     case quickStart
+    case characterProposal
     case discussion
     case proseContinuation
     case proseWholeChapter
@@ -68,7 +69,7 @@ enum NovelPromptCatalog {
                 "novel.whole-chapter-regeneration.v1",
                 "novel.whole-chapter-regeneration.v2",
             ])
-        case .discussionArchiveV1, .polishDriftV1, .continuityAuditV1:
+        case .characterProposal, .discussionArchiveV1, .polishDriftV1, .continuityAuditV1:
             break
         }
         return versions
@@ -111,6 +112,38 @@ enum NovelPromptCatalog {
                 characters into one title or content field. A character title must be that character's canonical
                 name. Put every known earlier name, former name, title, nickname, or disguise used in the story in
                 aliases. Use an empty aliases array when none are known.
+                """
+            )
+
+        case .characterProposal:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.character-proposal.v1",
+                systemText: """
+                You create one confirmable character proposal for a person who appeared in an ongoing novel but
+                has not yet been added to the character library. Use the current branch materials, manuscript,
+                story state, and conversation as context. The unresolved surface name and any author guidance are
+                in the user message. Do not rerun Quick Start and do not rewrite unrelated established settings.
+
+                Return exactly one JSON object and no Markdown, code fence, or prose outside it:
+                {
+                  "schemaVersion": 1,
+                  "character": {
+                    "title": "Canonical character name",
+                    "content": "Role, motivation, constraints, and story relevance",
+                    "aliases": ["Known earlier name, title, nickname, or surface mention"]
+                  },
+                  "relatedSuggestions": [
+                    {"kind":"relationship","title":"...","content":"A relationship plan worth confirming"},
+                    {"kind":"world","title":"...","content":"A world rule worth confirming"},
+                    {"kind":"plot","title":"...","content":"A plot adjustment worth confirming"}
+                  ]
+                }
+
+                character title and content must be non-empty. aliases must be an array and should not repeat the
+                canonical title. relatedSuggestions may be empty. Include at most one item for each supported kind
+                and only when it is materially useful; every item remains a proposal until the author confirms it.
+                Never claim that a proposed relationship or plot event has already happened. Use the user's language.
                 """
             )
 

@@ -556,6 +556,28 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
     }
 
+    func testContextualCharacterProposalKeepsItsSuggestedMaterialKind() {
+        let proposal = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: NovelBranchID(),
+            title: "郭威",
+            content: "后汉枢密使，后来建立后周。",
+            createdAt: Date(),
+            isResolved: false,
+            origin: .contextualCharacter(
+                runID: NovelRunID(),
+                sourceMention: "郭威",
+                suggestedKind: .character
+            ),
+            suggestedCharacterAliases: ["郭威", "郭雀儿"]
+        )
+
+        XCTAssertEqual(
+            NovelProposalAcceptanceSheet.initialKindChoice(for: proposal),
+            NovelMaterialKindChoice(kind: .character)
+        )
+    }
+
     func testWritingRequirementsProposalDefaultsToTheExistingManagedMaterial() {
         let existingID = NovelMaterialID()
         let existingRevisionID = NovelMaterialRevisionID()

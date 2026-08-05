@@ -62,6 +62,7 @@ private struct NovelSessionRunDraft: Equatable, Sendable {
     let askUserResponse: NovelAskUserResponse?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
+    var contextualCharacterMention: String? = nil
 }
 
 /// Absolute presentation target for one streaming run identity.
@@ -259,6 +260,7 @@ final class NovelSessionViewModel {
     /// Quick Start keeps its structured transport text separate from the user-facing tail.
     /// Only the strict terminal decoder is allowed to commit proposal records.
     @ObservationIgnored private var quickStartStructuredContent: String?
+    @ObservationIgnored private var characterProposalStructuredContent: String?
     @ObservationIgnored private var presentationFlushTask: Task<Void, Never>?
     /// 终态 tail 的延迟退役任务:完成后保留 tail 一个静窗再清空,避免完成瞬间整屏一跳。
     @ObservationIgnored private var terminalTailRetirementTask: Task<Void, Never>?
@@ -370,6 +372,33 @@ final class NovelSessionViewModel {
                   ) else { return nil }
             return (material, revision.title)
         }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    func activeCharacterProposal(
+        for mention: String
+    ) -> NovelSettingProposalRecord? {
+        let key = NovelCharacterIdentityResolver.normalize(mention)
+        return workspace.branchSnapshot?.activeSettingProposals.first { proposal in
+            guard case .some(.contextualCharacter(
+                _,
+                let sourceMention,
+                .character
+            )) = proposal.origin else { return false }
+            return NovelCharacterIdentityResolver.normalize(sourceMention) == key
+        }
+    }
+
+    func relatedCharacterProposalCount(for mention: String) -> Int {
+        let key = NovelCharacterIdentityResolver.normalize(mention)
+        return workspace.branchSnapshot?.activeSettingProposals.filter { proposal in
+            guard case .some(.contextualCharacter(
+                _,
+                let sourceMention,
+                let kind
+            )) = proposal.origin,
+                  kind != .character else { return false }
+            return NovelCharacterIdentityResolver.normalize(sourceMention) == key
+        }.count ?? 0
     }
 
     func projectedListModel(
@@ -759,6 +788,45 @@ final class NovelSessionViewModel {
         operationErrorMessage = workspace.errorMessage
         _ = await refreshDurable(binding: binding, token: bindingToken)
         return succeeded && workspace.errorMessage == nil
+    }
+
+    @discardableResult
+    func startCharacterProposal(
+        for mention: String,
+        guidance: String
+    ) async -> Bool {
+        let normalizedMention = mention.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedGuidance = guidance.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard pendingCharacterIdentityMentions.contains(where: {
+            NovelCharacterIdentityResolver.normalize($0.name) ==
+                NovelCharacterIdentityResolver.normalize(normalizedMention)
+        }) else {
+            operationErrorMessage = "这个人物身份问题已经失效。"
+            return false
+        }
+        guard activeCharacterProposal(for: normalizedMention) == nil else {
+            operationErrorMessage = "这个人物已有待确认建议。"
+            return false
+        }
+        var userText = """
+        请为正文中新出现但尚未建档的人物生成一份可确认的人物建议。
+
+        当前称呼：\(normalizedMention)
+        """
+        if !normalizedGuidance.isEmpty {
+            userText += "\n\n作者补充：\(normalizedGuidance)"
+        }
+        return await start(NovelSessionRunDraft(
+            kind: .characterProposal,
+            mode: .discussPlan,
+            granularity: nil,
+            userText: userText,
+            sourceChapterVersionID: nil,
+            askUserResponse: nil,
+            injectionOverrides: .none,
+            inputBudgetTokens: 16_000,
+            contextualCharacterMention: normalizedMention
+        ))
     }
 
     func stop(reason: NovelRunInterruptionReason = .user) async {
@@ -1817,6 +1885,10 @@ private extension NovelSessionViewModel {
         switch kind {
         case .discussion:
             return true
+        case .characterProposal:
+            return branch.syncStatus == .synchronized &&
+                branchPendingOperations.isEmpty &&
+                unresolvedBranchPolishTransactions.isEmpty
         case .prose:
             return !branchPendingOperations.contains(where: \.blocksProseGeneration)
         case .regenerate:
@@ -1847,7 +1919,7 @@ private extension NovelSessionViewModel {
 
         let candidateID: NovelCandidateID? = switch draft.kind {
         case .prose, .polish, .regenerate: NovelCandidateID()
-        case .quickStart, .discussion: nil
+        case .quickStart, .characterProposal, .discussion: nil
         }
         let request = NovelRunRequest(
             id: NovelRunID(),
@@ -1865,6 +1937,7 @@ private extension NovelSessionViewModel {
             injectionReceiptID: NovelReceiptID(),
             sourceChapterVersionID: draft.sourceChapterVersionID,
             askUserResponse: draft.askUserResponse,
+            contextualCharacterMention: draft.contextualCharacterMention,
             injectionOverrides: draft.injectionOverrides,
             inputBudgetTokens: draft.inputBudgetTokens,
             expectedProjectRevision: project.project.revision,
@@ -1887,6 +1960,7 @@ private extension NovelSessionViewModel {
             messageID: request.assistantMessageID,
             candidateID: request.candidateID,
             sourceChapterVersionID: request.sourceChapterVersionID,
+            contextualCharacterMention: request.contextualCharacterMention,
             baseCheckpointID: branch.branch.headCheckpointID,
             baseHeadRevision: branch.branch.headRevision,
             status: .running,
@@ -1976,12 +2050,16 @@ private extension NovelSessionViewModel {
         case .delta(let text):
             if draft.kind == .quickStart {
                 appendQuickStartStructuredDelta(text, runID: runID, token: token)
+            } else if draft.kind == .characterProposal {
+                appendCharacterProposalStructuredDelta(text, runID: runID, token: token)
             } else {
                 enqueuePresentationDelta(text, runID: runID, token: token)
             }
         case .replaced(let text):
             if draft.kind == .quickStart {
                 replaceQuickStartStructuredContent(text, runID: runID, token: token)
+            } else if draft.kind == .characterProposal {
+                replaceCharacterProposalStructuredContent(text, runID: runID, token: token)
             } else {
                 enqueuePresentationReplacement(text, runID: runID, token: token)
             }
@@ -2002,7 +2080,9 @@ private extension NovelSessionViewModel {
             publishTerminalPresentation(
                 runID: runID,
                 token: token,
-                authoritativeContent: draft.kind == .quickStart ? "" : snapshot?.message.content,
+                authoritativeContent: draft.kind == .quickStart || draft.kind == .characterProposal
+                    ? ""
+                    : snapshot?.message.content,
                 phase: .interrupted
             )
             terminalAwaitingRefresh = true
@@ -2015,7 +2095,9 @@ private extension NovelSessionViewModel {
             publishTerminalPresentation(
                 runID: runID,
                 token: token,
-                authoritativeContent: draft.kind == .quickStart ? "" : nil,
+                authoritativeContent: draft.kind == .quickStart || draft.kind == .characterProposal
+                    ? ""
+                    : nil,
                 phase: .failed(failure)
             )
             terminalAwaitingRefresh = true
@@ -2030,7 +2112,9 @@ private extension NovelSessionViewModel {
             publishTerminalPresentation(
                 runID: runID,
                 token: token,
-                authoritativeContent: draft.kind == .quickStart ? "" : nil,
+                authoritativeContent: draft.kind == .quickStart || draft.kind == .characterProposal
+                    ? ""
+                    : nil,
                 phase: .persistenceBlocked(failure)
             )
             lastFailure = failure
@@ -2061,9 +2145,16 @@ private extension NovelSessionViewModel {
             return
         }
         let expectedBinding = binding
-        let initialContent = run.kind == .quickStart
-            ? NovelQuickStartStreamingPresentation.markdown(from: run.partialContent)
-            : run.partialContent
+        let initialContent: String = switch run.kind {
+        case .quickStart:
+            NovelQuickStartStreamingPresentation.markdown(from: run.partialContent)
+        case .characterProposal:
+            NovelQuickStartStreamingPresentation.characterProposalMarkdown(
+                from: run.partialContent
+            )
+        case .discussion, .prose, .polish, .regenerate:
+            run.partialContent
+        }
         installTail(
             run: run,
             content: initialContent,
@@ -2112,7 +2203,8 @@ private extension NovelSessionViewModel {
                 forceIncludeMaterialIDs: injection.forceIncludeMaterialIDs,
                 forceExcludeMaterialIDs: injection.forceExcludeMaterialIDs
             ),
-            inputBudgetTokens: injection.requestedInputBudgetTokens
+            inputBudgetTokens: injection.requestedInputBudgetTokens,
+            contextualCharacterMention: run.contextualCharacterMention
         )
     }
 
@@ -2141,6 +2233,7 @@ private extension NovelSessionViewModel {
             injectionReceiptID: injection.id,
             sourceChapterVersionID: run.sourceChapterVersionID,
             askUserResponse: draft.askUserResponse,
+            contextualCharacterMention: run.contextualCharacterMention,
             injectionOverrides: draft.injectionOverrides,
             inputBudgetTokens: draft.inputBudgetTokens,
             expectedProjectRevision: project.project.revision,
@@ -2416,6 +2509,33 @@ private extension NovelSessionViewModel {
         publishQuickStartPresentation(runID: runID, token: token)
     }
 
+    func appendCharacterProposalStructuredDelta(
+        _ text: String,
+        runID: NovelRunID,
+        token: UUID
+    ) {
+        guard transientTail?.runID == runID, bindingToken == token else { return }
+        characterProposalStructuredContent = (characterProposalStructuredContent ?? "") + text
+        publishCharacterProposalStreamingPresentation(runID: runID, token: token)
+    }
+
+    func replaceCharacterProposalStructuredContent(
+        _ text: String,
+        runID: NovelRunID,
+        token: UUID
+    ) {
+        guard transientTail?.runID == runID, bindingToken == token else { return }
+        characterProposalStructuredContent = text
+        publishCharacterProposalStreamingPresentation(runID: runID, token: token)
+    }
+
+    func publishCharacterProposalStreamingPresentation(runID: NovelRunID, token: UUID) {
+        let presentation = NovelQuickStartStreamingPresentation.characterProposalMarkdown(
+            from: characterProposalStructuredContent ?? ""
+        )
+        enqueuePresentationReplacement(presentation, runID: runID, token: token)
+    }
+
     func publishQuickStartPresentation(runID: NovelRunID, token: UUID) {
         let markdown = NovelQuickStartStreamingPresentation.markdown(
             from: quickStartStructuredContent ?? ""
@@ -2477,6 +2597,9 @@ private extension NovelSessionViewModel {
         terminalTailRetirementTask = nil
         cancelPendingPresentation()
         quickStartStructuredContent = run.kind == .quickStart ? run.partialContent : nil
+        characterProposalStructuredContent = run.kind == .characterProposal
+            ? run.partialContent
+            : nil
         transientRunRecord = run
         transientTail = NovelSessionTransientTail(
             run: run,
@@ -2517,6 +2640,7 @@ private extension NovelSessionViewModel {
         terminalTailRetirementTask = nil
         cancelPendingPresentation()
         quickStartStructuredContent = nil
+        characterProposalStructuredContent = nil
         transientTail = nil
         transientRunRecord = nil
         terminalAwaitingRefresh = false

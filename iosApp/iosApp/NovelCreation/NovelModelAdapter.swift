@@ -15,6 +15,7 @@ struct NovelResolvedModel: Codable, Equatable, Sendable {
 
 enum NovelModelPurpose: String, Codable, CaseIterable, Sendable {
     case quickStart
+    case characterProposal
     case discussion
     case prose
     case polish

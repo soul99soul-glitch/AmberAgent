@@ -283,6 +283,124 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         XCTAssertEqual(final.activeRuns.first?.terminalFailure, failure)
     }
 
+    func testCapturedDeepSeekQuickStartWithNullTranslationHintsCompletes() async throws {
+        let document = try quickStartDocument()
+        let captured = """
+        Suggestions are ready:
+        ```json
+        {
+          "schemaVersion": 3,
+          "overview": "完整方向",
+          "world": {"title":"五代末世","content":"后周至宋初。","title_cn":null},
+          "characters": [
+            {"title":"沈越","content":"现代社畜。","aliases":[]},
+            {"title":"赵匡胤","content":"年轻游侠。","aliases":["赵大"]}
+          ],
+          "masterOutline": {"title":"从江湖到朝堂","content":"五幕结构。","title_cn":null},
+          "writingRequirements": {"title":"温情喜剧","content":"活泼幽默。","title_cn":null}
+        }
+        ```
+        """
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.delta(captured), .complete])]
+        )
+        let request = makeRequest(document: document, kind: .quickStart)
+
+        let events = await capturedEvents(try await harness.creation.start(request).events)
+        guard case .completed? = events.last else {
+            return XCTFail("Expected the captured complete suggestion set to be accepted.")
+        }
+        let final = try await harness.repository.document(request.projectID)
+        XCTAssertEqual(final.activeRuns.first?.status, .completed)
+        XCTAssertEqual(final.settingProposals.count, 5)
+        XCTAssertNil(final.activeRuns.first?.terminalFailure)
+    }
+
+    func testCharacterProposalLifecycleCreatesSuggestionsButNotMaterials() async throws {
+        let document = try documentWithUnresolvedCharacter("郭威")
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [
+                .delta(characterProposalJSON),
+                .complete
+            ])]
+        )
+        let request = makeRequest(
+            document: document,
+            kind: .characterProposal,
+            contextualCharacterMention: "郭威"
+        )
+
+        let events = await capturedEvents(try await harness.creation.start(request).events)
+        guard case .completed? = events.last else {
+            return XCTFail("Expected a completed contextual character proposal.")
+        }
+        let final = try await harness.repository.document(request.projectID)
+        XCTAssertEqual(final.activeRuns.first?.status, .completed)
+        XCTAssertEqual(final.settingProposals.count, 4)
+        XCTAssertTrue(final.materials.isEmpty)
+        XCTAssertEqual(final.stateSnapshots[0].unresolvedEntityNames, ["郭威"])
+    }
+
+    func testInvalidCharacterProposalLeavesIdentityQuestionUnresolved() async throws {
+        let document = try documentWithUnresolvedCharacter("郭威")
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.delta("not a proposal"), .complete])]
+        )
+        let request = makeRequest(
+            document: document,
+            kind: .characterProposal,
+            contextualCharacterMention: "郭威"
+        )
+
+        let events = await capturedEvents(try await harness.creation.start(request).events)
+        XCTAssertEqual(events.last, .failed(NovelFailure(
+            code: "invalid_character_proposal_output",
+            message: "人物建议不是有效的结构化结果。",
+            isRetryable: true
+        )))
+        let final = try await harness.repository.document(request.projectID)
+        XCTAssertTrue(final.settingProposals.isEmpty)
+        XCTAssertTrue(final.materials.isEmpty)
+        XCTAssertEqual(final.stateSnapshots[0].unresolvedEntityNames, ["郭威"])
+    }
+
+    func testCancellingCharacterProposalLeavesIdentityQuestionUnresolved() async throws {
+        let document = try documentWithUnresolvedCharacter("郭威")
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [.pause])]
+        )
+        let request = makeRequest(
+            document: document,
+            kind: .characterProposal,
+            contextualCharacterMention: "郭威"
+        )
+        let run = try await harness.creation.start(request)
+        var iterator = run.events.makeAsyncIterator()
+        guard case .started? = await iterator.next() else {
+            return XCTFail("Expected start event")
+        }
+
+        let running = try await harness.repository.document(request.projectID)
+        _ = try await harness.creation.perform(.cancelRun(cancelCommand(
+            document: running,
+            runID: request.id
+        )))
+        guard case .interrupted? = await iterator.next() else {
+            return XCTFail("Expected interrupted event")
+        }
+
+        let final = try await harness.repository.document(request.projectID)
+        XCTAssertEqual(final.activeRuns.first?.status, .interrupted)
+        XCTAssertTrue(final.settingProposals.isEmpty)
+        XCTAssertTrue(final.materials.isEmpty)
+        XCTAssertEqual(final.stateSnapshots[0].unresolvedEntityNames, ["郭威"])
+        XCTAssertNil(final.branches.first?.activeRunID)
+    }
+
     func testCancelPersistsOptionalPartialAndForcedSidecarWithoutWaitingForProvider() async throws {
         for partial in ["", "Keep this partial"] {
             let document = try NovelTestFixtures.document()
@@ -1991,15 +2109,16 @@ private extension NovelGenerationLifecycleTests {
         sourceChapterVersionID: NovelChapterVersionID? = nil,
         runID: NovelRunID = NovelRunID(),
         operationID: NovelOperationID = NovelOperationID(),
+        contextualCharacterMention: String? = nil,
         inputBudgetTokens: Int = 16_000
     ) -> NovelRunRequest {
         let branch = document.branches[0]
         let mode: NovelSessionMode = switch kind {
-        case .quickStart, .discussion: .discussPlan
+        case .quickStart, .characterProposal, .discussion: .discussPlan
         case .prose, .polish, .regenerate: .writeProse
         }
         let candidateID: NovelCandidateID? = switch kind {
-        case .quickStart, .discussion: nil
+        case .quickStart, .characterProposal, .discussion: nil
         case .prose, .polish, .regenerate: NovelCandidateID()
         }
         return NovelRunRequest(
@@ -2017,6 +2136,7 @@ private extension NovelGenerationLifecycleTests {
             generationReceiptID: NovelReceiptID(),
             injectionReceiptID: NovelReceiptID(),
             sourceChapterVersionID: sourceChapterVersionID,
+            contextualCharacterMention: contextualCharacterMention,
             inputBudgetTokens: inputBudgetTokens,
             expectedProjectRevision: document.project.revision,
             expectedConfigRevision: document.project.configRevision,
@@ -2040,6 +2160,40 @@ private extension NovelGenerationLifecycleTests {
                 coreIdea: "Memories can testify."
             )
         ), now: Date(timeIntervalSince1970: 1_700_000_000)).document
+    }
+
+    func documentWithUnresolvedCharacter(_ mention: String) throws -> NovelProjectDocumentV1 {
+        var document = try NovelTestFixtures.document()
+        let state = document.stateSnapshots[0]
+        document.stateSnapshots[0] = NovelStateSnapshotRecord(
+            id: state.id,
+            eventIDs: state.eventIDs,
+            summary: state.summary,
+            branchOutline: state.branchOutline,
+            unresolvedEntityNames: [mention],
+            createdAt: state.createdAt,
+            settingProposalIDs: state.settingProposalIDs,
+            characterIdentityClarifications: state.characterIdentityClarifications
+        )
+        return document
+    }
+
+    var characterProposalJSON: String {
+        """
+        {
+          "schemaVersion": 1,
+          "character": {
+            "title": "郭威",
+            "content": "后汉枢密使，连接柴荣与赵匡胤的关键人物。",
+            "aliases": ["郭雀儿"]
+          },
+          "relatedSuggestions": [
+            {"kind":"relationship","title":"郭威与柴荣","content":"养父子关系。"},
+            {"kind":"world","title":"后汉军政格局","content":"军权影响朝局。"},
+            {"kind":"plot","title":"后周权力交接","content":"三人的故事线依次推进。"}
+          ]
+        }
+        """
     }
 
     func cancelCommand(

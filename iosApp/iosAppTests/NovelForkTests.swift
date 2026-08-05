@@ -629,7 +629,7 @@ private extension NovelBranchTestFixtures {
             mode = .writeProse
             granularity = .wholeChapter
             candidateID = NovelCandidateID()
-        case .quickStart, .polish, .regenerate:
+        case .quickStart, .characterProposal, .polish, .regenerate:
             throw NovelError.invalidInput("The branch test fixture only supports discussion and prose runs.")
         }
         return NovelRunRequest(
@@ -663,7 +663,7 @@ private extension NovelBranchTestFixtures {
             promptKind = .discussion
         case .prose:
             promptKind = .proseWholeChapter
-        case .quickStart, .polish, .regenerate:
+        case .quickStart, .characterProposal, .polish, .regenerate:
             throw NovelError.invalidInput("Unsupported branch test run kind.")
         }
         let plan = try NovelInjectionPlanner.plan(

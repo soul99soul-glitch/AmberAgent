@@ -676,7 +676,55 @@ enum NovelDocumentValidator {
     ) {
         var quickStartKindCountsByRun: [NovelRunID: [String: Int]] = [:]
         var quickStartProposalsByRun: [NovelRunID: [NovelSettingProposalRecord]] = [:]
+        var contextualProposalsByRun: [NovelRunID: [NovelSettingProposalRecord]] = [:]
         for proposal in document.settingProposals {
+            if case .some(.contextualCharacter(
+                let runID,
+                let sourceMention,
+                let suggestedKind
+            )) = proposal.origin {
+                if proposal.supersededByRunID != nil {
+                    issues.append("Contextual character proposal \(proposal.id) is marked as superseded.")
+                }
+                contextualProposalsByRun[runID, default: []].append(proposal)
+                guard let sourceRun = document.activeRuns.first(where: {
+                    $0.id == runID &&
+                        $0.branchID == proposal.branchID &&
+                        $0.kind == .characterProposal &&
+                        $0.status == .completed
+                }) else {
+                    issues.append("Contextual character proposal \(proposal.id) has no completed source run.")
+                    continue
+                }
+                if NovelCharacterIdentityResolver.normalize(sourceMention) !=
+                    NovelCharacterIdentityResolver.normalize(
+                        sourceRun.contextualCharacterMention ?? ""
+                    ) {
+                    issues.append("Contextual character proposal \(proposal.id) changed its source mention.")
+                }
+                switch suggestedKind {
+                case .character:
+                    let aliasKeys = Set((proposal.suggestedCharacterAliases ?? []).map {
+                        NovelCharacterIdentityResolver.normalize($0)
+                    })
+                    if !aliasKeys.contains(NovelCharacterIdentityResolver.normalize(sourceMention)) {
+                        issues.append(
+                            "Contextual character proposal \(proposal.id) does not retain its source mention."
+                        )
+                    }
+                case .relationship, .world, .masterOutline:
+                    if proposal.suggestedCharacterAliases != nil {
+                        issues.append(
+                            "Non-character contextual proposal \(proposal.id) contains character aliases."
+                        )
+                    }
+                case .writingRequirements, .decisionLog, .custom:
+                    issues.append(
+                        "Contextual character proposal \(proposal.id) suggests an unsupported material kind."
+                    )
+                }
+                continue
+            }
             guard case .some(.quickStart(let runID, let suggestedKind)) = proposal.origin else {
                 if proposal.supersededByRunID != nil {
                     issues.append("Non-quick-start proposal \(proposal.id) is marked as superseded.")
@@ -729,7 +777,7 @@ enum NovelDocumentValidator {
             case .character: kindKey = "character"
             case .masterOutline: kindKey = "masterOutline"
             case .writingRequirements: kindKey = "writingRequirements"
-            case .decisionLog, .custom:
+            case .relationship, .decisionLog, .custom:
                 issues.append("Quick-start proposal \(proposal.id) suggests an unsupported material kind.")
                 continue
             }
@@ -770,6 +818,29 @@ enum NovelDocumentValidator {
                 (counts["character"] ?? 0) < 1 {
                 issues.append(
                     "Quick-start run \(run.id) does not own one fixed proposal per section and at least one character proposal."
+                )
+            }
+        }
+        for run in document.activeRuns where
+            run.kind == .characterProposal && run.status == .completed {
+            guard let output = try? NovelStructuredOutputDecoder.decodeCharacterProposal(
+                from: run.partialContent
+            ) else {
+                issues.append("Completed character-proposal run \(run.id) has invalid output.")
+                continue
+            }
+            let proposals = contextualProposalsByRun[run.id] ?? []
+            let expectedKinds: [NovelMaterialKind] = [.character] +
+                output.relatedSuggestions.map { suggestion in
+                    switch suggestion.kind {
+                    case .relationship: .relationship
+                    case .world: .world
+                    case .plot: .masterOutline
+                    }
+                }
+            if proposals.map(\.suggestedMaterialKind) != expectedKinds {
+                issues.append(
+                    "Character-proposal run \(run.id) does not own its typed proposal set."
                 )
             }
         }

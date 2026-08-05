@@ -175,6 +175,7 @@ enum NovelGenerationReducer {
             messageID: request.assistantMessageID,
             candidateID: request.candidateID,
             sourceChapterVersionID: request.sourceChapterVersionID,
+            contextualCharacterMention: request.contextualCharacterMention,
             baseCheckpointID: branch.headCheckpointID,
             baseHeadRevision: branch.headRevision,
             status: .running,
@@ -264,22 +265,33 @@ enum NovelGenerationReducer {
 
         let messageKind: NovelSessionMessageKind
         let quickStartSuggestions: NovelQuickStartSuggestionsV2?
+        let characterProposal: NovelCharacterProposalV1?
         switch run.kind {
         case .quickStart:
             messageKind = .discussion
             quickStartSuggestions = try NovelStructuredOutputDecoder
                 .decodeQuickStartSuggestions(from: content)
+            characterProposal = nil
+        case .characterProposal:
+            messageKind = .discussion
+            quickStartSuggestions = nil
+            characterProposal = try NovelStructuredOutputDecoder
+                .decodeCharacterProposal(from: content)
         case .discussion:
             messageKind = .discussion
             quickStartSuggestions = nil
+            characterProposal = nil
         case .prose, .regenerate:
             messageKind = .proseCandidate
             quickStartSuggestions = nil
+            characterProposal = nil
         case .polish:
             messageKind = .polishCandidate
             quickStartSuggestions = nil
+            characterProposal = nil
         }
-        let messageContent = quickStartSuggestions.map(quickStartMarkdown) ?? content
+        let messageContent = quickStartSuggestions.map(quickStartMarkdown) ??
+            characterProposal.map(characterProposalMarkdown) ?? content
         let message = NovelSessionMessageRecord(
             id: run.messageID,
             sequence: Int64(document.sessions[sessionIndex].messages.count),
@@ -311,6 +323,14 @@ enum NovelGenerationReducer {
                 next.settingProposals[index].supersededByRunID = run.id
             }
             next.settingProposals.append(contentsOf: proposals)
+        }
+        if let characterProposal {
+            next.settingProposals.append(contentsOf: try contextualCharacterProposals(
+                characterProposal,
+                run: run,
+                document: document,
+                now: now
+            ))
         }
         if let candidateID = run.candidateID {
             let candidateKind: NovelCandidateKind = run.kind == .polish ? .polish : .prose
@@ -443,6 +463,87 @@ enum NovelGenerationReducer {
         return "# 创作建议\n\n\(suggestions.overview)\n\n\(body)"
     }
 
+    static func characterProposalMarkdown(_ proposal: NovelCharacterProposalV1) -> String {
+        var sections = [
+            "# 人物建议：\(proposal.character.title)\n\n\(proposal.character.content)"
+        ]
+        if !proposal.relatedSuggestions.isEmpty {
+            sections.append(contentsOf: proposal.relatedSuggestions.map { suggestion in
+                let heading = switch suggestion.kind {
+                case .relationship: "人物关系"
+                case .world: "世界观"
+                case .plot: "剧情"
+                }
+                return "## 相关\(heading)：\(suggestion.title)\n\n\(suggestion.content)"
+            })
+        }
+        return sections.joined(separator: "\n\n")
+    }
+
+    private static func contextualCharacterProposals(
+        _ output: NovelCharacterProposalV1,
+        run: NovelActiveRunRecord,
+        document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> [NovelSettingProposalRecord] {
+        guard let sourceMention = run.contextualCharacterMention else {
+            throw NovelError.invalidInput("The character-proposal run lost its source mention.")
+        }
+        let typed: [(stableID: String, kind: NovelMaterialKind, suggestion: NovelQuickStartSuggestionV1)] = [
+            (
+                "character",
+                .character,
+                NovelQuickStartSuggestionV1(
+                    title: output.character.title,
+                    content: output.character.content,
+                    aliases: NovelCharacterIdentityResolver.normalizedAliases(
+                        [sourceMention] + (output.character.aliases ?? [])
+                    )
+                )
+            )
+        ] + output.relatedSuggestions.map { suggestion in
+            let kind: NovelMaterialKind = switch suggestion.kind {
+            case .relationship: .relationship
+            case .world: .world
+            case .plot: .masterOutline
+            }
+            return (
+                "related-\(suggestion.kind.rawValue)",
+                kind,
+                NovelQuickStartSuggestionV1(
+                    title: suggestion.title,
+                    content: suggestion.content
+                )
+            )
+        }
+        return try typed.map { item in
+            let id = NovelProposalID(deterministicProposalID(
+                operationID: run.operationID,
+                namespace: "contextual-character",
+                stableID: item.stableID
+            ))
+            guard document.settingProposals.allSatisfy({ $0.id != id }) else {
+                throw NovelError.immutableRecordConflict("setting proposal \(id)")
+            }
+            return NovelSettingProposalRecord(
+                id: id,
+                branchID: run.branchID,
+                title: item.suggestion.title,
+                content: item.suggestion.content,
+                createdAt: now,
+                isResolved: false,
+                origin: .contextualCharacter(
+                    runID: run.id,
+                    sourceMention: sourceMention,
+                    suggestedKind: item.kind
+                ),
+                suggestedCharacterAliases: item.kind == .character
+                    ? item.suggestion.aliases ?? []
+                    : nil
+            )
+        }
+    }
+
     private static func quickStartProposals(
         _ suggestions: NovelQuickStartSuggestionsV2,
         run: NovelActiveRunRecord,
@@ -483,8 +584,20 @@ enum NovelGenerationReducer {
         operationID: NovelOperationID,
         stableID: String
     ) -> UUID {
+        deterministicProposalID(
+            operationID: operationID,
+            namespace: "quick-start",
+            stableID: stableID
+        )
+    }
+
+    private static func deterministicProposalID(
+        operationID: NovelOperationID,
+        namespace: String,
+        stableID: String
+    ) -> UUID {
         let hex = NovelDocumentValidator.sha256(
-            operationID.description + "|quick-start-proposal|" + stableID
+            operationID.description + "|\(namespace)-proposal|" + stableID
         )
         let value = String(hex.prefix(8)) + "-" +
             String(hex.dropFirst(8).prefix(4)) + "-" +
@@ -809,6 +922,31 @@ private extension NovelGenerationReducer {
                   request.sourceChapterVersionID == nil else {
                 throw NovelError.invalidInput("The quick-start run shape is invalid.")
             }
+        case .characterProposal:
+            guard request.mode == .discussPlan,
+                  request.granularity == nil,
+                  request.candidateID == nil,
+                  request.sourceChapterVersionID == nil,
+                  request.askUserResponse == nil,
+                  let mention = request.contextualCharacterMention?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !mention.isEmpty,
+                  mention.count <= 200,
+                  let state = document.stateSnapshots.first(where: {
+                      $0.id == branch.currentStateSnapshotID
+                  }),
+                  state.unresolvedEntityNames.contains(where: {
+                      NovelCharacterIdentityResolver.normalize($0) ==
+                        NovelCharacterIdentityResolver.normalize(mention)
+                  }),
+                  !document.activeSettingProposals(for: branch.id).contains(where: { proposal in
+                      guard case .some(.contextualCharacter(_, let sourceMention, .character)) =
+                        proposal.origin else { return false }
+                      return NovelCharacterIdentityResolver.normalize(sourceMention) ==
+                        NovelCharacterIdentityResolver.normalize(mention)
+                  }) else {
+                throw NovelError.invalidInput("The character-proposal run shape is invalid.")
+            }
         case .discussion:
             guard request.mode == .discussPlan,
                   request.granularity == nil,
@@ -1007,6 +1145,8 @@ private extension NovelGenerationReducer {
         switch request.kind {
         case .quickStart:
             .quickStart
+        case .characterProposal:
+            .characterProposal
         case .discussion:
             .discussion
         case .prose:

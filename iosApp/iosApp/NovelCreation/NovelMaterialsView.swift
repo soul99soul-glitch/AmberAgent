@@ -274,6 +274,7 @@ private struct NovelMaterialDeleteCandidate: Identifiable {
 enum NovelMaterialKindChoice: String, CaseIterable, Identifiable {
     case world
     case character
+    case relationship
     case masterOutline
     case writingRequirements
     case custom
@@ -284,6 +285,7 @@ enum NovelMaterialKindChoice: String, CaseIterable, Identifiable {
         switch self {
         case .world: "世界观"
         case .character: "人物档案"
+        case .relationship: "人物关系"
         case .masterOutline: "总剧情大纲"
         case .writingRequirements: "写作要求"
         case .custom: "自定义"
@@ -294,6 +296,7 @@ enum NovelMaterialKindChoice: String, CaseIterable, Identifiable {
         switch kind {
         case .world: self = .world
         case .character: self = .character
+        case .relationship: self = .relationship
         case .masterOutline: self = .masterOutline
         case .writingRequirements: self = .writingRequirements
         case .decisionLog: self = .custom
@@ -305,6 +308,7 @@ enum NovelMaterialKindChoice: String, CaseIterable, Identifiable {
         switch self {
         case .world: .world
         case .character: .character
+        case .relationship: .relationship
         case .masterOutline: .masterOutline
         case .writingRequirements: .writingRequirements
         case .custom: .custom(customName.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -826,8 +830,7 @@ struct NovelProposalAcceptanceSheet: View {
     static func initialKindChoice(
         for proposal: NovelSettingProposalRecord
     ) -> NovelMaterialKindChoice? {
-        guard case .some(.quickStart(_, let kind)) = proposal.origin else { return nil }
-        return NovelMaterialKindChoice(kind: kind)
+        proposal.suggestedMaterialKind.map(NovelMaterialKindChoice.init(kind:))
     }
 
     static func initialTargetMaterialID(

@@ -269,6 +269,80 @@ final class NovelGenerationReducerTests: XCTestCase {
         }
     }
 
+    func testCharacterProposalCompletionCreatesConfirmableTypedProposalsWithoutResolvingMention() throws {
+        var document = try NovelTestFixtures.document()
+        document.stateSnapshots[0] = NovelStateSnapshotRecord(
+            id: document.stateSnapshots[0].id,
+            eventIDs: document.stateSnapshots[0].eventIDs,
+            summary: document.stateSnapshots[0].summary,
+            branchOutline: document.stateSnapshots[0].branchOutline,
+            unresolvedEntityNames: ["郭威"],
+            createdAt: document.stateSnapshots[0].createdAt,
+            settingProposalIDs: document.stateSnapshots[0].settingProposalIDs
+        )
+        let request = makeRequest(
+            document: document,
+            kind: .characterProposal,
+            contextualCharacterMention: "郭威"
+        )
+        let started = try begin(request, in: document)
+        let completed = try NovelGenerationReducer.complete(
+            runID: request.id,
+            content: characterProposalJSON,
+            in: started,
+            now: terminalTime
+        )
+
+        XCTAssertEqual(completed.message?.message.kind, .discussion)
+        XCTAssertEqual(completed.document.settingProposals.count, 4)
+        XCTAssertEqual(
+            completed.document.settingProposals.map(\.suggestedMaterialKind),
+            [.character, .relationship, .world, .masterOutline]
+        )
+        XCTAssertEqual(
+            completed.document.settingProposals.first?.suggestedCharacterAliases,
+            ["郭威", "郭雀儿"]
+        )
+        XCTAssertTrue(completed.document.materials.isEmpty)
+        XCTAssertEqual(
+            completed.document.stateSnapshots[0].unresolvedEntityNames,
+            ["郭威"]
+        )
+        XCTAssertEqual(completed.document.activeRuns[0].status, .completed)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(completed.document))
+
+        let characterProposal = try XCTUnwrap(completed.document.settingProposals.first)
+        let accepted = try NovelReducer.apply(.resolveSettingProposal(
+            NovelResolveSettingProposalCommand(
+                context: NovelTestFixtures.context(
+                    projectRevision: completed.document.project.revision,
+                    configRevision: completed.document.project.configRevision,
+                    branchHeadRevision: completed.document.branches[0].headRevision
+                ),
+                projectID: completed.document.project.id,
+                proposalID: characterProposal.id,
+                resolution: .accept(
+                    materialID: NovelMaterialID(),
+                    revisionID: NovelMaterialRevisionID(),
+                    kind: .character,
+                    title: "郭威",
+                    content: characterProposal.content,
+                    tags: [],
+                    injectionMode: .smart,
+                    aliases: []
+                )
+            )
+        ), to: completed.document).document
+
+        XCTAssertTrue(accepted.settingProposals[0].isResolved)
+        XCTAssertEqual(accepted.materials.first?.kind, .character)
+        XCTAssertEqual(accepted.materials.first?.aliases, ["郭威"])
+        XCTAssertNoThrow(try NovelDocumentValidator.validateTransition(
+            from: completed.document,
+            to: accepted
+        ))
+    }
+
     func testSuccessfulQuickStartRegenerationSupersedesOnlyThePreviousActiveRound() throws {
         let document = try quickStartDocument()
         let firstRequest = makeRequest(document: document, kind: .quickStart)
@@ -1137,6 +1211,7 @@ private extension NovelGenerationReducerTests {
             messageID: run.messageID,
             candidateID: run.candidateID,
             sourceChapterVersionID: sourceChapterVersionID,
+            contextualCharacterMention: run.contextualCharacterMention,
             baseCheckpointID: run.baseCheckpointID,
             baseHeadRevision: run.baseHeadRevision,
             status: run.status,
@@ -1155,16 +1230,17 @@ private extension NovelGenerationReducerTests {
         granularity: NovelGenerationGranularity? = nil,
         sourceChapterVersionID: NovelChapterVersionID? = nil,
         askUserResponse: NovelAskUserResponse? = nil,
+        contextualCharacterMention: String? = nil,
         expectedProjectRevision: Int64? = nil
     ) -> NovelRunRequest {
         let branch = document.branches[0]
         let mode: NovelSessionMode = switch kind {
-        case .quickStart, .discussion: .discussPlan
+        case .quickStart, .discussion, .characterProposal: .discussPlan
         case .prose, .polish, .regenerate: .writeProse
         }
         let candidateID: NovelCandidateID? = switch kind {
         case .prose, .polish, .regenerate: NovelCandidateID()
-        case .quickStart, .discussion: nil
+        case .quickStart, .discussion, .characterProposal: nil
         }
         return NovelRunRequest(
             id: NovelRunID(),
@@ -1182,6 +1258,7 @@ private extension NovelGenerationReducerTests {
             injectionReceiptID: NovelReceiptID(),
             sourceChapterVersionID: sourceChapterVersionID,
             askUserResponse: askUserResponse,
+            contextualCharacterMention: contextualCharacterMention,
             inputBudgetTokens: 16_000,
             expectedProjectRevision: expectedProjectRevision ?? document.project.revision,
             expectedConfigRevision: document.project.configRevision,
@@ -1198,6 +1275,8 @@ private extension NovelGenerationReducerTests {
         let promptKind: NovelPromptKind = switch request.kind {
         case .quickStart:
             .quickStart
+        case .characterProposal:
+            .characterProposal
         case .discussion:
             .discussion
         case .prose:
@@ -1292,6 +1371,36 @@ private extension NovelGenerationReducerTests {
           ],
           "masterOutline": {"title": "The appeal", "content": "A false memory forces the case to reopen."},
           "writingRequirements": {"title": "Voice", "content": "Keep clues concrete and courtroom scenes brisk."}
+        }
+        """
+    }
+
+    var characterProposalJSON: String {
+        """
+        {
+          "schemaVersion": 1,
+          "character": {
+            "title": "郭威",
+            "content": "后汉枢密使，连接柴荣与赵匡胤的关键人物。",
+            "aliases": ["郭雀儿"]
+          },
+          "relatedSuggestions": [
+            {
+              "kind": "relationship",
+              "title": "郭威与柴荣",
+              "content": "养父子关系既是权力继承，也是情感牵引。"
+            },
+            {
+              "kind": "world",
+              "title": "后汉军政格局",
+              "content": "枢密使掌握的军权决定朝局走向。"
+            },
+            {
+              "kind": "plot",
+              "title": "后周权力交接",
+              "content": "郭威、柴荣、赵匡胤的故事线应依次推进。"
+            }
+          ]
         }
         """
     }
