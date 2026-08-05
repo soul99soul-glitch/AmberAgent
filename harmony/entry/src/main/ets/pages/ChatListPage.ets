@@ -31,6 +31,17 @@ struct ChatListPage {
 
   aboutToAppear(): void {
     this.refresh();
+    // Want deep-link(通知/分享入口): EntryAbility 写 AppStorage, 首页消费后跳 DeepReadArticlePage
+    const wantTopicId: string = AppStorage.get<string>('wantTopicId') ?? '';
+    const wantTitle: string = AppStorage.get<string>('wantTitle') ?? '';
+    if (wantTopicId.length > 0) {
+      AppStorage.setOrCreate<string>('wantTopicId', '');
+      AppStorage.setOrCreate<string>('wantTitle', '');
+      const params: Record<string, string> = {};
+      params['topicId'] = wantTopicId;
+      params['title'] = wantTitle;
+      router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
+    }
   }
 
   private refresh(): void {
@@ -197,19 +208,13 @@ struct ChatListPage {
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
-        // 统一 title bar (对齐 SessionsView 设计: ← + 标题 + 右侧图标按钮)
+        // 首页 title bar(对话列表=根, 无返回): 标题 + 设置 + 新对话
         Row() {
-          Text('←')
-            .fontSize(24)
-            .fontColor(INK)
-            .onClick((): void => { router.back(); })
-          Text('对话历史')
+          Text('对话')
             .fontSize(TITLE)
             .fontWeight(FontWeight.Bold)
             .fontColor(INK)
-            .margin({ left: 8 })
             .layoutWeight(1)
-          // 右侧: 设置(单色文字) + 新对话(主操作)
           Text('设置')
             .fontSize(BODY)
             .fontColor(INK2)

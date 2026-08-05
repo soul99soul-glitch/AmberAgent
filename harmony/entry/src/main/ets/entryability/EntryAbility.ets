@@ -79,7 +79,8 @@ export default class EntryAbility extends UIAbility {
       hilog.warn(DOMAIN, TAG, 'immersive setup failed: %{public}s', String(e));
     }
 
-    windowStage.loadContent('pages/Index', (err: BusinessError) => {
+    // 首页=对话列表(用户心智: 列表是首页, 点 session 进聊天界面)
+    windowStage.loadContent('pages/ChatListPage', (err: BusinessError) => {
       if (err.code !== 0) {
         hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
       } else {
