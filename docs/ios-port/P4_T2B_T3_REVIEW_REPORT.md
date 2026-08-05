@@ -3,7 +3,7 @@
 >  reviewer：Kimi Code CLI  
 >  日期：2026-06-13  
 >  范围：`codex/ios-port-wip` 分支，提交 `6169e43c` + `1e7415ae`  
->  依据：`docs/ios-port/P4_T2B_T3_REVIEW_PROMPT.md`
+>  依据：当时提交 `6169e43c` + `1e7415ae` 的 review checklist 与真实代码；一次性 prompt 已从当前工作树移除，可从 Git 历史追溯。
 
 ---
 

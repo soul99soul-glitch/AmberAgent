@@ -620,6 +620,8 @@ enum ChatTimelinePlanner {
             return "image:\(image.url.count):\(String(describing: image.metadata).hashValue)"
         case let document as UIMessagePart.Document:
             return "document:\(document.fileName):\(document.url.count):\(String(describing: document.metadata).hashValue)"
+        case let miniApp as UIMessagePart.MiniApp:
+            return "mini_app:\(miniApp.appId):\(miniApp.version):\(miniApp.htmlHash ?? ""):\(miniApp.title)"
         case let tool as UIMessagePart.Tool:
             let outputToken = tool.output.last.map { compactRenderToken(for: $0) } ?? "empty"
             return "tool:\(tool.toolCallId):\(tool.toolName):\(tool.isExecuted):\(tool.output.count):\(outputToken)"

@@ -1296,6 +1296,10 @@ struct ChatView: View {
                 prompt: prompt,
                 aspectRatio: aspectRatio
             )
+        case let .openMiniApp(appId):
+            router.navigate(to: .miniAppRunner(appId: appId))
+        case .openMiniApps:
+            router.navigate(to: .miniApps)
         case .primaryConfiguration:
             openPrimaryConfigurationAction()
         case .modelDefaults:

@@ -12,6 +12,8 @@ enum ChatListAction {
     case selectVariant(messageId: String, variantIndex: Int)
     case generativeWidget(prompt: String)
     case modifyGeneratedImage(urlString: String, prompt: String, aspectRatio: String)
+    case openMiniApp(appId: String)
+    case openMiniApps
     case primaryConfiguration
     case modelDefaults
 }
@@ -2432,7 +2434,10 @@ private struct ChatSwiftUIMessageBubble: View, @MainActor Equatable {
             onModifyGeneratedImage: { imageURL, prompt, aspectRatio in
                 onAction(.modifyGeneratedImage(urlString: imageURL, prompt: prompt, aspectRatio: aspectRatio))
             },
+            onOpenMiniApp: { appId in onAction(.openMiniApp(appId: appId)) },
+            onOpenMiniApps: { onAction(.openMiniApps) },
             isGenerating: row.isLast && isGenerationActive,
+            isChatGenerationActive: isGenerationActive,
             isLastMessage: row.isLast,
             hasEverStreamed: renderState.hasEverStreamed,
             liveMarkdownRenderingEnabled: renderState.liveRenderingEnabled,
@@ -2455,7 +2460,8 @@ private struct ChatSwiftUIMessageBubble: View, @MainActor Equatable {
             lhs.row.canAnimateInsertion == rhs.row.canAnimateInsertion &&
             lhs.variantInfo == rhs.variantInfo &&
             lhs.renderState == rhs.renderState &&
-            lhs.renderDigest == rhs.renderDigest
+            lhs.renderDigest == rhs.renderDigest &&
+            lhs.isGenerationActive == rhs.isGenerationActive
     }
 }
 
@@ -4009,7 +4015,10 @@ private struct ChatMessageHostedBubble: View {
             onModifyGeneratedImage: { imageURL, prompt, aspectRatio in
                 onAction(.modifyGeneratedImage(urlString: imageURL, prompt: prompt, aspectRatio: aspectRatio))
             },
+            onOpenMiniApp: { appId in onAction(.openMiniApp(appId: appId)) },
+            onOpenMiniApps: { onAction(.openMiniApps) },
             isGenerating: model.row.isLast && isGenerationActive,
+            isChatGenerationActive: isGenerationActive,
             isLastMessage: model.row.isLast,
             hasEverStreamed: renderState.hasEverStreamed,
             liveMarkdownRenderingEnabled: renderState.liveRenderingEnabled,
@@ -4594,6 +4603,12 @@ final class ChatRowContentHashCache {
                 hasher.combine("document")
                 hasher.combine(document.fileName)
                 hasher.combine(document.url)
+            case let miniApp as UIMessagePart.MiniApp:
+                hasher.combine("mini_app")
+                hasher.combine(miniApp.appId)
+                hasher.combine(miniApp.version)
+                hasher.combine(miniApp.htmlHash ?? "")
+                hasher.combine(miniApp.title)
             default:
                 hasher.combine(String(describing: type(of: part)))
             }

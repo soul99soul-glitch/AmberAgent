@@ -3,7 +3,7 @@
 >  reviewer：Kimi Code CLI  
 >  日期：2026-06-12  
 >  范围：`/Users/arquiel/Downloads/AI/amberagent-ios`（`codex/ios-port-wip` 分支）  
->  依据：`docs/ios-port/REVIEW_PROMPT.md`、`docs/IOS_PORT_PLAN_2026-06-12.md` 及仓库实际代码
+>  依据：当时的 review checklist、`docs/IOS_PORT_PLAN_2026-06-12.md` 及仓库实际代码；一次性 prompt 已从当前工作树移除，可从 Git 历史追溯。
 
 ---
 

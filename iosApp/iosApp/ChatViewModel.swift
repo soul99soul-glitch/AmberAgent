@@ -570,7 +570,7 @@ final class ChatViewModel {
                     )
                 },
                 saveMiniAppIfPresent: { [weak self] messages, conversationId in
-                    self?.saveMiniAppIfPresent(in: messages, conversationId: conversationId)
+                    self?.applyMiniAppOutputIfPresentPublic(to: messages, conversationId: conversationId)
                 },
                 messagesByInjectingRuntimeContext: { [weak self] messages in
                     self?.messagesByInjectingRuntimeContext(messages) ?? messages
@@ -2176,32 +2176,73 @@ final class ChatViewModel {
     }
 #endif
 
-    private func saveMiniAppIfPresent(in messages: [UIMessage], conversationId: KotlinUuid?) -> UIMessage? {
+    /// App-level background recovery uses the same transform as foreground completion.
+    func applyMiniAppOutputIfPresentPublic(
+        to messages: [UIMessage],
+        conversationId: KotlinUuid?
+    ) -> [UIMessage]? {
+        applyMiniAppOutputIfPresent(to: messages, conversationId: conversationId)
+    }
+
+    /// Returns a full replaced message list when MiniApp output is applied; nil means unchanged.
+    private func applyMiniAppOutputIfPresent(
+        to messages: [UIMessage],
+        conversationId: KotlinUuid?
+    ) -> [UIMessage]? {
         guard isMiniAppRuntimeEnabled else { return nil }
-        guard let lastUser = messages.last(where: { $0.role == MessageRole.user }),
-              let userText = ChatRuntimeContextBuilder.messageText(lastUser),
+        guard let lastUserIndex = messages.lastIndex(where: { $0.role == MessageRole.user }),
+              let userText = ChatRuntimeContextBuilder.messageText(messages[lastUserIndex]),
               IOSMiniAppOutputParser.isExplicitMiniAppRequest(userText),
-              let assistant = messages.last(where: { $0.role == MessageRole.assistant }) else {
+              let assistantIndex = IOSMiniAppChatMessageFactory.assistantCandidateIndex(
+                in: messages,
+                afterUserIndex: lastUserIndex
+              ) else {
             return nil
         }
-        let assistantText = ChatRuntimeContextBuilder.messageText(assistant) ?? ""
-        guard let output = IOSMiniAppOutputParser().parseOrNull(assistantText) else { return nil }
+        let assistant = messages[assistantIndex]
+        guard let textPartIndex = assistant.parts.lastIndex(where: { $0 is UIMessagePart.Text }),
+              let textPart = assistant.parts[textPartIndex] as? UIMessagePart.Text,
+              IOSMiniAppChatMessageFactory.mightContainMiniApp(textPart.text) else {
+            return nil
+        }
+
+        let parser = IOSMiniAppOutputParser()
+        let output: IOSMiniAppGeneratedOutput
+        do {
+            output = try parser.parse(textPart.text)
+        } catch {
+            let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            var updated = messages
+            updated[assistantIndex] = IOSMiniAppChatMessageFactory.parseFailureAssistant(
+                assistant,
+                textPartIndex: textPartIndex,
+                reason: reason
+            )
+            return updated
+        }
+
+        let sourceConversationId = conversationId.map { String(describing: $0) }
+        let sourceMessageId = String(describing: assistant.id)
+        let revisionAppId = ChatRuntimeContextBuilder.revisionAppId(in: userText)
 
         do {
-            let sourceConversationId = conversationId.map { String(describing: $0) }
-            let sourceMessageId = String(describing: assistant.id)
             let record: IOSMiniAppRecord
-            if let targetAppId = ChatRuntimeContextBuilder.revisionAppId(in: userText) {
-                guard let updated = try miniAppRepository.saveRevision(
+            if let targetAppId = revisionAppId {
+                guard let updatedRecord = try miniAppRepository.saveRevision(
                     appId: targetAppId,
                     output: output,
                     expectedBaseVersion: ChatRuntimeContextBuilder.revisionVersion(in: userText),
                     sourceMessageId: sourceMessageId,
-                    changeNote: "Generated from chat"
+                    changeNote: IOSMiniAppChatMessageFactory.revisionChangeNote(from: userText)
                 ) else {
-                    throw IOSMiniAppStoreError.notFound(targetAppId)
+                    var updated = messages
+                    updated[assistantIndex] = IOSMiniAppChatMessageFactory.revisionFailedAssistant(
+                        assistant,
+                        textPartIndex: textPartIndex
+                    )
+                    return updated
                 }
-                record = updated
+                record = updatedRecord
             } else {
                 record = try miniAppRepository.saveGenerated(
                     output,
@@ -2209,7 +2250,9 @@ final class ChatViewModel {
                     sourceMessageId: sourceMessageId
                 )
             }
-            let workspaceNotice: String
+            var statusText = revisionAppId != nil
+                ? "已更新小应用：\(record.title) v\(record.version)"
+                : "已生成小应用：\(record.title)"
             do {
                 _ = try IOSWorkspaceStore.shared.saveArtifact(
                     title: record.title,
@@ -2218,41 +2261,34 @@ final class ChatViewModel {
                     sourceKind: "miniapp",
                     sourceId: record.id
                 )
-                workspaceNotice = "已同步保存到 Workspace。"
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                workspaceNotice = "但保存到 Workspace 失败：\(message)"
+                statusText += "\nWorkspace 同步失败：\(message)"
             }
-            let notice = """
-            已保存 MiniApp「\(record.title)」v\(record.version)。
-            appId: \(record.id)
-            可在小应用列表中打开并管理版本、grant 和运行状态。
-            \(workspaceNotice)
-            """
-            return UIMessage(
-                id: KotlinUuid.companion.random(),
-                role: MessageRole.assistant,
-                parts: [UIMessagePart.Text(text: notice, metadata: nil)],
-                annotations: [],
-                createdAt: chatNowLocalDateTime(),
-                finishedAt: chatNowLocalDateTime(),
-                modelId: nil,
-                usage: nil,
-                translation: nil
+            var updated = messages
+            updated[assistantIndex] = IOSMiniAppChatMessageFactory.updatedAssistant(
+                assistant,
+                textPartIndex: textPartIndex,
+                statusText: statusText,
+                record: record
             )
+            return updated
+        } catch IOSMiniAppStoreError.notFound {
+            var updated = messages
+            updated[assistantIndex] = IOSMiniAppChatMessageFactory.revisionFailedAssistant(
+                assistant,
+                textPartIndex: textPartIndex
+            )
+            return updated
         } catch {
-            let notice = "MiniApp 输出解析成功，但保存失败：\((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
-            return UIMessage(
-                id: KotlinUuid.companion.random(),
-                role: MessageRole.assistant,
-                parts: [UIMessagePart.Text(text: notice, metadata: nil)],
-                annotations: [],
-                createdAt: chatNowLocalDateTime(),
-                finishedAt: chatNowLocalDateTime(),
-                modelId: nil,
-                usage: nil,
-                translation: nil
+            let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            var updated = messages
+            updated[assistantIndex] = IOSMiniAppChatMessageFactory.parseFailureAssistant(
+                assistant,
+                textPartIndex: textPartIndex,
+                reason: reason
             )
+            return updated
         }
     }
 
@@ -2730,7 +2766,7 @@ final class ChatViewModel {
     }
 
     private var isMiniAppRuntimeEnabled: Bool {
-        true
+        sharedSettings.agentRuntime.miniApp.enabled
     }
 
     private var isWebMountRuntimeEnabled: Bool {

@@ -111,8 +111,7 @@ struct NovelSessionPresentationBuffer {
 ///
 /// The per-tick advance policy is shared with Chat via
 /// `StreamPresentationPacingPolicy` — this type only adapts it to the novel
-/// session's single-String shape. Terminal paths still snap to the
-/// authoritative full text.
+/// session's single-String shape. Terminal paths use the same bounded advance.
 enum NovelSessionPresentationPacer {
     static var minimumTextAdvance: Int { StreamPresentationPacingPolicy.minimumTextAdvance }
     static var maximumTextAdvance: Int { StreamPresentationPacingPolicy.maximumTextAdvance }
@@ -139,6 +138,27 @@ enum NovelSessionPresentationPacer {
         let advance = textAdvance(backlogCount: backlog)
         let next = String(targetContent.prefix(displayedContent.count + advance))
         return Step(content: next, isCaughtUp: next == targetContent)
+    }
+
+    static func terminalStep(
+        displayedContent: String,
+        targetContent: String,
+        runKind: NovelRunKind?
+    ) -> Step {
+        guard let runKind else {
+            return step(displayedContent: displayedContent, targetContent: targetContent)
+        }
+        let pacingBase: String
+        switch runKind {
+        case .prose, .regenerate, .polish:
+            // The bubble strips common prose fences while streaming. When lifecycle
+            // removes that same wrapper at terminal, keep pacing from the visible text.
+            let normalized = NovelPromptCatalog.normalizedStreamingCandidateProse(displayedContent)
+            pacingBase = targetContent.hasPrefix(normalized) ? normalized : displayedContent
+        case .quickStart, .characterProposal, .discussion:
+            pacingBase = displayedContent
+        }
+        return step(displayedContent: pacingBase, targetContent: targetContent)
     }
 }
 
@@ -522,7 +542,8 @@ final class NovelSessionViewModel {
     }
 
     var isBusy: Bool {
-        isStarting || isPerformingAction || workspace.isPerforming || isBatchPolishing
+        isStarting || terminalAwaitingRefresh || isPerformingAction ||
+            workspace.isPerforming || isBatchPolishing
     }
 
     /// 批量整章润色是否正在进行。派生自进度阶段,随 `batchPolishProgress` 一起被观察;
@@ -2064,43 +2085,40 @@ private extension NovelSessionViewModel {
                 enqueuePresentationReplacement(text, runID: runID, token: token)
             }
         case .completed(let snapshot):
-            publishTerminalPresentation(
+            guard await publishTerminalPresentation(
                 runID: runID,
                 token: token,
                 authoritativeContent: snapshot.message.content,
                 phase: .terminalAwaitingRefresh
-            )
-            terminalAwaitingRefresh = true
+            ) else { return }
             lastRetryDraft = nil
             lastRetryRunID = nil
             currentRunDraft = nil
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .interrupted(let snapshot):
-            publishTerminalPresentation(
+            guard await publishTerminalPresentation(
                 runID: runID,
                 token: token,
                 authoritativeContent: draft.kind == .quickStart || draft.kind == .characterProposal
                     ? ""
                     : snapshot?.message.content,
                 phase: .interrupted
-            )
-            terminalAwaitingRefresh = true
+            ) else { return }
             lastRetryDraft = draft
             lastRetryRunID = runID
             currentRunDraft = nil
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .failed(let failure):
-            publishTerminalPresentation(
+            guard await publishTerminalPresentation(
                 runID: runID,
                 token: token,
                 authoritativeContent: draft.kind == .quickStart || draft.kind == .characterProposal
                     ? ""
                     : nil,
                 phase: .failed(failure)
-            )
-            terminalAwaitingRefresh = true
+            ) else { return }
             lastFailure = failure
             operationErrorMessage = NovelPresentation.failureMessage(failure)
             lastRetryDraft = failure.isRetryable ? draft : nil
@@ -2109,14 +2127,15 @@ private extension NovelSessionViewModel {
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .persistenceBlocked(let failure):
-            publishTerminalPresentation(
+            guard await publishTerminalPresentation(
                 runID: runID,
                 token: token,
                 authoritativeContent: draft.kind == .quickStart || draft.kind == .characterProposal
                     ? ""
                     : nil,
                 phase: .persistenceBlocked(failure)
-            )
+            ) else { return }
+            terminalAwaitingRefresh = false
             lastFailure = failure
             operationErrorMessage = NovelPresentation.failureMessage(failure)
         }
@@ -2552,14 +2571,14 @@ private extension NovelSessionViewModel {
         token: UUID,
         authoritativeContent: String?,
         phase: NovelSessionTransientTailPhase
-    ) {
+    ) async -> Bool {
         presentationFlushTask?.cancel()
         presentationFlushTask = nil
         guard bindingToken == token,
               let current = transientTail,
               current.runID == runID else {
             presentationBuffer = nil
-            return
+            return false
         }
         let bufferedContent: String?
         if let buffer = presentationBuffer,
@@ -2567,16 +2586,50 @@ private extension NovelSessionViewModel {
                runID: runID,
                messageID: current.messageID,
                bindingToken: token
-           ) {
-            // Terminal snaps to the full target — no paced lag on complete/error/cancel.
+        ) {
             bufferedContent = buffer.targetContent
         } else {
             bufferedContent = nil
         }
         presentationBuffer = nil
-        let content = authoritativeContent ?? bufferedContent ?? current.content
-        guard content != current.content || current.phase != phase else { return }
-        updateTail(content: content, phase: phase)
+        let targetContent = authoritativeContent ?? bufferedContent ?? current.content
+        terminalAwaitingRefresh = true
+        var didPublishTerminal = false
+        defer {
+            if !didPublishTerminal,
+               bindingToken == token,
+               transientTail?.runID == runID {
+                terminalAwaitingRefresh = false
+            }
+        }
+
+        // 与标准 Chat 的终态语义一致：complete/error/cancel 到达时，模型全文可能
+        // 已领先可见文本很多拍。不能绕过 pacer 一次发布全部积压，否则正文高度会在
+        // 单帧暴涨，滚动驱动只能随后追赶。先逐拍追平，再切终态和刷新 durable。
+        while !Task.isCancelled,
+              bindingToken == token,
+              let visibleTail = transientTail,
+              visibleTail.runID == runID {
+            let step = NovelSessionPresentationPacer.terminalStep(
+                displayedContent: visibleTail.content,
+                targetContent: targetContent,
+                runKind: transientRunRecord?.kind
+            )
+            if step.isCaughtUp {
+                if step.content != visibleTail.content || visibleTail.phase != phase {
+                    updateTail(content: step.content, phase: phase)
+                }
+                didPublishTerminal = true
+                return true
+            }
+            updateTail(content: step.content, phase: .streaming)
+            do {
+                try await Task.sleep(nanoseconds: Self.presentationFlushDelayNanos)
+            } catch {
+                return false
+            }
+        }
+        return false
     }
 
     func cancelPendingPresentation() {

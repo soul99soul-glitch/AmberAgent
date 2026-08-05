@@ -28,6 +28,16 @@ final class IOSMiniAppOutputParserTests: XCTestCase {
         XCTAssertThrowsError(try IOSMiniAppOutputParser().parse(text))
     }
 
+    func testParsesJsonWithDefaultCategoryAndPermissions() throws {
+        let text = """
+        {"title":"计时器","description":"一个番茄钟","html":"<!DOCTYPE html><html><body>ok</body></html>"}
+        """
+        let output = try IOSMiniAppOutputParser().parse(text)
+        XCTAssertEqual(output.category, "tool")
+        XCTAssertEqual(output.permissions, [])
+        XCTAssertEqual(output.title, "计时器")
+    }
+
     func testParsesFencedHtmlFallback() throws {
         let text = """
         ```html

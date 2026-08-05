@@ -53,7 +53,6 @@ Write a `docs/REFACTOR_<id>_PRECUT_<date>.md` document. **Don't strip anything u
 ### 2.2 Reference docs
 
 Past pre-cut analyses serve as templates:
-- `docs/SESSION_5_HANDOFF.md` (P1 ChatInput Sandbox)
 - `docs/chatinput-composers-plan.md` (P1 Composers)
 - `docs/REFACTOR_P2_SETTING_EXP_PRECUT_2026-05-18.md` (P2 first cut)
 

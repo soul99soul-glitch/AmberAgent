@@ -96,7 +96,13 @@ struct AppShell: View {
         IOSChatBackgroundGenerationCoordinator.shared.configure(
             conversationStore: conversationStore,
             toolRuntime: backgroundToolRuntime,
-            sharedSettings: sharedSettingsStore
+            sharedSettings: sharedSettingsStore,
+            saveMiniAppIfPresent: { [chatViewModel] messages, conversationId in
+                chatViewModel.applyMiniAppOutputIfPresentPublic(
+                    to: messages,
+                    conversationId: conversationId
+                )
+            }
         )
         IOSDeepReadRecoveryOnce.run()
         // [Slice 6] Load persisted memories (Documents/memories/memories.json)

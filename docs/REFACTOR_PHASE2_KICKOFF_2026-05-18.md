@@ -120,8 +120,8 @@ Phase 1（4 个 god class 拆分）已合并到 main，PR #1，merge commit `930
   - `ui/components/setting/FormItem`（参考 setting 页表单约定）
   - `ui/context/LocalSettings`
 - 历史文档：
-  - `docs/SESSION_5_HANDOFF.md`（P1 ChatInput Sandbox pre-cut，可作 pre-cut 文档模板）
   - `docs/chatinput-composers-plan.md`（P1 Composers pre-cut）
+  - `docs/REFACTOR_P2_SETTING_EXP_PRECUT_2026-05-18.md`（P2 pre-cut 模板）
 
 ---
 

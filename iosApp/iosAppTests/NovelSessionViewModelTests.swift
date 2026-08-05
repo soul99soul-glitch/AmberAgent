@@ -491,7 +491,10 @@ final class NovelSessionViewModelTests: XCTestCase {
 
         let didStart = await harness.session.send(text: "帮我梳理人物动机")
         XCTAssertTrue(didStart)
-        let didAsk = await eventually { !harness.session.isRunning }
+        let didAsk = await eventually {
+            !harness.session.isRunning &&
+                harness.session.durableMessages.last?.interaction == .askUser(prompt)
+        }
         XCTAssertTrue(didAsk)
         let promptMessage = try XCTUnwrap(harness.session.durableMessages.last)
         XCTAssertEqual(promptMessage.interaction, .askUser(prompt))
@@ -501,7 +504,9 @@ final class NovelSessionViewModelTests: XCTestCase {
             answer: "家人"
         )
         XCTAssertTrue(didAnswer)
-        let didFinish = await eventually { !harness.session.isRunning }
+        let didFinish = await eventually {
+            !harness.session.isRunning && harness.session.durableMessages.count == 4
+        }
         XCTAssertTrue(didFinish)
         XCTAssertEqual(harness.session.durableMessages.count, 4)
         XCTAssertEqual(harness.session.durableMessages[2].content, "家人")
@@ -586,7 +591,7 @@ final class NovelSessionViewModelTests: XCTestCase {
             sawPacedPrefix,
             "Long-chapter burst must publish a paced prefix before the full body."
         )
-        let sawLongTail = await eventually(timeout: 15) {
+        let sawLongTail = await eventually(timeout: 20) {
             harness.session.transientTail?.content == longBody
         }
         XCTAssertTrue(sawLongTail)
@@ -604,7 +609,7 @@ final class NovelSessionViewModelTests: XCTestCase {
 
         await harness.adapter.resume(runID: runID)
         let expectedFinal = longBody + "结尾。"
-        let didFinish = await eventually(timeout: 15) {
+        let didFinish = await eventually(timeout: 20) {
             !harness.session.isRunning
                 && harness.session.transientTail == nil
                 && harness.session.availableProseCandidates.first?.content == expectedFinal
@@ -657,6 +662,100 @@ final class NovelSessionViewModelTests: XCTestCase {
         }
         XCTAssertTrue(didFinish)
         XCTAssertEqual(harness.session.durableMessages.last?.content, expected)
+    }
+
+    func testTerminalBurstDrainsVisibleBacklogAfterGenerationControlCloses() async throws {
+        let target = String(repeating: "终", count: 720)
+        let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
+            .delta(target),
+            .complete,
+        ])])
+        harness.session.mode = .writeProse
+        harness.session.granularity = .wholeChapter
+
+        let didStart = await harness.session.send(text: "生成一段突发正文")
+        XCTAssertTrue(didStart)
+        let durableCompleted = await eventually(timeout: 3) {
+            let document = try? await harness.repository.loadProject(id: harness.projectID).document
+            return document?.activeRuns.first?.status == .completed
+        }
+        XCTAssertTrue(durableCompleted)
+
+        // Lifecycle 已经持久化终态后，UI 仍应按 48ms 节拍追平剩余正文；旧实现会在
+        // terminal 回调里取消节拍任务并直接发布 720 字全文，稳定落入这里的反断言。
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        let visibleCount = harness.session.transientTail?.content.count ?? target.count
+        XCTAssertFalse(harness.session.isRunning, "模型终态到达后必须立即关闭生成控制 owner。")
+        XCTAssertFalse(harness.session.canStop, "仅剩 UI 排空时不能继续暴露 Stop。")
+        XCTAssertFalse(harness.session.canSend, "可见积压排空并刷新 durable 前不能开始下一轮。")
+        XCTAssertTrue(harness.session.isBusy, "终态排空与 durable 接管前必须继续锁住资料操作。")
+        XCTAssertGreaterThan(visibleCount, 0)
+        XCTAssertLessThan(
+            visibleCount,
+            target.count,
+            "终态不能绕过 pacer 把全部积压正文一次交给布局。"
+        )
+
+        await harness.session.stop()
+        let visibleAfterStop = harness.session.transientTail?.content ?? target
+        XCTAssertTrue(target.hasPrefix(visibleAfterStop))
+        XCTAssertLessThan(
+            visibleAfterStop.count,
+            target.count,
+            "终态排空期间的过期 Stop 不能清空 tail 后用 durable 全文瞬时接管。"
+        )
+
+        let didFinish = await eventually(timeout: 5) {
+            guard harness.session.durableMessages.last?.content == target else { return false }
+            return harness.session.transientTail == nil ||
+                harness.session.transientTail?.content == target
+        }
+        XCTAssertTrue(didFinish)
+    }
+
+    func testFencedTerminalProseContinuesFromVisiblePrefixInsteadOfSnapping() async throws {
+        let target = String(repeating: "围城旧雨。", count: 120)
+        let fencedTarget = "```markdown\n\(target)\n```"
+        let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
+            .delta(fencedTarget),
+            .pause,
+            .complete,
+        ])])
+        harness.session.mode = .writeProse
+        harness.session.granularity = .wholeChapter
+
+        let didStart = await harness.session.send(text: "生成带围栏的正文")
+        XCTAssertTrue(didStart)
+        let sawPartialFence = await eventually {
+            guard let content = harness.session.transientTail?.content else { return false }
+            return content.hasPrefix("```markdown\n") && content.count < fencedTarget.count
+        }
+        XCTAssertTrue(sawPartialFence)
+
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+        await harness.adapter.resume(runID: runID)
+        let durableCompleted = await eventually(timeout: 3) {
+            let document = try? await harness.repository.loadProject(id: harness.projectID).document
+            return document?.activeRuns.first?.status == .completed
+        }
+        XCTAssertTrue(durableCompleted)
+
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        let visibleContent = harness.session.transientTail?.content ?? target
+        XCTAssertTrue(target.hasPrefix(visibleContent))
+        XCTAssertGreaterThan(visibleContent.count, 0)
+        XCTAssertLessThan(
+            visibleContent.count,
+            target.count,
+            "去除模型围栏时必须沿当前可见正文继续 pacing，不能瞬时替换整章。"
+        )
+
+        let didFinish = await eventually(timeout: 5) {
+            guard harness.session.durableMessages.last?.content == target else { return false }
+            return harness.session.transientTail == nil ||
+                harness.session.transientTail?.content == target
+        }
+        XCTAssertTrue(didFinish)
     }
 
     func testStreamingTailRevisionReusesDurableProjection() async throws {

@@ -7,13 +7,14 @@
 - 当前产品主线包含 KMP 共享层和原生 iOS 应用。
 - iOS 应用位于 `iosApp/`；共享 provider、存储和业务能力位于 `ai-*`、`core/`、`feature/` 等模块。
 - `app/` 是 Android 应用；除非任务明确涉及 Android 或跨端一致性，不要把 Android 入口当成 iOS 运行时事实。
+- 深入 `iosApp/`、`docs/` 或 `iosApp/iosApp/NovelCreation/` 前，继续读取该目录内更窄的 `AGENTS.md`。
 - `iosApp/vendor/SwiftStreamingMarkdown/` 是仓库内 vendor 依赖，另有更深层 `AGENTS.md`；修改时同时遵守其局部规则。
 
 ## Automatic Start Protocol
 
 进入本仓库处理实质任务时，自动执行以下检查，不需要用户额外提醒：
 
-1. 读取 `docs/PROJECT_STATE.md`，再按任务范围读取其中列出的当前计划或 handoff；不要遍历全部旧 handoff。
+1. 读取 `docs/PROJECT_STATE.md`；需要更深背景时按 `docs/README.md` 的主题地图选择文档，不要遍历全部 Markdown 或历史 handoff。
 2. 运行 `git status --short --branch`，确认 repo、branch、staged/unstaged/untracked 状态。工作区很脏时先划定本轮文件范围。
 3. 不把 handoff、记忆或计划中的 commit、行号、测试状态当作当前事实；成本低时用真实代码、git 状态和测试重新核对。
 4. 用一句话定义可验证的成功标准，再定位最小相关代码。不要先写超细执行手册。
@@ -93,6 +94,7 @@ iOS 的具体门禁见 `iosApp/AGENTS.md`。
 
 - `AGENTS.md`：稳定工作方式和长期门禁。
 - `docs/PROJECT_STATE.md`：当前事实、有效工作区状态、最近证据和下一切口。
-- `*PLAN*.md`：尚未完成的阶段计划和验收标准。
+- `docs/README.md`：权威顺序、主题入口和文档状态地图。
+- `*PLAN*.md`：尚未完成的阶段计划和验收标准；完成或被取代后不继续冒充当前入口。
 - `*HANDOFF*.md`：特定时点快照，仅在明确交接时创建，不作为永久事实源。
 - Codex Memory：检索辅助，不作为代码、git 状态或验证结果的权威来源。

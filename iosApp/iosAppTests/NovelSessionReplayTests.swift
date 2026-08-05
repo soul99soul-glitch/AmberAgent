@@ -1665,6 +1665,11 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertTrue(source.contains("NativeTimelineScrollReturnPolicy.returnedToBottom("))
         XCTAssertTrue(source.contains("dispatchFollowEvent(.userDragEnded(isAtBottom: returnedToBottom))"))
         XCTAssertTrue(source.contains("ChatLayout.nearBottomResumeThreshold"))
+        XCTAssertTrue(source.contains("NativeChatTimelineView.shouldBeginNativeUserDrag("))
+        XCTAssertTrue(
+            source.contains("isUIKitUserInteracting: scrollDriver.isUIKitUserInteracting"),
+            "程序化 setContentOffset 产生的 interacting 不能被小说页误判成用户拖拽。"
+        )
         XCTAssertTrue(
             source.contains("NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory("),
             "完成瞬间必须吸收转入历史的行数，否则窗口会裁掉完成前已可见的旧行。"

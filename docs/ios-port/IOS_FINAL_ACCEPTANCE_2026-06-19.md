@@ -72,7 +72,7 @@ Re-reviewed this session by reading the actual surface code (`PlaceholderViews.s
 | Redaction | `IOSWebMountRedactor` applied to all wm_* URLs/JSON (verified across `IOSLocalToolExecutor.swift`); Bearer handling is redaction logic (`AgentActivityModels.swift:300`) or real HTTP header (`IOSImageGenerationRepository.swift:113`), not UI leak. Tests at `68192b345`: DeepRead multiline, AdvancedTaskStore Bearer, WebMount JSON URLs | Pass (covered by XCTest) |
 | WebMount info row “可用” | `WebMountView.swift:242` info block accurately states 正式能力=可用 / wm_eval=关闭 / URL allowlist=count — honest security-boundary explanation, not a fake toggle | Pass (kept as informational, P2 noted only) |
 
-**Note:** `docs/ios-release-readiness-plan.md` still describes an older “实验区 + 默认关闭 tool gate” model. Current parity branch intentionally treats advanced capabilities as **正式高级功能** per `IOS_PARITY_HANDOFF` / roadmap. Release checklist should be reconciled before App Store narrative, not treated as a P0 code defect for this parity closure.
+**Note:** `docs/ios-release-readiness-plan.md` still describes an older “实验区 + 默认关闭 tool gate” model. The parity roadmap intentionally treats advanced capabilities as **正式高级功能**. Release checklist should be reconciled before App Store narrative, not treated as a P0 code defect for this historical parity closure.
 
 ## Manual simulator smoke (recommended checklist)
 
@@ -136,7 +136,7 @@ None identified in the 2026-06-19 automated verification, static IA review, or c
 
 1. Working tree is clean; warning cleanup is already committed on `a81876885`. No further code change needed for parity closure.
 2. Verification block re-run this session: all four gates pass (see table above).
-3. Open PR `codex/ios-port-wip` → `main` with links to `IOS_PARITY_HANDOFF_2026-06-19.md` + this acceptance doc.
+3. Historical next step was to open `codex/ios-port-wip` → `main` with links to the parity roadmap and this acceptance doc; current branch and release direction must be rechecked from Git and `docs/PROJECT_STATE.md`.
 4. Optional docs-only follow-up: addendum to `ios-release-readiness-plan.md` stating the parity branch treats advanced capabilities as formal features (supersedes the experimental-gate matrix for those capabilities).
 5. Human smoke (rows 1, 4–13) to run before external review, with real-but-sandboxed keys if available; file any regression found as a separate P1.
 

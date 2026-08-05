@@ -228,7 +228,7 @@ P1/P2 与 P3 可以由不同执行者**并行**推进；P4 之后建议单执行
 状态: ⬜ 未开始
 - **前置**：P4-T2、P3-T2。
 - **做什么**：Swift 调用 `markdown-parser`（Rust AST）→ 渲染器输出 `AttributedString`/TextKit 2。首版范围：段落、标题、粗斜体、列表、引用、行内代码、围栏代码块（代码高亮接 `highlight-parser`）。表格/数学公式/mermaid 列为后续任务，不做。
-- **注意**：流式增量渲染策略对照 Android 端现有的 streaming reveal 实现（参考 `HANDOFF_STREAMING_RENDERING.md`），但允许 iOS 用更简单的整段重排首发。
+- **注意**：本计划中的首发渲染方案已经是历史背景；当前 iOS 流式渲染与滚动约束以 `iosApp/AGENTS.md` 和真实生产路径为准。
 - **验收**：聊天页能正确渲染含上述元素的流式回复，无明显闪烁；代码块有语法高亮。
 
 ---

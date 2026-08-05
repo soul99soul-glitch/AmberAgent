@@ -1,104 +1,14 @@
-# CLAUDE.md
+# Claude Code Entry Point
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件只为会自动读取 `CLAUDE.md` 的工具提供入口，不另存一套工程规则。
 
-## Project Overview
+开始工作时按顺序读取：
 
-AmberAgent is an Android AI agent platform evolving from a chat client toward a modular Agent Kernel + Surfaces architecture.
-Built with Jetpack Compose, Kotlin, and follows Material Design 3 principles.
-Original LLM/markdown/highlight rendering infrastructure forked from rikkahub (AGPL v3 / commercial dual-license), independently evolving since 2026-05.
+1. [`AGENTS.md`](AGENTS.md)
+2. [`docs/PROJECT_STATE.md`](docs/PROJECT_STATE.md)
+3. [`docs/README.md`](docs/README.md) 中与任务相关的最少文档
+4. 目标目录内更窄的 `AGENTS.md`
 
-## Architecture Overview
+当前仓库同时包含 KMP、原生 iOS 和 Android 代码。任务未明确涉及 Android 时，不要把 `app/` 的 Compose 实现当成 iOS 运行时事实。
 
-### Module Structure
-
-- **app**: Main application module with UI, ViewModels, and core logic
-- **core/agent-runtime**: Pure Kotlin Agent Kernel contracts (Agent, RunScope, AgentEvent, Surface)
-- **core/agent-store-room**: Room persistence for AgentRuntimeDatabase (agent_run, agent_event, trace_span)
-- **core/agent-utils**: Shared JSON extension utilities
-- **feature/deepread/api**: DeepRead agent types (DeepReadInput, DeepReadArtifact, events)
-- **feature/chat/api**: ChatTurn agent types (ChatTurnInput, ChatTurnArtifact, events)
-- **ai**: AI SDK abstraction layer for different providers (OpenAI, Google, Anthropic)
-- **common**: Common utilities and extensions
-- **document**: Document parsing module for handling PDF, DOCX, and PPTX files
-- **highlight**: Code syntax highlighting implementation
-- **search**: Search functionality SDK (Exa, Tavily, Zhipu)
-- **tts**: Text-to-speech implementation for different providers
-- **web**: Embedded web server module that provides Ktor server startup function and hosts static frontend build files (
-  built from web-ui/ React project)
-
-### Key Technologies
-
-- **Jetpack Compose**: Modern UI toolkit
-- **Koin**: Dependency injection
-- **Room**: Database ORM
-- **DataStore**: Preferences storage
-- **OkHttp**: HTTP client with SSE support
-- **Navigation Compose**: App navigation
-- **Kotlinx Serialization**: JSON handling
-
-### Core Packages (app module)
-
-- `data/`: Data layer with repositories, database entities, and API clients
-- `ui/pages/`: Screen implementations and ViewModels
-- `ui/components/`: Reusable UI components
-- `di/`: Dependency injection modules
-- `utils/`: Utility functions and extensions
-
-### Concepts
-
-- **Assistant**: An assistant configuration with system prompts, model parameters, and conversation isolation. Each assistant maintains its own settings including temperature, context size, custom headers, tools, memory options, regex transformations, and prompt injections (mode/lorebook). Assistants provide isolated chat environments with specific behaviors and capabilities. (app/src/main/java/app/amber/agent/data/model/Assistant.kt)
-
-- **Conversation**: A persistent conversation thread between the user and an assistant. Each conversation maintains a list of MessageNodes in a tree structure to support message branching, along with metadata like title, creation time, and pin status. Conversations can be truncated at a specific index and maintain chat suggestions. (app/src/main/java/app/amber/agent/data/model/Conversation.kt)
-
-- **UIMessage**: A platform-agnostic message abstraction that encapsulates chat messages with different types of content parts (text, images, documents, reasoning, tool calls/results, etc.). Each message has a role (USER, ASSISTANT, SYSTEM, TOOL), creation timestamp, model ID, token usage information, and optional annotations. UIMessages support streaming updates through chunk merging. (ai/src/main/java/app/amber/ai/ui/Message.kt)
-
-- **MessageNode**: A container holding one or more UIMessages to implement message branching functionality. Each node maintains a list of alternative messages and tracks which message is currently selected (selectIndex). This enables users to regenerate responses and switch between different conversation branches, creating a tree-like conversation structure. (app/src/main/java/app/amber/agent/data/model/Conversation.kt)
-
-- **Message Transformer**: A pipeline mechanism for transforming messages before sending to AI providers (InputMessageTransformer) or after receiving responses (OutputMessageTransformer). Transformers can modify message content, add metadata, apply templates, handle special tags, convert formats, and perform OCR. Common transformers include:
-  - TemplateTransformer: Apply Pebble templates to user messages with variables like time/date
-  - ThinkTagTransformer: Extract `<think>` tags and convert to reasoning parts
-  - RegexOutputTransformer: Apply regex replacements to assistant responses
-  - DocumentAsPromptTransformer: Convert document attachments to text prompts
-  - Base64ImageToLocalFileTransformer: Convert base64 images to local file references
-  - OcrTransformer: Perform OCR on images to extract text
-
-  Output transformers support `visualTransform()` for UI display during streaming and `onGenerationFinish()` for final processing after generation completes.
-  (app/src/main/java/app/amber/agent/data/ai/transformers/Transformer.kt)
-
-## Development Guidelines
-
-### UI Development
-
-- Follow Material Design 3 principles
-- Use existing UI components from `ui/components/`
-- Reference `SettingProviderPage.kt` for page layout patterns
-- Use `FormItem` for consistent form layouts
-- Implement proper state management with ViewModels
-- Use `Lucide.XXX` for icons, and import `import com.composables.icons.lucide.XXX` for each icon
-- Use `LocalToaster.current` for toast messages
-
-### Internationalization
-
-- String resources located in `app/src/main/res/values-*/strings.xml`
-- Use `stringResource(R.string.key_name)` in Compose
-- Page-specific strings should use page prefix (e.g., `setting_page_`)
-- If the user does not explicitly request localization, prioritize implementing functionality without considering
-  localization. (e.g `Text("Hello world")`)
-- If the user explicitly requests localization, all languages should be supported.
-- English(en) is the default language. Chinese(zh), Japanese(ja), and Traditional Chinese(zh-rTW), Korean(ko-rKR) are supported.
-- When localization is needed, use the `locale-tui-localization` skill for managing string resources.
-
-### Database
-
-- Room database with migration support
-- Schema files in `app/schemas/`
-- Use KSP for Room annotation processing
-- Current database version tracked in `AppDatabase.kt`
-
-### AI Provider Integration
-
-- New providers go in `ai/src/main/java/app/amber/ai/provider/providers/`
-- Extend base `Provider` class
-- Implement required API methods following existing patterns
-- Support for streaming responses via SSE
+旧 handoff、session snapshot、日期化审计和 Git 历史只用于追溯；分支、路径、测试状态、设备状态和下一任务必须以实时检查及 `PROJECT_STATE.md` 为准。

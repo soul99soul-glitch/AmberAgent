@@ -36,24 +36,41 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         XCTAssertEqual(object["version"], .number(1))
     }
 
-    func testStorageRequiresGrantThenPersists() async throws {
+    func testStorageFirstUseGrantPromptThenPersists() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: ["storage"]))
+        var prompts = 0
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            grantHandler: { permission in
+                prompts += 1
+                XCTAssertEqual(permission, .storage)
+                return true
+            }
+        )
+
+        let saved = await runtime.dispatch(method: "storage.set", params: ["key": "a", "value": "b"])
+        XCTAssertEqual(saved, .success(.bool(true)))
+        XCTAssertEqual(prompts, 1)
+        XCTAssertEqual(repo.grantDecision(appId: app.id, permission: "storage"), .allow)
+
+        let loaded = await runtime.dispatch(method: "storage.get", params: ["key": "a"])
+        XCTAssertEqual(loaded, .success(.string("b")))
+        XCTAssertEqual(prompts, 1, "cached grant should not prompt again")
+
+        try repo.setGrant(appId: app.id, permission: "storage", decision: .deny)
+        let rejected = await runtime.dispatch(method: "storage.get", params: ["key": "a"])
+        XCTAssertEqual(rejected.errorMessage, "Permission 'storage' was denied.")
+    }
+
+    func testStorageWithoutGrantHandlerStillFailsClosed() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: ["storage"]))
         let runtime = IOSMiniAppBridgeRuntime(appId: app.id, repository: repo)
 
         let denied = await runtime.dispatch(method: "storage.set", params: ["key": "a", "value": "b"])
         XCTAssertEqual(denied.errorMessage, "Permission 'storage' has no grant decision.")
-
-        try repo.setGrant(appId: app.id, permission: "storage", decision: .allow)
-        let saved = await runtime.dispatch(method: "storage.set", params: ["key": "a", "value": "b"])
-        XCTAssertEqual(saved, .success(.bool(true)))
-
-        let loaded = await runtime.dispatch(method: "storage.get", params: ["key": "a"])
-        XCTAssertEqual(loaded, .success(.string("b")))
-
-        try repo.setGrant(appId: app.id, permission: "storage", decision: .deny)
-        let rejected = await runtime.dispatch(method: "storage.get", params: ["key": "a"])
-        XCTAssertEqual(rejected.errorMessage, "Permission 'storage' was denied.")
     }
 
     func testSearchRespectsPolicyEvenWhenGranted() async throws {
@@ -293,7 +310,41 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         let allowed = try await resultTask.value
         XCTAssertFalse(allowed)
         XCTAssertFalse(owner.hasPendingRequest)
-        XCTAssertNil(owner.pendingConfirmation)
+        XCTAssertNil(owner.pendingPrompt)
+    }
+
+    func testPermissionGrantCoalescesSamePermissionAndSerializesDifferentOnes() async throws {
+        let owner = MiniAppHostConfirmationOwner()
+        async let first = owner.requestPermission(appTitle: "App", permission: .storage)
+        while owner.pendingPrompt == nil {
+            await Task.yield()
+        }
+        async let secondSame = owner.requestPermission(appTitle: "App", permission: .storage)
+        async let thirdDifferent = owner.requestPermission(appTitle: "App", permission: .network)
+
+        // Still only the first storage prompt is visible.
+        if case .grant(let prompt) = owner.pendingPrompt {
+            XCTAssertEqual(prompt.permission, .storage)
+        } else {
+            return XCTFail("expected storage grant prompt")
+        }
+
+        XCTAssertTrue(owner.resolve(allow: true))
+        let sameResult = try await secondSame
+        XCTAssertTrue(sameResult)
+        XCTAssertTrue(try await first)
+
+        while owner.pendingPrompt == nil {
+            await Task.yield()
+        }
+        if case .grant(let prompt) = owner.pendingPrompt {
+            XCTAssertEqual(prompt.permission, .network)
+        } else {
+            return XCTFail("expected network grant prompt after storage resolved")
+        }
+        XCTAssertTrue(owner.resolve(allow: false))
+        XCTAssertFalse(try await thirdDifferent)
+        XCTAssertNil(owner.pendingPrompt)
     }
 
     func testRuntimeCloseCancelsInFlightBridgeTaskExactlyOnce() async throws {

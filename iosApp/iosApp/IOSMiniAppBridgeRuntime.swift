@@ -83,6 +83,8 @@ final class IOSMiniAppBridgeRuntime {
     typealias EventEmitter = (_ type: String, _ subscriptionId: String?, _ payload: IOSMiniAppJSONValue) -> Void
     typealias AIGenerateHandler = (_ request: IOSMiniAppAIGenerateRequest) async throws -> IOSMiniAppJSONValue
     typealias HostHandler = (_ request: IOSMiniAppHostRequest) async throws -> IOSMiniAppJSONValue
+    /// First-use grant prompt. Return true to allow and persist, false to deny and persist.
+    typealias GrantHandler = (_ permission: IOSMiniAppPermission) async throws -> Bool
 
     let appId: String
 
@@ -91,6 +93,7 @@ final class IOSMiniAppBridgeRuntime {
     private let fetchTransport: any IOSSearchHTTPTransport
     private let aiGenerateHandler: AIGenerateHandler?
     private let hostHandler: HostHandler?
+    private let grantHandler: GrantHandler?
     private let toastHandler: (String) -> Void
     private let clipboardCopyHandler: (String) -> Void
     private let themeProvider: () -> IOSMiniAppThemePayload
@@ -106,6 +109,7 @@ final class IOSMiniAppBridgeRuntime {
         fetchTransport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport(),
         aiGenerateHandler: AIGenerateHandler? = nil,
         hostHandler: HostHandler? = nil,
+        grantHandler: GrantHandler? = nil,
         toastHandler: @escaping (String) -> Void = { _ in },
         clipboardCopyHandler: @escaping (String) -> Void = {
             #if canImport(UIKit)
@@ -125,6 +129,7 @@ final class IOSMiniAppBridgeRuntime {
         self.fetchTransport = fetchTransport
         self.aiGenerateHandler = aiGenerateHandler
         self.hostHandler = hostHandler
+        self.grantHandler = grantHandler
         self.toastHandler = toastHandler
         self.clipboardCopyHandler = clipboardCopyHandler
         self.themeProvider = themeProvider
@@ -168,45 +173,45 @@ final class IOSMiniAppBridgeRuntime {
             case "app.info":
                 return .success(try appInfo())
             case "storage.get":
-                try require(.storage, method: method)
+                try await require(.storage, method: method)
                 let key = try stringParam("key", params)
                 let value = try repository.storageGet(appId: appId, key: key) ?? .null
                 try audit(method: method, permission: .storage, summary: "storage.get", payload: params)
                 return .success(value)
             case "storage.set":
-                try require(.storage, method: method)
+                try await require(.storage, method: method)
                 let key = try stringParam("key", params)
                 let value = try IOSMiniAppJSONValue(any: params["value"])
                 try repository.storageSet(appId: appId, key: key, value: value)
                 try audit(method: method, permission: .storage, summary: "storage.set", payload: params)
                 return .success(.bool(true))
             case "storage.remove":
-                try require(.storage, method: method)
+                try await require(.storage, method: method)
                 try repository.storageRemove(appId: appId, key: try stringParam("key", params))
                 try audit(method: method, permission: .storage, summary: "storage.remove", payload: params)
                 return .success(.bool(true))
             case "toast":
-                try require(.toast, method: method)
+                try await require(.toast, method: method)
                 let message = try stringParam("message", params).truncated(to: 120)
                 toastHandler(message)
                 return .success(.bool(true))
             case "host.getTheme", "theme":
-                try require(.theme, method: method)
+                try await require(.theme, method: method)
                 return .success(themeProvider().json)
             case "clipboard.copy":
-                try require(.clipboardCopy, method: method)
+                try await require(.clipboardCopy, method: method)
                 let text = try stringParam("text", params).truncated(to: 20_000)
                 clipboardCopyHandler(text)
                 try audit(method: method, permission: .clipboardCopy, summary: "clipboard.copy", payload: ["bytes": text.utf8.count])
                 return .success(.bool(true))
             case "host.updateBoardSummary":
-                try require(.hostUpdateBoardSummary, method: method)
+                try await require(.hostUpdateBoardSummary, method: method)
                 let summary = try stringParam("summary", params).truncated(to: 500)
                 try repository.updateBoardSummary(id: appId, summary: summary)
                 try audit(method: method, permission: .hostUpdateBoardSummary, summary: "Update board summary", payload: ["summary": summary])
                 return .success(.bool(true))
             case "sharedStore.get":
-                try require(.sharedStore, method: method)
+                try await require(.sharedStore, method: method)
                 let value = try repository.sharedGet(
                     appId: appId,
                     namespace: stringParamOrNil("namespace", params),
@@ -215,7 +220,7 @@ final class IOSMiniAppBridgeRuntime {
                 try audit(method: method, permission: .sharedStore, summary: "sharedStore.get", payload: params)
                 return .success(value)
             case "sharedStore.set":
-                try require(.sharedStore, method: method)
+                try await require(.sharedStore, method: method)
                 try repository.sharedSet(
                     appId: appId,
                     namespace: stringParamOrNil("namespace", params),
@@ -225,7 +230,7 @@ final class IOSMiniAppBridgeRuntime {
                 try audit(method: method, permission: .sharedStore, summary: "sharedStore.set", payload: ["ok": true])
                 return .success(.bool(true))
             case "sharedStore.remove":
-                try require(.sharedStore, method: method)
+                try await require(.sharedStore, method: method)
                 try repository.sharedRemove(
                     appId: appId,
                     namespace: stringParamOrNil("namespace", params),
@@ -234,7 +239,7 @@ final class IOSMiniAppBridgeRuntime {
                 try audit(method: method, permission: .sharedStore, summary: "sharedStore.remove", payload: params)
                 return .success(.bool(true))
             case "eventBus.subscribe":
-                try require(.eventBus, method: method)
+                try await require(.eventBus, method: method)
                 let namespace = try ownNamespace(stringParamOrNil("namespace", params) ?? appId)
                 let topic = try safeTopic(try stringParam("topic", params))
                 let subscriptionId = IOSMiniAppEventBus.subscribe(appId: appId, namespace: namespace, topic: topic) { [weak self] id, payload in
@@ -244,13 +249,13 @@ final class IOSMiniAppBridgeRuntime {
                 try audit(method: method, permission: .eventBus, summary: "eventBus.subscribe", payload: params)
                 return .success(.object(["subscriptionId": .string(subscriptionId)]))
             case "eventBus.unsubscribe":
-                try require(.eventBus, method: method)
+                try await require(.eventBus, method: method)
                 let subscriptionId = try stringParam("subscriptionId", params)
                 eventSubscriptionIds.remove(subscriptionId)
                 IOSMiniAppEventBus.unsubscribe(subscriptionId)
                 return .success(.bool(true))
             case "eventBus.publish":
-                try require(.eventBus, method: method)
+                try await require(.eventBus, method: method)
                 let namespace = try ownNamespace(stringParamOrNil("namespace", params) ?? appId)
                 let topic = try safeTopic(try stringParam("topic", params))
                 let payload = try IOSMiniAppJSONValue(any: params["payload"])
@@ -259,7 +264,7 @@ final class IOSMiniAppBridgeRuntime {
                 try audit(method: method, permission: .eventBus, summary: "eventBus.publish", payload: ["ok": true])
                 return .success(.bool(true))
             case "search":
-                try require(.search, method: method)
+                try await require(.search, method: method)
                 let query = try stringParam("query", params)
                 let limit = (params["limit"] as? Int) ?? (params["max_results"] as? Int) ?? 5
                 let results = try await IOSSearchExecutor.searchDuckDuckGoLite(query: query, maxResults: limit)
@@ -274,12 +279,12 @@ final class IOSMiniAppBridgeRuntime {
                 }
                 return .success(.array(payload))
             case "fetch":
-                try require(.network, method: method)
+                try await require(.network, method: method)
                 let value = try await fetch(params: params)
                 try audit(method: method, permission: .network, summary: "MiniApp network request", payload: ["url": stringParamOrNil("url", params) ?? ""])
                 return .success(value)
             case "ai.generate":
-                try require(.aiGenerate, method: method)
+                try await require(.aiGenerate, method: method)
                 let request = try aiGenerateRequest(params)
                 guard let aiGenerateHandler else {
                     throw BridgeError.denied("Amber.ai is not available in this MiniApp runner.")
@@ -287,7 +292,7 @@ final class IOSMiniAppBridgeRuntime {
                 try audit(method: method, permission: .aiGenerate, summary: "ai.generate", payload: ["prompt": request.prompt])
                 return .success(try await aiGenerateHandler(request))
             case "host.getConversationContext":
-                try require(.hostContext, method: method)
+                try await require(.hostContext, method: method)
                 let request = hostContextRequest(params)
                 guard let hostHandler else {
                     throw BridgeError.denied("MiniApp host confirmation is not available in this runner.")
@@ -296,7 +301,7 @@ final class IOSMiniAppBridgeRuntime {
                 try audit(method: method, permission: .hostContext, summary: "host.context", payload: ["maxChars": request.maxChars])
                 return .success(value)
             case "host.sendToConversation":
-                try require(.hostSendToConversation, method: method)
+                try await require(.hostSendToConversation, method: method)
                 let request = try hostSendRequest(params)
                 guard let hostHandler else {
                     throw BridgeError.denied("MiniApp host confirmation is not available in this runner.")
@@ -305,7 +310,7 @@ final class IOSMiniAppBridgeRuntime {
                 try audit(method: method, permission: .hostSendToConversation, summary: "host.sendToConversation", payload: ["text": request.text])
                 return .success(value)
             case "host.createArtifact":
-                try require(.hostCreateArtifact, method: method)
+                try await require(.hostCreateArtifact, method: method)
                 let request = try hostArtifactRequest(params)
                 guard let hostHandler else {
                     throw BridgeError.denied("MiniApp host confirmation is not available in this runner.")
@@ -358,7 +363,7 @@ final class IOSMiniAppBridgeRuntime {
         ])
     }
 
-    private func require(_ permission: IOSMiniAppPermission, method: String) throws {
+    private func require(_ permission: IOSMiniAppPermission, method: String) async throws {
         guard let app = repository.get(appId) else { throw BridgeError.denied("MiniApp not found: \(appId)") }
         guard app.permissions.contains(permission.rawValue) else {
             throw BridgeError.denied("Permission '\(permission.rawValue)' is not declared by this MiniApp.")
@@ -372,7 +377,18 @@ final class IOSMiniAppBridgeRuntime {
         case .deny:
             throw BridgeError.denied("Permission '\(permission.rawValue)' was denied.")
         case nil:
-            throw BridgeError.denied("Permission '\(permission.rawValue)' has no grant decision.")
+            guard let grantHandler else {
+                throw BridgeError.denied("Permission '\(permission.rawValue)' has no grant decision.")
+            }
+            let allowed = try await grantHandler(permission)
+            try repository.setGrant(
+                appId: appId,
+                permission: permission.rawValue,
+                decision: allowed ? .allow : .deny
+            )
+            guard allowed else {
+                throw BridgeError.denied("Permission '\(permission.rawValue)' was denied.")
+            }
         }
     }
 

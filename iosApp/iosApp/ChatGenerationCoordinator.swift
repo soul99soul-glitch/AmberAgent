@@ -198,10 +198,11 @@ struct ChatStreamPresentationStep {
 /// 变红。真正共享的只有这段策略:两边的 `step` 吃的是不同的数据形状
 /// (Chat 是 `[UIMessage]` 的 part 列表,小说是单条 String),强行抽象反而更糟。
 enum StreamPresentationPacingPolicy {
-    /// 轻积压时的下限:一拍推进约一行手机宽度的中文,保留既有 48ms 发布时钟。
+    /// 轻积压时的下限:一拍推进不到一行手机宽度的中文,保留既有 48ms 发布时钟。
     static let minimumTextAdvance = 12
-    /// 每拍硬上限:让大积压在几秒内清空,而不是几十秒。
-    static let maximumTextAdvance = 64
+    /// 每拍硬上限:约一到两行中文。64 字会在手机宽度下一次放出约三行，
+    /// TextKit 高度与底部跟随只能在下一帧追上，表现为偶发的大幅跳变。
+    static let maximumTextAdvance = 36
     /// 尽量在这么多拍内清空*当前*积压。
     static let preferredDrainTicks = 16
 
@@ -384,7 +385,7 @@ struct ChatGenerationBindings {
     let recordRun: (String, Int64, String, String, String?) async -> Void
     var markRunAwaitingPermission: @MainActor (String, String) async -> Bool = { _, _ in true }
     let startLiveActivity: (String, KotlinUuid?, AgentActivityPresentation) -> Void
-    let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> UIMessage?
+    let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> [UIMessage]?
     let messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
     let userFacingGenerationError: (String, String?) -> String
     var generationSucceeded: @MainActor () -> Void = {}
@@ -2045,8 +2046,8 @@ final class ChatGenerationCoordinator {
         }
 
         var finalSnapshot = snapshot
-        if let miniAppNotice = bindings.saveMiniAppIfPresent(snapshot, conversationId) {
-            finalSnapshot.append(miniAppNotice)
+        if let updatedMessages = bindings.saveMiniAppIfPresent(snapshot, conversationId) {
+            finalSnapshot = updatedMessages
             bindings.setMessages(finalSnapshot)
             bindings.bumpMessageRevision(.toolResultAppended)
         }

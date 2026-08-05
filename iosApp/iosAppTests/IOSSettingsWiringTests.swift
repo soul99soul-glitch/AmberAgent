@@ -185,7 +185,7 @@ final class IOSSettingsWiringTests: XCTestCase {
         }
         XCTAssertEqual(StreamPresentationPacingPolicy.textAdvance(backlogCount: 0), 0)
         XCTAssertEqual(StreamPresentationPacingPolicy.textAdvance(backlogCount: 1), 12, "轻积压落到下限")
-        XCTAssertEqual(StreamPresentationPacingPolicy.textAdvance(backlogCount: 100_000), 64, "大积压封顶")
+        XCTAssertEqual(StreamPresentationPacingPolicy.textAdvance(backlogCount: 100_000), 36, "大积压封顶")
     }
 
     func testChatTopBarUsesStableControlDimensions() {

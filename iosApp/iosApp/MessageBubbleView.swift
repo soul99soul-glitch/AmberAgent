@@ -71,7 +71,11 @@ struct MessageBubbleView: View {
     var onSelectVariant: (Int) -> Void = { _ in }
     var onGenerativeWidgetAction: (String) -> Void = { _ in }
     var onModifyGeneratedImage: (String, String, String) -> Void = { _, _, _ in }
+    var onOpenMiniApp: (String) -> Void = { _ in }
+    var onOpenMiniApps: () -> Void = {}
     var isGenerating: Bool = false
+    /// Global chat busy flag (any in-flight generation), used by MiniApp modify gate.
+    var isChatGenerationActive: Bool = false
     /// True only for the last message — gates the live "thinking" timer so a stopped/older
     /// reasoning (whose finishedAt was never set on cancel) doesn't keep counting.
     var isLastMessage: Bool = false
@@ -333,6 +337,17 @@ struct MessageBubbleView: View {
                         onModify: onModifyGeneratedImage
                     )
                 }
+            } else if let miniApp = part as? UIMessagePart.MiniApp {
+                IOSMiniAppChatCard(
+                    part: miniApp,
+                    onRun: { onOpenMiniApp(miniApp.appId) },
+                    onOpenList: onOpenMiniApps,
+                    onModify: { prompt in
+                        guard !isChatGenerationActive else { return false }
+                        onGenerativeWidgetAction(prompt)
+                        return true
+                    }
+                )
             } else if let tool = part as? UIMessagePart.Tool {
                 ChatToolTimeline(
                     steps: [ChatToolStepModel(tool: tool)],
@@ -411,6 +426,9 @@ struct MessageBubbleView: View {
         if let tool = part as? UIMessagePart.Tool {
             let imageCount = tool.output.compactMap { $0 as? UIMessagePart.Image }.count
             return "tool:\(tool.toolCallId):\(tool.output.isEmpty):\(imageCount)"
+        }
+        if let miniApp = part as? UIMessagePart.MiniApp {
+            return "mini_app:\(miniApp.appId):\(miniApp.version):\(miniApp.htmlHash ?? "")"
         }
         return String(describing: type(of: part))
     }

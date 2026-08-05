@@ -1,5 +1,7 @@
 # AmberAgent Architecture
 
+> Status: Historical Android Agent Kernel baseline. This document does not describe the current native iOS runtime; use `docs/PROJECT_STATE.md` and `iosApp/AGENTS.md` for iOS work.
+>
 > Last updated: 2026-05-28 (Sessions 7-9: 42 physical Gradle modules,
 > Task 1 cascade GREEN, sync-crypto Rust wired; see
 > [refactor-completion-report.md](refactor-completion-report.md))
@@ -74,6 +76,5 @@ modular Agent Kernel + Surfaces architecture.
 
 | ADR | Title |
 |---|---|
-| [0001](adr/0001-legacy-frozen-surfaces.md) | Legacy Frozen Surfaces |
 | [0002](adr/0002-agent-kernel-interface-design.md) | Agent Kernel Interface Design |
 | [0003](adr/0003-uniffi-vs-hand-written-jni.md) | UniFFI vs Hand-Written JNI |

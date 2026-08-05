@@ -76,16 +76,16 @@ struct MiniAppRunnerView: View {
             loadApp(markRun: true)
         }
         .alert(item: Binding(
-            get: { hostConfirmationOwner.pendingConfirmation },
-            set: { confirmation in
-                if confirmation == nil {
+            get: { hostConfirmationOwner.pendingPrompt },
+            set: { prompt in
+                if prompt == nil {
                     _ = hostConfirmationOwner.resolve(allow: false)
                 }
             }
-        )) { confirmation in
+        )) { prompt in
             Alert(
-                title: Text(confirmation.title),
-                message: Text(confirmation.message),
+                title: Text(prompt.title),
+                message: Text(prompt.message),
                 primaryButton: .default(Text("允许")) {
                     resolveHostConfirmation(allow: true)
                 },
@@ -234,6 +234,7 @@ struct MiniAppRunnerView: View {
                     policy: bridgePolicy,
                     aiGenerateHandler: miniAppAIGenerateHandler,
                     hostHandler: miniAppHostHandler,
+                    grantHandler: miniAppGrantHandler,
                     onValidationError: { runnerError = $0 },
                     onBridgeLog: { bridgeLog = $0 },
                     onToast: { message in
@@ -284,13 +285,20 @@ struct MiniAppRunnerView: View {
                                     Label("拒绝", systemImage: "xmark.circle")
                                 }
                             } label: {
-                                Text(grantTitle(appId: app.id, permission: permission))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(grantTint(appId: app.id, permission: permission))
+                                HStack(spacing: 4) {
+                                    Text(grantTitle(appId: app.id, permission: permission))
+                                        .font(.caption.weight(.semibold))
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption2.weight(.semibold))
+                                }
+                                .foregroundStyle(grantTint(appId: app.id, permission: permission))
+                                .padding(.horizontal, 10)
+                                .frame(minHeight: 44)
+                                .background(AmberTheme.accentTint, in: Capsule())
                             }
                         }
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 11)
+                        .padding(.vertical, 8)
 
                         if index < app.permissions.count - 1 {
                             MiniAppCapabilityDivider()
@@ -409,7 +417,7 @@ struct MiniAppRunnerView: View {
         }
         let miniApp = sharedSettings.agentRuntime.miniApp
         return IOSMiniAppBridgePolicy(
-            miniAppEnabled: true,
+            miniAppEnabled: miniApp.enabled,
             storageEnabled: true,
             toastEnabled: true,
             themeEnabled: true,
@@ -423,6 +431,15 @@ struct MiniAppRunnerView: View {
             hostContextEnabled: miniApp.hostContextEnabled,
             hostWriteEnabled: miniApp.hostWriteEnabled
         )
+    }
+
+    private var miniAppGrantHandler: IOSMiniAppBridgeRuntime.GrantHandler {
+        { permission in
+            try await hostConfirmationOwner.requestPermission(
+                appTitle: app?.title ?? "MiniApp",
+                permission: permission
+            )
+        }
     }
 
     private var miniAppAIGenerateHandler: IOSMiniAppBridgeRuntime.AIGenerateHandler? {
@@ -679,7 +696,33 @@ struct MiniAppRunnerView: View {
     }
 }
 
-struct MiniAppHostConfirmation: Identifiable {
+enum MiniAppRunnerPrompt: Identifiable, Equatable {
+    case host(MiniAppHostConfirmation)
+    case grant(MiniAppPermissionGrantPrompt)
+
+    var id: UUID {
+        switch self {
+        case .host(let value): value.id
+        case .grant(let value): value.id
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .host(let value): value.title
+        case .grant(let value): value.title
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .host(let value): value.message
+        case .grant(let value): value.message
+        }
+    }
+}
+
+struct MiniAppHostConfirmation: Equatable {
     let id = UUID()
     let appTitle: String
     let request: IOSMiniAppHostRequest
@@ -707,20 +750,110 @@ struct MiniAppHostConfirmation: Identifiable {
     }
 }
 
+struct MiniAppPermissionGrantPrompt: Equatable {
+    let id = UUID()
+    let appTitle: String
+    let permission: IOSMiniAppPermission
+
+    var title: String { "允许\(Self.displayName(permission))？" }
+
+    var message: String {
+        "「\(appTitle)」首次请求：\(Self.displayDescription(permission))\n允许后可继续使用，拒绝后会记住本次选择。"
+    }
+
+    private static func displayName(_ permission: IOSMiniAppPermission) -> String {
+        switch permission {
+        case .storage: "本地存储"
+        case .toast: "提示"
+        case .theme: "读取主题"
+        case .network: "网络请求"
+        case .search: "搜索"
+        case .clipboardCopy: "写入剪贴板"
+        case .aiGenerate: "调用 AI"
+        case .sharedStore: "共享存储"
+        case .eventBus: "事件总线"
+        case .hostUpdateBoardSummary: "更新摘要"
+        case .hostContext: "读取上下文"
+        case .hostSendToConversation: "写回聊天"
+        case .hostCreateArtifact: "创建内容卡片"
+        case .externalImages: "外链图片"
+        case .launch: "打开其他小应用"
+        case .sensor: "传感器"
+        case .location: "定位"
+        case .clipboardRead: "读取剪贴板"
+        }
+    }
+
+    private static func displayDescription(_ permission: IOSMiniAppPermission) -> String {
+        switch permission {
+        case .storage: "读写该小应用自己的本地数据"
+        case .toast: "显示提示信息"
+        case .theme: "读取当前主题色"
+        case .network: "访问公开 https 页面"
+        case .search: "执行公开网页搜索"
+        case .clipboardCopy: "把文本写入剪贴板"
+        case .aiGenerate: "调用当前聊天模型生成文本"
+        case .sharedStore: "读写自身命名空间的共享数据"
+        case .eventBus: "在自身命名空间收发事件"
+        case .hostUpdateBoardSummary: "更新该小应用的摘要字段"
+        case .hostContext: "读取最小化会话上下文"
+        case .hostSendToConversation: "向聊天写入草稿"
+        case .hostCreateArtifact: "创建 Workspace 内容卡片"
+        case .externalImages: "加载外链图片"
+        case .launch: "打开另一个已保存的小应用"
+        case .sensor: "订阅设备传感器"
+        case .location: "读取当前位置"
+        case .clipboardRead: "读取剪贴板文本"
+        }
+    }
+}
+
 @MainActor
 final class MiniAppHostConfirmationOwner: ObservableObject {
-    @Published private(set) var pendingConfirmation: MiniAppHostConfirmation?
+    @Published private(set) var pendingPrompt: MiniAppRunnerPrompt?
     private var continuation: CheckedContinuation<Bool, Never>?
+    private var grantInFlight: [String: Task<Bool, Error>] = [:]
+    private var presentationWaiters: [CheckedContinuation<Void, Never>] = []
 
     var hasPendingRequest: Bool { continuation != nil }
 
     func request(appTitle: String, request: IOSMiniAppHostRequest) async throws -> Bool {
+        try await withPresentationSlot {
+            try await present(.host(MiniAppHostConfirmation(appTitle: appTitle, request: request)))
+        }
+    }
+
+    func requestPermission(appTitle: String, permission: IOSMiniAppPermission) async throws -> Bool {
+        let key = permission.rawValue
+        if let existing = grantInFlight[key] {
+            return try await existing.value
+        }
+        let task = Task { @MainActor in
+            try await withPresentationSlot {
+                try await present(.grant(MiniAppPermissionGrantPrompt(appTitle: appTitle, permission: permission)))
+            }
+        }
+        grantInFlight[key] = task
+        defer { grantInFlight[key] = nil }
+        return try await task.value
+    }
+
+    private func withPresentationSlot<T>(_ work: () async throws -> T) async throws -> T {
+        if continuation != nil {
+            await withCheckedContinuation { continuation in
+                presentationWaiters.append(continuation)
+            }
+        }
+        return try await work()
+    }
+
+    private func present(_ prompt: MiniAppRunnerPrompt) async throws -> Bool {
         guard continuation == nil else {
             throw MiniAppRunnerHostError.denied("Another MiniApp host request is waiting for confirmation.")
         }
         return await withCheckedContinuation { continuation in
             self.continuation = continuation
-            pendingConfirmation = MiniAppHostConfirmation(appTitle: appTitle, request: request)
+            pendingPrompt = prompt
         }
     }
 
@@ -728,8 +861,11 @@ final class MiniAppHostConfirmationOwner: ObservableObject {
     func resolve(allow: Bool) -> Bool {
         guard let continuation else { return false }
         self.continuation = nil
-        pendingConfirmation = nil
+        pendingPrompt = nil
         continuation.resume(returning: allow)
+        let waiters = presentationWaiters
+        presentationWaiters.removeAll()
+        waiters.forEach { $0.resume() }
         return true
     }
 

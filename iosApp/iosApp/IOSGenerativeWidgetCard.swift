@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 @preconcurrency import WebKit
 @preconcurrency import Shared
 
@@ -15,6 +16,9 @@ struct IOSGenerativeWidgetCard: View {
 
     @State private var sheet: IOSGenerativeWidgetSheetTarget?
     @State private var measuredHeight: CGFloat = widgetMinHeight
+    @State private var svgDocument: IOSGenerativeWidgetSVGDocument?
+    @State private var isExportingSVG = false
+    @State private var svgExportError: IOSGenerativeWidgetSVGExportError?
 
     private var settings: IOSGenerativeWidgetSettings {
         IOSGenerativeWidgetSettings(generativeUiSetting)
@@ -29,14 +33,13 @@ struct IOSGenerativeWidgetCard: View {
             (widget.complete || sanitized.html.count >= widgetMinPartialRenderChars)
     }
 
+    private var svgExport: IOSGenerativeWidgetSVGExportArtifact? {
+        IOSGenerativeWidgetSVGExport.artifact(widget: widget, sanitized: sanitized)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let title = widget.title?.nilIfBlank {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(2)
-            }
+            header
             content
             actionRow
             if !widget.complete, sanitized.status == .ready {
@@ -59,6 +62,63 @@ struct IOSGenerativeWidgetCard: View {
                 IOSGenerativeWidgetExpandedSheet(widget: widget, html: html, settings: settings)
             }
         }
+        .fileExporter(
+            isPresented: $isExportingSVG,
+            document: svgDocument,
+            contentType: IOSGenerativeWidgetSVGDocument.contentType,
+            defaultFilename: svgDocument?.filename ?? "visualization.svg"
+        ) { result in
+            if case .failure(let error) = result {
+                svgExportError = IOSGenerativeWidgetSVGExportError(message: error.localizedDescription)
+            }
+        }
+        .alert(item: $svgExportError) { error in
+            Alert(
+                title: Text("无法导出 SVG"),
+                message: Text(error.message),
+                dismissButton: .default(Text("知道了"))
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        if widget.title?.nilIfBlank != nil || svgExport != nil {
+            HStack(alignment: .top, spacing: 8) {
+                if let title = widget.title?.nilIfBlank {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(2)
+                        .layoutPriority(-1)
+                }
+                Spacer(minLength: 0)
+                if svgExport != nil {
+                    Button(action: beginSVGExport) {
+                        Text("保存")
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .foregroundStyle(AmberTheme.accentInk)
+                            .padding(.horizontal, 12)
+                            .frame(height: 28)
+                            .background(AmberTheme.accent, in: Capsule())
+                    }
+                    .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.94, haptic: .lightImpact))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(1)
+                    .accessibilityLabel("保存 SVG 到文件")
+                }
+            }
+        }
+    }
+
+    private func beginSVGExport() {
+        guard let svgExport else {
+            svgExportError = IOSGenerativeWidgetSVGExportError(message: "当前可视化没有可导出的 SVG 内容。")
+            return
+        }
+        svgDocument = IOSGenerativeWidgetSVGDocument(svg: svgExport.svg, filename: svgExport.filename)
+        isExportingSVG = true
     }
 
     @ViewBuilder
@@ -163,6 +223,80 @@ struct IOSGenerativeWidgetCard: View {
             "交互式图表"
         }
     }
+}
+
+struct IOSGenerativeWidgetSVGExportArtifact: Equatable {
+    let svg: String
+    let filename: String
+}
+
+enum IOSGenerativeWidgetSVGExport {
+    static func artifact(
+        widget: IOSGenerativeWidget,
+        sanitized: IOSSanitizedGenerativeWidget
+    ) -> IOSGenerativeWidgetSVGExportArtifact? {
+        guard widget.complete,
+              sanitized.status == .ready,
+              widget.renderer != "slides",
+              widget.renderer != IOSGuizangHtmlDeckValidator.renderer,
+              let svg = extractSVG(from: sanitized.html) else {
+            return nil
+        }
+        return IOSGenerativeWidgetSVGExportArtifact(svg: svg, filename: filename(for: widget.title))
+    }
+
+    static func extractSVG(from source: String) -> String? {
+        guard let start = source.range(of: "<svg\\b", options: [.regularExpression, .caseInsensitive]),
+              let end = source.range(of: "</svg\\s*>", options: [.regularExpression, .caseInsensitive], range: start.lowerBound..<source.endIndex) else {
+            return nil
+        }
+        return String(source[start.lowerBound..<end.upperBound])
+    }
+
+    static func filename(for title: String?) -> String {
+        let rawTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let titleWithoutControls = rawTitle.components(separatedBy: .controlCharacters)
+            .joined()
+        let forbidden = CharacterSet(charactersIn: "/:\\?%*|\"<>")
+        let stem = titleWithoutControls.components(separatedBy: forbidden)
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = stem.isEmpty ? "visualization" : stem
+        return normalized.lowercased().hasSuffix(".svg") ? normalized : "\(normalized).svg"
+    }
+}
+
+struct IOSGenerativeWidgetSVGDocument: FileDocument {
+    static let contentType = UTType(filenameExtension: "svg") ?? .xml
+    static var readableContentTypes: [UTType] { [contentType] }
+    static var writableContentTypes: [UTType] { [contentType] }
+
+    let svg: String
+    let filename: String
+
+    init(svg: String, filename: String) {
+        self.svg = svg
+        self.filename = filename
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard configuration.file.isRegularFile,
+              let data = configuration.file.regularFileContents,
+              let svg = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        self.svg = svg
+        self.filename = "visualization.svg"
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(svg.utf8))
+    }
+}
+
+private struct IOSGenerativeWidgetSVGExportError: Identifiable {
+    let id = UUID()
+    let message: String
 }
 
 @MainActor

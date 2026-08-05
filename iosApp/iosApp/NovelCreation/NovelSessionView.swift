@@ -361,6 +361,12 @@ struct NovelSessionView: View {
         .onScrollPhaseChange { _, phase in
             switch phase {
             case .tracking, .interacting:
+                if isNativeScrollDriverActive {
+                    guard NativeChatTimelineView.shouldBeginNativeUserDrag(
+                        phase: phase,
+                        isUIKitUserInteracting: scrollDriver.isUIKitUserInteracting
+                    ) else { return }
+                }
                 guard !userDragging else { return }
                 userDragging = true
                 dismissKeyboard()

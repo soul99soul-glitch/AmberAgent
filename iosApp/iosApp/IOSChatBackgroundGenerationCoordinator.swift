@@ -17,7 +17,7 @@ private struct IOSChatBackgroundRuntimeJob {
     let conversationStore: IOSConversationStore
     let toolRuntime: ChatToolRuntime
     let liveActivityController: AgentLiveActivityController
-    let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)?
+    let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)?
     let messagesSnapshot: IOSChatBackgroundMessagesSnapshot
 }
 
@@ -32,7 +32,7 @@ private struct IOSChatBackgroundDependencies {
     let toolRuntime: ChatToolRuntime
     let sharedSettings: IOSSharedSettingsStore
     let liveActivityController: AgentLiveActivityController
-    let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)?
+    let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)?
 }
 
 struct IOSChatBackgroundHandoff {
@@ -330,7 +330,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         toolRuntime: ChatToolRuntime? = nil,
         sharedSettings: IOSSharedSettingsStore? = nil,
         liveActivityController: AgentLiveActivityController = .shared,
-        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)? = nil
+        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)? = nil
     ) {
         if let conversationStore, let toolRuntime, let sharedSettings {
             dependencies = IOSChatBackgroundDependencies(
@@ -355,7 +355,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         conversationStore: IOSConversationStore,
         toolRuntime: ChatToolRuntime,
         liveActivityController: AgentLiveActivityController,
-        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)? = nil
+        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)? = nil
     ) -> Bool {
         configure()
 
@@ -531,7 +531,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         conversationStore: IOSConversationStore,
         toolRuntime: ChatToolRuntime,
         liveActivityController: AgentLiveActivityController,
-        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)?
+        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)?
     ) -> IOSChatBackgroundRuntimeJob {
         IOSChatBackgroundRuntimeJob(
             runId: handoff.runId,
@@ -908,8 +908,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             guardStoppedNotice = notice
         }
         if job.mode == .continueModel,
-           let miniAppNotice = job.saveMiniAppIfPresent?(finalMessages, job.conversationId) {
-            finalMessages.append(miniAppNotice)
+           let updatedMessages = job.saveMiniAppIfPresent?(finalMessages, job.conversationId) {
+            finalMessages = updatedMessages
         }
         let singleToolFailureReason = job.mode == .singleToolOnly
             ? ChatToolOutputFormatter.imageFailureReason(in: finalMessages)

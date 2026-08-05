@@ -54,7 +54,7 @@ struct MiniAppSettingsView: View {
     }
 
     private var intro: some View {
-        Text("控制小应用运行时可申请的能力。每个小应用仍需要在运行页单独允许或拒绝声明的权限。")
+        Text("控制小应用运行时可申请的能力。首次使用某项权限时会弹窗确认，选择会记住；也可在运行页手动改授权。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -66,6 +66,20 @@ struct MiniAppSettingsView: View {
 
     private var presetConfigSection: some View {
         VStack(spacing: 0) {
+            AmberSectionLabel(text: "小应用总开关")
+            AmberFormGroup {
+                MiniAppPresetToggleRow(
+                    title: "启用小应用",
+                    subtitle: "关闭后不再注入小应用生成指令，也不会保存或运行新的小应用。",
+                    systemImage: "square.grid.2x2",
+                    tint: AmberTheme.accent,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.enabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(enabled: enabled) } }
+                    )
+                )
+            }
+
             AmberSectionLabel(text: "小应用权限")
             AmberFormGroup {
                 MiniAppPresetToggleRow(
@@ -160,7 +174,7 @@ struct MiniAppSettingsView: View {
                     title: "宿主写回",
                     subtitle: "允许 host.sendToConversation / host.createArtifact 在前台确认后写入草稿或内容卡片。",
                     systemImage: "square.and.pencil",
-                    tint: .purple,
+                    tint: AmberTheme.accentIndigo,
                     isOn: Binding(
                         get: { sharedSettings.agentRuntime.miniApp.hostWriteEnabled },
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(hostWriteEnabled: enabled) } }

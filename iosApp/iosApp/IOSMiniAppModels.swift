@@ -119,6 +119,16 @@ struct IOSMiniAppGeneratedOutput: Codable, Equatable {
         self.html = html
     }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decode(String.self, forKey: .title)
+        description = try container.decode(String.self, forKey: .description)
+        icon = try container.decodeIfPresent(String.self, forKey: .icon)
+        category = try container.decodeIfPresent(String.self, forKey: .category) ?? "tool"
+        permissions = try container.decodeIfPresent([String].self, forKey: .permissions) ?? []
+        html = try container.decode(String.self, forKey: .html)
+    }
+
     func normalized() -> IOSMiniAppGeneratedOutput {
         var seen = Set<String>()
         let normalizedPermissions = permissions.compactMap { permission -> String? in
@@ -310,8 +320,25 @@ enum IOSMiniAppJSONValue: Codable, Equatable, Hashable {
 struct IOSMiniAppOutputParser {
     static let miniAppInstruction = """
     请按 AmberAgent MiniApp V3 输出一个严格 JSON 对象，不要输出 Markdown 解释或代码围栏。
-    Schema: {"title":"1-20 字标题","description":"1-80 字描述","icon":"最多 2 个字符","category":"tool|game|info|custom","permissions":["storage","toast","theme","network","externalImages","search","clipboard.copy","host.updateBoardSummary","host.context","host.sendToConversation","host.createArtifact","ai.generate","sharedStore","eventBus","launch","sensor","location","clipboard.read"],"html":"<!DOCTYPE html>..."}
-    约束：只生成单文件 HTML；不要使用 script src、iframe、form、eval、new Function、import()、XMLHttpRequest、WebSocket、localStorage、sessionStorage、geolocation。图片允许 data:image/... 或 https:// 图片 URL；网络、搜索、AI、剪贴板、宿主写回和共享存储只能通过 Amber bridge，并声明对应权限。最终只输出一个可解析 JSON 对象。
+    Schema:
+    {
+      "title": "1-20 字标题",
+      "description": "1-80 字描述",
+      "icon": "最多 2 个字符",
+      "category": "tool|game|info|custom",
+      "permissions": ["storage","toast","theme","network","externalImages","search","clipboard.copy","host.updateBoardSummary","host.context","host.sendToConversation","host.createArtifact","ai.generate","sharedStore","eventBus","launch","sensor","location","clipboard.read"],
+      "html": "<!DOCTYPE html>..."
+    }
+    约束：只生成单文件 HTML；不要使用 script src、iframe、form、eval、new Function、import()、XMLHttpRequest、WebSocket、localStorage、sessionStorage、geolocation。
+    图片允许 data:image/... 或 https:// 图片 URL；不要使用 http://、相对路径、file/content/blob URL。外链图片必须声明 externalImages 权限。
+    网络通过 await Amber.fetch({ url, method, headers, body, responseType }) 或 fetch("https://...")，必须声明 network 权限；fetch 会被安全桥接到 Amber.fetch。
+    搜索只能通过 await Amber.search({ query, limit })，必须声明 search 权限。
+    剪贴板写入只能用 await Amber.clipboard.copy(text)，必须声明 clipboard.copy。
+    持久化用 await Amber.storage.get/set/remove，提示用 await Amber.toast，主题用 await Amber.host.getTheme。
+    AI 只能通过 await Amber.ai.generate({prompt, system, maxOutputChars, temperature})，必须声明 ai.generate，且会弹确认。
+    如做新闻、阅读、列表类小应用，更新按钮可以调用 Amber.search 或 Amber.fetch 获取新内容；必须支持纵向滚动，不要把 body 固定成 overflow:hidden，除非用户明确要求全屏游戏/计时器。
+    为避免 JSON 被截断：HTML 尽量紧凑，目标控制在 200KB 内；不要生成大型静态 JSON 数据集、长篇文章库、base64 大图或重复模板。
+    category/permissions 可省略（默认 tool / []）。最终只输出一个可解析 JSON 对象。
     """
 
     private let decoder: JSONDecoder

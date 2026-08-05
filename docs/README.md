@@ -1,0 +1,38 @@
+# AmberAgent 文档地图
+
+这是一张入口地图，不是第二份项目状态。接手任务时先读仓库根 `AGENTS.md` 和 `PROJECT_STATE.md`，再按主题选择下列最少文档。
+
+## 权威顺序
+
+1. 真实代码、测试、Git 状态和运行证据
+2. 当前目录链上的 `AGENTS.md`
+3. [`PROJECT_STATE.md`](PROJECT_STATE.md)
+4. 已接受的产品规格与 ADR
+5. 标为 Active/Paused 的计划
+6. 日期化审计、评估和已完成计划（仅作历史证据）
+
+旧 handoff、session snapshot、一次性 prompt 和本地绝对路径不属于当前入口。需要追溯时使用 Git 历史。
+
+## 快速入口
+
+| 主题 | 先读 | 说明 |
+| --- | --- | --- |
+| 当前分支与最近工作 | [`PROJECT_STATE.md`](PROJECT_STATE.md) | 当前事实、验证、风险和下一切口 |
+| 全仓工程规则 | [`../AGENTS.md`](../AGENTS.md) | 启动、状态链路审计、验证与收尾 |
+| 原生 iOS | [`../iosApp/AGENTS.md`](../iosApp/AGENTS.md) | Chat、provider、后台、真机门禁 |
+| 小说创作 | [`../iosApp/iosApp/NovelCreation/AGENTS.md`](../iosApp/iosApp/NovelCreation/AGENTS.md) | 局部所有权、终态、输入法与测试契约 |
+| 小说产品契约 | [`NOVEL_CREATION_SPEC.md`](NOVEL_CREATION_SPEC.md) | 用户可见行为与领域边界 |
+| 小说领域语言 | [`../CONTEXT.md`](../CONTEXT.md) | 项目、分支、章节、候选和资料词汇 |
+| 小说状态所有权 | [`adr/0007-novel-creation-owns-project-state.md`](adr/0007-novel-creation-owns-project-state.md) | 小说项目为何是权威来源 |
+| 小说实现基线 | [`NOVEL_CREATION_IMPLEMENTATION_PLAN.md`](NOVEL_CREATION_IMPLEMENTATION_PLAN.md) | 已完成架构和仍受 schema 约束的工作 |
+| Live Activity 视觉 | [`ACTIVITY_ISLAND_REDESIGN.md`](ACTIVITY_ISLAND_REDESIGN.md) | 灵动岛/锁屏视觉规范 |
+| iOS 终端能力 | [`ios-terminal-runtime.md`](ios-terminal-runtime.md) | iSH/终端运行时边界 |
+| Android Agent Kernel 历史基线 | [`architecture.md`](architecture.md) | 仅解释 Android 模块化背景，不代表当前 iOS 运行时 |
+
+## 仍开放但不是默认任务
+
+- [`NOVEL_SESSION_MEMORY_PLAN_2026-07-19.md`](NOVEL_SESSION_MEMORY_PLAN_2026-07-19.md)：S1-S3 已完成，S4-S7 暂停，需真实 provider/真机证据后再决定。
+- [`IOS_AGENT_HARDENING_PLAN_2026-07-29.md`](IOS_AGENT_HARDENING_PLAN_2026-07-29.md)：iOS Agent 不变量补强设计稿；开始前必须重新核对当前代码是否已部分落地。
+- [`NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md`](NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md)：跨仓 Android 草案，不得在本 iOS 仓直接开工。
+
+其余日期化计划、审计、评估和 `.workflow/` 结果默认视为历史材料。只有当前任务明确命中其主题时再读取，并以实时代码复核。

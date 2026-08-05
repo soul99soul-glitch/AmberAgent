@@ -400,6 +400,87 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         XCTAssertEqual(issue, "expected renderer \"full_html\"")
     }
 
+    func testSVGExportUsesSanitizedSVGFragmentAndSafeFilename() {
+        let widget = IOSGenerativeWidget(
+            id: "flow",
+            title: "流程图 / v1",
+            widgetCode: "<svg><text>raw</text></svg>",
+            complete: true
+        )
+        let sanitized = IOSSanitizedGenerativeWidget(
+            status: .ready,
+            html: "<div class=\"widget\"><svg viewBox=\"0 0 10 10\"><rect/></svg></div>"
+        )
+
+        let artifact = IOSGenerativeWidgetSVGExport.artifact(widget: widget, sanitized: sanitized)
+
+        XCTAssertEqual(artifact?.svg, "<svg viewBox=\"0 0 10 10\"><rect/></svg>")
+        XCTAssertEqual(artifact?.filename, "流程图 - v1.svg")
+    }
+
+    func testSVGExportOnlyAllowsCompleteReadySVGWidgets() {
+        let svg = "<svg><rect/></svg>"
+        let completeWidget = IOSGenerativeWidget(id: "complete", title: nil, widgetCode: svg, complete: true)
+        let partialWidget = IOSGenerativeWidget(id: "partial", title: nil, widgetCode: svg, complete: false)
+
+        XCTAssertNotNil(IOSGenerativeWidgetSVGExport.artifact(
+            widget: completeWidget,
+            sanitized: IOSSanitizedGenerativeWidget(status: .ready, html: svg)
+        ))
+        XCTAssertNil(
+            IOSGenerativeWidgetSVGExport.artifact(
+                widget: completeWidget,
+                sanitized: IOSSanitizedGenerativeWidget(status: .ready, html: "<div>wrapped</div>")
+            ),
+            "净化内容未保留 SVG 时不应回退原始 SVG"
+        )
+        XCTAssertNil(IOSGenerativeWidgetSVGExport.artifact(
+            widget: partialWidget,
+            sanitized: IOSSanitizedGenerativeWidget(status: .ready, html: svg)
+        ))
+        XCTAssertNil(IOSGenerativeWidgetSVGExport.artifact(
+            widget: completeWidget,
+            sanitized: IOSSanitizedGenerativeWidget(status: .unsafe)
+        ))
+        XCTAssertNil(IOSGenerativeWidgetSVGExport.artifact(
+            widget: IOSGenerativeWidget(id: "html", title: nil, widgetCode: "<div>not svg</div>", complete: true),
+            sanitized: IOSSanitizedGenerativeWidget(status: .ready, html: "<div>not svg</div>")
+        ))
+    }
+
+    func testSVGExportExcludesFullHtmlAndSlidesRenderers() {
+        let svg = "<svg><rect/></svg>"
+        let sanitized = IOSSanitizedGenerativeWidget(status: .ready, html: svg)
+
+        XCTAssertNil(IOSGenerativeWidgetSVGExport.artifact(
+            widget: IOSGenerativeWidget(
+                id: "full-html",
+                title: "Deck cover",
+                widgetCode: svg,
+                complete: true,
+                renderer: IOSGuizangHtmlDeckValidator.renderer
+            ),
+            sanitized: sanitized
+        ))
+        XCTAssertNil(IOSGenerativeWidgetSVGExport.artifact(
+            widget: IOSGenerativeWidget(
+                id: "slides",
+                title: "Deck preview",
+                widgetCode: svg,
+                complete: true,
+                renderer: "slides"
+            ),
+            sanitized: sanitized
+        ))
+    }
+
+    func testSVGExportFilenamePreservesCaseInsensitiveExtensionAndCleansControlCharacters() {
+        XCTAssertEqual(IOSGenerativeWidgetSVGExport.filename(for: "Title.SVG"), "Title.SVG")
+        XCTAssertEqual(IOSGenerativeWidgetSVGExport.filename(for: "设计.SVG"), "设计.SVG")
+        XCTAssertEqual(IOSGenerativeWidgetSVGExport.filename(for: "flow\nchart\u{0007}"), "flowchart.svg")
+        XCTAssertEqual(IOSGenerativeWidgetSVGExport.filename(for: "\n\u{0000}\t"), "visualization.svg")
+    }
+
     private func message(role: MessageRole, text: String) -> UIMessage {
         UIMessage(
             id: KotlinUuid.companion.random(),
