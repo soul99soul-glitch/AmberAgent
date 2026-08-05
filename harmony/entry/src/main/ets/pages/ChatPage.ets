@@ -6,7 +6,7 @@
 // D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
-import { ACCENT,ACCENT_INK,BG,BODY,ERROR,HEADER,INK,INK2,INK3,INK4,LABEL,LINE,LINE2,META,MONO_SMALL,SURFACE,SURFACE2 } from '../design/tokens.ets';
+import { ACCENT,ACCENT_INK,BG,BODY,ERROR,HEADER,INK,INK2,INK3,INK4,LABEL,LINE,LINE2,META,MONO_SMALL,SIGNAL,SURFACE,SURFACE2 } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
@@ -547,6 +547,8 @@ interface PendingChipRow {
 @Component
 struct ChatPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @State greetName: string = '';
+  @State cursorOn: boolean = true;
   @State rows: MsgRow[] = [];
   @State streamingTail: UIMessage[] = [];
   @State suggestions: string[] = [];
@@ -714,6 +716,10 @@ struct ChatPage {
   }
 
   aboutToAppear(): void {
+    // 空状态问候名(读 KV user_nickname, 缺省空)
+    getChatKvStore().get('user_nickname').then((n: string | null): void => { this.greetName = n === null ? '' : n; });
+    // amber 光标闪烁(525ms)
+    setInterval((): void => { this.cursorOn = !this.cursorOn; }, 525);
     // 每次进入(含从选择器返回)刷新模型标签
     describeChatModel().then((label: string): void => { this.modelLabel = label; });    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
     //   = P1 登记;取持久化 model.contextWindowTokens = Android 未知模型
@@ -837,6 +843,11 @@ struct ChatPage {
 
   private scrollToBottom(): void {
     this.scroller.scrollEdge(Edge.Bottom);
+  }
+
+  // 「+」新对话: 重置为一个全新会话(替换当前页)
+  private newChat(): void {
+    router.replaceUrl({ url: 'pages/ChatPage' });
   }
 
   // ===== D-110:ContextUsageIndicator(ChatInputUsage.kt:77-162) =====
@@ -2644,13 +2655,11 @@ struct ChatPage {
     Column() {
       // Amber Redesign ChatHeader — Row[left ←/☰ | center title+model | right ctx-meter+✎]
       Row() {
-        // Left:返回箭头(有会话 ← 24/INK)或菜单(根 ☰ 22/INK2)
-        Text(this.conversation !== null ? '←' : '☰')
-          .fontSize(this.conversation !== null ? 24 : 22)
-          .fontColor(this.conversation !== null ? INK : INK2)
-          .onClick((): void => {
-            if (this.conversation !== null) router.back();
-          })
+        // Left:≡ 菜单(回对话列表, 对齐参考图)
+        Text('☰')
+          .fontSize(24)
+          .fontColor(INK)
+          .onClick((): void => { router.back(); })
 
         // Center:标题 + 模型行(flex 1, margin-left 2)
         Column() {
@@ -2699,27 +2708,11 @@ struct ChatPage {
               .onClick((): void => { this.editingTitle = false; })
           }
         } else {
-          Row() {
-            // ContextMeter:5 段柱(2.5x9,gap 2,accent 填充/LINE2 空)
-            Row() {
-              Column() {}.width(2.5).height(9)
-                .backgroundColor(this.contextFilledBars() >= 1 ? ACCENT : LINE2).borderRadius(1)
-              Column() {}.width(2.5).height(9).margin({ left: 2 })
-                .backgroundColor(this.contextFilledBars() >= 2 ? ACCENT : LINE2).borderRadius(1)
-              Column() {}.width(2.5).height(9).margin({ left: 2 })
-                .backgroundColor(this.contextFilledBars() >= 3 ? ACCENT : LINE2).borderRadius(1)
-              Column() {}.width(2.5).height(9).margin({ left: 2 })
-                .backgroundColor(this.contextFilledBars() >= 4 ? ACCENT : LINE2).borderRadius(1)
-              Column() {}.width(2.5).height(9).margin({ left: 2 })
-                .backgroundColor(this.contextFilledBars() >= 5 ? ACCENT : LINE2).borderRadius(1)
-            }
-            Text(`${Math.round(this.contextUsageRatio() * 100)}%`)
-              .fontSize(MONO_SMALL).fontFamily('monospace').fontColor(INK3)
-              .margin({ left: 4 })
-            Text('✎').fontSize(21).fontColor(INK2)
-              .margin({ left: 8 })
-              .onClick((): void => this.startEditTitle())
-          }
+          // Right:「+」新对话(对齐参考图)
+          Text('+')
+            .fontSize(26)
+            .fontColor(INK)
+            .onClick((): void => { this.newChat(); })
         }
       }
       .width('100%')
@@ -2932,6 +2925,25 @@ struct ChatPage {
       })
     }
     .width('100%').height('100%').backgroundColor(BG)
+
+    // 空状态 hero(1:1 对齐参考图): amber+绿光标 + Hi <name>, / 今天想聊点什么?
+    if (this.rows.length === 0 && !this.sending) {
+      Column() {
+        Row() {
+          Text('amber')
+            .fontSize(30).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily('monospace')
+          Text('')
+            .width(10).height(26).backgroundColor(SIGNAL).borderRadius(2)
+            .margin({ left: 4 })
+            .opacity(this.cursorOn ? 1 : 0)
+        }
+        Text(this.greetName.length > 0 ? `Hi ${this.greetName},` : 'Hi,')
+          .fontSize(28).fontColor(INK).margin({ top: 28 })
+        Text('今天想聊点什么?')
+          .fontSize(28).fontColor(INK).margin({ top: 10 })
+      }
+      .alignItems(HorizontalAlign.Center)
+    }
 
     // TopModelMenu 覆盖层(Android TopModelMenu.kt:Box { scrim; AnimatedVisibility(panel) })
     //   Stack 子节点序:主 Column(底) → 本覆盖层 → deny-dialog(顶,确保拒绝弹窗压在菜单之上)。
