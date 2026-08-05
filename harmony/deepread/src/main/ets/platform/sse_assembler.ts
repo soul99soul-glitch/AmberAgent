@@ -16,23 +16,64 @@ export interface SseEvent {
 // 解码器类型:把 ArrayBuffer 转 UTF-8 字符串
 export type DecodeChunk = (chunk: ArrayBuffer) => string;
 
-// Node 环境:全局 TextDecoder 可用。用 globalThis 间接访问,避免 ArkTS 编译期
-// 扫描到 TextDecoder 字面量(该全局在 ArkTS 应用层不存在)。ArkTS 路径必须显式注入 decode。
+// 纯 UTF-8 解码(ArkTS 应用层无全局 TextDecoder;Node 测试也可用)。
+// 输入必须是「完整」的 UTF-8 序列(尾部不含截断的多字节字符,由 feed 的字节缓冲保证)。
+const decodeUtf8 = (bytes: Uint8Array): string => {
+  let s: string = '';
+  let i: number = 0;
+  while (i < bytes.length) {
+    const b: number = bytes[i];
+    if ((b & 0x80) === 0) { s += String.fromCharCode(b); i += 1; }
+    else if ((b & 0xE0) === 0xC0) {
+      s += String.fromCharCode(((b & 0x1F) << 6) | (bytes[i + 1] & 0x3F)); i += 2;
+    } else if ((b & 0xF0) === 0xE0) {
+      s += String.fromCharCode(((b & 0x0F) << 12) | ((bytes[i + 1] & 0x3F) << 6) | (bytes[i + 2] & 0x3F)); i += 3;
+    } else {
+      const cp: number = ((b & 0x07) << 18) | ((bytes[i + 1] & 0x3F) << 12) | ((bytes[i + 2] & 0x3F) << 6) | (bytes[i + 3] & 0x3F);
+      s += String.fromCharCode(0xD800 + ((cp - 0x10000) >> 10), 0xDC00 + ((cp - 0x10000) & 0x3FF)); i += 4;
+    }
+  }
+  return s;
+};
+
+const concatBytes = (a: number[], b: Uint8Array): Uint8Array => {
+  const out: Uint8Array = new Uint8Array(a.length + b.length);
+  for (let i: number = 0; i < a.length; i++) out[i] = a[i];
+  for (let i: number = 0; i < b.length; i++) out[a.length + i] = b[i];
+  return out;
+};
+
+// 返回可安全解码的字节上界(尾部不完整多字节序列不计入,留给下一次 feed)
+const safeDecodeEnd = (bytes: Uint8Array): number => {
+  const n: number = bytes.length;
+  if (n === 0) return 0;
+  // 从尾部回扫最多 3 个 continuation 字节 + 1 个 lead 字节
+  for (let back: number = 1; back <= Math.min(4, n); back++) {
+    const b: number = bytes[n - back];
+    if ((b & 0xC0) === 0x80) continue; // continuation, 继续回扫
+    // lead 字节: 计算该序列需要的总长
+    let need: number = 1;
+    if ((b & 0xE0) === 0xC0) need = 2;
+    else if ((b & 0xF0) === 0xE0) need = 3;
+    else if ((b & 0xF8) === 0xF0) need = 4;
+    return back < need ? n - back : n; // 不完整 → 截掉; 完整 → 全部
+  }
+  return n; // 全是 continuation(异常), 全解码
+};
+
+// Node 环境:全局 TextDecoder 可用;ArkTS 应用层无该全局 → 走纯 UTF-8 解码。
 const defaultDecode: DecodeChunk = (chunk: ArrayBuffer): string => {
   const g: { TextDecoder?: { new (label: string): { decode: (input: ArrayBuffer) => string } } } =
     globalThis as { TextDecoder?: { new (label: string): { decode: (input: ArrayBuffer) => string } } };
   if (g.TextDecoder !== undefined) {
     return new g.TextDecoder('utf-8').decode(chunk);
   }
-  // 兜底:逐字节 ASCII 解码(仅 SSE 控制字符场景;真实 UTF-8 多字节应走注入)
-  const bytes: Uint8Array = new Uint8Array(chunk);
-  let s: string = '';
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-  return s;
+  return decodeUtf8(new Uint8Array(chunk));
 };
 
 export class SseAssembler {
   private buffer: string = '';
+  private pending: number[] = [];
   private decode: DecodeChunk;
 
   constructor(decode: DecodeChunk = defaultDecode) {
@@ -40,7 +81,16 @@ export class SseAssembler {
   }
 
   feed(chunk: ArrayBuffer): SseEvent[] {
-    const text = this.buffer + this.decode(chunk);
+    // 字节级缓冲: 合并上次尾部不完整多字节序列 + 本次 chunk, 只解码安全部分
+    const incoming: Uint8Array = new Uint8Array(chunk);
+    const combined: Uint8Array = this.pending.length === 0
+      ? incoming
+      : concatBytes(this.pending, incoming);
+    const safeEnd: number = safeDecodeEnd(combined);
+    this.pending = [];
+    for (let i: number = safeEnd; i < combined.length; i++) this.pending.push(combined[i]);
+    const safeBytes: Uint8Array = combined.slice(0, safeEnd);
+    const text = this.buffer + (safeBytes.length > 0 ? this.decode(safeBytes.buffer) : '');
     this.buffer = '';
     const events: SseEvent[] = [];
     let searchFrom = 0;
