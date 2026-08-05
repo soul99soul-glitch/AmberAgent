@@ -23,7 +23,7 @@ import {
   formatNumberInt,
 } from '@amber/chat-domain';
 import {
-  INK2, INK3, INK4, ACCENT, SURFACE2, LINE, BODY, META, LABEL,
+  INK2, INK3, INK4, ACCENT, SIGNAL, SURFACE, SURFACE2, LINE, BODY, META, LABEL, HEADER,
 } from '../design/tokens.ets';
 
 @Component
@@ -41,6 +41,7 @@ export struct TopModelMenu {
 
   // 展开的 provider 集合(本地态;aboutToAppear 初始化 = 当前 provider,不在则首组)
   @State expandedProviderIds: string[] = [];
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
 
   aboutToAppear(): void {
     if (this.currentProviderId.length > 0) {
@@ -78,6 +79,11 @@ export struct TopModelMenu {
     //   scrim:28% 黑(Android sheetBackdrop ~0.28 alpha),点击 = onClose
     //   面板:贴顶,SURFACE2 底 + 底部 hairline, maxHeight 420 可滚
     Column() {
+      // 顶部留白(头部高度, 透明+不拦截点击 → 头部仍可见可点, 对齐参考图面板在头部下方)
+      Column()
+        .width('100%')
+        .height(this.statusBarHeight + 56)
+        .hitTestBehavior(HitTestMode.None)
       // 面板(provider 分组手风琴 + 底部全页入口)
       Scroll() {
         Column() {
@@ -115,40 +121,43 @@ export struct TopModelMenu {
       }
       .align(Alignment.Top)
       .constraintSize({ maxHeight: 420 })
-      .backgroundColor(SURFACE2)
+      .backgroundColor(SURFACE)
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       // 消费面板点击,防穿透到 backdrop(否则点面板空白会误关)
       .onClick((): void => {})
-      // 透明 backdrop:占满剩余高度,点击 = 关闭(对齐 Android scrim)
+      // 灰色 scrim:占满剩余高度(头部下方),点击 = 关闭(对齐参考图)
       Column()
         .width('100%')
         .layoutWeight(1)
+        .backgroundColor('#47000000')
         .onClick((): void => { this.onClose(); })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#47000000')
   }
 
   @Builder ProviderGroupBuilder(group: TopModelMenuGroup): void {
     Column() {
-      // 分组 header:provider 名 + 展开/收起 glyph
+      // 分组 header(1:1 参考图): provider 名(mono) + 「+/−」
       Row() {
         Text(group.providerName)
-          .fontSize(BODY).fontColor(INK2).layoutWeight(1)
+          .fontSize(HEADER).fontFamily('monospace')
+          .fontColor(this.isExpanded(group.providerId) ? SIGNAL : INK2)
+          .layoutWeight(1)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.isExpanded(group.providerId) ? '▾' : '▸')
-          .fontSize(LABEL).fontColor(INK4)
+        Text(this.isExpanded(group.providerId) ? '−' : '+')
+          .fontSize(18).fontColor(INK4)
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
       .onClick((): void => { this.toggleExpand(group.providerId); })
 
       if (this.isExpanded(group.providerId)) {
         ForEach(group.models, (model: TopModelMenuModel): void => {
           Row() {
             Text(model.displayName.length > 0 ? model.displayName : model.modelId)
-              .fontSize(META).fontColor(model.selected ? ACCENT : INK3).layoutWeight(1)
+              .fontSize(BODY).fontFamily('monospace')
+              .fontColor(model.selected ? SIGNAL : INK3).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             if (model.contextWindowTokens !== null) {
               Text(formatNumberInt(model.contextWindowTokens))
@@ -157,8 +166,7 @@ export struct TopModelMenu {
             }
           }
           .width('100%')
-          .padding({ left: 24, right: 16, top: 9, bottom: 9 })
-          // 消费点击防穿透到 backdrop(已选中也允许重选 = 等价 nop,对齐 Android)
+          .padding({ left: 36, right: 16, top: 12, bottom: 12 })
           .onClick((): void => { this.onSelect(group.providerId, model.modelId); })
         }, (model: TopModelMenuModel): string => `${group.providerId}/${model.modelId}`)
       }
