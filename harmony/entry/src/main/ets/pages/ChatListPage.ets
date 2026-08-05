@@ -7,13 +7,17 @@
 //
 // 保留真实数据逻辑: repo.list/search/删除/撤销/置顶/删除全部
 
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
 import type { Conversation, ConversationSummary } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { SearchField } from '../components/ui/SearchField.ets';
 import { PageSpacer } from '../components/PageTemplate.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ERROR, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+
+interface ActionMenuResult {
+  index: number;
+}
 
 const SNACK_BG: string = '#32302B';
 const SNACK_DURATION_MS: number = 4000;
@@ -173,29 +177,6 @@ struct ChatListPage {
       }
       .width('100%')
 
-      // 滑动操作按钮(内联,不用 swipeAction)
-      Row() {
-        Text(item.isPinned ? '取消置顶' : '置顶')
-          .fontSize(META)
-          .fontColor(Color.White)
-          .textAlign(TextAlign.Center)
-          .width(72)
-          .height(36)
-          .backgroundColor(ACCENT)
-          .borderRadius(6)
-          .margin({ right: 8 })
-          .onClick((): void => { this.togglePin(item); })
-        Text('删除')
-          .fontSize(META)
-          .fontColor(Color.White)
-          .textAlign(TextAlign.Center)
-          .width(64)
-          .height(36)
-          .backgroundColor(ERROR)
-          .borderRadius(6)
-          .onClick((): void => { this.onDelete(item); })
-      }
-      .margin({ top: 6 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -203,6 +184,23 @@ struct ChatListPage {
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { this.openConversation(item.id); })
+    .gesture(
+      LongPressGesture()
+        .onAction((): void => { this.showRowMenu(item); })
+    )
+  }
+
+  // 长按操作菜单(置顶/删除), 取代常显按钮(设计更干净)
+  private showRowMenu(item: ConversationSummary): void {
+    promptAction.showActionMenu({
+      buttons: [
+        { text: item.isPinned ? '取消置顶' : '置顶', color: '#1B1A17' },
+        { text: '删除', color: '#C2553F' },
+      ],
+    }).then((result: ActionMenuResult): void => {
+      if (result.index === 0) this.togglePin(item);
+      else if (result.index === 1) this.onDelete(item);
+    }).catch((): void => {});
   }
 
   build(): void {

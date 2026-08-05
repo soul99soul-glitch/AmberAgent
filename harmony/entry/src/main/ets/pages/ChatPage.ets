@@ -826,17 +826,12 @@ struct ChatPage {
         this.conversation = seedConversationWithPresets(fresh, picked);
         this.rows = buildRows(this.conversation);
         this.suggestions = this.conversation.chatSuggestions;
-        // 消费 Index 首页传入的 initialText(首页输入框发送)
+        // 消费首页传入的 initialText(首页输入框发送);无则显示空状态 hero(不自动发送)
         const initialText: string = params ? (params['initialText'] ?? '') : '';
-        // DEBUG: 自动发送测试消息(设备验证用,上线前删除)
-        //   原因:uitest uiInput text 不触发 ArkUI TextArea.onChange,
-        //   导致无法通过 UI 自动化输入发送消息。直接调 send() 绕过。
-        setTimeout((): void => {
-          this.inputText = initialText.length > 0
-            ? initialText
-            : '你好,请用markdown格式简单介绍一下你自己';
+        if (initialText.length > 0) {
+          this.inputText = initialText;
           this.send();
-        }, 500);
+        }
       });
     }
   }
