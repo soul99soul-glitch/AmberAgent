@@ -8,9 +8,9 @@ Last updated: 2026-08-06
 
 - Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
-- Tracking: `origin/feat/ios-provider-parity-claude`；当前本地包含尚未 push 的 review fixes 提交。
-- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准；`61c3b4e46` 是本轮 review fixes 之前的远端基线。
-- Worktree: 本轮 MiniApp 持久化闭环、卡片交互、SVG 保存命中区、回归测试和文档修订已提交；是否干净以实时 `git status --short` 为准。
+- Tracking: `origin/feat/ios-provider-parity-claude`；当前本地 ahead 2，包含尚未 push 的 review fixes 与 `58b473837` 小说/核心记忆闭环提交。
+- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准；`58b473837` 是本轮已装机的产品代码基线。
+- Worktree: 小说共创/代笔 Phase 0–3c、核心记忆闭环、相关测试与文档已提交；是否干净以实时 `git status --short` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## Current Product Truth
@@ -62,6 +62,7 @@ Last updated: 2026-08-06
 - `NovelPromptCatalogTests/testCatalogSnapshot` 已随 acceptance v2 更新哈希。
 - 完成后 review 定点与配置/协作回归 **158/158 PASSED**；Session、reducer、注入、连续性、生命周期、恢复、文档与 prompt 扩大回归 **296/296 PASSED**，两组共 **454 passed / 0 failed**。
 - 最新 Simulator Debug 包已重新安装并成功启动；当前自动化无法稳定进入小说深层页面，且随后 CoreSimulatorService 连接失效，因此这里不把启动或静态读码当成深层视觉验收。
+- `58b473837` 已用 Team `89QRFX9548` 完成 iPhone Air（iOS 27.0）Debug arm64 构建与严格签名校验；2026-08-06 覆盖安装并成功启动 `app.amber.ios`，安装容器 `0F5914AC-6565-48F6-8FAB-DB250E329468/iosApp.app`。未先卸载，现有 App 数据应保留。
 - 真机：代笔单章闭环、审稿模型生效、下一弧注入、看板回执 — 仍待设备验收。
 - 下一刀：真机 Phase 2/3a/3b/3c 验收。
 
@@ -127,7 +128,7 @@ Last updated: 2026-08-06
 
 - 在真机用真实 provider 生成长章节，观察中途高度增长、终态切换和轻拖上滑期间是否仍闪烁或被拉回底部。
 - 真机 ProMotion、rubber-band、键盘安全区和后台系统到期行为不能由 Simulator/单测替代。
-- 该 slice 已随 `61c3b4e46` commit/push；本页顶部列出的当前 review fixes 尚未安装到真机。
+- 该 slice 已随 `61c3b4e46` commit/push；本页顶部列出的 `58b473837` review fixes 已构建并覆盖安装到真机，但长文手感仍需真实 provider 操作验收。
 
 ## Recently Landed Baseline
 
@@ -147,7 +148,7 @@ Last updated: 2026-08-06
 
 ## Known Risks
 
-- 当前产品改动与文档整理共处一个脏工作区；修改重叠文件前必须先读单文件 diff。
+- 当前产品改动已提交；后续仍需用实时 `git status` 复核是否有新的并发工作区改动。
 - “保存 SVG”契约 helper 已覆盖，但 Files picker / 真机导出体验与完整 `IOSGenerativeWidgetParserTests` 编译运行仍缺本机沙箱外证据。
 - Generative UI 的终态契约已经自动化验证，但模型是否能在真实 provider 的 token/window 限制内稳定输出完整 SVG/full_html 仍需真机与真实账号证据。
 - 当前 Chat pacer 上限 36 与 24KB 长文门禁的 24 字要求冲突；这是与 widget 无关的既有问题，需决定恢复 24、调整发布策略或同步契约。
