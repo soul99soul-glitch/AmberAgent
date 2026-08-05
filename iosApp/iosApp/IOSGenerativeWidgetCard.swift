@@ -104,6 +104,7 @@ struct IOSGenerativeWidgetCard: View {
                             .background(AmberTheme.accent, in: Capsule())
                     }
                     .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.94, haptic: .lightImpact))
+                    .contentShape(.interaction, Rectangle().inset(by: -8))
                     .fixedSize(horizontal: true, vertical: false)
                     .layoutPriority(1)
                     .accessibilityLabel("保存 SVG 到文件")

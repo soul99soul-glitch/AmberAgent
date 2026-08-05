@@ -17,7 +17,7 @@ private struct IOSChatBackgroundRuntimeJob {
     let conversationStore: IOSConversationStore
     let toolRuntime: ChatToolRuntime
     let liveActivityController: AgentLiveActivityController
-    let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)?
+    let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?)?
     let messagesSnapshot: IOSChatBackgroundMessagesSnapshot
 }
 
@@ -32,7 +32,7 @@ private struct IOSChatBackgroundDependencies {
     let toolRuntime: ChatToolRuntime
     let sharedSettings: IOSSharedSettingsStore
     let liveActivityController: AgentLiveActivityController
-    let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)?
+    let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?)?
 }
 
 struct IOSChatBackgroundHandoff {
@@ -330,7 +330,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         toolRuntime: ChatToolRuntime? = nil,
         sharedSettings: IOSSharedSettingsStore? = nil,
         liveActivityController: AgentLiveActivityController = .shared,
-        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)? = nil
+        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?)? = nil
     ) {
         if let conversationStore, let toolRuntime, let sharedSettings {
             dependencies = IOSChatBackgroundDependencies(
@@ -355,7 +355,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         conversationStore: IOSConversationStore,
         toolRuntime: ChatToolRuntime,
         liveActivityController: AgentLiveActivityController,
-        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)? = nil
+        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?)? = nil
     ) -> Bool {
         configure()
 
@@ -531,7 +531,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         conversationStore: IOSConversationStore,
         toolRuntime: ChatToolRuntime,
         liveActivityController: AgentLiveActivityController,
-        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> [UIMessage]?)?
+        saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?)?
     ) -> IOSChatBackgroundRuntimeJob {
         IOSChatBackgroundRuntimeJob(
             runId: handoff.runId,
@@ -907,9 +907,11 @@ final class IOSChatBackgroundGenerationCoordinator {
             finalMessages.append(Self.assistantMessage(notice))
             guardStoppedNotice = notice
         }
-        if job.mode == .continueModel,
-           let updatedMessages = job.saveMiniAppIfPresent?(finalMessages, job.conversationId) {
-            finalMessages = updatedMessages
+        let miniAppApplication = job.mode == .continueModel
+            ? job.saveMiniAppIfPresent?(finalMessages, job.conversationId)
+            : nil
+        if let miniAppApplication {
+            finalMessages = miniAppApplication.messages
         }
         let singleToolFailureReason = job.mode == .singleToolOnly
             ? ChatToolOutputFormatter.imageFailureReason(in: finalMessages)
@@ -929,6 +931,21 @@ final class IOSChatBackgroundGenerationCoordinator {
                 baseMessages: job.displayMessages,
                 completedMessages: finalMessages,
                 to: job.conversationId
+            )
+        }
+        if !didSave,
+           let miniAppApplication,
+           !miniAppApplication.rollback() {
+            NSLog("[AmberChatBG] MiniApp rollback skipped because its persisted state changed")
+        }
+        if didSave,
+           let workspaceFailureMessages = miniAppApplication?.syncWorkspaceAfterConversationPersistence() {
+            finalMessages = workspaceFailureMessages
+            let baseline = job.conversationStore.writeBaseline(for: job.conversationId)
+            _ = await job.conversationStore.save(
+                messages: finalMessages,
+                to: job.conversationId,
+                ifUnchangedSince: baseline
             )
         }
         guard runState.finalizeTerminal() else {

@@ -6,21 +6,12 @@ Last updated: 2026-08-05
 
 ## Repository
 
-- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
+- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
-- Tracking: `origin/feat/ios-provider-parity-claude`
-- Current committed HEAD: `3549d0c3c`（让 iOS timeline 的实时 SVG 在前后台可靠收口）；分支仍 `ahead 1`，尚未 push。
-- Worktree: 有未提交的 Chat/小说流式节拍与小说终态排空修复、Generative UI 卡片“保存 SVG”入口、本轮文档治理改动，以及其他并发工作；以实时 `git status --short` 为准。
+- Tracking: `origin/feat/ios-provider-parity-claude`；当前本地包含尚未 push 的 review fixes 提交。
+- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准；`61c3b4e46` 是本轮 review fixes 之前的远端基线。
+- Worktree: 本轮 MiniApp 持久化闭环、卡片交互、SVG 保存命中区、回归测试和文档修订已提交；是否干净以实时 `git status --short` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
-
-当前 iOS 流式 slice 的代码改动范围：
-
-- `iosApp/iosApp/ChatGenerationCoordinator.swift`
-- `iosApp/iosApp/NovelCreation/NovelSessionView.swift`
-- `iosApp/iosApp/NovelCreation/NovelSessionViewModel.swift`
-- `iosApp/iosAppTests/IOSSettingsWiringTests.swift`
-- `iosApp/iosAppTests/NovelSessionReplayTests.swift`
-- `iosApp/iosAppTests/NovelSessionViewModelTests.swift`
 
 ## Current Product Truth
 
@@ -31,11 +22,23 @@ Last updated: 2026-08-05
 - 只有官方 OpenAI Responses API 的小说正文、重新生成和单章润色已接入服务端 background response + cursor 恢复。Quick Start、讨论工具循环、Chat、模型议会及其他 provider 仍是本地 best-effort。
 - Live Activity、锁屏卡和 continued-processing task 按 `runId` 独立管理；旧 run 的完成、取消、深链和系统移除回调不得作用于新 run。
 
-## Generative UI Uncommitted Slice
+## Current Review Fixes
+
+- MiniApp 生成/修订现在以目标 app 的状态切片记录本次 mutation；前台或后台 conversation 保存失败时，只在该 app 未被后续修改的前提下恢复原记录与版本，不影响其他小应用。
+- Workspace artifact 改为 conversation 首次保存成功后再同步；同步失败会保留可运行的 MiniApp 与已落盘聊天卡片，并在当前消息中显示失败原因后尝试补存提示。
+- MiniApp 卡片导出缺失记录或临时文件写入失败时显示 alert；操作按钮保持原 bordered 视觉，提供 44pt 命中区，并在横向空间不足时切换纵向布局。
+- SVG“保存”胶囊保持 28pt 视觉，只把交互命中形状扩大到 44pt。
+
+### Verification
+
+- 最终 Swift parse、`git diff --check`、generic iOS App 构建和两组自包含 MiniApp 测试包编译通过；独立 Swift rollback harness 已真实运行通过。
+- 全量 iOS 测试包仍被范围外 `IOSMiniAppBridgeRuntimeTests` 的 Swift 6 `async let`/XCTest autoclosure 编译错误阻断；CoreSimulatorService 与 CoreDeviceService 当前不可用，因此本轮没有声明 Simulator、真机或 XCTest 运行通过。
+
+## Generative UI Current State
 
 目标是在 iOS 原生 timeline 中复用现有流式 `show-widget` 解析与安全 SVG 渲染，补齐 Android 已有的视觉意图路由、模型提示和终态兜底，不新增第二套渲染器或滚动 owner。
 
-本轮新增：完成态、安全净化后的 SVG 卡片右上角提供 44pt“保存 SVG”入口；通过系统 Files 导出 `.svg`，优先导出净化 HTML 中的 SVG 片段，必要时回退原始 SVG；导出失败显示 alert。相关契约测试覆盖净化优先、原始回退、完成态/安全门控和安全文件名。
+本轮新增：完成态且安全净化后的 SVG 卡片右上角提供 44pt“保存 SVG”命中区；通过系统 Files 导出从净化 HTML 中提取的 `.svg`；不导出 raw `widgetCode`、slides 或 full_html 封面预览；导出失败显示 alert。相关契约测试覆盖净化提取、完成态/安全门控和安全文件名。
 
 - `GenerativeUiPlanner` 已从 Android app 下移到 `core:ai:generation:api`，并与共享 show-widget prompt/protocol 一起导出给 Swift；Android 保持原 FQN 调用。
 - iOS 请求入口按真实用户意图注入共享 prompt：直接流程图/架构图/PPT 请求不暴露无关工具；图片生成和需要搜索、文件、skill、subagent 的请求保留工具路径。
@@ -48,11 +51,11 @@ Last updated: 2026-08-05
 
 ### Verification
 
-- “保存 SVG”导出 helper 的 Python 镜像契约已核对：净化 SVG 优先、原始 SVG 回退、partial/unsafe/非 SVG 均被门控；`git diff --check` 通过。
+- “保存 SVG”导出 helper 的 Python 镜像契约已核对：只提取净化 SVG，partial/unsafe/非 SVG 均被门控；`git diff --check` 通过。
 - 本机定点 `xcodebuild -only-testing:iosAppTests/IOSGenerativeWidgetParserTests/testSVGExport*` 未能编译：沙箱无法写 `~/.cache/clang/ModuleCache` 与 SwiftPM ManifestLoading 诊断文件，且 CoreSimulatorService 不可用；这不是本次按钮逻辑失败。
 - `GenerativeUiPlannerTest` 与 `IosChatBackgroundPayloadJsonBridgeTest` 的 JVM 定点测试均 **BUILD SUCCESSFUL**。
 - SVG/parser、full_html runtime、前台 stale-run 和后台 expiration 定点：**22 passed / 0 failed / 0 skipped**；完整 `ChatViewModelSelectedFileContextTests`：**63 passed / 0 failed / 0 skipped**。
-- 扩大到 `ChatSwiftUIStreamReplayTests`、`NativeTimelineScrollCoreTests`、`ChatViewportPolicyTests`、`IOSParityRedLightTests`：**170 passed / 1 failed / 0 skipped**。唯一失败是范围外的 24KB 纯文本 pacing 契约冲突：当前未提交代码允许单拍 36 字，测试要求绝大多数更新不超过 24 字；隔离复跑仍失败。该用例不经过 widget parser/card，本轮未覆盖用户现有 pacing 改动，也未放宽阈值。
+- 扩大到 `ChatSwiftUIStreamReplayTests`、`NativeTimelineScrollCoreTests`、`ChatViewportPolicyTests`、`IOSParityRedLightTests`：**170 passed / 1 failed / 0 skipped**。唯一失败是范围外的 24KB 纯文本 pacing 契约冲突：当前实现允许单拍 36 字，测试要求绝大多数更新不超过 24 字；隔离复跑仍失败。该用例不经过 widget parser/card，也未放宽阈值。
 - Android app 的定点 `GenerativeUiPlannerTest` / `GenerationPromptsTest` 被当前工作区中范围外的 Model Council 缺失符号阻断在 app 编译阶段；共享 planner 自身的 JVM 测试已通过。
 
 ### Remaining Acceptance
@@ -61,7 +64,7 @@ Last updated: 2026-08-05
 - 再验证图片请求仍调用 `generate_image`、需要外部上下文的视觉请求仍先完成工具链、PPT 最终落为完整 `full_html` deck。
 - Simulator 性能探针不能替代 ProMotion 真机的卡片高度增长和滚动手感验收。
 
-## Active Uncommitted Slice
+## Novel Streaming Current State
 
 目标是消除小说长文流式生成中数次大幅高度跳变及终态最后一拍闪烁，不新增滚动 owner 或几何补偿。
 
@@ -82,7 +85,7 @@ Last updated: 2026-08-05
 
 - 在真机用真实 provider 生成长章节，观察中途高度增长、终态切换和轻拖上滑期间是否仍闪烁或被拉回底部。
 - 真机 ProMotion、rubber-band、键盘安全区和后台系统到期行为不能由 Simulator/单测替代。
-- 当前 slice 尚未 commit/push；不要把已安装包误认为远端分支内容。
+- 该 slice 已随 `61c3b4e46` commit/push；本页顶部列出的当前 review fixes 尚未安装到真机。
 
 ## Recently Landed Baseline
 
@@ -94,7 +97,7 @@ Last updated: 2026-08-05
 ## Current Priorities
 
 1. 先完成 Generative UI 的真机真实 provider 验收，重点看同卡片渐进 SVG、一次兜底边界、右上角“保存 SVG”导出、图片工具路由和 full_html deck 完整性。
-2. 完成当前未提交流式 slice 的真机长文手感验收；若仍跳变，记录发生阶段、是否触摸屏幕、是否终态以及可见内容变化，再沿现有 owner 定位。
+2. 完成当前流式实现的真机长文手感验收；若仍跳变，记录发生阶段、是否触摸屏幕、是否终态以及可见内容变化，再沿现有 owner 定位。
 3. 只在真实复现支持时继续调整 pacer、终态排空或 Native Timeline 手势判定，不加第二套状态机或 offset 补偿。
 4. 后台能力下一步优先补真实 OpenAI 账号下的 expiration / 强杀 / 冷启动恢复证据；其他 provider 不伪装成服务端 durable job。
 5. Android 小说复刻属于 Android 主仓；本仓的 `NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md` 仅是跨仓草案。
@@ -104,7 +107,7 @@ Last updated: 2026-08-05
 - 当前产品改动与文档整理共处一个脏工作区；修改重叠文件前必须先读单文件 diff。
 - “保存 SVG”契约 helper 已覆盖，但 Files picker / 真机导出体验与完整 `IOSGenerativeWidgetParserTests` 编译运行仍缺本机沙箱外证据。
 - Generative UI 的终态契约已经自动化验证，但模型是否能在真实 provider 的 token/window 限制内稳定输出完整 SVG/full_html 仍需真机与真实账号证据。
-- 当前未提交的 Chat pacer 上限 36 与 24KB 长文门禁的 24 字要求冲突；这是与 widget 无关的现有工作，需由该 slice 的 owner 决定恢复 24、调整发布策略或同步契约。
+- 当前 Chat pacer 上限 36 与 24KB 长文门禁的 24 字要求冲突；这是与 widget 无关的既有问题，需决定恢复 24、调整发布策略或同步契约。
 - Android app 回归当前受范围外 Model Council 编译缺口阻断；不能把共享 planner 测试通过等同于 Android app 全门禁通过。
 - 长表格 display-link 性能探针在 Simulator 40ms 边界附近波动，尚无足够证据修改 renderer identity、发布 owner 或测试阈值。
 - iOS continued-processing 由系统决定调度与终止；用户从 App Switcher 强制结束后，本地 SSE 无法继续。

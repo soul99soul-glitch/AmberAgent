@@ -364,6 +364,35 @@ struct ChatGenerationDependencies {
     let mcpManager: IOSMcpManager
 }
 
+struct ChatMiniAppOutputApplication {
+    let messages: [UIMessage]
+    let rollbackMessages: [UIMessage]
+    private let rollbackHandler: (@MainActor () -> Bool)?
+    private let workspaceSyncHandler: (@MainActor () -> [UIMessage]?)?
+
+    init(
+        messages: [UIMessage],
+        rollbackMessages: [UIMessage]? = nil,
+        rollback: (@MainActor () -> Bool)? = nil,
+        syncWorkspace: (@MainActor () -> [UIMessage]?)? = nil
+    ) {
+        self.messages = messages
+        self.rollbackMessages = rollbackMessages ?? messages
+        self.rollbackHandler = rollback
+        self.workspaceSyncHandler = syncWorkspace
+    }
+
+    @MainActor
+    func rollback() -> Bool {
+        rollbackHandler?() ?? false
+    }
+
+    @MainActor
+    func syncWorkspaceAfterConversationPersistence() -> [UIMessage]? {
+        workspaceSyncHandler?()
+    }
+}
+
 struct ChatGenerationBindings {
     let getMessages: () -> [UIMessage]
     let setMessages: ([UIMessage]) -> Void
@@ -385,7 +414,7 @@ struct ChatGenerationBindings {
     let recordRun: (String, Int64, String, String, String?) async -> Void
     var markRunAwaitingPermission: @MainActor (String, String) async -> Bool = { _, _ in true }
     let startLiveActivity: (String, KotlinUuid?, AgentActivityPresentation) -> Void
-    let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> [UIMessage]?
+    let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?
     let messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
     let userFacingGenerationError: (String, String?) -> String
     var generationSucceeded: @MainActor () -> Void = {}
@@ -2046,8 +2075,9 @@ final class ChatGenerationCoordinator {
         }
 
         var finalSnapshot = snapshot
-        if let updatedMessages = bindings.saveMiniAppIfPresent(snapshot, conversationId) {
-            finalSnapshot = updatedMessages
+        let miniAppApplication = bindings.saveMiniAppIfPresent(snapshot, conversationId)
+        if let miniAppApplication {
+            finalSnapshot = miniAppApplication.messages
             bindings.setMessages(finalSnapshot)
             bindings.bumpMessageRevision(.toolResultAppended)
         }
@@ -2055,6 +2085,21 @@ final class ChatGenerationCoordinator {
         let conversationHex = conversationId?.toHexDashString()
         let summary = Self.watchSummary(from: finalSnapshot)
         let didPersist = await bindings.persistMessages(conversationId)
+        if !didPersist, let miniAppApplication {
+            if miniAppApplication.rollback() {
+                bindings.setMessages(miniAppApplication.rollbackMessages)
+                bindings.bumpMessageRevision(.toolResultAppended)
+            } else {
+                NSLog("[AmberChat] MiniApp rollback skipped because its persisted state changed")
+            }
+        }
+        if didPersist,
+           let workspaceFailureMessages = miniAppApplication?.syncWorkspaceAfterConversationPersistence() {
+            finalSnapshot = workspaceFailureMessages
+            bindings.setMessages(finalSnapshot)
+            bindings.bumpMessageRevision(.toolResultAppended)
+            _ = await bindings.persistMessages(conversationId)
+        }
         await bindings.recordRun(
             runId,
             startedAt,

@@ -412,6 +412,7 @@ final class ChatViewModel {
     private let localToolExecutor: IOSLocalToolExecutor?
     private let searchTransport: any IOSSearchHTTPTransport
     private let miniAppRepository: IOSMiniAppRepository
+    private let workspaceStore: IOSWorkspaceStore
     private let autoGenerateResponses: Bool
     private let auxiliaryTextProvider: any IOSAgentTextProvider
     private let liveActivityController: AgentLiveActivityController
@@ -457,6 +458,7 @@ final class ChatViewModel {
         localToolExecutor: IOSLocalToolExecutor? = nil,
         searchTransport: any IOSSearchHTTPTransport = IOSURLSessionSearchHTTPTransport(),
         miniAppRepository: IOSMiniAppRepository? = nil,
+        workspaceStore: IOSWorkspaceStore? = nil,
         autoGenerateResponses: Bool = true,
         auxiliaryTextProvider: any IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
         liveActivityController: AgentLiveActivityController? = nil
@@ -466,6 +468,7 @@ final class ChatViewModel {
         self.localToolExecutor = localToolExecutor
         self.searchTransport = searchTransport
         self.miniAppRepository = miniAppRepository ?? IOSMiniAppRepository.shared
+        self.workspaceStore = workspaceStore ?? IOSWorkspaceStore.shared
         self.autoGenerateResponses = autoGenerateResponses
         self.auxiliaryTextProvider = auxiliaryTextProvider
         self.liveActivityController = liveActivityController ?? .shared
@@ -2180,7 +2183,7 @@ final class ChatViewModel {
     func applyMiniAppOutputIfPresentPublic(
         to messages: [UIMessage],
         conversationId: KotlinUuid?
-    ) -> [UIMessage]? {
+    ) -> ChatMiniAppOutputApplication? {
         applyMiniAppOutputIfPresent(to: messages, conversationId: conversationId)
     }
 
@@ -2188,7 +2191,7 @@ final class ChatViewModel {
     private func applyMiniAppOutputIfPresent(
         to messages: [UIMessage],
         conversationId: KotlinUuid?
-    ) -> [UIMessage]? {
+    ) -> ChatMiniAppOutputApplication? {
         guard isMiniAppRuntimeEnabled else { return nil }
         guard let lastUserIndex = messages.lastIndex(where: { $0.role == MessageRole.user }),
               let userText = ChatRuntimeContextBuilder.messageText(messages[lastUserIndex]),
@@ -2218,7 +2221,7 @@ final class ChatViewModel {
                 textPartIndex: textPartIndex,
                 reason: reason
             )
-            return updated
+            return ChatMiniAppOutputApplication(messages: updated)
         }
 
         let sourceConversationId = conversationId.map { String(describing: $0) }
@@ -2226,9 +2229,9 @@ final class ChatViewModel {
         let revisionAppId = ChatRuntimeContextBuilder.revisionAppId(in: userText)
 
         do {
-            let record: IOSMiniAppRecord
+            let mutation: IOSMiniAppRepository.Mutation
             if let targetAppId = revisionAppId {
-                guard let updatedRecord = try miniAppRepository.saveRevision(
+                guard let revision = try miniAppRepository.saveRevisionMutation(
                     appId: targetAppId,
                     output: output,
                     expectedBaseVersion: ChatRuntimeContextBuilder.revisionVersion(in: userText),
@@ -2240,31 +2243,20 @@ final class ChatViewModel {
                         assistant,
                         textPartIndex: textPartIndex
                     )
-                    return updated
+                    return ChatMiniAppOutputApplication(messages: updated)
                 }
-                record = updatedRecord
+                mutation = revision
             } else {
-                record = try miniAppRepository.saveGenerated(
+                mutation = try miniAppRepository.saveGeneratedMutation(
                     output,
                     sourceConversationId: sourceConversationId,
                     sourceMessageId: sourceMessageId
                 )
             }
-            var statusText = revisionAppId != nil
+            let record = mutation.record
+            let statusText = revisionAppId != nil
                 ? "已更新小应用：\(record.title) v\(record.version)"
                 : "已生成小应用：\(record.title)"
-            do {
-                _ = try IOSWorkspaceStore.shared.saveArtifact(
-                    title: record.title,
-                    content: record.htmlContent,
-                    type: .miniApp,
-                    sourceKind: "miniapp",
-                    sourceId: record.id
-                )
-            } catch {
-                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                statusText += "\nWorkspace 同步失败：\(message)"
-            }
             var updated = messages
             updated[assistantIndex] = IOSMiniAppChatMessageFactory.updatedAssistant(
                 assistant,
@@ -2272,14 +2264,53 @@ final class ChatViewModel {
                 statusText: statusText,
                 record: record
             )
-            return updated
+            var rollbackMessages = messages
+            rollbackMessages[assistantIndex] = IOSMiniAppChatMessageFactory.parseFailureAssistant(
+                assistant,
+                textPartIndex: textPartIndex,
+                reason: "会话保存失败，因此此次小应用生成未保留。请检查存储空间后重试。"
+            )
+            return ChatMiniAppOutputApplication(
+                messages: updated,
+                rollbackMessages: rollbackMessages,
+                rollback: { [miniAppRepository, mutation] in
+                    do {
+                        return try miniAppRepository.rollback(mutation)
+                    } catch {
+                        NSLog("[AmberChat] Failed to roll back MiniApp mutation: \(error)")
+                        return false
+                    }
+                },
+                syncWorkspace: { [workspaceStore, updated, assistant, assistantIndex, textPartIndex, statusText, record] in
+                    do {
+                        _ = try workspaceStore.saveArtifact(
+                            title: record.title,
+                            content: record.htmlContent,
+                            type: .miniApp,
+                            sourceKind: "miniapp",
+                            sourceId: record.id
+                        )
+                        return nil
+                    } catch {
+                        let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        var failedMessages = updated
+                        failedMessages[assistantIndex] = IOSMiniAppChatMessageFactory.updatedAssistant(
+                            assistant,
+                            textPartIndex: textPartIndex,
+                            statusText: "\(statusText)\nWorkspace 同步失败：\(message)",
+                            record: record
+                        )
+                        return failedMessages
+                    }
+                }
+            )
         } catch IOSMiniAppStoreError.notFound {
             var updated = messages
             updated[assistantIndex] = IOSMiniAppChatMessageFactory.revisionFailedAssistant(
                 assistant,
                 textPartIndex: textPartIndex
             )
-            return updated
+            return ChatMiniAppOutputApplication(messages: updated)
         } catch {
             let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             var updated = messages
@@ -2288,7 +2319,7 @@ final class ChatViewModel {
                 textPartIndex: textPartIndex,
                 reason: reason
             )
-            return updated
+            return ChatMiniAppOutputApplication(messages: updated)
         }
     }
 

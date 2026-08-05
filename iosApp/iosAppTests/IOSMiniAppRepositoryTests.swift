@@ -43,6 +43,56 @@ final class IOSMiniAppRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.versions(appId: app.id).map(\.versionNumber), [3, 2, 1])
     }
 
+    func testGeneratedMutationRollbackRemovesPersistedAppAndVersion() throws {
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let mutation = try repo.saveGeneratedMutation(output(title: "临时应用"))
+
+        XCTAssertNotNil(repo.get(mutation.record.id))
+        XCTAssertTrue(try repo.rollback(mutation))
+
+        let reloaded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertNil(reloaded.get(mutation.record.id))
+        XCTAssertTrue(reloaded.versions(appId: mutation.record.id).isEmpty)
+    }
+
+    func testRevisionMutationRollbackRestoresPreviousRecordAndVersions() throws {
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let original = try repo.saveGenerated(output(title: "原版本", html: html("v1")))
+        let mutation = try XCTUnwrap(repo.saveRevisionMutation(
+            appId: original.id,
+            output: output(title: "新版本", html: html("v2")),
+            expectedBaseVersion: 1
+        ))
+
+        XCTAssertEqual(mutation.record.version, 2)
+        XCTAssertTrue(try repo.rollback(mutation))
+
+        let reloaded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertEqual(reloaded.get(original.id), original)
+        XCTAssertEqual(reloaded.versions(appId: original.id).map(\.versionNumber), [1])
+    }
+
+    func testRollbackDoesNotOverwriteLaterMiniAppChanges() throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let mutation = try repo.saveGeneratedMutation(output(title: "初版"))
+        try repo.rename(id: mutation.record.id, title: "用户已改名", description: "保留后续修改")
+
+        XCTAssertFalse(try repo.rollback(mutation))
+        XCTAssertEqual(repo.get(mutation.record.id)?.title, "用户已改名")
+    }
+
+    func testRollbackIgnoresUnrelatedMiniAppChanges() throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let mutation = try repo.saveGeneratedMutation(output(title: "待回滚"))
+        let unrelated = try repo.saveGenerated(output(title: "另一个应用"))
+
+        XCTAssertTrue(try repo.rollback(mutation))
+        XCTAssertNil(repo.get(mutation.record.id))
+        XCTAssertEqual(repo.get(unrelated.id), unrelated)
+    }
+
     func testRenamePinDeleteAndMarkRun() throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(title: "旧名"))

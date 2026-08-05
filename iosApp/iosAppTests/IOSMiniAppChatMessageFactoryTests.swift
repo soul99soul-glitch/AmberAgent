@@ -165,4 +165,88 @@ final class IOSMiniAppChatMessageFactoryTests: XCTestCase {
         """)
         XCTAssertEqual(note, "增加今日统计")
     }
+
+    func testAppliedMiniAppRollbackRemovesRepositoryAndWorkspaceWrites() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("miniapp-chat-rollback-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "miniapp-chat-rollback-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: defaults)
+        sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(enabled: true) }
+        let repository = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let workspace = IOSWorkspaceStore(baseDirectory: root)
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            miniAppRepository: repository,
+            workspaceStore: workspace,
+            autoGenerateResponses: false
+        )
+        let output = IOSMiniAppGeneratedOutput(
+            title: "计时器",
+            description: "一个番茄钟",
+            html: "<!DOCTYPE html><html><body>ok</body></html>"
+        )
+        let payload = try XCTUnwrap(String(data: JSONEncoder().encode(output), encoding: .utf8))
+        let application = try XCTUnwrap(viewModel.applyMiniAppOutputIfPresentPublic(
+            to: [
+                UIMessage.companion.user(prompt: "请创建一个小应用"),
+                UIMessage.companion.assistant(prompt: payload),
+            ],
+            conversationId: nil
+        ))
+
+        XCTAssertEqual(repository.apps.count, 1)
+        XCTAssertTrue(workspace.artifacts.isEmpty, "Workspace sync must wait until conversation persistence succeeds.")
+        XCTAssertTrue(application.rollback())
+        XCTAssertTrue(repository.apps.isEmpty)
+        XCTAssertTrue(workspace.artifacts.isEmpty)
+        XCTAssertTrue(application.rollbackMessages.last?.toText().contains("未保留") == true)
+    }
+
+    func testAppliedMiniAppSyncsWorkspaceOnlyAfterConversationCommitHook() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("miniapp-chat-workspace-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "miniapp-chat-workspace-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: defaults)
+        sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(enabled: true) }
+        let repository = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let workspace = IOSWorkspaceStore(baseDirectory: root)
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            miniAppRepository: repository,
+            workspaceStore: workspace,
+            autoGenerateResponses: false
+        )
+        let output = IOSMiniAppGeneratedOutput(
+            title: "计时器",
+            description: "一个番茄钟",
+            html: "<!DOCTYPE html><html><body>ok</body></html>"
+        )
+        let payload = try XCTUnwrap(String(data: JSONEncoder().encode(output), encoding: .utf8))
+        let application = try XCTUnwrap(viewModel.applyMiniAppOutputIfPresentPublic(
+            to: [
+                UIMessage.companion.user(prompt: "请创建一个小应用"),
+                UIMessage.companion.assistant(prompt: payload),
+            ],
+            conversationId: nil
+        ))
+
+        XCTAssertTrue(workspace.artifacts.isEmpty)
+        XCTAssertNil(application.syncWorkspaceAfterConversationPersistence())
+        XCTAssertEqual(workspace.artifacts.count, 1)
+        XCTAssertEqual(workspace.artifacts.first?.sourceId, repository.apps.first?.id)
+    }
 }

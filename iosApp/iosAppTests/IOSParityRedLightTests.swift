@@ -2332,6 +2332,40 @@ final class IOSParityRedLightTests: XCTestCase {
         }
     }
 
+    func testMiniAppWritesRollbackWhenConversationPersistenceFails() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let foreground = try String(
+            contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+        let background = try String(
+            contentsOf: appDirectory.appendingPathComponent("IOSChatBackgroundGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        let foregroundStart = try XCTUnwrap(foreground.range(of: "let miniAppApplication = bindings.saveMiniAppIfPresent"))
+        let foregroundTail = foreground[foregroundStart.lowerBound...].prefix(3_000)
+        let foregroundPersist = try XCTUnwrap(foregroundTail.range(of: "let didPersist = await bindings.persistMessages"))
+        let foregroundRollback = try XCTUnwrap(foregroundTail.range(of: "miniAppApplication.rollback()"))
+        let foregroundWorkspace = try XCTUnwrap(
+            foregroundTail.range(of: "miniAppApplication?.syncWorkspaceAfterConversationPersistence()")
+        )
+        XCTAssertLessThan(foregroundPersist.lowerBound, foregroundRollback.lowerBound)
+        XCTAssertLessThan(foregroundPersist.lowerBound, foregroundWorkspace.lowerBound)
+        XCTAssertTrue(foregroundTail.contains("bindings.setMessages(miniAppApplication.rollbackMessages)"))
+
+        let backgroundStart = try XCTUnwrap(background.range(of: "let miniAppApplication = job.mode == .continueModel"))
+        let backgroundTail = background[backgroundStart.lowerBound...].prefix(3_500)
+        let backgroundPersist = try XCTUnwrap(backgroundTail.range(of: "let didSave: Bool"))
+        let backgroundRollback = try XCTUnwrap(backgroundTail.range(of: "miniAppApplication.rollback()"))
+        let backgroundWorkspace = try XCTUnwrap(
+            backgroundTail.range(of: "miniAppApplication?.syncWorkspaceAfterConversationPersistence()")
+        )
+        XCTAssertLessThan(backgroundPersist.lowerBound, backgroundRollback.lowerBound)
+        XCTAssertLessThan(backgroundPersist.lowerBound, backgroundWorkspace.lowerBound)
+    }
+
     // MARK: - helpers / probe types
 
     private static func source(_ source: String, hasDebugGuardAround marker: String) -> Bool {

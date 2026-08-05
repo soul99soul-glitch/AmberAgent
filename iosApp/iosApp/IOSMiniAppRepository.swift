@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import Observation
 
-private struct IOSMiniAppStoreState: Codable, Equatable {
+fileprivate struct IOSMiniAppStoreState: Codable, Equatable {
     var apps: [IOSMiniAppRecord] = []
     var versions: [IOSMiniAppVersionRecord] = []
     var grants: [IOSMiniAppGrantRecord] = []
@@ -10,9 +10,23 @@ private struct IOSMiniAppStoreState: Codable, Equatable {
     var sharedData: [IOSMiniAppSharedDataRecord] = []
 }
 
+fileprivate struct IOSMiniAppStoreSlice: Equatable {
+    let app: IOSMiniAppRecord?
+    let versions: [IOSMiniAppVersionRecord]
+    let grants: [IOSMiniAppGrantRecord]
+    let auditLogs: [IOSMiniAppAuditRecord]
+    let sharedData: [IOSMiniAppSharedDataRecord]
+}
+
 @MainActor
 @Observable
 final class IOSMiniAppRepository {
+    struct Mutation {
+        let record: IOSMiniAppRecord
+        fileprivate let previousSlice: IOSMiniAppStoreSlice
+        fileprivate let committedSlice: IOSMiniAppStoreSlice
+    }
+
     static let shared = IOSMiniAppRepository()
 
     private(set) var apps: [IOSMiniAppRecord] = []
@@ -138,6 +152,32 @@ final class IOSMiniAppRepository {
         return record
     }
 
+    func saveGeneratedMutation(
+        _ output: IOSMiniAppGeneratedOutput,
+        sourceConversationId: String? = nil,
+        sourceMessageId: String? = nil
+    ) throws -> Mutation {
+        let appId = UUID().uuidString
+        let previousSlice = slice(appId: appId)
+        do {
+            let record = try saveGenerated(
+                output,
+                sourceConversationId: sourceConversationId,
+                sourceMessageId: sourceMessageId,
+                forcedId: appId
+            )
+            return Mutation(
+                record: record,
+                previousSlice: previousSlice,
+                committedSlice: slice(appId: appId)
+            )
+        } catch {
+            restore(previousSlice, appId: appId)
+            publish()
+            throw error
+        }
+    }
+
     func saveRevision(
         appId: String,
         output: IOSMiniAppGeneratedOutput,
@@ -171,6 +211,51 @@ final class IOSMiniAppRepository {
         pruneVersions(appId: appId)
         try persistAndPublish()
         return updated
+    }
+
+    func saveRevisionMutation(
+        appId: String,
+        output: IOSMiniAppGeneratedOutput,
+        expectedBaseVersion: Int? = nil,
+        sourceMessageId: String? = nil,
+        changeNote: String? = nil
+    ) throws -> Mutation? {
+        let previousSlice = slice(appId: appId)
+        do {
+            guard let record = try saveRevision(
+                appId: appId,
+                output: output,
+                expectedBaseVersion: expectedBaseVersion,
+                sourceMessageId: sourceMessageId,
+                changeNote: changeNote
+            ) else {
+                return nil
+            }
+            return Mutation(
+                record: record,
+                previousSlice: previousSlice,
+                committedSlice: slice(appId: appId)
+            )
+        } catch {
+            restore(previousSlice, appId: appId)
+            publish()
+            throw error
+        }
+    }
+
+    @discardableResult
+    func rollback(_ mutation: Mutation) throws -> Bool {
+        let appId = mutation.record.id
+        guard slice(appId: appId) == mutation.committedSlice else { return false }
+        restore(mutation.previousSlice, appId: appId)
+        do {
+            try persistAndPublish()
+            return true
+        } catch {
+            restore(mutation.committedSlice, appId: appId)
+            publish()
+            throw error
+        }
     }
 
     func saveNewVersion(appId: String, htmlContent: String, changeNote: String? = nil) throws -> IOSMiniAppRecord? {
@@ -447,6 +532,33 @@ final class IOSMiniAppRepository {
 
     private func storageNamespace(_ appId: String) -> String {
         "__storage__:\(appId)"
+    }
+
+    private func slice(appId: String) -> IOSMiniAppStoreSlice {
+        IOSMiniAppStoreSlice(
+            app: state.apps.first { $0.id == appId },
+            versions: state.versions.filter { $0.appId == appId },
+            grants: state.grants.filter { $0.appId == appId },
+            auditLogs: state.auditLogs.filter { $0.appId == appId },
+            sharedData: state.sharedData.filter { sharedDataBelongsToApp($0, appId: appId) }
+        )
+    }
+
+    private func restore(_ slice: IOSMiniAppStoreSlice, appId: String) {
+        state.apps.removeAll { $0.id == appId }
+        state.versions.removeAll { $0.appId == appId }
+        state.grants.removeAll { $0.appId == appId }
+        state.auditLogs.removeAll { $0.appId == appId }
+        state.sharedData.removeAll { sharedDataBelongsToApp($0, appId: appId) }
+        if let app = slice.app { state.apps.append(app) }
+        state.versions.append(contentsOf: slice.versions)
+        state.grants.append(contentsOf: slice.grants)
+        state.auditLogs.append(contentsOf: slice.auditLogs)
+        state.sharedData.append(contentsOf: slice.sharedData)
+    }
+
+    private func sharedDataBelongsToApp(_ record: IOSMiniAppSharedDataRecord, appId: String) -> Bool {
+        record.lastWriterId == appId || record.namespace == appId || record.namespace == storageNamespace(appId)
     }
 
     private func ensureWritable() throws {

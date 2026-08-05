@@ -14,6 +14,7 @@ struct IOSMiniAppChatCard: View {
     @State private var modifyPrompt = ""
     @State private var modifyBusyRejected = false
     @State private var exportShare: MiniAppExportShare?
+    @State private var exportError: MiniAppExportError?
     @State private var showVersionHistory = false
     @State private var versions: [IOSMiniAppVersionRecord] = []
     @State private var cardTitle: String = ""
@@ -45,6 +46,7 @@ struct IOSMiniAppChatCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AmberTheme.accent)
                     .buttonStyle(.plain)
+                    .frame(minWidth: 44, minHeight: 44)
             }
 
             if !part.description_.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -55,19 +57,11 @@ struct IOSMiniAppChatCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 8) {
-                miniAppActionButton(title: "运行", systemImage: "play.fill", emphasized: true, action: onRun)
-                miniAppActionButton(title: "修改", systemImage: "pencil", emphasized: false) {
-                    modifyBusyRejected = false
-                    modifyPrompt = ""
-                    showModifySheet = true
-                }
-                miniAppActionButton(title: "导出", systemImage: "square.and.arrow.up", emphasized: false, action: exportHTML)
-                miniAppActionButton(title: "历史", systemImage: "clock.arrow.circlepath", emphasized: false) {
-                    versions = repository.versions(appId: part.appId)
-                    showVersionHistory = true
-                }
+            ViewThatFits(in: .horizontal) {
+                actionButtons(stacked: false)
+                actionButtons(stacked: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -182,6 +176,13 @@ struct IOSMiniAppChatCard: View {
         .sheet(item: $exportShare) { share in
             MiniAppActivityShareSheet(items: [share.url])
         }
+        .alert(item: $exportError) { error in
+            Alert(
+                title: Text("无法导出小应用"),
+                message: Text(error.message),
+                dismissButton: .default(Text("知道了"))
+            )
+        }
     }
 
     private var displayTitle: String {
@@ -194,22 +195,64 @@ struct IOSMiniAppChatCard: View {
     }
 
     @ViewBuilder
+    private func actionButtons(stacked: Bool) -> some View {
+        Group {
+            if stacked {
+                VStack(spacing: 8) { actionButtonItems(stacked: true) }
+            } else {
+                HStack(spacing: 8) { actionButtonItems(stacked: false) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actionButtonItems(stacked: Bool) -> some View {
+        miniAppActionButton(
+            title: "运行",
+            systemImage: "play.fill",
+            emphasized: true,
+            stacked: stacked,
+            action: onRun
+        )
+        miniAppActionButton(title: "修改", systemImage: "pencil", emphasized: false, stacked: stacked) {
+            modifyBusyRejected = false
+            modifyPrompt = ""
+            showModifySheet = true
+        }
+        miniAppActionButton(
+            title: "导出",
+            systemImage: "square.and.arrow.up",
+            emphasized: false,
+            stacked: stacked,
+            action: exportHTML
+        )
+        miniAppActionButton(title: "历史", systemImage: "clock.arrow.circlepath", emphasized: false, stacked: stacked) {
+            versions = repository.versions(appId: part.appId)
+            showVersionHistory = true
+        }
+    }
+
+    @ViewBuilder
     private func miniAppActionButton(
         title: String,
         systemImage: String,
         emphasized: Bool,
+        stacked: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
                 .font(.caption.weight(.semibold))
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: stacked ? .infinity : nil)
                 .frame(minHeight: 34)
                 .padding(.horizontal, 4)
         }
         .buttonStyle(.bordered)
         .tint(emphasized ? AmberTheme.accent : AmberTheme.muted)
         .controlSize(.small)
+        .fixedSize(horizontal: !stacked, vertical: false)
+        .frame(maxWidth: stacked ? .infinity : nil, minHeight: 44)
+        .contentShape(Rectangle())
     }
 
     private func refreshHeaderFromRepository() {
@@ -223,7 +266,10 @@ struct IOSMiniAppChatCard: View {
     }
 
     private func exportHTML() {
-        guard let record = repository.get(part.appId) else { return }
+        guard let record = repository.get(part.appId) else {
+            exportError = MiniAppExportError(message: "找不到这个小应用的已保存内容。")
+            return
+        }
         let safeName = record.title
             .replacingOccurrences(of: "/", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -233,7 +279,7 @@ struct IOSMiniAppChatCard: View {
             try record.htmlContent.write(to: url, atomically: true, encoding: .utf8)
             exportShare = MiniAppExportShare(url: url)
         } catch {
-            // Best-effort export from the chat card.
+            exportError = MiniAppExportError(message: "无法写入导出文件：\(error.localizedDescription)")
         }
     }
 
@@ -246,6 +292,11 @@ struct IOSMiniAppChatCard: View {
 private struct MiniAppExportShare: Identifiable {
     let id = UUID()
     let url: URL
+}
+
+private struct MiniAppExportError: Identifiable {
+    let id = UUID()
+    let message: String
 }
 
 private struct MiniAppActivityShareSheet: UIViewControllerRepresentable {
