@@ -13,7 +13,8 @@ import { getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { SearchField } from '../components/ui/SearchField.ets';
 import { PageSpacer } from '../components/PageTemplate.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ERROR, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_INK, ERROR, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 
 interface ActionMenuResult {
   index: number;
@@ -30,10 +31,12 @@ struct ChatListPage {
   @State loaded: boolean = false;
   @State searchText: string = '';
   @State snackVisible: boolean = false;
+  @State cursorOn: boolean = true;
   private pendingDeleted: Conversation | null = null;
   private snackTimer: number = -1;
 
   aboutToAppear(): void {
+    setInterval((): void => { this.cursorOn = !this.cursorOn; }, 525);
     this.refresh();
     // Want deep-link(通知/分享入口): EntryAbility 写 AppStorage, 首页消费后跳 DeepReadArticlePage
     const wantTopicId: string = AppStorage.get<string>('wantTopicId') ?? '';
@@ -155,39 +158,75 @@ struct ChatListPage {
     });
   }
 
+  // 会话行(1:1 参考首页): 标题+置顶图标 / mono 元信息行(右=日期); 滑动/长按 置顶/删除
   @Builder
   ConversationRow(item: ConversationSummary): void {
     Column() {
       Row() {
-        if (item.isPinned) {
-          Text('置顶')
-            .fontSize(LABEL)
-            .fontColor(ACCENT)
-            .margin({ right: 6 })
-        }
         Text(item.title.length > 0 ? item.title : '未命名对话')
-          .fontSize(BODY)
+          .fontSize(15)
+          .fontWeight(FontWeight.Medium)
           .fontColor(INK)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
-        Text(item.updateAt.length > 10 ? item.updateAt.substring(0, 10) : item.updateAt)
-          .fontSize(LABEL)
-          .fontColor(INK3)
+        if (item.isPinned) {
+          Icon({ name: 'pin', iconSize: 16, color: ACCENT })
+        }
       }
       .width('100%')
 
+      // mono 元信息行: 左=会话, 右=日期
+      Row() {
+        Text('会话')
+          .fontSize(11)
+          .fontFamily('JetBrainsMono')
+          .fontColor(INK4)
+        Blank()
+        Text(item.updateAt.length > 10 ? item.updateAt.substring(0, 10) : item.updateAt)
+          .fontSize(11)
+          .fontFamily('JetBrainsMono')
+          .fontColor(INK4)
+      }
+      .width('100%')
+      .margin({ top: 6 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
+    .padding({ left: 20, right: 20, top: 14, bottom: 14 })
+    .backgroundColor(BG)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { this.openConversation(item.id); })
     .gesture(
       LongPressGesture()
         .onAction((): void => { this.showRowMenu(item); })
     )
+  }
+
+  @Builder
+  SwipePin(item: ConversationSummary): void {
+    Row() {
+      Icon({ name: 'pin', iconSize: 17, color: ACCENT })
+      Text(item.isPinned ? '取消置顶' : '置顶')
+        .fontSize(10).fontFamily('JetBrainsMono').fontColor(ACCENT).margin({ top: 4 })
+    }
+    .width(88).height('100%')
+    .backgroundColor(SURFACE2)
+    .justifyContent(FlexAlign.Center)
+    .onClick((): void => { this.togglePin(item); })
+  }
+
+  @Builder
+  SwipeDelete(item: ConversationSummary): void {
+    Row() {
+      Icon({ name: 'trash', iconSize: 17, color: ACCENT_INK })
+      Text('删除')
+        .fontSize(10).fontFamily('JetBrainsMono').fontColor(ACCENT_INK).margin({ top: 4 })
+    }
+    .width(88).height('100%')
+    .backgroundColor(ACCENT)
+    .justifyContent(FlexAlign.Center)
+    .onClick((): void => { this.onDelete(item); })
   }
 
   // 长按操作菜单(置顶/删除), 取代常显按钮(设计更干净)
@@ -203,106 +242,165 @@ struct ChatListPage {
     }).catch((): void => {});
   }
 
+  // 今天 · M月D日 周X(参考首页头部日期)
+  private todayLabel(): string {
+    const d: Date = new Date();
+    const wd: string = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
+    return `今天 · ${d.getMonth() + 1}月${d.getDate()}日 ${wd}`;
+  }
+
+  // 功能栏入口 → 对应页面
+  private onFeature(id: string): void {
+    if (id === 'reader') router.pushUrl({ url: 'pages/BoardPage' });
+    else if (id === 'novel') router.pushUrl({ url: 'pages/NovelProjectsPage' });
+    else if (id === 'council') router.pushUrl({ url: 'pages/CouncilPage' });
+    else promptAction.showToast({ message: '该功能即将上线', duration: 1500 });
+  }
+
+  @Builder
+  FeatureItem(id: string, label: string, icon: string, idx: number): void {
+    if (idx > 0) {
+      Column().width(1).height(26).backgroundColor(LINE)
+    }
+    Column() {
+      Icon({ name: icon, iconSize: 24, color: ACCENT })
+      Text(label)
+        .fontSize(12.5)
+        .fontColor(INK2)
+        .margin({ top: 10 })
+    }
+    .padding({ left: 10, right: 10, top: 12, bottom: 13 })
+    .onClick((): void => { this.onFeature(id); })
+  }
+
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
       Column() {
-        // 首页 title bar(对话列表=根, 无返回): 标题 + 设置 + 新对话
+        // 头部(1:1 参考): Amber 字标+光标 + 今天日期 | 右: 设置齿轮 + 头像
         Row() {
-          Text('对话')
-            .fontSize(TITLE)
-            .fontWeight(FontWeight.Bold)
-            .fontColor(INK)
-            .layoutWeight(1)
-          Text('设置')
-            .fontSize(BODY)
-            .fontColor(INK2)
-            .margin({ right: 16 })
+          Row() {
+            Text('Amber')
+              .fontSize(23)
+              .fontWeight(FontWeight.Bold)
+              .fontFamily('JetBrainsMono')
+              .fontColor(INK)
+            Text('')
+              .width(11).height(21).backgroundColor(ACCENT).borderRadius(1)
+              .margin({ left: 2 })
+              .opacity(this.cursorOn ? 1 : 0)
+          }
+          Text(this.todayLabel())
+            .fontSize(11.5)
+            .fontFamily('JetBrainsMono')
+            .fontColor(INK3)
+            .margin({ left: 9 })
+          Blank()
+          Icon({ name: 'gear', iconSize: 20, color: INK2 })
             .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
-          Text('+ 新对话')
-            .fontSize(BODY)
-            .fontColor(ACCENT)
-            .onClick((): void => { this.newConversation(); })
+          Column()
+            .width(34).height(34).borderRadius(999)
+            .backgroundColor(ACCENT)
+            .margin({ left: 10 })
         }
         .width('100%')
-        .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 20, right: 20, top: this.statusBarHeight + 8, bottom: 12 })
+
+        // 搜索栏(flat, 底部 hairline)
+        Row() {
+          Icon({ name: 'search', iconSize: 17, color: INK3 })
+          TextInput({ text: this.searchText, placeholder: '搜索会话' })
+            .fontSize(14.5)
+            .fontColor(INK)
+            .placeholderColor(INK4)
+            .backgroundColor('#00000000')
+            .layoutWeight(1)
+            .margin({ left: 9 })
+            .onChange((v: string): void => { this.searchText = v; this.refresh(); })
+          if (this.searchText.length > 0) {
+            Icon({ name: 'close', iconSize: 15, color: INK3 })
+              .onClick((): void => { this.searchText = ''; this.refresh(); })
+          }
+        }
+        .width('100%')
+        .padding({ left: 20, right: 20, top: 9, bottom: 10 })
         .border({ width: { bottom: 1 }, color: { bottom: LINE } })
-        .backgroundColor(BG)
 
-        // 搜索栏
-        SearchField({
-          value: this.searchText,
-          placeholder: '搜索对话标题…',
-          onChange: (v: string): void => {
-            this.searchText = v;
-            this.refresh();
-          },
-        })
-          .margin({ left: 16, right: 16, top: 12, bottom: 8 })
+        // 功能栏(5 入口, 竖直 hairline 分隔, 底部 hairline)
+        Row() {
+          this.FeatureItem('reader', '深度阅读', 'book', 0)
+          Blank()
+          this.FeatureItem('apps', '小应用', 'box', 1)
+          Blank()
+          this.FeatureItem('novel', '小说创作', 'edit', 2)
+          Blank()
+          this.FeatureItem('webmount', 'WebMount', 'globe', 3)
+          Blank()
+          this.FeatureItem('council', '模型议会', 'brain', 4)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 12, right: 12 })
+        .border({ width: { bottom: 1 }, color: { bottom: LINE } })
 
-        // 列表区
-        Scroll() {
-          Column() {
+        // 会话列表 + FAB(右下悬浮)
+        Stack({ alignContent: Alignment.BottomEnd }) {
+          List() {
             if (!this.loaded) {
-              Text('加载中…')
-                .fontSize(BODY)
-                .fontColor(INK3)
-                .padding({ top: 40 })
-            } else if (this.items.length === 0) {
-              Column() {
-                Text(this.searchText.trim().length > 0 ? '没有匹配的对话' : '还没有对话')
-                  .fontSize(BODY)
-                  .fontColor(INK2)
-                if (this.searchText.trim().length === 0) {
-                  Text('点右上角开始新对话')
-                    .fontSize(LABEL)
-                    .fontColor(INK3)
-                    .margin({ top: 8 })
-                }
+              ListItem() {
+                Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
               }
-              .margin({ top: 64 })
+            } else if (this.items.length === 0) {
+              ListItem() {
+                Column() {
+                  Row() {
+                    Text('//').fontSize(12).fontFamily('JetBrainsMono').fontColor(ACCENT)
+                    Text(' 0 results').fontSize(12).fontFamily('JetBrainsMono').fontColor(INK4)
+                  }
+                  .margin({ bottom: 8 })
+                  Text(this.searchText.trim().length > 0 ? `没有匹配「${this.searchText}」的会话` : '暂无会话，点击右下角按钮开始')
+                    .fontSize(13.5).fontColor(INK3)
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Center)
+                .padding({ top: 56, bottom: 56 })
+              }
             } else {
               ForEach(this.items, (item: ConversationSummary): void => {
-                this.ConversationRow(item)
+                ListItem() {
+                  this.ConversationRow(item)
+                }
+                .swipeAction({ start: (): void => { this.SwipePin(item); }, end: (): void => { this.SwipeDelete(item); } })
               }, (item: ConversationSummary): string => item.id)
-
-              // 删除全部(danger,列表底部,不挤在头部)
-              Row() {
-                Text('删除全部对话')
-                  .fontSize(BODY)
-                  .fontColor(ERROR)
-                Blank()
-                Text('›')
-                  .fontSize(BODY)
-                  .fontColor(INK4)
-              }
-              .width('100%')
-              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-              .backgroundColor(SURFACE)
-              .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-              .margin({ top: 24 })
-              .onClick((): void => { this.showDeleteAllConfirm(); })
             }
-
-            PageSpacer()
           }
           .width('100%')
+          .height('100%')
+          .divider({ strokeWidth: 0, color: '#00000000' })
+
+          // FAB 新会话(右下悬浮, accent 圆)
+          Column() {
+            Icon({ name: 'edit', iconSize: 24, color: ACCENT_INK })
+          }
+          .width(56).height(56).borderRadius(999)
+          .backgroundColor(ACCENT)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(HorizontalAlign.Center)
+          .margin({ right: 20, bottom: 24 })
+          .onClick((): void => { this.newConversation(); })
         }
         .layoutWeight(1)
-        .backgroundColor(BG)
+        .width('100%')
       }
       .width('100%')
       .height('100%')
 
-      // 撤销 snackbar
+      // 撤销 snackbar(底部居中)
       if (this.snackVisible) {
         Row() {
-          Text('对话已删除')
-            .fontSize(META)
-            .fontColor(Color.White)
+          Text('对话已删除').fontSize(META).fontColor(Color.White)
           Blank()
-          Text('撤销')
-            .fontSize(META)
-            .fontColor(ACCENT)
+          Text('撤销').fontSize(META).fontColor(ACCENT)
             .padding({ left: 16, top: 6, bottom: 6 })
             .onClick((): void => { this.undoDelete(); })
         }
