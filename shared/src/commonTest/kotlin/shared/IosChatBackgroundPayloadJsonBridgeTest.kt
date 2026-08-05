@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -59,5 +60,37 @@ class IosChatBackgroundPayloadJsonBridgeTest {
         assertEquals(emptyList(), decoded.params.model.customBodies)
         assertEquals(emptyList(), decoded.params.customHeaders)
         assertEquals(emptyList(), decoded.params.customBody)
+        assertFalse(decoded.generativeUiRequired)
+        assertFalse(decoded.generativeUiFallbackAttempted)
+    }
+
+    @Test
+    fun encodePersistsGenerativeUiFallbackContract() {
+        val provider = ProviderSetting.OpenAI(
+            id = Uuid.random(),
+            apiKey = "secret",
+            models = listOf(Model(modelId = "gpt-test", displayName = "GPT Test")),
+        )
+
+        val json = IosChatBackgroundPayloadJsonBridge.encode(
+            runId = "run-widget",
+            startedAt = 2L,
+            inputDigest = "digest",
+            conversationId = Uuid.random(),
+            providerSetting = provider,
+            params = TextGenerationParams(model = provider.models.first()),
+            uploadMessages = emptyList(),
+            displayMessages = emptyList(),
+            generativeUiRequired = true,
+            generativeUiExpectSlides = true,
+            generativeUiExpectFullHtmlDeck = true,
+            generativeUiFallbackAttempted = true,
+        )
+
+        val decoded = IosChatBackgroundPayloadJsonBridge.decode(json)
+        assertTrue(decoded.generativeUiRequired)
+        assertTrue(decoded.generativeUiExpectSlides)
+        assertTrue(decoded.generativeUiExpectFullHtmlDeck)
+        assertTrue(decoded.generativeUiFallbackAttempted)
     }
 }

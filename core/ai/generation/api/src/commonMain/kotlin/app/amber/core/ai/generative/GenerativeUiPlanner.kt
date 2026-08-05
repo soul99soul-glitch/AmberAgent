@@ -23,7 +23,7 @@ import app.amber.core.settings.GenerativeUiSetting
  * either way. Layer 3 (the AMBIGUOUS prompt) gives the model criteria to
  * route when keywords disagree.
  */
-enum class VisualRoute {
+internal enum class VisualRoute {
     /** Strong diagram / chart / schematic signal — emit show-widget SVG. Suppress tools. */
     DIAGRAM_WIDGET,
 
@@ -108,9 +108,9 @@ object GenerativeUiPlanner {
                         appendLine("Use the requested tool/skill/subagent first. Do NOT create a widget for routing, progress, plan, or status summaries.")
                         appendLine("After the real tool/skill/subagent result exists, the final artifact must be one full_html show-widget deck preview in the chat. Do NOT turn the deck into a MiniApp, a standalone webpage, or an ordinary HTML widget.")
                     } else {
-                        appendLine("The user asked for a multi-slide presentation / deck. Emit one show-widget with renderer \"${GuizangHtmlDeckValidator.RENDERER}\" and a complete HTML deck in spec.html, NOT an inline SVG.")
+                        appendLine("The user asked for a multi-slide presentation / deck. Emit one show-widget with renderer \"${GenerativeUiProtocol.FULL_HTML_RENDERER}\" and a complete HTML deck in spec.html, NOT an inline SVG.")
                     }
-                    appendLine("All PPT/deck HTML previews use renderer \"${GuizangHtmlDeckValidator.RENDERER}\". This is the single full-featured HTML path for normal decks and guizang-style dynamic PPTs.")
+                    appendLine("All PPT/deck HTML previews use renderer \"${GenerativeUiProtocol.FULL_HTML_RENDERER}\". This is the single full-featured HTML path for normal decks and guizang-style dynamic PPTs.")
                     appendLine("For full_html, spec.html must use `<div id=\"deck\">` with `<section class=\"slide ...\">` pages and AmberAgent local Motion/Lucide runtime URLs when those libraries are needed, not CDN scripts.")
                     appendLine("Pick a sensible deck length (4-8 slides) unless the user specified a count. Use a complete HTML document with CSS and any needed inline JS.")
                     appendLine("Keep slide content concise; each slide is one idea.")
@@ -178,7 +178,6 @@ object GenerativeUiPlanner {
         val text = latestUserText(messages)
         if (text.isBlank()) return GenerativeUiWidgetRequirement.None
         val route = classifyRoute(text)
-        val toolMediated = isToolMediatedRequest(text)
         return when (route) {
             VisualRoute.SLIDES -> GenerativeUiWidgetRequirement(
                 required = true,
@@ -186,13 +185,11 @@ object GenerativeUiPlanner {
                 expectFullHtmlDeck = true,
             )
 
-            VisualRoute.DIAGRAM_WIDGET -> {
-                if (toolMediated) {
-                    GenerativeUiWidgetRequirement.None
-                } else {
-                    GenerativeUiWidgetRequirement(required = true)
-                }
-            }
+            // Tools may supply facts or files, but they do not replace the
+            // diagram the user explicitly requested. The terminal check runs
+            // only after pending tools have completed, so this does not force
+            // an early widget while a tool call is still in flight.
+            VisualRoute.DIAGRAM_WIDGET -> GenerativeUiWidgetRequirement(required = true)
 
             else -> GenerativeUiWidgetRequirement.None
         }
@@ -290,17 +287,23 @@ object GenerativeUiPlanner {
         val explicitDelegation = listOf(
             "@",
             "subagent",
-            "agent",
             "skill",
             "技能",
             "插件",
-            "工具",
-            "调用",
+            "使用工具",
+            "用工具",
+            "调用工具",
+            "搜索工具",
             "委托",
             "delegate",
             "guizang",
             "workspace",
-            "文件",
+            "/workspace",
+            "读取文件",
+            "分析文件",
+            "根据文件",
+            "这个文件",
+            "附件",
             "读取",
             "搜索",
             "联网",

@@ -3,9 +3,9 @@ import UIKit
 @preconcurrency import WebKit
 @preconcurrency import Shared
 
-private let widgetMinHeight: CGFloat = 160
-private let widgetFallbackHeight: CGFloat = 320
+private let widgetMinHeight: CGFloat = 96
 private let widgetMinPartialRenderChars = 16
+private let widgetStreamUpdateDelay: TimeInterval = 0.016
 
 @MainActor
 struct IOSGenerativeWidgetCard: View {
@@ -14,7 +14,7 @@ struct IOSGenerativeWidgetCard: View {
     var onAction: (String) -> Void = { _ in }
 
     @State private var sheet: IOSGenerativeWidgetSheetTarget?
-    @State private var measuredHeight: CGFloat = widgetFallbackHeight
+    @State private var measuredHeight: CGFloat = widgetMinHeight
 
     private var settings: IOSGenerativeWidgetSettings {
         IOSGenerativeWidgetSettings(generativeUiSetting)
@@ -35,6 +35,7 @@ struct IOSGenerativeWidgetCard: View {
                 Text(title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
             }
             content
             actionRow
@@ -52,10 +53,6 @@ struct IOSGenerativeWidgetCard: View {
                 .stroke(AmberTheme.borderSoft, lineWidth: 1)
         }
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .onTapGesture {
-            guard canOpenExpanded else { return }
-            sheet = .widget(widget, sanitized.html, settings)
-        }
         .sheet(item: $sheet) { target in
             switch target {
             case .widget(let widget, let html, let settings):
@@ -116,26 +113,43 @@ struct IOSGenerativeWidgetCard: View {
             widget.specJson != nil &&
             canOpenExpanded
         if isRich || (settings.enableActions && widget.complete && !widget.actions.isEmpty) {
-            HStack(spacing: 8) {
-                if isRich {
-                    Button {
-                        sheet = .widget(widget, sanitized.html, settings)
-                    } label: {
-                        Label(richButtonTitle, systemImage: "play.circle")
-                            .font(.caption.weight(.semibold))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    actionButtons(isRich: isRich, stacked: false)
                 }
-                ForEach(widget.actions.prefix(3)) { action in
-                    Button(action.label) {
-                        onAction(action.toUserPrompt(widgetTitle: widget.title))
-                    }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                VStack(alignment: .leading, spacing: 6) {
+                    actionButtons(isRich: isRich, stacked: true)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func actionButtons(isRich: Bool, stacked: Bool) -> some View {
+        if isRich {
+            Button {
+                sheet = .widget(widget, sanitized.html, settings)
+            } label: {
+                Label(richButtonTitle, systemImage: "play.circle")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .buttonStyle(.bordered)
+            .frame(maxWidth: stacked ? .infinity : nil, minHeight: 44, alignment: .leading)
+            .fixedSize(horizontal: !stacked, vertical: false)
+        }
+        ForEach(widget.actions.prefix(3)) { action in
+            Button {
+                onAction(action.toUserPrompt(widgetTitle: widget.title))
+            } label: {
+                Text(action.label)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .buttonStyle(.bordered)
+            .frame(maxWidth: stacked ? .infinity : nil, minHeight: 44, alignment: .leading)
+            .fixedSize(horizontal: !stacked, vertical: false)
         }
     }
 
@@ -221,6 +235,7 @@ private struct IOSGenerativeWidgetExpandedSheet: View {
                 }
             }
             .background(AmberTheme.background)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle(widget.title?.nilIfBlank ?? "可视化卡片")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -388,6 +403,7 @@ private struct IOSSafeGenerativeWidgetWebView: UIViewRepresentable {
         var onTap: (() -> Void)?
         private weak var webView: WKWebView?
         private var latestHTML: String = ""
+        private var pendingPush: DispatchWorkItem?
 
         init(minHeight: CGFloat, maxHeight: CGFloat, onResize: @escaping (CGFloat) -> Void, onTap: (() -> Void)?) {
             self.minHeight = minHeight
@@ -401,13 +417,28 @@ private struct IOSSafeGenerativeWidgetWebView: UIViewRepresentable {
         }
 
         func close() {
+            pendingPush?.cancel()
+            pendingPush = nil
             webView = nil
         }
 
         func push(html: String) {
+            guard html != latestHTML else { return }
             latestHTML = html
-            guard let webView else { return }
-            webView.evaluateJavaScript("window.__amberWidgetSetHtml && window.__amberWidgetSetHtml(\(jsStringLiteral(html)));")
+            pendingPush?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.flushLatestHTML()
+            }
+            pendingPush = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + widgetStreamUpdateDelay, execute: work)
+        }
+
+        private func flushLatestHTML() {
+            pendingPush = nil
+            guard let webView, !latestHTML.isEmpty else { return }
+            webView.evaluateJavaScript(
+                "window.__amberWidgetSetHtml && window.__amberWidgetSetHtml(\(jsStringLiteral(latestHTML)));"
+            )
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -432,7 +463,8 @@ private struct IOSSafeGenerativeWidgetWebView: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            push(html: latestHTML)
+            pendingPush?.cancel()
+            flushLatestHTML()
         }
 
         func webView(

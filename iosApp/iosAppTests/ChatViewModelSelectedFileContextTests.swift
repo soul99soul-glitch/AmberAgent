@@ -1605,6 +1605,50 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(harness.state.recordedRunStatuses.last, "interrupted")
     }
 
+    func testStaleTerminalCannotFinishNewForegroundRun() {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        harness.coordinator.installRunMetadataForTesting(
+            runId: "run-new",
+            startedAt: 2,
+            inputDigest: "new-digest"
+        )
+        harness.state.isLoading = true
+
+        XCTAssertFalse(harness.coordinator.finishStreamingForTesting(runId: "run-old"))
+        XCTAssertTrue(harness.coordinator.isRunning)
+        XCTAssertTrue(harness.state.isLoading)
+
+        XCTAssertTrue(harness.coordinator.finishStreamingForTesting(runId: "run-new"))
+        XCTAssertFalse(harness.coordinator.isRunning)
+        XCTAssertFalse(harness.state.isLoading)
+    }
+
+    func testBackgroundToolHandoffRetainsGenerativeUiProtocolPrompt() {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        let runId = "run-generative-ui-handoff"
+        harness.coordinator.installRunMetadataForTesting(
+            runId: runId,
+            startedAt: 1,
+            inputDigest: "diagram-digest"
+        )
+        let prepared = harness.coordinator.backgroundToolHandoffUploadMessagesForTesting(
+            [UIMessage.companion.user(prompt: "搜索资料后画成流程图")],
+            params: makeTextGenerationParams(),
+            runId: runId
+        )
+        let systemPrompt = prepared
+            .filter { $0.role == MessageRole.system }
+            .map { $0.toText() }
+            .joined(separator: "\n")
+
+        XCTAssertTrue(systemPrompt.contains("show-widget"))
+        XCTAssertTrue(systemPrompt.contains("SVG"))
+    }
+
     func testBackgroundCancellationClosesPendingToolWithoutLosingForegroundMessage() async throws {
         let baseDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("BackgroundCancellationToolClosure-")

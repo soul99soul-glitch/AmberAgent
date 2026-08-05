@@ -72,7 +72,7 @@ struct IOSGenerativeWidgetRenderer: IOSGenerativeWidgetRendering {
         let labels = spec.stringArray("x").isEmpty ? spec.stringArray("labels").prefixArray(24) : spec.stringArray("x").prefixArray(24)
         let series = (spec["series"] as? [[String: Any]])?
             .compactMap { item -> ChartSeries? in
-                let data = item.numberArray("data").prefixArray(24)
+                let data = item.numberArray("data").prefixArray(min(24, max(labels.count, 1)))
                 guard !data.isEmpty else { return nil }
                 let name = String((item.string("name") ?? "Value").prefix(32))
                 return ChartSeries(name: name.isEmpty ? "Value" : name, data: data)
@@ -208,10 +208,12 @@ struct IOSGenerativeWidgetRenderer: IOSGenerativeWidgetRendering {
         let gap = 22.0
         let count = max(items.count, 1)
         let boxWidth = min(max((Double(width) - horizontalPadding * 2 - gap * Double(count - 1)) / Double(count), 118.0), 172.0)
+        let contentWidth = boxWidth * Double(count) + gap * Double(count - 1)
+        let startX = (Double(width) - contentWidth) / 2
         return baseSVG(width: width, height: 220) {
             var output = ""
             for (index, node) in items.enumerated() {
-                let x = horizontalPadding + Double(index) * (boxWidth + gap)
+                let x = startX + Double(index) * (boxWidth + gap)
                 let y = 62
                 output += "\n<rect x=\"\(round1(x))\" y=\"\(y)\" width=\"\(round1(boxWidth))\" height=\"82\" rx=\"14\" fill=\"#eff6ff\" stroke=\"#bfdbfe\"/>"
                 output += "\n<text x=\"\(round1(x + 16))\" y=\"\(y + 35)\" font-size=\"16\" font-weight=\"700\" fill=\"#1e3a8a\">\(String(escapeXML(node.string("label") ?? "").prefix(18)))</text>"

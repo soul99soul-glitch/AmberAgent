@@ -12,11 +12,19 @@ private struct IOSChatBackgroundRuntimeJob {
     let uploadMessages: [UIMessage]
     let displayMessages: [UIMessage]
     let mode: IOSChatBackgroundHandoffMode
+    let generativeUiRequirement: IOSGenerativeUiRequirement
+    let generativeUiFallbackAttempted: Bool
     let conversationStore: IOSConversationStore
     let toolRuntime: ChatToolRuntime
     let liveActivityController: AgentLiveActivityController
     let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> UIMessage?)?
     let messagesSnapshot: IOSChatBackgroundMessagesSnapshot
+}
+
+/// KMP message objects are not declared `Sendable`, but this retry snapshot is
+/// immutable after construction and the engine copies its array before mutation.
+private struct IOSChatBackgroundRetryMessages: @unchecked Sendable {
+    let values: [UIMessage]
 }
 
 private struct IOSChatBackgroundDependencies {
@@ -38,6 +46,8 @@ struct IOSChatBackgroundHandoff {
     let uploadMessages: [UIMessage]
     let displayMessages: [UIMessage]
     let mode: IOSChatBackgroundHandoffMode
+    let generativeUiRequirement: IOSGenerativeUiRequirement
+    let generativeUiFallbackAttempted: Bool
 }
 
 enum IOSChatBackgroundHandoffMode: String {
@@ -205,6 +215,12 @@ final class IOSChatBackgroundRunState: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return terminalOwner == owner && terminalFinalized
+    }
+
+    func terminalIsOwned(by owner: TerminalOwner) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return terminalOwner == owner
     }
 
     func claimSystemTaskCompletion() -> Bool {
@@ -527,6 +543,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             uploadMessages: handoff.uploadMessages,
             displayMessages: handoff.displayMessages,
             mode: handoff.mode,
+            generativeUiRequirement: handoff.generativeUiRequirement,
+            generativeUiFallbackAttempted: handoff.generativeUiFallbackAttempted,
             conversationStore: conversationStore,
             toolRuntime: toolRuntime,
             liveActivityController: liveActivityController,
@@ -701,7 +719,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         let operationTask = Task { () -> IOSAgentToolEngineResult in
             switch job.mode {
             case .continueModel:
-                return await engine.run(
+                let initialResult = await engine.run(
                     providerSetting: requestProvider,
                     messages: job.uploadMessages,
                     params: requestParams,
@@ -729,6 +747,84 @@ final class IOSChatBackgroundGenerationCoordinator {
                     onMessagesUpdated: { messages in
                         job.messagesSnapshot.replace(with: messages)
                     }
+                )
+                guard !job.generativeUiFallbackAttempted,
+                      !initialResult.wasCancelled,
+                      !Task.isCancelled,
+                      initialResult.providerFailureMessage == nil || initialResult.hitOutputLimit,
+                      initialResult.pendingApproval == nil,
+                      !initialResult.hitStepLimit,
+                      !initialResult.guardStopped,
+                      !job.toolRuntime.hasUnresolvedToolCall(in: initialResult.messages),
+                      let widgetIssue = IOSGenerativeUiRequestPolicy.widgetIssue(
+                        in: initialResult.messages,
+                        afterDisplayMessageCount: job.uploadMessages.count,
+                        requirement: job.generativeUiRequirement
+                      ) else {
+                    return initialResult
+                }
+                var retryBase = initialResult.messages
+                if retryBase.last?.role == MessageRole.assistant {
+                    retryBase.removeLast()
+                }
+                let retryMessages = IOSGenerativeUiRequestPolicy.retryMessages(
+                    retryBase,
+                    requirement: job.generativeUiRequirement,
+                    issue: widgetIssue
+                )
+                let retryUpload = IOSChatBackgroundRetryMessages(
+                    values: ChatRuntimeContextBuilder.coalescingSystemMessages(retryMessages)
+                )
+                let retryUploadMessageCount = retryUpload.values.count
+                let retryParams = IOSGenerativeUiRequestPolicy.retryParams(requestParams)
+                guard self.persistGenerativeUiRetryCheckpoint(
+                    for: job,
+                    requestId: backgroundTask.identifier,
+                    uploadMessages: retryUpload.values,
+                    params: retryParams
+                ) else {
+                    return initialResult
+                }
+                let retryResult = await engine.run(
+                    providerSetting: requestProvider,
+                    messages: retryUpload.values,
+                    params: retryParams,
+                    onAssistantTurnStarted: {
+                        assistantTextSnapshot.replace(with: "")
+                        presentationEvents.continuation.yield(
+                            AgentActivityPresentation.response(
+                                stage: AgentActivityResponseStagePolicy.initialStage
+                            )
+                        )
+                    },
+                    onToolExecutionStarted: { toolName in
+                        presentationEvents.continuation.yield(
+                            AgentActivityPresentation.runningTool(toolName: toolName)
+                        )
+                    },
+                    onAssistantStage: { stage in
+                        presentationEvents.continuation.yield(
+                            AgentActivityPresentation.response(stage: stage)
+                        )
+                    },
+                    onAssistantText: { text in
+                        assistantTextSnapshot.replace(with: text)
+                    },
+                    onMessagesUpdated: { messages in
+                        job.messagesSnapshot.replace(
+                            with: job.uploadMessages + Array(messages.dropFirst(retryUploadMessageCount))
+                        )
+                    }
+                )
+                return IOSAgentToolEngineResult(
+                    messages: job.uploadMessages + Array(retryResult.messages.dropFirst(retryUploadMessageCount)),
+                    stepsExecuted: retryResult.stepsExecuted,
+                    pendingApproval: retryResult.pendingApproval,
+                    hitStepLimit: retryResult.hitStepLimit,
+                    providerFailureMessage: retryResult.providerFailureMessage,
+                    hitOutputLimit: retryResult.hitOutputLimit,
+                    wasCancelled: retryResult.wasCancelled,
+                    guardStopped: retryResult.guardStopped
                 )
             case .singleToolOnly:
                 return IOSAgentToolEngineResult(
@@ -836,7 +932,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             )
         }
         guard runState.finalizeTerminal() else {
-            if runState.terminalWasFinalized(by: .expiration) {
+            if runState.terminalIsOwned(by: .expiration) {
                 await resolveExpiredInFlightSave(
                     job: job,
                     requestId: backgroundTask.identifier,
@@ -921,7 +1017,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
         let didFinalize = runState.finalizeTerminal()
         guard didFinalize else {
-            if runState.terminalWasFinalized(by: .expiration) {
+            if runState.terminalIsOwned(by: .expiration) {
                 await publishTruncatedTerminal(
                     job: job,
                     requestId: backgroundTask.identifier,
@@ -1033,7 +1129,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             ? runState.finalizeTerminal()
             : runState.finalizeTerminal(as: terminalOwner)
         guard didFinalize else {
-            if runState.terminalWasFinalized(by: .expiration) {
+            if runState.terminalIsOwned(by: .expiration) {
                 if didSave {
                     removePayload(requestId: backgroundTask.identifier)
                 }
@@ -1322,11 +1418,44 @@ final class IOSChatBackgroundGenerationCoordinator {
             params: handoff.params,
             uploadMessages: handoff.uploadMessages,
             displayMessages: handoff.displayMessages,
-            mode: handoff.mode.rawValue
+            mode: handoff.mode.rawValue,
+            generativeUiRequired: handoff.generativeUiRequirement.required,
+            generativeUiExpectSlides: handoff.generativeUiRequirement.expectSlides,
+            generativeUiExpectFullHtmlDeck: handoff.generativeUiRequirement.expectFullHtmlDeck,
+            generativeUiFallbackAttempted: handoff.generativeUiFallbackAttempted
         )
         let directory = try jobsDirectory()
         let url = payloadURL(for: requestId, in: directory)
         try Data(json.utf8).write(to: url, options: [.atomic])
+    }
+
+    private func persistGenerativeUiRetryCheckpoint(
+        for job: IOSChatBackgroundRuntimeJob,
+        requestId: String,
+        uploadMessages: [UIMessage],
+        params: TextGenerationParams
+    ) -> Bool {
+        let handoff = IOSChatBackgroundHandoff(
+            runId: job.runId,
+            startedAt: job.startedAt,
+            inputDigest: job.inputDigest,
+            conversationId: job.conversationId,
+            providerId: job.providerSetting.id.toHexDashString(),
+            providerSetting: job.providerSetting,
+            params: params,
+            uploadMessages: uploadMessages,
+            displayMessages: job.displayMessages,
+            mode: job.mode,
+            generativeUiRequirement: job.generativeUiRequirement,
+            generativeUiFallbackAttempted: true
+        )
+        do {
+            try persist(handoff: handoff, requestId: requestId)
+            return true
+        } catch {
+            NSLog("[AmberChatBG] Failed to persist generative UI retry checkpoint: \(error)")
+            return false
+        }
     }
 
     private func loadHandoff(requestId: String) -> IOSChatBackgroundHandoff? {
@@ -1359,7 +1488,13 @@ final class IOSChatBackgroundGenerationCoordinator {
                 params: params,
                 uploadMessages: payload.uploadMessages,
                 displayMessages: payload.displayMessages,
-                mode: IOSChatBackgroundHandoffMode(rawValue: payload.mode) ?? .continueModel
+                mode: IOSChatBackgroundHandoffMode(rawValue: payload.mode) ?? .continueModel,
+                generativeUiRequirement: IOSGenerativeUiRequirement(
+                    required: payload.generativeUiRequired,
+                    expectSlides: payload.generativeUiExpectSlides,
+                    expectFullHtmlDeck: payload.generativeUiExpectFullHtmlDeck
+                ),
+                generativeUiFallbackAttempted: payload.generativeUiFallbackAttempted
             )
         } catch {
             NSLog("[AmberChatBG] Failed to load background payload \(requestId): \(error)")

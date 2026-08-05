@@ -1,4 +1,5 @@
 import XCTest
+import Shared
 @testable import iosApp
 
 final class IOSGenerativeWidgetParserTests: XCTestCase {
@@ -105,6 +106,34 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         XCTAssertFalse(secondWidget.complete)
     }
 
+    func testWidgetIDStaysStableFromPartialToComplete() {
+        let partial = IOSGenerativeWidgetParser.parse(
+            """
+            Intro
+            ```show-widget
+            {"title":"Draft","widget_code":"<svg><rect
+            """,
+            streaming: true
+        )
+        let complete = IOSGenerativeWidgetParser.parse(
+            """
+            Intro
+            ```show-widget
+            {"title":"Draft","widget_code":"<svg><rect width=\\"20\\"/></svg>"}
+            ```
+            """,
+            streaming: false
+        )
+
+        guard case .widget(let partialWidget) = partial.last,
+              case .widget(let completeWidget) = complete.dropFirst().first else {
+            return XCTFail("Expected partial and complete widgets")
+        }
+        XCTAssertEqual(partialWidget.id, completeWidget.id)
+        XCTAssertFalse(partialWidget.complete)
+        XCTAssertTrue(completeWidget.complete)
+    }
+
     func testRendersStructuredChartSpec() {
         let segments = IOSGenerativeWidgetParser.parse(
             """
@@ -121,6 +150,25 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         XCTAssertEqual(widget.renderer, "chart")
         XCTAssertTrue(widget.widgetCode.contains("<svg"))
         XCTAssertTrue(widget.widgetCode.contains("Count"))
+    }
+
+    func testChartDoesNotRenderPointsPastItsLabels() {
+        let svg = IOSGenerativeWidgetRenderer().render(
+            renderer: "chart",
+            specJson: #"{"type":"line","x":["Only"],"series":[{"name":"Count","data":[1,2,3]}]}"#
+        )
+
+        XCTAssertNotNil(svg)
+        XCTAssertFalse(svg?.contains("1198.0") ?? true)
+    }
+
+    func testSingleFlowNodeIsHorizontallyCentered() {
+        let svg = IOSGenerativeWidgetRenderer().render(
+            renderer: "diagram",
+            specJson: #"{"type":"flow","nodes":[{"label":"Only"}]}"#
+        )
+
+        XCTAssertTrue(svg?.contains(#"x="254.0""#) ?? false)
     }
 
     func testNormalizesWrappedSlidesSpec() {
@@ -155,6 +203,21 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         }
         XCTAssertEqual(widget.renderer, "full_html")
         XCTAssertTrue(widget.specJson?.contains(#"<div id=\"deck\">"#) ?? false)
+    }
+
+    func testRejectsInvalidFullHtmlInsteadOfAcceptingPreviewCover() {
+        let content = """
+        ```show-widget
+        {"title":"Broken","renderer":"full_html","spec":{"html":"<html><body>no slides</body></html>"}}
+        ```
+        """
+
+        let segments = IOSGenerativeWidgetParser.parse(content, streaming: false)
+
+        XCTAssertFalse(segments.contains { segment in
+            if case .widget = segment { return true }
+            return false
+        })
     }
 
     func testActionsMatchAndroidLimitsAndSafetyRules() {
@@ -234,6 +297,23 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         XCTAssertFalse(imageBlocked.contains("amber-full-html-resource://image/"))
     }
 
+    func testFullHtmlRuntimeAcceptsSharedProtocolAssetURLs() {
+        let html = """
+        <!DOCTYPE html><html><body>
+        <div id="deck"><section class="slide">A</section></div>
+        <script src="https://amberagent.local/full-html/lucide.min.js"></script>
+        <script type="module">await import('https://amberagent.local/full-html/motion.min.js')</script>
+        </body></html>
+        """
+
+        let prepared = IOSGuizangHtmlDeckValidator.prepareRuntimeHtml(html)
+
+        XCTAssertTrue(IOSGuizangHtmlDeckValidator.validateHtml(html).valid)
+        XCTAssertTrue(prepared.contains(IOSGuizangHtmlDeckValidator.localLucideURL))
+        XCTAssertTrue(prepared.contains(IOSGuizangHtmlDeckValidator.localMotionURL))
+        XCTAssertFalse(prepared.contains("https://amberagent.local/full-html/"))
+    }
+
     func testSanitizerRemovesDangerousContent() {
         let result = IOSGenerativeWidgetSanitizer.sanitize(
             """
@@ -255,6 +335,83 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         XCTAssertFalse(result.html.localizedCaseInsensitiveContains("javascript:"))
         XCTAssertFalse(result.html.localizedCaseInsensitiveContains("https://example.com/chart.png"))
         XCTAssertFalse(result.html.localizedCaseInsensitiveContains("position:fixed"))
+    }
+
+    func testGenerativeUiTerminalPolicyRejectsMissingRequiredWidget() {
+        let baseline = [message(role: .user, text: "画一个流程图")]
+        let messages = baseline + [message(role: .assistant, text: "这里是文字版流程。")]
+
+        let issue = IOSGenerativeUiRequestPolicy.widgetIssue(
+            in: messages,
+            afterDisplayMessageCount: baseline.count,
+            requirement: IOSGenerativeUiRequirement(
+                required: true,
+                expectSlides: false,
+                expectFullHtmlDeck: false
+            )
+        )
+
+        XCTAssertEqual(issue, "missing required complete show-widget")
+    }
+
+    func testGenerativeUiTerminalPolicyAcceptsCompleteStreamedSvgWidget() {
+        let baseline = [message(role: .user, text: "画一个流程图")]
+        let messages = baseline + [message(
+            role: .assistant,
+            text: """
+            ```show-widget
+            {"title":"Flow","widget_code":"<svg viewBox=\\"0 0 680 180\\"><rect x=\\"24\\" y=\\"24\\" width=\\"632\\" height=\\"132\\"/></svg>"}
+            ```
+            """
+        )]
+
+        XCTAssertNil(IOSGenerativeUiRequestPolicy.widgetIssue(
+            in: messages,
+            afterDisplayMessageCount: baseline.count,
+            requirement: IOSGenerativeUiRequirement(
+                required: true,
+                expectSlides: false,
+                expectFullHtmlDeck: false
+            )
+        ))
+    }
+
+    func testGenerativeUiTerminalPolicyDoesNotAcceptSvgForDeckRequirement() {
+        let baseline = [message(role: .user, text: "做一份 PPT")]
+        let messages = baseline + [message(
+            role: .assistant,
+            text: """
+            ```show-widget
+            {"title":"Deck","widget_code":"<svg viewBox=\\"0 0 680 180\\"><text x=\\"24\\" y=\\"48\\">Deck</text></svg>"}
+            ```
+            """
+        )]
+
+        let issue = IOSGenerativeUiRequestPolicy.widgetIssue(
+            in: messages,
+            afterDisplayMessageCount: baseline.count,
+            requirement: IOSGenerativeUiRequirement(
+                required: true,
+                expectSlides: true,
+                expectFullHtmlDeck: true
+            )
+        )
+
+        XCTAssertEqual(issue, "expected renderer \"full_html\"")
+    }
+
+    private func message(role: MessageRole, text: String) -> UIMessage {
+        UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: role,
+            parts: [UIMessagePart.Text(text: text, metadata: nil)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
     }
 
     private func jsonStringLiteralForTest(_ value: String) -> String {

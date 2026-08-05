@@ -292,7 +292,7 @@ enum IOSGenerativeWidgetParser {
 
             if streaming {
                 let partialText = String(content[jsonStart...])
-                if let partial = parsePartialWidget(partialText, idSeed: "partial-\(content.distance(from: content.startIndex, to: jsonStart))") {
+                if let partial = parsePartialWidget(partialText, idSeed: "widget-\(content.distance(from: content.startIndex, to: jsonStart))") {
                     segments.append(.widget(partial))
                 } else {
                     segments.append(.loading(id: "loading-\(content.distance(from: content.startIndex, to: marker.range.lowerBound))"))
@@ -346,6 +346,12 @@ enum IOSGenerativeWidgetParser {
         if let recovered = recoverFullHtmlWidget(parsed: parsed, jsonText: jsonText, idSeed: idSeed) {
             return recovered
         }
+        // full_html is valid only through the dedicated validator/recovery path.
+        // Falling through to the preview renderer would turn an invalid deck
+        // into a complete-looking cover card and bypass terminal repair.
+        if renderer == IOSGuizangHtmlDeckValidator.renderer {
+            return nil
+        }
 
         let specValue: Any?
         if renderer == "slides", parsed?["spec"] == nil, parsed?["slides"] != nil || parsed?["pages"] != nil {
@@ -383,7 +389,7 @@ enum IOSGenerativeWidgetParser {
             return nil
         }
         return IOSGenerativeWidget(
-            id: "\(idSeed)-\(stableID(jsonText))",
+            id: idSeed,
             title: normalizeWidgetTitle(title),
             widgetCode: renderableCode,
             complete: true,
@@ -397,7 +403,7 @@ enum IOSGenerativeWidgetParser {
         if let code = extractJsonStringValue(jsonText, key: "widget_code", allowUnclosed: true)?.nilIfBlank {
             guard isRenderableWidgetCode(code, complete: false) else { return nil }
             return IOSGenerativeWidget(
-                id: "\(idSeed)-widget-code",
+                id: idSeed,
                 title: normalizeWidgetTitle(extractJsonStringValue(jsonText, key: "title", allowUnclosed: true)),
                 widgetCode: code,
                 complete: false,
@@ -431,7 +437,7 @@ enum IOSGenerativeWidgetParser {
                 }
                 svg += "\n</svg>"
                 return IOSGenerativeWidget(
-                    id: "\(idSeed)-slides",
+                    id: idSeed,
                     title: title,
                     widgetCode: svg,
                     complete: false,
@@ -445,7 +451,7 @@ enum IOSGenerativeWidgetParser {
         <svg width="100%" viewBox="0 0 680 100" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#f0f9ff" rx="10" stroke="#bae6fd"/><text x="340" y="42" text-anchor="middle" font-size="15" fill="#0369a1">生成\(label)...</text><text x="340" y="68" text-anchor="middle" font-size="13" fill="#7dd3fc">\(titleText)</text></svg>
         """
         return IOSGenerativeWidget(
-            id: "\(idSeed)-\(renderer)",
+            id: idSeed,
             title: title,
             widgetCode: placeholder,
             complete: false,
@@ -558,7 +564,7 @@ enum IOSGenerativeWidgetParser {
             specJson: specJson
         ) ?? ""
         return IOSGenerativeWidget(
-            id: "\(idSeed)-full-html-\(stableID(html))",
+            id: idSeed,
             title: normalizedTitle,
             widgetCode: preview,
             complete: complete,
@@ -634,7 +640,7 @@ enum IOSGenerativeWidgetParser {
         if placeholderPhrases.contains(where: { compact.localizedCaseInsensitiveContains($0) }) {
             return nil
         }
-        return compact
+        return String(compact.prefix(120))
     }
 
     private static func looksLikeFullHtmlWidgetFragment(_ widgetFragment: String) -> Bool {
@@ -1180,6 +1186,8 @@ enum IOSGuizangHtmlDeckValidator {
 
     static func rewriteRuntimeUrls(_ html: String) -> String {
         html
+            .replacing(pattern: #"https://amberagent\.local/(?:full-html|guizang)/motion\.min\.js"#, with: localMotionURL)
+            .replacing(pattern: #"https://amberagent\.local/(?:full-html|guizang)/lucide\.min\.js"#, with: localLucideURL)
             .replacing(pattern: #"https://unpkg\.com/lucide(?:@[^/"'`\s<>]+)?(?:/dist/umd/lucide(?:\.min)?\.js)?"#, with: localLucideURL)
             .replacing(pattern: #"https://cdn\.jsdelivr\.net/npm/lucide(?:@[^/"'`\s<>]+)?(?:/dist/umd/lucide(?:\.min)?\.js)?"#, with: localLucideURL)
             .replacing(pattern: #"https://cdn\.jsdelivr\.net/npm/motion(?:@[^/"'`\s<>]+)?/\+esm"#, with: localMotionURL)

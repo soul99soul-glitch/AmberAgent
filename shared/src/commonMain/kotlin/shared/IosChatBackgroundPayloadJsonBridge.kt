@@ -22,6 +22,10 @@ data class IosChatBackgroundPayload(
     val uploadMessages: List<UIMessage>,
     val displayMessages: List<UIMessage>,
     val mode: String = "continue_model",
+    val generativeUiRequired: Boolean = false,
+    val generativeUiExpectSlides: Boolean = false,
+    val generativeUiExpectFullHtmlDeck: Boolean = false,
+    val generativeUiFallbackAttempted: Boolean = false,
 )
 
 /** Swift-facing bridge for persisted iOS chat background generation payloads. */
@@ -37,6 +41,10 @@ object IosChatBackgroundPayloadJsonBridge {
         uploadMessages: List<UIMessage>,
         displayMessages: List<UIMessage>,
         mode: String = "continue_model",
+        generativeUiRequired: Boolean = false,
+        generativeUiExpectSlides: Boolean = false,
+        generativeUiExpectFullHtmlDeck: Boolean = false,
+        generativeUiFallbackAttempted: Boolean = false,
     ): String = JsonInstant.encodeToString(
         IosChatBackgroundPayload(
             runId = runId,
@@ -48,6 +56,10 @@ object IosChatBackgroundPayloadJsonBridge {
             uploadMessages = uploadMessages,
             displayMessages = displayMessages,
             mode = mode,
+            generativeUiRequired = generativeUiRequired,
+            generativeUiExpectSlides = generativeUiExpectSlides,
+            generativeUiExpectFullHtmlDeck = generativeUiExpectFullHtmlDeck,
+            generativeUiFallbackAttempted = generativeUiFallbackAttempted,
         )
     )
 

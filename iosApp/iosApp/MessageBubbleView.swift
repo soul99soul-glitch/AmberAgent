@@ -285,7 +285,9 @@ struct MessageBubbleView: View {
                 if isUser {
                     // 气泡现在是内容尺寸(已移除其内部的 300pt 框),contextMenu 的高亮平台贴合气泡。
                     // 再用 .contentShape(.contextMenuPreview, 气泡圆角) 把平台裁成气泡形状,消除灰角。
-                    ChatUserBubble(text: textPart.text)
+                    ChatUserBubble(
+                        text: GenerativeUiPlanner.shared.stripVisualRouteTagsForDisplay(text: textPart.text)
+                    )
                         .contentShape(
                             .contextMenuPreview,
                             UnevenRoundedRectangle(

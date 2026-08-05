@@ -1494,6 +1494,8 @@ final class IOSParityRedLightTests: XCTestCase {
 
         XCTAssertEqual(savingState.expireAndReserveTerminal(), .terminateInFlightSave)
         XCTAssertTrue(savingState.isExpired)
+        XCTAssertTrue(savingState.terminalIsOwned(by: .expiration))
+        XCTAssertFalse(savingState.terminalWasFinalized(by: .expiration))
         XCTAssertFalse(savingState.finalizeTerminal())
         XCTAssertTrue(savingState.finalizeTerminal(as: .expiration))
         XCTAssertTrue(savingState.terminalWasFinalized(by: .expiration))
