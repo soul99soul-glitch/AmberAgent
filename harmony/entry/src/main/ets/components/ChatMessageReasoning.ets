@@ -30,7 +30,7 @@ export struct ChatMessageReasoning {
           .fontSize(META)
           .fontColor(ACCENT)
           .fontWeight(FontWeight.Medium)
-          .fontFamily('monospace')
+          .fontFamily('JetBrainsMono')
           .margin({ left: 6 })
           .layoutWeight(1)
           .maxLines(1)
@@ -41,7 +41,7 @@ export struct ChatMessageReasoning {
           Text(this.durationLabel())
             .fontSize(11)
             .fontColor(INK3)
-            .fontFamily('monospace')
+            .fontFamily('JetBrainsMono')
             .margin({ right: 6 })
         }
 

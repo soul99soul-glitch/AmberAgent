@@ -117,7 +117,7 @@ struct Index {
           Text('deepseek-v4-flash')
             .fontSize(META)
             .fontColor(INK3)
-            .fontFamily('monospace')
+            .fontFamily('JetBrainsMono')
             .margin({ top: 1 })
         }
         .alignItems(HorizontalAlign.Center)
@@ -143,7 +143,7 @@ struct Index {
               .fontSize(30)
               .fontWeight(FontWeight.Bold)
               .fontColor(INK)
-              .fontFamily('monospace')
+              .fontFamily('JetBrainsMono')
             Text('')
               .width(8)
               .height(24)

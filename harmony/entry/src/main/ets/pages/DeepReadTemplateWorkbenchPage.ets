@@ -204,7 +204,7 @@ struct DeepReadTemplateWorkbenchPage {
               .margin({ left: 2, bottom: 8 })
             TextArea({ text: this.editContent, placeholder: '# {title}\n\n{content}' })
               .fontSize(BODY).fontColor(INK)
-              .fontFamily('monospace')
+              .fontFamily('JetBrainsMono')
               .backgroundColor(SURFACE)
               .borderRadius(12)
               .border({ width: 1, color: LINE })

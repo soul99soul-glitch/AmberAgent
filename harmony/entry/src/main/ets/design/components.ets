@@ -313,7 +313,7 @@ export struct JsonTree {
     Scroll() {
       Text(this.prettyJson())
         .fontSize(11).fontColor(INK2)
-        .fontFamily('monospace')
+        .fontFamily('JetBrainsMono')
         .width('100%')
         .padding(12)
     }

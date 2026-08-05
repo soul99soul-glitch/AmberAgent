@@ -241,7 +241,7 @@ export struct MarkdownText {
             this.getCodeLines(block),
             (lineTokens: HighlightToken[], idx: number): void => {
               if (lineTokens.length === 0) {
-                Text(' ').fontSize(12).fontFamily('monospace').lineHeight(18).width('100%')
+                Text(' ').fontSize(12).fontFamily('JetBrainsMono').lineHeight(18).width('100%')
               } else {
                 Text() {
                   ForEach(
@@ -249,14 +249,14 @@ export struct MarkdownText {
                     (tok: HighlightToken, ti: number): void => {
                       Span(tok.text)
                         .fontSize(12)
-                        .fontFamily('monospace')
+                        .fontFamily('JetBrainsMono')
                         .fontColor(this.tokenColor(tok.type))
                     },
                     (tok: HighlightToken, ti: number): string => `tok-${idx}-${ti}`,
                   )
                 }
                 .fontSize(12)
-                .fontFamily('monospace')
+                .fontFamily('JetBrainsMono')
                 .lineHeight(18)
                 .width('100%')
               }
@@ -267,7 +267,7 @@ export struct MarkdownText {
           Text(block.code)
             .fontSize(12)
             .fontColor(CODE_TEXT)
-            .fontFamily('monospace')
+            .fontFamily('JetBrainsMono')
             .lineHeight(18)
             .width('100%')
         }
@@ -370,7 +370,7 @@ export struct MarkdownText {
       Span(tok.text)
         .fontSize(size - 1)
         .fontColor(INLINE_CODE_FG)
-        .fontFamily('monospace')
+        .fontFamily('JetBrainsMono')
     } else if (tok.type === 'link') {
       Span(tok.text)
         .fontSize(size)

@@ -30,14 +30,14 @@ struct SettingPage {
               .fontSize(17)
               .fontWeight(FontWeight.Bold)
               .fontColor(BG)
-              .fontFamily('monospace')
+              .fontFamily('JetBrainsMono')
               .width(46).height(46).borderRadius(14)
               .backgroundColor(INK)
               .textAlign(TextAlign.Center)
             Column() {
               Text('光').fontSize(BODY).fontWeight(FontWeight.Bold).fontColor(INK)
               Text('Amber Plus · 续费于 6/30')
-                .fontSize(MONO_SMALL).fontColor(INK3).fontFamily('monospace').margin({ top: 3 })
+                .fontSize(MONO_SMALL).fontColor(INK3).fontFamily('JetBrainsMono').margin({ top: 3 })
             }
             .alignItems(HorizontalAlign.Start).margin({ left: 14 }).layoutWeight(1)
             Text('›').fontSize(BODY).fontColor(INK4)
@@ -134,7 +134,7 @@ struct SettingPage {
           .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
 
           Text('amber · 光的设备')
-            .fontSize(LABEL).fontColor(INK4).fontFamily('monospace')
+            .fontSize(LABEL).fontColor(INK4).fontFamily('JetBrainsMono')
             .textAlign(TextAlign.Center).width('100%').margin({ top: 22 })
 
           // ── 更多入口 ──

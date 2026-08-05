@@ -116,7 +116,7 @@ export struct AgentToolCallCapsule {
         .fontSize(META)
         .fontColor(INK2)
         .fontWeight(FontWeight.Medium)
-        .fontFamily('monospace')
+        .fontFamily('JetBrainsMono')
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)

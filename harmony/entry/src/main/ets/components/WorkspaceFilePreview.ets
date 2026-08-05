@@ -138,7 +138,7 @@ export struct WorkspaceFilePreview {
       Text(this.textContent)
         .fontSize(12)
         .fontColor(INK2)
-        .fontFamily('monospace')
+        .fontFamily('JetBrainsMono')
         .width('100%')
         .copyOption(CopyOptions.LocalDevice)
     }

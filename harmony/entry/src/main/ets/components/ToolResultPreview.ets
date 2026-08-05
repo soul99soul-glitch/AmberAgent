@@ -144,14 +144,14 @@ export struct ToolResultPreview {
               Text(this.previewBody())
                 .fontSize(LABEL)
                 .fontColor(this.hasError() ? ERROR : INK2)
-                .fontFamily('monospace')
+                .fontFamily('JetBrainsMono')
                 .width('100%')
                 .lineHeight(16)
             } else {
               Text(this.previewBody())
                 .fontSize(LABEL)
                 .fontColor(this.hasError() ? ERROR : INK2)
-                .fontFamily('monospace')
+                .fontFamily('JetBrainsMono')
                 .maxLines(3)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .width('100%')
@@ -233,7 +233,7 @@ export struct ToolResultPreview {
         Text('⌨️ 终端').fontSize(LABEL).fontColor(INK3)
         if (this.terminalCommand().length > 0) {
           Text(this.terminalCommand())
-            .fontSize(LABEL).fontColor(INK2).fontFamily('monospace')
+            .fontSize(LABEL).fontColor(INK2).fontFamily('JetBrainsMono')
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1).margin({ left: 6 })
         }

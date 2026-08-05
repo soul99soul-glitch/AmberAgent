@@ -4,7 +4,7 @@
 // 对照设计 §6.5
 
 import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
-import { window, display } from '@kit.ArkUI';
+import { window, display, font } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { getSkillManager, rescheduleCronTasksOnStartup } from '../di/AppContainer.ets';
@@ -15,6 +15,13 @@ const TAG: string = 'DeepRead.EntryAbility';
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'onCreate');
+    // 注册 JetBrains Mono(设计系统等宽字体), 供 fontFamily('JetBrainsMono') 使用
+    try {
+      font.registerFont({ familyName: 'JetBrainsMono', familySrc: $rawfile('fonts/JetBrainsMono-Regular.ttf') });
+      font.registerFont({ familyName: 'JetBrainsMonoBold', familySrc: $rawfile('fonts/JetBrainsMono-Bold.ttf') });
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'registerFont failed: %{public}s', String(e));
+    }
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
     // Want 契约(§7.2):分享/deep-link 收 URL/title → 写 AppStorage 供 Index 跳转

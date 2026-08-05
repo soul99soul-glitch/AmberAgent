@@ -146,7 +146,7 @@ struct MemoryPage {
         .fontSize(11)
         .fontWeight(600)
         .fontColor(INK3)
-        .fontFamily('monospace')
+        .fontFamily('JetBrainsMono')
       Blank()
       Row() {
         Text('+')
@@ -185,7 +185,7 @@ struct MemoryPage {
           .fontSize(10.5)
           .fontWeight(600)
           .fontColor(INK3)
-          .fontFamily('monospace')
+          .fontFamily('JetBrainsMono')
           .backgroundColor(SURFACE2)
           .padding({ left: 7, right: 7, top: 2, bottom: 2 })
           .borderRadius(5)

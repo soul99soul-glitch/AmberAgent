@@ -93,7 +93,7 @@ export struct ChatMessageSubAgentStep {
           .fontSize(META)
           .fontColor(INK2)
           .fontWeight(FontWeight.Medium)
-          .fontFamily('monospace')
+          .fontFamily('JetBrainsMono')
           .margin({ left: 6 })
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })

@@ -2620,7 +2620,7 @@ struct ChatPage {
             if (a === null) return '';
             return a.inputPreview.trim().length > 0 ? a.inputPreview : a.title;
           })())
-            .fontSize(12).fontColor(INK).fontFamily('monospace')
+            .fontSize(12).fontColor(INK).fontFamily('JetBrainsMono')
             .width('100%').margin({ top: 4 })
             .padding(10).backgroundColor(ROW).borderRadius(10)
           Text('调用结果')
@@ -2634,7 +2634,7 @@ struct ChatPage {
             }
             return '无输出';
           })())
-            .fontSize(12).fontColor(INK).fontFamily('monospace')
+            .fontSize(12).fontColor(INK).fontFamily('JetBrainsMono')
             .width('100%').margin({ top: 4 })
             .padding(10).backgroundColor(ROW).borderRadius(10)
         }
@@ -2673,7 +2673,7 @@ struct ChatPage {
           // 模型行(1:1 参考图): 模型名 mono + ⌄ 紧跟其后, 整体左对齐(不推到右)
           Row() {
             Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型')
-              .fontSize(META).fontFamily('monospace')
+              .fontSize(META).fontFamily('JetBrainsMono')
               .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             Text(this.modelMenuOpen ? '⌃' : '⌄')
@@ -2925,7 +2925,7 @@ struct ChatPage {
       Column() {
         Row() {
           Text('amber')
-            .fontSize(30).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily('monospace')
+            .fontSize(30).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily('JetBrainsMono')
           Text('')
             .width(10).height(26).backgroundColor(SIGNAL).borderRadius(2)
             .margin({ left: 4 })

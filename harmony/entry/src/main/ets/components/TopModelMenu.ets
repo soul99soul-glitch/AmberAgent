@@ -141,7 +141,7 @@ export struct TopModelMenu {
       // 分组 header(1:1 参考图): provider 名(mono) + 「+/−」
       Row() {
         Text(group.providerName)
-          .fontSize(15).fontFamily('monospace')
+          .fontSize(15).fontFamily('JetBrainsMono')
           .fontColor(this.isExpanded(group.providerId) ? SIGNAL : INK2)
           .layoutWeight(1)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -156,7 +156,7 @@ export struct TopModelMenu {
         ForEach(group.models, (model: TopModelMenuModel): void => {
           Row() {
             Text(model.displayName.length > 0 ? model.displayName : model.modelId)
-              .fontSize(14).fontFamily('monospace')
+              .fontSize(14).fontFamily('JetBrainsMono')
               .fontColor(model.selected ? SIGNAL : INK3).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             if (model.contextWindowTokens !== null) {

@@ -99,7 +99,7 @@ export struct ChatMessageAskUserStep {
               Text('A')
                 .fontSize(10)
                 .fontColor(ACCENT)
-                .fontFamily('monospace')
+                .fontFamily('JetBrainsMono')
                 .padding({ left: 6, right: 6, top: 2, bottom: 2 })
                 .backgroundColor(ACCENT_LIGHT)
                 .borderRadius(5)

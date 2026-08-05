@@ -94,7 +94,7 @@ export struct NavRow {
         Text(this.valueText)
           .fontSize(BODY2)
           .fontColor(this.danger ? ERROR : INK3)
-          .fontFamily('monospace')
+          .fontFamily('JetBrainsMono')
           .margin({ right: 8 })
       }
       Text('›')
@@ -160,7 +160,7 @@ export struct SelectRow {
       Text(this.valueText)
         .fontSize(BODY2)
         .fontColor(INK3)
-        .fontFamily('monospace')
+        .fontFamily('JetBrainsMono')
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
@@ -211,7 +211,7 @@ export struct SessionRowItem {
           Text(this.modelId)
             .fontSize(TINY)
             .fontColor(INK4)
-            .fontFamily('monospace')
+            .fontFamily('JetBrainsMono')
             .margin({ top: 6 })
         }
       }
@@ -221,7 +221,7 @@ export struct SessionRowItem {
       Text(this.timeText)
         .fontSize(LABEL)
         .fontColor(INK4)
-        .fontFamily('monospace')
+        .fontFamily('JetBrainsMono')
         .margin({ left: 11, top: 2 })
     }
     .width('100%')
