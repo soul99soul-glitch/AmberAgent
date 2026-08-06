@@ -964,32 +964,32 @@ struct NovelWritingContextSheet: View {
         }
         .interactiveDismissDisabled(workspace.isPerforming)
         .confirmationDialog(
-            "清除本章合同？",
+            "清除本章计划？",
             isPresented: $confirmClearPlan,
             titleVisibility: .visible
         ) {
-            Button("清除合同", role: .destructive) {
+            Button("清除计划", role: .destructive) {
                 NovelTextInputCommitter.perform {
                     Task { await clearChapterPlan() }
                 }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("清除后需重新填写并确认，才能继续代笔写整章。")
+            Text("清除后要重新写好并确认，才能继续代笔写整章。")
         }
         .confirmationDialog(
-            "清除下一弧？",
+            "清除往后几章的备注？",
             isPresented: $confirmClearArc,
             titleVisibility: .visible
         ) {
-            Button("清除下一弧", role: .destructive) {
+            Button("清除备注", role: .destructive) {
                 NovelTextInputCommitter.perform {
                     Task { await clearUpcomingArc() }
                 }
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("清除后整章生成将不再注入下一弧软方向。")
+            Text("清除后，写整章时就不再参考这些备注。")
         }
     }
 
@@ -1045,18 +1045,18 @@ struct NovelWritingContextSheet: View {
             if collaborationMode == .ghostwrite {
                 Section {
                     if let progress = session.ghostwriteProgress {
-                        LabeledContent("相位", value: progress.statusLabel)
-                        LabeledContent("步骤回执") {
+                        LabeledContent("状态", value: progress.statusLabel)
+                        LabeledContent("进度") {
                             Text(progress.boardStepSummary)
                                 .multilineTextAlignment(.trailing)
                         }
-                        LabeledContent("本章合同", value: planStatusLabel)
+                        LabeledContent("本章计划", value: planStatusLabel)
                         LabeledContent(
                             "本轮已收录",
                             value: "\(progress.autoCollectedCandidateIDs.count) 章"
                         )
                         LabeledContent("审稿模型", value: reviewModelLabel)
-                        LabeledContent("下一弧", value: upcomingArcStatusLabel)
+                        LabeledContent("往后几章", value: upcomingArcStatusLabel)
                         if let detail = progress.detailMessage, !detail.isEmpty {
                             let detailIsError = progress.phase == .failed
                                 || (
@@ -1075,17 +1075,17 @@ struct NovelWritingContextSheet: View {
                             }
                         }
                     } else {
-                        LabeledContent("本章合同", value: planStatusLabel)
+                        LabeledContent("本章计划", value: planStatusLabel)
                         LabeledContent("审稿模型", value: reviewModelLabel)
-                        LabeledContent("下一弧", value: upcomingArcStatusLabel)
-                        Text("确认本章合同后可开始代笔。")
+                        LabeledContent("往后几章", value: upcomingArcStatusLabel)
+                        Text("先确认本章计划，再开始代笔。")
                             .font(.footnote)
                             .foregroundStyle(AmberTheme.muted)
                     }
                 } header: {
-                    Text("代笔看板")
+                    Text("代笔进度")
                 } footer: {
-                    Text("只读回执；无 token 收据时不显示成本。")
+                    Text("只读；暂时看不到费用明细。")
                 }
 
                 Section {
@@ -1146,14 +1146,14 @@ struct NovelWritingContextSheet: View {
                         Spacer(minLength: 0)
                     }
                 } header: {
-                    Text("代笔推进")
+                    Text("开始代写")
                 } footer: {
-                    Text("单章有界：收录并同步后暂停；继续前须确认下一章合同。")
+                    Text("写完一章并同步后会停住；下一章要先定好计划再继续。")
                 }
             }
 
             Section {
-                LabeledContent("当前合同", value: planStatusLabel)
+                LabeledContent("计划状态", value: planStatusLabel)
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("与总纲的位置").font(.footnote).foregroundStyle(AmberTheme.muted)
@@ -1214,7 +1214,7 @@ struct NovelWritingContextSheet: View {
                     .contentShape(Rectangle())
                     .disabled(!canEditChapterPlan)
 
-                    Button("确认合同") {
+                    Button("确认计划") {
                         NovelTextInputCommitter.perform {
                             Task { await saveChapterPlan(status: .confirmed) }
                         }
@@ -1239,18 +1239,18 @@ struct NovelWritingContextSheet: View {
                     }
                 }
             } header: {
-                Text("本章合同")
+                Text("本章计划")
             } footer: {
                 Text(
                     collaborationMode == .ghostwrite
-                        ? "代笔写整章前必须确认合同；代笔进行中不可改合同。"
-                        : "共创写整章时可先拟合同；确认后会在整章生成时注入。"
+                        ? "代笔写整章前要先确认计划；代笔进行中不能改。"
+                        : "可以先写好本章计划；确认后写整章时会带上。"
                 )
             }
 
             Section {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("后续几章要点（每行一条）").font(.footnote).foregroundStyle(AmberTheme.muted)
+                    Text("后面几章想往哪走（每行一条）").font(.footnote).foregroundStyle(AmberTheme.muted)
                     TextField("例如：使者身份曝光", text: $upcomingArcBeats, axis: .vertical)
                         .lineLimit(3...10)
                         .disabled(!canEditUpcomingArc)
@@ -1268,7 +1268,7 @@ struct NovelWritingContextSheet: View {
                 }
 
                 HStack(spacing: 12) {
-                    Button("保存下一弧") {
+                    Button("保存") {
                         NovelTextInputCommitter.perform {
                             Task { await saveUpcomingArc() }
                         }
@@ -1293,9 +1293,9 @@ struct NovelWritingContextSheet: View {
                     }
                 }
             } header: {
-                Text("下一弧")
+                Text("往后几章")
             } footer: {
-                Text("有界软方向：最多 \(NovelUpcomingArcRecord.maxBeats) 条；写整章时注入，不替代本章合同。")
+                Text("最多 \(NovelUpcomingArcRecord.maxBeats) 条备注；写整章时会参考，不替代本章计划。")
             }
 
             Section("写作偏好") {
@@ -1354,7 +1354,7 @@ struct NovelWritingContextSheet: View {
     private var modeSectionFooter: String {
         var parts = [collaborationMode.shortSummary]
         if collaborationMode == .ghostwrite {
-            parts.append("可用「代笔推进」自动写整章并验收收录；也可仍人手操作。")
+            parts.append("可用「开始代写」自动写整章并验收收录；也可以继续自己点。")
         }
         return parts.joined(separator: " ")
     }
@@ -1476,10 +1476,10 @@ struct NovelWritingContextSheet: View {
             visibleFacts: planLines(from: planVisibleFacts)
         )
         if saved {
-            planMessage = status == .confirmed ? "合同已确认。" : "草稿已保存。"
+            planMessage = status == .confirmed ? "已确认，可以按这个写。" : "草稿已保存。"
             planMessageIsError = false
         } else {
-            planMessage = workspace.errorMessage ?? "本章合同保存失败。"
+            planMessage = workspace.errorMessage ?? "本章计划保存失败。"
             planMessageIsError = true
         }
     }
@@ -1495,10 +1495,10 @@ struct NovelWritingContextSheet: View {
             planMustNotHappen = ""
             planEndingHook = ""
             planVisibleFacts = ""
-            planMessage = "合同已清除。"
+            planMessage = "计划已清除。"
             planMessageIsError = false
         } else {
-            planMessage = workspace.errorMessage ?? "清除本章合同失败。"
+            planMessage = workspace.errorMessage ?? "清除本章计划失败。"
             planMessageIsError = true
         }
     }
@@ -1508,16 +1508,16 @@ struct NovelWritingContextSheet: View {
         arcMessageIsError = false
         let beats = planLines(from: upcomingArcBeats)
         guard !beats.isEmpty else {
-            arcMessage = "请至少填写一条下一弧要点。"
+            arcMessage = "请至少写一条。"
             arcMessageIsError = true
             return
         }
         let saved = await workspace.upsertUpcomingArc(beats: beats)
         if saved {
-            arcMessage = "下一弧已保存。"
+            arcMessage = "已保存。"
             arcMessageIsError = false
         } else {
-            arcMessage = workspace.errorMessage ?? "下一弧保存失败。"
+            arcMessage = workspace.errorMessage ?? "保存失败。"
             arcMessageIsError = true
         }
     }
@@ -1528,10 +1528,10 @@ struct NovelWritingContextSheet: View {
         let cleared = await workspace.clearUpcomingArc()
         if cleared {
             upcomingArcBeats = ""
-            arcMessage = "下一弧已清除。"
+            arcMessage = "备注已清除。"
             arcMessageIsError = false
         } else {
-            arcMessage = workspace.errorMessage ?? "清除下一弧失败。"
+            arcMessage = workspace.errorMessage ?? "清除失败。"
             arcMessageIsError = true
         }
     }

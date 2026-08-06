@@ -634,7 +634,7 @@ extension NovelSessionActionBlocker {
         case .reloadRequired: "请先重新载入项目"
         case .branchInactive: "分支已不可编辑"
         case .branchNeedsSync: "剧情状态同步未完成"
-        case .chapterPlanRequired: "代笔写整章前请先确认本章合同"
+        case .chapterPlanRequired: "代笔写整章前，请先确认本章计划"
         case .ghostwriteRequirementsMissing: "代笔条件尚未满足"
         case .generationRunning: "请先停止当前生成"
         case .pendingOperation: "有正文操作正在处理"

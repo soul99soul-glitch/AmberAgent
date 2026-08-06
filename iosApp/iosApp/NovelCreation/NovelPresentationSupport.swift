@@ -165,9 +165,9 @@ extension NovelInjectionSelectionReason {
         switch self {
         case .requiredPrompt: "系统指令"
         case .requiredPolishPreference: "润色偏好"
-        case .confirmedChapterPlan: "本章合同"
+        case .confirmedChapterPlan: "本章计划"
         case .recentWrittenHighlights: "近期已写要点"
-        case .upcomingArc: "下一弧"
+        case .upcomingArc: "往后几章"
         case .requiredUserInput: "本次输入"
         case .requiredCurrentState: "当前分支状态"
         case .requiredQuickStartSeed: "快速开始信息"

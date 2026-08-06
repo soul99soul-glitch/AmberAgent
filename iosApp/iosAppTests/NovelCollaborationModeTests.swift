@@ -413,7 +413,7 @@ final class NovelCollaborationModeTests: XCTestCase {
             guard case .invalidInput(let message) = error as? NovelError else {
                 return XCTFail("Expected invalidInput, got \(error)")
             }
-            XCTAssertTrue(message.contains("本章合同"))
+            XCTAssertTrue(message.contains("本章计划"))
         }
 
         document = try NovelReducer.apply(.upsertChapterPlan(NovelUpsertChapterPlanCommand(

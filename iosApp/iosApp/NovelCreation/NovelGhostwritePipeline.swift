@@ -25,14 +25,14 @@ enum NovelGhostwritePauseReason: Equatable, Sendable {
     var displayMessage: String {
         switch self {
         case .userPaused: "已暂停代笔。"
-        case .acceptanceFailed: "本章合同验收未通过，已保留候选。"
+        case .acceptanceFailed: "没按本章计划写过关，已留下稿子。"
         case .obviousRepetition: "检测到明显复读，已暂停自动收录。"
-        case .blockingContinuity: "连续性检查发现严重问题，已暂停自动收录。"
+        case .blockingContinuity: "前后情节有严重问题，已暂停自动收录。"
         case .collectFailed: "自动收录失败，已暂停代笔。"
-        case .syncFailed: "剧情同步未完成，代笔已暂停，不会开始下一章。"
+        case .syncFailed: "剧情同步还没完成，代笔已暂停，不会开始下一章。"
         case .incompleteCandidate: "本章正文不完整，已暂停代笔。"
-        case .planMismatch: "候选与当前合同不一致，已暂停代笔。"
-        case .chapterCompleted: "本章已收录并同步。请确认下一章合同后再继续。"
+        case .planMismatch: "这篇稿和当前计划对不上，已暂停代笔。"
+        case .chapterCompleted: "本章已收录并同步。请先定好下一章计划再继续。"
         case .cancelled: "代笔已取消。"
         }
     }
@@ -42,7 +42,8 @@ enum NovelGhostwritePauseReason: Equatable, Sendable {
             switch novel {
             case .invalidInput(let message) where message.contains("不完整"):
                 return .incompleteCandidate
-            case .invalidInput(let message) where message.contains("合同"):
+            case .invalidInput(let message)
+                where message.contains("合同") || message.contains("计划"):
                 return .planMismatch
             default:
                 break
@@ -85,7 +86,7 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
     var statusLabel: String {
         switch phase {
         case .writing: "代笔中 · 写整章"
-        case .accepting: "代笔中 · 验收合同"
+        case .accepting: "代笔中 · 核对计划"
         case .collecting: "代笔中 · 自动收录"
         case .syncing: "代笔中 · 剧情同步"
         case .paused: "代笔已暂停"

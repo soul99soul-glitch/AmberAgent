@@ -3034,7 +3034,7 @@ extension NovelSessionViewModel {
                     pauseGhostwritePipeline(
                         binding: expectedBinding,
                         reason: .collectFailed,
-                        detail: "本章已收录，但未能清除合同。请手动清除后再继续。",
+                        detail: "本章已收录，但未能清除计划。请手动清除后再继续。",
                         candidateID: alreadyCollected.id
                     )
                     return
@@ -3049,7 +3049,7 @@ extension NovelSessionViewModel {
                     pauseGhostwritePipeline(
                         binding: expectedBinding,
                         reason: .syncFailed,
-                        detail: "本章已收录，合同已消费；同步完成后请确认下一章合同再继续。",
+                        detail: "本章已收录，本章计划已用完；同步完成后请先定好下一章计划再继续。",
                         candidateID: alreadyCollected.id
                     )
                     return
@@ -3156,7 +3156,7 @@ extension NovelSessionViewModel {
                 pauseGhostwritePipeline(
                     binding: expectedBinding,
                     reason: .collectFailed,
-                    detail: "本章已收录，但未能清除合同。请手动清除后再继续。",
+                    detail: "本章已收录，但未能清除计划。请手动清除后再继续。",
                     candidateID: candidateID
                 )
                 return
@@ -3171,7 +3171,7 @@ extension NovelSessionViewModel {
             guard synced else {
                 let syncDetail = [
                     workspace.errorMessage,
-                    "本章已收录，合同已消费；同步完成后请确认下一章合同再继续。",
+                    "本章已收录，本章计划已用完；同步完成后请先定好下一章计划再继续。",
                 ]
                 .compactMap { $0 }
                 .joined(separator: " ")
@@ -3188,9 +3188,9 @@ extension NovelSessionViewModel {
             let completionDetail: String
             if highlightCount > 0 {
                 completionDetail =
-                    "本章已收录并同步。已记入 \(highlightCount) 条近期要点供下一章防复读。请确认下一章合同后再继续。"
+                    "本章已收录并同步。已记入 \(highlightCount) 条近期要点，方便下一章少复读。请先定好下一章计划再继续。"
             } else {
-                completionDetail = "本章已收录并同步。请确认下一章合同后再继续。"
+                completionDetail = "本章已收录并同步。请先定好下一章计划再继续。"
             }
             mutateGhostwriteProgress(binding: expectedBinding) {
                 $0.phase = .waitingUser
@@ -3275,7 +3275,7 @@ extension NovelSessionViewModel {
             kind: .prose,
             mode: .writeProse,
             granularity: .wholeChapter,
-            userText: "请按本章合同撰写完整一章正文。",
+            userText: "请按本章计划写完整一章正文。",
             sourceChapterVersionID: nil,
             askUserResponse: nil,
             injectionOverrides: .none,
@@ -3346,7 +3346,7 @@ extension NovelSessionViewModel {
         guard let candidate = candidate(id: candidateID),
               candidate.status == .available,
               candidate.chapterPlanDigest == plan.contentDigest else {
-            operationErrorMessage = "候选与当前合同不一致，无法自动收录。"
+            operationErrorMessage = "这篇稿和当前计划对不上，无法自动收录。"
             return false
         }
         if ghostwriteProgressStorage?.autoCollectedCandidateIDs.contains(candidateID) == true {
@@ -3412,7 +3412,7 @@ extension NovelSessionViewModel {
         guard let plan = workspace.projectSnapshot?.confirmedChapterPlan(
             for: expectedBinding.branchID
         ) else {
-            throw NovelError.invalidInput("代笔需要已确认的本章合同。")
+            throw NovelError.invalidInput("代笔需要已确认的本章计划。")
         }
         return plan
     }

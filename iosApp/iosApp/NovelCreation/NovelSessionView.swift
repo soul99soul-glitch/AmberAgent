@@ -1258,7 +1258,7 @@ struct NovelSessionView: View {
            viewModel.granularity == .wholeChapter,
            let branchID = viewModel.binding?.branchID,
            workspace.projectSnapshot?.confirmedChapterPlan(for: branchID) == nil {
-            return "代笔写整章前，请先在标题面板确认本章合同"
+            return "代笔写整章前，请先在标题面板确认本章计划"
         }
         if viewModel.needsSync {
             return "请先同步剧情状态，再写正文"

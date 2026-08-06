@@ -74,7 +74,7 @@ enum NovelCollaborationMode: String, Codable, CaseIterable, Sendable {
     var shortSummary: String {
         switch self {
         case .cocreation: "一起商量，你点收录才进书"
-        case .ghostwrite: "先定规矩再按章推进；验收通过后自动收录"
+        case .ghostwrite: "先定好这一章要写什么，再按章代写；过关后自动进书"
         }
     }
 }
@@ -176,7 +176,7 @@ enum NovelGhostwriteReadinessIssue: String, Equatable, Hashable, Sendable, CaseI
         case .branchNeedsSync: "当前分支资料待同步"
         case .pendingOperations: "仍有未完成的正文或同步操作"
         case .activeRun: "当前还有进行中的生成"
-        case .missingChapterPlan: "还没有确认的本章合同"
+        case .missingChapterPlan: "还没有确认的本章计划"
         }
     }
 }
@@ -288,7 +288,7 @@ struct NovelQuickStartSeed: Codable, Equatable, Sendable {
     let coreIdea: String
 }
 
-/// 分支级「下一弧」有界要点：软上下文，跨多章保留，直到用户改写或清除。
+/// 分支级「往后几章」有界备注：软上下文，跨多章保留，直到用户改写或清除。
 struct NovelUpcomingArcRecord: Codable, Equatable, Sendable {
     static let maxBeats = 8
     static let maxBeatCharacterCount = 160

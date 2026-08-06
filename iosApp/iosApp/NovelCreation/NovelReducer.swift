@@ -743,7 +743,7 @@ enum NovelReducer {
         }
         let beats = NovelUpcomingArcRecord.normalizedBeats(command.beats)
         guard !beats.isEmpty else {
-            throw NovelError.invalidInput("下一弧至少需要一条要点。")
+            throw NovelError.invalidInput("往后几章至少需要一条备注。")
         }
         let record = NovelUpcomingArcRecord(
             branchID: command.branchID,
@@ -790,7 +790,7 @@ enum NovelReducer {
             throw NovelError.branchNotFound(command.branchID)
         }
         guard document.upcomingArc(for: command.branchID) != nil else {
-            throw NovelError.invalidInput("当前分支没有下一弧可清除。")
+            throw NovelError.invalidInput("当前分支没有往后几章的备注可清除。")
         }
         var next = document
         next.upcomingArcs.removeAll { $0.branchID == command.branchID }

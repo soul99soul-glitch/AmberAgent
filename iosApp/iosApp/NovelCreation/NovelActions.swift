@@ -1670,7 +1670,7 @@ protocol NovelCreation: Sendable {
         branchID: NovelBranchID,
         candidateID: NovelCandidateID
     ) async throws -> NovelContinuityAuditReport
-    /// 代笔验收：用剧情同步模型核对候选是否满足已确认本章合同。结果不写进项目文档。
+    /// 代笔验收：用审稿模型核对候选是否满足已确认本章计划。结果不写进项目文档。
     func acceptChapterPlan(
         projectID: NovelProjectID,
         branchID: NovelBranchID,

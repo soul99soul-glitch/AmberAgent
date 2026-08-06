@@ -22,7 +22,7 @@ extension DefaultNovelCreation {
             throw NovelError.projectBusy(projectID)
         }
         guard let plan = loaded.document.confirmedChapterPlan(for: branch.id) else {
-            throw NovelError.invalidInput("代笔验收需要已确认的本章合同。")
+            throw NovelError.invalidInput("代笔验收需要已确认的本章计划。")
         }
         guard let candidate = loaded.document.candidates.first(where: {
             $0.id == candidateID &&
@@ -36,7 +36,7 @@ extension DefaultNovelCreation {
         }
         guard let boundDigest = candidate.chapterPlanDigest,
               boundDigest == plan.contentDigest else {
-            throw NovelError.invalidInput("候选未绑定当前确认合同，无法自动验收。")
+            throw NovelError.invalidInput("这篇稿没有绑定当前确认的计划，无法自动验收。")
         }
         let trimmed = candidate.content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
@@ -70,7 +70,7 @@ extension DefaultNovelCreation {
         guard case .chapterPlanAcceptance(let result) = evidence.output else {
             throw NovelStructuredModelExecutionFailure(
                 code: "invalid_structured_output",
-                message: "本章合同验收返回了错误的结构。",
+                message: "本章计划验收返回了错误的结构。",
                 isRetryable: true
             )
         }

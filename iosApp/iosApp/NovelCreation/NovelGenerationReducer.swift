@@ -988,7 +988,7 @@ private extension NovelGenerationReducer {
                request.granularity == .wholeChapter,
                document.confirmedChapterPlan(for: branch.id) == nil {
                 throw NovelError.invalidInput(
-                    "代笔模式下写整章前需要先确认本章合同。"
+                    "代笔模式下写整章前，需要先确认本章计划。"
                 )
             }
         case .regenerate:

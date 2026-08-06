@@ -27,7 +27,7 @@ struct NovelCreationSettingsView: View {
             } header: {
                 Text("默认模型")
             } footer: {
-                Text("创作偏长文与文风；剧情同步偏稳定与结构化输出；审稿用于合同验收与连续性检查。")
+                Text("创作偏长文与文风；剧情同步偏稳定与结构化输出；审稿用来核对是否按计划写、前后是否打架。")
             }
 
             if let viewModel {
@@ -159,7 +159,7 @@ extension NovelModelRole: Identifiable {
         switch self {
         case .creation: "优先选择擅长长文与创意写作的模型"
         case .stateSync: "优先选择稳定、便宜、结构化输出可靠的模型"
-        case .review: "用于代笔合同验收与连续性检查"
+        case .review: "核对是否按计划写、查前后是否打架"
         }
     }
 
