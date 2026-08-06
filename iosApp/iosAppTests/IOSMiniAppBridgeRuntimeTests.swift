@@ -22,6 +22,19 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         XCTAssertTrue(sandboxed.contains("Content-Security-Policy"))
     }
 
+    func testRunnerCSPOnlyAllowsProxiedImagesWhenExternalImagesIsEnabled() {
+        let html = "<!doctype html><html><body><img src='https://example.com/image.png'></body></html>"
+
+        let blocked = IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(html)
+        let allowed = IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(html, allowExternalImages: true)
+
+        XCTAssertTrue(blocked.contains("img-src data: blob:;"))
+        XCTAssertTrue(allowed.contains("img-src data: blob: amber-miniapp-image:;"))
+        XCTAssertFalse(allowed.contains("img-src data: blob: https:;"))
+        XCTAssertTrue(allowed.contains("connect-src 'none'"), "External images must not enable browser fetch.")
+        XCTAssertTrue(IOSMiniAppImageSchemeHandler.bootstrapScript.contains("encodeURIComponent"))
+    }
+
     func testAppInfoWorksWithoutGrant() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: []))
@@ -114,7 +127,8 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
             aiGenerateHandler: { _ in
                 callCount += 1
                 return .object(["text": .string("provider-owned auth")])
-            }
+            },
+            sensitiveConfirmationHandler: { _, _ in true }
         )
 
         let noLegacyKey = await noLegacyKeyRuntime.dispatch(method: "ai.generate", params: ["prompt": "hi"])
@@ -147,7 +161,8 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
                     "text": .string("mock response"),
                     "model": .string("mock-model"),
                 ])
-            }
+            },
+            sensitiveConfirmationHandler: { _, _ in true }
         )
 
         let result = await runtime.dispatch(
@@ -192,12 +207,163 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
             params: [
                 "url": "https://example.com/upload",
                 "method": "POST",
-                "body": String(repeating: "x", count: 64 * 1_024 + 1),
+                "body": String(repeating: "x", count: 128 * 1_024 + 1),
             ]
         )
 
         XCTAssertEqual(result.errorMessage, "Amber.fetch request body is too large.")
         XCTAssertTrue(transport.requests.isEmpty)
+    }
+
+    func testAdvancedSystemMethodsUsePolicyHandlersAndEmitSensorEvents() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: [
+            "launch",
+            "clipboard.read",
+            "location",
+            "sensor",
+        ]))
+        let target = try repo.saveGenerated(output(permissions: []))
+        for permission in app.permissions {
+            try repo.setGrant(appId: app.id, permission: permission, decision: .allow)
+        }
+
+        var launchedAppId: String?
+        var requestedAccuracy: String?
+        var sensorType: String?
+        var sensorInterval: Int?
+        var unsubscribed: [String] = []
+        var emittedType: String?
+        var emittedSubscriptionId: String?
+        var emittedPayload: IOSMiniAppJSONValue?
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(
+                launchEnabled: true,
+                sensorEnabled: true,
+                locationEnabled: true,
+                clipboardReadEnabled: true
+            ),
+            launchHandler: { launchedAppId = $0 },
+            clipboardReadHandler: { "clipboard value" },
+            locationHandler: { accuracy in
+                requestedAccuracy = accuracy
+                return .object([
+                    "latitude": .number(31.2),
+                    "longitude": .number(121.5),
+                    "accuracy": .number(25),
+                ])
+            },
+            sensorSubscribeHandler: { _, type, intervalMs, onEvent in
+                sensorType = type
+                sensorInterval = intervalMs
+                onEvent(.object(["x": .number(1), "y": .number(2), "z": .number(3)]))
+            },
+            sensorUnsubscribeHandler: { unsubscribed.append($0) },
+            sensitiveConfirmationHandler: { _, _ in true },
+            eventEmitter: { type, subscriptionId, payload in
+                emittedType = type
+                emittedSubscriptionId = subscriptionId
+                emittedPayload = payload
+            }
+        )
+
+        let launchResult = await runtime.dispatch(method: "launch", params: ["appId": target.id])
+        XCTAssertEqual(launchResult, .success(.bool(true)))
+        XCTAssertEqual(launchedAppId, target.id)
+        let clipboardResult = await runtime.dispatch(method: "clipboard.read", params: [:])
+        XCTAssertEqual(clipboardResult, .success(.string("clipboard value")))
+        let locationResult = await runtime.dispatch(method: "location.getCurrent", params: ["accuracy": "fine"])
+        XCTAssertEqual(locationResult, .success(.object([
+            "latitude": .number(31.2),
+            "longitude": .number(121.5),
+            "accuracy": .number(25),
+        ])))
+        XCTAssertEqual(requestedAccuracy, "fine")
+
+        let sensor = await runtime.dispatch(
+            method: "sensor.subscribe",
+            params: ["type": "gyroscope", "intervalMs": 10]
+        )
+        guard case .success(.object(let sensorObject)) = sensor,
+              let subscriptionId = sensorObject["subscriptionId"]?.stringValue else {
+            return XCTFail("expected sensor subscription")
+        }
+        XCTAssertEqual(sensorType, "gyroscope")
+        XCTAssertEqual(sensorInterval, 250)
+        XCTAssertEqual(emittedType, "sensor")
+        XCTAssertEqual(emittedSubscriptionId, subscriptionId)
+        XCTAssertEqual(emittedPayload, .object(["x": .number(1), "y": .number(2), "z": .number(3)]))
+
+        try repo.setGrant(appId: app.id, permission: "sensor", decision: .deny)
+        let unsubscribeResult = await runtime.dispatch(
+            method: "sensor.unsubscribe",
+            params: ["subscriptionId": subscriptionId]
+        )
+        XCTAssertEqual(unsubscribeResult, .success(.bool(true)))
+        XCTAssertEqual(unsubscribed, [subscriptionId])
+
+        let methods = Set(repo.auditLogs(appId: app.id).map(\.method))
+        XCTAssertTrue(methods.isSuperset(of: ["launch", "clipboard.read", "location.getCurrent", "sensor.subscribe"]))
+    }
+
+    func testAdvancedSystemMethodPolicyFailsClosedBeforeHandlers() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: ["location", "clipboard.read"]))
+        try repo.setGrant(appId: app.id, permission: "location", decision: .allow)
+        try repo.setGrant(appId: app.id, permission: "clipboard.read", decision: .allow)
+        var handlerCalls = 0
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(locationEnabled: false, clipboardReadEnabled: false),
+            clipboardReadHandler: {
+                handlerCalls += 1
+                return "should not run"
+            },
+            locationHandler: { _ in
+                handlerCalls += 1
+                return .null
+            }
+        )
+
+        let locationResult = await runtime.dispatch(method: "location.getCurrent", params: [:])
+        XCTAssertEqual(locationResult.errorMessage, "Permission 'location' is disabled in MiniApp settings.")
+        let clipboardResult = await runtime.dispatch(method: "clipboard.read", params: [:])
+        XCTAssertEqual(clipboardResult.errorMessage, "Permission 'clipboard.read' is disabled in MiniApp settings.")
+        XCTAssertEqual(handlerCalls, 0)
+    }
+
+    func testSensorSubscriptionIsRolledBackWhenAuditPersistenceFails() async throws {
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: ["sensor"]))
+        try repo.setGrant(appId: app.id, permission: "sensor", decision: .allow)
+        let storeDirectory = root.appendingPathComponent("miniapps", isDirectory: true)
+        try FileManager.default.removeItem(at: storeDirectory)
+        try Data("block-directory-recreation".utf8).write(to: storeDirectory)
+
+        var subscribedId: String?
+        var unsubscribedIds: [String] = []
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            policy: IOSMiniAppBridgePolicy(sensorEnabled: true),
+            sensorSubscribeHandler: { subscriptionId, _, _, _ in
+                subscribedId = subscriptionId
+            },
+            sensorUnsubscribeHandler: { unsubscribedIds.append($0) },
+            sensitiveConfirmationHandler: { _, _ in true }
+        )
+
+        let result = await runtime.dispatch(
+            method: "sensor.subscribe",
+            params: ["type": "accelerometer", "intervalMs": 500]
+        )
+
+        XCTAssertNotNil(result.errorMessage)
+        XCTAssertEqual(unsubscribedIds, [try XCTUnwrap(subscribedId)])
     }
 
     func testHostMethodsCheckPolicyHandlerThenAudit() async throws {
@@ -307,10 +473,52 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
 
         XCTAssertTrue(owner.close())
         XCTAssertFalse(owner.close())
-        let allowed = try await resultTask.value
-        XCTAssertFalse(allowed)
+        do {
+            _ = try await resultTask.value
+            XCTFail("closed confirmation must fail instead of looking like an explicit denial")
+        } catch {}
         XCTAssertFalse(owner.hasPendingRequest)
         XCTAssertNil(owner.pendingPrompt)
+
+        owner.reopen()
+        let reopened = Task { @MainActor in
+            try await owner.requestSystemAction(title: "Reopened", message: "Confirm")
+        }
+        while !owner.hasPendingRequest {
+            await Task.yield()
+        }
+        XCTAssertTrue(owner.resolve(allow: true))
+        let reopenedAllowed = try await reopened.value
+        XCTAssertTrue(reopenedAllowed)
+    }
+
+    func testHostConfirmationCloseRejectsQueuedRequestsWithoutPresentingAgain() async throws {
+        let owner = MiniAppHostConfirmationOwner()
+        let request = IOSMiniAppHostRequest.getConversationContext(.init(maxChars: 1_000))
+        let first = Task { @MainActor in
+            try await owner.request(appTitle: "First", request: request)
+        }
+        while !owner.hasPendingRequest {
+            await Task.yield()
+        }
+        let queued = Task { @MainActor in
+            try await owner.request(appTitle: "Queued", request: request)
+        }
+        await Task.yield()
+
+        XCTAssertTrue(owner.close())
+        owner.reopen()
+        do {
+            _ = try await first.value
+            XCTFail("closed confirmation must fail instead of looking like an explicit denial")
+        } catch {}
+        do {
+            _ = try await queued.value
+            XCTFail("queued request should be rejected after the runner closes")
+        } catch {
+            XCTAssertNil(owner.pendingPrompt)
+            XCTAssertFalse(owner.hasPendingRequest)
+        }
     }
 
     func testPermissionGrantCoalescesSamePermissionAndSerializesDifferentOnes() async throws {
@@ -349,6 +557,31 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         XCTAssertNil(owner.pendingPrompt)
     }
 
+    func testClosingRunnerDuringFirstUseGrantDoesNotPersistDenial() async throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let app = try repo.saveGenerated(output(permissions: ["storage"]))
+        let owner = MiniAppHostConfirmationOwner()
+        let runtime = IOSMiniAppBridgeRuntime(
+            appId: app.id,
+            repository: repo,
+            grantHandler: { permission in
+                try await owner.requestPermission(appTitle: "App", permission: permission)
+            }
+        )
+        let request = Task { @MainActor in
+            await runtime.dispatch(method: "storage.set", params: ["key": "k", "value": "v"])
+        }
+        while !owner.hasPendingRequest {
+            await Task.yield()
+        }
+
+        XCTAssertTrue(owner.close())
+        let result = await request.value
+        XCTAssertNotNil(result.errorMessage)
+        XCTAssertNil(repo.grantDecision(appId: app.id, permission: "storage"))
+        XCTAssertNil(try repo.storageGet(appId: app.id, key: "k"))
+    }
+
     func testRuntimeCloseCancelsInFlightBridgeTaskExactlyOnce() async throws {
         let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
         let app = try repo.saveGenerated(output(permissions: ["ai.generate"]))
@@ -367,7 +600,8 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
                 } onCancel: {
                     cancellationProbe.increment()
                 }
-            }
+            },
+            sensitiveConfirmationHandler: { _, _ in true }
         )
         let dispatchTask = Task { @MainActor in
             await runtime.dispatch(method: "ai.generate", params: ["prompt": "wait"])

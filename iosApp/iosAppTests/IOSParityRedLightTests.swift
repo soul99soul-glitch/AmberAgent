@@ -1540,6 +1540,15 @@ final class IOSParityRedLightTests: XCTestCase {
             ),
             "recovery_pending"
         )
+        XCTAssertEqual(
+            IOSChatBackgroundGenerationCoordinator.backgroundTerminalStatusForTesting(
+                didSave: true,
+                singleToolFailureReason: nil,
+                guardStopped: false,
+                miniAppFailed: true
+            ),
+            "failed"
+        )
     }
 
     func testBackgroundSystemTaskCompletionCanOnlyBeClaimedOnce() {
@@ -2348,10 +2357,13 @@ final class IOSParityRedLightTests: XCTestCase {
         let foregroundTail = foreground[foregroundStart.lowerBound...].prefix(3_000)
         let foregroundPersist = try XCTUnwrap(foregroundTail.range(of: "let didPersist = await bindings.persistMessages"))
         let foregroundRollback = try XCTUnwrap(foregroundTail.range(of: "miniAppApplication.rollback()"))
+        let foregroundCommit = try XCTUnwrap(foregroundTail.range(of: "miniAppApplication.commit()"))
         let foregroundWorkspace = try XCTUnwrap(
             foregroundTail.range(of: "miniAppApplication?.syncWorkspaceAfterConversationPersistence()")
         )
         XCTAssertLessThan(foregroundPersist.lowerBound, foregroundRollback.lowerBound)
+        XCTAssertLessThan(foregroundPersist.lowerBound, foregroundCommit.lowerBound)
+        XCTAssertLessThan(foregroundCommit.lowerBound, foregroundWorkspace.lowerBound)
         XCTAssertLessThan(foregroundPersist.lowerBound, foregroundWorkspace.lowerBound)
         XCTAssertTrue(foregroundTail.contains("bindings.setMessages(miniAppApplication.rollbackMessages)"))
 
@@ -2359,11 +2371,39 @@ final class IOSParityRedLightTests: XCTestCase {
         let backgroundTail = background[backgroundStart.lowerBound...].prefix(3_500)
         let backgroundPersist = try XCTUnwrap(backgroundTail.range(of: "let didSave: Bool"))
         let backgroundRollback = try XCTUnwrap(backgroundTail.range(of: "miniAppApplication.rollback()"))
+        let backgroundCommit = try XCTUnwrap(backgroundTail.range(of: "miniAppApplication.commit()"))
         let backgroundWorkspace = try XCTUnwrap(
             backgroundTail.range(of: "miniAppApplication?.syncWorkspaceAfterConversationPersistence()")
         )
         XCTAssertLessThan(backgroundPersist.lowerBound, backgroundRollback.lowerBound)
+        XCTAssertLessThan(backgroundPersist.lowerBound, backgroundCommit.lowerBound)
+        XCTAssertLessThan(backgroundCommit.lowerBound, backgroundWorkspace.lowerBound)
         XCTAssertLessThan(backgroundPersist.lowerBound, backgroundWorkspace.lowerBound)
+    }
+
+    func testMiniAppRunnerShowsTheAppBeforeDeveloperManagement() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
+        let source = try String(
+            contentsOf: appDirectory.appendingPathComponent("MiniAppRunnerView.swift"),
+            encoding: .utf8
+        )
+        let bodyStart = try XCTUnwrap(source.range(of: "var body: some View"))
+        let chromeStart = try XCTUnwrap(source.range(of: "private var runnerChrome"))
+        let body = source[bodyStart.lowerBound..<chromeStart.lowerBound]
+
+        XCTAssertTrue(body.contains("runnerSurface(app)"))
+        XCTAssertTrue(body.contains(".sheet(item: $presentedSheet)"))
+        XCTAssertFalse(body.contains("metadataSection(app)"))
+        XCTAssertFalse(body.contains("sourceSection(app)"))
+
+        let runnerStart = try XCTUnwrap(source.range(of: "private func runnerSurface"))
+        XCTAssertTrue(source[runnerStart.lowerBound...].prefix(3_000).contains("MiniAppRunnerWebView("))
+        XCTAssertTrue(source.contains("private var managementSheet"))
+        XCTAssertTrue(source.contains("sourceSection(app)"))
+        XCTAssertTrue(source.contains("chatViewModel.inputText = request.text"))
+        XCTAssertTrue(source.contains("requestSystemAction(title: title, message: message)"))
+        XCTAssertTrue(source.contains("MiniAppRunnerWebViewIdentity"))
     }
 
     // MARK: - helpers / probe types

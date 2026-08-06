@@ -975,6 +975,14 @@ final class IOSCouncilRoomRunner {
         return taskStore.tasks.first(where: { $0.id == taskId })?.status
     }
 
+    /// Returns the same durable record owned by this runner's injected store.
+    /// Home and runtime projections must not reach around an injected runner to
+    /// read the process-global store, or tests/custom owners can observe another task.
+    func taskRecord(taskId: String?) -> IOSAdvancedTaskRecord? {
+        guard let taskId else { return nil }
+        return taskStore.tasks.first(where: { $0.id == taskId })
+    }
+
     /// 由 ViewModel 在取消/系统执行权到期时写入任务终态；runner 本身仍只负责
     /// 取消 provider，避免把页面生命周期和 provider 流程混成第二套状态机。
     func markActiveTaskTerminal(

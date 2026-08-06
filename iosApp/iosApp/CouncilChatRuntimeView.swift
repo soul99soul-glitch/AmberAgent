@@ -1467,6 +1467,14 @@ enum CouncilRuntimeSheet: Identifiable {
     }
 }
 
+struct CouncilHomeResumeContext: Equatable {
+    let id: String
+    let title: String
+    let status: IOSAdvancedTaskStatus
+    let updatedAt: Date
+    let canContinue: Bool
+}
+
 @MainActor
 @Observable
 final class CouncilChatViewModel {
@@ -1504,9 +1512,9 @@ final class CouncilChatViewModel {
     /// 后台期间等讨论跑完、跑完就还执行权的那个任务。
     @ObservationIgnored private var keepAliveReleaseTask: Task<Void, Never>?
     @ObservationIgnored private var activeDiscussionID: UUID?
-    @ObservationIgnored private var currentObjective = ""
-    @ObservationIgnored private var currentFinalTopic = ""
-    @ObservationIgnored private var currentTaskId: String?
+    private var currentObjective = ""
+    private var currentFinalTopic = ""
+    private var currentTaskId: String?
     @ObservationIgnored private var pendingObjective = ""
     @ObservationIgnored private var pendingSourceMaterials: String?
     @ObservationIgnored private var pendingResearchObjective: String?
@@ -1711,6 +1719,47 @@ final class CouncilChatViewModel {
     /// 当前若处于只读重放,返回被重放那场的 taskId(供历史列表高亮),否则 nil。
     var activeReplayTaskId: String? {
         isReplay ? currentTaskId : nil
+    }
+
+    /// 首页只读投影当前房间；历史归档不参与，避免点“继续”后落到另一场议会。
+    var homeResumeContext: CouncilHomeResumeContext? {
+        guard !isReplay,
+              let currentTaskId,
+              archiveStore.load(taskId: currentTaskId) != nil,
+              let task = runner.taskRecord(taskId: currentTaskId) else {
+            return nil
+        }
+
+        let effectiveStatus: IOSAdvancedTaskStatus
+        if task.status == .completed,
+           let rawStatus = task.metadata["continuation_status"],
+           let continuationStatus = IOSAdvancedTaskStatus(rawValue: rawStatus) {
+            switch continuationStatus {
+            case .failed, .cancelled, .timedOut, .interrupted:
+                effectiveStatus = continuationStatus
+            case .queued, .running, .approvalRequired, .completed:
+                effectiveStatus = task.status
+            }
+        } else {
+            effectiveStatus = task.status
+        }
+        let canContinue = canContinueCurrentCouncil
+        switch effectiveStatus {
+        case .queued, .running, .approvalRequired:
+            break
+        case .failed, .cancelled, .timedOut, .interrupted:
+            guard canContinue else { return nil }
+        case .completed:
+            return nil
+        }
+
+        return CouncilHomeResumeContext(
+            id: task.id,
+            title: currentObjective.trimmedNilIfBlank ?? task.title,
+            status: effectiveStatus,
+            updatedAt: task.updatedAt,
+            canContinue: canContinue
+        )
     }
 
     func recoverInterruptedTasks(_ taskIds: [String]) {
@@ -3327,7 +3376,8 @@ final class CouncilRoomArchiveStore {
         let url = fileURL(for: taskId)
         guard fileManager.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
-              let room = try? decoder.decode(CouncilPersistedRoom.self, from: data) else {
+              let room = try? decoder.decode(CouncilPersistedRoom.self, from: data),
+              room.taskId == taskId else {
             return nil
         }
         return room

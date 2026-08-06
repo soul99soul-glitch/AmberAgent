@@ -332,12 +332,22 @@ struct IOSMiniAppOutputParser {
     约束：只生成单文件 HTML；不要使用 script src、iframe、form、eval、new Function、import()、XMLHttpRequest、WebSocket、localStorage、sessionStorage、geolocation。
     图片允许 data:image/... 或 https:// 图片 URL；不要使用 http://、相对路径、file/content/blob URL。外链图片必须声明 externalImages 权限。
     网络通过 await Amber.fetch({ url, method, headers, body, responseType }) 或 fetch("https://...")，必须声明 network 权限；fetch 会被安全桥接到 Amber.fetch。
-    搜索只能通过 await Amber.search({ query, limit })，必须声明 search 权限。
-    剪贴板写入只能用 await Amber.clipboard.copy(text)，必须声明 clipboard.copy。
+    搜索只能通过 await Amber.search({ query, limit })，必须声明 search 权限；返回值为 {items:[{title,url,snippet,source,publishedAt?}]}。
+    剪贴板写入只能用 await Amber.clipboard.copy(text)，必须声明 clipboard.copy；读取只能用 await Amber.clipboard.read()，必须声明 clipboard.read 且会弹确认。
     持久化用 await Amber.storage.get/set/remove，提示用 await Amber.toast，主题用 await Amber.host.getTheme。
-    AI 只能通过 await Amber.ai.generate({prompt, system, maxOutputChars, temperature})，必须声明 ai.generate，且会弹确认。
-    如做新闻、阅读、列表类小应用，更新按钮可以调用 Amber.search 或 Amber.fetch 获取新内容；必须支持纵向滚动，不要把 body 固定成 overflow:hidden，除非用户明确要求全屏游戏/计时器。
-    为避免 JSON 被截断：HTML 尽量紧凑，目标控制在 200KB 内；不要生成大型静态 JSON 数据集、长篇文章库、base64 大图或重复模板。
+    宿主上下文只能通过 await Amber.host.getConversationContext({mode:"summary", maxChars:8000}) 读取最小上下文，必须声明 host.context；不要假设能拿到完整聊天历史。
+    写回宿主只能通过 await Amber.host.sendToConversation({text, mode:"draft"}) 或 await Amber.host.createArtifact({title,type,content})，必须声明对应权限，且会弹确认。
+    AI 只能通过 await Amber.ai.generate({prompt, system, maxOutputChars, temperature})，必须声明 ai.generate，且会弹确认和较宽松的每日限额。
+    跨组件数据用 await Amber.sharedStore.get/set/remove({namespace,key,value})，必须声明 sharedStore；默认只能使用自身 appId namespace。
+    事件用 await Amber.eventBus.subscribe({namespace,topic}, handler) 和 await Amber.eventBus.publish({namespace,topic,payload})，必须声明 eventBus；只在 Runner 生命周期内有效。
+    打开其它小应用用 await Amber.launch({appId})，必须声明 launch，不允许 URL。
+    定位用 await Amber.location.getCurrent({accuracy:"coarse"})，传感器用 await Amber.sensor.subscribe({type:"accelerometer|gyroscope", intervalMs:500}, handler)，都必须声明权限且会弹确认。常见别名 gyro / accel 也会映射到传感器；iOS 不提供环境光传感器数据。
+    如做新闻、阅读、列表类小应用，更新按钮可以调用 Amber.search 或 Amber.fetch 获取新内容；如果未声明对应权限，就只能更新本地状态或演示数据。
+    新闻、阅读、列表类小应用必须支持纵向滚动；不要把 body 固定成 overflow:hidden 或只能显示一屏，除非用户明确要求全屏游戏/计时器类工具。
+    移动端可访问性是强制契约：所有可点击控件的可触区域至少 44×44 CSS px；使用 system-ui/-apple-system 和可缩放的相对字号；在 320px 宽度下必须自动换行且不得横向溢出。
+    HTML 必须设置 lang；图标按钮必须有可访问名称（文本、aria-label 或关联 label）；键盘焦点清晰可见；颜色不能是唯一状态提示；支持 prefers-color-scheme，并尊重 prefers-reduced-motion。
+    为避免 JSON 被截断：HTML 尽量紧凑，目标控制在 200KB 内；不要生成大型静态 JSON 数据集、长篇文章库、base64 大图或重复模板。杂志/新闻类只保留少量 seed 数据，其余通过 fetch/Amber.fetch 或 Amber.search 刷新。
+    生成后自检要求：最终输出 JSON 前你必须自己按“能否解析、能否在 Amber MiniApp 沙箱运行、权限是否齐全、是否有被禁止 API、移动端是否可滚动/可点击”做一轮自检；不要输出自检过程，只输出修正后的最终单个 JSON。
     category/permissions 可省略（默认 tool / []）。最终只输出一个可解析 JSON 对象。
     """
 
@@ -534,7 +544,7 @@ enum IOSMiniAppFixtures {
     )
 
     static let sampleHtml = """
-    <!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;padding:14px;color:#1f2937}button{font-size:15px;padding:8px 12px;margin:4px;border:0;border-radius:9px;background:#2563eb;color:white}pre{white-space:pre-wrap;background:#f3f4f6;padding:10px;border-radius:10px}</style></head>
+    <!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><style>:root{--bg:#fff;--fg:#1f2937;--sub:#f3f4f6;--primary:#2563eb}*{box-sizing:border-box}body{margin:0;padding:14px;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-size:1rem;line-height:1.45;overflow-wrap:anywhere}button{min-width:44px;min-height:44px;font:inherit;font-weight:600;padding:10px 12px;margin:4px;border:0;border-radius:9px;background:var(--primary);color:#fff}button:focus-visible{outline:3px solid currentColor;outline-offset:2px}pre{white-space:pre-wrap;background:var(--sub);padding:10px;border-radius:10px}@media(prefers-color-scheme:dark){:root{--bg:#111216;--fg:#f4f1ed;--sub:#24262d;--primary:#6ea8ff}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}</style></head>
     <body>
     <h3>Amber 小应用示例</h3>
     <p>点击按钮试用小应用提供的本机能力。</p>

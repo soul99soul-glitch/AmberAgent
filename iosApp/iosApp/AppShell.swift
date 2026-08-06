@@ -57,6 +57,7 @@ struct AppShell: View {
             sharedSettings: sharedSettingsStore,
             localToolExecutor: localToolExecutor
         )
+        chatViewModel.conversationStore = conversationStore
         let councilChatViewModel = CouncilChatViewModel(
             settingsStore: settingsStore,
             sharedSettings: sharedSettingsStore,
@@ -113,7 +114,12 @@ struct AppShell: View {
 
     var body: some View {
         NavigationStack(path: Binding(get: { rootRouter.path }, set: { rootRouter.path = $0 })) {
-            ConversationsView(sharedSettings: sharedSettings, chatViewModel: chatViewModel)
+            ConversationsView(
+                sharedSettings: sharedSettings,
+                chatViewModel: chatViewModel,
+                councilChatViewModel: councilChatViewModel,
+                novelCreationViewModel: novelCreationViewModel
+            )
                 .withAppDestinations(
                     settingsStore: settingsStore,
                     providerRegistry: providerRegistry,
@@ -171,6 +177,7 @@ struct AppShell: View {
                     excludingRunIds: backgroundRunIds
                 )
                 await conversationStore.bootstrap()
+                await chatViewModel.reconcilePendingMiniAppMutationsAfterConversationBootstrap()
                 didBootstrapConversations = true
 
                 // A failed approval-owner query makes it unsafe to classify any
@@ -457,6 +464,7 @@ final class RouterPath {
 
 enum Route: Hashable {
     case chat
+    case chatMessage(anchor: ChatMessageAnchor)
     case search(initialQuery: String)
     case account
     case settings
@@ -549,6 +557,16 @@ private extension View {
                     documentStore: documentStore,
                     workspaceStore: workspaceStore,
                     viewModel: chatViewModel
+                )
+            case .chatMessage(let anchor):
+                ChatView(
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    localToolExecutor: localToolExecutor,
+                    documentStore: documentStore,
+                    workspaceStore: workspaceStore,
+                    viewModel: chatViewModel,
+                    initialMessageAnchor: anchor
                 )
             case .search(let initialQuery):
                 if sharedSettings.isCapabilityGateEnabled(.standaloneSearch) {
@@ -658,7 +676,12 @@ private extension View {
             case .miniAppSettings:
                 MiniAppSettingsView(sharedSettings: sharedSettings)
             case .miniAppRunner(let appId):
-                MiniAppRunnerView(appId: appId, settingsStore: settingsStore, sharedSettings: sharedSettings)
+                MiniAppRunnerView(
+                    appId: appId,
+                    settingsStore: settingsStore,
+                    sharedSettings: sharedSettings,
+                    chatViewModel: chatViewModel
+                )
             case .novelCreation:
                 if let novelCreationViewModel {
                     NovelProjectListView(

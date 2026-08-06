@@ -365,21 +365,37 @@ struct ChatGenerationDependencies {
 }
 
 struct ChatMiniAppOutputApplication {
+    enum Outcome: Equatable {
+        case applied
+        case failed
+    }
+
     let messages: [UIMessage]
     let rollbackMessages: [UIMessage]
+    let outcome: Outcome
+    private let commitHandler: (@MainActor () -> Bool)?
     private let rollbackHandler: (@MainActor () -> Bool)?
-    private let workspaceSyncHandler: (@MainActor () -> [UIMessage]?)?
+    private let workspaceSyncHandler: (@MainActor () -> ChatMiniAppWorkspaceSyncFailure?)?
 
     init(
         messages: [UIMessage],
         rollbackMessages: [UIMessage]? = nil,
+        outcome: Outcome = .applied,
+        commit: (@MainActor () -> Bool)? = nil,
         rollback: (@MainActor () -> Bool)? = nil,
-        syncWorkspace: (@MainActor () -> [UIMessage]?)? = nil
+        syncWorkspace: (@MainActor () -> ChatMiniAppWorkspaceSyncFailure?)? = nil
     ) {
         self.messages = messages
         self.rollbackMessages = rollbackMessages ?? messages
+        self.outcome = outcome
+        self.commitHandler = commit
         self.rollbackHandler = rollback
         self.workspaceSyncHandler = syncWorkspace
+    }
+
+    @MainActor
+    func commit() -> Bool {
+        commitHandler?() ?? true
     }
 
     @MainActor
@@ -388,9 +404,14 @@ struct ChatMiniAppOutputApplication {
     }
 
     @MainActor
-    func syncWorkspaceAfterConversationPersistence() -> [UIMessage]? {
+    func syncWorkspaceAfterConversationPersistence() -> ChatMiniAppWorkspaceSyncFailure? {
         workspaceSyncHandler?()
     }
+}
+
+struct ChatMiniAppWorkspaceSyncFailure {
+    let messages: [UIMessage]
+    let replacementMessage: UIMessage
 }
 
 struct ChatGenerationBindings {
@@ -466,8 +487,16 @@ enum IOSGenerativeUiRequestPolicy {
     static func plan(
         setting: GenerativeUiSetting,
         messages: [UIMessage],
-        params: TextGenerationParams
+        params: TextGenerationParams,
+        suppressForMiniApp: Bool = false
     ) -> IOSGenerativeUiRequestPlan {
+        if suppressForMiniApp {
+            return IOSGenerativeUiRequestPlan(
+                params: params,
+                uploadMessages: messages,
+                requirement: .none
+            )
+        }
         let hasImageGenTool = params.tools.contains(where: { $0.name == "generate_image" })
         let sharedRequirement = GenerativeUiPlanner.shared.widgetRequirement(
             setting: setting,
@@ -1461,7 +1490,9 @@ final class ChatGenerationCoordinator {
         let generativeUiPlan = IOSGenerativeUiRequestPolicy.plan(
             setting: runSettings.agentRuntime.generativeUi,
             messages: uploadMessages,
-            params: codexParams
+            params: codexParams,
+            suppressForMiniApp: runSettings.agentRuntime.miniApp.enabled &&
+                ChatRuntimeContextBuilder.miniAppTurnContext(in: uploadMessages) != nil
         )
         let effectiveParams = generativeUiPlan.params
         let generativeUiPreparedMessages = generativeUiPlan.uploadMessages
@@ -2037,20 +2068,22 @@ final class ChatGenerationCoordinator {
 
         // 空回复检测：模型没有产出任何文本也没有工具调用时，给用户一个明确提示。
         if Self.isEmptyAssistantResponse(snapshot) {
+            let miniAppExpected = ChatRuntimeContextBuilder.miniAppTurnContext(in: displayMessages) != nil
             var emptySnapshot = snapshot
-            emptySnapshot.append(Self.emptyResponseNotice())
+            emptySnapshot.append(miniAppExpected ? Self.emptyMiniAppResponseNotice() : Self.emptyResponseNotice())
             bindings.setMessages(emptySnapshot)
             bindings.bumpMessageRevision(.toolResultAppended)
             let conversationHex = conversationId?.toHexDashString()
             let didPersist = await bindings.persistMessages(conversationId)
+            let succeeded = didPersist && !miniAppExpected
             await bindings.recordRun(
                 runId,
                 startedAt,
-                didPersist ? "completed" : "recovery_pending",
+                didPersist ? (miniAppExpected ? "failed" : "completed") : "recovery_pending",
                 inputDigest,
                 conversationHex
             )
-            if didPersist {
+            if succeeded {
                 WatchTaskCoordinator.shared.publishCompleted(
                     runId: runId,
                     conversationId: conversationHex,
@@ -2061,18 +2094,20 @@ final class ChatGenerationCoordinator {
                     runId: runId,
                     conversationId: conversationHex,
                     presentation: .failed(),
-                    summary: "回复已生成，但最终结果保存失败。"
+                    summary: miniAppExpected && didPersist
+                        ? "小应用生成失败：模型没有返回任何内容。"
+                        : "回复已生成，但最终结果保存失败。"
                 )
             }
             await dependencies.liveActivityController.end(
                 runId: runId,
-                presentation: didPersist ? .completed() : .failed()
+                presentation: succeeded ? .completed() : .failed()
             )
             let didFinish = finishStreaming(
                 runId: runId,
-                terminalEvent: didPersist ? .generationCompleted : .generationFailed
+                terminalEvent: succeeded ? .generationCompleted : .generationFailed
             )
-            if didPersist && didFinish {
+            if succeeded && didFinish {
                 bindings.generationSucceeded()
             }
             return
@@ -2089,6 +2124,7 @@ final class ChatGenerationCoordinator {
         let conversationHex = conversationId?.toHexDashString()
         let summary = Self.watchSummary(from: finalSnapshot)
         let didPersist = await bindings.persistMessages(conversationId)
+        let miniAppFailed = miniAppApplication?.outcome == .failed
         if !didPersist, let miniAppApplication {
             if miniAppApplication.rollback() {
                 bindings.setMessages(miniAppApplication.rollbackMessages)
@@ -2098,8 +2134,13 @@ final class ChatGenerationCoordinator {
             }
         }
         if didPersist,
-           let workspaceFailureMessages = miniAppApplication?.syncWorkspaceAfterConversationPersistence() {
-            finalSnapshot = workspaceFailureMessages
+           let miniAppApplication,
+           !miniAppApplication.commit() {
+            NSLog("[AmberChat] MiniApp transaction commit remains pending for cold-start reconciliation")
+        }
+        if didPersist,
+           let workspaceFailure = miniAppApplication?.syncWorkspaceAfterConversationPersistence() {
+            finalSnapshot = workspaceFailure.messages
             bindings.setMessages(finalSnapshot)
             bindings.bumpMessageRevision(.toolResultAppended)
             _ = await bindings.persistMessages(conversationId)
@@ -2107,11 +2148,11 @@ final class ChatGenerationCoordinator {
         await bindings.recordRun(
             runId,
             startedAt,
-            didPersist ? "completed" : "recovery_pending",
+            didPersist ? (miniAppFailed ? "failed" : "completed") : "recovery_pending",
             inputDigest,
             conversationHex
         )
-        if didPersist {
+        if didPersist, !miniAppFailed {
             WatchTaskCoordinator.shared.publishCompleted(
                 runId: runId,
                 conversationId: conversationHex,
@@ -2122,18 +2163,20 @@ final class ChatGenerationCoordinator {
                 runId: runId,
                 conversationId: conversationHex,
                 presentation: .failed(),
-                summary: "回复已生成，但最终结果保存失败。"
+                summary: miniAppFailed && didPersist
+                    ? "小应用生成未完成，错误详情已保存在会话中。"
+                    : "回复已生成，但最终结果保存失败。"
             )
         }
         await dependencies.liveActivityController.end(
             runId: runId,
-            presentation: didPersist ? .completed() : .failed()
+            presentation: didPersist && !miniAppFailed ? .completed() : .failed()
         )
         let didFinish = finishStreaming(
             runId: runId,
-            terminalEvent: didPersist ? .generationCompleted : .generationFailed
+            terminalEvent: didPersist && !miniAppFailed ? .generationCompleted : .generationFailed
         )
-        if didPersist && didFinish {
+        if didPersist && !miniAppFailed && didFinish {
             bindings.generationSucceeded()
         }
     }
@@ -2216,6 +2259,23 @@ final class ChatGenerationCoordinator {
             role: MessageRole.assistant,
             parts: [UIMessagePart.Text(
                 text: "模型没有返回任何内容。这可能是服务商的临时问题——请重新发送，或换一个模型试试。",
+                metadata: nil
+            )],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
+    static func emptyMiniAppResponseNotice() -> UIMessage {
+        UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(
+                text: "小应用生成失败：模型没有返回任何内容。请重试，或换一个模型后重新生成。",
                 metadata: nil
             )],
             annotations: [],

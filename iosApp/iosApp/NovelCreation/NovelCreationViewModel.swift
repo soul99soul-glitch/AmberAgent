@@ -200,6 +200,9 @@ final class NovelCreationViewModel {
     private(set) var isAuditingContinuity = false
     @ObservationIgnored private var continuityAuditTask: Task<Void, Never>?
     var isLoading = false
+    /// loadProjects 并发防护：首页 onAppear 与项目列表 .task 可并发触发同一加载，
+    /// 较早响应不得回写覆盖较晚结果（latest-wins）。
+    @ObservationIgnored private var projectsLoadRevision = 0
     private(set) var isPerforming = false
     private(set) var stateSyncActivity: NovelStateSyncActivity?
     private(set) var projectListLoadError: String?
@@ -596,6 +599,7 @@ final class NovelCreationViewModel {
 
     func resumeDetachedBackgroundGeneration() async {
         await creation.resumeDetachedGenerationRuns()
+        await loadProjects(restoresSelection: false)
     }
 
     func interruptSessionForBackground(deadline: Date) async {
@@ -662,11 +666,19 @@ final class NovelCreationViewModel {
         selecting preferredProjectID: NovelProjectID? = nil,
         restoresSelection: Bool = true
     ) async {
+        projectsLoadRevision &+= 1
+        let revision = projectsLoadRevision
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            if revision == projectsLoadRevision {
+                isLoading = false
+            }
+        }
         do {
             let loadedProjects = try await projectSummaries()
             try Task.checkCancellation()
+            // 仅接受最新一次加载的结果；较早响应静默丢弃，防止旧快照回写。
+            guard revision == projectsLoadRevision else { return }
             projects = loadedProjects
             projectListLoadError = nil
             guard restoresSelection else {
@@ -690,6 +702,8 @@ final class NovelCreationViewModel {
             return
         } catch {
             guard !Task.isCancelled else { return }
+            // 过期加载的失败同样不得覆盖最新状态。
+            guard revision == projectsLoadRevision else { return }
             projectListLoadError = errorDescription(error)
             report(error)
         }

@@ -907,12 +907,19 @@ final class IOSChatBackgroundGenerationCoordinator {
             finalMessages.append(Self.assistantMessage(notice))
             guardStoppedNotice = notice
         }
+        let emptyMiniAppResponse = job.mode == .continueModel &&
+            ChatRuntimeContextBuilder.miniAppTurnContext(in: job.displayMessages) != nil &&
+            ChatGenerationCoordinator.isEmptyAssistantResponse(finalMessages)
+        if emptyMiniAppResponse {
+            finalMessages.append(ChatGenerationCoordinator.emptyMiniAppResponseNotice())
+        }
         let miniAppApplication = job.mode == .continueModel
             ? job.saveMiniAppIfPresent?(finalMessages, job.conversationId)
             : nil
         if let miniAppApplication {
             finalMessages = miniAppApplication.messages
         }
+        let miniAppFailed = emptyMiniAppResponse || miniAppApplication?.outcome == .failed
         let singleToolFailureReason = job.mode == .singleToolOnly
             ? ChatToolOutputFormatter.imageFailureReason(in: finalMessages)
             : nil
@@ -939,13 +946,16 @@ final class IOSChatBackgroundGenerationCoordinator {
             NSLog("[AmberChatBG] MiniApp rollback skipped because its persisted state changed")
         }
         if didSave,
-           let workspaceFailureMessages = miniAppApplication?.syncWorkspaceAfterConversationPersistence() {
-            finalMessages = workspaceFailureMessages
-            let baseline = job.conversationStore.writeBaseline(for: job.conversationId)
-            _ = await job.conversationStore.save(
-                messages: finalMessages,
-                to: job.conversationId,
-                ifUnchangedSince: baseline
+           let miniAppApplication,
+           !miniAppApplication.commit() {
+            NSLog("[AmberChatBG] MiniApp transaction commit remains pending for cold-start reconciliation")
+        }
+        if didSave,
+           let workspaceFailure = miniAppApplication?.syncWorkspaceAfterConversationPersistence() {
+            finalMessages = workspaceFailure.messages
+            _ = await job.conversationStore.replaceBackgroundMessage(
+                workspaceFailure.replacementMessage,
+                in: job.conversationId
             )
         }
         guard runState.finalizeTerminal() else {
@@ -956,6 +966,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                     didSave: didSave,
                     singleToolFailureReason: singleToolFailureReason,
                     guardStoppedNotice: guardStoppedNotice,
+                    miniAppFailed: miniAppFailed,
                     summary: watchSummary
                 )
             }
@@ -973,7 +984,8 @@ final class IOSChatBackgroundGenerationCoordinator {
         let runStatus = Self.backgroundTerminalStatus(
             didSave: didSave,
             singleToolFailureReason: singleToolFailureReason,
-            guardStopped: guardStoppedNotice != nil
+            guardStopped: guardStoppedNotice != nil,
+            miniAppFailed: miniAppFailed
         )
         let succeeded = runStatus == "completed"
         await recordRun(
@@ -995,6 +1007,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                 conversationId: job.conversationId.toHexDashString(),
                 presentation: .failed(),
                 summary: guardStoppedNotice.flatMap { WatchTaskText.clipped($0, maxLength: 200) }
+                    ?? (miniAppFailed ? watchSummary : nil)
             )
         }
         await job.liveActivityController.end(
@@ -1338,12 +1351,14 @@ final class IOSChatBackgroundGenerationCoordinator {
         didSave: Bool,
         singleToolFailureReason: String?,
         guardStoppedNotice: String?,
+        miniAppFailed: Bool,
         summary: String?
     ) async {
         let runStatus = Self.backgroundTerminalStatus(
             didSave: didSave,
             singleToolFailureReason: singleToolFailureReason,
-            guardStopped: guardStoppedNotice != nil
+            guardStopped: guardStoppedNotice != nil,
+            miniAppFailed: miniAppFailed
         )
         let succeeded = runStatus == "completed"
         if didSave {
@@ -1368,6 +1383,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                 conversationId: job.conversationId.toHexDashString(),
                 presentation: .failed(),
                 summary: guardStoppedNotice.flatMap { WatchTaskText.clipped($0, maxLength: 200) }
+                    ?? (miniAppFailed ? summary : nil)
             )
         }
         await job.liveActivityController.end(
@@ -1630,10 +1646,12 @@ final class IOSChatBackgroundGenerationCoordinator {
     private static func backgroundTerminalStatus(
         didSave: Bool,
         singleToolFailureReason: String?,
-        guardStopped: Bool
+        guardStopped: Bool,
+        miniAppFailed: Bool = false
     ) -> String {
         guard didSave else { return "recovery_pending" }
         if guardStopped { return "guard_stopped" }
+        if miniAppFailed { return "failed" }
         return singleToolFailureReason == nil ? "completed" : "failed"
     }
 
@@ -1771,12 +1789,14 @@ final class IOSChatBackgroundGenerationCoordinator {
     static func backgroundTerminalStatusForTesting(
         didSave: Bool,
         singleToolFailureReason: String?,
-        guardStopped: Bool
+        guardStopped: Bool,
+        miniAppFailed: Bool = false
     ) -> String {
         backgroundTerminalStatus(
             didSave: didSave,
             singleToolFailureReason: singleToolFailureReason,
-            guardStopped: guardStopped
+            guardStopped: guardStopped,
+            miniAppFailed: miniAppFailed
         )
     }
 

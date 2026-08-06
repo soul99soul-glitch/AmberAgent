@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Observation
 @preconcurrency import Shared
 @testable import iosApp
 
@@ -1879,6 +1880,112 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(harness.viewModel.messages.last(where: { $0.kind == .host })?.body, "第三轮主持总结")
     }
 
+    func testHomeResumeContextRestoresEveryRecoverableContinuationStatus() async throws {
+        let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([
+            .success("首轮最终议题"),
+            .success("首轮工程发言"),
+            .success("首轮风险发言"),
+            .success("首轮主持总结"),
+        ]))
+
+        harness.viewModel.inputText = "首轮议题"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let taskID = try XCTUnwrap(
+            harness.taskStore.recent(kind: .modelCouncil, limit: 1).first?.id
+        )
+        for status in [
+            IOSAdvancedTaskStatus.failed,
+            .cancelled,
+            .timedOut,
+            .interrupted,
+        ] {
+            _ = harness.taskStore.updateTask(
+                id: taskID,
+                status: .completed,
+                metadata: ["continuation_status": status.rawValue]
+            )
+
+            let context = try XCTUnwrap(harness.viewModel.homeResumeContext)
+            XCTAssertEqual(context.status, status)
+            XCTAssertTrue(context.canContinue)
+        }
+    }
+
+    func testHomeResumeContextRejectsUndecodableArchive() async throws {
+        let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([
+            .success("首轮最终议题"),
+            .success("首轮工程发言"),
+            .success("首轮风险发言"),
+            .success("首轮主持总结"),
+        ]))
+
+        harness.viewModel.inputText = "首轮议题"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let taskID = try XCTUnwrap(
+            harness.taskStore.recent(kind: .modelCouncil, limit: 1).first?.id
+        )
+        let archiveURL = harness.archiveBaseDirectory
+            .appendingPathComponent("council", isDirectory: true)
+            .appendingPathComponent("\(taskID).json", isDirectory: false)
+        try Data("not-json".utf8).write(to: archiveURL, options: .atomic)
+
+        XCTAssertNil(harness.viewModel.homeResumeContext)
+    }
+
+    func testHomeResumeContextRejectsMismatchedArchiveIdentity() async throws {
+        let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([
+            .success("首轮最终议题"),
+            .success("首轮工程发言"),
+            .success("首轮风险发言"),
+            .success("首轮主持总结"),
+        ]))
+
+        harness.viewModel.inputText = "首轮议题"
+        harness.viewModel.send()
+        for _ in 0..<200 where harness.viewModel.isRunning {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        let taskID = try XCTUnwrap(
+            harness.taskStore.recent(kind: .modelCouncil, limit: 1).first?.id
+        )
+        let archiveURL = harness.archiveBaseDirectory
+            .appendingPathComponent("council", isDirectory: true)
+            .appendingPathComponent("\(taskID).json", isDirectory: false)
+        let archiveData = try Data(contentsOf: archiveURL)
+        var archive = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: archiveData) as? [String: Any]
+        )
+        archive["taskId"] = "another-task"
+        try JSONSerialization.data(withJSONObject: archive)
+            .write(to: archiveURL, options: .atomic)
+
+        XCTAssertNil(harness.viewModel.homeResumeContext)
+    }
+
+    func testHomeResumeProjectionInvalidatesWhenFirstCouncilStarts() async throws {
+        let streamStarted = expectation(description: "first council stream started")
+        let harness = try makeViewModelHarness(
+            streamer: RestartableCouncilStreamer(firstStreamStarted: streamStarted)
+        )
+        let projectionChanged = expectation(description: "home resume projection invalidated")
+        withObservationTracking {
+            XCTAssertNil(harness.viewModel.homeResumeContext)
+        } onChange: {
+            projectionChanged.fulfill()
+        }
+
+        harness.viewModel.inputText = "新议题"
+        harness.viewModel.send()
+        await fulfillment(of: [projectionChanged, streamStarted], timeout: 1)
+        harness.viewModel.cancelDiscussion()
+    }
+
     func testFollowUpRestoresEvictedTaskWithTheSameIdentity() async throws {
         let defaults = isolatedDefaults()
         let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
@@ -1972,7 +2079,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
         XCTAssertTrue(council.contains("AmberGlassGroup(spacing: 0)"))
         XCTAssertTrue(compactSharedChrome.contains(
-            "accessibilityLabel:\"设置\",size:40,symbolSize:17,tint:AmberTheme.accent"
+            "HomeGlassCircleButton(icon:.gear,accessibilityLabel:\"设置\",size:38,iconSize:20,tint:AmberTheme.fab)"
         ))
         XCTAssertTrue(compactCouncil.contains(
             "accessibilityLabel:\"历史议会\",size:44,symbolSize:18,tint:AmberTheme.accent"
@@ -2424,6 +2531,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
     ) throws -> (
         viewModel: CouncilChatViewModel,
         archiveStore: CouncilRoomArchiveStore,
+        archiveBaseDirectory: URL,
         taskStore: IOSAdvancedTaskStore,
         sharedSettings: IOSSharedSettingsStore,
         defaults: UserDefaults
@@ -2467,10 +2575,9 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
         roomSettings.settings = compactRoomSettings(defaultRounds: 1)
         roomSettings.dynamicSeatGeneration = false
-        let archiveStore = CouncilRoomArchiveStore(
-            baseDirectory: FileManager.default.temporaryDirectory
-                .appendingPathComponent("council-vm-test-\(UUID().uuidString)", isDirectory: true)
-        )
+        let archiveBaseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("council-vm-test-\(UUID().uuidString)", isDirectory: true)
+        let archiveStore = CouncilRoomArchiveStore(baseDirectory: archiveBaseDirectory)
         let viewModel = CouncilChatViewModel(
             settingsStore: settingsStore,
             sharedSettings: sharedSettings,
@@ -2481,7 +2588,14 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             transcriptDefaults: defaults,
             archiveStore: archiveStore
         )
-        return (viewModel, archiveStore, taskStore, sharedSettings, defaults)
+        return (
+            viewModel,
+            archiveStore,
+            archiveBaseDirectory,
+            taskStore,
+            sharedSettings,
+            defaults
+        )
     }
 
     private func isolatedDefaults() -> UserDefaults {

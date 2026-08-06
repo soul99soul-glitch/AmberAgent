@@ -109,6 +109,36 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    func testStaleProjectListLoadCannotClearNewerLoadingState() async {
+        let creation = OrderedProjectListNovelCreation(
+            base: DefaultNovelCreation(repository: InMemoryNovelProjectRepository())
+        )
+        let viewModel = NovelCreationViewModel(creation: creation)
+
+        let firstLoad = Task { @MainActor in
+            await viewModel.loadProjects(restoresSelection: false)
+        }
+        await creation.waitUntilProjectListRequest(1)
+
+        let secondLoad = Task { @MainActor in
+            await viewModel.loadProjects(restoresSelection: false)
+        }
+        await creation.waitUntilProjectListRequest(2)
+        XCTAssertTrue(viewModel.isLoading)
+
+        await creation.releaseProjectListRequest(1)
+        await firstLoad.value
+
+        XCTAssertTrue(
+            viewModel.isLoading,
+            "较早加载结束时不能提前清除仍在执行的最新加载态"
+        )
+
+        await creation.releaseProjectListRequest(2)
+        await secondLoad.value
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
     func testProjectListLoadFailureKeepsAnInlineRetryReasonUntilSuccess() async throws {
         let repository = InMemoryNovelProjectRepository()
         let document = try NovelTestFixtures.document()
@@ -1981,6 +2011,74 @@ private actor BranchSnapshotBlockingNovelCreation: NovelCreation {
     func resumeBranchSnapshot() {
         branchWaiter?.resume()
         branchWaiter = nil
+    }
+
+    func perform(_ action: NovelAction) async throws -> NovelOutcome {
+        try await base.perform(action)
+    }
+
+    func start(_ request: NovelRunRequest) async throws -> NovelRun {
+        try await base.start(request)
+    }
+
+    func interruptForBackground(
+        projectID: NovelProjectID,
+        deadline: Date,
+        runID: NovelRunID?
+    ) async {
+        await base.interruptForBackground(
+            projectID: projectID,
+            deadline: deadline,
+            runID: runID
+        )
+    }
+
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        await base.cancelInFlightBackgroundMutations(projectID: projectID)
+    }
+
+    func retryPendingTerminal(runID: NovelRunID) async throws {
+        try await base.retryPendingTerminal(runID: runID)
+    }
+}
+
+private actor OrderedProjectListNovelCreation: NovelCreation {
+    private let base: any NovelCreation
+    private var requestCount = 0
+    private var requestedOrdinals: Set<Int> = []
+    private var requestWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var releaseWaiters: [Int: CheckedContinuation<Void, Never>] = [:]
+    private var releasedOrdinals: Set<Int> = []
+
+    init(base: any NovelCreation) {
+        self.base = base
+    }
+
+    func waitUntilProjectListRequest(_ ordinal: Int) async {
+        if requestedOrdinals.contains(ordinal) { return }
+        await withCheckedContinuation { continuation in
+            requestWaiters[ordinal] = continuation
+        }
+    }
+
+    func releaseProjectListRequest(_ ordinal: Int) {
+        releasedOrdinals.insert(ordinal)
+        releaseWaiters.removeValue(forKey: ordinal)?.resume()
+    }
+
+    func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
+        if case .projects = scope {
+            requestCount += 1
+            let ordinal = requestCount
+            requestedOrdinals.insert(ordinal)
+            requestWaiters.removeValue(forKey: ordinal)?.resume()
+            if !releasedOrdinals.contains(ordinal) {
+                await withCheckedContinuation { continuation in
+                    releaseWaiters[ordinal] = continuation
+                }
+            }
+        }
+        return try await base.snapshot(scope)
     }
 
     func perform(_ action: NovelAction) async throws -> NovelOutcome {

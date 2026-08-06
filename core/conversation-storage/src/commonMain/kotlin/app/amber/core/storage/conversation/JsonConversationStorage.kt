@@ -97,7 +97,9 @@ class JsonConversationStorage(
     private fun saveConversationReplacingAllFieldsLocked(conversationToSave: Conversation) {
         val text = encodeConversation(conversationToSave)
         conversationFile(conversationToSave.id).writeText(text)
-        upsertIndex(conversationToSave.toSummary())
+        // The conversation file is canonical; index.json is a derived cache and
+        // must not turn an already-committed message write into a false failure.
+        runCatching { upsertIndex(conversationToSave.toSummary()) }
     }
 
     @Throws(Throwable::class)

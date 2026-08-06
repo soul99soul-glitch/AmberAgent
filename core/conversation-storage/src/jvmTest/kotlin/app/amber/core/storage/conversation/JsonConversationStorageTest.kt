@@ -65,6 +65,22 @@ class JsonConversationStorageTest {
     }
 
     @Test
+    fun derivedIndexWriteFailureDoesNotFailCanonicalConversationSave() = runTest {
+        tempDir.child("index.json").mkdirs()
+        val conversation = sampleConversation(
+            id = Uuid.parse("00000000-0000-0000-0000-000000000007"),
+            title = "canonical",
+            userText = "persisted despite index failure",
+        )
+
+        storage.saveConversation(conversation)
+
+        val loaded = storage.loadConversation(conversation.id)
+        assertNotNull(loaded)
+        assertEquals("persisted despite index failure", loaded.currentMessages.single().toText())
+    }
+
+    @Test
     fun bulkImportValidatesTheWholeBatchBeforeWritingAnyConversation() = runTest {
         val existingId = Uuid.parse("00000000-0000-0000-0000-000000000003")
         val importId = Uuid.parse("00000000-0000-0000-0000-000000000004")

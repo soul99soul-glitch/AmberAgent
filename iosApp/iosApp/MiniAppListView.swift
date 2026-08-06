@@ -70,7 +70,7 @@ struct MiniAppListView: View {
 
     private var header: some View {
         HStack {
-            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回设置", size: 44, symbolSize: 20) {
+            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
                 dismiss()
             }
 
@@ -194,21 +194,27 @@ struct MiniAppCapabilityStatusRow: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground)
                 Text(row.subtitle)
-                    .font(.system(size: 12.5))
+                    .font(.caption)
                     .lineSpacing(3)
                     .foregroundStyle(AmberTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(row.status)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(row.tint)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(row.tint)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text(row.status)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
@@ -216,10 +222,12 @@ struct MiniAppCapabilityStatusRow: View {
 }
 
 struct MiniAppCapabilityDivider: View {
+    var leading: CGFloat = 14
+
     var body: some View {
         Divider()
             .overlay(AmberTheme.borderSoft)
-            .padding(.leading, 14)
+            .padding(.leading, leading)
     }
 }
 
@@ -276,14 +284,18 @@ private struct MiniAppListRow: View {
                             .foregroundStyle(AmberTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        HStack(spacing: 8) {
-                            MiniAppPill(text: "v\(app.version)")
-                            MiniAppPill(text: "\(app.runCount) 次运行")
-                            MiniAppPill(text: grantSummary)
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 8) {
+                                metadataPills
+                            }
+
+                            VStack(alignment: .leading, spacing: 6) {
+                                metadataPills
+                            }
                         }
 
                         Text("appId: \(app.id)")
-                            .font(.system(size: 10.5, design: .monospaced))
+                            .font(.caption2.monospaced())
                             .foregroundStyle(AmberTheme.muted2)
                             .lineLimit(1)
                     }
@@ -307,12 +319,20 @@ private struct MiniAppListRow: View {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(AmberTheme.muted)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("更多操作")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
+    }
+
+    @ViewBuilder
+    private var metadataPills: some View {
+        MiniAppPill(text: "v\(app.version)")
+        MiniAppPill(text: "\(app.runCount) 次运行")
+        MiniAppPill(text: grantSummary)
     }
 }
 
@@ -321,10 +341,11 @@ private struct MiniAppPill: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10.5, weight: .semibold))
+            .font(.caption2.weight(.semibold))
             .foregroundStyle(AmberTheme.foreground2)
             .padding(.horizontal, 7)
-            .frame(height: 22)
+            .padding(.vertical, 4)
+            .fixedSize(horizontal: true, vertical: true)
             .background(AmberTheme.surface2, in: Capsule())
     }
 }

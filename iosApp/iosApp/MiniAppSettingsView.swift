@@ -54,7 +54,7 @@ struct MiniAppSettingsView: View {
     }
 
     private var intro: some View {
-        Text("控制小应用运行时可申请的能力。首次使用某项权限时会弹窗确认，选择会记住；也可在运行页手动改授权。")
+        Text("控制小应用运行时可申请的能力。桥接能力首次使用时会弹窗确认，选择会记住；也可在运行页手动改授权。")
             .font(.footnote)
             .lineSpacing(3)
             .foregroundStyle(AmberTheme.muted)
@@ -92,7 +92,18 @@ struct MiniAppSettingsView: View {
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(networkEnabled: enabled) } }
                     )
                 )
-                MiniAppCapabilityDivider()
+                MiniAppCapabilityDivider(leading: 54)
+                MiniAppPresetToggleRow(
+                    title: "外链图片",
+                    subtitle: "允许声明 externalImages 权限的小应用加载 HTTPS 图片；未声明或已拒绝时仍会阻止。",
+                    systemImage: "photo.on.rectangle.angled",
+                    tint: AmberTheme.accentCyan,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.externalImagesEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(externalImagesEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "搜索",
                     subtitle: "允许已授权小应用通过内置搜索执行公开检索。",
@@ -103,7 +114,7 @@ struct MiniAppSettingsView: View {
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(searchEnabled: enabled) } }
                     )
                 )
-                MiniAppCapabilityDivider()
+                MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "AI 生成",
                     subtitle: "允许已授权小应用调用宿主 AI 生成文本；缺少 API Key 时会返回错误。",
@@ -114,7 +125,7 @@ struct MiniAppSettingsView: View {
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(aiEnabled: enabled) } }
                     )
                 )
-                MiniAppCapabilityDivider()
+                MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "复制到剪贴板",
                     subtitle: "允许已授权小应用写入剪贴板。",
@@ -125,7 +136,7 @@ struct MiniAppSettingsView: View {
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(clipboardCopyEnabled: enabled) } }
                     )
                 )
-                MiniAppCapabilityDivider()
+                MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "SharedStore",
                     subtitle: "允许已授权小应用读写自己的共享存储命名空间。",
@@ -136,7 +147,7 @@ struct MiniAppSettingsView: View {
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(sharedStoreEnabled: enabled) } }
                     )
                 )
-                MiniAppCapabilityDivider()
+                MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "EventBus",
                     subtitle: "允许已授权小应用在自身命名空间内订阅和发布事件。",
@@ -147,7 +158,7 @@ struct MiniAppSettingsView: View {
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(eventBusEnabled: enabled) } }
                     )
                 )
-                MiniAppCapabilityDivider()
+                MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "深度阅读摘要",
                     subtitle: "允许已授权小应用更新自己的深度阅读摘要。",
@@ -158,7 +169,7 @@ struct MiniAppSettingsView: View {
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(boardSummaryUpdateEnabled: enabled) } }
                     )
                 )
-                MiniAppCapabilityDivider()
+                MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "读取宿主上下文",
                     subtitle: "允许 host.context 在前台确认后返回最小化上下文。",
@@ -169,7 +180,7 @@ struct MiniAppSettingsView: View {
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(hostContextEnabled: enabled) } }
                     )
                 )
-                MiniAppCapabilityDivider()
+                MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "宿主写回",
                     subtitle: "允许 host.sendToConversation / host.createArtifact 在前台确认后写入草稿或内容卡片。",
@@ -178,6 +189,72 @@ struct MiniAppSettingsView: View {
                     isOn: Binding(
                         get: { sharedSettings.agentRuntime.miniApp.hostWriteEnabled },
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(hostWriteEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider(leading: 54)
+                MiniAppPresetToggleRow(
+                    title: "打开其他小应用",
+                    subtitle: "允许声明 launch 权限的小应用按 appId 打开另一个已保存的小应用。",
+                    systemImage: "square.grid.3x3.square",
+                    tint: AmberTheme.accentIndigo,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.launchEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(launchEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider(leading: 54)
+                MiniAppPresetToggleRow(
+                    title: "设备传感器",
+                    subtitle: "允许声明 sensor 权限的小应用订阅加速度计或陀螺仪；iOS 不提供环境光传感器数据。",
+                    systemImage: "gyroscope",
+                    tint: AmberTheme.accentGreen,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.sensorEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(sensorEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider(leading: 54)
+                MiniAppPresetToggleRow(
+                    title: "当前位置",
+                    subtitle: "允许声明 location 权限的小应用在系统授权后读取一次当前位置。",
+                    systemImage: "location",
+                    tint: AmberTheme.accentCyan,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.locationEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(locationEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider(leading: 54)
+                MiniAppPresetToggleRow(
+                    title: "读取剪贴板",
+                    subtitle: "允许声明 clipboard.read 权限的小应用读取当前剪贴板文本。",
+                    systemImage: "clipboard",
+                    tint: AmberTheme.accentAmber,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.clipboardReadEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(clipboardReadEnabled: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider(leading: 54)
+                MiniAppPresetToggleRow(
+                    title: "显示源码",
+                    subtitle: "在小应用运行页显示源码和手动版本编辑入口。",
+                    systemImage: "chevron.left.forwardslash.chevron.right",
+                    tint: AmberTheme.accent,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.showSourceButton },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(showSourceButton: enabled) } }
+                    )
+                )
+                MiniAppCapabilityDivider(leading: 54)
+                MiniAppPresetToggleRow(
+                    title: "WebView 调试",
+                    subtitle: "允许 Safari Web Inspector 检查小应用，仅建议开发时开启。",
+                    systemImage: "ladybug",
+                    tint: AmberTheme.accentRed,
+                    isOn: Binding(
+                        get: { sharedSettings.agentRuntime.miniApp.webViewDebugEnabled },
+                        set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(webViewDebugEnabled: enabled) } }
                     )
                 )
             }
@@ -200,27 +277,29 @@ private struct MiniAppPresetToggleRow: View {
     @Binding var isOn: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
+        Toggle(isOn: $isOn) {
+            HStack(spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(tint)
+                    .frame(width: 28, height: 28)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
         }
+        .toggleStyle(.switch)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityHint(subtitle)
         .frame(minHeight: 54)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)

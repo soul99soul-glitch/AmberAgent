@@ -255,6 +255,8 @@ struct NativeChatTimelineView: View {
     var workspaceStore: IOSWorkspaceStore
     var scrollToBottomTrigger: Int
     var scrollToBottomSource: NativeTimelineBottomIntentSource
+    var messageAnchor: ChatMessageAnchor?
+    var currentConversationID: String?
     var messagesProvider: () -> [UIMessage]
     var variantInfoProvider: (Int) -> IOSConversationStore.VariantInfo?
     var onAction: (ChatListAction) -> Void
@@ -277,6 +279,9 @@ struct NativeChatTimelineView: View {
     @State private var nativeScrollFallbackShouldReplayBottom = false
     @State private var nativeScrollFallbackReplayToken: UInt64 = 0
     @State private var isNativeScrollSurfaceVisible = false
+    @State private var consumedMessageAnchor: ChatMessageAnchor?
+    @State private var scheduledMessageAnchor: ChatMessageAnchor?
+    @State private var imageAccessibilityFocusToolCallID: String?
 
     var body: some View {
         let messages = messagesProvider()
@@ -431,6 +436,7 @@ struct NativeChatTimelineView: View {
             nativeScrollFallbackReason = nil
             updateRendererMemory(event: signal.event, messages: messages)
             consumeExternalScrollToBottomTriggerIfNeeded()
+            scrollToMessageAnchorIfAvailable()
         }
         .onDisappear {
             isNativeScrollSurfaceVisible = false
@@ -443,13 +449,25 @@ struct NativeChatTimelineView: View {
         .onChange(of: signal) { _, newSignal in
             updateRendererMemory(event: newSignal.event, messages: messagesProvider())
             submitNativeScrollIntent(for: newSignal.event)
+            scrollToMessageAnchorIfAvailable()
+        }
+        .onChange(of: messageAnchor) { _, _ in
+            scrollToMessageAnchorIfAvailable()
         }
         .onChange(of: scrollToBottomTrigger) { _, trigger in
             consumeExternalScrollToBottomTriggerIfNeeded(trigger)
         }
         .onChange(of: nativeScrollFallbackReason) { _, reason in
-            guard reason != nil,
-                  nativeScrollFallbackShouldReplayBottom else { return }
+            guard reason != nil else { return }
+            if scheduledMessageAnchor != nil {
+                nativeScrollFallbackShouldReplayBottom = false
+                return
+            }
+            if scrollToMessageAnchorIfAvailable() {
+                nativeScrollFallbackShouldReplayBottom = false
+                return
+            }
+            guard nativeScrollFallbackShouldReplayBottom else { return }
             let replayToken = nativeScrollFallbackReplayToken
             nativeScrollFallbackShouldReplayBottom = false
             Task { @MainActor in
@@ -496,6 +514,9 @@ struct NativeChatTimelineView: View {
         }
         let didAttach = scrollDriver.attach(scrollView)
         guard didAttach, scrollDriver.isAttached else { return }
+        if scrollToMessageAnchorIfAvailable() {
+            return
+        }
         if nativeUserScrollActive || viewportState.followPaused {
             scrollDriver.submit(.userDragBegan)
         } else {
@@ -504,6 +525,131 @@ struct NativeChatTimelineView: View {
                 scrollDriver.submit(.generationTerminated)
             }
         }
+    }
+
+    @discardableResult
+    private func scrollToMessageAnchorIfAvailable() -> Bool {
+        let messages = messagesProvider()
+        let availableMessageIDs = Set(messages.map(ChatMessageProjector.messageId(for:)))
+        let availableImageToolCallIDs = Self.imageToolCallIDs(in: messages)
+        guard let request = messageAnchor,
+              scheduledMessageAnchor != request,
+              let targetID = NativeTimelineMessageAnchorPolicy.targetEntryID(
+                request: request,
+                consumed: consumedMessageAnchor,
+                currentConversationID: currentConversationID,
+                availableMessageIDs: availableMessageIDs,
+                availableImageToolCallIDs: availableImageToolCallIDs
+              ),
+              NativeTimelineMessageAnchorPolicy.canSchedule(
+                nativeDriverActive: isNativeScrollDriverActive,
+                fallbackActive: nativeScrollFallbackReason != nil
+              ) else {
+            return false
+        }
+
+        scheduledMessageAnchor = request
+        if isNativeScrollDriverActive {
+            scrollDriver.submit(.userDragBegan)
+        } else {
+            nativeScrollFallbackReplayToken &+= 1
+            nativeScrollFallbackShouldReplayBottom = false
+            var paused = viewportState
+            paused.followPaused = true
+            paused.showScrollToBottom = true
+            publishViewportState(paused)
+        }
+        Task { @MainActor in
+            await Task.yield()
+            let currentMessages = messagesProvider()
+            guard NativeTimelineMessageAnchorPolicy.targetEntryID(
+                request: request,
+                consumed: consumedMessageAnchor,
+                currentConversationID: currentConversationID,
+                availableMessageIDs: Set(currentMessages.map(ChatMessageProjector.messageId(for:))),
+                availableImageToolCallIDs: Self.imageToolCallIDs(in: currentMessages)
+            ) == targetID else {
+                scheduledMessageAnchor = nil
+                return
+            }
+            if reduceMotion {
+                scrollPosition.scrollTo(id: targetID, anchor: .center)
+                await Task.yield()
+                completeMessageAnchorScroll(request: request, targetID: targetID)
+            } else {
+                withAnimation(.easeOut(duration: 0.24), completionCriteria: .logicallyComplete) {
+                    scrollPosition.scrollTo(id: targetID, anchor: .center)
+                } completion: {
+                    completeMessageAnchorScroll(request: request, targetID: targetID)
+                }
+            }
+        }
+        return true
+    }
+
+    private func completeMessageAnchorScroll(
+        request: ChatMessageAnchor,
+        targetID: String
+    ) {
+        let currentMessages = messagesProvider()
+        guard scheduledMessageAnchor == request,
+              NativeTimelineMessageAnchorPolicy.targetEntryID(
+                request: request,
+                consumed: consumedMessageAnchor,
+                currentConversationID: currentConversationID,
+                availableMessageIDs: Set(currentMessages.map(ChatMessageProjector.messageId(for:))),
+                availableImageToolCallIDs: Self.imageToolCallIDs(in: currentMessages)
+              ) == targetID else {
+            scheduledMessageAnchor = nil
+            return
+        }
+        if let toolCallID = request.toolCallID {
+            imageAccessibilityFocusToolCallID = toolCallID
+            if UIAccessibility.isVoiceOverRunning,
+               let announcement = Self.imageAnchorAnnouncement(
+                toolCallID: toolCallID,
+                messages: currentMessages
+               ) {
+                UIAccessibility.post(notification: .announcement, argument: announcement)
+            }
+        }
+        ChatImageGenerationResumeConsumption.markViewedIfCompleted(
+            anchor: request,
+            messages: currentMessages,
+            isGenerationActive: isGenerationActive
+        )
+        consumedMessageAnchor = request
+        scheduledMessageAnchor = nil
+    }
+
+    private static func imageToolCallIDs(in messages: [UIMessage]) -> Set<String> {
+        Set(messages.flatMap { message in
+            message.parts.compactMap { part in
+                guard let tool = part as? UIMessagePart.Tool,
+                      tool.toolName == "generate_image" else { return nil }
+                return tool.toolCallId
+            }
+        })
+    }
+
+    private static func imageAnchorAnnouncement(
+        toolCallID: String,
+        messages: [UIMessage]
+    ) -> String? {
+        for message in messages {
+            for part in message.parts {
+                guard let tool = part as? UIMessagePart.Tool,
+                      tool.toolName == "generate_image",
+                      tool.toolCallId == toolCallID else { continue }
+                if tool.output.contains(where: { $0 is UIMessagePart.Image }) {
+                    return "已定位到生成图片"
+                }
+                return tool.output.isEmpty
+                    ? "已定位到正在生成的图片"
+                    : "已定位到图片生成失败结果"
+            }
+        }
+        return nil
     }
 
     private var shouldSettleNativeScrollAfterAttach: Bool {
@@ -560,6 +706,7 @@ struct NativeChatTimelineView: View {
                     displaySettingSignature: displaySettingSignature,
                     generativeUiSettingSignature: generativeUiSettingSignature,
                     reasoningLevelLabel: reasoningLevelLabel,
+                    imageAccessibilityFocusToolCallID: imageAccessibilityFocusToolCallID,
                     onAction: onAction
                 )
                 .equatable()
@@ -1190,6 +1337,35 @@ private struct ChatSwiftUIScrollGeometry: Equatable {
     var distanceToBottom: CGFloat = 0
     var visibleHeight: CGFloat = 1
     var contentHeight: CGFloat = 0
+}
+
+enum NativeTimelineMessageAnchorPolicy {
+    static func targetEntryID(
+        request: ChatMessageAnchor?,
+        consumed: ChatMessageAnchor?,
+        currentConversationID: String?,
+        availableMessageIDs: Set<String>,
+        availableImageToolCallIDs: Set<String> = []
+    ) -> String? {
+        guard let request,
+              request != consumed,
+              request.conversationID == currentConversationID,
+              availableMessageIDs.contains(request.messageID) else {
+            return nil
+        }
+        if let toolCallID = request.toolCallID {
+            guard availableImageToolCallIDs.contains(toolCallID) else { return nil }
+            return ChatImageGenerationAnchorTarget.id(toolCallID: toolCallID)
+        }
+        return ChatTimelinePlanner.messageEntryIDPrefix + request.messageID
+    }
+
+    static func canSchedule(
+        nativeDriverActive: Bool,
+        fallbackActive: Bool
+    ) -> Bool {
+        nativeDriverActive || fallbackActive
+    }
 }
 
 private extension View {
@@ -3875,6 +4051,7 @@ private struct ChatListHostedItemView: View {
                 displaySetting: displaySetting,
                 generativeUiSetting: generativeUiSetting,
                 reasoningLevelLabel: reasoningLevelLabel,
+                imageAccessibilityFocusToolCallID: nil,
                 onAction: onAction
             )
             .environment(workspaceStore)
@@ -3922,6 +4099,7 @@ private struct NativeTimelineMessageBubble: View, @MainActor Equatable {
     let displaySettingSignature: String
     let generativeUiSettingSignature: String
     let reasoningLevelLabel: String?
+    let imageAccessibilityFocusToolCallID: String?
     let onAction: (ChatListAction) -> Void
 
     var body: some View {
@@ -3930,6 +4108,7 @@ private struct NativeTimelineMessageBubble: View, @MainActor Equatable {
             displaySetting: displaySetting,
             generativeUiSetting: generativeUiSetting,
             reasoningLevelLabel: reasoningLevelLabel,
+            imageAccessibilityFocusToolCallID: imageAccessibilityFocusToolCallID,
             onAction: onAction
         )
         .id(model.renderIdentity)
@@ -3945,7 +4124,8 @@ private struct NativeTimelineMessageBubble: View, @MainActor Equatable {
               lhs.model.row.canAnimateInsertion == rhs.model.row.canAnimateInsertion,
               lhs.model.variantInfo == rhs.model.variantInfo,
               lhs.model.renderState == rhs.model.renderState,
-              lhs.model.renderIdentity == rhs.model.renderIdentity
+              lhs.model.renderIdentity == rhs.model.renderIdentity,
+              lhs.imageAccessibilityFocusToolCallID == rhs.imageAccessibilityFocusToolCallID
         else { return false }
 
         if lhs.usesLiveTail || rhs.usesLiveTail {
@@ -3969,6 +4149,7 @@ private struct ChatMessageHostedBubble: View {
     let displaySetting: DisplaySetting
     let generativeUiSetting: GenerativeUiSetting
     let reasoningLevelLabel: String?
+    let imageAccessibilityFocusToolCallID: String?
     let onAction: (ChatListAction) -> Void
 
     var body: some View {
@@ -3979,6 +4160,7 @@ private struct ChatMessageHostedBubble: View {
                 displaySetting: displaySetting,
                 generativeUiSetting: generativeUiSetting,
                 reasoningLevelLabel: reasoningLevelLabel,
+                imageAccessibilityFocusToolCallID: imageAccessibilityFocusToolCallID,
                 onAction: onAction
             )
         } else {
@@ -4023,7 +4205,8 @@ private struct ChatMessageHostedBubble: View {
             hasEverStreamed: renderState.hasEverStreamed,
             liveMarkdownRenderingEnabled: renderState.liveRenderingEnabled,
             frozenMarkdownSnapshot: renderState.frozenMarkdownSnapshot,
-            reasoningLevelLabel: reasoningLevelLabel
+            reasoningLevelLabel: reasoningLevelLabel,
+            imageAccessibilityFocusToolCallID: imageAccessibilityFocusToolCallID
         )
     }
 }
@@ -4034,6 +4217,7 @@ private struct ChatLiveTailBubble: View {
     let displaySetting: DisplaySetting
     let generativeUiSetting: GenerativeUiSetting
     let reasoningLevelLabel: String?
+    let imageAccessibilityFocusToolCallID: String?
     let onAction: (ChatListAction) -> Void
 
     var body: some View {
@@ -4042,6 +4226,7 @@ private struct ChatLiveTailBubble: View {
             displaySetting: displaySetting,
             generativeUiSetting: generativeUiSetting,
             reasoningLevelLabel: reasoningLevelLabel,
+            imageAccessibilityFocusToolCallID: imageAccessibilityFocusToolCallID,
             onAction: onAction
         )
         .messageBubble(

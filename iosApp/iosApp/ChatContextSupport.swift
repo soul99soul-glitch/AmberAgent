@@ -146,6 +146,12 @@ enum ChatMemoryContextBuilder {
 }
 
 struct ChatRuntimeContextBuilder {
+    struct MiniAppTurnContext: Equatable {
+        let currentUserIndex: Int
+        let requestText: String
+        let isContinuation: Bool
+    }
+
     let sharedSettings: IOSSharedSettingsStore
     let mcpTools: [IOSMcpDiscoveredTool]
     let miniAppRepository: IOSMiniAppRepository
@@ -265,22 +271,27 @@ struct ChatRuntimeContextBuilder {
     @MainActor
     private func messagesByInjectingMiniAppInstruction(_ messages: [UIMessage]) -> [UIMessage] {
         guard miniAppRuntimeEnabled else { return messages }
-        guard let lastUserIndex = messages.lastIndex(where: { $0.role == MessageRole.user }) else { return messages }
-        let message = messages[lastUserIndex]
+        guard let turn = Self.miniAppTurnContext(in: messages) else { return messages }
+        let message = messages[turn.currentUserIndex]
         guard let textIndex = message.parts.lastIndex(where: { $0 is UIMessagePart.Text }),
-              let textPart = message.parts[textIndex] as? UIMessagePart.Text,
-              IOSMiniAppOutputParser.isExplicitMiniAppRequest(textPart.text) else {
+              let textPart = message.parts[textIndex] as? UIMessagePart.Text else {
             return messages
         }
 
-        let instruction = miniAppInstruction(for: textPart.text)
+        let continuationInstruction = turn.isContinuation
+            ? """
+            上一次 MiniApp JSON 因输出上限被截断。不要续写残缺片段；请从 { 开始重新输出一个更紧凑、完整、可解析的单个 JSON 对象。
+
+            """
+            : ""
+        let instruction = continuationInstruction + miniAppInstruction(for: turn.requestText)
         var updatedParts = message.parts
         updatedParts[textIndex] = UIMessagePart.Text(
             text: textPart.text.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + instruction,
             metadata: textPart.metadata
         )
         var updatedMessages = messages
-        updatedMessages[lastUserIndex] = UIMessage(
+        updatedMessages[turn.currentUserIndex] = UIMessage(
             id: message.id,
             role: message.role,
             parts: updatedParts,
@@ -292,6 +303,44 @@ struct ChatRuntimeContextBuilder {
             translation: message.translation
         )
         return updatedMessages
+    }
+
+    static func miniAppTurnContext(in messages: [UIMessage]) -> MiniAppTurnContext? {
+        guard let lastUserIndex = messages.lastIndex(where: { $0.role == MessageRole.user }),
+              let latestText = messageText(messages[lastUserIndex]) else {
+            return nil
+        }
+        if IOSMiniAppOutputParser.isExplicitMiniAppRequest(latestText) {
+            return MiniAppTurnContext(
+                currentUserIndex: lastUserIndex,
+                requestText: latestText,
+                isContinuation: false
+            )
+        }
+        guard isMiniAppContinuationText(latestText), lastUserIndex > messages.startIndex else {
+            return nil
+        }
+
+        let earlierRange = messages.startIndex..<lastUserIndex
+        guard let originalUserIndex = messages[earlierRange].lastIndex(where: { $0.role == MessageRole.user }),
+              let requestText = messageText(messages[originalUserIndex]),
+              IOSMiniAppOutputParser.isExplicitMiniAppRequest(requestText) else {
+            return nil
+        }
+        let responseRange = messages.index(after: originalUserIndex)..<lastUserIndex
+        guard messages[responseRange].contains(where: { message in
+            message.role == MessageRole.assistant && message.parts.contains { part in
+                guard let text = part as? UIMessagePart.Text else { return false }
+                return IOSMiniAppChatMessageFactory.mightContainMiniApp(text.text)
+            }
+        }), messages[responseRange].contains(where: isOutputLimitNotice) else {
+            return nil
+        }
+        return MiniAppTurnContext(
+            currentUserIndex: lastUserIndex,
+            requestText: requestText,
+            isContinuation: true
+        )
     }
 
     @MainActor
@@ -317,8 +366,11 @@ struct ChatRuntimeContextBuilder {
             <miniapp-html-context>
             \(Self.safeHtmlContext(app.htmlContent))
             </miniapp-html-context>
+            \(app.htmlContent.count > 48_000 ? "注意：当前 HTML 很长，上下文只包含开头和结尾片段；请生成更紧凑的新版本，不要复制大型静态数据。" : "")
 
-            输出要求：只输出一个完整严格 JSON 对象，字段与 MiniApp Schema 一致。新版必须是完整可运行 HTML。
+            输出要求：仍然只输出一个完整严格 JSON 对象，字段与 MiniApp Schema 一致。不要输出 Markdown、解释、diff、补丁或多个对象。
+            新版必须是完整可运行 HTML；请把版本变化整合进 HTML。
+            如果是新闻、杂志、阅读模板，避免在 JSON/HTML 里硬塞大量静态文章数据；优先用 Amber.search 或 Amber.fetch 动态加载，或只保留少量示例数据，避免输出被截断。
 
             \(IOSMiniAppOutputParser.miniAppInstruction)
             """
@@ -348,6 +400,22 @@ struct ChatRuntimeContextBuilder {
 
     static func revisionVersion(in text: String) -> Int? {
         firstCapture(pattern: #"(?im)^\s*currentVersion\s*:\s*(\d+)\s*$"#, text: text).flatMap(Int.init)
+    }
+
+    private static func isMiniAppContinuationText(_ text: String) -> Bool {
+        let normalized = text
+            .lowercased()
+            .filter { !$0.isWhitespace && !"，。！？,.!?".contains($0) }
+        return ["继续", "请继续", "继续生成", "继续完成", "continue", "pleasecontinue"].contains(normalized)
+    }
+
+    private static func isOutputLimitNotice(_ message: UIMessage) -> Bool {
+        guard message.role == MessageRole.assistant else { return false }
+        return message.parts.contains { part in
+            guard let text = part as? UIMessagePart.Text else { return false }
+            return text.text.contains("输出上限") &&
+                (text.text.contains("不完整") || text.text.lowercased().contains("truncated"))
+        }
     }
 
     static func safeHtmlContext(_ html: String) -> String {

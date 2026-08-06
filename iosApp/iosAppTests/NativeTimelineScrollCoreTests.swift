@@ -226,6 +226,63 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         )
     }
 
+    func testMessageAnchorWaitsForTheOwningConversationAndConsumesOnce() {
+        let anchor = ChatMessageAnchor(
+            conversationID: "conversation-a",
+            messageID: "message-image",
+            toolCallID: "tool-image"
+        )
+
+        XCTAssertNil(NativeTimelineMessageAnchorPolicy.targetEntryID(
+            request: anchor,
+            consumed: nil,
+            currentConversationID: "conversation-b",
+            availableMessageIDs: ["message-image"],
+            availableImageToolCallIDs: ["tool-image"]
+        ))
+        XCTAssertNil(NativeTimelineMessageAnchorPolicy.targetEntryID(
+            request: anchor,
+            consumed: nil,
+            currentConversationID: "conversation-a",
+            availableMessageIDs: [],
+            availableImageToolCallIDs: ["tool-image"]
+        ))
+        XCTAssertNil(NativeTimelineMessageAnchorPolicy.targetEntryID(
+            request: anchor,
+            consumed: nil,
+            currentConversationID: "conversation-a",
+            availableMessageIDs: ["message-image"],
+            availableImageToolCallIDs: []
+        ))
+        XCTAssertEqual(NativeTimelineMessageAnchorPolicy.targetEntryID(
+            request: anchor,
+            consumed: nil,
+            currentConversationID: "conversation-a",
+            availableMessageIDs: ["message-image"],
+            availableImageToolCallIDs: ["tool-image"]
+        ), ChatImageGenerationAnchorTarget.id(toolCallID: "tool-image"))
+        XCTAssertNil(NativeTimelineMessageAnchorPolicy.targetEntryID(
+            request: anchor,
+            consumed: anchor,
+            currentConversationID: "conversation-a",
+            availableMessageIDs: ["message-image"],
+            availableImageToolCallIDs: ["tool-image"]
+        ))
+
+        XCTAssertFalse(NativeTimelineMessageAnchorPolicy.canSchedule(
+            nativeDriverActive: false,
+            fallbackActive: false
+        ))
+        XCTAssertTrue(NativeTimelineMessageAnchorPolicy.canSchedule(
+            nativeDriverActive: true,
+            fallbackActive: false
+        ))
+        XCTAssertTrue(NativeTimelineMessageAnchorPolicy.canSchedule(
+            nativeDriverActive: false,
+            fallbackActive: true
+        ))
+    }
+
     @MainActor
     func testTrackingPhaseBeginsUserDragBeforeUIKitFlagsCatchUp() {
         XCTAssertTrue(

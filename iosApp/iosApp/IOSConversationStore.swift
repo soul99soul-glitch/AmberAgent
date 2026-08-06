@@ -379,6 +379,43 @@ final class IOSConversationStore {
         return false
     }
 
+    /// Replaces one background-owned message by id without replaying an old
+    /// full conversation snapshot. This preserves messages or branches added
+    /// while the background job was running.
+    @discardableResult
+    func replaceBackgroundMessage(_ replacement: UIMessage, in id: KotlinUuid) async -> Bool {
+        let replacementId = String(describing: replacement.id)
+        for _ in 0..<3 {
+            guard !isDeletedConversation(id) else { return false }
+            let baseline = writeBaseline(for: id)
+            let conversation: Conversation?
+            if currentConversation?.id == id {
+                conversation = currentConversation
+            } else {
+                do {
+                    conversation = try await storage.loadConversation(id: id)
+                } catch {
+                    publishIOError(operation: "更新后台回复", detail: "目标 \(id): \(error)")
+                    conversation = nil
+                }
+            }
+            guard let conversation, !isDeletedConversation(id) else { return false }
+            var messages = conversation.currentMessages
+            guard let index = messages.firstIndex(where: {
+                String(describing: $0.id) == replacementId
+            }) else {
+                return false
+            }
+            messages[index] = replacement
+            guard await save(messages: messages, to: id, ifUnchangedSince: baseline) else { continue }
+            pendingBackgroundContentConversationIds.insert(String(describing: id))
+            backgroundContentRevision &+= 1
+            return true
+        }
+        print("[AA-STORE] background message replacement skipped after retries id=\(sequenceKey(for: id))")
+        return false
+    }
+
     @discardableResult
     func saveBackgroundToolCompletion(
         baseMessages: [UIMessage],

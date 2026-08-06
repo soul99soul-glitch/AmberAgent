@@ -105,6 +105,23 @@ enum IOSMiniAppChatMessageFactory {
         )
     }
 
+    static func persistedConversationReferences(
+        in messages: [UIMessage]
+    ) -> Set<IOSMiniAppConversationReference> {
+        Set(messages.flatMap(\.parts).compactMap { part in
+            guard let miniApp = part as? UIMessagePart.MiniApp,
+                  let htmlHash = miniApp.htmlHash?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !htmlHash.isEmpty else {
+                return nil
+            }
+            return IOSMiniAppConversationReference(
+                appId: miniApp.appId,
+                version: Int(miniApp.version),
+                htmlHash: htmlHash
+            )
+        })
+    }
+
     static func updatedAssistant(
         _ message: UIMessage,
         textPartIndex: Int,

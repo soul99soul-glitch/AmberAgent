@@ -11,12 +11,18 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
     private(set) var log: [String] = []
     private let sessionId: String
     private let runtime: IOSMiniAppBridgeRuntime
+    private let onLogChanged: ([String]) -> Void
     private weak var webView: WKWebView?
     private var isClosed = false
 
-    init(runtime: IOSMiniAppBridgeRuntime, sessionId: String = UUID().uuidString) {
+    init(
+        runtime: IOSMiniAppBridgeRuntime,
+        sessionId: String = UUID().uuidString,
+        onLogChanged: @escaping ([String]) -> Void = { _ in }
+    ) {
         self.sessionId = sessionId
         self.runtime = runtime
+        self.onLogChanged = onLogChanged
         super.init()
     }
 
@@ -78,7 +84,6 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
         appendLog("▶ onResponse: \(jsonString.prefix(500))")
         webView.evaluateJavaScript("""
         window.AmberBridge && window.AmberBridge._handleNativeResponse && window.AmberBridge._handleNativeResponse(\(jsonString));
-        window.AmberNative && window.AmberNative.onResponse && window.AmberNative.onResponse(\(jsonString));
         """)
     }
 
@@ -105,6 +110,7 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
     private func appendLog(_ line: String) {
         log.append(line)
         if log.count > 200 { log.removeFirst(log.count - 200) }
+        onLogChanged(log)
     }
 
     /// Serialize a JSON object back to a string safe for evaluateJavaScript.

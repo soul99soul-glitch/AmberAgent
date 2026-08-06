@@ -13,23 +13,23 @@ struct AmberPalette {
 // @Observable runtime, any SwiftUI body that reads AmberTheme.* auto-tracks theme changes and
 // re-renders — with zero changes at the ~1500 existing call sites.
 enum AmberTheme {
-    // Warm paper (default).
+    // 暖纸（设计 E 版变体）：画布 #EFE7D6、卡片 #FFFDF7，投影偏暖棕。
     static let paperLight = AmberPalette(
-        background: 0xFBF7F1, surface: 0xF2EADE, surface2: 0xE7DBCB,
-        foreground: 0x2A2320, foreground2: 0x4A4039, muted: 0x6E6254, muted2: 0xA89A88,
+        background: 0xEFE7D6, surface: 0xFFFDF7, surface2: 0xF0EBE2,
+        foreground: 0x1B1813, foreground2: 0x5B5449, muted: 0x746D62, muted2: 0x918A80,
         border: 0xDBCEBC, borderSoft: 0xECE3D6
     )
-    // Neutral white: true white canvas, with off-white grouped surfaces so
-    // cards, sheets, and code blocks remain visually separated.
+    // 默认主题（设计 E 版）：中性暖灰画布 #ECE8E4（禁止纯白）+ 暖白卡片 #F6F5F3，
+    // figure/ground 靠「卡片亮一档 + 贴身接触投影」建立，不靠描边。
     static let neutralLight = AmberPalette(
-        background: 0xFFFFFF, surface: 0xFAFAFB, surface2: 0xF1F2F4,
-        foreground: 0x1C1C1E, foreground2: 0x3A3A3C, muted: 0x6C6C70, muted2: 0xAEAEB2,
-        border: 0xD8DADF, borderSoft: 0xE6E8EC
+        background: 0xECE8E4, surface: 0xF6F5F3, surface2: 0xEDEBE7,
+        foreground: 0x161514, foreground2: 0x55524D, muted: 0x716D67, muted2: 0x8F8B85,
+        border: 0xD9D5CF, borderSoft: 0xE4E1DC
     )
-    // Warm dark (HIG: not pure black / not pure white; hairlines via near-bg surfaces).
+    // 深色（设计 E 版）：画布 #0E0D10、卡片 #1F1D23，玻璃改 10% 白、投影改黑系。
     static let darkPalette = AmberPalette(
-        background: 0x0E0D10, surface: 0x1B1A1E, surface2: 0x26242A,
-        foreground: 0xF4EFE7, foreground2: 0xCFC8BD, muted: 0x9A9189, muted2: 0x6E6760,
+        background: 0x0E0D10, surface: 0x1F1D23, surface2: 0x2B2930,
+        foreground: 0xF4F1ED, foreground2: 0xC3BEC5, muted: 0xAAA5AD, muted2: 0x6E6760,
         border: 0x3A3741, borderSoft: 0x2A2830
     )
 
@@ -114,6 +114,144 @@ enum AmberTheme {
     static let radiusLarge: CGFloat = 12
     static let radiusXLarge: CGFloat = 18
     static let radiusPill: CGFloat = 980
+
+    // ── E 版首页设计令牌 ─────────────────────────────────────────────
+    // 所有色值均为设计稿像素实测值，直接使用，不要取整或「优化」。
+    // 单一 accent：琥珀金 #B9863A 只允许出现在 FAB、设置齿轮、激活头像/墨色、focus 环。
+
+    /// 全 App 唯一分隔线语言：1px hairline。
+    static var separator: Color { homeColor(\.sep, alpha: \.sepAlpha) }
+    /// hover/按压垫底（前景只允许加深，禁止变浅变灰）。
+    static var press: Color { homeColor(\.press, alpha: \.pressAlpha) }
+    static var hoverCard: Color { homeColor(\.hoverCard) }
+    /// 激活会话行通栏色带（无内圆角、无内描边、无内缩，由外层卡片圆角裁切）。
+    static var activeCard: Color { homeColor(\.activeCard) }
+    /// 节标题墨（设计令牌 sec，与 foreground2 数值同构但语义独立，防止联动漂移）。
+    static var section: Color { homeColor(\.section) }
+    static var avatarActive: Color { homeColor(\.avatarActive) }
+    static var avatarActiveInk: Color { homeColor(\.avatarActiveInk) }
+    static var avatarIdle: Color { homeColor(\.avatarIdle) }
+    static var avatarIdleInk: Color { homeColor(\.avatarIdleInk) }
+    /// 全 App 唯一彩色：琥珀金 FAB 底 / 齿轮 / 激活态。与用户可选 accent 解耦，恒定 #B9863A。
+    static var fab: Color { homeColor(\.fab) }
+    static var fabInk: Color { homeColor(\.fabInk) }
+    /// focus-visible 焦点环。
+    static let focusRing = Color(hex: 0xB9863A, alpha: 0.55)
+    /// 首页控制层玻璃配方（仅搜索胶囊钮/展开搜索条/齿轮按钮三个控件，设计 §2）。
+    /// 浅色（含暖纸）：白 .78→.58 纵向渐变；深色：白 .14→.08。
+    /// 描边 .5px 白 .5（深色 .16）、顶部内高光白 .9（深色 .16）、投影 rgba(40,36,28) .10/.06（深色黑 .30/.22）。
+    static var homeGlassTop: Color { homeGlassWhite(\.glassTopAlpha) }
+    static var homeGlassBottom: Color { homeGlassWhite(\.glassBottomAlpha) }
+    static var homeGlassEdge: Color { homeGlassWhite(\.glassEdgeAlpha) }
+    static var homeGlassHighlight: Color { homeGlassWhite(\.glassHighlightAlpha) }
+    static var homeGlassShadowAmbient: Color { homeColor(\.glassShadow, alpha: \.glassShadowAmbientAlpha) }
+    static var homeGlassShadowContact: Color { homeColor(\.glassShadow, alpha: \.glassShadowContactAlpha) }
+    /// 贴身接触线投影（卡片「坐」在画布上的关键，不要飘）。
+    static var cardShadowContact: Color { homeColor(\.shadowContact, alpha: \.shadowContactAlpha) }
+    /// 弱环境光投影。
+    static var cardShadowAmbient: Color { homeColor(\.shadowAmbient, alpha: \.shadowAmbientAlpha) }
+
+    /// 环境光投影的几何随主题变化（浅色 0 5px 14px -6px，深色 0 8px 20px -8px），
+    /// 颜色已通过上面的动态令牌解析，这里只提供几何。
+    static func cardShadowAmbientGeometry(for colorScheme: ColorScheme) -> (radius: CGFloat, y: CGFloat) {
+        colorScheme == .dark ? (10, 8) : (7, 5)
+    }
+
+    private struct AmberHomeTokens {
+        let sep, press, hoverCard, activeCard: UInt32
+        let sepAlpha, pressAlpha: Double
+        let section: UInt32
+        let avatarActive, avatarActiveInk, avatarIdle, avatarIdleInk: UInt32
+        let fab, fabInk: UInt32
+        let shadowContact, shadowAmbient: UInt32
+        let shadowContactAlpha, shadowAmbientAlpha: Double
+        let glassTopAlpha, glassBottomAlpha, glassEdgeAlpha, glassHighlightAlpha: Double
+        let glassShadow: UInt32
+        let glassShadowAmbientAlpha, glassShadowContactAlpha: Double
+    }
+
+    // 默认主题（中性暖灰 light）
+    private static let homeNeutral = AmberHomeTokens(
+        sep: 0x161410, press: 0x463A28, hoverCard: 0xF0EEEA, activeCard: 0xEFE9DF,
+        sepAlpha: 0.045, pressAlpha: 0.06,
+        section: 0x55524D,
+        avatarActive: 0xE8DDC6, avatarActiveInk: 0x6F5019, avatarIdle: 0xEDEBE7, avatarIdleInk: 0x8F8B85,
+        fab: 0xB9863A, fabInk: 0x231602,
+        shadowContact: 0x3A342C, shadowAmbient: 0x3A342C,
+        shadowContactAlpha: 0.09, shadowAmbientAlpha: 0.05,
+        glassTopAlpha: 0.78, glassBottomAlpha: 0.58, glassEdgeAlpha: 0.5, glassHighlightAlpha: 0.9,
+        glassShadow: 0x28241C, glassShadowAmbientAlpha: 0.10, glassShadowContactAlpha: 0.06
+    )
+    // 暖纸（投影偏暖棕）
+    private static let homePaper = AmberHomeTokens(
+        sep: 0x261E14, press: 0x594223, hoverCard: 0xF7F1E6, activeCard: 0xF4EAD8,
+        sepAlpha: 0.05, pressAlpha: 0.055,
+        section: 0x5B5449,
+        avatarActive: 0xEADCBC, avatarActiveInk: 0x6F5019, avatarIdle: 0xF0EBE2, avatarIdleInk: 0x918A80,
+        fab: 0xB9863A, fabInk: 0x231602,
+        shadowContact: 0x4C3B22, shadowAmbient: 0x4C3B22,
+        shadowContactAlpha: 0.09, shadowAmbientAlpha: 0.06,
+        glassTopAlpha: 0.78, glassBottomAlpha: 0.58, glassEdgeAlpha: 0.5, glassHighlightAlpha: 0.9,
+        glassShadow: 0x28241C, glassShadowAmbientAlpha: 0.10, glassShadowContactAlpha: 0.06
+    )
+    // 深色（玻璃改 10% 白、投影改黑系，accent 墨色提亮一档保证 ≥4.5:1）
+    private static let homeDark = AmberHomeTokens(
+        sep: 0xFFFFFF, press: 0xFFFFFF, hoverCard: 0x29262D, activeCard: 0x302A25,
+        sepAlpha: 0.055, pressAlpha: 0.055,
+        section: 0xC3BEC5,
+        avatarActive: 0x443824, avatarActiveInk: 0xE0BA72, avatarIdle: 0x2B2930, avatarIdleInk: 0xAAA5AD,
+        fab: 0xB9863A, fabInk: 0x211402,
+        shadowContact: 0x000000, shadowAmbient: 0x000000,
+        shadowContactAlpha: 0.58, shadowAmbientAlpha: 0.76,
+        glassTopAlpha: 0.14, glassBottomAlpha: 0.08, glassEdgeAlpha: 0.16, glassHighlightAlpha: 0.16,
+        glassShadow: 0x000000, glassShadowAmbientAlpha: 0.30, glassShadowContactAlpha: 0.22
+    )
+
+    private static func homeTokens(for paper: AmberThemeRuntime.Paper, dark: Bool) -> AmberHomeTokens {
+        switch paper {
+        case .neutral:
+            return dark ? homeDark : homeNeutral
+        case .paper:
+            return dark ? homeDark : homePaper
+        case .garnet, .ochre, .turmeric, .magenta, .lotus:
+            // 沉浸式单色画布目前是隐藏的占位主题：从各自调色板派生中性令牌，
+            // 重新启用时按 E 版同构关系补一套实测值即可。
+            let palette = dark ? paper.darkPalette : paper.lightPalette
+            return AmberHomeTokens(
+                sep: palette.foreground, press: palette.foreground,
+                hoverCard: palette.surface2, activeCard: palette.surface2,
+                sepAlpha: 0.18, pressAlpha: 0.08,
+                section: palette.foreground2,
+                avatarActive: palette.surface2, avatarActiveInk: palette.foreground,
+                avatarIdle: palette.surface2, avatarIdleInk: palette.muted,
+                fab: 0xB9863A, fabInk: 0x231602,
+                shadowContact: 0x000000, shadowAmbient: 0x000000,
+                shadowContactAlpha: 0.25, shadowAmbientAlpha: 0.30,
+                glassTopAlpha: 0.14, glassBottomAlpha: 0.08, glassEdgeAlpha: 0.16, glassHighlightAlpha: 0.16,
+                glassShadow: 0x000000, glassShadowAmbientAlpha: 0.30, glassShadowContactAlpha: 0.22
+            )
+        }
+    }
+
+    /// 玻璃用的动态白（alpha 随主题表解析）。
+    private static func homeGlassWhite(_ alpha: KeyPath<AmberHomeTokens, Double>) -> Color {
+        let paper = AmberThemeRuntime.shared.paper
+        return Color(uiColor: UIColor { trait in
+            let tokens = homeTokens(for: paper, dark: trait.userInterfaceStyle == .dark)
+            return UIColor(hex: 0xFFFFFF, alpha: tokens[keyPath: alpha])
+        })
+    }
+
+    private static func homeColor(
+        _ key: KeyPath<AmberHomeTokens, UInt32>,
+        alpha: KeyPath<AmberHomeTokens, Double>? = nil
+    ) -> Color {
+        let paper = AmberThemeRuntime.shared.paper
+        return Color(uiColor: UIColor { trait in
+            let tokens = homeTokens(for: paper, dark: trait.userInterfaceStyle == .dark)
+            return UIColor(hex: tokens[keyPath: key], alpha: alpha.map { tokens[keyPath: $0] } ?? 1)
+        })
+    }
 }
 
 /// Persisted, observable theme state: canvas (paper vs neutral) + accent. Light/dark is handled
@@ -156,7 +294,7 @@ final class AmberThemeRuntime {
         var displayName: String {
             switch self {
             case .paper: "暖纸"
-            case .neutral: "中性白"
+            case .neutral: "暖灰"
             case .garnet: "绛红"
             case .ochre: "赭橙"
             case .turmeric: "姜黄"
@@ -185,9 +323,10 @@ final class AmberThemeRuntime {
 
     private init() {
         let d = UserDefaults.standard
-        paper = Paper(rawValue: d.string(forKey: Keys.paper) ?? "") ?? .paper
-        accentHex = (d.object(forKey: Keys.accent) as? Int).map { UInt32($0) } ?? AmberAccentOption.terracotta.accentHex
-        accentInkHex = (d.object(forKey: Keys.accentInk) as? Int).map { UInt32($0) } ?? AmberAccentOption.terracotta.inkHex
+        // 默认主题 = 中性暖灰 × 琥珀金（E 版定稿）；用户显式选择过的偏好仍以持久化值为准。
+        paper = Paper(rawValue: d.string(forKey: Keys.paper) ?? "") ?? .neutral
+        accentHex = (d.object(forKey: Keys.accent) as? Int).map { UInt32($0) } ?? AmberAccentOption.amberGold.accentHex
+        accentInkHex = (d.object(forKey: Keys.accentInk) as? Int).map { UInt32($0) } ?? AmberAccentOption.amberGold.inkHex
     }
 
     func apply(_ option: AmberAccentOption) {
@@ -199,18 +338,18 @@ final class AmberThemeRuntime {
 /// Authoritative accent set + paired ink (redesign/aa-base.jsx ACCENT_INK). High-luminance hues
 /// (sage, amber gold) pair with dark ink; the rest with white — never a blanket white.
 enum AmberAccentOption: String, CaseIterable, Identifiable {
-    case terracotta, sage, mistBlue, wisteria, rose, amberGold, ink
+    case amberGold, terracotta, sage, mistBlue, wisteria, rose, ink
 
     var id: String { rawValue }
 
     var accentHex: UInt32 {
         switch self {
+        case .amberGold:  0xB9863A
         case .terracotta: 0xB8623A
         case .sage:       0x5E9C6E
         case .mistBlue:   0x4F86D6
         case .wisteria:   0x9277C4
         case .rose:       0xC2607A
-        case .amberGold:  0xC79A4A
         case .ink:        0x222226
         }
     }
@@ -218,7 +357,7 @@ enum AmberAccentOption: String, CaseIterable, Identifiable {
     var inkHex: UInt32 {
         switch self {
         case .sage:      0x0F150E
-        case .amberGold: 0x1A1408
+        case .amberGold: 0x231602
         default:         0xFFFFFF
         }
     }
@@ -601,6 +740,7 @@ struct AmberSectionLabel: View {
             .padding(.horizontal, 16)
             .padding(.top, 20)
             .padding(.bottom, 7)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -713,9 +853,10 @@ private struct HomeAccountAvatar: View {
                     .clipShape(Circle())
             } else {
                 Text(initial)
-                    .font(.system(size: size * 0.38, weight: .bold, design: .rounded))
-                    .foregroundStyle(AmberTheme.foreground)
+                    .font(.system(size: size * 0.38, weight: .semibold, design: .rounded))
+                    .foregroundStyle(AmberTheme.avatarIdleInk)
                     .frame(width: size, height: size)
+                    .background(AmberTheme.avatarIdle, in: Circle())
             }
         }
         .contentShape(Circle())
@@ -726,53 +867,668 @@ private struct HomeAccountAvatar: View {
     }
 }
 
+enum HomeConversationIcon {
+    static let fallback: HomePhosphor = .chatCircle
+
+    /// 按会话标题语义取 Phosphor fill 实心字形（设计 §4 九行映射 + 置顶图钉 + 实心气泡回退）。
+    static func icon(forTitle title: String, isPinned: Bool) -> HomePhosphor {
+        if isPinned { return .pushPin }
+        let normalized = title.lowercased()
+        let mappings: [(HomePhosphor, [String])] = [
+            (.moon, ["月光", "月亮", "夜色", "夜晚", "晚安", "晚上", "星空", "半夜", "晚年", "梦"]),
+            (.wine, ["酒", "酿", "醉", "干杯"]),
+            (.sword, ["剑", "武侠", "江湖", "打仗", "战争", "战役", "战术", "兵法", "武将", "将军", "军队"]),
+            (.crown, ["皇帝", "帝王", "王冠", "君主", "国王", "女王", "皇后", "皇室", "王位", "登基", "在位"]),
+            (.list, ["顺序", "排行", "清单", "列表", "目录", "步骤", "流程", "时间表", "年表"]),
+            (.musicNotes, ["音乐", "歌曲", "歌单", "bgm", "配乐", "旋律", "专辑", "歌手", "歌词", "钢琴", "吉他"]),
+            (.mapPin, ["在哪", "哪里", "哪儿", "地址", "地图", "路线", "都城", "城市", "旅行", "旅游", "景点"]),
+            (.pill, ["药", "症状", "治疗", "医院", "看病", "疾病", "感冒", "发烧", "痛风", "健康"]),
+            (.scales, ["谁", "对比", "比较", "哪个好", "排名", "评价", "厉害", "更强"])
+        ]
+        return mappings.first(where: { _, words in words.contains { normalized.contains($0) } })?.0 ?? fallback
+    }
+}
+
+struct HomeNovelProjectRef: Equatable {
+    let id: NovelProjectID
+    let name: String
+    let updatedAt: Date
+    let isDegraded: Bool
+    let isRunning: Bool
+
+    init(
+        id: NovelProjectID,
+        name: String,
+        updatedAt: Date,
+        isDegraded: Bool,
+        isRunning: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.updatedAt = updatedAt
+        self.isDegraded = isDegraded
+        self.isRunning = isRunning
+    }
+
+    init(_ summary: NovelProjectSummary) {
+        id = summary.id
+        name = summary.name
+        updatedAt = summary.updatedAt
+        isDegraded = summary.isDegraded
+        isRunning = summary.hasRunningRun
+    }
+}
+
+struct HomeCouncilTaskRef: Equatable {
+    let id: String
+    let title: String
+    let status: IOSAdvancedTaskStatus
+    let updatedAt: Date
+    let canContinue: Bool
+
+    init(
+        id: String,
+        title: String,
+        status: IOSAdvancedTaskStatus,
+        updatedAt: Date,
+        canContinue: Bool
+    ) {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.updatedAt = updatedAt
+        self.canContinue = canContinue
+    }
+
+    init(_ context: CouncilHomeResumeContext) {
+        id = context.id
+        title = context.title
+        status = context.status
+        updatedAt = context.updatedAt
+        canContinue = context.canContinue
+    }
+}
+
+struct HomeDeepReadTaskRef: Equatable {
+    let id: String
+    let title: String
+    let status: IOSDeepReadTaskStatus
+    let updatedAt: Date
+    let workspaceSyncFailed: String?
+
+    init(
+        id: String,
+        title: String,
+        status: IOSDeepReadTaskStatus,
+        updatedAt: Date,
+        workspaceSyncFailed: String?
+    ) {
+        self.id = id
+        self.title = title
+        self.status = status
+        self.updatedAt = updatedAt
+        self.workspaceSyncFailed = workspaceSyncFailed
+    }
+
+    init(_ task: IOSDeepReadTask) {
+        id = task.id
+        title = task.title
+        status = task.status
+        updatedAt = Date(timeIntervalSince1970: TimeInterval(task.updatedAt) / 1_000)
+        workspaceSyncFailed = task.workspaceSyncFailed
+    }
+}
+
+struct HomeMiniAppRef: Equatable {
+    let id: String
+    let title: String
+    let latestVersionCreatedAt: Date
+    let lastRunAt: Date?
+}
+
+struct HomeImageGenerationRef: Equatable {
+    let id: String
+    let conversationID: String
+    let messageID: String
+    let toolCallID: String
+    let prompt: String
+    let state: ChatImageGenerationResumeState
+    let updatedAt: Date
+
+    init(
+        id: String,
+        conversationID: String,
+        messageID: String,
+        toolCallID: String,
+        prompt: String,
+        state: ChatImageGenerationResumeState,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.conversationID = conversationID
+        self.messageID = messageID
+        self.toolCallID = toolCallID
+        self.prompt = prompt
+        self.state = state
+        self.updatedAt = updatedAt
+    }
+
+    init(_ context: ChatImageGenerationResumeContext) {
+        id = context.id
+        conversationID = context.conversationID
+        messageID = context.messageID
+        toolCallID = context.toolCallID
+        prompt = context.prompt
+        state = context.state
+        updatedAt = context.updatedAt
+    }
+}
+
+/// 首页按压态 ButtonStyle：scale 回弹 + 把 isPressed 通过 Binding 回传，
+/// 让行内容可以成对切换按压垫底/前景（设计 §5：hover/按压前景背景成对定义）。
+private struct HomePressStateStyle: ButtonStyle {
+    @Binding var pressed: Bool
+    let scale: CGFloat
+    var haptic: AmberHapticEvent? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .animation(
+                reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.72),
+                value: configuration.isPressed
+            )
+            .onChange(of: configuration.isPressed) { _, isPressed in
+                pressed = isPressed
+                guard isPressed, let haptic else { return }
+                AmberHaptics.trigger(haptic)
+            }
+            // 行在按压中被回收/重建时，避免 pressed 残留导致按压垫底卡住。
+            .onDisappear { pressed = false }
+    }
+}
+
+struct HomeContinueCardModel: Equatable {
+    enum Feature: Equatable {
+        case deepRead
+        case novel
+        case council
+        case miniApp
+        case imageGeneration
+
+        var icon: HomePhosphor {
+            switch self {
+            case .deepRead: .bookOpen
+            case .novel: .notebook
+            case .council: .chatCircleDots
+            case .miniApp: .squaresFour
+            case .imageGeneration: .imageSquare
+            }
+        }
+    }
+
+    enum Destination: Equatable {
+        case openCouncil
+        case deepReadTask(String)
+        case resumeProject(NovelProjectID)
+        case miniAppRunner(String)
+        case generatedImage(ChatMessageAnchor)
+    }
+
+    private enum Priority: Int {
+        case draft = 1
+        case readyResult = 2
+        case recoverable = 3
+        case active = 4
+        case actionRequired = 5
+    }
+
+    private struct Candidate {
+        let stableID: String
+        let priority: Priority
+        let updatedAt: Date
+        let model: HomeContinueCardModel
+    }
+
+    let feature: Feature
+    let title: String
+    let meta: String
+    let ctaTitle: String
+    let destination: Destination
+
+    static func resolve(
+        novelProjects: [HomeNovelProjectRef] = [],
+        councilTask: HomeCouncilTaskRef? = nil,
+        deepReadTasks: [HomeDeepReadTaskRef] = [],
+        miniApps: [HomeMiniAppRef] = [],
+        imageGeneration: HomeImageGenerationRef? = nil,
+        now: Date = Date()
+    ) -> HomeContinueCardModel? {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+
+        var candidates = novelProjects.compactMap { project -> Candidate? in
+            guard !project.isDegraded else { return nil }
+            let state = project.isRunning ? "生成中" : formatter.localizedString(
+                for: project.updatedAt,
+                relativeTo: now
+            )
+            return Candidate(
+                stableID: "novel:\(project.id)",
+                priority: project.isRunning ? .active : .draft,
+                updatedAt: project.updatedAt,
+                model: .init(
+                    feature: .novel,
+                    title: "小说创作",
+                    meta: "《\(project.name)》· \(state)",
+                    ctaTitle: project.isRunning ? "查看" : "继续",
+                    destination: .resumeProject(project.id)
+                )
+            )
+        }
+
+        if let councilTask,
+           let priority = councilPriority(for: councilTask) {
+            let state = councilStateTitle(for: councilTask)
+            candidates.append(Candidate(
+                stableID: "council:\(councilTask.id)",
+                priority: priority,
+                updatedAt: councilTask.updatedAt,
+                model: .init(
+                    feature: .council,
+                    title: "模型议会",
+                    meta: "\(councilTask.title) · \(state)",
+                    ctaTitle: priority == .actionRequired ? "处理" : (priority == .active ? "查看" : "继续"),
+                    destination: .openCouncil
+                )
+            ))
+        }
+
+        candidates.append(contentsOf: deepReadTasks.compactMap { task -> Candidate? in
+            let priority: Priority
+            let state: String
+            let ctaTitle: String
+            if task.status == .succeeded, task.workspaceSyncFailed != nil {
+                priority = .actionRequired
+                state = "Workspace 同步失败"
+                ctaTitle = "处理"
+            } else {
+                switch task.status {
+                case .queued, .running:
+                    priority = .active
+                    state = task.status.title
+                    ctaTitle = "查看"
+                case .failed, .unsupported:
+                    priority = .recoverable
+                    state = "\(task.status.title) · 可重试"
+                    ctaTitle = "重试"
+                case .succeeded:
+                    return nil
+                }
+            }
+            return Candidate(
+                stableID: "deep-read:\(task.id)",
+                priority: priority,
+                updatedAt: task.updatedAt,
+                model: .init(
+                    feature: .deepRead,
+                    title: "深度阅读",
+                    meta: "\(task.title) · \(state)",
+                    ctaTitle: ctaTitle,
+                    destination: .deepReadTask(task.id)
+                )
+            )
+        })
+
+        candidates.append(contentsOf: miniApps.compactMap { app -> Candidate? in
+            if let lastRunAt = app.lastRunAt,
+               app.latestVersionCreatedAt <= lastRunAt {
+                return nil
+            }
+            let state = app.lastRunAt == nil ? "已生成，尚未打开" : "新版本尚未打开"
+            return Candidate(
+                stableID: "mini-app:\(app.id)",
+                priority: .draft,
+                updatedAt: app.latestVersionCreatedAt,
+                model: .init(
+                    feature: .miniApp,
+                    title: "小应用",
+                    meta: "「\(app.title)」· \(state)",
+                    ctaTitle: "打开",
+                    destination: .miniAppRunner(app.id)
+                )
+            )
+        })
+
+        if let imageGeneration {
+            let isCompleted = imageGeneration.state == .completed
+            let prompt = imageGeneration.prompt.isEmpty ? "未命名图片" : imageGeneration.prompt
+            candidates.append(Candidate(
+                stableID: "image:\(imageGeneration.id)",
+                priority: isCompleted ? .readyResult : .active,
+                updatedAt: imageGeneration.updatedAt,
+                model: .init(
+                    feature: .imageGeneration,
+                    title: "AI 生图",
+                    meta: "\(isCompleted ? "图片已生成" : "正在生成") · \(prompt)",
+                    ctaTitle: isCompleted ? "查看图片" : "查看",
+                    destination: .generatedImage(
+                        ChatMessageAnchor(
+                            conversationID: imageGeneration.conversationID,
+                            messageID: imageGeneration.messageID,
+                            toolCallID: imageGeneration.toolCallID
+                        )
+                    )
+                )
+            ))
+        }
+
+        return candidates.sorted { lhs, rhs in
+            if lhs.priority != rhs.priority { return lhs.priority.rawValue > rhs.priority.rawValue }
+            if lhs.updatedAt != rhs.updatedAt { return lhs.updatedAt > rhs.updatedAt }
+            return lhs.stableID < rhs.stableID
+        }.first?.model
+    }
+
+    private static func councilPriority(for task: HomeCouncilTaskRef) -> Priority? {
+        switch task.status {
+        case .approvalRequired:
+            .actionRequired
+        case .queued, .running:
+            .active
+        case .failed, .cancelled, .timedOut, .interrupted:
+            task.canContinue ? .recoverable : nil
+        case .completed:
+            nil
+        }
+    }
+
+    private static func councilStateTitle(for task: HomeCouncilTaskRef) -> String {
+        switch task.status {
+        case .failed, .cancelled, .timedOut, .interrupted:
+            "\(task.status.title) · 可继续"
+        default:
+            task.status.title
+        }
+    }
+}
+
+private enum HomeCardSlice { case top, middle, bottom, single }
+
+private struct HomeSliceShape: Shape {
+    let slice: HomeCardSlice
+    func path(in rect: CGRect) -> Path {
+        let radius: CGFloat = 22
+        switch slice {
+        case .top: return UnevenRoundedRectangle(topLeadingRadius: radius, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: radius, style: .continuous).path(in: rect)
+        case .bottom: return UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: radius, bottomTrailingRadius: radius, topTrailingRadius: 0, style: .continuous).path(in: rect)
+        case .single: return RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: rect)
+        case .middle: return Rectangle().path(in: rect)
+        }
+    }
+}
+
+private struct HomeEmptyCard: View {
+    let title: String
+    @Environment(\.colorScheme) private var colorScheme
+    var body: some View {
+        let ambient = AmberTheme.cardShadowAmbientGeometry(for: colorScheme)
+        Text(title).font(.system(size: 13, weight: .regular)).foregroundStyle(AmberTheme.muted)
+            .frame(maxWidth: .infinity, minHeight: 144)
+            .background(HomeSliceShape(slice: .single).fill(AmberTheme.card))
+            .shadow(color: AmberTheme.cardShadowContact, radius: 1, y: 1)
+            .shadow(color: AmberTheme.cardShadowAmbient, radius: ambient.radius, y: ambient.y)
+            .padding(.horizontal, 16)
+    }
+}
+
+private struct HomeShortcut: View {
+    let title: String
+    let icon: HomePhosphor
+    let action: () -> Void
+    @State private var hovering = false
+    @State private var pressed = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .caption2) private var shortcutLabelSize: CGFloat = 11
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                HomePhosphorIcon(icon, size: 20)
+                Text(title)
+                    .font(.system(size: shortcutLabelSize, weight: .semibold))
+                    .tracking(0.11)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(hovering || pressed ? AmberTheme.foreground : AmberTheme.muted)
+            .frame(
+                minWidth: dynamicTypeSize.isAccessibilitySize ? 144 : nil,
+                maxWidth: dynamicTypeSize.isAccessibilitySize ? 144 : .infinity,
+                minHeight: 44
+            )
+            .background(hovering || pressed ? AmberTheme.press : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(HomePressStateStyle(pressed: $pressed, scale: 0.92, haptic: .selection))
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct HomeContinueButton: View {
+    let model: HomeContinueCardModel
+    let action: (HomeContinueCardModel.Destination) -> Void
+    @State private var hovering = false
+    @State private var pressed = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var continueTitleSize: CGFloat = 15
+    @ScaledMetric(relativeTo: .caption2) private var continueMetaSize: CGFloat = 11
+    @ScaledMetric(relativeTo: .caption) private var continueCTAFontSize: CGFloat = 13
+    var body: some View {
+        Button { action(model.destination) } label: {
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .top, spacing: 14) {
+                            featureIcon
+                            titleBlock
+                        }
+                        continueCTA(expands: true)
+                    }
+                } else {
+                    HStack(spacing: 14) {
+                        featureIcon
+                        titleBlock
+                        continueCTA(expands: false)
+                    }
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 18)
+            .background(pressed ? AmberTheme.press : (hovering ? AmberTheme.hoverCard : Color.clear))
+        }
+        .buttonStyle(HomePressStateStyle(pressed: $pressed, scale: 0.985, haptic: .lightImpact))
+        .onHover { hovering = $0 }
+        .accessibilityLabel("\(model.title)，\(model.meta)，\(model.ctaTitle)")
+    }
+
+    private var featureIcon: some View {
+        HomePhosphorIcon(model.feature.icon, size: 22)
+            .foregroundStyle(AmberTheme.avatarActiveInk)
+            .frame(width: 44, height: 44)
+            .background(
+                AmberTheme.avatarActive,
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+            )
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(model.title)
+                .font(.system(size: continueTitleSize, weight: .semibold))
+                .tracking(0.075)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+            Text(model.meta)
+                .font(.system(size: continueMetaSize, weight: .regular))
+                .tracking(0.11)
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 2)
+        }
+        .foregroundStyle(AmberTheme.foreground)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func continueCTA(expands: Bool) -> some View {
+        let label = Text(model.ctaTitle)
+            .font(.system(size: continueCTAFontSize, weight: .semibold))
+            .tracking(0.26)
+            .foregroundStyle(AmberTheme.background)
+        if expands {
+            label
+                .padding(.vertical, 7)
+                .padding(.horizontal, 18)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(
+                    hovering || pressed ? AmberTheme.foreground2 : AmberTheme.foreground,
+                    in: Capsule()
+                )
+        } else {
+            label
+                .padding(.vertical, 7)
+                .padding(.horizontal, 18)
+                .frame(minHeight: 32)
+                .background(
+                    hovering || pressed ? AmberTheme.foreground2 : AmberTheme.foreground,
+                    in: Capsule()
+                )
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+}
+
+private struct HomeCascade: ViewModifier {
+    let delay: Double
+    /// false 时跳过动画直接呈现：级联是一次性入场，List 行回收/搜索重建不得重播。
+    var enabled: Bool = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(appeared || reduceMotion ? 1 : 0)
+            .offset(y: appeared || reduceMotion ? 0 : 8)
+            .onAppear {
+                guard !reduceMotion else { appeared = true; return }
+                guard enabled else { appeared = true; return }
+                withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.48).delay(delay)) { appeared = true }
+            }
+    }
+}
+
+private extension View {
+    func homeCascade(delay: Double, enabled: Bool = true) -> some View { modifier(HomeCascade(delay: delay, enabled: enabled)) }
+}
+
+/// 首页控制层专用玻璃（设计 §1.3：仅搜索胶囊钮/展开搜索条/齿轮按钮三个控件）。
+/// 配方 = 白渐变垫底（浅 .78→.58 / 深 .14→.08）+ 系统玻璃材质 + 贴身双投影；
+/// 与全局 `amberGlass`（内页通用）完全隔离，内页材质不随首页设计令牌变化。
+private struct HomeGlassControlModifier: ViewModifier {
+    let cornerRadius: CGFloat
+
+    private var gradient: LinearGradient {
+        LinearGradient(
+            colors: [AmberTheme.homeGlassTop, AmberTheme.homeGlassBottom],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // CSS blur 28/8 ≈ SwiftUI radius 14/4；颜色与 alpha 为主题表内的设计实测值。
+        if #available(iOS 26.0, *) {
+            content
+                .background(gradient, in: shape)
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+                .shadow(color: AmberTheme.homeGlassShadowAmbient, radius: 14, y: 10)
+                .shadow(color: AmberTheme.homeGlassShadowContact, radius: 4, y: 2)
+        } else {
+            content
+                .background(.ultraThinMaterial, in: shape)
+                .background(gradient, in: shape)
+                .overlay { shape.strokeBorder(AmberTheme.homeGlassEdge, lineWidth: 0.5) }
+                .overlay(alignment: .top) {
+                    shape.strokeBorder(AmberTheme.homeGlassHighlight, lineWidth: 0.5)
+                        .frame(height: 1)
+                        .clipShape(shape)
+                }
+                .shadow(color: AmberTheme.homeGlassShadowAmbient, radius: 14, y: 10)
+                .shadow(color: AmberTheme.homeGlassShadowContact, radius: 4, y: 2)
+        }
+    }
+}
+
+private extension View {
+    func homeGlassControl(cornerRadius: CGFloat) -> some View {
+        modifier(HomeGlassControlModifier(cornerRadius: cornerRadius))
+    }
+}
+
+/// 首页齿轮钮：38 圆形玻璃 + Phosphor 实心图标（与内页 AmberGlassCircleButton 隔离）。
+private struct HomeGlassCircleButton: View {
+    let icon: HomePhosphor
+    let accessibilityLabel: String
+    var size: CGFloat = 38
+    var iconSize: CGFloat = 20
+    var tint: Color = AmberTheme.muted
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HomePhosphorIcon(icon, size: iconSize)
+                .foregroundStyle(tint)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+        }
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.92, haptic: .lightImpact))
+        .homeGlassControl(cornerRadius: size / 2)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
 struct ConversationsView: View {
     let sharedSettings: IOSSharedSettingsStore
     let chatViewModel: ChatViewModel
+    let councilChatViewModel: CouncilChatViewModel
+    let novelCreationViewModel: NovelCreationViewModel?
 
     @Environment(RouterPath.self) private var router
     @Environment(IOSConversationStore.self) private var conversationStore
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     @State private var searchQuery: String = ""
+    @State private var deepReadStore = IOSDeepReadStore.shared
+    @State private var miniAppRepository = IOSMiniAppRepository.shared
     @State private var renamingConversationId: KotlinUuid?
     @State private var renameDraft: String = ""
     @State private var deletingConversationId: KotlinUuid?
     @State private var backgroundGenerationRevision = 0
-
-    private var shortcuts: [ConversationShortcut] {
-        [
-            .init(
-                title: "深度阅读",
-                systemImage: "book.pages",
-                color: AmberTheme.accentAmber,
-                route: .board
-            ),
-            .init(
-                title: "小应用",
-                systemImage: "square.grid.2x2",
-                color: AmberTheme.accent,
-                route: .miniApps
-            ),
-            .init(
-                title: "小说创作",
-                systemImage: "text.book.closed",
-                color: AmberTheme.accentCyan,
-                route: .novelCreation
-            ),
-            .init(
-                title: "WebMount",
-                systemImage: "globe",
-                color: AmberTheme.accentGreen,
-                route: .webMount
-            ),
-            .init(
-                title: "模型议会",
-                systemImage: "bubble.left.and.bubble.right",
-                color: AmberTheme.accentIndigo,
-                route: .council
-            )
-        ]
-    }
+    @State private var homeImageGenerationContext: ChatImageGenerationResumeContext?
+    @State private var homeContinueError: String?
+    @State private var isSearchExpanded = false
+    @State private var conversationNavigationTask: Task<Void, Never>?
+    @AppStorage(ChatImageGenerationResumeConsumption.viewedCompletionIDKey)
+    private var viewedImageGenerationID = ""
+    @FocusState private var searchFocused: Bool
+    @AccessibilityFocusState private var deepReadShortcutFocused: Bool
+    /// 展开搜索后的延迟聚焦任务：取消/离场必须可撤销，否则 170ms 内收起会残留 FocusState。
+    @State private var searchFocusTask: Task<Void, Never>?
+    /// 入场级联只播放一次：最晚一级 delay .22 + 时长 .48，0.9s 后全部按已入场处理。
+    @State private var cascadeComplete = false
+    @ScaledMetric(relativeTo: .caption2) private var sectionLabelSize: CGFloat = 11
 
     /// 本地标题过滤后的会话摘要（summaries 已按 updateAt 倒序/置顶优先）。
     private var filteredSummaries: [ConversationSummary] {
@@ -785,7 +1541,20 @@ struct ConversationsView: View {
         }
     }
 
+    private var homeImageGenerationScanSignature: Int {
+        var hasher = Hasher()
+        hasher.combine(conversationStore.backgroundContentRevision)
+        hasher.combine(backgroundGenerationRevision)
+        hasher.combine(chatViewModel.isLoading)
+        for summary in conversationStore.summaries {
+            hasher.combine(summary.id.toHexDashString())
+            hasher.combine(summary.updateAt.toEpochMilliseconds())
+        }
+        return hasher.finalize()
+    }
+
     var body: some View {
+        GeometryReader { geometry in
         ZStack(alignment: .bottomTrailing) {
             AmberTheme.background.ignoresSafeArea()
 
@@ -794,31 +1563,28 @@ struct ConversationsView: View {
             // .scrollContentBackground(.hidden) + 每行 .listRowBackground(.clear) 让 List 自身
             // 不画任何底色，保留 AmberTheme.background。
             List {
-                Group {
-                    header
-                    searchField
-                    shortcutStrip
-                    // Pull the 会话 header (and the list below it) up a touch — the shared
-                    // AmberSectionLabel bakes in 20pt of top padding.
-                    AmberSectionLabel(text: "会话")
-                        .padding(.top, -10)
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                header.listRowInsets(EdgeInsets()).listRowBackground(Color.clear).listRowSeparator(.hidden).homeCascade(delay: 0.06, enabled: !cascadeComplete)
+                controlCard.listRowInsets(EdgeInsets()).listRowBackground(Color.clear).listRowSeparator(.hidden).homeCascade(delay: 0.10, enabled: !cascadeComplete)
+                Text("会话")
+                    .font(.system(size: sectionLabelSize, weight: .semibold))
+                    .tracking(0.11).foregroundStyle(AmberTheme.section)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.top, 26).padding(.bottom, 12)
+                    .listRowInsets(EdgeInsets()).listRowBackground(Color.clear).listRowSeparator(.hidden).homeCascade(delay: 0.14, enabled: !cascadeComplete)
 
                 if filteredSummaries.isEmpty {
-                    emptyState
+                    HomeEmptyCard(title: searchQuery.isEmpty ? "还没有会话" : "没有匹配的会话")
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                        .homeCascade(delay: 0.18, enabled: !cascadeComplete)
                 } else {
                     conversationList
                 }
 
                 // 底部留白，避免最后一行被右下角悬浮「新建」按钮压住。
                 Color.clear
-                    .frame(height: 104)
+                    .frame(height: 112)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -831,27 +1597,65 @@ struct ConversationsView: View {
             .scrollEdgeEffectStyle(.soft, for: .top)
 
             Button {
-                Task { @MainActor in
-                    guard chatViewModel.prepareForConversationChange() else { return }
-                    await conversationStore.startNewConversationReusingEmpty()
-                    router.navigate(to: .chat)
-                }
+                startNewConversation()
             } label: {
-                Image(systemName: "pencil")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(AmberTheme.accentInk)
-                    .frame(width: 56, height: 56)
+                ZStack {
+                    Circle().fill(AmberTheme.fab)
+                    RadialGradient(colors: [.white.opacity(0.30), .clear], center: UnitPoint(x: 0.31, y: 0.25), startRadius: 0, endRadius: 21)
+                    Circle().strokeBorder(.white.opacity(0.22), lineWidth: 1)
+                    Circle().fill(Color(hex: 0x07190D, alpha: 0.16)).blur(radius: 6).offset(y: 6).mask(Circle())
+                    HomePhosphorIcon(.pencil, size: 22).foregroundStyle(AmberTheme.fabInk)
+                }.frame(width: 56, height: 56)
             }
-            .buttonStyle(.plain)
-            .amberProminentGlass(cornerRadius: 28, tint: AmberTheme.accent)
+            .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.91, haptic: .lightImpact))
+            // CSS 0 8px 20px ≈ SwiftUI radius 10/y 8（渲染实测与设计一致，勿按字面改 20）。
+            .shadow(color: Color(hex: 0x92681E, alpha: 0.32), radius: 10, y: 8)
             .accessibilityLabel("新建聊天")
-            .padding(.trailing, 20)
-            .padding(.bottom, 32)
+            // 设计 bottom=67 是相对屏幕底缘：无 Home Indicator 设备安全区为 0 时也要保持 67。
+            .padding(.trailing, 21)
+            .padding(
+                .bottom,
+                dynamicTypeSize.isAccessibilitySize
+                    ? 12
+                    : max(67 - geometry.safeAreaInsets.bottom, 12)
+            )
+            .homeCascade(delay: 0.22, enabled: !cascadeComplete)
+        }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onReceive(NotificationCenter.default.publisher(for: .amberChatBackgroundJobDidTerminate)) { _ in
             backgroundGenerationRevision &+= 1
+        }
+        .onAppear {
+            Task { await novelCreationViewModel?.loadProjects(restoresSelection: false) }
+            guard !cascadeComplete else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { cascadeComplete = true }
+        }
+        .task(id: homeImageGenerationScanSignature) {
+            let context = await chatViewModel.latestImageGenerationResumeContext()
+            guard !Task.isCancelled else { return }
+            homeImageGenerationContext = context
+        }
+        .onChange(of: homeContinueModel) { oldValue, newValue in
+            announceHomeContinueChange(from: oldValue, to: newValue)
+        }
+        .onChange(of: router.path) { _, path in
+            if !path.isEmpty {
+                conversationNavigationTask?.cancel()
+            }
+        }
+        .onDisappear {
+            searchFocusTask?.cancel()
+            conversationNavigationTask?.cancel()
+        }
+        .alert("无法打开任务", isPresented: Binding(
+            get: { homeContinueError != nil },
+            set: { if !$0 { homeContinueError = nil } }
+        )) {
+            Button("好") { homeContinueError = nil }
+        } message: {
+            Text(homeContinueError ?? "图片所在会话暂不可用。")
         }
         .alert("重命名会话", isPresented: Binding(
             get: { renamingConversationId != nil },
@@ -897,125 +1701,64 @@ struct ConversationsView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center) {
-            Text("Amber")
-                .font(.system(size: 32, weight: .bold, design: .default))
-                .foregroundStyle(AmberTheme.foreground)
+        HStack(spacing: 10) {
+            if !isSearchExpanded {
+                Text("Amber")
+                    .font(.system(size: 32, weight: .bold, design: .default))
+                    .tracking(-0.64).foregroundStyle(AmberTheme.foreground)
+                    .transition(.opacity)
+            }
 
             Spacer()
-
-            AmberGlassGroup(spacing: 10) {
-                HStack(spacing: 10) {
-                    AmberGlassCircleButton(
-                        systemImage: "gearshape",
-                        accessibilityLabel: "设置",
-                        size: 40,
-                        symbolSize: 17,
-                        tint: AmberTheme.accent
-                    ) {
-                        router.navigate(to: .settings)
-                    }
-
-                    Button {
-                        router.navigate(to: .account)
-                    } label: {
-                        HomeAccountAvatar(initial: accountInitial, size: 40)
-                    }
-                    .buttonStyle(.plain)
-                    .amberGlass(cornerRadius: 20)
-                    .accessibilityLabel("我的账户")
-                }
+            if isSearchExpanded {
+                expandedSearch
+            } else {
+                Button { expandSearch() } label: {
+                    HStack(spacing: 7) { HomePhosphorIcon(.magnifyingGlass, size: 14); Text("搜索").font(.system(size: 13, weight: .semibold)).tracking(0.26) }
+                    .foregroundStyle(AmberTheme.muted).frame(width: 78, height: 38)
+                }.buttonStyle(.plain).homeGlassControl(cornerRadius: 19).accessibilityLabel("搜索")
+                HomeGlassCircleButton(icon: .gear, accessibilityLabel: "设置", size: 38, iconSize: 20, tint: AmberTheme.fab) { router.navigate(to: .settings) }
+                Button { router.navigate(to: .account) } label: { HomeAccountAvatar(initial: accountInitial, size: 42) }
+                    .buttonStyle(.plain).accessibilityLabel("我的账户")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
+        .frame(height: 42).padding(.horizontal, 16)
     }
 
-    private var searchField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(AmberTheme.muted2)
+    private var expandedSearch: some View {
+        HStack(spacing: 7) {
+            HomePhosphorIcon(.magnifyingGlass, size: 14).foregroundStyle(AmberTheme.muted)
             TextField("搜索会话", text: $searchQuery)
-                .font(.body)
-                .foregroundStyle(AmberTheme.foreground)
-                .submitLabel(.search)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .onSubmit {
-                    router.navigate(to: .search(initialQuery: searchQuery))
-                }
-            if !searchQuery.isEmpty {
-                Button {
-                    searchQuery = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(AmberTheme.muted)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("清除搜索")
-            }
+                .font(.system(size: 13, weight: .regular)).tracking(0.13).foregroundStyle(AmberTheme.foreground).focused($searchFocused)
+                .submitLabel(.search).textInputAutocapitalization(.never).autocorrectionDisabled().onSubmit { router.navigate(to: .search(initialQuery: searchQuery)) }
+            Button("取消", action: collapseSearch)
+                .font(.system(size: 12, weight: .semibold)).tracking(0.24).foregroundStyle(AmberTheme.muted)
+                .frame(height: 30).padding(.horizontal, 8)
         }
-        .frame(height: 40)
-        .padding(.horizontal, 14)
-        .amberGlass(cornerRadius: 13)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity).frame(height: 38).padding(.leading, 12).padding(.trailing, 6)
+        .homeGlassControl(cornerRadius: 19)
+        // 设计 focus-visible：聚焦时玻璃条外 3px 琥珀金环。
+        .overlay { Capsule(style: .continuous).strokeBorder(AmberTheme.focusRing, lineWidth: 3).opacity(searchFocused ? 1 : 0).allowsHitTesting(false) }
+        .onKeyPress(.escape) { collapseSearch(); return .handled }
     }
 
-    private var shortcutStrip: some View {
-        HStack(spacing: 10) {
-            ForEach(shortcuts) { shortcut in
-                shortcutButton(shortcut)
-            }
+    private func expandSearch() {
+        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.32)) { isSearchExpanded = true }
+        searchFocusTask?.cancel()
+        searchFocusTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 170_000_000)
+            // 170ms 内取消/收起/离场都会取消本任务，不会再写 FocusState。
+            guard !Task.isCancelled, isSearchExpanded else { return }
+            searchFocused = true
         }
-        .padding(.horizontal, 16)
-        // Sit a little lower under the search field and tighten the gap to the 会话 header
-        // (which itself adds 20pt top), so the row isn't pushed high with a big void below.
-        .padding(.top, 10)
-        .padding(.bottom, 4)
     }
 
-    private func shortcutButton(_ shortcut: ConversationShortcut) -> some View {
-        Button {
-            router.navigate(to: shortcut.route)
-        } label: {
-            VStack(alignment: .center, spacing: 8) {
-                Image(systemName: shortcut.systemImage)
-                    .font(.system(size: 25, weight: .medium))
-                    .foregroundStyle(shortcut.color)
-                    .frame(width: 50, height: 50)
-                    .background(AmberTheme.surface.opacity(0.86), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 15, style: .continuous)
-                            .stroke(AmberTheme.borderSoft.opacity(0.82), lineWidth: 0.5)
-                    }
-
-                Text(shortcut.title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-            }
-            .frame(maxWidth: .infinity, minHeight: 76)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(AmberTheme.muted2)
-            Text(searchQuery.isEmpty ? "还没有会话" : "没有匹配的会话")
-                .font(.subheadline)
-                .foregroundStyle(AmberTheme.muted)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 48)
+    private func collapseSearch() {
+        searchFocusTask?.cancel()
+        searchFocusTask = nil
+        searchQuery = ""
+        searchFocused = false
+        withAnimation(.timingCurve(0.2, 0.8, 0.2, 1, duration: 0.32)) { isSearchExpanded = false }
     }
 
     private var conversationList: some View {
@@ -1025,20 +1768,15 @@ struct ConversationsView: View {
         // than preserving the off-screen NavigationStack snapshot.
         _ = chatViewModel.isLoading
         _ = backgroundGenerationRevision
-        return ForEach(filteredSummaries, id: \.id) { summary in
+        return ForEach(Array(filteredSummaries.enumerated()), id: \.element.id) { index, summary in
             ConversationSummaryRow(
                 summary: summary,
                 isCurrent: conversationStore.currentConversation?.id == summary.id,
                 isGenerating: chatViewModel.isGenerationActive(conversationId: summary.id),
+                slice: homeSlice(index: index, count: filteredSummaries.count),
+                hidesSeparator: index == filteredSummaries.count - 1 || conversationStore.currentConversation?.id == summary.id || (index + 1 < filteredSummaries.count && conversationStore.currentConversation?.id == filteredSummaries[index + 1].id),
                 onTap: {
-                    Task { @MainActor in
-                        let isAlreadyCurrent = conversationStore.currentConversation?.id == summary.id
-                        guard chatViewModel.prepareForConversationChange(to: summary.id) else { return }
-                        if !isAlreadyCurrent {
-                            await conversationStore.selectConversation(id: summary.id)
-                        }
-                        router.navigate(to: .chat)
-                    }
+                    openConversation(summary.id)
                 },
                 onRename: {
                     renameDraft = summary.title
@@ -1056,6 +1794,195 @@ struct ConversationsView: View {
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+            .homeCascade(delay: 0.18, enabled: !cascadeComplete)
+        }
+    }
+
+    private func homeSlice(index: Int, count: Int) -> HomeCardSlice {
+        if count == 1 { return .single }
+        if index == 0 { return .top }
+        return index == count - 1 ? .bottom : .middle
+    }
+
+    private var homeContinueModel: HomeContinueCardModel? {
+        let novelProjects = novelCreationViewModel?.projects.map(HomeNovelProjectRef.init) ?? []
+        let councilTask = councilChatViewModel.homeResumeContext.map(HomeCouncilTaskRef.init)
+        let deepReadTasks = deepReadStore.history.map(HomeDeepReadTaskRef.init)
+        let imageGeneration = homeImageGenerationContext.flatMap { context -> HomeImageGenerationRef? in
+            if context.state == .completed, context.id == viewedImageGenerationID {
+                return nil
+            }
+            return HomeImageGenerationRef(context)
+        }
+        let miniApps = miniAppRepository.apps.compactMap { app -> HomeMiniAppRef? in
+            guard let latestVersion = miniAppRepository.versions(appId: app.id).first else { return nil }
+            return HomeMiniAppRef(
+                id: app.id,
+                title: app.title,
+                latestVersionCreatedAt: Date(
+                    timeIntervalSince1970: TimeInterval(latestVersion.createdAt) / 1_000
+                ),
+                lastRunAt: app.lastRunAt.map {
+                    Date(timeIntervalSince1970: TimeInterval($0) / 1_000)
+                }
+            )
+        }
+
+        return HomeContinueCardModel.resolve(
+            novelProjects: novelProjects,
+            councilTask: councilTask,
+            deepReadTasks: deepReadTasks,
+            miniApps: miniApps,
+            imageGeneration: imageGeneration
+        )
+    }
+
+    private var controlCard: some View {
+        let ambient = AmberTheme.cardShadowAmbientGeometry(for: colorScheme)
+        return VStack(spacing: 0) {
+            if let model = homeContinueModel {
+                HomeContinueButton(model: model) { destination in
+                    switch destination {
+                    case .openCouncil: router.navigate(to: .council)
+                    case .deepReadTask(let id): router.navigate(to: .deepReadTask(id: id))
+                    case .resumeProject(let id): router.navigate(to: .novelProject(id: id))
+                    case .miniAppRunner(let id): router.navigate(to: .miniAppRunner(appId: id))
+                    case .generatedImage(let anchor):
+                        openGeneratedImage(anchor)
+                    }
+                }
+                Rectangle().fill(AmberTheme.separator).frame(height: 1 / displayScale).padding(.horizontal, 16)
+            }
+            shortcutRow
+        }
+        .background(AmberTheme.card).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: AmberTheme.cardShadowContact, radius: 1, y: 1)
+        .shadow(color: AmberTheme.cardShadowAmbient, radius: ambient.radius, y: ambient.y)
+        .padding(.horizontal, 16).padding(.top, 20)
+    }
+
+    @ViewBuilder
+    private var shortcutRow: some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            ScrollView(.horizontal) {
+                HStack(spacing: 0) { shortcutButtons }
+                    .padding(.horizontal, 8)
+            }
+            .scrollIndicators(.hidden)
+            .padding(.vertical, 9)
+            .padding(.bottom, 2)
+        } else {
+            HStack(spacing: 0) { shortcutButtons }
+                .padding(.vertical, 9)
+                .padding(.bottom, 2)
+        }
+    }
+
+    @ViewBuilder
+    private var shortcutButtons: some View {
+        HomeShortcut(title: "深度阅读", icon: .bookOpen) { router.navigate(to: .board) }
+            .accessibilityFocused($deepReadShortcutFocused)
+        HomeShortcut(title: "小说创作", icon: .notebook) { router.navigate(to: .novelCreation) }
+        HomeShortcut(title: "模型议会", icon: .chatCircleDots) { router.navigate(to: .council) }
+        HomeShortcut(title: "小应用", icon: .squaresFour) { router.navigate(to: .miniApps) }
+        HomeShortcut(title: "WebMount", icon: .globe) { router.navigate(to: .webMount) }
+    }
+
+    private func announceHomeContinueChange(
+        from oldValue: HomeContinueCardModel?,
+        to newValue: HomeContinueCardModel?
+    ) {
+        guard router.path.isEmpty,
+              UIAccessibility.isVoiceOverRunning,
+              oldValue != newValue else { return }
+        if newValue == nil {
+            deepReadShortcutFocused = true
+        }
+        let announcement = newValue.map {
+            "待继续任务更新：\($0.title)，\($0.meta)，\($0.ctaTitle)"
+        } ?? "没有待继续任务"
+        UIAccessibility.post(notification: .announcement, argument: announcement)
+    }
+
+    private func openGeneratedImage(_ anchor: ChatMessageAnchor) {
+        guard let conversationID = conversationStore.summaries.first(where: {
+            $0.id.toHexDashString() == anchor.conversationID
+        })?.id else {
+            homeImageGenerationContext = nil
+            homeContinueError = "图片所在会话已不存在。"
+            return
+        }
+        conversationNavigationTask?.cancel()
+        conversationNavigationTask = Task { @MainActor in
+            guard chatViewModel.prepareForConversationChange(to: conversationID) else {
+                homeContinueError = "当前生成任务暂时无法切换会话，请稍后重试。"
+                return
+            }
+            if conversationStore.currentConversation?.id != conversationID {
+                guard await conversationStore.selectConversationIfAvailable(
+                    id: conversationID,
+                    commitIf: { !Task.isCancelled }
+                ) else {
+                    guard !Task.isCancelled else { return }
+                    homeImageGenerationContext = nil
+                    homeContinueError = "图片所在会话已不存在。"
+                    return
+                }
+            }
+            guard !Task.isCancelled,
+                  conversationStore.currentConversation?.id == conversationID,
+                  let toolCallID = anchor.toolCallID else {
+                homeContinueError = "无法切换到图片所在会话。"
+                return
+            }
+
+            guard let context = ChatImageGenerationResumeProjection.matching(
+                in: conversationStore.currentMessages,
+                conversationID: anchor.conversationID,
+                messageID: anchor.messageID,
+                toolCallID: toolCallID,
+                isGenerationActive: chatViewModel.isGenerationActive(conversationId: conversationID)
+            ) else {
+                homeImageGenerationContext = nil
+                homeContinueError = "图片记录已不存在或生成没有成功。"
+                return
+            }
+
+            router.navigate(to: .chatMessage(anchor: ChatMessageAnchor(
+                conversationID: context.conversationID,
+                messageID: context.messageID,
+                toolCallID: context.toolCallID
+            )))
+        }
+    }
+
+    private func openConversation(_ conversationID: KotlinUuid) {
+        conversationNavigationTask?.cancel()
+        conversationNavigationTask = Task { @MainActor in
+            guard chatViewModel.prepareForConversationChange(to: conversationID) else { return }
+            if conversationStore.currentConversation?.id != conversationID {
+                guard await conversationStore.selectConversationIfAvailable(
+                    id: conversationID,
+                    commitIf: { !Task.isCancelled }
+                ) else {
+                    guard !Task.isCancelled else { return }
+                    homeContinueError = "该会话暂时无法打开。"
+                    return
+                }
+            }
+            guard !Task.isCancelled,
+                  conversationStore.currentConversation?.id == conversationID else { return }
+            router.navigate(to: .chat)
+        }
+    }
+
+    private func startNewConversation() {
+        conversationNavigationTask?.cancel()
+        conversationNavigationTask = Task { @MainActor in
+            guard chatViewModel.prepareForConversationChange() else { return }
+            await conversationStore.startNewConversationReusingEmpty()
+            guard !Task.isCancelled else { return }
+            router.navigate(to: .chat)
         }
     }
 }
@@ -1065,57 +1992,77 @@ private struct ConversationSummaryRow: View {
     let summary: ConversationSummary
     let isCurrent: Bool
     let isGenerating: Bool
+    let slice: HomeCardSlice
+    let hidesSeparator: Bool
     let onTap: () -> Void
     let onRename: () -> Void
     let onTogglePin: () -> Void
     let onDelete: () -> Void
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var pressed = false
+    @ScaledMetric(relativeTo: .body) private var conversationTitleSize: CGFloat = 16
+    @ScaledMetric(relativeTo: .caption2) private var conversationMetadataSize: CGFloat = 11
 
     var body: some View {
+        let ambient = AmberTheme.cardShadowAmbientGeometry(for: colorScheme)
         Button(action: onTap) {
-            HStack(spacing: 12) {
+            HStack(spacing: 13) {
                 iconView
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(summary.title.isEmpty ? "新对话" : summary.title)
-                        .font(.body.weight(.semibold))
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(displayTitle)
+                        .font(.system(size: conversationTitleSize, weight: .semibold))
+                        .tracking(-0.08)
                         .foregroundStyle(AmberTheme.foreground)
-                        .lineLimit(1)
+                        .lineLimit(2)
                     HStack(spacing: 6) {
                         Text(relativeTime)
-                            .font(.caption)
+                            .font(.system(size: conversationMetadataSize, weight: .regular)).tracking(0.11)
                             .foregroundStyle(AmberTheme.muted)
                         Text("·")
-                            .font(.caption)
+                            .font(.system(size: conversationMetadataSize, weight: .regular))
                             .foregroundStyle(AmberTheme.muted2)
                         Text("\(summary.messageCount) 条")
-                            .font(.caption)
+                            .font(.system(size: conversationMetadataSize, weight: .regular)).tracking(0.11)
                             .foregroundStyle(AmberTheme.muted)
                     }
+                    .monospacedDigit()
+                    .padding(.trailing, dynamicTypeSize.isAccessibilitySize ? 28 : 0)
                 }
 
                 Spacer(minLength: 8)
             }
-            .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 12)
+            .frame(minHeight: 72)
+            .padding(.leading, 17).padding(.trailing, 16)
             .background {
-                if isCurrent {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(AmberTheme.accent.opacity(0.075))
+                let fill = HomeSliceShape(slice: slice).fill(isCurrent ? AmberTheme.activeCard : AmberTheme.card)
+                // 会话卡是「一张整卡」：只有收尾行（bottom/single）携带卡片投影，
+                // 行间保持零阴影接缝。这是在保留原生 List swipeActions（行必须独立成 cell）
+                // 的前提下最接近「单卡单投影」的方案；卡顶/侧边投影弱于整卡外框，属已知取舍。
+                if slice == .bottom || slice == .single {
+                    fill
+                        .shadow(color: AmberTheme.cardShadowContact, radius: 1, y: 1)
+                        .shadow(color: AmberTheme.cardShadowAmbient, radius: ambient.radius, y: ambient.y)
+                        // bottom 行的投影向上越界时会在上一行底部留下接缝带、并压暗行间
+                        // hairline——用 mask 只裁行界以上的晕影（左右/下方延伸保留卡侧与
+                        // 卡底投影；行内部分被 fill 自身遮盖）。single 上方是画布，向上
+                        // 晕影与控制卡外投影一致，不裁。
+                        .mask(Rectangle().padding(.horizontal, -48).padding(.bottom, -48).padding(.top, slice == .bottom ? 0 : -48))
+                } else {
+                    fill
                 }
             }
-            .overlay {
-                if isCurrent {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(AmberTheme.accent.opacity(0.12), lineWidth: 0.5)
-                }
-            }
+            .overlay { if pressed { HomeSliceShape(slice: slice).fill(AmberTheme.press).allowsHitTesting(false) } }
+            .overlay(alignment: .bottom) { if !hidesSeparator { Rectangle().fill(AmberTheme.separator).frame(height: 1 / displayScale).padding(.leading, 70).padding(.trailing, 16) } }
             .padding(.horizontal, 16)
-            .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("会话 \(summary.title.isEmpty ? "新对话" : summary.title)，\(summary.messageCount) 条消息\(summary.isPinned ? "，已置顶" : "")\(isGenerating ? "，正在生成" : "")")
+        .buttonStyle(HomePressStateStyle(pressed: $pressed, scale: 0.98))
+        .accessibilityLabel("会话 \(displayTitle)，\(summary.messageCount) 条消息\(summary.isPinned ? "，已置顶" : "")\(isGenerating ? "，正在生成" : "")")
         // 主操作:Apple Music 同款左右滑动(原生 List swipeActions，iOS 26 自带 Liquid Glass 渲染)。
         // 右滑→删除(整行划到底即删) / 重命名;左滑→置顶切换。删除仍走二次确认弹窗，避免误删。
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -1128,14 +2075,14 @@ private struct ConversationSummaryRow: View {
             Button(action: onRename) {
                 Label("重命名", systemImage: "pencil")
             }
-            .tint(AmberTheme.accentIndigo)
+            .tint(AmberTheme.muted2)
         }
         .swipeActions(edge: .leading, allowsFullSwipe: true) {
             Button(action: onTogglePin) {
                 Label(summary.isPinned ? "取消置顶" : "置顶",
                       systemImage: summary.isPinned ? "pin.slash" : "pin")
             }
-            .tint(AmberTheme.accent)
+            .tint(AmberTheme.muted2)
         }
         // 次操作:保留长按上下文菜单(与 Apple Music 一致，两种入口并存)。
         .contextMenu {
@@ -1161,21 +2108,24 @@ private struct ConversationSummaryRow: View {
     private var iconView: some View {
         ZStack {
             Circle()
-                .fill(isCurrent ? AmberTheme.accent.opacity(0.16) : AmberTheme.surface2)
+                .fill(isCurrent ? AmberTheme.avatarActive : AmberTheme.avatarIdle)
             if summary.isPinned {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(AmberTheme.accent)
+                HomePhosphorIcon(.pushPin, size: 20)
+                    .foregroundStyle(isCurrent ? AmberTheme.avatarActiveInk : AmberTheme.avatarIdleInk)
             } else {
-                Image(systemName: "bubble.left.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(isCurrent || isGenerating ? AmberTheme.accent : AmberTheme.muted2)
+                HomePhosphorIcon(HomeConversationIcon.icon(forTitle: displayTitle, isPinned: false), size: 20)
+                    .foregroundStyle(isCurrent ? AmberTheme.avatarActiveInk : AmberTheme.avatarIdleInk)
             }
             if isGenerating {
                 ConversationGeneratingRing()
             }
         }
         .frame(width: 40, height: 40)
+    }
+
+    /// 空标题统一走「新对话」占位语义：行文本、搜索匹配与图标映射同一输入。
+    private var displayTitle: String {
+        summary.title.isEmpty ? "新对话" : summary.title
     }
 
     /// 相对时间：updateAt -> "刚刚 / N分钟前 / N小时前 / 昨天 / M月D日"。
@@ -1190,18 +2140,28 @@ private struct ConversationSummaryRow: View {
 
 private struct ConversationGeneratingRing: View {
     @State private var start = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @ViewBuilder
     var body: some View {
-        TimelineView(.animation) { context in
-            Circle()
-                .trim(from: 0.0, to: 0.78)
-                .stroke(
-                    AmberTheme.accent,
-                    style: StrokeStyle(lineWidth: 1.05, lineCap: .round)
-                )
+        if reduceMotion {
+            ring.rotationEffect(.degrees(-90))
+        } else {
+            TimelineView(.animation) { context in
+                ring
                 .rotationEffect(.degrees(rotationAngle(at: context.date)))
-                .accessibilityHidden(true)
+            }
         }
+    }
+
+    private var ring: some View {
+        Circle()
+            .trim(from: 0.0, to: 0.78)
+            .stroke(
+                AmberTheme.foreground2,
+                style: StrokeStyle(lineWidth: 1.05, lineCap: .round)
+            )
+            .accessibilityHidden(true)
     }
 
     private func rotationAngle(at date: Date) -> Double {

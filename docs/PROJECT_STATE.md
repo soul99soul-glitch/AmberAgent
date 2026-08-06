@@ -6,12 +6,63 @@ Last updated: 2026-08-06
 
 ## Repository
 
-- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
+- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Tracking: `origin/feat/ios-provider-parity-claude`；当前本地包含尚未 push 的 review fixes、小说/核心记忆闭环与文案提交，ahead 数以实时 Git 为准。
 - Current committed HEAD: 以实时 `git rev-parse HEAD` 为准；`52794d2de` 是当前已装机的产品代码基线。
 - Worktree: 小说共创/代笔 Phase 0–3c、核心记忆闭环、相关测试与文档已提交；是否干净以实时 `git status --short` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
+
+## Home E 版视觉落地（未提交）
+
+目标：把定稿 E 版首页设计（home-replica.html 同源规格）落到 `ConversationsView` 与全局主题令牌，并让顶部续接位只展示真实未完成工作。
+
+- 全局令牌：`AmberTheme.neutralLight` 改为默认暖灰（画布 `#ECE8E4`、卡片 `#F6F5F3`、主墨 `#161514` 等实测值），`paperLight` 为暖纸（`#EFE7D6`/`#FFFDF7`），`darkPalette` 为 `#0E0D10`/`#1F1D23`；新增 `separator/press/hoverCard/activeCard/avatarActive(Ink)/avatarIdle(Ink)/fab/fabInk/focusRing/cardShadow*` 首页令牌；默认画布主题改为「暖灰」（原「中性白」，已改名），默认 accent 改为琥珀金 `#B9863A`（`amberGold` 已修正为设计值并置首位）。用户已显式选择过的主题/accent 偏好不受影响。
+- 首页：搜索胶囊原位展开为玻璃搜索条（品牌/齿轮/头像让位，Esc/取消收起清空，保留提交进全文搜索）；控制卡顶部改为跨功能续接位，稳定优先级为「待处理 > 运行中 > 可恢复 > 可查看结果 > 草稿」，候选来自当前议会房间、深度阅读持久任务、小说项目、AI 生图和最新版本尚未运行的小应用；普通完成态、损坏小说、已运行的小应用版本均不出现，无候选时整行收起，只保留五入口。五入口为单墨色 Phosphor fill 语义图标，顺序为深度阅读/小说创作/模型议会/小应用/WebMount；会话列表为切片式一体卡（72pt 行高、激活行通栏 `activeCard` 色带、相邻 hairline 让位、按标题语义映射 Phosphor 实心图标、空态卡内文本）；FAB 实色琥珀金三层投影；入场级联 40ms stagger 且尊重 Reduce Motion。玻璃恰好 3 件（搜索胶囊/展开条、齿轮），卡片零描边，深度仅来自两层 `cardShadow`。
+- 图标体系（review 轮重做）：新增 `iosApp/iosApp/HomePhosphorIcons.swift`——21 个 Phosphor fill 字形（路径数据与 home-replica.html 内嵌 symbol 同源；chatCircle/pushPin/imageSquare 取自 phosphor-icons/core 同名资源）+ 最小 SVG path 解析器（M/L/H/V/C/S/Q/T/A/Z，椭圆弧按 SVG 1.1 F.6.5 转三次贝塞尔）。映射修正：剑=sword（原 shield）、天平=scales（原 medal）、AI 生图=imageSquare（原 pen）、crown 关键词补「在位」；swipe/context menu 系统图标保留 SF（系统 UI 层，不在设计约束内）。
+- Review 轮修复（4 只读审查代理：逻辑链/几何/渲染/taste）：①会话卡投影从「逐行切片各带阴影」改为「仅 bottom/single 行携带」——消除 72pt 行间阴影接缝，保留原生 swipeActions 的 List 结构（卡顶/侧边投影略弱为已知取舍）；②全局 `glass/glassStrong` 恢复原值（`base(\.background, 0.72/0.85)`），首页三件玻璃改用首页专用 `homeGlass*` 令牌（浅 .78→.58 / 深 .14→.08 白渐变 + 双层投影），与内页材质完全隔离；③几何：header 去掉多余 top 6（精确 42）、「会话」标题与首卡补 12pt、搜索胶囊固定 78×38、展开条 gap7/左12右6/取消 h30 横8/输入 tracking 0.13、会话 meta 接 `.monospacedDigit()`、FAB 底部改 `max(67-safeAreaInsets.bottom, 12)`；④focus 环接入展开搜索条（3px `focusRing`，聚焦时显示）；⑤搜索延迟聚焦改可取消 `Task`（收起/离场撤销，不再残留 FocusState）；⑥`loadProjects` 加 latest-wins revision（首页 onAppear 与项目列表 .task 并发时旧快照不得回写）；⑦级联入场加一次性门控（0.9s 后重建行不再重播）；⑧暖纸 `avatarActive` 修正 `#EADBCC`→`#EADCBC`；⑨节标题用独立 `section` 令牌（与 foreground2 数值同构、语义独立）。
+- 第二轮补充修复（多行运行时实测发现）：bottom 行投影向上越界，在上一行底部形成 Δ≤3 暗带并压暗该处 hairline（`#E8E7E6` vs 正常 `#ECEBE9`）；给 bottom/single 行投影加 mask，裁掉行界以上晕影（左右/下方延伸保留卡侧与卡底投影；single 上方是画布，向上晕影与控制卡外投影一致，不裁）。
+- 收敛轮补充修复：latest-wins 原实现虽能阻止旧项目列表/错误回写，但旧请求的 `defer` 仍会提前清除较新请求的共享 `isLoading`；收尾现在也校验同一 revision，行为回归测试用两个独立 gate 稳定复现红灯后验证修复。
+- 动态续接闭环：议会投影只认可可解码且 `taskId` 匹配的归档，并把持久任务的 failed/cancelled/timedOut/interrupted 映射回可恢复态；当前议会标识恢复 Observation 跟踪，首次开会即可刷新首页。小说项目摘要持久化 `hasRunningRun`，后台脱离恢复后重新加载摘要，首页不再只依赖当前选中项目的运行快照；旧索引首次读取会做一次项目扫描并重写，以免把历史运行中项目误判为静止。
+- AI 生图续接：以持久化 assistant `generate_image` Tool 消息为唯一导航真相，记录所属 conversation/message/toolCall；空输出且该会话仍在生成时显示「正在生成」，只有 Tool output 已含真实 Image part 才显示「图片已生成」。点击后以 latest-wins 选择精确会话，并用稳定 UUID + messageID + toolCallID 重新投影验证，再滚到超高 assistant 消息内的图片/加载/失败 tool part；Native driver 与正式 fallback 共用该锚点，只有滚动动画逻辑完成后才消费已查看结果。目标缺失、会话切换失败、仅有成功 JSON 但没有 Image part 时均不消费。
+- 无障碍与自适应：Continue 卡、快捷入口、会话行改用 ScaledMetric；辅助功能字号下 Continue 卡纵向排布、CTA 保持 44pt、快捷入口横向滚动且标签最多两行，默认字号几何不变；旋转进度环和图片锚点尊重 Reduce Motion；续接候选新增/替换/消失时为 VoiceOver 发布状态并在消失后回焦深度阅读入口，图片续接按正在生成/已完成/失败把焦点交给具名 tool part，首页在内页期间不抢播报；会话级联只在首次入场播放。
+- 数值决策记录：深色卡投影保持原型实测 `rgba(0,0,0,.58)/.76`（规格禁止取整优化，渲染观感问题实际由逐行投影叠加引起，结构修复后即为设计意图）；深色玻璃取原型 `data-mode="dark"` 实测 `.14→.08`（用户规格「10% 白」为概述，HTML 为像素实测源）；FAB 外投影 `radius 10 y 8` ≈ CSS `0 8 20` 视觉等效（SwiftUI radius 与 CSS blur 非字面同义）；功能标签 600 / Continue 标题 600 与 HTML 一致（规格 §4 的 500/640 与自身 §3 字重三档约束冲突，按 HTML 与 §3 执行）。
+- 纯逻辑可测：`HomeConversationIcon.icon(forTitle:isPinned:)`、跨功能 `HomeContinueCardModel.resolve(...)` 的空态/优先级/同级时间排序/真实未完成语义、20 字形解析完整性，契约测试在 `iosApp/iosAppTests/HomeDesignContractTests.swift`。
+
+### Verification
+
+- `xcodebuild -skipMacroValidation ... build`：iosApp 与 iosAppExperimentalGPL 双 scheme **BUILD SUCCEEDED**。另从受控 `iosApp/project.yml` 在临时目录运行 XcodeGen：`HomePhosphorIcons.swift` 自动进入稳定/Experimental 双 app target，`HomeDesignContractTests.swift` 自动进入 test target；被忽略的 pbxproj 只是生成物，不是交付缺口。
+- 定点测试全绿：`HomeDesignContractTests`（20 字形解析、映射、调色板/accent 实测值、Continue 模型）、`NovelCreationViewModelTests`（含并发 `loadProjects` 旧请求不得清除新请求加载态）、`IOSNovelCreationWiringTests`（该用例原断言旧首页入口顺序 `小应用<小说创作<WebMount` 与 `route:` 参数风格，已按 E 版定稿顺序与 `router.navigate(to:)` 更新；设置页「核心记忆」断言保留）。
+- 动态续接回归：`HomeDesignContractTests` + `IOSCouncilRunnerMechanicsTests` + `IOSNovelCreationWiringTests` + `NovelCreationViewModelTests` 合计 **205 passed / 0 failed / 0 skipped**。议会首页投影复用 runner 注入的持久任务 store，不旁路读取全局 store。iPhone 17 Pro Simulator 最新 Debug 包构建、覆盖安装并启动成功。实测未运行的小应用显示为「已生成，尚未打开」，点击进入正确 Runner；返回首页后该候选立即消失，控制卡收起为仅五入口状态。模型议会只投影当前可继续房间，不拿历史归档冒充可恢复任务。
+- AI 生图续接回归：直接相关的 `HomeDesignContractTests` + `NativeTimelineScrollCoreTests` **57 passed / 0 failed / 0 skipped**；新增真实 SwiftUI Timeline 超高消息/延迟装载精确 tool-part 回放和真实 `IOSConversationStore` 跨会话持久扫描各 1 项，均单跑通过。扩大到 `ChatViewportPolicyTests`、`ChatSwiftUIStreamReplayTests`、`ChatMessageProjectionTests` 与该持久化用例共 195 项，最终源码下为 **194/195**：唯一未过的是既有 80 行长表格流式性能采样（本轮 p95 40.58–41.04ms > 40ms）；相关生图、投影、滚动和消费契约均通过，未放宽性能阈值，也未把无调用关系的波动修补到生图功能。iPhone 17 Pro Simulator Debug 包构建、覆盖安装并启动成功；无生图候选的真实首页保持仅五入口状态，控制卡无残留占位。
+- 模拟器截图（iPhone 17 Pro, iOS 26.5）：三主题像素级核对——画布/卡片/激活带/头像墨色逐点匹配设计值；行高 72、卡左缘 16、FAB 右 21/底 67、节标题间距、「Amber」标题位置均实测通过。注意：本会话 view_image 渲染不可靠（曾把原型样例数据呈现为截图内容），一切以 PIL 逐像素探测为准。
+- 多会话多行态运行时验证（容器种子化 4 条会话，updateAt 倒序、首条激活）：行高各 72pt；激活行通栏 `#EFE9DF` + 头像 `#E8DDC6`/`#6F5019`；idle 行 `#F6F5F3` + 头像 `#EDEBE7`/`#8F8B85`；行间 hairline 恰为 sep 合成值 `#ECEBE9`、左缩进 70/右距 16（屏上 x=86..370，与标题字框左缘 86 对齐）；行间零阴影接缝（经第二轮补充修复后 hairline 上下为纯卡色），末行下方 18pt 卡投影带与卡侧投影完整。种子化教训：会话 JSON 时间戳须为合法 ISO8601（`...T14:40:00.Z` 空小数位非法），非法时 `JsonConversationStorage` 按 index 损坏路径扫描重建——实测该容错路径按设计工作（丢弃不可解码条目并自动建新会话）。
+- Simulator 真实交互复验：搜索胶囊原位展开且 focus 环可见；输入「红酒」后实时只保留匹配会话；Esc 与「取消」均收起、清空并恢复完整列表。相邻页面抽查设置页与 Chat 页，暖灰画布/暖白分组表面层级仍清楚，首页专用玻璃没有泄漏到内页。
+- Dynamic Type 实拍复验：iPhone 17 Pro 的 accessibility XXXL 下，Continue 标题/状态/主按钮完整，五入口可横向滚动且标签不压缩为单字列；恢复 Large 后卡片、72pt 会话行、FAB 与原 E 版默认几何一致。截图存于当前 Codex visualization 的 `home-resume-fix/02-max-dynamic-type.jpg` 与 `03-default-restored.jpg`。
+- 未覆盖：真实 VoiceOver 开关下的播报顺序/焦点迁移、按压 0.98 回弹的触感/中间帧（自动化只能稳定取得释放后终态）、真机观感与 swipe 手感；模拟器没有可复用的真实生图记录，未支付调用真实 provider，因此「生成完成后从首页进入并滚到真实图片」仍缺一轮真实账号手工验收。「还没有会话」空态卡为生产不可达路径（`bootstrap()` 与 `deleteConversation()` 在列表为空时都自动 `newConversation()`；唯一可达空态是搜索过滤后的「没有匹配的会话」）——结构事实记录，非验证遗漏。
+
+### Known Issues（非本轮改动引入）
+
+- `iosApp/**/*.xcodeproj/` 在 .gitignore 中：拉取 5bcf860ea 后本机 xcodeproj 缺 `NovelGhostwritePipeline.swift`、`NovelChapterPlanAcceptanceLifecycle.swift` 的 target 引用，app target 无法编译；已在本机 project.pbxproj 补齐（本机修改，不会入 git）。其他机器拉取后需同样处理。
+- 同一推送带入的 `NovelCollaborationModeTests.swift`、`IOSMemoryRecallPolicyTests.swift` 与当前 Shared 框架/代码不兼容（MemoryRecord 签名、AgentRuntimeSetting 等），加入 target 即编译失败；保持未加入 target，待该 slice owner 修复后再纳入。
+- `IOSSettingsWiringTests.testBackgroundToolEnginePublishesLiveActivityStagesAtExecutionBoundaries` 在基线上即失败：`15a2607a8` 在 run block 内重新引入 `await self.publishRunningPresentation(`，违反既有 wiring 契约；与本轮首页改动无关，待 owner 裁决。
+- `ChatSwiftUIStreamReplayTests.testPerfGrowingTableStreamingKeepsDisplayLinkResponsive` 在当前 Simulator 采样不稳定：同一工作区本轮既有通过，也出现 p95 40.823–44.215ms（门槛 40ms）和 SIGKILL；未放宽阈值，需在安静设备/真机重新建立性能证据。
+- 首页视觉真机验收仍缺（多数据多行态已在模拟器完成像素级验证，见 Verification；真机观感与 swipe 手感待确认）。
+
+## iOS MiniApp 与 Android 对齐（未提交）
+
+- 截图中的「Amber 小应用示例 + 状态/源码/版本 + 300pt 预览」来自 iOS MVP：生产仓库默认 seed 了固定样例，Runner 又把开发管理面板当成运行首页。现在生产默认不 seed；升级时只删除字段、版本、授权、运行次数、审计和本地数据都完全未变化的旧样例，任何已使用/编辑样例均保留。
+- Runner 默认直接显示沉浸式 WebView；返回、标题/版本和右上角管理按钮是唯一常驻 chrome，源码、权限、版本恢复、审计和 bridge 日志收进 large sheet。源码加载、保存版本、恢复版本、外链图片授权和运行策略变化都会刷新实际 WebView，不再只改 SwiftUI 状态。
+- 模型协议补齐 MiniApp V3 全能力、自检和长输出约束；截断后的紧邻「继续」会从 `{` 重生完整 JSON，跨过无关用户轮次不会误恢复旧请求。解析、校验、版本冲突或仓储失败会写入可见错误，并把前台/后台 run、Watch、Live Activity 收口为 failed，而不是假 completed。
+- iOS bridge 已补 `window.fetch`、`externalImages`、`launch`、加速度计/陀螺仪、一次定位、剪贴板读取、WebView debug 和源码开关；敏感系统能力逐次确认，launch 全局限频，Runtime/WebView 关闭会取消请求、事件、传感器和系统 continuation。`host.sendToConversation` 已真实写入当前 Chat composer；`host.createArtifact` 继续落 Workspace。
+- Review 收口：MiniApp 意图会抑制同轮 Generative UI planner，空响应与解析失败均按 failed 终态收口；后台 Workspace 同步失败只按 message id 替换目标卡片，不再拿旧全量快照覆盖并发消息。Repository 普通 mutation 在原子写失败时恢复最近 committed state，失败授权或 shared data 不再泄漏到内存并被后续写入带盘。
+- 进程强杀闭环：Chat 生成/修订会把 app/version 与轻量 pending undo 一次原子写入同一 `miniapps.json`；会话正文落盘后前后台路径都先 commit pending，再同步 Workspace。若进程死在两次文件写之间，冷启动会在开放会话入口前扫描持久聊天卡，并用 `appId + version + htmlHash` 精确决议：卡片已落盘则保留 app，未落盘则 CAS 回滚；旧版本卡片不能替新版背书，后续 rename/run/version 改动不会被旧事务覆盖，30 版裁剪时被移出的版本也可恢复。没有引入独立数据库或第二套后台状态机。
+- KMP conversation 的 `{id}.json` 是 canonical、`index.json` 是派生缓存；索引刷新失败不再把已原子提交的会话正文误报为 save failure，避免 iOS 随后错误回滚 MiniApp 并留下悬空聊天卡。列表读取仍会从会话文件扫描并机会性修复索引。
+- 权限生命周期：首次授权弹窗因离页/重建取消时不再持久化为 DENY；确认返回后复核 app/version/permission/policy/grant。设置或授权变化会重建 runtime 并关闭旧 EventBus/Sensor/请求；EventBus unsubscribe 在撤权后仍可清理，订阅/发布加 Android 对齐的上限。AI 每次调用确认并按 app/day 限 50 次。
+- 外链图片不再开放 WebView 直连 `https:`；只允许 `amber-miniapp-image:` 受控代理，复用公网 DNS/私网与重定向防护、HTTPS、image MIME 和 2MB 上限。`host.getTheme` 返回当前 Amber 深浅主题，WebView/错误页透明适配宿主。
+- UI review：列表、Runner、管理 sheet、设置页已在 iPhone 17 Pro Simulator 实拍；返回语义、Toggle/源码/权限菜单 VoiceOver 标签、44pt 更多/源码动作/版本恢复、语义字体、窄宽 metadata 回流、设置 divider 对齐、状态色对比、可见 toast/announcement、明确 loading 态均已修。MiniApp 生成协议新增 44×44、320px reflow、lang/label/focus、深色与 Reduce Motion 契约；旧截图所示源码+预览同页已不再是当前结构。
+- 为兼容已保存 iOS MiniApp，`Amber.search` 同时支持旧数组用法与 `.items`，EventBus/Sensor 回调同时保留 payload 和旧 envelope 字段。
+- 定点门禁：`IOSMiniAppBridgeRuntimeTests`、`IOSMiniAppOutputParserTests`、`IOSMiniAppChatMessageFactoryTests`、`IOSMiniAppRepositoryTests`、`IOSConversationStoreTests`、`IOSParityRedLightTests` 受影响集合合计 **155 passed / 0 failed / 0 skipped**；新增覆盖创建/修订强杀恢复、精确卡片对账、旧卡拒绝、30 版裁剪恢复、冷启动端到端扫描，以及前后台 commit 顺序。`JsonConversationStorageTest` 全类 JVM 门禁 **BUILD SUCCESSFUL**，含 canonical 会话写成功而派生索引写失败的回归；`git diff --check` 通过。iOS 最终门禁需排除当前工作区中范围外且 API 已漂移的 `HomeDesignContractTests.swift`、`NativeTimelineScrollCoreTests.swift`，两者未修改。截图证据保存在当前 Codex visualization 的 `miniapp-audit/`。仍缺真实 CoreLocation/CoreMotion/剪贴板与真实 provider 的设备端闭环；磁盘上仍是两个独立文件，但强杀中间态已有可恢复协议，不再依赖进程内 closure。
 
 ## Current Product Truth
 

@@ -109,6 +109,7 @@ struct ChatView: View {
     let sharedSettings: IOSSharedSettingsStore
     let documentStore: DocumentAccessStore?
     let workspaceStore: IOSWorkspaceStore
+    let initialMessageAnchor: ChatMessageAnchor?
     @State private var viewModel: ChatViewModel
     @State private var activeComposerPanel: ComposerPanel?
     @State private var isModelSheetPresented = false
@@ -143,12 +144,14 @@ struct ChatView: View {
         localToolExecutor: IOSLocalToolExecutor? = nil,
         documentStore: DocumentAccessStore? = nil,
         workspaceStore: IOSWorkspaceStore = .shared,
-        viewModel: ChatViewModel? = nil
+        viewModel: ChatViewModel? = nil,
+        initialMessageAnchor: ChatMessageAnchor? = nil
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
         self.documentStore = documentStore
         self.workspaceStore = workspaceStore
+        self.initialMessageAnchor = initialMessageAnchor
         let resolvedViewModel = viewModel ?? ChatViewModel(
             settingsStore: settingsStore,
             sharedSettings: sharedSettings,
@@ -518,7 +521,7 @@ struct ChatView: View {
     }
 
     private var currentConversationIdString: String? {
-        viewModel.currentConversationId.map { String(describing: $0) }
+        viewModel.currentConversationId?.toHexDashString()
     }
 
     /// Camera path (already on the main thread): compress + encode and attach.
@@ -796,6 +799,8 @@ struct ChatView: View {
             workspaceStore: workspaceStore,
             scrollToBottomTrigger: scrollToBottomTrigger,
             scrollToBottomSource: scrollToBottomSource,
+            messageAnchor: initialMessageAnchor,
+            currentConversationID: currentConversationIdString,
             messagesProvider: { viewModel.messages },
             variantInfoProvider: { index in viewModel.variantInfo(atMessageIndex: index) },
             onAction: handleChatListAction,

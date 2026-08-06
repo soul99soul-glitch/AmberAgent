@@ -138,6 +138,98 @@ final class IOSMiniAppChatMessageFactoryTests: XCTestCase {
         XCTAssertEqual(miniApp.htmlHash, "abc")
     }
 
+    func testPersistedConversationReferencesRequireExactVersionAndHash() {
+        let v1 = IOSMiniAppRecord(
+            id: "app-1",
+            title: "计时器",
+            description: "一个番茄钟",
+            htmlContent: "<!DOCTYPE html><html><body>ok</body></html>",
+            sourceConversationId: nil,
+            sourceMessageId: nil,
+            iconEmoji: "⏱",
+            category: "tool",
+            permissions: [],
+            pinned: false,
+            runCount: 0,
+            boardSummary: nil,
+            version: 1,
+            htmlHash: "hash-v1",
+            createdAt: 1,
+            updatedAt: 1,
+            lastRunAt: nil
+        )
+        var v2 = v1
+        v2.version = 2
+        v2.htmlHash = "hash-v2"
+        let assistant = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [IOSMiniAppChatMessageFactory.miniAppPart(from: v2)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+
+        let references = IOSMiniAppChatMessageFactory.persistedConversationReferences(in: [assistant])
+
+        XCTAssertTrue(references.contains(IOSMiniAppConversationReference(record: v2)))
+        XCTAssertFalse(references.contains(IOSMiniAppConversationReference(record: v1)))
+    }
+
+    func testColdStartReconciliationKeepsMutationReferencedByPersistedConversation() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("miniapp-reconcile-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "miniapp-reconcile-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+
+        let repository = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let mutation = try repository.saveGeneratedMutation(
+            IOSMiniAppGeneratedOutput(
+                title: "冷启动闭环",
+                description: "已写入聊天",
+                html: "<!DOCTYPE html><html><body>ok</body></html>"
+            )
+        )
+        let conversationStore = IOSConversationStore(
+            baseDirectory: root.appendingPathComponent("conversations", isDirectory: true)
+        )
+        await conversationStore.bootstrap()
+        let conversationId = try XCTUnwrap(conversationStore.currentConversation?.id)
+        let assistant = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [IOSMiniAppChatMessageFactory.miniAppPart(from: mutation.record)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        let didSaveConversation = await conversationStore.save(messages: [assistant], to: conversationId)
+        XCTAssertTrue(didSaveConversation)
+
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: defaults),
+            miniAppRepository: repository,
+            autoGenerateResponses: false
+        )
+        viewModel.conversationStore = conversationStore
+        await viewModel.reconcilePendingMiniAppMutationsAfterConversationBootstrap()
+
+        let relaunched = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertEqual(relaunched.get(mutation.record.id), mutation.record)
+        XCTAssertFalse(relaunched.hasPendingConversationMutations)
+    }
+
     func testRevisionPromptIncludesAppIdAndUserRequest() {
         let prompt = IOSMiniAppChatMessageFactory.revisionPrompt(
             appId: "app-9",
@@ -248,5 +340,36 @@ final class IOSMiniAppChatMessageFactoryTests: XCTestCase {
         XCTAssertNil(application.syncWorkspaceAfterConversationPersistence())
         XCTAssertEqual(workspace.artifacts.count, 1)
         XCTAssertEqual(workspace.artifacts.first?.sourceId, repository.apps.first?.id)
+    }
+
+    func testExplicitMiniAppWithoutPayloadReturnsFailedApplication() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("miniapp-chat-invalid-\(UUID().uuidString)", isDirectory: true)
+        let defaultsName = "miniapp-chat-invalid-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            defaults.removePersistentDomain(forName: defaultsName)
+        }
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: defaults)
+        sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(enabled: true) }
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            miniAppRepository: IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false),
+            workspaceStore: IOSWorkspaceStore(baseDirectory: root),
+            autoGenerateResponses: false
+        )
+
+        let application = try XCTUnwrap(viewModel.applyMiniAppOutputIfPresentPublic(
+            to: [
+                UIMessage.companion.user(prompt: "请创建一个番茄钟小应用"),
+                UIMessage.companion.assistant(prompt: "我暂时无法生成。"),
+            ],
+            conversationId: nil
+        ))
+
+        XCTAssertEqual(application.outcome, .failed)
+        XCTAssertTrue(application.messages.last?.toText().contains("没有返回完整的 MiniApp JSON") == true)
     }
 }

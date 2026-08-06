@@ -277,10 +277,55 @@ final class ChatViewModel {
 #endif
         if generationCoordinator.isRunning,
            let activeConversationId = generationCoordinator.activeConversationId,
-           String(describing: conversationId) == String(describing: activeConversationId) {
+           conversationId == activeConversationId {
             return true
         }
         return IOSChatBackgroundGenerationCoordinator.shared.hasActiveJob(conversationId: conversationId)
+    }
+
+    func latestImageGenerationResumeContext() async -> ChatImageGenerationResumeContext? {
+        guard let conversationStore else { return nil }
+        let summaries = conversationStore.summaries
+        var candidates: [ChatImageGenerationResumeContext] = []
+
+        for summary in summaries {
+            guard !Task.isCancelled else { return nil }
+            guard let messages = await conversationStore.messages(for: summary.id),
+                  let context = ChatImageGenerationResumeProjection.latest(
+                    in: messages,
+                    conversationID: summary.id.toHexDashString(),
+                    isGenerationActive: isGenerationActive(conversationId: summary.id)
+                  ) else {
+                continue
+            }
+            candidates.append(context)
+        }
+        return ChatImageGenerationResumeProjection.preferred(in: candidates)
+    }
+
+    func reconcilePendingMiniAppMutationsAfterConversationBootstrap() async {
+        guard miniAppRepository.hasPendingConversationMutations,
+              let conversationStore,
+              conversationStore.lastIOError == nil else {
+            return
+        }
+
+        var references = Set<IOSMiniAppConversationReference>()
+        for summary in conversationStore.summaries {
+            guard let storedMessages = await conversationStore.messages(for: summary.id) else {
+                // Absence is only authoritative when every conversation could be read.
+                return
+            }
+            references.formUnion(
+                IOSMiniAppChatMessageFactory.persistedConversationReferences(in: storedMessages)
+            )
+        }
+
+        do {
+            try miniAppRepository.reconcilePendingConversationMutations(referenced: references)
+        } catch {
+            NSLog("[AmberChat] Failed to reconcile pending MiniApp transactions: \(error)")
+        }
     }
 
     private var hasActiveBackgroundGenerationForCurrentConversation: Bool {
@@ -2219,20 +2264,44 @@ final class ChatViewModel {
         conversationId: KotlinUuid?
     ) -> ChatMiniAppOutputApplication? {
         guard isMiniAppRuntimeEnabled else { return nil }
-        guard let lastUserIndex = messages.lastIndex(where: { $0.role == MessageRole.user }),
-              let userText = ChatRuntimeContextBuilder.messageText(messages[lastUserIndex]),
-              IOSMiniAppOutputParser.isExplicitMiniAppRequest(userText),
-              let assistantIndex = IOSMiniAppChatMessageFactory.assistantCandidateIndex(
+        guard let turn = ChatRuntimeContextBuilder.miniAppTurnContext(in: messages) else {
+            return nil
+        }
+        let currentTurn = messages.index(after: turn.currentUserIndex)..<messages.endIndex
+        guard !messages[currentTurn].contains(where: { message in
+            message.role == MessageRole.assistant && message.parts.contains { $0 is UIMessagePart.MiniApp }
+        }) else {
+            return nil
+        }
+        guard let assistantIndex = IOSMiniAppChatMessageFactory.assistantCandidateIndex(
                 in: messages,
-                afterUserIndex: lastUserIndex
-              ) else {
+                afterUserIndex: turn.currentUserIndex
+              ) ?? messages[currentTurn].lastIndex(where: { $0.role == MessageRole.assistant }) else {
             return nil
         }
         let assistant = messages[assistantIndex]
         guard let textPartIndex = assistant.parts.lastIndex(where: { $0 is UIMessagePart.Text }),
-              let textPart = assistant.parts[textPartIndex] as? UIMessagePart.Text,
-              IOSMiniAppChatMessageFactory.mightContainMiniApp(textPart.text) else {
+              let textPart = assistant.parts[textPartIndex] as? UIMessagePart.Text else {
             return nil
+        }
+        let userText = turn.requestText
+        guard IOSMiniAppChatMessageFactory.mightContainMiniApp(textPart.text) else {
+            if let targetAppId = ChatRuntimeContextBuilder.revisionAppId(in: userText) {
+                let current = miniAppRepository.get(targetAppId)
+                let requestedVersion = ChatRuntimeContextBuilder.revisionVersion(in: userText)
+                if current == nil || requestedVersion.map({ $0 != current?.version }) == true {
+                    // The injected revision instruction explicitly asks for a short
+                    // explanation (and no JSON) when the target is missing or stale.
+                    return nil
+                }
+            }
+            var updated = messages
+            updated[assistantIndex] = IOSMiniAppChatMessageFactory.parseFailureAssistant(
+                assistant,
+                textPartIndex: textPartIndex,
+                reason: "模型没有返回完整的 MiniApp JSON 或 HTML。请重试，或调高最大输出长度后重新生成。"
+            )
+            return ChatMiniAppOutputApplication(messages: updated, outcome: .failed)
         }
 
         let parser = IOSMiniAppOutputParser()
@@ -2247,7 +2316,7 @@ final class ChatViewModel {
                 textPartIndex: textPartIndex,
                 reason: reason
             )
-            return ChatMiniAppOutputApplication(messages: updated)
+            return ChatMiniAppOutputApplication(messages: updated, outcome: .failed)
         }
 
         let sourceConversationId = conversationId.map { String(describing: $0) }
@@ -2269,7 +2338,7 @@ final class ChatViewModel {
                         assistant,
                         textPartIndex: textPartIndex
                     )
-                    return ChatMiniAppOutputApplication(messages: updated)
+                    return ChatMiniAppOutputApplication(messages: updated, outcome: .failed)
                 }
                 mutation = revision
             } else {
@@ -2299,6 +2368,14 @@ final class ChatViewModel {
             return ChatMiniAppOutputApplication(
                 messages: updated,
                 rollbackMessages: rollbackMessages,
+                commit: { [miniAppRepository, mutation] in
+                    do {
+                        return try miniAppRepository.commit(mutation)
+                    } catch {
+                        NSLog("[AmberChat] Failed to commit MiniApp transaction: \(error)")
+                        return false
+                    }
+                },
                 rollback: { [miniAppRepository, mutation] in
                     do {
                         return try miniAppRepository.rollback(mutation)
@@ -2326,7 +2403,10 @@ final class ChatViewModel {
                             statusText: "\(statusText)\nWorkspace 同步失败：\(message)",
                             record: record
                         )
-                        return failedMessages
+                        return ChatMiniAppWorkspaceSyncFailure(
+                            messages: failedMessages,
+                            replacementMessage: failedMessages[assistantIndex]
+                        )
                     }
                 }
             )
@@ -2336,7 +2416,7 @@ final class ChatViewModel {
                 assistant,
                 textPartIndex: textPartIndex
             )
-            return ChatMiniAppOutputApplication(messages: updated)
+            return ChatMiniAppOutputApplication(messages: updated, outcome: .failed)
         } catch {
             let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             var updated = messages
@@ -2345,7 +2425,7 @@ final class ChatViewModel {
                 textPartIndex: textPartIndex,
                 reason: reason
             )
-            return ChatMiniAppOutputApplication(messages: updated)
+            return ChatMiniAppOutputApplication(messages: updated, outcome: .failed)
         }
     }
 

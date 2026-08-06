@@ -92,11 +92,14 @@ struct MessageBubbleView: View {
     var frozenMarkdownSnapshot: String? = nil
     /// Reasoning effort label (e.g. "Auto") shown on the thinking pill. nil hides the suffix.
     var reasoningLevelLabel: String? = nil
+    /// One-shot VoiceOver focus target issued after an external image anchor scroll succeeds.
+    var imageAccessibilityFocusToolCallID: String? = nil
 
     @Environment(IOSWorkspaceStore.self) private var workspaceStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var workspaceSaveAlert: WorkspaceSaveAlert?
     @State private var toolDetailTarget: ToolDetailTarget?
+    @AccessibilityFocusState private var focusedGeneratedImageToolCallID: String?
 
     private var isUser: Bool {
         message.role == MessageRole.user
@@ -135,6 +138,17 @@ struct MessageBubbleView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contextMenu { messageActions }
+            }
+        }
+        .onChange(of: imageAccessibilityFocusToolCallID) { _, toolCallID in
+            guard let toolCallID,
+                  message.parts.contains(where: { part in
+                    guard let tool = part as? UIMessagePart.Tool else { return false }
+                    return tool.toolName == "generate_image" && tool.toolCallId == toolCallID
+                  }) else { return }
+            Task { @MainActor in
+                await Task.yield()
+                focusedGeneratedImageToolCallID = toolCallID
             }
         }
         .alert(item: $workspaceSaveAlert) { alert in
@@ -361,14 +375,40 @@ struct MessageBubbleView: View {
                             toolInput: tool.input,
                             onModify: onModifyGeneratedImage
                         )
+                            .id(ChatImageGenerationAnchorTarget.id(toolCallID: tool.toolCallId))
+                            .accessibilityElement(children: .contain)
+                            .accessibilityLabel("图片已生成")
+                            .accessibilityFocused(
+                                $focusedGeneratedImageToolCallID,
+                                equals: tool.toolCallId
+                            )
                             .transition(.opacity)
                     } else if tool.output.isEmpty {
                         ChatGeneratedImageLoadingPlaceholder(toolInput: tool.input)
+                            .id(ChatImageGenerationAnchorTarget.id(toolCallID: tool.toolCallId))
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("正在生成图片")
+                            .accessibilityFocused(
+                                $focusedGeneratedImageToolCallID,
+                                equals: tool.toolCallId
+                            )
                             .transition(.opacity)
                     } else {
                         ChatGeneratedImageFailureCard(
                             reason: ChatToolOutputFormatter.imageFailureReason(from: tool.output)
                                 ?? "图片生成工具没有返回图片。"
+                        )
+                        .id(ChatImageGenerationAnchorTarget.id(toolCallID: tool.toolCallId))
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            "图片生成失败：" + (
+                                ChatToolOutputFormatter.imageFailureReason(from: tool.output)
+                                    ?? "图片生成工具没有返回图片。"
+                            )
+                        )
+                        .accessibilityFocused(
+                            $focusedGeneratedImageToolCallID,
+                            equals: tool.toolCallId
                         )
                         .transition(.opacity)
                     }

@@ -28,12 +28,23 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(appShell.contains("NovelProjectListView("))
         XCTAssertTrue(appShell.contains("NovelProjectWorkspaceView("))
 
-        let miniApps = try XCTUnwrap(home.range(of: "title: \"小应用\""))
-        let novel = try XCTUnwrap(home.range(of: "title: \"小说创作\""))
-        let webMount = try XCTUnwrap(home.range(of: "title: \"WebMount\""))
-        XCTAssertLessThan(miniApps.lowerBound, novel.lowerBound)
-        XCTAssertLessThan(novel.lowerBound, webMount.lowerBound)
-        XCTAssertTrue(home.contains("route: .novelCreation"))
+        // E 版首页定稿的五入口顺序（设计 §4）：深度阅读｜小说创作｜模型议会｜小应用｜WebMount。
+        // 用 HomeShortcut 调用点定位，避免命中文件中其他视图的同名文案。
+        let entries = [
+            "HomeShortcut(title: \"深度阅读\"",
+            "HomeShortcut(title: \"小说创作\"",
+            "HomeShortcut(title: \"模型议会\"",
+            "HomeShortcut(title: \"小应用\"",
+            "HomeShortcut(title: \"WebMount\"",
+        ]
+        var positions: [String.Index] = []
+        for entry in entries {
+            positions.append(try XCTUnwrap(home.range(of: entry)?.lowerBound, "缺少首页入口：\(entry)"))
+        }
+        for pair in zip(positions, positions.dropFirst()) {
+            XCTAssertLessThan(pair.0, pair.1, "首页入口顺序必须保持 E 版定稿顺序")
+        }
+        XCTAssertTrue(home.contains("router.navigate(to: .novelCreation)"))
         XCTAssertTrue(home.contains("title: \"核心记忆\""))
         XCTAssertTrue(home.contains("route: .memory"))
     }
@@ -193,6 +204,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(appShell.contains("novelLifecycleCoordinator.enterForeground()"))
         XCTAssertTrue(viewModel.contains("UIApplication.shared.applicationState == .active"))
         XCTAssertTrue(viewModel.contains("await creation.resumeDetachedGenerationRuns()"))
+        XCTAssertTrue(viewModel.contains("await loadProjects(restoresSelection: false)"))
     }
 
     func testNovelGenerationOwnsTheSystemLeaseFromRuntimeStartToTerminal() throws {

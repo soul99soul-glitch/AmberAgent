@@ -1691,6 +1691,7 @@ struct NovelProjectSummary: Codable, Equatable, Sendable {
     let updatedAt: Date
     let revision: Int64
     let isDegraded: Bool
+    let hasRunningRun: Bool
     let loadError: String?
 
     init(document: NovelProjectDocumentV1, isDegraded: Bool = false) {
@@ -1700,6 +1701,7 @@ struct NovelProjectSummary: Codable, Equatable, Sendable {
         updatedAt = document.project.updatedAt
         revision = document.project.revision
         self.isDegraded = isDegraded
+        hasRunningRun = document.activeRuns.contains(where: { $0.status == .running })
         loadError = nil
     }
 
@@ -1710,6 +1712,7 @@ struct NovelProjectSummary: Codable, Equatable, Sendable {
         updatedAt = Date(timeIntervalSince1970: 0)
         revision = 0
         isDegraded = true
+        hasRunningRun = false
         loadError = String(describing: error)
     }
 }

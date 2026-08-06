@@ -49,11 +49,99 @@ final class IOSMiniAppRepositoryTests: XCTestCase {
         let mutation = try repo.saveGeneratedMutation(output(title: "临时应用"))
 
         XCTAssertNotNil(repo.get(mutation.record.id))
+        XCTAssertTrue(repo.hasPendingConversationMutations)
         XCTAssertTrue(try repo.rollback(mutation))
+        XCTAssertFalse(repo.hasPendingConversationMutations)
 
         let reloaded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
         XCTAssertNil(reloaded.get(mutation.record.id))
         XCTAssertTrue(reloaded.versions(appId: mutation.record.id).isEmpty)
+    }
+
+    func testPendingGeneratedMutationRollsBackAfterRelaunchWithoutConversationReference() throws {
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let mutation = try repo.saveGeneratedMutation(output(title: "强杀窗口"))
+
+        let relaunched = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertTrue(relaunched.hasPendingConversationMutations)
+        try relaunched.reconcilePendingConversationMutations(referenced: [])
+
+        let recovered = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertNil(recovered.get(mutation.record.id))
+        XCTAssertTrue(recovered.versions(appId: mutation.record.id).isEmpty)
+        XCTAssertFalse(recovered.hasPendingConversationMutations)
+    }
+
+    func testPendingGeneratedMutationCommitsAfterRelaunchWithExactConversationReference() throws {
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let mutation = try repo.saveGeneratedMutation(output(title: "已落聊天"))
+
+        let relaunched = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        try relaunched.reconcilePendingConversationMutations(referenced: [
+            IOSMiniAppConversationReference(record: mutation.record),
+        ])
+
+        let recovered = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertEqual(recovered.get(mutation.record.id), mutation.record)
+        XCTAssertFalse(recovered.hasPendingConversationMutations)
+    }
+
+    func testPendingRevisionDoesNotTreatOlderCardAsPersisted() throws {
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let original = try repo.saveGenerated(output(title: "初版", html: html("v1")))
+        let mutation = try XCTUnwrap(repo.saveRevisionMutation(
+            appId: original.id,
+            output: output(title: "二版", html: html("v2")),
+            expectedBaseVersion: 1
+        ))
+
+        let relaunched = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        try relaunched.reconcilePendingConversationMutations(referenced: [
+            IOSMiniAppConversationReference(record: original),
+        ])
+
+        let recovered = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertEqual(recovered.get(original.id), original)
+        XCTAssertEqual(recovered.versions(appId: original.id).map(\.versionNumber), [1])
+        XCTAssertNotEqual(mutation.record.htmlHash, original.htmlHash)
+    }
+
+    func testPendingRevisionRollbackRestoresVersionPrunedWhileStaging() throws {
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let original = try repo.saveGenerated(output(title: "版本 1", html: html("v1")))
+        for version in 2...30 {
+            _ = try repo.saveNewVersion(appId: original.id, htmlContent: html("v\(version)"))
+        }
+        let beforeMutation = try XCTUnwrap(repo.get(original.id))
+        _ = try XCTUnwrap(repo.saveRevisionMutation(
+            appId: original.id,
+            output: output(title: "版本 31", html: html("v31")),
+            expectedBaseVersion: 30
+        ))
+        XCTAssertEqual(repo.versions(appId: original.id).map(\.versionNumber), Array((2...31).reversed()))
+
+        let relaunched = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        try relaunched.reconcilePendingConversationMutations(referenced: [])
+
+        let recovered = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertEqual(recovered.get(original.id), beforeMutation)
+        XCTAssertEqual(recovered.versions(appId: original.id).map(\.versionNumber), Array((1...30).reversed()))
+    }
+
+    func testCommitClearsPendingMutationWithoutChangingMiniApp() throws {
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        let mutation = try repo.saveGeneratedMutation(output(title: "正常完成"))
+
+        XCTAssertTrue(try repo.commit(mutation))
+
+        let reloaded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertEqual(reloaded.get(mutation.record.id), mutation.record)
+        XCTAssertFalse(reloaded.hasPendingConversationMutations)
     }
 
     func testRevisionMutationRollbackRestoresPreviousRecordAndVersions() throws {
@@ -75,12 +163,17 @@ final class IOSMiniAppRepositoryTests: XCTestCase {
     }
 
     func testRollbackDoesNotOverwriteLaterMiniAppChanges() throws {
-        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let root = tempRoot()
+        let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
         let mutation = try repo.saveGeneratedMutation(output(title: "初版"))
         try repo.rename(id: mutation.record.id, title: "用户已改名", description: "保留后续修改")
 
         XCTAssertFalse(try repo.rollback(mutation))
         XCTAssertEqual(repo.get(mutation.record.id)?.title, "用户已改名")
+
+        let reloaded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
+        XCTAssertEqual(reloaded.get(mutation.record.id)?.title, "用户已改名")
+        XCTAssertFalse(reloaded.hasPendingConversationMutations)
     }
 
     func testRollbackIgnoresUnrelatedMiniAppChanges() throws {
@@ -145,6 +238,49 @@ final class IOSMiniAppRepositoryTests: XCTestCase {
         XCTAssertTrue(repo.apps.isEmpty)
         XCTAssertThrowsError(try repo.saveGenerated(output()))
         XCTAssertEqual(String(decoding: try Data(contentsOf: file), as: UTF8.self), "{not-json")
+    }
+
+    func testFailedPersistenceDoesNotLeakUncommittedStateInMemory() throws {
+        let root = tempRoot()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let blocker = root.appendingPathComponent("not-a-directory")
+        try Data("blocker".utf8).write(to: blocker)
+        let repo = IOSMiniAppRepository(baseDirectory: blocker, seedOnMissingStore: false)
+
+        XCTAssertThrowsError(try repo.saveGenerated(output(title: "不应泄漏")))
+        XCTAssertTrue(repo.apps.isEmpty)
+        XCTAssertTrue(repo.list().isEmpty)
+        XCTAssertNotNil(repo.storageError)
+    }
+
+    func testProductionRepositoryRemovesUntouchedLegacySeedSample() throws {
+        let root = tempRoot()
+        let seeded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: true)
+        XCTAssertNotNil(seeded.get(IOSMiniAppFixtures.sampleId))
+
+        let production = IOSMiniAppRepository(baseDirectory: root)
+        XCTAssertNil(production.get(IOSMiniAppFixtures.sampleId))
+
+        let reloaded = IOSMiniAppRepository(baseDirectory: root)
+        XCTAssertNil(reloaded.get(IOSMiniAppFixtures.sampleId))
+    }
+
+    func testProductionRepositoryPreservesEditedLegacySeedSample() throws {
+        let root = tempRoot()
+        let seeded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: true)
+        try seeded.rename(id: IOSMiniAppFixtures.sampleId, title: "我的小应用", description: "用户编辑过")
+
+        let production = IOSMiniAppRepository(baseDirectory: root)
+        XCTAssertEqual(production.get(IOSMiniAppFixtures.sampleId)?.title, "我的小应用")
+    }
+
+    func testProductionRepositoryPreservesUsedLegacySeedSample() throws {
+        let root = tempRoot()
+        let seeded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: true)
+        try seeded.markRun(id: IOSMiniAppFixtures.sampleId)
+
+        let production = IOSMiniAppRepository(baseDirectory: root)
+        XCTAssertEqual(production.get(IOSMiniAppFixtures.sampleId)?.runCount, 1)
     }
 
     func testRunnerInitialHtmlReadsByAppIdFromRepository() throws {

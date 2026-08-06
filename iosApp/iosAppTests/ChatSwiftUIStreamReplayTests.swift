@@ -28,6 +28,8 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         @Published var isGenerationActive = false
         @Published var followGeneration = true
         @Published var scrollToBottomTrigger = 0
+        @Published var messageAnchor: ChatMessageAnchor?
+        @Published var currentConversationID: String?
         var messages: [UIMessage] = []
         private(set) var viewportHistory: [ChatViewportState] = []
 
@@ -65,6 +67,8 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 workspaceStore: workspaceStore,
                 scrollToBottomTrigger: model.scrollToBottomTrigger,
                 scrollToBottomSource: .button,
+                messageAnchor: model.messageAnchor,
+                currentConversationID: model.currentConversationID,
                 messagesProvider: { [weak model] in model?.messages ?? [] },
                 variantInfoProvider: { _ in nil },
                 onAction: { _ in },
@@ -298,6 +302,41 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             annotations: [],
             createdAt: chatNowLocalDateTime(),
             finishedAt: finished ? chatNowLocalDateTime() : nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
+    private func makeCompletedImageMessage(
+        id: KotlinUuid,
+        toolCallID: String
+    ) -> UIMessage {
+        let leadingText = (0..<64).map { paragraph in
+            "第 \(paragraph) 段：生成前的长说明用于验证图片锚点必须落到 tool part，而不是整条超高消息的中点。"
+        }.joined(separator: "\n\n")
+        return UIMessage(
+            id: id,
+            role: MessageRole.assistant,
+            parts: [
+                UIMessagePart.Text(text: leadingText, metadata: nil),
+                UIMessagePart.Tool(
+                    toolCallId: toolCallID,
+                    toolName: "generate_image",
+                    input: #"{"prompt":"一座琥珀色的未来城市"}"#,
+                    output: [UIMessagePart.Image(
+                        url: "amber-image-generation://completed.png",
+                        metadata: nil
+                    )],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                ),
+                UIMessagePart.Text(text: "图片后的简短说明。", metadata: nil)
+            ],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
             modelId: nil,
             usage: nil,
             translation: nil
@@ -593,6 +632,72 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         XCTAssertTrue(viewport.isAtBottom, "进入长会话必须锚定到底部(入场重试梯)")
         XCTAssertFalse(viewport.followPaused)
         XCTAssertFalse(viewport.showScrollToBottom)
+    }
+
+    func testCompletedImageAnchorTargetsToolPartInsideTallMessageBeforeConsumption() throws {
+        let defaults = UserDefaults.standard
+        let viewedKey = ChatImageGenerationResumeConsumption.viewedCompletionIDKey
+        let previousViewedID = defaults.object(forKey: viewedKey)
+        defaults.removeObject(forKey: viewedKey)
+        defer {
+            if let previousViewedID {
+                defaults.set(previousViewedID, forKey: viewedKey)
+            } else {
+                defaults.removeObject(forKey: viewedKey)
+            }
+        }
+
+        let conversationID = "image-anchor-conversation"
+        let toolCallID = "image-anchor-tool"
+        let targetMessage = makeCompletedImageMessage(
+            id: KotlinUuid.companion.random(),
+            toolCallID: toolCallID
+        )
+        let targetMessageID = ChatMessageProjector.messageId(for: targetMessage)
+        let messages = longConversation(turns: 3) + [targetMessage] + longConversation(turns: 8)
+
+        let imageFixture = makeFixture { model in
+            model.followGeneration = false
+            model.currentConversationID = conversationID
+            model.messageAnchor = ChatMessageAnchor(
+                conversationID: conversationID,
+                messageID: targetMessageID,
+                toolCallID: toolCallID
+            )
+        }
+        defer { imageFixture.tearDown() }
+        pump(seconds: 0.2)
+        XCTAssertNil(defaults.string(forKey: viewedKey))
+        imageFixture.model.messages = messages
+        imageFixture.model.send(.conversationSwitch)
+        XCTAssertTrue(pumpUntil(timeout: 6.0) {
+            imageFixture.model.latestViewport.isContentScrollable &&
+                imageFixture.model.latestViewport.followPaused &&
+                !imageFixture.model.latestViewport.isAtBottom
+        })
+        pump(seconds: 0.4)
+
+        let imageScrollView = try XCTUnwrap(imageFixture.scrollView)
+        let imageOffsetY = imageScrollView.contentOffset.y
+        let maximumOffsetY = imageScrollView.contentSize.height - imageScrollView.bounds.height +
+            imageScrollView.adjustedContentInset.bottom
+        XCTAssertGreaterThan(
+            imageOffsetY,
+            -imageScrollView.adjustedContentInset.top + 120,
+            "精确图片锚点不能因目标未解析而停留在顶部"
+        )
+        XCTAssertLessThan(
+            imageOffsetY,
+            maximumOffsetY - 120,
+            "精确图片锚点不能因目标未解析而停留在默认底部"
+        )
+
+        let expectedContextID = "\(conversationID)|\(targetMessageID)|\(toolCallID)"
+        XCTAssertEqual(
+            defaults.string(forKey: viewedKey),
+            expectedContextID,
+            "完成结果只能在真实 timeline 已提交精确图片滚动后消费"
+        )
     }
 
     func testCompletedLongHistoryKeepsStableContentHeightDuringBidirectionalBrowse() {

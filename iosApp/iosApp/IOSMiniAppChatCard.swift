@@ -83,6 +83,9 @@ struct IOSMiniAppChatCard: View {
                         .frame(minHeight: 140)
                         .padding(10)
                         .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .scrollContentBackground(.hidden)
+                        .accessibilityLabel("小应用修改说明")
+                        .accessibilityHint("描述希望修改的内容")
                     if modifyBusyRejected {
                         Text("当前正在生成回复，请稍后再修改。")
                             .font(.caption)
@@ -159,6 +162,8 @@ struct IOSMiniAppChatCard: View {
                                 .padding(.vertical, 2)
                             }
                         }
+                        .scrollContentBackground(.hidden)
+                        .background(AmberTheme.background)
                         .listStyle(.insetGrouped)
                     }
                 }

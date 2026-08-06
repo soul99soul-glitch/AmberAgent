@@ -78,6 +78,7 @@ final class IOSSharedSettingsStoreSkillWriteBackTests: XCTestCase {
         store1.updateMiniAppRuntime { _ in
             MiniAppSettingPatch(
                 networkEnabled: false,
+                externalImagesEnabled: false,
                 searchEnabled: false,
                 clipboardCopyEnabled: false,
                 boardSummaryUpdateEnabled: false,
@@ -85,7 +86,13 @@ final class IOSSharedSettingsStoreSkillWriteBackTests: XCTestCase {
                 hostWriteEnabled: true,
                 aiEnabled: false,
                 sharedStoreEnabled: false,
-                eventBusEnabled: false
+                eventBusEnabled: false,
+                launchEnabled: false,
+                sensorEnabled: false,
+                locationEnabled: true,
+                clipboardReadEnabled: true,
+                webViewDebugEnabled: true,
+                showSourceButton: false
             )
         }
 
@@ -98,6 +105,13 @@ final class IOSSharedSettingsStoreSkillWriteBackTests: XCTestCase {
         XCTAssertFalse(store1.agentRuntime.miniApp.boardSummaryUpdateEnabled)
         XCTAssertTrue(store1.agentRuntime.miniApp.hostContextEnabled)
         XCTAssertTrue(store1.agentRuntime.miniApp.hostWriteEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.externalImagesEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.launchEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.sensorEnabled)
+        XCTAssertTrue(store1.agentRuntime.miniApp.locationEnabled)
+        XCTAssertTrue(store1.agentRuntime.miniApp.clipboardReadEnabled)
+        XCTAssertTrue(store1.agentRuntime.miniApp.webViewDebugEnabled)
+        XCTAssertFalse(store1.agentRuntime.miniApp.showSourceButton)
 
         let store2 = makeIsolatedStore(suiteName: suiteName)
         XCTAssertFalse(store2.agentRuntime.miniApp.networkEnabled)
@@ -109,6 +123,13 @@ final class IOSSharedSettingsStoreSkillWriteBackTests: XCTestCase {
         XCTAssertFalse(store2.agentRuntime.miniApp.boardSummaryUpdateEnabled)
         XCTAssertTrue(store2.agentRuntime.miniApp.hostContextEnabled)
         XCTAssertTrue(store2.agentRuntime.miniApp.hostWriteEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.externalImagesEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.launchEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.sensorEnabled)
+        XCTAssertTrue(store2.agentRuntime.miniApp.locationEnabled)
+        XCTAssertTrue(store2.agentRuntime.miniApp.clipboardReadEnabled)
+        XCTAssertTrue(store2.agentRuntime.miniApp.webViewDebugEnabled)
+        XCTAssertFalse(store2.agentRuntime.miniApp.showSourceButton)
     }
 
     func testCapabilityGatesAreAlwaysAvailable() {

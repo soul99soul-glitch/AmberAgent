@@ -43,6 +43,27 @@ final class IOSConversationStoreTests: XCTestCase {
         )
     }
 
+    private func imageGenerationMessage(
+        toolCallID: String,
+        prompt: String,
+        output: [UIMessagePart]
+    ) -> UIMessage {
+        makeMessage(
+            role: MessageRole.assistant,
+            parts: [
+                UIMessagePart.Tool(
+                    toolCallId: toolCallID,
+                    toolName: "generate_image",
+                    input: #"{"prompt":"\#(prompt)"}"#,
+                    output: output,
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                )
+            ]
+        )
+    }
+
     func testSavingNewMessagesRefreshesConversationAndSummaryUpdateTime() async throws {
         let baseDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("IOSConversationStoreUpdateTime-")
@@ -177,6 +198,111 @@ final class IOSConversationStoreTests: XCTestCase {
 
         XCTAssertFalse(didSelect)
         XCTAssertEqual(store.currentConversation?.id, currentId)
+    }
+
+    func testImageGenerationResumeScanUsesPersistedCrossConversationOwner() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreImageResume-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let completedMessage = imageGenerationMessage(
+            toolCallID: "completed-image-tool",
+            prompt: "已完成的图片",
+            output: [UIMessagePart.Image(
+                url: "amber-image-generation://completed.png",
+                metadata: nil
+            )]
+        )
+        await store.saveCurrent(messages: [
+            UIMessage.companion.user(prompt: "生成一张已完成的图片"),
+            completedMessage
+        ])
+
+        await store.newConversation()
+        let runningMessage = imageGenerationMessage(
+            toolCallID: "running-image-tool",
+            prompt: "正在生成的图片",
+            output: []
+        )
+        await store.saveCurrent(messages: [
+            UIMessage.companion.user(prompt: "生成一张仍在处理的图片"),
+            runningMessage
+        ])
+
+        let restartedStore = IOSConversationStore(baseDirectory: baseDirectory)
+        await restartedStore.bootstrap()
+        var persistedRunningOwner: (conversationID: KotlinUuid, messageID: String)?
+        var persistedCompletedOwner: (conversationID: KotlinUuid, messageID: String)?
+        for summary in restartedStore.summaries {
+            guard let messages = await restartedStore.messages(for: summary.id) else { continue }
+            for message in messages {
+                let toolCallIDs = message.parts.compactMap {
+                    ($0 as? UIMessagePart.Tool)?.toolCallId
+                }
+                if toolCallIDs.contains("running-image-tool") {
+                    persistedRunningOwner = (
+                        summary.id,
+                        ChatMessageProjector.messageId(for: message)
+                    )
+                }
+                if toolCallIDs.contains("completed-image-tool") {
+                    persistedCompletedOwner = (
+                        summary.id,
+                        ChatMessageProjector.messageId(for: message)
+                    )
+                }
+            }
+        }
+        let runningOwner = try XCTUnwrap(persistedRunningOwner)
+        let completedOwner = try XCTUnwrap(persistedCompletedOwner)
+
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.conversationStore = restartedStore
+        viewModel.generationActiveOverrideForTesting = {
+            $0 == runningOwner.conversationID
+        }
+        let loadedRunningMessages = await restartedStore.messages(
+            for: runningOwner.conversationID
+        )
+        let persistedRunningMessages = try XCTUnwrap(loadedRunningMessages)
+        XCTAssertNotNil(ChatImageGenerationResumeProjection.latest(
+            in: persistedRunningMessages,
+            conversationID: runningOwner.conversationID.toHexDashString(),
+            isGenerationActive: true
+        ))
+        XCTAssertTrue(viewModel.isGenerationActive(conversationId: runningOwner.conversationID))
+
+        let persistedRunningContext = await viewModel.latestImageGenerationResumeContext()
+        let runningContext = try XCTUnwrap(persistedRunningContext)
+        XCTAssertEqual(runningContext.conversationID, runningOwner.conversationID.toHexDashString())
+        XCTAssertEqual(runningContext.messageID, runningOwner.messageID)
+        XCTAssertEqual(runningContext.toolCallID, "running-image-tool")
+        XCTAssertEqual(runningContext.state, .running)
+
+        viewModel.generationActiveOverrideForTesting = { _ in false }
+        let persistedCompletedContext = await viewModel.latestImageGenerationResumeContext()
+        let completedContext = try XCTUnwrap(persistedCompletedContext)
+        XCTAssertEqual(completedContext.conversationID, completedOwner.conversationID.toHexDashString())
+        XCTAssertEqual(completedContext.messageID, completedOwner.messageID)
+        XCTAssertEqual(completedContext.toolCallID, "completed-image-tool")
+        XCTAssertEqual(completedContext.state, .completed)
+
+        let didSelectOwner = await restartedStore.selectConversationIfAvailable(
+            id: completedOwner.conversationID
+        )
+        XCTAssertTrue(didSelectOwner)
+        XCTAssertEqual(restartedStore.currentConversation?.id, completedOwner.conversationID)
+
+        await restartedStore.deleteConversation(id: completedOwner.conversationID)
+        let contextAfterOwnerDeletion = await viewModel.latestImageGenerationResumeContext()
+        XCTAssertNil(contextAfterOwnerDeletion)
     }
 
     func testSaveMessagesToExplicitConversationDoesNotOverwriteCurrentConversation() async throws {
@@ -956,6 +1082,42 @@ final class IOSConversationStoreTests: XCTestCase {
         XCTAssertTrue(
             store.pendingBackgroundContentConversationIds.contains(String(describing: convId)),
             "后台结果重试合并成功后应发布当前会话的后台内容通知"
+        )
+    }
+
+    func testBackgroundMessageReplacementPreservesConcurrentMessages() async throws {
+        let baseDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationStoreBackgroundMessagePatch-")
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: baseDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let store = IOSConversationStore(baseDirectory: baseDirectory)
+        await store.bootstrap()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let user = UIMessage.companion.user(prompt: "生成小应用")
+        let generated = UIMessage.companion.assistant(prompt: "已生成小应用")
+        await store.saveCurrent(messages: [user, generated])
+
+        let foreground = UIMessage.companion.user(prompt: "后台运行期间的新消息")
+        await store.saveCurrent(messages: [user, generated, foreground])
+        let replacement = UIMessage(
+            id: generated.id,
+            role: generated.role,
+            parts: [UIMessagePart.Text(text: "已生成小应用\nWorkspace 同步失败", metadata: nil)],
+            annotations: generated.annotations,
+            createdAt: generated.createdAt,
+            finishedAt: generated.finishedAt,
+            modelId: generated.modelId,
+            usage: generated.usage,
+            translation: generated.translation
+        )
+
+        let didReplace = await store.replaceBackgroundMessage(replacement, in: conversationId)
+        XCTAssertTrue(didReplace)
+        XCTAssertEqual(
+            store.currentMessages.map { $0.toText() },
+            ["生成小应用", "已生成小应用\nWorkspace 同步失败", "后台运行期间的新消息"]
         )
     }
 

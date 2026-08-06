@@ -1,4 +1,5 @@
 import XCTest
+import Shared
 @testable import iosApp
 
 final class IOSMiniAppOutputParserTests: XCTestCase {
@@ -57,5 +58,60 @@ final class IOSMiniAppOutputParserTests: XCTestCase {
         XCTAssertFalse(IOSMiniAppOutputParser.isExplicitMiniAppRequest("不要生成小应用，只要说明"))
         XCTAssertFalse(IOSMiniAppOutputParser.isExplicitMiniAppRequest("帮我做一个 PPT deck"))
         XCTAssertTrue(IOSMiniAppOutputParser.isExplicitMiniAppRequest("把这个内容做成小应用版 presentation"))
+    }
+
+    func testGenerationInstructionDocumentsEveryRunnableV3Capability() {
+        let prompt = IOSMiniAppOutputParser.miniAppInstruction
+
+        for contract in [
+            "Amber.fetch",
+            "{items:[{title,url,snippet,source,publishedAt?}]}",
+            "Amber.clipboard.read()",
+            "Amber.host.getConversationContext",
+            "Amber.host.sendToConversation",
+            "Amber.host.createArtifact",
+            "Amber.sharedStore.get/set/remove",
+            "Amber.eventBus.subscribe",
+            "Amber.launch",
+            "Amber.location.getCurrent",
+            "Amber.sensor.subscribe",
+            "生成后自检要求",
+        ] {
+            XCTAssertTrue(prompt.contains(contract), "Missing MiniApp generation contract: \(contract)")
+        }
+    }
+
+    @MainActor
+    func testContinueAfterTruncatedMiniAppKeepsOriginalGenerationIntent() throws {
+        let original = "帮我做一个番茄钟小应用"
+        let messages: [UIMessage] = [
+            UIMessage.companion.user(prompt: original),
+            UIMessage.companion.assistant(
+                prompt: #"{"title":"番茄钟","description":"计时","html":"<!DOCTYPE html><html><body>"#
+            ),
+            ChatGenerationCoordinator.outputLimitNotice(),
+            UIMessage.companion.user(prompt: "继续"),
+        ]
+
+        let turn = try XCTUnwrap(ChatRuntimeContextBuilder.miniAppTurnContext(in: messages))
+        XCTAssertEqual(turn.currentUserIndex, 3)
+        XCTAssertEqual(turn.requestText, original)
+        XCTAssertTrue(turn.isContinuation)
+    }
+
+    @MainActor
+    func testContinueDoesNotReviveMiniAppBeforeAnUnrelatedUserTurn() {
+        let messages: [UIMessage] = [
+            UIMessage.companion.user(prompt: "帮我做一个番茄钟小应用"),
+            UIMessage.companion.assistant(
+                prompt: #"{"title":"番茄钟","description":"计时","html":"<!DOCTYPE html><html><body>"#
+            ),
+            ChatGenerationCoordinator.outputLimitNotice(),
+            UIMessage.companion.user(prompt: "先解释一下时间管理方法"),
+            UIMessage.companion.assistant(prompt: "可以从设定边界开始。"),
+            UIMessage.companion.user(prompt: "继续"),
+        ]
+
+        XCTAssertNil(ChatRuntimeContextBuilder.miniAppTurnContext(in: messages))
     }
 }
