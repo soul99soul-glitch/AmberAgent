@@ -8,8 +8,8 @@ Last updated: 2026-08-06
 
 - Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
-- Tracking: `origin/feat/ios-provider-parity-claude`；当前本地 ahead 2，包含尚未 push 的 review fixes 与 `58b473837` 小说/核心记忆闭环提交。
-- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准；`58b473837` 是本轮已装机的产品代码基线。
+- Tracking: `origin/feat/ios-provider-parity-claude`；当前本地包含尚未 push 的 review fixes、小说/核心记忆闭环与文案提交，ahead 数以实时 Git 为准。
+- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准；`52794d2de` 是当前已装机的产品代码基线。
 - Worktree: 小说共创/代笔 Phase 0–3c、核心记忆闭环、相关测试与文档已提交；是否干净以实时 `git status --short` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
@@ -62,7 +62,7 @@ Last updated: 2026-08-06
 - `NovelPromptCatalogTests/testCatalogSnapshot` 已随 acceptance v2 更新哈希。
 - 完成后 review 定点与配置/协作回归 **158/158 PASSED**；Session、reducer、注入、连续性、生命周期、恢复、文档与 prompt 扩大回归 **296/296 PASSED**，两组共 **454 passed / 0 failed**。
 - 最新 Simulator Debug 包已重新安装并成功启动；当前自动化无法稳定进入小说深层页面，且随后 CoreSimulatorService 连接失效，因此这里不把启动或静态读码当成深层视觉验收。
-- `58b473837` 已用 Team `89QRFX9548` 完成 iPhone Air（iOS 27.0）Debug arm64 构建与严格签名校验；2026-08-06 覆盖安装并成功启动 `app.amber.ios`，安装容器 `0F5914AC-6565-48F6-8FAB-DB250E329468/iosApp.app`。未先卸载，现有 App 数据应保留。
+- 文案提交 `52794d2de` 的 3 项受影响定点测试 **3/3 PASSED**；已用 Team `89QRFX9548` 完成 iPhone Air（iOS 27.0）Debug arm64 增量构建与严格签名校验。2026-08-06 覆盖安装并成功启动 `app.amber.ios`，安装容器 `85B13522-2E02-41F4-9CD0-3EEE65C4B6CC/iosApp.app`；数据库 UUID 保持 `AC96CD34-4AD9-4317-A4CD-6BB64DC7FD3F`，未先卸载，现有 App 数据应保留。
 - 真机：代笔单章闭环、审稿模型生效、下一弧注入、看板回执 — 仍待设备验收。
 - 下一刀：真机 Phase 2/3a/3b/3c 验收。
 
