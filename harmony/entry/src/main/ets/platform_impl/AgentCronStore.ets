@@ -28,6 +28,9 @@ const TAG: string = 'Chat.AgentCron';
 
 export const AGENT_CRON_TASKS_KV_KEY: string = 'agent_cron_tasks_json';
 
+// WorkScheduler + chat run executor are not wired in this Harmony target yet.
+export const AGENT_CRON_EXECUTION_AVAILABLE: boolean = false;
+
 const filesDirPath = (): string => {
   const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
   return ctx.filesDir;
@@ -138,6 +141,15 @@ export interface EntryCronSchedulerDeps {
 }
 
 export const createEntryCronSchedulerPort = (deps: EntryCronSchedulerDeps): AgentCronSchedulerPort => {
+  if (!AGENT_CRON_EXECUTION_AVAILABLE || deps.runExecutor === undefined) {
+    return {
+      schedule: (_workName: string, _taskId: string, _delayMs: number): void => {},
+      runNow: (_workName: string, _taskId: string): void => {},
+      cancel: (_workName: string): void => {},
+    };
+  }
+
+  const runExecutor: AgentCronRunExecutor = deps.runExecutor;
   const timers: Map<string, number> = new Map();
 
   const clearTimer = (workName: string): void => {
@@ -156,10 +168,7 @@ export const createEntryCronSchedulerPort = (deps: EntryCronSchedulerDeps): Agen
       if (task === null) return;
       await manager.markRunStarted(taskId);
       try {
-        const executor: AgentCronRunExecutor = deps.runExecutor ??
-          ((_id: string): Promise<void> =>
-            Promise.reject(new Error('Cron 后台运行执行器未接线(P1)')));
-        await executor(taskId);
+        await runExecutor(taskId);
         await manager.markRunCompleted(taskId);
       } catch (e) {
         const message: string = e instanceof Error ? e.message : String(e);

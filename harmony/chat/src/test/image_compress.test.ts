@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AVIF_BRANDS, COMPRESS_JPEG_QUALITY, COMPRESS_MAX_DIMENSION, HEIF_BRANDS,
+  MAX_PICKER_IMAGE_BYTES, assertPickerImageSize,
   SUPPORTED_IMAGE_TYPES, calculateInSampleSize, guessImageMimeType,
   mapExifOrientationToTransform,
 } from '../main/ets/chat/image_compress.ts';
@@ -16,6 +17,15 @@ test('常量逐字:2048/85 + 支持类型 6 项 + brands', () => {
     ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/avif']);
   assert.ok(HEIF_BRANDS.includes('heic') && HEIF_BRANDS.includes('mif1'));
   assert.deepEqual([...AVIF_BRANDS], ['avif', 'avis']);
+});
+
+test('picker 图片大小上限在读取前阻断，GIF 同样受限', () => {
+  assert.equal(MAX_PICKER_IMAGE_BYTES, 64 * 1024 * 1024);
+  assert.doesNotThrow(() => assertPickerImageSize(MAX_PICKER_IMAGE_BYTES, 'file://ok.gif'));
+  assert.throws(
+    () => assertPickerImageSize(MAX_PICKER_IMAGE_BYTES + 1, 'file://large.gif'),
+    /Image exceeds 67108864 bytes: file:\/\/large\.gif/,
+  );
 });
 
 test('guessImageMimeType: 五族 magic 逐字', () => {

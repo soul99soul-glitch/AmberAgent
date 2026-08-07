@@ -458,7 +458,7 @@ struct ChatSearchSettingsPage {
         Text(trailing).fontSize(11).fontColor(INK3)
       }
     }
-    .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 6 })
+    .width('100%').padding({ left: 18, right: 18, top: 14, bottom: 6 })
   }
 
   @Builder
@@ -477,7 +477,7 @@ struct ChatSearchSettingsPage {
       .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 10 })
 
       if (showDivider) {
-        Row().width('100%').height(1).backgroundColor(LINE).margin({ left: 16 })
+        Row().height(1).backgroundColor(LINE).margin({ left: 16, right: 16 })
       }
     }
     .width('100%')
@@ -519,7 +519,7 @@ struct ChatSearchSettingsPage {
       .onClick((): void => { this.openEdit(svc, index); })
 
       if (index < this.s.searchServices.length - 1) {
-        Row().width('100%').height(1).backgroundColor(LINE).margin({ left: 16 })
+        Row().height(1).backgroundColor(LINE).margin({ left: 16, right: 16 })
       }
     }
     .width('100%')
@@ -613,6 +613,7 @@ struct ChatSearchSettingsPage {
               .onClick((): void => { this.typeMenuOpen = !this.typeMenuOpen; })
 
               if (this.typeMenuOpen) {
+                Scroll() {
                 Column() {
                   ForEach(SEARCH_TYPE_ORDER, (t: SearchServiceOptionsType) => {
                     Row() {
@@ -628,7 +629,9 @@ struct ChatSearchSettingsPage {
                     .onClick((): void => { this.onTypeChange(t); })
                   }, (t: SearchServiceOptionsType): string => t)
                 }
-                .width('100%').height(220).margin({ top: 4 })
+                .width('100%')
+                }
+                .height(220).margin({ top: 4 })
                 .backgroundColor(BG).borderRadius(8)
               }
             }

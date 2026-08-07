@@ -22,6 +22,14 @@ import type { UIMessagePart } from './message.ts';
 // ===== FileFolders(FilesManager.kt:649-656)=====
 export const FILE_FOLDERS_UPLOAD: string = 'upload';
 export const FILE_FOLDERS_SKILLS: string = 'skills';
+
+const isSafeUploadRelativePath = (relativePath: string): boolean => {
+  if (!relativePath.startsWith(`${FILE_FOLDERS_UPLOAD}/`)) return false;
+  const segments: string[] = relativePath.split('/');
+  if (segments.length < 2) return false;
+  return segments.every((segment: string): boolean =>
+    segment.length > 0 && segment !== '.' && segment !== '..');
+};
 export const FILE_FOLDERS_CHAT_IMAGES: string = 'chat_images';
 export const FILE_FOLDERS_IMAGES: string = 'images';
 
@@ -134,7 +142,7 @@ export const deleteChatFiles = async (
     if (!uri.startsWith('file:')) continue;
     try {
       const relativePath: string | null = deps.toRelativePath(uri);
-      if (relativePath === null || !relativePath.startsWith(`${FILE_FOLDERS_UPLOAD}/`)) {
+      if (relativePath === null || !isSafeUploadRelativePath(relativePath)) {
         continue;
       }
       if (relativePaths.indexOf(relativePath) < 0) {

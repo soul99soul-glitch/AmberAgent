@@ -128,12 +128,15 @@ test('hasUsableAuth 矩阵(ProviderSetting.kt:389-408)', () => {
   assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({ enabled: false, apiKey: 'k' })), false);
   assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({ apiKey: '' })), false);
   assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({ apiKey: 'k' })), true);
-  assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({ authMode: 'codex_oauth' })), true);
+  assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({
+    apiKey: 'k', useResponseApi: true,
+  })), false);
+  assert.equal(hasUsableAuth(makeProviderSettingOpenAIVariant({ authMode: 'codex_oauth' })), false);
   assert.equal(hasUsableAuth(makeProviderSettingGoogle({ apiKey: 'k' })), true);
-  assert.equal(hasUsableAuth(makeProviderSettingGoogle({ authMode: 'gemini_code_assist_oauth' })), true);
+  assert.equal(hasUsableAuth(makeProviderSettingGoogle({ authMode: 'gemini_code_assist_oauth' })), false);
   assert.equal(hasUsableAuth(makeProviderSettingGoogle({
     vertexAI: true, useServiceAccount: true, privateKey: 'pk',
-  })), true);
+  })), false);
   assert.equal(hasUsableAuth(makeProviderSettingGoogle({
     vertexAI: true, useServiceAccount: true, privateKey: '',
   })), false);

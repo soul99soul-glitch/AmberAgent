@@ -290,7 +290,10 @@ describe('ChatStreamSubAgentGenerationPort', () => {
 
   it('uses selected-model session defaults for AUTO reasoning and null maxTokens through the real loop', async () => {
     const observedParams: TextGenerationParams[] = [];
-    const selectedModel: ProviderModel = model('setting-id', 'deepseek-reasoner');
+    const selectedModel: ProviderModel = makeProviderModel({
+      id: 'setting-id', modelId: 'deepseek-reasoner', displayName: 'setting-id',
+      abilities: ['reasoning'],
+    });
     const port = new ChatStreamSubAgentGenerationPort({
       resolveModel: (): Promise<ProviderModel | null> => Promise.resolve(selectedModel),
       resolveAssistant: (): Promise<SubAgentAssistantResolution | null> =>

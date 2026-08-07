@@ -578,3 +578,30 @@ export const updateAgentRuntimeExecution = async (
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
 };
+
+// ===== 沙盒并发门写回(SettingSandboxPage 消费;tool_loop.ts:184-188 读侧) =====
+
+export interface SpeculativeToolExecutionPatch {
+  enabled?: boolean;
+  maxConcurrentTools?: number;
+}
+
+export const updateSpeculativeToolExecution = async (
+  kv: KeyValueStore, patch: SpeculativeToolExecutionPatch,
+): Promise<AgentRuntimeSnapshot> => {
+  const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
+  let root: AgentRuntimeJson = {};
+  if (raw !== null) {
+    try {
+      root = JSON.parse(raw) as AgentRuntimeJson;
+    } catch {
+      root = {};
+    }
+  }
+  const cur: SpeculativeToolExecutionJson = root.speculativeToolExecution ?? {};
+  if (patch.enabled !== undefined) cur.enabled = patch.enabled;
+  if (patch.maxConcurrentTools !== undefined) cur.maxConcurrentTools = patch.maxConcurrentTools;
+  root.speculativeToolExecution = cur;
+  await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
+  return loadAgentRuntimeSnapshot(kv);
+};

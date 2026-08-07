@@ -214,14 +214,21 @@ describe('parseMarkdown lists', () => {
     }
   });
 
-  it('ordered list', () => {
-    const md = '1. first\n2. second\n3. third';
+  it('ordered list preserves its source start number', () => {
+    const md = '4. first\n5. second\n6. third';
     const block = firstBlock(md);
     assert.equal(block.kind, 'list');
     if (block.kind === 'list') {
       assert.equal(block.ordered, true);
+      assert.equal(block.start, 4);
       assert.equal(block.items.length, 3);
     }
+  });
+
+  it('ordered list preserves zero as a valid start number', () => {
+    const block = firstBlock('0. first\n1. second');
+    assert.equal(block.kind, 'list');
+    if (block.kind === 'list') assert.equal(block.start, 0);
   });
 
   it('list items have inline tokens', () => {
@@ -265,13 +272,35 @@ describe('parseMarkdown hr', () => {
 });
 
 describe('parseMarkdown table', () => {
-  it('simple table', () => {
+  it('simple table has stable columns and default alignment', () => {
     const md = '| Name | Age |\n|------|-----|\n| Alice | 30 |\n| Bob | 25 |';
     const block = firstBlock(md);
     assert.equal(block.kind, 'table');
     if (block.kind === 'table') {
       assert.equal(block.headers.length, 2);
       assert.equal(block.rows.length, 2);
+      assert.deepEqual(block.alignments, ['left', 'left']);
+      assert.equal(block.rows[0].length, block.headers.length);
+    }
+  });
+
+  it('table preserves alignment markers and pads narrow rows', () => {
+    const md = '| Name | Score | Note |\n|:-----|------:|:----:|\n| Alice | 10 |';
+    const block = firstBlock(md);
+    assert.equal(block.kind, 'table');
+    if (block.kind === 'table') {
+      assert.deepEqual(block.alignments, ['left', 'right', 'center']);
+      assert.equal(block.rows[0].length, 3);
+      assert.deepEqual(block.rows[0][2], []);
+    }
+  });
+
+  it('escaped pipe stays inside one table cell', () => {
+    const block = firstBlock('| Name | Note |\n| --- | --- |\n| A | x\\|y |');
+    assert.equal(block.kind, 'table');
+    if (block.kind === 'table') {
+      assert.equal(block.rows[0].length, 2);
+      assert.equal(inlineTexts(block.rows[0][1]), 'x|y');
     }
   });
 });
@@ -296,6 +325,19 @@ describe('parseMarkdown mixed document', () => {
     assert.equal(blocks[1].kind, 'paragraph');
     assert.equal(blocks[2].kind, 'code_block');
     assert.equal(blocks[3].kind, 'list');
+  });
+});
+
+describe('parseMarkdown safety', () => {
+  it('does not collide with a user-written placeholder', () => {
+    const md = 'AMBER_CODE_BLOCK_0_END\n\n```txt\ncode\n```';
+    const blocks = blocksOf(md);
+    assert.equal(blocks[0].kind, 'paragraph');
+    assert.equal(blocks[1].kind, 'code_block');
+  });
+
+  it('retains malformed input as text instead of throwing', () => {
+    assert.doesNotThrow(() => parseMarkdown('```'.repeat(1000)));
   });
 });
 

@@ -8,8 +8,11 @@
 import { router } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { loadAssistants, saveAssistants, makeAssistant } from '@amber/chat-domain';
-import type { Assistant, Avatar, ConversationSummary } from '@amber/chat-domain';
+import type {
+  Assistant, Avatar, Conversation, ConversationSummary,
+} from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
+import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { PillSelect } from '../components/ui/Select.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT,
@@ -120,7 +123,12 @@ struct AssistantListPage {
               return repo.list(a.id).then((convs: ConversationSummary[]): Promise<void> => {
                 let chain: Promise<void> = Promise.resolve();
                 for (const c of convs) {
-                  chain = chain.then((): Promise<void> => repo.delete(c.id));
+                  chain = chain.then((): Promise<void> =>
+                    repo.getById(c.id).then((full: Conversation | null): Promise<void> => {
+                      if (full === null) return Promise.resolve();
+                      return repo.delete(c.id).then((): Promise<void> =>
+                        cleanupDeletedConversation(full, repo, getChatKvStore()));
+                    }));
                 }
                 return chain;
               });

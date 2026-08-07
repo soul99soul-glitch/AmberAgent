@@ -16,7 +16,7 @@
 //   实时状态卡 enableLiveStatusNotification/hideSensitiveLiveStatus(:155-199);
 //   Live 伴随卡 liveMode 五行(:201-318);
 //   后台保活 keepGenerationAliveInBackground(:372-390)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { ACCENT,ACCENT_INK,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import {
   loadAgentRuntimeSnapshot, updateAgentRuntimeExecution,
@@ -118,30 +118,33 @@ struct ChatAgentExecutionPage {
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
   }
 
-  // Select + ValueChip(:129-151) → 芯片行(选中态 ACCENT 填充,同 D-107 chip 先例)
+  // Select + ValueChip(:129-151) → 纵向卡:标题/描述在上,芯片行横向可滚(超宽不裁切)
   @Builder
   selectCard(title: string, desc: string, options: number[], selected: number,
     valueSuffix: string, onSelect: (v: number) => void) {
-    Row() {
-      Column() {
-        Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-        Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 })
+    Column() {
+      Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
+        .width('100%')
+      Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 }).width('100%')
+      Scroll() {
+        Row() {
+          ForEach(options, (opt: number) => {
+            Text(`${opt} ${valueSuffix}`)
+              .fontSize(12)
+              .fontColor(opt === selected ? ACCENT_INK : INK)
+              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+              .backgroundColor(opt === selected ? ACCENT : SURFACE)
+              .border({ width: 1, color: opt === selected ? ACCENT : LINE })
+              .borderRadius(10)
+              .margin({ right: 6 })
+              .onClick((): void => { onSelect(opt); })
+          }, (opt: number): string => `${opt}`)
+        }
       }
-      .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
-      Row() {
-        ForEach(options, (opt: number) => {
-          Text(`${opt} ${valueSuffix}`)
-            .fontSize(12)
-            .fontColor(opt === selected ? '#FFFFFF' : INK)
-            .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-            .backgroundColor(opt === selected ? ACCENT : SURFACE)
-            .border({ width: 1, color: opt === selected ? ACCENT : LINE })
-            .borderRadius(10)
-            .margin({ left: 6 })
-            .onClick((): void => { onSelect(opt); })
-        }, (opt: number): string => `${opt}`)
-      }
+      .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+      .width('100%').margin({ top: 10 })
     }
+    .alignItems(HorizontalAlign.Start)
     .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE).borderRadius(12)
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
@@ -151,26 +154,29 @@ struct ChatAgentExecutionPage {
   @Builder
   selectTextCard(title: string, desc: string, options: string[], labels: string[],
     selected: string, onSelect: (v: string) => void) {
-    Row() {
-      Column() {
-        Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-        Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 })
+    Column() {
+      Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
+        .width('100%')
+      Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 }).width('100%')
+      Scroll() {
+        Row() {
+          ForEach(options, (opt: string, index: number) => {
+            Text(labels[index])
+              .fontSize(12)
+              .fontColor(opt === selected ? ACCENT_INK : INK)
+              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+              .backgroundColor(opt === selected ? ACCENT : SURFACE)
+              .border({ width: 1, color: opt === selected ? ACCENT : LINE })
+              .borderRadius(10)
+              .margin({ right: 6 })
+              .onClick((): void => { onSelect(opt); })
+          }, (opt: string): string => opt)
+        }
       }
-      .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
-      Row() {
-        ForEach(options, (opt: string, index: number) => {
-          Text(labels[index])
-            .fontSize(12)
-            .fontColor(opt === selected ? '#FFFFFF' : INK)
-            .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-            .backgroundColor(opt === selected ? ACCENT : SURFACE)
-            .border({ width: 1, color: opt === selected ? ACCENT : LINE })
-            .borderRadius(10)
-            .margin({ left: 6 })
-            .onClick((): void => { onSelect(opt); })
-        }, (opt: string): string => opt)
-      }
+      .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
+      .width('100%').margin({ top: 10 })
     }
+    .alignItems(HorizontalAlign.Start)
     .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE).borderRadius(12)
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
@@ -207,9 +213,9 @@ struct ChatAgentExecutionPage {
               RETRY_COUNT_OPTIONS, coerceIn(this.retryMaxRetries, 1, 5), '次',
               (v: number): void => { this.setRetryMaxRetries(v); })
           }
-          .width('100%').padding({ left: 16, right: 16, bottom: 24 })
+          .width('100%').padding({ left: 18, right: 18, bottom: 24 })
         }
-        .width('100%').layoutWeight(1)
+        .width('100%').layoutWeight(1).align(Alignment.Top)
       }
     }
     .width('100%').height('100%').backgroundColor(BG)

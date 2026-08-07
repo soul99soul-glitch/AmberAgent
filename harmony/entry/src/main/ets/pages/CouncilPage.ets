@@ -22,9 +22,25 @@ struct CouncilPage {
   @State models: ModelConfig[] = [];
   @State errorMsg: string = '';
   @State starting: boolean = false;
+  private pageAlive: boolean = false;
+  private loadToken: number = 0;
 
-  async aboutToAppear(): Promise<void> {
-    this.models = await getModelRegistry().list();
+  aboutToAppear(): void {
+    this.pageAlive = true;
+    const token: number = ++this.loadToken;
+    this.loadModels(token).catch((e: Error): void => {
+      if (this.pageAlive && token === this.loadToken) this.errorMsg = String(e);
+    });
+  }
+
+  aboutToDisappear(): void {
+    this.pageAlive = false;
+    this.loadToken++;
+  }
+
+  private async loadModels(token: number): Promise<void> {
+    const models: ModelConfig[] = await getModelRegistry().list();
+    if (this.pageAlive && token === this.loadToken) this.models = models;
   }
 
   toggleLens(id: string): void {

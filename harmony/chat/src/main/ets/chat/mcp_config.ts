@@ -42,6 +42,9 @@ export const makeMcpCommonOptions = (opts: McpCommonOptionsOpts): McpCommonOptio
 // Global auto-approval settings still pass them without prompting.
 
 export interface McpTool {
+  // Present on runtime-discovered tools so direct calls retain the owning
+  // server identity even when multiple servers expose the same tool name.
+  serverId?: string;
   enable: boolean;
   name: string;
   description: string | null;
@@ -50,6 +53,7 @@ export interface McpTool {
 }
 
 export interface McpToolOpts {
+  serverId?: string;
   enable?: boolean;
   name?: string;
   description?: string | null;
@@ -58,6 +62,7 @@ export interface McpToolOpts {
 }
 
 export const makeMcpTool = (opts: McpToolOpts): McpTool => ({
+  ...(opts.serverId === undefined ? {} : { serverId: opts.serverId }),
   enable: opts.enable ?? true,
   name: opts.name ?? '',
   description: opts.description ?? null,

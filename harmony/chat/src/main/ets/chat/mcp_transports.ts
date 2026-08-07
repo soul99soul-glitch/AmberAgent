@@ -89,10 +89,11 @@ export class McpSseOpenError extends Error {
 
 export interface McpHttpPort {
   request(method: string, url: string, headers: Array<[string, string]>,
-    body: string | null): Promise<McpHttpResponse>;
+    body: string | null, requestId?: string): Promise<McpHttpResponse>;
   openSse(url: string, headers: Array<[string, string]>): Promise<McpSseStream>;
   postStream(url: string, headers: Array<[string, string]>,
-    body: string): Promise<McpPostStreamResponse>;
+    body: string, requestId?: string): Promise<McpPostStreamResponse>;
+  cancelPending?: (requestId: string) => void | Promise<void>;
 }
 
 // StreamableHttpError(:54-55):message = 'Streamable HTTP error: <message>'
@@ -208,6 +209,10 @@ export class McpSseClientTransport implements McpTransport {
     this.messageBlock = composeMsg(this.messageBlock, block);
   }
 
+  cancelPending(requestId: string): void | Promise<void> {
+    return this.port.cancelPending?.(requestId);
+  }
+
   // :65-93
   async start(): Promise<void> {
     if (this.initialized) {
@@ -241,8 +246,10 @@ export class McpSseClientTransport implements McpTransport {
         ...this.configHeaders,
         ['Content-Type', 'application/json'],
       ];
+      const requestId: string | undefined = typeof message['id'] === 'string'
+        ? message['id'] as string : undefined;
       const response: McpHttpResponse = await this.port.request(
-        'POST', this.endpointUrl, headers, JSON.stringify(message));
+        'POST', this.endpointUrl, headers, JSON.stringify(message), requestId);
       // bodyAsText 消费(:108-111 注释语义:端口层已全文读取)
       if (response.status < 200 || response.status >= 300) {
         throw new Error(
@@ -370,6 +377,10 @@ export class McpStreamableHttpTransport implements McpTransport {
     this.messageBlock = composeMsg(this.messageBlock, block);
   }
 
+  cancelPending(requestId: string): void | Promise<void> {
+    return this.port.cancelPending?.(requestId);
+  }
+
   // :82-87
   start(): Promise<void> {
     if (this.initialized) {
@@ -397,8 +408,10 @@ export class McpStreamableHttpTransport implements McpTransport {
       ['Content-Type', 'application/json'],
       ...this.configHeaders,
     ];
+    const requestId: string | undefined = typeof message['id'] === 'string'
+      ? message['id'] as string : undefined;
     const response: McpPostStreamResponse = await this.port.postStream(
-      this.url, headers, jsonBody);
+      this.url, headers, jsonBody, requestId);
 
     const sessionHeader: string | null = headerGet(response.headers, MCP_SESSION_ID_HEADER);
     if (sessionHeader !== null) this.sessionId = sessionHeader;

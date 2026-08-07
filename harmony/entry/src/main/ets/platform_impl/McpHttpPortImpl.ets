@@ -90,19 +90,56 @@ const headerFind = (headers: Array<[string, string]>, name: string): string | nu
   return null;
 };
 
-const decodeChunk: DecodeChunk = (chunk: ArrayBuffer): string => {
-  const td: util.TextDecoder = util.TextDecoder.create('utf-8');
-  return td.decodeToString(new Uint8Array(chunk));
-};
+class StatefulUtf8Decoder {
+  private pending: number[] = [];
+
+  decode(chunk: ArrayBuffer): string {
+    const incoming: Uint8Array = new Uint8Array(chunk);
+    const bytes: number[] = this.pending.concat(Array.from(incoming));
+    let end: number = bytes.length;
+    // Keep an incomplete UTF-8 sequence for the next network chunk.
+    for (let i: number = bytes.length - 1; i >= Math.max(0, bytes.length - 4); i--) {
+      const b: number = bytes[i];
+      if ((b & 0xC0) === 0x80) continue;
+      let width: number = 1;
+      if ((b & 0xE0) === 0xC0) width = 2;
+      else if ((b & 0xF0) === 0xE0) width = 3;
+      else if ((b & 0xF8) === 0xF0) width = 4;
+      if (bytes.length - i < width) end = i;
+      break;
+    }
+    this.pending = bytes.slice(end);
+    const complete: Uint8Array = new Uint8Array(bytes.slice(0, end));
+    const td: util.TextDecoder = util.TextDecoder.create('utf-8');
+    return complete.length === 0 ? '' : td.decodeToString(complete);
+  }
+
+  flush(): string {
+    if (this.pending.length === 0) return '';
+    const td: util.TextDecoder = util.TextDecoder.create('utf-8');
+    const out: string = td.decodeToString(new Uint8Array(this.pending));
+    this.pending = [];
+    return out;
+  }
+}
 
 // 队列式 SSE 事件流(requestInStream 回调泵入,next() 消费)
 class QueuedSseStream implements McpSseStream {
-  private readonly assembler: SseAssembler = new SseAssembler(decodeChunk);
+  private readonly decoder: StatefulUtf8Decoder = new StatefulUtf8Decoder();
+  private readonly assembler: SseAssembler = new SseAssembler((chunk: ArrayBuffer): string =>
+    this.decoder.decode(chunk));
+  private readonly cancelUnderlying: () => void;
   private queue: Array<McpSseEvent | null> = [];
   private waiters: Array<(e: McpSseEvent | null) => void> = [];
   private ended: boolean = false;
+  private cancelled: boolean = false;
+
+  constructor(cancelUnderlying: () => void) {
+    this.cancelUnderlying = cancelUnderlying;
+  }
 
   feed(chunk: ArrayBuffer): void {
+    if (this.ended) return;
     for (const e of this.assembler.feed(chunk)) {
       if (e.done) {
         this.end();
@@ -144,6 +181,10 @@ class QueuedSseStream implements McpSseStream {
   }
 
   cancel(): Promise<void> {
+    if (!this.cancelled) {
+      this.cancelled = true;
+      this.cancelUnderlying();
+    }
     this.end();
     return Promise.resolve();
   }
@@ -151,13 +192,21 @@ class QueuedSseStream implements McpSseStream {
 
 // 队列式行流(inline SSE:POST event-stream 响应的行源)
 class QueuedLineStream implements McpSseLineStream {
+  private readonly decoder: StatefulUtf8Decoder = new StatefulUtf8Decoder();
+  private readonly cancelUnderlying: () => void;
   private buffer: string = '';
   private queue: Array<string | null> = [];
   private waiters: Array<(l: string | null) => void> = [];
   private ended: boolean = false;
+  private cancelled: boolean = false;
+
+  constructor(cancelUnderlying: () => void) {
+    this.cancelUnderlying = cancelUnderlying;
+  }
 
   feed(chunk: ArrayBuffer): void {
-    this.buffer += decodeChunk(chunk);
+    if (this.ended) return;
+    this.buffer += this.decoder.decode(chunk);
     for (;;) {
       const lf: number = this.buffer.indexOf('\n');
       if (lf < 0) break;
@@ -169,6 +218,7 @@ class QueuedLineStream implements McpSseLineStream {
   }
 
   finish(): void {
+    this.buffer += this.decoder.flush();
     if (this.buffer.length > 0) {
       this.deliver(this.buffer);
       this.buffer = '';
@@ -199,15 +249,41 @@ class QueuedLineStream implements McpSseLineStream {
   }
 
   cancel(): Promise<void> {
+    if (!this.cancelled) {
+      this.cancelled = true;
+      this.cancelUnderlying();
+    }
     this.end();
     return Promise.resolve();
   }
 }
 
 class OhosMcpHttpPort implements McpHttpPort {
+  private readonly activeRequests: Map<string, http.HttpRequest> = new Map();
+  private anonymousSequence: number = 0;
+
+  private registerRequest(request: http.HttpRequest, requestId?: string): string {
+    const key: string = requestId ?? `anonymous-${this.anonymousSequence++}`;
+    this.activeRequests.set(key, request);
+    return key;
+  }
+
+  private releaseRequest(key: string, request: http.HttpRequest): void {
+    if (this.activeRequests.get(key) !== request) return;
+    this.activeRequests.delete(key);
+    request.destroy();
+  }
+
+  cancelPending(requestId: string): void {
+    const request: http.HttpRequest | undefined = this.activeRequests.get(requestId);
+    if (request === undefined) return;
+    this.activeRequests.delete(requestId);
+    request.destroy();
+  }
+
   // 非流式请求(SSE POST send / DELETE terminate)
   async request(method: string, url: string, headers: Array<[string, string]>,
-    body: string | null): Promise<McpHttpResponse> {
+    body: string | null, requestId?: string): Promise<McpHttpResponse> {
     const httpRequest: http.HttpRequest = http.createHttp();
     const options: http.HttpRequestOptions = {
       method: mapMethod(method),
@@ -220,6 +296,7 @@ class OhosMcpHttpPort implements McpHttpPort {
     if (body !== null && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
       options.extraData = body;
     }
+    const requestKey: string = this.registerRequest(httpRequest, requestId);
     try {
       const resp: http.HttpResponse = await httpRequest.request(url, options);
       const status: number = resp.responseCode;
@@ -240,14 +317,16 @@ class OhosMcpHttpPort implements McpHttpPort {
       if (e instanceof Error) throw e;
       throw new Error(String(e));
     } finally {
-      httpRequest.destroy();
+      this.releaseRequest(requestKey, httpRequest);
     }
   }
 
   // SSE 长连(legacy GET / streamable GET);非 2xx → McpSseOpenError(供 405/json 判定)
   openSse(url: string, headers: Array<[string, string]>): Promise<McpSseStream> {
     const httpRequest: http.HttpRequest = http.createHttp();
-    const stream: QueuedSseStream = new QueuedSseStream();
+    const requestKey: string = this.registerRequest(httpRequest);
+    const cancelUnderlying = (): void => { this.releaseRequest(requestKey, httpRequest); };
+    const stream: QueuedSseStream = new QueuedSseStream(cancelUnderlying);
     let respHeaders: Array<[string, string]> = [];
 
     httpRequest.on('headersReceive', (header: Object): void => {
@@ -258,7 +337,7 @@ class OhosMcpHttpPort implements McpHttpPort {
     });
     httpRequest.on('dataEnd', (): void => {
       stream.finish();
-      httpRequest.destroy();
+      this.releaseRequest(requestKey, httpRequest);
     });
 
     const options: http.HttpRequestOptions = {
@@ -274,7 +353,7 @@ class OhosMcpHttpPort implements McpHttpPort {
       .then((code: number): McpSseStream => {
         if (code < 200 || code >= 300) {
           // ktor sseSession 非 2xx → SSEClientException(status+contentType)
-          httpRequest.destroy();
+          this.releaseRequest(requestKey, httpRequest);
           throw new McpSseOpenError(
             `SSE open failed (HTTP ${code})`, code, headerFind(respHeaders, 'content-type'));
         }
@@ -282,15 +361,15 @@ class OhosMcpHttpPort implements McpHttpPort {
       })
       .catch((e: Error): never => {
         if (e instanceof McpSseOpenError) throw e;
-        httpRequest.destroy();
+        this.releaseRequest(requestKey, httpRequest);
         hilog.error(DOMAIN, TAG, 'openSse FAILED: %{public}s err=%{public}s', url, String(e));
         throw new McpSseOpenError(String(e), null, null);
       });
   }
 
-  // Streamable POST:event-stream 响应 → 行流即时返回;否则缓冲全文到 dataEnd
+  // Streamable POST:event-stream 响应 → 行流即时返回;否则缓冲全文到 dataEnd。
   postStream(url: string, headers: Array<[string, string]>,
-    body: string): Promise<McpPostStreamResponse> {
+    body: string, requestId?: string): Promise<McpPostStreamResponse> {
     const httpRequest: http.HttpRequest = http.createHttp();
     const options: http.HttpRequestOptions = {
       method: http.RequestMethod.POST,
@@ -301,15 +380,18 @@ class OhosMcpHttpPort implements McpHttpPort {
       usingCache: false,
       extraData: body,
     };
+    const requestKey: string = this.registerRequest(httpRequest, requestId);
+    const cancelUnderlying = (): void => { this.releaseRequest(requestKey, httpRequest); };
 
     return new Promise<McpPostStreamResponse>((resolve, reject): void => {
       let respHeaders: Array<[string, string]> = [];
       let code: number = 0;
       let codeReady: boolean = false;
       let headReady: boolean = false;
-      let decided: boolean = false;
+      let dataEnded: boolean = false;
+      let responseSettled: boolean = false;
       let lineStream: QueuedLineStream | null = null;
-      let buffered: string = '';
+      let bufferedChunks: ArrayBuffer[] = [];
 
       const makeHead = (lines: QueuedLineStream | null,
         bodyText: string): McpPostStreamResponse => ({
@@ -320,57 +402,74 @@ class OhosMcpHttpPort implements McpHttpPort {
         bodyText,
         lines,
       });
-
-      // 头部判定:2xx + text/event-stream → 行流;其余 → 缓冲(HTTP 序保证先于 body)
-      const tryDecide = (): void => {
-        if (decided || !headReady || !codeReady) return;
-        decided = true;
+      const decodeBuffered = (): string => {
+        const decoder: StatefulUtf8Decoder = new StatefulUtf8Decoder();
+        let text: string = '';
+        for (const chunk of bufferedChunks) text += decoder.decode(chunk);
+        text += decoder.flush();
+        bufferedChunks = [];
+        return text;
+      };
+      const tryResolve = (): void => {
+        if (responseSettled || !codeReady || (!headReady && !dataEnded)) return;
         const ct: string | null = headerFind(respHeaders, 'content-type');
         const ctBase: string | null = ct === null ? null : ct.split(';')[0].trim();
         if (code >= 200 && code < 300 && ctBase === 'text/event-stream') {
-          lineStream = new QueuedLineStream();
+          lineStream = new QueuedLineStream(cancelUnderlying);
+          const pending: ArrayBuffer[] = bufferedChunks;
+          bufferedChunks = [];
+          for (const chunk of pending) lineStream.feed(chunk);
+          responseSettled = true;
           resolve(makeHead(lineStream, ''));
+          if (dataEnded) {
+            lineStream.finish();
+            this.releaseRequest(requestKey, httpRequest);
+          }
+          return;
         }
-        // 非流:等 dataEnd 时 resolve(下方)
+        if (!dataEnded) return;
+        const bodyText: string = decodeBuffered();
+        responseSettled = true;
+        this.releaseRequest(requestKey, httpRequest);
+        resolve(makeHead(null, bodyText));
       };
 
       httpRequest.on('headersReceive', (header: Object): void => {
         respHeaders = headerPairs(header);
         headReady = true;
-        tryDecide();
+        tryResolve();
       });
       httpRequest.on('dataReceive', (data: ArrayBuffer): void => {
-        if (lineStream !== null) {
-          lineStream.feed(data);
-        } else {
-          buffered += decodeChunk(data);
-        }
+        if (lineStream !== null) lineStream.feed(data);
+        else bufferedChunks.push(data);
       });
       httpRequest.on('dataEnd', (): void => {
-        httpRequest.destroy();
+        dataEnded = true;
         if (lineStream !== null) {
           lineStream.finish();
+          this.releaseRequest(requestKey, httpRequest);
           return;
         }
-        if (!decided) decided = true;
-        resolve(makeHead(null, buffered));
+        tryResolve();
       });
 
       httpRequest.requestInStream(url, options)
         .then((c: number): void => {
           code = c;
           codeReady = true;
-          tryDecide();
+          tryResolve();
         })
         .catch((e: Error): void => {
-          httpRequest.destroy();
-          if (!decided) {
-            decided = true;
+          this.releaseRequest(requestKey, httpRequest);
+          if (lineStream !== null) {
+            lineStream.finish();
+            return;
+          }
+          if (!responseSettled) {
+            responseSettled = true;
             hilog.error(DOMAIN, TAG, 'postStream FAILED: %{public}s err=%{public}s',
               url, String(e));
             reject(e);
-          } else if (lineStream !== null) {
-            lineStream.finish();
           }
         });
     });

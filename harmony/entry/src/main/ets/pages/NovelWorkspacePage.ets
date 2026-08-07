@@ -73,14 +73,19 @@ struct NovelWorkspacePage {
 
   private projectId: string = '';
   private currentUnsub: (() => void) | null = null;
+  private pageAlive: boolean = false;
+  private reloadToken: number = 0;
 
-  async aboutToAppear(): Promise<void> {
+  aboutToAppear(): void {
+    this.pageAlive = true;
     const params = router.getParams() as Record<string, string>;
     this.projectId = params ? (params['projectId'] ?? '') : '';
-    await this.reload();
+    this.reload();
   }
 
   aboutToDisappear(): void {
+    this.pageAlive = false;
+    this.reloadToken++;
     if (this.currentUnsub !== null) {
       this.currentUnsub();
       this.currentUnsub = null;
@@ -89,10 +94,13 @@ struct NovelWorkspacePage {
 
   async reload(): Promise<void> {
     if (this.projectId.length === 0) return;
+    const token: number = ++this.reloadToken;
+    const projectId: string = this.projectId;
     try {
-      this.project = await getNovelCreation().open(this.projectId);
+      const project: NovelProject = await getNovelCreation().open(projectId);
+      if (this.pageAlive && token === this.reloadToken) this.project = project;
     } catch (e) {
-      this.errorMsg = '项目无法打开';
+      if (this.pageAlive && token === this.reloadToken) this.errorMsg = '项目无法打开';
     }
   }
 

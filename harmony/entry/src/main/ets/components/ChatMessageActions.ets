@@ -1,41 +1,79 @@
-// ChatMessageActions — 消息操作按钮组件(第二梯队 F)
-// Android 基准: ChatMessageActions.kt(416 行)— 分叉/编辑/重生成/复制/删除
-// 从 ChatPage MessageRow.build() 内联抽出(line 398-409)
-// 设备验证:按钮触摸目标需 ≥44dp(11sp 文字太小,加 padding 扩大)
-import { INK3, ACCENT, BODY, META, LABEL } from '../design/tokens.ets';
+// ChatMessageActions — 消息操作按钮组件(1:1 原型 turn-actions)
+//
+// 原型基准:icon 按钮(copy/retry/tts)17px、ink-3、gap 18、actbtn padding 2;
+//   鸿蒙保留 fork/edit 入口(能力差异登记),同样图标化:
+//   copy=square_on_square / fork=share / edit=square_and_pencil / retry=arrow_clockwise
+import { INK3, BG } from '../design/tokens.ets';
+import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatMessageActions {
+  @StorageProp('darkMode') darkMode: boolean = false;
   @Prop isUser: boolean = false;
   @Prop isLastAssistant: boolean = false;
   onFork: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
   onCopy: () => void = (): void => {};
+  onSpeak: () => void = (): void => {};
+  onFavorite: () => void = (): void => {};
+
   build(): void {
     Row() {
-      Text('复制')
-        .fontSize(11).fontColor(INK3)
-        .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+      // copy:自绘双框线字形(SDK 无 outline 版 square_on_square,与其余细线图标统一)
+      Row() {
+        Stack() {
+          Column().width(9).height(11).borderRadius(2)
+            .border({ width: 1, color: INK3 })
+            .offset({ x: 2.5, y: -2.5 })
+          Column().width(9).height(11).borderRadius(2)
+            .border({ width: 1, color: INK3 })
+            .backgroundColor(BG)
+            .offset({ x: -2.5, y: 2.5 })
+        }
+        .width(17).height(17)
+      }
+        .width(44).height(44)
+        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
         .margin({ right: 4 })
+        .accessibilityText('复制消息')
         .onClick((): void => this.onCopy())
-      Text('分叉')
-        .fontSize(11).fontColor(INK3)
-        .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+      Row() { Icon({ name: 'share', iconSize: 17, color: INK3 }) }
+        .width(44).height(44)
+        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
         .margin({ right: 4 })
+        .accessibilityText('创建消息分支')
         .onClick((): void => this.onFork())
       if (this.isUser) {
-        Text('编辑')
-          .fontSize(11).fontColor(INK3)
-          .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+        Row() { Icon({ name: 'edit', iconSize: 17, color: INK3 }) }
+          .width(44).height(44)
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
           .margin({ right: 4 })
+          .accessibilityText('编辑消息')
           .onClick((): void => this.onEdit())
       }
       if (this.isLastAssistant || this.isUser) {
-        Text('重新生成')
-          .fontSize(11).fontColor(ACCENT)
-          .padding({ left: 8, right: 8, top: 8, bottom: 8 })
+        Row() { Icon({ name: 'retry', iconSize: 17, color: INK3 }) }
+          .width(44).height(44)
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .accessibilityText('重新生成')
           .onClick((): void => this.onRegenerate())
+      }
+      if (!this.isUser) {
+        // 1:1 原型 turn-actions:speaker 朗读(系统 TTS 真引擎)
+        Row() { Icon({ name: 'speaker', iconSize: 17, color: INK3 }) }
+          .width(44).height(44)
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .margin({ left: 4 })
+          .accessibilityText('朗读消息')
+          .onClick((): void => this.onSpeak())
+        // 收藏(真实 FavoriteStore 落盘)
+        Row() { Icon({ name: 'star', iconSize: 17, color: INK3 }) }
+          .width(44).height(44)
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .margin({ left: 4 })
+          .accessibilityText('收藏消息')
+          .onClick((): void => this.onFavorite())
       }
     }
     .width('100%')

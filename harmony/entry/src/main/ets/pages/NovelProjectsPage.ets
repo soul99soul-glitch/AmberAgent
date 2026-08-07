@@ -15,15 +15,33 @@ struct NovelProjectsPage {
   @State nameInput: string = '';
   @State confirmDeleteId: string = '';
   @State errorMsg: string = '';
+  private pageAlive: boolean = false;
+  private loadToken: number = 0;
 
-  async aboutToAppear(): Promise<void> {
-    await this.loadProjects();
+  aboutToAppear(): void {
+    this.pageAlive = true;
+    this.loadProjects().catch((e: Error): void => {
+      if (this.pageAlive) this.errorMsg = String(e);
+    });
+  }
+
+  aboutToDisappear(): void {
+    this.pageAlive = false;
+    this.loadToken++;
   }
 
   async loadProjects(): Promise<void> {
-    this.loading = true;
-    this.projects = await getNovelCreation().listProjects();
-    this.loading = false;
+    const token: number = ++this.loadToken;
+    if (this.pageAlive) this.loading = true;
+    try {
+      const projects: NovelProject[] = await getNovelCreation().listProjects();
+      if (this.pageAlive && token === this.loadToken) {
+        this.projects = projects;
+        this.errorMsg = '';
+      }
+    } finally {
+      if (this.pageAlive && token === this.loadToken) this.loading = false;
+    }
   }
 
   openNew(): void {

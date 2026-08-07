@@ -186,6 +186,8 @@ test('deleteChatFiles: file: 前缀 + upload/ 门 + 去重 + 各自吞错 + 返�
     'file:///data/files/upload/a.png',    // 正常
     'file:///data/files/upload/a.png',    // 重复 → 去重
     'file:///data/files/chat_images/c.png', // 非 upload/ → 跳过
+    'file:///data/files/upload/../outside.png', // 路径穿越 → 跳过
+    'file:///data/files/upload//empty.png', // 空路径段 → 跳过
     'file:///other/x.png',                // 无法解析 → 跳过
     'file:///data/files/upload/missing.png', // 文件不存在 → 仅出库
     'file:///data/files/upload/boom.png', // 删文件抛错 → 吞错仍收集并出库

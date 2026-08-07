@@ -12,13 +12,8 @@
 
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import type {
-  DeepReadOutput, RunManagerDeps, UIMessage, AiClient,
-} from '@amber/deepread-domain';
-import { run, firstFailureMessage, isComplete } from '@amber/deepread-domain';
-import { getAppContainer, getNotifier, getPrefetcher,
-  getDeepReadPlaybookRepository,
-} from '../di/AppContainer.ets';
+import type { DeepReadOutput } from '@amber/deepread-domain';
+import { firstFailureMessage, isComplete } from '@amber/deepread-domain';
 import { ArticleRenderer } from '../components/ArticleRenderer.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
 import {
@@ -40,11 +35,6 @@ interface ArticleParams {
   title: string;
 }
 
-interface GenTextParams { model: string; messages: UIMessage[]; }
-class MockAiClient implements AiClient {
-  async generateText(_p: GenTextParams): Promise<UIMessage[]> { return []; }
-}
-
 @Entry
 @Component
 struct DeepReadArticlePage {
@@ -59,7 +49,7 @@ struct DeepReadArticlePage {
   // G5-S1:重新生成确认对话框
   @State showRegenerateDialog: boolean = false;
 
-  async aboutToAppear(): Promise<void> {
+  aboutToAppear(): void {
     const rawParams: object = router.getParams() as object;
     if (rawParams === null || rawParams === undefined) {
       hilog.error(DOMAIN, TAG, 'aboutToAppear: router.getParams() is null');
@@ -71,67 +61,14 @@ struct DeepReadArticlePage {
     this.topicId = params.topicId ?? '';
     this.title = params.title ?? '';
     hilog.info(DOMAIN, TAG, 'aboutToAppear: topicId=%{public}s title=%{public}s', this.topicId, this.title);
-    await this.generateArticle();
+    this.generateArticle();
   }
 
-  async generateArticle(): Promise<void> {
-    this.running = true;
-    this.errorMsg = '';
+  generateArticle(): void {
     this.output = null;
-    this.currentStage = '正在抓取来源…';
-    const notifier = getNotifier();
-    await notifier.notifyRunning(this.topicId, this.title);
-    try {
-      hilog.info(DOMAIN, TAG, 'generateArticle: start run()');
-      // 用 AppContainer 注入的 aiClient(自动读 settings 里配的 API Key + Base URL)
-      const container = getAppContainer();
-      const aiClient = container.aiClient;
-      const storage = container.storage;
-      const model = await storage.get<string>('ai_model', 'deepseek-chat');
-      const apiKey = await storage.get<string>('ai_api_key', '');
-      hilog.info(DOMAIN, TAG, 'AI config: model=%{public}s hasKey=%{public}s', model, String(apiKey.length > 0));
-      const prefetcher = getPrefetcher();
-      // D-127:DeepReadAgentRunManager.kt:350 — 规划前读 playbook.markdown
-      //   (此前硬编码 '' = 登记缺口,本切片闭环)
-      const playbook = await getDeepReadPlaybookRepository().read();
-      const deps: RunManagerDeps = {
-        prefetcher: prefetcher,
-        collectRun: async (messages: UIMessage[]): Promise<UIMessage[]> => {
-          // 无 API key → 返回原 messages,走 fallbackPlan + writeFallbackSection
-          return messages;
-        },
-        aiClient: aiClient,
-        model: model,
-        playbookMarkdown: playbook.markdown,
-        nowIso: (): string => '2026-06-25',
-      };
-      const result = await run(deps, this.topicId, this.title, { force: true, seedUrl: null });
-      hilog.info(DOMAIN, TAG, 'run() result: ok=%{public}s error=%{public}s',
-        String(result.ok), result.error ?? 'null');
-      if (result.ok) {
-        this.output = result.output;
-        this.currentStage = '完成';
-        await notifier.notifyCompleted(this.topicId, this.title, true);
-      } else {
-        // 部分失败但可能有基础稿:Android run() ok=false 但 output 含内容 → 走 partial error
-        if (result.output.summary.trim().length > 0) {
-          this.output = result.output;
-          this.currentStage = '部分完成';
-        } else {
-          this.errorMsg = result.error ?? '生成失败';
-          this.currentStage = '失败';
-        }
-        await notifier.notifyFailed(this.topicId, this.title, result.error ?? '未知错误');
-      }
-    } catch (e) {
-      hilog.error(DOMAIN, TAG, 'generateArticle EXCEPTION: %{public}s', String(e).substring(0, 120));
-      this.errorMsg = String(e).substring(0, 80);
-      this.currentStage = '失败';
-      await notifier.notifyFailed(this.topicId, this.title, String(e).substring(0, 60));
-    } finally {
-      this.running = false;
-      await notifier.cancelRunning(this.topicId);
-    }
+    this.currentStage = '不可用';
+    this.errorMsg = '当前 Harmony 版本尚未接通深度阅读生成器与持久化，暂不能生成文章。';
+    this.running = false;
   }
 
   // G5-S1:字号缩放 — zoom in/out
@@ -212,8 +149,8 @@ struct DeepReadArticlePage {
           Column() {
             Text('生成失败').fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 12 })
             Text(this.errorMsg).fontSize(META).fontColor(INK3).margin({ top: 6 })
-            Text('重试').fontSize(BODY).fontColor(ACCENT).margin({ top: 16 })
-              .onClick(() => { this.generateArticle(); })
+            Text('返回').fontSize(BODY).fontColor(ACCENT).margin({ top: 16 })
+              .onClick(() => { router.back(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.output !== null) {
           // 真实文章渲染 — ArticleRenderer 统一渲染全量块

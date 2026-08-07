@@ -116,6 +116,7 @@ export interface ResolvedSessionDefaults {
 }
 
 export const defaultReasoningLevelForModel = (model: ProviderModel): ReasoningLevel => {
+  if (model.abilities.indexOf('reasoning') < 0) return 'auto';
   const modelId: string = model.modelId.toLowerCase();
   if (modelId.includes('gpt') || modelId.includes('codex') || /\bo\d+/.test(modelId)) {
     return 'medium';

@@ -86,7 +86,7 @@ struct AssistantPropertyEditor {
                 onCheckedChange: (c: boolean): void => { this.editBool = c; },
               })
             }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
             .margin({ left: 16, right: 16 })
           } else if (this.propType === 'number') {
@@ -98,7 +98,7 @@ struct AssistantPropertyEditor {
                 onChange: (v: string): void => { this.editText = v; },
               })
             }
-            .width('100%').alignItems(HorizontalAlign.Start)
+            .alignItems(HorizontalAlign.Start)
             .padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
             .margin({ left: 16, right: 16 })
@@ -111,7 +111,7 @@ struct AssistantPropertyEditor {
                 .padding({ left: 14, right: 14 })
                 .onChange((v: string): void => { this.editText = v; })
             }
-            .width('100%').alignItems(HorizontalAlign.Start)
+            .alignItems(HorizontalAlign.Start)
             .padding({ left: 16, right: 16, top: 14, bottom: 14 })
             .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
             .margin({ left: 16, right: 16 })

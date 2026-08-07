@@ -201,13 +201,14 @@ export const googleAuthModeFixedBaseUrl = (mode: GoogleAuthMode): string | null 
 export const hasUsableAuth = (setting: ProviderSetting): boolean => {
   if (!setting.enabled) return false;
   if (setting.type === 'openai') {
-    if (setting.authMode === 'codex_oauth') return true;
-    return setting.apiKey.trim().length > 0;
+    // OAuth/coding-plan and Responses API transports are not implemented.
+    return setting.authMode === 'api_key' && !setting.useResponseApi
+      && setting.apiKey.trim().length > 0;
   }
   if (setting.type === 'google') {
-    if (setting.authMode === 'gemini_code_assist_oauth') return true;
-    if (setting.apiKey.trim().length > 0) return true;
-    return setting.vertexAI && setting.useServiceAccount && setting.privateKey.trim().length > 0;
+    // Service-account JWT and Gemini Code Assist OAuth are not implemented.
+    return !setting.useServiceAccount && setting.authMode === 'api_key'
+      && setting.apiKey.trim().length > 0;
   }
   return setting.apiKey.trim().length > 0;
 };

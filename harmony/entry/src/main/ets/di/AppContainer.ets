@@ -43,7 +43,6 @@ import {
   loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
   hasUsableAuth, openAIAuthHeaders, copyProviderSettingWithModels,
-  saveProviders, makeProviderSettingOpenAIVariant, makeProviderModel, newId,
   makeTextGenerationParams, toChatModel, defaultReasoningLevelForModel,
   resolveSessionDefaults, mergeCustomParams,
   SessionAccessGrantStore, DEFAULT_AUTO_MODEL_ID,
@@ -51,7 +50,7 @@ import {
   McpManager, SkillManager, AgentToolActivityStore, PosixWorkspaceManager,
   AgentPromptConfigRepository, createAgentPromptConfigTool,
   AgentPermissionBroker, createPermissionsStatusTool,
-  AgentTaskStore, AgentTaskScheduler, AgentTaskTools, AgentCronManager, AgentCronTools,
+  AgentTaskStore, AgentTaskScheduler, AgentTaskTools, AgentCronManager,
   asChatStreamProvider, makeGenerationRetrySetting, makeSubAgentRuntimeSetting,
   SubAgentManager, GenerationSubAgentRunner, ChatStreamSubAgentGenerationPort,
   SubAgentTools,
@@ -80,6 +79,7 @@ import {
 import {
   createEntryCronPersistencePort, createEntryAgentTaskFilePort,
   createEntryCronSchedulerPort, agentCronTaskDir, agentCronFilesDir,
+  AGENT_CRON_EXECUTION_AVAILABLE,
 } from '../platform_impl/AgentCronStore.ets';
 import {
   createEntrySubAgentTranscriptPort, subAgentRunsDir, subAgentTranscriptPathForRun,
@@ -298,13 +298,18 @@ export const getAgentCronManager = (): Promise<AgentCronManager> => {
   return agentCronManagerPromise;
 };
 
-// cron 四工具(LocalTools.kt:181 装配位 = permissions_status 之后/
-//   runPlanUpdate 之前)
-export const getAgentCronTools = async (): Promise<AgentTool[]> =>
-  new AgentCronTools(await getAgentCronManager()).getTools();
+// Cron 执行器/WorkScheduler 尚未接线：不向模型暴露会创建不可执行任务的工具。
+export const getAgentCronTools = async (): Promise<AgentTool[]> => [];
 
-// AmberAgentApp.rescheduleCronTasks(:216-224)等价:启动时重排全部任务
+export const isAgentCronExecutionAvailable = (): boolean =>
+  AGENT_CRON_EXECUTION_AVAILABLE;
+
+// 未接执行器时明确跳过启动重排，避免应用内定时器制造失败运行。
 export const rescheduleCronTasksOnStartup = (): void => {
+  if (!AGENT_CRON_EXECUTION_AVAILABLE) {
+    hilog.warn(DOMAIN, TAG, 'Cron execution unavailable; startup reschedule skipped');
+    return;
+  }
   getAgentCronManager()
     .then((manager: AgentCronManager): Promise<void> => manager.rescheduleAll())
     .catch((e: Error) => {
@@ -552,40 +557,8 @@ let chatKv: KeyValueStore | null = null;
 export const getChatKvStore = (): KeyValueStore => {
   if (chatKv === null) {
     chatKv = createChatKvStore(getAppContainer().storage);
-    // DEBUG 预置:首次启动无 Provider 时注入 DeepSeek 测试配置
-    seedDebugProvider();
   }
   return chatKv;
-};
-
-// DEBUG: 注入 DeepSeek 测试 Provider(设备验证用,上线前删除)
-let debugSeeded = false;
-const seedDebugProvider = async (): Promise<void> => {
-  if (debugSeeded) return;
-  debugSeeded = true;
-  try {
-    const existing = await loadProviders(chatKv!);
-    if (existing !== null && existing.length > 0) return;
-    const provider = makeProviderSettingOpenAIVariant({
-      id: newId(),
-      name: 'DeepSeek',
-      apiKey: 'sk-bd402b35619b42ec85233a467274d7b2',
-      // DEBUG: 模拟器走宿主机反向代理(绕过 Clash fake-ip DNS)
-      //   正式环境用 https://api.deepseek.com/v1
-      baseUrl: 'http://10.0.2.2:8080/v1',
-      models: [
-        // modelId 必须匹配 API 接受的值;deepseek-chat 是请求参数,
-        // API 服务端映射到 deepseek-v4-flash(见 response.model)
-        makeProviderModel({ modelId: 'deepseek-chat', displayName: 'DeepSeek V4 Flash', type: 'chat' }),
-      ],
-    });
-    await saveProviders(chatKv!, [provider]);
-    // 同时设置默认选中
-    await chatKv!.put('chat_selected_provider_id', provider.id);
-    await chatKv!.put('chat_selected_model_id', 'deepseek-chat');
-  } catch (_e) {
-    // 静默失败(不影响应用启动)
-  }
 };
 
 let chatRepo: ConversationRepository | null = null;
@@ -742,28 +715,54 @@ export interface ChatProviderChoice {
 const effectiveProvider = (p: ProviderSetting, m: ProviderModel): ProviderSetting =>
   m.providerOverwrite !== null ? copyProviderSettingWithModels(m.providerOverwrite, []) : p;
 
+const makeProviderChoice = (
+  p: ProviderSetting, m: ProviderModel,
+): ChatProviderChoice | null => {
+  const provider: ProviderSetting = effectiveProvider(p, m);
+  return hasUsableAuth(provider) ? { provider, model: m } : null;
+};
+
 // D-080:导出供 ChatPage 发送门(canSendWithoutChatModel 等价物)使用
-export const resolveChatProviderChoice = async (): Promise<ChatProviderChoice | null> => {
+export const resolveChatProviderChoice = async (
+  assistant?: Assistant,
+): Promise<ChatProviderChoice | null> => {
   const providers = await loadProviders(getChatKvStore());
   if (providers === null) return null;
-  // 用户选择优先(D-023;D-046 起不再限定 openai 变体)
-  const selection = await getChatModelSelection();
-  if (selection !== null) {
+
+  // Assistant-scoped model takes precedence over the global selection.
+  if (assistant !== undefined && assistant.chatModelId !== null
+    && assistant.chatModelId.trim().length > 0) {
     for (const p of providers) {
-      if (p.id === selection.providerId && hasUsableAuth(p)) {
-        for (const m of p.models) {
-          if (m.modelId === selection.modelId) {
-            return { provider: effectiveProvider(p, m), model: m };
-          }
+      if (!hasUsableAuth(p)) continue;
+      for (const m of p.models) {
+        if (m.id === assistant.chatModelId && m.type === 'chat') {
+          const choice: ChatProviderChoice | null = makeProviderChoice(p, m);
+          if (choice !== null) return choice;
         }
       }
     }
   }
-  // 回退 D-019 策略:第一个 hasUsableAuth 且非空 models 的变体(任意类型)+ 首模型
+
+  // 用户选择优先(D-023;D-046 起不再限定 openai 变体)
+  const selection = await getChatModelSelection();
+  if (selection !== null) {
+    for (const p of providers) {
+      if (p.id !== selection.providerId || !hasUsableAuth(p)) continue;
+      for (const m of p.models) {
+        if (m.modelId === selection.modelId && m.type === 'chat') {
+          const choice: ChatProviderChoice | null = makeProviderChoice(p, m);
+          if (choice !== null) return choice;
+        }
+      }
+    }
+  }
+  // 回退 D-019 策略:第一个有可用认证且含 chat 模型的 provider + 首个 chat 模型
   for (const p of providers) {
-    if (p.models.length > 0 && hasUsableAuth(p)) {
-      const m: ProviderModel = p.models[0];
-      return { provider: effectiveProvider(p, m), model: m };
+    if (!hasUsableAuth(p)) continue;
+    for (const m of p.models) {
+      if (m.type !== 'chat') continue;
+      const choice: ChatProviderChoice | null = makeProviderChoice(p, m);
+      if (choice !== null) return choice;
     }
   }
   return null;
@@ -843,44 +842,48 @@ const resolveCurrentChatModelUuid = async (providers: ProviderSetting[]): Promis
   for (const p of providers) {
     if (p.id === selection.providerId) {
       for (const m of p.models) {
-        if (m.modelId === selection.modelId) return m.id;
+        if (m.modelId === selection.modelId && m.type === 'chat') return m.id;
       }
     }
   }
   return DEFAULT_AUTO_MODEL_ID;
 };
 
+// 查找已配置且可认证的 chat 模型，不包含当前聊天模型兜底。
+const resolveConfiguredTaskChatModel = async (
+  modelId: string,
+): Promise<ChatProviderChoice | null> => {
+  const providers = await loadProviders(getChatKvStore());
+  if (providers === null) return null;
+  const found: ProviderModel | null = findModelByIdInProviders(providers, modelId);
+  if (found === null || found.type !== 'chat') return null;
+  for (const p of providers) {
+    if (!hasUsableAuth(p)) continue;
+    for (const m of p.models) {
+      if (m.id === found.id && m.type === 'chat') {
+        return makeProviderChoice(p, m);
+      }
+    }
+  }
+  return null;
+};
+
 // resolveTaskChatModel(PreferencesStore.kt:479-481)—
 //   findModelById(modelId) ?: getCurrentChatModel(= resolveChatProviderChoice)
 export const resolveTaskChatModelChoice = async (
   modelId: string,
-): Promise<ChatProviderChoice | null> => {
-  const providers = await loadProviders(getChatKvStore());
-  if (providers !== null) {
-    const found: ProviderModel | null = findModelByIdInProviders(providers, modelId);
-    if (found !== null) {
-      for (const p of providers) {
-        for (const m of p.models) {
-          if (m.id === found.id) {
-            // findProvider(checkOverwrite=true):容器命中 + overwrite 副本(D-084 同口径)
-            return { provider: effectiveProvider(p, m), model: m };
-          }
-        }
-      }
-    }
-  }
-  return resolveChatProviderChoice();
-};
+): Promise<ChatProviderChoice | null> =>
+  (await resolveConfiguredTaskChatModel(modelId)) ?? resolveChatProviderChoice();
 
-// 链式解析:按候选序逐个 resolveTaskChatModelChoice,首个非空胜出
+// 链式解析:候选全部按顺序尝试，最后才回退当前聊天模型。
 export const resolveTaskModelChain = async (
   candidates: string[],
 ): Promise<ChatProviderChoice | null> => {
   for (const id of candidates) {
-    const choice: ChatProviderChoice | null = await resolveTaskChatModelChoice(id);
+    const choice: ChatProviderChoice | null = await resolveConfiguredTaskChatModel(id);
     if (choice !== null) return choice;
   }
-  return null;
+  return resolveChatProviderChoice();
 };
 
 // 当前 chat 模型 uuid(供任务链 chatModelId 实参)
@@ -902,6 +905,12 @@ export const describeChatModel = async (): Promise<string> => {
 export const buildProviderApi = (
   chosen: ProviderSetting, customHeaderRecord: Record<string, string>,
 ): OpenAIChatApi => {
+  if (chosen.type === 'openai' && (chosen as ProviderSettingOpenAIVariant).useResponseApi) {
+    throw new Error('OpenAI Responses API 未落地');
+  }
+  if (!hasUsableAuth(chosen)) {
+    throw new Error('Provider 鉴权未配置或当前 Harmony 版本不支持');
+  }
   if (chosen.type === 'claude') {
     const claudeSetting: ProviderSettingClaude = chosen as ProviderSettingClaude;
     return createClaudeChatApi({
@@ -955,10 +964,6 @@ export const buildProviderApi = (
 };
 
 export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRuntime | null> => {
-  const choice = await resolveChatProviderChoice();
-  if (choice === null) return null;
-  const chosen: ProviderSetting = choice.provider;
-  const model = choice.model;
   // 助手解析(D-028):会话绑定 assistantId 优先,未命中/未传 → 首个(D-019 延续)
   const assistants: Assistant[] = await getChatAssistants();
   let assistant: Assistant = assistants[0];
@@ -970,6 +975,11 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
       }
     }
   }
+  // Assistant.chatModelId must be resolved before the global selection.
+  const choice = await resolveChatProviderChoice(assistant);
+  if (choice === null) return null;
+  const chosen: ProviderSetting = choice.provider;
+  const model = choice.model;
   const sessionDefaults = resolveSessionDefaults(
     assistant,
     null,

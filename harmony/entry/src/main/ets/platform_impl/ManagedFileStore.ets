@@ -6,10 +6,13 @@
 // 存储:filesDir/managed_files.json({nextId, rows});写操作 enqueueWrite 串行。
 import { Context } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
-import { createFilesRepository, deleteChatFiles, conversationFileUris } from '@amber/chat-domain';
+import {
+  createFilesRepository, deleteChatFiles, conversationFileUris, clearPendingQueueStorage,
+} from '@amber/chat-domain';
+import { removeFavoritesOfConversation } from './FavoriteStore.ets';
 import type {
   DeleteChatFilesDeps, FilesRepository, ManagedFileDaoPort, ManagedFileEntity,
-  Conversation,
+  Conversation, ConversationRepository, KeyValueStore,
 } from '@amber/chat-domain';
 
 interface ManagedFileFileShape {
@@ -17,7 +20,19 @@ interface ManagedFileFileShape {
   rows: ManagedFileEntity[];
 }
 
-const EMPTY_SHAPE: ManagedFileFileShape = { nextId: 1, rows: [] };
+let conversationFileMutationTail: Promise<void> = Promise.resolve();
+
+export const enqueueConversationFileMutation = (
+  mutation: () => Promise<void>,
+): Promise<void> => {
+  const next: Promise<void> = conversationFileMutationTail
+    .catch((): void => {})
+    .then(mutation);
+  conversationFileMutationTail = next;
+  return next;
+};
+
+const emptyShape = (): ManagedFileFileShape => ({ nextId: 1, rows: [] });
 
 const storePath = (): string => {
   const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
@@ -29,15 +44,15 @@ const readShape = async (): Promise<ManagedFileFileShape> => {
   const path: string = storePath();
   try {
     const ok: boolean = await fileIo.access(path);
-    if (!ok) return EMPTY_SHAPE;
+    if (!ok) return emptyShape();
     const text: string = await fileIo.readText(path);
     const parsed: ManagedFileFileShape = JSON.parse(text) as ManagedFileFileShape;
     if (typeof parsed.nextId !== 'number' || !Array.isArray(parsed.rows)) {
-      return EMPTY_SHAPE;
+      return emptyShape();
     }
     return parsed;
   } catch {
-    return EMPTY_SHAPE;
+    return emptyShape();
   }
 };
 
@@ -90,6 +105,7 @@ const dao: ManagedFileDaoPort = {
           (r: ManagedFileEntity): boolean => r.id === id);
         if (byId >= 0) shape.rows[byId] = file;
         else shape.rows.push(file);
+        if (id >= shape.nextId) shape.nextId = id + 1;
       }
       await writeShape(shape);
       return id;
@@ -181,8 +197,25 @@ export const getDeleteChatFilesDeps = (): DeleteChatFilesDeps => ({
 });
 
 // cleanupDeletedConversation(ConversationRepository.kt:425-432)—
-//   favoriteDAO.deleteByConversation:favorites 面未移植(无对应表);
+//   favoriteDAO.deleteByConversation → FavoriteStore 级联(KV 真实存储);
 //   deleteChatImagesDir:依附 generate_image 工具,未移植(P1 登记)
-export const cleanupDeletedConversation = async (conv: Conversation): Promise<void> => {
-  await deleteChatFiles(getDeleteChatFilesDeps(), conversationFileUris(conv));
-};
+export const cleanupDeletedConversation = async (
+  conv: Conversation, repository: ConversationRepository, kv: KeyValueStore,
+): Promise<void> => enqueueConversationFileMutation(async (): Promise<void> => {
+  const safeUris: string[] = [];
+  const summaries = await repository.list();
+  for (const uri of conversationFileUris(conv)) {
+    let referenced: boolean = false;
+    for (const summary of summaries) {
+      const other: Conversation | null = await repository.getById(summary.id);
+      if (other !== null && conversationFileUris(other).indexOf(uri) >= 0) {
+        referenced = true;
+        break;
+      }
+    }
+    if (!referenced) safeUris.push(uri);
+  }
+  await deleteChatFiles(getDeleteChatFilesDeps(), safeUris);
+  await clearPendingQueueStorage(kv, conv.id);
+  await removeFavoritesOfConversation(conv.id);
+});

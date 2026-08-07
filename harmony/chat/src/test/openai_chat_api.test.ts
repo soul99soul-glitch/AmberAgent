@@ -188,6 +188,17 @@ test('asChatStreamProvider: 适配 chat_turn 的 ChatStreamProvider 接口', asy
   assert.equal(chunks.length, 2);
 });
 
+test('Responses API remains unsupported at the request boundary', async () => {
+  const unsupported = makeProviderSettingOpenAI({ useResponseApi: true });
+  const api = createOpenAIChatApi({
+    http: fakeHttp({ status: 200, chunks: [SSE_TEXT] }, { req: null }),
+    setting: unsupported,
+  });
+  await assert.rejects(
+    api.streamText([makeUserMessage('hi')], params, (): void => {}),
+    /Responses API/);
+});
+
 test('openAIAuthHeaders: mimo_coding_plan/token-plan 主机用 api-key,其余 Bearer(:545-557)', async () => {
   const { openAIAuthHeaders } = await import('../main/ets/chat/openai_chat_api.ts');
   assert.deepEqual(openAIAuthHeaders('api_key', 'https://api.openai.com/v1', 'T'),

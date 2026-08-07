@@ -70,6 +70,11 @@ struct ChatTaskModelsPage {
     this.refresh();
   }
 
+  // 子选择页返回后重读选中名
+  onPageShow(): void {
+    this.refresh();
+  }
+
   private async refresh(): Promise<void> {
     const kv = getChatKvStore();
     const providers: ProviderSetting[] | null = await loadProviders(kv);
@@ -77,7 +82,9 @@ struct ChatTaskModelsPage {
     if (providers !== null) {
       this.rawProviders = providers;
       for (const p of providers) {
-        if (p.models.length > 0 && hasUsableAuth(p)) usable.push(p);
+        if (hasUsableAuth(p) && p.models.some((m: ProviderModel): boolean => m.type === 'chat')) {
+          usable.push(p);
+        }
       }
     }
     const ids: TaskModelIds = await loadTaskModelIds();
@@ -130,12 +137,13 @@ struct ChatTaskModelsPage {
 
   // follows = findModelById(id) == null(:446/:485/:568)
   private followsChat(uuid: string): boolean {
-    return findModelByIdInProviders(this.providers, uuid) === null;
+    const m: ProviderModel | null = findModelByIdInProviders(this.providers, uuid);
+    return m === null || m.type !== 'chat';
   }
 
   private selectedName(uuid: string): string {
     const m: ProviderModel | null = findModelByIdInProviders(this.providers, uuid);
-    if (m === null) return '';
+    if (m === null || m.type !== 'chat') return '';
     return m.displayName.length > 0 ? m.displayName : m.modelId;
   }
 
@@ -250,11 +258,10 @@ struct ChatTaskModelsPage {
       }
       .width('100%').margin({ top: 10 })
     }
-    .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .borderRadius(12)
-    .margin({ left: 16, right: 16, top: 12 })
+    .margin({ left: 18, right: 18, top: 12 })
   }
 
   @Builder

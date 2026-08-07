@@ -131,7 +131,7 @@ struct AssistantPromptPage {
                 onSelect: (i: number): void => { this.editModeIndex = i; },
               })
             }
-            .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
+            .padding({ left: 14, right: 14, top: 10, bottom: 10 })
             .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
             .margin({ left: 16, right: 16 })
 

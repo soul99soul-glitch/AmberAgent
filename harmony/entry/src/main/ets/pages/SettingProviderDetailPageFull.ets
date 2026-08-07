@@ -41,7 +41,7 @@ struct SettingProviderDetailPageFull {
   @State name: string = 'MiniMax';
   @State protocol: string = 'openai';       // openai / google / claude
   @State authMethod: string = 'api_key';     // api_key / token_plan
-  @State apiKey: string = 'sk-minimax-9f3a2b7c4d8e1f6a';
+  @State apiKey: string = '';
   @State baseUrl: string = 'https://api.minimaxi.com/v1';
   @State connected: boolean = true;
   @State providerEnabled: boolean = true;

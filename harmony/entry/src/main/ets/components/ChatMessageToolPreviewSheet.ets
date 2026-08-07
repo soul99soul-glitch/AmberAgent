@@ -273,8 +273,8 @@ export struct ChatMessageToolPreviewSheet {
       .width('100%')
       .padding({ left: 16, right: 16, top: 8, bottom: 4 })
 
-      if (this.getInputJson().length > 2) {
-        JsonTree({ json: this.getInputJson() })
+      if (Object.keys(this.getOutputJson()).length > 0) {
+        JsonTree({ json: JSON.stringify(this.getOutputJson(), null, 2) })
           .width('100%')
           .padding(12)
           .backgroundColor(SURFACE2)

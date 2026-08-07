@@ -106,54 +106,63 @@ export struct AgentToolCallCapsule {
 
   build(): void {
     Row() {
-      // 图标
-      Text(toolIconEmoji(this.toolName))
-        .fontSize(14)
-        .margin({ right: 6 })
+      Row() {
+        Text(toolIconEmoji(this.toolName))
+          .fontSize(14)
+          .margin({ right: 6 })
 
-      // 标题文本
-      Text(this.title)
-        .fontSize(META)
-        .fontColor(INK2)
-        .fontWeight(FontWeight.Medium)
-        .fontFamily('JetBrainsMono')
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .layoutWeight(1)
+        Text(this.title)
+          .fontSize(META)
+          .fontColor(INK2)
+          .fontWeight(FontWeight.Medium)
+          .fontFamily('JetBrainsMono')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
 
-      // 审批按钮(待授权时显示)
+        if (!this.showApproval) {
+          if (this.status === ToolStatus.Running) {
+            DotLoading({ dotSize: 12, color: ACCENT })
+          } else {
+            Text(toolStatusIcon(this.status))
+              .fontSize(10)
+              .fontColor('#FFFFFF')
+              .width(16)
+              .height(16)
+              .borderRadius(8)
+              .backgroundColor(toolStatusColor(this.status))
+              .textAlign(TextAlign.Center)
+          }
+        }
+      }
+      .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+      .constraintSize({ minHeight: 44 })
+      .backgroundColor(SURFACE2)
+      .borderRadius(50)
+      .border({ width: 1, color: LINE })
+      .alignItems(VerticalAlign.Center)
+      .onClick((): void => { this.onCapsuleClick(); })
+      .accessibilityText(`查看工具 ${this.title}`)
+
       if (this.showApproval) {
         Text('✕')
           .fontSize(12)
           .fontColor(ERROR)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+          .width(44)
+          .height(44)
+          .textAlign(TextAlign.Center)
           .onClick((): void => { this.onDeny(); })
+          .accessibilityText('拒绝工具执行')
         Text('✓')
           .fontSize(12)
           .fontColor(SIGNAL)
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+          .width(44)
+          .height(44)
+          .textAlign(TextAlign.Center)
           .onClick((): void => { this.onApprove(); })
-      } else {
-        // 状态徽章
-        if (this.status === ToolStatus.Running) {
-          DotLoading({ dotSize: 12, color: ACCENT })
-        } else {
-          Text(toolStatusIcon(this.status))
-            .fontSize(10)
-            .fontColor('#FFFFFF')
-            .width(16)
-            .height(16)
-            .borderRadius(8)
-            .backgroundColor(toolStatusColor(this.status))
-            .textAlign(TextAlign.Center)
-        }
+          .accessibilityText('批准工具执行')
       }
     }
-    .padding({ left: 7, right: 3, top: 3, bottom: 3 })
-    .backgroundColor(SURFACE2)
-    .borderRadius(50)
-    .border({ width: 1, color: LINE })
     .alignItems(VerticalAlign.Center)
-    .onClick((): void => { this.onCapsuleClick(); })
   }
 }

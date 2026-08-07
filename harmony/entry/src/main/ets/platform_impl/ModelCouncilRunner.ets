@@ -15,7 +15,8 @@ const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.CouncilRunner';
 const LIVE_EMIT_INTERVAL_MS: number = 32;
 
-// ArkTS 应用层无全局 TextDecoder,用 @kit.ArkTS 的 util.TextDecoder 注入到纯逻辑层
+// SseAssembler already retains incomplete UTF-8 byte sequences between feed
+// calls; this decoder only receives complete sequences.
 const arktsDecode: DecodeChunk = (chunk: ArrayBuffer): string => {
   const td: util.TextDecoder = util.TextDecoder.create('utf-8');
   return td.decodeToString(new Uint8Array(chunk));

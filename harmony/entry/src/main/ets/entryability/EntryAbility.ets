@@ -7,10 +7,20 @@ import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
 import { window, display, font } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { getSkillManager, rescheduleCronTasksOnStartup } from '../di/AppContainer.ets';
+import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore } from '../di/AppContainer.ets';
+import { loadDisplaySetting } from '@amber/chat-domain';
+import type { DisplaySetting } from '@amber/chat-domain';
+import { applyTheme, setAccentColor, BG } from '../design/tokens.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
+const MAX_WANT_PARAMETER_LENGTH: number = 512;
+
+const validatedWantParameter = (value: object | undefined): string => {
+  if (value === undefined || typeof value !== 'string') return '';
+  const trimmed: string = (value as string).trim();
+  return trimmed.length > 0 && trimmed.length <= MAX_WANT_PARAMETER_LENGTH ? trimmed : '';
+};
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
@@ -48,13 +58,13 @@ export default class EntryAbility extends UIAbility {
     if (params === undefined || params === null) {
       return;
     }
-    const topicIdVal: object | undefined = params['topicId'];
-    const titleVal: object | undefined = params['title'];
-    if (topicIdVal !== undefined && typeof topicIdVal === 'string') {
-      AppStorage.setOrCreate<string>('wantTopicId', topicIdVal as string);
+    const topicId: string = validatedWantParameter(params['topicId']);
+    const title: string = validatedWantParameter(params['title']);
+    if (topicId.length > 0) {
+      AppStorage.setOrCreate<string>('wantTopicId', topicId);
     }
-    if (titleVal !== undefined && typeof titleVal === 'string') {
-      AppStorage.setOrCreate<string>('wantTitle', titleVal as string);
+    if (title.length > 0) {
+      AppStorage.setOrCreate<string>('wantTitle', title);
     }
   }
 
@@ -86,14 +96,38 @@ export default class EntryAbility extends UIAbility {
       hilog.warn(DOMAIN, TAG, 'immersive setup failed: %{public}s', String(e));
     }
 
-    // 首页=对话列表(用户心智: 列表是首页, 点 session 进聊天界面)
-    windowStage.loadContent('pages/ChatListPage', (err: BusinessError) => {
-      if (err.code !== 0) {
-        hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
-      } else {
-        hilog.info(DOMAIN, TAG, 'loadContent success');
+    // 主题/强调色:必须在 loadContent 前应用完(tokens 可变,页面 build 时读取;
+    //   否则首帧静态组件读浅色、异步组件读深色 → 混色)
+    const start: () => void = (): void => {
+      // 首页=对话列表(用户心智: 列表是首页, 点 session 进聊天界面)
+      windowStage.loadContent('pages/ChatListPage', (err: BusinessError) => {
+        if (err.code !== 0) {
+          hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
+        } else {
+          hilog.info(DOMAIN, TAG, 'loadContent success');
+        }
+      });
+    };
+    getChatKvStore().get('ui_color_mode').then((mode: string | null): Promise<DisplaySetting> => {
+      applyTheme(mode === 'dark');
+      AppStorage.setOrCreate<boolean>('darkMode', mode === 'dark');
+      try {
+        const win: window.Window = windowStage.getMainWindowSync();
+        win.setWindowBackgroundColor(BG);
+        win.setWindowSystemBarProperties({
+          statusBarColor: '#00000000',
+          statusBarContentColor: mode === 'dark' ? '#ECE8DF' : '#1B1A17',
+          navigationBarColor: '#00000000',
+          navigationBarContentColor: mode === 'dark' ? '#ECE8DF' : '#1B1A17',
+        });
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'theme window apply failed: %{public}s', String(e));
       }
-    });
+      return loadDisplaySetting(getChatKvStore());
+    }).then((s: DisplaySetting): void => {
+      if (s.accentColor.length > 0) setAccentColor(s.accentColor);
+      start();
+    }).catch((): void => { start(); });
   }
 
   onForeground(): void {

@@ -1,366 +1,126 @@
-// SettingAgentMemoryPageFull — 全量记忆设置页(G5-S4a)
-// 本页为设置面自治态(不绑 Assistant):全局记忆策略 / 回写 / 梦境 / 列表 / 导入导出
-// 持久化:占位本地草稿(后续接入 chat-domain MemoryStore 后替换)
-// 依赖:AmberSwitch / PillSelect / FlatTextField / NotionSlider / pasteboard
-import { router } from '@kit.ArkUI';
-import { pasteboard } from '@kit.BasicServicesKit';
-import { promptAction } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
-import { AmberSwitch, SwitchSize } from '../components/ui/Switch.ets';
-import { PillSelect } from '../components/ui/Select.ets';
-import { FlatTextField } from '../components/ui/FlatTextField.ets';
-import { NotionSlider } from '../components/ui/NotionSlider.ets';
+// SettingAgentMemoryPageFull — 核心记忆(接 MemoryStore 真实后端)
+//
+// Android 基准: SettingAgentMemoryPage.kt(MemoryRepository 增删改)。
+//   鸿蒙接 entry MemoryStore.ets getMemoryLibraryOps():
+//   核心记忆 = MEMORY_BUCKET_GLOBAL 桶;支持 列表/新增/删除/编辑。
 
-interface MemoryRecord {
-  id: string;
-  text: string;
-  createdAt: number;
-}
-
-function makeRecord(id: string, text: string, createdAt: number): MemoryRecord {
-  return { id: id, text: text, createdAt: createdAt };
-}
-
-function fmtTime(ts: number): string {
-  const d: Date = new Date(ts);
-  const y: number = d.getFullYear();
-  const m: number = d.getMonth() + 1;
-  const day: number = d.getDate();
-  const hh: number = d.getHours();
-  const mm: number = d.getMinutes();
-  const mm2: string = mm < 10 ? `0${mm}` : `${mm}`;
-  return `${y}-${m}-${day} ${hh}:${mm2}`;
-}
+import type { AssistantMemory } from '@amber/chat-domain';
+import { MEMORY_BUCKET_GLOBAL } from '@amber/chat-domain';
+import { getMemoryLibraryOps, MemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
+import {
+  BG, SURFACE, SURFACE2, INK, INK3, INK4, LINE, ACCENT, ERROR,
+  BODY, BODY2, META, MONO_SMALL,
+} from '../design/tokens.ets';
+import { PageTitleBar, PageSpacer } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
 
 @Entry
 @Component
 struct SettingAgentMemoryPageFull {
+  @State memories: AssistantMemory[] = [];
   @State loaded: boolean = false;
-  // 总开关 + 策略
-  @State enable: boolean = true;
-  @State strategyIndex: number = 0; // 0 recall / 1 write / 2 dream
-  @State maxMemories: string = '200';
-  // 回写
-  @State autoWrite: boolean = true;
-  @State writeInterval: string = '3'; // 分钟
-  // 梦境
-  @State autoDream: boolean = false;
-  @State dreamInterval: string = '30'; // 分钟
-  @State dreamModelIndex: number = 0;
-  // 回忆相似度阈值(0~1) + 最大结果数
-  @State similarity: number = 0.6;
-  @State maxResults: string = '8';
-  // 列表
-  @State memories: MemoryRecord[] = [];
-  // UI
-  @State savedMsg: string = '';
-  private counter: number = 0;
-  private strategies: string[] = ['回忆 (recall)', '写入 (write)', '梦境 (dream)'];
-  private dreamModels: string[] = ['gpt-4o-mini', 'glm-4-flash', 'qwen2-1.5b'];
+  @State draft: string = '';
+  @State editingId: number = -1;
+  @State editDraft: string = '';
+  private ops: MemoryLibraryOps = getMemoryLibraryOps();
 
   aboutToAppear(): void {
-    // 占位种子
-    const now: number = Date.now();
-    this.memories = [
-      makeRecord('m-1', '用户偏好简洁回复,避免冗长寒暄。', now - 86400000),
-      makeRecord('m-2', '当前项目使用 TypeScript + ArkTS 双端架构。', now - 3600000),
-      makeRecord('m-3', '周末通常不工作,工作日 10:00-19:00 在线。', now - 7200000),
-    ];
-    this.counter = 3;
-    this.loaded = true;
+    this.reload();
   }
 
-  private nextId(): string {
-    this.counter += 1;
-    return `m-${this.counter}`;
+  private reload(): void {
+    this.ops.listBucket(MEMORY_BUCKET_GLOBAL).then((list: AssistantMemory[]): void => {
+      this.memories = list;
+      this.loaded = true;
+    }).catch((): void => { this.loaded = true; });
   }
 
-  private addMemory(): void {
-    const id: string = this.nextId();
-    this.memories = [...this.memories, makeRecord(id, '新建记忆,点击编辑内容…', Date.now())];
-  }
-
-  private deleteMemory(id: string): void {
-    this.memories = this.memories.filter((m: MemoryRecord): boolean => m.id !== id);
-  }
-
-  private editMemoryText(id: string, text: string): void {
-    this.memories = this.memories.map((m: MemoryRecord): MemoryRecord => {
-      if (m.id !== id) return m;
-      return makeRecord(m.id, text, m.createdAt);
-    });
-  }
-
-  private save(): void {
-    // 占位保存:接入 MemoryStore 后替换
-    this.savedMsg = '已保存';
-    setTimeout((): void => { this.savedMsg = ''; }, 1500);
-  }
-
-  private done(): void {
-    this.save();
-    router.back();
-  }
-
-  private exportToClipboard(): void {
-    let md: string = '';
-    md += `# 记忆导出\n`;
-    md += `> 导出时间: ${fmtTime(Date.now())}\n`;
-    md += `> 条目数: ${this.memories.length}\n\n---\n\n`;
-    this.memories.forEach((m: MemoryRecord): void => {
-      md += `- [${fmtTime(m.createdAt)}] ${m.text}\n`;
-    });
-    const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
-    board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, md));
-    promptAction.showToast({ message: `已复制 ${this.memories.length} 条记忆到剪贴板`, duration: 2000 });
-  }
-
-  private importFromClipboard(): void {
-    const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
-    if (!board.hasDataSync()) {
-      promptAction.showToast({ message: '剪贴板为空', duration: 2000 });
-      return;
-    }
-    const raw: string = board.getDataSync().getPrimaryText() ?? '';
-    if (raw.length === 0) {
-      promptAction.showToast({ message: '剪贴板无文本', duration: 2000 });
-      return;
-    }
-    // 行格式:"- [时间] 内容" 简单解析,忽略不匹配行
-    const lines: string[] = raw.split('\n');
-    const next: MemoryRecord[] = [];
-    lines.forEach((ln: string): void => {
-      const t: string = ln.trim();
-      if (t.startsWith('- [') && t.indexOf('] ') > 0) {
-        const close: number = t.indexOf('] ');
-        const content: string = t.substring(close + 2);
-        if (content.length > 0) {
-          this.counter += 1;
-          next.push(makeRecord(`m-${this.counter}`, content, Date.now()));
-        }
-      }
-    });
-    if (next.length === 0) {
-      promptAction.showToast({ message: '未识别到记忆行("- [时间] 内容")', duration: 2500 });
-      return;
-    }
-    this.memories = [...this.memories, ...next];
-    promptAction.showToast({ message: `已导入 ${next.length} 条记忆`, duration: 2000 });
-  }
-
-  @Builder sectionHeader(text: string): void {
-    Row() {
-      Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-      Text(` ${text}`).fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
-    }
-    .width('100%').padding({ left: 16, top: 20, bottom: 6 })
-  }
-
-  @Builder switchRow(label: string, desc: string, checked: boolean, onToggle: () => void): void {
-    Row() {
-      Column() {
-        Text(label).fontSize(BODY).fontColor(INK)
-        Text(desc).fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
-      }
-      .alignItems(HorizontalAlign.Start).layoutWeight(1)
-      AmberSwitch({
-        checked: checked,
-        switchSize: SwitchSize.Small,
-        onCheckedChange: (_c: boolean): void => { onToggle(); },
-      })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+  private add(): void {
+    const text: string = this.draft.trim();
+    if (text.length === 0) return;
+    this.ops.addMemory({ scope: 'core', kind: 'note', content: text })
+      .then((): void => { this.draft = ''; this.reload(); });
   }
 
   build(): void {
     Column() {
-      // 标题栏:返回 + 标题 + 完成
+      PageTitleBar({ title: '核心记忆' })
+
+      // 新增条(真实写入 MemoryStore)
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
-          .onClick((): void => { router.back(); })
-        Text('记忆设置').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .margin({ left: 12 }).layoutWeight(1)
-        Text('完成').fontSize(BODY).fontColor(ACCENT)
-          .onClick((): void => { this.done(); })
+        TextInput({ text: this.draft, placeholder: '记一条核心记忆…' })
+          .fontSize(BODY2).fontColor(INK).placeholderColor(INK4)
+          .backgroundColor(Color.Transparent).layoutWeight(1)
+          .onChange((v: string): void => { this.draft = v; })
+        Text('添加').fontSize(BODY2).fontColor(ACCENT)
+          .padding({ left: 10, right: 4 })
+          .onClick((): void => { this.add(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .height(44)
+      .backgroundColor(SURFACE2).borderRadius(12)
+      .padding({ left: 14, right: 10 })
+      .margin({ left: 18, right: 18, top: 10 })
 
-      if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+      if (this.loaded && this.memories.length === 0) {
+        Column() {
+          Text('// 暂无核心记忆').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
+          Text('Agent 会在对话中自动沉淀，也可手动添加')
+            .fontSize(BODY2).fontColor(INK4).margin({ top: 8 })
+        }
+        .width('100%').padding({ top: 60 }).alignItems(HorizontalAlign.Center)
       } else {
-        Scroll() {
-          Column() {
-            // 总开关
-            this.switchRow('启用记忆', '跨会话记住关键信息并按策略调度', this.enable,
-              (): void => { this.enable = !this.enable; })
-
-            // 策略
-            this.sectionHeader('策略')
-            Row() {
-              Text('记忆策略').fontSize(BODY).fontColor(INK).layoutWeight(1)
-              PillSelect({
-                options: this.strategies,
-                selectedIndex: this.strategyIndex,
-                onSelect: (i: number): void => { this.strategyIndex = i; },
-              })
-            }
-            .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
-            .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
-            .margin({ left: 16, right: 16 })
-
-            Column() {
-              Text('最大记忆条数').fontSize(BODY).fontColor(INK)
-              TextInput({ text: this.maxMemories, placeholder: '如 200' })
-                .fontSize(BODY).width('100%').height(40).margin({ top: 8 })
-                .backgroundColor(SURFACE2).borderRadius(8)
-                .type(InputType.Number)
-                .onChange((v: string): void => { this.maxMemories = v; })
-            }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-
-            // 回忆参数
-            this.sectionHeader('回忆 (recall)')
-            Column() {
-              Row() {
-                Text('相似度阈值').fontSize(BODY).fontColor(INK).layoutWeight(1)
-                Text(`${Math.round(this.similarity * 100)}%`).fontSize(META).fontColor(ACCENT)
-              }
-              .width('100%').margin({ bottom: 6 })
-              NotionSlider({
-                value: this.similarity,
-                min: 0,
-                max: 1,
-                step: 0.05,
-                labelMode: '',
-                onChange: (v: number): void => { this.similarity = v; },
-              })
-              Row() {
-                Text('最大返回条数').fontSize(BODY).fontColor(INK).layoutWeight(1)
-                TextInput({ text: this.maxResults, placeholder: '如 8' })
-                  .fontSize(META).width(70).height(36)
-                  .backgroundColor(SURFACE2).borderRadius(8)
-                  .textAlign(TextAlign.End)
-                  .type(InputType.Number)
-                  .onChange((v: string): void => { this.maxResults = v; })
-              }
-              .width('100%').margin({ top: 10 })
-            }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-
-            // 回写参数
-            this.sectionHeader('写入 (write)')
-            this.switchRow('自动写入', '对话结束时自动提炼并写入记忆', this.autoWrite,
-              (): void => { this.autoWrite = !this.autoWrite; })
-            Column() {
-              Text('写入间隔(分钟)').fontSize(BODY).fontColor(INK)
-              TextInput({ text: this.writeInterval, placeholder: '如 3' })
-                .fontSize(BODY).width('100%').height(40).margin({ top: 8 })
-                .backgroundColor(SURFACE2).borderRadius(8)
-                .type(InputType.Number)
-                .onChange((v: string): void => { this.writeInterval = v; })
-            }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-
-            // 梦境参数
-            this.sectionHeader('梦境 (dream)')
-            this.switchRow('自动梦境', '空闲时合并 / 修剪 / 摘要旧记忆', this.autoDream,
-              (): void => { this.autoDream = !this.autoDream; })
-            Column() {
-              Row() {
-                Text('梦境间隔(分钟)').fontSize(BODY).fontColor(INK).layoutWeight(1)
-                TextInput({ text: this.dreamInterval, placeholder: '如 30' })
-                  .fontSize(META).width(70).height(36)
-                  .backgroundColor(SURFACE2).borderRadius(8)
-                  .textAlign(TextAlign.End)
-                  .type(InputType.Number)
-                  .onChange((v: string): void => { this.dreamInterval = v; })
-              }
-              .width('100%').margin({ top: 8 })
-              Row() {
-                Text('梦境模型').fontSize(BODY).fontColor(INK).layoutWeight(1)
-                PillSelect({
-                  options: this.dreamModels,
-                  selectedIndex: this.dreamModelIndex,
-                  onSelect: (i: number): void => { this.dreamModelIndex = i; },
-                })
-              }
-              .width('100%').margin({ top: 10 })
-            }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-
-            // 记忆列表
-            this.sectionHeader('当前记忆')
-            if (this.memories.length === 0) {
+        List() {
+          ForEach(this.memories, (m: AssistantMemory): void => {
+            ListItem() {
               Column() {
-                Text('暂无记忆').fontSize(BODY).fontColor(INK3)
-                Text('点击下方"新建记忆"或从剪贴板导入').fontSize(LABEL).fontColor(INK4).margin({ top: 4 })
-              }
-              .width('100%').alignItems(HorizontalAlign.Center)
-              .padding({ top: 24, bottom: 24 })
-            } else {
-              ForEach(this.memories, (m: MemoryRecord): void => {
-                Column() {
+                if (this.editingId === m.id) {
                   Row() {
-                    Text(m.text)
-                      .fontSize(META).fontColor(INK2).layoutWeight(1)
-                      .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text('删除').fontSize(META).fontColor('#C93A2F')
-                      .padding({ left: 10 })
-                      .onClick((): void => { this.deleteMemory(m.id); })
+                    TextInput({ text: this.editDraft })
+                      .fontSize(BODY2).fontColor(INK).backgroundColor(Color.Transparent)
+                      .layoutWeight(1)
+                      .onChange((v: string): void => { this.editDraft = v; })
+                    Text('保存').fontSize(MONO_SMALL).fontColor(ACCENT)
+                      .onClick((): void => {
+                        this.ops.updateContent(m.id, this.editDraft.trim())
+                          .then((): void => { this.editingId = -1; this.reload(); });
+                      })
+                    Text('取消').fontSize(MONO_SMALL).fontColor(INK3).margin({ left: 10 })
+                      .onClick((): void => { this.editingId = -1; })
                   }
                   .width('100%')
-                  Text(fmtTime(m.createdAt)).fontSize(LABEL).fontColor(INK4).margin({ top: 6 })
-                  TextInput({ text: m.text, placeholder: '记忆内容' })
-                    .fontSize(META).width('100%').height(36).margin({ top: 8 })
-                    .backgroundColor(SURFACE2).borderRadius(8)
-                    .onChange((v: string): void => { this.editMemoryText(m.id, v); })
+                } else {
+                  Text(m.content).fontSize(BODY2).fontColor(INK)
+                    .width('100%')
+                    .onClick((): void => { this.editingId = m.id; this.editDraft = m.content; })
                 }
-                .width('100%').alignItems(HorizontalAlign.Start)
-                .padding(12).backgroundColor(SURFACE2).borderRadius(10)
-                .margin({ left: 16, right: 16, bottom: 8 })
-              }, (m: MemoryRecord): string => m.id)
+                Row() {
+                  Text(`${m.kind}${m.pinned ? ' · pinned' : ''}`)
+                    .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono')
+                  Blank()
+                  Icon({ name: 'trash', iconSize: 15, color: ERROR })
+                    .onClick((): void => {
+                      AlertDialog.show({
+                        title: '删除记忆', message: '删除这条核心记忆？',
+                        primaryButton: { value: '取消', action: (): void => {} },
+                        secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
+                          this.ops.deleteMemory(m.id).then((): void => { this.reload(); });
+                        } },
+                      });
+                    })
+                }
+                .width('100%').margin({ top: 6 })
+              }
+              .padding(14)
+              .backgroundColor(SURFACE)
+              .border({ width: 1, color: LINE }).borderRadius(14)
+              .margin({ left: 18, right: 18, bottom: 10 })
             }
-
-            // 操作行:新建 + 导入 + 导出
-            Row() {
-              Text('+ 新建记忆').fontSize(BODY).fontColor(ACCENT)
-                .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-                .backgroundColor(ACCENT_LIGHT).borderRadius(50)
-                .border({ width: 1, color: ACCENT })
-                .onClick((): void => { this.addMemory(); })
-              Blank()
-              Text('导入').fontSize(META).fontColor(INK2)
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(SURFACE2).borderRadius(50)
-                .onClick((): void => { this.importFromClipboard(); })
-              Text('导出').fontSize(META).fontColor(INK2)
-                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-                .backgroundColor(SURFACE2).borderRadius(50)
-                .margin({ left: 8 })
-                .onClick((): void => { this.exportToClipboard(); })
-            }
-            .width('100%').margin({ top: 8, bottom: 8 })
-
-            if (this.savedMsg.length > 0) {
-              Text(this.savedMsg).fontSize(META).fontColor(ACCENT).margin({ bottom: 8 })
-            }
-            Column() {}.height(32)
-          }
-          .width('100%').padding({ left: 0, right: 0 })
+          }, (m: AssistantMemory): string => `${m.id}`)
         }
-        .layoutWeight(1)
+        .width('100%').layoutWeight(1).padding({ top: 10 })
+        .divider({ strokeWidth: 0, color: Color.Transparent })
       }
+      PageSpacer()
     }
     .width('100%').height('100%').backgroundColor(BG)
   }

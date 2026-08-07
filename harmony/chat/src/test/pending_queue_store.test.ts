@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import {
   pendingQueueKey, pendingQueueAuditKey,
   serializePendingUserMessage, serializePendingQueue, parsePendingQueue,
-  persistPendingQueue, loadPendingQueue,
+  persistPendingQueue, loadPendingQueue, clearPendingQueueStorage,
   buildAuditEventLine, recordPendingQueueEvent,
 } from '../main/ets/chat/pending_queue_store.ts';
 import { makePendingUserMessage } from '../main/ets/chat/pending_queue.ts';
@@ -133,14 +133,24 @@ describe('buildAuditEventLine(recordEvent:62-87,键序忠实)', () => {
 });
 
 describe('recordPendingQueueEvent(jsonl append)', () => {
-  it('追加到 audit 键;两次事件两行', async () => {
+  it('并发 append 按调用序串行且不丢审计行', async () => {
     const store = createMemoryKeyValueStore();
-    await recordPendingQueueEvent(store, 'conv-1', { event: 'enqueue', messageId: 'm1', detail: 'steer' }, 1);
-    await recordPendingQueueEvent(store, 'conv-1', { event: 'dequeue', messageId: 'm1', detail: 'followup' }, 2);
-    const blob: string = store.entries.get(pendingQueueAuditKey('conv-1')) ?? '';
-    const lines: string[] = blob.trim().split('\n');
-    assert.equal(lines.length, 2);
-    assert.ok(lines[0].includes('"event":"enqueue"'));
-    assert.ok(lines[1].includes('"event":"dequeue"'));
+    await Promise.all([
+      recordPendingQueueEvent(store, 'conv-race', { event: 'enqueue', messageId: 'm1' }, 1),
+      recordPendingQueueEvent(store, 'conv-race', { event: 'dequeue', messageId: 'm1' }, 2),
+      recordPendingQueueEvent(store, 'conv-race', { event: 'cancel', messageId: 'm2' }, 3),
+    ]);
+    const blob: string = store.entries.get(pendingQueueAuditKey('conv-race')) ?? '';
+    assert.deepEqual(blob.trim().split('\n').map((line: string) => JSON.parse(line).event),
+      ['enqueue', 'dequeue', 'cancel']);
+  });
+
+  it('clear 同一会话的队列和审计', async () => {
+    const store = createMemoryKeyValueStore();
+    await persistPendingQueue(store, 'conv-clear', [msg('m1', 'x')]);
+    await recordPendingQueueEvent(store, 'conv-clear', { event: 'enqueue', messageId: 'm1' }, 1);
+    await clearPendingQueueStorage(store, 'conv-clear');
+    assert.equal(store.entries.has(pendingQueueKey('conv-clear')), false);
+    assert.equal(store.entries.has(pendingQueueAuditKey('conv-clear')), false);
   });
 });

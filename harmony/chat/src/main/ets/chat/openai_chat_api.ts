@@ -53,6 +53,9 @@ const buildRequest = (
   params: TextGenerationParams,
   stream: boolean,
 ): HttpRequest => {
+  if (deps.setting.useResponseApi) {
+    throw new Error('OpenAI Responses API 未落地');
+  }
   const body = buildChatCompletionRequest({
     messages, params, setting: deps.setting, stream, encodeImage: deps.encodeImage,
   });

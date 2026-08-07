@@ -12,11 +12,13 @@ import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets
 import { router } from '@kit.ArkUI';
 import type {
   Assistant, ReasoningLevel, CustomHeader, CustomBody, JsonValue, MainAgentToolProfile,
+  Conversation, ConversationSummary,
 } from '@amber/chat-domain';
 import {
   loadAssistants, saveAssistants, makeAssistant, patchAssistant, newId,
 } from '@amber/chat-domain';
 import { getChatKvStore, getChatAssistants, getChatRepository } from '../di/AppContainer.ets';
+import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 
 // D-107:工具范围(MainAgentToolProfile.entries 声明序;label() :98-105 逐字)
 const TOOL_PROFILES: MainAgentToolProfile[] =
@@ -282,10 +284,15 @@ struct ChatAssistantsPage {
             saveAssistants(getChatKvStore(), next).then((): Promise<void> => {
               // 级联删除该助手的会话
               const repo = getChatRepository();
-              return repo.list(a.id).then((convs): Promise<void> => {
+              return repo.list(a.id).then((convs: ConversationSummary[]): Promise<void> => {
                 let chain: Promise<void> = Promise.resolve();
                 for (const c of convs) {
-                  chain = chain.then((): Promise<void> => repo.delete(c.id));
+                  chain = chain.then((): Promise<void> =>
+                    repo.getById(c.id).then((full: Conversation | null): Promise<void> => {
+                      if (full === null) return Promise.resolve();
+                      return repo.delete(c.id).then((): Promise<void> =>
+                        cleanupDeletedConversation(full, repo, getChatKvStore()));
+                    }));
                 }
                 return chain;
               });

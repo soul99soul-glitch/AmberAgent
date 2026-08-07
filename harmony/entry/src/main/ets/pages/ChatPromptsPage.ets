@@ -19,6 +19,7 @@
 //   - ModalBottomSheet/AlertDialog → 全屏 overlay(D-094 先例;条目编辑为二级 overlay)
 //   - 导入/导出文件 picker + ExportDialog 未移植(外部目录 picker 未移植先例,P1 登记)
 //   - int 输入:toIntOrNull()?.let 语义 = 草稿串 + 确认时解析失败回退最后有效值
+import { promptAction } from '@kit.ArkUI';
 import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { makeLorebook, makeModeInjection, makeRegexInjection } from '@amber/chat-domain';
@@ -145,8 +146,9 @@ struct ChatPromptsPage {
     const index: number = list.findIndex((x: PromptInjection): boolean => x.id === edited.id);
     if (index >= 0) list[index] = edited;
     else list.push(edited);
-    this.miVisible = false;
-    this.patchModeInjections(list);
+    // 落盘成功后再关 overlay,失败诚实提示(修"先关后存"假成功)
+    this.patchModeInjections(list).then((): void => { this.miVisible = false; })
+      .catch((): void => { promptAction.showToast({ message: '保存失败', duration: 1500 }); });
   }
 
   private deleteModeInjection(item: PromptInjection): void {
@@ -200,8 +202,8 @@ struct ChatPromptsPage {
     const index: number = list.findIndex((x: Lorebook): boolean => x.id === edited.id);
     if (index >= 0) list[index] = edited;
     else list.push(edited);
-    this.lbVisible = false;
-    this.patchLorebooks(list);
+    this.patchLorebooks(list).then((): void => { this.lbVisible = false; })
+      .catch((): void => { promptAction.showToast({ message: '保存失败', duration: 1500 }); });
   }
 
   private deleteLorebook(item: Lorebook): void {
@@ -811,7 +813,7 @@ struct ChatPromptsPage {
                 }
               }
             }
-            .width('100%').padding({ left: 16, right: 16, bottom: 16 })
+            .width('100%').padding({ left: 18, right: 18, bottom: 16 })
           }
           .width('100%').layoutWeight(1)
 

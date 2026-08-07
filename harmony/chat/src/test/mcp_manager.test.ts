@@ -566,11 +566,7 @@ test('重连:持续失败 → 达最大次数 Error(连接断开，已达最大�
   h.manager.dispose();
 });
 
-test('removeClient 竞争 quirk(:372-386 + SDK 组合回调):close 时 status 仍 Connected → hook 调度重连', async () => {
-  // Android 同构:removeClient 先 close(此时 status==Connected → transport onClose
-  // hook 命中 scheduleReconnect),后删状态 entry;任务 setStatus(Reconnecting)
-  // 同步前缀先于删除执行 → 终态 entry 已删;config 仍在 settings+enabled 时
-  // delay 到期会 reconnectClient(冗余重连,Android 原样行为,登记 quirk)。
+test('removeClient: intentional close 不调度重连', async () => {
   let delayed: number = 0;
   const h: Harness = makeHarness((ms: number): Promise<void> => {
     void ms;
@@ -582,11 +578,10 @@ test('removeClient 竞争 quirk(:372-386 + SDK 组合回调):close 时 status �
   await ticks(6);
   assert.equal(lastStatus(h, 's1')?.kind, 'connected');
   await h.manager.removeClient(h.settings.servers[0]);
-  // hook 确已调度(delay 被调 1 次,任务挂起)
-  assert.equal(delayed, 1);
+  assert.equal(delayed, 0);
   const sawReconnecting: boolean = h.statuses.some((m: Map<string, McpStatus>): boolean =>
     m.get('s1')?.kind === 'reconnecting');
-  assert.ok(sawReconnecting);
+  assert.equal(sawReconnecting, false);
   // 状态 entry 最终被 removeClient 摘除(close 完成后)
   assert.equal(lastStatus(h, 's1'), undefined);
   assert.equal(h.manager.getClient(h.settings.servers[0]), null);

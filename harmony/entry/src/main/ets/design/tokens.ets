@@ -2,28 +2,61 @@
 //
 // 来源: oc-amber.css "Terminal × Modern" 暖中性石墨语言
 // 原则: 令牌唯一来源,组件中禁止硬编码 hex
+//
+// 主题: 色板令牌为 export let(可变),applyTheme(dark) 在启动/切换时整体赋值
+//   (session-home.html :root 与 [data-theme="dark"] 逐值复制)。
+//   组件在 build() 时读取 → 页面重建即生效;切换当前页经 replaceUrl 重建。
 
 // ── 基础色(Light base, Graphite) ──
-export const BG: string = '#F4F2EC';         // 页面背景(暖奶油)
-export const SURFACE: string = '#FAF9F5';    // 卡片/托盘(浅奶油)
-export const SURFACE2: string = '#EFECE4';   // 内嵌面(药丸/chip/开关off)
-export const RAISED: string = '#FFFFFF';     // 聚焦字段/分段激活
-export const INK: string = '#1B1A17';        // 主文字(近黑)
-export const INK2: string = '#57544C';       // 次文字/非活跃图标
-export const INK3: string = '#8F8B80';       // 三级/元数据
-export const INK4: string = '#B6B1A4';       // 淡(占位/禁用/标记)
-export const LINE: string = '#E4E0D6';       // 细线边框/分隔
-export const LINE2: string = '#D6D1C4';      // 强边框(chip/激活轮廓)
-export const USER_BG: string = '#1B1A17';    // 用户气泡填充
-export const USER_INK: string = '#F6F4EE';   // 用户气泡文字
-export const CODE_BG: string = '#EDEAE1';    // 行内代码/工具调用背景
+export let BG: string = '#F4F2EC';         // 页面背景(暖奶油)
+export let SURFACE: string = '#FAF9F5';    // 卡片/托盘(浅奶油)
+export let SURFACE2: string = '#EFECE4';   // 内嵌面(药丸/chip/开关off)
+export let RAISED: string = '#FFFFFF';     // 聚焦字段/分段激活
+export let INK: string = '#1B1A17';        // 主文字(近黑)
+export let INK2: string = '#57544C';       // 次文字/非活跃图标
+export let INK3: string = '#8F8B80';       // 三级/元数据
+export let INK4: string = '#B6B1A4';       // 淡(占位/禁用/标记)
+export let LINE: string = '#E4E0D6';       // 细线边框/分隔
+export let LINE2: string = '#D6D1C4';      // 强边框(chip/激活轮廓)
+export let USER_BG: string = '#1B1A17';    // 用户气泡填充
+export let USER_INK: string = '#F6F4EE';   // 用户气泡文字
+export let CODE_BG: string = '#EDEAE1';    // 行内代码/工具调用背景
 
 // ── 强调色 ──
-export const ACCENT: string = '#B8623A';     // 陶土色 — 选择/当前使用
+export let ACCENT: string = '#B8623A';     // 陶土色 — 选择/当前使用
 export const ACCENT_INK: string = '#FFFFFF'; // accent 填充上的文字
-export const ACCENT_LIGHT: string = '#FFF5F0'; // accent 淡背景
-export const SIGNAL: string = '#5E9C6E';     // 活跃/在线绿(区别于 accent)
-export const ERROR: string = '#C2553F';      // 危险红
+export let ACCENT_LIGHT: string = '#FFF5F0'; // accent 淡背景
+export const SIGNAL: string = '#5E9C6E';   // 活跃/在线绿(区别于 accent)
+export const ERROR: string = '#C2553F';    // 危险红
+
+// ── 派生 alpha 色(BG 的渐隐/玻璃变体,随主题切换) ──
+export let BG_FADE_START: string = '#00F4F2EC'; // 底部渐隐起点(全透)
+export let BG_FADE_END: string = '#F4F2EC';     // 底部渐隐终点(=BG)
+export let BG_GLASS: string = '#CCF4F2EC';      // 头部毛玻璃底(80% BG)
+
+// applyTheme — 浅/深双主题(session-home.html 令牌逐值)
+export const applyTheme = (dark: boolean): void => {
+  if (dark) {
+    BG = '#161512'; SURFACE = '#1C1B17'; SURFACE2 = '#211F1A'; RAISED = '#23211C';
+    INK = '#ECE8DF'; INK2 = '#A8A298'; INK3 = '#756F64'; INK4 = '#564F45';
+    LINE = '#2E2B25'; LINE2 = '#3A362E';
+    USER_BG = '#ECE8DF'; USER_INK = '#1B1A17'; CODE_BG = '#211F1A';
+    ACCENT_LIGHT = '#2A211B';
+    BG_FADE_START = '#00161512'; BG_FADE_END = '#161512'; BG_GLASS = '#CC161512';
+  } else {
+    BG = '#F4F2EC'; SURFACE = '#FAF9F5'; SURFACE2 = '#EFECE4'; RAISED = '#FFFFFF';
+    INK = '#1B1A17'; INK2 = '#57544C'; INK3 = '#8F8B80'; INK4 = '#B6B1A4';
+    LINE = '#E4E0D6'; LINE2 = '#D6D1C4';
+    USER_BG = '#1B1A17'; USER_INK = '#F6F4EE'; CODE_BG = '#EDEAE1';
+    ACCENT_LIGHT = '#FFF5F0';
+    BG_FADE_START = '#00F4F2EC'; BG_FADE_END = '#F4F2EC'; BG_GLASS = '#CCF4F2EC';
+  }
+};
+
+// setAccentColor — 强调色切换(色板五选一)
+export const setAccentColor = (hex: string): void => {
+  ACCENT = hex;
+};
 
 // ── 字号(对齐设计稿 px 值) ──
 export const TITLE: number = 19;             // 页面标题(19/700)

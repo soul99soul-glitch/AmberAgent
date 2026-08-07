@@ -23,22 +23,58 @@ const TAG: string = 'Mcp.Settings';
 class EntryMcpSettingsStore implements McpSettingsPort {
   private cache: McpServerConfig[] = [];
   private hydrated: boolean = false;
+  private hydration: Promise<void> | null = null;
+  private readonly pendingUpdates: Array<(old: McpServerConfig[]) => McpServerConfig[]> = [];
+  private persistQueue: Promise<void> = Promise.resolve();
   private readonly listeners: Array<(configs: McpServerConfig[]) => void> = [];
   private assistantIdsProvider: () => string[] = (): string[] => [];
 
+  private snapshot(configs: McpServerConfig[]): McpServerConfig[] {
+    return JSON.parse(JSON.stringify(configs)) as McpServerConfig[];
+  }
+
   async init(): Promise<void> {
-    if (this.hydrated) return;
-    this.hydrated = true;
-    try {
-      const loaded: McpServerConfig[] | null = await loadMcpServers(getChatKvStore());
-      this.cache = loaded ?? [];
-    } catch (e) {
-      hilog.error(DOMAIN, TAG, 'init load failed: %{public}s', String(e));
-      this.cache = [];
+    if (this.hydration !== null) {
+      await this.hydration;
+      return;
     }
-    // DataStore 首发射语义:hydrate 完成即对订阅者回放(manager init collect
-    // 据此为既有 enabled servers 建连 — settingsFlow 真值发射等价)
-    for (const l of this.listeners) l(this.cache);
+    this.hydration = (async (): Promise<void> => {
+      let loaded: McpServerConfig[] = [];
+      try {
+        loaded = (await loadMcpServers(getChatKvStore())) ?? [];
+      } catch (e) {
+        hilog.error(DOMAIN, TAG, 'init load failed: %{public}s', String(e));
+      }
+      this.cache = loaded;
+      // Apply writes made while the asynchronous load was in flight to the
+      // loaded value, instead of allowing hydration to overwrite them.
+      const queuedUpdates = this.pendingUpdates.splice(0);
+      for (const updater of queuedUpdates) {
+        this.cache = this.snapshot(updater(this.snapshot(this.cache)));
+      }
+      this.hydrated = true;
+      const current: McpServerConfig[] = this.snapshot(this.cache);
+      for (const l of this.listeners) {
+        try {
+          l(this.snapshot(current));
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'listener failed: %{public}s', String(e));
+        }
+      }
+      if (queuedUpdates.length > 0) this.persistSnapshot(this.cache);
+    })();
+    await this.hydration;
+  }
+
+  private persistSnapshot(configs: McpServerConfig[]): void {
+    const snapshot: McpServerConfig[] = this.snapshot(configs);
+    this.persistQueue = this.persistQueue.then(async (): Promise<void> => {
+      try {
+        await saveMcpServers(getChatKvStore(), snapshot);
+      } catch (e) {
+        hilog.error(DOMAIN, TAG, 'persist failed: %{public}s', String(e));
+      }
+    });
   }
 
   setAssistantIdsProvider(provider: () => string[]): void {
@@ -46,26 +82,37 @@ class EntryMcpSettingsStore implements McpSettingsPort {
   }
 
   getMcpServers(): McpServerConfig[] {
-    return this.cache;
+    return this.snapshot(this.cache);
   }
 
   getCurrentAssistantMcpServerIds(): string[] {
-    return this.assistantIdsProvider();
+    return [...this.assistantIdsProvider()];
   }
 
   updateMcpServers(updater: (old: McpServerConfig[]) => McpServerConfig[]): void {
-    this.cache = updater(this.cache);
-    // 写穿持久化(缓存权威;失败仅日志 — DataStore 异步落盘同语义)
-    const snapshot: McpServerConfig[] = this.cache;
-    saveMcpServers(getChatKvStore(), snapshot).catch((e: Error): void => {
-      hilog.error(DOMAIN, TAG, 'persist failed: %{public}s', e.message);
-    });
-    for (const l of this.listeners) l(snapshot);
+    if (!this.hydrated) {
+      // Do not apply against the empty pre-hydration cache: replaying the same
+      // updater after load is what preserves a concurrent edit.
+      this.pendingUpdates.push(updater);
+      return;
+    }
+    this.cache = this.snapshot(updater(this.snapshot(this.cache)));
+    // Publish and persist immutable snapshots. Persistence is serialized so a
+    // slower earlier write cannot overwrite a newer settings update.
+    const current: McpServerConfig[] = this.snapshot(this.cache);
+    this.persistSnapshot(current);
+    for (const l of this.listeners) {
+      try {
+        l(this.snapshot(current));
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'listener failed: %{public}s', String(e));
+      }
+    }
   }
 
   subscribeMcpServers(listener: (configs: McpServerConfig[]) => void): () => void {
     this.listeners.push(listener);
-    listener(this.cache); // StateFlow 初值发射(:85-114 collect 立即触发)
+    listener(this.snapshot(this.cache)); // StateFlow 初值发射(:85-114 collect 立即触发)
     return (): void => {
       const i: number = this.listeners.indexOf(listener);
       if (i >= 0) this.listeners.splice(i, 1);

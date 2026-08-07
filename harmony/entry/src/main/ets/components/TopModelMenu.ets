@@ -18,7 +18,9 @@
 import type {
   TopModelMenuGroup,
   TopModelMenuModel,
+  ReasoningLevelOption,
 } from '@amber/chat-domain';
+import { ReasoningPicker } from './ReasoningPicker.ets';
 import {
   formatNumberInt,
 } from '@amber/chat-domain';
@@ -33,6 +35,11 @@ export struct TopModelMenu {
   // 当前选中(provider.id + model.modelId 字符串);空串 = 无选中
   @Prop currentProviderId: string = '';
   @Prop currentModelId: string = '';
+  // 思考等级段集(off/high/max;空/单档 → ReasoningPicker 不渲染)。
+  //   点模型即关(父级 onSelect 关菜单);点等级保持开(仅回调,不关)。
+  @Prop reasoningLevels: ReasoningLevelOption[] = [];
+  @Prop currentReasoningLevel: string = '';
+  onReasoningLevelChange: (level: string) => void = (_l: string): void => {};
   // 选择回调(modelId 为人类可读字符串,与 saveChatModelSelection 契约一致)
   onSelect: (providerId: string, modelId: string) => void = (_p: string, _m: string): void => {};
   onClose: () => void = (): void => {};
@@ -42,6 +49,7 @@ export struct TopModelMenu {
   // 展开的 provider 集合(本地态;aboutToAppear 初始化 = 当前 provider,不在则首组)
   @State expandedProviderIds: string[] = [];
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('darkMode') darkMode: boolean = false;
 
   aboutToAppear(): void {
     if (this.currentProviderId.length > 0) {
@@ -106,6 +114,15 @@ export struct TopModelMenu {
               this.ProviderGroupBuilder(group)
             }, (group: TopModelMenuGroup): string => group.providerId)
           }
+          // 思考等级段集(模型感知;点等级保持菜单开)
+          if (this.reasoningLevels.length > 1) {
+            Divider().color(LINE).strokeWidth(0.5)
+            ReasoningPicker({
+              levels: this.reasoningLevels,
+              currentLevel: this.currentReasoningLevel,
+              onReasoningLevelChange: (level: string): void => { this.onReasoningLevelChange(level); },
+            })
+          }
           // 底部「全部模型 / 管理」入口(全页选择器,既有 ChatModelPickerPage)
           Divider().color(LINE).strokeWidth(0.5)
           Row() {
@@ -125,12 +142,19 @@ export struct TopModelMenu {
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       // 消费面板点击,防穿透到 backdrop(否则点面板空白会误关)
       .onClick((): void => {})
+      // 1:1 原型 menuIn .16s:scale .96 + translateY -3 + opacity,origin top center
+      .transition(
+        TransitionEffect.OPACITY
+          .combine(TransitionEffect.scale({ x: 0.96, y: 0.96, centerX: '50%', centerY: '0%' }))
+          .combine(TransitionEffect.translate({ y: -3 })),
+      )
       // 灰色 scrim:占满剩余高度(头部下方),点击 = 关闭(对齐参考图)
       Column()
         .width('100%')
         .layoutWeight(1)
         .backgroundColor('#47000000')
         .onClick((): void => { this.onClose(); })
+        .transition(TransitionEffect.OPACITY)
     }
     .width('100%')
     .height('100%')

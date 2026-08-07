@@ -17,13 +17,17 @@ import {
 } from '../main/ets/chat/reasoning_levels.ts';
 
 const chatModel = (modelId: string): ReturnType<typeof makeProviderModel> =>
-  makeProviderModel({ modelId, type: 'chat' });
+  makeProviderModel({ modelId, type: 'chat', abilities: ['reasoning'] });
 
 // ===== reasoningLevelsForModel 段集 =====
 
 test('deepseek → off/high/max(3 段)', () => {
   const levels = reasoningLevelsForModel(chatModel('deepseek-chat'));
   assert.deepEqual(levels.map((o) => o.level), ['off', 'high', 'max']);
+});
+
+test('没有 reasoning ability 时不显示推理档位', () => {
+  assert.deepEqual(reasoningLevelsForModel(makeProviderModel({ modelId: 'deepseek-chat', type: 'chat' })), []);
 });
 
 test('deepseek 大小写不敏感', () => {

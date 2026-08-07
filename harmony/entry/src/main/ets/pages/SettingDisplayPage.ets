@@ -19,7 +19,7 @@ struct SettingDisplayPage {
     loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
       this.setting = s;
       this.loaded = true;
-    });
+    }).catch((): void => { this.loaded = true; });
   }
 
   private update(patch: Partial<DisplaySetting>): void {
@@ -69,6 +69,7 @@ struct SettingDisplayPage {
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
       Toggle({ type: ToggleType.Switch, isOn: checked })
+        .selectedColor(ACCENT)
         .onChange((_v: boolean): void => { onToggle(); })
     }
     .width('100%')

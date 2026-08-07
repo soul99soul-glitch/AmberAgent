@@ -4,13 +4,12 @@
 //   GoogleEndpointFields(:563-623) / ClaudeEndpointFields(:625-642)
 // 持久化:saveProviders → Preferences KV(chat-domain D-016/D-017 线格式)
 // 裁剪(登记 D-047):
-//   - authMode 选择不呈现:openai 固定 api_key(codex_oauth token store = P1);
-//     google 固定 api_key(Code Assist OAuth 传输 = P1,api 层显式抛错);
-//     已有数据的 authMode 保存时原样保留
-//   - brand 编辑/useResponseApi 以外的 openai account 区(余额等)= P1
-//   - service account JSON 导入按钮 = P1(手填 email/privateKey 字段保留)
+//   - Harmony 仅支持 API Key;历史 OAuth/token-plan 配置明确提示迁移,
+//     不把旧 token 当 API Key 展示或继续执行
+//   - Responses API、Google Service Account 当前不支持;保存时迁移到已支持边界
+//   - brand 编辑及 openai account 区(余额等)= P1
 //   - 编辑中切换选中会丢弃未保存修改(MVP 草稿语义)
-import { ACCENT,BG,INK,INK3,SURFACE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,SURFACE,ERROR } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import type {
@@ -47,6 +46,7 @@ struct ChatProviderSettingsPage {
   @State modelsText: string = '';
   // openai 变体字段
   @State chatPath: string = '/chat/completions';
+  // Responses API is intentionally unsupported; retain stale value only for migration input.
   @State useResponseApi: boolean = false;
   // google 变体字段
   @State vertexAI: boolean = false;
@@ -58,11 +58,21 @@ struct ChatProviderSettingsPage {
   // claude 变体字段
   @State promptCaching: boolean = false;
   @State savedMsg: string = '';
+  @State unsupportedAuthMsg: string = '';
   // 选中 provider 的完整快照(保存时合并未编辑字段:authMode/brand/balanceOption 等)
   private selectedRaw: ProviderSetting | null = null;
   private all: ProviderSetting[] = [];
 
   aboutToAppear(): void {
+    this.load();
+  }
+
+  // 子页(模型参数页)保存返回后重读,避免陈旧 models 合并覆盖新参数
+  onPageShow(): void {
+    this.load();
+  }
+
+  private load(): void {
     loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
       this.all = list ?? [];
       this.rebuildRows();
@@ -88,19 +98,30 @@ struct ChatProviderSettingsPage {
     this.selectedType = p.type;
     this.providerEnabled = p.enabled;
     this.name = p.name;
-    this.apiKey = p.apiKey;
     this.baseUrl = p.baseUrl;
     this.modelsText = p.models.map((m: ProviderModel): string => m.modelId).join(', ');
+    this.unsupportedAuthMsg = '';
+    this.apiKey = p.apiKey;
     if (p.type === 'openai') {
       const v: ProviderSettingOpenAIVariant = p as ProviderSettingOpenAIVariant;
       this.chatPath = v.chatCompletionsPath;
       this.useResponseApi = v.useResponseApi;
+      if (v.authMode !== 'api_key' || v.useResponseApi) {
+        this.apiKey = '';
+        this.unsupportedAuthMsg = v.useResponseApi
+          ? '历史配置启用了 Responses API，当前 Harmony 版本不支持。填写 API Key 并保存可迁移为 Chat Completions。'
+          : '历史 OAuth/Token Plan 当前 Harmony 版本不支持。填写 API Key 并保存可迁移。';
+      }
     } else if (p.type === 'google') {
       const v: ProviderSettingGoogle = p as ProviderSettingGoogle;
       this.vertexAI = v.vertexAI;
       this.useServiceAccount = v.useServiceAccount;
-      this.serviceAccountEmail = v.serviceAccountEmail;
-      this.privateKey = v.privateKey;
+      this.serviceAccountEmail = '';
+      this.privateKey = '';
+      if (v.authMode !== 'api_key' || v.useServiceAccount) {
+        this.apiKey = '';
+        this.unsupportedAuthMsg = '历史 Google OAuth/Service Account 当前 Harmony 版本不支持。填写 API Key 并保存可迁移。';
+      }
       this.location = v.location;
       this.projectId = v.projectId;
     } else {
@@ -148,6 +169,10 @@ struct ChatProviderSettingsPage {
 
   private save(): void {
     if (this.selectedRaw === null || this.selectedType.length === 0) return;
+    if (this.unsupportedAuthMsg.length > 0 && this.apiKey.trim().length === 0) {
+      this.savedMsg = '请先填写 API Key';
+      return;
+    }
     const raw: ProviderSetting = this.selectedRaw;
     const models: ProviderModel[] = this.parseModels();
     const trimmedName: string = this.name.trim();
@@ -162,13 +187,14 @@ struct ChatProviderSettingsPage {
         apiKey: this.apiKey.trim(),
         models,
         vertexAI: this.vertexAI,
-        useServiceAccount: this.useServiceAccount,
-        serviceAccountEmail: this.serviceAccountEmail.trim(),
-        privateKey: this.privateKey,
+        // Vertex service-account transport is unsupported on Harmony.
+        useServiceAccount: false,
+        serviceAccountEmail: '',
+        privateKey: '',
         location: this.location.trim(),
         projectId: this.projectId.trim(),
         // 未编辑字段保留(Android 同字段但鸿蒙裁剪编辑面)
-        authMode: g.authMode,
+        authMode: 'api_key',
         balanceOption: g.balanceOption,
       });
     } else if (this.selectedType === 'claude') {
@@ -192,10 +218,11 @@ struct ChatProviderSettingsPage {
         baseUrl: this.baseUrl.trim(),
         apiKey: this.apiKey.trim(),
         chatCompletionsPath: this.chatPath.trim(),
-        useResponseApi: this.useResponseApi,
+        // Responses API is unsupported; always save the chat-completions boundary.
+        useResponseApi: false,
         models,
         // 未编辑字段保留(authMode/brand 编辑面 = P1)
-        authMode: o.authMode,
+        authMode: 'api_key',
         brand: o.brand,
         balanceOption: o.balanceOption,
       });
@@ -208,9 +235,14 @@ struct ChatProviderSettingsPage {
     }
     this.selectedRaw = updated;
     saveProviders(getChatKvStore(), this.all).then((): void => {
+      this.unsupportedAuthMsg = '';
+      this.useResponseApi = false;
+      this.useServiceAccount = false;
       this.rebuildRows();
       this.savedMsg = '已保存';
       setTimeout((): void => { this.savedMsg = ''; }, 1500);
+    }).catch((e: Error): void => {
+      this.savedMsg = `保存失败：${e.message}`;
     });
   }
 
@@ -226,7 +258,7 @@ struct ChatProviderSettingsPage {
       },
       secondaryButton: {
         value: '删除',
-        fontColor: 'ERROR',
+        fontColor: ERROR,
         action: (): void => {
           this.all = this.all.filter((p: ProviderSetting): boolean => p.id !== id);
           saveProviders(getChatKvStore(), this.all).then((): void => {
@@ -261,6 +293,7 @@ struct ChatProviderSettingsPage {
       Text(label).fontSize(14).fontColor(INK)
       Blank()
       Toggle({ type: ToggleType.Switch, isOn: isOn })
+        .selectedColor(ACCENT)
         .onChange(onChange)
     }.width('100%').margin({ bottom: 14 })
   }
@@ -330,44 +363,28 @@ struct ChatProviderSettingsPage {
               this.field('名称', 'Provider', this.name,
                 (v: string): void => { this.name = v; }, false, false)
 
-              // apiKey:google vertex+serviceAccount 时隐藏(Android :456)
-              if (!(this.selectedType === 'google' && this.vertexAI && this.useServiceAccount)) {
-                this.field('API Key',
-                  this.selectedType === 'claude' ? 'sk-ant-…' : 'sk-…',
-                  this.apiKey, (v: string): void => { this.apiKey = v; }, true, true)
+              if (this.unsupportedAuthMsg.length > 0) {
+                Text(this.unsupportedAuthMsg)
+                  .fontSize(12).fontColor(ERROR).lineHeight(18)
+                  .width('100%').margin({ bottom: 12 })
               }
+              this.field('API Key',
+                this.selectedType === 'claude' ? 'sk-ant-…' : 'sk-…',
+                this.apiKey, (v: string): void => { this.apiKey = v; }, true, true)
 
               if (this.selectedType === 'openai') {
                 // OpenAIEndpointFields(:531-561)
                 this.field('Base URL', 'https://api.openai.com/v1', this.baseUrl,
                   (v: string): void => { this.baseUrl = v; }, false, true)
-                if (!this.useResponseApi) {
-                  this.field('API Path', '/chat/completions', this.chatPath,
-                    (v: string): void => { this.chatPath = v; }, false, true)
-                }
-                this.switchRow('使用 Response API', this.useResponseApi,
-                  (v: boolean): void => { this.useResponseApi = v; })
+                this.field('API Path', '/chat/completions', this.chatPath,
+                  (v: string): void => { this.chatPath = v; }, false, true)
               } else if (this.selectedType === 'google') {
                 // GoogleAuthConsole(:436-487) + GoogleEndpointFields(:563-623)
                 this.switchRow('Vertex AI', this.vertexAI,
                   (v: boolean): void => { this.vertexAI = v; })
-                if (this.vertexAI) {
-                  this.switchRow('使用 Service Account', this.useServiceAccount,
-                    (v: boolean): void => { this.useServiceAccount = v; })
-                }
                 if (!this.vertexAI) {
                   this.field('Base URL', 'https://generativelanguage.googleapis.com/v1beta',
                     this.baseUrl, (v: string): void => { this.baseUrl = v; }, false, true)
-                } else if (this.useServiceAccount) {
-                  this.field('Service Account Email', 'name@project.iam.gserviceaccount.com',
-                    this.serviceAccountEmail,
-                    (v: string): void => { this.serviceAccountEmail = v; }, false, true)
-                  this.field('Private Key', '-----BEGIN PRIVATE KEY-----…',
-                    this.privateKey, (v: string): void => { this.privateKey = v; }, true, true)
-                  this.field('Location', 'us-central1', this.location,
-                    (v: string): void => { this.location = v; }, false, true)
-                  this.field('Project ID', 'my-gcp-project', this.projectId,
-                    (v: string): void => { this.projectId = v; }, false, true)
                 }
               } else if (this.selectedType === 'claude') {
                 // ClaudeEndpointFields(:625-642)
@@ -413,7 +430,7 @@ struct ChatProviderSettingsPage {
               }
 
               Row() {
-                Text('删除此 Provider').fontSize(13).fontColor('ERROR')
+                Text('删除此 Provider').fontSize(13).fontColor(ERROR)
                   .onClick((): void => this.removeSelected())
                 Blank()
                 if (this.savedMsg.length > 0) {
@@ -422,7 +439,7 @@ struct ChatProviderSettingsPage {
               }.width('100%').margin({ top: 16 })
             }
           }
-          .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 32 })
+          .width('100%').padding({ left: 18, right: 18, top: 8, bottom: 32 })
         }
         .layoutWeight(1)
       }

@@ -136,15 +136,27 @@ interface ReconnectHandle {
   cancel: () => void;
 }
 
+interface ClientEntry {
+  config: McpServerConfig;
+  client: McpClient;
+  intentionalClose: boolean;
+}
+
+const connectionConfigKey = (config: McpServerConfig): string => JSON.stringify({
+  kind: config.kind,
+  url: config.url,
+  headers: config.commonOptions.headers,
+});
+
 export class McpManager {
   private readonly deps: Required<Omit<McpManagerDeps, 'http' | 'settings' | 'files'>>;
   private readonly http: McpHttpPort;
   private readonly settings: McpSettingsPort;
   private readonly files: McpFilesPort;
-  // MutableMap<McpServerConfig, Client>(:80)— JS 恒等键(见头注偏差)
-  private readonly clients: Map<McpServerConfig, McpClient> = new Map();
+  private readonly clients: Map<string, ClientEntry> = new Map();
   private readonly reconnectJobs: Map<string, ReconnectHandle> = new Map();
   private readonly reconnectAttempts: Map<string, number> = new Map();
+  private reconcileTail: Promise<void> = Promise.resolve();
   // MutableStateFlow<Map<Uuid, McpStatus>>(:83)
   private syncingStatus: Map<string, McpStatus> = new Map();
   private readonly statusListeners: Array<(m: ReadonlyMap<string, McpStatus>) => void> = [];
@@ -165,44 +177,52 @@ export class McpManager {
       log: deps.log ?? ((): void => {}),
     };
 
-    // init(:85-114)
+    // init(:85-114). Settings callbacks are serialized; each queued pass reads
+    // the latest requested snapshot before mutating clients.
     this.unsubscribeSettings = this.settings.subscribeMcpServers(
       (mcpServerConfigs: McpServerConfig[]): void => {
-        try {
-          const newConfigs: McpServerConfig[] = mcpServerConfigs.filter(
-            (c: McpServerConfig): boolean => c.commonOptions.enable);
-          const currentConfigs: McpServerConfig[] = [...this.clients.keys()];
-          const { toAdd, toRemove } = checkDifferent(
-            currentConfigs, newConfigs, (a, b): boolean => a.id === b.id);
-          this.deps.log(`update configs: ${mcpServerConfigs.map((c) => c.commonOptions.name)}`);
-          this.deps.log(`to_add: ${toAdd.map((c) => c.commonOptions.name)}`);
-          this.deps.log(`to_remove: ${toRemove.map((c) => c.commonOptions.name)}`);
-          for (const cfg of toAdd) {
-            this.deps.launch(async (): Promise<void> => {
-              try {
-                await this.addClient(cfg);
-              } catch (e) {
-                this.deps.log(String(e));
-              }
-            });
+        const snapshot: McpServerConfig[] = mcpServerConfigs.map(
+          (config: McpServerConfig): McpServerConfig => cloneMcpServerConfig(config));
+        const run: Promise<void> = this.reconcileTail
+          .catch((): void => {})
+          .then((): Promise<void> => this.reconcileConfigs(snapshot));
+        this.reconcileTail = run;
+        this.deps.launch(async (): Promise<void> => {
+          try {
+            await run;
+          } catch (e) {
+            this.deps.log(String(e));
           }
-          for (const cfg of toRemove) {
-            this.deps.launch(async (): Promise<void> => {
-              await this.removeClient(cfg);
-            });
-          }
-        } catch (e) {
-          this.deps.log(String(e));
-        }
+        });
       });
+  }
+
+  private async reconcileConfigs(configs: McpServerConfig[]): Promise<void> {
+    const enabled: McpServerConfig[] = configs.filter(
+      (config: McpServerConfig): boolean => config.commonOptions.enable);
+    const desiredIds: string[] = enabled.map((config: McpServerConfig): string => config.id);
+    for (const entry of [...this.clients.values()]) {
+      const desired: McpServerConfig | undefined = enabled.find(
+        (config: McpServerConfig): boolean => config.id === entry.config.id);
+      if (desired === undefined ||
+        connectionConfigKey(desired) !== connectionConfigKey(entry.config)) {
+        await this.removeClient(entry.config);
+      }
+    }
+    for (const config of enabled) {
+      const entry: ClientEntry | undefined = this.clients.get(config.id);
+      if (entry === undefined) {
+        await this.addClient(config);
+      } else {
+        entry.config = config;
+      }
+    }
+    this.deps.log(`reconciled configs: ${desiredIds}`);
   }
 
   // :116-118
   getClient(config: McpServerConfig): McpClient | null {
-    for (const [k, v] of this.clients) {
-      if (k.id === config.id) return v;
-    }
-    return null;
+    return this.clients.get(config.id)?.client ?? null;
   }
 
   // :120-131
@@ -212,51 +232,65 @@ export class McpManager {
       .filter((c: McpServerConfig): boolean =>
         c.commonOptions.enable && assistantIds.includes(c.id))
       .flatMap((c: McpServerConfig): McpTool[] =>
-        c.commonOptions.tools.filter((t: McpTool): boolean => t.enable));
+        c.commonOptions.tools
+          .filter((t: McpTool): boolean => t.enable)
+          .map((t: McpTool): McpTool => ({ ...t, serverId: c.id })));
   }
 
   // :133-160
-  async callTool(toolName: string, args: JsonObject): Promise<McpMessagePart[]> {
-    const tools: McpTool[] = this.getAllAvailableTools();
-    const tool: McpTool | undefined = tools.find((t: McpTool): boolean => t.name === toolName);
-    if (tool === undefined) {
+  async callTool(toolName: string, args: JsonObject, serverId?: string): Promise<McpMessagePart[]> {
+    const available: McpTool[] = this.getAllAvailableTools().filter(
+      (candidate: McpTool): boolean => candidate.name === toolName && candidate.enable &&
+        (serverId === undefined || candidate.serverId === serverId));
+    if (available.length === 0) {
       return [{ type: 'text', text: 'Failed to execute tool, because no such tool', metadata: null }];
     }
-    let client: McpClient | null = null;
-    for (const [k, v] of this.clients) {
-      if (k.commonOptions.tools.some((t: McpTool): boolean => t.name === toolName)) {
-        client = v;
-        break;
-      }
+    if (available.length > 1) {
+      throw new Error(`Failed to execute tool, because tool is ambiguous: ${toolName}`);
     }
-    if (client === null) {
-      return [{ type: 'text', text: 'Failed to execute tool, because no such mcp client for the tool', metadata: null }];
+    const tool: McpTool = available[0];
+    const config: McpServerConfig | undefined = this.settings.getMcpServers().find(
+      (candidate: McpServerConfig): boolean => candidate.id === tool.serverId &&
+        candidate.commonOptions.enable && this.settings.getCurrentAssistantMcpServerIds().includes(candidate.id) &&
+        candidate.commonOptions.tools.some(
+          (candidateTool: McpTool): boolean => candidateTool.name === toolName && candidateTool.enable));
+    if (config === undefined) {
+      return [{
+        type: 'text', text: 'Failed to execute tool, because no such mcp client for the tool', metadata: null,
+      }];
     }
-    let config: McpServerConfig | null = null;
-    for (const [k, v] of this.clients) {
-      if (v === client) {
-        config = k;
-        break;
-      }
+    const entry: ClientEntry | undefined = this.clients.get(config.id);
+    if (entry === undefined) {
+      return [{
+        type: 'text', text: 'Failed to execute tool, because no such mcp client for the tool', metadata: null,
+      }];
     }
+    const client: McpClient = entry.client;
     this.deps.log(`callTool: ${toolName} keys=${Object.keys(args)}`);
-
-    if (!client.hasTransport) await client.connect(this.getTransport(config as McpServerConfig));
+    if (!client.hasTransport) await client.connect(this.getTransport(config));
     const result = await client.callTool(tool.name, args, 120000);
-    return this.mapContent(result.content);
+    return this.mapContent(result.content, result.isError, result.structuredContent);
   }
 
   // :162-205
   async callConfiguredTool(serverId: string | null, serverName: string | null,
     toolName: string, args: JsonObject): Promise<McpMessagePart[]> {
     if (toolName.trim().length === 0) throw new Error('tool_name is required');
-    const server: McpServerConfig | undefined = this.settings.getMcpServers()
-      .find((config: McpServerConfig): boolean =>
+    let candidates: McpServerConfig[] = this.settings.getMcpServers()
+      .filter((config: McpServerConfig): boolean =>
         config.commonOptions.enable &&
         (serverId === null || serverId.trim().length === 0 || config.id === serverId) &&
         (serverName === null || serverName.trim().length === 0 ||
           config.commonOptions.name === serverName) &&
-        config.commonOptions.tools.some((t: McpTool): boolean => t.name === toolName));
+        config.commonOptions.tools.some((tool: McpTool): boolean => tool.name === toolName));
+    if (candidates.length > 1) {
+      const callable: McpServerConfig[] = candidates.filter((config: McpServerConfig): boolean =>
+        config.commonOptions.tools.some(
+          (tool: McpTool): boolean => tool.name === toolName && tool.enable));
+      if (callable.length === 1) candidates = callable;
+      else throw new Error(`MCP tool is ambiguous across enabled servers: ${toolName}`);
+    }
+    const server: McpServerConfig | undefined = candidates[0];
     if (server === undefined) {
       throw new Error(`MCP tool not found in enabled servers: ${toolName}`);
     }
@@ -277,32 +311,46 @@ export class McpManager {
     if (client === null) {
       throw new Error(`MCP client is not connected: ${server.commonOptions.name}`);
     }
-    let liveConfig: McpServerConfig = server;
-    for (const k of this.clients.keys()) {
-      if (k.id === server.id) {
-        liveConfig = k;
-        break;
-      }
-    }
+    const liveConfig: McpServerConfig = this.clients.get(server.id)?.config ?? server;
     if (!client.hasTransport) await client.connect(this.getTransport(liveConfig));
     this.deps.log(
       `callConfiguredTool: ${server.commonOptions.name}/${toolName} keys=${Object.keys(args)}`);
     const result = await client.callTool(tool.name, args, 120000);
-    return this.mapContent(result.content);
+    return this.mapContent(result.content, result.isError, result.structuredContent);
   }
 
   // content 映射(:153-159/:198-204 同一 when)
-  private async mapContent(content: McpContentBlock[]): Promise<McpMessagePart[]> {
+  private async mapContent(content: McpContentBlock[], isError: boolean | null = null,
+    structuredContent: JsonObject | null = null): Promise<McpMessagePart[]> {
+    const metadata: JsonObject | null = structuredContent === null
+      ? null : { structuredContent };
     const out: McpMessagePart[] = [];
     for (const block of content) {
       if (block.type === 'text') {
-        out.push({ type: 'text', text: block.text, metadata: null });
+        out.push({ type: 'text', text: block.text, metadata });
       } else if (block.type === 'image') {
-        out.push(await this.convertImageContentToFilePart(block.data, block.mimeType));
+        const image: UIMessagePartImage = await this.convertImageContentToFilePart(
+          block.data, block.mimeType);
+        out.push({ ...image, metadata });
       } else {
-        // JsonInstant.encodeToString(it)(:157)
-        out.push({ type: 'text', text: JSON.stringify(block.raw), metadata: null });
+        out.push({ type: 'text', text: JSON.stringify(block.raw), metadata });
       }
+    }
+    if (out.length === 0 && structuredContent !== null) {
+      out.push({ type: 'text', text: JSON.stringify(structuredContent), metadata });
+    }
+    if (isError === true) {
+      const message: string = out
+        .filter((part: McpMessagePart): boolean => part.type === 'text')
+        .map((part: McpMessagePart): string =>
+          part.type === 'text' ? part.text : '')
+        .filter((text: string): boolean => text.trim().length > 0)
+        .join('\n') || 'MCP tool returned an error';
+      out.push({
+        type: 'text',
+        text: JSON.stringify({ status: 'failed', message, recoverable: true }),
+        metadata: structuredContent === null ? { isError: true } : { isError: true, structuredContent },
+      });
     }
     return out;
   }
@@ -334,9 +382,9 @@ export class McpManager {
 
     const transport: McpTransport = this.getTransport(config);
     const client: McpClient = new McpClient({ name: config.commonOptions.name, version: '1.0' });
-    this.installReconnectHooks(config, transport);
+    this.installReconnectHooks(config, transport, client);
 
-    this.clients.set(config, client);
+    this.clients.set(config.id, { config, client, intentionalClose: false });
     try {
       this.setStatus(config, MCP_STATUS_CONNECTING);
       await client.connect(transport);
@@ -352,19 +400,23 @@ export class McpManager {
   }
 
   // transport 回调(:265-281/:464-478 同一对)
-  private installReconnectHooks(config: McpServerConfig, transport: McpTransport): void {
+  private installReconnectHooks(config: McpServerConfig, transport: McpTransport,
+    client: McpClient): void {
     transport.onClose((): void => {
       this.deps.log(`Transport closed for ${config.commonOptions.name}`);
+      const entry: ClientEntry | undefined = this.clients.get(config.id);
       const currentStatus: McpStatus | undefined = this.syncingStatus.get(config.id);
-      // 只有在已连接状态下才触发重连，避免正常关闭时重连
-      if (currentStatus !== undefined && currentStatus.kind === 'connected') {
+      if (entry !== undefined && entry.client === client && !entry.intentionalClose &&
+        currentStatus !== undefined && currentStatus.kind === 'connected') {
         this.scheduleReconnect(config);
       }
     });
     transport.onError((error: Error): void => {
       this.deps.log(`Transport error for ${config.commonOptions.name}: ${error.message}`);
+      const entry: ClientEntry | undefined = this.clients.get(config.id);
       const currentStatus: McpStatus | undefined = this.syncingStatus.get(config.id);
-      if (currentStatus !== undefined && currentStatus.kind === 'connected') {
+      if (entry !== undefined && entry.client === client && !entry.intentionalClose &&
+        currentStatus !== undefined && currentStatus.kind === 'connected') {
         this.scheduleReconnect(config);
       }
     });
@@ -372,8 +424,9 @@ export class McpManager {
 
   // :297-360
   async sync(config: McpServerConfig): Promise<void> {
-    const client: McpClient | undefined = this.clients.get(config);
-    if (client === undefined) return;
+    const entry: ClientEntry | undefined = this.clients.get(config.id);
+    if (entry === undefined) return;
+    const client: McpClient = entry.client;
 
     this.setStatus(config, MCP_STATUS_CONNECTING);
 
@@ -398,6 +451,7 @@ export class McpManager {
           };
           if (existing === undefined) {
             tools.push(makeMcpTool({
+              serverId: config.id,
               name: serverTool.name,
               description: serverTool.description,
               enable: true,
@@ -406,6 +460,7 @@ export class McpManager {
           } else {
             const index: number = tools.indexOf(existing);
             tools[index] = makeMcpTool({
+              serverId: config.id,
               name: existing.name,
               description: serverTool.description,
               enable: existing.enable, // copy 仅改 description+inputSchema(:329-332)
@@ -419,10 +474,12 @@ export class McpManager {
         const merged: McpTool[] = tools.filter((tool: McpTool): boolean =>
           serverTools.some((st: McpServerTool): boolean => st.name === tool.name));
 
-        // 更新clients(:340-347)
-        this.clients.delete(config);
+        // Tool sync updates the config snapshot, not the client identity.
         const newCommon = { ...common, tools: merged };
-        this.clients.set(cloneMcpServerConfig(config, config.id, newCommon), client);
+        const liveEntry: ClientEntry | undefined = this.clients.get(config.id);
+        if (liveEntry !== undefined && liveEntry.client === client) {
+          liveEntry.config = cloneMcpServerConfig(config, config.id, newCommon);
+        }
 
         // 返回新的serverConfig，更新到settings store
         return cloneMcpServerConfig(serverConfig, serverConfig.id, newCommon);
@@ -433,7 +490,7 @@ export class McpManager {
 
   // :362-370
   async syncAll(): Promise<void> {
-    for (const config of [...this.clients.keys()]) {
+    for (const config of [...this.clients.values()].map((entry: ClientEntry): McpServerConfig => entry.config)) {
       try {
         await this.sync(config);
       } catch (e) {
@@ -445,20 +502,20 @@ export class McpManager {
   // :372-386
   async removeClient(config: McpServerConfig): Promise<void> {
     this.cancelReconnect(config.id);
-    const toRemove: Array<[McpServerConfig, McpClient]> = [...this.clients.entries()]
-      .filter(([k]): boolean => k.id === config.id);
-    for (const [key, client] of toRemove) {
+    const entry: ClientEntry | undefined = this.clients.get(config.id);
+    if (entry !== undefined) {
+      entry.intentionalClose = true;
       try {
-        await client.close();
+        await entry.client.close();
       } catch (e) {
         this.deps.log(String(e));
       }
-      this.clients.delete(key);
+      this.clients.delete(config.id);
       const next: Map<string, McpStatus> = new Map(this.syncingStatus);
-      next.delete(key.id);
+      next.delete(config.id);
       this.syncingStatus = next;
       this.emitStatuses();
-      this.deps.log(`removeClient: ${key.commonOptions.name}`);
+      this.deps.log(`removeClient: ${entry.config.commonOptions.name}`);
     }
     this.reconnectAttempts.delete(config.id);
   }
@@ -526,27 +583,22 @@ export class McpManager {
   // :447-487
   private async reconnectClient(config: McpServerConfig): Promise<void> {
     // 先关闭旧客户端
-    let oldEntry: [McpServerConfig, McpClient] | null = null;
-    for (const entry of this.clients.entries()) {
-      if (entry[0].id === config.id) {
-        oldEntry = entry;
-        break;
-      }
-    }
-    if (oldEntry !== null) {
+    const oldEntry: ClientEntry | undefined = this.clients.get(config.id);
+    if (oldEntry !== undefined) {
+      oldEntry.intentionalClose = true;
       try {
-        await oldEntry[1].close();
+        await oldEntry.client.close();
       } catch (e) {
         this.deps.log(String(e));
       }
-      this.clients.delete(oldEntry[0]);
+      this.clients.delete(config.id);
     }
 
     const transport: McpTransport = this.getTransport(config);
     const client: McpClient = new McpClient({ name: config.commonOptions.name, version: '1.0' });
-    this.installReconnectHooks(config, transport);
+    this.installReconnectHooks(config, transport, client);
 
-    this.clients.set(config, client);
+    this.clients.set(config.id, { config, client, intentionalClose: false });
     this.setStatus(config, MCP_STATUS_CONNECTING);
     await client.connect(transport);
     await this.sync(config);

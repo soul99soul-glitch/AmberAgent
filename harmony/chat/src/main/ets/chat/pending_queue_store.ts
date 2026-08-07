@@ -33,6 +33,19 @@ export const pendingQueueKey = (conversationId: string): string =>
 export const pendingQueueAuditKey = (conversationId: string): string =>
   `pending-queue/${conversationId}.events`;
 
+// KV has no compare-and-swap. Serialize every queue/audit mutation per
+// conversation so read-concat-write audit appends and queue deletes cannot lose
+// each other's updates.
+const mutationTails: Map<string, Promise<void>> = new Map();
+const enqueueMutation = (conversationId: string, mutation: () => Promise<void>): Promise<void> => {
+  const previous: Promise<void> = mutationTails.get(conversationId) ?? Promise.resolve();
+  const next: Promise<void> = previous.catch((): void => {}).then(mutation);
+  mutationTails.set(conversationId, next);
+  return next.finally((): void => {
+    if (mutationTails.get(conversationId) === next) mutationTails.delete(conversationId);
+  });
+};
+
 // ===== 窄化助手 =====
 
 const isObj = (v: JsonValue | undefined): v is JsonObject =>
@@ -92,13 +105,20 @@ export const parsePendingQueue = (raw: string, now: () => number): PendingUserMe
 
 export const persistPendingQueue = async (
   store: KeyValueStore, conversationId: string, messages: PendingUserMessage[],
-): Promise<void> => {
+): Promise<void> => enqueueMutation(conversationId, async (): Promise<void> => {
   if (messages.length === 0) {
     await store.delete(pendingQueueKey(conversationId));
   } else {
     await store.put(pendingQueueKey(conversationId), serializePendingQueue(messages));
   }
-};
+});
+
+export const clearPendingQueueStorage = async (
+  store: KeyValueStore, conversationId: string,
+): Promise<void> => enqueueMutation(conversationId, async (): Promise<void> => {
+  await store.delete(pendingQueueKey(conversationId));
+  await store.delete(pendingQueueAuditKey(conversationId));
+});
 
 // ===== 载入(PendingMessageStore.kt:32-40 — 无键/损坏均收敛 [],onError 非静默) =====
 
@@ -140,11 +160,30 @@ export const buildAuditEventLine = (
   return `${JSON.stringify(obj)}\n`;
 };
 
-export const recordPendingQueueEvent = async (
+const appendAuditEvent = async (
   store: KeyValueStore, conversationId: string, e: PendingQueueAuditEvent,
-  nowMs: number = Date.now(),
+  nowMs: number,
 ): Promise<void> => {
   const key: string = pendingQueueAuditKey(conversationId);
   const existing: string | null = await store.get(key);
   await store.put(key, (existing ?? '') + buildAuditEventLine(conversationId, e, nowMs));
 };
+
+export const persistPendingQueueWithEvent = async (
+  store: KeyValueStore, conversationId: string, messages: PendingUserMessage[],
+  e: PendingQueueAuditEvent, nowMs: number = Date.now(),
+): Promise<void> => enqueueMutation(conversationId, async (): Promise<void> => {
+  if (messages.length === 0) {
+    await store.delete(pendingQueueKey(conversationId));
+  } else {
+    await store.put(pendingQueueKey(conversationId), serializePendingQueue(messages));
+  }
+  await appendAuditEvent(store, conversationId, e, nowMs);
+});
+
+export const recordPendingQueueEvent = async (
+  store: KeyValueStore, conversationId: string, e: PendingQueueAuditEvent,
+  nowMs: number = Date.now(),
+): Promise<void> => enqueueMutation(conversationId, async (): Promise<void> => {
+  await appendAuditEvent(store, conversationId, e, nowMs);
+});

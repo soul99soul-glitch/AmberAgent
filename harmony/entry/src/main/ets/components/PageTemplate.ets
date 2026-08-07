@@ -28,10 +28,14 @@ export struct PageTitleBar {
   build(): void {
     Row() {
       if (this.showBack) {
-        Text('←')
-          .fontSize(24)
-          .fontColor(INK)
-          .onClick((): void => { this.onBack(); })
+        Row() {
+          Text('←').fontSize(24).fontColor(INK)
+        }
+        .width(44).height(44)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .accessibilityText('返回')
+        .onClick((): void => { this.onBack(); })
       }
       Text(this.title)
         .fontSize(TITLE)
@@ -40,10 +44,14 @@ export struct PageTitleBar {
         .margin({ left: this.showBack ? 8 : 0 })
         .layoutWeight(1)
       if (this.actionText.length > 0) {
-        Text(this.actionText)
-          .fontSize(BODY)
-          .fontColor(ACCENT)
-          .onClick((): void => { this.onAction(); })
+        Row() {
+          Text(this.actionText).fontSize(BODY).fontColor(ACCENT)
+        }
+        .constraintSize({ minWidth: 44, minHeight: 44 })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .accessibilityText(this.actionText)
+        .onClick((): void => { this.onAction(); })
       }
     }
     .width('100%')
@@ -81,6 +89,8 @@ export struct NavRow {
   @Prop valueText: string = '';
   @Prop danger: boolean = false;
   @Prop isLast: boolean = false;
+  // 纯展示行(版本等)不绘箭头,避免"看似可点"的死控件感
+  @Prop showChevron: boolean = true;
   onRowClick: () => void = (): void => {};
 
   build(): void {
@@ -97,9 +107,11 @@ export struct NavRow {
           .fontFamily('JetBrainsMono')
           .margin({ right: 8 })
       }
-      Text('›')
-        .fontSize(BODY)
-        .fontColor(INK4)
+      if (this.showChevron) {
+        Text('›')
+          .fontSize(BODY)
+          .fontColor(INK4)
+      }
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })

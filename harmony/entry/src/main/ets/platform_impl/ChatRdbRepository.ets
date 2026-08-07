@@ -15,9 +15,8 @@ import type {
 import {
   CHAT_SCHEMA_SQL, conversationToRow, rowToConversation,
   messageNodeToRow, rowToMessageNode, createMemoryConversationRepository,
-  conversationFileUris, removedFileUris, deleteChatFiles,
 } from '@amber/chat-domain';
-import { getDeleteChatFilesDeps } from './ManagedFileStore.ets';
+import { enqueueConversationFileMutation } from './ManagedFileStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.ChatRdbRepository';
@@ -59,55 +58,112 @@ const nodeBucket = (row: MessageNodeRow): relationalStore.ValuesBucket => {
 
 class ChatRdbRepository implements ConversationRepository {
   private store: relationalStore.RdbStore | null = null;
-  private initFailed: boolean = false;
+  private initPromise: Promise<relationalStore.RdbStore | null> | null = null;
   private memory: ConversationRepository = createMemoryConversationRepository();
+  // RDB calls are asynchronous; serialize mutations per conversation so an older
+  // whole-node replacement cannot finish after a newer save/delete.
+  private mutationTails: Map<string, Promise<void>> = new Map();
+  private deletedIds: Set<string> = new Set();
 
-  private async ensureStore(): Promise<relationalStore.RdbStore | null> {
-    if (this.store !== null) return this.store;
-    if (this.initFailed) return null;
+  private enqueueMutation(id: string, mutation: () => Promise<void>): Promise<void> {
+    const previous: Promise<void> = this.mutationTails.get(id) ?? Promise.resolve();
+    const next: Promise<void> = previous.catch((): void => {}).then(mutation);
+    this.mutationTails.set(id, next);
+    return next.finally((): void => {
+      if (this.mutationTails.get(id) === next) this.mutationTails.delete(id);
+    });
+  }
+
+  private async writeConversation(
+    store: relationalStore.RdbStore, conv: Conversation,
+  ): Promise<void> {
+    let committed: boolean = false;
+    store.beginTransaction();
+    try {
+      await store.insert('conversation', convBucket(conversationToRow(conv)),
+        relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
+      const delPredicates = new relationalStore.RdbPredicates('message_node');
+      delPredicates.equalTo('conversation_id', conv.id);
+      await store.delete(delPredicates);
+      for (let i = 0; i < conv.messageNodes.length; i++) {
+        await store.insert('message_node', nodeBucket(
+          messageNodeToRow(conv.id, conv.messageNodes[i], i)));
+      }
+      store.commit();
+      committed = true;
+    } finally {
+      if (!committed) {
+        try { store.rollBack(); } catch { /* preserve original write failure */ }
+      }
+    }
+  }
+
+  private async initializeStore(): Promise<relationalStore.RdbStore | null> {
     try {
       const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
       const store = await relationalStore.getRdbStore(ctx, {
         name: DB_NAME,
         securityLevel: relationalStore.SecurityLevel.S1,
       });
-      // schema 幂等建表(CREATE TABLE/INDEX IF NOT EXISTS,逐句执行)
       const stmts: string[] = CHAT_SCHEMA_SQL.split(';');
       for (const raw of stmts) {
         const sql: string = raw.trim();
-        if (sql.length > 0) {
-          await store.executeSql(sql);
-        }
+        if (sql.length > 0) await store.executeSql(sql);
       }
+
+      // Operations wait on the shared init promise, so the memory snapshot cannot
+      // change while it is being copied. Publish the RDB only after migration.
+      const fallbackRows: ConversationSummary[] = await this.memory.list();
+      for (const summary of fallbackRows) {
+        const conv: Conversation | null = await this.memory.getById(summary.id);
+        if (conv !== null) await this.writeConversation(store, conv);
+      }
+      this.memory = createMemoryConversationRepository();
       this.store = store;
+      AppStorage.setOrCreate<boolean>('chatStorageDegraded', false);
       return store;
     } catch (e) {
-      this.initFailed = true;
       const msg: string = e instanceof Error ? e.message : String(e);
-      hilog.warn(DOMAIN, TAG, 'RDB init failed, fallback to memory: %{public}s', msg);
+      AppStorage.setOrCreate<boolean>('chatStorageDegraded', true);
+      hilog.warn(DOMAIN, TAG, 'RDB init failed, using temporary memory: %{public}s', msg);
       return null;
     }
+  }
+
+  private async ensureStore(): Promise<relationalStore.RdbStore | null> {
+    if (this.store !== null) return this.store;
+    if (this.initPromise === null) {
+      const attempt: Promise<relationalStore.RdbStore | null> = this.initializeStore();
+      this.initPromise = attempt;
+      attempt.finally((): void => {
+        if (this.initPromise === attempt) this.initPromise = null;
+      });
+    }
+    return this.initPromise;
   }
 
   private async queryConversationRows(
     store: relationalStore.RdbStore, predicates: relationalStore.RdbPredicates,
   ): Promise<ConversationRow[]> {
     const rs = await store.query(predicates, CONV_COLUMNS);
-    const rows: ConversationRow[] = [];
-    while (rs.goToNextRow()) {
-      rows.push({
-        id: rs.getString(0),
-        assistant_id: rs.getString(1),
-        title: rs.getString(2),
-        create_at: rs.getLong(3),
-        update_at: rs.getLong(4),
-        suggestions: rs.getString(5),
-        is_pinned: rs.getLong(6),
-        auto_approve_tools: rs.getLong(7),
-      });
+    try {
+      const rows: ConversationRow[] = [];
+      while (rs.goToNextRow()) {
+        rows.push({
+          id: rs.getString(0),
+          assistant_id: rs.getString(1),
+          title: rs.getString(2),
+          create_at: rs.getLong(3),
+          update_at: rs.getLong(4),
+          suggestions: rs.getString(5),
+          is_pinned: rs.getLong(6),
+          auto_approve_tools: rs.getLong(7),
+        });
+      }
+      return rows;
+    } finally {
+      rs.close();
     }
-    rs.close();
-    return rows;
   }
 
   private async queryNodeRows(
@@ -117,48 +173,40 @@ class ChatRdbRepository implements ConversationRepository {
     predicates.equalTo('conversation_id', conversationId);
     predicates.orderByAsc('node_index');
     const rs = await store.query(predicates, NODE_COLUMNS);
-    const rows: MessageNodeRow[] = [];
-    while (rs.goToNextRow()) {
-      rows.push({
-        id: rs.getString(0),
-        conversation_id: rs.getString(1),
-        node_index: rs.getLong(2),
-        messages: rs.getString(3),
-        select_index: rs.getLong(4),
-      });
+    try {
+      const rows: MessageNodeRow[] = [];
+      while (rs.goToNextRow()) {
+        rows.push({
+          id: rs.getString(0),
+          conversation_id: rs.getString(1),
+          node_index: rs.getLong(2),
+          messages: rs.getString(3),
+          select_index: rs.getLong(4),
+        });
+      }
+      return rows;
+    } finally {
+      rs.close();
     }
-    rs.close();
-    return rows;
   }
 
   async save(conv: Conversation): Promise<void> {
-    // D-097:checkFilesDelete(ChatService.kt:1868-1877 updateConversation 默认 true +
-    //   :1903-1912 diff)— 持久化前与库内旧态 diff files,移除项 deleteChatFiles;
-    //   fire-and-forget(FilesManager appScope.launch 语义);旧不存在(新会话/
-    //   撤销恢复插入)→ 跳过;流式中间态不落库,不受影响(Android false 旗标位)
-    const old: Conversation | null = await this.getById(conv.id);
-    if (old !== null) {
-      const removed: string[] =
-        removedFileUris(conversationFileUris(old), conversationFileUris(conv));
-      if (removed.length > 0) {
-        // Log.w(TAG, "checkFilesDelete: $deletedFiles")(:1911)— uri 为 uuid 文件名,
-        //   不含消息内容(宪章隐私条款兼容)
-        hilog.warn(DOMAIN, TAG, 'checkFilesDelete: %{public}s', JSON.stringify(removed));
-        deleteChatFiles(getDeleteChatFilesDeps(), removed).catch((): void => {});
+    return this.enqueueMutation(conv.id, async (): Promise<void> => {
+      if (this.deletedIds.has(conv.id)) {
+        throw new Error(`Conversation was deleted: ${conv.id}`);
       }
-    }
-    const store = await this.ensureStore();
-    if (store === null) return this.memory.save(conv);
-    // upsert conv + 整体替换 nodes(对齐 Android ConversationDAO save 语义:
-    // memory 实现同口径,已被 persistence 测试锁定)
-    await store.insert('conversation', convBucket(conversationToRow(conv)),
-      relationalStore.ConflictResolution.ON_CONFLICT_REPLACE);
-    const delPredicates = new relationalStore.RdbPredicates('message_node');
-    delPredicates.equalTo('conversation_id', conv.id);
-    await store.delete(delPredicates);
-    for (let i = 0; i < conv.messageNodes.length; i++) {
-      await store.insert('message_node', nodeBucket(messageNodeToRow(conv.id, conv.messageNodes[i], i)));
-    }
+      return enqueueConversationFileMutation(async (): Promise<void> => {
+        if (this.deletedIds.has(conv.id)) {
+          throw new Error(`Conversation was deleted: ${conv.id}`);
+        }
+        const store = await this.ensureStore();
+        if (store === null) {
+          await this.memory.save(conv);
+        } else {
+          await this.writeConversation(store, conv);
+        }
+      });
+    });
   }
 
   async getById(id: string): Promise<Conversation | null> {
@@ -239,15 +287,36 @@ class ChatRdbRepository implements ConversationRepository {
   }
 
   async delete(id: string): Promise<void> {
-    const store = await this.ensureStore();
-    if (store === null) return this.memory.delete(id);
-    // 显式级联(Harmony RDB 外键默认不开启;语义对齐 FK CASCADE)
-    const nodePredicates = new relationalStore.RdbPredicates('message_node');
-    nodePredicates.equalTo('conversation_id', id);
-    await store.delete(nodePredicates);
-    const convPredicates = new relationalStore.RdbPredicates('conversation');
-    convPredicates.equalTo('id', id);
-    await store.delete(convPredicates);
+    this.deletedIds.add(id);
+    return this.enqueueMutation(id, async (): Promise<void> =>
+      enqueueConversationFileMutation(async (): Promise<void> => {
+        const old: Conversation | null = await this.getById(id);
+        if (old === null) return;
+        const store = await this.ensureStore();
+        if (store === null) {
+          await this.memory.delete(id);
+        } else {
+          let committed: boolean = false;
+          store.beginTransaction();
+          try {
+            const nodePredicates = new relationalStore.RdbPredicates('message_node');
+            nodePredicates.equalTo('conversation_id', id);
+            await store.delete(nodePredicates);
+            const convPredicates = new relationalStore.RdbPredicates('conversation');
+            convPredicates.equalTo('id', id);
+            await store.delete(convPredicates);
+            store.commit();
+            committed = true;
+          } finally {
+            if (!committed) {
+              try { store.rollBack(); } catch { /* preserve original delete failure */ }
+            }
+          }
+        }
+      }).catch((e: Error): void => {
+        this.deletedIds.delete(id);
+        throw e;
+      }));
   }
 }
 

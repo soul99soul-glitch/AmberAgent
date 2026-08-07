@@ -76,8 +76,12 @@ export interface MarkdownBlockCode {
 export interface MarkdownBlockList {
   kind: 'list';
   ordered: boolean;
+  /** The source number for an ordered list; unordered lists use 1. */
+  start: number;
   items: InlineToken[][];
 }
+
+export type MarkdownTableAlignment = 'left' | 'center' | 'right';
 
 export interface MarkdownBlockBlockquote {
   kind: 'blockquote';
@@ -88,6 +92,7 @@ export interface MarkdownBlockTable {
   kind: 'table';
   headers: InlineToken[][];
   rows: InlineToken[][][];
+  alignments: MarkdownTableAlignment[];
 }
 
 export interface MarkdownBlockHr {
@@ -253,31 +258,61 @@ const findCodeBlocks = (text: string): CodeBlockRange[] => {
   return blocks;
 };
 
-// 表格行解析
+// 表格行解析：只把未转义的 | 当分隔符，\| 还原为字面管道。
 const parseTableRow = (line: string): string[] => {
-  const trimmed: string = line.trim().replace(/^\||\|$/g, '');
-  return trimmed.split('|').map((cell: string): string => cell.trim());
+  let value: string = line.trim();
+  if (value.startsWith('|')) value = value.substring(1);
+  if (value.endsWith('|') && !value.endsWith('\\|')) {
+    value = value.substring(0, value.length - 1);
+  }
+  const cells: string[] = [];
+  let cell: string = '';
+  for (let i = 0; i < value.length; i++) {
+    const ch: string = value.charAt(i);
+    if (ch === '\\' && i + 1 < value.length && value.charAt(i + 1) === '|') {
+      cell += '|';
+      i++;
+    } else if (ch === '|') {
+      cells.push(cell.trim());
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  cells.push(cell.trim());
+  return cells;
+};
+
+const parseTableAlignment = (cell: string): MarkdownTableAlignment => {
+  const value: string = cell.trim();
+  if (value.startsWith(':') && value.endsWith(':')) return 'center';
+  if (value.endsWith(':')) return 'right';
+  return 'left';
 };
 
 // 判断是否为表格分隔行 |---|---|
 const isTableSeparator = (line: string): boolean => {
-  return /^\s*\|?[\s-:|-]+\|?\s*$/.test(line) && line.includes('-');
+  return /^\s*\|?(?:\s*:?-{1,}:?\s*\|)+\s*:?-{1,}:?\s*\|?\s*$/.test(line);
 };
 
 // ===== 主解析函数 =====
 
-export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
+const parseMarkdownInternal = (markdown: string): MarkdownBlock[] => {
   const input: string = markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   if (input.trim().length === 0) return [];
 
   const codeBlocks: CodeBlockRange[] = findCodeBlocks(input);
 
-  // 用占位符替换代码块
+  // 用不可能与用户文本碰撞的可打印占位符替换代码块。
+  // NUL 字符会被 ArkUI/字符串扫描器截断，并且用户文本可能包含相同占位符。
   let work: string = input;
   const codeBlockData: { lang: string; code: string }[] = [];
+  let placeholderPrefix: string = 'AMBER_CODE_BLOCK_';
+  while (input.includes(placeholderPrefix)) placeholderPrefix += '_';
+  const placeholderPattern: RegExp = new RegExp(`^${placeholderPrefix}(\\d+)_END$`);
   for (let i: number = codeBlocks.length - 1; i >= 0; i--) {
     const block: CodeBlockRange = codeBlocks[i];
-    const placeholder: string = `\x00CODEBLOCK_${i}\x00`;
+    const placeholder: string = `${placeholderPrefix}${i}_END`;
     codeBlockData[i] = { lang: block.lang, code: block.content };
     work = work.substring(0, block.start) + placeholder + work.substring(block.end);
   }
@@ -296,15 +331,19 @@ export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
     }
 
     // 代码块占位符
-    const codeBlockMatch: RegExpMatchArray | null = line.match(/^\x00CODEBLOCK_(\d+)\x00$/);
+    const codeBlockMatch: RegExpMatchArray | null = line.match(placeholderPattern);
     if (codeBlockMatch !== null) {
       const idx: number = parseInt(codeBlockMatch[1], 10);
-      const data: { lang: string; code: string } = codeBlockData[idx];
-      blocks.push({
-        kind: 'code_block',
-        lang: data.lang,
-        code: data.code,
-      } as MarkdownBlockCode);
+      const data: { lang: string; code: string } | undefined = codeBlockData[idx];
+      if (data !== undefined) {
+        blocks.push({
+          kind: 'code_block',
+          lang: data.lang,
+          code: data.code,
+        } as MarkdownBlockCode);
+      } else {
+        blocks.push({ kind: 'paragraph', inlines: parseInline(line) } as MarkdownBlockParagraph);
+      }
       i++;
       continue;
     }
@@ -354,6 +393,7 @@ export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
       blocks.push({
         kind: 'list',
         ordered: false,
+        start: 1,
         items,
       } as MarkdownBlockList);
       continue;
@@ -361,6 +401,9 @@ export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
 
     // 有序列表 1. / 2.
     if (/^\s*\d+\.\s+/.test(line)) {
+      const firstMatch: RegExpMatchArray | null = line.match(/^\s*(\d+)\.\s+/);
+      const parsedStart: number = firstMatch !== null ? parseInt(firstMatch[1], 10) : 1;
+      const start: number = Number.isFinite(parsedStart) && parsedStart >= 0 ? parsedStart : 1;
       const items: InlineToken[][] = [];
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
         const itemText: string = lines[i].replace(/^\s*\d+\.\s+/, '');
@@ -370,6 +413,7 @@ export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
       blocks.push({
         kind: 'list',
         ordered: true,
+        start,
         items,
       } as MarkdownBlockList);
       continue;
@@ -386,16 +430,24 @@ export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
       // 解析表格
       if (tableLines.length >= 2) {
         const headers: string[] = parseTableRow(tableLines[0]);
+        const separator: string[] = parseTableRow(tableLines[1]);
+        const columnCount: number = headers.length;
         const headerInlines: InlineToken[][] = headers.map((h: string): InlineToken[] => parseInline(h));
+        const alignments: MarkdownTableAlignment[] = [];
+        for (let ci: number = 0; ci < columnCount; ci++) {
+          alignments.push(parseTableAlignment(separator[ci] ?? ''));
+        }
         const bodyRows: InlineToken[][][] = [];
         for (let r: number = 2; r < tableLines.length; r++) {
           const cells: string[] = parseTableRow(tableLines[r]);
-          bodyRows.push(cells.map((c: string): InlineToken[] => parseInline(c)));
+          while (cells.length < columnCount) cells.push('');
+          bodyRows.push(cells.slice(0, columnCount).map((c: string): InlineToken[] => parseInline(c)));
         }
         blocks.push({
           kind: 'table',
           headers: headerInlines,
           rows: bodyRows,
+          alignments,
         } as MarkdownBlockTable);
       }
       continue;
@@ -409,8 +461,9 @@ export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
       !/^(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i]) &&
       !lines[i].startsWith('>') &&
       !/^\s*[-*]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i]) &&
-      !/^\x00CODEBLOCK_\d+\x00$/.test(lines[i]) &&
+        !/^\s*\d+\.\s+/.test(lines[i]) &&
+      !placeholderPattern.test(lines[i]) &&
+
       !(lines[i].includes('|') && (lines[i].match(/\|/g) ?? []).length >= 2 &&
         i + 1 < lines.length && isTableSeparator(lines[i + 1]))) {
       paraLines.push(lines[i]);
@@ -425,4 +478,16 @@ export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
   }
 
   return blocks;
+};
+
+/** Parse Markdown without allowing malformed input to break message rendering. */
+export const parseMarkdown = (markdown: string): MarkdownBlock[] => {
+  try {
+    return parseMarkdownInternal(markdown);
+  } catch (_error) {
+    const text: string = typeof markdown === 'string' ? markdown : String(markdown);
+    return text.length > 0
+      ? [{ kind: 'paragraph', inlines: [{ type: 'text', text }] } as MarkdownBlockParagraph]
+      : [];
+  }
 };

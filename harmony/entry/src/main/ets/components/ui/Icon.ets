@@ -22,6 +22,7 @@ export struct Icon {
     if (this.name === 'gear') return $r('sys.symbol.gearshape');
     if (this.name === 'star') return $r('sys.symbol.star');
     if (this.name === 'pin') return $r('sys.symbol.pin');
+    if (this.name === 'pin_fill') return $r('sys.symbol.pin_fill');
     if (this.name === 'puzzle') return $r('sys.symbol.puzzle');
     if (this.name === 'edit') return $r('sys.symbol.square_and_pencil');
     if (this.name === 'trash') return $r('sys.symbol.trash');
@@ -64,6 +65,7 @@ export struct Icon {
     if (this.name === 'palette') return $r('sys.symbol.paintpalette');
     if (this.name === 'clock') return $r('sys.symbol.clock');
     if (this.name === 'arrow_up') return $r('sys.symbol.arrow_up');
+    if (this.name === 'share') return $r('sys.symbol.share');
     return $r('sys.symbol.circle');
   }
 

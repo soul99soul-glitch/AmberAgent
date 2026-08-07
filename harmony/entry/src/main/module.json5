@@ -26,14 +26,6 @@
             "entities": ["entity.system.home"],
             "actions": ["action.system.home"]
           },
-          // 分享/deep-link 入口:接收 URL → deriveTopicId → DeepReadArticlePage
-          // TODO(toolchain): 实际 scheme/host 待配置(对照 §7.2)
-          {
-            "actions": ["ohos.want.action.viewData"],
-            "uris": [
-              { "scheme": "https" }
-            ]
-          }
         ]
       }
     ],
@@ -42,9 +34,7 @@
     //   checkAccessTokenSync 对未声明名返回拒绝,权限状态工具如实展示 Denied)
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET", "reason": "$string:reason_internet" },
-      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
-      { "name": "ohos.permission.MICROPHONE", "reason": "$string:reason_microphone",
-        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } }
+      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" }
       // 以下权限需要 debug profile ACL 包含,模拟器暂注释(Accessibility/通知功能 P2 恢复):
       // { "name": "ohos.permission.READ_CONTACTS", "reason": "$string:reason_contacts",
       //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },

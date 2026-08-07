@@ -27,6 +27,7 @@ export interface ReasoningLevelOption {
 //   按 modelId 关键字匹配返回段集;无 reasoning 能力的模型也返回默认 off/auto
 //   (调用方应先用 model.abilities 含 'reasoning' 做门控)
 export const reasoningLevelsForModel = (model: ProviderModel): ReasoningLevelOption[] => {
+  if (model.abilities.indexOf('reasoning') < 0) return [];
   const id: string = model.modelId.toLowerCase();
   if (id.includes('deepseek')) {
     return [

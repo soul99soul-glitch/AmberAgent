@@ -56,8 +56,9 @@ struct ChatTaskModelPickerPage {
       const usable: TaskModelRow[] = [];
       if (providers !== null) {
         for (const p of providers) {
-          if (p.models.length > 0 && hasUsableAuth(p)) {
+          if (hasUsableAuth(p)) {
             for (const m of p.models) {
+              if (m.type !== 'chat') continue;
               // D-098:ocr 任务按 preferredInputModality=IMAGE 过滤
               //   (SettingModelPage.kt:533;无 image 输入模态的模型不可做视觉识别)
               if (this.task === 'ocr' && m.inputModalities.indexOf('image') < 0) {

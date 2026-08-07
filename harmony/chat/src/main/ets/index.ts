@@ -108,7 +108,7 @@ export type { PendingQueueAuditEvent } from './chat/pending_queue_store.ts';
 export {
   pendingQueueKey, pendingQueueAuditKey,
   serializePendingUserMessage, serializePendingQueue, parsePendingQueue,
-  persistPendingQueue, loadPendingQueue,
+  persistPendingQueue, persistPendingQueueWithEvent, loadPendingQueue, clearPendingQueueStorage,
   buildAuditEventLine, recordPendingQueueEvent,
 } from './chat/pending_queue_store.ts';
 
@@ -734,7 +734,8 @@ export {
 // ===== D-079a:图片压缩纯函数(FileEncoder.kt:14-30,53-66,236-303) =====
 // PixelMap 解码/EXIF 归一化在 entry(ImageKit),HAR 只承载无平台依赖的部分。
 export {
-  AVIF_BRANDS, COMPRESS_JPEG_QUALITY, COMPRESS_MAX_DIMENSION, HEIF_BRANDS,
+  AVIF_BRANDS, COMPRESS_JPEG_QUALITY, COMPRESS_MAX_DIMENSION, MAX_PICKER_IMAGE_BYTES,
+  assertPickerImageSize, HEIF_BRANDS,
   SUPPORTED_IMAGE_TYPES,
   EXIF_ORIENTATION_FLIP_HORIZONTAL, EXIF_ORIENTATION_FLIP_VERTICAL,
   EXIF_ORIENTATION_NORMAL, EXIF_ORIENTATION_ROTATE_180, EXIF_ORIENTATION_ROTATE_270,
@@ -1060,6 +1061,7 @@ export type {
   MarkdownBlockList,
   MarkdownBlockBlockquote,
   MarkdownBlockTable,
+  MarkdownTableAlignment,
   MarkdownBlockHr,
   InlineToken,
   InlineTextToken,

@@ -19,25 +19,26 @@ struct SettingExperimentalPage {
         Column() {
           SectionHeader({ label: '智能体' })
           NavRow({ label: '子代理', valueText: 'Beta', onRowClick: (): void => { this.go('pages/SettingExperimentalSubAgentPageFull'); } })
-          NavRow({ label: '模型议会', valueText: 'Beta', onRowClick: (): void => { this.go('pages/SettingExperimentalModelCouncilPageFull'); } })
+          NavRow({ label: '模型议会', valueText: 'Beta', isLast: true, onRowClick: (): void => { this.go('pages/SettingExperimentalModelCouncilPageFull'); } })
 
           SectionHeader({ label: '内容' })
           NavRow({ label: '网页挂载', valueText: 'Alpha', onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })
           NavRow({ label: 'Office Pro', valueText: 'Alpha', onRowClick: (): void => { this.go('pages/SettingExperimentalOfficeProPage'); } })
-          NavRow({ label: 'DeepRead 模板', onRowClick: (): void => { this.go('pages/DeepReadTemplateSettingsPage'); } })
+          NavRow({ label: 'DeepRead 模板', isLast: true, onRowClick: (): void => { this.go('pages/DeepReadTemplateSettingsPage'); } })
 
           SectionHeader({ label: '自动化' })
-          NavRow({ label: '定时任务', valueText: 'Beta', onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
+          NavRow({ label: '定时任务', valueText: 'Beta', isLast: true, onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
 
           SectionHeader({ label: '其他' })
           NavRow({ label: '字体设置', onRowClick: (): void => { this.go('pages/SettingSlidesFontPage'); } })
-          NavRow({ label: '系统权限', onRowClick: (): void => { this.go('pages/SettingSystemAccessPage'); } })
+          NavRow({ label: '系统权限', isLast: true, onRowClick: (): void => { this.go('pages/SettingSystemAccessPage'); } })
 
           PageSpacer()
         }
         .width('100%')
       }
       .layoutWeight(1)
+      .align(Alignment.Top)
       .backgroundColor(BG)
     }
     .width('100%').height('100%').backgroundColor(BG)

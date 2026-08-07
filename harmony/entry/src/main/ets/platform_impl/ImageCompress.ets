@@ -16,7 +16,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 import { util } from '@kit.ArkTS';
 import {
-  COMPRESS_JPEG_QUALITY, COMPRESS_MAX_DIMENSION,
+  COMPRESS_JPEG_QUALITY, COMPRESS_MAX_DIMENSION, assertPickerImageSize,
   calculateInSampleSize, guessImageMimeType, mapExifOrientationToTransform,
 } from '@amber/chat-domain';
 import type { ExifTransformType } from '@amber/chat-domain';
@@ -84,6 +84,7 @@ export const compressImageAsDataUrl = async (uri: string): Promise<string> => {
   const file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
   try {
     const stat: fileIo.Stat = fileIo.statSync(file.fd);
+    assertPickerImageSize(stat.size, uri);
     // guessMimeType:前 16 字节魔数嗅探(<12 即抛,逐字)
     const header: Uint8Array = readAtStart(file.fd, Math.min(stat.size, 16));
     const mimeType: string = guessImageMimeType(header);

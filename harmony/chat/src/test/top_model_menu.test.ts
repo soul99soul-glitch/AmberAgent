@@ -166,14 +166,13 @@ test('contextWindowTokens 透传(含 null)', () => {
   assert.equal(groups[0].models[1].contextWindowTokens, null);
 });
 
-test('Google variant:oauth 可用即使 apiKey 空', () => {
+test('Google Code Assist OAuth is not selectable without API-key auth', () => {
   const g = makeProviderSettingGoogle({
     id: PID_B, apiKey: '  ', authMode: 'gemini_code_assist_oauth',
     models: [makeProviderModel({ modelId: 'gemini-pro', type: 'chat' })],
   });
   const groups = buildTopModelMenuGroups([g], 'chat', '', '');
-  assert.equal(groups.length, 1);
-  assert.equal(groups[0].models[0].modelId, 'gemini-pro');
+  assert.deepEqual(groups, []);
 });
 
 test('provider.models 为空 → 该组丢弃', () => {

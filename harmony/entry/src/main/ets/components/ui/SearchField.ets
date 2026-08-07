@@ -26,11 +26,14 @@ export struct SearchField {
         .onSubmit((_enterKey: EnterKeyType): void => { this.onSubmit(this.value); })
 
       if (this.value.length > 0) {
-        Text('✕').fontSize(LABEL).fontColor(INK3)
-          .width(20).height(20)
-          .textAlign(TextAlign.Center)
-          .borderRadius(6)
-          .onClick((): void => { this.onChange(''); })
+        Row() {
+          Text('✕').fontSize(LABEL).fontColor(INK3)
+        }
+        .width(44).height(44)
+        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+        .borderRadius(8)
+        .accessibilityText('清除搜索')
+        .onClick((): void => { this.onChange(''); })
       }
     }
     .width('100%')

@@ -9,20 +9,20 @@
 //   ✅ 多行 TextArea + 发送门(text 非空或 hasImages)
 //   ✅ 图片附件按钮(PhotoViewPicker 已有)
 //   ✅ 发送/停止切换(sending 态 → 停止按钮)
-//   ✅ 长按发送(sendWithoutAnswer)— 发送键和停止键均支持
+//   ✅ 长按发送(sendWithoutAnswer)— 仅发送键支持,停止键保持单击停止
 //   ✅ 编辑取消(取消编辑按钮)+ 编辑态 placeholder
 //   ✅ 斜杠命令面板(输入 / 触发,点击执行)
 //   ❌ 相机/文件/音频/视频 picker(后续迭代,依赖平台能力)
 //   ❌ +→× 形变动画(后续迭代)
 //   ❌ 用量面板(后续迭代)
 
-import { INK, INK2, INK3, INK4, ACCENT, ACCENT_INK, SURFACE, SURFACE2, RAISED, BODY, META, LABEL, LINE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, ACCENT, ACCENT_INK, SURFACE, SURFACE2, BODY, META, LABEL, LINE } from '../design/tokens.ets';
 import { SlashCommandPanel, SlashCommand, buildSlashCommands } from './SlashCommandPanel.ets';
-import { ReasoningPicker } from './ReasoningPicker.ets';
-import type { ReasoningLevelOption } from '@amber/chat-domain';
+import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatInput {
+  @StorageProp('darkMode') darkMode: boolean = false;
   @Prop text: string = '';
   @Prop sending: boolean = false;
   @Prop editing: boolean = false;
@@ -31,9 +31,6 @@ export struct ChatInput {
   @Prop subAgentMode: string = 'roster';
   // G2-S4:动态 skill 斜杠命令(由 ChatPage 从 SkillManager 装配)
   @Prop skillCommands: SlashCommand[] = [];
-  // M2.1:推理档位段集(模型感知;空/单档 → ReasoningPicker 自身不渲染)
-  @Prop reasoningLevels: ReasoningLevelOption[] = [];
-  @Prop currentReasoningLevel: string = '';
   onTextChange: (value: string) => void = (_v: string): void => {};
   onSend: () => void = (): void => {};
   onStop: () => void = (): void => {};
@@ -43,7 +40,18 @@ export struct ChatInput {
   onClearInput: () => void = (): void => {};
   onCompactContext: () => void = (): void => {};
   onInsertText: (text: string) => void = (_t: string): void => {};
-  onReasoningLevelChange: (level: string) => void = (_l: string): void => {};
+
+  // 1:1 原型 .pressable:active scale(.975) .14s ease-out
+  @State attachScale: number = 1;
+  @State sendScale: number = 1;
+
+  private pressTouch(which: boolean, e: TouchEvent): void {
+    const down: boolean = e.type === TouchType.Down;
+    const v: number = down ? 0.975 : 1;
+    animateTo({ duration: 140, curve: Curve.EaseOut }, (): void => {
+      if (which) this.attachScale = v; else this.sendScale = v;
+    });
+  }
 
   // 斜杠命令可见:text 以 / 开头且非编辑态
   private isSlashVisible(): boolean {
@@ -94,13 +102,6 @@ export struct ChatInput {
         onSelect: (cmd: SlashCommand): void => { this.handleSlashCommand(cmd); },
       })
 
-      // M2.1:推理档位段集(模型支持 reasoning 时显示;段集由 ChatPage 按模型装配)
-      ReasoningPicker({
-        levels: this.reasoningLevels,
-        currentLevel: this.currentReasoningLevel,
-        onReasoningLevelChange: (level: string): void => { this.onReasoningLevelChange(level); },
-      })
-
       // 编辑取消条
       if (this.editing) {
         Row() {
@@ -113,11 +114,12 @@ export struct ChatInput {
         .onClick((): void => { this.onCancelEdit(); })
       }
 
-      // Amber Redesign InputBar — border-top LINE, bg SURFACE, pill-style input
+      // Composer 沉浸式(原型验收规格):无底盘底色、无顶部分隔线,
+      //   + / 胶囊 / 发送键严格等高 48,容器 alignItems:center,胶囊固定 height 48。
       Row() {
-        // Attach capsule:48x48, radius 999, bg SURFACE2, border 1px LINE, + 22/INK2
+        // Attach capsule:48x48, radius 999, bg SURFACE2, border 1px LINE, plus 22/INK2
         Row() {
-          Text('+').fontSize(22).fontColor(INK2)
+          Icon({ name: 'plus', iconSize: 22, color: INK2 })
         }
         .width(48).height(48)
         .borderRadius(999)
@@ -126,8 +128,11 @@ export struct ChatInput {
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
         .opacity(this.sending ? 0.4 : 1)
+        .scale({ x: this.attachScale, y: this.attachScale })
+        .onTouch((e: TouchEvent): void => { this.pressTouch(true, e); })
         .margin({ right: 9 })
         .onClick((): void => { if (!this.sending) this.onPickImage(); })
+        .accessibilityText('添加图片')
 
         // Center pill:flex 1, radius 26, min-height 48, bg SURFACE2, border 1px LINE
         Row() {
@@ -139,39 +144,38 @@ export struct ChatInput {
             .placeholderFont({ size: BODY })
             .backgroundColor('#00000000')
             .borderRadius(26)
-            .padding({ top: 8, bottom: 8 })
+            .padding({ top: 13, bottom: 14 })
             .maxLines(4)
+            .constraintSize({ minHeight: 48, maxHeight: 111 })
             .lineHeight(21)
             .onChange((v: string): void => { this.onTextChange(v); })
         }
         .layoutWeight(1)
+        .constraintSize({ minHeight: 48, maxHeight: 111 })
         .borderRadius(26)
         .backgroundColor(SURFACE2)
         .border({ width: 1, color: LINE })
         .padding({ left: 18, right: 18 })
-        .constraintSize({ minHeight: 48 })
         .alignItems(VerticalAlign.Center)
         .margin({ right: 9 })
 
-        // Send/Stop button:48x48, radius 999
+        // Send/Stop button:48x48, radius 999(stop 用纯白方块 glyph,1:1 原型)
         if (this.sending) {
           Row() {
-            Text('⏹').fontSize(16).fontColor(SURFACE)
+            Column().width(14).height(14).backgroundColor(SURFACE).borderRadius(3)
           }
           .width(48).height(48)
           .borderRadius(999)
           .backgroundColor(INK)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
+          .scale({ x: this.sendScale, y: this.sendScale })
+          .onTouch((e: TouchEvent): void => { this.pressTouch(false, e); })
           .onClick((): void => { this.onStop(); })
-          .gesture(
-            LongPressGesture()
-              .onAction((): void => { this.onSendWithoutAnswer(); })
-          )
+          .accessibilityText('停止生成')
         } else {
           Row() {
-            Text('↑').fontSize(21).fontWeight(FontWeight.Bold)
-              .fontColor(this.canSend() ? ACCENT_INK : INK4)
+            Icon({ name: 'arrow_up', iconSize: 21, color: this.canSend() ? ACCENT_INK : INK2 })
           }
           .width(48).height(48)
           .borderRadius(999)
@@ -179,20 +183,25 @@ export struct ChatInput {
           .border({ width: 1, color: this.canSend() ? ACCENT : LINE })
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
-          .onClick((): void => {
-            if (this.canSend()) this.onSend();
-          })
+          .scale({ x: this.sendScale, y: this.sendScale })
+          .onTouch((e: TouchEvent): void => { this.pressTouch(false, e); })
           .gesture(
-            LongPressGesture()
-              .onAction((): void => { this.onSendWithoutAnswer(); })
+            GestureGroup(
+              GestureMode.Exclusive,
+              LongPressGesture().onAction((): void => {
+                if (this.canSend()) this.onSendWithoutAnswer();
+              }),
+              TapGesture().onAction((): void => {
+                if (this.canSend()) this.onSend();
+              }),
+            )
           )
+          .accessibilityText('发送消息，长按仅发送不等待回复')
         }
       }
       .width('100%')
-      .border({ width: { top: 1 }, color: { top: LINE } })
-      .backgroundColor(RAISED)
-      .padding({ left: 14, right: 14, top: 10, bottom: 14 })
-      .alignItems(VerticalAlign.Bottom)
+      .padding({ left: 20, right: 20, top: 10, bottom: 14 })
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
   }

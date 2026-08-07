@@ -8,7 +8,13 @@
 // FileEncoder.kt:140-141
 export const COMPRESS_MAX_DIMENSION: number = 2048;
 export const COMPRESS_JPEG_QUALITY: number = 85;
+export const MAX_PICKER_IMAGE_BYTES: number = 64 * 1024 * 1024;
 
+export const assertPickerImageSize = (sizeBytes: number, uri: string): void => {
+  if (sizeBytes > MAX_PICKER_IMAGE_BYTES) {
+    throw new Error(`Image exceeds ${MAX_PICKER_IMAGE_BYTES} bytes: ${uri}`);
+  }
+};
 export const SUPPORTED_IMAGE_TYPES: readonly string[] = Object.freeze([
   'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/avif',
 ]);

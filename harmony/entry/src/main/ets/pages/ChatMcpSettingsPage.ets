@@ -21,7 +21,7 @@
 //   green6/red6 → #34A853/#EA4335 近似;placement 同 '运行' 先例(顶栏入口,
 //   harmony 无设置索引页);滑动删除无撤销(Android 本页即无撤销,区别于 D-096)
 
-import { ACCENT,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,ACCENT_INK,BG,INK,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
@@ -62,6 +62,7 @@ interface CommonPatch {
 struct ChatMcpSettingsPage {
   @State servers: McpServerConfig[] = [];
   @State statuses: Record<string, McpStatus> = {};
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State refreshing: boolean = false;
   // 编辑态:draft 非 null 即开 sheet;creating 区分新建/编辑
   @State draft: McpServerConfig | null = null;
@@ -533,8 +534,8 @@ struct ChatMcpSettingsPage {
       Row() {
         Button('保存')
           .fontSize(14)
-          .backgroundColor(ACCENT).fontColor('#FFFFFF')
-          .padding({ left: 14, right: 14, top: 2, bottom: 11 })
+          .backgroundColor(ACCENT).fontColor(ACCENT_INK)
+          .padding({ left: 14, right: 14, top: 6, bottom: 6 })
           .onClick((): void => { this.confirmDraft(); })
       }
       .width('100%').justifyContent(FlexAlign.End).padding({ top: 8 })
@@ -598,7 +599,7 @@ struct ChatMcpSettingsPage {
         Text('＋').fontSize(20).fontColor(INK)
           .onClick((): void => { this.openCreate(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
 
@@ -614,11 +615,13 @@ struct ChatMcpSettingsPage {
           }, (config: McpServerConfig): string => config.id)
         }
         .width('100%').height('100%')
-        .padding({ left: 12, right: 12, top: 10 })
+        .padding({ left: 18, right: 18, top: 10 })
       }
       .layoutWeight(1)
       .onRefreshing((): void => {
-        getMcpManager().syncAll().catch((): void => {});
+        getMcpManager().syncAll()
+          .then((): void => { this.refreshing = false; })
+          .catch((): void => { this.refreshing = false; });
       })
 
       // 空态(:192-209)

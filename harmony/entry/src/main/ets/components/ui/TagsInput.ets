@@ -117,6 +117,17 @@ export struct TagsInput {
     this.showMaxWarning = false;
   }
 
+  private selectedTags(): AmberTag[] {
+    const byId: Record<string, AmberTag> = {};
+    for (const tag of this.tags) byId[tag.id] = tag;
+    const ordered: AmberTag[] = [];
+    for (const id of this.selectedIds) {
+      const tag: AmberTag | undefined = byId[id];
+      if (tag !== undefined) ordered.push(tag);
+    }
+    return ordered;
+  }
+
   private unselectedTags(): AmberTag[] {
     return this.tags.filter((t: AmberTag): boolean => !this.isSelected(t.id));
   }
@@ -148,13 +159,11 @@ export struct TagsInput {
     Column() {
       // chip 列表 + 添加按钮
       Flex({ wrap: FlexWrap.Wrap }) {
-        ForEach(this.tags, (tag: AmberTag): void => {
-          if (this.isSelected(tag.id)) {
-            if (this.editingId === tag.id) {
-              this.EditChip()
-            } else {
-              this.Chip(tag)
-            }
+        ForEach(this.selectedTags(), (tag: AmberTag): void => {
+          if (this.editingId === tag.id) {
+            this.EditChip()
+          } else {
+            this.Chip(tag)
           }
         }, (tag: AmberTag): string => tag.id)
 

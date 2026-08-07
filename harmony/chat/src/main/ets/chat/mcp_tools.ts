@@ -321,29 +321,38 @@ export interface McpServerToolsDeps {
   activity?: McpToolActivityPort;
 }
 
-export const createMcpServerTools = (deps: McpServerToolsDeps): AgentTool[] =>
-  deps.manager.getAllAvailableTools().map((tool: McpTool): AgentTool => makeAgentTool({
-    name: `mcp__${tool.name}`,
-    description: tool.description ?? '',
-    parameters: (): InputSchemaObj | null => tool.inputSchema,
-    needsApproval: tool.needsApproval,
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
-      const toolCallId: string | null = deps.activity !== undefined
-        ? deps.activity.startTool(`mcp__${tool.name}`, '调用 MCP 工具',
-          JSON.stringify(input), 'MCP')
-        : null;
-      try {
-        if (!isObj(input)) throw new Error(`Element ${typeof input} is not a JsonObject`);
-        const result: UIMessagePart[] = await deps.manager.callTool(tool.name, input);
-        if (deps.activity !== undefined && toolCallId !== null) {
-          deps.activity.complete(toolCallId, toolOutputPreview(result));
+export const createMcpServerTools = (deps: McpServerToolsDeps): AgentTool[] => {
+  const tools: McpTool[] = deps.manager.getAllAvailableTools();
+  const counts: Map<string, number> = new Map();
+  for (const tool of tools) counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
+  return tools.map((tool: McpTool): AgentTool => {
+    const duplicate: boolean = (counts.get(tool.name) ?? 0) > 1;
+    const serverSuffix: string = (tool.serverId ?? 'unknown').replace(/[^A-Za-z0-9_]/g, '_');
+    const exposedName: string = duplicate
+      ? `mcp__${tool.name}__${serverSuffix}` : `mcp__${tool.name}`;
+    return makeAgentTool({
+      name: exposedName,
+      description: tool.description ?? '',
+      parameters: (): InputSchemaObj | null => tool.inputSchema,
+      needsApproval: tool.needsApproval,
+      execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+        const toolCallId: string | null = deps.activity !== undefined
+          ? deps.activity.startTool(exposedName, '调用 MCP 工具', JSON.stringify(input), 'MCP')
+          : null;
+        try {
+          if (!isObj(input)) throw new Error(`Element ${typeof input} is not a JsonObject`);
+          const result: UIMessagePart[] = await deps.manager.callTool(tool.name, input, tool.serverId);
+          if (deps.activity !== undefined && toolCallId !== null) {
+            deps.activity.complete(toolCallId, toolOutputPreview(result));
+          }
+          return result;
+        } catch (e) {
+          if (deps.activity !== undefined && toolCallId !== null) {
+            deps.activity.fail(toolCallId, e instanceof Error ? e : new Error(String(e)));
+          }
+          throw e;
         }
-        return result;
-      } catch (e) {
-        if (deps.activity !== undefined && toolCallId !== null) {
-          deps.activity.fail(toolCallId, e instanceof Error ? e : new Error(String(e)));
-        }
-        throw e;
-      }
-    },
-  }));
+      },
+    });
+  });
+};

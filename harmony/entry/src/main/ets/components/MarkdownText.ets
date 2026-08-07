@@ -20,10 +20,11 @@ import {
 } from '@amber/chat-domain';
 import type {
   MarkdownBlock,
+  MarkdownBlockTable,
   InlineToken,
   HighlightToken,
 } from '@amber/chat-domain';
-import { INK, INK2, INK3, INK4, SURFACE2, LINE, ACCENT, BODY, META } from '../design/tokens.ets';
+import { INK, SURFACE2, LINE, BODY, META } from '../design/tokens.ets';
 
 // 代码高亮色板(对齐 code_highlight.ts HIGHLIGHT_COLORS)
 const CODE_KEYWORD: string = '#C678DD';
@@ -42,15 +43,35 @@ const INLINE_CODE_FG: string = '#B8623A';
 
 @Component
 export struct MarkdownText {
-  @Prop content: string = '';
+  @Prop @Watch('onContentChanged') content: string = '';
   @Prop fontSize: number = BODY;
   @Prop fontColor: string = INK;
+  // 收缩包裹场景(用户气泡 maxWidth 82%)需 'auto',否则 100% 使测宽失效不换行
+  @Prop fillWidth: boolean = true;
+  @State private cachedContent: string = '';
+  @State private cachedBlocks: MarkdownBlock[] = [];
+  private highlightCache: Map<string, HighlightToken[]> = new Map<string, HighlightToken[]>();
+
+  aboutToAppear(): void {
+    this.updateCachedContent(this.content);
+  }
+
+  private onContentChanged(): void {
+    this.updateCachedContent(this.content);
+  }
+
+  private updateCachedContent(content: string): void {
+    if (content === this.cachedContent) return;
+    this.cachedContent = content;
+    this.cachedBlocks = parseMarkdown(content);
+    this.highlightCache.clear();
+  }
 
   build(): void {
     Column() {
-      if (this.content.trim().length > 0) {
+      if (this.cachedContent.trim().length > 0) {
         ForEach(
-          this.getBlocks(),
+          this.cachedBlocks,
           (block: MarkdownBlock, idx: number): void => {
             if (block.kind === 'heading') {
               this.RenderHeading(block)
@@ -72,14 +93,21 @@ export struct MarkdownText {
         )
       }
     }
-    .width('100%')
+    .width(this.fillWidth ? '100%' : 'auto')
     .alignItems(HorizontalAlign.Start)
   }
 
   // ===== 预计算方法(非 @Builder) =====
 
-  private getBlocks(): MarkdownBlock[] {
-    return parseMarkdown(this.content);
+  private getCodeLines(block: MarkdownBlock): HighlightToken[][] {
+    if (block.kind !== 'code_block') return [];
+    if (block.lang.length === 0) return [];
+    const key: string = JSON.stringify([block.lang, block.code]);
+    const cached: HighlightToken[] | undefined = this.highlightCache.get(key);
+    if (cached !== undefined) return this.splitTokensByLine(cached);
+    const tokens: HighlightToken[] = tokenizeCode(block.code, block.lang);
+    this.highlightCache.set(key, tokens);
+    return this.splitTokensByLine(tokens);
   }
 
   private headingSize(level: number): number {
@@ -98,6 +126,13 @@ export struct MarkdownText {
     if (type === 'number') return CODE_NUMBER;
     if (type === 'operator') return CODE_OPERATOR;
     return CODE_PLAIN;
+  }
+
+  private tableTextAlign(block: MarkdownBlockTable, column: number): TextAlign {
+    const alignment = block.alignments[column] ?? 'left';
+    if (alignment === 'center') return TextAlign.Center;
+    if (alignment === 'right') return TextAlign.End;
+    return TextAlign.Start;
   }
 
   private splitTokensByLine(tokens: HighlightToken[]): HighlightToken[][] {
@@ -124,13 +159,6 @@ export struct MarkdownText {
     return lines;
   }
 
-  private getCodeLines(block: MarkdownBlock): HighlightToken[][] {
-    if (block.kind !== 'code_block') return [];
-    if (block.lang.length === 0) return [];
-    const tokens: HighlightToken[] = tokenizeCode(block.code, block.lang);
-    return this.splitTokensByLine(tokens);
-  }
-
   // ===== @Builder 渲染方法 =====
 
   @Builder
@@ -140,7 +168,7 @@ export struct MarkdownText {
         ForEach(
           block.inlines,
           (tok: InlineToken, idx: number): void => {
-            this.RenderInlineToken(tok, this.headingSize(block.level), INK, FontWeight.Bold)
+            this.RenderInlineToken(tok, this.headingSize(block.level), this.fontColor, FontWeight.Bold)
           },
           (tok: InlineToken, idx: number): string => `h-${idx}-${tok.type}`,
         )
@@ -148,8 +176,8 @@ export struct MarkdownText {
     }
     .width('100%')
     .fontSize(this.headingSize(block.kind === 'heading' ? block.level : 1))
-    .fontColor(INK)
-    .margin({ top: block.kind === 'heading' && block.level <= 2 ? 12 : 8, bottom: 4 })
+.fontColor(this.fontColor)
+        .margin({ top: block.kind === 'heading' && block.level <= 2 ? 12 : 8, bottom: 4 })
   }
 
   @Builder
@@ -165,7 +193,7 @@ export struct MarkdownText {
         )
       }
     }
-    .width('100%')
+    .width(this.fillWidth ? '100%' : 'auto')
     .fontSize(this.fontSize)
     .fontColor(this.fontColor)
     .lineHeight(this.fontSize * 1.6)
@@ -179,7 +207,8 @@ export struct MarkdownText {
         ForEach(
           block.inlines,
           (tok: InlineToken, idx: number): void => {
-            this.RenderInlineToken(tok, this.fontSize, INK3, FontWeight.Normal)
+              this.RenderInlineToken(tok, this.fontSize, this.fontColor, FontWeight.Normal)
+
           },
           (tok: InlineToken, idx: number): string => `bq-${idx}-${tok.type}`,
         )
@@ -187,7 +216,7 @@ export struct MarkdownText {
     }
     .width('100%')
     .fontSize(this.fontSize)
-    .fontColor(INK3)
+    .fontColor(this.fontColor)
     .lineHeight(this.fontSize * 1.5)
     .border({ width: { left: 3 }, color: LINE })
     .padding({ left: 10 })
@@ -202,10 +231,10 @@ export struct MarkdownText {
           block.items,
           (itemInlines: InlineToken[], idx: number): void => {
             Row() {
-              Text(block.ordered ? `${idx + 1}.` : '•')
+              Text(block.ordered ? `${block.start + idx}.` : '•')
                 .fontSize(this.fontSize)
-                .fontColor(INK3)
-                .width(block.ordered ? 24 : 16)
+                .fontColor(this.fontColor)
+                .width(block.ordered ? 32 : 16)
                 .margin({ top: 2 })
               Text() {
                 ForEach(
@@ -293,13 +322,14 @@ export struct MarkdownText {
                 ForEach(
                   cellInlines,
                   (tok: InlineToken, ti: number): void => {
-                    this.RenderInlineToken(tok, META, INK2, FontWeight.Medium)
+                    this.RenderInlineToken(tok, META, this.fontColor, FontWeight.Medium)
                   },
                   (tok: InlineToken, ti: number): string => `th-${ci}-${ti}-${tok.type}`,
                 )
               }
               .fontSize(META)
-              .fontColor(INK2)
+              .fontColor(this.fontColor)
+              .textAlign(this.tableTextAlign(block, ci))
               .layoutWeight(1)
               .padding({ left: 6, right: 6, top: 4, bottom: 4 })
             },
@@ -321,13 +351,14 @@ export struct MarkdownText {
                     ForEach(
                       cellInlines,
                       (tok: InlineToken, ti: number): void => {
-                        this.RenderInlineToken(tok, META, INK2, FontWeight.Normal)
+                        this.RenderInlineToken(tok, META, this.fontColor, FontWeight.Normal)
                       },
                       (tok: InlineToken, ti: number): string => `td-${ri}-${ci}-${ti}-${tok.type}`,
                     )
                   }
                   .fontSize(META)
-                  .fontColor(INK2)
+                  .fontColor(this.fontColor)
+                  .textAlign(this.tableTextAlign(block, ci))
                   .layoutWeight(1)
                   .padding({ left: 6, right: 6, top: 4, bottom: 4 })
                 },
@@ -369,17 +400,17 @@ export struct MarkdownText {
     } else if (tok.type === 'code') {
       Span(tok.text)
         .fontSize(size - 1)
-        .fontColor(INLINE_CODE_FG)
+        .fontColor(this.fontColor === INK ? INLINE_CODE_FG : color)
         .fontFamily('JetBrainsMono')
     } else if (tok.type === 'link') {
+      // No safe open action is available in this renderer; keep links as ordinary text.
       Span(tok.text)
         .fontSize(size)
-        .fontColor(ACCENT)
-        .decoration({ type: TextDecorationType.Underline })
+        .fontColor(color)
     } else {
       Span(`[图: ${tok.alt}]`)
         .fontSize(size)
-        .fontColor(INK3)
+        .fontColor(color)
     }
   }
 }

@@ -2,7 +2,9 @@
 // 列出已生成的 DeepRead 文章(标题 + 日期 + 状态),点击重新打开;空状态
 // Android 基准: feature/ui/pages/deepread/DeepReadHistoryPage.kt
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, ERROR } from '../design/tokens.ets';
+import type { DeepReadCacheEntry } from '@amber/deepread-domain';
+import { getRepository } from '../di/AppContainer.ets';
+import { INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 
 const DANGER: string = 'ERROR';
 
@@ -13,19 +15,28 @@ interface HistoryEntry {
   status: string;
 }
 
-function makeEntry(id: string, title: string, date: string, status: string): HistoryEntry {
-  return { id: id, title: title, date: date, status: status };
+function historyStatus(entry: DeepReadCacheEntry): string {
+  if (entry.lastError !== null && entry.lastError.trim().length > 0) return '失败';
+  return entry.phase === 'COMPLETE' ? '完成' : '未完成';
 }
 
-function placeholderLoadHistory(): Promise<HistoryEntry[]> {
-  const seed: HistoryEntry[] = [
-    makeEntry('h-1', '国产大模型集体降价,API 价格战再升级', '2026-08-02', '完成'),
-    makeEntry('h-2', '鸿蒙 NEXT 5.0 发布,纯血原生应用破万', '2026-08-01', '完成'),
-    makeEntry('h-3', 'AI 编程助手效率提升实测对比', '2026-07-30', '完成'),
-    makeEntry('h-4', '端侧小模型部署最佳实践总结', '2026-07-28', '失败'),
-    makeEntry('h-5', '开源向量数据库年度横评', '2026-07-25', '完成'),
-  ];
-  return Promise.resolve(seed);
+function historyDate(updatedAt: number): string {
+  const d: Date = new Date(updatedAt);
+  const pad = (n: number): string => n < 10 ? `0${n}` : `${n}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function loadHistory(): Promise<HistoryEntry[]> {
+  return getRepository().listHistory(100).then(
+    (rows: DeepReadCacheEntry[]): HistoryEntry[] => rows.map(
+      (entry: DeepReadCacheEntry): HistoryEntry => ({
+        id: entry.topicId,
+        title: entry.title,
+        date: historyDate(entry.updatedAt),
+        status: historyStatus(entry),
+      }),
+    ),
+  );
 }
 
 @Entry
@@ -33,10 +44,15 @@ function placeholderLoadHistory(): Promise<HistoryEntry[]> {
 struct DeepReadHistoryPage {
   @State items: HistoryEntry[] = [];
   @State loaded: boolean = false;
+  @State loadError: string = '';
 
   aboutToAppear(): void {
-    placeholderLoadHistory().then((list: HistoryEntry[]): void => {
+    loadHistory().then((list: HistoryEntry[]): void => {
       this.items = list;
+      this.loaded = true;
+    }).catch((e: Error): void => {
+      this.items = [];
+      this.loadError = e.message;
       this.loaded = true;
     });
   }
@@ -63,9 +79,13 @@ struct DeepReadHistoryPage {
       } else if (this.items.length === 0) {
         Column() {
           Text('◎').fontSize(34).fontColor(INK4)
-          Text('还没有阅读历史').fontSize(BODY).fontColor(INK2).margin({ top: 12 })
-          Text('去热榜选一篇文章深度阅读吧').fontSize(META).fontColor(INK3).margin({ top: 6 })
-        }.margin({ top: 64 })
+          Text(this.loadError.length > 0 ? '历史记录加载失败' : '还没有阅读历史')
+            .fontSize(BODY).fontColor(INK2).margin({ top: 12 })
+          Text(this.loadError.length > 0
+            ? this.loadError
+            : '当前仅使用进程内临时存储，重启后不会保留历史')
+            .fontSize(META).fontColor(INK3).margin({ top: 6 })
+        }.margin({ top: 64 }).padding({ left: 24, right: 24 })
       } else {
         List() {
           ForEach(this.items, (item: HistoryEntry): void => {

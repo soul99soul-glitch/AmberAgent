@@ -8,6 +8,7 @@
 export interface AbortSignalLike {
   readonly aborted: boolean;
   addEventListener?(type: string, listener: () => void): void;
+  removeEventListener?(type: string, listener: () => void): void;
 }
 
 export interface AbortControllerLike {

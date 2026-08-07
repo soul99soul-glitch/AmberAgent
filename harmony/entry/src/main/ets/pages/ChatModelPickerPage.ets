@@ -29,14 +29,20 @@ struct ChatModelPickerPage {
     this.refresh();
   }
 
+  // 从 Provider 设置返回后重读(新增 provider 可见)
+  onPageShow(): void {
+    this.refresh();
+  }
+
   private refresh(): void {
     loadProviders(getChatKvStore()).then((providers): void => {
       const usable: ModelRow[] = [];
       if (providers !== null) {
         for (const p of providers) {
           // D-046:不再限定 openai;google/claude 变体 auth 可用即可选
-          if (p.models.length > 0 && hasUsableAuth(p)) {
+          if (hasUsableAuth(p)) {
             for (const m of p.models) {
+              if (m.type !== 'chat') continue;
               usable.push({
                 providerId: p.id,
                 providerName: p.name,
@@ -56,7 +62,7 @@ struct ChatModelPickerPage {
         this.rows = usable;
         this.loaded = true;
       });
-    });
+    }).catch((): void => { this.loaded = true; });
   }
 
   private pick(row: ModelRow): void {

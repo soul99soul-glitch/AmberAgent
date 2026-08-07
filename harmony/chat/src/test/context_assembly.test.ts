@@ -87,16 +87,18 @@ test('resolveSessionDefaults: AUTO→默认,显式保留,contextSize 0→组默�
 });
 
 test('defaultReasoningLevelForModel: selected model family supplies Android AUTO default', () => {
-  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'gpt-5.4' })), 'medium');
-  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'codex-mini' })), 'medium');
-  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'openai/o3-mini' })), 'medium');
-  assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'deepseek-reasoner' })), 'high');
+  const reasoning = (modelId: string): ReturnType<typeof makeProviderModel> =>
+    makeProviderModel({ modelId, abilities: ['reasoning'] });
+  assert.equal(defaultReasoningLevelForModel(reasoning('gpt-5.4')), 'medium');
+  assert.equal(defaultReasoningLevelForModel(reasoning('codex-mini')), 'medium');
+  assert.equal(defaultReasoningLevelForModel(reasoning('openai/o3-mini')), 'medium');
+  assert.equal(defaultReasoningLevelForModel(reasoning('deepseek-reasoner')), 'high');
   assert.equal(defaultReasoningLevelForModel(makeProviderModel({ modelId: 'glm-5' })), 'auto');
 
   const auto = resolveSessionDefaults(
     makeAssistant({ maxTokens: null }),
     null,
-    defaultReasoningLevelForModel(makeProviderModel({ modelId: 'gpt-5.4' })),
+    defaultReasoningLevelForModel(reasoning('gpt-5.4')),
   );
   assert.equal(auto.reasoningLevel, 'medium');
   assert.equal(auto.maxTokens, null);

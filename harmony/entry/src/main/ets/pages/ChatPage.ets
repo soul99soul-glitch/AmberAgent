@@ -6,8 +6,8 @@
 // D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
-import { ACCENT,ACCENT_INK,BG,BODY,ERROR,HEADER,INK,INK2,INK3,INK4,LABEL,LINE,LINE2,META,MONO_SMALL,SIGNAL,SURFACE,SURFACE2 } from '../design/tokens.ets';
-import { router } from '@kit.ArkUI';
+import { ACCENT,ACCENT_INK,BG,BODY,ERROR,HEADER,INK,INK2,INK3,INK4,LABEL,LINE,LINE2,META,MONO_SMALL,SIGNAL,SURFACE,SURFACE2,USER_BG,USER_INK , BG_FADE_START, BG_FADE_END, BG_GLASS } from '../design/tokens.ets';
+import { router, promptAction } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import type {
@@ -32,7 +32,7 @@ import {
   makePendingUserMessage, enqueuePendingUserMessage, dequeueNextPendingUserMessage,
   cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
   convertSteerToFollowup, runAppendUserMessage,
-  persistPendingQueue, loadPendingQueue, recordPendingQueueEvent,
+  persistPendingQueue, persistPendingQueueWithEvent, loadPendingQueue, recordPendingQueueEvent,
   reasoningCardStateExpanded, onReasoningExpandedChange,
   makeCompactPolicy, prepareContext, invalidateCompacts,
   copyValidCompactsToConversation, ContextCompactionFailedError,
@@ -99,6 +99,10 @@ import {
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { MarkdownText } from '../components/MarkdownText.ets';
+import { Icon } from '../components/ui/Icon.ets';
+import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
+import { speakText } from '../platform_impl/TtsEngine.ets';
+import { addFavorite } from '../platform_impl/FavoriteStore.ets';
 import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
 import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
@@ -129,6 +133,11 @@ import {
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 const ROW: string = SURFACE2;
+
+// 1:1 原型空态 hero 轮换句(3.2s 淡入淡出)
+const GREETINGS: string[] = [
+  '今天想聊点什么？', '想精读哪一篇？', '描述一下，就搭给你看。', '要续写哪个世界？', '让四个模型辩一场？',
+];
 
 const HILOG_DOMAIN: number = 0x0001;
 const HILOG_TAG: string = 'DeepRead.ChatPage';
@@ -164,6 +173,7 @@ const buildRows = (conv: Conversation): MsgRow[] => {
 
 @Component
 struct MessageRow {
+  @StorageProp('darkMode') darkMode: boolean = false;
   @Prop message: UIMessage;
   @Prop branchCount: number = 1;
   @Prop selectIndex: number = 0;
@@ -183,6 +193,8 @@ struct MessageRow {
   onAnswerTool: (toolCallId: string, answer: string) => void = (_id: string, _a: string): void => {};
   onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void = (_id: string, _t: UIMessagePartTool[]): void => {};
   onCopy: () => void = (): void => {};
+  onSpeak: (text: string) => void = (_t: string): void => {};
+  onFavorite: (text: string) => void = (_t: string): void => {};
   onOpenToolPreview: (part: UIMessagePartTool) => void = (_p: UIMessagePartTool): void => {};
   // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
   @State reasoningStates: Record<string, string> = {};
@@ -193,6 +205,9 @@ struct MessageRow {
   // D-053:本会话内见过流式(Android sawStreamingMessage:123 —
   //   流式结束后保持 Preview 不自动折叠)
   @State sawStream: boolean = false;
+  // 1:1 原型 fadeRise .26s ease-out:行入场 opacity 0→1 + translateY 4→0
+  @State enterOpacity: number = 0;
+  @State enterY: number = 4;
 
   aboutToAppear(): void {
     if (this.streaming) this.sawStream = true;
@@ -205,6 +220,15 @@ struct MessageRow {
   // loading = messageLoading && finishedAt == null(ChatMessageReasoning.kt:107)
   private reasoningLoading(p: UIMessagePartReasoning): boolean {
     return this.streaming && p.finishedAt === null;
+  }
+
+  // 朗读文本:text part 拼接 + 去 **/`(TTS 友好)
+  private plainText(): string {
+    let s: string = '';
+    for (const p of this.message.parts) {
+      if (p.type === 'text') s += p.text;
+    }
+    return s.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
   }
 
   // :952-960 已拒绝展示:'已拒绝' + 非空白 reason → ': reason'(红色;
@@ -341,8 +365,8 @@ struct MessageRow {
 
   build() {
     Column() {
-      // 第二梯队 F:ChatMessageAvatar 替换内联头像
-      ChatMessageAvatar({ message: this.message })
+      // 1:1 原型抬头:assistant=amber 标签(+流式光标),user=无
+      ChatMessageAvatar({ message: this.message, streaming: this.streaming })
       // 阶段 A 接入:用 groupMessageParts 分组渲染,而非直接遍历 parts。
       //   ThinkingBlock → 连续 reasoning+tool 折叠为一组;
       //   ContentBlock → text/image/video/audio/document/mini_app;
@@ -418,21 +442,21 @@ struct MessageRow {
         } else if (block.kind === 'content') {
           if (block.part.type === 'text') {
             if (this.message.role === 'user') {
-              // M2.2:user 消息也支持 Markdown 渲染(对齐 Android MarkdownBlock)
+              // 1:1 原型 UserBubble:INK 底/USER_INK 字/radius 16-16-5-16/padding 11-15
               Column() {
-                MarkdownText({ content: block.part.text, fontSize: 15, fontColor: INK })
+                MarkdownText({ content: block.part.text, fontSize: 15, fontColor: USER_INK, fillWidth: false })
               }
-              .padding(10)
-              .backgroundColor(SURFACE2)
-              .borderRadius(8)
+              .alignItems(HorizontalAlign.Start)
+              .padding({ left: 15, right: 15, top: 11, bottom: 11 })
+              .backgroundColor(USER_BG)
+              .borderRadius({ topLeft: 16, topRight: 16, bottomRight: 5, bottomLeft: 16 })
+              .constraintSize({ maxWidth: '82%' })
               .margin({ bottom: 4 })
             } else {
+              // 1:1 原型 AgentTurn:无卡片,正文直接落在 BG 上(15/1.66/ink)
               Column() {
                 MarkdownText({ content: block.part.text, fontSize: 15, fontColor: INK })
               }
-              .padding(10)
-              .backgroundColor(SURFACE)
-              .borderRadius(8)
               .margin({ bottom: 4 })
             }
           } else if (block.part.type === 'image') {
@@ -519,12 +543,22 @@ struct MessageRow {
         onFork: (): void => this.onFork(),
         onEdit: (): void => this.onEdit(),
         onRegenerate: (): void => this.onRegenerate(),
+        onSpeak: (): void => { this.onSpeak(this.plainText()); },
+        onFavorite: (): void => { this.onFavorite(this.plainText()); },
         onSwitch: (idx: number): void => { this.onSwitch(idx); },
       })
     }
     .width('100%')
     .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
-    .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+    .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+    .opacity(this.enterOpacity)
+    .translate({ y: this.enterY })
+    .onAppear((): void => {
+      animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => {
+        this.enterOpacity = 1;
+        this.enterY = 0;
+      });
+    })
     .gesture(
       LongPressGesture()
         .onAction((): void => this.onDelete())
@@ -547,6 +581,23 @@ interface PendingChipRow {
 @Component
 struct ChatPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  // 主题切换时触发整页重建(build 重读可变令牌)
+  @StorageProp('darkMode') darkMode: boolean = false;
+  // Return-to-page forces rebuild, reads latest theme tokens (background pages in stack don't receive StorageProp updates)
+  @State themeTick: number = 0;
+  // 1:1 原型 slideInR .28s ease-out:整页入场
+  @State pageEnterOpacity: number = 0;
+  @State pageEnterX: number = 20;
+  // 头部悬浮层:scrollTop>4 玻璃化
+  @State headerSolid: boolean = false;
+  // 空态 hero 问候语轮换(3.2s 淡入淡出)
+  @State greetIdx: number = 0;
+  @State greetOpacity: number = 1;
+  private greetTimer: number = -1;
+  private cursorTimer: number = -1;
+  private pageAlive: boolean = false;
+  private generationToken: number = 0;
+  private favSeq: number = 0;
   @State greetName: string = '';
   @State cursorOn: boolean = true;
   @State rows: MsgRow[] = [];
@@ -627,6 +678,10 @@ struct ChatPage {
   private toolPreviewPart: UIMessagePartTool | null = null;
   private unsubActivity: () => void = (): void => {};
   private pendingQueue: PendingUserMessage[] = [];
+  private pendingDrainActive: boolean = false;
+  private appendActive: boolean = false;
+  private pickerToken: number = 0;
+  @State materializingImages: boolean = false;
   // D-050:重试状态文案(strings.xml:386;null = 清除)
   @State retryStatus: string = '';
   private conversation: Conversation | null = null;
@@ -708,6 +763,24 @@ struct ChatPage {
 
   // D-122:页面消失退订(store 为全局单例,防泄漏/跨页回调)
   aboutToDisappear(): void {
+    this.pageAlive = false;
+    this.generationToken++;
+    this.abortController?.abort();
+    this.abortController = null;
+    this.sending = false;
+    this.pendingDrainActive = false;
+    this.streamingTail = [];
+    this.regenTail = null;
+    this.regenNodeId = '';
+    if (this.greetTimer !== -1) {
+      clearInterval(this.greetTimer);
+      this.greetTimer = -1;
+    }
+    if (this.cursorTimer !== -1) {
+      clearInterval(this.cursorTimer);
+      this.cursorTimer = -1;
+    }
+    this.invalidatePicker(true);
     this.unsubActivity();
     if (this.unsubSubAgentLive !== null) {
       this.unsubSubAgentLive();
@@ -715,11 +788,32 @@ struct ChatPage {
     }
   }
 
+  onPageShow(): void {
+    this.themeTick = Date.now();
+  }
+
+  private isGenerationOperationActive(token: number): boolean {
+    return this.pageAlive && token === this.generationToken;
+  }
+
   aboutToAppear(): void {
+    this.pageAlive = true;
     // 空状态问候名(读 KV user_nickname, 缺省空)
-    getChatKvStore().get('user_nickname').then((n: string | null): void => { this.greetName = n === null ? '' : n; });
+    getChatKvStore().get('user_nickname').then((n: string | null): void => {
+      if (this.pageAlive) this.greetName = n === null ? '' : n;
+    });
     // amber 光标闪烁(525ms)
-    setInterval((): void => { this.cursorOn = !this.cursorOn; }, 525);
+    if (this.cursorTimer !== -1) clearInterval(this.cursorTimer);
+    this.cursorTimer = setInterval((): void => {
+      if (this.pageAlive) this.cursorOn = !this.cursorOn;
+    }, 525);
+    // 1:1 原型空态 hero:问候句 3.2s 淡入淡出轮换
+    this.greetTimer = setInterval((): void => {
+      animateTo({ duration: 260, curve: Curve.EaseOut, onFinish: (): void => {
+        this.greetIdx = (this.greetIdx + 1) % GREETINGS.length;
+        animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => { this.greetOpacity = 1; });
+      } }, (): void => { this.greetOpacity = 0; });
+    }, 3200);
     // 每次进入(含从选择器返回)刷新模型标签
     describeChatModel().then((label: string): void => { this.modelLabel = label; });    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
     //   = P1 登记;取持久化 model.contextWindowTokens = Android 未知模型
@@ -900,9 +994,9 @@ struct ChatPage {
     const updated: Conversation = selectMessageBranch(this.conversation, nodeId, idx);
     this.conversation = updated;
     this.rows = buildRows(updated);
-    getChatRepository().save(updated);
-    // D-055:分支切换使 compact 失效(ChatService.kt:2152 'message_branch_changed')
-    this.invalidateConvCompacts(updated.id, 'message_branch_changed');
+    getChatRepository().save(updated)
+      .then((): Promise<void> => this.invalidateConvCompacts(updated.id, 'message_branch_changed'))
+      .catch((e: Error): void => { this.errorMsg = e.message; });
   }
 
   private regenerate(nodeId: string): void {
@@ -910,6 +1004,7 @@ struct ChatPage {
     this.sending = true;
     this.errorMsg = '';
     this.abortController = new EntryAbortController();
+    const operationToken: number = ++this.generationToken;
     const conv: Conversation = this.conversation;
     const holder: RuntimeHolder = { rt: null };
     resolveChatRuntime(conv.assistantId)
@@ -951,12 +1046,15 @@ struct ChatPage {
           }),
           // D-050:重试状态(send 路径同语义)
           onRetryStatus: (status: string | null): void => {
-            this.retryStatus = status ?? '';
+            if (this.isGenerationOperationActive(operationToken)) {
+              this.retryStatus = status ?? '';
+            }
           },
           // D-041:流式预览 — 快照末条即活动流式消息(assistant 路径占位
           //   合并/user 路径尾部追加,均为末条);visual transforms 与 send 一致
           onUpdate: (msgs: UIMessage[]): void => {
-            if (msgs.length === 0 || holder.rt === null) return;
+            if (!this.isGenerationOperationActive(operationToken)
+              || msgs.length === 0 || holder.rt === null) return;
             const ctx: TransformerContext = { assistant: holder.rt.assistant };
             const transformed: UIMessage[] = applyVisualTransformersStreamingTail(
               msgs, [thinkTagTransformer, regexOutputTransformer], ctx);
@@ -966,6 +1064,7 @@ struct ChatPage {
         }, this.buildToolLoop(rt, conv)));
       })
       .then((out: Conversation): void => {
+        if (!this.isGenerationOperationActive(operationToken)) return;
         this.conversation = out;
         this.rows = buildRows(out);
         this.suggestions = out.chatSuggestions;
@@ -976,17 +1075,31 @@ struct ChatPage {
         this.regenNodeId = '';
         this.scrollToBottom();
         if (holder.rt !== null) {
+          this.maybeAutoTitle(out, holder.rt);
           this.maybeSuggestions(out, holder.rt);
           this.maybeMemoryExtraction(out, holder.rt);
         }
+        this.drainPendingQueue();
       })
       .catch((e: Error): void => {
+        if (!this.isGenerationOperationActive(operationToken)) return;
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
         this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
         this.regenTail = null;
         this.regenNodeId = '';
+        getChatRepository().getById(conv.id).then((saved: Conversation | null): void => {
+          if (saved !== null) {
+            this.conversation = saved;
+            this.rows = buildRows(saved);
+            this.suggestions = saved.chatSuggestions;
+          }
+          this.drainPendingQueue();
+        }).catch((reloadError: Error): void => {
+          hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'regenerate reload failed: %{public}s', reloadError.message);
+          this.drainPendingQueue();
+        });
       });
   }
 
@@ -1046,14 +1159,19 @@ struct ChatPage {
     });
   }
 
+  private sameConversationTail(a: Conversation, b: Conversation): boolean {
+    return JSON.stringify(currentMessages(a)) === JSON.stringify(currentMessages(b));
+  }
+
   // 自动命名(D-025):title 空白时非阻塞调用(对齐 Android 独立 launch);
-  // 失败上浮到 errorMsg(非静默,Android addError 同语义)
+  // 生成使用快照；落库前重载最新会话，只合并 title，避免覆盖新消息。
   private async maybeAutoTitle(conv: Conversation, rt: ChatRuntime): Promise<void> {
     if (conv.title.trim().length > 0) return;
     // D-094:settings.titlePrompt(ChatPrefs.kt:81)→ runAutoTitle deps.template
     //   (auto_title.ts:60;调用时新取 = settingsFlow.value 语义)
     const prompts: TaskPrompts = await loadTaskPrompts();
-    runAutoTitle(conv, {
+    const snapshot: Conversation = conv;
+    runAutoTitle(snapshot, {
       // D-087:title 任务模型(AiAuxiliaryGenerator.kt:41)—
       //   resolveTaskChatModel(titleModelId) ?: return(无模型静默跳过);
       //   params = model + reasoning OFF + model.customHeaders/customBodies(:55-59,
@@ -1081,14 +1199,20 @@ struct ChatPage {
         const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
         return msg !== null ? toText(msg) : '';
       },
-      store: getChatRepository(),
+      // Auxiliary generation must not persist its stale snapshot directly.
+      store: { save: (_ignored: Conversation): Promise<void> => Promise.resolve() },
       locale: '简体中文',
       template: prompts.titlePrompt,
     })
-      .then((titled: Conversation): void => {
-        if (this.conversation !== null && this.conversation.id === titled.id) {
-          this.conversation = titled;
-          this.title = titled.title.length > 0 ? titled.title : this.title;
+      .then(async (titled: Conversation): Promise<void> => {
+        const latest: Conversation | null = await getChatRepository().getById(titled.id);
+        if (latest === null || latest.title.trim().length > 0
+          || !this.sameConversationTail(snapshot, latest)) return;
+        const merged: Conversation = patchConversation(latest, { title: titled.title });
+        await getChatRepository().save(merged);
+        if (this.conversation !== null && this.conversation.id === merged.id) {
+          this.conversation = merged;
+          this.title = merged.title.length > 0 ? merged.title : this.title;
         }
       })
       .catch((e: Error): void => {
@@ -1099,6 +1223,7 @@ struct ChatPage {
   // 会话建议(D-026):每轮生成完成后非阻塞刷新;失败 hilog 记录(非静默,
   // 不上浮 UI — Android 对建议失败也不打扰用户,仅 printStackTrace)
   private async maybeSuggestions(conv: Conversation, rt: ChatRuntime): Promise<void> {
+    const snapshot: Conversation = conv;
     // D-094:settings.suggestionPrompt(ChatPrefs.kt:82)→ runSuggestion deps.template
     //   (suggestion.ts:57;调用时新取)
     const prompts: TaskPrompts = await loadTaskPrompts();
@@ -1127,14 +1252,20 @@ struct ChatPage {
         const msg = chunk.choices.length > 0 ? chunk.choices[0].message : null;
         return msg !== null ? toText(msg) : '';
       },
-      store: getChatRepository(),
+      store: { save: (_ignored: Conversation): Promise<void> => Promise.resolve() },
       locale: '简体中文',
       template: prompts.suggestionPrompt,
     })
-      .then((suggested: Conversation): void => {
-        if (this.conversation !== null && this.conversation.id === suggested.id) {
-          this.conversation = suggested;
-          this.suggestions = suggested.chatSuggestions;
+      .then(async (suggested: Conversation): Promise<void> => {
+        const latest: Conversation | null = await getChatRepository().getById(suggested.id);
+        if (latest === null || !this.sameConversationTail(snapshot, latest)) return;
+        const merged: Conversation = patchConversation(latest, {
+          chatSuggestions: suggested.chatSuggestions,
+        });
+        await getChatRepository().save(merged);
+        if (this.conversation !== null && this.conversation.id === merged.id) {
+          this.conversation = merged;
+          this.suggestions = merged.chatSuggestions;
         }
       })
       .catch((e: Error): void => {
@@ -1155,7 +1286,8 @@ struct ChatPage {
     this.conversation = updated;
     this.title = updated.title.length > 0 ? updated.title : '对话';
     this.editingTitle = false;
-    getChatRepository().save(updated);
+    getChatRepository().save(updated)
+      .catch((e: Error): void => { this.errorMsg = e.message; });
   }
 
   // 会话分叉(D-033):复制 0..目标节点为新会话并跳转
@@ -1174,7 +1306,7 @@ struct ChatPage {
       const params: Record<string, string> = {};
       params['conversationId'] = fork.id;
       router.pushUrl({ url: 'pages/ChatPage', params: params });
-    });
+    }).catch((e: Error): void => { this.errorMsg = e.message; });
   }
 
   // 编辑消息(D-031):填入输入框进入编辑态;发送时走「编辑并重发」
@@ -1196,25 +1328,43 @@ struct ChatPage {
   //   对齐 Android FileEncoder.compressAndEncode 载荷;
   //   读取失败逐张告警(非静默),Android 同语义(FileEncoder 失败即抛)
   private pickImages(): void {
-    if (this.sending) return;
+    if (this.sending || this.materializingImages) return;
+    const token: number = ++this.pickerToken;
     const options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
     options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
     options.maxSelectNumber = 3;
     const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
-    picker.select(options).then((result: photoAccessHelper.PhotoSelectResult): void => {
+    picker.select(options).then(async (result: photoAccessHelper.PhotoSelectResult): Promise<void> => {
+      if (token !== this.pickerToken) return;
       const uris: string[] = result.photoUris;
-      for (const uri of uris) {
-        compressImageAsDataUrl(uri).then((dataUrl: string): void => {
-          this.pendingImages = [...this.pendingImages, dataUrl];
-        }).catch((e: Error): void => {
-          hilog.warn(0x0001, 'ChatPage', `图片读取失败: ${e.message}`);
-          this.errorMsg = `图片读取失败: ${e.message}`;
-        });
+      this.materializingImages = true;
+      try {
+        const dataUrls: string[] = await Promise.all(uris.map(
+          (uri: string): Promise<string> => compressImageAsDataUrl(uri)));
+        if (token === this.pickerToken) {
+          this.pendingImages = [...this.pendingImages, ...dataUrls];
+        }
+      } catch (e) {
+        if (token === this.pickerToken) {
+          const err: Error = e as Error;
+          hilog.warn(0x0001, 'ChatPage', `图片读取失败: ${err.message}`);
+          this.errorMsg = `图片读取失败: ${err.message}`;
+        }
+      } finally {
+        if (token === this.pickerToken) this.materializingImages = false;
       }
     }).catch((e: Error): void => {
-      // 用户取消选择也会走 reject(cancel)— 仅记录,不算错误
-      hilog.info(0x0001, 'ChatPage', `图片选择结束: ${e.message}`);
+      if (token === this.pickerToken) {
+        hilog.info(0x0001, 'ChatPage', `图片选择结束: ${e.message}`);
+        this.materializingImages = false;
+      }
     });
+  }
+
+  private invalidatePicker(clearImages: boolean = false): void {
+    this.pickerToken++;
+    this.materializingImages = false;
+    if (clearImages) this.pendingImages = [];
   }
 
   private removePendingImage(index: number): void {
@@ -1225,7 +1375,7 @@ struct ChatPage {
 
   // 编辑并重发:editMessage(新分支)→ 持久化 → runRegenerateAt(user 节点截断续跑)
   private sendEdit(text: string): void {
-    if (this.conversation === null) return;
+    if (this.conversation === null || this.sending) return;
     const conv: Conversation = this.conversation;
     const nodeId: string = this.editingNodeId;
     const updated: Conversation = editMessage(conv, this.editingMessageId, makeUserMessage(text).parts);
@@ -1233,11 +1383,18 @@ struct ChatPage {
     this.rows = buildRows(updated);
     this.editingNodeId = '';
     this.editingMessageId = '';
-    // D-055:编辑使 compact 失效(ChatService.kt:2082 'message_edited')
-    this.invalidateConvCompacts(updated.id, 'message_edited');
-    getChatRepository().save(updated).then((): void => {
-      this.regenerate(nodeId);
-    });
+    this.sending = true;
+    this.errorMsg = '';
+    this.invalidateConvCompacts(updated.id, 'message_edited')
+      .then((): Promise<void> => getChatRepository().save(updated))
+      .then((): void => {
+        this.sending = false;
+        this.regenerate(nodeId);
+      })
+      .catch((e: Error): void => {
+        this.sending = false;
+        this.errorMsg = this.compactErrorText(e);
+      });
   }
 
   // 删除消息(D-029):长按 → 确认弹窗;生成中不提供入口(Android 同语义:
@@ -1259,9 +1416,9 @@ struct ChatPage {
           const updated: Conversation = deleteMessage(this.conversation, row.message.id, false);
           this.conversation = updated;
           this.rows = buildRows(updated);
-          getChatRepository().save(updated);
-          // D-055:删除使 compact 失效(ChatService.kt:2171 'message_deleted')
-          this.invalidateConvCompacts(updated.id, 'message_deleted');
+          getChatRepository().save(updated)
+            .then((): Promise<void> => this.invalidateConvCompacts(updated.id, 'message_deleted'))
+            .catch((e: Error): void => { this.errorMsg = e.message; });
         },
       },
     });
@@ -1276,22 +1433,33 @@ struct ChatPage {
 
   // D-052:每次队列变更 → KV 持久化(Android ConversationSession 通知点
   //   :128-231 + durable persist :712/:1046);失败 hilog 非静默
-  private persistQueue(): void {
-    if (this.conversation === null) return;
+  private persistQueue(): Promise<void> {
+    if (this.conversation === null) return Promise.resolve();
     const convId: string = this.conversation.id;
-    persistPendingQueue(getChatKvStore(), convId, this.pendingQueue)
-      .catch((e: Error): void => {
-        hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'persist pending queue failed: %{public}s', e.message);
-      });
+    return persistPendingQueue(getChatKvStore(), convId, this.pendingQueue).catch((e: Error): void => {
+      hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'persist pending queue failed: %{public}s', e.message);
+      throw e;
+    });
+  }
+
+  private persistQueueWithEvent(event: string, messageId: string,
+    detail?: string): Promise<void> {
+    if (this.conversation === null) return Promise.resolve();
+    return persistPendingQueueWithEvent(getChatKvStore(), this.conversation.id,
+      this.pendingQueue, { event, messageId, detail }).catch((e: Error): void => {
+      hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'pending queue mutation failed: %{public}s', e.message);
+      throw e;
+    });
   }
 
   // D-052:审计事件(recordEvent:62-87;entry 现有交互子集 enqueue/dequeue/cancel)
-  private auditQueueEvent(event: string, messageId: string, detail?: string): void {
-    if (this.conversation === null) return;
+  private auditQueueEvent(event: string, messageId: string, detail?: string): Promise<void> {
+    if (this.conversation === null) return Promise.resolve();
     const convId: string = this.conversation.id;
-    recordPendingQueueEvent(getChatKvStore(), convId, { event, messageId, detail })
+    return recordPendingQueueEvent(getChatKvStore(), convId, { event, messageId, detail })
       .catch((e: Error): void => {
         hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'pending queue audit failed: %{public}s', e.message);
+        throw e;
       });
   }
 
@@ -1433,6 +1601,38 @@ struct ChatPage {
   }
 
   // Copy sheet
+  // 1:1 原型消息区底部 56px mask 渐隐(不拦截触摸)
+  @Builder
+  BottomFade(h: number): void {
+    Column()
+      .width('100%')
+      .height(h)
+      .linearGradient({
+        direction: GradientDirection.Bottom,
+        colors: [[BG_FADE_START, 0.0], [BG_FADE_END, 1.0]],
+      })
+      .hitTestBehavior(HitTestMode.None)
+  }
+
+  // 收藏消息文本 → FavoriteStore 真实落盘(KV)
+  private favoriteText(text: string): void {
+    const conv = this.conversation;
+    const body: string = text.trim();
+    if (conv === null || body.length === 0) return;
+    const first: string = body.split('\n')[0];
+    this.favSeq++;
+    addFavorite({
+      // Date.now 同毫秒可碰撞 → 序号后缀保 ForEach key 唯一
+      id: `${Date.now()}-${this.favSeq}`,
+      title: first.substring(0, 40),
+      content: body,
+      conversationId: conv.id,
+      createdAt: Date.now(),
+    }).then((): void => {
+      promptAction.showToast({ message: '已收藏', duration: 1200 });
+    });
+  }
+
   private openCopySheet(msg: UIMessage): void {
     this.copySheetMessage = msg;
     this.copySheetOpen = true;
@@ -1457,9 +1657,16 @@ struct ChatPage {
   //   避免空 groups 闪烁(KV/Preferences 本地读取,用户感知不到延迟)。
   //   Android ChatPage.kt:985-996 装配 + 992 挂载 的鸿蒙对应。
   //   嵌套 .then(对齐 ChatModelPickerPage 既有装配范式,避开 Promise.all 元组推断)
+  // 1:1 原型 menuIn .16s ease-out:开/关都经 animateTo 驱动 transition 进出场
+  private closeModelMenu(): void {
+    animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+      this.modelMenuOpen = false;
+    });
+  }
+
   private toggleModelMenu(): void {
     if (this.modelMenuOpen) {
-      this.modelMenuOpen = false;
+      this.closeModelMenu();
       return;
     }
     // 重入守卫:装配期间连点忽略(KV/Preferences 本地读取快,但避免重复链)
@@ -1475,7 +1682,9 @@ struct ChatPage {
         this.modelMenuCurrentProvider = currentProvider;
         this.modelMenuCurrentModel = currentModel;
         this.modelMenuLoading = false;
-        this.modelMenuOpen = true;
+        animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+          this.modelMenuOpen = true;
+        });
       });
     });
   }
@@ -1491,7 +1700,7 @@ struct ChatPage {
         this.contextWindowTokens = choice !== null ? choice.model.contextWindowTokens : null;
         this.refreshReasoningPicker(choice);
       });
-      this.modelMenuOpen = false;
+      this.closeModelMenu();
     });
   }
 
@@ -1673,17 +1882,21 @@ struct ChatPage {
         //   ChatService:498-511 同语义(changed/count>0 才记录)
         ...createConversationQueueTools({
           pendingProvider: (): Promise<PendingUserMessage[]> => Promise.resolve(this.pendingQueue),
-          cancelOne: (messageId: string): Promise<void> => {
-            this.cancelPendingById(messageId);
-            return Promise.resolve();
-          },
+          cancelOne: (messageId: string): Promise<void> => this.cancelPendingById(messageId),
           clearAll: (): Promise<void> => {
-            const count: number = this.pendingQueue.length;
+            const previous: PendingUserMessage[] = this.pendingQueue;
+            const count: number = previous.length;
             if (count > 0) {
               this.pendingQueue = [];
               this.syncPendingRows();
-              this.persistQueue();
-              this.auditQueueEvent('clear', '', `count=${count}`);
+              return this.persistQueue().then((): Promise<void> =>
+                this.auditQueueEvent('clear', '', `count=${count}`))
+                .catch((e: Error): void => {
+                  this.pendingQueue = previous;
+                  this.syncPendingRows();
+                  this.errorMsg = e.message;
+                  throw e;
+                });
             }
             return Promise.resolve();
           },
@@ -1907,18 +2120,25 @@ struct ChatPage {
   //   GenerationHandler:386-390):生成中到达的 STEER 出队 → user 消息注入会话;
   //   出队后 durable persist + 审计(D-052 同规)
   private drainSteerMessages(): Promise<UIMessage[]> {
-    const steers: PendingUserMessage[] = this.pendingQueue.filter(
+    const previous: PendingUserMessage[] = this.pendingQueue;
+    const steers: PendingUserMessage[] = previous.filter(
       (m: PendingUserMessage): boolean => m.mode === 'STEER');
     if (steers.length === 0) return Promise.resolve([]);
     this.pendingQueue = this.pendingQueue.filter(
       (m: PendingUserMessage): boolean => m.mode !== 'STEER');
     this.syncPendingRows();
-    this.persistQueue();
+    let durable: Promise<void> = this.persistQueue();
     for (const s of steers) {
-      this.auditQueueEvent('dequeue', s.id, 'steer');
+      durable = durable.then((): Promise<void> => this.auditQueueEvent('dequeue', s.id, 'steer'));
     }
-    return Promise.resolve(steers.map(
-      (s: PendingUserMessage): UIMessage => makeUIMessage('user', s.parts)));
+    return durable.then((): UIMessage[] => steers.map(
+      (s: PendingUserMessage): UIMessage => makeUIMessage('user', s.parts)))
+      .catch((e: Error): UIMessage[] => {
+        this.pendingQueue = previous;
+        this.syncPendingRows();
+        this.errorMsg = e.message;
+        throw e;
+      });
   }
 
   // 工具审批(ChatService.kt:1122-1188):改写 approvalState → 持久化 →
@@ -1982,6 +2202,7 @@ struct ChatPage {
     this.sending = true;
     this.errorMsg = '';
     this.abortController = new EntryAbortController();
+    const operationToken: number = ++this.generationToken;
     const lastNodeId: string = conv.messageNodes.length > 0
       ? conv.messageNodes[conv.messageNodes.length - 1].id
       : '';
@@ -2020,10 +2241,13 @@ struct ChatPage {
             maxRetries: this.agentRuntime.generationRetry.maxRetries,
           }),
           onRetryStatus: (status: string | null): void => {
-            this.retryStatus = status ?? '';
+            if (this.isGenerationOperationActive(operationToken)) {
+              this.retryStatus = status ?? '';
+            }
           },
           onUpdate: (msgs: UIMessage[]): void => {
-            if (msgs.length === 0 || holder.rt === null) return;
+            if (!this.isGenerationOperationActive(operationToken)
+              || msgs.length === 0 || holder.rt === null) return;
             const ctx: TransformerContext = { assistant: holder.rt.assistant };
             const transformed: UIMessage[] = applyVisualTransformersStreamingTail(
               msgs, [thinkTagTransformer, regexOutputTransformer], ctx);
@@ -2033,6 +2257,7 @@ struct ChatPage {
         }, this.buildToolLoop(rt, conv));
       })
       .then((out: Conversation): void => {
+        if (!this.isGenerationOperationActive(operationToken)) return;
         this.conversation = out;
         this.rows = buildRows(out);
         this.suggestions = out.chatSuggestions;
@@ -2050,6 +2275,7 @@ struct ChatPage {
         this.drainPendingQueue();
       })
       .catch((e: Error): void => {
+        if (!this.isGenerationOperationActive(operationToken)) return;
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
         this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
@@ -2057,13 +2283,18 @@ struct ChatPage {
         this.regenTail = null;
         this.regenNodeId = '';
         // 审批态/部分写回已持久化,刷新显示
-        getChatRepository().getById(conv.id).then((saved: Conversation | null): void => {
-          if (saved !== null) {
-            this.conversation = saved;
-            this.rows = buildRows(saved);
-          }
-          this.drainPendingQueue();
-        });
+        getChatRepository().getById(conv.id)
+          .then((saved: Conversation | null): void => {
+            if (saved !== null) {
+              this.conversation = saved;
+              this.rows = buildRows(saved);
+            }
+          })
+          .catch((reloadError: Error): void => {
+            hilog.warn(HILOG_DOMAIN, HILOG_TAG,
+              'regenerate reload failed: %{public}s', reloadError.message);
+          })
+          .then((): void => { this.drainPendingQueue(); });
       });
   }
 
@@ -2075,65 +2306,78 @@ struct ChatPage {
   //   FOLLOWUP — 鸿蒙入队仅在 sending 分支发生,天然等价
   private enqueuePendingParts(
     parts: UIMessagePart[], answer: boolean, mode: PendingUserMessageMode = 'FOLLOWUP'): void {
-    const msg: PendingUserMessage = makePendingUserMessage({
-      parts,
-      answer,
-      mode,
-    });
-    const r = enqueuePendingUserMessage(this.pendingQueue, msg);
+    const previous: PendingUserMessage[] = this.pendingQueue;
+    const msg: PendingUserMessage = makePendingUserMessage({ parts, answer, mode });
+    const r = enqueuePendingUserMessage(previous, msg);
     if (!r.accepted) {
       this.errorMsg = '消息队列已满，请先等待或取消一些排队消息。';
       return;
     }
     this.pendingQueue = r.messages;
     this.syncPendingRows();
-    this.persistQueue();
-    // 审计:enqueue(detail = mode 小写,Android mode.name.lowercase())
-    this.auditQueueEvent('enqueue', msg.id, msg.mode.toLowerCase());
+    this.persistQueueWithEvent('enqueue', msg.id, msg.mode.toLowerCase())
+      .catch((e: Error): void => {
+        this.pendingQueue = previous;
+        this.syncPendingRows();
+        this.errorMsg = e.message;
+      });
   }
 
-  private cancelPendingById(id: string): void {
-    const r = cancelPendingUserMessage(this.pendingQueue, id);
-    if (r.changed) {
-      this.pendingQueue = r.messages;
-      this.syncPendingRows();
-      this.persistQueue();
-      this.auditQueueEvent('cancel', id);
-    }
+  private cancelPendingById(id: string): Promise<void> {
+    const previous: PendingUserMessage[] = this.pendingQueue;
+    const r = cancelPendingUserMessage(previous, id);
+    if (!r.changed) return Promise.resolve();
+    this.pendingQueue = r.messages;
+    this.syncPendingRows();
+    return this.persistQueueWithEvent('cancel', id)
+      .catch((e: Error): void => {
+        this.pendingQueue = previous;
+        this.syncPendingRows();
+        this.errorMsg = e.message;
+        throw e;
+      });
   }
 
   // 生成完成(成功/失败/中断)后出队下一条继续派发(Android 循环逐条 catch 后继续)
   private drainPendingQueue(): void {
-    if (this.sending || this.conversation === null) return;
-    // D-057:未执行/待审批工具阻塞 → 停止派发(ChatService.kt:860 break;
-    //   审批续跑/「继续」解阻后再 drain)
+    if (this.pendingDrainActive || this.sending || this.appendActive || this.conversation === null) return;
     if (conversationHasPendingOrUnexecutedTools(this.conversation)) return;
-    const dq: DequeueNextResult = dequeueNextPendingUserMessage(this.pendingQueue);
+    const previous: PendingUserMessage[] = this.pendingQueue;
+    const dq: DequeueNextResult = dequeueNextPendingUserMessage(previous);
     if (dq.next === null) return;
     const prep = preparePendingMessageForDispatch(dq.rest, dq.next);
     this.pendingQueue = prep.rest;
     this.syncPendingRows();
-    // D-052:dequeue 后 durable persist(ChatService.kt:1046-1053)+ 审计
-    //   (detail = 派发消息 mode 小写 — STEER 经 prepare 已转 FOLLOWUP)
-    this.persistQueue();
-    this.auditQueueEvent('dequeue', prep.dispatch.id, prep.dispatch.mode.toLowerCase());
-    // D-051:answer=false → 只记录不生成(ChatService.kt:847-850
-    //   appendUserMessage;answer 才 handleMessageComplete),随后继续出队
-    if (!prep.dispatch.answer) {
-      runAppendUserMessage(this.conversation, prep.dispatch.parts, getChatRepository())
-        .then((out: Conversation): void => {
-          this.conversation = out;
-          this.rows = buildRows(out);
-          this.scrollToBottom();
-          this.drainPendingQueue();
-        })
-        .catch((e: Error): void => {
-          this.errorMsg = e.message;
-          this.drainPendingQueue();
-        });
-      return;
-    }
-    this.sendParts(prep.dispatch.parts, prep.dispatch.id);
+    this.pendingDrainActive = true;
+    this.persistQueueWithEvent('dequeue', prep.dispatch.id, prep.dispatch.mode.toLowerCase())
+      .then((): void => {
+        this.pendingDrainActive = false;
+        if (!prep.dispatch.answer) {
+          this.pendingDrainActive = true;
+          this.appendActive = true;
+          runAppendUserMessage(this.conversation as Conversation, prep.dispatch.parts,
+            getChatRepository())
+            .then((out: Conversation): void => {
+              this.conversation = out;
+              this.rows = buildRows(out);
+              this.scrollToBottom();
+            })
+            .catch((e: Error): void => { this.errorMsg = e.message; })
+            .then((): void => {
+              this.appendActive = false;
+              this.pendingDrainActive = false;
+              this.drainPendingQueue();
+            });
+          return;
+        }
+        this.sendParts(prep.dispatch.parts, prep.dispatch.id);
+      })
+      .catch((e: Error): void => {
+        this.pendingQueue = previous;
+        this.syncPendingRows();
+        this.pendingDrainActive = false;
+        this.errorMsg = e.message;
+      });
   }
 
   // ===== D-064 /deepread 斜杠命令(SendMessageOrchestrator.kt:26-41) =====
@@ -2152,7 +2396,7 @@ struct ChatPage {
     const event: DeepReadOpenEvent | null = parseDeepReadSlashCommand(inputParts, sha256HexUtf8);
     if (event === null) return false;
     this.inputText = '';
-    this.pendingImages = [];
+    this.invalidatePicker(true);
     this.openDeepRead(event);
     return true;
   }
@@ -2164,6 +2408,7 @@ struct ChatPage {
   //   非生成中 → answer=false 直接 appendUserMessage(只记录不生成)
   //   登记偏差:编辑态不支持(Android 无此交互),编辑态长按按普通发送语义入队
   private sendWithoutAnswer(): void {
+    if (this.materializingImages) return;
     const text: string = this.inputText.trim();
     const hasImages: boolean = this.pendingImages.length > 0;
     if ((text.length === 0 && !hasImages) || this.conversation === null) return;
@@ -2181,20 +2426,26 @@ struct ChatPage {
     this.gateModelConfigured((choice: ChatProviderChoice): void => {
       this.guardImagesForSend(inputParts, choice, (): void => {
         this.inputText = '';
-        this.pendingImages = [];
+        this.invalidatePicker(true);
         if (this.editingNodeId.length > 0) this.cancelEdit();
         if (this.sending) {
           // D-081:STEER + answer=true(ChatPage.kt:708) — 插话注入进行中生成
           this.enqueuePendingParts(inputParts, true, 'STEER');
           return;
         }
+        if (this.appendActive) return;
+        this.appendActive = true;
         runAppendUserMessage(this.conversation as Conversation, inputParts, getChatRepository())
           .then((out: Conversation): void => {
             this.conversation = out;
             this.rows = buildRows(out);
             this.scrollToBottom();
           })
-          .catch((e: Error): void => { this.errorMsg = e.message; });
+          .catch((e: Error): void => { this.errorMsg = e.message; })
+          .then((): void => {
+            this.appendActive = false;
+            this.drainPendingQueue();
+          });
       });
     });
   }
@@ -2271,6 +2522,7 @@ struct ChatPage {
   }
 
   private send(): void {
+    if (this.materializingImages) return;
     const text: string = this.inputText.trim();
     const hasImages: boolean = this.pendingImages.length > 0;
     // D-038:文本可空但图片不可空;两者皆空才拦截(isEmptyInput 对齐 Android)
@@ -2294,12 +2546,13 @@ struct ChatPage {
         if (this.sending) {
           this.enqueuePendingParts(inputParts, true);
           this.inputText = '';
-          this.pendingImages = [];
+          this.invalidatePicker(true);
           if (this.editingNodeId.length > 0) this.cancelEdit();
           return;
         }
         // 编辑态:走「编辑并重发」(编辑态不携带待发图片,对齐 Android 编辑仅文本)
         if (this.editingNodeId.length > 0) {
+          this.invalidatePicker(true);
           this.sendEdit(text);
           return;
         }
@@ -2318,6 +2571,7 @@ struct ChatPage {
     this.sending = true;
     this.errorMsg = '';
     this.abortController = new EntryAbortController();
+    const operationToken: number = ++this.generationToken;
     const conv: Conversation = this.conversation;
     // 流式尾部起点 = 现有消息 + 即将入列的 user 消息
     const tailStart: number = currentMessages(conv).length + 1;
@@ -2365,9 +2619,12 @@ struct ChatPage {
           }),
           // D-050:重试状态(strings.xml:386 文案;null 清除)
           onRetryStatus: (status: string | null): void => {
-            this.retryStatus = status ?? '';
+            if (this.isGenerationOperationActive(operationToken)) {
+              this.retryStatus = status ?? '';
+            }
           },
           onUpdate: (msgs: UIMessage[]): void => {
+            if (!this.isGenerationOperationActive(operationToken)) return;
             if (resumeMode) {
               if (msgs.length > 0) {
                 this.regenNodeId = resumeNodeId;
@@ -2388,7 +2645,7 @@ struct ChatPage {
           .join('\n');
         const blocker: IdleToolBlockerResult = resolveIdleToolBlocker(conv, answerText, isPureText);
         if (blocker.changed) {
-          this.auditQueueEvent(blocker.event ?? 'pending_tool_cancel', dispatchMessageId,
+          await this.auditQueueEvent(blocker.event ?? 'pending_tool_cancel', dispatchMessageId,
             blocker.blockingToolNames.join(','));
           if (blocker.shouldResume) {
             resumeMode = true;
@@ -2408,6 +2665,7 @@ struct ChatPage {
         return runChatTurnWithTools(conv, userInput, deps, this.buildToolLoop(rt, conv));
       })
       .then((out: Conversation): void => {
+        if (!this.isGenerationOperationActive(operationToken)) return;
         this.conversation = out;
         this.rows = buildRows(out);
         this.streamingTail = [];
@@ -2415,7 +2673,7 @@ struct ChatPage {
         this.regenNodeId = '';
         this.suggestions = out.chatSuggestions;
         this.inputText = '';
-        this.pendingImages = [];
+        this.invalidatePicker(true);
         this.sending = false;
         this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
         this.abortController = null;
@@ -2430,6 +2688,7 @@ struct ChatPage {
         this.drainPendingQueue();
       })
       .catch((e: Error): void => {
+        if (!this.isGenerationOperationActive(operationToken)) return;
         this.errorMsg = this.compactErrorText(e);
         this.sending = false;
         this.refreshContextCompacts(); // D-110:压缩可能已写新摘要,刷新足迹
@@ -2438,17 +2697,23 @@ struct ChatPage {
         this.regenTail = null;
         this.regenNodeId = '';
         // 图片已随 user 快照持久化,清空避免重发时重复
-        this.pendingImages = [];
+        this.invalidatePicker(true);
         // user 消息快照已持久化(chat_turn 语义),刷新显示
-        getChatRepository().getById(conv.id).then((saved: Conversation | null): void => {
-          if (saved !== null) {
-            this.conversation = saved;
-            this.rows = buildRows(saved);
-            this.suggestions = saved.chatSuggestions;
-          }
-          // D-048:失败也继续出队(Android 循环逐条 catch → addError 后继续)
-          this.drainPendingQueue();
-        });
+        getChatRepository().getById(conv.id)
+          .then((saved: Conversation | null): void => {
+            if (saved !== null) {
+              this.conversation = saved;
+              this.rows = buildRows(saved);
+              this.suggestions = saved.chatSuggestions;
+            }
+          })
+          .catch((reloadError: Error): void => {
+            hilog.warn(HILOG_DOMAIN, HILOG_TAG, 'send reload failed: %{public}s', reloadError.message);
+          })
+          .then((): void => {
+            // D-048:失败也继续出队(Android 循环逐条 catch → addError 后继续)
+            this.drainPendingQueue();
+          });
       });
   }
 
@@ -2527,7 +2792,7 @@ struct ChatPage {
     .backgroundColor(SURFACE)
     .borderRadius(999)
     .border({ width: 1, color: LINE })
-    .margin({ left: 16, right: 16, bottom: 4 })
+    .margin({ left: 20, right: 20, bottom: 4 })
     .onClick((): void => { this.sandboxSheetOpen = true; })
   }
 
@@ -2648,72 +2913,9 @@ struct ChatPage {
   build() {
     Stack() {
     Column() {
-      // Amber Redesign ChatHeader — Row[left ←/☰ | center title+model | right ctx-meter+✎]
-      Row() {
-        // Left:≡ 菜单(回对话列表, 对齐参考图)
-        Text('☰')
-          .fontSize(24)
-          .fontColor(INK)
-          .onClick((): void => { router.back(); })
-
-        // Center:标题 + 模型行(flex 1, margin-left 2)
-        Column() {
-          if (this.editingTitle) {
-            TextInput({ text: this.titleInput, placeholder: '会话标题' })
-              .fontSize(HEADER).fontWeight(FontWeight.Bold)
-              .layoutWeight(1).height(36)
-              .backgroundColor(SURFACE)
-              .onChange((v: string): void => { this.titleInput = v; })
-          } else {
-            Text(this.title)
-              .fontSize(HEADER).fontWeight(FontWeight.Bold).fontColor(INK)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-          }
-          // 模型行(1:1 参考图): 模型名 mono + ⌄ 紧跟其后, 整体左对齐(不推到右)
-          Row() {
-            Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型')
-              .fontSize(META).fontFamily('JetBrainsMono')
-              .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Text(this.modelMenuOpen ? '⌃' : '⌄')
-              .fontSize(11).fontColor(INK4)
-              .margin({ left: 6 })
-          }
-          .margin({ top: 1 })
-        }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        .margin({ left: 10 })
-        .onClick((): void => {
-          if (!this.editingTitle) {
-            this.toggleModelMenu();
-          }
-        })
-
-        // Right:ContextMeter(5 段柱) + % + ✎(或编辑态 保存/取消)
-        if (this.editingTitle) {
-          Row() {
-            Text('保存').fontSize(META).fontColor(ACCENT)
-              .padding({ left: 8, right: 4 })
-              .onClick((): void => this.saveTitle())
-            Text('取消').fontSize(META).fontColor(INK3)
-              .padding({ left: 8, right: 0 })
-              .onClick((): void => { this.editingTitle = false; })
-          }
-        } else {
-          // Right:「+」新对话(对齐参考图)
-          Text('+')
-            .fontSize(26)
-            .fontColor(INK)
-            .onClick((): void => { this.newChat(); })
-        }
-      }
-      .width('100%')
-      .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
-      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
-      .backgroundColor(BG)
-
+      // 1:1 原型:头部悬浮层(默认全透明,scrollTop>4 玻璃化+浮出发丝线),
+      //   消息区 paddingTop 补偿头部高度
+      Stack({ alignContent: Alignment.Top }) {
       // cachedCount 预渲染可见区外 5 项,改善滚动流畅度
       // LazyForEach 替换 ForEach 需 IDataSource 重构(涉及 18+ 处 rows 赋值),
       //   登记为设备验证项(需真机验证 IDataSource 响应式 + 性能提升)
@@ -2738,6 +2940,8 @@ struct ChatPage {
                 this.openSubAgentSheet(rid, tools);
               },
               onCopy: (): void => { this.openCopySheet(row.message); },
+              onSpeak: (t: string): void => { speakText(t); },
+              onFavorite: (t: string): void => { this.favoriteText(t); },
               onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
             })
           }
@@ -2747,7 +2951,7 @@ struct ChatPage {
               MessageRow({ message: this.regenTail as UIMessage, streaming: true })
             }
           }
-        }, (row: MsgRow): string => row.nodeId)
+        }, (row: MsgRow): string => row.nodeId + (this.darkMode ? "-d" : "-l"))
         ForEach(this.streamingTail, (m: UIMessage): void => {
           ListItem() {
             MessageRow({ message: m, streaming: true })
@@ -2756,25 +2960,102 @@ struct ChatPage {
         if (this.sending) {
           ListItem() {
             Text('生成中…').fontSize(12).fontColor(INK3)
-              .padding({ left: 16, top: 4, bottom: 4 })
+              .padding({ left: 20, top: 4, bottom: 4 })
           }
         }
       }
       .width('100%').layoutWeight(1)
       .cachedCount(5)
+      .padding({ top: this.statusBarHeight + 58 })
+      .overlay(this.BottomFade(56), { align: Alignment.Bottom })
+      .onDidScroll((): void => {
+        const y: number = this.scroller.currentOffset().yOffset;
+        const solid: boolean = y > 4;
+        if (solid !== this.headerSolid) {
+          animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+            this.headerSolid = solid;
+          });
+        }
+      })
       .divider({ strokeWidth: 1, color: LINE })
+
+      // 悬浮头部(1:1 原型 padding 2px 20px 11px;透明 → 毛玻璃 blur14)
+      Row() {
+        // Left:返回箭头(chevL 24, ink;左缘 = 20px gutter)
+        Icon({ name: 'chevron_left', iconSize: 24, color: INK })
+          .onClick((): void => { router.back(); })
+
+        // Center:标题 + 模型行(flex 1, margin-left 2)
+        Column() {
+          if (this.editingTitle) {
+            TextInput({ text: this.titleInput, placeholder: '会话标题' })
+              .fontSize(HEADER).fontWeight(FontWeight.Bold)
+              .layoutWeight(1).height(36)
+              .backgroundColor(SURFACE)
+              .onChange((v: string): void => { this.titleInput = v; })
+          } else {
+            Text(this.title)
+              .fontSize(HEADER).fontWeight(FontWeight.Bold).fontColor(INK)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
+          // 模型行(1:1):厂商前缀模型名 mono + ⌄ 紧跟其后,整体左对齐
+          Row() {
+            Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型')
+              .fontSize(META).fontFamily('JetBrainsMono')
+              .fontColor(this.modelLabel.length > 0 ? INK3 : ACCENT)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Icon({ name: 'chevron_down', iconSize: 11, color: INK4 })
+              .rotate({ angle: this.modelMenuOpen ? 180 : 0 })
+              .margin({ left: 6 })
+          }
+          .margin({ top: 1 })
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .margin({ left: 10 })
+        .onClick((): void => {
+          if (!this.editingTitle) {
+            this.toggleModelMenu();
+          }
+        })
+
+        // Right:✎(或编辑态 保存/取消)
+        if (this.editingTitle) {
+          Row() {
+            Text('保存').fontSize(META).fontColor(ACCENT)
+              .padding({ left: 8, right: 4 })
+              .onClick((): void => this.saveTitle())
+            Text('取消').fontSize(META).fontColor(INK3)
+              .padding({ left: 8, right: 0 })
+              .onClick((): void => { this.editingTitle = false; })
+          }
+        } else {
+          // Right:「+」新对话(对齐参考图)
+          Icon({ name: 'plus', iconSize: 22, color: INK })
+            .onClick((): void => { this.newChat(); })
+        }
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: this.statusBarHeight + 2, bottom: 11 })
+      .border({ width: { bottom: 1 }, color: { bottom: this.headerSolid ? LINE : Color.Transparent }, style: { bottom: BorderStyle.Dotted } })
+      .backgroundColor(this.headerSolid ? BG_GLASS : Color.Transparent)
+      .backdropBlur(this.headerSolid ? 14 : 0)
+      }
+      .layoutWeight(1)
+      .width('100%')
 
       if (this.errorMsg.length > 0) {
         Text(this.errorMsg)
           .fontSize(12).fontColor(ERROR)
-          .padding({ left: 16, right: 16, top: 4, bottom: 4 })
+          .padding({ left: 20, right: 20, top: 4, bottom: 4 })
       }
 
       // D-050:重试状态(strings.xml:386 文案,重试等待期间显示)
       if (this.retryStatus.length > 0) {
         Text(this.retryStatus)
           .fontSize(12).fontColor(ACCENT)
-          .padding({ left: 16, right: 16, top: 4, bottom: 4 })
+          .padding({ left: 20, right: 20, top: 4, bottom: 4 })
       }
 
       // 会话建议 chips(D-026):生成完成后刷新;点击填入输入框
@@ -2809,7 +3090,7 @@ struct ChatPage {
                 )
             }, (s: string): string => s)
           }
-          .padding({ left: 16, right: 16 })
+          .padding({ left: 20, right: 20 })
         }
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
@@ -2834,7 +3115,11 @@ struct ChatPage {
                 Text('✕')
                   .fontSize(11).fontColor(INK3)
                   .padding({ left: 6 })
-                  .onClick((): void => this.cancelPendingById(row.id))
+                  .onClick((): void => {
+                    this.cancelPendingById(row.id).catch((e: Error): void => {
+                      this.errorMsg = e.message;
+                    });
+                  })
               }
               .padding({ left: 10, right: 8, top: 5, bottom: 5 })
               .backgroundColor(SURFACE2)
@@ -2842,7 +3127,7 @@ struct ChatPage {
               .margin({ right: 8 })
             }, (row: PendingChipRow): string => row.id)
           }
-          .padding({ left: 16, right: 16 })
+          .padding({ left: 20, right: 20 })
         }
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
@@ -2861,18 +3146,22 @@ struct ChatPage {
                   .width(64).height(64)
                   .objectFit(ImageFit.Cover)
                   .borderRadius(8)
+                  .onClick((): void => { this.inspectPendingImage(url); })
+                  .accessibilityText(`查看第 ${i + 1} 张待发图片`)
                 Text('✕')
-                  .fontSize(10).fontColor('#FFFFFF')
-                  .padding({ left: 4, right: 4, top: 1, bottom: 1 })
+                  .fontSize(11).fontColor('#FFFFFF')
+                  .width(44).height(44)
+                  .textAlign(TextAlign.Center)
                   .backgroundColor('#66000000')
-                  .borderRadius(8)
+                  .borderRadius(22)
                   .onClick((): void => { this.removePendingImage(i); })
+                  .accessibilityText(`删除第 ${i + 1} 张待发图片`)
               }
+              .alignContent(Alignment.TopEnd)
               .margin({ right: 8 })
-              .onClick((): void => { this.inspectPendingImage(url); })
             }, (url: string): string => url)
           }
-          .padding({ left: 16, right: 16 })
+          .padding({ left: 20, right: 20 })
         }
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
@@ -2896,9 +3185,12 @@ struct ChatPage {
         hasImages: this.pendingImages.length > 0,
         subAgentEnabled: this.subAgentEnabled,
         subAgentMode: this.subAgentMode,
-        reasoningLevels: this.reasoningLevels,
-        currentReasoningLevel: this.currentReasoningLevel,
-        onTextChange: (v: string): void => { this.inputText = v; },
+        // 1:1 原型 send 键 color/bg .18s ease:输入变化经 animateTo 驱动
+        onTextChange: (v: string): void => {
+          animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
+            this.inputText = v;
+          });
+        },
         onSend: (): void => { this.send(); },
         onStop: (): void => {
           this.abortController?.abort();
@@ -2906,7 +3198,7 @@ struct ChatPage {
           if (conv2.changed) {
             this.pendingQueue = conv2.messages;
             this.syncPendingRows();
-            this.persistQueue();
+            this.persistQueue().catch((e: Error): void => { this.errorMsg = e.message; });
           }
         },
         onSendWithoutAnswer: (): void => { this.sendWithoutAnswer(); },
@@ -2915,28 +3207,29 @@ struct ChatPage {
         onClearInput: (): void => { this.inputText = ''; },
         onCompactContext: (): void => { this.compactCurrentConversation(); },
         onInsertText: (t: string): void => { this.inputText = t; },
-        onReasoningLevelChange: (level: string): void => { this.handleReasoningLevelChange(level); },
       })
     }
     .width('100%').height('100%').backgroundColor(BG)
 
-    // 空状态 hero(1:1 对齐参考图): amber+绿光标 + Hi <name>, / 今天想聊点什么?
+    // 空状态 hero(1:1 原型): 居中 Amber▌ 词标 36px 陶土光标闪烁 +
+    //   问候句 3.2s 淡入淡出轮换;光学中心上移(margin bottom 128)
     if (this.rows.length === 0 && !this.sending) {
       Column() {
         Row() {
-          Text('amber')
-            .fontSize(30).fontWeight(FontWeight.Bold).fontColor(INK).fontFamily('JetBrainsMono')
+          DotText({ text: 'AMBER', dotScale: 3.6, color: INK, glow: true })
           Text('')
-            .width(10).height(26).backgroundColor(SIGNAL).borderRadius(2)
+            .width(12).height(30).backgroundColor(ACCENT).borderRadius(2)
             .margin({ left: 4 })
             .opacity(this.cursorOn ? 1 : 0)
         }
-        Text(this.greetName.length > 0 ? `Hi ${this.greetName},` : 'Hi,')
-          .fontSize(28).fontColor(INK).margin({ top: 28 })
-        Text('今天想聊点什么?')
-          .fontSize(28).fontColor(INK).margin({ top: 10 })
+        Text(GREETINGS[this.greetIdx])
+          .fontSize(15).fontColor(INK3)
+          .margin({ top: 14 })
+          .opacity(this.greetOpacity)
       }
       .alignItems(HorizontalAlign.Center)
+      .width('100%')
+      .margin({ bottom: 128 })
     }
 
     // TopModelMenu 覆盖层(Android TopModelMenu.kt:Box { scrim; AnimatedVisibility(panel) })
@@ -2947,16 +3240,19 @@ struct ChatPage {
         groups: this.modelMenuGroups,
         currentProviderId: this.modelMenuCurrentProvider,
         currentModelId: this.modelMenuCurrentModel,
+        reasoningLevels: this.reasoningLevels,
+        currentReasoningLevel: this.currentReasoningLevel,
+        onReasoningLevelChange: (level: string): void => { this.handleReasoningLevelChange(level); },
         onSelect: (providerId: string, modelId: string): void => {
           this.selectModelFromMenu(providerId, modelId);
         },
-        onClose: (): void => { this.modelMenuOpen = false; },
+        onClose: (): void => { this.closeModelMenu(); },
         onOpenFullPicker: (): void => {
-          this.modelMenuOpen = false;
+          this.closeModelMenu();
           router.pushUrl({ url: 'pages/ChatModelPickerPage' });
         },
         onOpenProviderSettings: (): void => {
-          this.modelMenuOpen = false;
+          this.closeModelMenu();
           router.pushUrl({ url: 'pages/ChatProviderSettingsPage' });
         },
       })
@@ -3003,6 +3299,16 @@ struct ChatPage {
     }
     }
     .width('100%').height('100%')
+    // 1:1 原型 slideInR .28s ease-out:整页入场 translateX 20→0 + opacity 0→1
+    //   乘 themeTick 读取建依赖:主题变更 onPageShow 后 build 重读令牌
+    .opacity(this.pageEnterOpacity * (this.themeTick >= 0 ? 1 : 1))
+    .translate({ x: this.pageEnterX })
+    .onAppear((): void => {
+      animateTo({ duration: 280, curve: Curve.EaseOut }, (): void => {
+        this.pageEnterOpacity = 1;
+        this.pageEnterX = 0;
+      });
+    })
     // D-122:沙盒活动 sheet(sandboxOverlayOpen → sandboxSheetOpen)
     .bindSheet(this.sandboxSheetOpen, this.sandboxSheet(this.sandboxTimeline()), {
       height: SheetSize.LARGE,

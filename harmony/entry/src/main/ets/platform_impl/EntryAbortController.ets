@@ -18,6 +18,12 @@ class EntryAbortSignal implements AbortSignalLike {
     this.listeners.push(listener);
   }
 
+  public removeEventListener(type: string, listener: () => void): void {
+    if (type !== 'abort') return;
+    const index: number = this.listeners.indexOf(listener);
+    if (index >= 0) this.listeners.splice(index, 1);
+  }
+
   public fire(): void {
     this.aborted = true;
     const pending: Array<() => void> = this.listeners;

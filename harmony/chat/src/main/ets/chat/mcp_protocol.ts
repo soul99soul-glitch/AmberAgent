@@ -77,6 +77,8 @@ export interface McpTransport {
   onClose(block: () => void): void;
   onError(block: (e: Error) => void): void;
   onMessage(block: (msg: JsonObject) => void): void;
+  // Abort only the HTTP operation carrying this JSON-RPC request id.
+  cancelPending?: (requestId: string) => void | Promise<void>;
 }
 
 // ===== 内容/工具类型(tools.kt/content.kt 使用面子集) =====
@@ -120,6 +122,7 @@ export class McpClient {
   private readonly clientInfo: McpClientInfo;
   private transport: McpTransport | null = null;
   private readonly pending: Map<string, PendingHandler> = new Map();
+  private readonly cancelledIds: Map<string, number> = new Map();
   private closeHook: () => void = (): void => {};
   private errorHook: (e: Error) => void = (): void => {};
   private messageHook: (msg: JsonObject) => void = (): void => {};
@@ -224,6 +227,8 @@ export class McpClient {
 
     const cancel = (reason: McpError): void => {
       this.pending.delete(id);
+      this.suppressLateResponse(id, timeoutMs);
+      void transport.cancelPending?.(id);
       const note: JsonObject = {
         method: 'notifications/cancelled',
         params: { requestId: id, reason: reason.message },
@@ -233,12 +238,9 @@ export class McpClient {
       transport.send(note).catch((): void => {});
     };
 
-    const send: Promise<void> = transport.send(message);
     let timedOut: boolean = false;
-    // withTimeout 完成即取消倒计时(SDK 协程语义)—— 不清理会让 JS 定时器
-    //   挂住事件循环 60s/120s(进程工件,非协议行为)
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const timeout: Promise<void> = new Promise((_resolve, reject): void => {
+    const timeout: Promise<JsonValue> = new Promise((_resolve, reject): void => {
       timer = setTimeout((): void => {
         timedOut = true;
         reject(new McpTimeoutError(timeoutMs));
@@ -247,18 +249,21 @@ export class McpClient {
     const clearTimer = (): void => {
       if (timer !== null) clearTimeout(timer);
     };
-    const race: Promise<void> = Promise.race([send, timeout]);
-
-    return race.then((): Promise<JsonValue> => {
-      clearTimer();
-      return done;
-    })
+    // The timeout covers both transport acceptance and response completion.
+    const sendAndWait: Promise<JsonValue> = transport.send(message).then(() => done);
+    return Promise.race([sendAndWait, timeout])
+      .then((value: JsonValue): JsonValue => {
+        clearTimer();
+        return value;
+      })
       .catch((cause: Error): Promise<JsonValue> => {
         clearTimer();
-        if (!timedOut) throw cause;
-        // Protocol.kt:511-520 — cancel(REQUEST_TIMEOUT) 后抛 TimeoutCancellationException
+        if (!timedOut) {
+          this.pending.delete(id);
+          this.suppressLateResponse(id, timeoutMs);
+          throw cause;
+        }
         cancel(new McpError(MCP_ERROR_REQUEST_TIMEOUT, 'Request timed out', { timeout: timeoutMs }));
-        this.pending.delete(id);
         throw cause;
       });
   }
@@ -345,12 +350,34 @@ export class McpClient {
     }
   }
 
+  private suppressLateResponse(id: string, ttlMs: number): void {
+    const now: number = Date.now();
+    for (const entry of this.cancelledIds.entries()) {
+      if (entry[1] <= now) this.cancelledIds.delete(entry[0]);
+    }
+    this.cancelledIds.set(id, now + Math.max(60000, ttlMs));
+    while (this.cancelledIds.size > 256) {
+      let oldest: string | null = null;
+      for (const key of this.cancelledIds.keys()) {
+        oldest = key;
+        break;
+      }
+      if (oldest === null) break;
+      this.cancelledIds.delete(oldest);
+    }
+  }
+
   // Protocol.kt:368-399
   private onResponse(response: JsonObject | null, error: JsonObject | null): void {
     const src: JsonObject = (response ?? error) as JsonObject;
     const id: string = String(src['id']);
     const handler: PendingHandler | undefined = this.pending.get(id);
     if (handler === undefined) {
+      const cancelledUntil: number | undefined = this.cancelledIds.get(id);
+      if (cancelledUntil !== undefined) {
+        this.cancelledIds.delete(id);
+        if (cancelledUntil > Date.now()) return;
+      }
       this.protocolErrorHook(new Error(
         `Received a response for an unknown message ID: ${JSON.stringify(src)}`));
       return;
@@ -394,6 +421,7 @@ export class McpClient {
   private doClose(): void {
     const handlers: PendingHandler[] = Array.from(this.pending.values());
     this.pending.clear();
+    this.cancelledIds.clear();
     this.transport = null;
     for (const h of handlers) {
       h.reject(new McpError(MCP_ERROR_CONNECTION_CLOSED, 'Connection closed'));
