@@ -251,10 +251,21 @@ enum IOSToolEffectClassMapping {
             || IOSWebMountToolCatalog.unsupportedToolNames.contains(toolName) {
             return .sideEffect
         }
+        if toolName == "skills_list"
+            || toolName == "use_skill"
+            || toolName == "skill_validate"
+            || toolName == "mcp_list" {
+            return .pure
+        }
         if toolName == "generate_image"
             || toolName == "subagent_dispatch"
             || toolName == "model_council_run"
-            || toolName == "mcp_call" {
+            || toolName == "mcp_call"
+            || toolName == "mcp_test"
+            || toolName == "mcp_import_from_skill"
+            || toolName == "skill_import"
+            || toolName == "skill_enable"
+            || toolName == "skill_disable" {
             return .sideEffect
         }
         // Fail-safe default (I-3): a tool name this map doesn't know about

@@ -296,6 +296,15 @@ struct ChatToolStepModel: Identifiable {
     private static func friendlyToolTitle(_ name: String, executed: Bool) -> String {
         let known: [String: String] = [
             "file_read_selected": "读取选中文件",
+            "skills_list": "列出技能",
+            "use_skill": "加载技能",
+            "skill_validate": "校验技能",
+            "skill_import": "导入技能",
+            "skill_enable": "启用技能",
+            "skill_disable": "禁用技能",
+            "mcp_list": "列出 MCP",
+            "mcp_test": "测试 MCP",
+            "mcp_import_from_skill": "从技能导入 MCP",
             "permissions_status": "查看权限状态",
             "tools_list": "列出可用工具",
             "subagent_report": "子智能体汇报",

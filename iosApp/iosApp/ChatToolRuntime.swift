@@ -113,21 +113,34 @@ final class ChatToolRuntime {
     private let localToolExecutor: IOSLocalToolExecutor?
     private let searchTransport: any IOSSearchHTTPTransport
     private let mcpManager: IOSMcpManager
+    private let skillFileStore: IOSSkillFileStore
+    private let mcpConfigStore: IOSMcpConfigStore
     private lazy var subAgentRunner = SubAgentRunner()
     private lazy var councilRunner = CouncilRunner()
+    private lazy var skillMcpToolService = IOSSkillMcpToolService(
+        skillStore: skillFileStore,
+        sharedSettings: sharedSettings,
+        workspaceStore: .shared,
+        mcpConfigStore: mcpConfigStore,
+        mcpManager: mcpManager
+    )
 
     init(
         settingsStore: SettingsStore,
         sharedSettings: IOSSharedSettingsStore,
         localToolExecutor: IOSLocalToolExecutor?,
         searchTransport: any IOSSearchHTTPTransport,
-        mcpManager: IOSMcpManager
+        mcpManager: IOSMcpManager,
+        skillFileStore: IOSSkillFileStore = IOSSkillFileStore(),
+        mcpConfigStore: IOSMcpConfigStore = .shared
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
         self.localToolExecutor = localToolExecutor
         self.searchTransport = searchTransport
         self.mcpManager = mcpManager
+        self.skillFileStore = skillFileStore
+        self.mcpConfigStore = mcpConfigStore
     }
 
     /// Tool set for the novel discussion agent. Ask User is always available;
@@ -285,6 +298,31 @@ final class ChatToolRuntime {
                 }
                 guard self.isAdvancedToolEnabled(toolName) else {
                     return .failed("\(toolName) 未开启。请先在设置中启用对应能力。")
+                }
+                let result = await self.dispatchAdvancedToolCall(
+                    self.toolCall(name: toolName, input: arguments),
+                    providerSetting: providerSetting,
+                    params: params,
+                    runId: runId
+                )
+                return .filled(result)
+            }
+        }
+
+        let skillMcpNames = IOSSkillToolCatalog.toolNames.union(IOSMcpManagementToolCatalog.toolNames)
+        for name in skillMcpNames where availableToolNames.contains(name) {
+            executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                let mutating = IOSSkillToolCatalog.mutatingToolNames.contains(toolName)
+                    || IOSMcpManagementToolCatalog.mutatingToolNames.contains(toolName)
+                if mutating,
+                   !IOSLocalToolExecutor.isGlobalAutoApproveEnabled,
+                   !IOSLocalToolExecutor.isHighRiskAutoApproveEnabled {
+                    return .denied("后台生成期间需要回到 App 确认 \(toolName)。")
+                }
+                if IOSMcpManagementToolCatalog.toolNames.contains(toolName),
+                   !self.isAdvancedToolEnabled(toolName) {
+                    return .failed("\(toolName) 未开启。请先在设置中启用 MCP。")
                 }
                 let result = await self.dispatchAdvancedToolCall(
                     self.toolCall(name: toolName, input: arguments),
@@ -881,7 +919,11 @@ final class ChatToolRuntime {
         in messages: [UIMessage],
         availableToolNames: Set<String>
     ) -> UIMessagePart.Tool? {
-        let advancedNames: Set<String> = ["mcp_call", "subagent_dispatch", "model_council_run"]
+        let advancedNames: Set<String> = Set([
+            "mcp_call", "subagent_dispatch", "model_council_run",
+        ])
+        .union(IOSSkillToolCatalog.toolNames)
+        .union(IOSMcpManagementToolCatalog.toolNames)
         for message in messages.reversed() where message.role == MessageRole.assistant {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
                 .first(where: {
@@ -1001,6 +1043,18 @@ final class ChatToolRuntime {
            let request = ChatToolApprovalRequestBuilder.mcp(
                for: pending.toolCall,
                reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。"
+           ) {
+            return .waitingForApproval(.mcp(request))
+        }
+
+        let mutatingSkillMcp = IOSSkillToolCatalog.mutatingToolNames.contains(pending.toolCall.toolName)
+            || IOSMcpManagementToolCatalog.mutatingToolNames.contains(pending.toolCall.toolName)
+        if mutatingSkillMcp,
+           !IOSLocalToolExecutor.isGlobalAutoApproveEnabled,
+           !IOSLocalToolExecutor.isHighRiskAutoApproveEnabled,
+           let request = ChatToolApprovalRequestBuilder.extensionMutation(
+               for: pending.toolCall,
+               reason: "将写入本机 Skill 或 MCP 配置，需要你确认。"
            ) {
             return .waitingForApproval(.mcp(request))
         }
@@ -1372,6 +1426,9 @@ final class ChatToolRuntime {
             } catch {
                 return "MCP 调用失败（server: \(server)，tool: \(tool)）：\(error.localizedDescription)"
             }
+        case let name where IOSSkillToolCatalog.toolNames.contains(name)
+            || IOSMcpManagementToolCatalog.toolNames.contains(name):
+            return await skillMcpToolService.execute(toolName: name, arguments: toolCall.input)
         default:
             return "未知工具：\(toolCall.toolName)"
         }
@@ -1552,8 +1609,12 @@ final class ChatToolRuntime {
 
     private func isAdvancedToolEnabled(_ toolName: String) -> Bool {
         switch toolName {
-        case "mcp_call":
-            sharedSettings.isCapabilityGateEnabled(.mcp)
+        case "mcp_call", "mcp_list", "mcp_test", "mcp_import_from_skill":
+            // Management tools stay callable so the model can import/enable MCP;
+            // call/test still need a live client (import auto-enables the gate).
+            true
+        case "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable":
+            true
         case "subagent_dispatch":
             isCapabilityPolicyEnabled("ios.agent.subagent_dispatch")
         case "model_council_run":

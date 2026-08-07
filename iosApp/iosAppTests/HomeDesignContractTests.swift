@@ -53,8 +53,8 @@ final class HomeDesignContractTests: XCTestCase {
     }
 
     func testPaletteDesignValues() {
-        XCTAssertEqual(AmberTheme.neutralLight.background, 0xECE8E4, "默认画布必须是设计实测暖灰")
-        XCTAssertEqual(AmberTheme.neutralLight.surface, 0xF6F5F3, "默认卡片必须比画布亮一档")
+        XCTAssertEqual(AmberTheme.neutralLight.background, 0xECE8E4, "暖灰画布必须是设计实测值")
+        XCTAssertEqual(AmberTheme.neutralLight.surface, 0xF6F5F3, "暖灰卡片必须比画布亮一档")
         XCTAssertEqual(AmberTheme.neutralLight.surface2, 0xEDEBE7, "闲置头像底色必须匹配设计令牌")
         XCTAssertEqual(AmberTheme.neutralLight.foreground, 0x161514, "主墨必须匹配设计令牌")
         XCTAssertEqual(AmberTheme.neutralLight.foreground2, 0x55524D, "节标题墨必须匹配设计令牌")
@@ -69,18 +69,41 @@ final class HomeDesignContractTests: XCTestCase {
         XCTAssertEqual(AmberTheme.paperLight.muted, 0x746D62, "暖纸次级墨必须匹配设计令牌")
         XCTAssertEqual(AmberTheme.paperLight.muted2, 0x918A80, "暖纸弱化墨必须匹配设计令牌")
 
+        XCTAssertEqual(AmberTheme.whiteLight.background, 0xF5F5F4, "中性白画布必须是冷中性灰白")
+        XCTAssertEqual(AmberTheme.whiteLight.surface, 0xFFFFFF, "中性白卡片必须为真白")
+        XCTAssertEqual(AmberTheme.whiteLight.surface2, 0xEEEEED, "中性白次表面必须与画布/卡片分层")
+        XCTAssertNotEqual(
+            AmberTheme.whiteLight.background,
+            AmberTheme.whiteLight.surface,
+            "中性白 background 与 surface 不得同值"
+        )
+
         XCTAssertEqual(AmberTheme.darkPalette.background, 0x0E0D10, "深色画布必须匹配设计令牌")
         XCTAssertEqual(AmberTheme.darkPalette.surface, 0x1F1D23, "深色卡片必须匹配设计令牌")
         XCTAssertEqual(AmberTheme.darkPalette.surface2, 0x2B2930, "深色次表面必须匹配设计令牌")
         XCTAssertEqual(AmberTheme.darkPalette.foreground, 0xF4F1ED, "深色主墨必须匹配设计令牌")
         XCTAssertEqual(AmberTheme.darkPalette.foreground2, 0xC3BEC5, "深色节标题墨必须匹配设计令牌")
         XCTAssertEqual(AmberTheme.darkPalette.muted, 0xAAA5AD, "深色次级墨必须匹配设计令牌")
+
+        XCTAssertEqual(AmberThemeRuntime.Paper.paper.displayName, "暖纸")
+        XCTAssertEqual(AmberThemeRuntime.Paper.neutral.displayName, "暖灰")
+        XCTAssertEqual(AmberThemeRuntime.Paper.white.displayName, "中性白")
+        XCTAssertFalse(AmberThemeRuntime.Paper.white.isImmersive)
     }
 
     func testAccentDesignValues() {
         XCTAssertEqual(AmberAccentOption.allCases.first, .amberGold, "默认 accent 必须是琥珀金")
         XCTAssertEqual(AmberAccentOption.amberGold.accentHex, 0xB9863A, "琥珀金色值必须精确匹配设计")
         XCTAssertEqual(AmberAccentOption.amberGold.inkHex, 0x231602, "FAB 前景墨色必须精确匹配设计")
+        // fab / focus 必须跟随 runtime accent，不得再钉死琥珀金常量。
+        let runtime = AmberThemeRuntime.shared
+        let previous = (runtime.accentHex, runtime.accentInkHex)
+        runtime.apply(.mistBlue)
+        XCTAssertEqual(runtime.accentHex, AmberAccentOption.mistBlue.accentHex)
+        // 读一次以保证观察链路；颜色本身是动态的，此处校验 runtime 写入。
+        XCTAssertEqual(runtime.accentInkHex, AmberAccentOption.mistBlue.inkHex)
+        runtime.accentHex = previous.0
+        runtime.accentInkHex = previous.1
     }
 
     func testContinueModelHidesWhenNoResumableWork() {
@@ -485,6 +508,100 @@ final class HomeDesignContractTests: XCTestCase {
         XCTAssertTrue(ring.contains("if reduceMotion"))
         XCTAssertTrue(source.contains("UIAccessibility.post(notification: .announcement"))
         XCTAssertTrue(source.contains("@AccessibilityFocusState private var deepReadShortcutFocused: Bool"))
+        // E 版当前会话头像呼吸光晕：只挂 isCurrent，Reduce Motion 关闭动画。
+        XCTAssertTrue(source.contains("CurrentConversationAvatarGlow()"))
+        XCTAssertTrue(source.contains("enum HomeCurrentAvatarBreath"))
+        XCTAssertTrue(source.contains("static var activeAvatarGlow"))
+    }
+
+    func testCurrentAvatarBreathIntensityMatchesPrototypeTiming() {
+        // 原型：delay 1.6s，period 3.4s，ease-in-out 0 → 1 → 0
+        XCTAssertEqual(HomeCurrentAvatarBreath.delaySeconds, 1.6, accuracy: 0.001)
+        XCTAssertEqual(HomeCurrentAvatarBreath.periodSeconds, 3.4, accuracy: 0.001)
+        XCTAssertEqual(HomeCurrentAvatarBreath.intensity(elapsed: 0, reduceMotion: false), 0, accuracy: 0.001)
+        XCTAssertEqual(HomeCurrentAvatarBreath.intensity(elapsed: 1.59, reduceMotion: false), 0, accuracy: 0.001)
+        XCTAssertEqual(
+            HomeCurrentAvatarBreath.intensity(elapsed: 1.6 + 3.4 * 0.5, reduceMotion: false),
+            1.0,
+            accuracy: 0.001,
+            "半周期应到峰值光晕"
+        )
+        XCTAssertEqual(
+            HomeCurrentAvatarBreath.intensity(elapsed: 1.6 + 3.4, reduceMotion: false),
+            0,
+            accuracy: 0.001,
+            "整周期应回到零"
+        )
+        XCTAssertEqual(
+            HomeCurrentAvatarBreath.intensity(elapsed: 100, reduceMotion: true),
+            0,
+            accuracy: 0.001,
+            "Reduce Motion 必须关掉呼吸（初始关键无光晕）"
+        )
+    }
+
+    @MainActor
+    func testListPreviewSanitizeAndWiringContracts() throws {
+        XCTAssertEqual(
+            ChatViewModel.sanitizeListPreview("  \"已整理好宋史相关段落，要看看吗？\"  \n第二行"),
+            "已整理好宋史相关段落，要看看吗？"
+        )
+        let long = String(repeating: "摘要", count: 20)
+        let truncated = ChatViewModel.sanitizeListPreview("- \(long)")
+        XCTAssertEqual(truncated.count, 28, "浓缩预览必须限长 28")
+        XCTAssertEqual(ChatViewModel.sanitizeListPreview(""), "")
+
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let chatVM = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/ChatViewModel.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(chatVM.contains("generateConversationListPreview()"))
+        XCTAssertTrue(chatVM.contains("ConversationListPreviewGenerator.schedule"))
+
+        let generator = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/ConversationListPreviewGenerator.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(generator.contains("requestTokens"))
+        XCTAssertTrue(generator.contains("titleModelId"))
+
+        let bg = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/IOSChatBackgroundGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            bg.contains("ConversationListPreviewGenerator.schedule"),
+            "后台成功完成必须挂 list preview，避免仅 FG generationSucceeded"
+        )
+
+        let store = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/IOSConversationStore.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(store.contains("listPreviewsByConversationId"))
+        XCTAssertTrue(store.contains("list-previews.json"))
+        XCTAssertTrue(store.contains("deletedConversationIds.contains(key)"))
+
+        let home = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/PlaceholderViews.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(home.contains("listPreview: conversationStore.listPreview(for: summary.id)"))
+        XCTAssertTrue(home.contains("restartMetaCycleIfNeeded"))
+        XCTAssertTrue(home.contains("showingListPreview"))
+        XCTAssertTrue(home.contains("scaleAnchor: .leading"))
+        XCTAssertTrue(home.contains("duration: 0.4"))
     }
 
     private func imageToolMessage(

@@ -645,7 +645,7 @@ final class ChatGenerationCoordinator {
     /// 后台时清空,避免下一个 run 继承上一个 run 的重复计数。
     private var currentToolLoopGuard = IOSToolLoopGuard()
     private var currentLiveActivityStage: AgentActivityStage?
-    private let maxToolResumeCount = 4
+    private let maxToolResumeCount = 6
     private var pendingStreamSnapshot: [UIMessage]?
     private var pendingStreamSnapshotProvider: (() -> [UIMessage])?
     private var streamSnapshotFlushTask: Task<Void, Never>?

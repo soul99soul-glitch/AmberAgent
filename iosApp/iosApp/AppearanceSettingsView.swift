@@ -90,20 +90,17 @@ struct AppearanceSettingsView: View {
         .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    // MARK: 2 · 背景色 (warm paper / neutral white)
+    // MARK: 2 · 背景色 (暖纸 / 暖灰 / 中性白)
 
     private var backgroundCards: some View {
-        // Only the neutral canvases (暖纸 / 中性白) are surfaced. The immersive single-hue
-        // canvases (绛红/赭橙/姜黄/品红/藕荷) are kept as placeholders in the theme system but
-        // HIDDEN here — full-bleed color didn't read well across the app's many surfaces.
-        // To bring them back (or swap in new colors): adjust the palettes in `AmberTheme` +
-        // the `Paper` cases, then drop the `!$0.isImmersive` filter below (or flip a case's
-        // `isImmersive` to false). Nothing else needs touching — base()/picker auto-pick up.
-        LazyVGrid(
+        // 三张非沉浸画布：暖纸、暖灰、中性白。沉浸单色画布仍隐藏。
+        // 顺序固定，避免 CaseIterable 声明序变化影响 UI。
+        let canvases: [AmberThemeRuntime.Paper] = [.paper, .neutral, .white]
+        return LazyVGrid(
             columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
             spacing: 12
         ) {
-            ForEach(AmberThemeRuntime.Paper.allCases.filter { !$0.isImmersive }, id: \.self) { paper in
+            ForEach(canvases, id: \.self) { paper in
                 backgroundCard(paper, palette: paper.lightPalette, name: paper.displayName)
             }
         }

@@ -19,7 +19,7 @@ struct IOSToolLoopGuard {
     }
 
     /// Grok 用 8/16 次才提醒/停止,是因为它的轮次预算本身宽裕。amber 前台
-    /// maxToolResumeCount=4、引擎 maxSteps=8——4 轮预算里重复到第 3 次已经烧掉
+    /// maxToolResumeCount=6、引擎 maxSteps=8——预算里重复到第 3 次已经烧掉
     /// 大半,没有"慢慢提醒几次"的空间,所以阈值直接定在 2/3。
     private static let remindAtCount = 2
     private static let stopAtCount = 3

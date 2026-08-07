@@ -967,7 +967,8 @@ final class IOSChatBackgroundGenerationCoordinator {
                     singleToolFailureReason: singleToolFailureReason,
                     guardStoppedNotice: guardStoppedNotice,
                     miniAppFailed: miniAppFailed,
-                    summary: watchSummary
+                    summary: watchSummary,
+                    completedMessages: finalMessages
                 )
             }
             return
@@ -1001,6 +1002,15 @@ final class IOSChatBackgroundGenerationCoordinator {
                 conversationId: job.conversationId.toHexDashString(),
                 summary: watchSummary
             )
+            // 与前台 generationSucceeded → list preview 对齐：用本 job 的消息快照，不读可能已切换的 ChatViewModel。
+            if let settings = dependencies?.sharedSettings {
+                ConversationListPreviewGenerator.schedule(
+                    conversationId: job.conversationId,
+                    messages: finalMessages,
+                    store: job.conversationStore,
+                    settings: settings
+                )
+            }
         } else {
             WatchTaskCoordinator.shared.publish(
                 runId: job.runId,
@@ -1352,7 +1362,8 @@ final class IOSChatBackgroundGenerationCoordinator {
         singleToolFailureReason: String?,
         guardStoppedNotice: String?,
         miniAppFailed: Bool,
-        summary: String?
+        summary: String?,
+        completedMessages: [UIMessage]
     ) async {
         let runStatus = Self.backgroundTerminalStatus(
             didSave: didSave,
@@ -1377,6 +1388,14 @@ final class IOSChatBackgroundGenerationCoordinator {
                 conversationId: job.conversationId.toHexDashString(),
                 summary: summary
             )
+            if let settings = dependencies?.sharedSettings {
+                ConversationListPreviewGenerator.schedule(
+                    conversationId: job.conversationId,
+                    messages: completedMessages,
+                    store: job.conversationStore,
+                    settings: settings
+                )
+            }
         } else {
             WatchTaskCoordinator.shared.publish(
                 runId: job.runId,

@@ -245,7 +245,13 @@ struct SkillDetailView: View {
     }
 
     private var enabledSkillName: String {
+        // Frontmatter display name — used for SKILL.md rename guard only.
         snapshot?.name ?? skillName
+    }
+
+    private var enableKey: String {
+        // Enable / injection / use_skill all key off the on-disk directory name.
+        dirName ?? skillName
     }
 
     private func loadSnapshot() {
@@ -259,7 +265,7 @@ struct SkillDetailView: View {
             let next = SkillDetailSnapshot(dirName: dirName, content: content)
             snapshot = next
             loadError = nil
-            isEnabled = sharedSettings.isSkillEnabled(next.name ?? skillName)
+            isEnabled = sharedSettings.isSkillEnabled(dirName)
         } catch {
             snapshot = nil
             loadError = "读取技能失败：\(error.localizedDescription)"
@@ -268,7 +274,7 @@ struct SkillDetailView: View {
     }
 
     private func setSkillEnabled(_ enabled: Bool) {
-        sharedSettings.setSkillEnabled(name: enabledSkillName, enabled: enabled)
+        sharedSettings.setSkillEnabled(name: enableKey, enabled: enabled)
         isEnabled = enabled
     }
 
@@ -296,7 +302,7 @@ struct SkillDetailView: View {
         }
         do {
             try skillStore.deleteSkill(dirName: dirName)
-            sharedSettings.removeSkillFromAllAssistants(name: enabledSkillName)
+            sharedSettings.removeSkillFromAllAssistants(name: enableKey)
             dismiss()
         } catch {
             pendingAlert = .operationFailed(error.localizedDescription)

@@ -92,6 +92,10 @@ final class IOSConversationStore {
     /// 会话摘要列表（按 updateAt 倒序、置顶优先，由 KMP 层排序）。
     private(set) var summaries: [ConversationSummary] = []
 
+    /// 首页列表 meta 用的 LLM 浓缩预览（会话 id 字符串 → 单行文案）。
+    /// 与 KMP `ConversationSummary` 解耦：不改 index schema，落盘在 conversations/list-previews.json。
+    private(set) var listPreviewsByConversationId: [String: String] = [:]
+
     /// 单调递增的修订号：每次 currentConversation 被替换（新建/切换/删除回退/落盘/分支）时 +1。
     /// 供需要感知「当前会话内容可能变了」的 UI 观察（如 island 标题）。
     /// 注意：它对「同会话落盘」也会 +1，因此不能用它判断「是否切到了别的会话」——
@@ -151,6 +155,7 @@ final class IOSConversationStore {
     // MARK: - Private
 
     private let storage: JsonConversationStorage
+    private let listPreviewsFileURL: URL
     private var deletedConversationIds: Set<String> = []
     private var writeSequences: [String: UInt64] = [:]
 
@@ -165,21 +170,28 @@ final class IOSConversationStore {
         // Documents/conversations/ —— iOS Documents 目录会被 iTunes 文件共享暴露，
         // 第一版可接受（便于调试）；后续如要隐藏可换 Application Support。
         let baseDirPath: String
+        let previewsURL: URL
         if let baseDirectory {
             baseDirPath = baseDirectory.path
+            previewsURL = baseDirectory.appendingPathComponent("list-previews.json")
         } else {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
                 ?? URL(fileURLWithPath: NSTemporaryDirectory())
-            baseDirPath = documents.appendingPathComponent("conversations").path
+            let conversations = documents.appendingPathComponent("conversations")
+            baseDirPath = conversations.path
+            previewsURL = conversations.appendingPathComponent("list-previews.json")
         }
         let baseDir = ConversationFile(path: baseDirPath)
         self.storage = JsonConversationStorage(baseDir: baseDir)
+        self.listPreviewsFileURL = previewsURL
+        self.listPreviewsByConversationId = Self.loadListPreviews(from: previewsURL)
     }
 
     // MARK: - Bootstrap
 
     /// App 启动时调用：加载摘要列表，选最近一条作为 current；无历史则新建空会话。
     func bootstrap() async {
+        listPreviewsByConversationId = Self.loadListPreviews(from: listPreviewsFileURL)
         do {
             summaries = try await storage.listSummaries()
         } catch {
@@ -195,6 +207,27 @@ final class IOSConversationStore {
         } else {
             await newConversation()
         }
+    }
+
+    /// 首页 meta 交错用的浓缩预览；无则返回空串。
+    func listPreview(for id: KotlinUuid) -> String {
+        listPreviewsByConversationId[sequenceKey(for: id)] ?? ""
+    }
+
+    /// 写入 LLM 浓缩预览（与标题生成同链路产出）。空串会清除该会话预览。
+    /// 已删除会话的 tombstone 会拒绝迟到写入，避免 orphan key 复活。
+    func setListPreview(id: KotlinUuid, preview: String) {
+        let key = sequenceKey(for: id)
+        guard !deletedConversationIds.contains(key) else { return }
+        let cleaned = preview.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.isEmpty {
+            guard listPreviewsByConversationId.removeValue(forKey: key) != nil else { return }
+        } else if listPreviewsByConversationId[key] == cleaned {
+            return
+        } else {
+            listPreviewsByConversationId[key] = cleaned
+        }
+        persistListPreviews()
     }
 
     /// Imports complete Conversation JSON documents through the storage owner.
@@ -518,6 +551,9 @@ final class IOSConversationStore {
 
         onDeletionCommitted()
         pendingBackgroundContentConversationIds.remove(String(describing: id))
+        if listPreviewsByConversationId.removeValue(forKey: sequenceKey(for: id)) != nil {
+            persistListPreviews()
+        }
         await refreshSummaries()
 
         if currentConversation?.id == id {
@@ -1103,6 +1139,21 @@ final class IOSConversationStore {
 
     private func sequenceKey(for id: KotlinUuid) -> String {
         String(describing: id)
+    }
+
+    private static func loadListPreviews(from url: URL) -> [String: String] {
+        guard let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return decoded.filter { !$0.key.isEmpty && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private func persistListPreviews() {
+        let directory = listPreviewsFileURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard let data = try? JSONEncoder().encode(listPreviewsByConversationId) else { return }
+        try? data.write(to: listPreviewsFileURL, options: .atomic)
     }
 
     private func refreshSummaries() async {

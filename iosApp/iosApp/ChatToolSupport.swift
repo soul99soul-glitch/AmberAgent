@@ -80,7 +80,13 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
     let argumentsPreview: String
     let reason: String
 
-    var title: String { "执行 MCP 工具" }
+    var title: String {
+        if toolName.hasPrefix("skill_") || toolName == "mcp_import_from_skill" || toolName == "mcp_test" {
+            "确认扩展操作"
+        } else {
+            "执行 MCP 工具"
+        }
+    }
 }
 
 struct ChatAskUserRequest: Identifiable, Equatable {
@@ -326,6 +332,26 @@ enum ChatToolApprovalRequestBuilder {
             serverName: server,
             toolName: tool,
             argumentsPreview: ChatToolCallParsing.truncatedMcpArguments(args["arguments"]),
+            reason: reason
+        )
+    }
+
+    static func extensionMutation(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> McpToolApprovalRequest? {
+        let args = ChatToolCallParsing.jsonObject(toolCall.input) ?? [:]
+        let target = (args["name"] as? String)
+            ?? (args["skill_name"] as? String)
+            ?? (args["workspace_path"] as? String)
+            ?? (args["server_id"] as? String)
+            ?? toolCall.toolName
+        return McpToolApprovalRequest(
+            id: ChatToolCallParsing.requestId(for: toolCall),
+            serverName: "local",
+            toolName: toolCall.toolName,
+            // Always pass a JSON object; bare String fails JSONSerialization.
+            argumentsPreview: ChatToolCallParsing.truncatedMcpArguments(args.isEmpty ? ["target": target] : args),
             reason: reason
         )
     }

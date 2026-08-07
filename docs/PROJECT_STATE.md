@@ -9,7 +9,7 @@ Last updated: 2026-08-06
 - Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
 - Branch: `feat/ios-provider-parity-claude`
 - Tracking: `origin/feat/ios-provider-parity-claude`；当前本地包含尚未 push 的 review fixes、小说/核心记忆闭环与文案提交，ahead 数以实时 Git 为准。
-- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准；`52794d2de` 是当前已装机的产品代码基线。
+- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准。2026-08-06 22:12 已把 `ab1d5fbeb` 覆盖安装到 iPhone Air（iPhone18,4，未卸载），新安装容器 `33FBA855-408D-46E1-83FD-6DD147744904/iosApp.app`，数据库 UUID 保持 `AC96CD34-4AD9-4317-A4CD-6BB64DC7FD3F`（既有 App 数据保留），启动成功；`52794d2de` 不再是装机基线。
 - Worktree: 小说共创/代笔 Phase 0–3c、核心记忆闭环、相关测试与文档已提交；是否干净以实时 `git status --short` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
@@ -17,8 +17,8 @@ Last updated: 2026-08-06
 
 目标：把定稿 E 版首页设计（home-replica.html 同源规格）落到 `ConversationsView` 与全局主题令牌，并让顶部续接位只展示真实未完成工作。
 
-- 全局令牌：`AmberTheme.neutralLight` 改为默认暖灰（画布 `#ECE8E4`、卡片 `#F6F5F3`、主墨 `#161514` 等实测值），`paperLight` 为暖纸（`#EFE7D6`/`#FFFDF7`），`darkPalette` 为 `#0E0D10`/`#1F1D23`；新增 `separator/press/hoverCard/activeCard/avatarActive(Ink)/avatarIdle(Ink)/fab/fabInk/focusRing/cardShadow*` 首页令牌；默认画布主题改为「暖灰」（原「中性白」，已改名），默认 accent 改为琥珀金 `#B9863A`（`amberGold` 已修正为设计值并置首位）。用户已显式选择过的主题/accent 偏好不受影响。
-- 首页：搜索胶囊原位展开为玻璃搜索条（品牌/齿轮/头像让位，Esc/取消收起清空，保留提交进全文搜索）；控制卡顶部改为跨功能续接位，稳定优先级为「待处理 > 运行中 > 可恢复 > 可查看结果 > 草稿」，候选来自当前议会房间、深度阅读持久任务、小说项目、AI 生图和最新版本尚未运行的小应用；普通完成态、损坏小说、已运行的小应用版本均不出现，无候选时整行收起，只保留五入口。五入口为单墨色 Phosphor fill 语义图标，顺序为深度阅读/小说创作/模型议会/小应用/WebMount；会话列表为切片式一体卡（72pt 行高、激活行通栏 `activeCard` 色带、相邻 hairline 让位、按标题语义映射 Phosphor 实心图标、空态卡内文本）；FAB 实色琥珀金三层投影；入场级联 40ms stagger 且尊重 Reduce Motion。玻璃恰好 3 件（搜索胶囊/展开条、齿轮），卡片零描边，深度仅来自两层 `cardShadow`。
+- 全局令牌：三画布——暖纸 `paperLight`、暖灰 `neutralLight`（默认）、中性白 `whiteLight`（`#F5F5F4`/`#FFFFFF`/`#EEEEED`）；`Paper.white` 已加入外观设置三卡。`fab`/`fabInk`/`focusRing`/`activeAvatarGlow` 绑定 runtime accent（可选色板生效），不再钉死琥珀金。默认仍为暖灰 × 琥珀金。用户已持久化偏好不受影响。
+- 首页：搜索胶囊原位展开为玻璃搜索条（品牌/齿轮/头像让位，Esc/取消收起清空，保留提交进全文搜索）；控制卡顶部改为跨功能续接位，稳定优先级为「待处理 > 运行中 > 可恢复 > 可查看结果 > 草稿」，候选来自当前议会房间、深度阅读持久任务、小说项目、AI 生图和最新版本尚未运行的小应用；普通完成态、损坏小说、已运行的小应用版本均不出现，无候选时整行收起，只保留五入口。五入口为单墨色 Phosphor fill 语义图标，顺序为深度阅读/小说创作/模型议会/小应用/WebMount；会话列表恢复切片一体卡外框（72pt、顶/底投影、卡内左缩进 hairline；激活 `activeCard` 随 accent 浅染；空态同卡壳）；控制卡外框保留；新建为右下拇指区浮层中性玻璃胶囊「新对话」（高 42、主墨字、琥珀仅图标；`homeGlassControl`；非满幅琥珀、非圆 FAB、非假底栏）。列表 scroll 留白 + soft bottom edge。Continue 黑 CTA；账户 38；Continue 显隐 0.30s。入场级联 40ms stagger 且尊重 Reduce Motion。玻璃为搜索胶囊/展开条、齿轮与底胶囊；内容卡零描边，深度仅来自两层 `cardShadow`。
 - 图标体系（review 轮重做）：新增 `iosApp/iosApp/HomePhosphorIcons.swift`——21 个 Phosphor fill 字形（路径数据与 home-replica.html 内嵌 symbol 同源；chatCircle/pushPin/imageSquare 取自 phosphor-icons/core 同名资源）+ 最小 SVG path 解析器（M/L/H/V/C/S/Q/T/A/Z，椭圆弧按 SVG 1.1 F.6.5 转三次贝塞尔）。映射修正：剑=sword（原 shield）、天平=scales（原 medal）、AI 生图=imageSquare（原 pen）、crown 关键词补「在位」；swipe/context menu 系统图标保留 SF（系统 UI 层，不在设计约束内）。
 - Review 轮修复（4 只读审查代理：逻辑链/几何/渲染/taste）：①会话卡投影从「逐行切片各带阴影」改为「仅 bottom/single 行携带」——消除 72pt 行间阴影接缝，保留原生 swipeActions 的 List 结构（卡顶/侧边投影略弱为已知取舍）；②全局 `glass/glassStrong` 恢复原值（`base(\.background, 0.72/0.85)`），首页三件玻璃改用首页专用 `homeGlass*` 令牌（浅 .78→.58 / 深 .14→.08 白渐变 + 双层投影），与内页材质完全隔离；③几何：header 去掉多余 top 6（精确 42）、「会话」标题与首卡补 12pt、搜索胶囊固定 78×38、展开条 gap7/左12右6/取消 h30 横8/输入 tracking 0.13、会话 meta 接 `.monospacedDigit()`、FAB 底部改 `max(67-safeAreaInsets.bottom, 12)`；④focus 环接入展开搜索条（3px `focusRing`，聚焦时显示）；⑤搜索延迟聚焦改可取消 `Task`（收起/离场撤销，不再残留 FocusState）；⑥`loadProjects` 加 latest-wins revision（首页 onAppear 与项目列表 .task 并发时旧快照不得回写）；⑦级联入场加一次性门控（0.9s 后重建行不再重播）；⑧暖纸 `avatarActive` 修正 `#EADBCC`→`#EADCBC`；⑨节标题用独立 `section` 令牌（与 foreground2 数值同构、语义独立）。
 - 第二轮补充修复（多行运行时实测发现）：bottom 行投影向上越界，在上一行底部形成 Δ≤3 暗带并压暗该处 hairline（`#E8E7E6` vs 正常 `#ECEBE9`）；给 bottom/single 行投影加 mask，裁掉行界以上晕影（左右/下方延伸保留卡侧与卡底投影；single 上方是画布，向上晕影与控制卡外投影一致，不裁）。
@@ -37,13 +37,16 @@ Last updated: 2026-08-06
 - AI 生图续接回归：直接相关的 `HomeDesignContractTests` + `NativeTimelineScrollCoreTests` **57 passed / 0 failed / 0 skipped**；新增真实 SwiftUI Timeline 超高消息/延迟装载精确 tool-part 回放和真实 `IOSConversationStore` 跨会话持久扫描各 1 项，均单跑通过。扩大到 `ChatViewportPolicyTests`、`ChatSwiftUIStreamReplayTests`、`ChatMessageProjectionTests` 与该持久化用例共 195 项，最终源码下为 **194/195**：唯一未过的是既有 80 行长表格流式性能采样（本轮 p95 40.58–41.04ms > 40ms）；相关生图、投影、滚动和消费契约均通过，未放宽性能阈值，也未把无调用关系的波动修补到生图功能。iPhone 17 Pro Simulator Debug 包构建、覆盖安装并启动成功；无生图候选的真实首页保持仅五入口状态，控制卡无残留占位。
 - 模拟器截图（iPhone 17 Pro, iOS 26.5）：三主题像素级核对——画布/卡片/激活带/头像墨色逐点匹配设计值；行高 72、卡左缘 16、FAB 右 21/底 67、节标题间距、「Amber」标题位置均实测通过。注意：本会话 view_image 渲染不可靠（曾把原型样例数据呈现为截图内容），一切以 PIL 逐像素探测为准。
 - 多会话多行态运行时验证（容器种子化 4 条会话，updateAt 倒序、首条激活）：行高各 72pt；激活行通栏 `#EFE9DF` + 头像 `#E8DDC6`/`#6F5019`；idle 行 `#F6F5F3` + 头像 `#EDEBE7`/`#8F8B85`；行间 hairline 恰为 sep 合成值 `#ECEBE9`、左缩进 70/右距 16（屏上 x=86..370，与标题字框左缘 86 对齐）；行间零阴影接缝（经第二轮补充修复后 hairline 上下为纯卡色），末行下方 18pt 卡投影带与卡侧投影完整。种子化教训：会话 JSON 时间戳须为合法 ISO8601（`...T14:40:00.Z` 空小数位非法），非法时 `JsonConversationStorage` 按 index 损坏路径扫描重建——实测该容错路径按设计工作（丢弃不可解码条目并自动建新会话）。
+- 首页当前会话 meta 交错（时间·条数 ↔ LLM 浓缩预览）：复用 titleModelId；FG/BG 共用 ConversationListPreviewGenerator（latest-wins）；setListPreview 拒绝已删 id；预览落盘 list-previews.json；光晕 56pt 自裁、按压 leading、meta 0.4s 淡切；Reduce Motion 不轮播。
+- 当前会话头像呼吸光晕（E 版 `hm-breathe`）：`isCurrent` 头像琥珀 glow 3.4s / 延迟 1.6s，Reduce Motion 关闭；`HomeCurrentAvatarBreath` 强度契约 + 接线源码断言已纳入 `HomeDesignContractTests`。
+- 首页 taste 可达性回正（2026-08-07）：右下拇指区浮层「新对话」胶囊（非圆 FAB、非顶栏、非假底栏）。Continue 黑 CTA、色带 0.16s、呼吸 glow、切片投影保留。
 - Simulator 真实交互复验：搜索胶囊原位展开且 focus 环可见；输入「红酒」后实时只保留匹配会话；Esc 与「取消」均收起、清空并恢复完整列表。相邻页面抽查设置页与 Chat 页，暖灰画布/暖白分组表面层级仍清楚，首页专用玻璃没有泄漏到内页。
 - Dynamic Type 实拍复验：iPhone 17 Pro 的 accessibility XXXL 下，Continue 标题/状态/主按钮完整，五入口可横向滚动且标签不压缩为单字列；恢复 Large 后卡片、72pt 会话行、FAB 与原 E 版默认几何一致。截图存于当前 Codex visualization 的 `home-resume-fix/02-max-dynamic-type.jpg` 与 `03-default-restored.jpg`。
 - 未覆盖：真实 VoiceOver 开关下的播报顺序/焦点迁移、按压 0.98 回弹的触感/中间帧（自动化只能稳定取得释放后终态）、真机观感与 swipe 手感；模拟器没有可复用的真实生图记录，未支付调用真实 provider，因此「生成完成后从首页进入并滚到真实图片」仍缺一轮真实账号手工验收。「还没有会话」空态卡为生产不可达路径（`bootstrap()` 与 `deleteConversation()` 在列表为空时都自动 `newConversation()`；唯一可达空态是搜索过滤后的「没有匹配的会话」）——结构事实记录，非验证遗漏。
 
 ### Known Issues（非本轮改动引入）
 
-- `iosApp/**/*.xcodeproj/` 在 .gitignore 中：拉取 5bcf860ea 后本机 xcodeproj 缺 `NovelGhostwritePipeline.swift`、`NovelChapterPlanAcceptanceLifecycle.swift` 的 target 引用，app target 无法编译；已在本机 project.pbxproj 补齐（本机修改，不会入 git）。其他机器拉取后需同样处理。
+- `iosApp/**/*.xcodeproj/` 在 .gitignore 中：拉取 5bcf860ea 后本机 xcodeproj 缺 `NovelGhostwritePipeline.swift`、`NovelChapterPlanAcceptanceLifecycle.swift` 的 target 引用，app target 无法编译；已在本机 project.pbxproj 补齐（本机修改，不会入 git）。其他机器拉取后需同样处理。`ab1d5fbeb` 新增的 `HomePhosphorIcons.swift` 同样缺引用（编译报 `cannot find type 'HomePhosphor'`），已于 2026-08-06 按同一模式补进本机 project.pbxproj（iosApp 与 iosAppExperimentalGPL 两个 app target）；pbxproj 被 gitignore，不入 git。
 - 同一推送带入的 `NovelCollaborationModeTests.swift`、`IOSMemoryRecallPolicyTests.swift` 与当前 Shared 框架/代码不兼容（MemoryRecord 签名、AgentRuntimeSetting 等），加入 target 即编译失败；保持未加入 target，待该 slice owner 修复后再纳入。
 - `IOSSettingsWiringTests.testBackgroundToolEnginePublishesLiveActivityStagesAtExecutionBoundaries` 在基线上即失败：`15a2607a8` 在 run block 内重新引入 `await self.publishRunningPresentation(`，违反既有 wiring 契约；与本轮首页改动无关，待 owner 裁决。
 - `ChatSwiftUIStreamReplayTests.testPerfGrowingTableStreamingKeepsDisplayLinkResponsive` 在当前 Simulator 采样不稳定：同一工作区本轮既有通过，也出现 p95 40.823–44.215ms（门槛 40ms）和 SIGKILL；未放宽阈值，需在安静设备/真机重新建立性能证据。
@@ -63,6 +66,18 @@ Last updated: 2026-08-06
 - UI review：列表、Runner、管理 sheet、设置页已在 iPhone 17 Pro Simulator 实拍；返回语义、Toggle/源码/权限菜单 VoiceOver 标签、44pt 更多/源码动作/版本恢复、语义字体、窄宽 metadata 回流、设置 divider 对齐、状态色对比、可见 toast/announcement、明确 loading 态均已修。MiniApp 生成协议新增 44×44、320px reflow、lang/label/focus、深色与 Reduce Motion 契约；旧截图所示源码+预览同页已不再是当前结构。
 - 为兼容已保存 iOS MiniApp，`Amber.search` 同时支持旧数组用法与 `.items`，EventBus/Sensor 回调同时保留 payload 和旧 envelope 字段。
 - 定点门禁：`IOSMiniAppBridgeRuntimeTests`、`IOSMiniAppOutputParserTests`、`IOSMiniAppChatMessageFactoryTests`、`IOSMiniAppRepositoryTests`、`IOSConversationStoreTests`、`IOSParityRedLightTests` 受影响集合合计 **155 passed / 0 failed / 0 skipped**；新增覆盖创建/修订强杀恢复、精确卡片对账、旧卡拒绝、30 版裁剪恢复、冷启动端到端扫描，以及前后台 commit 顺序。`JsonConversationStorageTest` 全类 JVM 门禁 **BUILD SUCCESSFUL**，含 canonical 会话写成功而派生索引写失败的回归；`git diff --check` 通过。iOS 最终门禁需排除当前工作区中范围外且 API 已漂移的 `HomeDesignContractTests.swift`、`NativeTimelineScrollCoreTests.swift`，两者未修改。截图证据保存在当前 Codex visualization 的 `miniapp-audit/`。仍缺真实 CoreLocation/CoreMotion/剪贴板与真实 provider 的设备端闭环；磁盘上仍是两个独立文件，但强杀中间态已有可恢复协议，不再依赖进程内 closure。
+
+## iOS Skill / MCP Chat 对齐
+
+目标：对齐 Android Chat 创建本机 Skill / 连接 MCP 的最小闭环，不过度设计。
+
+- 启动 seed：`IOSBuiltinSkills.installIfMissing` 写入并启用 `skill-creator`、`会议准备`、`监控文档`（内容嵌入，不依赖 Bundle 资源目录）。
+- Chat 工具：`skills_list` / `use_skill` / `skill_validate` / `skill_import` / `skill_enable` / `skill_disable`，以及 `mcp_list` / `mcp_test` / `mcp_import_from_skill`（另保留既有 `mcp_call`）。声明在 KMP `Tool.kt`，执行在 `IOSSkillMcpToolService`。
+- 写工具门控：用户说创建/连接/做一个 skill 或 MCP 时也会声明 `workspace_file_write`，不再要求必须出现 `/workspace` 字样。
+- 创建路径：`use_skill(skill-creator)` → `workspace_file_write` → `skill_import`；若有 `mcp.json` 再 `mcp_import_from_skill` → `mcp_test` / `mcp_call`。
+- Review 精准修复：skill enable/list/use 统一以目录名为键；单文件 `SKILL.md` import 顺带 sibling `mcp.json`；`mcp_import_from_skill` 跳过已存在同名 server；前台 `maxToolResumeCount` 4→6（与后台一致）。
+- 定点测试：`IOSSkillMcpToolsTests` + `IOSSkillFileStoreTests` + `ChatViewModelGenerationParamsTests` **22 passed / 0 failed**。`project.yml` 排除已知 API 漂移的 `IOSMemoryRecallPolicyTests` / `NovelCollaborationModeTests`。
+- 未覆盖：真机对话闭环、zip skill 导入、按 MCP 工具展开为 `mcp__*` 声明。
 
 ## Current Product Truth
 

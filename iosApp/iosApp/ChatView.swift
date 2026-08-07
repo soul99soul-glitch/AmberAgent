@@ -1002,6 +1002,8 @@ struct ChatView: View {
                     // Apple Music dock 风格:左侧输入胶囊 + 右侧独立圆形发送键,两块分离的原生
                     // Liquid Glass。`.bottom` 对齐让圆形发送键随胶囊向上增高时仍贴住底边。
                     HStack(alignment: .bottom, spacing: 8) {
+                        // 外高对齐发送键 54：内容行 max(附件 44, 文本 ≥40) + 上下 5。
+                        // 旧 vertical 7 → 44+14=58，比发送高 4pt，底对齐时顶边会「差一截」。
                         HStack(alignment: .center, spacing: 6) {
                             ComposerAttachToggleButton(
                                 isExpanded: isAttachExpanded,
@@ -1038,7 +1040,7 @@ struct ChatView: View {
                         }
                         .padding(.leading, 8)
                         .padding(.trailing, 18)
-                        .padding(.vertical, 7)
+                        .padding(.vertical, 5)
                         .composerDockGlass(cornerRadius: 27)
 
                         ComposerDockSendButton(

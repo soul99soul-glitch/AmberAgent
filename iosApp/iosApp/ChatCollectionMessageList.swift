@@ -676,17 +676,9 @@ struct NativeChatTimelineView: View {
         switch entry.kind {
         case .emptyState:
             ChatEmptyState()
-        case let .configurationIssue(compact):
-            if let configurationIssue {
-                ChatConfigurationNoticeCard(
-                    issue: configurationIssue,
-                    compact: compact,
-                    onPrimary: { onAction(.primaryConfiguration) },
-                    onModelDefaults: { onAction(.modelDefaults) }
-                )
-                .padding(.top, compact ? 0 : 72)
-                .padding(.bottom, compact ? 0 : 150)
-            }
+        case .configurationIssue:
+            // 配置引导卡已下线：缺 Key 时也不再占位整页「还不能聊天」。
+            EmptyView()
         case .message:
             if let message = entry.message,
                let index = entry.index,
@@ -1526,15 +1518,6 @@ struct ChatSwiftUIMessageList: View {
                 if messages.isEmpty {
                     emptyTimelineContent
                 } else {
-                    if let configurationIssue {
-                        ChatConfigurationNoticeCard(
-                            issue: configurationIssue,
-                            compact: true,
-                            onPrimary: { onAction(.primaryConfiguration) },
-                            onModelDefaults: { onAction(.modelDefaults) }
-                        )
-                    }
-
                     // Keep stable history lazy, but measure the only dynamically growing
                     // tail outside LazyVStack so its line-height changes stay exact.
                     if !historicalEntries.isEmpty {
@@ -1770,18 +1753,7 @@ struct ChatSwiftUIMessageList: View {
 
     @ViewBuilder
     private var emptyTimelineContent: some View {
-        if let configurationIssue {
-            ChatConfigurationNoticeCard(
-                issue: configurationIssue,
-                compact: false,
-                onPrimary: { onAction(.primaryConfiguration) },
-                onModelDefaults: { onAction(.modelDefaults) }
-            )
-            .padding(.top, 72)
-            .padding(.bottom, 150)
-        } else {
-            ChatEmptyState()
-        }
+        ChatEmptyState()
     }
 
     private var bottomAnchor: some View {
@@ -4036,15 +4008,8 @@ private struct ChatListHostedItemView: View {
         switch renderModel {
         case .emptyState:
             ChatEmptyState()
-        case let .configurationIssue(issue, compact):
-            ChatConfigurationNoticeCard(
-                issue: issue,
-                compact: compact,
-                onPrimary: { onAction(.primaryConfiguration) },
-                onModelDefaults: { onAction(.modelDefaults) }
-            )
-            .padding(.top, compact ? 0 : 72)
-            .padding(.bottom, compact ? 0 : 150)
+        case .configurationIssue:
+            EmptyView()
         case let .message(model):
             ChatMessageHostedBubble(
                 model: model,
@@ -4326,39 +4291,18 @@ private enum ChatListSnapshotBuilder {
         }
 
         if messages.isEmpty {
-            if let configurationIssue {
-                append(
-                    ChatListItem(id: "configuration-issue-empty", kind: .configurationIssue),
-                    model: .configurationIssue(configurationIssue, compact: false),
-                    digest: ChatRowDigest(
-                        layout: "configuration-empty-\(configurationIssue.title)-\(configurationIssue.message)",
-                        presentation: ""
-                    )
-                )
-            } else {
-                append(
-                    ChatListItem(id: "empty-state", kind: .emptyState),
-                    model: .emptyState,
-                    digest: ChatRowDigest(layout: "empty", presentation: "")
-                )
-            }
+            // 不再因 missingAPIKey 等配置问题替换空态为「还不能聊天」引导卡。
+            append(
+                ChatListItem(id: "empty-state", kind: .emptyState),
+                model: .emptyState,
+                digest: ChatRowDigest(layout: "empty", presentation: "")
+            )
             append(
                 ChatListItem(id: ChatLayout.bottomAnchorID, kind: .bottomSpacer),
                 model: .bottomSpacer,
                 digest: ChatRowDigest(layout: "bottom-\(ChatLayout.bottomRestGap)", presentation: "")
             )
         } else {
-            if let configurationIssue {
-                append(
-                    ChatListItem(id: "configuration-issue-compact", kind: .configurationIssue),
-                    model: .configurationIssue(configurationIssue, compact: true),
-                    digest: ChatRowDigest(
-                        layout: "configuration-compact-\(configurationIssue.title)-\(configurationIssue.message)",
-                        presentation: ""
-                    )
-                )
-            }
-
             let includePendingAssistant = (isGenerationActive || isLoading) &&
                 messages.last?.role == MessageRole.user
             let timelinePlan = ChatTimelinePlanner.build(

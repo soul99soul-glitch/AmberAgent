@@ -71,7 +71,7 @@ struct AccountView: View {
 
     private var header: some View {
         HStack {
-            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回首页", size: 44, symbolSize: 20) {
+            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回", size: 44, symbolSize: 20) {
                 dismiss()
             }
 

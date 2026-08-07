@@ -559,7 +559,8 @@ struct NovelSessionView: View {
                 }
                 .padding(.leading, 18)
                 .padding(.trailing, 18)
-                .padding(.vertical, 7)
+                // 与 Chat 一致：内容行 44 + 上下 5 → 外高 54，对齐发送键。
+                .padding(.vertical, 5)
                 .composerDockGlass(cornerRadius: 27)
 
                 ComposerDockSendButton(

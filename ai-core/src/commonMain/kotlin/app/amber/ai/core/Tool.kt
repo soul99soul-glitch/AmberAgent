@@ -403,6 +403,15 @@ fun iosToolDeclaration(name: String): Tool? = when (name) {
     "wm_find" -> createWebMountFindToolDeclaration()
     "wm_wait" -> createWebMountWaitToolDeclaration()
     "mcp_call" -> createMcpCallToolDeclaration()
+    "mcp_list" -> createMcpListToolDeclaration()
+    "mcp_test" -> createMcpTestToolDeclaration()
+    "mcp_import_from_skill" -> createMcpImportFromSkillToolDeclaration()
+    "skills_list" -> createSkillsListToolDeclaration()
+    "use_skill" -> createUseSkillToolDeclaration()
+    "skill_validate" -> createSkillValidateToolDeclaration()
+    "skill_import" -> createSkillImportToolDeclaration()
+    "skill_enable" -> createSkillEnableToolDeclaration()
+    "skill_disable" -> createSkillDisableToolDeclaration()
     "subagent_dispatch" -> createSubAgentDispatchToolDeclaration()
     "model_council_run" -> createModelCouncilRunToolDeclaration()
     "file_read_selected" -> createSelectedFileReadToolDeclaration()
@@ -515,6 +524,97 @@ fun createMcpCallToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createMcpListToolDeclaration(): Tool = Tool(
+    name = "mcp_list",
+    description = "List configured MCP servers, enabled state, connection status, and known tool counts. Pass include_tools=true to see callable MCP tool names.",
+    parameters = { mcpListParameters() },
+    execute = { emptyList() }
+)
+
+fun createMcpTestToolDeclaration(): Tool = Tool(
+    name = "mcp_test",
+    description = "Test one configured MCP server by id or name and refresh its tool list.",
+    parameters = { mcpServerLookupParameters() },
+    needsApproval = true,
+    execute = { emptyList() }
+)
+
+fun createMcpImportFromSkillToolDeclaration(): Tool = Tool(
+    name = "mcp_import_from_skill",
+    description = "Import standard mcp.json from an installed Skill into the global AmberAgent MCP settings.",
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("skill_name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Installed skill name.")
+                })
+            },
+            required = listOf("skill_name")
+        )
+    },
+    needsApproval = true,
+    execute = { emptyList() }
+)
+
+fun createSkillsListToolDeclaration(): Tool = Tool(
+    name = "skills_list",
+    description = "List AmberAgent skills and their load status. Use this first when you are unsure which skills are installed, enabled, disabled, or missing.",
+    parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
+    execute = { emptyList() }
+)
+
+fun createUseSkillToolDeclaration(): Tool = Tool(
+    name = "use_skill",
+    description = """
+        Load and apply a skill to get specialized instructions or capabilities.
+        Call this tool when the user's request matches one of the available skills.
+    """.trimIndent(),
+    parameters = { useSkillParameters() },
+    execute = { emptyList() }
+)
+
+fun createSkillValidateToolDeclaration(): Tool = Tool(
+    name = "skill_validate",
+    description = "Validate an installed skill by name or a /workspace skill folder/SKILL.md before import.",
+    parameters = { skillValidateParameters() },
+    execute = { emptyList() }
+)
+
+fun createSkillImportToolDeclaration(): Tool = Tool(
+    name = "skill_import",
+    description = "Import a skill folder or SKILL.md file from /workspace. Imported skills are enabled by default.",
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("workspace_path", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Workspace path to a skill folder or SKILL.md.")
+                })
+            },
+            required = listOf("workspace_path")
+        )
+    },
+    needsApproval = true,
+    execute = { emptyList() }
+)
+
+fun createSkillEnableToolDeclaration(): Tool = Tool(
+    name = "skill_enable",
+    description = "Enable an installed skill for the current AmberAgent assistant.",
+    parameters = { skillNameParameters() },
+    needsApproval = true,
+    execute = { emptyList() }
+)
+
+fun createSkillDisableToolDeclaration(): Tool = Tool(
+    name = "skill_disable",
+    description = "Disable an installed skill for the current AmberAgent assistant.",
+    parameters = { skillNameParameters() },
+    needsApproval = true,
+    execute = { emptyList() }
+)
+
 private fun mcpCallParameters(): InputSchema = InputSchema.Obj(
     properties = buildJsonObject {
         put("server", buildJsonObject {
@@ -531,6 +631,72 @@ private fun mcpCallParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("server", "tool")
+)
+
+private fun mcpListParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("include_tools", buildJsonObject {
+            put("type", "boolean")
+            put("description", "Include enabled/disabled tool names for each server. Defaults to true.")
+        })
+        put("include_schema", buildJsonObject {
+            put("type", "boolean")
+            put("description", "Include MCP input schemas. Defaults to false.")
+        })
+    }
+)
+
+private fun mcpServerLookupParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("server_id", buildJsonObject {
+            put("type", "string")
+            put("description", "MCP server id.")
+        })
+        put("name", buildJsonObject {
+            put("type", "string")
+            put("description", "MCP server name.")
+        })
+    }
+)
+
+private fun useSkillParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("name", buildJsonObject {
+            put("type", "string")
+            put("description", "The name of the skill to use")
+        })
+        put("path", buildJsonObject {
+            put("type", "string")
+            put(
+                "description",
+                "Optional relative path to a file inside the skill directory. Omit to read the default SKILL.md instructions."
+            )
+        })
+    },
+    required = listOf("name")
+)
+
+private fun skillValidateParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("name", buildJsonObject {
+            put("type", "string")
+            put("description", "Installed skill name.")
+        })
+        put("workspace_path", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace skill folder or SKILL.md.")
+        })
+    }
+)
+
+private fun skillNameParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("name", buildJsonObject {
+            put("type", "string")
+            put("description", "Skill name.")
+        })
+    },
+    required = listOf("name")
 )
 
 private fun searchWebParameters(): InputSchema = InputSchema.Obj(

@@ -63,6 +63,115 @@ struct IOSSkillFileStore {
         try fileManager.removeItem(at: directory)
     }
 
+    /// Writes a skill package (at least `SKILL.md`) into `skills/<name>/`.
+    /// Frontmatter `name` is the authoritative package id. Overwrites an existing package.
+    @discardableResult
+    func saveSkillFiles(files: [String: String]) throws -> String {
+        guard let skillMd = files["SKILL.md"] ?? files["skill.md"] else {
+            throw IOSSkillFileStoreError.missingSkillMarkdown
+        }
+        let frontmatter = Self.parseFrontmatter(skillMd)
+        guard let declaredName = frontmatter["name"], !declaredName.isEmpty else {
+            throw IOSSkillFileStoreError.missingFrontmatterField("name")
+        }
+        guard let description = frontmatter["description"], !description.isEmpty else {
+            throw IOSSkillFileStoreError.missingFrontmatterField("description")
+        }
+        let packageName = Self.normalizedSkillName(declaredName)
+        let skillDirectory = try resolveSkillDirectory(name: packageName)
+        if fileManager.fileExists(atPath: skillDirectory.path) {
+            try fileManager.removeItem(at: skillDirectory)
+        }
+        try fileManager.createDirectory(at: skillDirectory, withIntermediateDirectories: true)
+        for (relativePath, content) in files {
+            let clean = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard !clean.isEmpty, !clean.contains("..") else { continue }
+            let destination: URL
+            if clean.lowercased() == "skill.md" || clean.lowercased().hasSuffix("/skill.md") {
+                let parent = clean.contains("/")
+                    ? skillDirectory.appendingPathComponent((clean as NSString).deletingLastPathComponent)
+                    : skillDirectory
+                try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
+                destination = parent.appendingPathComponent("SKILL.md")
+            } else {
+                destination = skillDirectory.appendingPathComponent(clean)
+                try fileManager.createDirectory(
+                    at: destination.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+            }
+            try content.write(to: destination, atomically: true, encoding: .utf8)
+        }
+        if !fileManager.fileExists(atPath: skillDirectory.appendingPathComponent("SKILL.md").path) {
+            try skillMd.write(
+                to: skillDirectory.appendingPathComponent("SKILL.md"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        _ = description
+        return packageName
+    }
+
+    func skillDirectoryURL(name: String) throws -> URL {
+        try resolveSkillDirectory(name: Self.normalizedSkillName(name))
+    }
+
+    func containsMcpConfig(name: String) -> Bool {
+        guard let directory = try? skillDirectoryURL(name: name) else { return false }
+        return fileManager.fileExists(atPath: directory.appendingPathComponent("mcp.json").path)
+    }
+
+    func resolveSkillFile(name: String, relativePath: String) throws -> URL {
+        let directory = try skillDirectoryURL(name: name)
+        let clean = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !clean.isEmpty, !clean.contains("..") else {
+            throw IOSSkillFileStoreError.invalidSkillName
+        }
+        let target = directory.appendingPathComponent(clean).standardizedFileURL
+        guard target.path.hasPrefix(directory.standardizedFileURL.path + "/")
+            || target.path == directory.standardizedFileURL.path else {
+            throw IOSSkillFileStoreError.invalidSkillName
+        }
+        return target
+    }
+
+    static func parseFrontmatter(_ content: String) -> [String: String] {
+        guard content.hasPrefix("---"),
+              let endRange = content.range(
+                of: "\n---",
+                range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex
+              ) else {
+            return [:]
+        }
+        let yaml = String(content[content.index(content.startIndex, offsetBy: 3)..<endRange.lowerBound])
+        var frontmatter: [String: String] = [:]
+        for line in yaml.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let separator = trimmed.firstIndex(of: ":") else { continue }
+            let key = String(trimmed[..<separator]).trimmingCharacters(in: .whitespaces)
+            let value = String(trimmed[trimmed.index(after: separator)...])
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            if !key.isEmpty {
+                frontmatter[key] = value
+            }
+        }
+        return frontmatter
+    }
+
+    static func extractBody(from content: String) -> String {
+        guard content.hasPrefix("---"),
+              let endRange = content.range(
+                of: "\n---",
+                range: content.index(content.startIndex, offsetBy: 3)..<content.endIndex
+              ) else {
+            return content
+        }
+        let bodyStart = endRange.upperBound
+        return String(content[bodyStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func normalizedSkillName(_ raw: String) -> String {
         raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -158,6 +267,8 @@ enum IOSSkillFileStoreError: LocalizedError, Equatable {
     case skillAlreadyExists(String)
     case skillMissing(String)
     case skillNameChanged(expected: String)
+    case missingSkillMarkdown
+    case missingFrontmatterField(String)
 
     var errorDescription: String? {
         switch self {
@@ -171,6 +282,10 @@ enum IOSSkillFileStoreError: LocalizedError, Equatable {
             "技能 \(name) 不存在。"
         case .skillNameChanged(let expected):
             "不允许修改技能名称（name 字段必须为 \(expected)）。"
+        case .missingSkillMarkdown:
+            "Skill 包缺少 SKILL.md。"
+        case .missingFrontmatterField(let field):
+            "SKILL.md 缺少 \(field)。"
         }
     }
 }

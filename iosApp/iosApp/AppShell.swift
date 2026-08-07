@@ -177,6 +177,7 @@ struct AppShell: View {
                     excludingRunIds: backgroundRunIds
                 )
                 await conversationStore.bootstrap()
+                IOSBuiltinSkills.installIfMissing(enableWith: sharedSettings)
                 await chatViewModel.reconcilePendingMiniAppMutationsAfterConversationBootstrap()
                 didBootstrapConversations = true
 

@@ -1308,9 +1308,9 @@ final class ChatViewModel {
         return .success(results)
     }
 
-    // MARK: - Auxiliary generation (title + chat suggestions)
+    // MARK: - Auxiliary generation (title + chat suggestions + list preview)
 
-    /// 一轮生成完成后触发:总是尝试生成对话建议;首轮(仅 1 条用户消息)再生成标题。
+    /// 一轮生成完成后触发:总是尝试生成对话建议与列表浓缩预览;首轮(仅 1 条用户消息)再生成标题。
     /// 工具审批暂停期间(有 pending approval)不触发;最后一条非助手消息也不触发。
     private func onGenerationCompleted() {
         guard pendingMemoryApproval == nil, pendingSearchApproval == nil,
@@ -1325,6 +1325,8 @@ final class ChatViewModel {
         generateChatSuggestions()
         let userMessageCount = messages.filter { $0.role == MessageRole.user }.count
         if userMessageCount == 1 { generateConversationTitle() }
+        // 与标题共用 titleModelId；后台成功路径走同一 generator。
+        generateConversationListPreview()
     }
 
     /// 辅助模型:优先用指定的辅助模型,未设置时回退当前聊天模型(对齐 Android resolveTaskChatModel)。
@@ -1417,6 +1419,18 @@ final class ChatViewModel {
         }
     }
 
+    /// 列表浓缩预览：复用标题辅助模型（titleModelId → 当前聊天模型回退）。
+    private func generateConversationListPreview() {
+        guard let conversationId = currentConversationId,
+              let conversationStore else { return }
+        ConversationListPreviewGenerator.schedule(
+            conversationId: conversationId,
+            messages: messages,
+            store: conversationStore,
+            settings: sharedSettings
+        )
+    }
+
     private func generateChatSuggestions() {
         let snapshot = sharedSettings.snapshot
         guard let model = resolveAuxModel(snapshot.suggestionModelId) else { return }
@@ -1472,13 +1486,18 @@ final class ChatViewModel {
     }
 
     /// 清洗标题:取首行、去引号/首尾标点、限长。
-    private static func sanitizeTitle(_ raw: String) -> String {
+    static func sanitizeTitle(_ raw: String) -> String {
         var title = raw
             .split(separator: "\n").first.map(String.init)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         title = title.trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”『』「」《》 "))
         if title.count > 24 { title = String(title.prefix(24)) }
         return title
+    }
+
+    /// 清洗列表浓缩预览：与 `ConversationListPreviewGenerator.sanitize` 同源。
+    static func sanitizeListPreview(_ raw: String) -> String {
+        ConversationListPreviewGenerator.sanitize(raw)
     }
 
     private func makeImageOnlyUserMessage(dataUrl: String) -> UIMessage {
@@ -2725,9 +2744,14 @@ final class ChatViewModel {
                 names: Array(IOSWebMountToolCatalog.supportedToolNames).sorted()
             ))
         }
-        if sharedSettings.isCapabilityGateEnabled(.mcp) {
-            toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
-        }
+        toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+            names: Array(IOSSkillToolCatalog.toolNames).sorted()
+        ))
+        // Android always exposes MCP management + call tools in the chat run toolset.
+        toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
+        toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+            names: Array(IOSMcpManagementToolCatalog.toolNames).sorted()
+        ))
         if isSlice3ToolEnabled("subagent_dispatch") {
             toolDeclarations.append(ToolKt.createSubAgentDispatchToolDeclaration())
         }
@@ -2781,6 +2805,21 @@ final class ChatViewModel {
 
     private func latestUserMessageRequestsWorkspaceWrite() -> Bool {
         guard let text = latestUserMessageTextLowercased() else { return false }
+
+        // Skill / MCP package creation needs workspace_file_write even when the
+        // user does not mention /workspace explicitly.
+        let skillOrMcpWrite = [
+            "skill", "技能", "skill.md", "mcp.json", "mcp 服务器", "mcp服务器",
+            "连接 mcp", "配置 mcp", "导入 mcp"
+        ].contains { text.contains($0) }
+        if skillOrMcpWrite {
+            let hasCreateIntent = [
+                "创建", "新建", "写入", "保存", "生成", "导入", "连接", "配置", "安装",
+                "做一个", "做个", "定制",
+                "create", "write", "save", "import", "connect", "install", "add"
+            ].contains { text.contains($0) }
+            if hasCreateIntent { return true }
+        }
 
         let hasWriteAction = [
             "保存", "存到", "存入", "写入", "新建", "创建", "生成文件", "导出",
@@ -2912,8 +2951,9 @@ final class ChatViewModel {
 
     private func isSlice3ToolEnabled(_ toolName: String) -> Bool {
         switch toolName {
-        case "mcp_call":
-            sharedSettings.isCapabilityGateEnabled(.mcp)
+        case "mcp_call", "mcp_list", "mcp_test", "mcp_import_from_skill",
+             "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable":
+            true
         case "subagent_dispatch":
             isCapabilityPolicyEnabled("ios.agent.subagent_dispatch")
         case "model_council_run":

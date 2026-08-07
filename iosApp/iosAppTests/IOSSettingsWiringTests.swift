@@ -29,7 +29,9 @@ final class IOSSettingsWiringTests: XCTestCase {
         let settings = try source("iosApp/NovelCreation/NovelCreationSettingsView.swift")
 
         XCTAssertTrue(home.contains("title: \"小说创作\""))
-        XCTAssertTrue(home.contains("color: AmberTheme.accentIndigo, route: .novelCreation)"))
+        // 方案 B：设置首页统一 accent 图标，不再 per-row color。
+        XCTAssertTrue(home.contains("route: .novelCreation)"))
+        XCTAssertFalse(home.contains("color: AmberTheme.accentIndigo, route: .novelCreation)"))
         XCTAssertFalse(home.contains("route: .novelCreationSettings"))
         XCTAssertTrue(shell.contains("case novelCreationSettings"))
         XCTAssertFalse(shell.contains("NovelSettingsTransitionSource"))
