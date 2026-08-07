@@ -188,7 +188,7 @@ struct ChatReasoningCard: View {
         }
     }
 
-    // Compact cream pill: amber clock + "思考中 N 秒 · Auto" (live) / "思考了 N 秒 · Auto" (done) +
+    // Compact cream pill: brain + "思考中 N 秒 · Auto" (live) / "思考了 N 秒 · Auto" (done) +
     // chevron. Expands to a height-capped, auto-scrolling view of the streaming reasoning text.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -198,14 +198,11 @@ struct ChatReasoningCard: View {
                 setExpanded(!isExpanded, duration: 0.22)
             } label: {
                 HStack(spacing: 7) {
-                    // 思考中的时钟动画由 UIKit addSymbolEffect 驱动(视觉与 SwiftUI
-                    // .symbolEffect 相同)。SwiftUI 的永动 symbolEffect 会把
-                    // ViewGraphDisplayLink 钉在 60fps,每帧渲染器工作量 ∝ 整窗显示
-                    // 列表——长表格/代码块在屏时实测 ~240ms CPU/秒(2026-07-10
-                    // idleDecay 探针,裸挂 markdown 后降到 ~17ms/秒)。UIKit 版由
-                    // CA 层驱动同一动画,SwiftUI 零每帧成本,屏幕内动画不降级。
+                    // 用 brain 表达「思考」语义(时钟更像倒计时/耗时)。
+                    // variableColor 动画仍走 UIKit addSymbolEffect,避免 SwiftUI
+                    // 永动 symbolEffect 把 ViewGraphDisplayLink 钉在 60fps。
                     ChatUIKitVariableColorSymbol(
-                        systemName: "clock",
+                        systemName: "brain.head.profile",
                         pointSize: 12.5,
                         weight: .semibold,
                         tint: UIColor(AmberTheme.accentAmber),

@@ -167,6 +167,31 @@ final class IOSSkillMcpToolsTests: XCTestCase {
         XCTAssertTrue(writeNames.contains("workspace_file_write"))
     }
 
+    func testSkillEnableRejectsMissingSkill() async throws {
+        let root = tempRoot()
+        let skillStore = IOSSkillFileStore(baseDirectory: root)
+        let defaults = UserDefaults(suiteName: "skill-enable-missing-\(UUID().uuidString)")!
+        let settings = IOSSharedSettingsStore(userDefaults: defaults)
+        let service = IOSSkillMcpToolService(
+            skillStore: skillStore,
+            sharedSettings: settings,
+            workspaceStore: IOSWorkspaceStore(
+                baseDirectory: tempRoot().appendingPathComponent("ws", isDirectory: true)
+            ),
+            mcpConfigStore: IOSMcpConfigStore(userDefaults: UserDefaults(suiteName: "mcp-enable-\(UUID().uuidString)")!),
+            mcpManager: IOSMcpManager(
+                sharedSettings: settings,
+                configStore: IOSMcpConfigStore(userDefaults: UserDefaults(suiteName: "mcp-enable-mgr-\(UUID().uuidString)")!)
+            )
+        )
+        let result = await service.execute(
+            toolName: "skill_enable",
+            arguments: #"{"name":"does-not-exist"}"#
+        )
+        XCTAssertTrue(result.contains(#""ok":false"#), result)
+        XCTAssertFalse(settings.isSkillEnabled("does-not-exist"))
+    }
+
     func testUseSkillWorksWhenFrontmatterNameDiffersFromDirName() async throws {
         let root = tempRoot()
         let skillStore = IOSSkillFileStore(baseDirectory: root)

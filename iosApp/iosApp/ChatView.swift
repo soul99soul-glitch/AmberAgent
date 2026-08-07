@@ -164,7 +164,7 @@ struct ChatView: View {
 
     var body: some View {
         ZStack {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .app)
             messageList
 
             // 视觉浮层,不参与 bottom safe-area inset 布局。否则按钮显隐会改变

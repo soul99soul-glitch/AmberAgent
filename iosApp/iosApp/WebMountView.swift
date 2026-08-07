@@ -50,7 +50,7 @@ enum IOSDeepReadWebMountAdapter {
         } catch let error as IOSDeepReadSourceNormalizationError {
             return .failure(error)
         } catch {
-            return .failure(.unsupported("WebMount 页面正文读取失败：\(error.localizedDescription)"))
+            return .failure(.unsupported("WebMount 页面正文读取失败：\(IOSDeepReadUserFacingText.fromError(error))"))
         }
     }
 }

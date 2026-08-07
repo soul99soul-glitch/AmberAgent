@@ -185,24 +185,20 @@ struct MiniAppRunnerView: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         if let app {
-                            managementIntro
-                            metadataSection(app)
-                            if showsSourceEditor {
-                                sourceSection(app)
-                            }
+                            managementHero(app)
                             grantsSection(app)
                             versionsSection(app)
-                            auditSection(app)
-                            bridgeLogSection
+                            activitySection(app)
+                            developerSection(app)
                         } else {
                             missingSection
                         }
                     }
-                    .padding(.bottom, 36)
+                    .padding(.bottom, 48)
                 }
                 .scrollIndicators(.hidden)
             }
-            .navigationTitle("管理小应用")
+            .navigationTitle("管理")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -215,114 +211,68 @@ struct MiniAppRunnerView: View {
                     .padding(.bottom, 12)
             }
         }
-        .presentationDetents([.large])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
-    private var managementIntro: some View {
-        Text("查看源码、版本、权限与运行记录。关闭此面板不会停止正在显示的小应用。")
-            .font(.footnote)
-            .lineSpacing(3)
-            .foregroundStyle(AmberTheme.muted)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 0)
-    }
+    private func managementHero(_ app: IOSMiniAppRecord) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                Text(app.iconEmoji ?? "▣")
+                    .font(.system(size: 32))
+                    .frame(width: 56, height: 56)
+                    .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-    private func metadataSection(_ app: IOSMiniAppRecord) -> some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "状态")
-            AmberFormGroup {
-                MiniAppCapabilityStatusRow(row: .init(
-                    title: app.description,
-                    subtitle: "\(app.category) · 更新于 \(dateText(app.updatedAt))",
-                    status: app.pinned ? "已置顶" : "普通",
-                    tint: app.pinned ? AmberTheme.accentAmber : AmberTheme.accent
-                ))
-                MiniAppCapabilityDivider()
-                MiniAppCapabilityStatusRow(row: .init(
-                    title: "版本与运行",
-                    subtitle: "当前 v\(app.version)，历史 \(repository.versions(appId: app.id).count) 个版本；最后运行：\(app.lastRunAt.map(dateText) ?? "尚未记录")。",
-                    status: "\(app.runCount) 次",
-                    tint: AmberTheme.accentGreen
-                ))
-                if let summary = app.boardSummary, !summary.isEmpty {
-                    MiniAppCapabilityDivider()
-                    MiniAppCapabilityStatusRow(row: .init(
-                        title: "深度阅读摘要",
-                        subtitle: summary,
-                        status: "已更新",
-                        tint: AmberTheme.accentCyan
-                    ))
-                }
-            }
-
-            if let actionMessage {
-                MiniAppCapabilityNote(actionMessage)
-                    .padding(.top, 8)
-            }
-        }
-    }
-
-    private func sourceSection(_ app: IOSMiniAppRecord) -> some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "源码")
-
-            if showsSourceEditor {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("HTML（保存会创建新版本）")
-                        .font(.caption.weight(.semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(app.title)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(2)
+                    Text("v\(app.version) · \(categoryLabel(app.category)) · \(app.runCount) 次运行")
+                        .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
-                    TextEditor(text: $generatedHtml)
-                        .font(.system(size: 11, design: .monospaced))
-                        .frame(height: 132)
-                        .padding(6)
-                        .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10))
-                        .scrollContentBackground(.hidden)
-                        .accessibilityLabel("小应用 HTML 源码")
-                        .accessibilityHint("编辑后可加载校验或保存为新版本")
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
-
-                AmberGlassGroup(spacing: 14) {
-                    HStack(spacing: 8) {
-                        Button {
-                            loadEditedHtml()
-                        } label: {
-                            Label("加载并校验", systemImage: "play.circle.fill")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .frame(minHeight: 44)
-                        }
-                        .buttonStyle(.glassProminent)
-
-                        Button {
-                            saveEditedHtml(app)
-                        } label: {
-                            Label("保存新版本", systemImage: "tray.and.arrow.down")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .frame(minHeight: 44)
-                        }
-                        .buttonStyle(.glass)
+                    if app.pinned {
+                        Text("已置顶")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AmberTheme.accentAmber)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if let runnerError {
-                Text(runnerError)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.accentRed)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+            if !app.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(app.description)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
+            Text(
+                "更新于 \(dateText(app.updatedAt))"
+                    + (app.lastRunAt.map { " · 上次打开 \(dateText($0))" } ?? " · 尚未打开")
+            )
+                .font(.caption2)
+                .foregroundStyle(AmberTheme.muted2)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(AmberTheme.border.opacity(0.55), lineWidth: 1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private func categoryLabel(_ raw: String) -> String {
+        switch raw.lowercased() {
+        case "tool": return "工具"
+        case "game": return "游戏"
+        case "utility": return "实用"
+        case "entertainment": return "娱乐"
+        default: return raw.isEmpty ? "小应用" : raw
         }
     }
 
@@ -360,7 +310,7 @@ struct MiniAppRunnerView: View {
                 onValidationError: { runnerError = $0 },
                 onBridgeLog: { bridgeLog = $0 },
                 onToast: { message in
-                    actionMessage = "toast: \(message)"
+                    actionMessage = message
                 },
                 onClose: {
                     systemBridge.close()
@@ -400,21 +350,22 @@ struct MiniAppRunnerView: View {
             AmberFormGroup {
                 if app.permissions.isEmpty {
                     MiniAppCapabilityStatusRow(row: .init(
-                        title: "未声明权限",
-                        subtitle: "这个小应用没有申请额外权限。",
-                        status: "无",
-                        tint: AmberTheme.muted
+                        title: "无需额外权限",
+                        subtitle: "这个小应用只用基础能力。",
+                        status: "就绪",
+                        tint: AmberTheme.accentGreen
                     ))
                 } else {
                     ForEach(Array(app.permissions.enumerated()), id: \.element) { index, permission in
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(permission)
+                                Text(permissionDisplayName(permission))
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(AmberTheme.foreground)
                                 Text(grantDescription(permission))
                                     .font(.caption)
                                     .foregroundStyle(AmberTheme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -430,26 +381,26 @@ struct MiniAppRunnerView: View {
                                     Label("拒绝", systemImage: "xmark.circle")
                                 }
                             } label: {
-                                HStack(spacing: 4) {
-                                    Text(grantTitle(appId: app.id, permission: permission))
-                                        .font(.caption.weight(.semibold))
-                                    Image(systemName: "chevron.up.chevron.down")
-                                        .font(.caption2.weight(.semibold))
-                                }
-                                .foregroundStyle(grantTint(appId: app.id, permission: permission))
-                                .padding(.horizontal, 10)
-                                .frame(minHeight: 44)
-                                .background(AmberTheme.accentTint, in: Capsule())
+                                Text(grantTitle(appId: app.id, permission: permission))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(grantTint(appId: app.id, permission: permission))
+                                    .padding(.horizontal, 12)
+                                    .frame(minHeight: 32)
+                                    .background(
+                                        grantTint(appId: app.id, permission: permission).opacity(0.12),
+                                        in: Capsule()
+                                    )
                             }
-                            .accessibilityLabel("\(permission) 权限")
+                            .frame(minHeight: 44)
+                            .accessibilityLabel(permissionDisplayName(permission))
                             .accessibilityValue(grantTitle(appId: app.id, permission: permission))
-                            .accessibilityHint("双击可更改授权")
+                            .accessibilityHint("更改授权")
                         }
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
 
                         if index < app.permissions.count - 1 {
-                            MiniAppCapabilityDivider()
+                            MiniAppCapabilityDivider(leading: 14)
                         }
                     }
                 }
@@ -460,61 +411,84 @@ struct MiniAppRunnerView: View {
     private func versionsSection(_ app: IOSMiniAppRecord) -> some View {
         let versions = repository.versions(appId: app.id)
         return VStack(spacing: 0) {
-            AmberSectionLabel(text: "版本历史")
+            AmberSectionLabel(text: "版本")
             AmberFormGroup {
-                ForEach(Array(versions.enumerated()), id: \.element.id) { index, version in
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("v\(version.versionNumber)")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                            Text("\(version.changeNote ?? "小应用版本") · \(dateText(version.createdAt))")
-                                .font(.caption)
-                                .foregroundStyle(AmberTheme.muted)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                if versions.isEmpty {
+                    MiniAppCapabilityStatusRow(row: .init(
+                        title: "暂无历史版本",
+                        subtitle: "修改小应用后会出现在这里。",
+                        status: "—",
+                        tint: AmberTheme.muted
+                    ))
+                } else {
+                    ForEach(Array(versions.enumerated()), id: \.element.id) { index, version in
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    Text("v\(version.versionNumber)")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundStyle(AmberTheme.foreground)
+                                    if version.versionNumber == app.version {
+                                        Text("当前")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(AmberTheme.accent)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(AmberTheme.accentTint, in: Capsule())
+                                    }
+                                }
+                                Text(version.changeNote ?? "小应用版本")
+                                    .font(.caption)
+                                    .foregroundStyle(AmberTheme.muted)
+                                    .lineLimit(2)
+                                Text(dateText(version.createdAt))
+                                    .font(.caption2)
+                                    .foregroundStyle(AmberTheme.muted2)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Button {
-                            restore(version: version)
-                        } label: {
-                            Image(systemName: "arrow.uturn.backward.circle")
-                                .font(.system(size: 19, weight: .semibold))
+                            if version.versionNumber != app.version {
+                                Button("恢复") {
+                                    restore(version: version)
+                                }
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(AmberTheme.accent)
-                                .frame(width: 44, height: 44)
+                                .frame(minHeight: 44)
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("恢复 v\(version.versionNumber)")
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("恢复 v\(version.versionNumber)")
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
 
-                    if index < versions.count - 1 {
-                        MiniAppCapabilityDivider()
+                        if index < versions.count - 1 {
+                            MiniAppCapabilityDivider(leading: 14)
+                        }
                     }
                 }
             }
         }
     }
 
-    private func auditSection(_ app: IOSMiniAppRecord) -> some View {
+    private func activitySection(_ app: IOSMiniAppRecord) -> some View {
         let logs = repository.auditLogs(appId: app.id, limit: 6)
         return VStack(spacing: 0) {
-            AmberSectionLabel(text: "活动记录")
+            AmberSectionLabel(text: "最近活动")
             AmberFormGroup {
                 if logs.isEmpty {
                     MiniAppCapabilityStatusRow(row: .init(
-                        title: "暂无活动记录",
-                        subtitle: "小应用运行和权限调用会显示在这里。",
-                        status: "空",
+                        title: "还没有活动",
+                        subtitle: "打开小应用或使用权限后会出现记录。",
+                        status: "—",
                         tint: AmberTheme.muted
                     ))
                 } else {
                     ForEach(Array(logs.enumerated()), id: \.element.id) { index, log in
                         MiniAppCapabilityStatusRow(row: .init(
-                            title: log.method,
+                            title: humanizeAuditMethod(log.method),
                             subtitle: "\(log.summary) · \(dateText(log.createdAt))",
-                            status: log.permission,
-                            tint: AmberTheme.accentCyan
+                            status: permissionDisplayName(log.permission),
+                            tint: AmberTheme.accent
                         ))
                         if index < logs.count - 1 {
                             MiniAppCapabilityDivider()
@@ -525,38 +499,149 @@ struct MiniAppRunnerView: View {
         }
     }
 
-    private var bridgeLogSection: some View {
+    @ViewBuilder
+    private func developerSection(_ app: IOSMiniAppRecord) -> some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "运行日志")
-            if bridgeLog.isEmpty {
-                MiniAppCapabilityNote("暂无运行日志。与小应用交互后会显示最近消息。")
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(bridgeLog.suffix(8).enumerated()), id: \.offset) { _, line in
-                        Text(line)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(AmberTheme.muted2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            AmberSectionLabel(text: "开发者")
+            AmberFormGroup {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if showsSourceEditor {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("HTML 源码")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.muted)
+                                TextEditor(text: $generatedHtml)
+                                    .font(.system(size: 11.5, design: .monospaced))
+                                    .frame(height: 140)
+                                    .padding(8)
+                                    .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .scrollContentBackground(.hidden)
+                                    .accessibilityLabel("小应用 HTML 源码")
+
+                                HStack(spacing: 8) {
+                                    Button {
+                                        loadEditedHtml()
+                                    } label: {
+                                        Text("加载预览")
+                                            .font(.caption.weight(.semibold))
+                                            .frame(maxWidth: .infinity)
+                                            .frame(minHeight: 36)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(AmberTheme.accent)
+
+                                    Button {
+                                        saveEditedHtml(app)
+                                    } label: {
+                                        Text("保存版本")
+                                            .font(.caption.weight(.semibold))
+                                            .frame(maxWidth: .infinity)
+                                            .frame(minHeight: 36)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+
+                        if let runnerError {
+                            Text(runnerError)
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.accentRed)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("运行日志")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(AmberTheme.muted)
+                            if bridgeLog.isEmpty {
+                                Text("与小应用交互后会出现最近消息。")
+                                    .font(.caption)
+                                    .foregroundStyle(AmberTheme.muted2)
+                            } else {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    ForEach(Array(bridgeLog.suffix(8).enumerated()), id: \.offset) { _, line in
+                                        Text(line)
+                                            .font(.system(size: 10.5, design: .monospaced))
+                                            .foregroundStyle(AmberTheme.muted2)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                                .padding(10)
+                                .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            }
+                        }
                     }
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+                } label: {
+                    Text("源码与日志")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .tint(AmberTheme.muted)
             }
         }
     }
 
     private var missingSection: some View {
-        VStack(spacing: 0) {
-            MiniAppCapabilityNote("这个小应用可能已被删除，或本机记录读取失败。")
-                .padding(.top, 12)
-            TextEditor(text: .constant(Self.missingAppHtml(appId: appId)))
-                .font(.system(size: 11, design: .monospaced))
-                .frame(height: 180)
-                .padding(6)
-                .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: 10))
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(AmberTheme.accentAmber)
+            Text("找不到这个小应用")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground)
+            Text("它可能已被删除，或本机记录读取失败。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(28)
+        .padding(.top, 24)
+    }
+
+    private func permissionDisplayName(_ permission: String) -> String {
+        switch IOSMiniAppPermission(rawValue: permission) {
+        case .storage: "本地存储"
+        case .toast: "提示"
+        case .theme: "主题"
+        case .network: "网络"
+        case .search: "搜索"
+        case .clipboardCopy: "写入剪贴板"
+        case .aiGenerate: "调用 AI"
+        case .sharedStore: "共享存储"
+        case .eventBus: "事件"
+        case .hostUpdateBoardSummary: "更新摘要"
+        case .hostContext: "读取上下文"
+        case .hostSendToConversation: "写回聊天"
+        case .hostCreateArtifact: "创建内容卡片"
+        case .externalImages: "外链图片"
+        case .launch: "打开其他小应用"
+        case .sensor: "传感器"
+        case .location: "定位"
+        case .clipboardRead: "读取剪贴板"
+        case nil: permission.isEmpty ? "权限" : permission
+        }
+    }
+
+    private func humanizeAuditMethod(_ method: String) -> String {
+        switch method {
+        case "network.fetch", "fetch": return "网络请求"
+        case "search", "search.query": return "搜索"
+        case "ai.generate": return "AI 生成"
+        case "storage.get", "storage.set": return "本地存储"
+        case "toast": return "提示"
+        case "clipboard.copy": return "写入剪贴板"
+        case "clipboard.read": return "读取剪贴板"
+        case "location.get": return "定位"
+        default:
+            if method.hasPrefix("host.") { return "宿主能力" }
+            return method
         }
     }
 
@@ -898,7 +983,7 @@ struct MiniAppRunnerView: View {
     private func setGrant(appId: String, permission: String, decision: IOSMiniAppGrantDecision) {
         do {
             try repository.setGrant(appId: appId, permission: permission, decision: decision)
-            actionMessage = "\(permission) 已\(decision.title)。"
+            actionMessage = "「\(permissionDisplayName(permission))」已\(decision.title)"
         } catch {
             actionMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }

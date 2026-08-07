@@ -42,7 +42,7 @@ struct BoardView: View {
 
     var body: some View {
         ZStack {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .app)
 
             VStack(spacing: 0) {
                 header
@@ -179,77 +179,31 @@ struct BoardView: View {
         .padding(.bottom, 10)
     }
 
-    private var intro: some View {
-        Text("深度阅读会把你明确提供的文本、搜索结果、当前会话、文件或 WebMount 页面整理成可保存的阅读稿。无 API Key、无网络、文件不可读或页面未加载时会给出可恢复状态，不会把静态说明伪装成结果。")
-            .font(.footnote)
-            .lineSpacing(3)
-            .foregroundStyle(AmberTheme.muted)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 16)
-    }
-
-    private var hotListOverviewSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "综合热点")
-            AmberFormGroup {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        Image(systemName: hotListStore.isRefreshing ? "arrow.triangle.2.circlepath" : "flame")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(AmberTheme.accent)
-                            .frame(width: 34, height: 34)
-                            .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("综合热点")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                            Text(hotListSummaryText)
-                                .font(.caption)
-                                .foregroundStyle(AmberTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
-                    AmberGlassGroup(spacing: 16) {
-                        // 手动创建深度阅读(自定义来源)暂时下线 —— 现版太糙,后续重做。
-                        Button {
-                            Task { await refreshHotList(force: true) }
-                        } label: {
-                            Label(hotListStore.isRefreshing ? "刷新中" : "刷新", systemImage: "arrow.clockwise")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glassProminent)
-                        .disabled(hotListStore.isRefreshing)
-                    }
-
-                    if let message = deepReadMessage {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(deepReadMessageIsError ? AmberTheme.accentAmber : AmberTheme.muted)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-            }
-
-            BoardCapabilityNote("热榜只使用 iOS 当前真实支持的公开来源；Android 默认的 B 站源不会在 iOS 上被假装可用。")
-        }
-    }
-
     private var hotTopicSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "综合热榜")
+            ZStack(alignment: .trailing) {
+                AmberSectionLabel(text: "综合热榜")
+                Button {
+                    Task { await refreshHotList(force: true) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(hotListStore.isRefreshing)
+                .opacity(hotListStore.isRefreshing ? 0.45 : 1)
+                .accessibilityLabel(hotListStore.isRefreshing ? "刷新中" : "刷新热榜")
+                .padding(.trailing, 16)
+                .padding(.top, 10)
+            }
             AmberFormGroup {
                 if !hotListStore.dashboard.hasEnabledSources {
                     hotListEmptyText("没有启用任何 iOS 支持的热榜来源。请到设置里选择 Hacker News、arXiv AI、InfoQ AI、36Kr、HF Papers 或 GitHub AI。")
                 } else if hotListStore.dashboard.topics.isEmpty {
-                    hotListEmptyText(hotListStore.isRefreshing ? "正在刷新综合热榜…" : "暂无可显示的综合热点。下拉或点击刷新重试。")
+                    hotListEmptyText(hotListStore.isRefreshing ? "正在刷新综合热榜…" : "暂无可显示的综合热点。下拉或点标题旁刷新图标。")
                 } else {
                     ForEach(Array(hotListStore.dashboard.topics.prefix(20).enumerated()), id: \.element.id) { index, topic in
                         Button {
@@ -263,6 +217,16 @@ struct BoardView: View {
                         }
                     }
                 }
+            }
+            if let message = deepReadMessage {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(deepReadMessageIsError ? AmberTheme.accentAmber : AmberTheme.muted)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
             }
         }
     }
@@ -306,17 +270,6 @@ struct BoardView: View {
             .padding(.vertical, 12)
     }
 
-    private var hotListSummaryText: String {
-        let dashboard = hotListStore.dashboard
-        guard dashboard.hasEnabledSources else { return "未启用热榜来源" }
-        if dashboard.hasContent {
-            let date = dashboard.lastUpdatedAt > 0
-                ? IOSBoardDateFormatters.monthDayTime.string(from: Date(timeIntervalSince1970: TimeInterval(dashboard.lastUpdatedAt) / 1_000))
-                : "尚未刷新"
-            return "\(dashboard.topics.count) 个综合主题 · \(dashboard.providers.count) 个来源 · \(date)"
-        }
-        return hotListStore.isRefreshing ? "正在读取公开热榜" : "还没有缓存，点击刷新读取公开热榜"
-    }
 
     private var deepReadCreateSection: some View {
         VStack(spacing: 0) {
@@ -482,7 +435,7 @@ struct BoardView: View {
                     // as factual content (the generator excludes it).
                     sources.append(try IOSDeepReadSourceNormalizer.searchFailureSource(
                         query: searchQuery,
-                        error: error.localizedDescription
+                        error: IOSDeepReadUserFacingText.fromError(error)
                     ))
                 }
             }
@@ -491,7 +444,7 @@ struct BoardView: View {
             searchQuery = ""
             showCustomSourceSheet = false
         } catch {
-            deepReadMessage = error.localizedDescription
+            deepReadMessage = IOSDeepReadUserFacingText.fromError(error)
             deepReadMessageIsError = true
         }
     }
@@ -513,7 +466,7 @@ struct BoardView: View {
                 templateId: sharedSettings.todayBoard.deepReadTemplateId
             )
         } catch {
-            deepReadMessage = error.localizedDescription
+            deepReadMessage = IOSDeepReadUserFacingText.fromError(error)
             deepReadMessageIsError = true
         }
     }
@@ -530,7 +483,7 @@ struct BoardView: View {
             sharedSettings: sharedSettings,
             navigate: { router.navigate(to: .deepReadTask(id: $0)) },
             onStatus: { message, isError in
-                deepReadMessage = message
+                deepReadMessage = isError ? IOSDeepReadUserFacingText.sanitize(message) : message
                 deepReadMessageIsError = isError
                 if !isError, message.contains("已生成") {
                     deepReadTitle = ""
@@ -572,11 +525,11 @@ struct BoardView: View {
                     templateId: sharedSettings.todayBoard.deepReadTemplateId
                 )
             } catch {
-                deepReadMessage = error.localizedDescription
+                deepReadMessage = IOSDeepReadUserFacingText.fromError(error)
                 deepReadMessageIsError = true
             }
         case .failure(let error):
-            deepReadMessage = error.localizedDescription
+            deepReadMessage = IOSDeepReadUserFacingText.fromError(error)
             deepReadMessageIsError = true
         }
     }
@@ -603,7 +556,7 @@ struct BoardView: View {
                             templateId: sharedSettings.todayBoard.deepReadTemplateId
                         )
                     } catch {
-                        deepReadMessage = error.localizedDescription
+                        deepReadMessage = IOSDeepReadUserFacingText.fromError(error)
                         deepReadMessageIsError = true
                     }
                 case .failure(let error):
@@ -612,7 +565,7 @@ struct BoardView: View {
                 }
             }
         case .failure(let error):
-            deepReadMessage = "文件选择失败：\(error.localizedDescription)"
+            deepReadMessage = "文件选择失败：\(IOSDeepReadUserFacingText.fromError(error))"
             deepReadMessageIsError = true
         }
     }
@@ -826,7 +779,7 @@ private struct IOSHotProviderItemRow: View {
             Text("#\(item.rank)")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(AmberTheme.accent)
-                .frame(width: 36, alignment: .leading)
+                .frame(width: 44, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.presentationTitle)
@@ -869,7 +822,10 @@ struct IOSDeepReadTaskDetailView: View {
     @State private var templateStore = IOSDeepReadTemplateStore.shared
     @State private var toast: String?
     @State private var statusPulse = false
-    @State private var editorialHeight: CGFloat = 600
+    /// Start small so WKWebView contentSize / JS measure can grow to true article
+    /// height. A large default (e.g. 600) freezes a short article inside a tall frame
+    /// and leaves a blank gap above「相关报道」.
+    @State private var editorialHeight: CGFloat = 1
     @State private var isRetryingWorkspaceSync = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(RouterPath.self) private var router
@@ -893,7 +849,7 @@ struct IOSDeepReadTaskDetailView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .app)
 
             ScrollView {
                 VStack(spacing: 0) {
@@ -931,6 +887,9 @@ struct IOSDeepReadTaskDetailView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { statusPulse = true }
+        }
+        .onChange(of: taskId) { _, _ in
+            editorialHeight = 1
         }
     }
 
@@ -1059,16 +1018,18 @@ struct IOSDeepReadTaskDetailView: View {
     private func content(_ task: IOSDeepReadTask) -> some View {
         switch state(for: task) {
         case .generating:
-            DeepReadMagazineSkeleton(dimmed: false)
+            DeepReadMagazineSkeleton(
+                dimmed: false,
+                progressLabel: store.progressLabel(for: task.id)
+            )
         case .failed:
-            failBanner()
+            failBanner(task)
             DeepReadMagazineSkeleton(dimmed: true)
         case .done:
             if let html = customTemplateHTML(task) {
                 IOSDeepReadTemplateWebView(html: html)
                     .frame(minHeight: 560)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, 14)
+                    .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
             } else {
                 // 完成:编辑器 HTML 阅读器(body-only,标题由上方 masthead 提供)。关掉 WebView
@@ -1127,14 +1088,19 @@ struct IOSDeepReadTaskDetailView: View {
         }
     }
 
-    // 失败 inline 琥珀横幅(非浮卡、非 modal)。
+    // 失败 inline 琥珀横幅(非浮卡、非 modal)。优先展示真实 failureMessage。
     @ViewBuilder
-    private func failBanner() -> some View {
+    private func failBanner(_ task: IOSDeepReadTask) -> some View {
+        let detail = task.failureMessage?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = (detail?.isEmpty == false)
+            ? IOSDeepReadUserFacingText.sanitize(detail ?? "")
+            : "生成中断，部分内容可能不完整。点右上角重试。"
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 15))
                 .foregroundStyle(AmberTheme.accentAmber)
-            Text("生成中断，部分内容可能不完整。点右上角重试。")
+            Text(text)
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.foreground2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1210,7 +1176,7 @@ struct IOSDeepReadTaskDetailView: View {
             return
         }
         IOSDeepReadLauncher.retry(taskId: task.id, sharedSettings: sharedSettings) { message, isError in
-            showToast(message)
+            showToast(isError ? IOSDeepReadUserFacingText.sanitize(message) : message)
         }
     }
 
@@ -1228,7 +1194,7 @@ struct IOSDeepReadTaskDetailView: View {
             store.clearWorkspaceSyncFailure(id: task.id)
             showToast("已保存到 Workspace")
         } catch {
-            let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            let message = IOSDeepReadUserFacingText.fromError(error)
             store.markWorkspaceSyncFailed(id: task.id, message: message)
             showToast("保存到 Workspace 失败：\(message)")
         }
@@ -1413,7 +1379,8 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        // Needed so we can measure `article` height after load (static HTML only).
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         // Serve the app-bundled reader fonts (Noto Serif SC / JetBrains Mono) to the
         // page's @font-face via a custom scheme.
         configuration.setURLSchemeHandler(IOSDeepReadFontSchemeHandler(), forURLScheme: IOSDeepReadFontSchemeHandler.scheme)
@@ -1424,13 +1391,14 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false   // the detail page scrolls the article
         webView.scrollView.bounces = false
-        context.coordinator.observeContentSize(of: webView.scrollView)
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
+        context.coordinator.lastHeight = 0
         // Load from a handler-less origin so the main frame is NOT routed to the font
         // scheme handler (a registered scheme as the document base URL gets the main
         // request handed to the handler → fail → blank page). Fonts then load
@@ -1445,34 +1413,81 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         private let onHeight: @MainActor (CGFloat) -> Void
         var loadedHTML: String?
-        private var sizeObservation: NSKeyValueObservation?
-        private var lastHeight: CGFloat = 0
+        var lastHeight: CGFloat = 0
+        private var remeasureTask: Task<Void, Never>?
 
         init(onHeight: @escaping @MainActor (CGFloat) -> Void) {
             self.onHeight = onHeight
         }
 
-        /// Content height settles after layout (and again if the hero image reflows in),
-        /// so observe contentSize rather than reading it once on didFinish.
-        func observeContentSize(of scrollView: UIScrollView) {
-            sizeObservation = scrollView.observe(\.contentSize, options: [.new]) { [weak self] scrollView, _ in
-                // Round + dedupe so fractional contentSize values don't thrash SwiftUI
-                // layout (and the image reflow settles instead of oscillating).
-                let height = scrollView.contentSize.height.rounded(.up)
-                guard height > 0 else { return }
-                let deliver: @MainActor () -> Void = {
-                    guard let self, abs(height - self.lastHeight) > 0.5 else { return }
-                    self.lastHeight = height
-                    self.onHeight(height)
-                }
-                // KVO on contentSize normally fires on main; if it ever doesn't, hop
-                // instead of trapping (MainActor.assumeIsolated would crash off-main).
-                if Thread.isMainThread {
-                    MainActor.assumeIsolated(deliver)
-                } else {
-                    Task { @MainActor in deliver() }
+        /// Prefer measuring the laid-out `article` via JS. UIScrollView.contentSize
+        /// often stays at the *frame* height when the SwiftUI host starts tall, so
+        /// short articles leave a large empty gap above the native「相关报道」block.
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            scheduleRemeasure(webView)
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            // Avoid leaving the host at height 1 after a failed load.
+            publishHeight(max(120, webView.scrollView.contentSize.height))
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            publishHeight(max(120, webView.scrollView.contentSize.height))
+        }
+
+        private func scheduleRemeasure(_ webView: WKWebView) {
+            remeasureTask?.cancel()
+            // 0 / 280 / 800ms: first paint + font reflow, no continuous observer.
+            remeasureTask = Task { @MainActor [weak self, weak webView] in
+                for delayNs: UInt64 in [0, 280_000_000, 800_000_000] {
+                    if delayNs > 0 {
+                        try? await Task.sleep(nanoseconds: delayNs)
+                    }
+                    guard !Task.isCancelled, let self, let webView else { return }
+                    self.publishMeasuredHeight(from: webView)
                 }
             }
+        }
+
+        private func publishMeasuredHeight(from webView: WKWebView) {
+            let js = """
+            (function() {
+              var article = document.querySelector('article');
+              if (article) {
+                var r = article.getBoundingClientRect();
+                return Math.ceil(r.height + 2);
+              }
+              var body = document.body;
+              if (!body) return 0;
+              return Math.ceil(Math.max(body.scrollHeight, body.offsetHeight, 1));
+            })();
+            """
+            webView.evaluateJavaScript(js) { [weak self] result, _ in
+                let measured: CGFloat
+                if let number = result as? NSNumber {
+                    measured = CGFloat(truncating: number)
+                } else if let value = result as? Double {
+                    measured = CGFloat(value)
+                } else if let value = result as? Int {
+                    measured = CGFloat(value)
+                } else {
+                    measured = webView.scrollView.contentSize.height
+                }
+                Task { @MainActor [weak self] in
+                    self?.publishHeight(max(1, measured.rounded(.up)))
+                }
+            }
+        }
+
+        private func publishHeight(_ height: CGFloat) {
+            guard abs(height - lastHeight) > 0.5 else { return }
+            lastHeight = height
+            onHeight(height)
         }
 
         func webView(
@@ -1723,7 +1738,14 @@ private struct TopicActionRow: View {
 // + 「排版中」meta)+ 导读 / 左竖线 pullquote / 要点 / 双栏。dimmed = 失败态(降透明、spinner 停)。
 private struct DeepReadMagazineSkeleton: View {
     var dimmed: Bool = false
+    var progressLabel: String? = nil
     @State private var pulse = false
+
+    private var stageText: String {
+        if dimmed { return "生成已中断" }
+        let label = progressLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return label.isEmpty ? "正在生成阅读稿…" : label
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1737,9 +1759,10 @@ private struct DeepReadMagazineSkeleton: View {
                 } else {
                     ProgressView().controlSize(.small).tint(AmberTheme.accent)
                 }
-                Text(dimmed ? "生成已中断" : "正在生成阅读稿…")
+                Text(stageText)
                     .font(.system(size: 14, design: .serif))
                     .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
                 Spacer(minLength: 8)
                 Text(dimmed ? "已中断" : "排版中")
                     .font(.system(size: 10, weight: .semibold))
@@ -1792,7 +1815,7 @@ private struct DeepReadMagazineSkeleton: View {
         .opacity(dimmed ? 0.38 : 1)
         .allowsHitTesting(!dimmed)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(dimmed ? "生成已中断" : "正在生成")
+        .accessibilityLabel(dimmed ? "生成已中断" : stageText)
         .onAppear {
             guard !dimmed else { return }
             withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) { pulse = true }
@@ -1860,14 +1883,43 @@ private struct DeepReadRelatedRow: View {
         .accessibilityHint("打开原文")
     }
 
-    /// 媒体名:取 url 主域名主体(reuters.com → REUTERS);无可解析 url 时回退来源类型。
+    /// 媒体名：取注册主域主体，而不是最左子域。
+    /// `s.weibo.com` → WEIBO（不是 S）；`news.sina.com.cn` → SINA；`reuters.com` → REUTERS。
     private var mediaLabel: String {
         if let raw = source.url?.trimmingCharacters(in: .whitespaces),
            let host = URL(string: raw)?.host {
-            let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
-            return bare.split(separator: ".").first.map(String.init) ?? bare
+            return Self.brandLabel(fromHost: host)
         }
         return source.kind.title
+    }
+
+    static func brandLabel(fromHost host: String) -> String {
+        var bare = host.lowercased()
+        if bare.hasPrefix("www.") {
+            bare = String(bare.dropFirst(4))
+        }
+        let parts = bare.split(separator: ".").map(String.init)
+        guard !parts.isEmpty else { return host }
+
+        // 常见复合后缀：取后缀前一段作为品牌。
+        let multiTLDs: Set<String> = [
+            "com.cn", "net.cn", "org.cn", "gov.cn", "co.uk", "com.hk", "com.tw", "co.jp", "com.au",
+        ]
+        let brand: String
+        if parts.count >= 3 {
+            let lastTwo = parts.suffix(2).joined(separator: ".")
+            if multiTLDs.contains(lastTwo) {
+                brand = parts[parts.count - 3]
+            } else {
+                // s.weibo.com / m.zhihu.com → weibo / zhihu
+                brand = parts[parts.count - 2]
+            }
+        } else if parts.count == 2 {
+            brand = parts[0]
+        } else {
+            brand = parts[0]
+        }
+        return brand.uppercased()
     }
 }
 

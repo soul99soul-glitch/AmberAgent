@@ -31,6 +31,18 @@ enum AmberTheme {
         foreground: 0x1A1A1A, foreground2: 0x5C5C5C, muted: 0x737373, muted2: 0x8E8E8E,
         border: 0xD4D4D4, borderSoft: 0xE5E5E5
     )
+    // 点阵 · 钢蓝（pi-dotgrid / Open Design brand-spec）：奶油稿纸 + 实底卡片。
+    static let piLight = AmberPalette(
+        background: 0xF3F0EB, surface: 0xFAF9F7, surface2: 0xEBE7E0,
+        foreground: 0x1C1B19, foreground2: 0x4A4640, muted: 0x6A6560, muted2: 0x9A948C,
+        border: 0xD4CFC7, borderSoft: 0xE8E4DC
+    )
+    // 空白 · 暖白（Open Design blank-workspace / Notion 工作台）：暖中性 + 真白 surface。
+    static let notionLight = AmberPalette(
+        background: 0xF6F5F4, surface: 0xFFFFFF, surface2: 0xEFEEEC,
+        foreground: 0x1A1918, foreground2: 0x31302E, muted: 0x615D59, muted2: 0xA39E98,
+        border: 0xE6E5E3, borderSoft: 0xF0EFED
+    )
     // 深色（设计 E 版）：画布 #0E0D10、卡片 #1F1D23，玻璃改 10% 白、投影改黑系。
     static let darkPalette = AmberPalette(
         background: 0x0E0D10, surface: 0x1F1D23, surface2: 0x2B2930,
@@ -116,8 +128,21 @@ enum AmberTheme {
 
     static let radiusSmall: CGFloat = 6
     static let radiusMedium: CGFloat = 8
-    static let radiusLarge: CGFloat = 12
-    static let radiusXLarge: CGFloat = 18
+    /// Chat / tool card radius — follows optional `bubbleChrome` theme slot.
+    static var radiusLarge: CGFloat {
+        switch AmberThemeRuntime.shared.bubbleChrome {
+        case .standard: 12
+        case .soft: 14
+        case .crisp: 10
+        }
+    }
+    static var radiusXLarge: CGFloat {
+        switch AmberThemeRuntime.shared.bubbleChrome {
+        case .standard: 18
+        case .soft: 22
+        case .crisp: 14
+        }
+    }
     static let radiusPill: CGFloat = 980
 
     // ── 首页设计令牌 ────────────────────────────────────────────────
@@ -128,12 +153,17 @@ enum AmberTheme {
     /// hover/按压垫底（前景只允许加深，禁止变浅变灰）。
     static var press: Color { homeColor(\.press, alpha: \.pressAlpha) }
     static var hoverCard: Color { homeColor(\.hoverCard) }
-    /// 激活会话行通栏色带：随 accent 浅染（比头像底更淡，避免整行抢戏）。
+    /// 激活会话行通栏色带。
+    /// Notion 暖白：中性浅墨晕（≈ rgba(0,0,0,0.04)），蓝只留在图标/头像，避免整行「皮肤」蓝。
+    /// 其它 paper：仍随 accent 浅染。
     static var activeCard: Color {
         Color(uiColor: UIColor { trait in
+            let dark = trait.userInterfaceStyle == .dark
+            if AmberThemeRuntime.shared.paper == .notion {
+                return UIColor(hex: dark ? 0xFFFFFF : 0x000000, alpha: dark ? 0.08 : 0.04)
+            }
             let hex = AmberThemeRuntime.shared.accentHex
-            let alpha: Double = trait.userInterfaceStyle == .dark ? 0.16 : 0.09
-            return UIColor(hex: hex, alpha: alpha)
+            return UIColor(hex: hex, alpha: dark ? 0.16 : 0.09)
         })
     }
     /// 节标题墨（设计令牌 sec，与 foreground2 数值同构但语义独立，防止联动漂移）。
@@ -267,7 +297,7 @@ enum AmberTheme {
     private static func homeTokens(for paper: AmberThemeRuntime.Paper, dark: Bool) -> AmberHomeTokens {
         if dark {
             switch paper {
-            case .paper, .neutral, .white:
+            case .paper, .neutral, .white, .pi, .notion:
                 return homeDark
             case .garnet, .ochre, .turmeric, .magenta, .lotus:
                 break
@@ -277,6 +307,8 @@ enum AmberTheme {
             case .neutral: return homeNeutral
             case .paper: return homePaper
             case .white: return homeWhite
+            case .pi: return homePaper // cream draft paper shares warm-home chrome
+            case .notion: return homeWhite // warm-white workspace
             case .garnet, .ochre, .turmeric, .magenta, .lotus:
                 break
             }
@@ -318,8 +350,10 @@ enum AmberTheme {
     }
 }
 
-/// Persisted, observable theme state: canvas (paper vs neutral) + accent. Light/dark is handled
-/// separately via `IOSAppearanceMode` → `.preferredColorScheme` (+ the dynamicProvider above).
+/// Persisted, observable theme state: canvas (paper vs neutral) + accent + swappable visual
+/// style slots (texture / brand mark / shortcut icons). Light/dark is handled separately via
+/// `IOSAppearanceMode` → `.preferredColorScheme` (+ the dynamicProvider above).
+/// List layout is **not** part of this state.
 @Observable
 final class AmberThemeRuntime {
     // Read/written only from main-actor view bodies and tap handlers; the dynamicProvider color
@@ -329,7 +363,7 @@ final class AmberThemeRuntime {
 
     enum Paper: String, CaseIterable {
         /// 暖纸 / 暖灰 / 中性白（非沉浸）+ 隐藏的沉浸色画布占位。
-        case paper, neutral, white, garnet, ochre, turmeric, magenta, lotus
+        case paper, neutral, white, pi, notion, garnet, ochre, turmeric, magenta, lotus
 
         /// Light-appearance palette. Neutral canvases adapt to system dark;
         /// the immersive single-hue canvases keep their color in both appearances.
@@ -338,6 +372,8 @@ final class AmberThemeRuntime {
             case .paper: AmberTheme.paperLight
             case .neutral: AmberTheme.neutralLight
             case .white: AmberTheme.whiteLight
+            case .pi: AmberTheme.piLight
+            case .notion: AmberTheme.notionLight
             case .garnet: AmberTheme.garnetPalette
             case .ochre: AmberTheme.ochrePalette
             case .turmeric: AmberTheme.turmericPalette
@@ -348,7 +384,7 @@ final class AmberThemeRuntime {
 
         var darkPalette: AmberPalette {
             switch self {
-            case .paper, .neutral, .white: AmberTheme.darkPalette
+            case .paper, .neutral, .white, .pi, .notion: AmberTheme.darkPalette
             case .garnet: AmberTheme.garnetPalette
             case .ochre: AmberTheme.ochrePalette
             case .turmeric: AmberTheme.turmericPalette
@@ -362,6 +398,8 @@ final class AmberThemeRuntime {
             case .paper: "暖纸"
             case .neutral: "暖灰"
             case .white: "中性白"
+            case .pi: "奶油稿纸"
+            case .notion: "暖白"
             case .garnet: "绛红"
             case .ochre: "赭橙"
             case .turmeric: "姜黄"
@@ -372,7 +410,7 @@ final class AmberThemeRuntime {
 
         var isImmersive: Bool {
             switch self {
-            case .paper, .neutral, .white: false
+            case .paper, .neutral, .white, .pi, .notion: false
             default: true
             }
         }
@@ -381,19 +419,84 @@ final class AmberThemeRuntime {
     var paper: Paper { didSet { UserDefaults.standard.set(paper.rawValue, forKey: Keys.paper) } }
     var accentHex: UInt32 { didSet { UserDefaults.standard.set(Int(accentHex), forKey: Keys.accent) } }
     var accentInkHex: UInt32 { didSet { UserDefaults.standard.set(Int(accentInkHex), forKey: Keys.accentInk) } }
+    /// Canvas texture overlay style (default `.flat` = solid color only).
+    var canvasStyle: AmberCanvasStyle {
+        didSet { UserDefaults.standard.set(canvasStyle.rawValue, forKey: Keys.canvasStyle) }
+    }
+    /// Home brand mark style (default `.systemWordmark`).
+    var brandMarkStyle: AmberBrandMarkStyle {
+        didSet { UserDefaults.standard.set(brandMarkStyle.rawValue, forKey: Keys.brandMark) }
+    }
+    /// Home shortcut icon skin (default `.phosphorFill`). Conversation list icons are independent.
+    var shortcutIconStyle: AmberShortcutIconStyle {
+        didSet { UserDefaults.standard.set(shortcutIconStyle.rawValue, forKey: Keys.shortcutIconStyle) }
+    }
+    /// Home chrome typeface (brand / section / shortcut labels). Never writes chat body font prefs.
+    var chromeTypeface: AmberChromeTypeface {
+        didSet { UserDefaults.standard.set(chromeTypeface.rawValue, forKey: Keys.chromeTypeface) }
+    }
+    var canvasScope: AmberCanvasScope {
+        didSet { UserDefaults.standard.set(canvasScope.rawValue, forKey: Keys.canvasScope) }
+    }
+    var bubbleChrome: AmberBubbleChrome {
+        didSet { UserDefaults.standard.set(bubbleChrome.rawValue, forKey: Keys.bubbleChrome) }
+    }
+    var glassChrome: AmberGlassChrome {
+        didSet { UserDefaults.standard.set(glassChrome.rawValue, forKey: Keys.glassChrome) }
+    }
+    var emptyArt: AmberEmptyArtStyle {
+        didSet { UserDefaults.standard.set(emptyArt.rawValue, forKey: Keys.emptyArt) }
+    }
+    var settingsChrome: Bool {
+        didSet { UserDefaults.standard.set(settingsChrome, forKey: Keys.settingsChrome) }
+    }
+    var launchBrand: AmberLaunchBrandStyle {
+        didSet { UserDefaults.standard.set(launchBrand.rawValue, forKey: Keys.launchBrand) }
+    }
+    var assetMode: AmberThemeAssetMode {
+        didSet { UserDefaults.standard.set(assetMode.rawValue, forKey: Keys.assetMode) }
+    }
+    var immersivePolicy: AmberImmersivePolicy {
+        didSet { UserDefaults.standard.set(immersivePolicy.rawValue, forKey: Keys.immersivePolicy) }
+    }
 
     private enum Keys {
         static let paper = "app.amber.ios.theme.paper"
         static let accent = "app.amber.ios.theme.accentHex"
         static let accentInk = "app.amber.ios.theme.accentInkHex"
+        static let canvasStyle = "app.amber.ios.theme.canvasStyle"
+        static let brandMark = "app.amber.ios.theme.brandMarkStyle"
+        static let shortcutIconStyle = "app.amber.ios.theme.shortcutIconStyle"
+        static let chromeTypeface = "app.amber.ios.theme.chromeTypeface"
+        static let canvasScope = "app.amber.ios.theme.canvasScope"
+        static let bubbleChrome = "app.amber.ios.theme.bubbleChrome"
+        static let glassChrome = "app.amber.ios.theme.glassChrome"
+        static let emptyArt = "app.amber.ios.theme.emptyArt"
+        static let settingsChrome = "app.amber.ios.theme.settingsChrome"
+        static let launchBrand = "app.amber.ios.theme.launchBrand"
+        static let assetMode = "app.amber.ios.theme.assetMode"
+        static let immersivePolicy = "app.amber.ios.theme.immersivePolicy"
     }
 
     private init() {
         let d = UserDefaults.standard
         // 默认主题 = 中性暖灰 × 琥珀金（E 版定稿）；用户显式选择过的偏好仍以持久化值为准。
+        // Style 槽缺省 = 现状观感，旧安装升级后仍匹配原 6 色 pack。
         paper = Paper(rawValue: d.string(forKey: Keys.paper) ?? "") ?? .neutral
         accentHex = (d.object(forKey: Keys.accent) as? Int).map { UInt32($0) } ?? AmberAccentOption.amberGold.accentHex
         accentInkHex = (d.object(forKey: Keys.accentInk) as? Int).map { UInt32($0) } ?? AmberAccentOption.amberGold.inkHex
+        canvasStyle = AmberCanvasStyle(rawValue: d.string(forKey: Keys.canvasStyle) ?? "") ?? .flat
+        brandMarkStyle = AmberBrandMarkStyle(rawValue: d.string(forKey: Keys.brandMark) ?? "") ?? .systemWordmark
+        shortcutIconStyle = AmberShortcutIconStyle(rawValue: d.string(forKey: Keys.shortcutIconStyle) ?? "") ?? .phosphorFill
+        chromeTypeface = AmberChromeTypeface(rawValue: d.string(forKey: Keys.chromeTypeface) ?? "") ?? .system
+        canvasScope = AmberCanvasScope(rawValue: d.string(forKey: Keys.canvasScope) ?? "") ?? .homeOnly
+        bubbleChrome = AmberBubbleChrome(rawValue: d.string(forKey: Keys.bubbleChrome) ?? "") ?? .standard
+        glassChrome = AmberGlassChrome(rawValue: d.string(forKey: Keys.glassChrome) ?? "") ?? .standard
+        emptyArt = AmberEmptyArtStyle(rawValue: d.string(forKey: Keys.emptyArt) ?? "") ?? .none
+        settingsChrome = d.object(forKey: Keys.settingsChrome) as? Bool ?? false
+        launchBrand = AmberLaunchBrandStyle(rawValue: d.string(forKey: Keys.launchBrand) ?? "") ?? .none
+        assetMode = AmberThemeAssetMode(rawValue: d.string(forKey: Keys.assetMode) ?? "") ?? .builtinOnly
+        immersivePolicy = AmberImmersivePolicy(rawValue: d.string(forKey: Keys.immersivePolicy) ?? "") ?? .hidden
     }
 
     func apply(_ option: AmberAccentOption) {
@@ -405,7 +508,7 @@ final class AmberThemeRuntime {
 /// Authoritative accent set + paired ink (redesign/aa-base.jsx ACCENT_INK). High-luminance hues
 /// (sage, amber gold) pair with dark ink; the rest with white — never a blanket white.
 enum AmberAccentOption: String, CaseIterable, Identifiable {
-    case amberGold, terracotta, sage, mistBlue, wisteria, rose, ink
+    case amberGold, terracotta, sage, mistBlue, steelBlue, notionBlue, wisteria, rose, ink
 
     var id: String { rawValue }
 
@@ -415,6 +518,8 @@ enum AmberAccentOption: String, CaseIterable, Identifiable {
         case .terracotta: 0xB8623A
         case .sage:       0x5E9C6E
         case .mistBlue:   0x4F86D6
+        case .steelBlue:  0x6B8CAD // pi-dotgrid / Open Design
+        case .notionBlue: 0x0075DE // Notion Blue (blank-workspace)
         case .wisteria:   0x9277C4
         case .rose:       0xC2607A
         case .ink:        0x222226
@@ -423,9 +528,11 @@ enum AmberAccentOption: String, CaseIterable, Identifiable {
 
     var inkHex: UInt32 {
         switch self {
-        case .sage:      0x0F150E
-        case .amberGold: 0x231602
-        default:         0xFFFFFF
+        case .sage:       0x0F150E
+        case .amberGold:  0x231602
+        case .steelBlue:  0xFAF9F7 // cream ink on steel blue (brand-spec)
+        case .notionBlue: 0xFFFFFF
+        default:          0xFFFFFF
         }
     }
 
@@ -434,6 +541,8 @@ enum AmberAccentOption: String, CaseIterable, Identifiable {
         case .terracotta: "陶土"
         case .sage:       "鼠尾草绿"
         case .mistBlue:   "雾蓝"
+        case .steelBlue:  "钢蓝"
+        case .notionBlue: "Notion 蓝"
         case .wisteria:   "紫藤"
         case .rose:       "玫红"
         case .amberGold:  "琥珀金"
@@ -947,22 +1056,243 @@ private struct HomeAccountAvatar: View {
 enum HomeConversationIcon {
     static let fallback: HomePhosphor = .chatCircle
 
-    /// 按会话标题语义取 Phosphor fill 实心字形（设计 §4 九行映射 + 置顶图钉 + 实心气泡回退）。
-    static func icon(forTitle title: String, isPinned: Bool) -> HomePhosphor {
+    /// 给标题 LLM 的短 key 表（稳定英文 slug → 实心字形 + 中文提示）。
+    /// 生成标题时让模型选一个 key，列表优先用它，而不是事后猜标题文案。
+    static let llmCatalog: [(key: String, icon: HomePhosphor, hint: String)] = [
+        ("moon", .moon, "夜晚/梦"),
+        ("sun", .sun, "白天/阳光"),
+        ("wine", .wine, "酒"),
+        ("coffee", .coffee, "咖啡"),
+        ("sword", .sword, "武侠/战争"),
+        ("crown", .crown, "帝王/王室"),
+        ("castle", .castleTurret, "王朝/宫廷"),
+        ("list", .list, "清单/顺序"),
+        ("checklist", .listChecks, "待办"),
+        ("music", .musicNotes, "音乐"),
+        ("headphones", .headphones, "播客/耳机"),
+        ("map", .mapPin, "地点/旅行"),
+        ("globe", .globe, "世界/国际"),
+        ("plane", .airplane, "飞机/出行"),
+        ("car", .car, "汽车"),
+        ("train", .train, "火车/地铁"),
+        ("pill", .pill, "医疗/健康"),
+        ("heart_pulse", .heartbeat, "心脏/体检"),
+        ("scales", .scales, "对比/评价"),
+        ("law", .gavel, "法律"),
+        ("book", .bookOpen, "小说/阅读"),
+        ("books", .books, "历史/典籍"),
+        ("notebook", .notebook, "笔记"),
+        ("pencil", .pencil, "写作"),
+        ("code", .code, "编程/模型"),
+        ("robot", .robot, "AI/机器人"),
+        ("brain", .brain, "思考/心理"),
+        ("idea", .lightbulb, "想法/原理"),
+        ("science", .flask, "科学/实验"),
+        ("game", .gameController, "游戏"),
+        ("trophy", .trophy, "比赛/冠军"),
+        ("football", .football, "足球"),
+        ("basketball", .basketball, "篮球"),
+        ("heart", .heart, "感情/恋爱"),
+        ("smile", .smiley, "搞笑/轻松"),
+        ("fire", .fire, "热门/燃"),
+        ("bolt", .lightning, "速度/性能"),
+        ("water", .drop, "水/海洋"),
+        ("snow", .snowflake, "雪/冬天"),
+        ("mountain", .mountains, "山"),
+        ("tree", .tree, "树/自然"),
+        ("flower", .flower, "花"),
+        ("dog", .dog, "狗"),
+        ("cat", .cat, "猫"),
+        ("fish", .fish, "鱼/海鲜"),
+        ("food", .forkKnife, "美食"),
+        ("pizza", .pizza, "披萨"),
+        ("burger", .hamburger, "汉堡"),
+        ("cake", .cake, "蛋糕/生日"),
+        ("home", .house, "家/住房"),
+        ("office", .buildings, "公司/都市"),
+        ("money", .wallet, "钱/消费"),
+        ("finance", .currencyCny, "理财/汇率"),
+        ("chart", .chartLineUp, "数据/趋势"),
+        ("shop", .shoppingCart, "购物"),
+        ("gift", .gift, "礼物"),
+        ("calendar", .calendar, "日程"),
+        ("clock", .clock, "时间"),
+        ("study", .graduationCap, "考试/学习"),
+        ("student", .student, "学生/上课"),
+        ("camera", .camera, "拍照"),
+        ("movie", .filmSlate, "电影/剧"),
+        ("video", .videoCamera, "视频/直播"),
+        ("phone", .phone, "电话/手机"),
+        ("mail", .envelope, "邮件"),
+        ("bell", .bell, "提醒"),
+        ("lock", .lock, "安全/密码"),
+        ("key", .key, "密钥"),
+        ("translate", .translate, "翻译/语言"),
+        ("quote", .quotes, "名言"),
+        ("people", .users, "团队/社交"),
+        ("baby", .baby, "育儿"),
+        ("rocket", .rocket, "创业/发布"),
+        ("work", .briefcase, "职场/面试"),
+        ("deal", .handshake, "合作"),
+        ("zen", .yinYang, "哲学"),
+        ("ghost", .ghost, "灵异"),
+        ("alien", .alien, "科幻"),
+        ("drama", .maskHappy, "戏剧/角色"),
+        ("design", .palette, "设计/配色"),
+        ("paint", .paintBrush, "绘画"),
+        ("search", .magnifyingGlass, "搜索/研究"),
+        ("settings", .gear, "设置"),
+        ("chat", .chatCircle, "闲聊/一般"),
+    ]
+
+    /// 按会话标题 / 可选 LLM 图标 key 取 Phosphor fill。
+    /// 1) 置顶 → 图钉  
+    /// 2) 标题 LLM 写入的 preferredKey  
+    /// 3) 标题关键词表  
+    /// 4) 标题稳定哈希
+    static func icon(forTitle title: String, isPinned: Bool, preferredKey: String? = nil) -> HomePhosphor {
         if isPinned { return .pushPin }
+        if let preferredKey,
+           let icon = resolveLLMKey(preferredKey) {
+            return icon
+        }
         let normalized = title.lowercased()
+        if let mapped = semanticIcon(for: normalized) {
+            return mapped
+        }
+        return hashedIcon(for: title)
+    }
+
+    /// 只认 `llmCatalog` 里的 slug；返回落盘用的规范化 key。
+    static func canonicalLLMKey(_ raw: String) -> String? {
+        let key = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "_")
+        guard !key.isEmpty else { return nil }
+        return llmCatalog.first(where: { $0.key == key })?.key
+    }
+
+    static func resolveLLMKey(_ raw: String) -> HomePhosphor? {
+        guard let key = canonicalLLMKey(raw) else { return nil }
+        return llmCatalog.first(where: { $0.key == key })?.icon
+    }
+
+    /// 塞进标题 prompt 的 icon 说明（短、可解析）。
+    static func llmIconInstructionBlock() -> String {
+        let keys = llmCatalog.map(\.key).joined(separator: ", ")
+        return """
+
+        Also pick ONE icon key that best matches the topic.
+        Reply in exactly two lines:
+        line1 = the title only (rules above still apply)
+        line2 = icon:<key>
+        Allowed <key> values: \(keys)
+        """
+    }
+
+    /// 关键词命中；顺序即优先级（先匹配先生效）。
+    private static func semanticIcon(for normalized: String) -> HomePhosphor? {
         let mappings: [(HomePhosphor, [String])] = [
-            (.moon, ["月光", "月亮", "夜色", "夜晚", "晚安", "晚上", "星空", "半夜", "晚年", "梦"]),
-            (.wine, ["酒", "酿", "醉", "干杯"]),
-            (.sword, ["剑", "武侠", "江湖", "打仗", "战争", "战役", "战术", "兵法", "武将", "将军", "军队"]),
-            (.crown, ["皇帝", "帝王", "王冠", "君主", "国王", "女王", "皇后", "皇室", "王位", "登基", "在位"]),
+            (.moon, ["月光", "月亮", "夜色", "夜晚", "晚安", "晚上", "星空", "半夜", "晚年", "梦", "失眠"]),
+            (.sun, ["白天", "阳光", "日出", "日落", "晴天", "夏天", "夏日"]),
+            (.wine, ["酒", "酿", "醉", "干杯", "白酒", "红酒", "啤酒", "威士忌"]),
+            (.coffee, ["咖啡", "拿铁", "美式", "espresso", "café"]),
+            (.sword, ["剑", "武侠", "江湖", "打仗", "战争", "战役", "战术", "兵法", "武将", "将军", "军队", "项羽", "吕布", "关羽"]),
+            (.crown, ["皇帝", "帝王", "王冠", "君主", "国王", "女王", "皇后", "皇室", "王位", "登基", "在位", "宋太祖", "赵匡胤", "天子"]),
+            (.castleTurret, ["宫殿", "城堡", "王朝", "帝国", "朝廷"]),
             (.list, ["顺序", "排行", "清单", "列表", "目录", "步骤", "流程", "时间表", "年表"]),
-            (.musicNotes, ["音乐", "歌曲", "歌单", "bgm", "配乐", "旋律", "专辑", "歌手", "歌词", "钢琴", "吉他"]),
-            (.mapPin, ["在哪", "哪里", "哪儿", "地址", "地图", "路线", "都城", "城市", "旅行", "旅游", "景点"]),
-            (.pill, ["药", "症状", "治疗", "医院", "看病", "疾病", "感冒", "发烧", "痛风", "健康"]),
-            (.scales, ["谁", "对比", "比较", "哪个好", "排名", "评价", "厉害", "更强"])
+            (.listChecks, ["todo", "待办", "checklist", "勾选", "任务列表"]),
+            (.musicNotes, ["音乐", "歌曲", "歌单", "bgm", "配乐", "旋律", "专辑", "歌手", "歌词", "钢琴", "吉他", "rap"]),
+            (.headphones, ["耳机", "播客", "podcast", "听歌"]),
+            (.mapPin, ["在哪", "哪里", "哪儿", "地址", "地图", "路线", "都城", "城市", "旅行", "旅游", "景点", "定位"]),
+            (.globe, ["世界", "国际", "全球", "地球", "国家", "海外", "跨国"]),
+            (.airplane, ["飞机", "航班", "机场", "航空", "出差", "飞去"]),
+            (.car, ["开车", "汽车", "驾车", "高速", "路况", "停车"]),
+            (.train, ["火车", "高铁", "地铁", "动车", "站台"]),
+            (.pill, ["药", "症状", "治疗", "医院", "看病", "疾病", "感冒", "发烧", "痛风", "健康", "养生"]),
+            (.heartbeat, ["心脏", "血压", "体检", "心率"]),
+            (.scales, ["谁", "对比", "比较", "哪个好", "排名", "评价", "厉害", "更强", "哪个厉害"]),
+            (.gavel, ["法律", "法院", "律师", "判决", "合同", "合规"]),
+            (.bookOpen, ["小说", "读书", "阅读", "章节", "写书", "连载", "故事", "剧本", "剧情"]),
+            (.books, ["历史", "史料", "文献", "典籍", "通史"]),
+            (.notebook, ["笔记", "备忘", "日记", "手账"]),
+            (.pencil, ["写作", "作文", "改写", "润色", "文案", "起草"]),
+            (.code, ["代码", "编程", "程序", "bug", "api", "swift", "python", "前端", "后端", "算法", "模型", "训练", "llm", "gpt"]),
+            (.robot, ["机器人", "ai", "人工智能", "智能体", "agent"]),
+            (.brain, ["思考", "推理", "认知", "心理", "脑"]),
+            (.lightbulb, ["想法", "创意", "灵感", "点子", "方案"]),
+            (.flask, ["化学", "实验", "科学", "物理", "公式"]),
+            (.gameController, ["游戏", "电玩", "通关", "副本", "rpg", "steam"]),
+            (.trophy, ["冠军", "夺冠", "奖杯", "比赛", "胜负"]),
+            (.football, ["足球", "世界杯", "联赛"]),
+            (.basketball, ["篮球", "nba", "扣篮"]),
+            (.heart, ["爱情", "恋爱", "喜欢", "表白", "女朋友", "男朋友", "结婚", "暗恋"]),
+            (.smiley, ["开心", "搞笑", "笑话", "幽默", "段子"]),
+            (.fire, ["火", "热门", "爆", "燃", "热情"]),
+            (.lightning, ["闪电", "速度", "性能", "加速"]),
+            (.drop, ["水", "下雨", "喝水", "饮水", "海洋"]),
+            (.snowflake, ["雪", "冬天", "冰冷", "霜"]),
+            (.mountains, ["山", "登山", "爬山", "高原"]),
+            (.tree, ["树", "森林", "植物", "环保"]),
+            (.flower, ["花", "玫瑰", "花园"]),
+            (.dog, ["狗", "犬", "汪"]),
+            (.cat, ["猫", "喵"]),
+            (.fish, ["鱼", "海鲜", "钓鱼", "三文鱼", "帝王鲑"]),
+            (.pizza, ["披萨", "pizza"]),
+            (.hamburger, ["汉堡", "快餐"]),
+            (.cake, ["蛋糕", "生日", "甜品"]),
+            (.forkKnife, ["美食", "餐厅", "做饭", "菜谱", "吃什么", "下厨"]),
+            (.house, ["家", "房子", "居住", "装修", "租房"]),
+            (.buildings, ["公司", "办公", "写字楼", "都市"]),
+            (.wallet, ["钱", "理财", "存款", "消费", "省钱"]),
+            (.currencyCny, ["人民币", "汇率", "日元", "美元", "炒股", "股票", "基金"]),
+            (.chartLineUp, ["增长", "趋势", "数据", "分析", "报表", "kpi"]),
+            (.shoppingCart, ["购物", "网购", "下单", "淘宝", "买东西"]),
+            (.gift, ["礼物", "送礼", "红包"]),
+            (.calendar, ["日程", "日历", "约会", "会议", "安排"]),
+            (.clock, ["时间", "几点", "迟到", "闹钟", "倒计时"]),
+            (.graduationCap, ["考试", "高考", "考研", "留学", "大学", "学习", "课程", "作业"]),
+            (.student, ["学生", "同学", "老师", "上课"]),
+            (.camera, ["拍照", "摄影", "相机", "照片"]),
+            (.filmSlate, ["电影", "影视", "剧集", "追剧", "导演"]),
+            (.videoCamera, ["视频", "直播", "剪辑"]),
+            (.phone, ["电话", "手机", "通话"]),
+            (.envelope, ["邮件", "email", "写信"]),
+            (.bell, ["提醒", "通知", "闹钟提醒"]),
+            (.lock, ["密码", "加密", "隐私", "安全", "登录"]),
+            (.key, ["钥匙", "密钥", "token"]),
+            (.translate, ["翻译", "英文", "日语", "语法", "单词"]),
+            (.quotes, ["名言", "引用", "摘抄"]),
+            (.users, ["团队", "同事", "朋友", "群", "社交"]),
+            (.baby, ["宝宝", "婴儿", "育儿", "怀孕"]),
+            (.rocket, ["创业", "上线", "发布", "起飞", "航天"]),
+            (.briefcase, ["工作", "职业", "面试", "简历", "职场"]),
+            (.handshake, ["合作", "商务", "谈判", "签约"]),
+            (.yinYang, ["哲学", "道家", "阴阳", "禅"]),
+            (.ghost, ["鬼", "灵异", "恐怖", "玄学"]),
+            (.alien, ["外星", "ufo", "科幻"]),
+            (.maskHappy, ["戏剧", "表演", "话剧", "角色", "喜剧"]),
+            (.palette, ["设计", "配色", "画画", "美术", "ui"]),
+            (.paintBrush, ["绘画", "水彩", "油画"]),
+            (.magnifyingGlass, ["搜索", "查找", "检索", "研究"]),
+            (.gear, ["设置", "配置", "参数", "系统"]),
+            (.lightbulb, ["为什么", "怎么做", "如何", "解释", "原理"]),
         ]
-        return mappings.first(where: { _, words in words.contains { normalized.contains($0) } })?.0 ?? fallback
+        return mappings.first(where: { _, words in words.contains { normalized.contains($0) } })?.0
+    }
+
+    /// 无关键词时：用标题 utf8 稳定哈希映射到 **会话语义池**（llmCatalog），
+    /// 避免抽到 pin/gear 等 chrome 形看起来像「置顶/设置」。
+    private static func hashedIcon(for title: String) -> HomePhosphor {
+        let pool = llmCatalog.map(\.icon)
+        guard !pool.isEmpty else { return fallback }
+        var hash: UInt64 = 5381
+        for byte in title.utf8 {
+            hash = 127 &* hash &+ UInt64(byte)
+        }
+        let index = Int(hash % UInt64(pool.count))
+        return pool[index]
     }
 }
 
@@ -1246,14 +1576,18 @@ struct HomeContinueCardModel: Equatable {
                     return nil
                 }
             }
+            // Primary line is the task topic so the continue card matches what
+            // the user just launched — not a generic "深度阅读" label that looks
+            // like a different entry after failure.
+            let topic = task.title.trimmingCharacters(in: .whitespacesAndNewlines)
             return Candidate(
                 stableID: "deep-read:\(task.id)",
                 priority: priority,
                 updatedAt: task.updatedAt,
                 model: .init(
                     feature: .deepRead,
-                    title: "深度阅读",
-                    meta: "\(task.title) · \(state)",
+                    title: topic.isEmpty ? "深度阅读" : topic,
+                    meta: "深度阅读 · \(state)",
                     ctaTitle: ctaTitle,
                     destination: .deepReadTask(task.id)
                 )
@@ -1360,6 +1694,22 @@ private struct HomeEmptyCard: View {
             .frame(maxWidth: .infinity, minHeight: 120, alignment: .center)
             .padding(.horizontal, 24)
             .padding(.vertical, 20)
+            .background {
+                if AmberThemeRuntime.shared.emptyArt == .character {
+                    Group {
+                        switch AmberThemeRuntime.shared.canvasStyle {
+                        case .lineGrid:
+                            // Same 18pt lattice as page/cards; opacity only softens ink.
+                            AmberLineGridOverlay()
+                                .opacity(0.65)
+                        default:
+                            AmberDotGridOverlay()
+                                .opacity(0.55)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                }
+            }
             .background(HomeSliceShape(slice: .single).fill(AmberTheme.card))
             .shadow(color: AmberTheme.cardShadowContact, radius: 1, y: 1)
             .shadow(color: AmberTheme.cardShadowAmbient, radius: ambient.radius, y: ambient.y)
@@ -1368,8 +1718,7 @@ private struct HomeEmptyCard: View {
 }
 
 private struct HomeShortcut: View {
-    let title: String
-    let icon: HomePhosphor
+    let entry: HomeShortcutEntry
     let action: () -> Void
     @State private var hovering = false
     @State private var pressed = false
@@ -1378,9 +1727,11 @@ private struct HomeShortcut: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                HomePhosphorIcon(icon, size: 20)
-                Text(title)
-                    .font(.system(size: shortcutLabelSize, weight: .semibold))
+                // Icon skin from theme pack; VStack layout frozen.
+                HomeShortcutIconView(entry: entry, size: 20)
+                Text(entry.title)
+                    // Chrome typeface from theme pack; not chat body IOSChatFont.
+                    .font(AmberChromeFont.system(size: shortcutLabelSize, weight: .semibold))
                     .tracking(0.11)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
@@ -1521,12 +1872,20 @@ private struct HomeGlassControlModifier: ViewModifier {
     let cornerRadius: CGFloat
     var interactive: Bool = true
 
+    private var padOpacity: Double {
+        switch AmberThemeRuntime.shared.glassChrome {
+        case .standard: 0.28
+        case .quieter: 0.18
+        case .solid: 0.52
+        }
+    }
+
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         if #available(iOS 26.0, *) {
-            // 垫底极轻：帮助折射，不盖住 Liquid Glass 光学（microinteractions skill 警告勿做成 flat chip）。
+            // 垫底极轻：帮助折射；强度由主题 glassChrome 弱控。
             content
-                .background(AmberTheme.homeGlassTop.opacity(0.28), in: shape)
+                .background(AmberTheme.homeGlassTop.opacity(padOpacity), in: shape)
                 .glassEffect(
                     interactive ? .regular.interactive() : .regular,
                     in: .rect(cornerRadius: cornerRadius)
@@ -1536,7 +1895,10 @@ private struct HomeGlassControlModifier: ViewModifier {
                 .background(.ultraThinMaterial, in: shape)
                 .background(
                     LinearGradient(
-                        colors: [AmberTheme.homeGlassTop, AmberTheme.homeGlassBottom],
+                        colors: [
+                            AmberTheme.homeGlassTop.opacity(padOpacity / 0.28),
+                            AmberTheme.homeGlassBottom.opacity(padOpacity / 0.28),
+                        ],
                         startPoint: .top,
                         endPoint: .bottom
                     ),
@@ -1674,7 +2036,8 @@ struct ConversationsView: View {
         let _ = sharedSettings.revision
         GeometryReader { geometry in
         ZStack(alignment: .bottomTrailing) {
-            AmberTheme.background.ignoresSafeArea()
+            // Canvas layer (color + optional texture). List structure unchanged.
+            AmberCanvasBackground()
 
             // 用原生 List 承载整屏，会话行才能挂 .swipeActions(Apple Music 同款左右滑动)。
             // 顶部 header/搜索/快捷区作为清空背景的 List 行铺在上面，玻璃风格不受影响:
@@ -1690,7 +2053,8 @@ struct ConversationsView: View {
                     .homeCascade(delay: 0.10, enabled: !cascadeComplete)
                     .simultaneousGesture(dismissSearchOutsideTap)
                 Text("会话")
-                    .font(.system(size: sectionLabelSize, weight: .semibold))
+                    // Section chrome from theme pack; list row layout frozen; chat body font independent.
+                    .font(AmberChromeFont.system(size: sectionLabelSize, weight: .semibold))
                     .tracking(0.11).foregroundStyle(AmberTheme.section)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16).padding(.top, 26).padding(.bottom, 12)
@@ -1852,14 +2216,13 @@ struct ConversationsView: View {
     private var homeNewChatCapsule: some View {
         let height = homeNewChatCapsuleHeight
         return Button {
-            AmberHaptics.trigger(.lightImpact)
             startNewConversation()
         } label: {
             HStack(spacing: 6) {
                 HomePhosphorIcon(.pencil, size: 14)
                     .foregroundStyle(AmberTheme.fab)
                 Text("新对话")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(AmberChromeFont.system(size: 14, weight: .semibold))
                     .tracking(0.2)
                     .foregroundStyle(AmberTheme.foreground)
             }
@@ -1895,10 +2258,8 @@ struct ConversationsView: View {
     private func homeHeaderStack(useGlassEffectID: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Text("Amber")
-                    .font(.system(size: 32, weight: .bold, design: .default))
-                    .tracking(-0.64)
-                    .foregroundStyle(AmberTheme.foreground)
+                // Brand mark layer — HStack chrome layout frozen.
+                AmberBrandMarkView()
 
                 Spacer(minLength: 8)
 
@@ -1926,7 +2287,7 @@ struct ConversationsView: View {
                 .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.92, haptic: .lightImpact))
                 .accessibilityLabel("我的账户")
             }
-            .frame(height: 38)
+            .frame(minHeight: 38)
             .padding(.horizontal, 16)
 
             if isSearchExpanded {
@@ -1949,7 +2310,7 @@ struct ConversationsView: View {
             HStack(spacing: 6) {
                 HomePhosphorIcon(.magnifyingGlass, size: 14)
                 Text("搜索")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(AmberChromeFont.system(size: 13, weight: .semibold))
                     .tracking(0.26)
             }
             .foregroundStyle(AmberTheme.muted)
@@ -1989,7 +2350,7 @@ struct ConversationsView: View {
                 .autocorrectionDisabled()
                 .onSubmit { router.navigate(to: .search(initialQuery: searchQuery)) }
             Button("取消", action: collapseSearch)
-                .font(.system(size: 13, weight: .semibold))
+                .font(AmberChromeFont.system(size: 13, weight: .semibold))
                 .tracking(0.26)
                 .foregroundStyle(AmberTheme.muted)
         }
@@ -2064,6 +2425,7 @@ struct ConversationsView: View {
         _ = backgroundGenerationRevision
         // 观察浓缩预览字典，生成完成后 meta 第二态能刷新到首页。
         _ = conversationStore.listPreviewsByConversationId
+        _ = conversationStore.listIconsByConversationId
         let count = filteredSummaries.count
         return ForEach(Array(filteredSummaries.enumerated()), id: \.element.id) { index, summary in
             let isLast = index == count - 1
@@ -2072,6 +2434,7 @@ struct ConversationsView: View {
                 isCurrent: conversationStore.currentConversation?.id == summary.id,
                 isGenerating: chatViewModel.isGenerationActive(conversationId: summary.id),
                 listPreview: conversationStore.listPreview(for: summary.id),
+                listIconKey: conversationStore.listIconKey(for: summary.id),
                 slice: homeSlice(index: index, count: count),
                 // 一体卡内：末行无底线；当前行与下一行若为当前则让 hairline 让位，避免与 accent 色带打架。
                 hidesSeparator: isLast
@@ -2164,7 +2527,14 @@ struct ConversationsView: View {
         }
         // Continue 候选出现/消失：高度随 VStack 收放 + opacity（taste：离散状态 0.3s，非 spring 列表）。
         .animation(homeContinuePresenceMotion, value: homeContinueModel)
-        .background(AmberTheme.card).clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background {
+            ZStack {
+                AmberTheme.card
+                // Pi/sit：卡内淡网格，避免只有露边画布有纹理、卡面一片板。
+                HomeCardCanvasTexture()
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .shadow(color: AmberTheme.cardShadowContact, radius: 1, y: 1)
         .shadow(color: AmberTheme.cardShadowAmbient, radius: ambient.radius, y: ambient.y)
         .padding(.horizontal, 16).padding(.top, 20)
@@ -2189,12 +2559,12 @@ struct ConversationsView: View {
 
     @ViewBuilder
     private var shortcutButtons: some View {
-        HomeShortcut(title: "深度阅读", icon: .bookOpen) { router.navigate(to: .board) }
+        HomeShortcut(entry: .deepRead) { router.navigate(to: .board) }
             .accessibilityFocused($deepReadShortcutFocused)
-        HomeShortcut(title: "小说创作", icon: .notebook) { router.navigate(to: .novelCreation) }
-        HomeShortcut(title: "模型议会", icon: .chatCircleDots) { router.navigate(to: .council) }
-        HomeShortcut(title: "小应用", icon: .squaresFour) { router.navigate(to: .miniApps) }
-        HomeShortcut(title: "WebMount", icon: .globe) { router.navigate(to: .webMount) }
+        HomeShortcut(entry: .novel) { router.navigate(to: .novelCreation) }
+        HomeShortcut(entry: .council) { router.navigate(to: .council) }
+        HomeShortcut(entry: .miniApps) { router.navigate(to: .miniApps) }
+        HomeShortcut(entry: .webMount) { router.navigate(to: .webMount) }
     }
 
     private func announceHomeContinueChange(
@@ -2305,6 +2675,8 @@ private struct ConversationSummaryRow: View {
     let isGenerating: Bool
     /// LLM 浓缩预览；空则 meta 只显示时间·条数（不交错）。
     let listPreview: String
+    /// 标题 LLM 选出的图标 key；nil 则回退标题关键词 / 哈希。
+    var listIconKey: String? = nil
     let slice: HomeCardSlice
     let hidesSeparator: Bool
     let onTap: () -> Void
@@ -2347,9 +2719,12 @@ private struct ConversationSummaryRow: View {
             .frame(minHeight: 72)
             .padding(.leading, 17).padding(.trailing, 16)
             .background {
-                // 卡面实色 + 当前行 accent 浅染叠层（避免半透明 activeCard 单独填导致「漏画布」）。
+                // 卡面实色 +（纹理主题）卡内淡网格 + 当前行浅染。
+                // 网格叠在实色上、选中晕之下，字仍坐在不透明面上，但 session 框内有方格/点阵感。
                 let fill = ZStack {
                     HomeSliceShape(slice: slice).fill(AmberTheme.card)
+                    HomeCardCanvasTexture()
+                        .clipShape(HomeSliceShape(slice: slice))
                     HomeSliceShape(slice: slice)
                         .fill(isCurrent ? AmberTheme.activeCard : Color.clear)
                         .animation(homeCurrentBandMotion, value: isCurrent)
@@ -2504,9 +2879,17 @@ private struct ConversationSummaryRow: View {
                     .foregroundStyle(isCurrent ? AmberTheme.avatarActiveInk : AmberTheme.avatarIdleInk)
                     .animation(homeCurrentBandMotion, value: isCurrent)
             } else {
-                HomePhosphorIcon(HomeConversationIcon.icon(forTitle: displayTitle, isPinned: false), size: 20)
+                HomePhosphorIcon(
+                    HomeConversationIcon.icon(
+                        forTitle: displayTitle,
+                        isPinned: false,
+                        preferredKey: listIconKey
+                    ),
+                    size: 20
+                )
                     .foregroundStyle(isCurrent ? AmberTheme.avatarActiveInk : AmberTheme.avatarIdleInk)
                     .animation(homeCurrentBandMotion, value: isCurrent)
+                    .animation(homeCurrentBandMotion, value: listIconKey)
             }
             if isGenerating {
                 ConversationGeneratingRing()

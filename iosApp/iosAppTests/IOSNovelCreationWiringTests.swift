@@ -29,13 +29,13 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(appShell.contains("NovelProjectWorkspaceView("))
 
         // E 版首页定稿的五入口顺序（设计 §4）：深度阅读｜小说创作｜模型议会｜小应用｜WebMount。
-        // 用 HomeShortcut 调用点定位，避免命中文件中其他视图的同名文案。
+        // 用 HomeShortcut(entry:) 调用点定位；标题在 HomeShortcutEntry，图标皮肤走 theme pack。
         let entries = [
-            "HomeShortcut(title: \"深度阅读\"",
-            "HomeShortcut(title: \"小说创作\"",
-            "HomeShortcut(title: \"模型议会\"",
-            "HomeShortcut(title: \"小应用\"",
-            "HomeShortcut(title: \"WebMount\"",
+            "HomeShortcut(entry: .deepRead)",
+            "HomeShortcut(entry: .novel)",
+            "HomeShortcut(entry: .council)",
+            "HomeShortcut(entry: .miniApps)",
+            "HomeShortcut(entry: .webMount)",
         ]
         var positions: [String.Index] = []
         for entry in entries {

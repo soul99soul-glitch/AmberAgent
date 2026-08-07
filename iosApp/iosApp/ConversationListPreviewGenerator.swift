@@ -94,7 +94,12 @@ enum ConversationListPreviewGenerator {
         while line.hasPrefix("#") || line.hasPrefix("*") || line.hasPrefix("-") {
             line = String(line.dropFirst()).trimmingCharacters(in: .whitespaces)
         }
-        if line.count > 28 { line = String(line.prefix(28)) }
+        // Prompt: ≤28 CJK / ~40 Latin. Detect any CJK ideograph → 28, else 40.
+        let limit = line.unicodeScalars.contains(where: {
+            let v = $0.value
+            return (0x4E00...0x9FFF).contains(v) || (0x3400...0x4DBF).contains(v)
+        }) ? 28 : 40
+        if line.count > limit { line = String(line.prefix(limit)) }
         return line
     }
 

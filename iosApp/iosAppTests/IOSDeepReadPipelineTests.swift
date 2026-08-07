@@ -171,6 +171,7 @@ final class IOSDeepReadPipelineTests: XCTestCase {
             now: 1_000
         )
 
+        store.markRunning(id: task.id)
         let didComplete = await IOSDeepReadLauncher.runExistingTask(
             taskId: task.id,
             sharedSettings: IOSSharedSettingsStore(userDefaults: UserDefaults(suiteName: "deepread-\(UUID().uuidString)")!),
@@ -181,7 +182,7 @@ final class IOSDeepReadPipelineTests: XCTestCase {
         XCTAssertTrue(didComplete)
         let reloaded = try XCTUnwrap(IOSDeepReadStore(baseDirectory: base).task(id: task.id))
         XCTAssertEqual(reloaded.status, .succeeded)
-        XCTAssertEqual(reloaded.workspaceSyncFailed, "workspace unavailable")
+        XCTAssertEqual(reloaded.workspaceSyncFailed, "Workspace 保存失败，请稍后重试。")
     }
 
     func testOfflineFallbackDeterministicDraftStillWorks() {

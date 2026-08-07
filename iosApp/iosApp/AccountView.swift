@@ -21,13 +21,18 @@ struct AccountView: View {
 
     var body: some View {
         ZStack {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .shell)
 
             VStack(spacing: 0) {
                 header
 
                 ScrollView {
                     VStack(spacing: 0) {
+                        if AmberThemeRuntime.shared.launchBrand == .matchBrand {
+                            AmberBrandMarkView()
+                                .padding(.top, 8)
+                                .padding(.bottom, 4)
+                        }
                         hero
                         statsSection
                     }

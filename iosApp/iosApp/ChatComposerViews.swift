@@ -7,15 +7,31 @@ extension View {
     /// 原生 Liquid Glass 输入胶囊:`.regular` 提供半透折射,`.interactive()` 提供触控时的
     /// HDR 高光/透镜响应。低于 iOS 26 时回退到 `.thinMaterial`。
     /// 内部可见(非 private),以便模型议会等其他页面复用同一套原生输入胶囊样式。
+    ///
+    /// `glassChrome.quieter` / `.solid` 时垫一层与首页同源的弱底，避免 appWide 网格在
+    /// 输入条下折射发脏；`.standard` 不垫，保持经典包体观感。
     @ViewBuilder
     func composerDockGlass(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        // Matches home `HomeGlassControlModifier`; 0 keeps classic packs unchanged.
+        let pad: Double = {
+            switch AmberThemeRuntime.shared.glassChrome {
+            case .standard: 0
+            case .quieter: 0.18
+            case .solid: 0.52
+            }
+        }()
         if #available(iOS 26.0, *) {
-            glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+            if pad > 0 {
+                background(AmberTheme.homeGlassTop.opacity(pad), in: shape)
+                    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+            } else {
+                glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+            }
         } else {
-            background(.thinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            background(.thinMaterial, in: shape)
                 .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
+                    shape.stroke(AmberTheme.border.opacity(0.42), lineWidth: 0.5)
                 }
                 .shadow(color: .black.opacity(0.06), radius: 12, y: 4)
         }

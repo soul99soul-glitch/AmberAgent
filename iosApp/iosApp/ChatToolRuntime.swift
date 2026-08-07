@@ -1610,8 +1610,6 @@ final class ChatToolRuntime {
     private func isAdvancedToolEnabled(_ toolName: String) -> Bool {
         switch toolName {
         case "mcp_call", "mcp_list", "mcp_test", "mcp_import_from_skill":
-            // Management tools stay callable so the model can import/enable MCP;
-            // call/test still need a live client (import auto-enables the gate).
             true
         case "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable":
             true

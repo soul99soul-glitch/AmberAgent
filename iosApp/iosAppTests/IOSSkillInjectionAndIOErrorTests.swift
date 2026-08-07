@@ -16,22 +16,70 @@ final class IOSSkillInjectionAndIOErrorTests: XCTestCase {
 
     // MARK: - Skill injection
 
-    func testNoSkillInjectionWhenNoSkillsEnabled() {
+    func testNoSkillCatalogWhenSkillPackagesMissing() throws {
+        // Default assistant may list required skill names; catalog only injects for packages on disk.
         let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
-        let viewModel = ChatViewModel(
-            settingsStore: SettingsStore(),
-            sharedSettings: sharedSettings,
-            autoGenerateResponses: false
-        )
-        viewModel.inputText = "hello"
-        viewModel.sendMessage()
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSSkillInjectionEmpty-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        // No skills enabled → the upload context must not contain a <skills> block.
-        let uploadMessages = viewModel.preparedUploadMessagesForTesting(viewModel.messages)
-        let hasSkillBlock = uploadMessages.contains { msg in
-            msg.toText().contains("<skills>")
+        var builder = ChatRuntimeContextBuilder(
+            sharedSettings: sharedSettings,
+            mcpTools: [],
+            miniAppRepository: IOSMiniAppRepository(baseDirectory: tempRoot),
+            miniAppRuntimeEnabled: false
+        )
+        builder.skillFileStore = IOSSkillFileStore(baseDirectory: tempRoot)
+
+        let prepared = builder.injectingRuntimeContext(
+            into: [UIMessage.companion.user(prompt: "hello")],
+            coalesceSystemMessages: true
+        )
+        let hasSkillBlock = prepared.contains { msg in
+            let text = msg.toText()
+            return text.contains("<available_skills>") || text.contains("<skills>")
         }
         XCTAssertFalse(hasSkillBlock)
+    }
+
+    func testEnabledSkillInjectsCatalogNotFullBody() throws {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSSkillInjectionCatalog-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let store = IOSSkillFileStore(baseDirectory: tempRoot)
+        try store.createSkill(
+            name: "summarize",
+            description: "Summarize any text concisely.",
+            allowedTools: []
+        )
+        sharedSettings.setSkillEnabled(name: "summarize", enabled: true)
+
+        var builder = ChatRuntimeContextBuilder(
+            sharedSettings: sharedSettings,
+            mcpTools: [],
+            miniAppRepository: IOSMiniAppRepository(baseDirectory: tempRoot),
+            miniAppRuntimeEnabled: false
+        )
+        builder.skillFileStore = store
+
+        let prepared = builder.injectingRuntimeContext(
+            into: [UIMessage.companion.user(prompt: "hello")],
+            coalesceSystemMessages: true
+        )
+        let systemText = prepared
+            .filter { $0.role == MessageRole.system }
+            .map { $0.toText() }
+            .joined(separator: "\n")
+        XCTAssertTrue(systemText.contains("<available_skills>"))
+        XCTAssertTrue(systemText.contains("<name>summarize</name>"))
+        XCTAssertTrue(systemText.contains("Summarize any text concisely."))
+        // Catalog only — not the full markdown body section heading dump.
+        XCTAssertFalse(systemText.contains("### summarize"))
+        XCTAssertTrue(systemText.contains("use_skill"))
     }
 
     func testRuntimeSystemMessagesAreCoalescedForSingleSystemProviders() {

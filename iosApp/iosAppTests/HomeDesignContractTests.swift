@@ -8,7 +8,7 @@ final class HomeDesignContractTests: XCTestCase {
     /// 设计硬约束：首页图标统一 Phosphor fill（路径数据与定稿原型内嵌 symbol 同源）。
     /// 每个字形必须能被解析器完整消化：非空、整体落在 256 viewBox 内（含贝塞尔控制点余量）。
     func testHomePhosphorGlyphsParse() {
-        XCTAssertEqual(HomePhosphor.allCases.count, 21, "首页 Phosphor 字形表意外增删")
+        XCTAssertEqual(HomePhosphor.allCases.count, 300, "首页 Phosphor 字形表意外增删")
         for icon in HomePhosphor.allCases {
             let path = HomeSVGPathParser.parse(icon.pathData)
             let box = path.boundingRect
@@ -34,7 +34,6 @@ final class HomeDesignContractTests: XCTestCase {
             ("中国各朝各代的都城都在哪", .mapPin),
             ("痛风药影响精子质量吗", .pill),
             ("秦皇汉武，唐宗宋祖，到底谁应该被排第一", .scales),
-            ("梁圣和牢梁的区别是什么", .chatCircle),
         ]
 
         for (title, expectedSymbol) in expectations {
@@ -49,7 +48,55 @@ final class HomeDesignContractTests: XCTestCase {
             .pushPin,
             "置顶会话必须优先显示实心图钉"
         )
-        XCTAssertEqual(HomeConversationIcon.fallback, .chatCircle, "无匹配标题不能产生空头像")
+        // Unmapped titles hash into the full glyph set (not fixed chatCircle).
+        let unmapped = "梁圣和牢梁的区别是什么"
+        let hashed = HomeConversationIcon.icon(forTitle: unmapped, isPinned: false)
+        XCTAssertEqual(
+            hashed,
+            HomeConversationIcon.icon(forTitle: unmapped, isPinned: false),
+            "同一无匹配标题必须稳定映射到同一图标"
+        )
+        XCTAssertEqual(
+            HomeConversationIcon.icon(forTitle: unmapped, isPinned: false, preferredKey: "crown"),
+            .crown,
+            "LLM preferredKey 优先于标题哈希/语义"
+        )
+        XCTAssertEqual(
+            HomeConversationIcon.canonicalLLMKey("CROWN"),
+            "crown",
+            "catalog key 应规范化为小写 slug"
+        )
+        XCTAssertNil(
+            HomeConversationIcon.canonicalLLMKey("listChecks"),
+            "非 catalog 的 enum 名不应当作 LLM key"
+        )
+        // 哈希池只用 llmCatalog，不应落到 pushPin
+        for sample in ["梁圣和牢梁的区别是什么", "无关紧要的闲聊标题xyz", "asdfqwer1234"] {
+            XCTAssertNotEqual(
+                HomeConversationIcon.icon(forTitle: sample, isPinned: false),
+                .pushPin,
+                "未映射标题哈希不应抽到图钉"
+            )
+        }
+        XCTAssertEqual(HomeConversationIcon.fallback, .chatCircle, "fallback 常量仍为实心气泡")
+    }
+
+    @MainActor
+    func testParseTitleAndIcon() {
+        let both = ChatViewModel.parseTitleAndIcon("宋太祖\nicon:crown")
+        XCTAssertEqual(ChatViewModel.sanitizeTitle(both.title), "宋太祖")
+        XCTAssertEqual(both.iconKey, "crown")
+
+        let iconOnly = ChatViewModel.parseTitleAndIcon("icon:coffee")
+        XCTAssertTrue(ChatViewModel.sanitizeTitle(iconOnly.title).isEmpty)
+        XCTAssertEqual(iconOnly.iconKey, "coffee")
+
+        let badIcon = ChatViewModel.parseTitleAndIcon("随便标题\nicon:not_a_real_key_zzz")
+        XCTAssertEqual(ChatViewModel.sanitizeTitle(badIcon.title), "随便标题")
+        XCTAssertNil(badIcon.iconKey)
+
+        let cased = ChatViewModel.parseTitleAndIcon("标题\nicon:Crown")
+        XCTAssertEqual(cased.iconKey, "crown")
     }
 
     func testPaletteDesignValues() {

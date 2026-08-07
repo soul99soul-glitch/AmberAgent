@@ -191,6 +191,9 @@ struct IOSSkillMcpToolService {
             throw IOSSkillToolError.missingArgument("name")
         }
         let dirName = resolveInstalledDirName(name)
+        guard skillStore.listSkillDirNames().contains(dirName) else {
+            throw IOSSkillFileStoreError.skillMissing(name)
+        }
         sharedSettings.setSkillEnabled(name: dirName, enabled: enable)
         return Self.json([
             "success": true,
@@ -203,7 +206,6 @@ struct IOSSkillMcpToolService {
 
     private func mcpListJSON(_ args: [String: Any]) async -> String {
         let includeTools = (args["include_tools"] as? Bool) ?? true
-        let includeSchema = (args["include_schema"] as? Bool) ?? false
         mcpManager.refreshServers()
         let servers = mcpManager.servers.isEmpty ? mcpConfigStore.servers : mcpManager.servers
         let payload: [[String: Any]] = servers.map { server in
@@ -218,16 +220,13 @@ struct IOSSkillMcpToolService {
                 "url": server.url,
             ]
             if includeTools {
+                // No persisted input schemas on IOSMcpTool; list names/descriptions only.
                 entry["tools"] = server.tools.map { tool -> [String: Any] in
-                    var toolEntry: [String: Any] = [
+                    [
                         "name": tool.name,
                         "description": String((tool.description ?? "").prefix(240)),
                         "enabled": tool.enabled,
                     ]
-                    if includeSchema {
-                        toolEntry["schema"] = ""
-                    }
-                    return toolEntry
                 }
             }
             return entry

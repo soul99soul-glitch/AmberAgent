@@ -2383,7 +2383,88 @@ enum IOSDeepReadSourceNormalizationError: LocalizedError, Equatable {
         case .emptySource(let kind):
             return "\(kind.title)没有可读取内容。"
         case .unsupported(let reason):
-            return reason
+            return IOSDeepReadUserFacingText.sanitize(reason)
+        }
+    }
+}
+
+/// 深度阅读用户可见文案：尽量中文，避免把系统/SDK 英文错误直接抛到界面。
+enum IOSDeepReadUserFacingText {
+    static func fromError(_ error: Error) -> String {
+        if let access = error as? DocumentAccessError {
+            return access.userMessageForDeepRead
+        }
+        if let localized = error as? LocalizedError,
+           let description = localized.errorDescription?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !description.isEmpty {
+            return sanitize(description)
+        }
+        return sanitize(error.localizedDescription)
+    }
+
+    /// 清洗任意原始错误串；已是中文则保留，常见英文映射为中文，否则给通用句。
+    static func sanitize(_ raw: String) -> String {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "操作失败，请稍后重试。" }
+        if containsCJK(text) {
+            // 去掉夹杂的 debug 英文尾巴（如 threw=2, unusable=1）
+            return text
+                .replacingOccurrences(
+                    of: #"\s*\(threw=\d+,\s*unusable=\d+\)"#,
+                    with: "",
+                    options: .regularExpression
+                )
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let lower = text.lowercased()
+        if lower.contains("network") || lower.contains("offline") || lower.contains("internet")
+            || lower.contains("not connected") || lower.contains("connection") {
+            return "网络不可用，请检查连接后重试。"
+        }
+        if lower.contains("timeout") || lower.contains("timed out") || lower.contains("time out") {
+            return "请求超时，请稍后重试。"
+        }
+        if lower.contains("cancel") {
+            return "操作已取消。"
+        }
+        if lower.contains("unauthorized") || lower.contains("api key") || lower.contains("401")
+            || lower.contains("invalid api") || lower.contains("authentication") {
+            return "鉴权失败，请检查 API Key 或登录状态。"
+        }
+        if lower.contains("forbidden") || lower.contains("403") || lower.contains("permission") {
+            return "没有权限执行此操作。"
+        }
+        if lower.contains("not found") || lower.contains("404") {
+            return "未找到相关资源。"
+        }
+        if lower.contains("429") || lower.contains("rate limit") || lower.contains("too many") {
+            return "请求过于频繁，请稍后重试。"
+        }
+        if lower.contains("500") || lower.contains("502") || lower.contains("503")
+            || lower.contains("server error") || lower.contains("internal error") {
+            return "服务暂时不可用，请稍后重试。"
+        }
+        if lower.contains("ssl") || lower.contains("certificate") || lower.contains("secure connection") {
+            return "安全连接失败，请稍后重试。"
+        }
+        if lower.contains("json") || lower.contains("decode") || lower.contains("parse") {
+            return "返回内容无法解析。"
+        }
+        if lower.contains("no such file") || lower.contains("file") && lower.contains("exist") {
+            return "文件不存在或无法读取。"
+        }
+        if lower.contains("workspace") {
+            return "Workspace 保存失败，请稍后重试。"
+        }
+        return "操作失败，请稍后重试。"
+    }
+
+    private static func containsCJK(_ text: String) -> Bool {
+        text.unicodeScalars.contains {
+            let v = $0.value
+            return (0x4E00...0x9FFF).contains(v) || (0x3400...0x4DBF).contains(v)
         }
     }
 }
@@ -2591,6 +2672,8 @@ final class IOSDeepReadStore {
     static let shared = IOSDeepReadStore()
 
     private(set) var tasks: [IOSDeepReadTask]
+    /// Ephemeral in-memory stage labels for the detail skeleton (not persisted).
+    private(set) var progressLabelsByTaskId: [String: String] = [:]
 
     private let directory: URL
     private let fileURL: URL
@@ -2608,6 +2691,23 @@ final class IOSDeepReadStore {
         encoder = JSONEncoder()
         decoder = JSONDecoder()
         tasks = Self.loadTasks(from: fileURL, decoder: decoder)
+    }
+
+    func progressLabel(for id: String) -> String? {
+        progressLabelsByTaskId[id]
+    }
+
+    func setProgressLabel(id: String, _ label: String?) {
+        let cleaned = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if cleaned.isEmpty {
+            progressLabelsByTaskId.removeValue(forKey: id)
+        } else {
+            progressLabelsByTaskId[id] = cleaned
+        }
+    }
+
+    func clearProgressLabel(id: String) {
+        progressLabelsByTaskId.removeValue(forKey: id)
     }
 
     var history: [IOSDeepReadTask] {
@@ -2667,6 +2767,7 @@ final class IOSDeepReadStore {
     }
 
     func complete(id: String, markdown: String, structuredJSON: String? = nil, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        clearProgressLabel(id: id)
         update(id: id) { task in
             task.status = .succeeded
             task.resultMarkdown = markdown
@@ -2693,6 +2794,7 @@ final class IOSDeepReadStore {
     }
 
     func fail(id: String, message: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        clearProgressLabel(id: id)
         update(id: id) { task in
             task.status = .failed
             task.failureMessage = message.prefixString(500)
@@ -2701,6 +2803,7 @@ final class IOSDeepReadStore {
     }
 
     func markUnsupported(id: String, message: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        clearProgressLabel(id: id)
         update(id: id) { task in
             task.status = .unsupported
             task.failureMessage = message.prefixString(500)
@@ -2709,6 +2812,7 @@ final class IOSDeepReadStore {
     }
 
     func prepareRetry(id: String, now: Int64 = IOSBoardSignalRepository.currentEpochMs()) {
+        clearProgressLabel(id: id)
         update(id: id) { task in
             task.status = .queued
             task.resultMarkdown = ""
@@ -3382,7 +3486,6 @@ enum IOSDeepReadDraftGenerator {
 
         var merged = IOSDeepReadOutput()
         var threwCount = 0
-        var unusableCount = 0
         for (stageIndex, stage) in stages.enumerated() {
             let priorJSON = merged.hasStructuredBody ? (encodeStructured(merged) ?? "") : ""
             let prompt = buildStagePrompt(
@@ -3396,8 +3499,6 @@ enum IOSDeepReadDraftGenerator {
                 threwCount += 1
             } else if let parsed = parseStageJSON(text), parsed.hasStructuredBody {
                 merged = merged.merged(with: parsed)
-            } else {
-                unusableCount += 1
             }
             await onStageProgress?(stage.label, stageIndex + 1, stages.count)
         }
@@ -3406,10 +3507,10 @@ enum IOSDeepReadDraftGenerator {
         // Honest failure only when nothing usable came back at all.
         let didFail = !merged.hasStructuredBody
         let reason: String
-        if didFail && threwCount == 4 {
-            reason = "所有阶段调用失败（provider 抛错）"
+        if didFail && threwCount == stages.count {
+            reason = "模型调用全部失败，请检查网络、API Key 或模型配置后重试。"
         } else if didFail {
-            reason = "所有阶段未产出可用结构化内容（threw=\(threwCount), unusable=\(unusableCount)）"
+            reason = "未能生成可用的深度阅读内容，请换个来源或模型后重试。"
         } else {
             reason = ""
         }

@@ -1403,19 +1403,29 @@ final class ChatViewModel {
               let expectedTitle = conversationStore.currentConversation?.title else { return }
         let content = auxConversationText(maxMessages: 4)
         guard !content.isEmpty else { return }
+        // 标题 LLM 顺带选 icon key：列表优先用它，避免事后猜标题关键词。
         let prompt = snapshot.titlePrompt
             .replacingOccurrences(of: "{locale}", with: auxLocaleName())
             .replacingOccurrences(of: "{content}", with: content)
+            + HomeConversationIcon.llmIconInstructionBlock()
         Task { [weak self] in
             guard let self else { return }
             guard let raw = await self.runAuxModel(model: model, prompt: prompt) else { return }
-            let title = Self.sanitizeTitle(raw)
-            guard !title.isEmpty else { return }
-            _ = await conversationStore.renameConversation(
-                id: conversationId,
-                title: title,
-                ifCurrentTitleMatches: expectedTitle
-            )
+            let parsed = Self.parseTitleAndIcon(raw)
+            let title = Self.sanitizeTitle(parsed.title)
+            // Title rename is optional (LLM may return only icon:). Icon write follows
+            // rename success when a title is present — never after user rename mismatch.
+            if !title.isEmpty {
+                let renamed = await conversationStore.renameConversation(
+                    id: conversationId,
+                    title: title,
+                    ifCurrentTitleMatches: expectedTitle
+                )
+                guard renamed else { return }
+            }
+            if let iconKey = parsed.iconKey {
+                conversationStore.setListIconKey(id: conversationId, key: iconKey)
+            }
         }
     }
 
@@ -1488,11 +1498,36 @@ final class ChatViewModel {
     /// 清洗标题:取首行、去引号/首尾标点、限长。
     static func sanitizeTitle(_ raw: String) -> String {
         var title = raw
-            .split(separator: "\n").first.map(String.init)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty && !$0.lowercased().hasPrefix("icon:") })
+            ?? ""
         title = title.trimmingCharacters(in: CharacterSet(charactersIn: "\"'“”『』「」《》 "))
         if title.count > 24 { title = String(title.prefix(24)) }
         return title
+    }
+
+    /// 解析标题 LLM 两行输出：`标题` + 可选 `icon:<key>`。
+    static func parseTitleAndIcon(_ raw: String) -> (title: String, iconKey: String?) {
+        let lines = raw
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var iconKey: String?
+        var titleLines: [String] = []
+        for line in lines {
+            let lower = line.lowercased()
+            if lower.hasPrefix("icon:") {
+                let key = String(line.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+                // 只存 catalog 规范化 slug，避免 lower 后的 camelCase 回读失败。
+                if let canonical = HomeConversationIcon.canonicalLLMKey(key) {
+                    iconKey = canonical
+                }
+                continue
+            }
+            titleLines.append(line)
+        }
+        return (titleLines.first ?? "", iconKey)
     }
 
     /// 清洗列表浓缩预览：与 `ConversationListPreviewGenerator.sanitize` 同源。
@@ -2747,7 +2782,7 @@ final class ChatViewModel {
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
             names: Array(IOSSkillToolCatalog.toolNames).sorted()
         ))
-        // Android always exposes MCP management + call tools in the chat run toolset.
+        // Capability gates are always-on on iOS; declare management + call together.
         toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
             names: Array(IOSMcpManagementToolCatalog.toolNames).sorted()

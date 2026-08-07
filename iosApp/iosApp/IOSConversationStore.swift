@@ -96,6 +96,10 @@ final class IOSConversationStore {
     /// 与 KMP `ConversationSummary` 解耦：不改 index schema，落盘在 conversations/list-previews.json。
     private(set) var listPreviewsByConversationId: [String: String] = [:]
 
+    /// 标题 LLM 一并选出的列表图标 key（`HomeConversationIcon.llmCatalog`）。
+    /// 不改 conversation schema，落盘在 conversations/list-icons.json。
+    private(set) var listIconsByConversationId: [String: String] = [:]
+
     /// 单调递增的修订号：每次 currentConversation 被替换（新建/切换/删除回退/落盘/分支）时 +1。
     /// 供需要感知「当前会话内容可能变了」的 UI 观察（如 island 标题）。
     /// 注意：它对「同会话落盘」也会 +1，因此不能用它判断「是否切到了别的会话」——
@@ -156,6 +160,7 @@ final class IOSConversationStore {
 
     private let storage: JsonConversationStorage
     private let listPreviewsFileURL: URL
+    private let listIconsFileURL: URL
     private var deletedConversationIds: Set<String> = []
     private var writeSequences: [String: UInt64] = [:]
 
@@ -171,20 +176,25 @@ final class IOSConversationStore {
         // 第一版可接受（便于调试）；后续如要隐藏可换 Application Support。
         let baseDirPath: String
         let previewsURL: URL
+        let iconsURL: URL
         if let baseDirectory {
             baseDirPath = baseDirectory.path
             previewsURL = baseDirectory.appendingPathComponent("list-previews.json")
+            iconsURL = baseDirectory.appendingPathComponent("list-icons.json")
         } else {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
                 ?? URL(fileURLWithPath: NSTemporaryDirectory())
             let conversations = documents.appendingPathComponent("conversations")
             baseDirPath = conversations.path
             previewsURL = conversations.appendingPathComponent("list-previews.json")
+            iconsURL = conversations.appendingPathComponent("list-icons.json")
         }
         let baseDir = ConversationFile(path: baseDirPath)
         self.storage = JsonConversationStorage(baseDir: baseDir)
         self.listPreviewsFileURL = previewsURL
+        self.listIconsFileURL = iconsURL
         self.listPreviewsByConversationId = Self.loadListPreviews(from: previewsURL)
+        self.listIconsByConversationId = Self.loadListPreviews(from: iconsURL)
     }
 
     // MARK: - Bootstrap
@@ -192,6 +202,7 @@ final class IOSConversationStore {
     /// App 启动时调用：加载摘要列表，选最近一条作为 current；无历史则新建空会话。
     func bootstrap() async {
         listPreviewsByConversationId = Self.loadListPreviews(from: listPreviewsFileURL)
+        listIconsByConversationId = Self.loadListPreviews(from: listIconsFileURL)
         do {
             summaries = try await storage.listSummaries()
         } catch {
@@ -228,6 +239,25 @@ final class IOSConversationStore {
             listPreviewsByConversationId[key] = cleaned
         }
         persistListPreviews()
+    }
+
+    /// 标题 LLM 选出的列表图标 key；空串清除。
+    func listIconKey(for id: KotlinUuid) -> String? {
+        listIconsByConversationId[sequenceKey(for: id)]
+    }
+
+    func setListIconKey(id: KotlinUuid, key: String?) {
+        let storageKey = sequenceKey(for: id)
+        guard !deletedConversationIds.contains(storageKey) else { return }
+        let cleaned = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if cleaned.isEmpty {
+            guard listIconsByConversationId.removeValue(forKey: storageKey) != nil else { return }
+        } else if listIconsByConversationId[storageKey] == cleaned {
+            return
+        } else {
+            listIconsByConversationId[storageKey] = cleaned
+        }
+        persistListIcons()
     }
 
     /// Imports complete Conversation JSON documents through the storage owner.
@@ -553,6 +583,9 @@ final class IOSConversationStore {
         pendingBackgroundContentConversationIds.remove(String(describing: id))
         if listPreviewsByConversationId.removeValue(forKey: sequenceKey(for: id)) != nil {
             persistListPreviews()
+        }
+        if listIconsByConversationId.removeValue(forKey: sequenceKey(for: id)) != nil {
+            persistListIcons()
         }
         await refreshSummaries()
 
@@ -1154,6 +1187,13 @@ final class IOSConversationStore {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard let data = try? JSONEncoder().encode(listPreviewsByConversationId) else { return }
         try? data.write(to: listPreviewsFileURL, options: .atomic)
+    }
+
+    private func persistListIcons() {
+        let directory = listIconsFileURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard let data = try? JSONEncoder().encode(listIconsByConversationId) else { return }
+        try? data.write(to: listIconsFileURL, options: .atomic)
     }
 
     private func refreshSummaries() async {

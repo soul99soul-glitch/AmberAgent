@@ -1577,8 +1577,30 @@ enum DocumentAccessError: Error, Equatable {
 }
 
 extension DocumentAccessError {
+    /// 深度阅读专用中文提示（不复用通用英文 `userMessage`）。
     var userMessageForDeepRead: String {
-        userMessage
+        switch self {
+        case .missingGrant:
+            "请先选择文件。"
+        case .grantMismatch:
+            "所选文件授权不匹配，请重新选择文件。"
+        case .expiredGrant:
+            "文件授权已失效，请重新选择文件。"
+        case .fileMissing:
+            "文件已不存在，请从文件 App 重新选择。"
+        case .fileTooLarge:
+            "文件过大，超出导入限制。"
+        case .unknownFileSize:
+            "无法确认文件大小，请选择普通文件后重试。"
+        case .alreadyReading:
+            "正在读取该文件，请稍候。"
+        case .unsupportedFileType(let message):
+            IOSDeepReadUserFacingText.sanitize(message)
+        case .noReadableText(let message):
+            IOSDeepReadUserFacingText.sanitize(message)
+        case .readFailed(let message):
+            "读取文件失败：\(IOSDeepReadUserFacingText.sanitize(message))"
+        }
     }
 }
 

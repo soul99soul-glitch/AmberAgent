@@ -102,10 +102,10 @@ struct ChatUserBubble: View {
             .background(
                 AmberTheme.accent,
                 in: UnevenRoundedRectangle(
-                    topLeadingRadius: 18,
-                    bottomLeadingRadius: 18,
+                    topLeadingRadius: AmberTheme.radiusXLarge,
+                    bottomLeadingRadius: AmberTheme.radiusXLarge,
                     bottomTrailingRadius: 6,
-                    topTrailingRadius: 18,
+                    topTrailingRadius: AmberTheme.radiusXLarge,
                     style: .continuous
                 )
             )
@@ -139,6 +139,13 @@ struct ChatAssistantText<Content: View>: View {
             .lineSpacing(4 * boundedScale)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // Pi appWide lineGrid: keep body readable without a full bubble redesign.
+            // Only lineGrid paints under chat; sit stays shell-scoped so this is a no-op there.
+            .background {
+                if AmberThemeRuntime.shared.canvasStyle == .lineGrid {
+                    AmberTheme.background.opacity(0.92)
+                }
+            }
     }
 }
 

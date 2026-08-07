@@ -194,31 +194,43 @@ struct ChatRuntimeContextBuilder {
     }
 
     private func messagesByInjectingSkillContext(_ messages: [UIMessage]) -> [UIMessage] {
+        // Android parity: name+description catalog only; full body via use_skill.
         let enabledNames = Array(sharedSettings.currentAssistantEnabledSkillNames).sorted()
         guard !enabledNames.isEmpty else { return messages }
 
-        let dirByName: [String: String] = Dictionary(
-            uniqueKeysWithValues: skillFileStore.listSkillDirNames().map { ($0, $0) }
-        )
-
-        var bodies: [String] = []
+        let installed = Set(skillFileStore.listSkillDirNames())
+        var entries: [String] = []
         for name in enabledNames {
-            let dirName = dirByName[name] ?? name
-            guard let markdown = try? skillFileStore.readSkillMarkdown(dirName: dirName) else { continue }
-            let body = Self.skillBodyFromMarkdown(markdown)
-            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            bodies.append("### \(name)\n\(trimmed)")
+            guard installed.contains(name),
+                  let markdown = try? skillFileStore.readSkillMarkdown(dirName: name) else { continue }
+            let description = IOSSkillFileStore.parseFrontmatter(markdown)["description"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            entries.append(
+                """
+                  <skill>
+                    <name>\(Self.escapeSkillCatalogText(name))</name>
+                    <description>\(Self.escapeSkillCatalogText(description))</description>
+                  </skill>
+                """
+            )
         }
-        guard !bodies.isEmpty else { return messages }
+        guard !entries.isEmpty else { return messages }
 
         let prompt = """
-        The following skills are enabled for this conversation. Follow each skill's instructions when relevant.
-        <skills>
-        \(bodies.joined(separator: "\n\n"))
-        </skills>
+        Enabled skills (\(entries.count)). Call use_skill with the skill name to load full instructions when relevant. Prefer skills_list if unsure what is installed or enabled.
+        <available_skills>
+        \(entries.joined(separator: "\n"))
+        </available_skills>
         """
         return [UIMessage.companion.system(prompt: prompt)] + messages
+    }
+
+    private static func escapeSkillCatalogText(_ raw: String) -> String {
+        raw
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     private func messagesByInjectingSystemPrompt(_ messages: [UIMessage]) -> [UIMessage] {

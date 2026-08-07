@@ -80,7 +80,7 @@ struct MiniAppListView: View {
                 Text("小应用")
                     .font(.title2.weight(.bold))
                     .foregroundStyle(AmberTheme.foreground)
-                Text("\(repository.apps.count) 个本地小应用")
+                Text(repository.apps.isEmpty ? "在聊天里生成即可出现" : "\(repository.apps.count) 个")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(AmberTheme.muted)
             }
@@ -98,23 +98,17 @@ struct MiniAppListView: View {
     }
 
     private var intro: some View {
-        Text("这里展示保存在本机的小应用。你可以打开、置顶、重命名或删除它们。")
-            .font(.footnote)
-            .lineSpacing(3)
-            .foregroundStyle(AmberTheme.muted)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 4)
-            .padding(.bottom, 16)
+        EmptyView()
     }
 
     private var repositorySection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "已保存小应用")
+            if !repository.apps.isEmpty {
+                AmberSectionLabel(text: "我的小应用")
+            }
 
             if let storageError = repository.storageError {
-                MiniAppCapabilityNote("MiniApp store 读取异常：\(storageError)。为保护数据，当前不会覆盖原文件。")
+                MiniAppCapabilityNote("读取失败：\(storageError)。为保护数据，暂不会覆盖本地文件。")
                     .padding(.bottom, 8)
                     .foregroundStyle(AmberTheme.accentRed)
             }
@@ -126,20 +120,13 @@ struct MiniAppListView: View {
             }
 
             if repository.apps.isEmpty {
-                AmberFormGroup {
-                    MiniAppCapabilityStatusRow(row: .init(
-                        title: "暂无小应用",
-                        subtitle: "聊天中生成的小应用会出现在这里。",
-                        status: "空",
-                        tint: AmberTheme.muted
-                    ))
-                }
+                emptyState
             } else {
                 AmberFormGroup {
                     ForEach(Array(repository.apps.enumerated()), id: \.element.id) { index, app in
                         MiniAppListRow(
                             app: app,
-                            grantSummary: grantSummary(for: app),
+                            metaLine: metaLine(for: app),
                             onOpen: { router.navigate(to: .miniAppRunner(appId: app.id)) },
                             onPin: {
                                 perform {
@@ -151,7 +138,7 @@ struct MiniAppListView: View {
                         )
 
                         if index < repository.apps.count - 1 {
-                            MiniAppCapabilityDivider()
+                            MiniAppCapabilityDivider(leading: 70)
                         }
                     }
                 }
@@ -159,14 +146,51 @@ struct MiniAppListView: View {
         }
     }
 
-    private func grantSummary(for app: IOSMiniAppRecord) -> String {
-        guard !app.permissions.isEmpty else { return "无权限" }
-        let allowed = app.permissions.filter { repository.grantDecision(appId: app.id, permission: $0) == .allow }.count
-        let denied = app.permissions.filter { repository.grantDecision(appId: app.id, permission: $0) == .deny }.count
-        let unset = app.permissions.count - allowed - denied
-        if unset > 0 { return "\(allowed) 允许 · \(unset) 未设" }
-        if denied > 0 { return "\(allowed) 允许 · \(denied) 拒绝" }
-        return "\(allowed) 允许"
+    private var emptyState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(AmberTheme.accent)
+                .frame(width: 56, height: 56)
+                .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            VStack(spacing: 6) {
+                Text("还没有小应用")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                Text("在聊天里说「做一个番茄钟小应用」，生成后会保存在这里。")
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 40)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(AmberTheme.border.opacity(0.55), lineWidth: 1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+    }
+
+    private func metaLine(for app: IOSMiniAppRecord) -> String {
+        var parts: [String] = ["v\(app.version)"]
+        if app.runCount > 0 {
+            parts.append("运行 \(app.runCount) 次")
+        } else {
+            parts.append("尚未打开")
+        }
+        if !app.permissions.isEmpty {
+            let allowed = app.permissions.filter {
+                repository.grantDecision(appId: app.id, permission: $0) == .allow
+            }.count
+            parts.append("权限 \(allowed)/\(app.permissions.count)")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func perform(_ action: () throws -> Void) {
@@ -250,52 +274,44 @@ struct MiniAppCapabilityNote: View {
 
 private struct MiniAppListRow: View {
     let app: IOSMiniAppRecord
-    let grantSummary: String
+    let metaLine: String
     let onOpen: () -> Void
     let onPin: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Button(action: onOpen) {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
                     Text(app.iconEmoji ?? "▣")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background(AmberTheme.accentCyan.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .font(.system(size: 26))
+                        .frame(width: 48, height: 48)
+                        .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
+                            Text(app.title)
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(AmberTheme.foreground)
+                                .lineLimit(1)
                             if app.pinned {
                                 Image(systemName: "pin.fill")
                                     .font(.caption2.weight(.bold))
                                     .foregroundStyle(AmberTheme.accentAmber)
                             }
-                            Text(app.title)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                                .lineLimit(1)
                         }
 
-                        Text(app.description)
-                            .font(.system(size: 12.5))
-                            .lineSpacing(3)
-                            .foregroundStyle(AmberTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 8) {
-                                metadataPills
-                            }
-
-                            VStack(alignment: .leading, spacing: 6) {
-                                metadataPills
-                            }
+                        if !app.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(app.description)
+                                .font(.footnote)
+                                .foregroundStyle(AmberTheme.muted)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
 
-                        Text("appId: \(app.id)")
-                            .font(.caption2.monospaced())
+                        Text(metaLine)
+                            .font(.caption)
                             .foregroundStyle(AmberTheme.muted2)
                             .lineLimit(1)
                     }
@@ -304,8 +320,13 @@ private struct MiniAppListRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(app.title)
+            .accessibilityHint("打开小应用")
 
             Menu {
+                Button(action: onOpen) {
+                    Label("打开", systemImage: "play.fill")
+                }
                 Button(action: onPin) {
                     Label(app.pinned ? "取消置顶" : "置顶", systemImage: app.pinned ? "pin.slash" : "pin")
                 }
@@ -316,37 +337,18 @@ private struct MiniAppListRow: View {
                     Label("删除", systemImage: "trash")
                 }
             } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 19, weight: .semibold))
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(AmberTheme.muted)
-                    .frame(width: 44, height: 44)
+                    .frame(width: 36, height: 36)
+                    .background(AmberTheme.surface2, in: Circle())
             }
             .buttonStyle(.plain)
+            .frame(minWidth: 44, minHeight: 44)
             .accessibilityLabel("更多操作")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-    }
-
-    @ViewBuilder
-    private var metadataPills: some View {
-        MiniAppPill(text: "v\(app.version)")
-        MiniAppPill(text: "\(app.runCount) 次运行")
-        MiniAppPill(text: grantSummary)
-    }
-}
-
-private struct MiniAppPill: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(AmberTheme.foreground2)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .fixedSize(horizontal: true, vertical: true)
-            .background(AmberTheme.surface2, in: Capsule())
+        .padding(.vertical, 12)
     }
 }
 

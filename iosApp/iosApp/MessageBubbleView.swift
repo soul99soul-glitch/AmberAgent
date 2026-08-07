@@ -309,14 +309,25 @@ struct MessageBubbleView: View {
                         .contentShape(
                             .contextMenuPreview,
                             UnevenRoundedRectangle(
-                                topLeadingRadius: 18,
-                                bottomLeadingRadius: 18,
+                                topLeadingRadius: AmberTheme.radiusXLarge,
+                                bottomLeadingRadius: AmberTheme.radiusXLarge,
                                 bottomTrailingRadius: 6,
-                                topTrailingRadius: 18,
+                                topTrailingRadius: AmberTheme.radiusXLarge,
                                 style: .continuous
                             )
                         )
                         .contextMenu { messageActions }
+                } else if Self.shouldRenderMiniAppStreamingCard(
+                    textPart.text,
+                    isLiveStream: isGenerating && isLastMessage
+                ) {
+                    // Only hijack the live stream. Idle HTML/markdown stays readable text
+                    // unless apply already replaced it with UIMessagePart.MiniApp.
+                    ChatMiniAppStreamingCard(
+                        text: textPart.text,
+                        isGenerating: true
+                    )
+                    .transition(.opacity)
                 } else {
                     ChatAssistantText {
                         ChatAssistantMarkdownView(
@@ -462,6 +473,12 @@ struct MessageBubbleView: View {
             .first { $0.toolCallId == toolCallId }
     }
 
+    /// Streaming MiniApp card is live-only: same shape as apply's "in-flight" window,
+    /// without inventing a second turn-context gate in the bubble.
+    private static func shouldRenderMiniAppStreamingCard(_ text: String, isLiveStream: Bool) -> Bool {
+        isLiveStream && IOSMiniAppChatMessageFactory.mightContainMiniApp(text)
+    }
+
     private static func partAnimationKey(_ part: UIMessagePart) -> String {
         if let tool = part as? UIMessagePart.Tool {
             let imageCount = tool.output.compactMap { $0 as? UIMessagePart.Image }.count
@@ -469,6 +486,11 @@ struct MessageBubbleView: View {
         }
         if let miniApp = part as? UIMessagePart.MiniApp {
             return "mini_app:\(miniApp.appId):\(miniApp.version):\(miniApp.htmlHash ?? "")"
+        }
+        if let text = part as? UIMessagePart.Text,
+           IOSMiniAppChatMessageFactory.mightContainMiniApp(text.text) {
+            // Coarse key so streaming length growth does not thrash every token.
+            return "mini_app_stream:\(text.text.count / 64)"
         }
         return String(describing: type(of: part))
     }
@@ -2814,8 +2836,14 @@ private struct ChatGeneratedImageRequestDisplay {
 
 }
 
-private struct ChatGeneratedImageDotPlaceholder: View {
+/// Shared animated dot surface used by image generation placeholders and MiniApp
+/// streaming cards. Kept internal so chat surfaces can reuse the same motion language.
+struct ChatGeneratedImageDotPlaceholder: View {
     let aspectRatio: CGFloat
+    var cornerRadius: CGFloat = AmberTheme.radiusXLarge
+    var showsChrome: Bool = true
+    /// When false, freeze at a calm phase (no 30fps TimelineView).
+    var isAnimating: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -2823,7 +2851,7 @@ private struct ChatGeneratedImageDotPlaceholder: View {
 
     var body: some View {
         Group {
-            if reduceMotion {
+            if reduceMotion || !isAnimating {
                 Canvas { context, size in
                     drawDots(context: context, size: size, phase: 0.28)
                 }
@@ -2836,12 +2864,17 @@ private struct ChatGeneratedImageDotPlaceholder: View {
             }
         }
         .modifier(ChatWidthDrivenAspectRatio(aspectRatio: aspectRatio))
-        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(
+            showsChrome ? AmberTheme.surface : Color.clear,
+            in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(AmberTheme.borderSoft, lineWidth: 1)
+            if showsChrome {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(AmberTheme.borderSoft, lineWidth: 1)
+            }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
     private func phase(at date: Date) -> CGFloat {
@@ -2929,7 +2962,7 @@ private struct ChatWidthAspectLayout: Layout {
     }
 }
 
-private struct ChatGeneratedImageAppearModifier: ViewModifier {
+struct ChatGeneratedImageAppearModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
 
@@ -3487,9 +3520,9 @@ private struct ChatUserImageTile: View {
                 Image(uiImage: decoded)
                     .resizable()
                     .frame(width: size.width, height: size.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
                             .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
                     )
             case .loading:
@@ -3503,7 +3536,7 @@ private struct ChatUserImageTile: View {
                 case .success(let image):
                     image.resizable().scaledToFit()
                         .frame(maxWidth: Self.maxW, maxHeight: Self.maxH)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
                 case .failure:
                     placeholder(failed: true)
                 default:
@@ -3516,7 +3549,7 @@ private struct ChatUserImageTile: View {
     }
 
     private func placeholder(failed: Bool) -> some View {
-        RoundedRectangle(cornerRadius: 18, style: .continuous)
+        RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
             .fill(AmberTheme.surface2)
             .frame(width: 150, height: 190)
             .overlay(

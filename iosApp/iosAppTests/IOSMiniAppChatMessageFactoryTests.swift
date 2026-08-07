@@ -372,4 +372,18 @@ final class IOSMiniAppChatMessageFactoryTests: XCTestCase {
         XCTAssertEqual(application.outcome, .failed)
         XCTAssertTrue(application.messages.last?.toText().contains("没有返回完整的 MiniApp JSON") == true)
     }
+
+    func testMiniAppStreamingCodePreviewPrefersHTMLAndUnescapesJSONField() {
+        let rawHTML = ChatMiniAppStreamingCard.codePreview(
+            from: "preamble\n<!DOCTYPE html><html><body>ok</body></html>"
+        )
+        XCTAssertTrue(rawHTML.hasPrefix("<!DOCTYPE html>"))
+
+        let fromJSON = ChatMiniAppStreamingCard.codePreview(
+            from: #"{"title":"计时","description":"番茄钟","html":"<!DOCTYPE html>\n<html>\n<body>hi</body>\n</html>"}"#
+        )
+        XCTAssertTrue(fromJSON.contains("<!DOCTYPE html>"))
+        XCTAssertTrue(fromJSON.contains("\n<html>"))
+        XCTAssertFalse(fromJSON.contains("\\n"))
+    }
 }

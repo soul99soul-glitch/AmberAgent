@@ -395,8 +395,9 @@ enum IOSDeepReadEditorialRenderer {
 
     private static let baseCSS = """
     html,body{margin:0;padding:0;background:var(--deep-read-bg);color:var(--deep-read-fg);font-family:var(--deep-read-serif);-webkit-user-select:text;}
-    article{padding-bottom:34px;}
-    .hero{margin:0 0 8px 0;position:relative;background:var(--deep-read-surface);min-height:310px;overflow:hidden;}
+    /* Tight bottom pad — height is measured from article; avoid phantom whitespace. */
+    article{padding-bottom:12px;display:block;}
+    .hero{margin:0 0 8px 0;position:relative;background:var(--deep-read-surface);overflow:hidden;}
     .hero img{display:block;width:100%;height:265px;object-fit:cover;}
     .hero-cut{height:106px;background:var(--deep-read-bg);clip-path:polygon(0 24%,100% 0,100% 100%,0 100%);margin-top:-54px;position:relative;padding:46px 22px 0;box-sizing:border-box;}
     .hero-cut>div{display:flex;align-items:center;justify-content:space-between;gap:14px;}
