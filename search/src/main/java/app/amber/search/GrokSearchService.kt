@@ -96,7 +96,7 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
                 put("store", JsonPrimitive(false))
             }
 
-            Log.i(TAG, "search: $query")
+            Log.i(TAG, "search request started")
 
             val response = httpClient.post(serviceOptions.customUrl) {
                 setBody(body.toString())
@@ -136,7 +136,8 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
                     )
                 )
             } else {
-                error("response failed #${response.status.value}: ${response.bodyAsText()}")
+                response.bodyAsText()
+                error("response failed #${response.status.value}")
             }
         }
     }

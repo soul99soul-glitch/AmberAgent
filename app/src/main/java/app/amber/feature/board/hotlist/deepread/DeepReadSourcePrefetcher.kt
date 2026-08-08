@@ -108,7 +108,7 @@ class DeepReadSourcePrefetcher(
                             } catch (error: CancellationException) {
                                 throw error
                             } catch (error: Throwable) {
-                                Log.w(TAG, "deep read search failed: ${service.id} query=$query", error)
+                                Log.w(TAG, "deep read search failed: ${service.id}")
                                 null
                             }
                         }

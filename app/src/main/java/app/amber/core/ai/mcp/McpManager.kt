@@ -100,14 +100,14 @@ class McpManager(
                         toAdd.forEach { cfg ->
                             appScope.launch {
                                 runCatching { addClient(cfg) }
-                                    .onFailure { it.printStackTrace() }
+                                    .onFailure { Log.w(TAG, "Failed to remove MCP client") }
                             }
                         }
                         toRemove.forEach { cfg ->
                             appScope.launch { removeClient(cfg) }
                         }
                     }.onFailure {
-                        it.printStackTrace()
+                        Log.w(TAG, "Failed to update MCP clients")
                     }
                 }
         }
@@ -272,7 +272,7 @@ class McpManager(
         }
 
         transport.onError { error ->
-            Log.e(TAG, "Transport error for ${config.commonOptions.name}: ${error.message}")
+            Log.e(TAG, "Transport error for ${config.commonOptions.name}")
             val currentStatus = syncingStatus.value[config.id]
             // 只有在已连接状态下才触发重连
             if (currentStatus == McpStatus.Connected) {
@@ -289,7 +289,7 @@ class McpManager(
             reconnectAttempts[config.id] = 0 // 重置重连计数
             Log.i(TAG, "addClient: connected ${config.commonOptions.name}")
         }.onFailure {
-            it.printStackTrace()
+            Log.w(TAG, "Failed to add MCP client")
             setStatus(config = config, status = McpStatus.Error(it.message ?: it.javaClass.name))
         }
     }
@@ -304,7 +304,7 @@ class McpManager(
             client.connect(getTransport(config))
         }
         val serverTools = client.listTools().tools
-        Log.i(TAG, "sync: tools: $serverTools")
+        Log.i(TAG, "sync: discovered ${serverTools.size} MCP tools")
         settingsStore.update { old ->
             old.copy(
                 mcpServers = old.mcpServers.map { serverConfig ->
@@ -364,7 +364,7 @@ class McpManager(
             runCatching {
                 sync(config)
             }.onFailure {
-                it.printStackTrace()
+                Log.w(TAG, "Failed to close MCP client")
             }
         }
     }
@@ -376,7 +376,7 @@ class McpManager(
             runCatching {
                 entry.value.close()
             }.onFailure {
-                it.printStackTrace()
+                Log.w(TAG, "Failed to close MCP client scope")
             }
             clients.remove(entry.key)
             syncingStatus.emit(syncingStatus.value.toMutableMap().apply { remove(entry.key.id) })
@@ -426,7 +426,7 @@ class McpManager(
                 Log.i(TAG, "Reconnect cancelled for ${config.commonOptions.name}")
                 throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Reconnect failed for ${config.commonOptions.name}", e)
+                Log.e(TAG, "Reconnect failed for ${config.commonOptions.name}")
                 // 继续尝试重连
                 scheduleReconnect(config)
             }
@@ -448,7 +448,7 @@ class McpManager(
         // 先关闭旧客户端
         val oldEntry = clients.entries.find { it.key.id == config.id }
         if (oldEntry != null) {
-            runCatching { oldEntry.value.close() }.onFailure { it.printStackTrace() }
+            runCatching { oldEntry.value.close() }.onFailure { Log.w(TAG, "Failed to replace MCP client") }
             clients.remove(oldEntry.key)
         }
 
@@ -470,7 +470,7 @@ class McpManager(
         }
 
         transport.onError { error ->
-            Log.e(TAG, "Transport error for ${config.commonOptions.name}: ${error.message}")
+            Log.e(TAG, "Transport error for ${config.commonOptions.name}")
             val currentStatus = syncingStatus.value[config.id]
             if (currentStatus == McpStatus.Connected) {
                 scheduleReconnect(config)

@@ -90,7 +90,7 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
                 }
             }
 
-            Log.i(TAG, "search: $body")
+            Log.i(TAG, "search request started")
 
             val response = httpClient.post(PERPLEXITY_ENDPOINT) {
                 setBody(body.toString())
@@ -109,7 +109,7 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
                     .mapNotNull { it.imageUrl }
                     .distinct()
                     .take(5)
-                Log.i(TAG, "allImages (${allImages.size}): ${allImages.take(2)}")
+                Log.i(TAG, "usable response images: ${allImages.size}")
 
                 val rawItems = perplexityResponse.results
                     .filter { !it.title.isNullOrBlank() && !it.url.isNullOrBlank() }
@@ -138,7 +138,8 @@ object PerplexitySearchService : SearchService<SearchServiceOptions.PerplexityOp
                     )
                 )
             } else {
-                error("response failed #${response.status.value}: ${response.bodyAsText()}")
+                response.bodyAsText()
+                error("response failed #${response.status.value}")
             }
         }
     }

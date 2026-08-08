@@ -81,7 +81,6 @@ object BraveSearchService : SearchService<SearchServiceOptions.BraveOptions> {
                     // most news CDNs ship sub-1MB JPEGs.
                     val imgUrl = (result.thumbnail?.original ?: result.thumbnail?.src)
                         ?.takeIf { it.startsWith("http") }
-                    android.util.Log.i("BraveSearchService", "result: ${result.title}, thumbnail: ${result.thumbnail?.src}, original: ${result.thumbnail?.original}, imgUrl: $imgUrl")
                     SearchResultItem(
                         title = result.title,
                         url = result.url,

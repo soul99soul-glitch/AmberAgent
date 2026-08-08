@@ -94,11 +94,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                 val bodyRaw = response.bodyAsText()
                 val exaResponse = runCatching {
                     json.decodeFromString<ExaData>(bodyRaw)
-                }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
-                    error("Failed to decode response: $bodyRaw")
-                }.getOrThrow()
+                }.getOrElse { error("Failed to decode Exa response") }
 
                 return@withContext Result.success(
                     SearchResult(
@@ -112,7 +108,7 @@ object ExaSearchService : SearchService<SearchServiceOptions.ExaOptions> {
                         }
                     ))
             } else {
-                println(response.bodyAsText())
+                response.bodyAsText()
                 error("response failed #${response.status.value}")
             }
         }

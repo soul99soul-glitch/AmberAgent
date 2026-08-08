@@ -79,11 +79,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                 val bodyRaw = response.bodyAsText()
                 val bochaResponse = runCatching {
                     json.decodeFromString<BochaResponse>(bodyRaw)
-                }.onFailure {
-                    it.printStackTrace()
-                    println(bodyRaw)
-                    error("Failed to decode response: $bodyRaw")
-                }.getOrThrow()
+                }.getOrElse { error("Failed to decode Bocha response") }
 
                 if (bochaResponse.code != 200) {
                     error("Bocha API error: ${bochaResponse.msg ?: "Unknown error"}")
@@ -101,7 +97,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                     )
                 )
             } else {
-                println(response.bodyAsText())
+                response.bodyAsText()
                 error("response failed #${response.status.value}")
             }
         }

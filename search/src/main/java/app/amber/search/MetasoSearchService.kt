@@ -77,11 +77,7 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
                 val bodyRaw = response.bodyAsText()
                 val searchResponse = runCatching {
                     json.decodeFromString<MetasoSearchResponse>(bodyRaw)
-                }.onFailure {
-                    it.printStackTrace()
-                    println("Failed to decode Metaso response: $bodyRaw")
-                    error("Failed to decode response: $bodyRaw")
-                }.getOrThrow()
+                }.getOrElse { error("Failed to decode Metaso response") }
 
                 return@withContext Result.success(
                     SearchResult(
@@ -95,9 +91,8 @@ object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
                     )
                 )
             } else {
-                val errorBody = response.bodyAsText()
-                println("Metaso search failed with code ${response.status.value}: $errorBody")
-                error("Search request failed with code ${response.status.value}: $errorBody")
+                response.bodyAsText()
+                error("Search request failed with code ${response.status.value}")
             }
         }
     }

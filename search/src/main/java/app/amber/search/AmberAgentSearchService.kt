@@ -65,7 +65,7 @@ object AmberAgentSearchService : SearchService<SearchServiceOptions.AmberAgentSe
                 header("Authorization", "Bearer ${serviceOptions.apiKey}")
             }
 
-            Log.i(TAG, "search: $query")
+            Log.i(TAG, "search request started")
 
             if (response.status.isSuccess()) {
                 val responseBody = response.bodyAsText().let {
@@ -85,7 +85,8 @@ object AmberAgentSearchService : SearchService<SearchServiceOptions.AmberAgentSe
                     )
                 )
             } else {
-                error("response failed #${response.status.value}: ${response.bodyAsText()}")
+                response.bodyAsText() // consume the body without logging user/search content
+                error("response failed #${response.status.value}")
             }
         }
     }

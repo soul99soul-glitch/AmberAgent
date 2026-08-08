@@ -80,17 +80,13 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
                 }
             }
 
-            Log.i(TAG, "search: ${baseUrl}")
+            Log.i(TAG, "search request started")
 
             if (response.status.isSuccess()) {
                 val bodyRaw = response.bodyAsText()
                 val searchResponse = runCatching {
                     json.decodeFromString<SearXNGResponse>(bodyRaw)
-                }.onFailure {
-                    it.printStackTrace()
-                    println("SearXNG response body: $bodyRaw")
-                    error("Failed to decode SearXNG response: ${it.message}")
-                }.getOrThrow()
+                }.getOrElse { error("Failed to decode SearXNG response") }
 
                 // 转换为标准格式，取前 N 个结果
                 val resolveBase = java.net.URI(baseUrl)
@@ -118,8 +114,7 @@ object SearXNGService : SearchService<SearchServiceOptions.SearXNGOptions> {
 
                 return@withContext Result.success(SearchResult(items = items))
             } else {
-                val errorBody = response.bodyAsText()
-                println("SearXNG API error: ${response.status.value} - $errorBody")
+                response.bodyAsText()
                 error("SearXNG request failed with status ${response.status.value}")
             }
         }

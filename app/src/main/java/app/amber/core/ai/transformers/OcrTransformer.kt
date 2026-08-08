@@ -128,7 +128,7 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         if (content.isBlank()) {
             throw VisualRecognitionException("视觉识别模型没有返回可用内容")
         }
-        Log.i(TAG, "performImageToText: $content")
+        Log.i(TAG, "performImageToText: extracted ${content.length} characters")
         val visionResult = """
             <image_context>
             $content

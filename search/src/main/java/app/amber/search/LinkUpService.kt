@@ -88,7 +88,7 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
                 header("Authorization", "Bearer $apiKey")
             }
 
-            Log.i(TAG, "search: $query")
+            Log.i(TAG, "search request started")
 
             if (response.status.isSuccess()) {
                 val responseBody = response.bodyAsText().let {
@@ -108,7 +108,8 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
                     )
                 )
             } else {
-                error("response failed #${response.status.value}: ${response.bodyAsText()}")
+                response.bodyAsText()
+                error("response failed #${response.status.value}")
             }
         }
     }
@@ -149,7 +150,8 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
                     )
                 )
             } else {
-                error("response failed #${response.status.value}: ${response.bodyAsText()}")
+                response.bodyAsText()
+                error("response failed #${response.status.value}")
             }
         }
     }
