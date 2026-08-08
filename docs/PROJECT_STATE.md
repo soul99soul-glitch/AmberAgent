@@ -1,19 +1,31 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-06
+Last updated: 2026-08-08
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
 ## Repository
 
-- Repo: `/Users/mi/Downloads/AI/AmberAgent-iOS`
+- Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
-- Tracking: `origin/feat/ios-provider-parity-claude`；当前本地包含尚未 push 的 review fixes、小说/核心记忆闭环与文案提交，ahead 数以实时 Git 为准。
+- Tracking: `origin/feat/ios-provider-parity-claude`；本批提交完成后为 `11 ahead / 0 behind`，尚未 push。
 - Current committed HEAD: 以实时 `git rev-parse HEAD` 为准。2026-08-06 22:12 已把 `ab1d5fbeb` 覆盖安装到 iPhone Air（iPhone18,4，未卸载），新安装容器 `33FBA855-408D-46E1-83FD-6DD147744904/iosApp.app`，数据库 UUID 保持 `AC96CD34-4AD9-4317-A4CD-6BB64DC7FD3F`（既有 App 数据保留），启动成功；`52794d2de` 不再是装机基线。
-- Worktree: 小说共创/代笔 Phase 0–3c、核心记忆闭环、相关测试与文档已提交；是否干净以实时 `git status --short` 为准。
+- Worktree: 本批产品 WIP、代码瘦身与深审修复已分组提交；提交过程中并发出现的 vendor 宽度探针、其测试及 `Package.resolved` 变化未纳入，仍以实时 `git status --short` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
-## Home E 版视觉落地（未提交）
+## 代码库瘦身（2026-08-08，已提交）
+
+全仓七代理只读审计后执行的精准删除与修复，已与同批 G6/G7 生成参数、守卫链和主题改动按领域拆分提交。
+
+- 死代码删除合计约 4,900 行、31 个文件、1 个 Gradle 模块：iOS 1,563 行（ContentView/AssistantParamsView/IOSHealthService 整文件 + 24 个零引用类型 + CouncilChatViewModel 等死成员）；Android 2,158 行（AssistantPicker/CompressContextDialog/CherryStudioProviderImporter/setting/memory 桩目录等 12 个死文件 + OfficeProjectEditorDialog 等死块 + USE_SPLIT_* 脚手架四文件连 flag）+ 级联死代码约 410 行（SearchPicker.kt 整文件、office 导入函数簇、ChatInputUsage 两组件）；KMP 404 行 + `:core:llm` 模块整体移除（settings/app/shared 三处构建配置同步清理）；iOS 测试 368 行（NovelPrefixReuseCostExperimentTests 纯打印探针 + ProviderRegistryStoreTests 的 #if false 死块）。
+- 审计结论被事实修正而未删的项：AssistantImporter.kt（AssistantPage.kt:367 有活调用）、FeishuDocRadarWorker.kt（WorkManager 老 job 升级兼容桩）、NovelPolishTestSupport.swift（其 NovelPolishTestCase 被 3 个测试文件继承）、探针四件套中 3 件（含真实阈值/契约断言，是活跃防回归锁）、FeishuOfficeReportDraft/FeishuWorkSkillDefinition（有活引用）。
+- 语义修复 5 处：agent_run 账本写失败由 print 改为 publishUserVisibleError（ChatViewModel/IOSChatBackgroundGenerationCoordinator 各一）；AccountAvatarStore.save 失败不假成功；IOSWebMountRegistry decode 失败不再用 seeds 覆盖写回用户存储；IOSSkillFileStore.saveSkillFiles 手写 staging+backup+rollback 换为 FileManager.replaceItemAt 原子替换；NovelProjectRepository.writeLifecycleMarker 删除写后读回校验。
+- 顺带最小修复（非瘦身范围但阻塞门禁）：①G7 同批工作在 ChatGenerationCoordinator 内裸调 IOSGenerativeUiRequestPolicy 的 fileprivate systemMessage，已加类型限定；②G6 同批测试引用不存在的 ReasoningLevel.standard 与已改签名的 toText()，按当前 API 最小修正（注意 ObjC 保留字导出：Kotlin AUTO → Swift `.auto_`）；③project.yml 两个 widget target 显式引用 zh-Hans.lproj 内文件导致 XcodeGen 生成 zh-Hans.lproj/zh-Hans.lproj 双重路径，改为声明 lproj 目录（既有基线问题，重新生成工程才暴露）。
+- 验证：`:shared:compileKotlinIosSimulatorArm64` BUILD SUCCESSFUL；XcodeGen 重新生成工程后 iosApp 与 iosAppExperimentalGPL 双 scheme BUILD SUCCEEDED（需 ARCHS=arm64，AmberNative.xcframework 无 x86_64 slice）；早期 3 个旧契约断言已按最终行为收口，最新 Chat 八类定点 173/173，MCP/Board/DeepRead/MiniApp/Memory/Skill 三组 111/111。
+- 环境限制：本机无 Android SDK，`:app:compileDebugKotlin` 无法运行；Android 侧删除靠全仓（含 res/Manifest/测试）rg 零引用验证兜底。`:shared:compileCommonMainKotlinMetadata` 在 agent-store-room 的 Room 构造器处失败，属既有基线（本轮未触碰、非常规门禁任务）。
+- 未执行（留待后续轮次/裁决）：wiring 源码断言测试约 3,300 行去留（当前是在用门禁）、聊天链路 coordinator @Observable 化与转发层收敛（约 800 行）、KMP 伪 KMP 模块合并（10-12 个模块）、SseEvent/工具声明双轨单源化、DeepReadStructures 40 处双层兜底解码。
+
+## Home E 版视觉落地（已提交）
 
 目标：把定稿 E 版首页设计（home-replica.html 同源规格）落到 `ConversationsView` 与全局主题令牌，并让顶部续接位只展示真实未完成工作。
 
@@ -46,13 +58,11 @@ Last updated: 2026-08-06
 
 ### Known Issues（非本轮改动引入）
 
-- `iosApp/**/*.xcodeproj/` 在 .gitignore 中：拉取 5bcf860ea 后本机 xcodeproj 缺 `NovelGhostwritePipeline.swift`、`NovelChapterPlanAcceptanceLifecycle.swift` 的 target 引用，app target 无法编译；已在本机 project.pbxproj 补齐（本机修改，不会入 git）。其他机器拉取后需同样处理。`ab1d5fbeb` 新增的 `HomePhosphorIcons.swift` 同样缺引用（编译报 `cannot find type 'HomePhosphor'`），已于 2026-08-06 按同一模式补进本机 project.pbxproj（iosApp 与 iosAppExperimentalGPL 两个 app target）；pbxproj 被 gitignore，不入 git。
-- 同一推送带入的 `NovelCollaborationModeTests.swift`、`IOSMemoryRecallPolicyTests.swift` 与当前 Shared 框架/代码不兼容（MemoryRecord 签名、AgentRuntimeSetting 等），加入 target 即编译失败；保持未加入 target，待该 slice owner 修复后再纳入。
-- `IOSSettingsWiringTests.testBackgroundToolEnginePublishesLiveActivityStagesAtExecutionBoundaries` 在基线上即失败：`15a2607a8` 在 run block 内重新引入 `await self.publishRunningPresentation(`，违反既有 wiring 契约；与本轮首页改动无关，待 owner 裁决。
+- `iosApp/**/*.xcodeproj/` 仍是生成物；受控 `project.yml` 已重新纳入 `NovelCollaborationModeTests.swift` 与 `IOSMemoryRecallPolicyTests.swift`，本机 XcodeGen 生成成功。早先观察到的 Xcode 26.6 私有框架失配本轮未再阻断定点门禁：`iosApp` 已成功 `build-for-testing`，并在 iPhone 17 Pro Simulator 执行了受影响测试；全量测试仍未重跑。
 - `ChatSwiftUIStreamReplayTests.testPerfGrowingTableStreamingKeepsDisplayLinkResponsive` 在当前 Simulator 采样不稳定：同一工作区本轮既有通过，也出现 p95 40.823–44.215ms（门槛 40ms）和 SIGKILL；未放宽阈值，需在安静设备/真机重新建立性能证据。
 - 首页视觉真机验收仍缺（多数据多行态已在模拟器完成像素级验证，见 Verification；真机观感与 swipe 手感待确认）。
 
-## iOS MiniApp 与 Android 对齐（未提交）
+## iOS MiniApp 与 Android 对齐（已提交）
 
 - 截图中的「Amber 小应用示例 + 状态/源码/版本 + 300pt 预览」来自 iOS MVP：生产仓库默认 seed 了固定样例，Runner 又把开发管理面板当成运行首页。现在生产默认不 seed；升级时只删除字段、版本、授权、运行次数、审计和本地数据都完全未变化的旧样例，任何已使用/编辑样例均保留。
 - Runner 默认直接显示沉浸式 WebView；返回、标题/版本和右上角管理按钮是唯一常驻 chrome，源码、权限、版本恢复、审计和 bridge 日志收进 large sheet。源码加载、保存版本、恢复版本、外链图片授权和运行策略变化都会刷新实际 WebView，不再只改 SwiftUI 状态。
@@ -134,6 +144,17 @@ Last updated: 2026-08-06
 
 ## Current Review Fixes
 
+- 模型自主性护栏拆除第二梯队 G6-G10 已实施并提交：widget 重试改「保留草稿 + 追加补绘 notice」（不剥工具、二次失败有中性失败终态）、工具循环上限参数化 `chatMaxToolResumeCount`（默认 12、clamp 4-24）、小说讨论模板 v5→v6 软化（v5 归档 receipt 兼容）、上下文压缩加工显式标注（`[tool output compacted]` 占位 + 移除计数 + 截尾注记）、记忆召回默认 24 条/6000 字符且 `memory_tool` 只读动作（read/search/query/status）补齐真实执行语义。细节与验证限制见 `docs/MODEL_AUTONOMY_GUARDRAILS_PLAN.md` 实施状态节；本轮已完成真实 `build-for-testing`，受影响 Chat/Background/SubAgent/Memory 测试 173/173 通过。
+- G4 权限收口已提交：未引入通用 run-scoped grant，也未改变 Search、Workspace、Council 等既有策略。仅修复 SubAgent 的真实越权路径：`askEveryTime`（以及历史 `allowOncePerRun` 兼容值）在前台必须走审批卡，后台拒绝并要求回到 App；只有 `autoApprove` 维持静默执行。相关通用权限扩张与测试已撤回。
+- 2026-08-08 全项目深审确认修复已提交：iOS 收口 Chat/Background 补绘、handoff、取消/恢复状态，SubAgent 权限/预算/取消，Keychain 清理，CJK 召回，MCP 同源 endpoint/取消/并发流/完整 schema，Board/MiniApp WebView 信任边界，DeepRead owner 取消，Memory Int32 边界，内置 Skill 保护及私密日志；KMP/Android 收口 Settings 并发 RMW、AgentTask/Cron 持久化与恢复、运行时 map 竞态，Sync 完整性/补偿回滚，Document 解压/输出上限与 MuPDF 释放，并移除会拒绝本版本自身备份的任意 64 MiB/100k 限制；Native 修复 FFI byte buffer 分配/释放 layout UB，并将声明与 CI MSRV 对齐为 Rust 1.86。
+- 深审验证：iOS Chat 八类定点 173/173；MCP/Board/DeepRead/MiniApp/Memory/Skill 三组 111/111，MiniApp fragment 修正后 22/22 复跑；KMP `:feature:task:jvmTest` 及相关 JVM/iOS 编译门禁 `BUILD SUCCESSFUL`；Native workspace 122/122 通过（另 1 个 doc test 按既有标记 ignored），`amber-ffi` 定点通过，JNI 19/19 与 Swift export 10/10 契约检查通过；`git diff --check` 通过。Android `document:testDebugUnitTest` 仅因本机缺少 Android SDK 在配置阶段阻断，不是产品测试失败。
+- 深审残余边界：Sync 跨 DataStore/密钥存储/SQLite/文件系统只能做写前校验与补偿回滚，进程死亡下不是单一 ACID 事务；大 table 仍整条 JSONL 进内存；真机 BGContinuedProcessingTask/强杀恢复、WebKit 实际导航时序、Keychain 持久化与 Android 真机大备份内存峰值仍未验证。
+- 已提交两项批准改动：① 工具声明去除关键词门控——`workspace_file_write/edit/move/delete` 与 `workspace_artifact_delete` 在 `workspaceToolNamesForCurrentTurn()` 恒声明（原 Skill/MCP 单写、显式保存等关键词判定函数已删除）；iSH 内置执行（`ios_ish_execute`，保留 `ENABLE_EXPERIMENTAL_TERMINAL_RUNTIMES` 编译条件）与外部交接（`ish_handoff`）同时恒声明，不再二选一；执行层审批（`IOSLocalToolExecutor`/能力策略过滤）与 `ChatContextSupport` 工作区策略软提示均未动。② `core/types` 的 `Settings.enableWebSearch` 默认值 `false`→`true`（影响 iOS 种子快照与 Android 默认；`ChatPrefs` 中间层与审批/SSRF 防护未动）。测试按新契约翻转：`ChatViewModelGenerationParamsTests` 原「无关键词不声明写工具/iSH 二选一」用例反转为恒声明契约，并补「无写关键词消息仍声明全部 workspace 写工具」用例；`IOSSkillMcpToolsTests` 两个关键词用例与新契约仍兼容未改。验证：`git diff --check` 通过；`:core:types:jvmTest`（NO-SOURCE）与 `compileKotlinIosSimulatorArm64` 成功；两个 Swift 文件 `swiftc -parse` 通过。本轮后续 `build-for-testing` 已成功；该条原有 Kotlin 门禁保持通过，未放宽断言。
+- 对 `da71c8597^..HEAD` 与当前 WIP 的复核补齐：MiniApp handoff 继续抑制 Generative UI；前后台 widget 补绘保留已经完成的工具轮次；后台 checkpoint 写失败不再把缺失必填视觉结果收为成功。
+- MiniApp 授权 alert 被 SwiftUI 清空 Binding 时只取消等待，不持久化 DENY；代笔把“连续性审计未完成”与真实严重连续性分开，继续时保留已验收候选；owned durable run 的取消不再依赖展示态 `activeRunID`。
+- 切回共创的 reducer 现在以项目内真实 running run 为硬闸；普通 Skill 导入禁止覆盖内置包，内置 seeder 使用显式特权路径。
+- `workspaceToolNamesForCurrentTurn` 当前被并发的自主性 WIP 改为恒声明全部写/移/删工具，与 Draft G1 一致但尚标注“待用户裁决”；这与 review 中“Skill 意图不应扩大危险工具面”的产品判断冲突，本轮不覆盖该并发改动，必须先统一策略。
+- `use_skill` 的 `mcp.json` 拒读、文件大小上限和 URL 凭证脱敏，以及失效的 Live Activity wiring 测试锚点，均已在同一 WIP 收束。“已查看生图后是否回显更早完成图”按当前单条最新完成态契约保留，不改造成未读队列。
 - MiniApp 生成/修订现在以目标 app 的状态切片记录本次 mutation；前台或后台 conversation 保存失败时，只在该 app 未被后续修改的前提下恢复原记录与版本，不影响其他小应用。
 - Workspace artifact 改为 conversation 首次保存成功后再同步；同步失败会保留可运行的 MiniApp 与已落盘聊天卡片，并在当前消息中显示失败原因后尝试补存提示。
 - MiniApp 卡片导出缺失记录或临时文件写入失败时显示 alert；操作按钮保持原 bordered 视觉，提供 44pt 命中区，并在横向空间不足时切换纵向布局。
@@ -214,8 +235,8 @@ Last updated: 2026-08-06
 
 ## Known Risks
 
-- 当前产品改动已提交；后续仍需用实时 `git status` 复核是否有新的并发工作区改动。
-- “保存 SVG”契约 helper 已覆盖，但 Files picker / 真机导出体验与完整 `IOSGenerativeWidgetParserTests` 编译运行仍缺本机沙箱外证据。
+- 当前 review fixes 已分组提交；提交过程中出现的 vendor 宽度探针与 SwiftPM 锁文件变化仍在工作区，未纳入本批提交。
+- “保存 SVG”契约 helper 与完整 `IOSGenerativeWidgetParserTests` 已通过；Files picker 与真机导出体验仍缺设备端证据。
 - Generative UI 的终态契约已经自动化验证，但模型是否能在真实 provider 的 token/window 限制内稳定输出完整 SVG/full_html 仍需真机与真实账号证据。
 - 当前 Chat pacer 上限 36 与 24KB 长文门禁的 24 字要求冲突；这是与 widget 无关的既有问题，需决定恢复 24、调整发布策略或同步契约。
 - Android app 回归当前受范围外 Model Council 编译缺口阻断；不能把共享 planner 测试通过等同于 Android app 全门禁通过。
@@ -236,6 +257,7 @@ Last updated: 2026-08-06
 - 小说所有权 ADR：`docs/adr/0007-novel-creation-owns-project-state.md`
 - 小说实现基线：`docs/NOVEL_CREATION_IMPLEMENTATION_PLAN.md`
 - 共创 / 代笔计划：`docs/NOVEL_COCREATION_GHOSTWRITE_PLAN.md`
+- 模型自主性护栏拆除计划（Draft，待裁决）：`docs/MODEL_AUTONOMY_GUARDRAILS_PLAN.md`
 - Live Activity 视觉：`docs/ACTIVITY_ISLAND_REDESIGN.md`
 
 ## Update Contract
