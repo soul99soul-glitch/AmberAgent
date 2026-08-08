@@ -40,7 +40,8 @@ pub extern "C" fn amber_free_string(s: *mut c_char) {
 pub extern "C" fn amber_free_bytes(data: *mut u8, len: usize) {
     if !data.is_null() {
         unsafe {
-            drop(Vec::from_raw_parts(data, len, len));
+            let slice = std::ptr::slice_from_raw_parts_mut(data, len);
+            drop(Box::from_raw(slice));
         }
     }
 }
@@ -71,9 +72,9 @@ fn vec_to_cbytes(v: Vec<u8>, out_len: *mut usize) -> *mut u8 {
         unsafe { *out_len = 0 };
         return std::ptr::null_mut();
     }
-    let len = v.len();
-    let mut v = std::mem::ManuallyDrop::new(v);
-    let ptr = v.as_mut_ptr();
+    let bytes = v.into_boxed_slice();
+    let len = bytes.len();
+    let ptr = Box::into_raw(bytes) as *mut u8;
     unsafe { *out_len = len };
     ptr
 }
@@ -590,5 +591,24 @@ pub extern "C" fn amber_tokenizer_count(
     match tokenizer::count_tokens(tokenizer_id, text) {
         Ok(count) => count as i64,
         Err(_) => -1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_buffer_round_trip_does_not_depend_on_vec_capacity() {
+        let mut source = Vec::with_capacity(64);
+        source.extend_from_slice(b"amber");
+        assert!(source.capacity() > source.len());
+
+        let mut len = 0usize;
+        let ptr = vec_to_cbytes(source, &mut len);
+
+        assert_eq!(len, 5);
+        assert_eq!(unsafe { std::slice::from_raw_parts(ptr, len) }, b"amber");
+        amber_free_bytes(ptr, len);
     }
 }

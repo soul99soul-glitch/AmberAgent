@@ -22,11 +22,9 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-# Bumped from 1.75 → 1.76 because `std::any::type_name_of_val` (used by
-# jni-common::panic_to_string) stabilized in 1.76. Previous setting was a
-# latent contract violation — local builds passed because the active toolchain
-# was ≥1.76, but a strict CI on a 1.75 toolchain would have failed.
-rust-version = "1.76"
+# The locked dependency graph uses Edition 2024 crates and ICU components that
+# require Rust 1.86; keep CI pinned to the same minimum.
+rust-version = "1.86"
 license = "Apache-2.0"
 publish = false
 

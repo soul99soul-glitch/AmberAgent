@@ -46,7 +46,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Rust + Android target
-        uses: dtolnay/rust-toolchain@1.82.0
+        uses: dtolnay/rust-toolchain@1.86.0
         with:
           targets: aarch64-linux-android
 
