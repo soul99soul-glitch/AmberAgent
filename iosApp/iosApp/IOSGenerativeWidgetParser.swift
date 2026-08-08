@@ -169,15 +169,18 @@ struct IOSGenerativeWidgetPayloadDetector {
 enum IOSGenerativeWidgetParser {
     private static let markers: Set<String> = ["show-widget", "widget", "generative-ui"]
     private static let renderableTagPattern = #"<\s*(?:svg|div|section|article|table|ul|ol|p|figure|main|aside|header|footer)\b"#
-    private static let placeholderPhrases = [
+    /// G6: 占位判定改为结构化——widget_code 去标签后可见文本不足阈值即视为占位，
+    /// 不再做 "placeholder"/"replace me"/"todo" 子串匹配（那些词可能是真实内容）。
+    /// 只对模型亲手输出的代码生效（见 parseWidgetJson），渲染器合成的预览不参与。
+    private static let minimumVisibleTextLength = 24
+    /// 旧 prompt 模板的占位字样（曾让模型照抄这些标题）。仅用于标题归一——
+    /// 真实标题里的 "TODO"/"placeholder" 等词不再被误拒。
+    private static let templatePlaceholderPhrases = [
         "human readable title",
         "<svg or static",
         "svg or static html",
         "static html/css",
         "<svg 或",
-        "placeholder",
-        "replace me",
-        "todo",
     ]
     private static let blockedActionInstructionSnippets = [
         "<system",
@@ -388,6 +391,12 @@ enum IOSGenerativeWidgetParser {
               isRenderableWidgetCode(renderableCode, complete: true) else {
             return nil
         }
+        // G6: 结构化占位判定只作用于模型亲手输出的代码（html renderer / 无
+        // renderer 的裸 widget_code）。渲染器合成的预览（chart/slides/full_html
+        // preview）是渲染产物，字数多少与模型是否偷懒无关，不参与判定。
+        if code == rawWidgetCode, isPlaceholderLike(renderableCode) {
+            return nil
+        }
         return IOSGenerativeWidget(
             id: idSeed,
             title: normalizeWidgetTitle(title),
@@ -585,7 +594,6 @@ enum IOSGenerativeWidgetParser {
         let compact = code?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if compact.isEmpty { return false }
         let lower = compact.lowercased()
-        if placeholderPhrases.contains(where: { lower.contains($0) }) { return false }
         if ["<svg>", "<div>", "<svg></svg>", "<div></div>"].contains(lower) {
             return !complete
         }
@@ -593,6 +601,33 @@ enum IOSGenerativeWidgetParser {
         if complete, compact.filter({ $0 == "<" }).count < 2 { return false }
         return true
     }
+
+    /// G6: 结构化占位判定——先整块剔除 `<script>`/`<style>` 再算去标签可见文本，
+    /// 不足阈值视为模板占位。空骨架与模板泄漏文本都落在阈值之下，而任何真实
+    /// 图表/流程图都至少带着一条可读标签。含真实图形元素（path/rect/circle/
+    /// line/polygon/ellipse/polyline）或 img 的代码即使无文本也不判占位
+    /// （两节点流程图等合法极简图豁免）。只对 complete 生效：流式 partial
+    /// 天然不完整，交给 loading 态即可。
+    private static func isPlaceholderLike(_ code: String) -> Bool {
+        let withoutScriptStyle = code.replacing(pattern: scriptStyleBlockPattern, with: "")
+        if withoutScriptStyle.containsMatch(pattern: graphicElementPattern) {
+            return false
+        }
+        let visibleText = withoutScriptStyle
+            .replacing(pattern: #"<[^>]*>"#, with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return visibleText.count < minimumVisibleTextLength
+    }
+
+    /// `<script>`/`<style>` 块整体剔除——块内文本既不是可见内容，也不该为
+    /// 占位判定贡献字符数（否则可用脚本内文绕过阈值）。
+    private static let scriptStyleBlockPattern =
+        #"<\s*(?:script|style)\b[^>]*>.*?<\s*/\s*(?:script|style)\s*>"#
+
+    /// 真实图形元素集合：模型输出只要含其一（或 `<img>`），就不按
+    /// 「无内容占位」拒绝，哪怕没有可读文本。
+    private static let graphicElementPattern =
+        #"<\s*(?:path|rect|circle|line|polygon|ellipse|polyline|img)\b"#
 
     private static func parseActions(_ parsed: [String: Any]?) -> [IOSGenerativeWidgetAction] {
         guard let rows = parsed?["actions"] as? [[String: Any]] else { return [] }
@@ -637,7 +672,7 @@ enum IOSGenerativeWidgetParser {
 
     private static func normalizeWidgetTitle(_ title: String?) -> String? {
         guard let compact = title?.compactSpaces().nilIfBlank else { return nil }
-        if placeholderPhrases.contains(where: { compact.localizedCaseInsensitiveContains($0) }) {
+        if templatePlaceholderPhrases.contains(where: { compact.localizedCaseInsensitiveContains($0) }) {
             return nil
         }
         return String(compact.prefix(120))
@@ -663,7 +698,9 @@ enum IOSGenerativeWidgetParser {
             lower.contains("class='deck'")
     }
 
-    private static func looksLikeStandaloneHtml(_ value: String) -> Bool {
+    /// 可识别的完整 HTML 结构标记（跨类型被 IOSGuizangHtmlDeckValidator 复用，
+    /// 因此不设 private）。
+    static func looksLikeStandaloneHtml(_ value: String) -> Bool {
         let lower = String(value.prefix(2_000)).lowercased()
         return lower.contains("<!doctype html") ||
             lower.contains("<html") ||
@@ -1156,13 +1193,22 @@ enum IOSGuizangHtmlDeckValidator {
         validateHtml(spec.html)
     }
 
-    static func validateHtml(_ html: String) -> ValidationResult {
+    /// G6: SLIDES 路由（expectSlides）仍要求 slide 结构，deck 校验不变；
+    /// 非 slides 的 full_html（单页海报、文章页）放宽为「完整 HTML 即可」——
+    /// 按既有结构标记（deck/card-set/poster/slides 等）识别，不再强制 slide。
+    static func validateHtml(_ html: String, expectSlides: Bool = false) -> ValidationResult {
         if html.utf8.count > maxHTMLBytes {
             return ValidationResult(valid: false, reason: "html too large: max \(maxHTMLBytes / 1_000)KB")
         }
         let runtimeHtml = prepareRuntimeHtml(html)
-        guard hasSlideLikeContent(runtimeHtml) else {
-            return ValidationResult(valid: false, reason: "expected at least one slide element: <section class=\"slide ...\">")
+        if expectSlides {
+            guard hasSlideLikeContent(runtimeHtml) else {
+                return ValidationResult(valid: false, reason: "expected at least one slide element: <section class=\"slide ...\">")
+            }
+        } else {
+            guard IOSGenerativeWidgetParser.looksLikeStandaloneHtml(runtimeHtml) else {
+                return ValidationResult(valid: false, reason: "expected a complete HTML document or a deck/card-set/poster structure")
+            }
         }
         for rule in blockedRules where runtimeHtml.containsMatch(pattern: rule.pattern) {
             return ValidationResult(valid: false, reason: rule.reason)
@@ -1313,7 +1359,9 @@ enum IOSGuizangHtmlDeckValidator {
         BlockedRule(pattern: #"\bmodulepreload\b"#, reason: "module preloads are not allowed"),
     ]
 
-    private static func hasSlideLikeContent(_ html: String) -> Bool {
+    /// 是否含 slide 结构。被 ChatGenerationCoordinator 的终态校验（SLIDES 路由）
+    /// 复用，因此不设 private。
+    static func hasSlideLikeContent(_ html: String) -> Bool {
         html.containsMatch(pattern: #"<(?:section|article|div)\b(?=[^>]*(?:\bclass\s*=\s*(?:"[^"]*\bslide\b[^"]*"|'[^']*\bslide\b[^']*'|[^\s>]*\bslide\b[^\s>]*)|\bdata-slide(?:\s|=|>)))[^>]*>"#)
     }
 

@@ -97,10 +97,15 @@ enum IOSSubAgentRoleCatalog {
         )
     ]
 
-    static func resolve(roleId: String?) -> IOSSubAgentRoleDescriptor {
+    /// Resolves a built-in role id. Returns nil for unknown ids instead of
+    /// silently falling back to explorer, so callers can surface a structured
+    /// error (G3).
+    static func resolve(roleId: String?) -> IOSSubAgentRoleDescriptor? {
         let normalized = roleId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        return builtIns.first { $0.id == normalized } ?? builtIns[0]
+        return builtIns.first { $0.id == normalized }
     }
+
+    static let validRoleIds: [String] = builtIns.map(\.id).sorted()
 }
 
 enum IOSSubAgentToolPolicy {
@@ -132,6 +137,8 @@ final class SubAgentRunner {
     @ObservationIgnored private var currentRunId: String?
     @ObservationIgnored private let taskStore: IOSAdvancedTaskStore
     @ObservationIgnored private var currentTaskId: String?
+    @ObservationIgnored private var currentEngineRunTask: Task<IOSAgentToolEngineResult, Never>?
+    @ObservationIgnored private var currentEngineExecutionId: UUID?
 
     var lastRunResult: String = "(未运行)"
     var isRunning: Bool = false
@@ -144,6 +151,12 @@ final class SubAgentRunner {
     var recentTasks: [IOSAdvancedTaskRecord] {
         taskStore.recent(kind: .subAgent, limit: 5)
     }
+
+#if DEBUG
+    var hasActiveEngineRunForTesting: Bool {
+        currentEngineRunTask != nil
+    }
+#endif
 
     private func ensureManager() -> SubAgentManager? {
         if let manager { return manager }
@@ -199,6 +212,12 @@ final class SubAgentRunner {
         objective: String,
         roleId: String = "explorer",
         requestedToolScope: [String] = [],
+        customRoleName: String? = nil,
+        customRoleLens: String? = nil,
+        customRolePrompt: String? = nil,
+        savedRolePromptOverride: String? = nil,
+        maxTurnsOverride: Int? = nil,
+        outputBudgetCharsOverride: Int? = nil,
         providerSetting: ProviderSetting,
         modelId: String,
         baseParams: TextGenerationParams? = nil,
@@ -207,7 +226,23 @@ final class SubAgentRunner {
         timeoutSeconds: TimeInterval? = nil,
         provider: any IOSAgentTextProvider = OpenAIKmpProviderAdapter()
     ) async -> String {
-        let role = IOSSubAgentRoleCatalog.resolve(roleId: roleId)
+        let role = Self.resolveDispatchRole(
+            roleId: roleId,
+            customRoleName: customRoleName,
+            customRoleLens: customRoleLens,
+            customRolePrompt: customRolePrompt,
+            savedRolePromptOverride: savedRolePromptOverride,
+            maxTurnsOverride: maxTurnsOverride,
+            outputBudgetCharsOverride: outputBudgetCharsOverride
+        )
+        guard let role else {
+            return Self.json([
+                "ok": false,
+                "error": "Unknown sub-agent role_id: \(roleId).",
+                "valid_role_ids": IOSSubAgentRoleCatalog.validRoleIds,
+                "hint": "Omit role_id for the default role, or pass custom_role_prompt to define a one-off custom role."
+            ])
+        }
         let requested = requestedToolScope
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -216,8 +251,10 @@ final class SubAgentRunner {
             return Self.json([
                 "ok": false,
                 "denied": true,
-                "reason": "SubAgent read-only scope does not execute write, destructive, nested-agent, or sensitive WebMount tools.",
-                "requested_tools": deniedRequested
+                "reason": "SubAgent is a read-only worker: requested tool_scope includes tools it may never execute (write, destructive, nested-agent, or sensitive WebMount tools).",
+                "requested_tools": deniedRequested,
+                "removed_tools": deniedRequested,
+                "hint": "Narrow tool_scope to read-only tools (for example search_web, workspace_file_read, wm_get) or omit tool_scope to use the role allowlist."
             ])
         }
         let scopedTools = requested.isEmpty
@@ -226,6 +263,7 @@ final class SubAgentRunner {
         let tools = Self.uniqueTools((["tools_list"] + scopedTools).filter { tool in
             tool == "tools_list" || IOSSubAgentToolPolicy.readOnlyParentToolNames.contains(tool)
         })
+        let removedTools = requested.filter { !tools.contains($0) }
 
         let task = taskStore.startTask(
             kind: .subAgent,
@@ -280,7 +318,10 @@ final class SubAgentRunner {
             UIMessage.companion.user(prompt: userPrompt)
         ]
 
-        let fallbackMaxTokens = KotlinInt(value: Int32(role.outputBudgetChars / 4))
+        let roleMaxTokens = Int32(role.outputBudgetChars / 4)
+        let effectiveMaxTokens = baseParams?.maxTokens
+            .map { min(Int32(truncating: $0), roleMaxTokens) }
+            ?? roleMaxTokens
         let fallbackModel = Model(
                 modelId: modelId,
                 displayName: modelId,
@@ -299,7 +340,7 @@ final class SubAgentRunner {
             model: baseParams?.model ?? fallbackModel,
             temperature: baseParams?.temperature,
             topP: baseParams?.topP,
-            maxTokens: baseParams?.maxTokens ?? fallbackMaxTokens,
+            maxTokens: KotlinInt(value: effectiveMaxTokens),
             tools: Self.buildSubAgentToolDeclarations(names: [SUBAGENT_REPORT_TOOL_NAME_swift] + tools),
             reasoningLevel: baseParams?.reasoningLevel ?? .off,
             customHeaders: baseParams?.customHeaders ?? [],
@@ -409,6 +450,7 @@ final class SubAgentRunner {
             "role_name": role.name,
             "status": mappedStatus.rawValue,
             "tool_scope": tools,
+            "removed_tools": removedTools,
             "engine": true,
             "steps_executed": result?.stepsExecuted ?? 0,
             "report_captured": reportCapture.captured != nil,
@@ -446,6 +488,15 @@ final class SubAgentRunner {
                     Task { @MainActor in liveModel.ingest(text) }
                 }
             )
+        }
+        let executionId = UUID()
+        currentEngineExecutionId = executionId
+        currentEngineRunTask = runTask
+        defer {
+            if currentEngineExecutionId == executionId {
+                currentEngineExecutionId = nil
+                currentEngineRunTask = nil
+            }
         }
         let timeoutTask = Task { @MainActor in
             do {
@@ -503,15 +554,113 @@ final class SubAgentRunner {
         return result
     }
 
+    /// Resolves the role for one dispatch: a one-off custom role when
+    /// `customRolePrompt` is provided, otherwise a built-in role by id (nil for
+    /// unknown ids, so callers surface a structured error instead of silently
+    /// falling back). Budgets are clamped to the shared execution bounds —
+    /// maxTurns 2-8 (custom roles default 4), output budget 4000-24000 chars
+    /// (custom roles default 12000) — while built-in role seeds are preserved
+    /// when no override is passed. Custom roles get the same read-only tool
+    /// whitelist and denied set as built-ins (IOSSubAgentToolPolicy unchanged).
+    private static func resolveDispatchRole(
+        roleId: String?,
+        customRoleName: String?,
+        customRoleLens: String?,
+        customRolePrompt: String?,
+        savedRolePromptOverride: String?,
+        maxTurnsOverride: Int?,
+        outputBudgetCharsOverride: Int?
+    ) -> IOSSubAgentRoleDescriptor? {
+        let prompt = customRolePrompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let base: IOSSubAgentRoleDescriptor
+        if !prompt.isEmpty {
+            let name = customRoleName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let lens = customRoleLens?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            base = IOSSubAgentRoleDescriptor(
+                id: "custom",
+                name: name.isEmpty ? "Custom Agent" : name,
+                summary: lens.isEmpty ? "一次性自定义角色，按本次目标聚焦。" : lens,
+                systemPrompt: prompt,
+                routing: "模型按需组建的一次性专家；只使用只读工具。",
+                toolAllowlist: Array(IOSSubAgentToolPolicy.readOnlyParentToolNames).sorted(),
+                maxTurns: 4,
+                timeoutSeconds: 300,
+                outputBudgetChars: 12_000
+            )
+        } else if let resolved = IOSSubAgentRoleCatalog.resolve(roleId: roleId) {
+            let savedPrompt = savedRolePromptOverride?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            base = IOSSubAgentRoleDescriptor(
+                id: resolved.id,
+                name: resolved.name,
+                summary: resolved.summary,
+                systemPrompt: savedPrompt.isEmpty ? resolved.systemPrompt : savedPrompt,
+                routing: resolved.routing,
+                toolAllowlist: resolved.toolAllowlist,
+                maxTurns: resolved.maxTurns,
+                timeoutSeconds: resolved.timeoutSeconds,
+                outputBudgetChars: resolved.outputBudgetChars
+            )
+        } else {
+            return nil
+        }
+        return IOSSubAgentRoleDescriptor(
+            id: base.id,
+            name: base.name,
+            summary: base.summary,
+            systemPrompt: base.systemPrompt,
+            routing: base.routing,
+            toolAllowlist: base.toolAllowlist,
+            maxTurns: Self.clamp(maxTurnsOverride ?? base.maxTurns, lower: 2, upper: 8),
+            timeoutSeconds: base.timeoutSeconds,
+            outputBudgetChars: Self.clamp(outputBudgetCharsOverride ?? base.outputBudgetChars, lower: 4_000, upper: 24_000)
+        )
+    }
+
+    private static func clamp(_ value: Int, lower: Int, upper: Int) -> Int {
+        Swift.min(Swift.max(value, lower), upper)
+    }
+
     func run(objective: String, roleId: String = "explorer", requestedToolScope: [String] = []) async -> String {
         guard let m = ensureManager() else {
             return "SubAgent 不可用：无法构造 Manager（文档目录不可用）。"
         }
-        let role = IOSSubAgentRoleCatalog.resolve(roleId: roleId)
-        let scopedTools = requestedToolScope.isEmpty
+        let role = Self.resolveDispatchRole(
+            roleId: roleId,
+            customRoleName: nil,
+            customRoleLens: nil,
+            customRolePrompt: nil,
+            savedRolePromptOverride: nil,
+            maxTurnsOverride: nil,
+            outputBudgetCharsOverride: nil
+        )
+        guard let role else {
+            return Self.json([
+                "ok": false,
+                "error": "Unknown sub-agent role_id: \(roleId).",
+                "valid_role_ids": IOSSubAgentRoleCatalog.validRoleIds,
+                "hint": "Omit role_id for the default role, or pass custom_role_prompt to define a one-off custom role."
+            ])
+        }
+        let requested = requestedToolScope
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let deniedRequested = requested.filter(IOSSubAgentToolPolicy.isDenied)
+        if !deniedRequested.isEmpty {
+            return Self.json([
+                "ok": false,
+                "denied": true,
+                "reason": "SubAgent is a read-only worker: requested tool_scope includes tools it may never execute (write, destructive, nested-agent, or sensitive WebMount tools).",
+                "requested_tools": deniedRequested,
+                "removed_tools": deniedRequested,
+                "hint": "Narrow tool_scope to read-only tools (for example search_web, workspace_file_read, wm_get) or omit tool_scope to use the role allowlist."
+            ])
+        }
+        let scopedTools = requested.isEmpty
             ? role.toolAllowlist
-            : requestedToolScope.filter { role.toolAllowlist.contains($0) }
+            : requested.filter { role.toolAllowlist.contains($0) }
         let tools = scopedTools.isEmpty ? role.toolAllowlist : scopedTools
+        let removedTools = requested.filter { !tools.contains($0) }
         let providerMode = SettingsStore().currentApiKey.isEmpty ? "stub_fallback" : "real_provider"
         let task = taskStore.startTask(
             kind: .subAgent,
@@ -620,11 +769,17 @@ final class SubAgentRunner {
             "run_id": startResult.runId,
             "status": mappedStatus.rawValue,
             "tool_scope": tools,
+            "removed_tools": removedTools,
             "summary": summary
         ])
     }
 
     func cancelCurrentRun() {
+        if let currentEngineRunTask {
+            currentEngineRunTask.cancel()
+            lastRunResult = "正在取消 SubAgent…"
+            return
+        }
         guard let m = ensureManager(), let runId = currentRunId else {
             lastRunResult = "没有可取消的 SubAgent runId"
             return

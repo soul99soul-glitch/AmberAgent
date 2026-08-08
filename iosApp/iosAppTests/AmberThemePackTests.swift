@@ -451,6 +451,14 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertTrue(runtime.isCustomCombination)
     }
 
+    func testMatchingPackIncludesAccentInkColor() {
+        let pack = AmberThemePack.builtins[0]
+        runtime.apply(pack)
+        runtime.accentInkHex ^= 0x000001
+
+        XCTAssertFalse(pack.matches(runtime: runtime))
+    }
+
     func testImportAcceptsHashAndBareHex() throws {
         let json = """
         {

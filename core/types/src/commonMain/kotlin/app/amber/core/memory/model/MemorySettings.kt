@@ -6,8 +6,8 @@ import kotlin.uuid.Uuid
 
 @Serializable
 data class MemoryRecallSetting(
-    val maxItems: Int = 12,
-    val maxPromptChars: Int = 2_000,
+    val maxItems: Int = 24,
+    val maxPromptChars: Int = 6_000,
     val debug: Boolean = false,
 )
 

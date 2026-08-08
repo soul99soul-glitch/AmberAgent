@@ -15,14 +15,25 @@ struct IOSMemoryToolApprovalPreview: Equatable {
     let kind: String?
     let contentPreview: String?
     let targetId: Int?
+    let expectedUpdatedAt: Int64?
 }
 
 enum IOSMemoryToolExecutor {
+    /// search/query 默认与上限（入参 `limit` 可调，硬顶 20）。
+    private static let defaultSearchLimit = 10
+    private static let maxSearchLimit = 20
+    /// list 数量上限（默认 50，入参 `limit` 可调，硬顶 200）。
+    private static let defaultListLimit = 50
+    private static let maxListLimit = 200
+    /// list 单条 content 截断长度，超出部分以 "..." 结尾并打 `truncated`。
+    private static let listContentLimit = 500
+
     @MainActor
     static func execute(
         input: String,
         runtime: AgentRuntimeSetting,
-        writePolicy: IOSMemoryToolWritePolicy
+        writePolicy: IOSMemoryToolWritePolicy,
+        expectedUpdatedAt: Int64? = nil
     ) -> String {
         guard let args = jsonObject(input) else {
             return json(["ok": false, "tool": "memory_tool", "error": "memory_tool input must be a JSON object"])
@@ -30,14 +41,25 @@ enum IOSMemoryToolExecutor {
 
         let action = action(from: args)
         switch action {
-        case "list", "read", "search", "query", "status":
+        case "list":
             return list(args: args, runtime: runtime)
+        case "read":
+            return read(args: args, runtime: runtime)
+        case "search", "query":
+            return search(args: args, runtime: runtime, action: action)
+        case "status":
+            return status(args: args, runtime: runtime)
         case "create", "add", "write":
             return create(args: args, runtime: runtime, writePolicy: writePolicy)
         case "edit", "update":
-            return edit(args: args, runtime: runtime, writePolicy: writePolicy)
+            return edit(
+                args: args,
+                runtime: runtime,
+                writePolicy: writePolicy,
+                expectedUpdatedAt: expectedUpdatedAt
+            )
         case "delete", "remove":
-            return delete(args: args, writePolicy: writePolicy)
+            return delete(args: args, writePolicy: writePolicy, expectedUpdatedAt: expectedUpdatedAt)
         default:
             return json([
                 "ok": false,
@@ -69,11 +91,12 @@ enum IOSMemoryToolExecutor {
         }
 
         let targetId = int(args["id"])
+        let targetRecord = targetId.flatMap { id in
+            IosMemoryFactory.shared.getAllRecords().first(where: { Int($0.id) == id })
+        }
         let requestedContent = nonEmptyString(args["content"]).map { previewText($0) }
-        let storedContent: String? = if ["delete", "remove"].contains(action), let targetId {
-            IosMemoryFactory.shared.getAllRecords()
-                .first(where: { Int($0.id) == targetId })
-                .map { previewText($0.content) }
+        let storedContent: String? = if ["delete", "remove"].contains(action) {
+            targetRecord.map { previewText($0.content) }
         } else {
             nil
         }
@@ -83,7 +106,8 @@ enum IOSMemoryToolExecutor {
             scope: nonEmptyString(args["scope"] ?? args["type"]),
             kind: nonEmptyString(args["kind"]),
             contentPreview: requestedContent ?? storedContent,
-            targetId: targetId
+            targetId: targetId,
+            expectedUpdatedAt: targetRecord?.updatedAt
         )
     }
 
@@ -102,12 +126,144 @@ enum IOSMemoryToolExecutor {
                 return lhs.id < rhs.id
             }
 
+        let limit = min(max(int(args["limit"]) ?? defaultListLimit, 1), maxListLimit)
+        let limited = Array(records.prefix(limit))
         return json([
             "ok": true,
             "tool": "memory_tool",
             "action": "list",
-            "count": records.count,
-            "memories": records.map(recordPayload)
+            "count": limited.count,
+            "total": records.count,
+            "limit": limit,
+            "truncated": records.count > limit,
+            "memories": limited.map(listPayload)
+        ])
+    }
+
+    /// list 专用 payload：单条 content 超过 listContentLimit 时截断并打
+    /// `truncated` 标记，避免全量列表把长记忆整段倾倒给模型。create/edit
+    /// 的写回响应仍用完整 recordPayload。
+    private static func listPayload(_ record: MemoryRecord) -> [String: Any] {
+        var payload = recordPayload(record)
+        if record.content.count > listContentLimit {
+            payload["content"] = String(record.content.prefix(listContentLimit)) + "..."
+            payload["truncated"] = true
+        }
+        return payload
+    }
+
+    /// `read`：按入参 id 精确返回单条记录；不存在时返回结构化错误并提示用
+    /// list 查看可用记忆，不再走全量列表。
+    @MainActor
+    private static func read(args: [String: Any], runtime: AgentRuntimeSetting) -> String {
+        guard let id = int(args["id"]) else {
+            return json([
+                "ok": false,
+                "tool": "memory_tool",
+                "action": "read",
+                "error": "read requires an id"
+            ])
+        }
+        guard let record = IosMemoryFactory.shared.getAllRecords().first(where: { Int($0.id) == id }) else {
+            return json([
+                "ok": false,
+                "tool": "memory_tool",
+                "action": "read",
+                "error": "memory not found",
+                "id": id,
+                "hint": "use action \"list\" to see available memories"
+            ])
+        }
+        guard isScopeEnabled(record.scope, runtime: runtime) else {
+            return disabledScopeResult(record.scope, action: "read")
+        }
+        return json([
+            "ok": true,
+            "tool": "memory_tool",
+            "action": "read",
+            "memory": recordPayload(record)
+        ])
+    }
+
+    /// `search`/`query`：复用 ChatMemoryContextBuilder 的召回打分（pinned/
+    /// 词元重叠/时间衰减/confidence），按分排序后返回 top N（默认 10，
+    /// 上限 20）。过滤契约与上下文召回对齐：无词元重叠时仅 pinned / core /
+    /// feedback / 高置信 long_term user 记录参与。
+    @MainActor
+    private static func search(args: [String: Any], runtime: AgentRuntimeSetting, action: String) -> String {
+        let query = nonEmptyString(args["query"] ?? args["q"] ?? args["text"])
+        let limit = min(max(int(args["limit"]) ?? defaultSearchLimit, 1), maxSearchLimit)
+        let requestedScope = (args["scope"] ?? args["type"]) as? String
+        let records = IosMemoryFactory.shared.getAllRecords()
+            .filter { !$0.archived }
+            .filter { record in
+                guard isScopeEnabled(record.scope, runtime: runtime) else { return false }
+                guard let requestedScope, requestedScope != "all" else { return true }
+                return record.scope.wireName == requestedScope
+            }
+        let queryTokens = query.map { Set(ChatMemoryContextBuilder.recallTokens(from: $0)) } ?? []
+        let scored = ChatMemoryContextBuilder.scoredByRelevance(records, queryText: query ?? "", now: nowMillis())
+        let ranked = scored
+            .filter { record, _ in
+                queryTokens.isEmpty
+                    || !Set(ChatMemoryContextBuilder.recallTokens(from: record.content)).isDisjoint(with: queryTokens)
+                    || isAlwaysEligibleForSearch(record)
+            }
+            .sorted { lhs, rhs in
+                if lhs.record.pinned != rhs.record.pinned { return lhs.record.pinned && !rhs.record.pinned }
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                if lhs.record.updatedAt != rhs.record.updatedAt { return lhs.record.updatedAt > rhs.record.updatedAt }
+                return lhs.record.id < rhs.record.id
+            }
+            .prefix(limit)
+            .map(\.record)
+
+        var payload: [String: Any] = [
+            "ok": true,
+            "tool": "memory_tool",
+            "action": action,
+            "count": ranked.count,
+            "memories": ranked.map(recordPayload)
+        ]
+        if let query { payload["query"] = query }
+        return json(payload)
+    }
+
+    /// 与 ChatMemoryContextBuilder.isAlwaysEligible 等价的最小实现。
+    private static func isAlwaysEligibleForSearch(_ record: MemoryRecord) -> Bool {
+        record.pinned || record.scope == .core || record.kind == .feedback ||
+            (record.scope == .longTerm && record.kind == .user && record.confidence >= 0.70)
+    }
+
+    /// `status`：返回可用性摘要（各 scope 是否启用、可见/archived 记录数、
+    /// 召回预算默认值），不倾倒全量 content。
+    @MainActor
+    private static func status(args: [String: Any], runtime: AgentRuntimeSetting) -> String {
+        let records = IosMemoryFactory.shared.getAllRecords()
+        let recall = runtime.memoryRecall
+        let scopes = [MemoryScope.core, MemoryScope.shortTerm, MemoryScope.longTerm].map { scope in
+            let scopeRecords = records.filter { $0.scope == scope }
+            return [
+                "scope": scope.wireName,
+                "enabled": isScopeEnabled(scope, runtime: runtime),
+                "visible": scopeRecords.filter { !$0.archived }.count,
+                "archived": scopeRecords.filter { $0.archived }.count,
+            ]
+        }
+        let visibleRecords = records.filter { isScopeEnabled($0.scope, runtime: runtime) && !$0.archived }
+        let archivedRecords = records.filter { isScopeEnabled($0.scope, runtime: runtime) && $0.archived }
+        return json([
+            "ok": true,
+            "tool": "memory_tool",
+            "action": "status",
+            "available": isEnabled(runtime: runtime),
+            "scopes": scopes,
+            "visibleCount": visibleRecords.count,
+            "archivedCount": archivedRecords.count,
+            "recallDefaults": [
+                "maxItems": Int(recall.maxItems),
+                "maxPromptChars": Int(recall.maxPromptChars),
+            ],
         ])
     }
 
@@ -148,6 +304,10 @@ enum IOSMemoryToolExecutor {
             IOSMemoryWriteAuditStore.shared.record(action: "create", status: "failed", reason: "invalid memory kind")
             return json(["ok": false, "tool": "memory_tool", "action": "create", "error": "invalid memory kind"])
         }
+        guard let supersedesIds = kotlinIntArray(args["supersedesIds"]) else {
+            IOSMemoryWriteAuditStore.shared.record(action: "create", status: "failed", reason: "supersedesIds contains an out-of-range integer")
+            return integerOutOfRangeResult(action: "create", field: "supersedesIds")
+        }
         let previousRecords = IosMemoryFactory.shared.snapshotRecords()
         let record = IosMemoryFactory.shared.addDetailedMemory(
             scope: scope,
@@ -156,7 +316,7 @@ enum IOSMemoryToolExecutor {
             assistantId: bucket(for: scope),
             sourceConversationId: nonEmptyString(args["sourceConversationId"]),
             sourceMessageIds: stringArray(args["sourceMessageIds"]),
-            supersedesIds: kotlinIntArray(args["supersedesIds"]),
+            supersedesIds: supersedesIds,
             expiresAt: int64(args["expiresAt"]).map { KotlinLong(value: $0) },
             confidence: float(args["confidence"]) ?? 1,
             pinned: bool(args["pinned"]) ?? false,
@@ -187,7 +347,8 @@ enum IOSMemoryToolExecutor {
     private static func edit(
         args: [String: Any],
         runtime: AgentRuntimeSetting,
-        writePolicy: IOSMemoryToolWritePolicy
+        writePolicy: IOSMemoryToolWritePolicy,
+        expectedUpdatedAt: Int64?
     ) -> String {
         guard case .allow = writePolicy else {
             let result = writeBlockedResult(action: "edit", writePolicy: writePolicy)
@@ -202,6 +363,15 @@ enum IOSMemoryToolExecutor {
         guard let existing = previousRecords.first(where: { Int($0.id) == id }) else {
             IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "memory not found", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "edit", "error": "memory not found", "id": id])
+        }
+        guard expectedUpdatedAt == nil || existing.updatedAt == expectedUpdatedAt else {
+            IOSMemoryWriteAuditStore.shared.record(
+                action: "edit",
+                status: "failed",
+                reason: "memory changed after approval",
+                memoryId: id
+            )
+            return staleApprovalResult(action: "edit", id: id)
         }
         guard let content = nonEmptyString(args["content"]) else {
             IOSMemoryWriteAuditStore.shared.record(action: "edit", status: "failed", reason: "content is required", memoryId: id)
@@ -234,9 +404,21 @@ enum IOSMemoryToolExecutor {
         let sourceMessageIds = args.keys.contains("sourceMessageIds")
             ? stringArray(args["sourceMessageIds"])
             : existing.sourceMessageIds
-        let supersedesIds = args.keys.contains("supersedesIds")
-            ? kotlinIntArray(args["supersedesIds"])
-            : existing.supersedesIds
+        let supersedesIds: [KotlinInt]
+        if args.keys.contains("supersedesIds") {
+            guard let parsedSupersedesIds = kotlinIntArray(args["supersedesIds"]) else {
+                IOSMemoryWriteAuditStore.shared.record(
+                    action: "edit",
+                    status: "failed",
+                    reason: "supersedesIds contains an out-of-range integer",
+                    memoryId: id
+                )
+                return integerOutOfRangeResult(action: "edit", field: "supersedesIds")
+            }
+            supersedesIds = parsedSupersedesIds
+        } else {
+            supersedesIds = existing.supersedesIds
+        }
         let updatedAt = nowMillis()
         let updated = MemoryRecord(
             id: existing.id,
@@ -286,7 +468,11 @@ enum IOSMemoryToolExecutor {
     }
 
     @MainActor
-    private static func delete(args: [String: Any], writePolicy: IOSMemoryToolWritePolicy) -> String {
+    private static func delete(
+        args: [String: Any],
+        writePolicy: IOSMemoryToolWritePolicy,
+        expectedUpdatedAt: Int64?
+    ) -> String {
         guard case .allow = writePolicy else {
             let result = writeBlockedResult(action: "delete", writePolicy: writePolicy)
             auditWrite(action: "delete", args: args, writePolicy: writePolicy)
@@ -302,6 +488,15 @@ enum IOSMemoryToolExecutor {
         guard existed else {
             IOSMemoryWriteAuditStore.shared.record(action: "delete", status: "failed", reason: "memory not found", memoryId: id)
             return json(["ok": false, "tool": "memory_tool", "action": "delete", "error": "memory not found", "id": id])
+        }
+        guard expectedUpdatedAt == nil || existing?.updatedAt == expectedUpdatedAt else {
+            IOSMemoryWriteAuditStore.shared.record(
+                action: "delete",
+                status: "failed",
+                reason: "memory changed after approval",
+                memoryId: id
+            )
+            return staleApprovalResult(action: "delete", id: id)
         }
         IosMemoryFactory.shared.deleteMemory(id: Int32(id))
         guard IOSMemoryPersistence.shared.persist(previousRecords: previousRecords) else {
@@ -349,6 +544,17 @@ enum IOSMemoryToolExecutor {
                 "reason": reason
             ])
         }
+    }
+
+    private static func staleApprovalResult(action: String, id: Int) -> String {
+        json([
+            "ok": false,
+            "tool": "memory_tool",
+            "action": action,
+            "error": "memory changed after approval",
+            "code": "stale_memory",
+            "id": id,
+        ])
     }
 
     @MainActor
@@ -508,15 +714,35 @@ enum IOSMemoryToolExecutor {
         (value as? [Any])?.compactMap { $0 as? String } ?? []
     }
 
-    private static func kotlinIntArray(_ value: Any?) -> [KotlinInt] {
-        ((value as? [Any]) ?? []).compactMap { item in
-            int(item).map { KotlinInt(value: Int32($0)) }
+    private static func kotlinIntArray(_ value: Any?) -> [KotlinInt]? {
+        guard let value else { return [] }
+        guard let items = value as? [Any] else { return nil }
+        var result: [KotlinInt] = []
+        for item in items {
+            guard let value = int(item) else { return nil }
+            guard let exactValue = Int32(exactly: value) else { return nil }
+            result.append(KotlinInt(value: exactValue))
         }
+        return result
+    }
+
+    private static func integerOutOfRangeResult(action: String, field: String) -> String {
+        json([
+            "ok": false,
+            "tool": "memory_tool",
+            "action": action,
+            "code": "integer_out_of_range",
+            "field": field,
+            "error": "\(field) must contain only 32-bit signed integers",
+        ])
     }
 
     private static func int(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber {
+            guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            return Int(number.stringValue)
+        }
         if let int = value as? Int { return int }
-        if let number = value as? NSNumber { return number.intValue }
         if let string = value as? String { return Int(string) }
         return nil
     }
@@ -624,7 +850,7 @@ final class IOSMemoryPersistence {
         do {
             let data = try Data(contentsOf: fileURL)
             let persisted = try decoder.decode([PersistedMemoryRecord].self, from: data)
-            let kmpRecords = persisted.map { $0.toKmp() }
+            let kmpRecords = try persisted.map { try $0.toKmp() }
             IosMemoryFactory.shared.replaceAll(records: kmpRecords)
             records = kmpRecords
             revision += 1
@@ -794,18 +1020,33 @@ private struct PersistedMemoryRecord: Codable {
         )
     }
 
-    func toKmp() -> MemoryRecord {
+    func toKmp() throws -> MemoryRecord {
+        guard let exactId = Int32(exactly: id) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: [],
+                debugDescription: "Memory id is outside the 32-bit signed integer range"
+            ))
+        }
+        let exactSupersedesIds = try supersedesIds.map { value -> KotlinInt in
+            guard let exactValue = Int32(exactly: value) else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: [],
+                    debugDescription: "Memory supersedesIds contains a value outside the 32-bit signed integer range"
+                ))
+            }
+            return KotlinInt(value: exactValue)
+        }
         let scopeValue = memoryScopeByName(scope) ?? MemoryScope.longTerm
         let kindValue = memoryKindByName(kind) ?? MemoryKind.note
         return MemoryRecord(
-            id: Int32(id),
+            id: exactId,
             content: content,
             scope: scopeValue,
             kind: kindValue,
             assistantId: assistantId,
             sourceConversationId: sourceConversationId,
             sourceMessageIds: sourceMessageIds,
-            supersedesIds: supersedesIds.map { KotlinInt(value: Int32($0)) },
+            supersedesIds: exactSupersedesIds,
             expiresAt: expiresAt.map { KotlinLong(value: $0) },
             confidence: Float(confidence),
             pinned: pinned,

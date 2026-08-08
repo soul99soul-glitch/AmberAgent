@@ -220,12 +220,26 @@ enum StreamPresentationPacingPolicy {
 }
 
 enum ChatStreamPresentationPacer {
+    enum Mode {
+        case streaming
+        case terminalDrain
+    }
+
     static var minimumTextAdvance: Int { StreamPresentationPacingPolicy.minimumTextAdvance }
     static var maximumTextAdvance: Int { StreamPresentationPacingPolicy.maximumTextAdvance }
     static var preferredDrainTicks: Int { StreamPresentationPacingPolicy.preferredDrainTicks }
+    /// 24K-char terminal bursts are the observed worst normal reply; drain
+    /// that backlog within the existing 16 ticks without changing live pacing.
+    private static let terminalMaximumTextAdvance = 24 * 1_024 / StreamPresentationPacingPolicy.preferredDrainTicks
 
     static func textAdvance(backlogCount: Int) -> Int {
         StreamPresentationPacingPolicy.textAdvance(backlogCount: backlogCount)
+    }
+
+    private static func terminalTextAdvance(backlogCount: Int) -> Int {
+        guard backlogCount > 0 else { return 0 }
+        let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
+        return min(terminalMaximumTextAdvance, max(maximumTextAdvance, adaptive))
     }
 
     /// 本轮所有 text part 的未显示字符总量,用来定这一拍的推进预算。
@@ -250,7 +264,11 @@ enum ChatStreamPresentationPacer {
         return backlog
     }
 
-    static func step(current: [UIMessage], target: [UIMessage]) -> ChatStreamPresentationStep {
+    static func step(
+        current: [UIMessage],
+        target: [UIMessage],
+        mode: Mode = .streaming
+    ) -> ChatStreamPresentationStep {
         guard let targetAssistant = target.last,
               targetAssistant.role == MessageRole.assistant else {
             return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
@@ -282,12 +300,13 @@ enum ChatStreamPresentationPacer {
             return ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
         }
 
-        var remainingBudget = textAdvance(
-            backlogCount: pendingTextBacklog(
-                currentParts: currentParts,
-                targetParts: targetAssistant.parts
-            )
+        let backlogCount = pendingTextBacklog(
+            currentParts: currentParts,
+            targetParts: targetAssistant.parts
         )
+        var remainingBudget = mode == .terminalDrain
+            ? terminalTextAdvance(backlogCount: backlogCount)
+            : textAdvance(backlogCount: backlogCount)
         var caughtUp = true
         var pacedParts: [UIMessagePart] = []
         pacedParts.reserveCapacity(targetAssistant.parts.count)
@@ -502,11 +521,8 @@ enum IOSGenerativeUiRequestPolicy {
             setting: setting,
             messages: messages
         )
-        let shouldSuppressTools = GenerativeUiPlanner.shared.shouldGenerateDirectWidgetWithoutTools(
-            setting: setting,
-            messages: messages
-        )
-        let plannedParams = shouldSuppressTools ? copying(params, tools: [], reasoningLevel: params.reasoningLevel) : params
+        // G6: keyword routing only injects prompt guidance — it never clears
+        // the tool catalog. Whether the model uses tools is its own choice.
         let basePrompt = GenerativeUiPromptCatalog.shared.build(setting: setting, model: params.model)
         let routePrompt = GenerativeUiPlanner.shared.buildPrompt(
             setting: setting,
@@ -517,14 +533,99 @@ enum IOSGenerativeUiRequestPolicy {
             .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             .joined(separator: "\n")
         return IOSGenerativeUiRequestPlan(
-            params: plannedParams,
+            params: params,
             uploadMessages: prompt.isEmpty ? messages : [systemMessage(prompt)] + messages,
             requirement: IOSGenerativeUiRequirement(sharedRequirement)
         )
     }
 
+    /// G6: the repair round is a normal continuation — tools stay declared and
+    /// the reasoning level is untouched, so the model can research missing
+    /// facts before drawing instead of streaming blind.
     static func retryParams(_ params: TextGenerationParams) -> TextGenerationParams {
-        copying(params, tools: [], reasoningLevel: .off)
+        params
+    }
+
+    /// G6: the repair round appends instead of deleting — the user's visible
+    /// draft is kept verbatim and a short "repairing" notice is appended after
+    /// it. The second round streams in as a NEW assistant message, so a second
+    /// failure leaves the real (draft + failed attempt) transcript behind.
+    static func retryBaseMessages(_ messages: [UIMessage]) -> [UIMessage] {
+        messages + [generativeUiRepairNotice()]
+    }
+
+    /// 用户可见的「补绘」状态标记：可视化未生成完整时，在保留原草稿的
+    /// 前提下追加这条短消息，复用 emptyResponseNotice 同款 assistant 通知形态。
+    static func generativeUiRepairNotice() -> UIMessage {
+        UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Text(
+                text: generativeUiRepairNoticeText,
+                metadata: nil
+            )],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
+    static let generativeUiRepairNoticeText = "可视化未生成完整，正在补绘，请稍候…"
+    static let generativeUiRepairFailedText = "可视化未能生成，已保留原始回答"
+
+    /// G6: 补绘轮二次失败的终态收口——把「正在补绘，请稍候…」notice 替换为
+    /// 中性失败说明，不残留 pending 语义。最多一次重试，不再发起第三轮。
+    /// 找不到 notice（baseline 边界不符或文本不匹配）时原样返回，不误伤。
+    static func terminalRepairFailureMessages(
+        _ messages: [UIMessage],
+        afterDisplayMessageCount baselineCount: Int
+    ) -> [UIMessage] {
+        let noticeIndex = min(max(baselineCount, 0), messages.count) - 1
+        guard noticeIndex >= 0, noticeIndex < messages.count else { return messages }
+        let notice = messages[noticeIndex]
+        guard isGeneratedRepairNotice(notice) else { return messages }
+        var updated = messages
+        updated[noticeIndex] = UIMessage(
+            id: notice.id,
+            role: notice.role,
+            parts: [UIMessagePart.Text(text: generativeUiRepairFailedText, metadata: nil)],
+            annotations: notice.annotations,
+            createdAt: notice.createdAt,
+            finishedAt: notice.finishedAt,
+            modelId: notice.modelId,
+            usage: notice.usage,
+            translation: notice.translation
+        )
+        return updated
+    }
+
+    /// Background retries may be restored from a checkpoint whose display
+    /// prefix is different from the upload prefix. Locate the durable repair
+    /// notice by identity instead of guessing its index from the upload count.
+    static func terminalRepairFailureMessages(_ messages: [UIMessage]) -> [UIMessage] {
+        guard let noticeIndex = messages.indices.reversed().first(where: {
+            isGeneratedRepairNotice(messages[$0])
+        }) else {
+            return messages
+        }
+        return terminalRepairFailureMessages(
+            messages,
+            afterDisplayMessageCount: noticeIndex + 1
+        )
+    }
+
+    private static func isGeneratedRepairNotice(_ message: UIMessage) -> Bool {
+        guard message.role == MessageRole.assistant,
+              message.parts.count == 1,
+              let text = message.parts.first as? UIMessagePart.Text else {
+            return false
+        }
+        return text.text == generativeUiRepairNoticeText
+            && message.modelId == nil
+            && message.usage == nil
     }
 
     static func retryMessages(
@@ -565,33 +666,25 @@ enum IOSGenerativeUiRequestPolicy {
            !widgets.contains(where: { $0.renderer == IOSGuizangHtmlDeckValidator.renderer }) {
             return "expected renderer \"\(IOSGuizangHtmlDeckValidator.renderer)\""
         }
-        if requirement.expectSlides,
-           !widgets.contains(where: {
-               $0.renderer == "slides" || $0.renderer == IOSGuizangHtmlDeckValidator.renderer
-           }) {
-            return "expected a slides or full_html deck widget"
+        if requirement.expectSlides {
+            let hasDeckWidget = widgets.contains(where: {
+                $0.renderer == "slides" || $0.renderer == IOSGuizangHtmlDeckValidator.renderer
+            })
+            if !hasDeckWidget {
+                return "expected a slides or full_html deck widget"
+            }
+            // G6: 单页海报放宽后（完整 HTML 即可），SLIDES 路由仍要求
+            // full_html 里真的有 slide 结构，而不是一张无分页的海报。
+            if let deckWidget = widgets.first(where: { $0.renderer == IOSGuizangHtmlDeckValidator.renderer }),
+               let spec = deckWidget.specJson.flatMap(IOSGuizangHtmlDeckValidator.normalizeSpecJson),
+               !IOSGuizangHtmlDeckValidator.hasSlideLikeContent(spec.html) {
+                return "expected slide sections in full_html deck"
+            }
         }
         return nil
     }
 
-    private static func copying(
-        _ params: TextGenerationParams,
-        tools: [Tool],
-        reasoningLevel: ReasoningLevel
-    ) -> TextGenerationParams {
-        TextGenerationParams(
-            model: params.model,
-            temperature: params.temperature,
-            topP: params.topP,
-            maxTokens: params.maxTokens,
-            tools: tools,
-            reasoningLevel: reasoningLevel,
-            customHeaders: params.customHeaders,
-            customBody: params.customBody
-        )
-    }
-
-    private static func systemMessage(_ prompt: String) -> UIMessage {
+    fileprivate static func systemMessage(_ prompt: String) -> UIMessage {
         UIMessage(
             id: KotlinUuid.companion.random(),
             role: MessageRole.system,
@@ -645,7 +738,9 @@ final class ChatGenerationCoordinator {
     /// 后台时清空,避免下一个 run 继承上一个 run 的重复计数。
     private var currentToolLoopGuard = IOSToolLoopGuard()
     private var currentLiveActivityStage: AgentActivityStage?
-    private let maxToolResumeCount = 6
+    /// G7: 前台工具循环上限参数化（设置页 chatMaxToolResumeCount，默认 12，clamp 4-24）。
+    /// 实时读取而非 run 冻结：它只是防浪费的预算护栏，不是影响对话内容的配置。
+    private var maxToolResumeCount: Int { dependencies.settingsStore.chatMaxToolResumeCount }
     private var pendingStreamSnapshot: [UIMessage]?
     private var pendingStreamSnapshotProvider: (() -> [UIMessage])?
     private var streamSnapshotFlushTask: Task<Void, Never>?
@@ -660,6 +755,7 @@ final class ChatGenerationCoordinator {
     /// complete 只延后可见终态，直到分帧追上，数据完整性不受影响。
     private let streamSnapshotFlushDelayNanos: UInt64 = 48_000_000
     private var pendingMemoryToolApproval: ChatPendingToolApproval?
+    private var pendingMemoryExpectedUpdatedAt: Int64?
     private var pendingSearchToolApproval: ChatPendingToolApproval?
     private var pendingWebMountToolApproval: ChatPendingToolApproval?
     private var pendingWorkspaceToolApproval: ChatPendingToolApproval?
@@ -1264,15 +1360,50 @@ final class ChatGenerationCoordinator {
 
     private func backgroundToolHandoffUploadMessages(
         from baseMessages: [UIMessage],
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
-        runId: String
-    ) -> [UIMessage] {
+        runId: String,
+        conversationId: KotlinUuid?
+    ) async -> [UIMessage]? {
+        let runSettings = settingsSnapshot(forRun: runId)
         let plan = IOSGenerativeUiRequestPolicy.plan(
-            setting: settingsSnapshot(forRun: runId).agentRuntime.generativeUi,
+            setting: runSettings.agentRuntime.generativeUi,
             messages: baseMessages,
-            params: params
+            params: params,
+            suppressForMiniApp: runSettings.agentRuntime.miniApp.enabled &&
+                ChatRuntimeContextBuilder.miniAppTurnContext(in: baseMessages) != nil
         )
-        return runtimeContextUploadMessages(from: plan.uploadMessages)
+        let runtimeBaseline = bindings.messagesByInjectingRuntimeContext(plan.uploadMessages)
+        let runtimeOverheadTokens = max(
+            IOSContextCompactionCoordinator.estimatedTokensForRequest(runtimeBaseline) -
+                IOSContextCompactionCoordinator.estimatedTokensForRequest(plan.uploadMessages),
+            0
+        )
+        do {
+            let prepared = try await IOSContextCompactionCoordinator.shared.prepareMessagesForRequest(
+                uploadMessages: plan.uploadMessages,
+                conversationId: conversationId,
+                settings: runSettings,
+                params: plan.params,
+                fallbackProvider: providerSetting,
+                promptOverheadTokens: runtimeOverheadTokens
+            )
+            guard currentRunId == runId else { return nil }
+            let prompted = messagesByInjectingImageGenerationPromptIfNeeded(
+                prepared,
+                params: plan.params
+            )
+            let runtimePrepared = bindings.messagesByInjectingRuntimeContext(prompted)
+            let finalized = try IOSContextCompactionCoordinator.shared.finalizedMessagesForRequest(
+                runtimePrepared,
+                settings: runSettings,
+                params: plan.params
+            )
+            return ChatRuntimeContextBuilder.coalescingSystemMessages(finalized)
+        } catch {
+            NSLog("[AmberChat] Failed to prepare background tool handoff.")
+            return nil
+        }
     }
 
     /// - Parameter honorKeepAliveLease: 只有「App 退到后台」这一种理由能认这道短路。
@@ -1460,7 +1591,10 @@ final class ChatGenerationCoordinator {
         inputDigest: String,
         conversationId: KotlinUuid?,
         uploadMessages: [UIMessage],
-        diagnosticOriginalProvider: ProviderSetting? = nil
+        diagnosticOriginalProvider: ProviderSetting? = nil,
+        generativeUiRequirementOverride: IOSGenerativeUiRequirement? = nil,
+        generativeUiFallbackAttempted: Bool = false,
+        displayMessagesOverride: [UIMessage]? = nil
     ) async {
         guard currentRunId == runId else { return }
         let effectiveProvider: ProviderSetting
@@ -1495,6 +1629,7 @@ final class ChatGenerationCoordinator {
                 ChatRuntimeContextBuilder.miniAppTurnContext(in: uploadMessages) != nil
         )
         let effectiveParams = generativeUiPlan.params
+        let effectiveGenerativeUiRequirement = generativeUiRequirementOverride ?? generativeUiPlan.requirement
         let generativeUiPreparedMessages = generativeUiPlan.uploadMessages
         IOSCodexProviderResolver.writeRequestDiagnostic(
             originalProvider: diagnosticOriginalProvider ?? providerSetting,
@@ -1581,7 +1716,9 @@ final class ChatGenerationCoordinator {
             conversationId: conversationId,
             uploadMessages: finalUploadMessages,
             backgroundProviderSetting: providerSetting,
-            generativeUiRequirement: generativeUiPlan.requirement
+            generativeUiRequirement: effectiveGenerativeUiRequirement,
+            generativeUiFallbackAttempted: generativeUiFallbackAttempted,
+            displayMessagesOverride: displayMessagesOverride
         )
     }
 
@@ -1754,7 +1891,6 @@ final class ChatGenerationCoordinator {
                         inputDigest: inputDigest,
                         conversationId: conversationId,
                         hitOutputLimit: streamSession.hitOutputLimit,
-                        uploadMessages: uploadMessages,
                         backgroundProviderSetting: backgroundProviderSetting,
                         displayMessages: displayMessages,
                         generativeUiRequirement: generativeUiRequirement,
@@ -1844,9 +1980,17 @@ final class ChatGenerationCoordinator {
     }
 
     @discardableResult
-    private func publishPacedStreamSnapshot(_ target: [UIMessage], runId: String) -> Bool {
+    private func publishPacedStreamSnapshot(
+        _ target: [UIMessage],
+        runId: String,
+        mode: ChatStreamPresentationPacer.Mode = .streaming
+    ) -> Bool {
         let step = bindings.shouldPaceStreamPresentation()
-            ? ChatStreamPresentationPacer.step(current: bindings.getMessages(), target: target)
+            ? ChatStreamPresentationPacer.step(
+                current: bindings.getMessages(),
+                target: target,
+                mode: mode
+            )
             : ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
         ChatStreamRecorder.shared.record(runId: runId, snapshot: step.snapshot)
         bindings.setMessages(step.snapshot)
@@ -1860,7 +2004,7 @@ final class ChatGenerationCoordinator {
         // full provider result rather than the currently visible prefix.
         pendingStreamSnapshot = target
         while currentRunId == runId, !Task.isCancelled {
-            if publishPacedStreamSnapshot(target, runId: runId) {
+            if publishPacedStreamSnapshot(target, runId: runId, mode: .terminalDrain) {
                 pendingStreamSnapshot = nil
                 return true
             }
@@ -1964,7 +2108,6 @@ final class ChatGenerationCoordinator {
         inputDigest: String,
         conversationId: KotlinUuid?,
         hitOutputLimit: Bool = false,
-        uploadMessages: [UIMessage],
         backgroundProviderSetting: ProviderSetting?,
         displayMessages: [UIMessage],
         generativeUiRequirement: IOSGenerativeUiRequirement,
@@ -1981,29 +2124,49 @@ final class ChatGenerationCoordinator {
                afterDisplayMessageCount: displayMessages.count,
                requirement: generativeUiRequirement
            ) {
+            let retryBase = IOSGenerativeUiRequestPolicy.retryBaseMessages(snapshot)
             let retryMessages = IOSGenerativeUiRequestPolicy.retryMessages(
-                uploadMessages,
+                retryBase,
                 requirement: generativeUiRequirement,
                 issue: widgetIssue
             )
             let retryParams = IOSGenerativeUiRequestPolicy.retryParams(params)
-            bindings.setMessages(displayMessages)
+            bindings.setMessages(retryBase)
             bindings.bumpMessageRevision(.assistantStreamClosed)
             streamJob = nil
-            startStreaming(
-                providerSetting: providerSetting,
+            await prepareAndStartStreaming(
+                providerSetting: backgroundProviderSetting ?? providerSetting,
                 params: retryParams,
                 runId: runId,
                 startedAt: startedAt,
                 inputDigest: inputDigest,
                 conversationId: conversationId,
-                uploadMessages: ChatRuntimeContextBuilder.coalescingSystemMessages(retryMessages),
-                backgroundProviderSetting: backgroundProviderSetting,
-                generativeUiRequirement: generativeUiRequirement,
+                uploadMessages: retryMessages,
+                diagnosticOriginalProvider: backgroundProviderSetting,
+                generativeUiRequirementOverride: generativeUiRequirement,
                 generativeUiFallbackAttempted: true,
-                displayMessagesOverride: displayMessages
+                displayMessagesOverride: retryBase
             )
             return
+        }
+
+        var completedSnapshot = snapshot
+        // G6: 补绘轮二次失败的终态收口。最多一次重试，不发起第三轮；只把
+        // 「正在补绘，请稍候…」notice 替换为中性失败说明，让转录以已收口的
+        // 状态结束。第二轮产出了合法 widget 时 widgetIssue 为 nil，不动。
+        if generativeUiFallbackAttempted,
+           !toolRuntime.hasUnresolvedToolCall(in: snapshot),
+           IOSGenerativeUiRequestPolicy.widgetIssue(
+               in: snapshot,
+               afterDisplayMessageCount: displayMessages.count,
+               requirement: generativeUiRequirement
+           ) != nil {
+            completedSnapshot = IOSGenerativeUiRequestPolicy.terminalRepairFailureMessages(
+                snapshot,
+                afterDisplayMessageCount: displayMessages.count
+            )
+            bindings.setMessages(completedSnapshot)
+            bindings.bumpMessageRevision(.assistantStreamClosed)
         }
 
         // 输出上限截断:正文有效但不完整。必须先于工具分支返回——截断点可能
@@ -2012,7 +2175,7 @@ final class ChatGenerationCoordinator {
         // pendingToolCalls)。静默记 completed 会让用户把半截答案当完整答案。
         if hitOutputLimit {
             await completeTruncatedStream(
-                snapshot: snapshot,
+                snapshot: completedSnapshot,
                 runId: runId,
                 startedAt: startedAt,
                 inputDigest: inputDigest,
@@ -2023,12 +2186,12 @@ final class ChatGenerationCoordinator {
 
         let availableToolNames = Set(params.tools.map(\.name))
         if let pendingToolCall = toolRuntime.nextPendingToolCall(
-            in: snapshot,
+            in: completedSnapshot,
             availableToolNames: availableToolNames
         ) {
             guard currentToolResumeCount < maxToolResumeCount else {
                 await failPendingToolCalls(
-                    snapshot: snapshot,
+                    snapshot: completedSnapshot,
                     failureText: "工具调用未执行：已达到本轮工具循环上限（\(maxToolResumeCount) 次）。请继续对话或拆分任务后重试。",
                     runId: runId,
                     startedAt: startedAt,
@@ -2049,14 +2212,14 @@ final class ChatGenerationCoordinator {
                 startedAt: startedAt,
                 inputDigest: inputDigest,
                 conversationId: conversationId,
-                baseMessages: snapshot
+                baseMessages: completedSnapshot
             )
             return
         }
 
-        if toolRuntime.hasUnresolvedToolCall(in: snapshot) {
+        if toolRuntime.hasUnresolvedToolCall(in: completedSnapshot) {
             await failPendingToolCalls(
-                snapshot: snapshot,
+                snapshot: completedSnapshot,
                 failureText: "工具调用未执行：该工具当前未启用或不可执行。请在设置中启用对应能力后重试。",
                 runId: runId,
                 startedAt: startedAt,
@@ -2067,9 +2230,9 @@ final class ChatGenerationCoordinator {
         }
 
         // 空回复检测：模型没有产出任何文本也没有工具调用时，给用户一个明确提示。
-        if Self.isEmptyAssistantResponse(snapshot) {
+        if Self.isEmptyAssistantResponse(completedSnapshot) {
             let miniAppExpected = ChatRuntimeContextBuilder.miniAppTurnContext(in: displayMessages) != nil
-            var emptySnapshot = snapshot
+            var emptySnapshot = completedSnapshot
             emptySnapshot.append(miniAppExpected ? Self.emptyMiniAppResponseNotice() : Self.emptyResponseNotice())
             bindings.setMessages(emptySnapshot)
             bindings.bumpMessageRevision(.toolResultAppended)
@@ -2113,8 +2276,8 @@ final class ChatGenerationCoordinator {
             return
         }
 
-        var finalSnapshot = snapshot
-        let miniAppApplication = bindings.saveMiniAppIfPresent(snapshot, conversationId)
+        var finalSnapshot = completedSnapshot
+        let miniAppApplication = bindings.saveMiniAppIfPresent(completedSnapshot, conversationId)
         if let miniAppApplication {
             finalSnapshot = miniAppApplication.messages
             bindings.setMessages(finalSnapshot)
@@ -2466,23 +2629,31 @@ final class ChatGenerationCoordinator {
         // HTTP call, so a background transition during tool execution hands off
         // a snapshot carrying this pending tool call. The background engine then
         // pre-executes it instead of re-prompting the model to re-issue it.
-        refreshBackgroundHandoff(
-            runId: runId,
-            startedAt: startedAt,
-            inputDigest: inputDigest,
-            conversationId: conversationId,
+        if let handoffUploadMessages = await backgroundToolHandoffUploadMessages(
+            from: baseMessages,
             providerSetting: providerSetting,
-            backgroundProviderSetting: nil,
             params: params,
-            uploadMessages: backgroundToolHandoffUploadMessages(
-                from: baseMessages,
+            runId: runId,
+            conversationId: conversationId
+        ) {
+            refreshBackgroundHandoff(
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                providerSetting: providerSetting,
+                backgroundProviderSetting: nil,
                 params: params,
-                runId: runId
-            ),
-            displayMessages: bindings.getMessages(),
-            generativeUiRequirement: currentGenerativeUiRequirement,
-            generativeUiFallbackAttempted: currentGenerativeUiFallbackAttempted
-        )
+                uploadMessages: handoffUploadMessages,
+                displayMessages: bindings.getMessages(),
+                generativeUiRequirement: currentGenerativeUiRequirement,
+                generativeUiFallbackAttempted: currentGenerativeUiFallbackAttempted
+            )
+        } else {
+            // A previously prepared snapshot is now stale relative to this tool
+            // stage. Never hand it off after compaction/final-fit failed.
+            backgroundHandoff = nil
+        }
 
         // I-1 durable boundary ("先记账，后动手"): persist the assistant message
         // carrying this tool call, THEN record the ledger's Started entry —
@@ -2680,28 +2851,36 @@ final class ChatGenerationCoordinator {
             return
         }
 
-        let continuationParams = Self.continuationParamsAfterToolExecution(
-            params,
+        // G7: continuation 参数原样保留（工具目录不清空）；只有预算耗尽时
+        // 向本轮流式输入注入「总结收尾」系统提示，把收尾方式的选择权交给模型。
+        let continuationUploadMessages = Self.continuationMessagesAfterToolBudgetExhaustion(
+            resumedMessages,
             resumeCount: currentToolResumeCount,
             maxResumeCount: maxToolResumeCount
         )
-        refreshBackgroundHandoff(
-            runId: runId,
-            startedAt: startedAt,
-            inputDigest: inputDigest,
-            conversationId: conversationId,
+        if let handoffUploadMessages = await backgroundToolHandoffUploadMessages(
+            from: continuationUploadMessages,
             providerSetting: providerSetting,
-            backgroundProviderSetting: nil,
-            params: continuationParams,
-            uploadMessages: backgroundToolHandoffUploadMessages(
-                from: resumedMessages,
-                params: continuationParams,
-                runId: runId
-            ),
-            displayMessages: resumedMessages,
-            generativeUiRequirement: currentGenerativeUiRequirement,
-            generativeUiFallbackAttempted: currentGenerativeUiFallbackAttempted
-        )
+            params: params,
+            runId: runId,
+            conversationId: conversationId
+        ) {
+            refreshBackgroundHandoff(
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId,
+                providerSetting: providerSetting,
+                backgroundProviderSetting: nil,
+                params: params,
+                uploadMessages: handoffUploadMessages,
+                displayMessages: resumedMessages,
+                generativeUiRequirement: currentGenerativeUiRequirement,
+                generativeUiFallbackAttempted: currentGenerativeUiFallbackAttempted
+            )
+        } else {
+            backgroundHandoff = nil
+        }
         let generating = AgentActivityPresentation.response(stage: .generating)
         currentLiveActivityStage = generating.stage
         WatchTaskCoordinator.shared.publish(
@@ -2716,31 +2895,34 @@ final class ChatGenerationCoordinator {
         )
         await prepareAndStartStreaming(
             providerSetting: providerSetting,
-            params: continuationParams,
+            params: params,
             runId: runId,
             startedAt: startedAt,
             inputDigest: inputDigest,
             conversationId: conversationId,
-            uploadMessages: resumedMessages
+            uploadMessages: continuationUploadMessages,
+            generativeUiRequirementOverride: currentGenerativeUiRequirement,
+            generativeUiFallbackAttempted: currentGenerativeUiFallbackAttempted
         )
     }
 
-    static func continuationParamsAfterToolExecution(
-        _ params: TextGenerationParams,
+    /// G7: 预算耗尽时不再静默清空工具目录——保留工具声明，并注入收尾提示，
+    /// 让模型用最后一轮做带解释的总结（向用户说明哪些步骤未完成）。
+    static func continuationMessagesAfterToolBudgetExhaustion(
+        _ messages: [UIMessage],
         resumeCount: Int,
         maxResumeCount: Int
-    ) -> TextGenerationParams {
-        guard resumeCount >= maxResumeCount, !params.tools.isEmpty else { return params }
-        return TextGenerationParams(
-            model: params.model,
-            temperature: params.temperature,
-            topP: params.topP,
-            maxTokens: params.maxTokens,
-            tools: [],
-            reasoningLevel: params.reasoningLevel,
-            customHeaders: params.customHeaders,
-            customBody: params.customBody
-        )
+    ) -> [UIMessage] {
+        guard resumeCount >= maxResumeCount else { return messages }
+        return [IOSGenerativeUiRequestPolicy.systemMessage(toolBudgetExhaustionPrompt(maxResumeCount: maxResumeCount))] + messages
+    }
+
+    static func toolBudgetExhaustionPrompt(maxResumeCount: Int) -> String {
+        """
+        工具调用预算已用完（本轮最多 \(maxResumeCount) 次工具调用）。
+        请用现有信息总结收尾，并向用户说明哪些步骤未完成、为什么未完成。
+        不要再发起新的工具调用。
+        """
     }
 
     private func pauseForApproval(
@@ -2752,6 +2934,7 @@ final class ChatGenerationCoordinator {
         switch prompt {
         case .memory(let request):
             pendingMemoryToolApproval = pending
+            pendingMemoryExpectedUpdatedAt = request.expectedUpdatedAt
             bindings.setPendingMemoryApproval(request)
         case .search(let request):
             pendingSearchToolApproval = pending
@@ -2851,6 +3034,7 @@ final class ChatGenerationCoordinator {
     // Started durably lands before `finishMemoryApproval` runs.
     private func finishPendingMemoryToolApproval(writePolicy: IOSMemoryToolWritePolicy) {
         guard let pending = pendingMemoryToolApproval else { return }
+        let expectedUpdatedAt = pendingMemoryExpectedUpdatedAt
         clearPendingMemoryApproval()
         guard currentRunId == pending.runId else { return }
         Task { @MainActor [weak self] in
@@ -2889,7 +3073,8 @@ final class ChatGenerationCoordinator {
             }
             let executedMessages = self.toolRuntime.finishMemoryApproval(
                 pending: pending,
-                writePolicy: writePolicy
+                writePolicy: writePolicy,
+                expectedUpdatedAt: expectedUpdatedAt
             )
             await self.toolLedger.recordToolCallFinished(
                 runId: pending.runId,
@@ -3156,23 +3341,29 @@ final class ChatGenerationCoordinator {
         }
         guard currentRunId == pending.runId, let result else { return nil }
         guard case .completed(let resumedMessages) = result else { return nil }
-        refreshBackgroundHandoff(
-            runId: pending.runId,
-            startedAt: pending.startedAt,
-            inputDigest: pending.inputDigest,
-            conversationId: pending.conversationId,
+        if let handoffUploadMessages = await backgroundToolHandoffUploadMessages(
+            from: resumedMessages,
             providerSetting: pending.providerSetting,
-            backgroundProviderSetting: nil,
             params: pending.params,
-            uploadMessages: backgroundToolHandoffUploadMessages(
-                from: resumedMessages,
+            runId: pending.runId,
+            conversationId: pending.conversationId
+        ) {
+            refreshBackgroundHandoff(
+                runId: pending.runId,
+                startedAt: pending.startedAt,
+                inputDigest: pending.inputDigest,
+                conversationId: pending.conversationId,
+                providerSetting: pending.providerSetting,
+                backgroundProviderSetting: nil,
                 params: pending.params,
-                runId: pending.runId
-            ),
-            displayMessages: resumedMessages,
-            generativeUiRequirement: currentGenerativeUiRequirement,
-            generativeUiFallbackAttempted: currentGenerativeUiFallbackAttempted
-        )
+                uploadMessages: handoffUploadMessages,
+                displayMessages: resumedMessages,
+                generativeUiRequirement: currentGenerativeUiRequirement,
+                generativeUiFallbackAttempted: currentGenerativeUiFallbackAttempted
+            )
+        } else {
+            backgroundHandoff = nil
+        }
         return resumedMessages
     }
 
@@ -3426,6 +3617,7 @@ final class ChatGenerationCoordinator {
 
     private func clearPendingMemoryApproval() {
         pendingMemoryToolApproval = nil
+        pendingMemoryExpectedUpdatedAt = nil
         bindings.setPendingMemoryApproval(nil)
     }
 
@@ -3560,10 +3752,17 @@ final class ChatGenerationCoordinator {
 
     func backgroundToolHandoffUploadMessagesForTesting(
         _ baseMessages: [UIMessage],
+        providerSetting: ProviderSetting,
         params: TextGenerationParams,
         runId: String
-    ) -> [UIMessage] {
-        backgroundToolHandoffUploadMessages(from: baseMessages, params: params, runId: runId)
+    ) async -> [UIMessage]? {
+        await backgroundToolHandoffUploadMessages(
+            from: baseMessages,
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            conversationId: nil
+        )
     }
 
     @discardableResult

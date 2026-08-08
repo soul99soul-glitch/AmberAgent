@@ -60,7 +60,7 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertTrue(conversations.contains("backgroundGenerationRevision &+= 1"))
     }
 
-    func testForegroundToolBatchDrainsBeforeOneModelContinuationAndLimitDisablesTools() throws {
+    func testForegroundToolBatchDrainsBeforeOneModelContinuationAndInjectsBudgetPromptAtLimit() throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
         let coordinator = try String(
@@ -78,49 +78,42 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertLessThan(pending.lowerBound, stream.lowerBound)
         XCTAssertLessThan(pending.lowerBound, unresolved.lowerBound)
         XCTAssertLessThan(unresolved.lowerBound, stream.lowerBound)
-        XCTAssertTrue(continuation.prefix(7000).contains("continuationParamsAfterToolExecution("))
-        XCTAssertTrue(coordinator.contains("tools: []"))
+        XCTAssertTrue(continuation.prefix(7000).contains("continuationMessagesAfterToolBudgetExhaustion("))
+        // G7: 预算耗尽不再清空工具目录——continuation 路径必须保留工具声明。
+        XCTAssertFalse(coordinator.contains("tools: []"))
     }
 
-    func testToolContinuationParamsDisableToolsOnlyAtTheExecutionLimit() {
-        let model = Model(
-            modelId: "test-model",
-            displayName: "Test Model",
+    func testToolBudgetExhaustionInjectsWrapUpPromptAndKeepsConversation() {
+        let userMessage = UIMessage(
             id: KotlinUuid.companion.random(),
-            type: ModelType.chat,
-            customHeaders: [],
-            customBodies: [],
-            inputModalities: [],
-            outputModalities: [],
-            abilities: [],
-            tools: Set<BuiltInTools>(),
-            contextWindowTokens: nil,
-            providerOverwrite: nil
-        )
-        let params = TextGenerationParams(
-            model: model,
-            temperature: nil,
-            topP: nil,
-            maxTokens: nil,
-            tools: [ToolKt.createSearchWebToolDeclaration()],
-            reasoningLevel: ReasoningLevel.off,
-            customHeaders: [],
-            customBody: []
+            role: MessageRole.user,
+            parts: [UIMessagePart.Text(text: "查资料后写一份总结", metadata: nil)],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
         )
 
-        let beforeLimit = ChatGenerationCoordinator.continuationParamsAfterToolExecution(
-            params,
+        let belowLimit = ChatGenerationCoordinator.continuationMessagesAfterToolBudgetExhaustion(
+            [userMessage],
             resumeCount: 3,
             maxResumeCount: 4
         )
-        let atLimit = ChatGenerationCoordinator.continuationParamsAfterToolExecution(
-            params,
+        XCTAssertEqual(belowLimit.count, 1, "预算未耗尽时不得注入收尾提示")
+
+        let atLimit = ChatGenerationCoordinator.continuationMessagesAfterToolBudgetExhaustion(
+            [userMessage],
             resumeCount: 4,
             maxResumeCount: 4
         )
-
-        XCTAssertEqual(beforeLimit.tools.map(\.name), params.tools.map(\.name))
-        XCTAssertTrue(atLimit.tools.isEmpty)
+        XCTAssertEqual(atLimit.count, 2, "预算耗尽时注入一条收尾系统提示")
+        XCTAssertEqual(atLimit.first?.role, MessageRole.system)
+        let prompt = atLimit.first?.toText() ?? ""
+        XCTAssertTrue(prompt.contains("总结收尾"))
+        XCTAssertTrue(prompt.contains("未完成"))
+        XCTAssertEqual(atLimit.last?.role, MessageRole.user)
     }
 
     // MARK: - shared fixtures
@@ -2021,6 +2014,41 @@ final class IOSParityRedLightTests: XCTestCase {
             150,
             "4000 字积压必须在约 150 拍(≈7s)内追平;固定 12 字符/拍需要 334 拍(≈16s)"
         )
+    }
+
+    func testForegroundTerminalDrainUsesIndependentBoundedBudget() {
+        let user = UIMessage.companion.user(prompt: "question")
+        let assistant = UIMessage.companion.assistant(prompt: "已显示")
+        let targetAssistant = UIMessage(
+            id: assistant.id,
+            role: assistant.role,
+            parts: [UIMessagePart.Text(text: "已显示" + String(repeating: "长", count: 24_000), metadata: nil)],
+            annotations: assistant.annotations,
+            createdAt: assistant.createdAt,
+            finishedAt: nil,
+            modelId: assistant.modelId,
+            usage: assistant.usage,
+            translation: assistant.translation
+        )
+        let target = [user, targetAssistant]
+
+        var current = [user, assistant]
+        var ticks = 0
+        var caughtUp = false
+        while !caughtUp, ticks < 100 {
+            let step = ChatStreamPresentationPacer.step(
+                current: current,
+                target: target,
+                mode: .terminalDrain
+            )
+            current = step.snapshot
+            caughtUp = step.isCaughtUp
+            ticks += 1
+        }
+
+        XCTAssertTrue(caughtUp)
+        XCTAssertEqual(current.last?.toText(), targetAssistant.toText())
+        XCTAssertLessThanOrEqual(ticks, 16, "终态 2.4 万字积压应在约 0.8 秒内分批排空")
     }
 
     /// 命中模型输出上限(finish_reason = length / max_tokens)必须被当成截断收尾,

@@ -15,7 +15,10 @@ enum IOSBuiltinSkills {
         for name in requiredNames {
             if !existing.contains(name), let markdown = markdown(for: name) {
                 do {
-                    _ = try store.saveSkillFiles(files: ["SKILL.md": markdown])
+                    _ = try store.saveSkillFiles(
+                        files: ["SKILL.md": markdown],
+                        allowBuiltinSkill: true
+                    )
                     installed.append(name)
                 } catch {
                     continue

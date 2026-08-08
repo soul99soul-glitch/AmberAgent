@@ -84,13 +84,13 @@ struct McpServersView: View {
             Spacer()
 
             HStack(spacing: 8) {
-                AmberGlassCircleButton(systemImage: "arrow.clockwise", accessibilityLabel: "刷新 MCP 工具", size: 38, symbolSize: 16) {
+                AmberGlassCircleButton(systemImage: "arrow.clockwise", accessibilityLabel: "刷新 MCP 工具", size: 44, symbolSize: 16) {
                     Task { await mcpManager.syncAll() }
                 }
-                AmberGlassCircleButton(systemImage: "square.and.arrow.down", accessibilityLabel: "导入服务器", size: 38, symbolSize: 16) {
+                AmberGlassCircleButton(systemImage: "square.and.arrow.down", accessibilityLabel: "导入服务器", size: 44, symbolSize: 16) {
                     router.navigate(to: .mcpImport)
                 }
-                AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加服务器", size: 38, symbolSize: 17) {
+                AmberGlassCircleButton(systemImage: "plus", accessibilityLabel: "添加服务器", size: 44, symbolSize: 17) {
                     router.navigate(to: .mcpAdd)
                 }
             }
@@ -718,24 +718,6 @@ private struct McpToolToggleRow: View {
         .frame(minHeight: 64)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-    }
-}
-
-private struct FlowPills: View {
-    let pills: [McpPillModel]
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ForEach(pills) { pill in
-                Text(pill.text)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(pill.kind.foreground)
-                    .lineLimit(1)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(pill.kind.background, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-            }
-        }
     }
 }
 

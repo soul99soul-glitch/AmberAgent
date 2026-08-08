@@ -70,8 +70,8 @@ enum ChatToolApprovalPrompt {
             request.title
         case .mcp:
             "MCP 工具"
-        case .council:
-            "模型议会"
+        case .council(let request):
+            request.title
         case .askUser:
             "需要你的回答"
         }
@@ -242,10 +242,9 @@ final class ChatToolRuntime {
 
         // Advanced tools in background. The foreground approval UI cannot surface
         // during a BGContinuedProcessingTask, so:
-        //  - subagent_dispatch: gated by the capability switch (isAdvancedToolEnabled),
-        //    same as foreground; runs silently via the engine loop and returns its
-        //    JSON report. The live token panel is not driven — the user sees the
-        //    final result on return to the app.
+        //  - subagent_dispatch: disabled stays blocked; askEveryTime (including a
+        //    normalized legacy allowOncePerRun value) must return to foreground
+        //    for approval. Only autoApprove may execute silently in background.
         //  - mcp_call: high-risk (external/remote), mirrors the foreground gate —
         //    only runs when the high-risk auto-approve switch is on, otherwise
         //    denied so the user returns to the app to confirm.
@@ -259,15 +258,27 @@ final class ChatToolRuntime {
         if availableToolNames.contains("subagent_dispatch") {
             executors["subagent_dispatch"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
                 guard let self else { return .failed("Chat runtime is unavailable.") }
+                let toolCall = self.toolCall(name: toolName, input: arguments)
                 guard self.isAdvancedToolEnabled(toolName) else {
                     return .failed("\(toolName) 未开启。请先在设置中启用对应能力。")
                 }
+                guard !self.requiresSubAgentApproval() else {
+                    self.recordToolApproval(
+                        capabilityId: "ios.agent.subagent_dispatch",
+                        toolCall: toolCall,
+                        action: .denied,
+                        reason: "Background subagent dispatch requires foreground approval.",
+                        runId: runId
+                    )
+                    return .denied("后台生成期间需要回到 App 确认子代理调度。")
+                }
                 let result = await self.dispatchAdvancedToolCall(
-                    self.toolCall(name: toolName, input: arguments),
+                    toolCall,
                     providerSetting: providerSetting,
                     params: params,
                     runId: runId
                 )
+                self.recordAdvancedToolApprovalIfNeeded(toolCall: toolCall, runId: runId)
                 return .filled(result)
             }
         }
@@ -315,9 +326,12 @@ final class ChatToolRuntime {
                 guard let self else { return .failed("Chat runtime is unavailable.") }
                 let mutating = IOSSkillToolCatalog.mutatingToolNames.contains(toolName)
                     || IOSMcpManagementToolCatalog.mutatingToolNames.contains(toolName)
-                if mutating,
-                   !IOSLocalToolExecutor.isGlobalAutoApproveEnabled,
-                   !IOSLocalToolExecutor.isHighRiskAutoApproveEnabled {
+                let highRisk = IOSMcpManagementToolCatalog.highRiskToolNames.contains(toolName)
+                let autoApproved = highRisk
+                    ? IOSLocalToolExecutor.isHighRiskAutoApproveEnabled
+                    : IOSLocalToolExecutor.isGlobalAutoApproveEnabled
+                        || IOSLocalToolExecutor.isHighRiskAutoApproveEnabled
+                if mutating, !autoApproved {
                     return .denied("后台生成期间需要回到 App 确认 \(toolName)。")
                 }
                 if IOSMcpManagementToolCatalog.toolNames.contains(toolName),
@@ -441,7 +455,8 @@ final class ChatToolRuntime {
 
     func finishMemoryApproval(
         pending: ChatPendingToolApproval,
-        writePolicy: IOSMemoryToolWritePolicy
+        writePolicy: IOSMemoryToolWritePolicy,
+        expectedUpdatedAt: Int64? = nil
     ) -> [UIMessage] {
         let allowed: Bool
         if case .allow = writePolicy {
@@ -460,7 +475,8 @@ final class ChatToolRuntime {
         let resultText = IOSMemoryToolExecutor.execute(
             input: pending.toolCall.input,
             runtime: sharedSettings.agentRuntime,
-            writePolicy: writePolicy
+            writePolicy: writePolicy,
+            expectedUpdatedAt: expectedUpdatedAt
         )
         return messagesByFinishingToolCall(
             pending.toolCall,
@@ -480,7 +496,6 @@ final class ChatToolRuntime {
             reason: allow ? "User approved network search." : "User denied network search.",
             runId: pending.runId
         )
-
         let resultText = allow
             ? await dispatchSearchToolCall(pending.toolCall)
             : ChatToolOutputFormatter.toolFailureJSON(
@@ -591,11 +606,19 @@ final class ChatToolRuntime {
         pending: ChatPendingToolApproval,
         allow: Bool
     ) async -> [UIMessage] {
+        let audit: (capabilityId: String, actionName: String)
+        if pending.toolCall.toolName == "mcp_call" {
+            audit = ("ios.mcp.tool_call", "MCP tool call")
+        } else if IOSMcpManagementToolCatalog.toolNames.contains(pending.toolCall.toolName) {
+            audit = ("ios.mcp.management", "MCP management operation")
+        } else {
+            audit = ("ios.skills.management", "local Skill operation")
+        }
         recordToolApproval(
-            capabilityId: "ios.mcp.tool_call",
+            capabilityId: audit.capabilityId,
             toolCall: pending.toolCall,
             action: allow ? .allowed : .denied,
-            reason: allow ? "User approved MCP tool call." : "User denied MCP tool call.",
+            reason: allow ? "User approved \(audit.actionName)." : "User denied \(audit.actionName).",
             runId: pending.runId
         )
 
@@ -608,7 +631,7 @@ final class ChatToolRuntime {
                 runId: pending.runId
             )
         } else {
-            resultText = "用户拒绝执行 MCP 工具。"
+            resultText = "用户拒绝执行 \(pending.toolCall.toolName)。"
         }
         return messagesByFinishingToolCall(
             pending.toolCall,
@@ -621,14 +644,19 @@ final class ChatToolRuntime {
         pending: ChatPendingToolApproval,
         allow: Bool
     ) async -> [UIMessage] {
+        let isSubAgent = pending.toolCall.toolName == "subagent_dispatch"
+        let capabilityId = isSubAgent
+            ? "ios.agent.subagent_dispatch"
+            : "ios.agent.model_council_run"
         recordToolApproval(
-            capabilityId: "ios.agent.model_council_run",
+            capabilityId: capabilityId,
             toolCall: pending.toolCall,
             action: allow ? .allowed : .denied,
-            reason: allow ? "User approved model council run." : "User denied model council run.",
+            reason: allow
+                ? "User approved \(pending.toolCall.toolName)."
+                : "User denied \(pending.toolCall.toolName).",
             runId: pending.runId
         )
-
         let resultText: String
         if allow {
             resultText = await dispatchAdvancedToolCall(
@@ -640,11 +668,11 @@ final class ChatToolRuntime {
         } else {
             resultText = IOSWorkspaceStore.json([
                 "ok": false,
-                "tool": "model_council_run",
+                "tool": pending.toolCall.toolName,
                 "status": "denied",
                 "denied": true,
                 "policy": "user_denied",
-                "reason": "用户拒绝启动模型议会。"
+                "reason": isSubAgent ? "用户拒绝调度子代理。" : "用户拒绝启动模型议会。"
             ])
         }
         return messagesByFinishingToolCall(
@@ -944,10 +972,10 @@ final class ChatToolRuntime {
             || IOSLocalToolExecutor.isHighRiskAutoApproveEnabled
         if !autoApprove,
            let request = ChatToolApprovalRequestBuilder.search(
-            for: pending.toolCall,
-            reason: "网络搜索和网页读取会访问外部站点，需要你确认。",
-            settings: sharedSettings.snapshot
-        ) {
+               for: pending.toolCall,
+               reason: "网络搜索和网页读取会访问外部站点，需要你确认。",
+               settings: sharedSettings.snapshot
+           ) {
             return .waitingForApproval(.search(request))
         }
 
@@ -1037,19 +1065,27 @@ final class ChatToolRuntime {
     }
 
     private func executeAdvancedToolCall(_ pending: ChatPendingToolApproval) async -> ChatToolRuntimeResult {
-        // MCP is high-risk (external/remote); auto-approve only when the high-risk switch is on.
-        if pending.toolCall.toolName == "mcp_call",
+        // MCP calls and MCP management can access remote services or import
+        // connection configuration. Ordinary global auto-approve must not cross
+        // this high-risk boundary.
+        let highRiskMcp = pending.toolCall.toolName == "mcp_call"
+            || IOSMcpManagementToolCatalog.highRiskToolNames.contains(pending.toolCall.toolName)
+        if highRiskMcp,
            !IOSLocalToolExecutor.isHighRiskAutoApproveEnabled,
-           let request = ChatToolApprovalRequestBuilder.mcp(
-               for: pending.toolCall,
-               reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。"
-           ) {
+           let request = pending.toolCall.toolName == "mcp_call"
+               ? ChatToolApprovalRequestBuilder.mcp(
+                   for: pending.toolCall,
+                   reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。"
+               )
+               : ChatToolApprovalRequestBuilder.extensionMutation(
+                   for: pending.toolCall,
+                   reason: "MCP 管理操作可能访问外部服务或写入连接配置，需要你确认。"
+               ) {
             return .waitingForApproval(.mcp(request))
         }
 
-        let mutatingSkillMcp = IOSSkillToolCatalog.mutatingToolNames.contains(pending.toolCall.toolName)
-            || IOSMcpManagementToolCatalog.mutatingToolNames.contains(pending.toolCall.toolName)
-        if mutatingSkillMcp,
+        let mutatingSkill = IOSSkillToolCatalog.mutatingToolNames.contains(pending.toolCall.toolName)
+        if mutatingSkill,
            !IOSLocalToolExecutor.isGlobalAutoApproveEnabled,
            !IOSLocalToolExecutor.isHighRiskAutoApproveEnabled,
            let request = ChatToolApprovalRequestBuilder.extensionMutation(
@@ -1064,6 +1100,15 @@ final class ChatToolRuntime {
            let request = ChatToolApprovalRequestBuilder.council(
                for: pending.toolCall,
                reason: "模型议会会发起多次模型请求，需要你确认。"
+           ) {
+            return .waitingForApproval(.council(request))
+        }
+
+        if pending.toolCall.toolName == "subagent_dispatch",
+           requiresSubAgentApproval(),
+           let request = ChatToolApprovalRequestBuilder.subAgent(
+               for: pending.toolCall,
+               reason: "子代理会发起独立模型请求并使用获准的只读工具，需要你确认。"
            ) {
             return .waitingForApproval(.council(request))
         }
@@ -1397,6 +1442,12 @@ final class ChatToolRuntime {
                 objective: objective,
                 roleId: roleId,
                 requestedToolScope: scope,
+                customRoleName: args?["custom_role_name"] as? String,
+                customRoleLens: args?["custom_role_lens"] as? String,
+                customRolePrompt: args?["custom_role_prompt"] as? String,
+                savedRolePromptOverride: sharedSettings.snapshot.agentRuntime.subAgent.overrides[roleId]?.systemPrompt,
+                maxTurnsOverride: args?["max_turns"] as? Int,
+                outputBudgetCharsOverride: args?["output_budget_chars"] as? Int,
                 providerSetting: providerSetting,
                 modelId: params.model.modelId,
                 baseParams: params,
@@ -1509,15 +1560,8 @@ final class ChatToolRuntime {
         toolCall: UIMessagePart.Tool,
         runId: String
     ) {
-        let capabilityId: String
-        switch toolCall.toolName {
-        case "subagent_dispatch":
-            capabilityId = "ios.agent.subagent_dispatch"
-        case "model_council_run":
-            capabilityId = "ios.agent.model_council_run"
-        default:
-            return
-        }
+        guard toolCall.toolName == "subagent_dispatch" else { return }
+        let capabilityId = "ios.agent.subagent_dispatch"
         let enabled = isAdvancedToolEnabled(toolCall.toolName)
         recordToolApproval(
             capabilityId: capabilityId,
@@ -1609,7 +1653,7 @@ final class ChatToolRuntime {
 
     private func isAdvancedToolEnabled(_ toolName: String) -> Bool {
         switch toolName {
-        case "mcp_call", "mcp_list", "mcp_test", "mcp_import_from_skill":
+        case "mcp_call", "mcp_list", "mcp_test", "mcp_describe_tool", "mcp_import_from_skill":
             true
         case "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable":
             true
@@ -1631,6 +1675,15 @@ final class ChatToolRuntime {
     private var requiresCouncilApproval: Bool {
         guard let policy = localToolExecutor?.permissionPolicy(
             capabilityId: "ios.agent.model_council_run"
+        ) else {
+            return false
+        }
+        return policy == .askEveryTime || policy == .allowOncePerRun
+    }
+
+    func requiresSubAgentApproval() -> Bool {
+        guard let policy = localToolExecutor?.permissionPolicy(
+            capabilityId: "ios.agent.subagent_dispatch"
         ) else {
             return false
         }
@@ -1678,11 +1731,16 @@ final class ChatToolRuntime {
         return ChatToolApprovalRequestBuilder.memory(for: toolCall, reason: reason)
     }
 
-    func memoryToolApprovalOutputForTesting(input: String, allow: Bool) -> String {
+    func memoryToolApprovalOutputForTesting(
+        input: String,
+        allow: Bool,
+        expectedUpdatedAt: Int64? = nil
+    ) -> String {
         IOSMemoryToolExecutor.execute(
             input: input,
             runtime: sharedSettings.agentRuntime,
-            writePolicy: allow ? .allow : .deniedByUser("User denied memory write.")
+            writePolicy: allow ? .allow : .deniedByUser("User denied memory write."),
+            expectedUpdatedAt: expectedUpdatedAt
         )
     }
 

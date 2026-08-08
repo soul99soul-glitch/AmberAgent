@@ -22,6 +22,7 @@ enum IOSMcpManagementToolCatalog {
     static let toolNames: Set<String> = [
         "mcp_list",
         "mcp_test",
+        "mcp_describe_tool",
         "mcp_import_from_skill",
     ]
 
@@ -29,11 +30,15 @@ enum IOSMcpManagementToolCatalog {
         "mcp_test",
         "mcp_import_from_skill",
     ]
+
+    static let highRiskToolNames = mutatingToolNames
 }
 
 /// Android `createSkillTools` + `createMcpManagementTools` parity for iOS chat.
 @MainActor
 struct IOSSkillMcpToolService {
+    private static let maximumSkillReadBytes = 256 * 1024
+
     let skillStore: IOSSkillFileStore
     let sharedSettings: IOSSharedSettingsStore
     let workspaceStore: IOSWorkspaceStore
@@ -60,6 +65,8 @@ struct IOSSkillMcpToolService {
                 return await mcpListJSON(args)
             case "mcp_test":
                 return await mcpTestJSON(args)
+            case "mcp_describe_tool":
+                return await mcpDescribeToolJSON(args)
             case "mcp_import_from_skill":
                 return try mcpImportFromSkillJSON(args)
             default:
@@ -127,14 +134,18 @@ struct IOSSkillMcpToolService {
         let content: String
         let pathLabel: String
         if let path, !path.isEmpty {
+            guard (path as NSString).lastPathComponent.lowercased() != "mcp.json" else {
+                throw IOSSkillToolError.sensitiveSkillFile(path)
+            }
             let url = try skillStore.resolveSkillFile(name: dirName, relativePath: path)
             guard FileManager.default.fileExists(atPath: url.path) else {
                 throw IOSSkillToolError.skillFileMissing(path)
             }
-            content = try String(contentsOf: url, encoding: .utf8)
+            content = try readSkillText(at: url, pathLabel: path)
             pathLabel = path
         } else {
-            let markdown = try skillStore.readSkillMarkdown(dirName: dirName)
+            let markdownURL = try skillStore.resolveSkillFile(name: dirName, relativePath: "SKILL.md")
+            let markdown = try readSkillText(at: markdownURL, pathLabel: "SKILL.md")
             content = IOSSkillFileStore.extractBody(from: markdown)
             pathLabel = "SKILL.md"
         }
@@ -217,15 +228,17 @@ struct IOSSkillMcpToolService {
                 "tool_count": server.tools.count,
                 "enabled_tool_count": server.tools.filter(\.enabled).count,
                 "type": server.transportKey,
-                "url": server.url,
+                "url": IOSWebMountRedactor.redactedURL(server.url) ?? "",
             ]
             if includeTools {
-                // No persisted input schemas on IOSMcpTool; list names/descriptions only.
+                // Directory entry: names/descriptions only (schema lives in the
+                // persisted IOSMcpTool.inputSchema; fetch it with mcp_describe_tool).
                 entry["tools"] = server.tools.map { tool -> [String: Any] in
                     [
                         "name": tool.name,
                         "description": String((tool.description ?? "").prefix(240)),
                         "enabled": tool.enabled,
+                        "has_input_schema": tool.inputSchema != nil,
                     ]
                 }
             }
@@ -247,7 +260,10 @@ struct IOSSkillMcpToolService {
         }) else {
             return Self.json(["ok": false, "error": "MCP server not found"])
         }
-        await mcpManager.syncAll()
+        guard server.enabled else {
+            return Self.json(["ok": false, "error": "MCP server is disabled: \(server.name)"])
+        }
+        await mcpManager.sync(serverName: server.name)
         let status = mcpManager.statusByServer[server.name]
         let toolCount = mcpManager.servers.first(where: { $0.name == server.name })?.tools.count
             ?? server.tools.count
@@ -259,9 +275,58 @@ struct IOSSkillMcpToolService {
                 "status": statusString(status),
                 "tool_count": toolCount,
                 "type": server.transportKey,
-                "url": server.url,
+                "url": IOSWebMountRedactor.redactedURL(server.url) ?? "",
             ],
             "status": statusString(status),
+        ])
+    }
+
+    /// `mcp_describe_tool`: read-only lookup of one discovered tool's full
+    /// description + persisted input schema. Never touches the network and
+    /// never mutates config, so it shares `mcp_list`'s approval classification.
+    private func mcpDescribeToolJSON(_ args: [String: Any]) async -> String {
+        let serverName = (args["server"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let toolName = (args["tool"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        mcpManager.refreshServers()
+        let servers = mcpManager.servers.isEmpty ? mcpConfigStore.servers : mcpManager.servers
+        guard let server = servers.first(where: { $0.name == serverName }) else {
+            return Self.json([
+                "ok": false,
+                "error": "MCP server not found: \(serverName)",
+                "valid_servers": servers.map(\.name).sorted(),
+            ])
+        }
+        guard let tool = server.tools.first(where: { $0.name == toolName }) else {
+            return Self.json([
+                "ok": false,
+                "error": "MCP tool not found on server '\(serverName)': \(toolName)",
+                "valid_tools": server.tools.map(\.name).sorted(),
+            ])
+        }
+        let inputSchema: Any
+        if let schemaText = tool.inputSchema, !schemaText.isEmpty {
+            guard let data = schemaText.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) else {
+                return Self.json([
+                    "ok": false,
+                    "code": "invalid_persisted_schema",
+                    "error": "Persisted MCP input schema is not complete JSON; refresh this server's tools.",
+                    "server": serverName,
+                    "tool": toolName,
+                ])
+            }
+            inputSchema = object
+        } else {
+            inputSchema = NSNull()
+        }
+        return Self.json([
+            "ok": true,
+            "server": serverName,
+            "tool": toolName,
+            "enabled": tool.enabled,
+            "description": tool.description ?? "",
+            "input_schema": inputSchema,
+            "untrusted": true,
         ])
     }
 
@@ -421,8 +486,21 @@ struct IOSSkillMcpToolService {
         case .connecting: "connecting"
         case .connected: "connected"
         case .reconnecting: "reconnecting"
-        case .error(let message): "error:\(message)"
+        case .error(let message): "error:\(IOSWebMountRedactor.redactedText(message))"
         }
+    }
+
+    private func readSkillText(at url: URL, pathLabel: String) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: Self.maximumSkillReadBytes + 1) ?? Data()
+        guard data.count <= Self.maximumSkillReadBytes else {
+            throw IOSSkillToolError.skillFileTooLarge(pathLabel, Self.maximumSkillReadBytes)
+        }
+        guard let content = String(data: data, encoding: .utf8) else {
+            throw IOSSkillToolError.skillFileNotUTF8(pathLabel)
+        }
+        return content
     }
 
     private static func isLikelyTextSkillFile(_ name: String) -> Bool {
@@ -473,6 +551,9 @@ private enum IOSSkillToolError: LocalizedError {
     case missingArgument(String)
     case skillNotEnabled(String)
     case skillFileMissing(String)
+    case sensitiveSkillFile(String)
+    case skillFileTooLarge(String, Int)
+    case skillFileNotUTF8(String)
     case workspacePathMissing(String)
     case unsupportedZip
 
@@ -484,6 +565,12 @@ private enum IOSSkillToolError: LocalizedError {
             "Skill '\(name)' is not enabled. Call skills_list to see installed and enabled skills."
         case .skillFileMissing(let path):
             "File '\(path)' not found in skill package."
+        case .sensitiveSkillFile(let path):
+            "File '\(path)' contains MCP connection configuration and cannot be exposed through use_skill. Use mcp_import_from_skill instead."
+        case .skillFileTooLarge(let path, let limit):
+            "File '\(path)' exceeds the use_skill limit of \(limit) bytes."
+        case .skillFileNotUTF8(let path):
+            "File '\(path)' is not UTF-8 text."
         case .workspacePathMissing(let path):
             "Workspace path not found: \(path)"
         case .unsupportedZip:

@@ -57,7 +57,7 @@ data class Settings(
     val themeId: String = DEFAULT_PRESET_THEME_ID,
     val developerMode: Boolean = false,
     val displaySetting: DisplaySetting = DisplaySetting(),
-    val enableWebSearch: Boolean = false,
+    val enableWebSearch: Boolean = true,
     val favoriteModels: List<Uuid> = emptyList(),
     val chatModelId: Uuid = Uuid.random(),
     val titleModelId: Uuid = Uuid.random(),

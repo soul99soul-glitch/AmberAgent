@@ -760,7 +760,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             sharedSettings: sharedSettings,
             autoGenerateResponses: false
         )
-        viewModel.inputText = "帮我规划一下"
+        viewModel.inputText = "long-term memory should remain，帮我规划一下"
         viewModel.sendMessage()
 
         let uploadMessages = viewModel.preparedUploadMessagesForTesting(viewModel.messages)
@@ -857,7 +857,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             sharedSettings: sharedSettings,
             autoGenerateResponses: false
         )
-        viewModel.inputText = "下一步怎么做"
+        viewModel.inputText = "端到端验证后，下一步怎么做"
         viewModel.sendMessage()
 
         let uploadMessages = viewModel.preparedUploadMessagesForTesting(viewModel.messages)
@@ -997,6 +997,230 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(createPayload["ok"] as? Bool, false)
         XCTAssertEqual(createPayload["needs_user_action"] as? Bool, true)
         XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().count, 1)
+    }
+
+    func testMemoryToolReadReturnsExactRecordAndStructuredMiss() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer { IosMemoryFactory.shared.replaceAll(records: originalRecords) }
+
+        let runtime = memorySettings(core: true, shortTerm: true, longTerm: true).agentRuntime
+        let record = IosMemoryFactory.shared.addMemory(
+            scope: MemoryScope.longTerm,
+            kind: MemoryKind.note,
+            content: "端到端验证先行",
+            assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+        )
+        let id = Int(record.id)
+
+        let hit = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"read","id":\#(id)}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        XCTAssertEqual(hit["ok"] as? Bool, true)
+        let memory = try XCTUnwrap(hit["memory"] as? [String: Any])
+        XCTAssertEqual(memory["id"] as? Int, id)
+        XCTAssertEqual(memory["content"] as? String, "端到端验证先行")
+
+        let miss = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"read","id":999999}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        XCTAssertEqual(miss["ok"] as? Bool, false)
+        XCTAssertEqual(miss["error"] as? String, "memory not found")
+        XCTAssertTrue((miss["hint"] as? String)?.contains("list") ?? false)
+    }
+
+    func testMemoryToolSearchRanksByRelevance() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer { IosMemoryFactory.shared.replaceAll(records: originalRecords) }
+
+        let runtime = memorySettings(core: true, shortTerm: true, longTerm: true).agentRuntime
+        let first = IosMemoryFactory.shared.addMemory(
+            scope: MemoryScope.longTerm,
+            kind: MemoryKind.note,
+            content: "用户偏好深色主题与简洁界面",
+            assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+        )
+        let second = IosMemoryFactory.shared.addMemory(
+            scope: MemoryScope.longTerm,
+            kind: MemoryKind.note,
+            content: "设计稿里要用到界面布局",
+            assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+        )
+        _ = IosMemoryFactory.shared.addMemory(
+            scope: MemoryScope.longTerm,
+            kind: MemoryKind.note,
+            content: "午餐吃什么",
+            assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+        )
+
+        let output = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"search","query":"主题 界面"}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        XCTAssertEqual(output["ok"] as? Bool, true)
+        XCTAssertEqual(output["query"] as? String, "主题 界面")
+        let memories = try XCTUnwrap(output["memories"] as? [[String: Any]])
+        XCTAssertEqual(memories.compactMap { $0["id"] as? Int }, [Int(first.id), Int(second.id)])
+
+        // query 与 search 同语义（q 别名也生效）；只命中第一条
+        let queryOutput = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"query","q":"主题"}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        let queryMemories = try XCTUnwrap(queryOutput["memories"] as? [[String: Any]])
+        XCTAssertEqual(queryMemories.compactMap { $0["id"] as? Int }, [Int(first.id)])
+    }
+
+    func testMemoryToolSearchRespectsLimitAndDefaultCap() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer { IosMemoryFactory.shared.replaceAll(records: originalRecords) }
+
+        let runtime = memorySettings(core: true, shortTerm: true, longTerm: true).agentRuntime
+        for index in 0..<12 {
+            _ = IosMemoryFactory.shared.addMemory(
+                scope: MemoryScope.longTerm,
+                kind: MemoryKind.note,
+                content: "主题相关记录 \(index)",
+                assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+            )
+        }
+
+        let defaultOutput = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"search","query":"主题"}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        XCTAssertEqual(defaultOutput["count"] as? Int, 10)
+
+        let cappedOutput = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"search","query":"主题","limit":5}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        XCTAssertEqual(cappedOutput["count"] as? Int, 5)
+    }
+
+    func testMemoryToolStatusReturnsSummaryNotDump() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        defer { IosMemoryFactory.shared.replaceAll(records: originalRecords) }
+
+        let runtime = memorySettings(core: true, shortTerm: true, longTerm: true).agentRuntime
+        _ = IosMemoryFactory.shared.addMemory(
+            scope: MemoryScope.longTerm,
+            kind: MemoryKind.note,
+            content: "长时记忆一",
+            assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+        )
+        _ = IosMemoryFactory.shared.addMemory(
+            scope: MemoryScope.longTerm,
+            kind: MemoryKind.note,
+            content: "长时记忆二",
+            assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+        )
+        let archived = MemoryRecord(
+            id: 4242,
+            content: "已归档的核心记忆",
+            scope: .core,
+            kind: .note,
+            assistantId: IosMemoryFactory.shared.GLOBAL_MEMORY_ID,
+            sourceConversationId: nil,
+            sourceMessageIds: [],
+            supersedesIds: [],
+            expiresAt: nil,
+            confidence: 1,
+            pinned: false,
+            archived: true,
+            createdAt: 1,
+            updatedAt: 1,
+            lastUsedAt: nil
+        )
+        IosMemoryFactory.shared.replaceAll(records: IosMemoryFactory.shared.getAllRecords() + [archived])
+
+        let output = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"status"}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        XCTAssertEqual(output["ok"] as? Bool, true)
+        XCTAssertEqual(output["available"] as? Bool, true)
+        XCTAssertEqual(output["visibleCount"] as? Int, 2)
+        XCTAssertEqual(output["archivedCount"] as? Int, 1)
+        XCTAssertNil(output["memories"])
+
+        let scopes = try XCTUnwrap(output["scopes"] as? [[String: Any]])
+        let longTerm = try XCTUnwrap(scopes.first { $0["scope"] as? String == "long_term" })
+        XCTAssertEqual(longTerm["enabled"] as? Bool, true)
+        XCTAssertEqual(longTerm["visible"] as? Int, 2)
+        let core = try XCTUnwrap(scopes.first { $0["scope"] as? String == "core" })
+        XCTAssertEqual(core["archived"] as? Int, 1)
+
+        let recallDefaults = try XCTUnwrap(output["recallDefaults"] as? [String: Any])
+        XCTAssertEqual(recallDefaults["maxItems"] as? Int, 24)
+        XCTAssertEqual(recallDefaults["maxPromptChars"] as? Int, 6_000)
+    }
+
+    func testMemoryToolListTruncatesContentAndCapsCount() throws {
+        let originalRecords = IosMemoryFactory.shared.getAllRecords()
+        IosMemoryFactory.shared.replaceAll(records: [])
+        defer { IosMemoryFactory.shared.replaceAll(records: originalRecords) }
+
+        let runtime = memorySettings(core: true, shortTerm: true, longTerm: true).agentRuntime
+        for index in 0..<60 {
+            _ = IosMemoryFactory.shared.addMemory(
+                scope: MemoryScope.longTerm,
+                kind: MemoryKind.note,
+                content: "记录 \(index)",
+                assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+            )
+        }
+        // updatedAt 只有毫秒精度；跨过一个 tick，避免 61 次快速插入同毫秒时
+        // 退化到 id 排序、把最后的长记录挤出前 50 条。
+        Thread.sleep(forTimeInterval: 0.01)
+        _ = IosMemoryFactory.shared.addMemory(
+            scope: MemoryScope.longTerm,
+            kind: MemoryKind.note,
+            content: String(repeating: "长", count: 700),
+            assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
+        )
+
+        let output = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"list"}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        XCTAssertEqual(output["ok"] as? Bool, true)
+        XCTAssertEqual(output["count"] as? Int, 50)
+        XCTAssertEqual(output["total"] as? Int, 61)
+        XCTAssertEqual(output["truncated"] as? Bool, true)
+
+        let memories = try XCTUnwrap(output["memories"] as? [[String: Any]])
+        let longPayload = try XCTUnwrap(memories.first {
+            ($0["content"] as? String)?.hasSuffix("...") == true
+        })
+        XCTAssertEqual(longPayload["truncated"] as? Bool, true)
+        XCTAssertTrue((longPayload["content"] as? String)?.hasSuffix("...") ?? false)
+        XCTAssertEqual((longPayload["content"] as? String)?.count, 503)
+        // 未超限记录不带 truncated 标记
+        let shortPayload = try XCTUnwrap(memories.first {
+            ($0["content"] as? String)?.hasPrefix("记录 ") == true
+        })
+        XCTAssertNil(shortPayload["truncated"])
+
+        // 入参 limit 生效
+        let limitedOutput = try jsonObject(IOSMemoryToolExecutor.execute(
+            input: #"{"action":"list","limit":5}"#,
+            runtime: runtime,
+            writePolicy: .allow
+        ))
+        XCTAssertEqual(limitedOutput["count"] as? Int, 5)
     }
 
     func testChatMemoryToolModelWriteRequiresForegroundApproval() throws {
@@ -1699,7 +1923,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertFalse(harness.state.isLoading)
     }
 
-    func testBackgroundToolHandoffRetainsGenerativeUiProtocolPrompt() {
+    func testBackgroundToolHandoffRetainsGenerativeUiProtocolPrompt() async throws {
         let harness = makeGenerationCoordinatorHarness(
             transport: ChatSearchTransport(responses: [])
         )
@@ -1709,11 +1933,13 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             startedAt: 1,
             inputDigest: "diagram-digest"
         )
-        let prepared = harness.coordinator.backgroundToolHandoffUploadMessagesForTesting(
+        let preparedValue = await harness.coordinator.backgroundToolHandoffUploadMessagesForTesting(
             [UIMessage.companion.user(prompt: "搜索资料后画成流程图")],
+            providerSetting: makeOpenAIProviderSetting(),
             params: makeTextGenerationParams(),
             runId: runId
         )
+        let prepared = try XCTUnwrap(preparedValue)
         let systemPrompt = prepared
             .filter { $0.role == MessageRole.system }
             .map { $0.toText() }
@@ -1721,6 +1947,32 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
 
         XCTAssertTrue(systemPrompt.contains("show-widget"))
         XCTAssertTrue(systemPrompt.contains("SVG"))
+    }
+
+    func testBackgroundToolHandoffSuppressesGenerativeUiForMiniAppTurn() async throws {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        let runId = "run-mini-app-handoff"
+        harness.coordinator.installRunMetadataForTesting(
+            runId: runId,
+            startedAt: 1,
+            inputDigest: "mini-app-digest"
+        )
+
+        let preparedValue = await harness.coordinator.backgroundToolHandoffUploadMessagesForTesting(
+            [UIMessage.companion.user(prompt: "做个小应用，再画一张流程图")],
+            providerSetting: makeOpenAIProviderSetting(),
+            params: makeTextGenerationParams(),
+            runId: runId
+        )
+        let prepared = try XCTUnwrap(preparedValue)
+        let systemPrompt = prepared
+            .filter { $0.role == MessageRole.system }
+            .map { $0.toText() }
+            .joined(separator: "\n")
+
+        XCTAssertFalse(systemPrompt.contains("show-widget"))
     }
 
     func testBackgroundCancellationClosesPendingToolWithoutLosingForegroundMessage() async throws {

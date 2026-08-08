@@ -355,7 +355,7 @@ struct AppearanceSettingsView: View {
     // MARK: 4 · 强调色
 
     private var accentSwatches: some View {
-        HStack(spacing: 0) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 56, maximum: 72), spacing: 0)], spacing: 0) {
             ForEach(AmberAccentOption.allCases) { option in
                 let isSel = runtime.accentHex == option.accentHex
                 Button {
@@ -452,7 +452,12 @@ struct AppearanceSettingsView: View {
                 if access { url.stopAccessingSecurityScopedResource() }
             }
             do {
-                let data = try Data(contentsOf: url)
+                let handle = try FileHandle(forReadingFrom: url)
+                defer { try? handle.close() }
+                let data = try handle.read(upToCount: 1_048_577) ?? Data()
+                guard data.count <= 1_048_576 else {
+                    throw AmberThemePackTransferError.fileTooLarge
+                }
                 let document = try AmberThemePackTransfer.decode(data)
                 try runtime.apply(document)
                 transferBanner = "已导入：\(document.displayName)"
@@ -467,6 +472,8 @@ struct AppearanceSettingsView: View {
             return error.localizedDescription
         }
         switch e {
+        case .fileTooLarge:
+            return e.localizedDescription
         case .invalidJSON, .invalidFormat:
             return "不是 Amber 主题配方"
         case .unsupportedVersion:

@@ -18,6 +18,9 @@ struct IOSSkillFileStore {
     @discardableResult
     func createSkill(name rawName: String, description: String, allowedTools: [String]) throws -> String {
         let name = Self.normalizedSkillName(rawName)
+        guard !IOSBuiltinSkills.requiredNames.contains(name) else {
+            throw IOSSkillFileStoreError.builtinSkillProtected(name)
+        }
         let skillDirectory = try resolveSkillDirectory(name: name)
         guard !fileManager.fileExists(atPath: skillDirectory.path) else {
             throw IOSSkillFileStoreError.skillAlreadyExists(name)
@@ -44,6 +47,10 @@ struct IOSSkillFileStore {
     }
 
     func saveSkillMarkdown(dirName: String, expectedName: String, content: String) throws {
+        let normalizedName = Self.normalizedSkillName(dirName)
+        guard !IOSBuiltinSkills.requiredNames.contains(normalizedName) else {
+            throw IOSSkillFileStoreError.builtinSkillProtected(normalizedName)
+        }
         let directory = try resolveSkillDirectory(name: dirName)
         guard fileManager.fileExists(atPath: directory.path) else {
             throw IOSSkillFileStoreError.skillMissing(dirName)
@@ -56,6 +63,10 @@ struct IOSSkillFileStore {
     }
 
     func deleteSkill(dirName: String) throws {
+        let normalizedName = Self.normalizedSkillName(dirName)
+        guard !IOSBuiltinSkills.requiredNames.contains(normalizedName) else {
+            throw IOSSkillFileStoreError.builtinSkillProtected(normalizedName)
+        }
         let directory = try resolveSkillDirectory(name: dirName)
         guard fileManager.fileExists(atPath: directory.path) else {
             throw IOSSkillFileStoreError.skillMissing(dirName)
@@ -64,9 +75,13 @@ struct IOSSkillFileStore {
     }
 
     /// Writes a skill package (at least `SKILL.md`) into `skills/<name>/`.
-    /// Frontmatter `name` is the authoritative package id. Overwrites an existing package.
+    /// Frontmatter `name` is the authoritative package id. Overwrites an existing
+    /// user package, while reserved built-ins can only be seeded by IOSBuiltinSkills.
     @discardableResult
-    func saveSkillFiles(files: [String: String]) throws -> String {
+    func saveSkillFiles(
+        files: [String: String],
+        allowBuiltinSkill: Bool = false
+    ) throws -> String {
         guard let skillMd = files["SKILL.md"] ?? files["skill.md"] else {
             throw IOSSkillFileStoreError.missingSkillMarkdown
         }
@@ -78,23 +93,34 @@ struct IOSSkillFileStore {
             throw IOSSkillFileStoreError.missingFrontmatterField("description")
         }
         let packageName = Self.normalizedSkillName(declaredName)
-        let skillDirectory = try resolveSkillDirectory(name: packageName)
-        if fileManager.fileExists(atPath: skillDirectory.path) {
-            try fileManager.removeItem(at: skillDirectory)
+        guard allowBuiltinSkill || !IOSBuiltinSkills.requiredNames.contains(packageName) else {
+            throw IOSSkillFileStoreError.builtinSkillProtected(packageName)
         }
-        try fileManager.createDirectory(at: skillDirectory, withIntermediateDirectories: true)
+        let skillDirectory = try resolveSkillDirectory(name: packageName)
+        try fileManager.createDirectory(at: skillsDirectory, withIntermediateDirectories: true)
+        let stagingDirectory = skillsDirectory.appendingPathComponent(
+            ".\(packageName)-staging-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+        var shouldRemoveStaging = true
+        defer {
+            if shouldRemoveStaging {
+                try? fileManager.removeItem(at: stagingDirectory)
+            }
+        }
         for (relativePath, content) in files {
             let clean = relativePath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
             guard !clean.isEmpty, !clean.contains("..") else { continue }
             let destination: URL
             if clean.lowercased() == "skill.md" || clean.lowercased().hasSuffix("/skill.md") {
                 let parent = clean.contains("/")
-                    ? skillDirectory.appendingPathComponent((clean as NSString).deletingLastPathComponent)
-                    : skillDirectory
+                    ? stagingDirectory.appendingPathComponent((clean as NSString).deletingLastPathComponent)
+                    : stagingDirectory
                 try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
                 destination = parent.appendingPathComponent("SKILL.md")
             } else {
-                destination = skillDirectory.appendingPathComponent(clean)
+                destination = stagingDirectory.appendingPathComponent(clean)
                 try fileManager.createDirectory(
                     at: destination.deletingLastPathComponent(),
                     withIntermediateDirectories: true
@@ -102,12 +128,27 @@ struct IOSSkillFileStore {
             }
             try content.write(to: destination, atomically: true, encoding: .utf8)
         }
-        if !fileManager.fileExists(atPath: skillDirectory.appendingPathComponent("SKILL.md").path) {
+        if !fileManager.fileExists(atPath: stagingDirectory.appendingPathComponent("SKILL.md").path) {
             try skillMd.write(
-                to: skillDirectory.appendingPathComponent("SKILL.md"),
+                to: stagingDirectory.appendingPathComponent("SKILL.md"),
                 atomically: true,
                 encoding: .utf8
             )
+        }
+
+        if fileManager.fileExists(atPath: skillDirectory.path) {
+            // 原子替换：失败或进程强杀时原目录始终在位（replaceItemAt 先把
+            // 新目录就位再移除旧的），没有「旧目录已移成 backup 后被杀」的窗口。
+            _ = try fileManager.replaceItemAt(
+                skillDirectory,
+                withItemAt: stagingDirectory,
+                backupItemName: nil,
+                options: []
+            )
+            shouldRemoveStaging = false
+        } else {
+            try fileManager.moveItem(at: stagingDirectory, to: skillDirectory)
+            shouldRemoveStaging = false
         }
         _ = description
         return packageName
@@ -265,6 +306,7 @@ enum IOSSkillFileStoreError: LocalizedError, Equatable {
     case invalidSkillName
     case emptyDescription
     case skillAlreadyExists(String)
+    case builtinSkillProtected(String)
     case skillMissing(String)
     case skillNameChanged(expected: String)
     case missingSkillMarkdown
@@ -278,6 +320,8 @@ enum IOSSkillFileStoreError: LocalizedError, Equatable {
             "触发说明不能为空。"
         case .skillAlreadyExists(let name):
             "技能 \(name) 已存在。"
+        case .builtinSkillProtected(let name):
+            "内置技能 \(name) 不允许被创建或覆盖。"
         case .skillMissing(let name):
             "技能 \(name) 不存在。"
         case .skillNameChanged(let expected):

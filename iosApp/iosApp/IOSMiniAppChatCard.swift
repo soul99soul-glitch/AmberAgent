@@ -248,8 +248,7 @@ struct IOSMiniAppChatCard: View {
     @State private var versions: [IOSMiniAppVersionRecord] = []
     @State private var cardTitle: String = ""
     @State private var cardVersion: Int = 1
-
-    private var repository: IOSMiniAppRepository { .shared }
+    @State private var repository = IOSMiniAppRepository.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -306,7 +305,7 @@ struct IOSMiniAppChatCard: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(AmberTheme.border.opacity(0.7), lineWidth: 1)
         )
-        .task(id: part.appId) {
+        .task(id: "\(part.appId):\(repository.revision)") {
             refreshHeaderFromRepository()
         }
         .sheet(isPresented: $showModifySheet) {

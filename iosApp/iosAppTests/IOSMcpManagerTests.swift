@@ -111,6 +111,29 @@ final class IOSMcpManagerTests: XCTestCase {
             XCTAssertTrue(error is IOSMcpClientError)
         }
     }
+
+    func testSyncNamedServerDoesNotConnectOtherEnabledServers() async {
+        let docsClient = FakeIOSMcpClient(tools: [IOSMcpTool(name: "search", description: nil)])
+        let privateClient = FakeIOSMcpClient(tools: [IOSMcpTool(name: "query", description: nil)])
+        let manager = IOSMcpManager(
+            serverProvider: {
+                [
+                    .streamableHTTP(name: "docs", url: "https://example.com/docs"),
+                    .streamableHTTP(name: "private", url: "https://example.com/private"),
+                ]
+            },
+            clientFactory: { config in
+                config.name == "docs" ? docsClient : privateClient
+            }
+        )
+
+        await manager.sync(serverName: "docs")
+
+        XCTAssertTrue(docsClient.didConnect)
+        XCTAssertFalse(privateClient.didConnect)
+        XCTAssertEqual(manager.statusByServer["docs"], .connected)
+        XCTAssertEqual(manager.statusByServer["private"], .idle)
+    }
 }
 
 private final class FakeIOSMcpClient: IOSMcpClienting {

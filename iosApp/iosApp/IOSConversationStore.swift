@@ -1183,17 +1183,25 @@ final class IOSConversationStore {
     }
 
     private func persistListPreviews() {
-        let directory = listPreviewsFileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        guard let data = try? JSONEncoder().encode(listPreviewsByConversationId) else { return }
-        try? data.write(to: listPreviewsFileURL, options: .atomic)
+        do {
+            let directory = listPreviewsFileURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(listPreviewsByConversationId)
+            try data.write(to: listPreviewsFileURL, options: .atomic)
+        } catch {
+            publishIOError(operation: "保存会话预览", detail: "\(error)")
+        }
     }
 
     private func persistListIcons() {
-        let directory = listIconsFileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        guard let data = try? JSONEncoder().encode(listIconsByConversationId) else { return }
-        try? data.write(to: listIconsFileURL, options: .atomic)
+        do {
+            let directory = listIconsFileURL.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(listIconsByConversationId)
+            try data.write(to: listIconsFileURL, options: .atomic)
+        } catch {
+            publishIOError(operation: "保存会话图标", detail: "\(error)")
+        }
     }
 
     private func refreshSummaries() async {

@@ -24,7 +24,7 @@ import app.amber.core.settings.GenerativeUiSetting
  * route when keywords disagree.
  */
 internal enum class VisualRoute {
-    /** Strong diagram / chart / schematic signal — emit show-widget SVG. Suppress tools. */
+    /** Strong diagram / chart / schematic signal — emit show-widget SVG. Tools stay available. */
     DIAGRAM_WIDGET,
 
     /** Strong photographic / artistic signal — call generate_image (if available). Keep tools enabled. */
@@ -139,40 +139,13 @@ object GenerativeUiPlanner {
     }
 
     /**
-     * True when we're going to forcibly retry without tools to get a widget
-     * streamed back. Only kicks in for confident diagram intent — for
-     * IMAGE_GEN / AMBIGUOUS_VISUAL the model is free to choose and we don't
-     * want to penalise it for picking the tool.
+     * G6: keyword routing only injects prompt guidance — it never decides the
+     * tool catalog. `shouldGenerateDirectWidgetWithoutTools` / `needsVisibleStreamingFallback`
+     * were removed (2026-08-08): "画一个流程图" kept clearing the whole tool
+     * catalog on both platforms, so the model could not research facts before
+     * drawing. Whether tools are used is now entirely the model's choice;
+     * `widgetRequirement` still guarantees the final artifact.
      */
-    fun needsVisibleStreamingFallback(setting: GenerativeUiSetting, messages: List<UIMessage>): Boolean =
-        shouldGenerateDirectWidgetWithoutTools(setting, messages)
-
-    /**
-     * True when the request is so clearly a diagram-style direct visual that
-     * we should clear the tool catalog and let the model stream the widget
-     * inline (current behaviour for "flowchart" / "架构图" requests).
-     *
-     * For IMAGE_GEN-classified requests we KEEP the tool catalog so the model
-     * can call `generate_image`. For AMBIGUOUS_VISUAL we also keep the
-     * catalog so the model picks based on the routing prompt above.
-     */
-    fun shouldGenerateDirectWidgetWithoutTools(setting: GenerativeUiSetting, messages: List<UIMessage>): Boolean {
-        if (!setting.enabled) return false
-        val text = latestUserText(messages)
-        // Tool catalog is suppressed only for confident diagram / slides
-        // intent — image-gen and ambiguous-visual paths need the tool list
-        // intact so the model can call generate_image when appropriate.
-        val route = classifyRoute(text)
-        if (route != VisualRoute.DIAGRAM_WIDGET && route != VisualRoute.SLIDES) return false
-        if (isToolMediatedRequest(text)) return false
-        val lower = text.lowercase()
-        val needsExternalContext = listOf(
-            "搜索", "查一下", "联网", "网页", "网址", "http://", "https://", "url",
-            "读取", "文件", "workspace", "屏幕", "当前页面", "用工具", "调用工具",
-        ).any { it in lower }
-        return !needsExternalContext
-    }
-
     fun widgetRequirement(setting: GenerativeUiSetting, messages: List<UIMessage>): GenerativeUiWidgetRequirement {
         if (!setting.enabled) return GenerativeUiWidgetRequirement.None
         val text = latestUserText(messages)
@@ -223,16 +196,22 @@ object GenerativeUiPlanner {
             "[route:slides]" in lower -> return VisualRoute.SLIDES
         }
 
-        val imageGenStrong = IMAGE_GEN_STRONG_KEYWORDS.any { it in lower } ||
-            IMAGE_GEN_STRONG_REGEX.containsMatchIn(lower) ||
+        // Remove only visual artifacts that the user explicitly rejected,
+        // then classify any remaining request normally. This keeps
+        // "不要流程图，改生成图片" on the image route instead of treating the
+        // negated diagram keyword as a positive signal.
+        val routingText = NEGATED_VISUAL_REGEX.replace(lower, " ")
+
+        val imageGenStrong = IMAGE_GEN_STRONG_KEYWORDS.any { it in routingText } ||
+            IMAGE_GEN_STRONG_REGEX.containsMatchIn(routingText) ||
             // Style modifiers: "油画风格 / oil painting style / in the style of …"
             // are reliable image-gen tells when paired with any subject noun.
-            STYLE_MODIFIER_REGEX.containsMatchIn(lower)
-        val diagramStrong = DIAGRAM_STRONG_KEYWORDS.any { it in lower } ||
-            DIAGRAM_STRONG_REGEX.containsMatchIn(lower)
-        val guizangDeckStrong = GUIZANG_DECK_KEYWORDS.any { it in lower }
-        val slidesStrong = SLIDES_STRONG_KEYWORDS.any { it in lower } ||
-            SLIDES_STRONG_REGEX.containsMatchIn(lower) ||
+            STYLE_MODIFIER_REGEX.containsMatchIn(routingText)
+        val diagramStrong = DIAGRAM_STRONG_KEYWORDS.any { it in routingText } ||
+            DIAGRAM_STRONG_REGEX.containsMatchIn(routingText)
+        val guizangDeckStrong = GUIZANG_DECK_KEYWORDS.any { it in routingText }
+        val slidesStrong = SLIDES_STRONG_KEYWORDS.any { it in routingText } ||
+            SLIDES_STRONG_REGEX.containsMatchIn(routingText) ||
             guizangDeckStrong
 
         // Slides win over diagram/image when explicitly named — "5 张幻灯片"
@@ -261,8 +240,8 @@ object GenerativeUiPlanner {
             // (Old behaviour was to treat these as ENCOURAGE → SVG; the
             // problem was photographic requests like "画一个风景图" silently
             // routed to a bad SVG. Now we let the model decide.)
-            GENERIC_VISUAL_KEYWORDS.any { it in lower } -> VisualRoute.AMBIGUOUS_VISUAL
-            GENERIC_VISUAL_REGEX.containsMatchIn(lower) -> VisualRoute.AMBIGUOUS_VISUAL
+            GENERIC_VISUAL_KEYWORDS.any { it in routingText } -> VisualRoute.AMBIGUOUS_VISUAL
+            GENERIC_VISUAL_REGEX.containsMatchIn(routingText) -> VisualRoute.AMBIGUOUS_VISUAL
 
             else -> VisualRoute.PROSE
         }
@@ -279,6 +258,11 @@ object GenerativeUiPlanner {
 
     private val ROUTE_TAG_REGEX = Regex(
         """\[ROUTE:(?:image|svg|diagram|slides)\]\n?""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private val NEGATED_VISUAL_REGEX = Regex(
+        """(?:不要|不需要|无需|不用|别)(?:再)?(?:给我)?(?:画|生成|制作|创建|输出|提供|展示)?(?:任何)?(?:的)?(?:流程图|架构图|示意图|图表|图片|图|可视化|幻灯片|ppt)|\b(?:no|without|skip|avoid)\s+(?:any\s+)?(?:diagrams?|charts?|visuals?|images?|slides?|ppt)\b|\b(?:do\s+not|don't)\s+(?:draw|create|generate|include|use|show)\s+(?:a\s+|any\s+)?(?:diagrams?|charts?|visuals?|images?|slides?|ppt)\b""",
         RegexOption.IGNORE_CASE,
     )
 

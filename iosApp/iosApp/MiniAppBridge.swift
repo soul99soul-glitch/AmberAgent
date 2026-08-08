@@ -1,6 +1,29 @@
 import Foundation
 @preconcurrency import WebKit
 
+enum IOSMiniAppBridgeDocumentPolicy {
+    static func allowsMessage(
+        isTrustedDocument: Bool,
+        isMainFrame: Bool,
+        frameURL: URL?,
+        mainDocumentURL: URL?
+    ) -> Bool {
+        guard isTrustedDocument, isMainFrame, frameURL != nil || mainDocumentURL != nil else { return false }
+        if let frameURL, !isInitialDocumentURL(frameURL) { return false }
+        if let mainDocumentURL, !isInitialDocumentURL(mainDocumentURL) { return false }
+        return true
+    }
+
+    private static func isInitialDocumentURL(_ url: URL?) -> Bool {
+        guard let url,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return false
+        }
+        components.fragment = nil
+        return components.string?.caseInsensitiveCompare("about:blank") == .orderedSame
+    }
+}
+
 /// WKScriptMessageHandler for the iOS MiniApp runner.
 /// Dispatches into IOSMiniAppBridgeRuntime, which owns grants, audit, storage,
 /// shared store, event bus, and honest errors for unavailable capabilities.
@@ -14,6 +37,7 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
     private let onLogChanged: ([String]) -> Void
     private weak var webView: WKWebView?
     private var isClosed = false
+    private var isTrustedMainDocument = false
 
     init(
         runtime: IOSMiniAppBridgeRuntime,
@@ -33,6 +57,10 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
         }
     }
 
+    func setTrustedMainDocument(_ trusted: Bool) {
+        isTrustedMainDocument = trusted
+    }
+
     func close() {
         guard !isClosed else { return }
         isClosed = true
@@ -44,6 +72,15 @@ final class MiniAppBridge: NSObject, WKScriptMessageHandler {
     /// `window.webkit.messageHandlers.amberNative.postMessage(...)`.
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard !isClosed else { return }
+        guard IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: isTrustedMainDocument,
+            isMainFrame: message.frameInfo.isMainFrame,
+            frameURL: message.frameInfo.request.url,
+            mainDocumentURL: message.webView?.url ?? webView?.url
+        ) else {
+            appendLog("Blocked bridge message from an untrusted document.")
+            return
+        }
         guard let raw = message.body as? String else { return }
         Task { @MainActor in
             await self.handle(raw, webView: message.webView ?? self.webView)

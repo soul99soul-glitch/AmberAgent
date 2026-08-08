@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import UIKit
+import OSLog
 import Shared
 
 struct AccountView: View {
@@ -49,8 +50,10 @@ struct AccountView: View {
                 if let data = try? await item.loadTransferable(type: Data.self),
                    let ui = UIImage(data: data) {
                     let resized = AccountAvatarStore.downscaled(ui)
-                    AccountAvatarStore.save(resized)
-                    await MainActor.run { avatarImage = resized }
+                    // 写入失败时不刷新 UI，避免“看起来保存了、重启后消失”。
+                    if AccountAvatarStore.save(resized) {
+                        await MainActor.run { avatarImage = resized }
+                    }
                 }
             }
         }
@@ -174,6 +177,8 @@ extension Notification.Name {
 
 /// 本机自定义头像存储(账户页用)。下采样后存为 Documents/account-avatar.jpg。
 enum AccountAvatarStore {
+    private static let logger = Logger(subsystem: "app.amber.ios", category: "account-avatar")
+
     private static var fileURL: URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return documents.appendingPathComponent("account-avatar.jpg", isDirectory: false)
@@ -184,10 +189,22 @@ enum AccountAvatarStore {
         return UIImage(data: data)
     }
 
-    static func save(_ image: UIImage) {
-        guard let data = image.jpegData(compressionQuality: 0.85) else { return }
-        try? data.write(to: fileURL, options: [.atomic])
+    /// 落盘头像并广播变更。返回 false 表示保存失败（调用方不应把 UI 表现为
+    /// 已保存，否则重启后头像会消失）。
+    @discardableResult
+    static func save(_ image: UIImage) -> Bool {
+        guard let data = image.jpegData(compressionQuality: 0.85) else {
+            logger.error("头像 JPEG 编码失败，未保存")
+            return false
+        }
+        do {
+            try data.write(to: fileURL, options: [.atomic])
+        } catch {
+            logger.error("头像写入失败：\(error.localizedDescription)")
+            return false
+        }
         NotificationCenter.default.post(name: .accountAvatarChanged, object: nil)
+        return true
     }
 
     static func downscaled(_ image: UIImage, maxDimension: CGFloat = 256) -> UIImage {

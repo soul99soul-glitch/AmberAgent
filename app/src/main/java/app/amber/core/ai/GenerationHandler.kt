@@ -172,12 +172,14 @@ class GenerationHandler(
                 maxSteps = maxSteps,
                 hasResumableTools = hasResumableTools,
             )
-            val directWidgetRequested =
-                GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(settings.agentRuntime.generativeUi, messages)
+            // G6 (2026-08-08): keyword routing no longer clears the tool
+            // catalog for diagram requests — the shared planner removed
+            // `shouldGenerateDirectWidgetWithoutTools`. Whether tools are used
+            // is the model's choice; only the step budget hides tools here.
             val toolsInternal = buildList {
                 Log.i(TAG, "generateInternal: build tools($assistant)")
                 addAll(
-                    if ((directWidgetRequested && !hasResumableTools) || shouldHideToolsForBudget) {
+                    if (shouldHideToolsForBudget) {
                         emptyList()
                     } else {
                         toolExposure.toolsForStep()
@@ -468,8 +470,10 @@ class GenerationHandler(
         )
         val generativeUiWidgetRequirement =
             GenerativeUiPlanner.widgetRequirement(settings.agentRuntime.generativeUi, messages)
-        val shouldGuardGenerativeUiReasoningOnly =
-            GenerativeUiPlanner.needsVisibleStreamingFallback(settings.agentRuntime.generativeUi, messages)
+        // G6 (2026-08-08): the shared planner removed `needsVisibleStreamingFallback`
+        // — keyword routing no longer forces reasoning-only mode. Invalid-widget
+        // detection below still drives the visible-fallback retry on its own.
+        val shouldGuardGenerativeUiReasoningOnly = false
         if (stream) {
             runProviderCallWithRetry(
                 retrySetting = settings.agentRuntime.generationRetry,

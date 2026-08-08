@@ -1146,9 +1146,9 @@ enum HomeConversationIcon {
     ]
 
     /// 按会话标题 / 可选 LLM 图标 key 取 Phosphor fill。
-    /// 1) 置顶 → 图钉  
-    /// 2) 标题 LLM 写入的 preferredKey  
-    /// 3) 标题关键词表  
+    /// 1) 置顶 → 图钉
+    /// 2) 标题 LLM 写入的 preferredKey
+    /// 3) 标题关键词表
     /// 4) 标题稳定哈希
     static func icon(forTitle title: String, isPinned: Bool, preferredKey: String? = nil) -> HomePhosphor {
         if isPinned { return .pushPin }
@@ -2034,6 +2034,7 @@ struct ConversationsView: View {
     var body: some View {
         // snapshot 为 @ObservationIgnored；读 revision 才能在改昵称后刷新头像首字。
         let _ = sharedSettings.revision
+        let visibleSummaries = filteredSummaries
         GeometryReader { geometry in
         ZStack(alignment: .bottomTrailing) {
             // Canvas layer (color + optional texture). List structure unchanged.
@@ -2062,7 +2063,7 @@ struct ConversationsView: View {
                     .contentShape(Rectangle())
                     .simultaneousGesture(dismissSearchOutsideTap)
 
-                if filteredSummaries.isEmpty {
+                if visibleSummaries.isEmpty {
                     HomeEmptyCard(title: searchQuery.isEmpty ? "还没有会话" : "没有匹配的会话")
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
@@ -2070,7 +2071,7 @@ struct ConversationsView: View {
                         .homeCascade(delay: 0.18, enabled: !cascadeComplete)
                         .simultaneousGesture(dismissSearchOutsideTap)
                 } else {
-                    conversationList
+                    conversationList(visibleSummaries)
                 }
 
                 // 滚到底时末行让过右下胶囊（仅 scroll 留白，无实色底栏）。
@@ -2416,7 +2417,7 @@ struct ConversationsView: View {
         }
     }
 
-    private var conversationList: some View {
+    private func conversationList(_ visibleSummaries: [ConversationSummary]) -> some View {
         // `isLoading` is the observable foreground transition; background jobs
         // publish their terminal transition through `backgroundGenerationRevision`.
         // Reading both here keeps each row derived from the current owners rather
@@ -2426,8 +2427,8 @@ struct ConversationsView: View {
         // 观察浓缩预览字典，生成完成后 meta 第二态能刷新到首页。
         _ = conversationStore.listPreviewsByConversationId
         _ = conversationStore.listIconsByConversationId
-        let count = filteredSummaries.count
-        return ForEach(Array(filteredSummaries.enumerated()), id: \.element.id) { index, summary in
+        let count = visibleSummaries.count
+        return ForEach(Array(visibleSummaries.enumerated()), id: \.element.id) { index, summary in
             let isLast = index == count - 1
             ConversationSummaryRow(
                 summary: summary,
@@ -2440,7 +2441,7 @@ struct ConversationsView: View {
                 hidesSeparator: isLast
                     || conversationStore.currentConversation?.id == summary.id
                     || (index + 1 < count
-                        && conversationStore.currentConversation?.id == filteredSummaries[index + 1].id),
+                        && conversationStore.currentConversation?.id == visibleSummaries[index + 1].id),
                 onTap: {
                     openConversation(summary.id)
                 },
@@ -3424,14 +3425,6 @@ private func relativeTime(ms: Int64) -> String {
     let formatter = RelativeDateTimeFormatter()
     formatter.unitsStyle = .abbreviated
     return formatter.localizedString(for: date, relativeTo: Date())
-}
-
-private struct ConversationShortcut: Identifiable {
-    let id = UUID()
-    let title: String
-    let systemImage: String
-    let color: Color
-    let route: Route
 }
 
 struct SettingsHomeView: View {

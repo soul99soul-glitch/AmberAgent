@@ -76,6 +76,15 @@ final class IOSSharedSettingsStoreSubAgentOverrideTests: XCTestCase {
 
         let override = store.snapshot.agentRuntime.subAgent.overrides[testRoleId]
         XCTAssertEqual(override?.systemPrompt, "v2", "second put for the same roleId must overwrite")
+        XCTAssertEqual(
+            store.savedSubAgentOverrides.filter { $0["roleId"] == testRoleId }.count,
+            1,
+            "the compatibility mirror must replace the same role instead of creating duplicate rows"
+        )
+
+        store.removeSubAgentOverride(at: 0)
+        XCTAssertNil(store.snapshot.agentRuntime.subAgent.overrides[testRoleId])
+        XCTAssertFalse(store.savedSubAgentOverrides.contains { $0["roleId"] == testRoleId })
     }
 
     // MARK: - helpers

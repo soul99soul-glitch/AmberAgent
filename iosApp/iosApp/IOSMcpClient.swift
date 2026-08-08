@@ -5,21 +5,26 @@ struct IOSMcpTool: Codable, Equatable, Identifiable {
     let name: String
     let description: String?
     let enabled: Bool
+    /// Persisted raw JSON text of the tool's `inputSchema` from the MCP
+    /// `tools/list` result, or nil for legacy persisted data / servers that
+    /// omit a schema. The text is always a complete JSON value.
+    let inputSchema: String?
 
     var id: String { name }
 
-    init(name: String, description: String?, enabled: Bool = true) {
+    init(name: String, description: String?, enabled: Bool = true, inputSchema: String? = nil) {
         self.name = name
         self.description = description
         self.enabled = enabled
+        self.inputSchema = inputSchema
     }
 
     func withEnabled(_ enabled: Bool) -> IOSMcpTool {
-        IOSMcpTool(name: name, description: description, enabled: enabled)
+        IOSMcpTool(name: name, description: description, enabled: enabled, inputSchema: inputSchema)
     }
 
     func withDescription(_ description: String?) -> IOSMcpTool {
-        IOSMcpTool(name: name, description: description, enabled: enabled)
+        IOSMcpTool(name: name, description: description, enabled: enabled, inputSchema: inputSchema)
     }
 }
 
@@ -167,6 +172,7 @@ enum IOSMcpConnectionStatus: Equatable {
 
 enum IOSMcpClientError: LocalizedError, Equatable {
     case invalidURL(String)
+    case unsafeEndpoint
     case httpStatus(Int)
     case invalidResponse
     case rpcError(String)
@@ -180,7 +186,8 @@ enum IOSMcpClientError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .invalidURL(let url): "Invalid MCP server URL: \(url)"
+        case .invalidURL: "Invalid MCP server URL."
+        case .unsafeEndpoint: "MCP server advertised an unsafe endpoint."
         case .httpStatus(let status): "MCP server returned HTTP status \(status)."
         case .invalidResponse: "MCP server returned an invalid JSON-RPC response."
         case .rpcError(let message): message
@@ -322,6 +329,42 @@ final class URLSessionMcpHTTPTransport: IOSMcpHTTPTransport {
 }
 
 @MainActor
+enum IOSMcpLegacyEndpointPolicy {
+    static func validatedEndpoint(_ endpoint: String, relativeTo serverURLString: String) throws -> URL {
+        guard let serverURL = URL(string: serverURLString),
+              isAllowedTransportURL(serverURL),
+              let endpointURL = URL(string: endpoint, relativeTo: serverURL)?.absoluteURL,
+              isAllowedTransportURL(endpointURL),
+              endpointURL.user == nil,
+              endpointURL.password == nil,
+              sameOrigin(serverURL, endpointURL) else {
+            throw IOSMcpClientError.unsafeEndpoint
+        }
+        return endpointURL
+    }
+
+    private static func isAllowedTransportURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), url.host != nil else { return false }
+        return scheme == "https" || scheme == "http"
+    }
+
+    private static func sameOrigin(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.scheme?.lowercased() == rhs.scheme?.lowercased()
+            && lhs.host?.lowercased() == rhs.host?.lowercased()
+            && effectivePort(lhs) == effectivePort(rhs)
+    }
+
+    private static func effectivePort(_ url: URL) -> Int? {
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "https": return 443
+        case "http": return 80
+        default: return nil
+        }
+    }
+}
+
+@MainActor
 private final class LegacySSEMcpSession {
     private let config: IOSMcpServerConfig
     private let session: URLSession
@@ -413,10 +456,7 @@ private final class LegacySSEMcpSession {
             let event = try await readNextEvent()
             guard event.name == "endpoint" else { continue }
             let endpoint = event.data.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let url = URL(string: endpoint, relativeTo: URL(string: config.url))?.absoluteURL else {
-                throw IOSMcpClientError.invalidURL(endpoint)
-            }
-            return url
+            return try IOSMcpLegacyEndpointPolicy.validatedEndpoint(endpoint, relativeTo: config.url)
         }
     }
 
@@ -515,6 +555,8 @@ final class IOSMcpClient: IOSMcpClienting {
     private let requestTimeoutSeconds: TimeInterval
     private var config: IOSMcpServerConfig?
     private var nextId = 1
+    private var requestInProgress = false
+    private var requestWaiters: [IOSMcpRequestWaiter] = []
 
     private(set) var status: IOSMcpConnectionStatus = .idle
 
@@ -524,25 +566,27 @@ final class IOSMcpClient: IOSMcpClienting {
     }
 
     func connect(config: IOSMcpServerConfig) async throws -> Bool {
-        if status == .connected, self.config == config {
+        try await withRequestSlot {
+            if self.status == .connected, self.config == config {
+                return true
+            }
+            if let previousConfig = self.config {
+                self.transport.disconnect(config: previousConfig)
+            }
+            self.status = .connecting
+            self.config = config
+            _ = try await self.sendWithoutRequestSlot(method: "initialize", params: [
+                "protocolVersion": "2024-11-05",
+                "capabilities": [:],
+                "clientInfo": [
+                    "name": "AmberAgent iOS",
+                    "version": "1.0"
+                ]
+            ])
+            try await self.sendNotificationWithoutRequestSlot(method: "notifications/initialized", params: [:])
+            self.status = .connected
             return true
         }
-        if let previousConfig = self.config {
-            transport.disconnect(config: previousConfig)
-        }
-        status = .connecting
-        self.config = config
-        _ = try await send(method: "initialize", params: [
-            "protocolVersion": "2024-11-05",
-            "capabilities": [:],
-            "clientInfo": [
-                "name": "AmberAgent iOS",
-                "version": "1.0"
-            ]
-        ])
-        try await sendNotification(method: "notifications/initialized", params: [:])
-        status = .connected
-        return true
     }
 
     func listTools() async throws -> [IOSMcpTool] {
@@ -550,8 +594,25 @@ final class IOSMcpClient: IOSMcpClienting {
         guard let tools = result["tools"] as? [[String: Any]] else { return [] }
         return tools.compactMap { item in
             guard let name = item["name"] as? String, !name.isEmpty else { return nil }
-            return IOSMcpTool(name: name, description: item["description"] as? String)
+            return IOSMcpTool(
+                name: name,
+                description: item["description"] as? String,
+                inputSchema: Self.persistedSchemaText(item["inputSchema"])
+            )
         }
+    }
+
+    /// Serializes the raw `inputSchema` object into complete compact JSON text.
+    /// Returns nil when the server omitted a schema or the value is not
+    /// serializable JSON.
+    private static func persistedSchemaText(_ value: Any?) -> String? {
+        guard let value else { return nil }
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return text
     }
 
     func callTool(name: String, arguments: [String: Any]) async throws -> String {
@@ -583,6 +644,12 @@ final class IOSMcpClient: IOSMcpClienting {
     }
 
     private func send(method: String, params: [String: Any]) async throws -> [String: Any] {
+        try await withRequestSlot {
+            try await self.sendWithoutRequestSlot(method: method, params: params)
+        }
+    }
+
+    private func sendWithoutRequestSlot(method: String, params: [String: Any]) async throws -> [String: Any] {
         guard let config else { throw IOSMcpClientError.invalidResponse }
         let id = nextId
         nextId += 1
@@ -603,6 +670,12 @@ final class IOSMcpClient: IOSMcpClienting {
     }
 
     private func sendNotification(method: String, params: [String: Any]) async throws {
+        try await withRequestSlot {
+            try await self.sendNotificationWithoutRequestSlot(method: method, params: params)
+        }
+    }
+
+    private func sendNotificationWithoutRequestSlot(method: String, params: [String: Any]) async throws {
         guard let config else { throw IOSMcpClientError.invalidResponse }
         let payload: [String: Any] = [
             "jsonrpc": "2.0",
@@ -610,6 +683,49 @@ final class IOSMcpClient: IOSMcpClienting {
             "params": params
         ]
         try await sendJSONRPCNotificationWithTimeout(payload, to: config, method: method)
+    }
+
+    private func withRequestSlot<T>(_ operation: () async throws -> T) async throws -> T {
+        try await acquireRequestSlot()
+        defer { releaseRequestSlot() }
+        try Task.checkCancellation()
+        return try await operation()
+    }
+
+    private func acquireRequestSlot() async throws {
+        try Task.checkCancellation()
+        guard requestInProgress else {
+            requestInProgress = true
+            return
+        }
+
+        let waiterID = UUID()
+        try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    requestWaiters.append(.init(id: waiterID, continuation: continuation))
+                }
+            }
+        }, onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelRequestWaiter(id: waiterID)
+            }
+        })
+    }
+
+    private func releaseRequestSlot() {
+        guard !requestWaiters.isEmpty else {
+            requestInProgress = false
+            return
+        }
+        requestWaiters.removeFirst().continuation.resume()
+    }
+
+    private func cancelRequestWaiter(id: UUID) {
+        guard let index = requestWaiters.firstIndex(where: { $0.id == id }) else { return }
+        requestWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 
     private func sendJSONRPCWithTimeout(
@@ -631,39 +747,49 @@ final class IOSMcpClient: IOSMcpClienting {
         timeoutText: String,
         operation: @escaping @MainActor () async throws -> T
     ) async throws -> T {
-        try await withCheckedThrowingContinuation { continuation in
-            let gate = IOSMcpContinuationGate<T>()
-            let operationTaskBox = IOSMcpOperationTaskBox()
-            let timerTask = Task {
-                do {
-                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                    let didResume = gate.resume(
-                        throwing: IOSMcpClientError.requestTimedOut(
+        let gate = IOSMcpContinuationGate<T>()
+        let operationTaskBox = IOSMcpOperationTaskBox()
+        let timerTaskBox = IOSMcpOperationTaskBox()
+        return try await withTaskCancellationHandler(operation: {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                gate.install(continuation)
+                guard !gate.isCompleted else { return }
+
+                let timerTask = Task {
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                        if gate.resume(throwing: IOSMcpClientError.requestTimedOut(
                             "MCP request \(method) timed out after \(timeoutText)s"
-                        ),
-                        continuation
-                    )
-                    if didResume {
-                        operationTaskBox.cancel()
-                    }
-                } catch {
-                    // Timer task was cancelled after the operation completed.
-                }
-            }
-            let operationTask = Task { @MainActor in
-                do {
-                    let value = try await operation()
-                    if gate.resume(returning: value, continuation) {
-                        timerTask.cancel()
-                    }
-                } catch {
-                    if gate.resume(throwing: error, continuation) {
-                        timerTask.cancel()
+                        )) {
+                            operationTaskBox.cancel()
+                        }
+                    } catch {
+                        // Timer task was cancelled after the operation completed.
                     }
                 }
+                timerTaskBox.task = timerTask
+
+                let operationTask = Task { @MainActor in
+                    do {
+                        let value = try await operation()
+                        if gate.resume(returning: value) {
+                            timerTaskBox.cancel()
+                        }
+                    } catch {
+                        if gate.resume(throwing: error) {
+                            timerTaskBox.cancel()
+                        }
+                    }
+                }
+                operationTaskBox.task = operationTask
             }
-            operationTaskBox.task = operationTask
-        }
+        }, onCancel: {
+            if gate.resume(throwing: CancellationError()) {
+                operationTaskBox.cancel()
+                timerTaskBox.cancel()
+            }
+        })
     }
 
     private func sendJSONRPCNotificationWithTimeout(
@@ -688,6 +814,11 @@ final class IOSMcpClient: IOSMcpClienting {
     }
 }
 
+private struct IOSMcpRequestWaiter {
+    let id: UUID
+    let continuation: CheckedContinuation<Void, Error>
+}
+
 private struct IOSMcpJSONRPCPayloadBox: @unchecked Sendable {
     let payload: [String: Any]
 }
@@ -698,25 +829,54 @@ private struct IOSMcpJSONRPCResponseBox: @unchecked Sendable {
 
 private final class IOSMcpContinuationGate<T: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
-    private var didResume = false
+    private var continuation: CheckedContinuation<T, Error>?
+    private var pendingResult: Result<T, Error>?
+    private var completed = false
 
-    @discardableResult
-    func resume(returning value: T, _ continuation: CheckedContinuation<T, Error>) -> Bool {
+    var isCompleted: Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard !didResume else { return false }
-        didResume = true
-        continuation.resume(returning: value)
-        return true
+        return completed
+    }
+
+    func install(_ continuation: CheckedContinuation<T, Error>) {
+        lock.lock()
+        let result = pendingResult
+        if result == nil {
+            self.continuation = continuation
+        } else {
+            pendingResult = nil
+        }
+        lock.unlock()
+        if let result {
+            continuation.resume(with: result)
+        }
     }
 
     @discardableResult
-    func resume(throwing error: Error, _ continuation: CheckedContinuation<T, Error>) -> Bool {
+    func resume(returning value: T) -> Bool {
+        finish(with: .success(value))
+    }
+
+    @discardableResult
+    func resume(throwing error: Error) -> Bool {
+        finish(with: .failure(error))
+    }
+
+    private func finish(with result: Result<T, Error>) -> Bool {
         lock.lock()
-        defer { lock.unlock() }
-        guard !didResume else { return false }
-        didResume = true
-        continuation.resume(throwing: error)
+        guard !completed else {
+            lock.unlock()
+            return false
+        }
+        completed = true
+        let continuation = self.continuation
+        self.continuation = nil
+        if continuation == nil {
+            pendingResult = result
+        }
+        lock.unlock()
+        continuation?.resume(with: result)
         return true
     }
 }
@@ -724,6 +884,7 @@ private final class IOSMcpContinuationGate<T: Sendable>: @unchecked Sendable {
 private final class IOSMcpOperationTaskBox: @unchecked Sendable {
     private let lock = NSLock()
     private var storedTask: Task<Void, Never>?
+    private var cancellationRequested = false
 
     var task: Task<Void, Never>? {
         get {
@@ -734,11 +895,19 @@ private final class IOSMcpOperationTaskBox: @unchecked Sendable {
         set {
             lock.lock()
             storedTask = newValue
+            let shouldCancel = cancellationRequested
             lock.unlock()
+            if shouldCancel {
+                newValue?.cancel()
+            }
         }
     }
 
     func cancel() {
+        lock.lock()
+        cancellationRequested = true
+        let task = storedTask
+        lock.unlock()
         task?.cancel()
     }
 }

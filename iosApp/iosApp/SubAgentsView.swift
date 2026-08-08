@@ -54,6 +54,7 @@ struct SubAgentsView: View {
         return await runner.runViaEngine(
             objective: objective,
             roleId: roleId,
+            savedRolePromptOverride: sharedSettings.snapshot.agentRuntime.subAgent.overrides[roleId]?.systemPrompt,
             providerSetting: resolved,
             modelId: modelId,
             parentToolExecutors: [:],
@@ -142,7 +143,7 @@ struct SubAgentsView: View {
                                 .font(.body)
                                 .foregroundStyle(AmberTheme.foreground)
                             Spacer()
-                            Text(IOSSubAgentRoleCatalog.resolve(roleId: selectedRoleId).name)
+                            Text(IOSSubAgentRoleCatalog.resolve(roleId: selectedRoleId)?.name ?? selectedRoleId)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(AmberTheme.accent)
                             Image(systemName: "chevron.right")

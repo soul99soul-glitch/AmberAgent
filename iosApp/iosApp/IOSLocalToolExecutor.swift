@@ -1,10 +1,13 @@
 import Foundation
 import Combine
 import Observation
+import OSLog
 import WebKit
 #if canImport(UIKit)
 import UIKit
 #endif
+
+private let webMountRegistryLogger = Logger(subsystem: "app.amber.ios", category: "webmount")
 
 struct IOSLocalToolExecutionRequest: Equatable {
     let toolName: String
@@ -737,9 +740,15 @@ final class IOSWebMountRegistry {
         self.storageKey = storageKey
         self.seededKey = seededKey
 
-        if let data = userDefaults.data(forKey: storageKey),
-           let decoded = try? decoder.decode([IOSWebMountSite].self, from: data) {
-            self.sites = decoded
+        if let data = userDefaults.data(forKey: storageKey) {
+            if let decoded = try? decoder.decode([IOSWebMountSite].self, from: data) {
+                self.sites = decoded
+            } else {
+                // 已有用户数据但解码失败（如 schema 演进）：只在内存里回退到
+                // seeds，绝不把 seeds 编码写回磁盘，避免把用户配置冲掉。
+                webMountRegistryLogger.error("webMount sites 解码失败，使用内存 seeds 回退（不写回存储）")
+                self.sites = IOSWebMountSite.seeds()
+            }
         } else {
             self.sites = IOSWebMountSite.seeds()
             if let data = try? encoder.encode(self.sites) {

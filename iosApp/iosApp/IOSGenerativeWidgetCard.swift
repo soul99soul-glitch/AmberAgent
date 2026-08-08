@@ -247,11 +247,35 @@ enum IOSGenerativeWidgetSVGExport {
     }
 
     static func extractSVG(from source: String) -> String? {
-        guard let start = source.range(of: "<svg\\b", options: [.regularExpression, .caseInsensitive]),
-              let end = source.range(of: "</svg\\s*>", options: [.regularExpression, .caseInsensitive], range: start.lowerBound..<source.endIndex) else {
-            return nil
+        var cursor = source.startIndex
+        var start: String.Index?
+        var depth = 0
+        while cursor < source.endIndex,
+              let tag = source.range(
+                of: #"</?svg\b[^>]*>"#,
+                options: [.regularExpression, .caseInsensitive],
+                range: cursor..<source.endIndex
+              ) {
+            let text = source[tag].trimmingCharacters(in: .whitespacesAndNewlines)
+            let closing = text.hasPrefix("</")
+            let selfClosing = text.hasSuffix("/>")
+            if closing {
+                if depth > 0 {
+                    depth -= 1
+                    if depth == 0, let start {
+                        return String(source[start..<tag.upperBound])
+                    }
+                }
+            } else {
+                if start == nil { start = tag.lowerBound }
+                if selfClosing, depth == 0, let start {
+                    return String(source[start..<tag.upperBound])
+                }
+                if !selfClosing { depth += 1 }
+            }
+            cursor = tag.upperBound
         }
-        return String(source[start.lowerBound..<end.upperBound])
+        return nil
     }
 
     static func filename(for title: String?) -> String {

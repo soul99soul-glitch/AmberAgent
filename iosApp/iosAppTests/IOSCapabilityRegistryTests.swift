@@ -141,7 +141,7 @@ final class IOSCapabilityRegistryTests: XCTestCase {
 
     @MainActor
     func testSubAgentRolesAndCouncilTaskMetadataAreBounded() throws {
-        let role = IOSSubAgentRoleCatalog.resolve(roleId: "oracle")
+        let role = try XCTUnwrap(IOSSubAgentRoleCatalog.resolve(roleId: "oracle"))
         XCTAssertEqual(role.id, "oracle")
         XCTAssertTrue(role.toolAllowlist.contains("file_read_selected"))
         XCTAssertFalse(role.toolAllowlist.contains("terminal_execute"))

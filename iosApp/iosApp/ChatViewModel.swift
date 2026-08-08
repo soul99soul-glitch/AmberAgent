@@ -1,10 +1,13 @@
 import Foundation
 import CryptoKit
 import Observation
+import OSLog
 import SwiftUI
 @preconcurrency import Shared
 
 // MARK: - ChatViewModel
+
+private let chatLedgerLogger = Logger(subsystem: "app.amber.ios", category: "chat-ledger")
 
 struct ChatContextSnapshot {
     let messageCount: Int
@@ -85,6 +88,12 @@ enum ChatComposerSendBlockReason: Equatable {
 @Observable
 final class ChatViewModel {
 
+    private struct ImageGenerationResumeCacheEntry {
+        let summaryUpdatedAtMillis: Int64
+        let isGenerationActive: Bool
+        let context: ChatImageGenerationResumeContext?
+    }
+
     // MARK: - State
 
     var messages: [UIMessage] = []
@@ -105,6 +114,8 @@ final class ChatViewModel {
     @ObservationIgnored private var tokenRevision: Int = 0
     @ObservationIgnored private var cachedTokenSnapshot: ChatContextSnapshot?
     @ObservationIgnored private var cachedTokenRevision: Int = -1
+    @ObservationIgnored private var imageGenerationResumeCache: [String: ImageGenerationResumeCacheEntry] = [:]
+    @ObservationIgnored private var imageGenerationResumeCacheStoreID: ObjectIdentifier?
     /// UI presentation pacing is useful only while the live tail is being watched.
     /// The authoritative stream accumulator is independent from this flag.
     var streamPresentationPacingEnabled = true
@@ -116,6 +127,7 @@ final class ChatViewModel {
     var pendingMcpApproval: McpToolApprovalRequest?
     var pendingCouncilApproval: CouncilToolApprovalRequest?
     var pendingAskUser: ChatAskUserRequest?
+
     var configurationError: String?
     var contextCompactState: ChatContextCompactState = .idle
 
@@ -285,20 +297,45 @@ final class ChatViewModel {
 
     func latestImageGenerationResumeContext() async -> ChatImageGenerationResumeContext? {
         guard let conversationStore else { return nil }
+        let storeID = ObjectIdentifier(conversationStore)
+        if imageGenerationResumeCacheStoreID != storeID {
+            imageGenerationResumeCache.removeAll()
+            imageGenerationResumeCacheStoreID = storeID
+        }
         let summaries = conversationStore.summaries
+        let liveConversationIDs = Set(summaries.map { $0.id.toHexDashString() })
+        imageGenerationResumeCache = imageGenerationResumeCache.filter {
+            liveConversationIDs.contains($0.key)
+        }
         var candidates: [ChatImageGenerationResumeContext] = []
 
         for summary in summaries {
             guard !Task.isCancelled else { return nil }
-            guard let messages = await conversationStore.messages(for: summary.id),
-                  let context = ChatImageGenerationResumeProjection.latest(
+            let conversationID = summary.id.toHexDashString()
+            let summaryUpdatedAtMillis = summary.updateAt.toEpochMilliseconds()
+            let generationActive = isGenerationActive(conversationId: summary.id)
+            let context: ChatImageGenerationResumeContext?
+            if let cached = imageGenerationResumeCache[conversationID],
+               cached.summaryUpdatedAtMillis == summaryUpdatedAtMillis,
+               cached.isGenerationActive == generationActive {
+                context = cached.context
+            } else if let messages = await conversationStore.messages(for: summary.id) {
+                context = ChatImageGenerationResumeProjection.latest(
                     in: messages,
-                    conversationID: summary.id.toHexDashString(),
-                    isGenerationActive: isGenerationActive(conversationId: summary.id)
-                  ) else {
+                    conversationID: conversationID,
+                    isGenerationActive: generationActive
+                )
+                imageGenerationResumeCache[conversationID] = ImageGenerationResumeCacheEntry(
+                    summaryUpdatedAtMillis: summaryUpdatedAtMillis,
+                    isGenerationActive: generationActive,
+                    context: context
+                )
+            } else {
                 continue
             }
-            candidates.append(context)
+            if let context {
+                candidates.append(context)
+            }
         }
         return ChatImageGenerationResumeProjection.preferred(in: candidates)
     }
@@ -309,6 +346,8 @@ final class ChatViewModel {
               conversationStore.lastIOError == nil else {
             return
         }
+        let pendingMutationIds = miniAppRepository.pendingConversationMutationIds()
+        guard !pendingMutationIds.isEmpty else { return }
 
         var references = Set<IOSMiniAppConversationReference>()
         for summary in conversationStore.summaries {
@@ -322,7 +361,10 @@ final class ChatViewModel {
         }
 
         do {
-            try miniAppRepository.reconcilePendingConversationMutations(referenced: references)
+            try miniAppRepository.reconcilePendingConversationMutations(
+                referenced: references,
+                mutationIds: pendingMutationIds
+            )
         } catch {
             NSLog("[AmberChat] Failed to reconcile pending MiniApp transactions: \(error)")
         }
@@ -2649,7 +2691,16 @@ final class ChatViewModel {
                 }
             }
         } catch {
-            print("[Room] Failed to insert agent_run: \(error)")
+            // agent_run 是强杀恢复（applyToolCallLedgerRecovery）依赖的账本，
+            // 写失败必须走用户可见错误通道，不能只 print 静默吞掉。
+            let detail = "未能写入运行账本：\(error)"
+            if let conversationStore {
+                conversationStore.publishUserVisibleError(
+                    IOSUserVisibleError(title: "运行状态记录失败", message: detail, severity: .error)
+                )
+            } else {
+                chatLedgerLogger.error("\(detail)")
+            }
         }
     }
 
@@ -2816,64 +2867,13 @@ final class ChatViewModel {
     }
 
     private func workspaceToolNamesForCurrentTurn() -> [String] {
-        let names = latestUserMessageRequestsWorkspaceWrite()
-            ? IOSWorkspaceToolCatalog.supportedToolNames
-            : IOSWorkspaceToolCatalog.readToolNames
-        return Array(names).sorted()
+        Array(IOSWorkspaceToolCatalog.supportedToolNames).sorted()
     }
 
     private func ishToolNamesForCurrentTurn() -> [String] {
-        let embeddedNames = enabledModelToolNames(IOSEmbeddedIshToolCatalog.supportedToolNames)
-        let handoffNames = enabledModelToolNames(IOSIshToolCatalog.supportedToolNames)
-        guard !embeddedNames.isEmpty else { return handoffNames }
-        return latestUserMessageRequestsExternalIshHandoff() ? handoffNames : embeddedNames
-    }
-
-    private func latestUserMessageRequestsExternalIshHandoff() -> Bool {
-        guard let text = latestUserMessageTextLowercased() else { return false }
-        return [
-            "外部 ish", "ish app", "ish 应用", "打开 ish", "交给 ish",
-            "交接", "复制到剪贴板", "剪贴板", "粘贴", "手动执行",
-            "handoff", "external ish", "clipboard", "paste manually"
-        ].contains { text.contains($0) }
-    }
-
-    private func latestUserMessageRequestsWorkspaceWrite() -> Bool {
-        guard let text = latestUserMessageTextLowercased() else { return false }
-
-        // Skill / MCP package creation needs workspace_file_write even when the
-        // user does not mention /workspace explicitly.
-        let skillOrMcpWrite = [
-            "skill", "技能", "skill.md", "mcp.json", "mcp 服务器", "mcp服务器",
-            "连接 mcp", "配置 mcp", "导入 mcp"
-        ].contains { text.contains($0) }
-        if skillOrMcpWrite {
-            let hasCreateIntent = [
-                "创建", "新建", "写入", "保存", "生成", "导入", "连接", "配置", "安装",
-                "做一个", "做个", "定制",
-                "create", "write", "save", "import", "connect", "install", "add"
-            ].contains { text.contains($0) }
-            if hasCreateIntent { return true }
-        }
-
-        let hasWriteAction = [
-            "保存", "存到", "存入", "写入", "新建", "创建", "生成文件", "导出",
-            "修改", "编辑", "删除", "移动", "重命名", "落盘",
-            "save", "write", "create", "export", "edit", "delete", "move", "rename"
-        ].contains { text.contains($0) }
-        guard hasWriteAction else { return false }
-
-        return [
-            "workspace", "工作区", "/workspace", "文件", "文档",
-            ".md", ".txt", ".json", ".html", ".csv"
-        ].contains { text.contains($0) }
-    }
-
-    private func latestUserMessageTextLowercased() -> String? {
-        messages.reversed()
-            .first(where: { $0.role == MessageRole.user })?
-            .toText()
-            .lowercased()
+        enabledModelToolNames(
+            IOSEmbeddedIshToolCatalog.supportedToolNames.union(IOSIshToolCatalog.supportedToolNames)
+        )
     }
 
     #if DEBUG

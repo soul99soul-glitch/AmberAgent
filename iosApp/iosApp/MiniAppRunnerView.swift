@@ -90,11 +90,7 @@ struct MiniAppRunnerView: View {
         }
         .alert(item: Binding(
             get: { hostConfirmationOwner.pendingPrompt },
-            set: { prompt in
-                if prompt == nil {
-                    _ = hostConfirmationOwner.resolve(allow: false)
-                }
-            }
+            set: { _ in }
         )) { prompt in
             Alert(
                 title: Text(prompt.title),

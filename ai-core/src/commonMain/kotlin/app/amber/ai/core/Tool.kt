@@ -70,6 +70,8 @@ fun createMemoryToolDeclaration(): Tool = Tool(
     description = """
         Read and update AmberAgent iOS memories. Use `action`:
         - `list`: list saved memories visible under the enabled memory scopes.
+        - `read`, `search`, `query`: actively find memories, optionally filtered by `scope`/`kind`; call these to recall more than the injected set when the conversation needs continuity.
+        - `status`: check whether memory recall is available.
         - `create`: add a memory with `content`, optional `scope` (`core`, `short_term`, `long_term`), `kind`, `pinned`, `expiresAt`, and `confidence`.
         - `edit`: update an existing memory by `id` with new `content`, and optional `scope`, `kind`, or `pinned`.
         - `delete`: remove a memory by `id`.
@@ -405,6 +407,7 @@ fun iosToolDeclaration(name: String): Tool? = when (name) {
     "mcp_call" -> createMcpCallToolDeclaration()
     "mcp_list" -> createMcpListToolDeclaration()
     "mcp_test" -> createMcpTestToolDeclaration()
+    "mcp_describe_tool" -> createMcpDescribeToolDeclaration()
     "mcp_import_from_skill" -> createMcpImportFromSkillToolDeclaration()
     "skills_list" -> createSkillsListToolDeclaration()
     "use_skill" -> createUseSkillToolDeclaration()
@@ -445,8 +448,12 @@ fun createSubAgentDispatchToolDeclaration(): Tool = Tool(
         with its own system prompt and model. Use when a task should be delegated
         (e.g. research, drafting, code review) rather than done inline. Returns the
         sub-agent's final output as text.
-        Provide a clear `objective`; optionally a `role_id` to select a configured
-        sub-agent role (e.g. "historian", "researcher").
+        Provide a clear `objective`; optionally a `role_id` to select a built-in
+        sub-agent role (explorer, historian, oracle, designer, writer, fixer), or
+        pass `custom_role_prompt` (with optional `custom_role_name` and
+        `custom_role_lens`) for a one-off custom role. `tool_scope` narrows the
+        sub-agent's tools within the read-only allowlist. `max_turns` (2-8) and
+        `output_budget_chars` (4000-24000) budget the run.
     """.trimIndent(),
     parameters = { subAgentDispatchParameters() },
     execute = { emptyList() }
@@ -480,7 +487,36 @@ private fun subAgentDispatchParameters(): InputSchema = InputSchema.Obj(
         })
         put("role_id", buildJsonObject {
             put("type", "string")
-            put("description", "optional sub-agent role id (e.g. historian, researcher); omit for default")
+            put("description", "optional built-in sub-agent role id (explorer, historian, oracle, designer, writer, fixer); omit for the default role")
+        })
+        put("custom_role_name", buildJsonObject {
+            put("type", "string")
+            put("description", "optional display name for a one-off custom role; used with custom_role_prompt")
+        })
+        put("custom_role_lens", buildJsonObject {
+            put("type", "string")
+            put("description", "optional focus lens or summary for a one-off custom role")
+        })
+        put("custom_role_prompt", buildJsonObject {
+            put("type", "string")
+            put("description", "optional system prompt for a one-off custom role; when present a custom role is used instead of role_id")
+        })
+        put("max_turns", buildJsonObject {
+            put("type", "integer")
+            put("minimum", 2)
+            put("maximum", 8)
+            put("description", "optional max engine turns for the sub-agent run; clamped to 2-8 (custom roles default to 4)")
+        })
+        put("output_budget_chars", buildJsonObject {
+            put("type", "integer")
+            put("minimum", 4000)
+            put("maximum", 24000)
+            put("description", "optional output budget in characters; clamped to 4000-24000 (custom roles default to 12000)")
+        })
+        put("tool_scope", buildJsonObject {
+            put("type", "array")
+            put("description", "optional list of tool names the sub-agent may use; narrowed within the read-only allowlist")
+            put("items", buildJsonObject { put("type", "string") })
         })
     },
     required = listOf("objective")
@@ -536,6 +572,17 @@ fun createMcpTestToolDeclaration(): Tool = Tool(
     description = "Test one configured MCP server by id or name and refresh its tool list.",
     parameters = { mcpServerLookupParameters() },
     needsApproval = true,
+    execute = { emptyList() }
+)
+
+fun createMcpDescribeToolDeclaration(): Tool = Tool(
+    name = "mcp_describe_tool",
+    description = """
+        Return the full description and input JSON schema of one discovered MCP
+        tool. Call this before `mcp_call` when you need the exact argument names
+        and types for a tool's `arguments`.
+    """.trimIndent(),
+    parameters = { mcpDescribeToolParameters() },
     execute = { emptyList() }
 )
 
@@ -659,6 +706,20 @@ private fun mcpServerLookupParameters(): InputSchema = InputSchema.Obj(
     }
 )
 
+private fun mcpDescribeToolParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("server", buildJsonObject {
+            put("type", "string")
+            put("description", "the configured MCP server name")
+        })
+        put("tool", buildJsonObject {
+            put("type", "string")
+            put("description", "the discovered tool name on that server")
+        })
+    },
+    required = listOf("server", "tool")
+)
+
 private fun useSkillParameters(): InputSchema = InputSchema.Obj(
     properties = buildJsonObject {
         put("name", buildJsonObject {
@@ -760,6 +821,10 @@ private fun memoryToolParameters(): InputSchema = InputSchema.Obj(
             put("description", "operation to perform")
             put("enum", buildJsonArray {
                 add("list")
+                add("read")
+                add("search")
+                add("query")
+                add("status")
                 add("create")
                 add("edit")
                 add("delete")

@@ -109,12 +109,17 @@ final class IOSContextCompactionCoordinator {
             promptOverheadTokens: promptOverheadTokens
         )
 
-        let editedMessages = policy.enabled
-            ? Self.editPreparedContext(
+        let edited: (messages: [UIMessage], removedToolResults: Int)
+        if policy.enabled {
+            edited = Self.editPreparedContext(
                 messages: uploadMessages,
                 keepRecentMessages: max(policy.keepRecentTurns * 2, 4)
             )
-            : uploadMessages
+        } else {
+            edited = (uploadMessages, 0)
+        }
+        let editedMessages = edited.messages
+        let removedToolResults = edited.removedToolResults
 
         guard policy.enabled, let conversationId else {
             return Self.limitContext(editedMessages, size: contextMessageSize)
@@ -173,7 +178,8 @@ final class IOSContextCompactionCoordinator {
             messages: editedMessages,
             activeCompacts: compacts,
             policy: policy,
-            contextMessageSize: contextMessageSize
+            contextMessageSize: contextMessageSize,
+            removedToolResults: removedToolResults
         )
         let contextWindow = Self.estimateContextWindow(Self.intValue(params.model.contextWindowTokens))
         let forceBudget = max(Int(Double(contextWindow) * policy.forceRatio), 1)
@@ -216,7 +222,8 @@ final class IOSContextCompactionCoordinator {
                 messages: editedMessages,
                 activeCompacts: compacts,
                 policy: fitPolicy,
-                contextMessageSize: contextMessageSize
+                contextMessageSize: contextMessageSize,
+                removedToolResults: removedToolResults
             )
             estimate = Self.estimateTokens(preparedMessages) + overheadEstimate
         }
@@ -375,7 +382,7 @@ final class IOSContextCompactionCoordinator {
         )
         let coveredCompactIds = previousCompacts.map(\.id)
         let previousCompactContext = previousCompacts
-            .map(Self.injectionText)
+            .map { Self.injectionText($0) }
             .joined(separator: "\n\n")
         let createdAt = Self.nowMillis()
         let prompt = Self.buildCompressionPrompt(
@@ -725,7 +732,8 @@ private extension IOSContextCompactionCoordinator {
         messages: [UIMessage],
         activeCompacts: [IOSConversationCompact],
         policy: IOSCompactPolicy,
-        contextMessageSize: Int
+        contextMessageSize: Int,
+        removedToolResults: Int = 0
     ) -> [UIMessage] {
         guard policy.enabled, !activeCompacts.isEmpty else {
             return limitContext(messages, size: contextMessageSize)
@@ -736,8 +744,13 @@ private extension IOSContextCompactionCoordinator {
             return limitContext(messages, size: contextMessageSize)
         }
 
-        let summaries = selectCompactsForInjection(activeCompacts: activeCompacts, existingMessageIds: existingIds)
-            .map { UIMessage.companion.system(prompt: injectionText($0)) }
+        let selected = selectCompactsForInjection(activeCompacts: activeCompacts, existingMessageIds: existingIds)
+        let summaries = selected.enumerated().map { index, compact in
+            UIMessage.companion.system(prompt: injectionText(
+                compact,
+                removedToolResults: index == selected.count - 1 ? removedToolResults : 0
+            ))
+        }
         let coveredIds = Set(completed.flatMap(\.sourceMessageIds))
         let recentMessages = messages.filter { !coveredIds.contains(messageId($0)) }
         let keepLimit = contextMessageSize > 0
@@ -747,7 +760,14 @@ private extension IOSContextCompactionCoordinator {
     }
 
     static func fitMessagesToTokenBudget(_ messages: [UIMessage], maxTokens: Int) -> [UIMessage] {
-        guard maxTokens > 0, !messages.isEmpty else { return Array(messages.suffix(1)) }
+        let originalCount = messages.count
+        guard maxTokens > 0, !messages.isEmpty else {
+            return appendingTruncationNotice(
+                to: Array(messages.suffix(1)),
+                originalCount: originalCount,
+                maxTokens: maxTokens
+            )
+        }
         guard estimateTokens(messages) > maxTokens else { return messages }
 
         let systemMessages = messages.filter { $0.role == MessageRole.system }
@@ -763,10 +783,14 @@ private extension IOSContextCompactionCoordinator {
             }
         }
         var result = systemMessages + selected
-        guard estimateTokens(result) > maxTokens else { return result }
+        guard estimateTokens(result) > maxTokens else {
+            return appendingTruncationNotice(to: result, originalCount: originalCount, maxTokens: maxTokens)
+        }
 
         result = trimmingCompactHandoffSystemMessages(in: result, maxTokens: maxTokens)
-        guard estimateTokens(result) > maxTokens else { return result }
+        guard estimateTokens(result) > maxTokens else {
+            return appendingTruncationNotice(to: result, originalCount: originalCount, maxTokens: maxTokens)
+        }
 
         let compactIndexes = result.indices.filter { isCompactHandoffSystemMessage(result[$0]) }
         if compactIndexes.count > 1 {
@@ -778,7 +802,27 @@ private extension IOSContextCompactionCoordinator {
                 return message
             }
         }
-        return result
+        return appendingTruncationNotice(to: result, originalCount: originalCount, maxTokens: maxTokens)
+    }
+
+    /// 截尾不能静默:若 `fitMessagesToTokenBudget` 实际丢弃了消息,在注入侧追加一条
+    /// system 说明,让模型知道历史有空洞。受 `maxTokens` 预算约束——预算极端紧张时
+    /// 宁可不加注记也不能让请求超窗失败。
+    static func appendingTruncationNotice(
+        to fitted: [UIMessage],
+        originalCount: Int,
+        maxTokens: Int
+    ) -> [UIMessage] {
+        let droppedCount = originalCount - fitted.count
+        guard droppedCount > 0 else { return fitted }
+        let notice = UIMessage.companion.system(prompt: truncationNoticeText(droppedMessages: droppedCount))
+        let withNotice = fitted + [notice]
+        guard estimateTokens(withNotice) <= maxTokens else { return fitted }
+        return withNotice
+    }
+
+    static func truncationNoticeText(droppedMessages: Int) -> String {
+        "Context note: \(droppedMessages) older message(s) were omitted from this request to fit the model's token budget. If you need their content, re-run the relevant tool or expand history; the original conversation storage is unchanged."
     }
 
     static func requestOverheadTokens(
@@ -859,9 +903,23 @@ private extension IOSContextCompactionCoordinator {
         return "\(header)\n\n\(trimmedBody)"
     }
 
-    static func editPreparedContext(messages: [UIMessage], keepRecentMessages: Int) -> [UIMessage] {
+    /// 发送前静默裁剪/清空旧消息工具结果的入口。返回处理后的消息,以及被改动过的
+    /// 工具结果条数(trim 或 clear 任一生效都算,不重复计数),供 handoff 注入如实
+    /// 标注历史空洞。
+    static func editPreparedContext(messages: [UIMessage], keepRecentMessages: Int) -> (messages: [UIMessage], removedToolResults: Int) {
         let trimmed = editMessageTools(messages: messages, keepRecentMessages: keepRecentMessages) { trimToolResult($0) }
-        return editMessageTools(messages: trimmed, keepRecentMessages: keepRecentMessages) { clearToolResult($0) }
+        let cleared = editMessageTools(messages: trimmed, keepRecentMessages: keepRecentMessages) { clearToolResult($0) }
+        var removedToolResults = 0
+        for (original, edited) in zip(messages, cleared) {
+            for (originalPart, editedPart) in zip(original.parts, edited.parts) {
+                if originalPart is UIMessagePart.Tool,
+                   editedPart is UIMessagePart.Tool,
+                   originalPart != editedPart {
+                    removedToolResults += 1
+                }
+            }
+        }
+        return (cleared, removedToolResults)
     }
 
     static func buildCompressionInput(_ messages: [UIMessage]) -> String {
@@ -949,11 +1007,16 @@ private extension IOSContextCompactionCoordinator {
         ])
     }
 
-    static func injectionText(_ compact: IOSConversationCompact) -> String {
-        injectionText(id: compact.id, summary: compact.summary, sourceMessageIds: compact.sourceMessageIds)
+    static func injectionText(_ compact: IOSConversationCompact, removedToolResults: Int = 0) -> String {
+        injectionText(
+            id: compact.id,
+            summary: compact.summary,
+            sourceMessageIds: compact.sourceMessageIds,
+            removedToolResults: removedToolResults
+        )
     }
 
-    static func injectionText(id: String, summary: String, sourceMessageIds: [String]) -> String {
+    static func injectionText(id: String, summary: String, sourceMessageIds: [String], removedToolResults: Int = 0) -> String {
         let payload = payloadObject(summary)
         let handoff = cleanMarkdown(stringValue(payload?["handoff_markdown"]) ?? timelineSummary(summary) ?? summary)
         let covered = stringList(payload?["covered_compact_ids"])
@@ -964,9 +1027,18 @@ private extension IOSContextCompactionCoordinator {
         if !covered.isEmpty {
             lines.append("Covered compact ids: \(covered.joined(separator: ", "))")
         }
+        if removedToolResults > 0 {
+            lines.append(compactedToolResultsNote(removedToolResults))
+        }
         lines.append("")
         lines.append(handoff)
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// handoff 注入中的事实说明:有多少条旧消息的工具结果被压缩处理过,模型如需原始
+    /// 内容可以重新调用工具(workspace 文件、file search、web search 均可重取)。
+    static func compactedToolResultsNote(_ count: Int) -> String {
+        "Note: \(count) tool result(s) from older messages were removed or trimmed from this prepared context. If you need their exact original content, re-run the relevant tool — workspace files, file search, and web search can re-fetch it. The original conversation storage is unchanged."
     }
 
     static func isHighQualityPayload(_ summary: String) -> Bool {
@@ -1185,18 +1257,24 @@ private extension IOSContextCompactionCoordinator {
         }
     }
 
+    /// 被压缩处理过的工具输出原位留下的可见占位标记,让模型识别历史有空洞。
+    static let compactedToolOutputMarker = "[tool output compacted]"
+
     static func trimToolResult(_ tool: UIMessagePart.Tool) -> UIMessagePart.Tool {
         guard canEditPreparedResult(tool) else { return tool }
         let outputChars = outputChars(tool.output)
         guard outputChars > 16_000 else { return tool }
         let preview = summarizeToolOutput(tool.output, maxChars: 8_000)
-        return replacingToolOutput(tool, text: jsonString([
-            "status": "trimmed_tool_result",
-            "tool_name": tool.toolName,
-            "tool_call_id": tool.toolCallId,
-            "original_output_chars": outputChars,
-            "preview": preview
-        ]))
+        return replacingToolOutput(tool, text: """
+            \(compactedToolOutputMarker) — original result trimmed to a preview.
+            \(jsonString([
+                "status": "trimmed_tool_result",
+                "tool_name": tool.toolName,
+                "tool_call_id": tool.toolCallId,
+                "original_output_chars": outputChars,
+                "preview": preview
+            ]))
+            """)
     }
 
     static func clearToolResult(_ tool: UIMessagePart.Tool) -> UIMessagePart.Tool {
@@ -1204,14 +1282,17 @@ private extension IOSContextCompactionCoordinator {
               safeToClearPreparedResult(tool) else { return tool }
         let outputChars = outputChars(tool.output)
         guard outputChars > 2_000 else { return tool }
-        return replacingToolOutput(tool, text: jsonString([
-            "status": "cleared_tool_result",
-            "tool_name": tool.toolName,
-            "tool_call_id": tool.toolCallId,
-            "input_chars": tool.input.count,
-            "original_output_chars": outputChars,
-            "reason": "Historical result was cleared from prepared context only. Original conversation storage is unchanged; call the tool again or expand history if exact output is needed."
-        ]))
+        return replacingToolOutput(tool, text: """
+            \(compactedToolOutputMarker) — historical result removed from this prepared context.
+            \(jsonString([
+                "status": "cleared_tool_result",
+                "tool_name": tool.toolName,
+                "tool_call_id": tool.toolCallId,
+                "input_chars": tool.input.count,
+                "original_output_chars": outputChars,
+                "reason": "Historical result was cleared from prepared context only. Original conversation storage is unchanged; call the tool again or expand history if exact output is needed."
+            ]))
+            """)
     }
 
     static func replacingToolOutput(_ tool: UIMessagePart.Tool, text: String) -> UIMessagePart.Tool {
@@ -1501,6 +1582,43 @@ enum ChatGenerationRequestPreparationTestSupport {
         )
         return ChatRuntimeContextBuilder.coalescingSystemMessages(fitted)
     }
+}
+#endif
+
+#if DEBUG
+/// G9 契约测试支撑:把 coordinator 的私有静态入口暴露给 iosAppTests,验证占位标记、
+/// 移除计数与截尾注记的真实行为(不经过 provider/存储)。
+@MainActor
+enum ContextCompactionEditTestSupport {
+    static func editedMessagesWithCount(
+        messages: [UIMessage],
+        keepRecentMessages: Int
+    ) -> (messages: [UIMessage], removedToolResults: Int) {
+        IOSContextCompactionCoordinator.editPreparedContext(
+            messages: messages,
+            keepRecentMessages: keepRecentMessages
+        )
+    }
+
+    static func injectedHandoffText(
+        id: String,
+        summary: String,
+        sourceMessageIds: [String],
+        removedToolResults: Int
+    ) -> String {
+        IOSContextCompactionCoordinator.injectionText(
+            id: id,
+            summary: summary,
+            sourceMessageIds: sourceMessageIds,
+            removedToolResults: removedToolResults
+        )
+    }
+
+    static func fittedMessagesWithBudget(messages: [UIMessage], maxTokens: Int) -> [UIMessage] {
+        IOSContextCompactionCoordinator.fitMessagesToTokenBudget(messages, maxTokens: maxTokens)
+    }
+
+    static let compactedToolOutputMarker = IOSContextCompactionCoordinator.compactedToolOutputMarker
 }
 #endif
 

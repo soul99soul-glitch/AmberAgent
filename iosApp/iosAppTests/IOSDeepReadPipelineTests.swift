@@ -10,6 +10,41 @@ import XCTest
 @MainActor
 final class IOSDeepReadPipelineTests: XCTestCase {
 
+    func testRunRegistryCancelsExactGenerationAndRejectsStaleFinish() async throws {
+        let registry = IOSDeepReadRunRegistry()
+        let firstGeneration = try XCTUnwrap(registry.reserve(taskId: "task"))
+        var observedCancellation = false
+        let firstTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            } catch is CancellationError {
+                observedCancellation = true
+            } catch {}
+        }
+        registry.attach(firstTask, taskId: "task", generationID: firstGeneration)
+
+        XCTAssertTrue(registry.cancel(taskId: "task", generationID: firstGeneration))
+        await firstTask.value
+        XCTAssertTrue(observedCancellation)
+
+        let retryGeneration = try XCTUnwrap(registry.reserve(taskId: "task"))
+        XCTAssertFalse(registry.finish(taskId: "task", generationID: firstGeneration))
+        XCTAssertTrue(registry.isCurrent(taskId: "task", generationID: retryGeneration))
+        XCTAssertTrue(registry.finish(taskId: "task", generationID: retryGeneration))
+    }
+
+    func testOnlySystemExpirationCancelsDeepReadOwner() {
+        var cancellationCount = 0
+        let handlers = IOSDeepReadExpirationHandlers.cancelOwnerOnlyOnSystemExpiration {
+            cancellationCount += 1
+        }
+
+        XCTAssertNil(handlers.onShortWindowExpiration)
+        XCTAssertEqual(cancellationCount, 0)
+        handlers.onSystemTaskExpiration()
+        XCTAssertEqual(cancellationCount, 1)
+    }
+
     private func makeProviderSetting() -> ProviderSetting.OpenAI {
         ProviderSetting.OpenAI(
             id: KotlinUuid.companion.random(),

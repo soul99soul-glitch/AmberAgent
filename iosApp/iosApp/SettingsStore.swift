@@ -79,11 +79,34 @@ final class SettingsStore {
         didSet { save() }
     }
 
+    /// G7: 前台单轮工具循环上限。UserDefaults 独立 key 直读直写（与
+    /// ExecutionSettingsView 的 @AppStorage 共用），不进 SettingsData blob，
+    /// 避免两处写同一 blob 互相覆盖。默认 12，clamp 4-24。
+    var chatMaxToolResumeCount: Int {
+        get {
+            guard defaults.object(forKey: Self.chatMaxToolResumeCountKey) != nil else {
+                return Self.defaultChatMaxToolResumeCount
+            }
+            return Self.clampChatMaxToolResumeCount(defaults.integer(forKey: Self.chatMaxToolResumeCountKey))
+        }
+        set {
+            defaults.set(Self.clampChatMaxToolResumeCount(newValue), forKey: Self.chatMaxToolResumeCountKey)
+        }
+    }
+
+    static let defaultChatMaxToolResumeCount = 12
+    static let chatMaxToolResumeCountRange = 4...24
+
+    static func clampChatMaxToolResumeCount(_ value: Int) -> Int {
+        min(max(value, chatMaxToolResumeCountRange.lowerBound), chatMaxToolResumeCountRange.upperBound)
+    }
+
     private static let storageKey = "app.amber.ios.settings"
     private static let apiKeyKeychainAccount = "app.amber.ios.apiKey"
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let storageKey: String
     @ObservationIgnored private let apiKeyStore: any SettingsAPIKeyStore
+    private static let chatMaxToolResumeCountKey = IOSExecutionPreferenceKeys.chatMaxToolResumeCount
 
     init(
         userDefaults: UserDefaults = .standard,

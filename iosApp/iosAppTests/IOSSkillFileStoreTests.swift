@@ -68,6 +68,23 @@ final class IOSSkillFileStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.readSkillMarkdown(dirName: name))
     }
 
+    func testRequiredBuiltinCannotBeEditedOrDeletedAfterSeeding() throws {
+        let store = IOSSkillFileStore(baseDirectory: tempRoot())
+        let name = try XCTUnwrap(IOSBuiltinSkills.requiredNames.first)
+        let markdown = try XCTUnwrap(IOSBuiltinSkills.markdown(for: name))
+        try store.saveSkillFiles(files: ["SKILL.md": markdown], allowBuiltinSkill: true)
+
+        XCTAssertThrowsError(
+            try store.saveSkillMarkdown(dirName: name, expectedName: name, content: markdown)
+        ) { error in
+            XCTAssertEqual(error as? IOSSkillFileStoreError, .builtinSkillProtected(name))
+        }
+        XCTAssertThrowsError(try store.deleteSkill(dirName: name)) { error in
+            XCTAssertEqual(error as? IOSSkillFileStoreError, .builtinSkillProtected(name))
+        }
+        XCTAssertEqual(try store.readSkillMarkdown(dirName: name), markdown)
+    }
+
     private func tempRoot() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ios-skill-file-store-\(UUID().uuidString)", isDirectory: true)

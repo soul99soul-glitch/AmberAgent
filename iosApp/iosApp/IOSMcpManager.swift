@@ -69,33 +69,24 @@ final class IOSMcpManager {
         }
 
         for server in servers {
-            guard server.enabled else {
-                clientsByServer[server.name]?.disconnect()
-                clientsByServer.removeValue(forKey: server.name)
-                statusByServer[server.name] = .idle
-                continue
-            }
-
-            statusByServer[server.name] = .connecting
-            let client = clientsByServer[server.name] ?? clientFactory(server)
-            clientsByServer[server.name] = client
-
-            do {
-                _ = try await client.connect(config: server)
-                let listedTools = try await client.listTools()
-                let mergedTools = discoveredToolSink(server.name, listedTools) ?? Self.mergeDiscoveredTools(
-                    discovered: listedTools,
-                    existing: server.tools
-                )
-                if let index = servers.firstIndex(where: { $0.name == server.name }) {
-                    servers[index] = server.withTools(mergedTools)
-                }
-                tools.append(contentsOf: mergedTools.map { IOSMcpDiscoveredTool(serverName: server.name, tool: $0) })
-                statusByServer[server.name] = .connected
-            } catch {
-                statusByServer[server.name] = .error(error.localizedDescription)
-            }
+            await sync(server: server)
         }
+    }
+
+    /// Refreshes exactly one configured server. Management-tool tests must not
+    /// contact every enabled MCP server as a side effect.
+    func sync(serverName: String) async {
+        guard isEnabled() else {
+            disconnectAll()
+            servers = []
+            tools = []
+            statusByServer = [:]
+            return
+        }
+        refreshServers()
+        guard let server = servers.first(where: { $0.name == serverName }) else { return }
+        tools.removeAll { $0.serverName == serverName }
+        await sync(server: server)
     }
 
     func callTool(serverName: String, toolName: String, arguments: [String: Any]) async throws -> String {
@@ -203,7 +194,7 @@ final class IOSMcpManager {
                 lastReconnectAttemptByServer[server.name] = nil
                 retried.append(serverName)
             } catch {
-                statusByServer[server.name] = .error(error.localizedDescription)
+                statusByServer[server.name] = .error(IOSWebMountRedactor.redactedText(error.localizedDescription))
             }
         }
         return retried
@@ -213,7 +204,41 @@ final class IOSMcpManager {
         let existingByName = Dictionary(uniqueKeysWithValues: existing.map { ($0.name, $0) })
         return discovered.map { tool in
             guard let old = existingByName[tool.name] else { return tool }
-            return IOSMcpTool(name: tool.name, description: tool.description ?? old.description, enabled: old.enabled)
+            return IOSMcpTool(
+                name: tool.name,
+                description: tool.description ?? old.description,
+                enabled: old.enabled,
+                inputSchema: tool.inputSchema ?? old.inputSchema
+            )
+        }
+    }
+
+    private func sync(server: IOSMcpServerConfig) async {
+        guard server.enabled else {
+            clientsByServer[server.name]?.disconnect()
+            clientsByServer.removeValue(forKey: server.name)
+            statusByServer[server.name] = .idle
+            return
+        }
+
+        statusByServer[server.name] = .connecting
+        let client = clientsByServer[server.name] ?? clientFactory(server)
+        clientsByServer[server.name] = client
+
+        do {
+            _ = try await client.connect(config: server)
+            let listedTools = try await client.listTools()
+            let mergedTools = discoveredToolSink(server.name, listedTools) ?? Self.mergeDiscoveredTools(
+                discovered: listedTools,
+                existing: server.tools
+            )
+            if let index = servers.firstIndex(where: { $0.name == server.name }) {
+                servers[index] = server.withTools(mergedTools)
+            }
+            tools.append(contentsOf: mergedTools.map { IOSMcpDiscoveredTool(serverName: server.name, tool: $0) })
+            statusByServer[server.name] = .connected
+        } catch {
+            statusByServer[server.name] = .error(IOSWebMountRedactor.redactedText(error.localizedDescription))
         }
     }
 

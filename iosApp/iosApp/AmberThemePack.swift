@@ -341,6 +341,7 @@ struct AmberThemePack: Identifiable, Equatable, Hashable {
     func matches(runtime: AmberThemeRuntime) -> Bool {
         paper == runtime.paper
             && accent.accentHex == runtime.accentHex
+            && accent.inkHex == runtime.accentInkHex
             && canvasStyle == runtime.canvasStyle
             && brandMark == runtime.brandMarkStyle
             && shortcutIconStyle == runtime.shortcutIconStyle
@@ -428,6 +429,7 @@ struct AmberThemePackDocument: Codable, Equatable, Sendable {
 }
 
 enum AmberThemePackTransferError: LocalizedError, Equatable {
+    case fileTooLarge
     case invalidJSON
     case invalidFormat(String)
     case unsupportedVersion(Int)
@@ -442,6 +444,8 @@ enum AmberThemePackTransferError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .fileTooLarge:
+            "主题文件不能超过 1 MB"
         case .invalidJSON:
             "无法解析 JSON"
         case .invalidFormat(let value):

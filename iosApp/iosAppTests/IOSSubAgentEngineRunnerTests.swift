@@ -39,6 +39,7 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
         private(set) var seenTemperature: Float?
         private(set) var seenMaxTokens: Int32?
         private(set) var seenCustomHeaderNames: [String] = []
+        private(set) var seenMessages: [UIMessage] = []
         init(_ script: [UIMessage]) { self.script = script }
 
         func generateText(
@@ -52,6 +53,7 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
             seenTemperature = params.temperature.map { Float(truncating: $0) }
             seenMaxTokens = params.maxTokens.map { Int32(truncating: $0) }
             seenCustomHeaderNames = params.customHeaders.map(\.name)
+            seenMessages = messages
             if !script.isEmpty {
                 let msg = script.removeFirst()
                 return chunk(with: msg)
@@ -353,6 +355,85 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
         XCTAssertTrue(provider.seenToolNames.contains("subagent_report"))
     }
 
+    func testRunViaEngineCapsParentMaxTokensToRoleOutputBudget() async {
+        let provider = ScriptedProvider([
+            makeMessage(role: MessageRole.assistant, parts: [UIMessagePart.Text(text: "Done.", metadata: nil)])
+        ])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-budget-cap-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        ))
+        let model = Model(
+            modelId: "parent-model",
+            displayName: "Parent Model",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let baseParams = TextGenerationParams(
+            model: model,
+            temperature: nil,
+            topP: nil,
+            maxTokens: KotlinInt(value: 16_000),
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+
+        _ = await runner.runViaEngine(
+            objective: "Respect the requested output budget",
+            outputBudgetCharsOverride: 4_000,
+            providerSetting: makeProviderSetting(),
+            modelId: "fallback-model",
+            baseParams: baseParams,
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        XCTAssertEqual(provider.seenMaxTokens, 1_000)
+    }
+
+    func testStandaloneEngineUsesSavedRolePromptOverride() async {
+        let provider = ScriptedProvider([
+            makeMessage(role: MessageRole.assistant, parts: [UIMessagePart.Text(text: "Done.", metadata: nil)])
+        ])
+        let settings = IOSSharedSettingsStore(
+            userDefaults: UserDefaults(suiteName: "subagent-role-override-\(UUID().uuidString)")!
+        )
+        settings.addCustomModel(name: "Override Model", modelId: "override-model", providerName: "Override Provider")
+        if let added = settings.snapshot.providers.last as? ProviderSetting.OpenAI,
+           let model = added.models.first {
+            settings.setCurrentChatModelId(model.id.description())
+        }
+        settings.addSubAgentOverride(roleId: "explorer", systemPrompt: "SAVED_ROLE_OVERRIDE_SENTINEL")
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-role-task-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        ))
+
+        _ = await SubAgentsView.dispatchStandalone(
+            objective: "Use the saved role",
+            roleId: "explorer",
+            sharedSettings: settings,
+            runner: runner,
+            provider: provider
+        )
+
+        let systemText = provider.seenMessages
+            .filter { $0.role == MessageRole.system }
+            .map { $0.toText() }
+            .joined(separator: "\n")
+        XCTAssertTrue(systemText.contains("SAVED_ROLE_OVERRIDE_SENTINEL"), systemText)
+    }
+
     func testRunViaEnginePersistsProviderFailureInsteadOfCompletion() async throws {
         let store = IOSAdvancedTaskStore(
             userDefaults: UserDefaults(suiteName: "subagent-provider-failure-\(UUID().uuidString)")!,
@@ -399,6 +480,35 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
         XCTAssertTrue(output.contains("\"status\":\"cancelled\""))
     }
 
+    func testCancelCurrentRunCancelsStandaloneEngineTask() async throws {
+        let store = IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-ui-cancelled-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        )
+        let runner = SubAgentRunner(taskStore: store)
+        let run = Task {
+            await runner.runViaEngine(
+                objective: "Cancel from the standalone UI",
+                providerSetting: makeProviderSetting(),
+                modelId: "test-model",
+                parentToolExecutors: [:],
+                provider: SuspendedProvider()
+            )
+        }
+
+        for _ in 0..<100 where !runner.hasActiveEngineRunForTesting {
+            await Task.yield()
+        }
+        XCTAssertTrue(runner.hasActiveEngineRunForTesting)
+        runner.cancelCurrentRun()
+        let output = await run.value
+
+        let task = try XCTUnwrap(store.recent(kind: .subAgent, limit: 1).first)
+        XCTAssertEqual(task.status, .cancelled)
+        XCTAssertTrue(output.contains("\"status\":\"cancelled\""), output)
+        XCTAssertFalse(runner.hasActiveEngineRunForTesting)
+    }
+
     func testRunViaEngineEnforcesRoleTimeoutInsteadOfReportingCompletion() async throws {
         let store = IOSAdvancedTaskStore(
             userDefaults: UserDefaults(suiteName: "subagent-timeout-\(UUID().uuidString)")!,
@@ -418,5 +528,163 @@ final class IOSSubAgentEngineRunnerTests: XCTestCase {
         let task = try XCTUnwrap(store.recent(kind: .subAgent, limit: 1).first)
         XCTAssertEqual(task.status, .timedOut)
         XCTAssertTrue(output.contains("\"status\":\"timed_out\""))
+    }
+
+    // MARK: - G3: unknown role ids, custom roles, budgets, tool_scope
+
+    func testRunViaEngineUnknownRoleIdReturnsStructuredErrorInsteadOfFallingBack() async {
+        let provider = ScriptedProvider([])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-unknown-role-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        ))
+
+        let result = await runner.runViaEngine(
+            objective: "Anything",
+            roleId: "nobody",
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        XCTAssertEqual(provider.callCount, 0, "no model call when the role cannot be resolved")
+        XCTAssertTrue(result.contains("\"ok\":false"), result)
+        XCTAssertTrue(result.contains("Unknown sub-agent role_id"), result)
+        XCTAssertTrue(result.contains("explorer"), result)
+        XCTAssertTrue(result.contains("fixer"), result)
+        XCTAssertFalse(result.contains("\"role_name\""), "must not silently fall back to explorer")
+    }
+
+    func testRunViaEngineCustomRoleAppliesPromptAndClampsBudgets() async {
+        let reportCall = makeMessage(
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Tool(
+                toolCallId: "rep-custom",
+                toolName: "subagent_report",
+                input: "{\"summary\":\"custom role ran\"}",
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            )]
+        )
+        let finalText = makeMessage(role: MessageRole.assistant, parts: [UIMessagePart.Text(text: "Done.", metadata: nil)])
+        let provider = ScriptedProvider([reportCall, finalText])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-custom-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        ))
+
+        let result = await runner.runViaEngine(
+            objective: "Review animation polish",
+            roleId: "explorer",
+            requestedToolScope: [],
+            customRoleName: "Animation Reviewer",
+            customRoleLens: "SwiftUI 动画细节评审",
+            customRolePrompt: "你是一名 SwiftUI 动画评审，专注 120Hz 时序与手感。",
+            maxTurnsOverride: 99,
+            outputBudgetCharsOverride: 999_999,
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        let systemText = provider.seenMessages
+            .filter { $0.role == MessageRole.system }
+            .map { $0.toText() }
+            .joined(separator: "\n")
+        XCTAssertTrue(systemText.contains("你是一名 SwiftUI 动画评审"), systemText)
+        XCTAssertTrue(systemText.contains("Animation Reviewer"), systemText)
+        // Custom role identity + clamped budgets surface in the result.
+        XCTAssertTrue(result.contains("\"role_id\":\"custom\""), result)
+        XCTAssertTrue(result.contains("\"role_name\":\"Animation Reviewer\""), result)
+        // max_turns 99 -> clamped to 8; output budget 999999 -> clamped to 24000
+        // chars, so fallback maxTokens = 24000 / 4.
+        XCTAssertEqual(provider.seenMaxTokens, 6_000)
+    }
+
+    func testRunViaEngineCustomRoleClampsLowBudgetsUpToDefaults() async {
+        let finalText = makeMessage(role: MessageRole.assistant, parts: [UIMessagePart.Text(text: "Done.", metadata: nil)])
+        let provider = ScriptedProvider([finalText])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-custom-low-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        ))
+
+        _ = await runner.runViaEngine(
+            objective: "Tiny custom run",
+            customRolePrompt: "做一件小事。",
+            maxTurnsOverride: 1,
+            outputBudgetCharsOverride: 100,
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        // max_turns 1 -> clamped to 2; output budget 100 -> clamped to 4000 chars.
+        XCTAssertEqual(provider.seenMaxTokens, 1_000)
+    }
+
+    func testRunViaEngineCustomRoleStillDeniedForWriteTools() async {
+        let provider = ScriptedProvider([])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-custom-denied-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        ))
+
+        let result = await runner.runViaEngine(
+            objective: "Write a file",
+            requestedToolScope: ["search_web", "workspace_file_write"],
+            customRolePrompt: "你是一个写文件专家。",
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        XCTAssertEqual(provider.callCount, 0)
+        XCTAssertTrue(result.contains("\"denied\":true"), result)
+        XCTAssertTrue(result.contains("workspace_file_write"), result)
+    }
+
+    func testRunViaEngineToolScopeNarrowsWithinAllowlistAndReportsRemovedTools() async {
+        let reportCall = makeMessage(
+            role: MessageRole.assistant,
+            parts: [UIMessagePart.Tool(
+                toolCallId: "rep-scope",
+                toolName: "subagent_report",
+                input: "{\"summary\":\"scoped run\"}",
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            )]
+        )
+        let finalText = makeMessage(role: MessageRole.assistant, parts: [UIMessagePart.Text(text: "Done.", metadata: nil)])
+        let provider = ScriptedProvider([reportCall, finalText])
+        let runner = SubAgentRunner(taskStore: IOSAdvancedTaskStore(
+            userDefaults: UserDefaults(suiteName: "subagent-scope-\(UUID().uuidString)")!,
+            storageKey: "tasks"
+        ))
+
+        let result = await runner.runViaEngine(
+            objective: "Scoped search",
+            roleId: "explorer",
+            requestedToolScope: ["search_web", "workspace_file_list", "nonsense_tool"],
+            providerSetting: makeProviderSetting(),
+            modelId: "test-model",
+            parentToolExecutors: [:],
+            provider: provider
+        )
+
+        // Unknown/out-of-allowlist tools are narrowed out and reported, not run.
+        XCTAssertTrue(result.contains("\"removed_tools\""), result)
+        XCTAssertTrue(result.contains("nonsense_tool"), result)
+        XCTAssertTrue(provider.seenToolNames.contains("search_web"))
+        XCTAssertTrue(provider.seenToolNames.contains("workspace_file_list"))
+        XCTAssertFalse(provider.seenToolNames.contains("nonsense_tool"))
     }
 }

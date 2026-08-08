@@ -12,6 +12,107 @@ final class IOSMiniAppBridgeRuntimeTests: XCTestCase {
         tempDirs.removeAll()
     }
 
+    func testBridgeMessagesOnlyComeFromInitialMainDocument() {
+        XCTAssertTrue(IOSMiniAppNavigationTrustPolicy.trustsInitialDocument(
+            isAwaitingTrustedDocument: true,
+            isOtherNavigation: true,
+            targetIsMainFrame: nil,
+            url: nil
+        ), "loadHTMLString may report nil URL and target frame for its initial navigation")
+        XCTAssertFalse(IOSMiniAppNavigationTrustPolicy.trustsInitialDocument(
+            isAwaitingTrustedDocument: true,
+            isOtherNavigation: true,
+            targetIsMainFrame: false,
+            url: nil
+        ), "a nil-URL subframe must not gain document trust")
+        XCTAssertFalse(IOSMiniAppNavigationTrustPolicy.trustsInitialDocument(
+            isAwaitingTrustedDocument: false,
+            isOtherNavigation: true,
+            targetIsMainFrame: true,
+            url: nil
+        ), "a later nil-URL navigation must not gain document trust")
+        XCTAssertFalse(IOSMiniAppNavigationTrustPolicy.trustsInitialDocument(
+            isAwaitingTrustedDocument: true,
+            isOtherNavigation: true,
+            targetIsMainFrame: true,
+            url: URL(string: "blob:null/attacker")
+        ))
+        XCTAssertTrue(IOSMiniAppNavigationTrustPolicy.preservesTrustedFragmentNavigation(
+            isTrustedDocument: true,
+            isAwaitingTrustedDocument: false,
+            isReloadNavigation: false,
+            targetIsMainFrame: true,
+            currentURL: URL(string: "about:blank"),
+            requestedURL: URL(string: "about:blank#section")!
+        ))
+        XCTAssertFalse(IOSMiniAppNavigationTrustPolicy.preservesTrustedFragmentNavigation(
+            isTrustedDocument: true,
+            isAwaitingTrustedDocument: false,
+            isReloadNavigation: true,
+            targetIsMainFrame: true,
+            currentURL: URL(string: "about:blank#section"),
+            requestedURL: URL(string: "about:blank#section")!
+        ), "a real reload must reacquire document trust")
+        for url in ["about:blank", "data:text/html,attacker", "blob:null/attacker"] {
+            XCTAssertFalse(IOSMiniAppNavigationTrustPolicy.preservesTrustedFragmentNavigation(
+                isTrustedDocument: true,
+                isAwaitingTrustedDocument: false,
+                isReloadNavigation: false,
+                targetIsMainFrame: true,
+                currentURL: URL(string: "about:blank"),
+                requestedURL: URL(string: url)!
+            ))
+        }
+        XCTAssertTrue(IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: true,
+            isMainFrame: true,
+            frameURL: URL(string: "about:blank"),
+            mainDocumentURL: URL(string: "about:blank")
+        ))
+        XCTAssertTrue(IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: true,
+            isMainFrame: true,
+            frameURL: URL(string: "about:blank#section"),
+            mainDocumentURL: URL(string: "about:blank#section")
+        ), "same-document fragment navigation must retain bridge access")
+        XCTAssertTrue(IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: true,
+            isMainFrame: true,
+            frameURL: nil,
+            mainDocumentURL: URL(string: "about:blank")
+        ), "loadHTMLString may omit frameInfo.request.url; its about:blank main document must retain bridge access")
+        XCTAssertTrue(IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: true,
+            isMainFrame: true,
+            frameURL: URL(string: "about:blank"),
+            mainDocumentURL: nil
+        ), "WKWebView.url may be nil during an early loadHTMLString bridge message")
+        XCTAssertFalse(IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: true,
+            isMainFrame: false,
+            frameURL: URL(string: "about:blank"),
+            mainDocumentURL: URL(string: "about:blank")
+        ))
+        XCTAssertFalse(IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: true,
+            isMainFrame: true,
+            frameURL: URL(string: "blob:null/attacker"),
+            mainDocumentURL: URL(string: "blob:null/attacker")
+        ))
+        XCTAssertFalse(IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: true,
+            isMainFrame: true,
+            frameURL: URL(string: "data:text/html,attacker"),
+            mainDocumentURL: URL(string: "data:text/html,attacker")
+        ))
+        XCTAssertFalse(IOSMiniAppBridgeDocumentPolicy.allowsMessage(
+            isTrustedDocument: false,
+            isMainFrame: true,
+            frameURL: URL(string: "about:blank"),
+            mainDocumentURL: URL(string: "about:blank")
+        ), "a newly navigated document must not inherit the validated document's native bridge trust")
+    }
+
     func testRunnerCSPBlocksDirectBrowserNetworkAndKeepsInlineAppCode() {
         let html = "<!doctype html><html><head></head><body><script>fetch('https://example.com')</script></body></html>"
 

@@ -1,6 +1,9 @@
 @preconcurrency import BackgroundTasks
 import Foundation
+import OSLog
 @preconcurrency import Shared
+
+private let backgroundRunLedgerLogger = Logger(subsystem: "app.amber.ios", category: "chat-bg-ledger")
 
 private struct IOSChatBackgroundRuntimeJob {
     let runId: String
@@ -466,11 +469,21 @@ final class IOSChatBackgroundGenerationCoordinator {
             } else {
                 cancelledMessages = latestMessages
             }
-            let didPersistTerminal = await job.conversationStore.saveBackgroundToolCompletion(
-                baseMessages: job.displayMessages,
-                completedMessages: cancelledMessages,
-                to: job.conversationId
-            )
+            let didPersistTerminal: Bool
+            switch job.mode {
+            case .continueModel:
+                didPersistTerminal = await job.conversationStore.saveBackgroundCompletion(
+                    baseMessages: job.displayMessages,
+                    completedMessages: cancelledMessages,
+                    to: job.conversationId
+                )
+            case .singleToolOnly:
+                didPersistTerminal = await job.conversationStore.saveBackgroundToolCompletion(
+                    baseMessages: job.displayMessages,
+                    completedMessages: cancelledMessages,
+                    to: job.conversationId
+                )
+            }
             await self.recordRun(
                 job.runId,
                 startedAt: job.startedAt,
@@ -702,6 +715,10 @@ final class IOSChatBackgroundGenerationCoordinator {
                 params: requestParams,
                 runId: job.runId
             ),
+            // G7: 后台续跑步数上限保持 6（引擎默认 8）。理由：后台续跑是前台预算
+            // 之外的第二道防线，跑在无人盯屏的电池/流量预算上；前台上限已参数化
+            // （默认 12），交互式长链由前台设置自控，后台保持较短预算以约束静默耗电。
+            // 若后续发现后台续跑频繁在 6 步被掐断，再同步到引擎默认 8。
             configuration: .init(maxSteps: 6, honorApprovalPause: false),
             ledger: toolLedger,
             ledgerRunId: job.runId
@@ -763,10 +780,12 @@ final class IOSChatBackgroundGenerationCoordinator {
                       ) else {
                     return initialResult
                 }
-                var retryBase = initialResult.messages
-                if retryBase.last?.role == MessageRole.assistant {
-                    retryBase.removeLast()
-                }
+                let retryBase = IOSGenerativeUiRequestPolicy.retryBaseMessages(initialResult.messages)
+                let retryDisplayMessages = Self.reconciledMessages(
+                    resultMessages: retryBase,
+                    uploadMessageCount: job.uploadMessages.count,
+                    displayMessages: job.displayMessages
+                )
                 let retryMessages = IOSGenerativeUiRequestPolicy.retryMessages(
                     retryBase,
                     requirement: job.generativeUiRequirement,
@@ -781,9 +800,19 @@ final class IOSChatBackgroundGenerationCoordinator {
                     for: job,
                     requestId: backgroundTask.identifier,
                     uploadMessages: retryUpload.values,
+                    displayMessages: retryDisplayMessages,
                     params: retryParams
                 ) else {
-                    return initialResult
+                    return IOSAgentToolEngineResult(
+                        messages: initialResult.messages,
+                        stepsExecuted: initialResult.stepsExecuted,
+                        pendingApproval: initialResult.pendingApproval,
+                        hitStepLimit: initialResult.hitStepLimit,
+                        providerFailureMessage: "Unable to persist the required visual retry checkpoint.",
+                        hitOutputLimit: initialResult.hitOutputLimit,
+                        wasCancelled: initialResult.wasCancelled,
+                        guardStopped: initialResult.guardStopped
+                    )
                 }
                 let retryResult = await engine.run(
                     providerSetting: requestProvider,
@@ -812,12 +841,12 @@ final class IOSChatBackgroundGenerationCoordinator {
                     },
                     onMessagesUpdated: { messages in
                         job.messagesSnapshot.replace(
-                            with: job.uploadMessages + Array(messages.dropFirst(retryUploadMessageCount))
+                            with: retryBase + Array(messages.dropFirst(retryUploadMessageCount))
                         )
                     }
                 )
                 return IOSAgentToolEngineResult(
-                    messages: job.uploadMessages + Array(retryResult.messages.dropFirst(retryUploadMessageCount)),
+                    messages: retryBase + Array(retryResult.messages.dropFirst(retryUploadMessageCount)),
                     stepsExecuted: retryResult.stepsExecuted,
                     pendingApproval: retryResult.pendingApproval,
                     hitStepLimit: retryResult.hitStepLimit,
@@ -846,13 +875,23 @@ final class IOSChatBackgroundGenerationCoordinator {
         progress.completedUnitCount = 3
         backgroundTask.updateTitle("Amber 后台生成", subtitle: "正在保存结果")
 
-        let reconciledMessages = job.mode == .continueModel
+        var reconciledMessages = job.mode == .continueModel
             ? Self.reconciledMessages(
                 resultMessages: result.messages,
                 uploadMessageCount: job.uploadMessages.count,
                 displayMessages: job.displayMessages
             )
             : result.messages
+        if job.mode == .continueModel,
+           IOSGenerativeUiRequestPolicy.widgetIssue(
+               in: reconciledMessages,
+               afterDisplayMessageCount: job.displayMessages.count,
+               requirement: job.generativeUiRequirement
+           ) != nil {
+            reconciledMessages = IOSGenerativeUiRequestPolicy.terminalRepairFailureMessages(
+                reconciledMessages
+            )
+        }
         let generatedSuffix = job.mode == .continueModel
             ? Array(reconciledMessages.dropFirst(job.displayMessages.count))
             : []
@@ -860,7 +899,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             await completeTruncatedAfterTerminalReservation(
                 job: job,
                 backgroundTask: backgroundTask,
-                runState: runState
+                runState: runState,
+                reconciledMessages: reconciledMessages
             )
             return
         }
@@ -1036,13 +1076,10 @@ final class IOSChatBackgroundGenerationCoordinator {
     private func completeTruncatedAfterTerminalReservation(
         job: IOSChatBackgroundRuntimeJob,
         backgroundTask: BGContinuedProcessingTask,
-        runState: IOSChatBackgroundRunState
+        runState: IOSChatBackgroundRunState,
+        reconciledMessages: [UIMessage]
     ) async {
-        var finalMessages = Self.reconciledMessages(
-            resultMessages: job.messagesSnapshot.messages,
-            uploadMessageCount: job.uploadMessages.count,
-            displayMessages: job.displayMessages
-        )
+        var finalMessages = reconciledMessages
         if job.toolRuntime.hasUnresolvedToolCall(in: finalMessages) {
             finalMessages = job.toolRuntime.messagesByFailingPendingToolCalls(
                 in: finalMessages,
@@ -1485,6 +1522,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         for job: IOSChatBackgroundRuntimeJob,
         requestId: String,
         uploadMessages: [UIMessage],
+        displayMessages: [UIMessage],
         params: TextGenerationParams
     ) -> Bool {
         let handoff = IOSChatBackgroundHandoff(
@@ -1496,7 +1534,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             providerSetting: job.providerSetting,
             params: params,
             uploadMessages: uploadMessages,
-            displayMessages: job.displayMessages,
+            displayMessages: displayMessages,
             mode: job.mode,
             generativeUiRequirement: job.generativeUiRequirement,
             generativeUiFallbackAttempted: true
@@ -1620,7 +1658,16 @@ final class IOSChatBackgroundGenerationCoordinator {
                 }
             }
         } catch {
-            print("[AmberChatBG] Failed to insert agent_run: \(error)")
+            // agent_run 是强杀恢复（applyToolCallLedgerRecovery）依赖的账本，
+            // 写失败必须走用户可见错误通道，不能只 print 静默吞掉。
+            let detail = "未能写入运行账本：\(error)"
+            if let store = dependencies?.conversationStore {
+                store.publishUserVisibleError(
+                    IOSUserVisibleError(title: "运行状态记录失败", message: detail, severity: .error)
+                )
+            } else {
+                backgroundRunLedgerLogger.error("\(detail)")
+            }
         }
     }
 

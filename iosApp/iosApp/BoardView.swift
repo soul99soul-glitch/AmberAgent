@@ -654,32 +654,6 @@ private struct BoardSignalPreviewItem: Identifiable {
     }
 }
 
-private struct BoardSignalPreview: View {
-    let signals: [BoardSignalPreviewItem]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("本次使用的线索")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.foreground)
-            ForEach(signals) { signal in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(signal.title)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.foreground2)
-                    Text(BoardSourceLabels.title(for: signal.sourceType))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(AmberTheme.muted2)
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(10)
-        .background(AmberTheme.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-}
-
 private struct IOSDeepReadHistoryRow: View {
     let task: IOSDeepReadTask
 
@@ -1318,12 +1292,28 @@ struct IOSDeepReadTaskDetailView: View {
 }
 
 #if canImport(WebKit)
+enum IOSDeepReadNavigationPolicy {
+    static func allowsInitialDocument(
+        url: URL?,
+        isMainFrame: Bool,
+        isOtherNavigation: Bool,
+        isAwaitingInitialDocument: Bool,
+        allowedDocumentURLs: [String] = ["about:blank"]
+    ) -> Bool {
+        guard isAwaitingInitialDocument, isMainFrame, isOtherNavigation, let url else { return false }
+        return allowedDocumentURLs.contains {
+            $0.caseInsensitiveCompare(url.absoluteString) == .orderedSame
+        }
+    }
+}
+
 struct IOSDeepReadTemplateWebView: UIViewRepresentable {
     let html: String
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        configuration.websiteDataStore = .nonPersistent()
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.isOpaque = false
@@ -1335,7 +1325,8 @@ struct IOSDeepReadTemplateWebView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         let validation = IOSDeepReadTemplateValidator.validateHTML(html, requirePlaceholders: false)
         let safeHTML = validation.ok ? html : "<html><body><p>模板校验失败：\(validation.error ?? "未知错误")</p></body></html>"
-        webView.loadHTMLString(safeHTML, baseURL: nil)
+        context.coordinator.prepareForInitialDocument()
+        webView.loadHTMLString(IOSDeepReadHTMLSecurity.hardenedDocument(safeHTML), baseURL: nil)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -1343,16 +1334,27 @@ struct IOSDeepReadTemplateWebView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate {
+        private var isAwaitingInitialDocument = false
+
+        func prepareForInitialDocument() {
+            isAwaitingInitialDocument = true
+        }
+
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
-            guard navigationAction.navigationType == .other else {
-                decisionHandler(.cancel)
-                return
+            let shouldAllow = IOSDeepReadNavigationPolicy.allowsInitialDocument(
+                url: navigationAction.request.url,
+                isMainFrame: navigationAction.targetFrame?.isMainFrame == true,
+                isOtherNavigation: navigationAction.navigationType == .other,
+                isAwaitingInitialDocument: isAwaitingInitialDocument
+            )
+            if shouldAllow {
+                isAwaitingInitialDocument = false
             }
-            decisionHandler(.allow)
+            decisionHandler(shouldAllow ? .allow : .cancel)
         }
     }
 }
@@ -1381,6 +1383,7 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
         let configuration = WKWebViewConfiguration()
         // Needed so we can measure `article` height after load (static HTML only).
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        configuration.websiteDataStore = .nonPersistent()
         // Serve the app-bundled reader fonts (Noto Serif SC / JetBrains Mono) to the
         // page's @font-face via a custom scheme.
         configuration.setURLSchemeHandler(IOSDeepReadFontSchemeHandler(), forURLScheme: IOSDeepReadFontSchemeHandler.scheme)
@@ -1399,11 +1402,16 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
         guard context.coordinator.loadedHTML != html else { return }
         context.coordinator.loadedHTML = html
         context.coordinator.lastHeight = 0
+        webView.stopLoading()
+        context.coordinator.prepareForInitialDocument()
         // Load from a handler-less origin so the main frame is NOT routed to the font
         // scheme handler (a registered scheme as the document base URL gets the main
         // request handed to the handler → fail → blank page). Fonts then load
         // cross-origin via the handler's Access-Control-Allow-Origin: * response.
-        webView.loadHTMLString(html, baseURL: URL(string: IOSDeepReadFontSchemeHandler.documentBaseURL))
+        webView.loadHTMLString(
+            IOSDeepReadHTMLSecurity.hardenedDocument(html),
+            baseURL: URL(string: IOSDeepReadFontSchemeHandler.documentBaseURL)
+        )
     }
 
     func makeCoordinator() -> Coordinator {
@@ -1415,9 +1423,14 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
         var loadedHTML: String?
         var lastHeight: CGFloat = 0
         private var remeasureTask: Task<Void, Never>?
+        private var isAwaitingInitialDocument = false
 
         init(onHeight: @escaping @MainActor (CGFloat) -> Void) {
             self.onHeight = onHeight
+        }
+
+        func prepareForInitialDocument() {
+            isAwaitingInitialDocument = true
         }
 
         /// Prefer measuring the laid-out `article` via JS. UIScrollView.contentSize
@@ -1495,16 +1508,25 @@ struct IOSDeepReadEditorialWebView: UIViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
-            // The initial loadHTMLString is `.other` → allow; a tapped source link
-            // opens in the system browser instead of navigating inside the reader.
             if navigationAction.navigationType == .linkActivated {
-                if let url = navigationAction.request.url {
+                if let url = navigationAction.request.url,
+                   ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                     UIApplication.shared.open(url)
                 }
                 decisionHandler(.cancel)
                 return
             }
-            decisionHandler(navigationAction.navigationType == .other ? .allow : .cancel)
+            let shouldAllow = IOSDeepReadNavigationPolicy.allowsInitialDocument(
+                url: navigationAction.request.url,
+                isMainFrame: navigationAction.targetFrame?.isMainFrame == true,
+                isOtherNavigation: navigationAction.navigationType == .other,
+                isAwaitingInitialDocument: isAwaitingInitialDocument,
+                allowedDocumentURLs: ["about:blank", IOSDeepReadFontSchemeHandler.documentBaseURL]
+            )
+            if shouldAllow {
+                isAwaitingInitialDocument = false
+            }
+            decisionHandler(shouldAllow ? .allow : .cancel)
         }
     }
 }
@@ -1546,90 +1568,6 @@ struct BoardCapabilityNote: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .padding(.top, 7)
-    }
-}
-
-private struct BoardCollectorStatusRow: View {
-    let status: IOSBoardCollectorStatus
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: status.errorMessage == nil ? "checkmark.circle" : "exclamationmark.triangle")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(status.errorMessage == nil ? AmberTheme.accentGreen : AmberTheme.accentAmber)
-                .frame(width: 30, height: 30)
-                .background(AmberTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(BoardSourceLabels.title(for: status.sourceType))
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("\(status.ingestedCount)/\(status.collectedCount)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(status.ingestedCount > 0 ? AmberTheme.accentGreen : AmberTheme.foreground2)
-                if status.duplicateCount > 0 {
-                    Text("去重 \(status.duplicateCount)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(AmberTheme.muted2)
-                }
-            }
-        }
-        .frame(minHeight: 58)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-    }
-
-    private var subtitle: String {
-        if let error = status.errorMessage, !error.isEmpty {
-            return error
-        }
-        if let title = status.latestTitle, !title.isEmpty {
-            return "最近：\(title)"
-        }
-        if let message = status.statusMessage, !message.isEmpty {
-            return message
-        }
-        return "暂无新信号"
-    }
-}
-
-private struct BoardRecentSignalRow: View {
-    let signal: IOSBoardSignalRecord
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 8) {
-                Text(BoardSourceLabels.title(for: signal.sourceType))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.accent)
-                Text(signal.processed ? "已使用" : "待使用")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(signal.processed ? AmberTheme.muted2 : AmberTheme.accentAmber)
-            }
-
-            Text(signal.title)
-                .font(.caption)
-                .foregroundStyle(AmberTheme.foreground2)
-                .lineLimit(2)
-
-            Text(IOSBoardDateFormatters.monthDayTime.string(from: Date(timeIntervalSince1970: TimeInterval(signal.signalTime) / 1_000)))
-                .font(.system(size: 10))
-                .foregroundStyle(AmberTheme.muted2)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
     }
 }
 

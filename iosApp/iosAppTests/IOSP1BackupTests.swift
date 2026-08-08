@@ -45,6 +45,30 @@ final class IOSP1BackupTests: XCTestCase {
         XCTAssertEqual(Set(documents), ["{\"id\":\"a\"}", "{\"id\":\"b\"}"])
     }
 
+    func testConversationBackupExcludesListMetadataSidecars() throws {
+        let dir = try makeTempDir("ConvSidecars")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try #"{"id":"conversation-1"}"#.write(
+            to: dir.appendingPathComponent("conversation-1.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"{"conversation-1":"preview"}"#.write(
+            to: dir.appendingPathComponent("list-previews.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try #"{"conversation-1":"sparkles"}"#.write(
+            to: dir.appendingPathComponent("list-icons.json"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let zip = try XCTUnwrap(IOSSyncBackup.conversationsZip(fromDirectory: dir))
+
+        XCTAssertEqual(try IOSSyncBackup.conversationDocuments(zipData: zip), [#"{"id":"conversation-1"}"#])
+    }
+
     func testRestoreConversationsRoundTripsIntoDirectory() throws {
         let sourceDir = try makeTempDir("ConvSrc")
         let destDir = try makeTempDir("ConvDest")

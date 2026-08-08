@@ -43,6 +43,20 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertFalse(settings.contains("projectID:"))
     }
 
+    /// G7 接线闭环：设置页可见控件（Stepper）、UserDefaults key、运行时消费
+    /// （coordinator 从 SettingsStore 读上限）三处齐备。
+    func testChatToolResumeCapIsWiredThroughExecutionSettings() throws {
+        let view = try source("iosApp/ExecutionSettingsView.swift")
+        let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
+        let store = try source("iosApp/SettingsStore.swift")
+
+        XCTAssertTrue(view.contains("@AppStorage(IOSExecutionPreferenceKeys.chatMaxToolResumeCount)"))
+        XCTAssertTrue(view.contains("Stepper("))
+        XCTAssertTrue(view.contains("chatMaxToolResumeCountRange"))
+        XCTAssertTrue(store.contains("chatMaxToolResumeCount"))
+        XCTAssertTrue(coordinator.contains("dependencies.settingsStore.chatMaxToolResumeCount"))
+    }
+
     func testChatSendKeepsTheComposerKeyboardVisibleWhileStartingGeneration() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let start = try XCTUnwrap(chatView.range(of: "private func sendComposerMessage()"))
@@ -550,7 +564,7 @@ final class IOSSettingsWiringTests: XCTestCase {
     func testBackgroundToolEnginePublishesLiveActivityStagesAtExecutionBoundaries() throws {
         let coordinator = try source("iosApp/IOSChatBackgroundGenerationCoordinator.swift")
         let engine = try source("iosApp/IOSAgentToolEngine.swift")
-        let runStart = try XCTUnwrap(coordinator.range(of: "return await engine.run("))
+        let runStart = try XCTUnwrap(coordinator.range(of: "let initialResult = await engine.run("))
         let runSuffix = String(coordinator[runStart.lowerBound...])
         let runEnd = try XCTUnwrap(runSuffix.range(of: "case .singleToolOnly:"))
         let runBlock = String(runSuffix[..<runEnd.lowerBound])

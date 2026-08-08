@@ -595,7 +595,7 @@ struct CouncilToolApprovalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "person.3.sequence")
+                Image(systemName: request.systemImage)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(AmberTheme.accentIndigo)
                     .frame(width: 30, height: 30)

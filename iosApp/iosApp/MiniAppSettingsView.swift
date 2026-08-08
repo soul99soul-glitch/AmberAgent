@@ -95,7 +95,7 @@ struct MiniAppSettingsView: View {
                 MiniAppCapabilityDivider(leading: 54)
                 MiniAppPresetToggleRow(
                     title: "外链图片",
-                    subtitle: "允许声明 externalImages 权限的小应用加载 HTTPS 图片；未声明或已拒绝时仍会阻止。",
+                    subtitle: "允许已明确授权 externalImages 权限的小应用加载 HTTPS 图片；未授权或已拒绝时会阻止。",
                     systemImage: "photo.on.rectangle.angled",
                     tint: AmberTheme.accentCyan,
                     isOn: Binding(

@@ -81,6 +81,24 @@ final class IOSMemoryPersistenceTests: XCTestCase {
         }
     }
 
+    func testOutOfRangePersistedIdsAreUnreadableAndPreserveBytes() throws {
+        let fixtures = [
+            #"[{"id":2147483648,"content":"bad-id","scope":"core","kind":"note","assistantId":"__global__"}]"#,
+            #"[{"id":1,"content":"bad-link","scope":"core","kind":"note","assistantId":"__global__","supersedesIds":[-2147483649]}]"#,
+        ]
+        for fixture in fixtures {
+            let originalData = Data(fixture.utf8)
+            try withIsolatedPersistence(initialData: originalData) { persistence, fileURL in
+                persistence.load()
+
+                XCTAssertEqual(persistence.loadState, .unreadable)
+                XCTAssertEqual(try Data(contentsOf: fileURL), originalData)
+                XCTAssertFalse(persistence.persist(previousRecords: []))
+                XCTAssertEqual(try Data(contentsOf: fileURL), originalData)
+            }
+        }
+    }
+
     func testWriteFailureRollsBackEntireStore() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("IOSMemoryPersistenceTests-\(UUID().uuidString)", isDirectory: true)

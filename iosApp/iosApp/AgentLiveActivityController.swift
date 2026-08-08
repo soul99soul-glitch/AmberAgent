@@ -3,6 +3,9 @@ import Foundation
 
 enum IOSExecutionPreferenceKeys {
     static let liveActivity = "app.amber.ios.execution.liveActivity"
+    /// G7: 前台单轮工具循环上限（默认 12，clamp 4-24）。与
+    /// ExecutionSettingsView 的 @AppStorage / SettingsStore 共用同一 key。
+    static let chatMaxToolResumeCount = "app.amber.ios.execution.chatMaxToolResumeCount"
 }
 
 struct AgentActivityOwnershipCandidate: Equatable {

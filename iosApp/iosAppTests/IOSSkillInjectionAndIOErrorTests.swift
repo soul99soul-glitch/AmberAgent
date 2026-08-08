@@ -200,6 +200,19 @@ final class IOSSkillInjectionAndIOErrorTests: XCTestCase {
         XCTAssertNil(store.lastUserVisibleError)
     }
 
+    func testListSidecarWriteFailureIsUserVisible() throws {
+        let badBase = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSConversationSidecarError-\(UUID().uuidString)")
+        try "not-a-directory".data(using: .utf8)!.write(to: badBase)
+        defer { try? FileManager.default.removeItem(at: badBase) }
+
+        let store = IOSConversationStore(baseDirectory: badBase)
+        store.setListPreview(id: KotlinUuid.companion.random(), preview: "预览")
+
+        XCTAssertEqual(store.lastIOError?.operation, "保存会话预览")
+        XCTAssertEqual(store.lastUserVisibleError?.title, "会话存储出错")
+    }
+
     func testUserVisibleErrorBusCanPublishNonConversationErrors() {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("IOSUserVisibleError-\(UUID().uuidString)")

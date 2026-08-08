@@ -143,18 +143,23 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertTrue(names.contains("subagent_dispatch"))
         XCTAssertTrue(names.contains("model_council_run"))
         XCTAssertTrue(names.contains("ask_user"))
-        if IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty {
-            XCTAssertTrue(names.contains("ish_handoff"))
-        } else {
-            XCTAssertFalse(names.contains("ish_handoff"))
-            XCTAssertEqual(names.intersection(IOSEmbeddedIshToolCatalog.supportedToolNames), IOSEmbeddedIshToolCatalog.supportedToolNames)
-        }
+        // Workspace read AND write tools are always declared; the approval gate
+        // and the injected workspace policy prompt (not keyword detection) stop
+        // unsanctioned writes.
         XCTAssertTrue(names.contains("workspace_file_list"))
         XCTAssertTrue(names.contains("workspace_file_search"))
-        XCTAssertFalse(names.contains("workspace_file_write"))
-        XCTAssertFalse(names.contains("workspace_file_edit"))
-        XCTAssertFalse(names.contains("workspace_file_move"))
-        XCTAssertFalse(names.contains("workspace_artifact_delete"))
+        XCTAssertTrue(names.contains("workspace_file_write"))
+        XCTAssertTrue(names.contains("workspace_file_edit"))
+        XCTAssertTrue(names.contains("workspace_file_move"))
+        XCTAssertTrue(names.contains("workspace_artifact_delete"))
+        // iSH embedded execution (when compiled in) and external handoff are
+        // both always declared; the model picks per user intent and the
+        // approval gate guards execution.
+        XCTAssertTrue(names.contains("ish_handoff"))
+        XCTAssertEqual(
+            names.intersection(IOSEmbeddedIshToolCatalog.supportedToolNames),
+            IOSEmbeddedIshToolCatalog.supportedToolNames
+        )
         XCTAssertTrue(names.contains("wm_tab_list"))
         XCTAssertTrue(names.contains("wm_tab_new"))
         XCTAssertTrue(names.contains("wm_tab_close"))
@@ -173,7 +178,7 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertTrue(names.contains("wm_wait"))
     }
 
-    func testEmbeddedIshExecutionIsPreferredForPlainIshRequest() {
+    func testEmbeddedIshExecutionAndHandoffBothDeclaredForPlainIshRequest() {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
@@ -184,12 +189,11 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         viewModel.sendMessage()
 
         let names = Set(viewModel.currentToolDeclarationNames())
-        if IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty {
-            XCTAssertTrue(names.contains("ish_handoff"))
-        } else {
-            XCTAssertTrue(names.contains("ios_ish_execute"))
-            XCTAssertFalse(names.contains("ish_handoff"))
-        }
+        XCTAssertTrue(names.contains("ish_handoff"))
+        XCTAssertEqual(
+            names.intersection(IOSEmbeddedIshToolCatalog.supportedToolNames),
+            IOSEmbeddedIshToolCatalog.supportedToolNames
+        )
     }
 
     func testExternalIshHandoffCanBeRequestedExplicitly() {
@@ -204,12 +208,17 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
 
         let names = Set(viewModel.currentToolDeclarationNames())
         XCTAssertTrue(names.contains("ish_handoff"))
-        if !IOSEmbeddedIshToolCatalog.supportedToolNames.isEmpty {
-            XCTAssertFalse(names.contains("ios_ish_execute"))
-        }
+        XCTAssertEqual(
+            names.intersection(IOSEmbeddedIshToolCatalog.supportedToolNames),
+            IOSEmbeddedIshToolCatalog.supportedToolNames
+        )
     }
 
-    func testWorkspaceWriteToolsRequireExplicitFileWriteRequest() {
+    /// Workspace write tools are always declared regardless of the latest user
+    /// message wording — including a message with no write keyword at all. The
+    /// approval gate and the injected workspace policy prompt (not keyword
+    /// detection) are what stop unsanctioned writes.
+    func testWorkspaceWriteToolsAlwaysDeclaredEvenWithoutWriteRequest() {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -222,9 +231,10 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         viewModel.sendMessage()
 
         let markdownDemoNames = Set(viewModel.currentToolDeclarationNames())
-        XCTAssertTrue(markdownDemoNames.contains("workspace_file_list"))
-        XCTAssertFalse(markdownDemoNames.contains("workspace_file_write"))
-        XCTAssertFalse(markdownDemoNames.contains("workspace_file_edit"))
+        XCTAssertEqual(
+            markdownDemoNames.intersection(IOSWorkspaceToolCatalog.supportedToolNames),
+            IOSWorkspaceToolCatalog.supportedToolNames
+        )
 
         let explicitWriteViewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -236,10 +246,10 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         explicitWriteViewModel.sendMessage()
 
         let explicitWriteNames = Set(explicitWriteViewModel.currentToolDeclarationNames())
-        XCTAssertTrue(explicitWriteNames.contains("workspace_file_write"))
-        XCTAssertTrue(explicitWriteNames.contains("workspace_file_edit"))
-        XCTAssertTrue(explicitWriteNames.contains("workspace_file_move"))
-        XCTAssertTrue(explicitWriteNames.contains("workspace_artifact_delete"))
+        XCTAssertEqual(
+            explicitWriteNames.intersection(IOSWorkspaceToolCatalog.supportedToolNames),
+            IOSWorkspaceToolCatalog.supportedToolNames
+        )
     }
 
     func testDisabledAdvancedCapabilityIsNotDeclaredToModel() throws {
@@ -274,6 +284,23 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertFalse(names.contains("ios_ish_execute"))
     }
 
+    /// G7: 前台工具循环上限参数化——默认 12，clamp 4-24，UserDefaults 持久化。
+    func testChatMaxToolResumeCountDefaultsToTwelveAndClamps() {
+        let defaults = isolatedDefaults()
+        let store = SettingsStore(userDefaults: defaults)
+
+        XCTAssertEqual(store.chatMaxToolResumeCount, 12)
+
+        store.chatMaxToolResumeCount = 3
+        XCTAssertEqual(store.chatMaxToolResumeCount, 4)
+
+        store.chatMaxToolResumeCount = 100
+        XCTAssertEqual(store.chatMaxToolResumeCount, 24)
+
+        store.chatMaxToolResumeCount = 9
+        XCTAssertEqual(SettingsStore(userDefaults: defaults).chatMaxToolResumeCount, 9)
+    }
+
     func testLocalToolDeclarationsMatchCatalogAndCapabilityRegistry() {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -288,8 +315,8 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let embeddedIshNames = IOSEmbeddedIshToolCatalog.supportedToolNames
         let webMountNames = IOSWebMountToolCatalog.supportedToolNames
 
-        XCTAssertEqual(paramsNames.intersection(workspaceNames), IOSWorkspaceToolCatalog.readToolNames)
-        XCTAssertEqual(paramsNames.intersection(ishNames), embeddedIshNames.isEmpty ? ishNames : [])
+        XCTAssertEqual(paramsNames.intersection(workspaceNames), workspaceNames)
+        XCTAssertEqual(paramsNames.intersection(ishNames), ishNames)
         XCTAssertEqual(paramsNames.intersection(embeddedIshNames), embeddedIshNames)
         XCTAssertEqual(paramsNames.intersection(webMountNames), webMountNames)
         XCTAssertEqual(executableNames.intersection(workspaceNames), workspaceNames)
@@ -301,5 +328,16 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         viewModel.sendMessage()
         let explicitWriteNames = Set(viewModel.currentToolDeclarationNames())
         XCTAssertEqual(explicitWriteNames.intersection(workspaceNames), workspaceNames)
+
+        let skillViewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: localToolExecutor(),
+            autoGenerateResponses: false
+        )
+        skillViewModel.inputText = "生成一份技能说明"
+        skillViewModel.sendMessage()
+        let skillWriteNames = Set(skillViewModel.currentToolDeclarationNames())
+        XCTAssertEqual(skillWriteNames.intersection(workspaceNames), workspaceNames)
     }
 }

@@ -43,6 +43,32 @@ final class IOSMiniAppRepositoryTests: XCTestCase {
         XCTAssertEqual(repo.versions(appId: app.id).map(\.versionNumber), [3, 2, 1])
     }
 
+    func testRestoreVersionRestoresHistoricalMetadataSnapshot() throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let original = try repo.saveGenerated(output(title: "旧标题", description: "旧描述", html: html("v1")))
+        _ = try XCTUnwrap(repo.saveRevision(
+            appId: original.id,
+            output: IOSMiniAppGeneratedOutput(
+                title: "新标题",
+                description: "新描述",
+                icon: "🆕",
+                category: "info",
+                permissions: ["toast"],
+                html: html("v2")
+            ),
+            expectedBaseVersion: 1
+        ))
+
+        let restored = try XCTUnwrap(repo.restoreVersion(appId: original.id, versionNumber: 1))
+
+        XCTAssertEqual(restored.title, "旧标题")
+        XCTAssertEqual(restored.description, "旧描述")
+        XCTAssertEqual(restored.iconEmoji, "🧪")
+        XCTAssertEqual(restored.category, "tool")
+        XCTAssertEqual(restored.permissions, [])
+        XCTAssertEqual(restored.htmlContent, html("v1"))
+    }
+
     func testGeneratedMutationRollbackRemovesPersistedAppAndVersion() throws {
         let root = tempRoot()
         let repo = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
@@ -86,6 +112,23 @@ final class IOSMiniAppRepositoryTests: XCTestCase {
         let recovered = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
         XCTAssertEqual(recovered.get(mutation.record.id), mutation.record)
         XCTAssertFalse(recovered.hasPendingConversationMutations)
+    }
+
+    func testReconciliationOnlyConsumesMutationsPresentAtScanStart() throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let first = try repo.saveGeneratedMutation(output(title: "扫描前"))
+        let scanSnapshot = repo.pendingConversationMutationIds()
+        let second = try repo.saveGeneratedMutation(output(title: "扫描中"))
+
+        try repo.reconcilePendingConversationMutations(
+            referenced: [IOSMiniAppConversationReference(record: first.record)],
+            mutationIds: scanSnapshot
+        )
+
+        XCTAssertEqual(repo.get(first.record.id), first.record)
+        XCTAssertEqual(repo.get(second.record.id), second.record)
+        XCTAssertTrue(repo.hasPendingConversationMutations)
+        XCTAssertEqual(repo.pendingConversationMutationIds().count, 1)
     }
 
     func testPendingRevisionDoesNotTreatOlderCardAsPersisted() throws {
@@ -160,6 +203,28 @@ final class IOSMiniAppRepositoryTests: XCTestCase {
         let reloaded = IOSMiniAppRepository(baseDirectory: root, seedOnMissingStore: false)
         XCTAssertEqual(reloaded.get(original.id), original)
         XCTAssertEqual(reloaded.versions(appId: original.id).map(\.versionNumber), [1])
+    }
+
+    func testRevisionRollbackRestoresPermissionAndSharedStateSnapshot() throws {
+        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
+        let original = try repo.saveGenerated(output(title: "原版本", permissions: ["storage", "sharedStore"]))
+        try repo.setGrant(appId: original.id, permission: "storage", decision: .allow)
+        try repo.sharedSet(appId: original.id, namespace: nil, key: "value", value: .string("before"))
+        try repo.audit(appId: original.id, method: "before", permission: "storage", summary: "before", payload: "before")
+        let mutation = try XCTUnwrap(repo.saveRevisionMutation(
+            appId: original.id,
+            output: output(title: "新版本", permissions: ["storage", "sharedStore"], html: html("v2")),
+            expectedBaseVersion: 1
+        ))
+        try repo.setGrant(appId: original.id, permission: "storage", decision: .deny)
+        try repo.sharedSet(appId: original.id, namespace: nil, key: "value", value: .string("after"))
+        try repo.audit(appId: original.id, method: "after", permission: "storage", summary: "after", payload: "after")
+
+        XCTAssertTrue(try repo.rollback(mutation))
+
+        XCTAssertEqual(repo.grantDecision(appId: original.id, permission: "storage"), .allow)
+        XCTAssertEqual(try repo.sharedGet(appId: original.id, namespace: nil, key: "value"), .string("before"))
+        XCTAssertEqual(repo.auditLogs(appId: original.id).map(\.method), ["before"])
     }
 
     func testRollbackDoesNotOverwriteLaterMiniAppChanges() throws {

@@ -73,7 +73,8 @@ final class IOSMcpConfigStore {
             return IOSMcpTool(
                 name: discovered.name,
                 description: discovered.description ?? existing.description,
-                enabled: existing.enabled
+                enabled: existing.enabled,
+                inputSchema: discovered.inputSchema ?? existing.inputSchema
             )
         }
         servers[index] = servers[index].withTools(merged)

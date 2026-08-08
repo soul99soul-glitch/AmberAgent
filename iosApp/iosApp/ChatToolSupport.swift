@@ -8,6 +8,7 @@ struct MemoryToolApprovalRequest: Identifiable, Equatable {
     let kind: String?
     let contentPreview: String?
     let targetId: Int?
+    let expectedUpdatedAt: Int64?
     let reason: String
 
     var title: String {
@@ -97,13 +98,38 @@ struct ChatAskUserRequest: Identifiable, Equatable {
     var title: String { "需要你的回答" }
 }
 
+enum CouncilToolApprovalKind: Equatable {
+    case council
+    case subAgent
+}
+
 struct CouncilToolApprovalRequest: Identifiable, Equatable {
     let id: String
+    let kind: CouncilToolApprovalKind
     let objectivePreview: String
     let maxSeats: Int?
     let reason: String
 
-    var title: String { "启动模型议会" }
+    var title: String {
+        switch kind {
+        case .council: "启动模型议会"
+        case .subAgent: "调度子代理"
+        }
+    }
+
+    var capabilityId: String {
+        switch kind {
+        case .council: "ios.agent.model_council_run"
+        case .subAgent: "ios.agent.subagent_dispatch"
+        }
+    }
+
+    var systemImage: String {
+        switch kind {
+        case .council: "person.3.sequence"
+        case .subAgent: "person.crop.circle.badge.gearshape"
+        }
+    }
 }
 
 enum IshToolApprovalMode: String, Equatable {
@@ -263,6 +289,7 @@ enum ChatToolApprovalRequestBuilder {
             kind: preview.kind,
             contentPreview: preview.contentPreview,
             targetId: preview.targetId,
+            expectedUpdatedAt: preview.expectedUpdatedAt,
             reason: reason
         )
     }
@@ -364,8 +391,25 @@ enum ChatToolApprovalRequestBuilder {
         let objective = args?["objective"] as? String ?? toolCall.input
         return CouncilToolApprovalRequest(
             id: ChatToolCallParsing.requestId(for: toolCall),
+            kind: .council,
             objectivePreview: ChatToolCallParsing.truncatedSearchTarget(objective),
             maxSeats: args?["max_seats"] as? Int,
+            reason: reason
+        )
+    }
+
+    static func subAgent(
+        for toolCall: UIMessagePart.Tool,
+        reason: String
+    ) -> CouncilToolApprovalRequest? {
+        guard toolCall.toolName == "subagent_dispatch" else { return nil }
+        let args = ChatToolCallParsing.jsonObject(toolCall.input)
+        let objective = args?["objective"] as? String ?? toolCall.input
+        return CouncilToolApprovalRequest(
+            id: ChatToolCallParsing.requestId(for: toolCall),
+            kind: .subAgent,
+            objectivePreview: ChatToolCallParsing.truncatedSearchTarget(objective),
+            maxSeats: nil,
             reason: reason
         )
     }

@@ -176,6 +176,13 @@ struct IOSMiniAppVersionRecord: Codable, Identifiable, Equatable, Hashable {
     var htmlHash: String
     var changeNote: String?
     var createdAt: Int64
+    // Optional so version records written before metadata snapshots remain readable.
+    var title: String? = nil
+    var description: String? = nil
+    var sourceMessageId: String? = nil
+    var iconEmoji: String? = nil
+    var category: String? = nil
+    var permissions: [String]? = nil
 }
 
 struct IOSMiniAppGrantRecord: Codable, Identifiable, Equatable, Hashable {

@@ -8,6 +8,8 @@ struct ExecutionSettingsView: View {
     @Environment(RouterPath.self) private var router
 
     @AppStorage(IOSExecutionPreferenceKeys.liveActivity) private var liveActivity = true
+    @AppStorage(IOSExecutionPreferenceKeys.chatMaxToolResumeCount)
+    private var chatMaxToolResumeCount = SettingsStore.defaultChatMaxToolResumeCount
     @State private var taskStore = IOSAdvancedTaskStore.shared
 
     var body: some View {
@@ -18,6 +20,7 @@ struct ExecutionSettingsView: View {
                 VStack(spacing: 0) {
                     header
                     runSection
+                    toolLoopSection
                     recentTasksSection
                     liveActivitySection
                 }
@@ -62,6 +65,41 @@ struct ExecutionSettingsView: View {
                 ) {
                     router.navigate(to: .sandbox)
                 }
+            }
+        }
+    }
+
+    private var toolLoopSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "工具循环")
+            AmberFormGroup {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .frame(width: 28, height: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("单轮工具调用上限")
+                            .font(.body)
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text("达到上限后模型会用现有信息总结收尾，并说明未完成的步骤")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Stepper(
+                        "\(SettingsStore.clampChatMaxToolResumeCount(chatMaxToolResumeCount)) 次",
+                        value: $chatMaxToolResumeCount,
+                        in: SettingsStore.chatMaxToolResumeCountRange
+                    )
+                    .fixedSize()
+                }
+                .frame(minHeight: 58)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 4)
             }
         }
     }

@@ -10,56 +10,6 @@ import org.junit.Test
 
 class GenerativeUiPlannerTest {
     @Test
-    fun needsVisibleStreamingFallbackOnlyForVisualRequests() {
-        assertTrue(
-            GenerativeUiPlanner.needsVisibleStreamingFallback(
-                setting = GenerativeUiSetting(enabled = true),
-                messages = listOf(userMessage("画一个流程图解释这件事")),
-            )
-        )
-        assertFalse(
-            GenerativeUiPlanner.needsVisibleStreamingFallback(
-                setting = GenerativeUiSetting(enabled = true),
-                messages = listOf(userMessage("一句话解释")),
-            )
-        )
-        assertFalse(
-            GenerativeUiPlanner.needsVisibleStreamingFallback(
-                setting = GenerativeUiSetting(enabled = true),
-                messages = listOf(userMessage("@Designer 用 guizang 的 skill 做一份瑞士国际主义风的 PPT")),
-            )
-        )
-        assertFalse(
-            GenerativeUiPlanner.needsVisibleStreamingFallback(
-                setting = GenerativeUiSetting(enabled = false),
-                messages = listOf(userMessage("画一个流程图")),
-            )
-        )
-    }
-
-    @Test
-    fun directDrawingRequestsDisableToolDetours() {
-        assertTrue(
-            GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(
-                setting = GenerativeUiSetting(enabled = true),
-                messages = listOf(userMessage("画一下唐代的三省六部制")),
-            )
-        )
-        assertFalse(
-            GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(
-                setting = GenerativeUiSetting(enabled = true),
-                messages = listOf(userMessage("搜索资料后画一个流程图")),
-            )
-        )
-        assertFalse(
-            GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(
-                setting = GenerativeUiSetting(enabled = true),
-                messages = listOf(userMessage("@designer 调用 skill 画一个 PPT")),
-            )
-        )
-    }
-
-    @Test
     fun slashRoutesSeparateDrawAndSvg() {
         val setting = GenerativeUiSetting(enabled = true)
         val drawMessages = listOf(userMessage("[ROUTE:image]\n画一只猫"))
@@ -77,9 +27,7 @@ class GenerativeUiPlannerTest {
         )
 
         assertTrue(drawPrompt.contains("Call the `generate_image` tool"))
-        assertFalse(GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(setting, drawMessages))
         assertTrue(svgPrompt.contains("show-widget SVG"))
-        assertTrue(GenerativeUiPlanner.shouldGenerateDirectWidgetWithoutTools(setting, svgMessages))
         assertFalse(GenerativeUiPlanner.stripVisualRouteTagsForDisplay("[ROUTE:svg]\n画一只猫").contains("[ROUTE:"))
     }
 

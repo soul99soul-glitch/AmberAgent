@@ -536,9 +536,18 @@ final class IOSSharedSettingsStore {
     @discardableResult
     func updateProviderApiKey(providerId: String, apiKey: String) -> ProviderSetting? {
         let before = snapshot
+        let isClearing = apiKey.isEmpty
+        let genericCredentialRefs = isClearing ? genericCredentialRefs(stableId: providerId) : []
         let merged = IosSettingsMutations.shared.updateProviderApiKey(
             settings: before, providerId: providerId, apiKey: apiKey
         )
+        if isClearing {
+            // `restoreSnapshot` rehydrates both credential schemes before it
+            // persists. Remove every old reference first, otherwise an empty
+            // edit is immediately repopulated from Keychain.
+            IOSCredentialSideTable.delete(key: IOSCredentialSideTable.providerApiKey(providerId: providerId))
+            genericCredentialRefs.forEach { IOSCredentialSideTable.delete(key: $0) }
+        }
         restoreSnapshot(merged)
         // Identify the updated provider by id description equality (KMP parses
         // the string internally; we match the same provider here without needing
@@ -1119,6 +1128,7 @@ final class IOSSharedSettingsStore {
         )
         restoreSnapshot(merged)
         var overrides = savedSubAgentOverrides
+        overrides.removeAll { $0["roleId"] == roleId }
         overrides.append([
             "id": UUID().uuidString,
             "roleId": roleId,
@@ -1133,13 +1143,19 @@ final class IOSSharedSettingsStore {
         var overrides = savedSubAgentOverrides
         guard index >= 0 && index < overrides.count else { return }
         let removed = overrides.remove(at: index)
-        savedSubAgentOverrides = overrides
         if let roleId = removed["roleId"] {
+            // Repair compatibility mirrors created by older builds that could
+            // stack several rows for the same role. One delete owns the role,
+            // so no ghost row should remain after the canonical map is cleared.
+            overrides.removeAll { $0["roleId"] == roleId }
+            savedSubAgentOverrides = overrides
             let merged = IosSettingsMutations.shared.removeSubAgentOverride(
                 settings: snapshot,
                 roleId: roleId
             )
             restoreSnapshot(merged)
+        } else {
+            savedSubAgentOverrides = overrides
         }
     }
 

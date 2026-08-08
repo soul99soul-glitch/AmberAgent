@@ -79,6 +79,17 @@ final class ChatMessageWidthOverflowTests: XCTestCase {
         }
     }
 
+    func testVendorWidthDiagnosticsNeverLogParagraphContents() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("vendor/SwiftStreamingMarkdown/Sources/MarkdownText/UI/UIKit/ParagraphUIView.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        XCTAssertFalse(source.contains("text=%{public}@"))
+        XCTAssertFalse(source.contains("String(paragraphContents.string.prefix"))
+    }
+
     // MARK: - Configurations
 
     /// a: live streaming, fade renderer path (SwiftStreamingMarkdown.MarkdownView via

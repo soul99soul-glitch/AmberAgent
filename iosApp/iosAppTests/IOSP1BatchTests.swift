@@ -60,13 +60,14 @@ final class IOSP1BatchTests: XCTestCase {
 
     func testRecallTokensSplitsLatinAndCJK() {
         let tokens = ChatMemoryContextBuilder.recallTokens(from: "Hello world 你好 记忆")
-        // Latin words kept (length>1); CJK chars each become a token.
+        // Latin words stay whole; CJK runs use bigrams so unrelated phrases do
+        // not match merely because they share one common character.
         XCTAssertTrue(tokens.contains("hello"))
         XCTAssertTrue(tokens.contains("world"))
-        XCTAssertTrue(tokens.contains("你"))
-        XCTAssertTrue(tokens.contains("好"))
-        XCTAssertTrue(tokens.contains("记"))
-        XCTAssertTrue(tokens.contains("忆"))
+        XCTAssertTrue(tokens.contains("你好"))
+        XCTAssertTrue(tokens.contains("记忆"))
+        XCTAssertFalse(tokens.contains("你"))
+        XCTAssertFalse(tokens.contains("记"))
         // Single-char latin + stopwords dropped.
         XCTAssertFalse(tokens.contains("a"))
     }

@@ -39,7 +39,9 @@ struct SkillDetailView: View {
                     triggerSection
                     toolsSection
                     infoSection
-                    deleteSection
+                    if !isBuiltinSkill {
+                        deleteSection
+                    }
                 }
                 .padding(.bottom, 36)
             }
@@ -86,11 +88,17 @@ struct SkillDetailView: View {
 
             Spacer()
 
-            SkillEditButton {
-                if let content = snapshot?.content {
-                    editorDraft = SkillEditorDraft(content: content)
-                } else {
-                    pendingAlert = .file
+            if isBuiltinSkill {
+                Color.clear
+                    .frame(width: 44, height: 44)
+                    .accessibilityHidden(true)
+            } else {
+                SkillEditButton {
+                    if let content = snapshot?.content {
+                        editorDraft = SkillEditorDraft(content: content)
+                    } else {
+                        pendingAlert = .file
+                    }
                 }
             }
         }
@@ -196,7 +204,7 @@ struct SkillDetailView: View {
                 SkillStaticValueRow(title: "文件", value: snapshot?.relativePath ?? "SKILL.md", monospace: true)
             }
 
-            SkillDetailFooter(loadError ?? "编辑按钮会保存到这个本机技能。")
+            SkillDetailFooter(loadError ?? (isBuiltinSkill ? "这是 AmberAgent 必需的内置技能，不可编辑或删除。" : "编辑按钮会保存到这个本机技能。"))
         }
     }
 
@@ -252,6 +260,10 @@ struct SkillDetailView: View {
     private var enableKey: String {
         // Enable / injection / use_skill all key off the on-disk directory name.
         dirName ?? skillName
+    }
+
+    private var isBuiltinSkill: Bool {
+        IOSBuiltinSkills.requiredNames.contains(IOSSkillFileStore.normalizedSkillName(enableKey))
     }
 
     private func loadSnapshot() {
@@ -434,37 +446,6 @@ private struct SkillDetailSwitch: View {
                     .padding(2)
             }
             .animation(.snappy(duration: 0.18), value: isOn)
-    }
-}
-
-private struct SkillDetailValueRow: View {
-    let title: String
-    let value: String
-    var monospace = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                Text(value)
-                    .font(monospace ? .system(.caption, design: .monospaced) : .subheadline)
-                    .foregroundStyle(AmberTheme.muted)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted2)
-            }
-            .frame(minHeight: 52)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 

@@ -48,6 +48,11 @@ struct IOSSyncBackup {
     private static let settingsEntry = "settings.json"
     private static let payloadManifestEntry = "payload_manifest.json"
     private static let conversationsEntry = "conversations.zip"
+    private static let conversationMetadataEntries: Set<String> = [
+        "index.json",
+        "list-previews.json",
+        "list-icons.json",
+    ]
 
     /// Exports an encrypted backup archive. Includes settings (always) plus an
     /// optional conversations bundle (Android SyncArchiveManager parity — iOS
@@ -130,8 +135,7 @@ struct IOSSyncBackup {
         guard fm.fileExists(atPath: directoryURL.path) else { return nil }
         let entries = try fm.contentsOfDirectory(at: directoryURL, includingPropertiesForKeys: nil)
         let jsonFiles = entries.filter {
-            $0.pathExtension.lowercased() == "json"
-                && $0.lastPathComponent.lowercased() != "index.json"
+            isConversationDocumentName($0.lastPathComponent)
         }
         guard !jsonFiles.isEmpty else { return nil }
         let zipEntries = try jsonFiles.map { file in
@@ -152,10 +156,10 @@ struct IOSSyncBackup {
         let fm = FileManager.default
         try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
         var written = 0
-        for (name, data) in entries where name.hasSuffix(".json") {
+        for (name, data) in entries {
             // Sanitize the name to a single component (no path traversal).
             let safeName = (name as NSString).lastPathComponent
-            guard !safeName.isEmpty else { continue }
+            guard isConversationDocumentName(safeName) else { continue }
             try data.write(to: directoryURL.appendingPathComponent(safeName), options: [.atomic])
             written += 1
         }
@@ -169,8 +173,7 @@ struct IOSSyncBackup {
         return try entries
             .filter { name, _ in
                 let component = (name as NSString).lastPathComponent
-                return (component as NSString).pathExtension.lowercased() == "json"
-                    && component.lowercased() != "index.json"
+                return isConversationDocumentName(component)
             }
             .sorted { $0.key < $1.key }
             .map { name, data in
@@ -179,6 +182,12 @@ struct IOSSyncBackup {
                 }
                 return document
             }
+    }
+
+    private static func isConversationDocumentName(_ name: String) -> Bool {
+        let component = (name as NSString).lastPathComponent.lowercased()
+        return (component as NSString).pathExtension == "json"
+            && !conversationMetadataEntries.contains(component)
     }
 
     static func restorePreview(data: Data, passphrase: String?, fileName: String? = nil) throws -> IOSSyncPreview {

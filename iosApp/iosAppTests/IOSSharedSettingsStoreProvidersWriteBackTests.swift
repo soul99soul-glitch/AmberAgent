@@ -153,6 +153,42 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         XCTAssertTrue(store.snapshot.providers.contains { $0.id.description() == providerId })
     }
 
+    func testClearingProviderApiKeyDeletesTypedAndGenericCredentialReferences() throws {
+        let suiteName = "ProviderKeyClear-\(UUID().uuidString)"
+        let store = makeIsolatedStore(suiteName: suiteName)
+        let provider = IosSettingsMutations.shared.buildOpenAIProvider(
+            name: "待清除服务商",
+            apiKey: "sk-clear-me",
+            baseUrl: "https://example.com/v1",
+            modelName: "待清除模型",
+            modelId: "clear-model"
+        )
+        let added = store.addProvider(provider)
+        let providerId = added.id.description()
+        let itemMarker = "[\(providerId)#"
+        let genericRefs = IOSCredentialRedactor.activeCredentialPaths(
+            in: IosSettingsJsonBridge.shared.encode(settings: store.snapshot)
+        )
+        .filter { $0.contains(itemMarker) }
+        .map(IOSCredentialSideTable.settingsPath)
+
+        XCTAssertNotNil(
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.providerApiKey(providerId: providerId))
+        )
+        XCTAssertFalse(genericRefs.isEmpty)
+
+        _ = store.updateProviderApiKey(providerId: providerId, apiKey: "")
+
+        XCTAssertNil(
+            IOSCredentialSideTable.load(key: IOSCredentialSideTable.providerApiKey(providerId: providerId))
+        )
+        XCTAssertTrue(genericRefs.allSatisfy { IOSCredentialSideTable.load(key: $0) == nil })
+        XCTAssertEqual((store.snapshot.providers.first { $0.id.description() == providerId } as? ProviderSetting.OpenAI)?.apiKey, "")
+
+        let restarted = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertEqual((restarted.snapshot.providers.first { $0.id.description() == providerId } as? ProviderSetting.OpenAI)?.apiKey, "")
+    }
+
     // ---- TTS engines ----
 
     func testAddOpenAITtsEngineMergesIntoSnapshot() {
@@ -231,6 +267,15 @@ final class IOSSharedSettingsStoreProvidersWriteBackTests: XCTestCase {
         XCTAssertTrue(
             addedId.map { id in store.snapshot.searchEnabledServiceIds.contains { $0.description() == id } } ?? false,
             "newly added search provider should be enabled for execution"
+        )
+    }
+
+    func testEnableWebSearchDefaultsToTrueForFreshInstall() {
+        let suiteName = "Slice4-SrchDefault-\(UUID().uuidString)"
+        let store = makeIsolatedStore(suiteName: suiteName)
+        XCTAssertTrue(
+            store.snapshot.enableWebSearch,
+            "fresh install must default enableWebSearch to true (model autonomy contract)"
         )
     }
 

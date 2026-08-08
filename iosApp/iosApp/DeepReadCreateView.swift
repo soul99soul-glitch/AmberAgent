@@ -61,14 +61,21 @@ enum IOSDeepReadLauncher {
         sharedSettings: IOSSharedSettingsStore,
         store: IOSDeepReadStore = .shared,
         workspaceArtifactSaver: WorkspaceArtifactSaver = IOSDeepReadLauncher.defaultWorkspaceArtifactSaver,
-        onStatus: StatusHandler? = nil
+        onStatus: StatusHandler? = nil,
+        isCurrentRun: @escaping @MainActor () -> Bool = { !Task.isCancelled }
     ) async -> Bool {
-        defer { store.clearProgressLabel(id: taskId) }
+        defer {
+            if isCurrentRun() {
+                store.clearProgressLabel(id: taskId)
+            }
+        }
+        guard isCurrentRun() else { return false }
         guard var running = store.task(id: taskId) else { return false }
         guard running.status == .queued || running.status == .running else { return false }
 
         var progressTotal: Int64 = 7
         func updateProgress(_ completed: Int64, _ subtitle: String, total: Int64? = nil) {
+            guard isCurrentRun() else { return }
             if let total { progressTotal = max(1, total) }
             // Progress label is in-memory only — avoid rewriting tasks.json every tick.
             store.setProgressLabel(id: taskId, subtitle)
@@ -85,6 +92,7 @@ enum IOSDeepReadLauncher {
 
         updateProgress(1, "正在搜索补充来源")
         let searched = await searchSourcesForDeepRead(title: running.title, settings: sharedSettings.snapshot)
+        guard isCurrentRun() else { return false }
 
         let mergedSources = Array(dedupeSources(running.sources + searched).prefix(10))
         let scrapeBase: Int64 = 2
@@ -98,6 +106,7 @@ enum IOSDeepReadLauncher {
                 updateProgress(scrapeBase + Int64(index), "正在抓取网页正文 \(index)/\(total)")
             }
         )
+        guard isCurrentRun() else { return false }
 
         store.replaceSources(id: taskId, sources: enriched)
         running.sources = enriched
@@ -124,6 +133,7 @@ enum IOSDeepReadLauncher {
                     updateProgress(generationBase + Int64(index), "正在生成\(label)")
                 }
             )
+            guard isCurrentRun() else { return false }
             switch IOSDeepReadDraftGenerator.outcome(
                 for: result,
                 offlineFallback: IOSDeepReadDraftGenerator.generate(task: running)
@@ -145,7 +155,7 @@ enum IOSDeepReadLauncher {
         }
 
         // KeepAlive expire/system-cancel may have already marked failed; don't resurrect.
-        guard store.task(id: taskId)?.status == .running else { return false }
+        guard isCurrentRun(), store.task(id: taskId)?.status == .running else { return false }
 
         updateProgress(progressTotal, "正在保存结果")
         store.complete(id: taskId, markdown: output, structuredJSON: structuredJSON)
@@ -200,6 +210,7 @@ enum IOSDeepReadLauncher {
     ) async -> [IOSDeepReadSource] {
         var enriched: [IOSDeepReadSource] = []
         for (index, var source) in sources.enumerated() {
+            guard !Task.isCancelled else { break }
             defer { onSourceProgress?(index + 1, sources.count) }
             if source.metadata["scrape_status"] == "failed" {
                 enriched.append(source)
@@ -337,6 +348,67 @@ enum IOSDeepReadLauncher {
     }
 }
 
+@MainActor
+final class IOSDeepReadRunRegistry {
+    private struct Entry {
+        let generationID: UUID
+        var task: Task<Void, Never>?
+    }
+
+    private var entries: [String: Entry] = [:]
+
+    var activeTaskIds: Set<String> { Set(entries.keys) }
+
+    func reserve(taskId: String) -> UUID? {
+        guard entries[taskId] == nil else { return nil }
+        let generationID = UUID()
+        entries[taskId] = Entry(generationID: generationID, task: nil)
+        return generationID
+    }
+
+    func attach(_ task: Task<Void, Never>, taskId: String, generationID: UUID) {
+        guard var entry = entries[taskId], entry.generationID == generationID else {
+            task.cancel()
+            return
+        }
+        entry.task = task
+        entries[taskId] = entry
+    }
+
+    func isCurrent(taskId: String, generationID: UUID) -> Bool {
+        entries[taskId]?.generationID == generationID
+    }
+
+    @discardableResult
+    func cancel(taskId: String, generationID: UUID) -> Bool {
+        guard let entry = entries[taskId], entry.generationID == generationID else { return false }
+        entries.removeValue(forKey: taskId)
+        entry.task?.cancel()
+        return true
+    }
+
+    @discardableResult
+    func finish(taskId: String, generationID: UUID) -> Bool {
+        guard entries[taskId]?.generationID == generationID else { return false }
+        entries.removeValue(forKey: taskId)
+        return true
+    }
+}
+
+struct IOSDeepReadExpirationHandlers {
+    let onShortWindowExpiration: (() -> Void)?
+    let onSystemTaskExpiration: () -> Void
+
+    static func cancelOwnerOnlyOnSystemExpiration(
+        _ cancelOwner: @escaping () -> Void
+    ) -> IOSDeepReadExpirationHandlers {
+        IOSDeepReadExpirationHandlers(
+            onShortWindowExpiration: nil,
+            onSystemTaskExpiration: cancelOwner
+        )
+    }
+}
+
 /// Starts deep-read generation immediately in-process and holds background
 /// execution rights via `BackgroundGenerationKeepAlive` (same pattern as
 /// chat / council / novel). Does not host the pipeline inside a BG handler.
@@ -345,7 +417,7 @@ final class IOSDeepReadBackgroundCoordinator {
     static let shared = IOSDeepReadBackgroundCoordinator()
 
     private var sharedSettings: IOSSharedSettingsStore?
-    private var inFlightTaskIds: Set<String> = []
+    private let runRegistry = IOSDeepReadRunRegistry()
 
     private init() {}
 
@@ -355,7 +427,7 @@ final class IOSDeepReadBackgroundCoordinator {
 
     /// Task ids currently generating in this process (for cold-start recovery exclusion).
     var activeTaskIds: Set<String> {
-        inFlightTaskIds.union(BackgroundGenerationKeepAlive.shared.activeLeaseIds)
+        runRegistry.activeTaskIds.union(BackgroundGenerationKeepAlive.shared.activeLeaseIds)
     }
 
     func start(
@@ -365,33 +437,33 @@ final class IOSDeepReadBackgroundCoordinator {
         onStatus: @escaping IOSDeepReadLauncher.StatusHandler
     ) {
         configure(sharedSettings: sharedSettings)
-        guard !inFlightTaskIds.contains(taskId) else { return }
-        inFlightTaskIds.insert(taskId)
+        guard let generationID = runRegistry.reserve(taskId: taskId) else { return }
 
-        // System continued-processing cancel / kill is a real stop.
-        // UIKit 30s short-window `onExpire` is NOT — deep-read runs multi-minute
-        // search/scrape/LLM stages in-process; if the system task never adopts,
-        // failing on the short window marks every run failed while the Task is
-        // still working (and then complete is blocked by status != .running).
+        // System continued-processing cancellation is a real ownership stop.
+        // The UIKit short window is not an authoritative run-owner signal; its
+        // deadline may lapse while the in-process run remains valid. It therefore
+        // intentionally has no cancellation callback.
         let interruptMessage = "后台生成被系统中断，可稍后重试。"
-        let failIfSystemInterrupted: () -> Void = { [weak self] in
+        let failIfInterrupted: () -> Void = { [weak self] in
             Task { @MainActor in
-                guard let self, self.inFlightTaskIds.contains(taskId) else { return }
+                guard let self, self.runRegistry.cancel(taskId: taskId, generationID: generationID) else { return }
                 if let task = IOSDeepReadStore.shared.task(id: taskId),
                    task.status == .running || task.status == .queued {
                     IOSDeepReadStore.shared.fail(id: taskId, message: interruptMessage)
                     onStatus(interruptMessage, true)
                 }
-                self.inFlightTaskIds.remove(taskId)
             }
         }
+        let expirationHandlers = IOSDeepReadExpirationHandlers.cancelOwnerOnlyOnSystemExpiration(
+            failIfInterrupted
+        )
 
         BackgroundGenerationKeepAlive.shared.begin(
             taskId,
             title: "深度阅读",
             subtitle: title,
-            onExpire: nil,
-            onSystemTaskExpiration: failIfSystemInterrupted
+            onExpire: expirationHandlers.onShortWindowExpiration,
+            onSystemTaskExpiration: expirationHandlers.onSystemTaskExpiration
         )
         BackgroundGenerationKeepAlive.shared.updateProgress(
             taskId,
@@ -400,17 +472,24 @@ final class IOSDeepReadBackgroundCoordinator {
             subtitle: "准备生成"
         )
 
-        Task { @MainActor in
+        let operationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
             defer {
-                BackgroundGenerationKeepAlive.shared.end(taskId)
-                inFlightTaskIds.remove(taskId)
+                if self.runRegistry.finish(taskId: taskId, generationID: generationID) {
+                    BackgroundGenerationKeepAlive.shared.end(taskId)
+                }
             }
             _ = await IOSDeepReadLauncher.runExistingTask(
                 taskId: taskId,
                 sharedSettings: sharedSettings,
-                onStatus: onStatus
+                onStatus: onStatus,
+                isCurrentRun: { [weak self] in
+                    guard !Task.isCancelled, let self else { return false }
+                    return self.runRegistry.isCurrent(taskId: taskId, generationID: generationID)
+                }
             )
         }
+        runRegistry.attach(operationTask, taskId: taskId, generationID: generationID)
     }
 }
 

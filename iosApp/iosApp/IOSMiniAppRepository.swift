@@ -60,6 +60,9 @@ fileprivate struct IOSMiniAppMutationUndo: Codable, Equatable {
     let previousApp: IOSMiniAppRecord?
     let addedVersionNumber: Int
     let prunedVersions: [IOSMiniAppVersionRecord]
+    let previousGrants: [IOSMiniAppGrantRecord]?
+    let previousAuditLogs: [IOSMiniAppAuditRecord]?
+    let previousSharedData: [IOSMiniAppSharedDataRecord]?
 }
 
 fileprivate struct IOSMiniAppPendingConversationMutation: Codable, Equatable {
@@ -227,7 +230,10 @@ final class IOSMiniAppRepository {
             undo: IOSMiniAppMutationUndo(
                 previousApp: nil,
                 addedVersionNumber: record.version,
-                prunedVersions: []
+                prunedVersions: [],
+                previousGrants: nil,
+                previousAuditLogs: nil,
+                previousSharedData: nil
             )
         )
         try persistAndPublish()
@@ -262,6 +268,9 @@ final class IOSMiniAppRepository {
     ) throws -> Mutation? {
         try ensureWritable()
         let previousApp = state.apps.first { $0.id == appId }
+        let previousGrants = state.grants.filter { $0.appId == appId }
+        let previousAuditLogs = state.auditLogs.filter { $0.appId == appId }
+        let previousSharedData = state.sharedData.filter { sharedDataBelongsToApp($0, appId: appId) }
         guard let application = try applyRevision(
             appId: appId,
             output: output,
@@ -274,7 +283,10 @@ final class IOSMiniAppRepository {
             undo: IOSMiniAppMutationUndo(
                 previousApp: previousApp,
                 addedVersionNumber: application.record.version,
-                prunedVersions: application.prunedVersions
+                prunedVersions: application.prunedVersions,
+                previousGrants: previousGrants,
+                previousAuditLogs: previousAuditLogs,
+                previousSharedData: previousSharedData
             )
         )
         try persistAndPublish()
@@ -283,6 +295,10 @@ final class IOSMiniAppRepository {
 
     var hasPendingConversationMutations: Bool {
         !(state.pendingConversationMutations ?? []).isEmpty
+    }
+
+    func pendingConversationMutationIds() -> Set<String> {
+        Set((state.pendingConversationMutations ?? []).map(\.id))
     }
 
     @discardableResult
@@ -306,20 +322,24 @@ final class IOSMiniAppRepository {
     }
 
     func reconcilePendingConversationMutations(
-        referenced: Set<IOSMiniAppConversationReference>
+        referenced: Set<IOSMiniAppConversationReference>,
+        mutationIds: Set<String>? = nil
     ) throws {
         let pending = state.pendingConversationMutations ?? []
-        guard !pending.isEmpty else { return }
+        let targetIds = mutationIds ?? Set(pending.map(\.id))
+        let target = pending.filter { targetIds.contains($0.id) }
+        guard !target.isEmpty else { return }
 
         // Newest-first lets a chain of uncommitted revisions unwind back to
         // the last card that was actually persisted in a conversation.
-        for transaction in pending.reversed() where !referenced.contains(transaction.reference) {
+        for transaction in target.reversed() where !referenced.contains(transaction.reference) {
             if state.apps.first(where: { $0.id == transaction.reference.appId })
                 .map(IOSMiniAppRecordFingerprint.init) == transaction.committedApp {
                 applyUndo(transaction.undo, appId: transaction.reference.appId)
             }
         }
-        state.pendingConversationMutations = nil
+        let remaining = pending.filter { !targetIds.contains($0.id) }
+        state.pendingConversationMutations = remaining.isEmpty ? nil : remaining
         try persistAndPublish()
     }
 
@@ -345,7 +365,21 @@ final class IOSMiniAppRepository {
         guard let version = state.versions.first(where: { $0.appId == appId && $0.versionNumber == versionNumber }) else {
             return nil
         }
-        return try saveNewVersion(appId: appId, htmlContent: version.htmlContent, changeNote: "Restored from v\(versionNumber)")
+        guard let current = state.apps.first(where: { $0.id == appId }) else { return nil }
+        return try saveRevision(
+            appId: appId,
+            output: IOSMiniAppGeneratedOutput(
+                title: version.title ?? current.title,
+                description: version.description ?? current.description,
+                icon: version.iconEmoji ?? current.iconEmoji,
+                category: version.category ?? current.category,
+                permissions: version.permissions ?? current.permissions,
+                html: version.htmlContent
+            ),
+            expectedBaseVersion: current.version,
+            sourceMessageId: version.sourceMessageId ?? current.sourceMessageId,
+            changeNote: "Restored from v\(versionNumber)"
+        )
     }
 
     func rename(id: String, title: String, description: String) throws {
@@ -583,6 +617,18 @@ final class IOSMiniAppRepository {
             }) {
                 state.versions.append(version)
             }
+            if let previousGrants = undo.previousGrants {
+                state.grants.removeAll { $0.appId == appId }
+                state.grants.append(contentsOf: previousGrants)
+            }
+            if let previousAuditLogs = undo.previousAuditLogs {
+                state.auditLogs.removeAll { $0.appId == appId }
+                state.auditLogs.append(contentsOf: previousAuditLogs)
+            }
+            if let previousSharedData = undo.previousSharedData {
+                state.sharedData.removeAll { sharedDataBelongsToApp($0, appId: appId) }
+                state.sharedData.append(contentsOf: previousSharedData)
+            }
         } else {
             state.versions.removeAll { $0.appId == appId }
             state.grants.removeAll { $0.appId == appId }
@@ -620,7 +666,8 @@ final class IOSMiniAppRepository {
               sample.version == 1,
               sample.title == IOSMiniAppFixtures.sampleOutput.title,
               sample.description == IOSMiniAppFixtures.sampleOutput.description,
-              sample.htmlHash == sha256(IOSMiniAppFixtures.sampleOutput.html),
+              sample.htmlHash == sha256(IOSMiniAppFixtures.sampleOutput.html)
+                || Self.legacySampleHTMLHashes.contains(sample.htmlHash),
               sample.iconEmoji == IOSMiniAppFixtures.sampleOutput.icon,
               sample.category == IOSMiniAppFixtures.sampleOutput.category,
               sample.permissions == IOSMiniAppFixtures.sampleOutput.normalized().permissions,
@@ -690,9 +737,19 @@ final class IOSMiniAppRepository {
             htmlContent: app.htmlContent,
             htmlHash: app.htmlHash,
             changeNote: changeNote,
-            createdAt: createdAt
+            createdAt: createdAt,
+            title: app.title,
+            description: app.description,
+            sourceMessageId: app.sourceMessageId,
+            iconEmoji: app.iconEmoji,
+            category: app.category,
+            permissions: app.permissions
         )
     }
+
+    private static let legacySampleHTMLHashes: Set<String> = [
+        "11ac60e0b6baa239e1e5c6d5b1c61ca88548d49716c78d73d6e280532e094467",
+    ]
 
     private func maxVersionNumber(appId: String) -> Int {
         state.versions

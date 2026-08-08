@@ -438,6 +438,66 @@ final class IOSBoardPersistenceTests: XCTestCase {
         let external = IOSDeepReadTemplateValidator.validateHTML("<html><body><img src=\"https://example.com/a.png\"></body></html>")
         XCTAssertFalse(external.ok)
         XCTAssertTrue(external.error?.contains("外部") == true || external.error?.contains("资源") == true)
+
+        let entityEncodedExternal = IOSDeepReadTemplateValidator.validateHTML(
+            #"<html><body><img src="h&#116;tps&#58;//example.com/a.png"></body></html>"#,
+            requirePlaceholders: false
+        )
+        XCTAssertFalse(entityEncodedExternal.ok)
+
+        let metaRefresh = IOSDeepReadTemplateValidator.validateHTML(
+            #"<html><head><meta content="0; url=https://example.com" http-equiv="re&#x66;resh"></head><body></body></html>"#,
+            requirePlaceholders: false
+        )
+        XCTAssertFalse(metaRefresh.ok)
+        XCTAssertTrue(metaRefresh.error?.contains("refresh") == true)
+    }
+
+    func testDeepReadHTMLHardeningAddsStrictCSPAndNavigationAllowsOnlyInitialAboutBlank() {
+        let hardened = IOSDeepReadHTMLSecurity.hardenedDocument("<html><head data-note=\"1 > 0\"></head><body>safe</body></html>")
+        XCTAssertTrue(hardened.contains("Content-Security-Policy"))
+        XCTAssertTrue(hardened.contains("default-src 'none'"))
+        XCTAssertTrue(hardened.contains("connect-src 'none'"))
+        XCTAssertTrue(hardened.contains(#"<head data-note="1 > 0"><meta http-equiv="Content-Security-Policy""#))
+        let malformedHead = IOSDeepReadHTMLSecurity.hardenedDocument("<html></head><body>safe</body></html>")
+        XCTAssertTrue(malformedHead.contains(#"<html><head><meta http-equiv="Content-Security-Policy""#))
+
+        #if canImport(WebKit)
+        XCTAssertTrue(IOSDeepReadNavigationPolicy.allowsInitialDocument(
+            url: URL(string: "about:blank"),
+            isMainFrame: true,
+            isOtherNavigation: true,
+            isAwaitingInitialDocument: true
+        ))
+        for blockedURL in ["data:text/html,stale", "blob:https://example.com/id", "https://example.com"] {
+            XCTAssertFalse(IOSDeepReadNavigationPolicy.allowsInitialDocument(
+                url: URL(string: blockedURL),
+                isMainFrame: true,
+                isOtherNavigation: true,
+                isAwaitingInitialDocument: true
+            ))
+        }
+        XCTAssertFalse(IOSDeepReadNavigationPolicy.allowsInitialDocument(
+            url: URL(string: "about:blank"),
+            isMainFrame: true,
+            isOtherNavigation: true,
+            isAwaitingInitialDocument: false
+        ))
+        XCTAssertTrue(IOSDeepReadNavigationPolicy.allowsInitialDocument(
+            url: URL(string: IOSDeepReadFontSchemeHandler.documentBaseURL),
+            isMainFrame: true,
+            isOtherNavigation: true,
+            isAwaitingInitialDocument: true,
+            allowedDocumentURLs: ["about:blank", IOSDeepReadFontSchemeHandler.documentBaseURL]
+        ))
+        XCTAssertFalse(IOSDeepReadNavigationPolicy.allowsInitialDocument(
+            url: URL(string: "data:text/html,refresh"),
+            isMainFrame: true,
+            isOtherNavigation: true,
+            isAwaitingInitialDocument: true,
+            allowedDocumentURLs: ["about:blank", IOSDeepReadFontSchemeHandler.documentBaseURL]
+        ))
+        #endif
     }
 
     func testHotlistProviderIdsAndIOSDefaultExpansion() {

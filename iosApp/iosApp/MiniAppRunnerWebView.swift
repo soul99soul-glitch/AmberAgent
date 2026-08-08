@@ -1,6 +1,52 @@
 import SwiftUI
 @preconcurrency import WebKit
 
+enum IOSMiniAppNavigationTrustPolicy {
+    static func trustsInitialDocument(
+        isAwaitingTrustedDocument: Bool,
+        isOtherNavigation: Bool,
+        targetIsMainFrame: Bool?,
+        url: URL?
+    ) -> Bool {
+        guard isAwaitingTrustedDocument,
+              isOtherNavigation,
+              targetIsMainFrame != false else {
+            return false
+        }
+        guard let url else { return true }
+        return url.absoluteString.caseInsensitiveCompare("about:blank") == .orderedSame
+    }
+
+    static func preservesTrustedFragmentNavigation(
+        isTrustedDocument: Bool,
+        isAwaitingTrustedDocument: Bool,
+        isReloadNavigation: Bool,
+        targetIsMainFrame: Bool?,
+        currentURL: URL?,
+        requestedURL: URL
+    ) -> Bool {
+        guard isTrustedDocument,
+              !isAwaitingTrustedDocument,
+              !isReloadNavigation,
+              targetIsMainFrame == true,
+              requestedURL.fragment != nil,
+              isAboutBlankDocumentURL(currentURL),
+              isAboutBlankDocumentURL(requestedURL) else {
+            return false
+        }
+        return true
+    }
+
+    private static func isAboutBlankDocumentURL(_ url: URL?) -> Bool {
+        guard let url,
+              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return false
+        }
+        components.fragment = nil
+        return components.string?.caseInsensitiveCompare("about:blank") == .orderedSame
+    }
+}
+
 enum IOSMiniAppHTMLSandbox {
     static func enforceBridgeOnlyNetwork(_ html: String, allowExternalImages: Bool = false) -> String {
         let imageSources = allowExternalImages ? "data: blob: amber-miniapp-image:" : "data: blob:"
@@ -345,6 +391,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
         // Inject the validated HTML. baseURL nil = origin "null" (sandboxed).
         context.coordinator.loadedHTML = html
         context.coordinator.externalImagesAllowed = externalImagesAllowed
+        context.coordinator.prepareForTrustedDocumentLoad()
         webView.loadHTMLString(
             IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(html, allowExternalImages: externalImagesAllowed),
             baseURL: nil
@@ -361,6 +408,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
                 try MiniAppHtmlValidator.validate(html)
                 context.coordinator.loadedHTML = html
                 context.coordinator.externalImagesAllowed = externalImagesAllowed
+                context.coordinator.prepareForTrustedDocumentLoad()
                 webView.loadHTMLString(
                     IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(
                         html,
@@ -381,7 +429,10 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
               app.permissions.contains(IOSMiniAppPermission.externalImages.rawValue) else {
             return false
         }
-        return repository.grantDecision(appId: appId, permission: IOSMiniAppPermission.externalImages.rawValue) != .deny
+        return repository.grantDecision(
+            appId: appId,
+            permission: IOSMiniAppPermission.externalImages.rawValue
+        ) == .allow
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
@@ -411,6 +462,8 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
         var loadedHTML = ""
         var externalImagesAllowed = false
         private var isClosed = false
+        private var isAwaitingTrustedDocument = false
+        private var isTrustedMainDocument = false
 
         init(
             onValidationError: @escaping (String) -> Void,
@@ -432,17 +485,57 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
             onClose()
         }
 
+        func prepareForTrustedDocumentLoad() {
+            isAwaitingTrustedDocument = true
+            setTrustedMainDocument(false)
+        }
+
+        private func setTrustedMainDocument(_ trusted: Bool) {
+            isTrustedMainDocument = trusted
+            bridge?.setTrustedMainDocument(trusted)
+        }
+
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
             guard let url = navigationAction.request.url else {
-                decisionHandler(.allow)
+                let shouldTrust = IOSMiniAppNavigationTrustPolicy.trustsInitialDocument(
+                    isAwaitingTrustedDocument: isAwaitingTrustedDocument,
+                    isOtherNavigation: navigationAction.navigationType == .other,
+                    targetIsMainFrame: navigationAction.targetFrame?.isMainFrame,
+                    url: nil
+                )
+                if shouldTrust {
+                    isAwaitingTrustedDocument = false
+                    setTrustedMainDocument(true)
+                }
+                decisionHandler(shouldTrust ? .allow : .cancel)
                 return
             }
             let scheme = url.scheme?.lowercased() ?? ""
             if scheme == "about" || scheme == "data" || scheme == "blob" {
+                let isMainFrame = navigationAction.targetFrame?.isMainFrame == true
+                    || (navigationAction.targetFrame == nil && isAwaitingTrustedDocument)
+                if isMainFrame {
+                    let isTrustedInitialLoad = IOSMiniAppNavigationTrustPolicy.trustsInitialDocument(
+                        isAwaitingTrustedDocument: isAwaitingTrustedDocument,
+                        isOtherNavigation: navigationAction.navigationType == .other,
+                        targetIsMainFrame: navigationAction.targetFrame?.isMainFrame,
+                        url: url
+                    )
+                    let preservesTrustedFragment = IOSMiniAppNavigationTrustPolicy.preservesTrustedFragmentNavigation(
+                        isTrustedDocument: isTrustedMainDocument,
+                        isAwaitingTrustedDocument: isAwaitingTrustedDocument,
+                        isReloadNavigation: navigationAction.navigationType == .reload,
+                        targetIsMainFrame: navigationAction.targetFrame?.isMainFrame,
+                        currentURL: webView.url,
+                        requestedURL: url
+                    )
+                    isAwaitingTrustedDocument = false
+                    setTrustedMainDocument(isTrustedInitialLoad || preservesTrustedFragment)
+                }
                 decisionHandler(.allow)
                 return
             }
