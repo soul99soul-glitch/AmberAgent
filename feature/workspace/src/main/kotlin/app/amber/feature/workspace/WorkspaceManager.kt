@@ -12,6 +12,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.nio.file.Files
 
 class WorkspaceManager(private val context: Context) {
@@ -65,11 +67,35 @@ class WorkspaceManager(private val context: Context) {
             ?: error("Unable to read file: $relativePath")
     }
 
-    suspend fun readBytes(relativePath: String): ByteArray = withContext(Dispatchers.IO) {
+    suspend fun readBytes(relativePath: String, maxBytes: Long? = null): ByteArray = withContext(Dispatchers.IO) {
         val file = requireDocument(relativePath)
         require(file.isFile) { "Not a file: $relativePath" }
-        context.contentResolver.openInputStream(file.uri)?.use { it.readBytes() }
+        maxBytes?.let { limit ->
+            require(limit >= 0L) { "maxBytes must not be negative" }
+            val declaredSize = file.length()
+            require(declaredSize <= limit) {
+                "File exceeds the $limit byte read limit: $relativePath"
+            }
+        }
+        context.contentResolver.openInputStream(file.uri)?.use { input ->
+            if (maxBytes != null) input.readBytesLimited(maxBytes) else input.readBytes()
+        }
             ?: error("Unable to read file: $relativePath")
+    }
+
+    private fun InputStream.readBytesLimited(maxBytes: Long): ByteArray {
+        val output = ByteArrayOutputStream(minOf(maxBytes, DEFAULT_BUFFER_SIZE.toLong()).toInt())
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) break
+            if (read == 0) continue
+            total += read
+            require(total <= maxBytes) { "File grew beyond the $maxBytes byte read limit" }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
     }
 
     suspend fun writeText(relativePath: String, content: String, append: Boolean = false): WorkspaceEntry =

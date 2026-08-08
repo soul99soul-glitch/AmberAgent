@@ -1,6 +1,7 @@
 package app.amber.document.nativebridge
 
 import android.util.Log
+import app.amber.document.DocumentParseLimits
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.random.Random
@@ -94,13 +95,13 @@ object OfficeNativeSwitch {
      * does not fire it is not called at all (zero overhead in steady-state).
      */
     fun parseDocxOrNull(file: File, jvmFallback: () -> String): String? =
-        runOneShot("docx", jvmFallback) { OfficeParserNative.parseDocx(file) }
+        runOneShot(file, "docx", jvmFallback) { OfficeParserNative.parseDocx(file) }
 
     fun parsePptxOrNull(file: File, jvmFallback: () -> String): String? =
-        runOneShot("pptx", jvmFallback) { OfficeParserNative.parsePptx(file) }
+        runOneShot(file, "pptx", jvmFallback) { OfficeParserNative.parsePptx(file) }
 
     fun parseEpubOrNull(file: File, jvmFallback: () -> String): String? =
-        runOneShot("epub", jvmFallback) { OfficeParserNative.parseEpub(file) }
+        runOneShot(file, "epub", jvmFallback) { OfficeParserNative.parseEpub(file) }
 
     /**
      * Phase 3 D-1: net-new (no JVM `XlsxParser` exists). [jvmFallback] is
@@ -110,15 +111,18 @@ object OfficeNativeSwitch {
      * pattern.
      */
     fun parseXlsxOrNull(file: File, jvmFallback: () -> String): String? =
-        runOneShot("xlsx", jvmFallback) { OfficeParserNative.parseXlsx(file) }
+        runOneShot(file, "xlsx", jvmFallback) { OfficeParserNative.parseXlsx(file) }
 
     private inline fun runOneShot(
+        file: File,
         stage: String,
         jvmFallback: () -> String,
         nativeBlock: () -> OfficeParserNative.Result,
     ): String? {
         val cfg = config
         if (!cfg.enabled()) return null
+        runCatching { DocumentParseLimits.requireOfficeArchive(file) }
+            .getOrElse { return null }
         // Eagerly detect load failure once and surface to telemetry.
         if (!OfficeParserNative.available) {
             if (loadFailureReported.compareAndSet(false, true)) {
@@ -151,7 +155,7 @@ object OfficeNativeSwitch {
             Log.i(TAG, "native $stage ok (first success): len=${nativeOutput.length}")
         }
         maybeSample(cfg, stage, nativeOutput, jvmFallback)
-        return nativeOutput
+        return DocumentParseLimits.limitOutput(nativeOutput)
     }
 
     private inline fun maybeSample(
@@ -181,9 +185,8 @@ object OfficeNativeSwitch {
     }
 
     private fun summarize(s: String): String {
-        // 256-char window + length so Crashlytics custom-key payload stays
-        // well under the 1KB per-key ceiling.
-        val head = if (s.length <= 256) s else s.substring(0, 256) + "...(+${s.length - 256})"
-        return "len=${s.length} head=$head"
+        // Document text can contain credentials or private content. Diff
+        // telemetry records shape only, never a content prefix.
+        return "len=${s.length}"
     }
 }

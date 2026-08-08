@@ -18,22 +18,32 @@ private data class ParagraphProperties(
 )
 
 object DocxParser {
-    fun parse(file: File): String {
+    fun parse(file: File, maxChars: Int = DocumentParseLimits.MAX_OUTPUT_CHARS): String {
+        DocumentParseLimits.requireOfficeArchive(file)
+        val outputLimit = maxChars.coerceIn(1, DocumentParseLimits.MAX_OUTPUT_CHARS)
         return try {
             file.inputStream().use { fileInputStream ->
                 ZipInputStream(fileInputStream).use { zipStream ->
+                    var entryCount = 0
                     var entry = zipStream.nextEntry
                     while (entry != null) {
+                        entryCount += 1
+                        require(entryCount <= DocumentParseLimits.MAX_CONTAINER_ENTRIES) {
+                            "Document archive contains too many entries"
+                        }
                         if (entry.name == "word/document.xml") {
-                            return parseDocumentXml(zipStream)
+                            return DocumentParseLimits.limitOutput(
+                                parseDocumentXml(DocumentParseLimits.boundedEntry(zipStream)),
+                                outputLimit,
+                            )
                         }
                         entry = zipStream.nextEntry
                     }
-                    "Unable to find document content in DOCX file"
+                    DocumentParseLimits.limitOutput("Unable to find document content in DOCX file", outputLimit)
                 }
             }
         } catch (e: Exception) {
-            "Error parsing DOCX file: ${e.message}"
+            DocumentParseLimits.limitOutput("Error parsing DOCX file: ${e.message}", outputLimit)
         }
     }
 
@@ -63,7 +73,7 @@ object DocxParser {
                 parser.next()
             }
 
-            result.toString().trim()
+            DocumentParseLimits.limitOutput(result.toString().trim())
         } catch (e: Exception) {
             "Error parsing document XML: ${e.message}"
         }

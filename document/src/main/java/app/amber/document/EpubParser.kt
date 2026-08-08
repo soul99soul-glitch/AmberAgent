@@ -13,41 +13,59 @@ private data class ManifestItem(
 )
 
 object EpubParser {
-    fun parse(file: File): String {
+    fun parse(file: File, maxChars: Int = DocumentParseLimits.MAX_OUTPUT_CHARS): String {
+        DocumentParseLimits.requireOfficeArchive(file)
+        val outputLimit = maxChars.coerceIn(1, DocumentParseLimits.MAX_OUTPUT_CHARS)
         return try {
             ZipFile(file).use { zip ->
                 val opfPath = findOpfPath(zip)
-                    ?: return "Unable to find OPF file in EPUB"
+                    ?: return DocumentParseLimits.limitOutput("Unable to find OPF file in EPUB", outputLimit)
                 val opfDir = opfPath.substringBeforeLast('/', "")
 
                 val opfEntry = zip.getEntry(opfPath)
-                    ?: return "Unable to read OPF file in EPUB"
-                val (manifest, spine) = zip.getInputStream(opfEntry).use { parseOpf(it) }
+                    ?: return DocumentParseLimits.limitOutput("Unable to read OPF file in EPUB", outputLimit)
+                val (manifest, spine) = zip.getInputStream(opfEntry).use {
+                    parseOpf(DocumentParseLimits.boundedEntry(it))
+                }
 
                 val result = StringBuilder()
                 for (itemId in spine) {
+                    if (result.length >= outputLimit) break
                     val item = manifest[itemId] ?: continue
                     if (!item.mediaType.contains("html")) continue
 
                     val itemPath = if (opfDir.isEmpty()) item.href else "$opfDir/${item.href}"
                     val entry = zip.getEntry(itemPath) ?: continue
-                    val content = zip.getInputStream(entry).use { parseXhtml(it) }
+                    val content = zip.getInputStream(entry).use {
+                        parseXhtml(
+                            DocumentParseLimits.boundedEntry(it),
+                            maxChars = outputLimit - result.length,
+                        )
+                    }
                     if (content.isNotBlank()) {
-                        result.append(content)
-                        result.append("\n\n")
+                        val remaining = outputLimit - result.length
+                        if (remaining <= 0) break
+                        result.append(content.take(remaining))
+                        if (result.length < outputLimit) {
+                            DocumentParseLimits.appendLimited(result, "\n\n", outputLimit)
+                        }
                     }
                 }
 
-                result.toString().trim().ifEmpty { "No readable content found in EPUB file" }
+                DocumentParseLimits.limitOutput(
+                    result.toString().trim().ifEmpty { "No readable content found in EPUB file" },
+                    maxChars,
+                )
             }
         } catch (e: Exception) {
-            "Error parsing EPUB file: ${e.message}"
+            DocumentParseLimits.limitOutput("Error parsing EPUB file: ${e.message}", outputLimit)
         }
     }
 
     private fun findOpfPath(zip: ZipFile): String? {
         val containerEntry = zip.getEntry("META-INF/container.xml") ?: return null
-        return zip.getInputStream(containerEntry).use { stream ->
+        return zip.getInputStream(containerEntry).use { rawStream ->
+            val stream = DocumentParseLimits.boundedEntry(rawStream)
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = true
             val parser = factory.newPullParser()
@@ -80,6 +98,9 @@ object EpubParser {
                         val href = parser.getAttributeValue(null, "href") ?: ""
                         val mediaType = parser.getAttributeValue(null, "media-type") ?: ""
                         if (id.isNotEmpty()) {
+                            require(manifest.size < DocumentParseLimits.MAX_CONTAINER_ENTRIES) {
+                                "EPUB manifest contains too many items"
+                            }
                             manifest[id] = ManifestItem(id, href, mediaType)
                         }
                     }
@@ -87,6 +108,9 @@ object EpubParser {
                     "itemref" -> {
                         val idref = parser.getAttributeValue(null, "idref") ?: ""
                         if (idref.isNotEmpty()) {
+                            require(spine.size < DocumentParseLimits.MAX_CONTAINER_ENTRIES) {
+                                "EPUB spine contains too many items"
+                            }
                             spine.add(idref)
                         }
                     }
@@ -98,7 +122,7 @@ object EpubParser {
         return manifest to spine
     }
 
-    private fun parseXhtml(inputStream: InputStream): String {
+    private fun parseXhtml(inputStream: InputStream, maxChars: Int): String {
         return try {
             val factory = XmlPullParserFactory.newInstance()
             factory.isNamespaceAware = false
@@ -111,11 +135,14 @@ object EpubParser {
             var inBody = false
             var listCounter = 0
 
-            while (parser.eventType != XmlPullParser.END_DOCUMENT) {
+            while (parser.eventType != XmlPullParser.END_DOCUMENT && result.length < maxChars) {
                 when (parser.eventType) {
                     XmlPullParser.START_TAG -> {
                         val tag = parser.name.lowercase()
                         tagStack.addLast(tag)
+                        require(tagStack.size <= DocumentParseLimits.MAX_CONTAINER_ENTRIES) {
+                            "EPUB XHTML nesting is too deep"
+                        }
 
                         when (tag) {
                             "body" -> inBody = true
@@ -124,18 +151,18 @@ object EpubParser {
                                 val parentTag = tagStack.dropLast(1).lastOrNull()
                                 if (parentTag == "ol") {
                                     listCounter++
-                                    result.append("$listCounter. ")
+                                    DocumentParseLimits.appendLimited(result, "$listCounter. ", maxChars)
                                 } else {
-                                    result.append("- ")
+                                    DocumentParseLimits.appendLimited(result, "- ", maxChars)
                                 }
                             }
 
-                            "br" -> result.append("\n")
+                            "br" -> DocumentParseLimits.appendLimited(result, "\n", maxChars)
                             "img" -> {
                                 if (inBody) {
                                     val alt = parser.getAttributeValue(null, "alt")
                                     if (!alt.isNullOrBlank()) {
-                                        result.append("[image: $alt]")
+                                        DocumentParseLimits.appendLimited(result, "[image: $alt]", maxChars)
                                     }
                                 }
                             }
@@ -143,24 +170,24 @@ object EpubParser {
                             "h1", "h2", "h3", "h4", "h5", "h6" -> {
                                 if (inBody) {
                                     val level = tag[1].digitToInt()
-                                    result.append("${"#".repeat(level)} ")
+                                    DocumentParseLimits.appendLimited(result, "${"#".repeat(level)} ", maxChars)
                                 }
                             }
 
                             "strong", "b" -> {
-                                if (inBody) result.append("**")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "**", maxChars)
                             }
 
                             "em", "i" -> {
-                                if (inBody) result.append("*")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "*", maxChars)
                             }
 
                             "hr" -> {
-                                if (inBody) result.append("\n---\n")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "\n---\n", maxChars)
                             }
 
                             "blockquote" -> {
-                                if (inBody) result.append("> ")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "> ", maxChars)
                             }
                         }
                     }
@@ -172,7 +199,7 @@ object EpubParser {
                                 ?.replace('\r', ' ')
                                 ?.replace("\\s+".toRegex(), " ")
                             if (!text.isNullOrBlank()) {
-                                result.append(text)
+                                DocumentParseLimits.appendLimited(result, text, maxChars)
                             }
                         }
                     }
@@ -184,32 +211,32 @@ object EpubParser {
                         when (tag) {
                             "body" -> inBody = false
                             "p", "div" -> {
-                                if (inBody) result.append("\n\n")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "\n\n", maxChars)
                             }
 
                             "h1", "h2", "h3", "h4", "h5", "h6" -> {
-                                if (inBody) result.append("\n\n")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "\n\n", maxChars)
                             }
 
                             "li" -> {
-                                if (inBody) result.append("\n")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "\n", maxChars)
                             }
 
                             "ul", "ol" -> {
-                                if (inBody) result.append("\n")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "\n", maxChars)
                             }
 
                             "br" -> {}
                             "strong", "b" -> {
-                                if (inBody) result.append("**")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "**", maxChars)
                             }
 
                             "em", "i" -> {
-                                if (inBody) result.append("*")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "*", maxChars)
                             }
 
                             "blockquote" -> {
-                                if (inBody) result.append("\n")
+                                if (inBody) DocumentParseLimits.appendLimited(result, "\n", maxChars)
                             }
                         }
                     }

@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.document.DocxParser
+import app.amber.document.DocumentParseLimits
 import app.amber.document.EpubParser
 import app.amber.document.PdfParser
 import app.amber.document.PptxParser
@@ -84,7 +85,7 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
                 "application/epub+zip" -> parseEpubAsText(file)
                 else -> {
                     if (document.isLikelyTextFile()) {
-                        file.readText()
+                        DocumentParseLimits.readText(file)
                     } else {
                         buildString {
                             appendLine("[BINARY_OR_ARCHIVE_FILE]")

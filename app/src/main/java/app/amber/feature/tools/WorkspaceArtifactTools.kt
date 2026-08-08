@@ -23,6 +23,7 @@ import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.document.DocxParser
+import app.amber.document.DocumentParseLimits
 import app.amber.document.PdfParser
 import app.amber.document.PptxParser
 import app.amber.document.nativebridge.OfficeNativeSwitch
@@ -568,7 +569,7 @@ class WorkspaceArtifactTools(
 
     private suspend fun <T> withTempWorkspaceFile(path: String, block: (File) -> T): T =
         withContext(Dispatchers.IO) {
-            val bytes = workspaceManager.readBytes(path)
+            val bytes = workspaceManager.readBytes(path, maxBytes = DocumentParseLimits.MAX_INPUT_BYTES)
             val ext = path.substringAfterLast('.', "bin")
             val file = File.createTempFile("amberagent-${safeBaseName(path)}", ".$ext", context.cacheDir)
             try {
@@ -599,16 +600,21 @@ class WorkspaceArtifactTools(
     }
 
     private fun parseXlsxText(file: File): String {
+        DocumentParseLimits.requireOfficeArchive(file)
         val text = StringBuilder()
         java.util.zip.ZipFile(file).use { zip ->
             zip.entries().asSequence()
                 .filter { it.name == "xl/sharedStrings.xml" || it.name.startsWith("xl/worksheets/sheet") }
                 .forEach { entry ->
+                    if (text.length >= DocumentParseLimits.MAX_OUTPUT_CHARS) return@forEach
                     text.appendLine("## ${entry.name}")
-                    text.appendLine(stripXml(zip.getInputStream(entry).bufferedReader().readText()))
+                    val raw = zip.getInputStream(entry).use { input ->
+                        DocumentParseLimits.boundedEntry(input).bufferedReader().readText()
+                    }
+                    text.appendLine(stripXml(raw))
                 }
         }
-        return text.toString()
+        return DocumentParseLimits.limitOutput(text.toString())
     }
 
     private fun stripXml(xml: String): String =
