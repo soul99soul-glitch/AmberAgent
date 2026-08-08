@@ -30,6 +30,7 @@ import app.amber.agent.data.db.fts.MessageFtsManager
 import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.zip.CRC32
@@ -237,10 +238,17 @@ class SyncArchiveManager(
         val scope = request.scope
         var settingsJson: String? = null
         var secretsJson: String? = null
+        var payloadManifestJson: String? = null
         val tableRows = linkedMapOf<String, MutableList<JsonObject>>()
-        val stagedFilesRoot = File(context.cacheDir, "sync-restore-stage").canonicalFile
-        stagedFilesRoot.deleteRecursively()
-        stagedFilesRoot.mkdirs()
+        val seenEntries = mutableSetOf<String>()
+        val seenTableEntries = mutableSetOf<String>()
+        var restoredFileCount = 0
+        var restoredFileBytes = 0L
+        val stagedFilesRoot = File.createTempFile("sync-restore-stage-", ".tmp", context.cacheDir).let { temp ->
+            check(temp.delete()) { "无法准备同步恢复暂存目录" }
+            check(temp.mkdirs()) { "无法创建同步恢复暂存目录" }
+            temp.canonicalFile
+        }
 
         // CONFIG_ONLY skips both DB-table extraction and file-tree
         // extraction — we only care about the settings entry. Reading the
@@ -261,43 +269,60 @@ class SyncArchiveManager(
             while (true) {
                 val entry = zip.nextEntry ?: break
                 requireSafeRelativePath(entry.name)
+                require(seenEntries.add(entry.name)) { "同步备份包含重复条目：${entry.name}" }
                 if (!entry.isDirectory) {
                     when {
                         entry.name == SETTINGS_ENTRY -> {
-                            settingsJson = zip.readBytes().decodeToString()
+                            settingsJson = zip.readEntryBytes(MAX_SETTINGS_BYTES).decodeToString()
                         }
 
                         entry.name == SECRETS_ENTRY -> {
-                            // Read even when CONFIG_ONLY skips applying — we
-                            // ignore the bytes later but reading keeps the
-                            // ZipInputStream's position consistent.
-                            secretsJson = zip.readBytes().decodeToString()
+                            if (scope == RestoreScope.EVERYTHING) {
+                                secretsJson = zip.readEntryBytes(MAX_SECRETS_BYTES).decodeToString()
+                            } else {
+                                zip.drainEntry(MAX_SECRETS_BYTES)
+                            }
                         }
 
-                        !skipBulkPayload &&
-                            entry.name.startsWith("tables/") &&
+                        entry.name == PAYLOAD_MANIFEST_ENTRY -> {
+                            payloadManifestJson = zip.readEntryBytes(MAX_PAYLOAD_MANIFEST_BYTES).decodeToString()
+                        }
+
+                        entry.name.startsWith("tables/") &&
                             entry.name.endsWith(".jsonl") -> {
                             val table = entry.name.removePrefix("tables/").removeSuffix(".jsonl")
-                            val rows = tableRows.getOrPut(table) { mutableListOf() }
-                            zip.readBytes()
-                                .decodeToString()
-                                .lineSequence()
-                                .filter { it.isNotBlank() }
-                                .forEach { rows += json.parseToJsonElement(it).jsonObject }
+                            if (skipBulkPayload) {
+                                zip.drainEntry()
+                            } else {
+                                require(table in SYNC_TABLES) { "同步备份包含未知数据表：$table" }
+                                seenTableEntries += table
+                                val rows = tableRows.getOrPut(table) { mutableListOf() }
+                                zip.readEntryBytes()
+                                    .decodeToString()
+                                    .lineSequence()
+                                    .filter { it.isNotBlank() }
+                                    .forEach { rows += json.parseToJsonElement(it).jsonObject }
+                            }
                         }
 
-                        !skipBulkPayload && entry.name.startsWith("files/") -> {
+                        entry.name.startsWith("files/") -> {
                             val relativePath = entry.name.removePrefix("files/")
                             requireSafeRelativePath(relativePath)
-                            // Per-root skip for the preserve toggles. We don't
-                            // need to drain the entry bytes — ZipInputStream's
-                            // closeEntry() (at the bottom of the outer loop)
-                            // skips past any unread payload of the current
-                            // entry before advancing.
+                            if (!skipBulkPayload) {
+                                require('/' in relativePath && relativePath.substringBefore('/') in SYNC_FILE_ROOTS) {
+                                    "Invalid staged sync path: $relativePath"
+                                }
+                            }
+                            // Preserve branches still drain and count the
+                            // bytes so the payload manifest is verified before
+                            // any local state is mutated.
                             val isChatImages = relativePath.startsWith(FileFolders.CHAT_IMAGES + "/")
                             val isImages = relativePath.startsWith(FileFolders.IMAGES + "/")
-                            if ((skipChatImages && isChatImages) || (skipImages && isImages)) {
-                                // intentionally drop — local files of this root stay.
+                            val skipFile = skipBulkPayload ||
+                                (skipChatImages && isChatImages) ||
+                                (skipImages && isImages)
+                            val fileBytes = if (skipFile) {
+                                zip.drainEntry()
                             } else {
                                 val target = File(stagedFilesRoot, relativePath).canonicalFile
                                 require(target.path.startsWith(stagedFilesRoot.path + File.separator)) {
@@ -305,17 +330,58 @@ class SyncArchiveManager(
                                 }
                                 target.parentFile?.mkdirs()
                                 FileOutputStream(target).buffered().use { output ->
-                                    zip.copyTo(output)
+                                    zip.copyEntryTo(output)
                                 }
+                            }
+                            if (!skipBulkPayload) {
+                                restoredFileCount += 1
+                                restoredFileBytes += fileBytes
+                            }
+                        }
+
+                        else -> {
+                            if (skipBulkPayload) {
+                                zip.drainEntry()
+                            } else {
+                                error("同步备份包含未知条目：${entry.name}")
                             }
                         }
                     }
+                }
+                if (skipBulkPayload && settingsJson != null) {
+                    // The decrypted payload has already passed AES-GCM and
+                    // SHA-256 verification. CONFIG_ONLY needs no unrelated
+                    // tables, secrets, or files, so stop at settings instead
+                    // of streaming a potentially multi-gigabyte full backup.
+                    zip.closeEntry()
+                    break
                 }
                 zip.closeEntry()
             }
         }
 
         val restoredSettingsJson = settingsJson ?: error("同步备份缺少 settings.json")
+        val payloadManifest = payloadManifestJson?.let { json.decodeFromString<SyncPayloadManifest>(it) }
+        if (scope == RestoreScope.EVERYTHING) {
+            validatePayloadManifestForRestore(
+                requireNotNull(payloadManifest) { "同步备份缺少 payload_manifest.json" },
+                requireComplete = true,
+            )
+        } else if (payloadManifest != null) {
+            validatePayloadManifestForRestore(payloadManifest, requireComplete = false)
+        }
+        if (scope == RestoreScope.EVERYTHING) {
+            val missingTables = SYNC_TABLES.toSet() - seenTableEntries
+            require(missingTables.isEmpty()) {
+                "同步备份缺少数据表：${missingTables.sorted().joinToString()}"
+            }
+            validatePayloadContentForRestore(
+                manifest = requireNotNull(payloadManifest),
+                tableRowCounts = tableRows.mapValues { (_, rows) -> rows.size },
+                fileCount = restoredFileCount,
+                fileBytes = restoredFileBytes,
+            )
+        }
 
         val currentSettings = settingsStore.settingsFlow.value
         val decodedSettings = redactor.decodeSettingsForRestore(
@@ -338,8 +404,30 @@ class SyncArchiveManager(
             RestoreScope.CONFIG_ONLY ->
                 currentSettings.copy(providers = decodedSettings.providers)
         }
-
+        // Decode secrets before the first write. A malformed secret payload
+        // must not discover itself only after DB/files have been replaced.
+        val restoredSecrets = if (scope == RestoreScope.EVERYTHING) {
+            json.decodeFromString<SyncSecretSnapshot>(
+                requireNotNull(secretsJson) { "同步备份缺少 secrets.json" },
+            )
+        } else {
+            null
+        }
+        val previousSecrets = if (scope == RestoreScope.EVERYTHING) {
+            SyncSecretSnapshot(
+                webMountOauth = webMountOAuthTokenStore.exportRawJsonForSync(),
+                openAICodexOAuth = openAICodexAuthStore.exportRawJsonForSync(),
+            )
+        } else {
+            null
+        }
+        var settingsMayNeedRollback = false
+        var secretsMayNeedRollback = false
+        var durableDataCommitted = false
+        var fileRestore: FileTreeRestore? = null
         try {
+            settingsMayNeedRollback = true
+            settingsStore.update(finalSettings)
             when (scope) {
                 RestoreScope.EVERYTHING -> {
                     // Apply the preserve toggles: filter out tables the user
@@ -359,9 +447,15 @@ class SyncArchiveManager(
                         if (skipChatImages) add(FileFolders.CHAT_IMAGES)
                         if (skipImages) add(FileFolders.IMAGES)
                     }
+                    secretsMayNeedRollback = true
+                    restoreSecrets(requireNotNull(restoredSecrets))
+                    val fileTransaction = FileTreeRestore(stagedFilesRoot, skippedFileRoots)
+                    fileRestore = fileTransaction
                     restoreTables(filteredTableRows, skippedTables) {
-                        replaceFileTreesFromStage(stagedFilesRoot, skippedFileRoots)
+                        fileTransaction.apply()
                     }
+                    durableDataCommitted = true
+                    fileTransaction.commit()
                 }
                 RestoreScope.CONFIG_ONLY -> {
                     // No table or file work — the staged file tree we
@@ -369,22 +463,43 @@ class SyncArchiveManager(
                     // earlier) is wiped by the outer `finally` regardless.
                 }
             }
+        } catch (error: Throwable) {
+            if (!durableDataCommitted) {
+                runCatching { fileRestore?.rollback() }
+                    .exceptionOrNull()
+                    ?.let(error::addSuppressed)
+                if (secretsMayNeedRollback) {
+                    runCatching { restoreSecrets(requireNotNull(previousSecrets)) }
+                        .exceptionOrNull()
+                        ?.let(error::addSuppressed)
+                }
+                if (settingsMayNeedRollback) {
+                    runCatching { settingsStore.update(currentSettings) }
+                        .exceptionOrNull()
+                        ?.let(error::addSuppressed)
+                }
+            }
+            throw error
         } finally {
             stagedFilesRoot.deleteRecursively()
         }
         if (scope == RestoreScope.EVERYTHING) {
-            // Secrets (WebMount + Codex OAuth tokens) are session-bound.
-            // Restoring them on CONFIG_ONLY would clobber a freshly-paired
-            // OAuth session with an old token from the backup. Only do it
-            // when the user explicitly chose the full migrate-everything
-            // path. See Review Risk #4.
-            restoreSecrets(secretsJson)
             // FTS index + file dir sync only need to run after a full
-            // table / file replace.
-            filesManager.syncFolder(FileFolders.UPLOAD)
-            messageFtsManager.rebuildAllFromDatabase()
+            // table / file replace. These are derived indexes, so a failure
+            // after the durable commit is reported as partial success rather
+            // than rolling settings/secrets back around already-committed DB.
+            val postRestoreFailures = listOfNotNull(
+                runCatching { filesManager.syncFolder(FileFolders.UPLOAD) }.exceptionOrNull(),
+                runCatching { messageFtsManager.rebuildAllFromDatabase() }.exceptionOrNull(),
+            )
+            if (postRestoreFailures.isNotEmpty()) {
+                val failure = IllegalStateException(
+                    "主要数据已恢复，但文件索引或全文索引重建失败；重启后可重试",
+                )
+                postRestoreFailures.forEach(failure::addSuppressed)
+                throw failure
+            }
         }
-        settingsStore.update(finalSettings)
     }
 
     private fun cursorRowToJson(table: String, cursor: Cursor): JsonObject = buildJsonObject {
@@ -427,7 +542,12 @@ class SyncArchiveManager(
             SYNC_TABLES.forEach { table ->
                 if (table in preservedTables) return@forEach
                 rowsByTable[table].orEmpty().forEach { row ->
-                    db.insert(table, SQLiteDatabase.CONFLICT_REPLACE, row.toContentValues(table))
+                    val insertedRowId = db.insert(
+                        table,
+                        SQLiteDatabase.CONFLICT_REPLACE,
+                        row.toContentValues(table),
+                    )
+                    check(insertedRowId != -1L) { "同步备份数据表写入失败：$table" }
                 }
             }
             afterTablesRestored()
@@ -475,82 +595,146 @@ class SyncArchiveManager(
                 .filter { it.isFile }
                 .forEach { file ->
                     val relativePath = file.relativeTo(context.filesDir).invariantSeparatorsPath
-                    writeFileTreeEntry(zip, "files/$relativePath", file)
+                    val writtenBytes = writeFileTreeEntry(zip, "files/$relativePath", file)
                     count += 1
-                    bytes += file.length()
+                    bytes += writtenBytes
                 }
         }
         return SyncDatasetSummary("files", recordCount = count, byteCount = bytes)
     }
 
-    private fun writeFileTreeEntry(zip: ZipOutputStream, name: String, file: File) {
+    private fun writeFileTreeEntry(zip: ZipOutputStream, name: String, file: File): Long {
         // Images, audio, video, and pre-compressed archives carry incompressible
         // payloads — DEFLATE just spends CPU for no gain. STORE them straight; the
         // extra CRC32 pass is still cheaper than a wasted DEFLATE pass.
         if (shouldStoreUncompressed(name)) {
+            val sizeBytes = file.length()
             writeStoredFileEntry(
                 zip = zip,
                 name = name,
                 file = file,
-                sizeBytes = file.length(),
+                sizeBytes = sizeBytes,
                 crc32 = computeCrc32(file),
             )
+            return sizeBytes
         } else {
-            writeFileEntry(zip, name, file)
+            return writeFileEntry(zip, name, file)
         }
     }
 
-    private fun replaceFileTreesFromStage(
-        stageRoot: File,
-        preservedRoots: Set<String> = emptySet(),
+    private inner class FileTreeRestore(
+        private val stageRoot: File,
+        private val preservedRoots: Set<String>,
     ) {
-        val filesDir = context.filesDir.canonicalFile
-        val backupRoot = File(context.cacheDir, "sync-restore-backup").canonicalFile
-        backupRoot.deleteRecursively()
-        backupRoot.mkdirs()
-        try {
-            SYNC_FILE_ROOTS.forEach { relativeRoot ->
-                if (relativeRoot in preservedRoots) return@forEach
-                val target = File(filesDir, relativeRoot).canonicalFile
-                require(target.path.startsWith(filesDir.path + File.separator)) {
-                    "Invalid sync file root: $relativeRoot"
-                }
-                if (target.exists()) {
-                    val backup = File(backupRoot, relativeRoot).canonicalFile
-                    backup.parentFile?.mkdirs()
-                    if (!target.renameTo(backup)) {
-                        target.copyRecursively(backup, overwrite = true)
-                        target.deleteRecursively()
+        private val filesDir = context.filesDir.canonicalFile
+        private val backupRoot = File.createTempFile("sync-restore-backup-", ".tmp", context.cacheDir).let { temp ->
+            check(temp.delete()) { "无法准备同步恢复回滚目录" }
+            check(temp.mkdirs()) { "无法创建同步恢复回滚目录" }
+            temp.canonicalFile
+        }
+        private var applied = false
+        private var started = false
+        private var finished = false
+        private val movedRoots = linkedSetOf<String>()
+        private val createdRoots = linkedSetOf<String>()
+
+        fun apply() {
+            check(!started && !finished) { "同步文件恢复事务已应用" }
+            started = true
+            try {
+                SYNC_FILE_ROOTS.forEach { relativeRoot ->
+                    if (relativeRoot in preservedRoots) return@forEach
+                    val target = File(filesDir, relativeRoot).canonicalFile
+                    require(target.path.startsWith(filesDir.path + File.separator)) {
+                        "Invalid sync file root: $relativeRoot"
+                    }
+                    if (target.exists()) {
+                        val backup = File(backupRoot, relativeRoot).canonicalFile
+                        backup.parentFile?.mkdirs()
+                        if (target.renameTo(backup)) {
+                            movedRoots += relativeRoot
+                        } else {
+                            check(target.copyRecursively(backup, overwrite = true)) {
+                                "无法备份同步目录：$relativeRoot"
+                            }
+                            // From this point rollback has a complete copy.
+                            movedRoots += relativeRoot
+                            check(target.deleteRecursively()) { "无法替换同步目录：$relativeRoot" }
+                        }
                     }
                 }
-            }
-            stageRoot.listFiles().orEmpty().forEach { staged ->
-                val relativeRoot = staged.name
-                require(relativeRoot in SYNC_FILE_ROOTS) {
-                    "Invalid staged sync root: $relativeRoot"
+                stageRoot.listFiles().orEmpty().forEach { staged ->
+                    val relativeRoot = staged.name
+                    require(relativeRoot in SYNC_FILE_ROOTS) {
+                        "Invalid staged sync root: $relativeRoot"
+                    }
+                    if (relativeRoot in preservedRoots) return@forEach
+                    // Mark before copying so a partial destination is removed.
+                    createdRoots += relativeRoot
+                    check(staged.copyRecursively(File(filesDir, relativeRoot), overwrite = true)) {
+                        "无法恢复同步目录：$relativeRoot"
+                    }
                 }
-                if (relativeRoot in preservedRoots) return@forEach
-                staged.copyRecursively(File(filesDir, relativeRoot), overwrite = true)
+                applied = true
+            } catch (error: Throwable) {
+                runCatching { rollback() }.exceptionOrNull()?.let(error::addSuppressed)
+                throw error
             }
+        }
+
+        fun rollback() {
+            if (finished) return
+            if (!started) {
+                finished = true
+                backupRoot.deleteRecursively()
+                return
+            }
+            var rollbackFailure: Throwable? = null
+            fun recordFailure(error: Throwable) {
+                if (rollbackFailure == null) {
+                    rollbackFailure = error
+                } else {
+                    rollbackFailure?.addSuppressed(error)
+                }
+            }
+            createdRoots.forEach { relativeRoot ->
+                val target = File(filesDir, relativeRoot)
+                if (target.exists() && !target.deleteRecursively()) {
+                    recordFailure(IllegalStateException("无法清理同步恢复的部分目录：$relativeRoot"))
+                }
+            }
+            movedRoots.forEach { relativeRoot ->
+                val backup = File(backupRoot, relativeRoot)
+                if (!backup.exists()) return@forEach
+                val target = File(filesDir, backup.name)
+                if (!backup.renameTo(target)) {
+                    runCatching {
+                        check(backup.copyRecursively(target, overwrite = true)) {
+                            "无法回滚同步目录：$relativeRoot"
+                        }
+                    }.exceptionOrNull()?.let(::recordFailure)
+                }
+            }
+            finished = true
+            val failure = rollbackFailure
+            if (failure == null) {
+                backupRoot.deleteRecursively()
+            } else {
+                throw IllegalStateException(
+                    "同步恢复回滚不完整；原目录副本保留在 ${backupRoot.path}",
+                    failure,
+                )
+            }
+        }
+
+        fun commit() {
+            check(applied && !finished) { "同步文件恢复事务尚未完成" }
             backupRoot.deleteRecursively()
-        } catch (error: Throwable) {
-            SYNC_FILE_ROOTS.forEach { relativeRoot ->
-                if (relativeRoot in preservedRoots) return@forEach
-                File(filesDir, relativeRoot).deleteRecursively()
-            }
-            backupRoot.listFiles().orEmpty().forEach { backup ->
-                if (backup.name in preservedRoots) return@forEach
-                backup.copyRecursively(File(filesDir, backup.name), overwrite = true)
-            }
-            throw error
-        } finally {
-            backupRoot.deleteRecursively()
+            finished = true
         }
     }
 
-    private fun restoreSecrets(secretsJson: String?) {
-        if (secretsJson.isNullOrBlank()) return
-        val snapshot = runCatching { json.decodeFromString<SyncSecretSnapshot>(secretsJson) }.getOrNull() ?: return
+    private fun restoreSecrets(snapshot: SyncSecretSnapshot) {
         snapshot.webMountOauth?.let { webMountOAuthTokenStore.restoreRawJsonFromSync(it) }
         snapshot.openAICodexOAuth?.let { openAICodexAuthStore.restoreRawJsonFromSync(it) }
     }
@@ -580,14 +764,16 @@ class SyncArchiveManager(
     private fun parseArchive(file: File, payloadTarget: File? = null): ParsedSyncArchive {
         var manifestJson: String? = null
         var hasEncryptedPayload = false
+        val seenEntries = mutableSetOf<String>()
         ZipInputStream(FileInputStream(file).buffered()).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
                 requireSafeRelativePath(entry.name)
+                require(seenEntries.add(entry.name)) { "同步备份包含重复条目：${entry.name}" }
                 if (!entry.isDirectory) {
                     when (entry.name) {
                         SYNC_MANIFEST_ENTRY -> {
-                            manifestJson = zip.readBytes().decodeToString()
+                            manifestJson = zip.readEntryBytes(MAX_SYNC_MANIFEST_BYTES).decodeToString()
                         }
 
                         SYNC_PAYLOAD_ENTRY -> {
@@ -595,7 +781,7 @@ class SyncArchiveManager(
                             if (payloadTarget != null) {
                                 payloadTarget.parentFile?.mkdirs()
                                 FileOutputStream(payloadTarget).buffered().use { output ->
-                                    zip.copyTo(output)
+                                    zip.copyEntryTo(output)
                                 }
                             }
                         }
@@ -611,7 +797,34 @@ class SyncArchiveManager(
         require(manifest.archiveVersion == CURRENT_ARCHIVE_VERSION) {
             "不支持的同步备份版本：${manifest.archiveVersion}"
         }
+        crypto.validateManifestCrypto(manifest)
         return ParsedSyncArchive(manifest = manifest)
+    }
+
+    private fun ZipInputStream.readEntryBytes(maxBytes: Long? = null): ByteArray {
+        val output = ByteArrayOutputStream()
+        copyEntryTo(output, maxBytes)
+        return output.toByteArray()
+    }
+
+    private fun ZipInputStream.drainEntry(maxBytes: Long? = null): Long =
+        copyEntryTo(null, maxBytes)
+
+    private fun ZipInputStream.copyEntryTo(
+        output: java.io.OutputStream?,
+        maxBytes: Long? = null,
+    ): Long {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var entryBytes = 0L
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) break
+            if (read == 0) continue
+            entryBytes += read
+            require(maxBytes == null || entryBytes <= maxBytes) { "同步备份条目解压后过大" }
+            output?.write(buffer, 0, read)
+        }
+        return entryBytes
     }
 
     private fun normalizeStringForExport(table: String, column: String, value: String): String =
@@ -645,10 +858,11 @@ class SyncArchiveManager(
     private fun writeTextEntry(zip: ZipOutputStream, name: String, text: String) =
         writeBytesEntry(zip, name, text.toByteArray())
 
-    private fun writeFileEntry(zip: ZipOutputStream, name: String, file: File) {
+    private fun writeFileEntry(zip: ZipOutputStream, name: String, file: File): Long {
         zip.putNextEntry(ZipEntry(name))
-        file.inputStream().use { input -> input.copyTo(zip) }
+        val writtenBytes = file.inputStream().use { input -> input.copyTo(zip) }
         zip.closeEntry()
+        return writtenBytes
     }
 
     private fun writeStoredFileEntry(
@@ -702,6 +916,70 @@ class SyncArchiveManager(
         private const val SETTINGS_ENTRY = "settings.json"
         private const val SECRETS_ENTRY = "secrets.json"
         private const val AMBER_FILE_PREFIX = "amber-file://"
+        private const val MAX_SYNC_MANIFEST_BYTES = 64L * 1024L
+        private const val MAX_PAYLOAD_MANIFEST_BYTES = 256L * 1024L
+        private const val MAX_SETTINGS_BYTES = 8L * 1024L * 1024L
+        private const val MAX_SECRETS_BYTES = 4L * 1024L * 1024L
+        private const val MAX_DATASET_ID_CHARS = 128
+        private const val MAX_CONFIG_PREVIEW_DATASETS = 512
+        private val REQUIRED_PAYLOAD_DATASETS = setOf("settings", "secrets", "files")
+
+        internal fun validatePayloadManifestForRestore(
+            manifest: SyncPayloadManifest,
+            requireComplete: Boolean = true,
+        ) {
+            val maxDatasets = if (requireComplete) {
+                SYNC_TABLES.size + REQUIRED_PAYLOAD_DATASETS.size
+            } else {
+                MAX_CONFIG_PREVIEW_DATASETS
+            }
+            require(manifest.datasets.size <= maxDatasets) {
+                "payload manifest 数据集数量无效"
+            }
+            val ids = manifest.datasets.map { dataset ->
+                require(dataset.id.isNotBlank() && dataset.id.length <= MAX_DATASET_ID_CHARS) {
+                    "payload manifest 数据集 ID 无效"
+                }
+                require(dataset.recordCount >= 0 && dataset.byteCount >= 0L) {
+                    "payload manifest 数据集计数无效：${dataset.id}"
+                }
+                dataset.id
+            }
+            require(ids.size == ids.toSet().size) { "payload manifest 包含重复数据集" }
+            val required = if (requireComplete) {
+                REQUIRED_PAYLOAD_DATASETS + SYNC_TABLES.map { "table:$it" }
+            } else {
+                setOf("settings")
+            }
+            val missing = required.toSet() - ids.toSet()
+            require(missing.isEmpty()) {
+                "payload manifest 缺少数据集：${missing.sorted().joinToString()}"
+            }
+        }
+
+        internal fun validatePayloadContentForRestore(
+            manifest: SyncPayloadManifest,
+            tableRowCounts: Map<String, Int>,
+            fileCount: Int,
+            fileBytes: Long,
+        ) {
+            val datasets = manifest.datasets.associateBy { it.id }
+            SYNC_TABLES.forEach { table ->
+                val declared = requireNotNull(datasets["table:$table"]) {
+                    "payload manifest 缺少数据表：$table"
+                }
+                val actualRows = tableRowCounts[table] ?: 0
+                require(declared.recordCount == actualRows) {
+                    "同步备份数据表计数不匹配：$table"
+                }
+            }
+            val declaredFiles = requireNotNull(datasets["files"]) {
+                "payload manifest 缺少 files 数据集"
+            }
+            require(declaredFiles.recordCount == fileCount && declaredFiles.byteCount == fileBytes) {
+                "同步备份文件计数或字节数不匹配"
+            }
+        }
 
         // Pre-compressed/lossy formats: DEFLATE has no headroom and just burns CPU.
         // Listed by extension so the check stays cheap and stable across content

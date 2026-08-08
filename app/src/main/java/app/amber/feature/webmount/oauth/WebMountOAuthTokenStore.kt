@@ -86,19 +86,44 @@ class WebMountOAuthTokenStore(context: Context) {
     }.toString()
 
     fun restoreRawJsonFromSync(raw: String) {
-        val obj = runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull() ?: return
-        clearAllForSync()
-        obj["tokens"]?.jsonObject?.forEach { (provider, value) ->
-            runCatching { putToken(provider, tokenFromJson(value.jsonObject)) }
+        // Decode everything before the first destructive clear so malformed
+        // backup data cannot partially erase the current credential set.
+        val obj = json.parseToJsonElement(raw).jsonObject
+        val restoredTokens = obj["tokens"]?.jsonObject.orEmpty().mapValues { (_, value) ->
+            tokenFromJson(value.jsonObject)
         }
-        obj["credentials"]?.jsonObject?.forEach { (provider, value) ->
-            runCatching { putCredentials(provider, credentialsFromJson(value.jsonObject)) }
+        val restoredCredentials = obj["credentials"]?.jsonObject.orEmpty().mapValues { (_, value) ->
+            credentialsFromJson(value.jsonObject)
         }
-    }
 
-    private fun clearAllForSync() {
-        tokenProviders().forEach(::clearToken)
-        credentialProviders().forEach(::clearCredentials)
+        if (tokens != null) {
+            val committed = tokens.edit().clear().apply {
+                restoredTokens.forEach { (provider, token) ->
+                    putString(provider, json.encodeToString(JsonElement.serializer(), token.toJson()))
+                }
+            }.commit()
+            check(committed) { "Unable to persist restored WebMount OAuth tokens" }
+            memTokens.clear()
+        } else {
+            memTokens.clear()
+            memTokens.putAll(restoredTokens)
+        }
+
+        if (creds != null) {
+            val committed = creds.edit().clear().apply {
+                restoredCredentials.forEach { (provider, credential) ->
+                    putString(provider, json.encodeToString(JsonElement.serializer(), credential.toJson()))
+                }
+            }.commit()
+            check(committed) { "Unable to persist restored WebMount OAuth credentials" }
+            memCreds.clear()
+        } else {
+            memCreds.clear()
+            memCreds.putAll(restoredCredentials)
+        }
+        (restoredTokens.keys + restoredCredentials.keys).forEach { provider ->
+            _updates.tryEmit(provider)
+        }
     }
 
     // ---- credentials -------------------------------------------------------

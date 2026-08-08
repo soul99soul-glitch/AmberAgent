@@ -1,15 +1,11 @@
 package app.amber.core.sync.core
 
 import android.util.Base64
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.zip.CRC32
 import javax.crypto.Cipher
-import javax.crypto.CipherInputStream
-import javax.crypto.CipherOutputStream
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
@@ -41,19 +37,14 @@ class SyncCrypto(private val nativeEnabled: Boolean = true) {
     }
 
     fun encrypt(bytes: ByteArray, passphrase: String, params: SyncEncryptionParams): ByteArray {
+        validatePassphrase(passphrase)
+        validateEncryptionMetadata(params.kdf, params.cipher)
         if (nativeEnabled) {
             val nativeResult = encryptNative(bytes, passphrase, params.kdf, params.cipher)
             if (nativeResult != null) return nativeResult
         }
         val cipher = cipher(Cipher.ENCRYPT_MODE, passphrase, params.kdf, params.cipher)
-        return ByteArrayOutputStream().use { output ->
-            CipherOutputStream(output, cipher).use { cipherOut ->
-                ByteArrayInputStream(bytes).use { input ->
-                    input.copyTo(cipherOut)
-                }
-            }
-            output.toByteArray()
-        }
+        return cipher.doFinal(bytes)
     }
 
     fun encrypt(
@@ -62,26 +53,38 @@ class SyncCrypto(private val nativeEnabled: Boolean = true) {
         passphrase: String,
         params: SyncEncryptionParams,
     ): EncryptResult {
+        validatePassphrase(passphrase)
+        validateEncryptionMetadata(params.kdf, params.cipher)
         val cipher = cipher(Cipher.ENCRYPT_MODE, passphrase, params.kdf, params.cipher)
         outputFile.parentFile?.mkdirs()
         val digest = MessageDigest.getInstance("SHA-256")
         val crc = CRC32()
         var size = 0L
-        inputFile.inputStream().buffered().use { rawIn ->
-            CipherInputStream(rawIn, cipher).use { cipherIn ->
+        try {
+            inputFile.inputStream().buffered().use { input ->
                 outputFile.outputStream().buffered().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                     while (true) {
-                        val read = cipherIn.read(buffer)
+                        val read = input.read(buffer)
                         if (read < 0) break
                         if (read == 0) continue
-                        output.write(buffer, 0, read)
-                        digest.update(buffer, 0, read)
-                        crc.update(buffer, 0, read)
-                        size += read
+                        cipher.update(buffer, 0, read)?.takeIf { it.isNotEmpty() }?.let { encrypted ->
+                            output.write(encrypted)
+                            digest.update(encrypted)
+                            crc.update(encrypted)
+                            size += encrypted.size
+                        }
                     }
+                    val finalBytes = cipher.doFinal()
+                    output.write(finalBytes)
+                    digest.update(finalBytes)
+                    crc.update(finalBytes)
+                    size += finalBytes.size
                 }
             }
+        } catch (error: Throwable) {
+            outputFile.delete()
+            throw error
         }
         return EncryptResult(
             sha256 = digest.digest().joinToString("") { "%02x".format(it) },
@@ -91,25 +94,41 @@ class SyncCrypto(private val nativeEnabled: Boolean = true) {
     }
 
     fun decrypt(bytes: ByteArray, passphrase: String, manifest: SyncManifest): ByteArray {
+        validatePassphrase(passphrase)
+        validateManifestCrypto(manifest)
         if (nativeEnabled) {
             val nativeResult = decryptNative(bytes, passphrase, manifest.kdf, manifest.cipher)
             if (nativeResult != null) return nativeResult
         }
         val cipher = cipher(Cipher.DECRYPT_MODE, passphrase, manifest.kdf, manifest.cipher)
-        return CipherInputStream(ByteArrayInputStream(bytes), cipher).use { input ->
-            input.readBytes()
-        }
+        return cipher.doFinal(bytes)
     }
 
     fun decrypt(inputFile: File, outputFile: File, passphrase: String, manifest: SyncManifest) {
+        validatePassphrase(passphrase)
+        validateManifestCrypto(manifest)
         val cipher = cipher(Cipher.DECRYPT_MODE, passphrase, manifest.kdf, manifest.cipher)
         outputFile.parentFile?.mkdirs()
-        inputFile.inputStream().buffered().use { input ->
-            CipherInputStream(input, cipher).use { cipherIn ->
+        try {
+            inputFile.inputStream().buffered().use { input ->
                 outputFile.outputStream().buffered().use { output ->
-                    cipherIn.copyTo(output)
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        if (read == 0) continue
+                        cipher.update(buffer, 0, read)?.takeIf { it.isNotEmpty() }?.let { decrypted ->
+                            output.write(decrypted)
+                        }
+                    }
+                    val finalBytes = cipher.doFinal()
+                    output.write(finalBytes)
                 }
             }
+        } catch (error: Throwable) {
+            // Never leave unauthenticated/partial plaintext for a later parser.
+            outputFile.delete()
+            throw error
         }
     }
 
@@ -144,9 +163,8 @@ class SyncCrypto(private val nativeEnabled: Boolean = true) {
         kdf: SyncKdfInfo,
         cipherInfo: SyncCipherInfo,
     ): Cipher {
-        require(passphrase.isNotBlank()) { "同步口令不能为空" }
-        require(kdf.name == "PBKDF2WithHmacSHA256") { "Unsupported KDF: ${kdf.name}" }
-        require(cipherInfo.name == "AES/GCM/NoPadding") { "Unsupported cipher: ${cipherInfo.name}" }
+        validatePassphrase(passphrase)
+        validateEncryptionMetadata(kdf, cipherInfo)
         val key = deriveKey(passphrase, kdf)
         val cipher = Cipher.getInstance(cipherInfo.name)
         cipher.init(
@@ -232,9 +250,39 @@ class SyncCrypto(private val nativeEnabled: Boolean = true) {
 
     companion object {
         const val PBKDF2_ITERATIONS = 210_000
-        private const val SALT_BYTES = 16
-        private const val IV_BYTES = 12
+        internal const val MIN_PBKDF2_ITERATIONS = 100_000
+        internal const val MAX_PBKDF2_ITERATIONS = 1_000_000
+        internal const val SALT_BYTES = 16
+        internal const val IV_BYTES = 12
+        private const val MAX_PASSPHRASE_CHARS = 4_096
         private val secureRandom = SecureRandom()
+    }
+
+    internal fun validateManifestCrypto(manifest: SyncManifest) {
+        require(manifest.encrypted) { "同步备份未标记为加密格式" }
+        require(manifest.payloadSha256.matches(Regex("^[0-9a-f]{64}$"))) { "备份摘要格式无效" }
+        validateEncryptionMetadata(manifest.kdf, manifest.cipher)
+    }
+
+    internal fun validateEncryptionMetadata(kdf: SyncKdfInfo, cipherInfo: SyncCipherInfo) {
+        require(kdf.name == "PBKDF2WithHmacSHA256") { "Unsupported KDF: ${kdf.name}" }
+        require(kdf.iterations in MIN_PBKDF2_ITERATIONS..MAX_PBKDF2_ITERATIONS) {
+            "PBKDF2 iterations out of range"
+        }
+        require(kdf.keySizeBits == 256) { "Unsupported key size: ${kdf.keySizeBits}" }
+        val salt = runCatching { kdf.saltBase64.fromBase64() }
+            .getOrElse { throw IllegalArgumentException("Invalid KDF salt", it) }
+        require(salt.size == SALT_BYTES) { "Invalid KDF salt length" }
+        require(cipherInfo.name == "AES/GCM/NoPadding") { "Unsupported cipher: ${cipherInfo.name}" }
+        require(cipherInfo.tagSizeBits == 128) { "Unsupported GCM tag size: ${cipherInfo.tagSizeBits}" }
+        val iv = runCatching { cipherInfo.ivBase64.fromBase64() }
+            .getOrElse { throw IllegalArgumentException("Invalid cipher IV", it) }
+        require(iv.size == IV_BYTES) { "Invalid cipher IV length" }
+    }
+
+    private fun validatePassphrase(passphrase: String) {
+        require(passphrase.isNotBlank()) { "同步口令不能为空" }
+        require(passphrase.length <= MAX_PASSPHRASE_CHARS) { "同步口令过长" }
     }
 }
 

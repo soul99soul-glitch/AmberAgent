@@ -99,13 +99,14 @@ class OpenAICodexAuthStore(context: Context) {
     }
 
     fun restoreRawJsonFromSync(raw: String) {
-        val values = runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrNull() ?: return
-        prefs.edit().apply {
+        val values = json.decodeFromString<Map<String, String>>(raw)
+        val committed = prefs.edit().apply {
             clear()
             values.forEach { (key, value) ->
                 putString(key, value)
             }
-        }.apply()
+        }.commit()
+        check(committed) { "Unable to persist restored OpenAI Codex credentials" }
     }
 }
 

@@ -137,11 +137,11 @@ data class SyncExportRequest(
 /**
  * Scope of a restore operation.
  *
- * - [CONFIG_ONLY] writes only the settings + secrets (provider list, API
- *   keys, OAuth tokens) back into local state. Local conversations,
- *   messages, memories, files, generated images, board / feishu state —
- *   ALL preserved. Intended for the "I just want my provider configs
- *   back, don't touch my chat history" workflow.
+ * - [CONFIG_ONLY] writes only provider settings from `settings.json` back
+ *   into local state. OAuth/session secrets and all local conversations,
+ *   messages, memories, files, generated images, board / feishu state are
+ *   preserved. Intended for the "I just want my provider configs back,
+ *   don't touch my chat history or current sessions" workflow.
  *
  * - [EVERYTHING] is the historical full-replace: every backed-up table
  *   wipes and replaces its local counterpart; all file directories are

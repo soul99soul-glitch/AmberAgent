@@ -141,6 +141,62 @@ class SyncCryptoParityTest {
         assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", hex)
     }
 
+    @Test
+    fun manifestKdfWorkFactorIsBoundedBeforeDerivation() {
+        val error = runCatching {
+            SyncCrypto(nativeEnabled = false).validateManifestCrypto(
+                manifest(kdf = validKdf().copy(iterations = Int.MAX_VALUE)),
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalArgumentException)
+        assertTrue(error?.message.orEmpty().contains("iterations"))
+    }
+
+    @Test
+    fun manifestRejectsInvalidSaltIvAndDigestShapes() {
+        val crypto = SyncCrypto(nativeEnabled = false)
+        assertTrue(
+            runCatching { crypto.validateManifestCrypto(manifest(kdf = validKdf().copy(saltBase64 = "AA=="))) }
+                .exceptionOrNull() is IllegalArgumentException,
+        )
+        assertTrue(
+            runCatching {
+                crypto.validateManifestCrypto(
+                    manifest(cipher = validCipher().copy(ivBase64 = "AA==")),
+                )
+            }.exceptionOrNull() is IllegalArgumentException,
+        )
+        assertTrue(
+            runCatching { crypto.validateManifestCrypto(manifest(payloadSha256 = "not-a-digest")) }
+                .exceptionOrNull() is IllegalArgumentException,
+        )
+    }
+
+    private fun validKdf() = SyncKdfInfo(
+        iterations = SyncCrypto.PBKDF2_ITERATIONS,
+        saltBase64 = java.util.Base64.getEncoder().encodeToString(ByteArray(16) { 1 }),
+    )
+
+    private fun validCipher() = SyncCipherInfo(
+        ivBase64 = java.util.Base64.getEncoder().encodeToString(ByteArray(12) { 2 }),
+    )
+
+    private fun manifest(
+        kdf: SyncKdfInfo = validKdf(),
+        cipher: SyncCipherInfo = validCipher(),
+        payloadSha256: String = "a".repeat(64),
+    ) = SyncManifest(
+        appVersionName = "test",
+        appVersionCode = 1L,
+        createdAt = 1L,
+        deviceId = "test",
+        mode = SyncMode.FULL,
+        kdf = kdf,
+        cipher = cipher,
+        payloadSha256 = payloadSha256,
+    )
+
     private fun pbkdf2Jvm(passphrase: String, salt: ByteArray, iter: Int, keyBytes: Int): ByteArray {
         val spec = PBEKeySpec(passphrase.toCharArray(), salt, iter, keyBytes * 8)
         return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
