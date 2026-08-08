@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
@@ -62,6 +64,16 @@ class SettingsAggregator(
     scope: AppScope,
 ) {
 
+    /**
+     * Serializes the read/transform/write transaction exposed by [update].
+     *
+     * DataStore serializes individual edit blocks, but the transform overload
+     * historically read [settingsFlow] before entering that edit. Two callers
+     * could therefore derive complete Settings snapshots from the same stale
+     * value and the later write would erase the earlier caller's fields.
+     */
+    private val updateMutex = Mutex()
+
     private val _settingsFlow: MutableStateFlow<Settings> = combine(
         uiPrefs.rawFlow,
         searchPrefs.rawFlow,
@@ -95,16 +107,17 @@ class SettingsAggregator(
      * test can prove behavioural equivalence.
      */
     suspend fun update(settings: Settings) {
+        updateMutex.withLock {
+            writeSettings(settings)
+        }
+    }
+
+    private suspend fun writeSettings(settings: Settings) {
         if (settings.init) {
             Log.w(TAG, "Cannot update dummy settings")
             return
         }
         val settingsForWrite = settings.withMigratedMemoryDreamLegacy()
-        // [M1.1.8a W1] Mirror the pre-M1.1.8e SettingsStore.update line 484 — push value into
-        // flow eagerly so caller reading settingsFlow.value immediately after
-        // update() sees the new value (matches existing god-class semantics
-        // before the dataStore.edit reader cycle completes).
-        _settingsFlow.value = settingsForWrite
         dataStore.edit { p ->
             p[PreferencesKeys.DYNAMIC_COLOR] = settings.dynamicColor
             p[PreferencesKeys.THEME_ID] = settings.themeId
@@ -177,25 +190,39 @@ class SettingsAggregator(
                 p[PreferencesKeys.SEEDED_ROUTING_QUICK_MESSAGES_V1] = true
             }
         }
+        // Publish only after persistence succeeds. Callers still observe the
+        // value before update() returns, while a failed DataStore write can no
+        // longer leave an unpersisted snapshot presented as canonical state.
+        _settingsFlow.value = settingsForWrite
     }
 
     suspend fun update(fn: (Settings) -> Settings) {
-        update(fn(settingsFlow.value))
+        updateMutex.withLock {
+            writeSettings(fn(settingsFlow.value))
+        }
     }
 
     suspend fun updateLaunchCount(launchCount: Int) {
-        dataStore.edit { p ->
-            p[PreferencesKeys.LAUNCH_COUNT] = launchCount
-        }
-        val current = _settingsFlow.value
-        if (!current.init) {
-            _settingsFlow.value = current.copy(launchCount = launchCount)
+        updateMutex.withLock {
+            dataStore.edit { p ->
+                p[PreferencesKeys.LAUNCH_COUNT] = launchCount
+            }
+            val current = _settingsFlow.value
+            if (!current.init) {
+                _settingsFlow.value = current.copy(launchCount = launchCount)
+            }
         }
     }
 
     suspend fun updateAssistant(assistantId: Uuid) {
-        dataStore.edit { p ->
-            p[PreferencesKeys.SELECT_ASSISTANT] = assistantId.toString()
+        updateMutex.withLock {
+            dataStore.edit { p ->
+                p[PreferencesKeys.SELECT_ASSISTANT] = assistantId.toString()
+            }
+            val current = _settingsFlow.value
+            if (!current.init) {
+                _settingsFlow.value = current.copy(assistantId = assistantId)
+            }
         }
     }
 

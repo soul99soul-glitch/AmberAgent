@@ -57,4 +57,5 @@ dependencies {
     implementation("androidx.compose.runtime:runtime")
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
