@@ -1,6 +1,6 @@
 # AmberAgent iOS · Theme Pack 设计规范
 
-> 版本：2026-08（对应 iOS Phase 0–3）  
+> 版本：2026-08（对应 iOS Phase 0–3）
 > 目标：定义「可换层 / 不可换排版」的主题配方，让设计、设计 AI、工程用同一套语言交付主题。
 
 ---
@@ -238,7 +238,7 @@ AmberThemePack
 | pi-steel | 点阵 · Pi | pi（奶油稿纸） | steelBlue | **lineGrid 方格点阵** + serifWordmark + **monospace chrome** + **appWide**（含 chat） |
 | notion-blue | Notion · 暖白 | notion（暖白） | notionBlue `#0075de` | flat + system wordmark + phosphor + quieter glass；选中行中性晕 |
 
-**经典包** = 只换 paper × accent。  
+**经典包** = 只换 paper × accent。
 **角色包** = 颜色 + 纹理 + 字标 + 五图标 + chrome/可选表面槽，整套叙事。
 
 ---
