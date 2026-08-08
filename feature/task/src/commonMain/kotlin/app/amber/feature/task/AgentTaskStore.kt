@@ -15,18 +15,23 @@ class AgentTaskStore(
     private val json: Json,
 ) {
     private val appFilesDirPath = filesDirPath
-    private val taskDir = TaskFile(filesDirPath + separatorChar() + "amberagent" + separatorChar() + "tasks").also { it.mkdirs() }
+    private val taskDir = TaskFile(filesDirPath + separatorChar() + "amberagent" + separatorChar() + "tasks").also {
+        check(it.mkdirs()) { "Unable to create agent task directory: ${it.path}" }
+    }
     private val recoveryManager = AgentTaskRecoveryManager()
     private val mutex = Mutex()
     private val tasks = mutableMapOf<String, AgentTaskSnapshot>()
     private val cancelCallbacks = mutableMapOf<String, suspend () -> Boolean>()
     private val retryCallbacks = mutableMapOf<String, suspend () -> Boolean>()
+    @kotlin.concurrent.Volatile
+    private var taskSnapshot: Map<String, AgentTaskSnapshot> = emptyMap()
     private val _tasksFlow = MutableStateFlow<List<AgentTaskSnapshot>>(emptyList())
     val tasksFlow: StateFlow<List<AgentTaskSnapshot>> = _tasksFlow.asStateFlow()
 
     init {
         loadSnapshots()
-        publish()
+        // Construction is single-threaded; all post-publication mutations use [mutex].
+        publishLocked()
     }
 
     suspend fun register(
@@ -40,6 +45,10 @@ class AgentTaskStore(
         cancel: (suspend () -> Boolean)? = null,
         retry: (suspend () -> Boolean)? = null,
     ): AgentTaskSnapshot = mutex.withLock {
+        require(!snapshot.retryPolicy.retryable || retry != null) {
+            "Retryable agent task ${snapshot.taskId} must register a live retry adapter"
+        }
+        persist(snapshot)
         tasks[snapshot.taskId] = snapshot
         if (cancel != null) {
             cancelCallbacks[snapshot.taskId] = cancel
@@ -51,8 +60,7 @@ class AgentTaskStore(
         } else if (!snapshot.retryPolicy.retryable) {
             retryCallbacks.remove(snapshot.taskId)
         }
-        persist(snapshot)
-        publish()
+        publishLocked()
         snapshot
     }
 
@@ -70,50 +78,64 @@ class AgentTaskStore(
         retryPolicy: AgentTaskRetryPolicy? = null,
         outputRef: AgentTaskOutputRef? = null,
         lastHeartbeatMs: Long? = null,
+        clearSummary: Boolean = false,
+        clearError: Boolean = false,
+        clearLastErrorCode: Boolean = false,
+        clearOutputPath: Boolean = false,
+        clearOutputRef: Boolean = false,
+        clearLastHeartbeat: Boolean = false,
     ): AgentTaskSnapshot? = mutex.withLock {
         val current = tasks[taskId] ?: return@withLock null
         val next = current.copy(
             status = status ?: current.status,
             queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,
-            summary = summary ?: current.summary,
-            error = error ?: current.error,
-            lastErrorCode = lastErrorCode ?: current.lastErrorCode,
-            outputPath = outputPath ?: current.outputPath,
+            summary = if (clearSummary) null else summary ?: current.summary,
+            error = if (clearError) null else error ?: current.error,
+            lastErrorCode = if (clearLastErrorCode) null else lastErrorCode ?: current.lastErrorCode,
+            outputPath = if (clearOutputPath) null else outputPath ?: current.outputPath,
             outputOffset = outputOffset ?: current.outputOffset,
             cancelCapability = cancelCapability ?: current.cancelCapability,
             recoveryState = recoveryState ?: status?.toRecoveryState(current.type, current.retryPolicy) ?: current.recoveryState,
             retryPolicy = retryPolicy ?: current.retryPolicy,
-            outputRef = outputRef ?: current.outputRef,
-            lastHeartbeatMs = lastHeartbeatMs ?: current.lastHeartbeatMs,
+            outputRef = if (clearOutputRef) null else outputRef ?: current.outputRef,
+            lastHeartbeatMs = if (clearLastHeartbeat) null else lastHeartbeatMs ?: current.lastHeartbeatMs,
             updatedAtMs = Clock.System.now().toEpochMilliseconds(),
         )
-        tasks[taskId] = next
+        require(!next.retryPolicy.retryable || retryCallbacks.containsKey(taskId)) {
+            "Retryable agent task $taskId must retain a live retry adapter"
+        }
         persist(next)
-        publish()
+        tasks[taskId] = next
+        if (!next.cancelCapability) cancelCallbacks.remove(taskId)
+        if (!next.retryPolicy.retryable) retryCallbacks.remove(taskId)
+        publishLocked()
         next
     }
 
     suspend fun remove(taskId: String): Boolean = mutex.withLock {
-        val removed = tasks.remove(taskId) != null
+        val existing = tasks[taskId] ?: return@withLock false
+        deleteOrThrow(taskDir.child("$taskId.json"))
+        val removed = tasks.remove(existing.taskId) != null
         cancelCallbacks.remove(taskId)
         retryCallbacks.remove(taskId)
-        taskDir.child("$taskId.json").delete()
-        publish()
+        publishLocked()
         removed
     }
 
     fun list(type: String? = null, status: AgentTaskStatus? = null): List<AgentTaskSnapshot> =
-        tasks.values
+        taskSnapshot.values
             .filter { type == null || it.type == type }
             .filter { status == null || it.status == status }
             .sortedWith(compareByDescending<AgentTaskSnapshot> { it.status.running }.thenByDescending { it.updatedAtMs })
 
-    fun read(taskId: String): AgentTaskSnapshot? = tasks[taskId]
+    fun read(taskId: String): AgentTaskSnapshot? = taskSnapshot[taskId]
 
     suspend fun cancel(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.Default) {
-        val current = tasks[taskId] ?: error("Unknown agent task: $taskId")
+        val (current, callback) = mutex.withLock {
+            val snapshot = tasks[taskId] ?: error("Unknown agent task: $taskId")
+            snapshot to cancelCallbacks[taskId]
+        }
         if (!current.status.running) return@withContext current
-        val callback = cancelCallbacks[taskId]
         if (!current.cancelCapability || callback == null) {
             return@withContext update(
                 taskId = taskId,
@@ -122,14 +144,23 @@ class AgentTaskStore(
         }
         val ok = runCatching { callback() }.getOrDefault(false)
         if (ok) {
-            update(taskId = taskId, status = AgentTaskStatus.CANCELLED, summary = "Cancellation requested.")
+            update(
+                taskId = taskId,
+                status = AgentTaskStatus.CANCELLED,
+                summary = "Cancellation requested.",
+                clearError = true,
+                clearLastErrorCode = true,
+            )
         } else {
             update(taskId = taskId, error = "Cancellation request failed.")
         } ?: current
     }
 
     suspend fun retry(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.Default) {
-        val current = tasks[taskId] ?: error("Unknown agent task: $taskId")
+        val (current, callback) = mutex.withLock {
+            val snapshot = tasks[taskId] ?: error("Unknown agent task: $taskId")
+            snapshot to retryCallbacks[taskId]
+        }
         if (!current.retryPolicy.retryable) {
             return@withContext update(
                 taskId = taskId,
@@ -144,7 +175,6 @@ class AgentTaskStore(
                 lastErrorCode = "retry_limit_reached",
             ) ?: current
         }
-        val callback = retryCallbacks[taskId]
         if (callback == null) {
             return@withContext update(
                 taskId = taskId,
@@ -163,8 +193,8 @@ class AgentTaskStore(
                 recoveryState = AgentTaskRecoveryState.ACTIVE,
                 retryPolicy = retryPolicy,
                 summary = "Retry requested.",
-                error = null,
-                lastErrorCode = null,
+                clearError = true,
+                clearLastErrorCode = true,
             )
         } else {
             update(
@@ -179,24 +209,22 @@ class AgentTaskStore(
     suspend fun cleanup(taskId: String, deletePrivateOutput: Boolean = false): Boolean = mutex.withLock {
         val current = tasks[taskId] ?: return@withLock false
         if (deletePrivateOutput) {
-            privateOutputFile(current)?.delete()
+            privateOutputFile(current)?.let(::deleteOrThrow)
         }
+        deleteOrThrow(taskDir.child("$taskId.json"))
         tasks.remove(taskId)
         cancelCallbacks.remove(taskId)
         retryCallbacks.remove(taskId)
-        taskDir.child("$taskId.json").delete()
-        publish()
+        publishLocked()
         true
     }
 
     suspend fun reconcileOnStartup(): List<AgentTaskSnapshot> = mutex.withLock {
         val now = Clock.System.now().toEpochMilliseconds()
         val recovered = tasks.values.map { recoveryManager.recoverOnStartup(it, now) }
-        recovered.forEach { snapshot ->
-            tasks[snapshot.taskId] = snapshot
-            persist(snapshot)
-        }
-        publish()
+        recovered.forEach(::persist)
+        recovered.forEach { snapshot -> tasks[snapshot.taskId] = snapshot }
+        publishLocked()
         recovered.sortedByDescending { it.updatedAtMs }
     }
 
@@ -220,13 +248,20 @@ class AgentTaskStore(
     }
 
     private fun persist(snapshot: AgentTaskSnapshot) {
-        runCatching {
-            taskDir.child("${snapshot.taskId}.json").writeText(json.encodeToString(AgentTaskSnapshot.serializer(), snapshot))
+        taskDir.child("${snapshot.taskId}.json")
+            .writeText(json.encodeToString(AgentTaskSnapshot.serializer(), snapshot))
+    }
+
+    private fun deleteOrThrow(file: TaskFile) {
+        if (file.exists() && !file.delete()) {
+            error("Unable to delete agent task file: ${file.path}")
         }
     }
 
-    private fun publish() {
-        _tasksFlow.value = list()
+    private fun publishLocked() {
+        taskSnapshot = tasks.toMap()
+        _tasksFlow.value = taskSnapshot.values
+            .sortedWith(compareByDescending<AgentTaskSnapshot> { it.status.running }.thenByDescending { it.updatedAtMs })
     }
 }
 

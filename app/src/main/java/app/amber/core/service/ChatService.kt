@@ -1715,10 +1715,11 @@ class ChatService(
                     lastHeartbeatMs = now,
                     cancelCapability = true,
                     retryPolicy = AgentTaskRetryPolicy(
-                        retryable = true,
+                        // Automatic generation retry is internal to this live run.
+                        // AgentTask retry cannot reconstruct the request after it ends.
+                        retryable = false,
                         requiresApproval = false,
-                        maxRetries = settings.agentRuntime.generationRetry.maxRetries,
-                        reason = "Temporary network or provider failures retry automatically during the live generation.",
+                        maxRetries = 0,
                     ),
                 ),
                 cancel = {
@@ -1736,10 +1737,9 @@ class ChatService(
         runCatching {
             when {
                 cause == null -> agentTaskScheduler.complete(taskId, summary = "Generation completed.")
-                cause is CancellationException -> agentTaskScheduler.fail(
+                cause is CancellationException -> agentTaskScheduler.markCancelled(
                     taskId = taskId,
-                    message = "Generation cancelled by user.",
-                    code = "cancelled",
+                    summary = "Generation cancelled by user.",
                 )
 
                 else -> agentTaskScheduler.fail(

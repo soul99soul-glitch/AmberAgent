@@ -1,5 +1,7 @@
 package app.amber.feature.task
 
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.time.Clock
 
 class AgentTaskRecoveryManager(
@@ -20,8 +22,38 @@ class AgentTaskRecoveryManager(
                     exists = outputExists,
                 )
             }
+        // Retry callbacks are executable process state and never survive a
+        // restart. A producer may opt back in only by re-registering a live
+        // adapter with AgentTaskStore.
+        val recoveredSnapshot = if (snapshot.retryPolicy.retryable) {
+            snapshot.copy(
+                retryPolicy = snapshot.retryPolicy.copy(
+                    retryable = false,
+                    maxRetries = 0,
+                    reason = null,
+                ),
+            )
+        } else {
+            snapshot
+        }
+        val cronEnabled = runCatching {
+            recoveredSnapshot.spec
+                ?.get("enabled")
+                ?.jsonPrimitive
+                ?.booleanOrNull
+        }.getOrNull()
         return when {
-            snapshot.type == "cron" -> snapshot.copy(
+            recoveredSnapshot.type == "cron" &&
+                (cronEnabled == false || recoveredSnapshot.status == AgentTaskStatus.CANCELLED) -> recoveredSnapshot.copy(
+                status = AgentTaskStatus.CANCELLED,
+                queueState = AgentTaskQueueState.TERMINAL,
+                recoveryState = AgentTaskRecoveryState.CLEANUP_ONLY,
+                cancelCapability = false,
+                outputRef = outputRef,
+                lastHeartbeatMs = nowMs,
+            )
+
+            recoveredSnapshot.type == "cron" -> recoveredSnapshot.copy(
                 status = AgentTaskStatus.QUEUED,
                 queueState = AgentTaskQueueState.SCHEDULED,
                 recoveryState = AgentTaskRecoveryState.SCHEDULED,
@@ -30,7 +62,7 @@ class AgentTaskRecoveryManager(
                 lastHeartbeatMs = nowMs,
             )
 
-            snapshot.status.running -> snapshot.copy(
+            recoveredSnapshot.status.running -> recoveredSnapshot.copy(
                 status = AgentTaskStatus.INTERRUPTED,
                 queueState = AgentTaskQueueState.TERMINAL,
                 recoveryState = if (outputExists) AgentTaskRecoveryState.OUTPUT_ONLY else AgentTaskRecoveryState.INTERRUPTED,
@@ -41,30 +73,18 @@ class AgentTaskRecoveryManager(
                 outputRef = outputRef,
             )
 
-            snapshot.status == AgentTaskStatus.COMPLETED && outputExists -> snapshot.copy(
+            recoveredSnapshot.status == AgentTaskStatus.COMPLETED && outputExists -> recoveredSnapshot.copy(
                 recoveryState = AgentTaskRecoveryState.OUTPUT_ONLY,
                 cancelCapability = false,
                 outputRef = outputRef,
                 lastHeartbeatMs = nowMs,
             )
 
-            snapshot.status in setOf(AgentTaskStatus.FAILED, AgentTaskStatus.INTERRUPTED, AgentTaskStatus.TIMED_OUT) &&
-                snapshot.retryPolicy.retryable -> snapshot.copy(
-                    recoveryState = AgentTaskRecoveryState.RETRYABLE,
-                    cancelCapability = false,
-                    outputRef = outputRef,
-                )
-
-            else -> snapshot.copy(
+            else -> recoveredSnapshot.copy(
                 recoveryState = AgentTaskRecoveryState.CLEANUP_ONLY,
                 cancelCapability = false,
                 outputRef = outputRef,
             )
         }
     }
-}
-
-interface TaskRecoveryAdapter {
-    val type: String
-    fun canRetry(snapshot: AgentTaskSnapshot): Boolean
 }

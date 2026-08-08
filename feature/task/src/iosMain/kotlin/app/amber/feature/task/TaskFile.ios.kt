@@ -36,11 +36,13 @@ actual class TaskFile actual constructor(actual val path: String) {
     actual fun exists(): Boolean = fm.fileExistsAtPath(path)
 
     actual fun delete(): Boolean =
-        runCatching { fm.removeItemAtPath(path, error = null) }.isSuccess
+        runCatching { fm.removeItemAtPath(path, error = null) }.getOrDefault(false)
 
     actual fun writeText(text: String) {
         val nsString = text as NSString
-        nsString.writeToFile(path, atomically = true, encoding = NSUTF8StringEncoding, error = null)
+        check(nsString.writeToFile(path, atomically = true, encoding = NSUTF8StringEncoding, error = null)) {
+            "Unable to persist agent task file: $path"
+        }
     }
 
     actual fun readText(): String? {

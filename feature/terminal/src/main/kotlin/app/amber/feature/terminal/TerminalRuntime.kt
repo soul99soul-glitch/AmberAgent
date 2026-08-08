@@ -670,10 +670,11 @@ class TerminalRuntime(
             exists = log.file.exists(),
         ),
         retryPolicy = AgentTaskRetryPolicy(
-            retryable = status in setOf(AgentTaskStatus.FAILED, AgentTaskStatus.TIMED_OUT, AgentTaskStatus.INTERRUPTED),
+            // Re-running a command requires its original approval and launch context;
+            // no AgentTask retry adapter currently reconstructs those inputs.
+            retryable = false,
             requiresApproval = true,
-            maxRetries = 1,
-            reason = "Terminal commands can be retried by launching a fresh process; interrupted processes are not reattached.",
+            maxRetries = 0,
         ),
         runtime = runtime.name.lowercase(),
         sourceToolName = toolName,

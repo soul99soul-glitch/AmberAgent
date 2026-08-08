@@ -18,5 +18,8 @@ kotlin {
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.datetime)
         }
+        jvmTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

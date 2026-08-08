@@ -42,6 +42,8 @@ class AgentTaskScheduler(
             queueState = AgentTaskQueueState.TERMINAL,
             summary = summary,
             cancelCapability = false,
+            clearError = true,
+            clearLastErrorCode = true,
         )
 
     suspend fun fail(taskId: String, message: String, code: String = "failed"): AgentTaskSnapshot? =
@@ -52,6 +54,17 @@ class AgentTaskScheduler(
             error = message,
             lastErrorCode = code,
             cancelCapability = false,
+        )
+
+    suspend fun markCancelled(taskId: String, summary: String = "Task cancelled by user."): AgentTaskSnapshot? =
+        taskStore.update(
+            taskId = taskId,
+            status = AgentTaskStatus.CANCELLED,
+            queueState = AgentTaskQueueState.TERMINAL,
+            summary = summary,
+            cancelCapability = false,
+            clearError = true,
+            clearLastErrorCode = true,
         )
 
     suspend fun cancel(taskId: String): AgentTaskSnapshot = taskStore.cancel(taskId)
@@ -95,9 +108,3 @@ data class AgentRuntimeStatus(
     val interrupted: Int,
     val byType: Map<String, Int>,
 )
-
-interface AgentTaskAdapter {
-    val type: String
-    val maxConcurrency: Int
-    suspend fun cancel(taskId: String): Boolean
-}

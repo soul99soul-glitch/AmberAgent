@@ -1,5 +1,8 @@
 package app.amber.feature.task
 
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -41,7 +44,7 @@ class AgentTaskRecoveryManagerTest {
     }
 
     @Test
-    fun failedRetryableTaskBecomesRetryable() {
+    fun retryAdapterDoesNotSurviveProcessRestart() {
         val recovered = manager.recoverOnStartup(
             snapshot(
                 type = "subagent",
@@ -51,8 +54,25 @@ class AgentTaskRecoveryManagerTest {
             nowMs = 2_000L,
         )
 
-        assertEquals(AgentTaskRecoveryState.RETRYABLE, recovered.recoveryState)
-        assertTrue(recovered.retryPolicy.retryable)
+        assertEquals(AgentTaskRecoveryState.CLEANUP_ONLY, recovered.recoveryState)
+        assertEquals(false, recovered.retryPolicy.retryable)
+        assertEquals(0, recovered.retryPolicy.maxRetries)
+    }
+
+    @Test
+    fun disabledCronStaysCancelledAfterRestart() {
+        val recovered = manager.recoverOnStartup(
+            snapshot(
+                type = "cron",
+                status = AgentTaskStatus.CANCELLED,
+                spec = buildJsonObject { put("enabled", false) },
+            ),
+            nowMs = 2_000L,
+        )
+
+        assertEquals(AgentTaskStatus.CANCELLED, recovered.status)
+        assertEquals(AgentTaskQueueState.TERMINAL, recovered.queueState)
+        assertEquals(AgentTaskRecoveryState.CLEANUP_ONLY, recovered.recoveryState)
     }
 
     @Test
@@ -76,6 +96,7 @@ class AgentTaskRecoveryManagerTest {
         status: AgentTaskStatus,
         retryPolicy: AgentTaskRetryPolicy = AgentTaskRetryPolicy(),
         outputRef: AgentTaskOutputRef? = null,
+        spec: JsonObject? = null,
     ) = AgentTaskSnapshot(
         taskId = "task-$type",
         type = type,
@@ -83,6 +104,7 @@ class AgentTaskRecoveryManagerTest {
         status = status,
         retryPolicy = retryPolicy,
         outputRef = outputRef,
+        spec = spec,
         createdAtMs = 1_000L,
         updatedAtMs = 1_000L,
     )

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -22,6 +23,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskStatus
 import app.amber.feature.task.AgentTaskStore
@@ -208,7 +210,12 @@ class AgentCronManager(
                 }
             }
         }
-        agentTaskStore.update(id, status = AgentTaskStatus.RUNNING, error = "")
+        agentTaskStore.update(
+            id,
+            status = AgentTaskStatus.RUNNING,
+            clearError = true,
+            clearLastErrorCode = true,
+        )
     }
 
     suspend fun markRunCompleted(id: String) = withContext(Dispatchers.IO) {
@@ -225,7 +232,13 @@ class AgentCronManager(
                 }
             }
         }
-        agentTaskStore.update(id, status = AgentTaskStatus.COMPLETED, summary = "Cron run completed.")
+        agentTaskStore.update(
+            id,
+            status = AgentTaskStatus.COMPLETED,
+            summary = "Cron run completed.",
+            clearError = true,
+            clearLastErrorCode = true,
+        )
     }
 
     suspend fun markRunFailed(id: String, message: String) = withContext(Dispatchers.IO) {
@@ -256,6 +269,9 @@ class AgentCronManager(
             } else {
                 workManager.cancelUniqueWork(workName(task.id))
             }
+            // The cron store is canonical. Refresh task metadata so legacy
+            // snapshots also persist the enabled/disabled state.
+            agentTaskStore.upsert(task.toAgentTaskSnapshot())
         }
     }
 
@@ -363,6 +379,11 @@ class AgentCronManager(
         taskId = id,
         type = "cron",
         title = title,
+        spec = buildJsonObject {
+            put("enabled", enabled)
+            put("cron_expression", cronExpression)
+            put("timezone_id", timezoneId)
+        },
         sourceConversationId = conversationId,
         status = status ?: when {
             !enabled -> AgentTaskStatus.CANCELLED

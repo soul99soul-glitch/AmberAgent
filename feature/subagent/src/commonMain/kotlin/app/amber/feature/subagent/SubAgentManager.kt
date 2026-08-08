@@ -41,6 +41,8 @@ class SubAgentManager(
 ) {
     private val runs = mutableMapOf<String, RuntimeRun>()
     private val runsMutex = Mutex()
+    @kotlin.concurrent.Volatile
+    private var runsView: Map<String, RuntimeRun> = emptyMap()
 
     /**
      * Per-run streaming text flows. The runner writes the assistant's evolving response here as
@@ -49,6 +51,10 @@ class SubAgentManager(
      */
     private val liveTextFlows = mutableMapOf<String, MutableStateFlow<String>>()
     private val livePartsFlows = mutableMapOf<String, MutableStateFlow<List<UIMessagePart>>>()
+    @kotlin.concurrent.Volatile
+    private var liveTextFlowsView: Map<String, MutableStateFlow<String>> = emptyMap()
+    @kotlin.concurrent.Volatile
+    private var livePartsFlowsView: Map<String, MutableStateFlow<List<UIMessagePart>>> = emptyMap()
 
     suspend fun start(
         parentConversationId: Uuid,
@@ -144,6 +150,7 @@ class SubAgentManager(
 
                 else -> {
                     runs[runId] = runtimeRun
+                    publishViewsLocked()
                     null
                 }
             }
@@ -151,11 +158,26 @@ class SubAgentManager(
         if (admissionError != null) {
             return@withContext errorPayload(admissionError.first, admissionError.second)
         }
-        agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
-            cancel(runId)
-            true
-        })
-        appendEvent(runtimeRun, "started", runToPayload(run))
+        var taskRegistered = false
+        try {
+            agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
+                cancel(runId)
+                true
+            })
+            taskRegistered = true
+            appendEvent(runtimeRun, "started", runToPayload(run))
+        } catch (error: Throwable) {
+            runsMutex.withLock {
+                runs.remove(runId)
+                publishViewsLocked()
+            }
+            if (taskRegistered) {
+                runCatching { agentTaskStore.remove(runId) }
+                    .exceptionOrNull()
+                    ?.let(error::addSuppressed)
+            }
+            throw error
+        }
 
         // Live text flow for UI subscribers — created BEFORE the runner starts so a sheet opened
         // immediately after subagent_start sees the same flow that will be written to.
@@ -165,6 +187,7 @@ class SubAgentManager(
             liveTextFlows[runId] = liveText
             livePartsFlows[runId] = liveParts
             capLiveTextFlowsLocked()
+            publishViewsLocked()
         }
 
         runtimeRun.job = appScope.launch(Dispatchers.Default) {
@@ -249,12 +272,12 @@ class SubAgentManager(
      * [snapshot] (or its status) in parallel; when `status.running == false`, the latest text
      * is the final text. A `combine(liveTextFlow, snapshotFlow)` pattern works well.
      */
-    fun liveTextFlow(runId: String): StateFlow<String>? = liveTextFlows[runId]?.asStateFlow()
+    fun liveTextFlow(runId: String): StateFlow<String>? = liveTextFlowsView[runId]?.asStateFlow()
 
-    fun livePartsFlow(runId: String): StateFlow<List<UIMessagePart>>? = livePartsFlows[runId]?.asStateFlow()
+    fun livePartsFlow(runId: String): StateFlow<List<UIMessagePart>>? = livePartsFlowsView[runId]?.asStateFlow()
 
     /** Snapshot of a known run, or null if it was never started or was already evicted. */
-    fun snapshot(runId: String): SubAgentRun? = runs[runId]?.snapshot
+    fun snapshot(runId: String): SubAgentRun? = runsView[runId]?.snapshot
 
     /** True iff Model Council experimental mode is currently on. Used by SubAgentTools to
      *  decide whether to advertise @council alongside the regular subagent roster. */
@@ -269,9 +292,8 @@ class SubAgentManager(
      * entries — flows whose run snapshot was already evicted elsewhere — are also reclaimed.
      * Active runs (status.running) are skipped: the runner is still writing to them.
      *
-     * Race note: two concurrent [start] calls can both pass the size check and both insert
-     * before this runs, so the cap is soft. Worst case: temporarily 65–66 entries, never an
-     * eviction of a still-active run. Acceptable.
+     * The cap stays soft only when more than [LIVE_TEXT_CAP] runs are simultaneously active;
+     * active writers are never evicted. Terminal entries are reclaimed as runs finish.
      */
     private fun capLiveTextFlowsLocked() {
         if (liveTextFlows.size <= LIVE_TEXT_CAP && livePartsFlows.size <= LIVE_TEXT_CAP) return
@@ -304,7 +326,7 @@ class SubAgentManager(
             put("timeout_ms", setting.timeoutMs)
             put("max_turns", setting.maxTurns)
             put("output_budget_chars", setting.outputBudgetChars)
-            put("running", runs.values.count { it.snapshot.status.running })
+            put("running", runsView.values.count { it.snapshot.status.running })
         }
     }
 
@@ -331,6 +353,10 @@ class SubAgentManager(
             )
         }
         appendEvent(runtimeRun, "finished", runToPayload(next, includeDisplayText = true))
+        runsMutex.withLock {
+            capCompletedRunsLocked()
+            publishViewsLocked()
+        }
     }
 
     private fun readMissingRun(runId: String): JsonObject {
@@ -383,10 +409,11 @@ class SubAgentManager(
             exists = runStorage.transcriptExists(transcriptPath),
         ),
         retryPolicy = AgentTaskRetryPolicy(
-            retryable = status == SubAgentRunStatus.FAILED,
+            // A fresh subagent requires the original tool/grant context. No
+            // AgentTask adapter can safely reconstruct it today.
+            retryable = false,
             requiresApproval = false,
-            maxRetries = 1,
-            reason = "Sub Agent retry starts a new isolated run from the original task spec.",
+            maxRetries = 0,
         ),
         sourceToolName = "subagent_start",
         createdAtMs = startedAtMs,
@@ -416,11 +443,31 @@ class SubAgentManager(
         id == "historian" ||
             toolAllowlist.any { it in HISTORY_FULL_READ_TOOLS }
 
+    private fun capCompletedRunsLocked() {
+        if (runs.size <= RUN_CAP) return
+        val terminalIds = runs.values
+            .filterNot { it.snapshot.status.running }
+            .sortedBy { it.snapshot.updatedAtMs }
+            .map { it.snapshot.runId }
+        terminalIds.take(runs.size - RUN_CAP).forEach { id ->
+            runs.remove(id)
+            liveTextFlows.remove(id)
+            livePartsFlows.remove(id)
+        }
+    }
+
+    private fun publishViewsLocked() {
+        runsView = runs.toMap()
+        liveTextFlowsView = liveTextFlows.toMap()
+        livePartsFlowsView = livePartsFlows.toMap()
+    }
+
     private companion object {
         val HISTORY_FULL_READ_TOOLS = setOf("session_read", "session_expand")
 
         /** Soft cap on how many run-text flows we keep around. Plenty for normal use. */
         const val LIVE_TEXT_CAP = 64
+        const val RUN_CAP = LIVE_TEXT_CAP
     }
 }
 

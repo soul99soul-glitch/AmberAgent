@@ -53,6 +53,11 @@ class ModelCouncilManager(
 ) {
     private val runs = mutableMapOf<String, RuntimeRun>()
     private val seatLiveTextFlows = mutableMapOf<String, MutableMap<String, MutableStateFlow<String>>>()
+    private val runsMutex = Mutex()
+    @kotlin.concurrent.Volatile
+    private var runsView: Map<String, RuntimeRun> = emptyMap()
+    @kotlin.concurrent.Volatile
+    private var seatLiveTextFlowsView: Map<String, Map<String, MutableStateFlow<String>>> = emptyMap()
 
     private val settingsStore get() = settingsSource
 
@@ -83,17 +88,36 @@ class ModelCouncilManager(
             startedAtMs = now,
         )
         val runtimeRun = RuntimeRun(run)
-        runs[runId] = runtimeRun
         val perSeatFlows = mutableMapOf<String, MutableStateFlow<String>>()
         run.seats.forEach { seat -> perSeatFlows[seat.seatId] = MutableStateFlow("") }
         perSeatFlows[SYNTHESIZER_SEAT_KEY] = MutableStateFlow("")
-        seatLiveTextFlows[runId] = perSeatFlows
-        capLiveTextFlows()
-        agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
-            cancel(runId)
-            true
-        })
-        appendEvent(runtimeRun, "started", runToPayload(run))
+        runsMutex.withLock {
+            runs[runId] = runtimeRun
+            seatLiveTextFlows[runId] = perSeatFlows
+            capLiveTextFlowsLocked()
+            publishViewsLocked()
+        }
+        var taskRegistered = false
+        try {
+            agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
+                cancel(runId)
+                true
+            })
+            taskRegistered = true
+            appendEvent(runtimeRun, "started", runToPayload(run))
+        } catch (error: Throwable) {
+            runsMutex.withLock {
+                runs.remove(runId)
+                seatLiveTextFlows.remove(runId)
+                publishViewsLocked()
+            }
+            if (taskRegistered) {
+                runCatching { agentTaskStore.remove(runId) }
+                    .exceptionOrNull()
+                    ?.let(error::addSuppressed)
+            }
+            throw error
+        }
 
         runtimeRun.job = appScope.launch(Dispatchers.Default) {
             val result = try {
@@ -116,7 +140,7 @@ class ModelCouncilManager(
     }
 
     suspend fun read(runId: String): JsonObject = withContext(Dispatchers.Default) {
-        val run = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
+        val run = runsMutex.withLock { runs[runId]?.snapshot } ?: return@withContext readMissingRun(runId)
         runToPayload(run)
     }
 
@@ -132,11 +156,11 @@ class ModelCouncilManager(
         }
         val deadline = Clock.System.now().toEpochMilliseconds() + effectiveWaitMs
         while (Clock.System.now().toEpochMilliseconds() < deadline) {
-            val current = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
+            val current = runsMutex.withLock { runs[runId]?.snapshot } ?: return@withContext readMissingRun(runId)
             if (!current.status.running) return@withContext runToPayload(current)
             delay(250)
         }
-        val current = runs[runId]?.snapshot ?: return@withContext readMissingRun(runId)
+        val current = runsMutex.withLock { runs[runId]?.snapshot } ?: return@withContext readMissingRun(runId)
         if (!current.status.running) {
             runToPayload(current)
         } else {
@@ -153,7 +177,7 @@ class ModelCouncilManager(
     }
 
     suspend fun cancel(runId: String): JsonObject = withContext(Dispatchers.Default) {
-        val runtimeRun = runs[runId] ?: return@withContext readMissingRun(runId)
+        val runtimeRun = runsMutex.withLock { runs[runId] } ?: return@withContext readMissingRun(runId)
         runtimeRun.job?.cancel()
         finish(
             runId,
@@ -164,14 +188,14 @@ class ModelCouncilManager(
     }
 
     fun liveTextFlow(runId: String, seatId: String): StateFlow<String>? =
-        seatLiveTextFlows[runId]?.get(seatId)?.asStateFlow()
+        seatLiveTextFlowsView[runId]?.get(seatId)?.asStateFlow()
 
     fun liveTextFlows(runId: String): Map<String, StateFlow<String>>? =
-        seatLiveTextFlows[runId]?.mapValues { it.value.asStateFlow() }
+        seatLiveTextFlowsView[runId]?.mapValues { it.value.asStateFlow() }
 
-    fun snapshot(runId: String): ModelCouncilRun? = runs[runId]?.snapshot
+    fun snapshot(runId: String): ModelCouncilRun? = runsView[runId]?.snapshot
 
-    private fun capLiveTextFlows() {
+    private fun capLiveTextFlowsLocked() {
         if (seatLiveTextFlows.size <= LIVE_TEXT_CAP) return
         val candidates = seatLiveTextFlows.keys.mapNotNull { id ->
             val snap = runs[id]?.snapshot
@@ -206,7 +230,7 @@ class ModelCouncilManager(
             put("synthesis_model_id", synthesisModelId.toString())
             put("synthesis_model_name", synthesisModelInfo.modelName)
             put("synthesis_provider_name", synthesisModelInfo.providerName)
-            put("running", runs.values.count { it.snapshot.status.running })
+            put("running", runsView.values.count { it.snapshot.status.running })
             putJsonArray("default_seats") {
                 setting.defaultSeats.forEach { seat ->
                     add(encoded(seat))
@@ -216,7 +240,7 @@ class ModelCouncilManager(
     }
 
     fun reportMarkdown(runId: String, title: String): String {
-        val run = runs[runId]?.snapshot ?: error("Unknown active model council run_id: $runId")
+        val run = runsView[runId]?.snapshot ?: error("Unknown active model council run_id: $runId")
         val result = run.result ?: error("Model Council run has no result yet.")
         return buildString {
             appendLine("# ${title.ifBlank { "Model Council Report" }}")
@@ -320,7 +344,7 @@ class ModelCouncilManager(
         promptForSeat: (ModelCouncilSeat) -> String,
     ): List<ModelCouncilTurn> = supervisorScope {
         val runId = runtimeRun.snapshot.runId
-        val seatFlows = seatLiveTextFlows[runId]
+        val seatFlows = seatLiveTextFlowsView[runId]
         val priorPrefixBySeat: Map<String, String> = if (round > 1) {
             runtimeRun.snapshot.seats.associate { seat ->
                 val priorTurns = runtimeRun.snapshot.turns
@@ -430,7 +454,7 @@ class ModelCouncilManager(
     ): ModelCouncilSynthesisResult {
         val prompt = synthesisPrompt(task, turns)
         val synthesisModelInfo = settings.describeCouncilProviderModel(synthesisModelId)
-        val synthFlow = seatLiveTextFlows[runId]?.get(SYNTHESIZER_SEAT_KEY)
+        val synthFlow = seatLiveTextFlowsView[runId]?.get(SYNTHESIZER_SEAT_KEY)
         var synthesisError = ""
         val generated = runCatching {
             withTimeout(setting.seatTimeoutMs.coerceAtLeast(1_000L)) {
@@ -525,7 +549,7 @@ class ModelCouncilManager(
     }
 
     private suspend fun finish(runId: String, status: ModelCouncilRunStatus, result: ModelCouncilResult) {
-        val runtimeRun = runs[runId] ?: return
+        val runtimeRun = runsMutex.withLock { runs[runId] } ?: return
         val next = runtimeRun.snapshotMutex.withLock {
             val current = runtimeRun.snapshot
             if (!current.status.running) return@withLock null
@@ -545,6 +569,10 @@ class ModelCouncilManager(
             )
         }
         appendEvent(runtimeRun, "finished", runToPayload(next))
+        runsMutex.withLock {
+            capCompletedRunsLocked()
+            publishViewsLocked()
+        }
     }
 
     private fun readMissingRun(runId: String): JsonObject {
@@ -646,10 +674,11 @@ class ModelCouncilManager(
             exists = runStorage.transcriptExists(transcriptPath),
         ),
         retryPolicy = AgentTaskRetryPolicy(
-            retryable = status == ModelCouncilRunStatus.FAILED,
+            // Council retry needs the original seat runners and launch context;
+            // no AgentTask adapter currently reconstructs those inputs.
+            retryable = false,
             requiresApproval = false,
-            maxRetries = 1,
-            reason = "Model Council retry starts a new run from the original council task.",
+            maxRetries = 0,
         ),
         sourceToolName = "model_council_start",
         createdAtMs = startedAtMs,
@@ -683,9 +712,27 @@ class ModelCouncilManager(
         val failed: Boolean,
     )
 
+    private fun capCompletedRunsLocked() {
+        if (runs.size <= RUN_CAP) return
+        val terminalIds = runs.values
+            .filterNot { it.snapshot.status.running }
+            .sortedBy { it.snapshot.updatedAtMs }
+            .map { it.snapshot.runId }
+        terminalIds.take(runs.size - RUN_CAP).forEach { id ->
+            runs.remove(id)
+            seatLiveTextFlows.remove(id)
+        }
+    }
+
+    private fun publishViewsLocked() {
+        runsView = runs.toMap()
+        seatLiveTextFlowsView = seatLiveTextFlows.mapValues { (_, flows) -> flows.toMap() }
+    }
+
     companion object {
         const val SYNTHESIZER_SEAT_KEY = "__synthesizer__"
         const val LIVE_TEXT_CAP = 64
+        const val RUN_CAP = LIVE_TEXT_CAP
     }
 }
 
