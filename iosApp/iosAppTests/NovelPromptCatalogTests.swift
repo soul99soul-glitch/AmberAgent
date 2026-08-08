@@ -9,6 +9,11 @@ final class NovelPromptCatalogTests: XCTestCase {
             "\($0.kind.rawValue)\n\($0.version)\n\($0.systemText)"
         }.joined(separator: "\n---\n")
 
+        // 2026-08-08 显式更新:`.discussion` 升到 `novel.discussion.v6`。把「即使用户说
+        // go ahead 也不许写整章/示例散文不得超过 3 段」的 HARD RULES 改写为状态说明 +
+        // 软引导（讨论模式产出不会自动进正文；示例散文/片段允许；用户确认方向后建议
+        // 切换到写作流程）；旧 v5 文本归档进 `systemText(for:version:)`。
+        //
         // 2026-08-06 显式更新(第二次):`.chapterPlanAcceptanceV1` 升至 schemaVersion 2 /
         // `novel.chapter-plan-acceptance.v2`（增加 obviousRepetition 软门）。
         //
@@ -28,7 +33,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
         XCTAssertEqual(
             sha256(snapshot),
-            "c5ea661d891fc6164ace170d02632cb808429e252e9f8da5a38c9b15b3164d88"
+            "b771137210b5878ecfdf403eeeb3ee5ac44fb6710e26ca353f2b26cd67eed431"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -146,6 +151,10 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .discussion,
             version: "novel.discussion.v4"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: "novel.discussion.v5"
         ))
         XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .proseContinuation,

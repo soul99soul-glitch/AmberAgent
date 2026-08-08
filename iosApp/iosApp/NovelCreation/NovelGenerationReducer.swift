@@ -63,6 +63,7 @@ enum NovelGenerationReducer {
                 sourceChapterVersionID: run.sourceChapterVersionID,
                 collectedCheckpointID: nil,
                 chapterPlanDigest: run.chapterPlanDigest,
+                ghostwritePlanID: run.ghostwritePlanID,
                 createdAt: message.createdAt
             ))
             candidateIDs.insert(candidateID)
@@ -192,7 +193,8 @@ enum NovelGenerationReducer {
             terminalAt: nil,
             interruptionReason: nil,
             terminalFailure: nil,
-            chapterPlanDigest: boundPlanDigest
+            chapterPlanDigest: boundPlanDigest,
+            ghostwritePlanID: request.ghostwritePlanID
         )
 
         var next = document
@@ -355,6 +357,7 @@ enum NovelGenerationReducer {
                 sourceChapterVersionID: run.sourceChapterVersionID,
                 collectedCheckpointID: nil,
                 chapterPlanDigest: run.chapterPlanDigest,
+                ghostwritePlanID: run.ghostwritePlanID,
                 createdAt: now
             ))
         }
@@ -858,6 +861,7 @@ private extension NovelGenerationReducer {
                     sourceChapterVersionID: run.sourceChapterVersionID,
                     collectedCheckpointID: nil,
                     chapterPlanDigest: run.chapterPlanDigest,
+                    ghostwritePlanID: run.ghostwritePlanID,
                     createdAt: now
                 ))
             }

@@ -97,6 +97,10 @@ final class NovelCollaborationModeTests: XCTestCase {
             NovelGhostwriteContinuityGate.pauseDetail(for: report),
             "严重身份漂移"
         )
+        XCTAssertEqual(
+            NovelGhostwriteContinuityGate.pauseReason(for: report),
+            .blockingContinuity
+        )
     }
 
     func testGhostwriteContinuityGatePausesWhenAuditIncomplete() {
@@ -115,6 +119,10 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertEqual(
             NovelGhostwriteContinuityGate.pauseDetail(for: report),
             "连续性检查未完整完成，已暂停自动收录。"
+        )
+        XCTAssertEqual(
+            NovelGhostwriteContinuityGate.pauseReason(for: report),
+            .continuityAuditIncomplete
         )
     }
 
@@ -334,6 +342,71 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertEqual(document.project.collaborationMode, .cocreation)
     }
 
+    func testCannotSwitchBackToCocreationWhileBranchRunIsActive() throws {
+        var document = try seedGhostwriteMaterials(in: try NovelTestFixtures.document())
+        let branchID = document.branches[0].id
+        document = try NovelReducer.apply(.setCollaborationMode(NovelSetCollaborationModeCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            branchID: branchID,
+            mode: .ghostwrite
+        )), to: document).document
+        document = try NovelReducer.apply(.upsertChapterPlan(NovelUpsertChapterPlanCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            branchID: branchID,
+            planID: NovelChapterPlanID(),
+            status: .confirmed,
+            outlinePlacement: "第 1 章",
+            goalAndConflict: "夺回信物",
+            mustHappen: ["夺回信物"],
+            mustNotHappen: [],
+            endingHook: "信物碎裂",
+            visibleFacts: []
+        )), to: document).document
+        let plan = try XCTUnwrap(document.confirmedChapterPlan(for: branchID))
+        let request = NovelRunRequest(
+            id: NovelRunID(),
+            operationID: NovelOperationID(),
+            projectID: document.project.id,
+            branchID: branchID,
+            kind: .prose,
+            mode: .writeProse,
+            granularity: .wholeChapter,
+            userText: "写第一章",
+            userMessageID: NovelMessageID(),
+            assistantMessageID: NovelMessageID(),
+            candidateID: NovelCandidateID(),
+            generationReceiptID: NovelReceiptID(),
+            injectionReceiptID: NovelReceiptID(),
+            sourceChapterVersionID: nil,
+            ghostwritePlanID: plan.id,
+            expectedProjectRevision: document.project.revision,
+            expectedConfigRevision: document.project.configRevision,
+            expectedBranchHeadRevision: document.branches[0].headRevision
+        )
+        document = try NovelGenerationReducer.begin(
+            request,
+            artifacts: makeStartArtifacts(document: document, request: request),
+            in: document,
+            now: Date(timeIntervalSince1970: 1_700_000_200)
+        ).document
+
+        XCTAssertThrowsError(try NovelReducer.apply(.setCollaborationMode(
+            NovelSetCollaborationModeCommand(
+                context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+                projectID: document.project.id,
+                branchID: branchID,
+                mode: .cocreation
+            )
+        ), to: document)) { error in
+            guard case .projectBusy(let projectID) = error as? NovelError else {
+                return XCTFail("Expected projectBusy, got \(error)")
+            }
+            XCTAssertEqual(projectID, document.project.id)
+        }
+    }
+
     func testChapterPlanCanBeRecreatedAfterClear() throws {
         var document = try NovelTestFixtures.document()
         let branchID = document.branches[0].id
@@ -524,6 +597,7 @@ final class NovelCollaborationModeTests: XCTestCase {
             generationReceiptID: NovelReceiptID(),
             injectionReceiptID: NovelReceiptID(),
             sourceChapterVersionID: nil,
+            ghostwritePlanID: plan.id,
             expectedProjectRevision: document.project.revision,
             expectedConfigRevision: document.project.configRevision,
             expectedBranchHeadRevision: document.branches[0].headRevision
@@ -536,6 +610,7 @@ final class NovelCollaborationModeTests: XCTestCase {
             now: Date(timeIntervalSince1970: 1_700_000_200)
         )
         XCTAssertEqual(started.document.activeRuns[0].chapterPlanDigest, plan.contentDigest)
+        XCTAssertEqual(started.document.activeRuns[0].ghostwritePlanID, plan.id)
 
         let completed = try NovelGenerationReducer.complete(
             runID: request.id,
@@ -545,7 +620,50 @@ final class NovelCollaborationModeTests: XCTestCase {
         )
         let candidate = try XCTUnwrap(completed.document.candidates.first { $0.id == candidateID })
         XCTAssertEqual(candidate.chapterPlanDigest, plan.contentDigest)
+        XCTAssertEqual(candidate.ghostwritePlanID, plan.id)
         XCTAssertEqual(candidate.status, .available)
+    }
+
+    func testGhostwriteCandidateOwnershipRequiresDurablePlanIdentity() throws {
+        var document = try NovelTestFixtures.document()
+        document = try NovelReducer.apply(.upsertChapterPlan(NovelUpsertChapterPlanCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            planID: NovelChapterPlanID(),
+            status: .confirmed,
+            outlinePlacement: "第 1 章",
+            goalAndConflict: "相同内容",
+            mustHappen: ["同一事件"],
+            mustNotHappen: [],
+            endingHook: "",
+            visibleFacts: []
+        )), to: document).document
+        let plan = try XCTUnwrap(document.confirmedChapterPlan(for: document.branches[0].id))
+        let branch = document.branches[0]
+        let session = document.sessions[0]
+        func candidate(ghostwritePlanID: NovelChapterPlanID?) -> NovelCandidateRecord {
+            NovelCandidateRecord(
+                id: NovelCandidateID(),
+                kind: .prose,
+                branchID: branch.id,
+                sessionID: session.id,
+                sourceMessageID: NovelMessageID(),
+                baseCheckpointID: branch.headCheckpointID,
+                baseHeadRevision: branch.headRevision,
+                status: .available,
+                content: "正文",
+                sourceChapterVersionID: nil,
+                collectedCheckpointID: nil,
+                chapterPlanDigest: plan.contentDigest,
+                ghostwritePlanID: ghostwritePlanID,
+                createdAt: Date()
+            )
+        }
+
+        XCTAssertTrue(NovelGhostwriteCandidateOwnership.belongs(candidate(ghostwritePlanID: plan.id), to: plan))
+        XCTAssertFalse(NovelGhostwriteCandidateOwnership.belongs(candidate(ghostwritePlanID: NovelChapterPlanID()), to: plan))
+        XCTAssertFalse(NovelGhostwriteCandidateOwnership.belongs(candidate(ghostwritePlanID: nil), to: plan))
     }
 
     func testCollectRejectsCandidateWhenChapterPlanDigestMismatches() throws {

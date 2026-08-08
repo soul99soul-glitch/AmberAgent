@@ -1434,9 +1434,9 @@ struct NovelWritingContextSheet: View {
     private func selectCollaborationMode(_ mode: NovelCollaborationMode) async {
         guard mode != collaborationMode else { return }
         modeSwitchMessage = nil
-        if mode == .cocreation, session.isGhostwriting {
+        if mode == .cocreation, session.isGhostwriting || session.isRunning {
             selectedMode = collaborationMode
-            modeSwitchMessage = "代笔进行中，请先暂停再切回共创。"
+            modeSwitchMessage = "当前生成仍在进行，请先停止再切回共创。"
             return
         }
         if mode == .ghostwrite, !ghostwriteSwitchBlockers.isEmpty {

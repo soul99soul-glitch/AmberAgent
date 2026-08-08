@@ -821,6 +821,8 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
     /// Digest of the confirmed chapter plan bound when this prose candidate was generated.
     /// Nil for legacy candidates and non-prose kinds. Collect rejects a mismatch.
     let chapterPlanDigest: String?
+    /// Set only for candidates produced by the ghostwrite pipeline.
+    let ghostwritePlanID: NovelChapterPlanID?
     let createdAt: Date
 
     init(
@@ -837,6 +839,7 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
         clonedFromCandidateID: NovelCandidateID? = nil,
         collectedCheckpointID: NovelCheckpointID?,
         chapterPlanDigest: String? = nil,
+        ghostwritePlanID: NovelChapterPlanID? = nil,
         createdAt: Date
     ) {
         self.id = id
@@ -852,6 +855,7 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
         self.clonedFromCandidateID = clonedFromCandidateID
         self.collectedCheckpointID = collectedCheckpointID
         self.chapterPlanDigest = chapterPlanDigest
+        self.ghostwritePlanID = ghostwritePlanID
         self.createdAt = createdAt
     }
 
@@ -869,6 +873,7 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
         case clonedFromCandidateID
         case collectedCheckpointID
         case chapterPlanDigest
+        case ghostwritePlanID
         case createdAt
     }
 
@@ -896,6 +901,7 @@ struct NovelCandidateRecord: Codable, Equatable, Sendable {
             forKey: .collectedCheckpointID
         )
         chapterPlanDigest = try values.decodeIfPresent(String.self, forKey: .chapterPlanDigest)
+        ghostwritePlanID = try values.decodeIfPresent(NovelChapterPlanID.self, forKey: .ghostwritePlanID)
         createdAt = try values.decode(Date.self, forKey: .createdAt)
     }
 }
@@ -1267,6 +1273,8 @@ struct NovelActiveRunRecord: Codable, Equatable, Sendable {
     /// Confirmed chapter-plan digest captured at run begin for whole-chapter prose.
     /// Bound onto the resulting candidate so collect can reject stale drafts.
     let chapterPlanDigest: String?
+    /// Non-nil only when this run is owned by the ghostwrite pipeline.
+    var ghostwritePlanID: NovelChapterPlanID? = nil
 }
 
 struct NovelRecoverySidecarV1: Codable, Equatable, Sendable {

@@ -1470,6 +1470,7 @@ struct NovelRunRequest: Equatable, Sendable {
     let sourceChapterVersionID: NovelChapterVersionID?
     let askUserResponse: NovelAskUserResponse?
     let contextualCharacterMention: String?
+    let ghostwritePlanID: NovelChapterPlanID?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
     let expectedProjectRevision: Int64
@@ -1493,6 +1494,7 @@ struct NovelRunRequest: Equatable, Sendable {
         sourceChapterVersionID: NovelChapterVersionID?,
         askUserResponse: NovelAskUserResponse? = nil,
         contextualCharacterMention: String? = nil,
+        ghostwritePlanID: NovelChapterPlanID? = nil,
         injectionOverrides: NovelInjectionOverrides = .none,
         inputBudgetTokens: Int = 16_000,
         expectedProjectRevision: Int64,
@@ -1515,6 +1517,7 @@ struct NovelRunRequest: Equatable, Sendable {
         self.sourceChapterVersionID = sourceChapterVersionID
         self.askUserResponse = askUserResponse
         self.contextualCharacterMention = contextualCharacterMention
+        self.ghostwritePlanID = ghostwritePlanID
         self.injectionOverrides = NovelInjectionOverrides(
             forceIncludeMaterialIDs: Array(Set(injectionOverrides.forceIncludeMaterialIDs)).sorted {
                 $0.description < $1.description
@@ -1548,6 +1551,7 @@ struct NovelRunRequest: Equatable, Sendable {
             sourceChapterVersionID: sourceChapterVersionID,
             askUserResponse: askUserResponse,
             contextualCharacterMention: contextualCharacterMention,
+            ghostwritePlanID: ghostwritePlanID,
             injectionOverrides: injectionOverrides,
             inputBudgetTokens: inputBudgetTokens
         )
@@ -1574,6 +1578,7 @@ private struct NovelCanonicalRunPayload: Codable {
     let sourceChapterVersionID: NovelChapterVersionID?
     let askUserResponse: NovelAskUserResponse?
     let contextualCharacterMention: String?
+    let ghostwritePlanID: NovelChapterPlanID?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
 }

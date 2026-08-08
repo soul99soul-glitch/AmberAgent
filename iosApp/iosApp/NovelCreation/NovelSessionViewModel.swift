@@ -63,6 +63,7 @@ struct NovelSessionRunDraft: Equatable, Sendable {
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
     var contextualCharacterMention: String? = nil
+    var ghostwritePlanID: NovelChapterPlanID? = nil
 }
 
 /// Absolute presentation target for one streaming run identity.
@@ -1992,6 +1993,7 @@ private extension NovelSessionViewModel {
             sourceChapterVersionID: draft.sourceChapterVersionID,
             askUserResponse: draft.askUserResponse,
             contextualCharacterMention: draft.contextualCharacterMention,
+            ghostwritePlanID: draft.ghostwritePlanID,
             injectionOverrides: draft.injectionOverrides,
             inputBudgetTokens: draft.inputBudgetTokens,
             expectedProjectRevision: project.project.revision,
@@ -2024,7 +2026,8 @@ private extension NovelSessionViewModel {
             terminalAt: nil,
             interruptionReason: nil,
             terminalFailure: nil,
-            chapterPlanDigest: nil
+            chapterPlanDigest: nil,
+            ghostwritePlanID: draft.ghostwritePlanID
         )
         installTail(
             run: placeholderRun,
@@ -2257,7 +2260,8 @@ private extension NovelSessionViewModel {
                 forceExcludeMaterialIDs: injection.forceExcludeMaterialIDs
             ),
             inputBudgetTokens: injection.requestedInputBudgetTokens,
-            contextualCharacterMention: run.contextualCharacterMention
+            contextualCharacterMention: run.contextualCharacterMention,
+            ghostwritePlanID: run.ghostwritePlanID
         )
     }
 
@@ -2287,6 +2291,7 @@ private extension NovelSessionViewModel {
             sourceChapterVersionID: run.sourceChapterVersionID,
             askUserResponse: draft.askUserResponse,
             contextualCharacterMention: run.contextualCharacterMention,
+            ghostwritePlanID: run.ghostwritePlanID,
             injectionOverrides: draft.injectionOverrides,
             inputBudgetTokens: draft.inputBudgetTokens,
             expectedProjectRevision: project.project.revision,
@@ -2765,9 +2770,12 @@ private extension NovelSessionViewModel {
         }
     }
 
-    func interruptBoundRun(reason: NovelRunInterruptionReason) async -> Bool {
+    func interruptBoundRun(
+        reason: NovelRunInterruptionReason,
+        runID explicitRunID: NovelRunID? = nil
+    ) async -> Bool {
         guard let bound = binding,
-              let runID = activeRunID else { return true }
+              let runID = explicitRunID ?? activeRunID else { return true }
         guard !isPerformingAction,
               !workspace.isPerforming || isStarting else { return false }
         let isCancellingSessionStart = sessionStartingRunID == runID
@@ -3021,7 +3029,7 @@ extension NovelSessionViewModel {
             let plan = try requireConfirmedGhostwritePlan(for: expectedBinding)
             // 合同对应候选已进正史：不得再写一章。常见于收录后清合同失败 / 取消。
             if let alreadyCollected = candidates(kind: .prose).first(where: {
-                $0.chapterPlanDigest == plan.contentDigest && $0.status == .collected
+                NovelGhostwriteCandidateOwnership.belongs($0, to: plan) && $0.status == .collected
             }) {
                 mutateGhostwriteProgress(binding: expectedBinding) {
                     $0.autoCollectedCandidateIDs.insert(alreadyCollected.id)
@@ -3115,10 +3123,11 @@ extension NovelSessionViewModel {
                     candidateID: candidateID
                 )
                 try Task.checkCancellation()
-                if let detail = NovelGhostwriteContinuityGate.pauseDetail(for: continuityReport) {
+                if let reason = NovelGhostwriteContinuityGate.pauseReason(for: continuityReport),
+                   let detail = NovelGhostwriteContinuityGate.pauseDetail(for: continuityReport) {
                     pauseGhostwritePipeline(
                         binding: expectedBinding,
-                        reason: .blockingContinuity,
+                        reason: reason,
                         detail: detail,
                         candidateID: candidateID
                     )
@@ -3210,6 +3219,17 @@ extension NovelSessionViewModel {
                 detail: nil,
                 candidateID: ghostwriteProgressStorage?.candidateID
             )
+        } catch let failure as NovelStructuredModelExecutionFailure where failure.failure.code == "cancelled" {
+            await stopOwnedGhostwriteRun(binding: expectedBinding, reason: .user)
+            let reason = ghostwriteProgressStorage?.pauseReason == .userPaused
+                ? NovelGhostwritePauseReason.userPaused
+                : .cancelled
+            pauseGhostwritePipeline(
+                binding: expectedBinding,
+                reason: reason,
+                detail: nil,
+                candidateID: ghostwriteProgressStorage?.candidateID
+            )
         } catch {
             pauseGhostwritePipeline(
                 binding: expectedBinding,
@@ -3226,8 +3246,7 @@ extension NovelSessionViewModel {
     ) async {
         let runID = ghostwriteOwnedRunID ?? (isGhostwriteStartingRun ? activeRunID : nil)
         guard let runID,
-              binding == expectedBinding,
-              activeRunID == runID else { return }
+              binding == expectedBinding else { return }
         let durableRun = workspace.projectSnapshot?.activeRuns.first {
             $0.id == runID && $0.branchID == expectedBinding.branchID
         }
@@ -3235,7 +3254,8 @@ extension NovelSessionViewModel {
             if transientTail?.runID == runID { clearTransientTail() }
             return
         }
-        await stop(reason: reason)
+        guard durableRun?.status == .running || activeRunID == runID else { return }
+        _ = await interruptBoundRun(reason: reason, runID: runID)
     }
 
     private func obtainGhostwriteCandidate(
@@ -3254,9 +3274,18 @@ extension NovelSessionViewModel {
            let ownedID = ghostwriteProgressStorage?.candidateID,
            let owned = candidate(id: ownedID),
            owned.status == .available,
-           owned.chapterPlanDigest == plan.contentDigest,
+           NovelGhostwriteCandidateOwnership.belongs(owned, to: plan),
            !(ghostwriteProgressStorage?.autoCollectedCandidateIDs.contains(ownedID) ?? false) {
             return ownedID
+        }
+        if !mustRewrite,
+           let recovered = candidates(kind: .prose)
+            .filter({ $0.status == .available && NovelGhostwriteCandidateOwnership.belongs($0, to: plan) })
+            .max(by: { $0.createdAt < $1.createdAt }) {
+            mutateGhostwriteProgress(binding: expectedBinding) {
+                $0.candidateID = recovered.id
+            }
+            return recovered.id
         }
         mutateGhostwriteProgress(binding: expectedBinding) {
             $0.phase = .writing
@@ -3279,7 +3308,8 @@ extension NovelSessionViewModel {
             sourceChapterVersionID: nil,
             askUserResponse: nil,
             injectionOverrides: .none,
-            inputBudgetTokens: 16_000
+            inputBudgetTokens: 16_000,
+            ghostwritePlanID: plan.id
         ))
         ghostwriteOwnedRunID = activeRunID
         isGhostwriteStartingRun = false
@@ -3288,7 +3318,7 @@ extension NovelSessionViewModel {
             throw NovelError.invalidInput(operationErrorMessage ?? "代笔写整章没有开始。")
         }
         guard let candidateID = try await awaitGhostwriteCandidate(
-            digest: plan.contentDigest,
+            plan: plan,
             preexistingIDs: preexisting,
             expectedBinding: expectedBinding
         ) else {
@@ -3302,7 +3332,7 @@ extension NovelSessionViewModel {
     }
 
     private func awaitGhostwriteCandidate(
-        digest: String,
+        plan: NovelChapterPlanRecord,
         preexistingIDs: Set<NovelCandidateID>,
         expectedBinding: NovelSessionBinding
     ) async throws -> NovelCandidateID? {
@@ -3313,14 +3343,14 @@ extension NovelSessionViewModel {
             try Task.checkCancellation()
             if let candidate = candidates(kind: .prose).first(where: {
                 $0.status == .available &&
-                    $0.chapterPlanDigest == digest &&
+                    NovelGhostwriteCandidateOwnership.belongs($0, to: plan) &&
                     !preexistingIDs.contains($0.id)
             }) {
                 return candidate.id
             }
             if let interrupted = candidates(kind: .prose).first(where: {
                 $0.status == .interrupted &&
-                    $0.chapterPlanDigest == digest &&
+                    NovelGhostwriteCandidateOwnership.belongs($0, to: plan) &&
                     !preexistingIDs.contains($0.id)
             }), activeRunID == nil, !isStarting {
                 mutateGhostwriteProgress {
@@ -3345,7 +3375,7 @@ extension NovelSessionViewModel {
     ) async -> Bool {
         guard let candidate = candidate(id: candidateID),
               candidate.status == .available,
-              candidate.chapterPlanDigest == plan.contentDigest else {
+              NovelGhostwriteCandidateOwnership.belongs(candidate, to: plan) else {
             operationErrorMessage = "这篇稿和当前计划对不上，无法自动收录。"
             return false
         }
@@ -3425,7 +3455,8 @@ extension NovelSessionViewModel {
     ) {
         let phase: NovelGhostwritePhase = switch reason {
         case .chapterCompleted: .waitingUser
-        case .acceptanceFailed, .obviousRepetition, .blockingContinuity, .userPaused, .cancelled:
+        case .acceptanceFailed, .obviousRepetition, .blockingContinuity,
+             .continuityAuditIncomplete, .userPaused, .cancelled:
             .paused
         case .collectFailed, .syncFailed, .incompleteCandidate, .planMismatch:
             .failed

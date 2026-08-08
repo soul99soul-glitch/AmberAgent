@@ -531,6 +531,10 @@ enum NovelReducer {
         if command.mode == document.project.collaborationMode {
             throw NovelError.invalidInput("The project is already in \(command.mode.displayName).")
         }
+        if command.mode == .cocreation,
+           document.activeRuns.contains(where: { $0.status == .running }) {
+            throw NovelError.projectBusy(command.projectID)
+        }
         if command.mode == .ghostwrite {
             let issues = NovelGhostwriteReadiness.issues(
                 in: document,

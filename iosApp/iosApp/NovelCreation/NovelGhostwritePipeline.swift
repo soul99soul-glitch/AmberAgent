@@ -1,5 +1,12 @@
 import Foundation
 
+enum NovelGhostwriteCandidateOwnership {
+    static func belongs(_ candidate: NovelCandidateRecord, to plan: NovelChapterPlanRecord) -> Bool {
+        candidate.ghostwritePlanID == plan.id
+            && candidate.chapterPlanDigest == plan.contentDigest
+    }
+}
+
 enum NovelGhostwritePhase: Equatable, Sendable {
     case writing
     case accepting
@@ -15,6 +22,7 @@ enum NovelGhostwritePauseReason: Equatable, Sendable {
     case acceptanceFailed
     case obviousRepetition
     case blockingContinuity
+    case continuityAuditIncomplete
     case collectFailed
     case syncFailed
     case incompleteCandidate
@@ -28,6 +36,7 @@ enum NovelGhostwritePauseReason: Equatable, Sendable {
         case .acceptanceFailed: "没按本章计划写过关，已留下稿子。"
         case .obviousRepetition: "检测到明显复读，已暂停自动收录。"
         case .blockingContinuity: "前后情节有严重问题，已暂停自动收录。"
+        case .continuityAuditIncomplete: "连续性检查未完整完成，已暂停自动收录。"
         case .collectFailed: "自动收录失败，已暂停代笔。"
         case .syncFailed: "剧情同步还没完成，代笔已暂停，不会开始下一章。"
         case .incompleteCandidate: "本章正文不完整，已暂停代笔。"
@@ -70,6 +79,11 @@ enum NovelGhostwriteContinuityGate {
         }
         let blocking = blockingIssueSummaries(in: report)
         return blocking.isEmpty ? nil : blocking.joined(separator: "；")
+    }
+
+    static func pauseReason(for report: NovelContinuityAuditReport) -> NovelGhostwritePauseReason? {
+        if report.failedChunkCount > 0 { return .continuityAuditIncomplete }
+        return blockingIssueSummaries(in: report).isEmpty ? nil : .blockingContinuity
     }
 }
 

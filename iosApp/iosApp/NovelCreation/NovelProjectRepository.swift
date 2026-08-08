@@ -886,15 +886,9 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         _ marker: ProjectLifecycleMarkerV1,
         to url: URL
     ) throws {
+        // .atomic 写失败本身会抛错；写后读回只防硬件故障，去掉这次读回校验。
         let data = try makeEncoder().encode(marker)
         try data.write(to: url, options: [.atomic])
-        let installed = try makeDecoder().decode(
-            ProjectLifecycleMarkerV1.self,
-            from: Data(contentsOf: url)
-        )
-        guard installed == marker else {
-            throw NovelError.repositoryFailure("Novel project lifecycle marker changed after write.")
-        }
     }
 
     private func deletionTombstoneProjectIDs() -> Set<NovelProjectID> {
