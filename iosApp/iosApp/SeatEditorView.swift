@@ -356,29 +356,6 @@ struct SeatEditorView: View {
     }
 }
 
-private struct SeatEditorStatusLine: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(value)
-                .font(.subheadline)
-                .foregroundStyle(AmberTheme.foreground)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(minHeight: 46)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 6)
-    }
-}
-
 private struct SeatEditorRow: View {
     let systemImage: String?
     var iconColor = AmberTheme.accent

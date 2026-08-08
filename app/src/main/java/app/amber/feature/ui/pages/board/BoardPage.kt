@@ -450,9 +450,6 @@ private fun TopicActionRow(
     }
 }
 
-private fun chatContext(item: BoardItemEntity): String =
-    "看板待办: ${item.title}\n\n原因: ${item.reason}\n建议: ${item.suggestion}\n\n来源内容: ${item.sourceContent.take(1000)}"
-
 internal fun visibleTodayReviewTodoItems(items: List<BoardItemEntity>): List<BoardItemEntity> =
     items
         .filter { it.status != "dismissed" && (it.category == "todo" || it.category == "action") }
@@ -781,68 +778,6 @@ private fun AccentLiveDot(color: Color, dotSize: Dp = 7.dp) {
                 .background(color, CircleShape),
         )
         Box(Modifier.size(dotSize).background(color, CircleShape))
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun TodayReviewTab(
-    todoItems: List<BoardItemEntity>,
-    review: DailyReviewEntity?,
-    onRefresh: () -> Unit,
-    onComplete: (String) -> Unit,
-    onChat: (BoardItemEntity) -> Unit,
-) {
-    val pullState = rememberPullToRefreshState()
-    var isRefreshing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(
-        todoItems.map { Triple(it.id, it.status, it.signalTime) },
-        review?.updatedAt,
-    ) {
-        if (isRefreshing) isRefreshing = false
-    }
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = {
-            isRefreshing = true
-            onRefresh()
-            scope.launch {
-                delay(15_000L)
-                isRefreshing = false
-            }
-        },
-        state = pullState,
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        LazyColumn(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            item { SectionTitle("📋 待办", if (todoItems.isEmpty()) "暂无" else "${todoItems.size.coerceAtMost(5)} 条") }
-            if (todoItems.isEmpty()) {
-                item { EmptyLine("没有新的待办。") }
-            } else {
-                items(todoItems.take(5), key = { it.id }) { item ->
-                    TodoRow(item = item, onComplete = { onComplete(item.id) }, onChat = { onChat(item) })
-                }
-            }
-            item { SectionTitle("📝 今日回顾", review?.let { reviewPhaseLabel(it) }) }
-            item {
-                if (review == null) {
-                    ReviewEmptyState()
-                } else {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = workspaceColors().paper,
-                        border = workspaceBorder(),
-                    ) {
-                        MarkdownBlock(content = review.content, modifier = Modifier.padding(16.dp))
-                    }
-                }
-            }
-        }
     }
 }
 

@@ -166,13 +166,6 @@ internal fun buildMemoryPrompt(
         appendLine()
     }
 
-internal fun buildCoreMemoryPrompt(memories: List<AssistantMemory>) =
-    buildMemoryPrompt(
-        title = "Core Memories",
-        description = "These are durable AmberAgent core memories stored in the global bucket. Treat them as explicit user-approved context.",
-        memories = memories,
-    )
-
 internal fun buildShortTermMemoryPrompt(memories: List<AssistantMemory>) =
     buildMemoryPrompt(
         title = "Short-Term Memories",

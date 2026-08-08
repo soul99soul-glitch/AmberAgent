@@ -287,35 +287,6 @@ private struct SubAgentRoleDetail {
     ]
 }
 
-private struct SubAgentRoleStatusRow: View {
-    let row: SubAgentRoleStatus
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                Text(row.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(row.value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(row.color)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(minHeight: 58)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 5)
-    }
-}
-
 private struct SubAgentRoleDivider: View {
     var body: some View {
         Divider()

@@ -148,41 +148,6 @@ struct SkillsView: View {
     }
 }
 
-private struct SkillStatusRow: View {
-    let systemImage: String
-    let iconColor: Color
-    let title: String
-    let subtitle: String
-    let badge: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 32, height: 32)
-                .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(AmberTheme.foreground)
-
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                SkillBadge(text: badge, color: AmberTheme.muted, background: AmberTheme.surface2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(minHeight: 72)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-}
-
 private struct SkillRowModel: Identifiable {
     let id = UUID()
     let name: String
@@ -201,50 +166,6 @@ private enum SkillState {
         } else {
             false
         }
-    }
-}
-
-private struct SkillRow: View {
-    let skill: SkillRowModel
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                SkillIcon(state: skill.state)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(skill.name)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(skill.state.dimmed ? AmberTheme.muted : AmberTheme.foreground)
-                        .lineLimit(1)
-
-                    Text(skill.summary)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(2)
-
-                    switch skill.state {
-                    case .disabled:
-                        SkillBadge(text: "未启用", color: AmberTheme.muted2, background: AmberTheme.surface2)
-                    case .mcp:
-                        SkillBadge(text: "MCP", color: AmberTheme.accentCyan, background: AmberTheme.accentCyan.opacity(0.12))
-                    case .enabled:
-                        EmptyView()
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AmberTheme.muted2)
-            }
-            .frame(minHeight: 64)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -364,32 +285,5 @@ private struct SkillUtilityRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct SkillDivider: View {
-    var body: some View {
-        Rectangle()
-            .fill(AmberTheme.borderSoft)
-            .frame(height: 0.5)
-            .padding(.leading, 58)
-    }
-}
-
-private struct SkillsFooter: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(AmberTheme.muted2)
-            .lineSpacing(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 7)
     }
 }

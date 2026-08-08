@@ -150,14 +150,6 @@ import kotlin.uuid.Uuid
 
 @Composable
 fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
-    // T2 perf-layer dispatch — flag-gated route to ChatPageSplit (scaffold).
-    // Default flag = false → legacy path below runs unchanged. See PerfFlags.kt
-    // + ChatPageSplit.kt for the new code path and on-device verification
-    // steps in docs/visual-sanity-check.md.
-    if (app.amber.agent.PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES) {
-        ChatPageSplit(id = id, text = text, files = files, nodeId = nodeId)
-        return
-    }
 
     val vm: ChatVM = koinViewModel(
         parameters = {

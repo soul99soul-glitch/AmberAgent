@@ -20,12 +20,6 @@ enum ChatLayout {
     static let liveRenderingLODScreenFactor: CGFloat = 1.15
 }
 
-struct ChatScrollGeometryState: Equatable {
-    let atBottom: Bool
-    let isScrollable: Bool
-    let liveRenderingFarFromBottom: Bool
-}
-
 struct ChatComposerHeightPreferenceKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 

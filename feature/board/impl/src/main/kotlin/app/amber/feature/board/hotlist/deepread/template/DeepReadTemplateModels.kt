@@ -6,11 +6,6 @@ object DeepReadTemplateLimits {
     const val MAX_HTML_BYTES = 96 * 1024
 }
 
-object DeepReadBuiltInTemplates {
-    const val COMPOSE_MAGAZINE = "compose_magazine"
-    const val EDITORIAL_SLANT = "editorial_slant"
-}
-
 @Serializable
 data class DeepReadTemplatePackage(
     val id: String,

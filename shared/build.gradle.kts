@@ -26,7 +26,6 @@ kotlin {
         ":core:event",
         ":core:agent-runtime",
         ":core:agent-utils",
-        ":core:llm",
         ":core:ai-prompts",
         ":core:sync:api",
         ":core:context:api",

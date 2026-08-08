@@ -1,8 +1,6 @@
 package app.amber.feature.ui.pages.setting
 
 import android.content.Context
-import android.net.Uri
-import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -39,9 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.File02
@@ -49,7 +45,6 @@ import app.amber.agent.R
 import app.amber.feature.office.FeishuOfficeEnhancementManager
 import app.amber.feature.office.FeishuWorkProject
 import app.amber.feature.office.radar.DocRadar
-import app.amber.feature.workspace.WorkspaceManager
 import app.amber.agent.data.db.dao.DocChangeLogDAO
 import app.amber.agent.data.db.dao.DocSubscriptionDAO
 import app.amber.agent.data.db.entity.DocSubscriptionEntity
@@ -345,232 +340,6 @@ fun SettingExperimentalOfficeProPage(
 }
 
 @Composable
-private fun OfficeProjectEditorDialog(
-    project: FeishuWorkProject?,
-    workspaceManager: WorkspaceManager,
-    context: Context,
-    onDismiss: () -> Unit,
-    onSave: (FeishuWorkProject) -> Unit,
-    onToast: (String) -> Unit,
-) {
-    val scope = rememberCoroutineScope()
-    var nameInput by remember(project?.id) { mutableStateOf(project?.name.orEmpty()) }
-    var keywordsInput by remember(project?.id) { mutableStateOf(project?.keywords.orEmpty().joinToString("\n")) }
-    var currentGoalInput by remember(project?.id) { mutableStateOf(project?.currentGoal.orEmpty()) }
-    var coreSellingPointsInput by remember(project?.id) { mutableStateOf(project?.coreSellingPoints.orEmpty().joinToString("\n")) }
-    var risksInput by remember(project?.id) { mutableStateOf(project?.risks.orEmpty().joinToString("\n")) }
-    var openQuestionsInput by remember(project?.id) { mutableStateOf(project?.openQuestions.orEmpty().joinToString("\n")) }
-    var keyDecisionsInput by remember(project?.id) { mutableStateOf(project?.keyDecisions.orEmpty().joinToString("\n")) }
-    var recentChangesInput by remember(project?.id) { mutableStateOf(project?.recentChanges.orEmpty().joinToString("\n")) }
-    var sourceRefsInput by remember(project?.id) { mutableStateOf(project?.sourceRefs.orEmpty().joinToString("\n")) }
-    var importing by remember { mutableStateOf(false) }
-    val importSuccess = stringResource(R.string.setting_officepro_import_source_success)
-    val blankNameError = stringResource(R.string.setting_officepro_project_name_required)
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        importing = true
-        scope.launch {
-            runCatching {
-                importOfficeProjectSource(
-                    context = context,
-                    workspaceManager = workspaceManager,
-                    uri = uri,
-                    projectName = nameInput.ifBlank { project?.name ?: "officepro-project" },
-                )
-            }.onSuccess { path ->
-                sourceRefsInput = appendSourceRef(sourceRefsInput, path)
-                onToast(importSuccess.format(path))
-            }.onFailure { error ->
-                onToast(error.message ?: error.toString())
-            }
-            importing = false
-        }
-    }
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.92f)
-                .padding(16.dp),
-            shape = RoundedCornerShape(16.dp),
-            color = workspaceColors().paper,
-            border = BorderStroke(1.dp, workspaceColors().hairline),
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.setting_officepro_project_editor_title),
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = workspaceColors().ink,
-                    )
-                    IconButton(onClick = onDismiss) {
-                        Icon(HugeIcons.Cancel01, contentDescription = null)
-                    }
-                }
-                ExperimentNote(text = stringResource(R.string.setting_officepro_project_editor_desc))
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item {
-                        OutlinedTextField(
-                            value = nameInput,
-                            onValueChange = { nameInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_name)) },
-                            singleLine = true,
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = keywordsInput,
-                            onValueChange = { keywordsInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_keywords)) },
-                            supportingText = { Text(stringResource(R.string.setting_officepro_project_list_field_desc)) },
-                            minLines = 2,
-                            maxLines = 5,
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = currentGoalInput,
-                            onValueChange = { currentGoalInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_goal)) },
-                            minLines = 2,
-                            maxLines = 5,
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = sourceRefsInput,
-                            onValueChange = { sourceRefsInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_sources)) },
-                            supportingText = { Text(stringResource(R.string.setting_officepro_project_sources_desc)) },
-                            minLines = 3,
-                            maxLines = 7,
-                        )
-                    }
-                    item {
-                        ExperimentActionRow {
-                            ExperimentActionButton(
-                                text = stringResource(R.string.setting_officepro_import_source),
-                                enabled = !importing,
-                                onClick = { importLauncher.launch(arrayOf("*/*")) },
-                            )
-                        }
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = coreSellingPointsInput,
-                            onValueChange = { coreSellingPointsInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_selling_points)) },
-                            supportingText = { Text(stringResource(R.string.setting_officepro_project_list_field_desc)) },
-                            minLines = 2,
-                            maxLines = 5,
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = risksInput,
-                            onValueChange = { risksInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_risks)) },
-                            supportingText = { Text(stringResource(R.string.setting_officepro_project_list_field_desc)) },
-                            minLines = 2,
-                            maxLines = 5,
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = openQuestionsInput,
-                            onValueChange = { openQuestionsInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_open_questions)) },
-                            supportingText = { Text(stringResource(R.string.setting_officepro_project_list_field_desc)) },
-                            minLines = 2,
-                            maxLines = 5,
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = keyDecisionsInput,
-                            onValueChange = { keyDecisionsInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_key_decisions)) },
-                            supportingText = { Text(stringResource(R.string.setting_officepro_project_list_field_desc)) },
-                            minLines = 2,
-                            maxLines = 5,
-                        )
-                    }
-                    item {
-                        OutlinedTextField(
-                            value = recentChangesInput,
-                            onValueChange = { recentChangesInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.setting_officepro_project_recent_changes)) },
-                            supportingText = { Text(stringResource(R.string.setting_officepro_project_list_field_desc)) },
-                            minLines = 2,
-                            maxLines = 5,
-                        )
-                    }
-                }
-                ExperimentActionRow {
-                    ExperimentActionButton(
-                        text = stringResource(R.string.setting_officepro_save_project),
-                        primary = true,
-                        enabled = !importing,
-                        onClick = {
-                            val cleanName = nameInput.trim()
-                            if (cleanName.isBlank()) {
-                                onToast(blankNameError)
-                            } else {
-                                onSave(
-                                    FeishuWorkProject(
-                                        id = project?.id ?: cleanName.toOfficeProjectId(),
-                                        name = cleanName.take(80),
-                                        keywords = parseProjectList(keywordsInput).ifEmpty { listOf(cleanName.take(80)) },
-                                        currentGoal = currentGoalInput.trim().take(500),
-                                        coreSellingPoints = parseProjectList(coreSellingPointsInput),
-                                        risks = parseProjectList(risksInput),
-                                        openQuestions = parseProjectList(openQuestionsInput),
-                                        keyDecisions = parseProjectList(keyDecisionsInput),
-                                        recentChanges = parseProjectList(recentChangesInput),
-                                        sourceRefs = parseProjectSourceRefs(sourceRefsInput),
-                                        updatedAtMs = System.currentTimeMillis(),
-                                    )
-                                )
-                            }
-                        },
-                    )
-                    ExperimentActionButton(
-                        text = stringResource(R.string.cancel),
-                        enabled = !importing,
-                        onClick = onDismiss,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun WatchDocDialog(
     onDismiss: () -> Unit,
     onSave: (title: String, url: String, threshold: Int, interval: Int, notify: Boolean) -> Unit,
@@ -705,89 +474,6 @@ private fun OfficeProSwitchRow(
         )
     }
 }
-
-private const val OFFICE_PROJECT_IMPORT_MAX_BYTES = 50L * 1024L * 1024L
-
-private fun parseProjectList(raw: String): List<String> =
-    raw.split('\n', ',', '，', ';', '；')
-        .map { it.trim().take(500) }
-        .filter { it.isNotBlank() }
-        .distinct()
-        .take(24)
-
-private fun parseProjectSourceRefs(raw: String): List<String> =
-    raw.lineSequence()
-        .flatMap { it.split('，', ';', '；').asSequence() }
-        .map { it.trim().take(500) }
-        .filter { it.isNotBlank() }
-        .distinct()
-        .take(32)
-        .toList()
-
-private fun appendSourceRef(existing: String, path: String): String =
-    (parseProjectSourceRefs(existing) + path)
-        .distinct()
-        .joinToString("\n")
-
-private suspend fun importOfficeProjectSource(
-    context: Context,
-    workspaceManager: WorkspaceManager,
-    uri: Uri,
-    projectName: String,
-): String = withContext(Dispatchers.IO) {
-    val resolver = context.contentResolver
-    var displayName: String? = null
-    var sizeBytes: Long? = null
-    resolver.query(uri, null, null, null, null)?.use { cursor ->
-        if (cursor.moveToFirst()) {
-            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-            if (nameIndex >= 0) {
-                displayName = cursor.getString(nameIndex)
-            }
-            if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
-                sizeBytes = cursor.getLong(sizeIndex)
-            }
-        }
-    }
-    val knownSize = sizeBytes
-    require(knownSize == null || knownSize <= OFFICE_PROJECT_IMPORT_MAX_BYTES) {
-        "文件超过 50MB，先放入 workspace 后再把路径写入来源引用。"
-    }
-    val safeName = (displayName ?: "source-${System.currentTimeMillis()}")
-        .toSafeWorkspaceFileName()
-    val bytes = resolver.openInputStream(uri)?.use { input ->
-        input.readBytes()
-    } ?: error("无法读取选择的文件")
-    require(bytes.size.toLong() <= OFFICE_PROJECT_IMPORT_MAX_BYTES) {
-        "文件超过 50MB，先放入 workspace 后再把路径写入来源引用。"
-    }
-    val mimeType = resolver.getType(uri) ?: "application/octet-stream"
-    val projectDir = projectName.toOfficeProjectId()
-    val relativePath = "officepro/knowledge/$projectDir/$safeName"
-    workspaceManager.writeBytes(relativePath, bytes, mimeType).path
-}
-
-private fun String.toOfficeProjectId(): String {
-    val ascii = lowercase()
-        .map { char ->
-            when {
-                char in 'a'..'z' || char in '0'..'9' -> char
-                char.isWhitespace() || char in listOf('-', '_', '.', '/', '，', ',', '；', ';') -> '-'
-                else -> '-'
-            }
-        }
-        .joinToString("")
-        .trim('-')
-        .replace(Regex("-+"), "-")
-    return ascii.ifBlank { "custom-project" }.take(64)
-}
-
-private fun String.toSafeWorkspaceFileName(): String =
-    replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_")
-        .trim()
-        .take(120)
-        .ifBlank { "source-${System.currentTimeMillis()}" }
 
 private fun formatOfficeProjectUpdatedAt(updatedAtMs: Long): String =
     SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(updatedAtMs))

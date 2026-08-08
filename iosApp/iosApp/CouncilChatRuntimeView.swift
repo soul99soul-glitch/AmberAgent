@@ -792,58 +792,6 @@ struct CouncilChatRuntimeView: View {
 
 }
 
-private struct CouncilParticipantChip: View {
-    let participant: CouncilParticipant
-    let state: CouncilParticipantState
-    let currentModelId: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                ZStack(alignment: .bottomTrailing) {
-                    Image(systemName: participant.systemImage)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(participant.tint)
-                        .frame(width: 26, height: 26)
-                        .background(participant.tint.opacity(0.13), in: Circle())
-
-                    if state == .speaking {
-                        Circle()
-                            .fill(AmberTheme.accentGreen)
-                            .frame(width: 7, height: 7)
-                            .overlay(Circle().stroke(AmberTheme.background, lineWidth: 1))
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(participant.displayName)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AmberTheme.foreground)
-                        .lineLimit(1)
-                    Text(participant.isHost ? currentModelId : state.label)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(1)
-                }
-            }
-            .padding(.leading, 7)
-            .padding(.trailing, 10)
-            .frame(height: 42)
-            .background(
-                state == .speaking ? participant.tint.opacity(0.16) : AmberTheme.surface,
-                in: Capsule()
-            )
-            .overlay {
-                Capsule()
-                    .stroke(participant.isHost ? AmberTheme.accent.opacity(0.34) : AmberTheme.borderSoft, lineWidth: 0.7)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("提及 \(participant.displayName)")
-    }
-}
-
 private struct CouncilMessageRow: View, Equatable {
     let message: CouncilChatMessage
     let onTapDetail: () -> Void
@@ -1702,21 +1650,6 @@ final class CouncilChatViewModel {
         participants.first(where: \.isHost)?.displayName ?? Self.hostName(for: currentModelId)
     }
 
-    var roomStateText: String {
-        if let roomStateOverride { return roomStateOverride }
-        if let issue = currentConfigurationIssue {
-            return issue.title
-        }
-        if isRunning {
-            return selectedMode.runningState
-        }
-        return "就绪"
-    }
-
-    var lastMessageBody: String {
-        messages.last?.body ?? ""
-    }
-
     /// 当前若处于只读重放,返回被重放那场的 taskId(供历史列表高亮),否则 nil。
     var activeReplayTaskId: String? {
         isReplay ? currentTaskId : nil
@@ -1823,18 +1756,6 @@ final class CouncilChatViewModel {
             return .invited
         }
         return .idle
-    }
-
-    func insertMention(_ participant: CouncilParticipant) {
-        appendToken("@\(participant.handle)")
-    }
-
-    func insertHostMention() {
-        appendToken("@host")
-    }
-
-    func insertInviteTemplate() {
-        appendToken("请主持人动态选择本轮需要加入的席位。")
     }
 
     func addPendingImage(dataUrl: String, previewData: Data, displayName: String = "图片") {
@@ -2174,14 +2095,6 @@ final class CouncilChatViewModel {
     private func cancelScheduledArchive() {
         archiveThrottleTask?.cancel()
         archiveThrottleTask = nil
-    }
-
-    func restartLastDiscussion() {
-        let objective = lastRunObjective.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !objective.isEmpty, !isRunning else { return }
-        resetRoom()
-        pendingObjective = objective
-        startPendingDiscussion(researchAllowed: lastResearchAllowed)
     }
 
     /// 以指定议题重开一场议会:清空当前画面(含只读重放),再用该议题重新开跑。
@@ -2855,34 +2768,6 @@ struct CouncilParticipant: Identifiable {
                 modelHint: "质询视角"
             )
         ]
-    }
-
-    static func customSeats(from savedSeats: [[String: String]]) -> [CouncilParticipant] {
-        let palette = [
-            AmberTheme.accentCyan,
-            AmberTheme.accentGreen,
-            AmberTheme.accentAmber,
-            AmberTheme.accentIndigo,
-            AmberTheme.accentRed
-        ]
-
-        return savedSeats.enumerated().compactMap { index, seat in
-            guard let name = seat["name"]?.trimmedNilIfBlank else { return nil }
-            let role = seat["role"]?.trimmedNilIfBlank ?? "自定义视角"
-            let modelId = seat["modelId"]?.trimmedNilIfBlank
-            return CouncilParticipant(
-                id: seat["seatId"]?.trimmedNilIfBlank ?? "custom-\(index)",
-                handle: makeHandle(from: name, fallback: "seat\(index + 1)"),
-                displayName: name,
-                roleDescription: role,
-                shortLens: role,
-                systemImage: "person.crop.circle.badge.checkmark",
-                tint: palette[index % palette.count],
-                isHost: false,
-                modelHint: modelId ?? "当前模型",
-                modelId: modelId
-            )
-        }
     }
 
     private static func makeHandle(from name: String, fallback: String) -> String {

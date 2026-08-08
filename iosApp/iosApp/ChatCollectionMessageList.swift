@@ -2525,30 +2525,6 @@ struct ChatSwiftUIMessageList: View {
 
 }
 
-private struct ChatSwiftUIViewportHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct ChatSwiftUIContentHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct ChatSwiftUIBottomMaxYKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 private struct ChatSwiftUIMessageBubble: View, @MainActor Equatable {
     let entryID: String
     let renderDigest: ChatRowDigest

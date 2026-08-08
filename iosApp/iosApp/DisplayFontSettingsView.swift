@@ -209,37 +209,6 @@ private struct DisplayValueRow: View {
     }
 }
 
-private struct DisplayStatusRow: View {
-    let title: String
-    let subtitle: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(AmberTheme.muted.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-        }
-        .frame(minHeight: 64)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-    }
-}
-
 private struct DisplayToggleRow: View {
     let title: String
     var subtitle: String?

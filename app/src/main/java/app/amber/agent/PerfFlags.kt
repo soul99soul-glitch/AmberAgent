@@ -24,34 +24,6 @@ package app.amber.agent
 object PerfFlags {
 
     /**
-     * T2 — Use ChatPageSplit (region-based sub-Composables) instead of the
-     * monolithic ChatPage. New path collects state per-region so a
-     * streaming-state emission only recomposes the streaming-indicator
-     * subtree, not the whole chat tree.
-     *
-     * Revert if enabled and broken: `git revert <commit-T2-split>`.
-     */
-    const val USE_SPLIT_CHATPAGE_COMPOSABLES = false
-
-    /**
-     * T4 — Use DeepReadScreenSplit (region-based sub-Composables) instead
-     * of the monolithic DeepReadScreen. Default monolith path preserved.
-     */
-    const val USE_SPLIT_DEEPREAD_SCREEN = false
-
-    /**
-     * T4 — Use MarkdownSplit (smaller per-node renderers) instead of the
-     * monolithic Markdown renderer.
-     */
-    const val USE_SPLIT_MARKDOWN = false
-
-    /**
-     * T4 — Use GenerativeWidgetCardSplit (per-widget-type sub-Composables)
-     * instead of the monolithic GenerativeWidgetCard.
-     */
-    const val USE_SPLIT_GENERATIVE_WIDGET_CARD = false
-
-    /**
      * Streaming rich text A/B — feed new model output into layout immediately
      * without the paced display buffer. Batch reveal (suffix fade + block
      * motion) still applies on the active tail block.

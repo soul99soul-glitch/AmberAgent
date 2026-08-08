@@ -116,13 +116,6 @@ object IosSettingsMutations {
         return DEFAULT_PROVIDERS.any { it.id == parsed }
     }
 
-    /** Replace an existing provider by id; no-op if the provider is not present. */
-    fun replaceProvider(settings: Settings, provider: ProviderSetting): Settings {
-        return settings.copy(
-            providers = settings.providers.map { if (it.id == provider.id) provider else it }
-        )
-    }
-
     /** Remove a provider by [id] and keep chat-model references valid. */
     fun removeProvider(settings: Settings, id: String): Settings {
         val parsed = kotlin.uuid.Uuid.parse(id)
@@ -871,11 +864,6 @@ object IosSettingsMutations {
     }
 
     // ---- Search services (settings.searchServices: List<SearchServiceOptions>) ----
-
-    /** Append a fully-constructed [service] to `settings.searchServices`. */
-    fun addSearchService(settings: Settings, service: SearchServiceOptions): Settings {
-        return settings.copy(searchServices = settings.searchServices + service)
-    }
 
     /**
      * Append [service], make it the selected search service, and mark it

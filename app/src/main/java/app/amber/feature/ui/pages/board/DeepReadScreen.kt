@@ -114,17 +114,6 @@ fun DeepReadScreen(
     initialForceRegenerate: Boolean = false,
     fromHistory: Boolean = false,
 ) {
-    // T-C perf-layer dispatch — see PerfFlags + docs/visual-sanity-check.md.
-    if (app.amber.agent.PerfFlags.USE_SPLIT_DEEPREAD_SCREEN) {
-        DeepReadScreenSplit(
-            topicId = topicId,
-            title = title,
-            sourceUrl = sourceUrl,
-            initialForceRegenerate = initialForceRegenerate,
-            fromHistory = fromHistory,
-        )
-        return
-    }
 
     val deepReadScheduler: DeepReadScheduler = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
@@ -1439,18 +1428,6 @@ private fun deepReadSourceLabel(output: DeepReadOutput): String =
         ?: "DEEP READ"
 
 @Composable
-private fun EditorialSection(title: String, body: String, palette: MagazinePalette, fontFamily: FontFamily?) {
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        SectionKicker(title, palette)
-        DeepReadMarkdownText(
-            text = body,
-            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
-                .withReadingFont(fontFamily),
-        )
-    }
-}
-
-@Composable
 private fun TimelineSection(
     events: List<TimelineEvent>,
     verifiedImageUrls: Set<String>,
@@ -1829,90 +1806,6 @@ private fun SectionKicker(text: String, palette: MagazinePalette) {
     )
 }
 
-@Composable
-private fun DeepReadLoading(
-    modifier: Modifier,
-    palette: MagazinePalette,
-    output: DeepReadOutput?,
-) {
-    val stages = remember { DeepReadGenerationStage.entries }
-    val states = output?.sectionStates.orEmpty()
-    val progress = output.deepReadProgressSnapshot(running = true)
-    val activeStage = stages.firstOrNull { states[it]?.status == DeepReadSectionStatus.RUNNING }
-        ?: stages.firstOrNull { (states[it]?.status ?: DeepReadSectionStatus.PENDING) != DeepReadSectionStatus.READY }
-        ?: stages.first()
-    Box(modifier.fillMaxSize().background(palette.background), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier.padding(horizontal = 38.dp),
-            verticalArrangement = Arrangement.spacedBy(28.dp),
-        ) {
-            Text(
-                "正在为你生成\n一篇深度好文",
-                style = MaterialTheme.typography.displaySmall.copy(fontWeight = FontWeight.Light, color = palette.ink),
-            )
-            Text(
-                "内容会按段写入：概览先出现，随后补齐叙事、分析和扩展阅读。",
-                style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 23.sp),
-                color = palette.muted,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                stages.forEachIndexed { index, stage ->
-                    val status = states[stage]?.status ?: DeepReadSectionStatus.PENDING
-                    val active = stage == activeStage
-                    val done = status == DeepReadSectionStatus.READY
-                    val failed = status == DeepReadSectionStatus.FAILED
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        color = when {
-                            failed -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
-                            active -> palette.surface
-                            done -> palette.surface.copy(alpha = 0.72f)
-                            else -> palette.surface.copy(alpha = 0.44f)
-                        },
-                        tonalElevation = if (active) 2.dp else 0.dp,
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            TimelineMarker(highlight = done || active, palette = palette)
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    when {
-                                        done -> "${stage.label} · 已写入"
-                                        failed -> "${stage.label} · 失败"
-                                        active -> "${stage.label} · 正在写入"
-                                        else -> "${stage.label} · 排队中"
-                                    },
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Light),
-                                    color = if (done || active) palette.ink else palette.muted,
-                                )
-                                Text(
-                                    when (index) {
-                                        0 -> "先生成可读概览、关键实体和真实来源图片"
-                                        1 -> "再补时间轴叙事或故事性脉络"
-                                        2 -> "继续写核心分歧、各方立场和影响"
-                                        else -> "最后整理引用、相关阅读并写入缓存"
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = palette.muted,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            LinearProgressIndicator(
-                progress = { progress.fraction },
-                modifier = Modifier.fillMaxWidth().height(2.dp),
-                color = palette.accent,
-                trackColor = palette.line,
-            )
-        }
-    }
-}
 
 @Composable
 private fun DeepReadError(

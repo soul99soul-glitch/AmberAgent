@@ -519,32 +519,6 @@ private inline fun measureChatTimelinePlan(
     return plan
 }
 
-internal fun buildLazyItemMessageIndexMap(
-    messageNodes: List<MessageNode>,
-    assistant: Assistant?,
-    showAssistantBubble: Boolean,
-    loading: Boolean,
-    hasHistoryLoadingItem: Boolean,
-    pendingMessageCount: Int,
-    hasPostSendWaitingPlaceholder: Boolean = false,
-): List<Int?> = buildList {
-    if (hasHistoryLoadingItem) add(null)
-    messageNodes.forEachIndexed { index, node ->
-        val itemCount = buildChatMessageVirtualItems(
-            node = node,
-            assistant = assistant,
-            showAssistantBubble = showAssistantBubble,
-            loading = loading && index == messageNodes.lastIndex,
-            lastMessage = index == messageNodes.lastIndex,
-        )?.size ?: 1
-        repeat(itemCount) { add(index) }
-    }
-    if (hasPostSendWaitingPlaceholder) add(null)
-    repeat(pendingMessageCount) { add(null) }
-    if (loading) add(null)
-    add(null)
-}
-
 internal fun List<UIMessagePart>.hasVisibleTimelineContent(): Boolean {
     return any { part ->
         when (part) {

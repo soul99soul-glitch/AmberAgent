@@ -329,21 +329,6 @@ private fun toolStatusTone(status: AgentToolStatus): WorkspaceTone = when (statu
 }
 
 @Composable
-private fun toolKindLabel(kind: AgentToolKind, toolName: String): String = when (kind) {
-    AgentToolKind.FILE -> "文件"
-    AgentToolKind.TERMINAL -> "终端"
-    AgentToolKind.MCP -> "MCP"
-    AgentToolKind.SCREEN -> "屏幕"
-    AgentToolKind.WEB -> "网页"
-    AgentToolKind.MEMORY -> "记忆"
-    // Generic fallback used to return toolName itself, which produced the
-    // ugly "$toolName · $toolName" duplicate subtitle for any tool not in
-    // one of the categorized buckets. Plain "工具" reads cleaner and the
-    // tool name still shows on the right of the dot.
-    AgentToolKind.GENERIC -> "工具"
-}
-
-@Composable
 private fun ToolStatusPill(
     status: AgentToolStatus,
     modifier: Modifier = Modifier,
@@ -539,41 +524,6 @@ private fun V3ToolStatusBadge(
                     modifier = Modifier.size(10.dp),
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun RunningToolSpinner(
-    color: Color,
-    modifier: Modifier = Modifier,
-) {
-    val transition = rememberInfiniteTransition(label = "toolRunningSpinner")
-    val rotation by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = LinearEasing),
-        ),
-        label = "toolRunningSpinnerRotation",
-    )
-    Canvas(
-        modifier = modifier.graphicsLayer { rotationZ = rotation }
-    ) {
-        val dotCount = 8
-        val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
-        val radius = size.minDimension * 0.36f
-        val dotRadius = size.minDimension * 0.07f
-        for (index in 0 until dotCount) {
-            val angle = (2.0 * PI * index / dotCount).toFloat()
-            drawCircle(
-                color = color.copy(alpha = 0.22f + 0.68f * (index + 1) / dotCount),
-                radius = dotRadius,
-                center = androidx.compose.ui.geometry.Offset(
-                    x = center.x + cos(angle) * radius,
-                    y = center.y + sin(angle) * radius,
-                ),
-            )
         }
     }
 }

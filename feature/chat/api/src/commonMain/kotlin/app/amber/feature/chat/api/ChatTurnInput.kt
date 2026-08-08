@@ -26,9 +26,3 @@ enum class ToolChoicePolicy {
     NONE,
     REQUIRED,
 }
-
-@Serializable
-data class RetryPolicy(
-    val maxRetries: Int = 3,
-    val backoffMs: Long = 1000,
-)

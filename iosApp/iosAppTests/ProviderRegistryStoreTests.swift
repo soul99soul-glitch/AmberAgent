@@ -364,35 +364,6 @@ final class ProviderRegistryStoreTests: XCTestCase {
         // and the goal's red-light tests can run. Tracked in docs/ios-port/PHASE_LOG.md.
         // Restoring this test requires rebuilding the chat-model-id resolution API it relied on.
         throw XCTSkip("pre-existing: ModelDefaultsChatModelSource removed in 326e870af; see PHASE_LOG.md")
-#if false
-        let provider = ProviderSetting.OpenAI(
-            id: KotlinUuid.companion.random(),
-            enabled: true,
-            name: "Current Provider",
-            models: [
-                makeChatModel("current-chat-a"),
-                makeChatModel("current-chat-b"),
-                makeChatModel("current-chat-a"),
-                makeChatModel(" ")
-            ],
-            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
-            builtIn: false,
-            descriptionText: nil,
-            shortDescriptionText: nil,
-            apiKey: "",
-            baseUrl: "https://api.example.com/v1",
-            chatCompletionsPath: "/chat/completions",
-            useResponseApi: false,
-            authMode: OpenAIAuthMode.apiKey,
-            brand: OpenAIBrand.generic
-        )
-
-        XCTAssertEqual(
-            ModelDefaultsChatModelSource.chatModelIds(for: provider),
-            ["current-chat-a", "current-chat-b"]
-        )
-        XCTAssertEqual(ModelDefaultsChatModelSource.chatModelIds(for: nil), [])
-#endif
     }
 
     private func makeSettings(

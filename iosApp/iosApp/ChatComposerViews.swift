@@ -982,26 +982,6 @@ struct ComposerContextCompactStatRow: View {
     }
 }
 
-struct ComposerPopoverHeader: View {
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AmberTheme.foreground)
-
-            Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(AmberTheme.muted)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-}
-
 struct ComposerPopoverDivider: View {
     let index: Int
 

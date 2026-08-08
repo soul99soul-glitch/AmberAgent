@@ -1139,20 +1139,6 @@ fun MarkdownBlock(
     onStreamingVisibleFrame: (() -> Unit)? = null,
     onClickCitation: (String) -> Unit = {}
 ) {
-    // T-C perf-layer dispatch — see PerfFlags + docs/visual-sanity-check.md.
-    if (app.amber.agent.PerfFlags.USE_SPLIT_MARKDOWN) {
-        MarkdownBlockSplit(
-            content = content,
-            modifier = modifier,
-            style = style,
-            fillWidth = fillWidth,
-            streaming = streaming,
-            deferStreamingParse = deferStreamingParse,
-            onStreamingVisibleFrame = onStreamingVisibleFrame,
-            onClickCitation = onClickCitation,
-        )
-        return
-    }
     val bufferStreaming = streaming && !content.shouldBypassStreamingDisplayBuffer()
     val renderContent = rememberStreamingDisplayText(
         content = content,

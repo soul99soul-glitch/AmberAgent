@@ -435,29 +435,6 @@ private struct SearchProviderStatusRow: View {
     }
 }
 
-private struct SearchProviderPreviewLine: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text(value)
-                .font(.subheadline)
-                .foregroundStyle(AmberTheme.foreground)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(minHeight: 46)
-        .padding(.horizontal, 15)
-        .padding(.vertical, 6)
-    }
-}
-
 private struct SearchProviderDivider: View {
     var body: some View {
         Divider()

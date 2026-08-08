@@ -428,35 +428,6 @@ fun ChatDrawerContent(
 }
 
 @Composable
-private fun DrawerActions(navController: Navigator, todayBoardEnabled: Boolean = false) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        DrawerNavRow(
-            icon = HugeIcons.Search01,
-            label = stringResource(R.string.chat_page_search_chats),
-            onClick = { navController.navigate(Screen.MessageSearch) },
-            tone = WorkspaceTone.Accent,
-        )
-        DrawerNavRow(
-            icon = HugeIcons.TransactionHistory,
-            label = stringResource(R.string.chat_page_history),
-            onClick = { navController.navigate(Screen.History) },
-        )
-        if (todayBoardEnabled) {
-            DrawerNavRow(
-                icon = HugeIcons.News01,
-                label = "今日看板",
-                onClick = { navController.navigate(Screen.TodayBoard) },
-            )
-        }
-        DrawerNavRow(
-            icon = HugeIcons.DashboardSquare01,
-            label = "小应用",
-            onClick = { navController.navigate(Screen.MiniAppList) },
-        )
-    }
-}
-
-@Composable
 private fun DrawerNavRow(
     icon: ImageVector,
     label: String,
@@ -493,33 +464,6 @@ private fun DrawerNavRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-        }
-    }
-}
-
-@Composable
-private fun DrawerAction(
-    modifier: Modifier = Modifier,
-    icon: @Composable () -> Unit,
-    label: @Composable () -> Unit,
-    onClick: () -> Unit,
-    tone: WorkspaceTone = WorkspaceTone.Neutral,
-) {
-    val workspace = workspaceColors()
-    Tooltip(
-        tooltip = { label() }
-    ) {
-        Surface(
-            onClick = onClick,
-            modifier = modifier.size(44.dp),
-            color = if (tone == WorkspaceTone.Accent) workspace.blueContainer else workspace.paper,
-            shape = RoundedCornerShape(9.dp),
-            contentColor = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
-            border = workspaceBorder(),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Box(modifier = Modifier.size(22.dp)) { icon() }
-            }
         }
     }
 }

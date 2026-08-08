@@ -192,9 +192,3 @@ class HotListAggregator(
         )
     }
 }
-
-internal fun stableHotId(input: String): String =
-    MessageDigest.getInstance("SHA-256")
-        .digest(input.toByteArray())
-        .joinToString("") { "%02x".format(it) }
-        .take(32)

@@ -299,13 +299,6 @@ data class DeepReadPlaybookSnapshot(
     val updatedAt: Long,
 )
 
-data class DeepReadState(
-    val isLoading: Boolean = false,
-    val output: DeepReadOutput? = null,
-    val cached: Boolean = false,
-    val error: String? = null,
-)
-
 fun DeepReadOutput.hasReadableArticle(): Boolean {
     if (summary.trim().length < 80) return false
     if (lowInformationFallbackPhrases.any { it in visibleTextForLanguageCheck() }) return false

@@ -348,44 +348,6 @@ private struct ModelDefaultStaticRow: View {
     }
 }
 
-private struct ModelDefaultTextFieldRow: View {
-    let systemImage: String
-    let iconColor: Color
-    let title: String
-    let subtitle: String
-    @Binding var text: String
-    let placeholder: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 32, height: 32)
-                .background(iconColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                TextField(placeholder, text: $text)
-                    .font(.system(size: 14, weight: .regular, design: .monospaced))
-                    .foregroundStyle(AmberTheme.foreground)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(minHeight: 78)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-    }
-}
-
 private struct ModelDefaultRowContent: View {
     let systemImage: String
     let iconColor: Color

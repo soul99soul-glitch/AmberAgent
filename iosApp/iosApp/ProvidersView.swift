@@ -765,36 +765,6 @@ private struct ProviderDraftTextFieldRow: View {
     }
 }
 
-private struct ProviderDraftPickerRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
-
-                Text(value)
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.accent)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(AmberTheme.muted2)
-        }
-        .frame(minHeight: 58)
-        .padding(.horizontal, 15)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-    }
-}
-
 private struct ProviderDraftValueRow: View {
     let title: String
     let value: String
@@ -829,39 +799,6 @@ private struct ProviderDraftValueRow: View {
     }
 }
 
-private struct ProviderDraftToggleRow: View {
-    let title: String
-    let subtitle: String
-    let isOn: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.body)
-                        .foregroundStyle(AmberTheme.foreground)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(AmberTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                ProviderDraftSwitch(isOn: isOn)
-            }
-            .frame(minHeight: 58)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityValue(isOn ? "开启" : "关闭")
-    }
-}
-
 private struct ProviderDraftSwitch: View {
     let isOn: Bool
 
@@ -877,25 +814,6 @@ private struct ProviderDraftSwitch: View {
                     .padding(2)
             }
             .animation(.snappy(duration: 0.18), value: isOn)
-    }
-}
-
-private struct ProviderDraftNote: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.footnote)
-            .foregroundStyle(AmberTheme.muted)
-            .lineSpacing(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
-            .padding(.top, 7)
     }
 }
 
