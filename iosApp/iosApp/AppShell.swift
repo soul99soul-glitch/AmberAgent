@@ -486,7 +486,6 @@ enum Route: Hashable {
     case providers
     case providerAdd
     case providerDetail(id: String)
-    case providerKeyEditor(name: String)
     case modelDefaults
     case searchServices
     case searchProvider
@@ -514,7 +513,6 @@ enum Route: Hashable {
     case assistant(id: String)
     case workspaceItem(id: String)
     case settingsPlaceholder(title: String, subtitle: String, systemImage: String)
-    case providerSettings
     case toolPermissions
     case promptInjection
 }
@@ -644,8 +642,6 @@ private extension View {
                 ProviderAddView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings)
             case .providerDetail(let id):
                 ProviderDetailView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings, providerId: id)
-            case .providerKeyEditor(let name):
-                ProviderKeyEditView(providerRegistry: providerRegistry, sharedSettings: sharedSettings, providerName: name)
             case .modelDefaults:
                 ModelDefaultsView(
                     settingsStore: settingsStore,
@@ -792,12 +788,6 @@ private extension View {
                 }
             case .settingsPlaceholder(let title, let subtitle, let systemImage):
                 PlaceholderDetailView(title: title, subtitle: subtitle, systemImage: systemImage)
-            case .providerSettings:
-                if sharedSettings.isCapabilityGateEnabled(.remoteRuntime) {
-                    SettingsView(settingsStore: settingsStore, sharedSettings: sharedSettings)
-                } else {
-                    CapabilityGateLockedView(gate: .remoteRuntime)
-                }
             case .toolPermissions:
                 PermissionsApprovalView(permissionStore: permissionStore)
             case .promptInjection:
