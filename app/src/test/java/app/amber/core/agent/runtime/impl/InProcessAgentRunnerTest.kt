@@ -49,6 +49,19 @@ class InProcessAgentRunnerTest {
         }
     }
 
+    private fun fakeRegistry(
+        descriptor: AgentDescriptor = FakeAgent().descriptor,
+        factory: () -> FakeAgent = { FakeAgent() },
+    ) = InMemoryAgentRegistry().apply {
+        register(
+            descriptor = descriptor,
+            inputClass = FakeInput::class,
+            inputSerializer = FakeInput.serializer(),
+            artifactSerializer = FakeArtifact.serializer(),
+            factory = factory,
+        )
+    }
+
     private class RecordingEventStore : AgentEventStore {
         val runs = mutableListOf<AgentRunRecord>()
         val events = mutableListOf<AgentEventRecord>()
@@ -77,21 +90,15 @@ class InProcessAgentRunnerTest {
     @Test
     fun `launch and complete writes running then completed`() = runBlocking {
         val store = RecordingEventStore()
-        val registry = InMemoryAgentRegistry().apply {
-            register(
-                descriptor = FakeAgent().descriptor,
-                inputClass = FakeInput::class,
-                inputSerializer = FakeInput.serializer(),
-                artifactSerializer = FakeArtifact.serializer(),
-                factory = { FakeAgent() },
-            )
-        }
-        val runner = InProcessAgentRunner(registry, store)
+        val runner = InProcessAgentRunner(fakeRegistry(), store)
 
         val result = runner.launch(AgentDescriptorId("fake"), FakeInput("hello"))
         assertTrue("launch should succeed", result.isSuccess)
         val handle = result.getOrThrow()
         assertNotNull(handle.runId)
+        val snapshot = runner.observe(handle.runId).value
+        assertEquals(handle.runId, snapshot.runId)
+        assertTrue(snapshot.status in setOf(AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED))
 
         // Wait for completion (handler is synchronous in fake)
         repeat(20) {
@@ -122,25 +129,20 @@ class InProcessAgentRunnerTest {
     fun `launch and fail writes failed status`() = runBlocking {
         val store = RecordingEventStore()
         val handlerCallCount = AtomicInteger(0)
-        val registry = InMemoryAgentRegistry().apply {
-            register(
-                descriptor = AgentDescriptor(
-                    id = AgentDescriptorId("failing"),
-                    version = "1.0",
-                    displayName = "Failing",
-                    capabilities = emptySet(),
-                ),
-                inputClass = FakeInput::class,
-                inputSerializer = FakeInput.serializer(),
-                artifactSerializer = FakeArtifact.serializer(),
-                factory = {
-                    FakeAgent {
-                        handlerCallCount.incrementAndGet()
-                        throw IllegalStateException("intentional failure")
-                    }
-                },
-            )
-        }
+        val registry = fakeRegistry(
+            descriptor = AgentDescriptor(
+                id = AgentDescriptorId("failing"),
+                version = "1.0",
+                displayName = "Failing",
+                capabilities = emptySet(),
+            ),
+            factory = {
+                FakeAgent {
+                    handlerCallCount.incrementAndGet()
+                    throw IllegalStateException("intentional failure")
+                }
+            },
+        )
         val runner = InProcessAgentRunner(registry, store)
 
         runner.launch(AgentDescriptorId("failing"), FakeInput("x"))
@@ -157,50 +159,15 @@ class InProcessAgentRunnerTest {
         assertTrue(store.runs.last().interruptedReason?.contains("intentional failure") == true)
     }
 
-    @Test
-    fun `observe returns snapshot for existing run`() = runBlocking {
-        val store = RecordingEventStore()
-        val registry = InMemoryAgentRegistry().apply {
-            register(
-                descriptor = FakeAgent().descriptor,
-                inputClass = FakeInput::class,
-                inputSerializer = FakeInput.serializer(),
-                artifactSerializer = FakeArtifact.serializer(),
-                factory = { FakeAgent() },
-            )
-        }
-        val runner = InProcessAgentRunner(registry, store)
-
-        val handle = runner.launch(AgentDescriptorId("fake"), FakeInput("y")).getOrThrow()
-        val snapshot = runner.observe(handle.runId).value
-
-        assertEquals(handle.runId, snapshot.runId)
-        // Status should be RUNNING or COMPLETED depending on timing
-        assertTrue(snapshot.status in setOf(AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED))
-    }
-
     // P1-e: 账本写失败不得被静默吞掉——必须走 onLedgerError（用户可见错误通道）。
     // 即使账本写入失败，agent 本体照常执行（不把账本故障转嫁为 run 失败）。
     @Test
     fun `ledger append failure is published via onLedgerError and run still completes`() = runBlocking {
         val store = ThrowingEventStore()
         val handlerCallCount = AtomicInteger(0)
-        val registry = InMemoryAgentRegistry().apply {
-            register(
-                descriptor = AgentDescriptor(
-                    id = AgentDescriptorId("fake"),
-                    version = "1.0",
-                    displayName = "Fake",
-                    capabilities = setOf(AgentCapability.CHAT_TURN),
-                ),
-                inputClass = FakeInput::class,
-                inputSerializer = FakeInput.serializer(),
-                artifactSerializer = FakeArtifact.serializer(),
-                factory = {
-                    FakeAgent { handlerCallCount.incrementAndGet() }
-                },
-            )
-        }
+        val registry = fakeRegistry(
+            factory = { FakeAgent { handlerCallCount.incrementAndGet() } },
+        )
         val ledgerErrors = java.util.concurrent.CopyOnWriteArrayList<Pair<AgentRunId, Throwable>>()
         val runner = InProcessAgentRunner(
             registry,

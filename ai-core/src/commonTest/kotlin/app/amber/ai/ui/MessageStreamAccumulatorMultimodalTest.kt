@@ -42,51 +42,22 @@ class MessageStreamAccumulatorMultimodalTest {
     )
 
     @Test
-    fun videoPartIsPreservedNotDropped() {
-        val acc = MessageStreamAccumulator(baseMessages(), model = null)
+    fun multimodalPartsArePreservedAlongsideText() {
+        val accumulator = MessageStreamAccumulator(baseMessages(), model = null)
+        val text = UIMessagePart.Text("answer")
         val video = UIMessagePart.Video(url = "https://example/v.mp4")
-        acc.append(chunk(video))
-        val parts = acc.snapshot().last().parts
-        assertTrue(parts.any { it is UIMessagePart.Video }, "Video part 被 accumulator 丢弃了（旧的 println else 分支）")
-    }
-
-    @Test
-    fun audioPartIsPreservedNotDropped() {
-        val acc = MessageStreamAccumulator(baseMessages(), model = null)
         val audio = UIMessagePart.Audio(url = "https://example/a.mp3")
-        acc.append(chunk(audio))
-        val parts = acc.snapshot().last().parts
-        assertTrue(parts.any { it is UIMessagePart.Audio }, "Audio part 被丢弃")
-    }
+        val document = UIMessagePart.Document(url = "https://example/r.pdf", fileName = "report.pdf")
+        val miniApp = UIMessagePart.MiniApp(appId = "wx123", title = "demo", description = "d")
 
-    @Test
-    fun documentPartIsPreservedNotDropped() {
-        val acc = MessageStreamAccumulator(baseMessages(), model = null)
-        val doc = UIMessagePart.Document(url = "https://example/r.pdf", fileName = "report.pdf")
-        acc.append(chunk(doc))
-        val parts = acc.snapshot().last().parts
-        assertTrue(parts.any { it is UIMessagePart.Document }, "Document part 被丢弃")
-    }
+        accumulator.append(chunk(text, video, audio, document, miniApp))
 
-    @Test
-    fun miniAppPartIsPreservedNotDropped() {
-        val acc = MessageStreamAccumulator(baseMessages(), model = null)
-        val mini = UIMessagePart.MiniApp(appId = "wx123", title = "demo", description = "d")
-        acc.append(chunk(mini))
-        val parts = acc.snapshot().last().parts
-        assertTrue(parts.any { it is UIMessagePart.MiniApp }, "MiniApp part 被丢弃")
-    }
-
-    /**
-     * 混合流：Text + 多模态 part 同时到达，两者都必须存活——证明 Static 追加
-     * 不影响 Text 的 appendText 合并路径。
-     */
-    @Test
-    fun mixedTextAndMultimodalPartsCoexist() {
-        val acc = MessageStreamAccumulator(baseMessages(), model = null)
-        acc.append(chunk(UIMessagePart.Text("answer"), UIMessagePart.Document(url = "u", fileName = "d.pdf")))
-        val parts = acc.snapshot().last().parts
+        val parts = accumulator.snapshot().last().parts
+        assertEquals(5, parts.size, "Text 与四种多模态 part 应同时存活")
         assertTrue(parts.any { it is UIMessagePart.Text }, "Text part 丢失")
+        assertTrue(parts.any { it is UIMessagePart.Video }, "Video part 被 accumulator 丢弃了（旧的 println else 分支）")
+        assertTrue(parts.any { it is UIMessagePart.Audio }, "Audio part 被丢弃")
         assertTrue(parts.any { it is UIMessagePart.Document }, "Document part 丢失")
+        assertTrue(parts.any { it is UIMessagePart.MiniApp }, "MiniApp part 被丢弃")
     }
 }

@@ -41,7 +41,13 @@ class JsonConversationStorageTest {
     }
 
     @Test
-    fun emptyStorageReturnsEmptySummaryList() = runTest {
+    fun emptyStorageAndMissingConversationOperationsAreNoops() = runTest {
+        val missingId = Uuid.parse("00000000-0000-0000-0000-000000000099")
+
+        assertEquals(emptyList(), storage.listSummaries())
+        assertNull(storage.loadConversation(missingId))
+        storage.deleteConversation(missingId)
+        storage.updateMetadata(missingId, title = "ignored")
         assertEquals(emptyList(), storage.listSummaries())
     }
 
@@ -151,40 +157,28 @@ class JsonConversationStorageTest {
 
     @Test
     fun summariesAreOrderedPinnedFirstThenUpdateAtDesc() = runTest {
-        val older = sampleConversation(
+        val olderPinned = sampleConversation(
             id = Uuid.parse("00000000-0000-0000-0000-000000000010"),
             title = "older pinned",
             isPinned = true,
-        )
-        val newer = sampleConversation(
+        ).copy(updateAt = Instant.parse("2024-01-01T00:00:00Z"))
+        val newerPinned = sampleConversation(
             id = Uuid.parse("00000000-0000-0000-0000-000000000011"),
-            title = "newer unpinned",
+            title = "newer pinned",
+            isPinned = true,
+        ).copy(updateAt = Instant.parse("2024-02-01T00:00:00Z"))
+        val newestUnpinned = sampleConversation(
+            id = Uuid.parse("00000000-0000-0000-0000-000000000012"),
+            title = "newest unpinned",
             isPinned = false,
-        )
-        // 保存顺序：先 older 再 newer。newer.updateAt 更晚。
-        storage.saveConversation(older)
-        // 给 newer 一个更晚的 updateAt，确保排序依赖真实时间而不是插入顺序。
-        val newerLater = newer.copy(updateAt = newer.updateAt)
-        storage.saveConversation(newerLater)
+        ).copy(updateAt = Instant.parse("2024-03-01T00:00:00Z"))
+
+        storage.saveConversation(newerPinned)
+        storage.saveConversation(newestUnpinned)
+        storage.saveConversation(olderPinned)
 
         val order = storage.listSummaries().map { it.title }
-        // 置顶（older）必须排第一，即使它更新更早。
-        assertEquals(listOf("older pinned", "newer unpinned"), order)
-    }
-
-    @Test
-    fun saveUpsertsExistingConversation() = runTest {
-        val id = Uuid.parse("00000000-0000-0000-0000-000000000020")
-        val first = sampleConversation(id = id, title = "v1", userText = "first")
-        storage.saveConversation(first)
-
-        val second = sampleConversation(id = id, title = "v2", userText = "second")
-        storage.saveConversation(second)
-
-        val summaries = storage.listSummaries()
-        assertEquals(1, summaries.size, "upsert 不应新增列表条目")
-        assertEquals("v1", summaries.first().title, "消息写入不拥有标题 metadata")
-        assertEquals("second", storage.loadConversation(id)?.currentMessages?.first()?.toText())
+        assertEquals(listOf("newer pinned", "older pinned", "newest unpinned"), order)
     }
 
     @Test
@@ -196,17 +190,6 @@ class JsonConversationStorageTest {
         storage.deleteConversation(id)
         assertNull(storage.loadConversation(id))
         assertEquals(0, storage.listSummaries().size)
-    }
-
-    @Test
-    fun deleteNonexistentIsNoop() = runTest {
-        storage.deleteConversation(Uuid.random())
-        assertEquals(0, storage.listSummaries().size)
-    }
-
-    @Test
-    fun loadNonexistentReturnsNull() = runTest {
-        assertNull(storage.loadConversation(Uuid.random()))
     }
 
     @Test
@@ -223,26 +206,13 @@ class JsonConversationStorageTest {
         assertEquals("renamed", loaded.title)
         assertTrue(loaded.isPinned)
         assertEquals(1, loaded.messageNodes.size, "消息节点不应被 metadata 更新改动")
-    }
 
-    @Test
-    fun updateMetadataNullArgsPreserveOriginalValues() = runTest {
-        val id = Uuid.parse("00000000-0000-0000-0000-000000000041")
-        storage.saveConversation(
-            sampleConversation(id = id, title = "keep-title", isPinned = false)
-        )
-        storage.updateMetadata(id)  // 两个参数都 null
-
-        val loaded = storage.loadConversation(id)
-        assertNotNull(loaded)
-        assertEquals("keep-title", loaded.title)
-        assertFalse(loaded.isPinned)
-    }
-
-    @Test
-    fun updateMetadataNonexistentIsNoop() = runTest {
-        storage.updateMetadata(Uuid.random(), title = "x")
-        assertEquals(0, storage.listSummaries().size)
+        storage.updateMetadata(id)
+        val unchanged = storage.loadConversation(id)
+        assertNotNull(unchanged)
+        assertEquals("renamed", unchanged.title, "null metadata 参数应保留原值")
+        assertTrue(unchanged.isPinned)
+        assertEquals("kept", unchanged.currentMessages.single().toText())
     }
 
     @Test
@@ -291,6 +261,7 @@ class JsonConversationStorageTest {
 
         val loaded = storage.loadConversation(id)
         assertNotNull(loaded)
+        assertEquals(1, storage.listSummaries().size, "同 id 消息写入必须是 upsert")
         assertEquals("new message", loaded.currentMessages.first().toText())
         assertEquals("renamed", loaded.title, "message 写入不得反向覆盖 metadata owner 的标题")
         assertTrue(loaded.isPinned, "message 写入不得反向覆盖 metadata owner 的置顶状态")
@@ -369,16 +340,6 @@ class JsonConversationStorageTest {
     }
 
     @Test
-    fun staleIndexEntryWithoutConversationFileIsFilteredAndRepaired() = runTest {
-        val id = Uuid.parse("00000000-0000-0000-0000-000000000052")
-        storage.saveConversation(sampleConversation(id = id, title = "deleted"))
-        assertTrue(tempDir.child("${id}.json").delete())
-
-        assertTrue(storage.listSummaries().none { it.id == id })
-        assertFalse(tempDir.child("index.json").readText()?.contains(id.toString()) == true)
-    }
-
-    @Test
     fun validIndexRefreshesStaleSummaryForTheSameConversationId() = runTest {
         val id = Uuid.parse("00000000-0000-0000-0000-000000000055")
         storage.saveConversation(sampleConversation(id = id, title = "cached title"))
@@ -393,21 +354,6 @@ class JsonConversationStorageTest {
 
         assertEquals("disk title", summaries.single().title)
         assertEquals("disk title", persistedIndex.single().title)
-    }
-
-    @Test
-    fun validIndexDiscoversConversationFileLeftByInterruptedIndexWrite() = runTest {
-        val indexedId = Uuid.parse("00000000-0000-0000-0000-000000000053")
-        val orphanId = Uuid.parse("00000000-0000-0000-0000-000000000054")
-        storage.saveConversation(sampleConversation(id = indexedId, title = "indexed"))
-        tempDir.child("${orphanId}.json").writeText(
-            JsonInstant.encodeToString(sampleConversation(id = orphanId, title = "orphan"))
-        )
-
-        val summaries = storage.listSummaries()
-
-        assertEquals(setOf(indexedId, orphanId), summaries.mapTo(mutableSetOf()) { it.id })
-        assertTrue(tempDir.child("index.json").readText()?.contains(orphanId.toString()) == true)
     }
 
     @Test

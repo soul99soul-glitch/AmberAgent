@@ -80,45 +80,44 @@ class MemoryPollutionTest {
 
     @Test
     fun memoryModeRoundTripsThroughSerialization() {
-        for (mode in ConversationMemoryMode.entries) {
+        val wireNames = mapOf(
+            ConversationMemoryMode.ENABLED to "enabled",
+            ConversationMemoryMode.DISABLED to "disabled",
+            ConversationMemoryMode.POLLUTED to "polluted",
+        )
+
+        for ((mode, wireName) in wireNames) {
             val json = JsonInstant.encodeToString(Conversation.serializer(), sampleConversation(
                 id = Uuid.parse("00000000-0000-0000-0000-000000000002"),
                 memoryMode = mode,
             ))
             val decoded = JsonInstant.decodeFromString(Conversation.serializer(), json)
+            assertEquals(wireName, mode.wireName)
+            assertTrue(json.contains("\"memoryMode\":\"$wireName\""), "wire name 必须稳定: $json")
             assertEquals(mode, decoded.memoryMode)
         }
     }
 
     @Test
-    fun wireNamesAreStableLowerCaseSnake() {
-        assertEquals("enabled", ConversationMemoryMode.ENABLED.wireName)
-        assertEquals("disabled", ConversationMemoryMode.DISABLED.wireName)
-        assertEquals("polluted", ConversationMemoryMode.POLLUTED.wireName)
-    }
-
-    @Test
-    fun saveAndLoadPreservesMemoryMode() = runTest {
-        val conv = sampleConversation(
-            id = Uuid.parse("00000000-0000-0000-0000-000000000003"),
-            memoryMode = ConversationMemoryMode.POLLUTED,
-        )
-        storage.saveConversation(conv)
-        val loaded = storage.loadConversation(conv.id)
-        assertNotNull(loaded)
-        assertEquals(ConversationMemoryMode.POLLUTED, loaded.memoryMode)
-    }
-
-    @Test
-    fun updateMemoryModeEscalatesToPollutedAndIsIdempotent() = runTest {
+    fun updateMemoryModeStateTransitionsAreGuarded() = runTest {
         val id = Uuid.parse("00000000-0000-0000-0000-000000000004")
         storage.saveConversation(sampleConversation(id))
 
+        assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.DISABLED))
+        assertEquals(ConversationMemoryMode.DISABLED, storage.loadConversation(id)?.memoryMode)
+        assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.ENABLED))
+        assertEquals(ConversationMemoryMode.ENABLED, storage.loadConversation(id)?.memoryMode)
+        assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.DISABLED))
         assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.POLLUTED))
-        assertEquals(
-            ConversationMemoryMode.POLLUTED,
-            storage.loadConversation(id)?.memoryMode,
-        )
+        assertEquals(ConversationMemoryMode.POLLUTED, storage.loadConversation(id)?.memoryMode)
+
+        // POLLUTED 的唯一出口是显式复位到 ENABLED；关闭记忆不能掩盖污染状态。
+        assertFalse(storage.updateMemoryMode(id, ConversationMemoryMode.DISABLED))
+        assertEquals(ConversationMemoryMode.POLLUTED, storage.loadConversation(id)?.memoryMode)
+
+        val missing = Uuid.parse("00000000-0000-0000-0000-000000000007")
+        assertFalse(storage.updateMemoryMode(missing, ConversationMemoryMode.POLLUTED))
+        assertNull(storage.loadConversation(missing))
         // 幂等：重复置位保持 POLLUTED，不报错、不降级。
         assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.POLLUTED))
         assertEquals(
@@ -157,56 +156,13 @@ class MemoryPollutionTest {
     }
 
     @Test
-    fun updateMemoryModeRejectsPollutedToDisabled() = runTest {
-        val id = Uuid.parse("00000000-0000-0000-0000-000000000009")
-        storage.saveConversation(sampleConversation(id))
-        assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.POLLUTED))
-
-        // POLLUTED 的唯一出口是 ENABLED 复位：POLLUTED→DISABLED 被拒，值不变。
-        assertFalse(storage.updateMemoryMode(id, ConversationMemoryMode.DISABLED))
-        assertEquals(
-            ConversationMemoryMode.POLLUTED,
-            storage.loadConversation(id)?.memoryMode,
-        )
-    }
-
-    @Test
-    fun updateMemoryModeAllowsEnabledDisabledTransitions() = runTest {
-        val id = Uuid.parse("00000000-0000-0000-0000-00000000000A")
-        storage.saveConversation(sampleConversation(id))
-
-        // ENABLED→DISABLED：用户关闭记忆抽取的正当迁移。
-        assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.DISABLED))
-        assertEquals(
-            ConversationMemoryMode.DISABLED,
-            storage.loadConversation(id)?.memoryMode,
-        )
-        // DISABLED→ENABLED：重新打开。
-        assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.ENABLED))
-        assertEquals(
-            ConversationMemoryMode.ENABLED,
-            storage.loadConversation(id)?.memoryMode,
-        )
-        // DISABLED→POLLUTED：仍可升级为 POLLUTED（只升不降）。
-        assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.POLLUTED))
-        assertEquals(
-            ConversationMemoryMode.POLLUTED,
-            storage.loadConversation(id)?.memoryMode,
-        )
-    }
-
-    @Test
-    fun updateMemoryModeOnMissingConversationReturnsFalse() = runTest {
-        val missing = Uuid.parse("00000000-0000-0000-0000-000000000007")
-        assertFalse(storage.updateMemoryMode(missing, ConversationMemoryMode.POLLUTED))
-        assertNull(storage.loadConversation(missing))
-    }
-
-    @Test
-    fun summaryCarriesMemoryModeThroughIndex() = runTest {
+    fun saveAndSummaryCarryMemoryModeThroughStorage() = runTest {
         val id = Uuid.parse("00000000-0000-0000-0000-000000000008")
-        storage.saveConversation(sampleConversation(id))
-        assertTrue(storage.updateMemoryMode(id, ConversationMemoryMode.POLLUTED))
+        storage.saveConversation(sampleConversation(id, memoryMode = ConversationMemoryMode.POLLUTED))
+
+        val loaded = storage.loadConversation(id)
+        assertNotNull(loaded)
+        assertEquals(ConversationMemoryMode.POLLUTED, loaded.memoryMode)
 
         val summaries = storage.listSummaries()
         val summary = summaries.firstOrNull { it.id == id }

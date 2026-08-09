@@ -92,14 +92,11 @@ class ConversationForkTest {
             texts(forked),
             "最近 2 个用户轮次：q2 与其全部 assistant 序列 + q3",
         )
-    }
-
-    @Test
-    fun forkNumberLargerThanTurnCountKeepsEverything() {
-        val source = sourceConversation(listOf(node(user("q1")), node(assistant("a1"))))
-        val forked = fork(source, "9")
-
-        assertEquals(listOf("q1", "a1"), texts(forked))
+        assertEquals(
+            listOf("q1", "a1", "q2", "a2-1", "a2-2", "q3", "a3"),
+            texts(fork(source, "9")),
+            "请求轮次超过现有轮次时保留全部消息",
+        )
     }
 
     @Test
@@ -129,43 +126,28 @@ class ConversationForkTest {
         )
     }
 
-    @Test
-    fun forkAllKeepsSelectedVariantOfNthUserTurn() {
-        val selectedQ2 = user("q2 选中")
-        val staleQ2 = user("q2 旧分支")
-        val source = sourceConversation(
-            listOf(
-                node(user("q1")), node(assistant("a1")),
-                node(selectedQ2, extraVariants = listOf(staleQ2), selectIndex = 0),
-                node(assistant("a2")),
-            ),
-        )
-        val forked = fork(source, "1")
-
-        assertEquals(
-            listOf("q2 选中", "a2"),
-            texts(forked),
-            "截断轮次内的变体同样只保留选中项",
-        )
-    }
-
     // MARK: - 截断点安全（空 tool part 裁剪）
 
     @Test
-    fun forkTrimsTrailingAssistantWithUnfinishedToolCall() {
-        val unfinishedTool = assistantWithTool("tc-1", "search_web")
+    fun forkTrimsConsecutiveUnsafeAssistantMessagesForRequestedTurns() {
+        val unfinished1 = assistantWithTool("tc-1", "search_web")
+        val unfinished2 = assistantWithTool("tc-2", "scrape_web")
         val source = sourceConversation(
             listOf(
                 node(user("q1")), node(assistant("a1")),
-                node(user("q2")), node(assistant("a2-正文")), node(unfinishedTool),
+                node(user("q2")), node(assistant("a2")), node(unfinished1), node(unfinished2),
             ),
         )
-        val forked = fork(source, "2")
 
         assertEquals(
-            listOf("q1", "a1", "q2", "a2-正文"),
-            texts(forked),
-            "截断后末尾 assistant 含空 output tool part → 继续往前截到安全点（最近 2 轮含第 1 轮）",
+            listOf("q1", "a1", "q2", "a2"),
+            texts(fork(source, "2")),
+            "连续多条未完成工具调用必须从末尾全部裁掉",
+        )
+        assertEquals(
+            listOf("q2", "a2"),
+            texts(fork(source, "1")),
+            "保留最近轮次时，截断边界上的未完成工具调用也必须裁掉",
         )
     }
 
@@ -182,52 +164,19 @@ class ConversationForkTest {
         assertTrue(toolNode.messages.single().parts.single() is UIMessagePart.Tool)
     }
 
-    @Test
-    fun forkTrimsMultipleUnsafeAssistantMessagesUntilSafePoint() {
-        val unfinished1 = assistantWithTool("tc-1", "search_web")
-        val unfinished2 = assistantWithTool("tc-2", "scrape_web")
-        val source = sourceConversation(
-            listOf(
-                node(user("q1")), node(assistant("a1")),
-                node(user("q2")), node(assistant("a2")), node(unfinished1), node(unfinished2),
-            ),
-        )
-        val forked = fork(source, "1")
-
-        assertEquals(
-            listOf("q2", "a2"),
-            texts(forked),
-            "连续多条含空 tool part 的 assistant 一直截到安全点",
-        )
-    }
-
-    @Test
-    fun forkNumberTrimsUnsafeToolAtTruncationBoundary() {
-        // 第 3 轮用户消息后紧跟未完成工具调用；保留最近 1 轮时该调用落在截断区。
-        val unfinishedTool = assistantWithTool("tc-late", "search_web")
-        val source = sourceConversation(
-            listOf(
-                node(user("q1")), node(assistant("a1")),
-                node(user("q2")), node(assistant("a2")),
-                node(user("q3")), node(unfinishedTool),
-            ),
-        )
-        val forked = fork(source, "1")
-
-        assertEquals(
-            listOf("q3"),
-            texts(forked),
-            "截断边界上的未完成工具调用必须裁掉",
-        )
-    }
-
     // MARK: - 新会话字段
 
     @Test
     fun forkInheritsAssistantIdAndResetsLifecycleFields() {
         val source = sourceConversation(listOf(node(user("q1")), node(assistant("a1"))))
         val newId = Uuid.random()
-        val forked = fork(source, "all", newId = newId, newTitle = "子线程标题")
+        val forked = forkConversation(
+            source = source,
+            newId = newId,
+            newTitle = "子线程标题",
+            forkTurns = "all",
+            assistantId = null,
+        )
 
         assertEquals(newId, forked.id)
         assertEquals("子线程标题", forked.title)
@@ -251,11 +200,4 @@ class ConversationForkTest {
         assertNotEquals(roleId, source.assistantId, "role 与 source 助手不同才证明覆盖生效")
     }
 
-    @Test
-    fun forkNullAssistantIdFallsBackToSourceInheritance() {
-        val source = sourceConversation(listOf(node(user("q1"))))
-        val forked = forkConversation(source, Uuid.random(), "子线程", "all", assistantId = null)
-
-        assertEquals(source.assistantId, forked.assistantId, "null 显式值必须回退为继承 source")
-    }
 }

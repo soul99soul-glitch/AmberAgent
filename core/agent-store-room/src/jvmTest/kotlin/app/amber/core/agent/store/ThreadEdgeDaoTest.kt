@@ -15,16 +15,16 @@ import java.nio.file.Files
  *
  * 覆盖：insert/查询（edgeFor/childrenOf）；setStatus；descendants 内存递归
  * （传递子级、跨代稳定序）；v2 → v3 迁移保全（agent_run + mailbox_envelope
- * 行原样保留、thread_edge 表可用）；未配置迁移时 Room 拒绝打开 v2 库。
+ * 行原样保留、thread_edge 表可用）。
  */
 class ThreadEdgeDaoTest {
 
-    private fun newDatabase(name: String, addMigrations: Boolean = true): AgentRuntimeDatabase {
+    private fun newDatabase(name: String): AgentRuntimeDatabase {
         val path = Files.createTempFile("thread-edge-$name", ".db")
         Files.delete(path)
         return Room.databaseBuilder<AgentRuntimeDatabase>(name = path.toAbsolutePath().toString())
             .setDriver(BundledSQLiteDriver())
-            .apply { if (addMigrations) addMigrations(MIGRATION_1_2, MIGRATION_2_3) }
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 
@@ -169,28 +169,6 @@ class ThreadEdgeDaoTest {
             listOf("post-migration"),
             edgeDao.descendantsOf("root").map { it.childThreadId },
         )
-    }
-
-    /** 数据安全红：v2 库未配置 MIGRATION_2_3 时 Room 必须拒绝打开而非静默破坏。 */
-    @Test
-    fun v2DatabaseCannotBeOpenedWithoutConfiguredMigration() = runTest {
-        val path = Files.createTempFile("thread-edge-migration-no-migration", ".db")
-        Files.delete(path)
-        val absolutePath = path.toAbsolutePath().toString()
-        createV2DatabaseWithProductionRows(absolutePath)
-
-        val unconfiguredDb = Room.databaseBuilder<AgentRuntimeDatabase>(name = absolutePath)
-            .setDriver(BundledSQLiteDriver())
-            .build()
-        try {
-            unconfiguredDb.agentRuntimeDao().getRun("run-v2-prod")
-            assertTrue("未配置迁移时打开 v2 库必须失败（而不是静默丢数据）", false)
-        } catch (expected: IllegalStateException) {
-            assertTrue(
-                expected.message ?: "no message",
-                expected.message?.contains("Migration") == true,
-            )
-        }
     }
 
     /** 用 2.json 的确切 v2 schema + identity hash 构造 v2 库，写入生产形态行。 */

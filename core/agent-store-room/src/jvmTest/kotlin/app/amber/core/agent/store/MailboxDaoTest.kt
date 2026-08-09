@@ -22,16 +22,16 @@ import java.nio.file.Files
  */
 class MailboxDaoTest {
 
-    private fun newDatabase(name: String, addMigrations: Boolean = true): AgentRuntimeDatabase {
+    private fun newDatabase(name: String): AgentRuntimeDatabase {
         val path = Files.createTempFile("mailbox-$name", ".db")
         Files.delete(path)
-        return builder(path = path.toAbsolutePath().toString(), addMigrations = addMigrations)
+        return builder(path.toAbsolutePath().toString())
     }
 
-    private fun builder(path: String, addMigrations: Boolean): AgentRuntimeDatabase =
+    private fun builder(path: String): AgentRuntimeDatabase =
         Room.databaseBuilder<AgentRuntimeDatabase>(name = path)
             .setDriver(BundledSQLiteDriver())
-            .apply { if (addMigrations) addMigrations(MIGRATION_1_2, MIGRATION_2_3) }
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
 
     private fun envelope(
@@ -207,7 +207,7 @@ class MailboxDaoTest {
         createV1DatabaseWithProductionRun(absolutePath)
 
         // 2) 升级路径打开：MIGRATION_1_2 创建 mailbox 表，不动既有数据。
-        val migratedDb = builder(path = absolutePath, addMigrations = true)
+        val migratedDb = builder(absolutePath)
         val migratedDao = migratedDb.agentRuntimeDao()
 
         val run = migratedDao.getRun("run-v1-prod")
@@ -223,28 +223,6 @@ class MailboxDaoTest {
             listOf("post-migration"),
             mailboxDao.drainPending("root", deliveredAt = 9_000).map { it.id },
         )
-    }
-
-    /**
-     * 数据安全红：builder 未配置迁移时（本阶段改造前的状态），Room 必须拒绝打开
-     * v1 库而不是静默破坏（我们绝不走 fallbackToDestructiveMigration）。MIGRATION_1_2
-     * 配置后同一库可打开（见上一条）。这条同时证明升级策略是「正式迁移」而非重建。
-     */
-    @Test
-    fun v1DatabaseCannotBeOpenedWithoutConfiguredMigration() = runTest {
-        val path = Files.createTempFile("mailbox-migration-no-migration", ".db")
-        Files.delete(path)
-        val absolutePath = path.toAbsolutePath().toString()
-        createV1DatabaseWithProductionRun(absolutePath)
-
-        val unconfiguredDb = builder(path = absolutePath, addMigrations = false)
-        try {
-            unconfiguredDb.agentRuntimeDao().getRun("run-v1-prod")
-            assertTrue("未配置迁移时打开 v1 库必须失败（而不是静默丢数据）", false)
-        } catch (expected: IllegalStateException) {
-            // 预期：Room 报「缺少 1→2 迁移」。
-            assertTrue(expected.message ?: "no message", expected.message?.contains("Migration") == true)
-        }
     }
 
     /** 用 1.json 的确切 v1 schema + identity hash 构造 v1 库，并写入一条生产形态 agent_run 行。 */

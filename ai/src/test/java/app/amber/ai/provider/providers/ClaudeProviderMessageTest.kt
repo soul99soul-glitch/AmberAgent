@@ -235,7 +235,6 @@ class ClaudeProviderMessageTest {
 
         var toolUseCount = 0
         var toolResultCount = 0
-        var thinkingCount = 0
 
         for (msg in result) {
             val msgObj = msg.jsonObject
@@ -245,16 +244,12 @@ class ClaudeProviderMessageTest {
                 when (blockObj["type"]?.jsonPrimitive?.content) {
                     "tool_use" -> toolUseCount++
                     "tool_result" -> toolResultCount++
-                    "thinking" -> thinkingCount++
                 }
             }
         }
 
         assertEquals("Should have 2 tool_use blocks", 2, toolUseCount)
         assertEquals("Should have 2 tool_result blocks", 2, toolResultCount)
-        // Note: Not all reasoning may be included depending on implementation
-        assertTrue("Should have thinking blocks", thinkingCount >= 0)
-
         // Verify tool_use -> tool_result order
         for (i in 0 until result.size - 1) {
             val msg = result[i].jsonObject

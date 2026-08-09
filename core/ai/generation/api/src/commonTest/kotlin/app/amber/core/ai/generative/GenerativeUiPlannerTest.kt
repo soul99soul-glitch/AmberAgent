@@ -84,6 +84,40 @@ class GenerativeUiPlannerTest {
     }
 
     @Test
+    fun guizangAndToolMediatedDecksKeepFinalFullHtmlContract() {
+        val setting = GenerativeUiSetting(enabled = true)
+        val guizangMessages = listOf(userMessage("用 guizang skill 做一个演示"))
+        val requirement = GenerativeUiPlanner.widgetRequirement(setting, guizangMessages)
+        val prompt = GenerativeUiPlanner.buildPrompt(setting, guizangMessages)
+
+        assertTrue(requirement.required)
+        assertTrue(requirement.expectSlides)
+        assertTrue(requirement.expectFullHtmlDeck)
+        assertTrue(prompt.contains("Do NOT create a widget for routing, progress, plan, or status summaries."))
+        assertTrue(prompt.contains("final artifact must be one full_html show-widget deck preview"))
+        assertTrue(prompt.contains("Do NOT turn the deck into a MiniApp"))
+        assertTrue(prompt.contains("renderer \"full_html\""))
+    }
+
+    @Test
+    fun slidesIgnoreStructuredAndChartSwitches() {
+        val setting = GenerativeUiSetting(
+            enabled = true,
+            enableStructuredRenderers = false,
+            enableInteractiveCharts = false,
+        )
+        val messages = listOf(userMessage("做一份 5 页 PPT"))
+        val prompt = GenerativeUiPlanner.buildPrompt(setting, messages)
+        val requirement = GenerativeUiPlanner.widgetRequirement(setting, messages)
+
+        assertTrue(prompt.contains("renderer \"full_html\""))
+        assertTrue(prompt.contains("""<div id="deck">"""))
+        assertTrue(requirement.required)
+        assertTrue(requirement.expectSlides)
+        assertTrue(requirement.expectFullHtmlDeck)
+    }
+
+    @Test
     fun routeMetadataCanBeHiddenFromTimeline() {
         val text = GenerativeUiPlanner.stripVisualRouteTagsForDisplay("[ROUTE:svg]\n画一只猫")
 

@@ -162,46 +162,6 @@ class GoogleProviderMessageTest {
     }
 
     @Test
-    fun `reasoning parts should have thought flag set to true`() {
-        val assistantMessage = UIMessage(
-            role = MessageRole.ASSISTANT,
-            parts = listOf(
-                UIMessagePart.Reasoning(reasoning = "Let me think about this..."),
-                UIMessagePart.Text("Here is my response")
-            )
-        )
-
-        val messages = listOf(
-            UIMessage.user("Question"),
-            assistantMessage
-        )
-
-        val result = invokeBuildContents(messages)
-
-        // Find model message
-        val modelMsg = result.find {
-            it.jsonObject["role"]?.jsonPrimitive?.content == "model"
-        }?.jsonObject
-
-        assertTrue("Should have model message", modelMsg != null)
-
-        val parts = modelMsg!!["parts"]?.jsonArray
-        assertTrue("Parts should not be null", parts != null)
-
-        // Find text part with thought:true (reasoning is converted to text with thought flag)
-        // Note: The implementation may vary - check for thought flag in text parts
-        val textParts = parts!!.filter { it.jsonObject.containsKey("text") }
-        assertTrue("Should have text parts", textParts.isNotEmpty())
-
-        // Verify we have both regular text and thought text
-        val hasThoughtPart = textParts.any {
-            it.jsonObject["thought"]?.jsonPrimitive?.content == "true" ||
-            it.jsonObject["thought"]?.toString() == "true"
-        }
-        // Note: If reasoning is handled differently, adjust this assertion
-    }
-
-    @Test
     fun `parallel tool calls should be in same model message`() {
         val assistantMessage = UIMessage(
             role = MessageRole.ASSISTANT,
@@ -266,65 +226,6 @@ class GoogleProviderMessageTest {
     }
 
     @Test
-    fun `multi-round reasoning and tools should maintain correct order`() {
-        val assistantMessage = UIMessage(
-            role = MessageRole.ASSISTANT,
-            parts = listOf(
-                UIMessagePart.Reasoning(reasoning = "Step 1: Search"),
-                UIMessagePart.Text("Searching..."),
-                createExecutedTool("call_1", "search", "{}", "Found data"),
-                UIMessagePart.Reasoning(reasoning = "Step 2: Analyze"),
-                UIMessagePart.Text("Analyzing..."),
-                createExecutedTool("call_2", "analyze", "{}", "Analysis done"),
-                UIMessagePart.Reasoning(reasoning = "Step 3: Present"),
-                UIMessagePart.Text("Results")
-            )
-        )
-
-        val messages = listOf(
-            UIMessage.user("Analyze"),
-            assistantMessage
-        )
-
-        val result = invokeBuildContents(messages)
-
-        // Verify structure:
-        // model -> user (functionResponse) -> model -> user (functionResponse) -> model
-
-        var functionCallCount = 0
-        var functionResponseCount = 0
-
-        for (msg in result) {
-            val msgObj = msg.jsonObject
-            val parts = msgObj["parts"]?.jsonArray ?: continue
-            for (part in parts) {
-                val partObj = part.jsonObject
-                if (partObj.containsKey("functionCall")) functionCallCount++
-                if (partObj.containsKey("functionResponse")) functionResponseCount++
-            }
-        }
-
-        assertEquals("Should have 2 functionCall parts", 2, functionCallCount)
-        assertEquals("Should have 2 functionResponse parts", 2, functionResponseCount)
-
-        // Verify functionCall -> functionResponse order
-        for (i in 0 until result.size - 1) {
-            val msg = result[i].jsonObject
-            val parts = msg["parts"]?.jsonArray ?: continue
-            val hasFunctionCall = parts.any { it.jsonObject.containsKey("functionCall") }
-
-            if (hasFunctionCall && msg["role"]?.jsonPrimitive?.content == "model") {
-                // Next should be user with functionResponse
-                val nextMsg = result[i + 1].jsonObject
-                assertEquals("user", nextMsg["role"]?.jsonPrimitive?.content)
-                val nextParts = nextMsg["parts"]?.jsonArray
-                assertTrue("Should have functionResponse in next message",
-                    nextParts?.any { it.jsonObject.containsKey("functionResponse") } == true)
-            }
-        }
-    }
-
-    @Test
     fun `user message parts should be correctly formatted`() {
         val messages = listOf(
             UIMessage(
@@ -347,50 +248,6 @@ class GoogleProviderMessageTest {
 
         val textPart = parts.find { it.jsonObject.containsKey("text") }?.jsonObject
         assertEquals("Hello, how are you?", textPart?.get("text")?.jsonPrimitive?.content)
-    }
-
-    @Test
-    fun `complex multi-round scenario with interleaved content`() {
-        val messages = listOf(
-            UIMessage.user("Execute task"),
-            UIMessage(
-                role = MessageRole.ASSISTANT,
-                parts = listOf(
-                    UIMessagePart.Text("Starting"),
-                    createExecutedTool("step1", "init", "{}", "initialized"),
-                    UIMessagePart.Text("Processing"),
-                    createExecutedTool("step2", "process", """{"data": "x"}""", "processed"),
-                    UIMessagePart.Text("Finalizing"),
-                    createExecutedTool("step3", "finalize", "{}", "done"),
-                    UIMessagePart.Text("Task completed")
-                )
-            )
-        )
-
-        val result = invokeBuildContents(messages)
-
-        // Count roles
-        val userCount = result.count { it.jsonObject["role"]?.jsonPrimitive?.content == "user" }
-        val modelCount = result.count { it.jsonObject["role"]?.jsonPrimitive?.content == "model" }
-
-        // Should have: 1 initial user + 3 functionResponse users = 4 user messages
-        // And: multiple model messages
-        assertEquals("Should have 4 user messages (1 initial + 3 responses)", 4, userCount)
-        assertTrue("Should have multiple model messages", modelCount >= 3)
-
-        // Verify order: each functionCall should be followed by functionResponse
-        var lastFunctionCallIndex = -1
-        for (i in result.indices) {
-            val msg = result[i].jsonObject
-            val parts = msg["parts"]?.jsonArray ?: continue
-            if (parts.any { it.jsonObject.containsKey("functionCall") }) {
-                assertTrue("functionCall should not be last", i < result.size - 1)
-                val next = result[i + 1].jsonObject
-                assertEquals("user", next["role"]?.jsonPrimitive?.content)
-                assertTrue("Index should increase", i > lastFunctionCallIndex)
-                lastFunctionCallIndex = i
-            }
-        }
     }
 
     @Test

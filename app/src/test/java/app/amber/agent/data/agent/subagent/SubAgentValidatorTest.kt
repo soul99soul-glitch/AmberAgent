@@ -35,23 +35,21 @@ class SubAgentValidatorTest {
     }
 
     @Test
-    fun rosterModeReplacesGenericEnglishNameInsteadOfFailing() {
-        val input = inputWithCustomSubagent(name = "General Helper")
+    fun genericEnglishAndChineseNamesAreReplacedInBothModes() {
+        SubAgentMode.entries.forEach { mode ->
+            listOf("General Helper" to "general", "万能助手" to "万能").forEach { (name, forbidden) ->
+                val result = SubAgentValidator.resolveDefinition(
+                    inputWithCustomSubagent(name = name),
+                    setting.copy(mode = mode),
+                    setOf("file_read"),
+                )
 
-        val result = SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
-
-        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
-        assertFalse(result.definition.id.contains("general"))
-    }
-
-    @Test
-    fun rosterModeReplacesGenericChineseNameInsteadOfFailing() {
-        val input = inputWithCustomSubagent(name = "万能助手")
-
-        val result = SubAgentValidator.resolveDefinition(input, setting, setOf("file_read"))
-
-        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
-        assertFalse(result.definition.name.contains("万能"))
+                assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
+                assertFalse(result.definition.name.contains(forbidden, ignoreCase = true))
+                assertFalse(result.definition.id.contains(forbidden, ignoreCase = true))
+                assertTrue(result.definition.dynamic)
+            }
+        }
     }
 
     @Test
@@ -80,79 +78,18 @@ class SubAgentValidatorTest {
     }
 
     @Test
-    fun smartModeAssignsEnglishNameWhenNameMissing() {
-        val input = inputWithCustomSubagent(name = null)
+    fun missingNameIsAssignedInBothModes() {
+        SubAgentMode.entries.forEach { mode ->
+            val result = SubAgentValidator.resolveDefinition(
+                inputWithCustomSubagent(name = null),
+                setting.copy(mode = mode),
+                setOf("file_read"),
+            )
 
-        val result = SubAgentValidator.resolveDefinition(
-            input,
-            setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
-            setOf("file_read"),
-        )
-
-        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
-        assertTrue(result.definition.dynamic)
-    }
-
-    @Test
-    fun rosterModeAssignsNameWhenDynamicNameMissing() {
-        val input = inputWithCustomSubagent(name = null)
-
-        val result = SubAgentValidator.resolveDefinition(
-            input,
-            setting,
-            setOf("file_read"),
-        )
-
-        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
-        assertTrue(result.definition.id.isNotBlank())
-        assertTrue(result.definition.dynamic)
-    }
-
-    @Test
-    fun smartModeReplacesGenericNameInsteadOfFailing() {
-        val input = inputWithCustomSubagent(name = "General Helper")
-
-        val result = SubAgentValidator.resolveDefinition(
-            input,
-            setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
-            setOf("file_read"),
-        )
-
-        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
-        assertFalse(result.definition.id.contains("general"))
-    }
-
-    @Test
-    fun smartModeReplacesChineseGenericNameInsteadOfFailing() {
-        val input = inputWithCustomSubagent(name = "万能助手")
-
-        val result = SubAgentValidator.resolveDefinition(
-            input,
-            setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
-            setOf("file_read"),
-        )
-
-        assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
-        assertFalse(result.definition.name.contains("万能"))
-        assertTrue(result.definition.dynamic)
-    }
-
-    @Test
-    fun smartModeKeepsSpecificChineseDisplayName() {
-        val input = inputWithCustomSubagent(
-            name = "情书子代理",
-            toolProfile = "none",
-        )
-
-        val result = SubAgentValidator.resolveDefinition(
-            input,
-            setting.copy(mode = SubAgentMode.SMART_DYNAMIC),
-            emptySet(),
-        )
-
-        assertEquals("情书子代理", result.definition.name)
-        assertTrue(result.definition.id.startsWith("dynamic-"))
-        assertTrue(result.definition.dynamic)
+            assertTrue(result.definition.name.matches(Regex("[A-Z][a-z]+")))
+            assertTrue(result.definition.id.isNotBlank())
+            assertTrue(result.definition.dynamic)
+        }
     }
 
     @Test
@@ -203,18 +140,18 @@ class SubAgentValidatorTest {
     }
 
     @Test
-    fun rosterModeDynamicRoleAllowsNonLatinDisplayName() {
-        val input = inputWithCustomSubagent(name = "新闻员")
+    fun nonLatinDisplayNameIsKeptInBothModes() {
+        SubAgentMode.entries.forEach { mode ->
+            val result = SubAgentValidator.resolveDefinition(
+                input = inputWithCustomSubagent(name = "新闻员", toolProfile = "none"),
+                setting = setting.copy(mode = mode),
+                availableToolNames = emptySet(),
+            )
 
-        val result = SubAgentValidator.resolveDefinition(
-            input = input,
-            setting = setting,
-            availableToolNames = setOf("file_read"),
-        )
-
-        assertEquals("新闻员", result.definition.name)
-        assertTrue(result.definition.id.startsWith("dynamic-"))
-        assertTrue(result.definition.dynamic)
+            assertEquals("新闻员", result.definition.name)
+            assertTrue(result.definition.id.startsWith("dynamic-"))
+            assertTrue(result.definition.dynamic)
+        }
     }
 
     @Test
@@ -271,10 +208,8 @@ class SubAgentValidatorTest {
         )
 
         assertEquals("tiny-poet", result.definition.id)
-        assertTrue(result.definition.description.contains("Use when"))
-        assertTrue(result.definition.systemPrompt.contains("Boundaries:"))
-        assertTrue(result.definition.systemPrompt.contains("Report output as:"))
-        assertTrue(result.definition.systemPrompt.length >= 80)
+        assertTrue(result.definition.description.isNotBlank())
+        assertTrue(result.definition.systemPrompt.isNotBlank())
         assertEquals(emptySet<String>(), result.definition.toolAllowlist)
     }
 

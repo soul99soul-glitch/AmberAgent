@@ -28,69 +28,37 @@ class SubAgentRunnerTest {
     private val visibleAnswer = "可见答案已经生成。"
 
     @Test
-    fun pureTextRunFallsBackWhenReportToolArgumentsFailAfterVisibleText() = runBlocking {
-        val runner = GenerationSubAgentRunner(
-            FakeGenerator(
-                error = IllegalArgumentException(
-                    "invalid params: invalid function arguments json string for tool_call_id call_1"
-                )
+    fun reportToolArgumentFallbackIsLimitedToPureTextRuns() = runBlocking {
+        val reportArgumentError = IllegalArgumentException(
+            "invalid params: invalid function arguments json string for tool_call_id call_1"
+        )
+        val cases = listOf(
+            Triple(reportArgumentError, emptySet(), SubAgentRunStatus.COMPLETED),
+            Triple(IllegalStateException("network unavailable"), emptySet(), SubAgentRunStatus.FAILED),
+            Triple(reportArgumentError, setOf("file_read"), SubAgentRunStatus.FAILED),
+        )
+
+        cases.forEach { (error, toolAllowlist, expectedStatus) ->
+            val liveText = MutableStateFlow("")
+            val result = GenerationSubAgentRunner(FakeGenerator(error = error)).run(
+                settings = settings(),
+                definition = definition(toolAllowlist = toolAllowlist),
+                task = task(),
+                tools = emptyList(),
+                liveText = liveText,
+                liveParts = MutableStateFlow(emptyList()),
             )
-        )
-        val liveText = MutableStateFlow("")
-        val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
 
-        val result = runner.run(
-            settings = settings(),
-            definition = definition(toolAllowlist = emptySet()),
-            task = task(),
-            tools = emptyList(),
-            liveText = liveText,
-            liveParts = liveParts,
-        )
-
-        assertEquals(SubAgentRunStatus.COMPLETED, result.status)
-        assertEquals(visibleAnswer, result.summary)
-        assertEquals(visibleAnswer, liveText.value)
-        assertTrue(result.risks.any { it.contains("Structured subagent report failed") })
-    }
-
-    @Test
-    fun ordinaryGenerationErrorIsNotTreatedAsCompletedEvenWithVisibleText() = runBlocking {
-        val runner = GenerationSubAgentRunner(FakeGenerator(error = IllegalStateException("network unavailable")))
-
-        val result = runner.run(
-            settings = settings(),
-            definition = definition(toolAllowlist = emptySet()),
-            task = task(),
-            tools = emptyList(),
-            liveText = MutableStateFlow(""),
-            liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList()),
-        )
-
-        assertEquals(SubAgentRunStatus.FAILED, result.status)
-        assertTrue(result.error.contains("network unavailable"))
-    }
-
-    @Test
-    fun toolEnabledRunDoesNotFallbackOnReportToolArgumentError() = runBlocking {
-        val runner = GenerationSubAgentRunner(
-            FakeGenerator(
-                error = IllegalArgumentException(
-                    "invalid params: invalid function arguments json string for tool_call_id call_1"
-                )
-            )
-        )
-
-        val result = runner.run(
-            settings = settings(),
-            definition = definition(toolAllowlist = setOf("file_read")),
-            task = task(),
-            tools = emptyList(),
-            liveText = MutableStateFlow(""),
-            liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList()),
-        )
-
-        assertEquals(SubAgentRunStatus.FAILED, result.status)
+            assertEquals(expectedStatus, result.status)
+            if (expectedStatus == SubAgentRunStatus.COMPLETED) {
+                assertEquals(visibleAnswer, result.summary)
+                assertEquals(visibleAnswer, liveText.value)
+                assertTrue(result.risks.any { it.contains("Structured subagent report failed") })
+            } else {
+                assertTrue(result.error.isNotBlank())
+                if (error is IllegalStateException) assertTrue(result.error.contains("network unavailable"))
+            }
+        }
     }
 
     @Test
@@ -99,23 +67,7 @@ class SubAgentRunnerTest {
             toolCallId = "call-search",
             toolName = "search_web",
             input = """{"query":"Will Smith tour"}""",
-            output = listOf(
-                UIMessagePart.Text(
-                    """
-                    {
-                      "items": [
-                        {
-                          "title": "Will Smith tour news",
-                          "url": "https://example.com/will-smith-tour",
-                          "source": "Example",
-                          "images": ["https://img.example/will-smith.jpg"]
-                        }
-                      ],
-                      "total_images": 1
-                    }
-                    """.trimIndent()
-                )
-            ),
+            output = listOf(UIMessagePart.Text("{}")),
         )
         val runner = GenerationSubAgentRunner(
             FakeGenerator(

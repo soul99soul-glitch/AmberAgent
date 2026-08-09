@@ -3,19 +3,13 @@ package app.amber.ai.core
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
-import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-/**
- * P1-c: 线程编排三工具声明契约（纯函数，iOS/Android 共用）。
- * 钉死参数形状、required、needsApproval=false、canonical path 语义文案与
- * iosToolDeclaration 目录可发现性（非常驻：进 deferred 池由 tool_search 命中）。
- */
+/** 线程编排工具的 schema、审批与关键语义契约。 */
 class OrchestrationToolDeclarationsTest {
 
     // MARK: - spawn_agent
@@ -43,17 +37,14 @@ class OrchestrationToolDeclarationsTest {
         assertTrue("\"none\"" in forkDescription, "描述必须写明 \"none\" 取值")
         assertTrue("\"all\"" in forkDescription, "描述必须写明 \"all\" 取值")
         assertTrue("positive-integer" in forkDescription, "描述必须写明正整数字符串取值")
+        assertTrue("Defaults to \"all\"" in forkDescription, "fork_turns 必须写明默认 all")
 
         assertTrue("role_assistant_id" in params.properties)
-    }
 
-    @Test
-    fun spawnAgentDescriptionCarriesCodexSemantics() {
-        val description = createSpawnAgentToolDeclaration().description
-        assertTrue("same tools as you" in description, "必须声明 spawned agent 与父同工具面")
-        assertTrue("spawn its own subagents" in description, "必须声明可再 spawn 孙线程")
-        assertTrue("/root/" in description, "必须说明 canonical path 约定")
-        assertTrue("FINAL_ANSWER" in description, "必须说明终态回传")
+        val description = tool.description
+        listOf("same tools as you", "can spawn its own subagents", "/root/", "FINAL_ANSWER").forEach { semantic ->
+            assertTrue(semantic in description, "spawn_agent 描述缺少关键语义: $semantic")
+        }
     }
 
     // MARK: - list_agents / interrupt_agent
@@ -85,13 +76,11 @@ class OrchestrationToolDeclarationsTest {
             "target 描述必须同时接受 child_thread_id 与 agent path",
         )
         assertTrue("agent path" in (target["description"]?.jsonPrimitive?.contentOrNull ?: ""))
-    }
 
-    @Test
-    fun interruptAgentDescriptionSaysThreadIsPreserved() {
-        val description = createInterruptAgentToolDeclaration().description
-        assertTrue("stays Open" in description, "interrupt 不销毁线程")
-        assertTrue("idle" in description, "idle 返回语义必须在描述里")
+        val description = tool.description
+        assertTrue("thread is preserved" in description, "interrupt 不销毁线程")
+        assertTrue("stays Open" in description, "interrupt 后线程保持可寻址")
+        assertTrue("idle thread returns" in description, "idle 返回语义必须在描述里")
     }
 
     // MARK: - send_message / followup_task / wait_agent（P1-d）
@@ -139,29 +128,25 @@ class OrchestrationToolDeclarationsTest {
         assertTrue("timeout_ms" in params.properties, "timeout_ms 可选")
         assertTrue(params.required.isNullOrEmpty(), "wait_agent 无必填参数")
 
+        val timeout = params.properties["timeout_ms"]!!.jsonObject
+        assertEquals("integer", timeout["type"]?.jsonPrimitive?.contentOrNull)
+        val timeoutDescription = timeout["description"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        assertTrue("[5000, 300000]" in timeoutDescription)
+        assertTrue("defaults to 30000" in timeoutDescription)
+
         val description = tool.description
         assertTrue("interrupted" in description, "必须说明被新输入打断的语义")
-        assertTrue("5000" in description && "300000" in description, "必须写明 timeout clamp 区间")
     }
 
     // MARK: - catalog discoverability（非常驻，deferred 池）
 
     @Test
-    fun orchestrationNamesResolveThroughIosToolDeclarationCatalog() {
-        val declarations = iosToolDeclarations(listOf("spawn_agent", "list_agents", "interrupt_agent"))
-        assertEquals(listOf("spawn_agent", "list_agents", "interrupt_agent"), declarations.map { it.name })
-        assertNotNull(iosToolDeclaration("spawn_agent"))
-        assertNotNull(iosToolDeclaration("list_agents"))
-        assertNotNull(iosToolDeclaration("interrupt_agent"))
-    }
-
-    @Test
-    fun messagingNamesResolveThroughIosToolDeclarationCatalog() {
-        val declarations = iosToolDeclarations(listOf("send_message", "followup_task", "wait_agent"))
-        assertEquals(listOf("send_message", "followup_task", "wait_agent"), declarations.map { it.name })
-        assertNotNull(iosToolDeclaration("send_message"))
-        assertNotNull(iosToolDeclaration("followup_task"))
-        assertNotNull(iosToolDeclaration("wait_agent"))
+    fun deferredNamesResolveThroughIosToolDeclarationCatalog() {
+        val names = listOf(
+            "exec", "wait", "spawn_agent", "list_agents", "interrupt_agent",
+            "send_message", "followup_task", "wait_agent", "session_search", "session_read",
+        )
+        assertEquals(names, iosToolDeclarations(names).map { it.name })
     }
 
     // MARK: - session_search / session_read（跨会话读取，与 Android 当前会话
@@ -183,7 +168,7 @@ class OrchestrationToolDeclarationsTest {
         val limit = params.properties["limit"]!!.jsonObject
         assertEquals("integer", limit["type"]?.jsonPrimitive?.contentOrNull)
         val limitDescription = limit["description"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        assertTrue("20" in limitDescription, "limit 描述必须写明上限 20")
+        assertTrue("[1, 20]" in limitDescription, "limit 描述必须写明范围 [1, 20]")
         assertTrue("8" in limitDescription, "limit 描述必须写明默认 8")
 
         val description = tool.description
@@ -209,7 +194,7 @@ class OrchestrationToolDeclarationsTest {
         val maxMessages = params.properties["max_messages"]!!.jsonObject
         assertEquals("integer", maxMessages["type"]?.jsonPrimitive?.contentOrNull)
         val maxDescription = maxMessages["description"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        assertTrue("50" in maxDescription, "max_messages 描述必须写明上限 50")
+        assertTrue("[1, 50]" in maxDescription, "max_messages 描述必须写明范围 [1, 50]")
         assertTrue("20" in maxDescription, "max_messages 描述必须写明默认 20")
 
         val description = tool.description
@@ -217,11 +202,4 @@ class OrchestrationToolDeclarationsTest {
         assertTrue("session_search" in description, "描述必须说明 id 来自 session_search 结果")
     }
 
-    @Test
-    fun sessionReadNamesResolveThroughIosToolDeclarationCatalog() {
-        val declarations = iosToolDeclarations(listOf("session_search", "session_read"))
-        assertEquals(listOf("session_search", "session_read"), declarations.map { it.name })
-        assertNotNull(iosToolDeclaration("session_search"))
-        assertNotNull(iosToolDeclaration("session_read"))
-    }
 }

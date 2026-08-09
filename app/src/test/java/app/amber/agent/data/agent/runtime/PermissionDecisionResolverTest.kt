@@ -47,17 +47,99 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
-    fun highRiskToolStillHoldsWithoutHighRiskAutoApproval() {
+    fun ordinaryAutoApprovalRespectsBothSettings() {
+        listOf(
+            Triple(false to false, PermissionDecisionAction.ASK, "ui"),
+            Triple(false to true, PermissionDecisionAction.ASK, "ui"),
+            Triple(true to false, PermissionDecisionAction.ALLOW, "settings"),
+            Triple(true to true, PermissionDecisionAction.ALLOW, "settings_unattended"),
+        ).forEach { (settings, expectedAction, expectedSource) ->
+            val (autoApproveTools, autoApproveHighRiskTools) = settings
+            val decision = resolver.resolve(
+                toolDef = approvalTool("safe_lookup"),
+                tool = toolCall("safe_lookup"),
+                autoApproveTools = autoApproveTools,
+                autoApproveHighRiskTools = autoApproveHighRiskTools,
+            )
+
+            val message = "regular=$autoApproveTools, highRisk=$autoApproveHighRiskTools"
+            assertEquals(message, expectedAction, decision.action)
+            assertEquals(message, expectedSource, decision.source)
+        }
+    }
+
+    @Test
+    fun askUserAlwaysRequiresHumanInput() {
         val decision = resolver.resolve(
+            toolDef = approvalTool("ask_user"),
+            tool = toolCall("ask_user"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("hitl", decision.source)
+    }
+
+    @Test
+    fun httpMethodPolicyDistinguishesReadOnlyAndMutatingRequests() {
+        listOf("GET" to false, "HEAD" to true).forEach { (method, autoApproveTools) ->
+            val decision = resolver.resolve(
+                toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                tool = toolCall("http_request", """{"method":"$method","url":"https://example.com"}"""),
+                autoApproveTools = autoApproveTools,
+                autoApproveHighRiskTools = false,
+            )
+
+            assertEquals("$method should be read-only", PermissionDecisionAction.ALLOW, decision.action)
+            assertEquals("policy", decision.source)
+            assertFalse(decision.trace.policy!!.needsApproval)
+        }
+
+        listOf("POST", "PUT", "PATCH", "DELETE").forEach { method ->
+            val decision = resolver.resolve(
+                toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                tool = toolCall("http_request", """{"method":"$method","url":"https://example.com"}"""),
+                autoApproveTools = true,
+                autoApproveHighRiskTools = false,
+            )
+
+            assertEquals("$method should require approval", PermissionDecisionAction.ASK, decision.action)
+            assertEquals("risk", decision.source)
+            assertEquals(ToolRisk.High, decision.trace.policy!!.risk)
+        }
+
+        val unattendedPost = resolver.resolve(
             toolDef = approvalTool("http_request", allowsAutoApproval = false),
-            tool = toolCall("http_request", """{"method":"POST"}"""),
+            tool = toolCall("http_request", """{"method":"POST","url":"https://example.com"}"""),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+        )
+        assertEquals(PermissionDecisionAction.ALLOW, unattendedPost.action)
+        assertEquals("settings_unattended", unattendedPost.source)
+    }
+
+    @Test
+    fun memoryPolicyDistinguishesReadAndWriteOperations() {
+        val read = resolver.resolve(
+            toolDef = approvalTool("memory_tool", allowsAutoApproval = false),
+            tool = toolCall("memory_tool", """{"operation":"search","query":"Q代"}"""),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+        )
+        val write = resolver.resolve(
+            toolDef = approvalTool("memory_tool", allowsAutoApproval = false),
+            tool = toolCall("memory_tool", """{"operation":"delete","id":"memory-1"}"""),
             autoApproveTools = true,
             autoApproveHighRiskTools = false,
         )
 
-        assertEquals(PermissionDecisionAction.ASK, decision.action)
-        assertEquals("risk", decision.source)
-        assertEquals(ToolRisk.High, decision.trace.policy!!.risk)
+        assertEquals(PermissionDecisionAction.ALLOW, read.action)
+        assertEquals("policy", read.source)
+        assertFalse(read.trace.policy!!.needsApproval)
+        assertEquals(PermissionDecisionAction.ASK, write.action)
+        assertEquals("risk", write.source)
+        assertEquals(ToolRisk.High, write.trace.policy!!.risk)
     }
 
     @Test

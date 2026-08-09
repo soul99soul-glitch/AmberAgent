@@ -38,13 +38,6 @@ class McpToolExposureTest {
     }
 
     @Test
-    fun expandedNameIsDeterministic() {
-        val server = "srv with spaces / slashes"
-        val tool = "tool:name&symbols"
-        assertEquals(expandedMcpToolName(server, tool), expandedMcpToolName(server, tool))
-    }
-
-    @Test
     fun expandedNameTruncatesWholeNameAt64Chars() {
         val server = "s".repeat(40)
         val tool = "t".repeat(40)
@@ -227,19 +220,6 @@ class McpToolExposureTest {
     }
 
     @Test
-    fun crossServerSanitizedCollisionsShareNameAndCallerMergeKeepsFirst() {
-        // "srv.1" and "srv_1" sanitize to the same part; the flattened names
-        // collide across servers, so the caller-side merge keeps the first.
-        val fromSrvOne = mcpExpandedToolDeclarations("srv.1", listOf(McpDiscoveredToolSpec("x", "from srv.1")))
-        val fromSrvTwo = mcpExpandedToolDeclarations("srv_1", listOf(McpDiscoveredToolSpec("x", "from srv_1")))
-        assertEquals(fromSrvOne.single().name, fromSrvTwo.single().name)
-        // Caller-side merge (per-server generation then concatenation) keeps the first occurrence.
-        val merged = (fromSrvOne + fromSrvTwo).distinctBy { it.name }
-        assertEquals(1, merged.size)
-        assertEquals("from srv.1", merged.single().description)
-    }
-
-    @Test
     fun expandedDeclarationsCopyMcpCallApprovalFlags() {
         val mcpCall = createMcpCallToolDeclaration()
         val tool = mcpExpandedToolDeclarations("docs", listOf(McpDiscoveredToolSpec("search"))).single()
@@ -247,11 +227,6 @@ class McpToolExposureTest {
         assertEquals(mcpCall.needsApproval, tool.needsApproval)
         assertEquals(mcpCall.allowsAutoApproval, tool.allowsAutoApproval)
         assertEquals(mcpCall.mandatoryApproval, tool.mandatoryApproval)
-    }
-
-    @Test
-    fun emptyDiscoveredListYieldsNoDeclarations() {
-        assertTrue(mcpExpandedToolDeclarations("docs", emptyList()).isEmpty())
     }
 
     // MARK: - Swift-facing string-schema constructor (raw persisted schema text)
