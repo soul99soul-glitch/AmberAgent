@@ -112,6 +112,8 @@ import app.amber.feature.ui.pages.zcode.ZCodePage
 import app.amber.feature.ui.pages.zcode.ZCodeSessionPage
 import app.amber.feature.ui.pages.log.LogPage
 import app.amber.feature.ui.pages.miniapp.MiniAppListPage
+import app.amber.feature.novel.model.NovelProjectId
+import app.amber.feature.novel.model.NovelRunId
 import app.amber.feature.ui.pages.novel.NovelProjectsPage
 import app.amber.feature.ui.pages.novel.NovelSettingsPage
 import app.amber.feature.ui.pages.novel.NovelWorkspacePage
@@ -181,6 +183,8 @@ class RouteActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_OPEN_CHAT_PROMPT = "openChatPrompt"
+        const val EXTRA_OPEN_NOVEL_PROJECT_ID = "openNovelProjectId"
+        const val EXTRA_OPEN_NOVEL_RUN_ID = "openNovelRunId"
     }
 
     @SuppressLint("RestrictedApi")
@@ -294,6 +298,9 @@ class RouteActivity : ComponentActivity() {
         intent.getStringExtra("conversationId")?.let { text ->
             navStack?.add(Screen.Chat(text))
         }
+        novelWorkspaceScreenFromIntent(intent)?.let { screen ->
+            navStack?.add(screen)
+        }
         taskSessionScreenFromIntent(intent)?.let { screen ->
             navStack?.add(screen)
         }
@@ -337,6 +344,12 @@ class RouteActivity : ComponentActivity() {
         )
     }
 
+    private fun novelWorkspaceScreenFromIntent(intent: Intent): Screen.NovelWorkspace? =
+        novelWorkspaceScreenFromNotification(
+            projectId = intent.getStringExtra(EXTRA_OPEN_NOVEL_PROJECT_ID),
+            runId = intent.getStringExtra(EXTRA_OPEN_NOVEL_RUN_ID),
+        )
+
     @Composable
     fun AppRoutes() {
         val toastState = rememberToasterState()
@@ -345,6 +358,9 @@ class RouteActivity : ComponentActivity() {
         val eventBus = koinInject<AppEventBus>()
 
         val startScreen = remember {
+            novelWorkspaceScreenFromIntent(intent)?.let { screen ->
+                return@remember screen
+            }
             if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
                 return@remember Screen.SettingAgentMemory
             }
@@ -815,6 +831,15 @@ private fun Intent.extractMultipleStreamUris(): List<String> =
     getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
         ?.map { it.toString() }
         .orEmpty()
+
+internal fun novelWorkspaceScreenFromNotification(
+    projectId: String?,
+    runId: String?,
+): Screen.NovelWorkspace? {
+    val parsedProjectId = runCatching { NovelProjectId.parse(projectId.orEmpty()) }.getOrNull() ?: return null
+    if (runCatching { NovelRunId.parse(runId.orEmpty()) }.isFailure) return null
+    return Screen.NovelWorkspace(parsedProjectId.rawValue)
+}
 
 sealed interface Screen : NavKey {
     @Serializable

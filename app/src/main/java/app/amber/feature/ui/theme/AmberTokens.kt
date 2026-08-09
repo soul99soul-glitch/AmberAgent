@@ -94,12 +94,15 @@ val AmberAccents: List<AmberAccent> = listOf(
 )
 
 /**
- * Text/icon color drawn *on* an accent fill (design §2.3 `inkFor`):
- * green → near-black, gold → dark brown, everything else → white.
+ * Text/icon color drawn on an accent fill. Curated accents use a dark ink when white misses AA contrast.
  */
 fun accentInkFor(accent: Color): Color = when (accent) {
-    Color(0xFF5E9C6E) -> Color(0xFF0F150E) // sage-green
-    Color(0xFFD9A441), Color(0xFFC9A461) -> Color(0xFF1A1408) // gold (defensive)
+    Color(0xFFB8623A) -> Color(0xFF000000) // terracotta needs true black to clear 4.5:1
+    Color(0xFF5E9C6E),
+    Color(0xFF4F86D6),
+    Color(0xFF9277C4),
+    Color(0xFFC2607A),
+    -> Color(0xFF0F150E)
     else -> Color(0xFFFFFFFF)
 }
 

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -32,6 +33,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -48,13 +53,20 @@ import app.amber.feature.ui.theme.LocalAmberType
 fun Modifier.pressable(
     onClick: () -> Unit,
     enabled: Boolean = true,
+    role: Role? = Role.Button,
 ): Modifier {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.975f else 1f, label = "pressable")
     return this
         .graphicsLayer { scaleX = scale; scaleY = scale }
-        .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick)
+        .clickable(
+            interactionSource = interaction,
+            indication = null,
+            enabled = enabled,
+            role = role,
+            onClick = onClick,
+        )
 }
 
 /** Default container: surface + hairline + 14dp radius (oc-amber `.card`). */
@@ -87,6 +99,7 @@ fun BtnInk(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val type = LocalAmberType.current
     Box(
         modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(15.dp))
             .background(t.ink)
             .pressable(onClick = onClick)
@@ -102,6 +115,7 @@ fun BtnAccent(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) 
     val type = LocalAmberType.current
     Box(
         modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(15.dp))
             .background(t.accent)
             .pressable(onClick = onClick)
@@ -179,8 +193,8 @@ fun BlinkingCursor(
 fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Text("//", style = type.eyebrow, color = t.accent)
-        Text(" " + text.uppercase(), style = type.eyebrow, color = t.ink3)
+    Row(modifier.semantics { heading() }, verticalAlignment = Alignment.CenterVertically) {
+        Text("//", modifier = Modifier.clearAndSetSemantics {}, style = type.eyebrow, color = t.accent)
+        Text(" " + text.uppercase(), style = type.eyebrow, color = t.ink2)
     }
 }

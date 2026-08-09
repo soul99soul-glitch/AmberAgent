@@ -31,6 +31,107 @@ class NovelQuickStartDecoderTest {
     }
 
     @Test
+    fun decode_continuityAudit_duplicateOrBlankIssueIdentityFails() {
+        val duplicate = """
+            {"schemaVersion":1,"consistent":false,"issues":[
+              {"id":"same","category":"contradiction","severity":"major","summary":"A vs B",
+               "references":[
+                 {"chapterOrdinal":1,"chapterTitle":"一","evidence":"A"},
+                 {"chapterOrdinal":2,"chapterTitle":"二","evidence":"B"}
+               ]},
+              {"id":"same","category":"chronology","severity":"minor","summary":"C vs D",
+               "references":[
+                 {"chapterOrdinal":2,"chapterTitle":"二","evidence":"C"},
+                 {"chapterOrdinal":3,"chapterTitle":"三","evidence":"D"}
+               ]}
+            ]}
+        """.trimIndent()
+        assertTrue(runCatching { NovelStructuredOutputDecoder.decodeContinuityAudit(duplicate) }.isFailure)
+
+        val blankId = """
+            {"schemaVersion":1,"consistent":false,"issues":[
+              {"id":" ","category":"contradiction","severity":"major","summary":"A vs B",
+               "references":[
+                 {"chapterOrdinal":1,"chapterTitle":"一","evidence":"A"},
+                 {"chapterOrdinal":2,"chapterTitle":"二","evidence":"B"}
+               ]}
+            ]}
+        """.trimIndent()
+        assertTrue(runCatching { NovelStructuredOutputDecoder.decodeContinuityAudit(blankId) }.isFailure)
+
+        val blankSummary = """
+            {"schemaVersion":1,"consistent":false,"issues":[
+              {"id":"i1","category":"contradiction","severity":"major","summary":" ",
+               "references":[
+                 {"chapterOrdinal":1,"chapterTitle":"一","evidence":"A"},
+                 {"chapterOrdinal":2,"chapterTitle":"二","evidence":"B"}
+               ]}
+            ]}
+        """.trimIndent()
+        assertTrue(runCatching { NovelStructuredOutputDecoder.decodeContinuityAudit(blankSummary) }.isFailure)
+    }
+
+    @Test
+    fun decode_continuityAudit_invalidReferenceFailsClosed() {
+        fun result(firstReference: String) = runCatching {
+            NovelStructuredOutputDecoder.decodeContinuityAudit(
+                """
+                {"schemaVersion":1,"consistent":false,"issues":[
+                  {"id":"i1","category":"contradiction","severity":"major","summary":"A vs B",
+                   "references":[
+                     $firstReference,
+                     {"chapterOrdinal":2,"chapterTitle":"二","evidence":"B"}
+                   ]}
+                ]}
+                """.trimIndent(),
+            )
+        }
+
+        assertTrue(
+            result("""{"chapterOrdinal":0,"chapterTitle":"一","evidence":"A"}""").isFailure,
+        )
+        assertTrue(
+            result("""{"chapterOrdinal":1,"chapterTitle":" ","evidence":"A"}""").isFailure,
+        )
+        assertTrue(
+            result("""{"chapterOrdinal":1,"chapterTitle":"一","evidence":" "}""").isFailure,
+        )
+
+        val tooFewReferences = """
+            {"schemaVersion":1,"consistent":false,"issues":[
+              {"id":"i1","category":"contradiction","severity":"major","summary":"A vs B",
+               "references":[{"chapterOrdinal":1,"chapterTitle":"一","evidence":"A"}]}
+            ]}
+        """.trimIndent()
+        assertTrue(
+            runCatching {
+                NovelStructuredOutputDecoder.decodeContinuityAudit(tooFewReferences)
+            }.isFailure,
+        )
+    }
+
+    @Test
+    fun decode_continuityAudit_rejectsDuplicateDriftAndWrongRootTypes() {
+        val invalidPayloads = listOf(
+            """{"schemaVersion":1,"consistent":true,"consistent":false,"issues":[]}""",
+            """{"schemaVersion":1,"consistent":true,"issues":[],"extra":false}""",
+            """{"schemaVersion":1,"consistent":true}""",
+            """{"schemaVersion":"1","consistent":true,"issues":[]}""",
+            """{"schemaVersion":1,"consistent":"true","issues":[]}""",
+            """{"schemaVersion":1,"consistent":true,"issues":{}}""",
+        )
+
+        invalidPayloads.forEach { payload ->
+            assertTrue(
+                "Expected continuity payload to fail closed: $payload",
+                runCatching {
+                    NovelStructuredOutputDecoder.decodeContinuityAudit(payload)
+                }.isFailure,
+            )
+        }
+    }
+
+    @Test
     fun decode_discussionArchive_fencedAndTrims() {
         val wrapped = """
             归档结果如下：

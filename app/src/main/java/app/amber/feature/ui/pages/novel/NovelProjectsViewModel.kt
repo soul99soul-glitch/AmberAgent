@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import app.amber.feature.novel.NovelCreation
+import app.amber.feature.novel.NovelGhostwriteBatchController
 import app.amber.feature.novel.NovelIntent
 import app.amber.feature.novel.NovelQuery
 import app.amber.feature.novel.NovelSnapshot
@@ -46,6 +47,7 @@ data class NovelProjectsUiState(
 
 class NovelProjectsViewModel(
     private val novelCreation: NovelCreation,
+    private val ghostwriteBatchController: NovelGhostwriteBatchController,
 ) : ViewModel() {
     private val _state = MutableStateFlow(NovelProjectsUiState())
     val state: StateFlow<NovelProjectsUiState> = _state.asStateFlow()
@@ -95,6 +97,7 @@ class NovelProjectsViewModel(
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
+                if (!ensureNoActiveBatch(projectId)) return@launch
                 novelCreation.perform(NovelIntent.RenameProject(projectId, name))
             } catch (error: CancellationException) {
                 throw error
@@ -110,7 +113,18 @@ class NovelProjectsViewModel(
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
+                if (!ensureNoActiveBatch(projectId)) return@launch
                 novelCreation.perform(NovelIntent.DeleteProject(projectId))
+                try {
+                    ghostwriteBatchController.deleteTerminalJobsForProject(projectId)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    _state.value = _state.value.copy(
+                        errorMessage = "项目已删除，但连续代笔账本仍有残留：" +
+                            error.message.orEmpty().take(200),
+                    )
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -157,6 +171,9 @@ class NovelProjectsViewModel(
                 importConflict = null,
             )
             try {
+                if (replaceProjectId != null && !ensureNoActiveBatch(replaceProjectId)) {
+                    return@launch
+                }
                 val outcome = novelCreation.perform(
                     NovelIntent.ImportPackage(bytes = bytes, replaceProjectId = replaceProjectId),
                 )
@@ -296,6 +313,25 @@ class NovelProjectsViewModel(
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
         ).find(msg) ?: return null
         return runCatching { NovelProjectId.parse(match.value) }.getOrNull()
+    }
+
+    private suspend fun ensureNoActiveBatch(projectId: NovelProjectId): Boolean = try {
+        val active = ghostwriteBatchController.activeForProject(projectId)
+        if (active.isNotEmpty()) {
+            _state.value = _state.value.copy(
+                errorMessage = "连续代笔批次尚未结束，请进入项目取消批次后再修改或删除",
+            )
+            false
+        } else {
+            true
+        }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Exception) {
+        _state.value = _state.value.copy(
+            errorMessage = "连续代笔账本异常；为避免遗留后台任务，当前操作已阻止",
+        )
+        false
     }
 
     private fun create(

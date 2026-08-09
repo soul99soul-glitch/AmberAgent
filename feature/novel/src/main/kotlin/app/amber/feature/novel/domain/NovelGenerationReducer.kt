@@ -4,6 +4,7 @@ import app.amber.feature.novel.model.NovelActiveRunRecord
 import app.amber.feature.novel.model.NovelAppliedOperationRecord
 import app.amber.feature.novel.model.NovelBranchLifecycle
 import app.amber.feature.novel.model.NovelBranchSyncStatus
+import app.amber.feature.novel.model.NovelCollaborationMode
 import app.amber.feature.novel.model.NovelCandidateKind
 import app.amber.feature.novel.model.NovelCandidateRecord
 import app.amber.feature.novel.model.NovelCandidateStatus
@@ -47,6 +48,7 @@ data class NovelInternalRunRequest(
     val generationReceiptID: app.amber.feature.novel.model.NovelReceiptId,
     val injectionReceiptID: app.amber.feature.novel.model.NovelReceiptId,
     val sourceChapterVersionID: app.amber.feature.novel.model.NovelChapterVersionId?,
+    val ghostwritePlanID: app.amber.feature.novel.model.NovelChapterPlanId? = null,
     val expectedProjectRevision: Long,
     val expectedConfigRevision: Long,
     val expectedBranchHeadRevision: Long,
@@ -95,6 +97,24 @@ object NovelGenerationReducer {
         if (document.activeRuns.any { it.id == request.id && it.status == NovelRunStatus.Running }) {
             throw NovelError.ProjectBusy(document.project.id)
         }
+        val confirmedPlan = document.confirmedChapterPlan(branch.id)
+        if (document.project.collaborationMode == NovelCollaborationMode.Ghostwrite &&
+            request.kind == NovelRunKind.Prose &&
+            request.granularity == NovelGenerationGranularity.WholeChapter &&
+            confirmedPlan == null
+        ) {
+            throw NovelError.InvalidInput("代笔模式下写整章前需要先确认本章计划。")
+        }
+        if (request.ghostwritePlanID != null) {
+            if (request.kind != NovelRunKind.Prose ||
+                request.granularity != NovelGenerationGranularity.WholeChapter
+            ) {
+                throw NovelError.InvalidInput("A ghostwrite plan can only own whole-chapter prose.")
+            }
+            if (confirmedPlan?.id != request.ghostwritePlanID) {
+                throw NovelError.InvalidInput("The ghostwrite run does not match the confirmed chapter plan.")
+            }
+        }
 
         val sessionIndex = document.sessions.indexOfFirst {
             it.id == branch.sessionID && it.branchID == branch.id
@@ -132,6 +152,15 @@ object NovelGenerationReducer {
             partialContent = "",
             receiptID = request.generationReceiptID,
             startedAt = now,
+            chapterPlanDigest = if (
+                request.kind == NovelRunKind.Prose &&
+                request.granularity == NovelGenerationGranularity.WholeChapter
+            ) {
+                confirmedPlan?.contentDigest
+            } else {
+                null
+            },
+            ghostwritePlanID = request.ghostwritePlanID,
         )
 
         val sessions = document.sessions.toMutableList()
@@ -249,6 +278,8 @@ object NovelGenerationReducer {
                     status = NovelCandidateStatus.Available,
                     content = content,
                     sourceChapterVersionID = run.sourceChapterVersionID,
+                    chapterPlanDigest = run.chapterPlanDigest,
+                    ghostwritePlanID = run.ghostwritePlanID,
                     createdAt = now,
                 ),
             )
@@ -317,6 +348,8 @@ object NovelGenerationReducer {
                         status = NovelCandidateStatus.Interrupted,
                         content = partialContent,
                         sourceChapterVersionID = run.sourceChapterVersionID,
+                        chapterPlanDigest = run.chapterPlanDigest,
+                        ghostwritePlanID = run.ghostwritePlanID,
                         createdAt = now,
                     ),
                 )

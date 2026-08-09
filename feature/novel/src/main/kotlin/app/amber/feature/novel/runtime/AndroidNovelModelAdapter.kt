@@ -2,8 +2,10 @@ package app.amber.feature.novel.runtime
 
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderManager
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.findModelById
@@ -18,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -43,12 +46,10 @@ class AndroidNovelModelAdapter(
                     ?: throw NovelError.ModelUnavailable("Global chat model is not configured")
                 val provider = model.findProvider(settings.providers)
                     ?: throw NovelError.ModelUnavailable("Provider missing for global model")
-                NovelResolvedModel(
+                resolvedNovelModel(
+                    model = model,
                     providerID = provider.id.toString(),
                     ownerProviderID = provider.id.toString(),
-                    modelID = model.id.toString(),
-                    wireModelID = model.modelId,
-                    displayName = model.displayName.ifBlank { model.modelId },
                 )
             }
             is NovelProjectModelPolicy.Fixed -> {
@@ -61,12 +62,10 @@ class AndroidNovelModelAdapter(
                 if (provider.id.toString() != policy.providerID) {
                     throw NovelError.ModelUnavailable("Project model is unavailable; please reselect")
                 }
-                NovelResolvedModel(
+                resolvedNovelModel(
+                    model = model,
                     providerID = provider.id.toString(),
                     ownerProviderID = policy.providerID,
-                    modelID = model.id.toString(),
-                    wireModelID = model.modelId,
-                    displayName = model.displayName.ifBlank { model.modelId },
                 )
             }
         }
@@ -96,30 +95,14 @@ class AndroidNovelModelAdapter(
                             )
                         }
                     }
-                    val params = TextGenerationParams(
-                        model = model,
-                        tools = emptyList(),
-                        temperature = request.parameters.temperature?.toFloat(),
-                        topP = request.parameters.topP?.toFloat(),
-                        maxTokens = request.parameters.maxOutputTokens,
-                        reasoningLevel = ReasoningLevel.OFF,
-                        customHeaders = model.customHeaders,
-                        customBody = model.customBodies,
-                    )
-                    providerImpl.streamText(
-                        providerSetting = provider,
-                        messages = messages,
-                        params = params,
-                    ).collect { chunk ->
-                        val delta = chunk.choices.firstOrNull()?.delta?.parts
-                            ?.filterIsInstance<UIMessagePart.Text>()
-                            ?.joinToString("") { it.text }
-                            .orEmpty()
-                        if (delta.isNotEmpty()) {
-                            send(NovelModelEvent.TextDelta(delta))
-                        }
-                    }
-                    send(NovelModelEvent.Completed)
+                    val params = novelTextGenerationParams(model, request.parameters)
+                    novelModelEvents(
+                        providerImpl.streamText(
+                            providerSetting = provider,
+                            messages = messages,
+                            params = params,
+                        ),
+                    ).collect { event -> send(event) }
                 } catch (error: kotlinx.coroutines.CancellationException) {
                     throw error
                 } catch (error: Exception) {
@@ -142,3 +125,100 @@ class AndroidNovelModelAdapter(
         jobs[runId.rawValue]?.cancel()
     }
 }
+
+internal fun resolvedNovelModel(
+    model: Model,
+    providerID: String,
+    ownerProviderID: String,
+): NovelResolvedModel = NovelResolvedModel(
+    providerID = providerID,
+    ownerProviderID = ownerProviderID,
+    modelID = model.id.toString(),
+    wireModelID = model.modelId,
+    displayName = model.displayName.ifBlank { model.modelId },
+    contextWindowTokens = model.contextWindowTokens,
+)
+
+internal fun novelTextGenerationParams(
+    model: Model,
+    parameters: NovelModelParameters,
+): TextGenerationParams = TextGenerationParams(
+    model = model,
+    tools = emptyList(),
+    temperature = parameters.temperature?.toFloat(),
+    topP = parameters.topP?.toFloat(),
+    maxTokens = parameters.maxOutputTokens,
+    reasoningLevel = parseNovelReasoningLevel(parameters.reasoningLevel),
+    customHeaders = model.customHeaders,
+    customBody = model.customBodies,
+)
+
+private fun parseNovelReasoningLevel(rawValue: String): ReasoningLevel {
+    val value = rawValue.trim()
+    return ReasoningLevel.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+        ?: throw IllegalArgumentException(
+            "Unsupported novel reasoningLevel '$rawValue'; expected " +
+                ReasoningLevel.entries.joinToString { it.name.lowercase() },
+        )
+}
+
+/** Converts provider chunks into the fail-closed terminal contract used by novel runs. */
+internal fun novelModelEvents(chunks: Flow<MessageChunk>): Flow<NovelModelEvent> = flow {
+    var abnormalFinishReason: String? = null
+    chunks.collect { chunk ->
+        val delta = chunk.choices.firstOrNull()?.delta?.parts
+            ?.filterIsInstance<UIMessagePart.Text>()
+            ?.joinToString("") { it.text }
+            .orEmpty()
+        if (delta.isNotEmpty()) emit(NovelModelEvent.TextDelta(delta))
+
+        if (abnormalFinishReason == null) {
+            abnormalFinishReason = chunk.choices
+                .asSequence()
+                .mapNotNull { it.finishReason?.trim()?.takeIf(String::isNotEmpty) }
+                .firstOrNull { !isNormalNovelFinishReason(it) }
+        }
+    }
+
+    val reason = abnormalFinishReason
+    if (reason == null) {
+        emit(NovelModelEvent.Completed)
+    } else {
+        emit(novelFinishReasonFailure(reason))
+    }
+}
+
+private fun isNormalNovelFinishReason(reason: String): Boolean =
+    normalizedFinishReason(reason) in setOf(
+        "stop",
+        "end_turn",
+        "stop_sequence",
+        "completed",
+        // Some OpenAI-compatible gateways use these placeholders on non-terminal chunks.
+        "unknown",
+        "unspecified",
+        "finish_reason_unspecified",
+    )
+
+private fun novelFinishReasonFailure(reason: String): NovelModelEvent.Failed {
+    val normalized = normalizedFinishReason(reason)
+    val compact = normalized.filter(Char::isLetterOrDigit)
+    val filtered = compact.contains("contentfilter") || compact.contains("safety")
+    val truncated = compact == "length" ||
+        compact.contains("maxtokens") ||
+        compact.contains("maxoutputtokens")
+    return NovelModelEvent.Failed(
+        code = when {
+            filtered -> "content_filtered"
+            truncated -> "output_truncated"
+            else -> "abnormal_finish_reason"
+        },
+        message = "Provider ended generation with finish reason: $reason",
+        isRetryable = !filtered,
+    )
+}
+
+private fun normalizedFinishReason(reason: String): String = reason
+    .trim()
+    .lowercase()
+    .replace(Regex("[\\s-]+"), "_")

@@ -5,7 +5,10 @@ import app.amber.feature.novel.model.NovelBranchCheckpointRecord
 import app.amber.feature.novel.model.NovelBranchLifecycle
 import app.amber.feature.novel.model.NovelBranchRecord
 import app.amber.feature.novel.model.NovelBranchSyncStatus
+import app.amber.feature.novel.model.NovelChapterPlanRecord
+import app.amber.feature.novel.model.NovelChapterPlanStatus
 import app.amber.feature.novel.model.NovelCheckpointKind
+import app.amber.feature.novel.model.NovelCollaborationMode
 import app.amber.feature.novel.model.NovelGenerationGranularity
 import app.amber.feature.novel.model.NovelMaterialRecord
 import app.amber.feature.novel.model.NovelMaterialRevisionRecord
@@ -18,6 +21,7 @@ import app.amber.feature.novel.model.NovelProjectRecord
 import app.amber.feature.novel.model.NovelSessionCursor
 import app.amber.feature.novel.model.NovelSessionRecord
 import app.amber.feature.novel.model.NovelStateSnapshotRecord
+import app.amber.feature.novel.model.NovelUpcomingArcRecord
 import app.amber.feature.novel.serialization.NovelSwiftCompatibleJson
 import app.amber.feature.novel.serialization.sha256Hex
 import kotlinx.serialization.json.buildJsonObject
@@ -119,8 +123,11 @@ object NovelReducer {
             mainBranchID = command.branchID,
             modelPolicy = NovelProjectModelPolicy.Global,
             stateSyncModelPolicy = null,
+            reviewModelPolicy = null,
             lastGenerationGranularity = NovelGenerationGranularity.WholeChapter,
             polishPreference = "",
+            collaborationMode = NovelCollaborationMode.Cocreation,
+            pauseGhostwriteOnBlockingContinuity = true,
         )
         val outcome = NovelOutcome.ProjectCreated(
             projectID = command.projectID,
@@ -231,6 +238,7 @@ object NovelReducer {
         val purposeWire = when (command.purpose) {
             NovelModelPolicyPurpose.Creation -> "creation"
             NovelModelPolicyPurpose.StateSync -> "stateSync"
+            NovelModelPolicyPurpose.Review -> "review"
         }
         val payloadSHA256 = canonicalPayloadSha(
             buildJsonObject {
@@ -262,6 +270,12 @@ object NovelReducer {
                 // UI uses ClearStateSyncModelPolicy / clearStateSyncModelPolicy for null
                 // (follow writing model) — distinct from Global.
                 stateSyncModelPolicy = command.policy,
+                revision = document.project.revision + 1,
+                configRevision = document.project.configRevision + 1,
+                updatedAt = now,
+            )
+            NovelModelPolicyPurpose.Review -> document.project.copy(
+                reviewModelPolicy = command.policy,
                 revision = document.project.revision + 1,
                 configRevision = document.project.configRevision + 1,
                 updatedAt = now,
@@ -543,6 +557,438 @@ object NovelReducer {
         return NovelReduceResult(next, outcome)
     }
 
+    fun setCollaborationMode(
+        command: NovelSetCollaborationModeCommand,
+        document: NovelProjectDocumentV1,
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        val now = wireNow(now)
+        requireProjectId(command.projectID, document)
+        val payloadSHA256 = canonicalPayloadSha(
+            buildJsonObject {
+                put("kind", "setCollaborationMode")
+                put("projectID", command.projectID.rawValue)
+                put("branchID", command.branchID.rawValue)
+                put(
+                    "mode",
+                    when (command.mode) {
+                        NovelCollaborationMode.Cocreation -> "cocreation"
+                        NovelCollaborationMode.Ghostwrite -> "ghostwrite"
+                    },
+                )
+            },
+        )
+        replayIfPresent(command.context, NovelOperationKind.SetCollaborationMode, payloadSHA256, document)
+            ?.let { return NovelReduceResult(document, it) }
+        requireConfigRevision(command.context, document)
+        val branch = document.branches.firstOrNull {
+            it.id == command.branchID && it.lifecycle == NovelBranchLifecycle.Active
+        } ?: throw NovelError.BranchNotFound(command.branchID)
+        if (command.mode == document.project.collaborationMode) {
+            throw NovelError.InvalidInput("The project is already in the requested collaboration mode.")
+        }
+        if (command.mode == NovelCollaborationMode.Cocreation &&
+            document.activeRuns.any { it.status == app.amber.feature.novel.model.NovelRunStatus.Running }
+        ) {
+            throw NovelError.ProjectBusy(command.projectID)
+        }
+        if (command.mode == NovelCollaborationMode.Ghostwrite) {
+            val issues = NovelGhostwriteReadiness.issues(document, branch.id, requireChapterPlan = false)
+            if (issues.isNotEmpty()) {
+                throw NovelError.InvalidInput(
+                    "无法切入代笔模式：${issues.joinToString("；") { it.displayName }}",
+                )
+            }
+        }
+
+        val nextProject = document.project.copy(
+            collaborationMode = command.mode,
+            revision = document.project.revision + 1,
+            configRevision = document.project.configRevision + 1,
+            updatedAt = now,
+        )
+        val outcome = NovelOutcome.CollaborationModeChanged(
+            projectID = command.projectID,
+            mode = command.mode,
+            projectRevision = nextProject.revision,
+            configRevision = nextProject.configRevision,
+        )
+        val next = document.copy(
+            project = nextProject,
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = command.context.operationID,
+                kind = NovelOperationKind.SetCollaborationMode,
+                payloadSHA256 = payloadSHA256,
+                outcome = outcome,
+                appliedProjectRevision = nextProject.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
+
+    fun setPauseGhostwriteOnBlockingContinuity(
+        command: NovelSetPauseGhostwriteOnBlockingContinuityCommand,
+        document: NovelProjectDocumentV1,
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        val now = wireNow(now)
+        requireProjectId(command.projectID, document)
+        val payloadSHA256 = canonicalPayloadSha(
+            buildJsonObject {
+                put("kind", "setPauseGhostwriteOnBlockingContinuity")
+                put("projectID", command.projectID.rawValue)
+                put("enabled", command.enabled)
+            },
+        )
+        replayIfPresent(
+            command.context,
+            NovelOperationKind.SetPauseGhostwriteOnBlockingContinuity,
+            payloadSHA256,
+            document,
+        )?.let { return NovelReduceResult(document, it) }
+        requireConfigRevision(command.context, document)
+        if (command.enabled == document.project.pauseGhostwriteOnBlockingContinuity) {
+            throw NovelError.InvalidInput("The ghostwrite continuity-pause setting is already unchanged.")
+        }
+
+        val nextProject = document.project.copy(
+            pauseGhostwriteOnBlockingContinuity = command.enabled,
+            revision = document.project.revision + 1,
+            configRevision = document.project.configRevision + 1,
+            updatedAt = now,
+        )
+        val outcome = NovelOutcome.PauseGhostwriteOnBlockingContinuityChanged(
+            projectID = command.projectID,
+            enabled = command.enabled,
+            projectRevision = nextProject.revision,
+            configRevision = nextProject.configRevision,
+        )
+        val next = document.copy(
+            project = nextProject,
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = command.context.operationID,
+                kind = NovelOperationKind.SetPauseGhostwriteOnBlockingContinuity,
+                payloadSHA256 = payloadSHA256,
+                outcome = outcome,
+                appliedProjectRevision = nextProject.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
+
+    fun upsertChapterPlan(
+        command: NovelUpsertChapterPlanCommand,
+        document: NovelProjectDocumentV1,
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        val now = wireNow(now)
+        requireProjectId(command.projectID, document)
+        val payloadSHA256 = canonicalPayloadSha(
+            buildJsonObject {
+                put("kind", "upsertChapterPlan")
+                put("projectID", command.projectID.rawValue)
+                put("branchID", command.branchID.rawValue)
+                put("planID", command.planID.rawValue)
+                put("status", command.status.name.lowercase())
+                put("outlinePlacement", command.outlinePlacement)
+                put("goalAndConflict", command.goalAndConflict)
+                putStringList("mustHappen", command.mustHappen)
+                putStringList("mustNotHappen", command.mustNotHappen)
+                put("endingHook", command.endingHook)
+                putStringList("visibleFacts", command.visibleFacts)
+            },
+        )
+        replayIfPresent(command.context, NovelOperationKind.UpsertChapterPlan, payloadSHA256, document)
+            ?.let { return NovelReduceResult(document, it) }
+        requireConfigRevision(command.context, document)
+        if (document.branches.none {
+                it.id == command.branchID && it.lifecycle == NovelBranchLifecycle.Active
+            }
+        ) {
+            throw NovelError.BranchNotFound(command.branchID)
+        }
+        requireBranchHeadRevisionIfPresent(command.context, command.branchID, document)
+
+        val outlinePlacement = command.outlinePlacement.trim()
+        val goalAndConflict = command.goalAndConflict.trim()
+        val endingHook = command.endingHook.trim()
+        val mustHappen = NovelChapterPlanRecord.normalizedLines(command.mustHappen)
+        val mustNotHappen = NovelChapterPlanRecord.normalizedLines(command.mustNotHappen)
+        val visibleFacts = NovelChapterPlanRecord.normalizedLines(command.visibleFacts)
+        if (outlinePlacement.length > 500) {
+            throw NovelError.InvalidInput("The chapter-plan placement note is too long.")
+        }
+        if (goalAndConflict.isEmpty()) {
+            throw NovelError.InvalidInput("The chapter plan needs a goal and conflict.")
+        }
+        if (goalAndConflict.length > 8_000) {
+            throw NovelError.InvalidInput("The chapter-plan goal is too long.")
+        }
+        if (endingHook.length > 4_000) {
+            throw NovelError.InvalidInput("The chapter-plan ending hook is too long.")
+        }
+        if (mustHappen.size > 32 || mustNotHappen.size > 32 || visibleFacts.size > 32) {
+            throw NovelError.InvalidInput("The chapter plan has too many checklist items.")
+        }
+        if (command.status == NovelChapterPlanStatus.Confirmed && mustHappen.isEmpty()) {
+            throw NovelError.InvalidInput(
+                "Confirming a chapter plan requires at least one must-happen item.",
+            )
+        }
+        val existing = document.chapterPlan(command.branchID)
+        if (existing != null && existing.id != command.planID) {
+            throw NovelError.InvalidInput("The branch already has a chapter plan with a different ID.")
+        }
+
+        var plan = NovelChapterPlanRecord(
+            id = command.planID,
+            branchID = command.branchID,
+            status = command.status,
+            outlinePlacement = outlinePlacement,
+            goalAndConflict = goalAndConflict,
+            mustHappen = mustHappen,
+            mustNotHappen = mustNotHappen,
+            endingHook = endingHook,
+            visibleFacts = visibleFacts,
+            contentDigest = "",
+            updatedAt = now,
+            confirmedAt = now.takeIf { command.status == NovelChapterPlanStatus.Confirmed },
+        )
+        plan = plan.copy(
+            contentDigest = NovelChapterPlanRecord.digest(plan.canonicalDigestPayload()),
+        )
+        val plans = document.chapterPlans.toMutableList()
+        val planIndex = plans.indexOfFirst { it.branchID == command.branchID }
+        if (planIndex >= 0) plans[planIndex] = plan else plans += plan
+
+        val nextProject = document.project.copy(
+            revision = document.project.revision + 1,
+            configRevision = document.project.configRevision + 1,
+            updatedAt = now,
+        )
+        val outcome = NovelOutcome.ChapterPlanUpserted(
+            projectID = command.projectID,
+            branchID = command.branchID,
+            planID = plan.id,
+            status = plan.status,
+            contentDigest = plan.contentDigest,
+            projectRevision = nextProject.revision,
+            configRevision = nextProject.configRevision,
+        )
+        val next = document.copy(
+            project = nextProject,
+            chapterPlans = plans,
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = command.context.operationID,
+                kind = NovelOperationKind.UpsertChapterPlan,
+                payloadSHA256 = payloadSHA256,
+                outcome = outcome,
+                appliedProjectRevision = nextProject.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
+
+    fun clearChapterPlan(
+        command: NovelClearChapterPlanCommand,
+        document: NovelProjectDocumentV1,
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        val now = wireNow(now)
+        requireProjectId(command.projectID, document)
+        val payloadSHA256 = canonicalPayloadSha(
+            buildJsonObject {
+                put("kind", "clearChapterPlan")
+                put("projectID", command.projectID.rawValue)
+                put("branchID", command.branchID.rawValue)
+                put(
+                    "expectedPlanID",
+                    command.expectedPlanID?.let {
+                        kotlinx.serialization.json.JsonPrimitive(it.rawValue)
+                    } ?: kotlinx.serialization.json.JsonNull,
+                )
+                put(
+                    "expectedPlanDigest",
+                    command.expectedPlanDigest?.let {
+                        kotlinx.serialization.json.JsonPrimitive(it)
+                    } ?: kotlinx.serialization.json.JsonNull,
+                )
+            },
+        )
+        replayIfPresent(command.context, NovelOperationKind.ClearChapterPlan, payloadSHA256, document)
+            ?.let { return NovelReduceResult(document, it) }
+        requireConfigRevision(command.context, document)
+        if (document.branches.none {
+                it.id == command.branchID && it.lifecycle == NovelBranchLifecycle.Active
+            }
+        ) {
+            throw NovelError.BranchNotFound(command.branchID)
+        }
+        requireBranchHeadRevisionIfPresent(command.context, command.branchID, document)
+        val hasExpectedPlanID = command.expectedPlanID != null
+        val hasExpectedPlanDigest = command.expectedPlanDigest != null
+        if (hasExpectedPlanID != hasExpectedPlanDigest) {
+            throw NovelError.InvalidInput("Expected chapter-plan ID and digest must be provided together.")
+        }
+        val currentPlan = document.chapterPlan(command.branchID)
+        if (currentPlan == null) {
+            throw NovelError.InvalidInput("There is no chapter plan to clear on this branch.")
+        }
+        if (command.expectedPlanID != null &&
+            (currentPlan.id != command.expectedPlanID ||
+                currentPlan.contentDigest != command.expectedPlanDigest)
+        ) {
+            throw NovelError.InvalidInput("The chapter plan changed before it could be cleared.")
+        }
+
+        val nextProject = document.project.copy(
+            revision = document.project.revision + 1,
+            configRevision = document.project.configRevision + 1,
+            updatedAt = now,
+        )
+        val outcome = NovelOutcome.ChapterPlanCleared(
+            projectID = command.projectID,
+            branchID = command.branchID,
+            projectRevision = nextProject.revision,
+            configRevision = nextProject.configRevision,
+        )
+        val next = document.copy(
+            project = nextProject,
+            chapterPlans = document.chapterPlans.filterNot { it.branchID == command.branchID },
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = command.context.operationID,
+                kind = NovelOperationKind.ClearChapterPlan,
+                payloadSHA256 = payloadSHA256,
+                outcome = outcome,
+                appliedProjectRevision = nextProject.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
+
+    fun upsertUpcomingArc(
+        command: NovelUpsertUpcomingArcCommand,
+        document: NovelProjectDocumentV1,
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        val now = wireNow(now)
+        requireProjectId(command.projectID, document)
+        val payloadSHA256 = canonicalPayloadSha(
+            buildJsonObject {
+                put("kind", "upsertUpcomingArc")
+                put("projectID", command.projectID.rawValue)
+                put("branchID", command.branchID.rawValue)
+                putStringList("beats", command.beats)
+            },
+        )
+        replayIfPresent(command.context, NovelOperationKind.UpsertUpcomingArc, payloadSHA256, document)
+            ?.let { return NovelReduceResult(document, it) }
+        requireConfigRevision(command.context, document)
+        if (document.branches.none {
+                it.id == command.branchID && it.lifecycle == NovelBranchLifecycle.Active
+            }
+        ) {
+            throw NovelError.BranchNotFound(command.branchID)
+        }
+        val beats = NovelUpcomingArcRecord.normalizedBeats(command.beats)
+        if (beats.isEmpty()) {
+            throw NovelError.InvalidInput("往后几章至少需要一条备注。")
+        }
+        val arc = NovelUpcomingArcRecord(command.branchID, beats, now)
+        val arcs = document.upcomingArcs.toMutableList()
+        val arcIndex = arcs.indexOfFirst { it.branchID == command.branchID }
+        if (arcIndex >= 0) arcs[arcIndex] = arc else arcs += arc
+
+        val nextProject = document.project.copy(
+            revision = document.project.revision + 1,
+            configRevision = document.project.configRevision + 1,
+            updatedAt = now,
+        )
+        val outcome = NovelOutcome.UpcomingArcUpserted(
+            projectID = command.projectID,
+            branchID = command.branchID,
+            beatCount = arc.beats.size,
+            projectRevision = nextProject.revision,
+            configRevision = nextProject.configRevision,
+        )
+        val next = document.copy(
+            project = nextProject,
+            upcomingArcs = arcs,
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = command.context.operationID,
+                kind = NovelOperationKind.UpsertUpcomingArc,
+                payloadSHA256 = payloadSHA256,
+                outcome = outcome,
+                appliedProjectRevision = nextProject.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
+
+    fun clearUpcomingArc(
+        command: NovelClearUpcomingArcCommand,
+        document: NovelProjectDocumentV1,
+        now: Instant = Instant.now(),
+    ): NovelReduceResult {
+        val now = wireNow(now)
+        requireProjectId(command.projectID, document)
+        val payloadSHA256 = canonicalPayloadSha(
+            buildJsonObject {
+                put("kind", "clearUpcomingArc")
+                put("projectID", command.projectID.rawValue)
+                put("branchID", command.branchID.rawValue)
+            },
+        )
+        replayIfPresent(command.context, NovelOperationKind.ClearUpcomingArc, payloadSHA256, document)
+            ?.let { return NovelReduceResult(document, it) }
+        requireConfigRevision(command.context, document)
+        if (document.branches.none {
+                it.id == command.branchID && it.lifecycle == NovelBranchLifecycle.Active
+            }
+        ) {
+            throw NovelError.BranchNotFound(command.branchID)
+        }
+        if (document.upcomingArc(command.branchID) == null) {
+            throw NovelError.InvalidInput("当前分支没有往后几章的备注可清除。")
+        }
+
+        val nextProject = document.project.copy(
+            revision = document.project.revision + 1,
+            configRevision = document.project.configRevision + 1,
+            updatedAt = now,
+        )
+        val outcome = NovelOutcome.UpcomingArcCleared(
+            projectID = command.projectID,
+            branchID = command.branchID,
+            projectRevision = nextProject.revision,
+            configRevision = nextProject.configRevision,
+        )
+        val next = document.copy(
+            project = nextProject,
+            upcomingArcs = document.upcomingArcs.filterNot { it.branchID == command.branchID },
+            appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
+                operationID = command.context.operationID,
+                kind = NovelOperationKind.ClearUpcomingArc,
+                payloadSHA256 = payloadSHA256,
+                outcome = outcome,
+                appliedProjectRevision = nextProject.revision,
+                appliedAt = now,
+            ),
+        )
+        NovelDocumentValidator.validateTransition(document, next)
+        return NovelReduceResult(next, outcome)
+    }
+
     private fun requireProjectId(projectId: app.amber.feature.novel.model.NovelProjectId, document: NovelProjectDocumentV1) {
         if (projectId != document.project.id) {
             throw NovelError.ProjectNotFound(projectId)
@@ -567,6 +1013,20 @@ object NovelReducer {
         }
         if (expectedConfig != document.project.configRevision) {
             throw NovelError.StaleConfigRevision(expectedConfig, document.project.configRevision)
+        }
+    }
+
+    private fun requireBranchHeadRevisionIfPresent(
+        context: NovelMutationContext,
+        branchID: app.amber.feature.novel.model.NovelBranchId,
+        document: NovelProjectDocumentV1,
+    ) {
+        val expected = context.expectedBranchHeadRevision ?: return
+        val branch = document.branches.firstOrNull {
+            it.id == branchID && it.lifecycle == NovelBranchLifecycle.Active
+        } ?: throw NovelError.BranchNotFound(branchID)
+        if (expected != branch.headRevision) {
+            throw NovelError.StaleBranchHeadRevision(expected, branch.headRevision)
         }
     }
 
@@ -595,5 +1055,17 @@ object NovelReducer {
     private fun canonicalPayloadSha(element: kotlinx.serialization.json.JsonElement): String {
         val canonical = NovelSwiftCompatibleJson.canonicalJson(element)
         return sha256Hex(canonical.toByteArray(Charsets.UTF_8))
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putStringList(
+        key: String,
+        values: List<String>,
+    ) {
+        put(
+            key,
+            kotlinx.serialization.json.JsonArray(
+                values.map { kotlinx.serialization.json.JsonPrimitive(it) },
+            ),
+        )
     }
 }

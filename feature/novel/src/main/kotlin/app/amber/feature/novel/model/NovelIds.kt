@@ -380,3 +380,24 @@ value class NovelProposalId(val rawValue: String) {
         unwrap = { it.rawValue },
     )
 }
+
+@Serializable(with = NovelChapterPlanId.Serializer::class)
+@JvmInline
+value class NovelChapterPlanId(val rawValue: String) {
+    init {
+        require(rawValue == normalizeUuidString(rawValue))
+    }
+
+    override fun toString(): String = uuidStringLower(rawValue)
+
+    companion object {
+        fun generate(): NovelChapterPlanId = NovelChapterPlanId(UUID.randomUUID().toString().uppercase())
+        fun parse(raw: String): NovelChapterPlanId = NovelChapterPlanId(normalizeUuidString(raw))
+    }
+
+    object Serializer : NovelTypedIdSerializer<NovelChapterPlanId>(
+        serialName = "NovelChapterPlanId",
+        wrap = { NovelChapterPlanId(it) },
+        unwrap = { it.rawValue },
+    )
+}

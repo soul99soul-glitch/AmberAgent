@@ -14,6 +14,7 @@ import app.amber.feature.novel.model.NovelChapterVersionRecord
 import app.amber.feature.novel.model.NovelCheckpointId
 import app.amber.feature.novel.model.NovelCheckpointKind
 import app.amber.feature.novel.model.NovelCollectionTarget
+import app.amber.feature.novel.model.NovelCollectionSource
 import app.amber.feature.novel.model.NovelEventId
 import app.amber.feature.novel.model.NovelOperationId
 import app.amber.feature.novel.model.NovelOperationKind
@@ -45,11 +46,13 @@ data class NovelCollectCommand(
     val target: NovelCollectionTarget,
     val operationId: NovelOperationId = NovelOperationId.generate(),
     val expectedProjectRevision: Long,
+    val expectedConfigRevision: Long,
     val expectedBranchHeadRevision: Long,
     val newChapterVersionId: NovelChapterVersionId = NovelChapterVersionId.generate(),
     val newCheckpointId: NovelCheckpointId = NovelCheckpointId.generate(),
     val newStateSnapshotId: NovelStateSnapshotId = NovelStateSnapshotId.generate(),
     val stateDelta: NovelStateDeltaV1? = null,
+    val source: NovelCollectionSource = NovelCollectionSource.User,
     /**
      * When true, manuscript is committed but branch stays [NovelBranchSyncStatus.NeedsSync]
      * so the user can retry state extraction via the existing「同步状态」path (P0-A soft-fail).
@@ -64,8 +67,22 @@ object NovelCollectionReducer {
         now: Instant = Instant.now(),
     ): NovelReduceResult {
         if (command.projectId != document.project.id) throw NovelError.ProjectNotFound(command.projectId)
+        val payloadSHA256 = app.amber.feature.novel.serialization.sha256HexOfUtf8(
+            "${command.candidateId.rawValue}|${command.selectedText}|${command.source.wireValue}",
+        )
+        document.appliedOperations.firstOrNull { it.operationID == command.operationId }?.let { applied ->
+            if (applied.kind != NovelOperationKind.CollectCandidate ||
+                applied.payloadSHA256 != payloadSHA256
+            ) {
+                throw NovelError.IdempotencyConflict(command.operationId)
+            }
+            return NovelReduceResult(document, applied.outcome)
+        }
         if (command.expectedProjectRevision != document.project.revision) {
             throw NovelError.StaleProjectRevision(command.expectedProjectRevision, document.project.revision)
+        }
+        if (command.expectedConfigRevision != document.project.configRevision) {
+            throw NovelError.StaleConfigRevision(command.expectedConfigRevision, document.project.configRevision)
         }
         val branchIndex = document.branches.indexOfFirst { it.id == command.branchId }
         if (branchIndex < 0) throw NovelError.BranchNotFound(command.branchId)
@@ -88,6 +105,35 @@ object NovelCollectionReducer {
         }
         if (candidate.kind != app.amber.feature.novel.model.NovelCandidateKind.Prose) {
             throw NovelError.InvalidInput("Only prose candidates can be collected into the manuscript")
+        }
+        val boundPlanDigest = candidate.chapterPlanDigest
+        val confirmedPlan = document.confirmedChapterPlan(branch.id)
+        if (boundPlanDigest != null) {
+            if (confirmedPlan?.contentDigest != boundPlanDigest) {
+                throw NovelError.InvalidInput(
+                    "The candidate no longer matches the confirmed chapter plan.",
+                )
+            }
+        } else if (command.source == NovelCollectionSource.SystemAutoCollect) {
+            throw NovelError.InvalidInput(
+                "Automatic collection requires a candidate bound to a confirmed chapter plan.",
+            )
+        }
+        if (command.source == NovelCollectionSource.SystemAutoCollect) {
+            if (candidate.status != NovelCandidateStatus.Available) {
+                throw NovelError.InvalidInput("Automatic collection requires a complete candidate.")
+            }
+            if (command.target !is NovelCollectionTarget.CreateNextChapter) {
+                throw NovelError.InvalidInput("Automatic collection must create the next chapter.")
+            }
+            if (command.selectedText != candidate.content) {
+                throw NovelError.InvalidInput("Automatic collection must collect the complete candidate.")
+            }
+            if (confirmedPlan == null || candidate.ghostwritePlanID != confirmedPlan.id) {
+                throw NovelError.InvalidInput(
+                    "Automatic collection requires a candidate owned by the confirmed chapter plan.",
+                )
+            }
         }
         if (command.selectedText.isBlank()) throw NovelError.InvalidInput("Selected text is empty")
 
@@ -205,6 +251,10 @@ object NovelCollectionReducer {
             branchOutline = delta?.branchOutlinePatch ?: baseState.branchOutline,
             unresolvedEntityNames = delta?.unresolvedEntityNames ?: baseState.unresolvedEntityNames,
             settingProposalIDs = baseState.settingProposalIDs + proposals.map { it.id },
+            recentWrittenHighlights = NovelStateSnapshotRecord.mergedHighlights(
+                prior = baseState.recentWrittenHighlights,
+                newEventSummaries = newEvents.map { it.summary },
+            ),
             createdAt = now,
         )
         val session = document.sessions.first { it.id == branch.sessionID }
@@ -253,7 +303,9 @@ object NovelCollectionReducer {
             currentStateSnapshotID = newState.id,
             headRevision = branch.headRevision + 1,
             workingRevision = branch.workingRevision + 1,
-            syncStatus = if (command.markNeedsSync) {
+            syncStatus = if (
+                command.markNeedsSync || command.source == NovelCollectionSource.SystemAutoCollect
+            ) {
                 NovelBranchSyncStatus.NeedsSync
             } else {
                 NovelBranchSyncStatus.Synchronized
@@ -286,9 +338,7 @@ object NovelCollectionReducer {
             appliedOperations = document.appliedOperations + NovelAppliedOperationRecord(
                 operationID = command.operationId,
                 kind = NovelOperationKind.CollectCandidate,
-                payloadSHA256 = app.amber.feature.novel.serialization.sha256HexOfUtf8(
-                    "${command.candidateId.rawValue}|${command.selectedText}",
-                ),
+                payloadSHA256 = payloadSHA256,
                 outcome = outcome,
                 appliedProjectRevision = project.revision,
                 appliedAt = now,

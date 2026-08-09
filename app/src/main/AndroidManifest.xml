@@ -215,7 +215,7 @@
       tools:node="merge">
       <property
         android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-        android:value="mobile cron task execution" />
+        android:value="long-running AI generation and scheduled task execution" />
     </service>
     <service
       android:name="app.amber.core.automation.AmberAccessibilityService"

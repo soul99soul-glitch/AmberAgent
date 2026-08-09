@@ -1,10 +1,16 @@
 package app.amber.core.di
 
-import android.content.Context
 import app.amber.feature.novel.DefaultNovelCreation
 import app.amber.feature.novel.NovelCreation
+import app.amber.feature.novel.NovelBackgroundRunRegistry
+import app.amber.feature.novel.NovelGhostwriteBatchController
+import app.amber.feature.novel.NovelGhostwriteCoordinator
 import app.amber.feature.novel.NovelLifecycleBridge
+import app.amber.feature.novel.background.NovelGhostwriteBatchExecutor
+import app.amber.feature.novel.background.NovelGhostwriteBatchRunning
+import app.amber.feature.novel.background.NovelGhostwriteBatchScheduler
 import app.amber.feature.novel.persistence.NovelFileProjectRepository
+import app.amber.feature.novel.persistence.NovelGhostwriteJobStore
 import app.amber.feature.novel.persistence.NovelProjectPersisting
 import app.amber.feature.novel.persistence.NovelRecoveryStore
 import app.amber.feature.novel.runtime.AndroidNovelModelAdapter
@@ -13,6 +19,7 @@ import app.amber.feature.ui.pages.novel.NovelProjectUiSession
 import app.amber.feature.ui.pages.novel.NovelProjectsViewModel
 import app.amber.feature.ui.pages.novel.NovelSettingsViewModel
 import app.amber.feature.ui.pages.novel.NovelWorkspaceViewModel
+import java.io.File
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,12 +41,33 @@ val novelModule = module {
         })
     }
 
+    single<File>(named("novelRootDirectory")) {
+        NovelFileProjectRepository.defaultRoot(androidContext().filesDir)
+    }
+
     single<NovelProjectPersisting> {
-        val context: Context = androidContext()
         NovelFileProjectRepository(
-            rootDirectory = NovelFileProjectRepository.defaultRoot(context.filesDir),
+            rootDirectory = get(named("novelRootDirectory")),
         )
     }
+
+    single {
+        NovelGhostwriteJobStore(
+            rootDirectory = get(named("novelRootDirectory")),
+        )
+    }
+
+    single { NovelGhostwriteBatchScheduler(androidContext()) }
+
+    single<NovelGhostwriteBatchRunning> {
+        NovelGhostwriteBatchExecutor(
+            store = get(),
+            novelCreation = get(),
+            runRegistry = get(),
+        )
+    }
+
+    single { NovelBackgroundRunRegistry() }
 
     single<NovelModelRunning> {
         AndroidNovelModelAdapter(
@@ -49,22 +77,36 @@ val novelModule = module {
     }
 
     single {
-        val repo: NovelProjectPersisting = get()
-        val root = (repo as? NovelFileProjectRepository)?.let {
-            // recovery next to projects root via defaultRoot
-            NovelFileProjectRepository.defaultRoot(androidContext().filesDir)
-        } ?: NovelFileProjectRepository.defaultRoot(androidContext().filesDir)
         DefaultNovelCreation(
-            repository = repo,
+            repository = get(),
             modelRunning = get(),
             appScope = get(named("novelAppScope")),
-            recoveryStore = NovelRecoveryStore(root),
+            recoveryStore = NovelRecoveryStore(get(named("novelRootDirectory"))),
         )
     } binds arrayOf(NovelCreation::class)
 
     single {
+        NovelGhostwriteBatchController(
+            context = androidContext(),
+            novelCreation = get(),
+            store = get(),
+            scheduler = get(),
+        )
+    }
+
+    single {
+        NovelGhostwriteCoordinator(
+            context = androidContext(),
+            novelCreation = get(),
+            appScope = get(named("novelAppScope")),
+            backgroundRunRegistry = get(),
+        )
+    }
+
+    single {
         NovelLifecycleBridge(
             novelCreation = get(),
+            backgroundRunRegistry = get(),
             appScope = get(named("novelAppScope")),
         )
     }
@@ -72,7 +114,10 @@ val novelModule = module {
     single { NovelProjectUiSession() }
 
     viewModel {
-        NovelProjectsViewModel(novelCreation = get())
+        NovelProjectsViewModel(
+            novelCreation = get(),
+            ghostwriteBatchController = get(),
+        )
     }
 
     viewModel { parameters ->
@@ -80,6 +125,9 @@ val novelModule = module {
             projectId = parameters.get(),
             novelCreation = get(),
             uiSession = get(),
+            ghostwriteCoordinator = get(),
+            backgroundRunRegistry = get(),
+            ghostwriteBatchController = get(),
         )
     }
 
@@ -88,6 +136,8 @@ val novelModule = module {
             projectId = parameters.get(),
             novelCreation = get(),
             uiSession = get(),
+            ghostwriteCoordinator = get(),
+            ghostwriteBatchController = get(),
         )
     }
 }

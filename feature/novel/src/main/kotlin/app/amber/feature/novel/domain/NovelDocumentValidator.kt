@@ -2,6 +2,7 @@ package app.amber.feature.novel.domain
 
 import app.amber.feature.novel.model.NovelBranchLifecycle
 import app.amber.feature.novel.model.NovelProjectDocumentV1
+import app.amber.feature.novel.model.NovelProjectModelPolicy
 import app.amber.feature.novel.model.NovelRecoverySidecarV1
 import app.amber.feature.novel.serialization.sha256HexOfUtf8
 
@@ -100,6 +101,13 @@ object NovelDocumentValidator {
         if (document.branches.none { it.id == document.project.mainBranchID }) {
             issues += "Main branch is missing from branches."
         }
+        validateFixedModelPolicy(document.project.modelPolicy, "creation", issues)
+        document.project.stateSyncModelPolicy?.let {
+            validateFixedModelPolicy(it, "state-sync", issues)
+        }
+        document.project.reviewModelPolicy?.let {
+            validateFixedModelPolicy(it, "review", issues)
+        }
     }
 
     private fun validateSessionsAndBranches(
@@ -173,6 +181,48 @@ object NovelDocumentValidator {
                 if (eventId !in eventIds) {
                     issues += "State snapshot ${snapshot.id} references missing event."
                 }
+            }
+        }
+        val branchIds = document.branches.map { it.id }.toSet()
+        val planIds = document.chapterPlans.map { it.id }
+        if (planIds.toSet().size != planIds.size) issues += "Duplicate chapter plan IDs."
+        val planBranchIds = document.chapterPlans.map { it.branchID }
+        if (planBranchIds.toSet().size != planBranchIds.size) {
+            issues += "Duplicate chapter plans for a branch."
+        }
+        for (plan in document.chapterPlans) {
+            if (plan.branchID !in branchIds) {
+                issues += "Chapter plan ${plan.id} references a missing branch."
+            }
+            val expectedDigest = app.amber.feature.novel.model.NovelChapterPlanRecord.digest(
+                plan.canonicalDigestPayload(),
+            )
+            if (plan.contentDigest != expectedDigest) {
+                issues += "Chapter plan ${plan.id} digest does not match its content."
+            }
+            if (plan.isConfirmed && plan.confirmedAt == null) {
+                issues += "Confirmed chapter plan ${plan.id} is missing confirmedAt."
+            }
+            if (plan.isConfirmed && plan.mustHappen.isEmpty()) {
+                issues += "Confirmed chapter plan ${plan.id} has no must-happen items."
+            }
+            if (plan.goalAndConflict.isBlank()) {
+                issues += "Chapter plan ${plan.id} is missing a goal and conflict."
+            }
+        }
+        val arcBranchIds = document.upcomingArcs.map { it.branchID }
+        if (arcBranchIds.toSet().size != arcBranchIds.size) {
+            issues += "Duplicate upcoming arcs for a branch."
+        }
+        for (arc in document.upcomingArcs) {
+            if (arc.branchID !in branchIds) {
+                issues += "Upcoming arc references a missing branch ${arc.branchID}."
+            }
+            if (arc.beats.isEmpty()) {
+                issues += "Upcoming arc for branch ${arc.branchID} has no beats."
+            }
+            if (arc.beats != app.amber.feature.novel.model.NovelUpcomingArcRecord.normalizedBeats(arc.beats)) {
+                issues += "Upcoming arc for branch ${arc.branchID} is not normalized."
             }
         }
     }
@@ -264,6 +314,18 @@ object NovelDocumentValidator {
             if (!isSHA256(applied.payloadSHA256)) {
                 issues += "Applied operation ${applied.operationID} has invalid payload hash."
             }
+        }
+    }
+
+    private fun validateFixedModelPolicy(
+        policy: NovelProjectModelPolicy,
+        label: String,
+        issues: MutableList<String>,
+    ) {
+        if (policy is NovelProjectModelPolicy.Fixed &&
+            (policy.providerID.isBlank() || policy.modelID.isBlank())
+        ) {
+            issues += "Fixed $label model policy has an empty stable ID."
         }
     }
 

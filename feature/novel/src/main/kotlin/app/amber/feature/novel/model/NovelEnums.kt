@@ -35,12 +35,45 @@ enum class NovelProjectCreationMode {
 }
 
 @Serializable
+enum class NovelCollaborationMode {
+    @SerialName("cocreation")
+    Cocreation,
+
+    @SerialName("ghostwrite")
+    Ghostwrite,
+}
+
+@Serializable
+enum class NovelChapterPlanStatus {
+    @SerialName("draft")
+    Draft,
+
+    @SerialName("confirmed")
+    Confirmed,
+}
+
+@Serializable
 enum class NovelGenerationGranularity {
     @SerialName("continuation")
     Continuation,
 
     @SerialName("wholeChapter")
     WholeChapter,
+}
+
+@Serializable
+enum class NovelCollectionSource {
+    @SerialName("user")
+    User,
+
+    @SerialName("systemAutoCollect")
+    SystemAutoCollect;
+
+    val wireValue: String
+        get() = when (this) {
+            User -> "user"
+            SystemAutoCollect -> "systemAutoCollect"
+        }
 }
 
 @Serializable
@@ -289,6 +322,24 @@ enum class NovelOperationKind {
     @SerialName("setPolishPreference")
     SetPolishPreference,
 
+    @SerialName("setCollaborationMode")
+    SetCollaborationMode,
+
+    @SerialName("setPauseGhostwriteOnBlockingContinuity")
+    SetPauseGhostwriteOnBlockingContinuity,
+
+    @SerialName("upsertChapterPlan")
+    UpsertChapterPlan,
+
+    @SerialName("clearChapterPlan")
+    ClearChapterPlan,
+
+    @SerialName("upsertUpcomingArc")
+    UpsertUpcomingArc,
+
+    @SerialName("clearUpcomingArc")
+    ClearUpcomingArc,
+
     @SerialName("forkBranch")
     ForkBranch,
 
@@ -384,6 +435,15 @@ enum class NovelInjectionSelectionReason {
 
     @SerialName("requiredPolishPreference")
     RequiredPolishPreference,
+
+    @SerialName("confirmedChapterPlan")
+    ConfirmedChapterPlan,
+
+    @SerialName("recentWrittenHighlights")
+    RecentWrittenHighlights,
+
+    @SerialName("upcomingArc")
+    UpcomingArc,
 
     @SerialName("requiredUserInput")
     RequiredUserInput,
@@ -732,6 +792,9 @@ sealed class NovelSettingProposalOrigin {
 sealed class NovelInjectionSectionKind {
     data object FixedPrompt : NovelInjectionSectionKind()
     data object PolishPreference : NovelInjectionSectionKind()
+    data class ChapterPlan(val planID: NovelChapterPlanId) : NovelInjectionSectionKind()
+    data class RecentWrittenHighlights(val snapshotID: NovelStateSnapshotId) : NovelInjectionSectionKind()
+    data class UpcomingArc(val branchID: NovelBranchId) : NovelInjectionSectionKind()
     data class CurrentState(val snapshotID: NovelStateSnapshotId) : NovelInjectionSectionKind()
     data class PendingManualState(
         val pendingID: NovelPendingOperationId,
@@ -754,6 +817,36 @@ sealed class NovelInjectionSectionKind {
             val element = when (value) {
                 FixedPrompt -> swiftAssociatedObject("fixedPrompt")
                 PolishPreference -> swiftAssociatedObject("polishPreference")
+                is ChapterPlan -> swiftAssociatedObject(
+                    "chapterPlan",
+                    buildJsonObject {
+                        put(
+                            "_0",
+                            json.json.encodeToJsonElement(NovelChapterPlanId.Serializer, value.planID),
+                        )
+                    },
+                )
+                is RecentWrittenHighlights -> swiftAssociatedObject(
+                    "recentWrittenHighlights",
+                    buildJsonObject {
+                        put(
+                            "_0",
+                            json.json.encodeToJsonElement(
+                                NovelStateSnapshotId.Serializer,
+                                value.snapshotID,
+                            ),
+                        )
+                    },
+                )
+                is UpcomingArc -> swiftAssociatedObject(
+                    "upcomingArc",
+                    buildJsonObject {
+                        put(
+                            "_0",
+                            json.json.encodeToJsonElement(NovelBranchId.Serializer, value.branchID),
+                        )
+                    },
+                )
                 is CurrentState -> swiftAssociatedObject(
                     "currentState",
                     buildJsonObject {
@@ -837,6 +930,24 @@ sealed class NovelInjectionSectionKind {
             return when (caseName) {
                 "fixedPrompt" -> FixedPrompt
                 "polishPreference" -> PolishPreference
+                "chapterPlan" -> ChapterPlan(
+                    json.json.decodeFromJsonElement(
+                        NovelChapterPlanId.Serializer,
+                        associated.getValue("_0"),
+                    ),
+                )
+                "recentWrittenHighlights" -> RecentWrittenHighlights(
+                    json.json.decodeFromJsonElement(
+                        NovelStateSnapshotId.Serializer,
+                        associated.getValue("_0"),
+                    ),
+                )
+                "upcomingArc" -> UpcomingArc(
+                    json.json.decodeFromJsonElement(
+                        NovelBranchId.Serializer,
+                        associated.getValue("_0"),
+                    ),
+                )
                 "currentState" -> CurrentState(
                     json.json.decodeFromJsonElement(
                         NovelStateSnapshotId.Serializer,

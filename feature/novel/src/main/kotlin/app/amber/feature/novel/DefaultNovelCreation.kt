@@ -1,8 +1,12 @@
 package app.amber.feature.novel
 
 import app.amber.feature.novel.domain.NovelBranchReducer
+import app.amber.feature.novel.domain.NovelClearChapterPlanCommand
+import app.amber.feature.novel.domain.NovelClearUpcomingArcCommand
 import app.amber.feature.novel.domain.NovelCollectCommand
 import app.amber.feature.novel.domain.NovelCollectionReducer
+import app.amber.feature.novel.domain.NovelContinuityAuditChapter
+import app.amber.feature.novel.domain.NovelContinuityAuditMapper
 import app.amber.feature.novel.domain.NovelCreateProjectCommand
 import app.amber.feature.novel.domain.NovelDeleteMaterialCommand
 import app.amber.feature.novel.domain.NovelError
@@ -19,14 +23,21 @@ import app.amber.feature.novel.domain.NovelReducer
 import app.amber.feature.novel.domain.NovelRenameProjectCommand
 import app.amber.feature.novel.domain.NovelReviseMaterialCommand
 import app.amber.feature.novel.domain.NovelSetModelPolicyCommand
+import app.amber.feature.novel.domain.NovelSetCollaborationModeCommand
+import app.amber.feature.novel.domain.NovelSetPauseGhostwriteOnBlockingContinuityCommand
 import app.amber.feature.novel.domain.NovelSetPolishPreferenceCommand
 import app.amber.feature.novel.domain.NovelStructuredOutputDecoder
+import app.amber.feature.novel.domain.NovelUpsertChapterPlanCommand
+import app.amber.feature.novel.domain.NovelUpsertUpcomingArcCommand
 import app.amber.feature.novel.model.NovelBranchId
 import app.amber.feature.novel.model.NovelBranchLifecycle
 import app.amber.feature.novel.model.NovelBranchSyncStatus
 import app.amber.feature.novel.model.NovelCandidateId
+import app.amber.feature.novel.model.NovelCandidateKind
+import app.amber.feature.novel.model.NovelCandidateStatus
 import app.amber.feature.novel.model.NovelChapterId
 import app.amber.feature.novel.model.NovelCheckpointId
+import app.amber.feature.novel.model.NovelCollectionSource
 import app.amber.feature.novel.model.NovelCollectionTarget
 import app.amber.feature.novel.model.NovelFailure
 import app.amber.feature.novel.model.NovelGenerationGranularity
@@ -38,6 +49,7 @@ import app.amber.feature.novel.model.NovelMessageId
 import app.amber.feature.novel.model.NovelOperationId
 import app.amber.feature.novel.model.NovelOutcome
 import app.amber.feature.novel.model.NovelProjectId
+import app.amber.feature.novel.model.NovelProjectDocumentV1
 import app.amber.feature.novel.model.NovelProjectModelPolicy
 import app.amber.feature.novel.model.NovelProjectSummary
 import app.amber.feature.novel.model.NovelReceiptId
@@ -53,6 +65,7 @@ import app.amber.feature.novel.model.NovelStateSnapshotId
 import app.amber.feature.novel.persistence.NovelFileProjectRepository
 import app.amber.feature.novel.persistence.NovelProjectPersisting
 import app.amber.feature.novel.persistence.NovelRecoveryStore
+import app.amber.feature.novel.runtime.NovelInjectionDefaults
 import app.amber.feature.novel.runtime.NovelInjectionPlanner
 import app.amber.feature.novel.runtime.NovelModelEvent
 import app.amber.feature.novel.runtime.NovelModelMessage
@@ -64,26 +77,58 @@ import app.amber.feature.novel.runtime.NovelPromptCatalog
 import app.amber.feature.novel.runtime.NovelPromptKind
 import app.amber.feature.novel.serialization.NovelPackageCodec
 import app.amber.feature.novel.serialization.sha256HexOfUtf8
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+
+private const val DEFAULT_ONE_SHOT_TIMEOUT_MILLIS = 90_000L
+private const val MANUAL_SYNC_FALLBACK_CONTEXT_TOKENS = 32_000
+private const val MANUAL_SYNC_OUTPUT_TOKENS = 8_192
+private const val MANUAL_SYNC_CONTEXT_MARGIN_TOKENS = 1_024
+private const val CONTINUITY_FALLBACK_CONTEXT_TOKENS = 32_000
+private const val CONTINUITY_REVIEW_OUTPUT_RESERVE_TOKENS = 4_096
+// Chinese prose can approach one token per character; use the conservative bound.
+private const val CONTINUITY_SAFE_CHARS_PER_TOKEN = 1
+private const val CONTINUITY_FIXED_SAFE_MANUSCRIPT_CHARS = 48_000
+
+internal fun manualSyncInputBudget(contextWindowTokens: Int?): Int {
+    val contextTokens = contextWindowTokens ?: MANUAL_SYNC_FALLBACK_CONTEXT_TOKENS
+    val available = contextTokens.toLong() -
+        MANUAL_SYNC_OUTPUT_TOKENS -
+        MANUAL_SYNC_CONTEXT_MARGIN_TOKENS
+    if (available <= 0L) {
+        throw NovelError.InvalidInput(
+            "The state synchronization model context window is too small for a safe request.",
+        )
+    }
+    return minOf(NovelInjectionDefaults.ESTIMATED_INPUT_TOKENS, available.toInt())
+}
 
 class DefaultNovelCreation(
     private val repository: NovelProjectPersisting,
     private val modelRunning: NovelModelRunning,
     private val appScope: CoroutineScope,
     private val recoveryStore: NovelRecoveryStore? = null,
+    private val oneShotTimeoutMillis: Long = DEFAULT_ONE_SHOT_TIMEOUT_MILLIS,
 ) : NovelCreation {
+    init {
+        require(oneShotTimeoutMillis > 0) { "oneShotTimeoutMillis must be positive" }
+    }
+
     private val writeMutex = Mutex()
     private val _projectList = MutableStateFlow<List<NovelProjectSummary>>(emptyList())
     override val projectList: StateFlow<List<NovelProjectSummary>> = _projectList.asStateFlow()
@@ -155,6 +200,13 @@ class DefaultNovelCreation(
                     is NovelIntent.SetModelPolicy -> setModelPolicy(intent)
                     is NovelIntent.ClearStateSyncModelPolicy -> clearStateSyncModelPolicy(intent)
                     is NovelIntent.SetPolishPreference -> setPolishPreference(intent)
+                    is NovelIntent.SetCollaborationMode -> setCollaborationMode(intent)
+                    is NovelIntent.SetPauseGhostwriteOnBlockingContinuity ->
+                        setPauseGhostwriteOnBlockingContinuity(intent)
+                    is NovelIntent.UpsertChapterPlan -> upsertChapterPlan(intent)
+                    is NovelIntent.ClearChapterPlan -> clearChapterPlan(intent)
+                    is NovelIntent.UpsertUpcomingArc -> upsertUpcomingArc(intent)
+                    is NovelIntent.ClearUpcomingArc -> clearUpcomingArc(intent)
                     is NovelIntent.ResolveProposal -> resolveProposal(intent)
                     is NovelIntent.ForkBranch -> forkBranch(intent)
                     is NovelIntent.UndoHead -> undoHead(intent)
@@ -183,7 +235,7 @@ class DefaultNovelCreation(
     }
 
     override fun start(request: NovelRunRequest): NovelRun {
-        val runId = NovelRunId.generate()
+        val runId = request.runId ?: NovelRunId.generate()
         val events = MutableSharedFlow<NovelRunEvent>(
             replay = 16,
             extraBufferCapacity = 64,
@@ -221,7 +273,9 @@ class DefaultNovelCreation(
         val targets = if (request.runId != null) {
             listOfNotNull(liveRuns[request.runId.rawValue])
         } else {
-            liveRuns.values.filter { it.projectId == request.projectId }
+            liveRuns.values.filter {
+                it.projectId == request.projectId && it.runId !in request.excludedRunIds
+            }
         }
         for (live in targets) {
             interruptTombstones.add(live.runId.rawValue)
@@ -460,7 +514,14 @@ class DefaultNovelCreation(
             parameters = NovelModelParameters(),
         )
         val requestPayload = sha256HexOfUtf8(
-            listOf(runId.rawValue, branchId.rawValue, kind.name, regenerateUserText).joinToString("|"),
+            listOf(
+                runId.rawValue,
+                branchId.rawValue,
+                kind.name,
+                request.ghostwritePlanId?.rawValue.orEmpty(),
+                plan.canonicalInputSHA256,
+                regenerateUserText,
+            ).joinToString("|"),
         )
         val generationReceipt = NovelGenerationReceiptRecord(
             id = generationReceiptId,
@@ -493,9 +554,10 @@ class DefaultNovelCreation(
             generationReceiptID = generationReceiptId,
             injectionReceiptID = injectionReceiptId,
             sourceChapterVersionID = request.sourceChapterVersionId,
-            expectedProjectRevision = doc.project.revision,
-            expectedConfigRevision = doc.project.configRevision,
-            expectedBranchHeadRevision = branch.headRevision,
+            ghostwritePlanID = request.ghostwritePlanId,
+            expectedProjectRevision = request.expectedProjectRevision ?: doc.project.revision,
+            expectedConfigRevision = request.expectedConfigRevision ?: doc.project.configRevision,
+            expectedBranchHeadRevision = request.expectedBranchHeadRevision ?: branch.headRevision,
             requestPayloadSHA256 = requestPayload,
         )
         if (runId.rawValue in interruptTombstones) {
@@ -702,12 +764,148 @@ class DefaultNovelCreation(
         return commitIfChanged(loaded, reduced)
     }
 
+    private suspend fun setCollaborationMode(intent: NovelIntent.SetCollaborationMode): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        val reduced = NovelReducer.setCollaborationMode(
+            NovelSetCollaborationModeCommand(
+                context = NovelMutationContext(
+                    operationID = NovelOperationId.generate(),
+                    expectedProjectRevision = loaded.document.project.revision,
+                    expectedConfigRevision = loaded.document.project.configRevision,
+                ),
+                projectID = intent.projectId,
+                branchID = intent.branchId,
+                mode = intent.mode,
+            ),
+            loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
+    private suspend fun setPauseGhostwriteOnBlockingContinuity(
+        intent: NovelIntent.SetPauseGhostwriteOnBlockingContinuity,
+    ): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        val reduced = NovelReducer.setPauseGhostwriteOnBlockingContinuity(
+            NovelSetPauseGhostwriteOnBlockingContinuityCommand(
+                context = NovelMutationContext(
+                    operationID = NovelOperationId.generate(),
+                    expectedProjectRevision = loaded.document.project.revision,
+                    expectedConfigRevision = loaded.document.project.configRevision,
+                ),
+                projectID = intent.projectId,
+                enabled = intent.enabled,
+            ),
+            loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
+    private suspend fun upsertChapterPlan(intent: NovelIntent.UpsertChapterPlan): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        val reduced = NovelReducer.upsertChapterPlan(
+            NovelUpsertChapterPlanCommand(
+                context = NovelMutationContext(
+                    operationID = intent.operationId ?: NovelOperationId.generate(),
+                    expectedProjectRevision = intent.expectedProjectRevision
+                        ?: loaded.document.project.revision,
+                    expectedConfigRevision = intent.expectedConfigRevision
+                        ?: loaded.document.project.configRevision,
+                    expectedBranchHeadRevision = intent.expectedBranchHeadRevision
+                        ?: loaded.document.branches.firstOrNull { it.id == intent.branchId }?.headRevision,
+                ),
+                projectID = intent.projectId,
+                branchID = intent.branchId,
+                planID = intent.planId,
+                status = intent.status,
+                outlinePlacement = intent.outlinePlacement,
+                goalAndConflict = intent.goalAndConflict,
+                mustHappen = intent.mustHappen,
+                mustNotHappen = intent.mustNotHappen,
+                endingHook = intent.endingHook,
+                visibleFacts = intent.visibleFacts,
+            ),
+            loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
+    private suspend fun clearChapterPlan(intent: NovelIntent.ClearChapterPlan): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        val reduced = NovelReducer.clearChapterPlan(
+            NovelClearChapterPlanCommand(
+                context = NovelMutationContext(
+                    operationID = intent.operationId ?: NovelOperationId.generate(),
+                    expectedProjectRevision = intent.expectedProjectRevision
+                        ?: loaded.document.project.revision,
+                    expectedConfigRevision = intent.expectedConfigRevision
+                        ?: loaded.document.project.configRevision,
+                    expectedBranchHeadRevision = intent.expectedBranchHeadRevision
+                        ?: loaded.document.branches.firstOrNull { it.id == intent.branchId }?.headRevision,
+                ),
+                projectID = intent.projectId,
+                branchID = intent.branchId,
+                expectedPlanID = intent.expectedPlanId,
+                expectedPlanDigest = intent.expectedPlanDigest,
+            ),
+            loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
+    private suspend fun upsertUpcomingArc(intent: NovelIntent.UpsertUpcomingArc): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        val reduced = NovelReducer.upsertUpcomingArc(
+            NovelUpsertUpcomingArcCommand(
+                context = NovelMutationContext(
+                    operationID = NovelOperationId.generate(),
+                    expectedProjectRevision = loaded.document.project.revision,
+                    expectedConfigRevision = loaded.document.project.configRevision,
+                ),
+                projectID = intent.projectId,
+                branchID = intent.branchId,
+                beats = intent.beats,
+            ),
+            loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
+    private suspend fun clearUpcomingArc(intent: NovelIntent.ClearUpcomingArc): NovelOutcome {
+        val loaded = repository.loadProject(intent.projectId)
+        val reduced = NovelReducer.clearUpcomingArc(
+            NovelClearUpcomingArcCommand(
+                context = NovelMutationContext(
+                    operationID = NovelOperationId.generate(),
+                    expectedProjectRevision = loaded.document.project.revision,
+                    expectedConfigRevision = loaded.document.project.configRevision,
+                ),
+                projectID = intent.projectId,
+                branchID = intent.branchId,
+            ),
+            loaded.document,
+        )
+        return commitIfChanged(loaded, reduced)
+    }
+
     private suspend fun collectCandidate(intent: NovelIntent.CollectCandidate): NovelOutcome {
         // Snapshot under lock, then release before any provider await.
-        val (policy, planSeed) = writeMutex.withLock {
+        val (policyAndPlan, replayObserved) = writeMutex.withLock {
             val loaded = repository.loadProject(intent.projectId)
-            assertNotBusy(loaded)
-            val plan = if (intent.runStateDelta) {
+            val hasAppliedOperation = intent.operationId?.let { operationID ->
+                loaded.document.appliedOperations.any { it.operationID == operationID }
+            } == true
+            if (!hasAppliedOperation) {
+                assertNotBusy(loaded)
+                if (intent.source == NovelCollectionSource.SystemAutoCollect) {
+                    validateSystemAutoCollect(intent, loaded.document)
+                }
+            }
+            val shouldExtractState =
+                !hasAppliedOperation &&
+                    intent.runStateDelta &&
+                    intent.source == NovelCollectionSource.User
+            val plan = if (shouldExtractState) {
                 NovelInjectionPlanner.plan(
                     loaded.document,
                     intent.branchId,
@@ -715,13 +913,16 @@ class DefaultNovelCreation(
                     intent.selectedText,
                 )
             } else null
-            loaded.document.project.effectiveStateSyncModelPolicy() to plan
+            (loaded.document.project.effectiveStateSyncModelPolicy() to plan) to hasAppliedOperation
         }
+        val (policy, planSeed) = policyAndPlan
 
         // Provider await is outside the write lock. Manuscript collect still proceeds if
         // state-delta fails — prose must not be lost (P0-A soft-fail policy).
         var stateDelta: app.amber.feature.novel.domain.NovelStateDeltaV1? = null
-        val deltaRequested = intent.runStateDelta
+        val deltaRequested = !replayObserved &&
+            intent.runStateDelta &&
+            intent.source == NovelCollectionSource.User
         if (deltaRequested && planSeed != null) {
             try {
                 val model = modelRunning.resolveModel(policy)
@@ -769,11 +970,15 @@ class DefaultNovelCreation(
             }
         }
         // Soft-fail: keep manuscript, mark needsSync so「同步状态」can rebuild living state.
-        val markNeedsSync = deltaRequested && stateDelta == null
+        val markNeedsSync = intent.source == NovelCollectionSource.SystemAutoCollect ||
+            (deltaRequested && stateDelta == null)
 
         return writeMutex.withLock {
             val current = repository.loadProject(intent.projectId)
-            assertNotBusy(current)
+            val hasAppliedOperation = intent.operationId?.let { operationID ->
+                current.document.appliedOperations.any { it.operationID == operationID }
+            } == true
+            if (!hasAppliedOperation) assertNotBusy(current)
             val reduced = NovelCollectionReducer.collect(
                 NovelCollectCommand(
                     projectId = intent.projectId,
@@ -781,16 +986,48 @@ class DefaultNovelCreation(
                     candidateId = intent.candidateId,
                     selectedText = intent.selectedText,
                     target = intent.target,
-                    expectedProjectRevision = current.document.project.revision,
-                    expectedBranchHeadRevision = current.document.branches
-                        .first { it.id == intent.branchId }.headRevision,
+                    expectedProjectRevision = intent.expectedProjectRevision
+                        ?: current.document.project.revision,
+                    expectedConfigRevision = intent.expectedConfigRevision
+                        ?: current.document.project.configRevision,
+                    expectedBranchHeadRevision = intent.expectedBranchHeadRevision
+                        ?: current.document.branches.first { it.id == intent.branchId }.headRevision,
                     stateDelta = stateDelta,
                     markNeedsSync = markNeedsSync,
+                    source = intent.source,
+                    operationId = intent.operationId ?: NovelOperationId.generate(),
+                    newChapterVersionId = intent.newChapterVersionId
+                        ?: app.amber.feature.novel.model.NovelChapterVersionId.generate(),
+                    newCheckpointId = intent.newCheckpointId ?: NovelCheckpointId.generate(),
+                    newStateSnapshotId = intent.newStateSnapshotId ?: NovelStateSnapshotId.generate(),
                 ),
                 current.document,
             )
+            if (reduced.document == current.document) return@withLock reduced.outcome
             repository.commitProject(reduced.document, expectedRevision = current.document.project.revision)
             reduced.outcome
+        }
+    }
+
+    private fun validateSystemAutoCollect(
+        intent: NovelIntent.CollectCandidate,
+        document: app.amber.feature.novel.model.NovelProjectDocumentV1,
+    ) {
+        val candidate = document.candidates.firstOrNull { it.id == intent.candidateId }
+            ?: throw NovelError.InvalidInput("Candidate not found")
+        val confirmedPlan = document.confirmedChapterPlan(intent.branchId)
+            ?: throw NovelError.InvalidInput("Automatic collection requires a confirmed chapter plan.")
+        if (candidate.branchID != intent.branchId ||
+            candidate.kind != NovelCandidateKind.Prose ||
+            candidate.status != NovelCandidateStatus.Available ||
+            candidate.chapterPlanDigest != confirmedPlan.contentDigest ||
+            candidate.ghostwritePlanID != confirmedPlan.id ||
+            intent.target !is NovelCollectionTarget.CreateNextChapter ||
+            intent.selectedText != candidate.content
+        ) {
+            throw NovelError.InvalidInput(
+                "Automatic collection requires the complete candidate bound to the current chapter plan.",
+            )
         }
     }
 
@@ -878,39 +1115,96 @@ class DefaultNovelCreation(
     }
 
     private suspend fun syncManualEdits(intent: NovelIntent.SyncManualEdits): NovelOutcome {
-        val (policy, chunks, planSeed) = writeMutex.withLock {
+        data class SyncPreparation(
+            val policy: NovelProjectModelPolicy,
+            val chunks: List<String>,
+            val document: NovelProjectDocumentV1,
+            val projectRevision: Long,
+            val configRevision: Long,
+            val branchHeadRevision: Long,
+        )
+
+        val operationId = intent.operationId ?: NovelOperationId.generate()
+        val newCheckpointId = intent.newCheckpointId ?: NovelCheckpointId.generate()
+        val newStateSnapshotId = intent.newStateSnapshotId ?: NovelStateSnapshotId.generate()
+        // A durable batch may crash after the project commit and before its own ledger advances.
+        // Reconcile the caller-owned identities before planning or invoking a provider.
+        writeMutex.withLock {
+            val loaded = repository.loadProject(intent.projectId)
+            NovelManualSyncReducer.replayApplied(
+                projectId = intent.projectId,
+                branchId = intent.branchId,
+                operationId = operationId,
+                newCheckpointId = newCheckpointId,
+                newStateSnapshotId = newStateSnapshotId,
+                document = loaded.document,
+            )
+        }?.let { return it }
+
+        val preparation = writeMutex.withLock {
             val loaded = repository.loadProject(intent.projectId)
             assertNotBusy(loaded)
             val branch = loaded.document.branches.first { it.id == intent.branchId }
-            val chunks = NovelManualSyncReducer.workingManuscriptChunks(
-                loaded.document,
-                intent.branchId,
-            )
-            val fullManuscript = chunks.joinToString("\n\n")
-            val plan = if (intent.runStateDelta) {
-                NovelInjectionPlanner.plan(
+            val projectRevision = intent.expectedProjectRevision ?: loaded.document.project.revision
+            val configRevision = intent.expectedConfigRevision ?: loaded.document.project.configRevision
+            val branchHeadRevision = intent.expectedBranchHeadRevision ?: branch.headRevision
+            if (projectRevision != loaded.document.project.revision) {
+                throw NovelError.StaleProjectRevision(projectRevision, loaded.document.project.revision)
+            }
+            if (configRevision != loaded.document.project.configRevision) {
+                throw NovelError.StaleConfigRevision(configRevision, loaded.document.project.configRevision)
+            }
+            if (branchHeadRevision != branch.headRevision) {
+                throw NovelError.StaleBranchHeadRevision(branchHeadRevision, branch.headRevision)
+            }
+            val chunks = if (intent.failClosed) {
+                NovelManualSyncReducer.appendOnlyHeadSuffixChunks(
                     loaded.document,
                     intent.branchId,
-                    NovelPromptKind.ManualSyncV1,
-                    // Plan context uses a short seed; per-chunk model input carries the body.
-                    fullManuscript.take(4_000),
+                ) ?: throw NovelError.InvalidInput(
+                    "Strict synchronization requires exactly one append-only collected chapter.",
                 )
-            } else null
-            Triple(
-                loaded.document.project.effectiveStateSyncModelPolicy(),
-                chunks,
-                plan,
+            } else {
+                NovelManualSyncReducer.workingManuscriptChunks(
+                    loaded.document,
+                    intent.branchId,
+                )
+            }
+            SyncPreparation(
+                policy = loaded.document.project.effectiveStateSyncModelPolicy(),
+                chunks = chunks,
+                document = loaded.document,
+                projectRevision = projectRevision,
+                configRevision = configRevision,
+                branchHeadRevision = branchHeadRevision,
             )
         }
         var stateDelta: app.amber.feature.novel.domain.NovelStateDeltaV1? = null
         var modelRebuildAttempted = false
         var successfulChunkCount = 0
-        if (intent.runStateDelta && planSeed != null && chunks.isNotEmpty()) {
+        if (intent.runStateDelta && preparation.chunks.isNotEmpty()) {
             modelRebuildAttempted = true
             try {
-                val model = modelRunning.resolveModel(policy)
+                val model = modelRunning.resolveModel(preparation.policy)
+                val inputBudgetTokens = manualSyncInputBudget(model.contextWindowTokens)
                 val chunkDeltas = mutableListOf<app.amber.feature.novel.domain.NovelStateDeltaV1>()
-                chunks.forEachIndexed { index, chunk ->
+                var projectedDocument = preparation.document
+                preparation.chunks.forEachIndexed { index, chunk ->
+                    val modelInput = NovelManualSyncReducer.modelInputForChunk(
+                        chunk = chunk,
+                        index = index,
+                        total = preparation.chunks.size,
+                    )
+                    // Plan each chunk independently so the canonical chunk is included in the
+                    // input budget. ManualSync planning excludes session messages and chapter
+                    // tails, so rejected/unfinished candidates cannot leak into state rebuild.
+                    val plan = NovelInjectionPlanner.plan(
+                        document = projectedDocument,
+                        branchId = intent.branchId,
+                        promptKind = NovelPromptKind.ManualSyncV1,
+                        userText = modelInput,
+                        budgetTokens = inputBudgetTokens,
+                    )
                     val text = buildString {
                         modelRunning.start(
                             NovelModelRequest(
@@ -920,16 +1214,19 @@ class DefaultNovelCreation(
                                 messages = listOf(
                                     NovelModelMessage(
                                         NovelModelMessage.Role.System,
-                                        planSeed.prompt.systemText + "\n\n" + planSeed.contextText,
+                                        plan.prompt.systemText + "\n\n" + plan.contextText,
                                     ),
                                     NovelModelMessage(
                                         NovelModelMessage.Role.User,
-                                        NovelManualSyncReducer.modelInputForChunk(
-                                            chunk = chunk,
-                                            index = index,
-                                            total = chunks.size,
-                                        ),
+                                        "Return the strict JSON object for the canonical " +
+                                            "MANUAL SYNC CHUNK in the system context.",
                                     ),
+                                ),
+                                parameters = NovelModelParameters(
+                                    temperature = 0.0,
+                                    topP = 1.0,
+                                    maxOutputTokens = MANUAL_SYNC_OUTPUT_TOKENS,
+                                    reasoningLevel = "auto",
                                 ),
                             ),
                         ).collect { ev ->
@@ -938,16 +1235,35 @@ class DefaultNovelCreation(
                                 is NovelModelEvent.TextReplacement -> {
                                     clear(); append(ev.text)
                                 }
-                                else -> Unit
+                                is NovelModelEvent.Failed -> throw NovelError.ProviderError(ev.message)
+                                NovelModelEvent.Completed -> Unit
                             }
                         }
                     }
                     if (text.isNotBlank()) {
                         runCatching {
-                            NovelStructuredOutputDecoder.decodeStateDelta(text)
+                            if (intent.failClosed) {
+                                NovelStructuredOutputDecoder.decodeManualSyncStateDelta(
+                                    text = text,
+                                    evidenceSource = chunk,
+                                ).also { decoded ->
+                                    NovelManualSyncReducer.validateCumulativeStateDelta(
+                                        document = projectedDocument,
+                                        branchId = intent.branchId,
+                                        stateDelta = decoded,
+                                    )
+                                }
+                            } else {
+                                NovelStructuredOutputDecoder.decodeStateDelta(text)
+                            }
                         }.getOrNull()?.let {
                             chunkDeltas += it
                             successfulChunkCount++
+                            projectedDocument = NovelManualSyncReducer.projectStateForNextChunk(
+                                document = projectedDocument,
+                                branchId = intent.branchId,
+                                stateDelta = it,
+                            )
                         }
                     }
                 }
@@ -956,10 +1272,26 @@ class DefaultNovelCreation(
                 stateDelta = null
             }
         }
+        if (intent.failClosed && intent.runStateDelta &&
+            (!modelRebuildAttempted ||
+                stateDelta == null ||
+                successfulChunkCount != preparation.chunks.size)
+        ) {
+            throw NovelError.ProviderError(
+                "State synchronization was incomplete; the manuscript remains marked for sync.",
+            )
+        }
         return writeMutex.withLock {
             val current = repository.loadProject(intent.projectId)
+            NovelManualSyncReducer.replayApplied(
+                projectId = intent.projectId,
+                branchId = intent.branchId,
+                operationId = operationId,
+                newCheckpointId = newCheckpointId,
+                newStateSnapshotId = newStateSnapshotId,
+                document = current.document,
+            )?.let { return@withLock it }
             assertNotBusy(current)
-            val branch = current.document.branches.first { it.id == intent.branchId }
             // Formalize manuscript always (needsSync must clear), but if a model rebuild was
             // requested and produced nothing, leave a visible incomplete summary rather than
             // silently reusing stale living state as "success".
@@ -977,11 +1309,16 @@ class DefaultNovelCreation(
             val reduced = NovelManualSyncReducer.sync(
                 projectId = intent.projectId,
                 branchId = intent.branchId,
-                expectedProjectRevision = current.document.project.revision,
-                expectedBranchHeadRevision = branch.headRevision,
+                operationId = operationId,
+                newCheckpointId = newCheckpointId,
+                newStateSnapshotId = newStateSnapshotId,
+                expectedProjectRevision = preparation.projectRevision,
+                expectedConfigRevision = preparation.configRevision,
+                expectedBranchHeadRevision = preparation.branchHeadRevision,
                 stateDelta = commitDelta,
                 document = current.document,
             )
+            if (reduced.document == current.document) return@withLock reduced.outcome
             repository.commitProject(reduced.document, expectedRevision = current.document.project.revision)
             // Partial rebuild is visible via state summary "model rebuild incomplete";
             // manuscript formalization still commits so NeedsSync clears.
@@ -1286,7 +1623,7 @@ class DefaultNovelCreation(
         if (manuscript.isBlank()) {
             throw NovelError.InvalidInput("No manuscript chapters to audit.")
         }
-        val model = modelRunning.resolveModel(doc.project.modelPolicy)
+        val model = modelRunning.resolveModel(doc.project.effectiveReviewModelPolicy())
         val prompt = NovelPromptCatalog.template(NovelPromptKind.ContinuityAuditV1)
         val text = buildString {
             modelRunning.start(
@@ -1306,11 +1643,298 @@ class DefaultNovelCreation(
                         clear()
                         append(ev.text)
                     }
-                    else -> Unit
+                    is NovelModelEvent.Failed -> throw NovelError.ProviderError(ev.message)
+                    NovelModelEvent.Completed -> Unit
                 }
             }
         }
         return NovelStructuredOutputDecoder.decodeContinuityAudit(text)
+    }
+
+    override suspend fun acceptChapterPlan(
+        projectId: NovelProjectId,
+        branchId: NovelBranchId,
+        candidateId: NovelCandidateId,
+    ): app.amber.feature.novel.domain.NovelChapterPlanAcceptanceV1 {
+        val loaded = repository.loadProject(projectId)
+        if (loaded.access != app.amber.feature.novel.model.NovelProjectLoadAccess.ReadWrite) {
+            throw NovelError.DegradedReadOnly(projectId)
+        }
+        assertNotBusy(loaded)
+        val document = loaded.document
+        val branch = document.branches.firstOrNull {
+            it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active
+        } ?: throw NovelError.BranchNotFound(branchId)
+        val confirmedPlan = document.confirmedChapterPlan(branchId)
+            ?: throw NovelError.InvalidInput("A confirmed chapter plan is required for review.")
+        val candidate = document.candidates.firstOrNull {
+            it.id == candidateId && it.branchID == branchId
+        } ?: throw NovelError.InvalidInput("Candidate not found")
+        if (candidate.kind != NovelCandidateKind.Prose ||
+            candidate.status != NovelCandidateStatus.Available ||
+            candidate.content.isBlank() ||
+            candidate.baseCheckpointID != branch.headCheckpointID ||
+            candidate.baseHeadRevision != branch.headRevision ||
+            candidate.chapterPlanDigest != confirmedPlan.contentDigest ||
+            candidate.ghostwritePlanID != confirmedPlan.id
+        ) {
+            throw NovelError.InvalidInput(
+                "The candidate is not an available whole chapter bound to the current plan.",
+            )
+        }
+        val state = document.stateSnapshots.firstOrNull { it.id == branch.currentStateSnapshotID }
+        val input = NovelInjectionPlanner.chapterPlanAcceptanceInput(
+            confirmedPlan = confirmedPlan.injectionText(),
+            candidate = candidate.content,
+            recentWrittenHighlights = state?.injectionHighlightsText().orEmpty(),
+        )
+        val model = modelRunning.resolveModel(document.project.effectiveReviewModelPolicy())
+        val text = collectOneShotText(
+            NovelModelRequest(
+                runID = NovelRunId.generate(),
+                model = model,
+                purpose = NovelModelPurpose.ChapterPlanAcceptance,
+                messages = listOf(
+                    NovelModelMessage(NovelModelMessage.Role.System, input.prompt.systemText),
+                    NovelModelMessage(NovelModelMessage.Role.User, input.userText),
+                ),
+                parameters = NovelModelParameters(
+                    temperature = 0.0,
+                    topP = 1.0,
+                    maxOutputTokens = 4_096,
+                    reasoningLevel = "auto",
+                ),
+            ),
+        )
+        return NovelStructuredOutputDecoder.decodeChapterPlanAcceptance(text)
+    }
+
+    override suspend fun proposeNextChapterPlan(
+        projectId: NovelProjectId,
+        branchId: NovelBranchId,
+        previousPlanSummary: String?,
+    ): app.amber.feature.novel.domain.NovelChapterPlanProposalV1 {
+        val loaded = repository.loadProject(projectId)
+        if (loaded.access != app.amber.feature.novel.model.NovelProjectLoadAccess.ReadWrite) {
+            throw NovelError.DegradedReadOnly(projectId)
+        }
+        assertNotBusy(loaded)
+        val document = loaded.document
+        val branch = document.branches.firstOrNull {
+            it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active
+        } ?: throw NovelError.BranchNotFound(branchId)
+        if (branch.syncStatus != NovelBranchSyncStatus.Synchronized) {
+            throw NovelError.InvalidInput("The branch must be synchronized before planning the next chapter.")
+        }
+        if (document.confirmedChapterPlan(branchId) != null) {
+            throw NovelError.InvalidInput("A confirmed chapter plan already exists on this branch.")
+        }
+        val input = NovelInjectionPlanner.chapterPlanProposalInput(
+            document = document,
+            branchId = branchId,
+            nextOrdinal = branch.workingChapterSelections.size + 1,
+            previousPlanSummary = previousPlanSummary,
+        )
+        val model = modelRunning.resolveModel(document.project.modelPolicy)
+        val text = collectOneShotText(
+            NovelModelRequest(
+                runID = NovelRunId.generate(),
+                model = model,
+                purpose = NovelModelPurpose.ChapterPlanProposal,
+                messages = listOf(
+                    NovelModelMessage(NovelModelMessage.Role.System, input.prompt.systemText),
+                    NovelModelMessage(NovelModelMessage.Role.User, input.userText),
+                ),
+                parameters = NovelModelParameters(
+                    temperature = 0.0,
+                    topP = 1.0,
+                    maxOutputTokens = 4_096,
+                    reasoningLevel = "auto",
+                ),
+            ),
+        )
+        return NovelStructuredOutputDecoder.decodeChapterPlanProposal(text)
+    }
+
+    override suspend fun continuityAuditIncludingCandidate(
+        projectId: NovelProjectId,
+        branchId: NovelBranchId,
+        candidateId: NovelCandidateId,
+        maxCanonicalChapters: Int?,
+    ): NovelContinuityAuditReport {
+        require(maxCanonicalChapters == null || maxCanonicalChapters > 0) {
+            "Canonical continuity window must be positive."
+        }
+        val loaded = repository.loadProject(projectId)
+        if (loaded.access != app.amber.feature.novel.model.NovelProjectLoadAccess.ReadWrite) {
+            throw NovelError.DegradedReadOnly(projectId)
+        }
+        assertNotBusy(loaded)
+        val document = loaded.document
+        val branch = document.branches.firstOrNull {
+            it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active
+        } ?: throw NovelError.BranchNotFound(branchId)
+        if (branch.syncStatus == NovelBranchSyncStatus.NeedsSync) {
+            throw NovelError.InvalidInput("Synchronize the working manuscript before continuity audit.")
+        }
+        val candidate = document.candidates.firstOrNull {
+            it.id == candidateId && it.branchID == branchId
+        } ?: throw NovelError.InvalidInput("Candidate not found")
+        if (candidate.kind != NovelCandidateKind.Prose ||
+            candidate.status != NovelCandidateStatus.Available ||
+            candidate.content.isBlank() ||
+            candidate.baseCheckpointID != branch.headCheckpointID ||
+            candidate.baseHeadRevision != branch.headRevision
+        ) {
+            throw NovelError.InvalidInput("Only a current available prose candidate can be audited.")
+        }
+
+        var failedChunkCount = 0
+        val selectedCanonical = maxCanonicalChapters?.let(branch.workingChapterSelections::takeLast)
+            ?: branch.workingChapterSelections
+        val firstOrdinal = branch.workingChapterSelections.size - selectedCanonical.size + 1
+        val committedChapters = selectedCanonical.mapIndexedNotNull { index, selection ->
+            val version = document.chapterVersions.firstOrNull { it.id == selection.versionID }
+            if (version == null || version.content.isBlank()) {
+                failedChunkCount += 1
+                null
+            } else {
+                NovelContinuityAuditChapter(
+                    ordinal = firstOrdinal + index,
+                    title = continuityChapterTitle(version.title, "第${firstOrdinal + index}章"),
+                    content = version.content,
+                    isCandidate = false,
+                )
+            }
+        }
+        if (branch.workingChapterSelections.isEmpty()) {
+            return NovelContinuityAuditReport(
+                issues = emptyList(),
+                failedChunkCount = failedChunkCount,
+            )
+        }
+        val candidateChapter = NovelContinuityAuditChapter(
+            ordinal = branch.workingChapterSelections.size + 1,
+            title = "候选下一章",
+            content = candidate.content,
+            isCandidate = true,
+        )
+        val prompt = NovelPromptCatalog.template(NovelPromptKind.ContinuityAuditV1)
+        val systemText = prompt.systemText + "\n\n" + CANDIDATE_CONTINUITY_GROUNDING_INSTRUCTION
+        val model = try {
+            modelRunning.resolveModel(document.project.effectiveReviewModelPolicy())
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            return NovelContinuityAuditReport(
+                issues = emptyList(),
+                failedChunkCount = failedChunkCount + 1,
+            )
+        }
+        val chunking = NovelContinuityAuditMapper.chunkCanonicalWithCandidate(
+            canonicalChapters = committedChapters,
+            candidate = candidateChapter,
+            maxManuscriptChars = continuityManuscriptCharBudget(model.contextWindowTokens, systemText.length),
+        )
+        failedChunkCount += chunking.failedChunkCount
+        val candidateIssues = mutableListOf<app.amber.feature.novel.domain.NovelContinuityIssueV1>()
+        val canonicalOnlyBlockingIssues =
+            mutableListOf<app.amber.feature.novel.domain.NovelContinuityIssueV1>()
+        chunking.chunks.forEachIndexed { chunkIndex, chunk ->
+            try {
+                val text = collectOneShotText(
+                    NovelModelRequest(
+                        runID = NovelRunId.generate(),
+                        model = model,
+                        purpose = NovelModelPurpose.ContinuityAudit,
+                        messages = listOf(
+                            NovelModelMessage(NovelModelMessage.Role.System, systemText),
+                            NovelModelMessage(NovelModelMessage.Role.User, chunk.manuscript),
+                        ),
+                        parameters = NovelModelParameters(
+                            temperature = 0.0,
+                            topP = 1.0,
+                            maxOutputTokens = CONTINUITY_REVIEW_OUTPUT_RESERVE_TOKENS,
+                            reasoningLevel = "auto",
+                        ),
+                    ),
+                )
+                val audit = NovelStructuredOutputDecoder.decodeContinuityAudit(text)
+                val mapped = NovelContinuityAuditMapper.mapValidatedIssues(
+                    audit = audit,
+                    suppliedChapters = chunk.chapters,
+                    chunkIndex = chunkIndex,
+                )
+                candidateIssues += mapped.candidateIssues
+                canonicalOnlyBlockingIssues += mapped.canonicalOnlyBlockingIssues
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                failedChunkCount += 1
+            }
+        }
+        return NovelContinuityAuditReport(
+            issues = NovelContinuityAuditMapper.deduplicate(candidateIssues),
+            failedChunkCount = failedChunkCount,
+            canonicalOnlyBlockingIssues = NovelContinuityAuditMapper.deduplicate(canonicalOnlyBlockingIssues),
+        )
+    }
+
+    private fun continuityManuscriptCharBudget(contextWindowTokens: Int?, systemChars: Int): Int {
+        val contextTokens = (contextWindowTokens ?: CONTINUITY_FALLBACK_CONTEXT_TOKENS).coerceAtLeast(1)
+        val outputReserveTokens = minOf(
+            CONTINUITY_REVIEW_OUTPUT_RESERVE_TOKENS,
+            (contextTokens / 4).coerceAtLeast(1),
+        )
+        val contextBound = (
+            (contextTokens - outputReserveTokens).toLong() * CONTINUITY_SAFE_CHARS_PER_TOKEN - systemChars
+            ).coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
+        return minOf(CONTINUITY_FIXED_SAFE_MANUSCRIPT_CHARS, contextBound)
+    }
+
+    private fun continuityChapterTitle(raw: String, fallback: String): String = raw
+        .replace('\r', ' ')
+        .replace('\n', ' ')
+        .trim()
+        .ifBlank { fallback }
+
+    private suspend fun collectOneShotText(request: NovelModelRequest): String {
+        val output = StringBuilder()
+        var completed = false
+        try {
+            withTimeout(oneShotTimeoutMillis) {
+                modelRunning.start(request).takeWhile { event ->
+                    when (event) {
+                        is NovelModelEvent.TextDelta -> output.append(event.text)
+                        is NovelModelEvent.TextReplacement -> {
+                            output.clear()
+                            output.append(event.text)
+                        }
+                        is NovelModelEvent.Failed -> throw NovelError.ProviderError(event.message)
+                        NovelModelEvent.Completed -> completed = true
+                    }
+                    event != NovelModelEvent.Completed
+                }.collect {}
+            }
+        } catch (_: TimeoutCancellationException) {
+            throw NovelError.ProviderError("The review model timed out.")
+        }
+        if (!completed) {
+            throw NovelError.ProviderError("The review model ended without completing.")
+        }
+        return output.toString().also { text ->
+            if (text.isBlank()) {
+                throw NovelError.ProviderError("The review model returned no output.")
+            }
+        }
+    }
+
+    private companion object {
+        val CANDIDATE_CONTINUITY_GROUNDING_INSTRUCTION = """
+            This request contains one uncollected candidate labelled as the final chapter and a bounded subset of
+            canonical chapters. Every reference must use the exact supplied chapter ordinal and title. Evidence must
+            be a non-empty verbatim substring of that chapter body. Do not cite or infer text outside this request.
+        """.trimIndent()
     }
 
     override suspend fun distillDiscussionArchive(

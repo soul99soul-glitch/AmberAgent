@@ -337,6 +337,8 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
         Log.i(TAG, "streamText: model=${params.model.modelId}")
 
+        val terminationGuard = StreamTerminationGuard(StreamProtocol.GOOGLE)
+
         // Google functionCall 不携带 id; parseMessagePart 的随机 UUID 每个 chunk 都不同,
         // merge 层无法识别同一 tool。这里在 stream scope 内分配单调递增的确定性 id +
         // stream index, 保证同一流内 tool 标识稳定且并行 tool 不串线。
@@ -388,6 +390,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                     }
                     val candidates = jsonData["candidates"]?.jsonArray ?: return
                     if (candidates.isEmpty()) return
+                    terminationGuard.observeGoogleCandidates(candidates)
                     val usage = parseUsageMeta(jsonData["usageMetadata"] as? JsonObject)
                     val messageChunk = MessageChunk(
                         id = Uuid.random().toString(),
@@ -396,8 +399,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
                             val candidateObj = candidate.jsonObject
                             val content = candidateObj["content"]?.jsonObject
                             val groundingMetadata = candidateObj["groundingMetadata"]?.jsonObject
-                            val finishReason =
-                                candidateObj["finishReason"]?.jsonPrimitive?.contentOrNull
+                            val finishReason = googleCandidateFinishReason(candidateObj)
 
                             val message = content?.let {
                                 parseMessage(buildJsonObject {
@@ -469,7 +471,7 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
 
             override fun onClosed(eventSource: EventSource) {
                 Log.d(TAG, "onClosed")
-                close()
+                close(terminationGuard.cleanEofCause())
             }
         }
 
@@ -479,6 +481,15 @@ class GoogleProvider(private val client: OkHttpClient, context: Context? = null)
         awaitClose {
             Log.d(TAG, "awaitClose: cancel eventSource")
             eventSource.cancel()
+        }
+    }
+
+    internal fun googleCandidateFinishReason(candidate: JsonObject): String? =
+        candidate["finishReason"]?.jsonPrimitive?.contentOrNull
+
+    internal fun StreamTerminationGuard.observeGoogleCandidates(candidates: JsonArray) {
+        candidates.forEach { candidate ->
+            observeFinishReason(googleCandidateFinishReason(candidate.jsonObject))
         }
     }
 

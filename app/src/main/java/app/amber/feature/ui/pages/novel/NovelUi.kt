@@ -16,6 +16,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -199,9 +206,9 @@ object NovelControl {
     val QuietVPad = 8.dp
     val ChipHPad = 14.dp
     val ChipVPad = 8.dp
-    val IconTap = 36.dp
+    val IconTap = 48.dp
     val IconGlyph = 18.dp
-    val MinTouch = 36.dp
+    val MinTouch = 48.dp
 }
 
 @Composable
@@ -222,26 +229,27 @@ fun NovelBanner(
         WorkspaceTone.Neutral -> workspace.row to workspace.muted
     }
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite },
         shape = RoundedCornerShape(12.dp),
         color = container,
         border = workspaceBorder(),
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
                 text = text,
                 style = type.secondary,
                 color = content,
-                modifier = Modifier.weight(1f),
             )
             if (actionLabel != null && onAction != null) {
                 NovelPrimaryButton(
                     text = actionLabel,
                     onClick = onAction,
+                    modifier = Modifier.align(Alignment.End),
                     accent = true,
                     compact = true,
                 )
@@ -300,7 +308,8 @@ fun NovelChipButton(
             .clip(shape)
             .background(bg)
             .border(1.dp, borderColor, shape)
-            .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
+            .semantics { this.selected = selected }
+            .pressable(onClick = onClick, enabled = enabled, role = Role.Tab)
             .padding(
                 horizontal = if (compact) 12.dp else NovelControl.ChipHPad,
                 vertical = if (compact) 6.dp else NovelControl.ChipVPad,
@@ -337,7 +346,7 @@ fun NovelQuietButton(
         modifier = modifier
             .heightIn(min = NovelControl.MinTouch)
             .clip(RoundedCornerShape(NovelControl.RadiusCompact))
-            .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
+            .pressable(onClick = onClick, enabled = enabled)
             .padding(horizontal = NovelControl.QuietHPad, vertical = NovelControl.QuietVPad),
         contentAlignment = Alignment.Center,
     ) {
@@ -345,7 +354,8 @@ fun NovelQuietButton(
             text = text,
             style = type.meta.copy(fontWeight = FontWeight.SemiBold),
             color = fg,
-            maxLines = 1,
+            maxLines = 2,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -366,7 +376,7 @@ fun NovelIconButton(
         modifier = modifier
             .size(NovelControl.IconTap)
             .clip(RoundedCornerShape(10.dp))
-            .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier),
+            .pressable(onClick = onClick, enabled = enabled),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -395,7 +405,12 @@ fun NovelCheckRow(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .then(if (enabled) Modifier.pressable(onClick = onToggle) else Modifier)
+            .toggleable(
+                value = checked,
+                enabled = enabled,
+                role = Role.Checkbox,
+                onValueChange = { onToggle() },
+            )
             .padding(vertical = 6.dp, horizontal = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -468,6 +483,7 @@ fun NovelSegmentedTabs(
                 Box(
                     modifier = Modifier
                         .weight(1f)
+                        .heightIn(min = NovelControl.MinTouch)
                         .clip(shape)
                         .background(if (selected) workspace.paper else Color.Transparent)
                         .then(
@@ -477,9 +493,11 @@ fun NovelSegmentedTabs(
                                 Modifier
                             },
                         )
-                        .clickable(
+                        .selectable(
+                            selected = selected,
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                             indication = null,
+                            role = Role.Tab,
                             onClick = { onSelect(index) },
                         )
                         .padding(vertical = 6.dp),
@@ -536,7 +554,7 @@ fun NovelGhostButton(
                     else -> workspace.paper
                 },
             )
-            .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
+            .pressable(onClick = onClick, enabled = enabled)
             .padding(horizontal = NovelControl.CompactHPad, vertical = NovelControl.CompactVPad),
         contentAlignment = Alignment.Center,
     ) {
@@ -544,7 +562,8 @@ fun NovelGhostButton(
             text = text,
             style = type.meta.copy(fontWeight = FontWeight.SemiBold),
             color = fg,
-            maxLines = 1,
+            maxLines = 2,
+            textAlign = TextAlign.Center,
         )
     }
 }
@@ -582,7 +601,7 @@ fun NovelPrimaryButton(
                 .heightIn(min = NovelControl.MinTouch)
                 .clip(shape)
                 .background(bg)
-                .then(if (enabled) Modifier.pressable(onClick = onClick) else Modifier)
+                .pressable(onClick = onClick, enabled = enabled)
                 .padding(horizontal = NovelControl.CompactHPad, vertical = NovelControl.CompactVPad),
             contentAlignment = Alignment.Center,
         ) {
@@ -590,7 +609,8 @@ fun NovelPrimaryButton(
                 text = text,
                 color = fg,
                 style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                maxLines = 1,
+                maxLines = 2,
+                textAlign = TextAlign.Center,
             )
         }
         return
@@ -600,6 +620,7 @@ fun NovelPrimaryButton(
     if (!enabled) {
         Box(
             modifier = modifier
+                .heightIn(min = NovelControl.MinTouch)
                 .clip(shape)
                 .background(workspace.row)
                 .padding(horizontal = 18.dp, vertical = 12.dp),
@@ -609,7 +630,8 @@ fun NovelPrimaryButton(
                 text,
                 color = workspace.faint,
                 style = type.body.copy(fontWeight = FontWeight.SemiBold),
-                maxLines = 1,
+                maxLines = 2,
+                textAlign = TextAlign.Center,
             )
         }
         return

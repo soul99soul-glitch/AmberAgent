@@ -2,6 +2,7 @@ package app.amber.feature.novel.model
 
 import app.amber.feature.novel.serialization.NovelBareUuidSerializer
 import app.amber.feature.novel.serialization.NovelSwiftDateSerializer
+import app.amber.feature.novel.serialization.sha256HexOfUtf8
 import kotlinx.serialization.Serializable
 import java.time.Instant
 import java.util.UUID
@@ -11,6 +12,82 @@ data class NovelQuickStartSeed(
     val genre: String,
     val coreIdea: String,
 )
+
+@Serializable
+data class NovelChapterPlanRecord(
+    val id: NovelChapterPlanId,
+    val branchID: NovelBranchId,
+    val status: NovelChapterPlanStatus,
+    val outlinePlacement: String,
+    val goalAndConflict: String,
+    val mustHappen: List<String>,
+    val mustNotHappen: List<String>,
+    val endingHook: String,
+    val visibleFacts: List<String>,
+    val contentDigest: String,
+    @Serializable(with = NovelSwiftDateSerializer::class)
+    val updatedAt: Instant,
+    @Serializable(with = NovelSwiftDateSerializer::class)
+    val confirmedAt: Instant? = null,
+) {
+    val isConfirmed: Boolean
+        get() = status == NovelChapterPlanStatus.Confirmed
+
+    fun canonicalDigestPayload(): String = listOf(
+        outlinePlacement.trim(),
+        goalAndConflict.trim(),
+        normalizedLines(mustHappen).joinToString("\n"),
+        normalizedLines(mustNotHappen).joinToString("\n"),
+        endingHook.trim(),
+        normalizedLines(visibleFacts).joinToString("\n"),
+    ).joinToString("\n---\n")
+
+    fun injectionText(): String = buildList {
+        add("Status: ${status.name.lowercase()}")
+        add("Digest: $contentDigest")
+        add("Placement: $outlinePlacement")
+        add("Goal and conflict:\n$goalAndConflict")
+        if (mustHappen.isNotEmpty()) add("Must happen:\n" + mustHappen.joinToString("\n") { "- $it" })
+        if (mustNotHappen.isNotEmpty()) add("Must not happen:\n" + mustNotHappen.joinToString("\n") { "- $it" })
+        if (endingHook.isNotBlank()) add("Ending hook:\n$endingHook")
+        if (visibleFacts.isNotEmpty()) add("POV-visible facts:\n" + visibleFacts.joinToString("\n") { "- $it" })
+    }.joinToString("\n\n")
+
+    companion object {
+        fun digest(forCanonicalPayload: String): String = sha256HexOfUtf8(forCanonicalPayload)
+
+        fun normalizedLines(lines: List<String>): List<String> = lines
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+}
+
+@Serializable
+data class NovelUpcomingArcRecord(
+    val branchID: NovelBranchId,
+    val beats: List<String>,
+    @Serializable(with = NovelSwiftDateSerializer::class)
+    val updatedAt: Instant,
+) {
+    fun injectionText(): String = beats.joinToString("\n") { "- $it" }
+
+    companion object {
+        const val MAX_BEATS = 8
+        const val MAX_BEAT_CHARACTER_COUNT = 160
+
+        fun normalizedBeats(raw: List<String>): List<String> {
+            val seen = mutableSetOf<String>()
+            return buildList {
+                for (item in raw) {
+                    val clipped = item.trim().take(MAX_BEAT_CHARACTER_COUNT)
+                    if (clipped.isEmpty() || !seen.add(clipped.lowercase())) continue
+                    add(clipped)
+                    if (size >= MAX_BEATS) break
+                }
+            }
+        }
+    }
+}
 
 @Serializable
 data class NovelProjectRecord(
@@ -35,9 +112,15 @@ data class NovelProjectRecord(
     val stateSyncModelPolicy: NovelProjectModelPolicy? = null,
     val lastGenerationGranularity: NovelGenerationGranularity,
     val polishPreference: String,
+    val collaborationMode: NovelCollaborationMode = NovelCollaborationMode.Cocreation,
+    val pauseGhostwriteOnBlockingContinuity: Boolean = true,
+    val reviewModelPolicy: NovelProjectModelPolicy? = null,
 ) {
     fun effectiveStateSyncModelPolicy(): NovelProjectModelPolicy =
         stateSyncModelPolicy ?: modelPolicy
+
+    fun effectiveReviewModelPolicy(): NovelProjectModelPolicy =
+        reviewModelPolicy ?: NovelProjectModelPolicy.Global
 }
 
 @Serializable
@@ -147,6 +230,8 @@ data class NovelCandidateRecord(
     val sourceChapterVersionID: NovelChapterVersionId? = null,
     val clonedFromCandidateID: NovelCandidateId? = null,
     val collectedCheckpointID: NovelCheckpointId? = null,
+    val chapterPlanDigest: String? = null,
+    val ghostwritePlanID: NovelChapterPlanId? = null,
     @Serializable(with = NovelSwiftDateSerializer::class)
     val createdAt: Instant,
 )
@@ -196,9 +281,32 @@ data class NovelStateSnapshotRecord(
     val branchOutline: String,
     val unresolvedEntityNames: List<String> = emptyList(),
     val settingProposalIDs: List<NovelProposalId> = emptyList(),
+    val recentWrittenHighlights: List<String> = emptyList(),
     @Serializable(with = NovelSwiftDateSerializer::class)
     val createdAt: Instant,
-)
+) {
+    fun injectionHighlightsText(): String = recentWrittenHighlights.joinToString("\n") { "- $it" }
+
+    companion object {
+        const val MAX_RECENT_WRITTEN_HIGHLIGHTS = 24
+        const val MAX_HIGHLIGHT_CHARACTER_COUNT = 160
+
+        fun mergedHighlights(prior: List<String>, newEventSummaries: List<String>): List<String> =
+            normalizedHighlights(prior + newEventSummaries)
+
+        fun normalizedHighlights(raw: List<String>): List<String> {
+            val seen = mutableSetOf<String>()
+            val normalized = buildList {
+                for (item in raw) {
+                    val clipped = item.trim().take(MAX_HIGHLIGHT_CHARACTER_COUNT)
+                    if (clipped.isEmpty() || !seen.add(clipped.lowercase())) continue
+                    add(clipped)
+                }
+            }
+            return normalized.takeLast(MAX_RECENT_WRITTEN_HIGHLIGHTS)
+        }
+    }
+}
 
 @Serializable
 data class NovelBranchCheckpointRecord(
@@ -321,6 +429,8 @@ data class NovelActiveRunRecord(
     val terminalAt: Instant? = null,
     val interruptionReason: NovelRunInterruptionReason? = null,
     val terminalFailure: NovelFailure? = null,
+    val chapterPlanDigest: String? = null,
+    val ghostwritePlanID: NovelChapterPlanId? = null,
 )
 
 @Serializable

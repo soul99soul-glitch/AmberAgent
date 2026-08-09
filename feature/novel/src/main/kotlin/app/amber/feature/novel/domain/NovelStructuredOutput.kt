@@ -1,9 +1,12 @@
 package app.amber.feature.novel.domain
 
+import app.amber.feature.novel.model.NovelChapterPlanRecord
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -141,6 +144,43 @@ data class NovelDiscussionArchiveV1(
     val summary: String,
 )
 
+/**
+ * Whole-chapter candidate review against the branch's confirmed chapter plan.
+ *
+ * The wire name intentionally remains V1 to match iOS. Schema v2 adds
+ * [obviousRepetition]; valid persisted/model v1 payloads decode it as an empty list.
+ */
+@Serializable
+data class NovelChapterPlanAcceptanceV1(
+    val schemaVersion: Int,
+    val accepted: Boolean,
+    val missingMustHappen: List<String>,
+    val forbiddenViolations: List<String>,
+    val obviousRepetition: List<String> = emptyList(),
+    val summary: String,
+) {
+    companion object {
+        const val CURRENT_SCHEMA_VERSION = 2
+        const val LEGACY_SCHEMA_VERSION = 1
+    }
+}
+
+/** Structured next-chapter contract for multi-chapter ghostwrite auto-planning. */
+@Serializable
+data class NovelChapterPlanProposalV1(
+    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val outlinePlacement: String,
+    val goalAndConflict: String,
+    val mustHappen: List<String>,
+    val mustNotHappen: List<String>,
+    val endingHook: String,
+    val visibleFacts: List<String>,
+) {
+    companion object {
+        const val CURRENT_SCHEMA_VERSION = 1
+    }
+}
+
 object NovelStructuredOutputDecoder {
     /** Strict for schemas that must not drift (quick-start shape, polish drift). */
     private val strictJson = Json {
@@ -214,6 +254,84 @@ object NovelStructuredOutputDecoder {
         return value
     }
 
+    /**
+     * Strict manual-sync entry point. The ordinary state-delta decoder remains lenient
+     * for collection compatibility; sync rebuilds must fail closed against one canonical chunk.
+     */
+    fun decodeManualSyncStateDelta(
+        text: String,
+        evidenceSource: String,
+    ): NovelStateDeltaV1 {
+        require(evidenceSource.isNotBlank()) { "evidenceSource must be non-blank" }
+        val cleaned = stripFence(text, strictJson)
+        val root = strictJson.parseToJsonElement(cleaned).jsonObject
+        requireNoDuplicateObjectKeys(cleaned)
+        requireExactKeys(
+            root,
+            setOf(
+                "schemaVersion",
+                "stateSummary",
+                "events",
+                "characterChanges",
+                "relationshipChanges",
+                "foreshadowingChanges",
+                "unresolvedEntityNames",
+                "branchOutlinePatch",
+                "settingProposals",
+            ),
+        )
+        requireIntegerField(root, "schemaVersion")
+        requireStringField(root, "stateSummary")
+        requireEventArrayField(root, "events")
+        requireArrayField(root, "characterChanges")
+        requireArrayField(root, "relationshipChanges")
+        requireArrayField(root, "foreshadowingChanges")
+        requireStringArrayField(root, "unresolvedEntityNames")
+        requireNullableStringField(root, "branchOutlinePatch")
+        requireSettingProposalArrayField(root, "settingProposals")
+
+        val value = strictJson.decodeFromString(NovelStateDeltaV1.serializer(), cleaned)
+        require(value.schemaVersion == 1) { "schemaVersion must be 1" }
+        require(value.stateSummary.isNotBlank()) { "stateSummary must be non-blank" }
+        value.branchOutlinePatch?.let { patch ->
+            require(patch.isNotBlank()) { "branchOutlinePatch must be null or non-blank" }
+        }
+        require(value.characterChanges.isEmpty()) {
+            "manual sync does not persist characterChanges; encode the change as an event"
+        }
+        require(value.relationshipChanges.isEmpty()) {
+            "manual sync does not persist relationshipChanges; encode the change as an event"
+        }
+        require(value.foreshadowingChanges.isEmpty()) {
+            "manual sync does not persist foreshadowingChanges; encode the change as an event"
+        }
+        requireNonBlankItems(value.unresolvedEntityNames, "unresolvedEntityNames")
+
+        val normalizedSource = normalizeEvidence(evidenceSource)
+        value.events.forEachIndexed { index, event ->
+            require(event.id.isNotBlank()) { "events[$index].id must be non-blank" }
+            require(event.kind.isNotBlank()) { "events[$index].kind must be non-blank" }
+            require(event.summary.isNotBlank()) { "events[$index].summary must be non-blank" }
+            requireNonBlankItems(event.entityReferences, "events[$index].entityReferences")
+            require(event.evidence.isNotBlank()) { "events[$index].evidence must be non-blank" }
+            require(isEvidenceAnchored(event.evidence, normalizedSource)) {
+                "events[$index].evidence is not anchored in evidenceSource"
+            }
+        }
+        value.settingProposals.forEachIndexed { index, proposal ->
+            require(proposal.id.isNotBlank()) { "settingProposals[$index].id must be non-blank" }
+            require(proposal.title.isNotBlank()) { "settingProposals[$index].title must be non-blank" }
+            require(proposal.content.isNotBlank()) { "settingProposals[$index].content must be non-blank" }
+            require(proposal.evidence.isNotBlank()) {
+                "settingProposals[$index].evidence must be non-blank"
+            }
+            require(isEvidenceAnchored(proposal.evidence, normalizedSource)) {
+                "settingProposals[$index].evidence is not anchored in evidenceSource"
+            }
+        }
+        return value
+    }
+
     fun decodePolishDrift(text: String): NovelPolishDriftV1Json {
         val cleaned = stripFence(text, strictJson)
         val value = strictJson.decodeFromString(NovelPolishDriftV1Json.serializer(), cleaned)
@@ -225,18 +343,36 @@ object NovelStructuredOutputDecoder {
 
     fun decodeContinuityAudit(text: String): NovelContinuityAuditV1 {
         val cleaned = stripFence(text, strictJson)
+        val root = strictJson.parseToJsonElement(cleaned).jsonObject
+        requireNoDuplicateObjectKeys(cleaned)
+        requireExactKeys(root, setOf("schemaVersion", "consistent", "issues"))
+        requireIntegerField(root, "schemaVersion")
+        requireBooleanField(root, "consistent")
+        requireArrayField(root, "issues")
         val value = strictJson.decodeFromString(NovelContinuityAuditV1.serializer(), cleaned)
         require(value.schemaVersion == 1) { "schemaVersion must be 1" }
+        val issueIds = mutableSetOf<String>()
+        value.issues.forEach { issue ->
+            require(issue.id.isNotBlank()) { "continuity issue id must be non-blank" }
+            require(issueIds.add(issue.id)) { "continuity issue id must be unique" }
+            require(issue.summary.isNotBlank()) { "continuity issue summary must be non-blank" }
+            require(issue.references.size >= 2) {
+                "continuity issue needs at least 2 references"
+            }
+            issue.references.forEach { reference ->
+                require(reference.chapterOrdinal >= 1) { "chapterOrdinal must be at least 1" }
+                require(reference.chapterTitle.isNotBlank()) {
+                    "continuity reference chapterTitle must be non-blank"
+                }
+                require(reference.evidence.isNotBlank()) {
+                    "continuity reference evidence must be non-blank"
+                }
+            }
+        }
         if (value.consistent) {
             require(value.issues.isEmpty()) { "consistent audit must have empty issues" }
         } else {
             require(value.issues.isNotEmpty()) { "inconsistent audit must have issues" }
-            value.issues.forEach { issue ->
-                require(issue.id.isNotBlank() && issue.summary.isNotBlank())
-                require(issue.references.size >= 2) {
-                    "continuity issue needs at least 2 references"
-                }
-            }
         }
         return value
     }
@@ -278,6 +414,290 @@ object NovelStructuredOutputDecoder {
                 )
             },
         )
+    }
+
+    fun decodeChapterPlanAcceptance(text: String): NovelChapterPlanAcceptanceV1 {
+        val cleaned = stripFence(text, strictJson)
+        val root = strictJson.parseToJsonElement(cleaned).jsonObject
+        requireNoDuplicateObjectKeys(cleaned)
+        val schemaVersion = requireIntegerField(root, "schemaVersion")
+        val requiredKeys = when (schemaVersion) {
+            NovelChapterPlanAcceptanceV1.LEGACY_SCHEMA_VERSION -> setOf(
+                "schemaVersion",
+                "accepted",
+                "missingMustHappen",
+                "forbiddenViolations",
+                "summary",
+            )
+            NovelChapterPlanAcceptanceV1.CURRENT_SCHEMA_VERSION -> setOf(
+                "schemaVersion",
+                "accepted",
+                "missingMustHappen",
+                "forbiddenViolations",
+                "obviousRepetition",
+                "summary",
+            )
+            else -> error(
+                "schemaVersion must be ${NovelChapterPlanAcceptanceV1.LEGACY_SCHEMA_VERSION} " +
+                    "or ${NovelChapterPlanAcceptanceV1.CURRENT_SCHEMA_VERSION}",
+            )
+        }
+        requireExactKeys(root, requiredKeys)
+        requireBooleanField(root, "accepted")
+        requireStringArrayField(root, "missingMustHappen")
+        requireStringArrayField(root, "forbiddenViolations")
+        if (schemaVersion == NovelChapterPlanAcceptanceV1.CURRENT_SCHEMA_VERSION) {
+            requireStringArrayField(root, "obviousRepetition")
+        }
+        requireStringField(root, "summary")
+        val value = strictJson.decodeFromString(NovelChapterPlanAcceptanceV1.serializer(), cleaned)
+        require(value.summary.isNotBlank()) { "summary must be non-blank" }
+        requireNonBlankItems(value.missingMustHappen, "missingMustHappen")
+        requireNonBlankItems(value.forbiddenViolations, "forbiddenViolations")
+        requireNonBlankItems(value.obviousRepetition, "obviousRepetition")
+        val hasContractViolation =
+            value.missingMustHappen.isNotEmpty() || value.forbiddenViolations.isNotEmpty()
+        if (value.accepted) {
+            require(!hasContractViolation) {
+                "accepted result must not list chapter-plan violations"
+            }
+        } else {
+            require(hasContractViolation) {
+                "rejected result must list at least one chapter-plan violation"
+            }
+        }
+        return value
+    }
+
+    fun decodeChapterPlanProposal(text: String): NovelChapterPlanProposalV1 {
+        val cleaned = stripFence(text, strictJson)
+        val root = strictJson.parseToJsonElement(cleaned).jsonObject
+        requireNoDuplicateObjectKeys(cleaned)
+        requireExactKeys(
+            root,
+            setOf(
+                "schemaVersion",
+                "outlinePlacement",
+                "goalAndConflict",
+                "mustHappen",
+                "mustNotHappen",
+                "endingHook",
+                "visibleFacts",
+            ),
+        )
+        requireIntegerField(root, "schemaVersion")
+        requireStringField(root, "outlinePlacement")
+        requireStringField(root, "goalAndConflict")
+        requireStringArrayField(root, "mustHappen")
+        requireStringArrayField(root, "mustNotHappen")
+        requireStringField(root, "endingHook")
+        requireStringArrayField(root, "visibleFacts")
+
+        val value = strictJson.decodeFromString(NovelChapterPlanProposalV1.serializer(), cleaned)
+        require(value.schemaVersion == NovelChapterPlanProposalV1.CURRENT_SCHEMA_VERSION) {
+            "schemaVersion must be ${NovelChapterPlanProposalV1.CURRENT_SCHEMA_VERSION}"
+        }
+        require(value.goalAndConflict.isNotBlank()) { "goalAndConflict must be non-blank" }
+        require(value.goalAndConflict.length <= 8_000) { "goalAndConflict is too long" }
+        require(value.outlinePlacement.length <= 500) { "outlinePlacement is too long" }
+        require(value.endingHook.length <= 4_000) { "endingHook is too long" }
+        requireNonBlankItems(value.mustHappen, "mustHappen")
+        requireNonBlankItems(value.mustNotHappen, "mustNotHappen")
+        requireNonBlankItems(value.visibleFacts, "visibleFacts")
+        val mustHappen = NovelChapterPlanRecord.normalizedLines(value.mustHappen)
+        val mustNotHappen = NovelChapterPlanRecord.normalizedLines(value.mustNotHappen)
+        val visibleFacts = NovelChapterPlanRecord.normalizedLines(value.visibleFacts)
+        require(mustHappen.isNotEmpty()) { "mustHappen must contain at least one item" }
+        require(mustHappen.size <= 32 && mustNotHappen.size <= 32 && visibleFacts.size <= 32) {
+            "chapter plan has too many checklist items"
+        }
+        return value
+    }
+
+    private fun requireExactKeys(root: JsonObject, requiredKeys: Set<String>) {
+        require(root.keys == requiredKeys) {
+            val missing = requiredKeys - root.keys
+            val unknown = root.keys - requiredKeys
+            "JSON fields do not match the contract; missing=$missing unknown=$unknown"
+        }
+    }
+
+    private fun requireIntegerField(root: JsonObject, field: String): Int {
+        val primitive = root[field] as? JsonPrimitive
+            ?: error("$field must be an integer")
+        require(!primitive.isString) { "$field must be an integer" }
+        return primitive.content.toIntOrNull()
+            ?: error("$field must be an integer")
+    }
+
+    private fun requireBooleanField(root: JsonObject, field: String) {
+        val primitive = root[field] as? JsonPrimitive
+            ?: error("$field must be a boolean")
+        require(!primitive.isString && primitive.content in setOf("true", "false")) {
+            "$field must be a boolean"
+        }
+    }
+
+    private fun requireStringField(root: JsonObject, field: String) {
+        val primitive = root[field] as? JsonPrimitive
+            ?: error("$field must be a string")
+        require(primitive.isString) { "$field must be a string" }
+    }
+
+    private fun requireStringArrayField(root: JsonObject, field: String) {
+        val array = root[field] as? JsonArray
+            ?: error("$field must be an array of strings")
+        require(array.all { it is JsonPrimitive && it.isString }) {
+            "$field must be an array of strings"
+        }
+    }
+
+    private fun requireArrayField(root: JsonObject, field: String) {
+        require(root[field] is JsonArray) { "$field must be an array" }
+    }
+
+    private fun requireNullableStringField(root: JsonObject, field: String) {
+        val value = root[field]
+        require(
+            value is JsonNull ||
+                (value is JsonPrimitive && value.isString),
+        ) { "$field must be null or a string" }
+    }
+
+    private fun requireEventArrayField(root: JsonObject, field: String) {
+        requireObjectArrayField(
+            root = root,
+            field = field,
+            requiredKeys = setOf("id", "kind", "summary", "entityReferences", "evidence"),
+        ) { item, _ ->
+            requireStringField(item, "id")
+            requireStringField(item, "kind")
+            requireStringField(item, "summary")
+            requireStringArrayField(item, "entityReferences")
+            requireStringField(item, "evidence")
+        }
+    }
+
+    private fun requireSettingProposalArrayField(root: JsonObject, field: String) {
+        requireObjectArrayField(
+            root = root,
+            field = field,
+            requiredKeys = setOf("id", "title", "content", "evidence"),
+        ) { item, _ ->
+            requireStringField(item, "id")
+            requireStringField(item, "title")
+            requireStringField(item, "content")
+            requireStringField(item, "evidence")
+        }
+    }
+
+    private fun requireObjectArrayField(
+        root: JsonObject,
+        field: String,
+        requiredKeys: Set<String>,
+        validate: (JsonObject, String) -> Unit,
+    ) {
+        val array = root[field] as? JsonArray ?: error("$field must be an array of objects")
+        array.forEachIndexed { index, element ->
+            val path = "$field[$index]"
+            val item = element as? JsonObject ?: error("$path must be an object")
+            requireExactKeys(item, requiredKeys)
+            validate(item, path)
+        }
+    }
+
+    private fun requireNonBlankItems(values: List<String>, field: String) {
+        values.forEachIndexed { index, value ->
+            require(value.isNotBlank()) { "$field[$index] must be non-blank" }
+        }
+    }
+
+    /** kotlinx.serialization keeps the last duplicate key; contract decoders must reject it instead. */
+    private fun requireNoDuplicateObjectKeys(text: String) {
+        val keyScopes = mutableListOf<MutableSet<String>>()
+        var index = 0
+        while (index < text.length) {
+            when (text[index]) {
+                '{' -> keyScopes.add(mutableSetOf())
+                '}' -> {
+                    require(keyScopes.isNotEmpty()) { "malformed JSON object" }
+                    keyScopes.removeAt(keyScopes.lastIndex)
+                }
+                '"' -> {
+                    val start = index
+                    index++
+                    while (index < text.length && text[index] != '"') {
+                        if (text[index] == '\\') index++
+                        index++
+                    }
+                    require(index < text.length) { "unterminated JSON string" }
+                    var next = index + 1
+                    while (next < text.length && text[next].isWhitespace()) next++
+                    if (next < text.length && text[next] == ':') {
+                        require(keyScopes.isNotEmpty()) { "JSON key outside an object" }
+                        val key = strictJson.parseToJsonElement(
+                            text.substring(start, index + 1),
+                        ).jsonPrimitive.content
+                        require(keyScopes.last().add(key)) { "duplicate JSON key: $key" }
+                    }
+                }
+            }
+            index++
+        }
+        require(keyScopes.isEmpty()) { "malformed JSON object" }
+    }
+
+    private fun normalizeEvidence(value: String): String {
+        val widthAndPunctuation = buildString(value.length) {
+            for (character in value) {
+                append(
+                    when (character) {
+                        '\u3000' -> ' '
+                        in '\uFF01'..'\uFF5E' -> (character.code - 0xFEE0).toChar()
+                        '\u201C', '\u201D', '\u2018', '\u2019',
+                        '\u300C', '\u300D', '\u300E', '\u300F', '\'' -> '"'
+                        '\u2014', '\u2013', '\u2010', '\u2212' -> '-'
+                        else -> character
+                    },
+                )
+            }
+        }.replace(Regex("[\\u2026]+|\\.{2,}"), "…")
+        return buildString(widthAndPunctuation.length) {
+            var needsSpace = false
+            for (character in widthAndPunctuation) {
+                if (character.isWhitespace()) {
+                    needsSpace = isNotEmpty()
+                } else {
+                    if (needsSpace) append(' ')
+                    append(character)
+                    needsSpace = false
+                }
+            }
+        }
+    }
+
+    private fun isEvidenceAnchored(evidence: String, normalizedSource: String): Boolean {
+        val normalizedEvidence = normalizeEvidence(evidence)
+        if (normalizedEvidence.isEmpty()) return false
+        if (normalizedSource.contains(normalizedEvidence)) return true
+
+        val evidenceCodePoints = normalizedEvidence.codePoints().toArray()
+        val sourceCodePoints = normalizedSource.codePoints().toArray()
+        val threshold = maxOf(8, (evidenceCodePoints.size * 2 + 4) / 5)
+        if (threshold > evidenceCodePoints.size || threshold > sourceCodePoints.size) return false
+
+        var previous = IntArray(evidenceCodePoints.size + 1)
+        for (sourceCodePoint in sourceCodePoints) {
+            val current = IntArray(evidenceCodePoints.size + 1)
+            for (index in evidenceCodePoints.indices) {
+                if (sourceCodePoint == evidenceCodePoints[index]) {
+                    current[index + 1] = previous[index] + 1
+                    if (current[index + 1] >= threshold) return true
+                }
+            }
+            previous = current
+        }
+        return false
     }
 
     private fun stripFence(text: String, json: Json): String {

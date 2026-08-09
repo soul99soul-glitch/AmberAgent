@@ -12,6 +12,8 @@ enum class NovelPromptKind {
     PolishDriftV1,
     ContinuityAuditV1,
     DiscussionArchiveV1,
+    ChapterPlanAcceptanceV1,
+    ChapterPlanProposalV1,
 }
 
 data class NovelPromptTemplate(
@@ -141,9 +143,46 @@ object NovelPromptCatalog {
             kind = kind,
             version = NovelPromptVersions.MANUAL_SYNC,
             systemText = """
-                Rebuild derived branch state from a manuscript chunk. Return NovelStateRebuildV1 JSON
-                (schemaVersion 1) with stateSummary, branchOutline, events, characterStates, relationships,
-                foreshadowing, unresolvedEntityNames, settingProposals.
+                Extract the derived story-state contribution of this manuscript chunk for strict manual sync.
+                Return exactly one raw NovelStateDeltaV1 JSON object with no Markdown fence, comment, or trailing prose:
+                {
+                  "schemaVersion": 1,
+                  "stateSummary": "non-empty cumulative summary after projected base plus this chunk",
+                  "events": [
+                    {
+                      "id": "stable non-empty id",
+                      "kind": "non-empty event kind",
+                      "summary": "non-empty persisted change",
+                      "entityReferences": [],
+                      "evidence": "non-empty text anchored in the current canonical chunk"
+                    }
+                  ],
+                  "characterChanges": [],
+                  "relationshipChanges": [],
+                  "foreshadowingChanges": [],
+                  "unresolvedEntityNames": [],
+                  "branchOutlinePatch": null,
+                  "settingProposals": [
+                    {
+                      "id": "stable non-empty id",
+                      "title": "non-empty title",
+                      "content": "non-empty proposal",
+                      "evidence": "non-empty text anchored in the current canonical chunk"
+                    }
+                  ]
+                }
+                Include every root field shown above and do not add unknown root keys.
+                Current branch state in the canonical context is the projected base after every prior chunk.
+                stateSummary must describe the complete state after applying this chunk to that base.
+                If the projected summary is empty and this chunk adds no evidence-backed fact, return the exact
+                stateSummary "No derived story facts yet."; otherwise preserve an unchanged projected summary.
+                unresolvedEntityNames must be the complete remaining set, not only names introduced by this chunk.
+                branchOutlinePatch is the cumulative updated outline, or null only when this chunk does not change it.
+                Do not infer unsupported facts. Project-setting changes must be proposals, never direct mutations.
+                Evidence must quote the current canonical chunk or retain a long, high-coverage literal anchor in it.
+                Use an empty events or settingProposals array when this chunk contains none.
+                Android strict sync does not persist characterChanges, relationshipChanges, or foreshadowingChanges.
+                Return [] for all three. Encode every persistable change as an evidence-backed events item instead.
             """.trimIndent(),
         )
         NovelPromptKind.WholeChapterPolish -> NovelPromptTemplate(
@@ -217,6 +256,70 @@ object NovelPromptCatalog {
                 }
                 decisions must be non-empty. relatedMaterialID is either null or a UUID explicitly supplied in
                 the discussion input. Do not add unknown keys.
+            """.trimIndent(),
+        )
+        NovelPromptKind.ChapterPlanAcceptanceV1 -> NovelPromptTemplate(
+            kind = kind,
+            version = NovelPromptVersions.CHAPTER_PLAN_ACCEPTANCE,
+            systemText = """
+                Decide whether a whole-chapter prose candidate satisfies the confirmed chapter plan contract.
+                Fail closed: if evidence is ambiguous, mark accepted false.
+                Check that every must-happen beat is present as a clear event in the candidate, and that no
+                must-not-happen beat clearly occurs. Ending hook and POV-visible facts are soft guidance —
+                omit them from violation lists unless the candidate contradicts them outright.
+                Also compare the candidate against RECENT WRITTEN BEATS. List only clear, same-beat rehashes
+                in obviousRepetition; necessary callbacks or deliberate callbacks are not repetition.
+                Contract acceptance and obviousRepetition are independent: accepted may stay true while
+                obviousRepetition is non-empty.
+                Do not rewrite the prose. Return only the JSON object.
+
+                Output contract: NovelChapterPlanAcceptanceV1, schemaVersion 2.
+                Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
+                Every key shown below is required. Do not add unknown keys at any level.
+                Root shape:
+                {
+                  "schemaVersion":2,
+                  "accepted":true,
+                  "missingMustHappen":[],
+                  "forbiddenViolations":[],
+                  "obviousRepetition":[],
+                  "summary":"non-empty string"
+                }
+                missingMustHappen and forbiddenViolations are arrays of non-empty strings copied exactly from
+                the matching contract lists. Do not paraphrase or add reviewer commentary. If accepted is true,
+                both arrays must be empty. If accepted is
+                false, at least one of the two arrays must be non-empty.
+                obviousRepetition lists clear rehashes of RECENT WRITTEN BEATS; use an empty array when none.
+            """.trimIndent(),
+        )
+        NovelPromptKind.ChapterPlanProposalV1 -> NovelPromptTemplate(
+            kind = kind,
+            version = NovelPromptVersions.CHAPTER_PLAN_PROPOSAL,
+            systemText = """
+                Propose the next chapter plan contract for automated ghostwriting.
+                Use the master outline, current story state, upcoming arc notes, and recent written beats.
+                Advance the plot one chapter only: concrete, checkable must-happen beats; do not rehash
+                recent written beats as new obligations. Prefer forward motion over recap.
+                mustHappen must contain at least one concrete event the chapter must deliver.
+                mustNotHappen lists clear bans (may be empty). endingHook and visibleFacts may be empty
+                strings / empty arrays when unused. outlinePlacement should name chapter position briefly.
+                Use the user's language. Return only the JSON object.
+
+                Output contract: NovelChapterPlanProposalV1, schemaVersion 1.
+                Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
+                Every key shown below is required. Do not add unknown keys at any level.
+                Root shape:
+                {
+                  "schemaVersion":1,
+                  "outlinePlacement":"string (may be empty)",
+                  "goalAndConflict":"non-empty string",
+                  "mustHappen":["non-empty string"],
+                  "mustNotHappen":[],
+                  "endingHook":"string (may be empty)",
+                  "visibleFacts":[]
+                }
+                mustHappen must contain at least one non-empty string. mustNotHappen and visibleFacts are arrays of
+                non-empty strings when present; use empty arrays when none.
             """.trimIndent(),
         )
     }

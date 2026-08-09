@@ -2,9 +2,13 @@ package app.amber.feature.novel
 
 import app.amber.feature.novel.model.NovelBranchId
 import app.amber.feature.novel.model.NovelCandidateId
+import app.amber.feature.novel.model.NovelChapterPlanId
+import app.amber.feature.novel.model.NovelChapterPlanStatus
 import app.amber.feature.novel.model.NovelChapterId
 import app.amber.feature.novel.model.NovelCheckpointId
 import app.amber.feature.novel.model.NovelCollectionTarget
+import app.amber.feature.novel.model.NovelCollectionSource
+import app.amber.feature.novel.model.NovelCollaborationMode
 import app.amber.feature.novel.model.NovelGenerationGranularity
 import app.amber.feature.novel.model.NovelMaterialId
 import app.amber.feature.novel.model.NovelOutcome
@@ -42,6 +46,14 @@ data class NovelDiscussionArchiveDraft(
     val decisions: List<NovelDiscussionArchiveDraftDecision>,
 )
 
+data class NovelContinuityAuditReport(
+    /** Issues backed by at least one exact reference to the uncollected candidate. */
+    val issues: List<app.amber.feature.novel.domain.NovelContinuityIssueV1>,
+    val failedChunkCount: Int,
+    /** Blocking defects whose references are entirely in already-collected canon. */
+    val canonicalOnlyBlockingIssues: List<app.amber.feature.novel.domain.NovelContinuityIssueV1> = emptyList(),
+)
+
 /** Confirmable decision row for [NovelIntent.ArchiveDiscussion] (optional related material link). */
 data class NovelArchiveDecisionInput(
     val topic: String,
@@ -70,6 +82,40 @@ interface NovelCreation {
         projectId: NovelProjectId,
         branchId: NovelBranchId,
     ): app.amber.feature.novel.domain.NovelContinuityAuditV1
+
+    /** Audit the committed manuscript plus an available candidate as the next chapter. */
+    suspend fun continuityAuditIncludingCandidate(
+        projectId: NovelProjectId,
+        branchId: NovelBranchId,
+        candidateId: NovelCandidateId,
+        maxCanonicalChapters: Int? = null,
+    ): NovelContinuityAuditReport {
+        throw app.amber.feature.novel.domain.NovelError.InvalidInput(
+            "This novel runtime cannot audit candidate continuity.",
+        )
+    }
+
+    /** Review an available whole-chapter candidate against the currently confirmed plan. */
+    suspend fun acceptChapterPlan(
+        projectId: NovelProjectId,
+        branchId: NovelBranchId,
+        candidateId: NovelCandidateId,
+    ): app.amber.feature.novel.domain.NovelChapterPlanAcceptanceV1 {
+        throw app.amber.feature.novel.domain.NovelError.InvalidInput(
+            "This novel runtime cannot accept chapter-plan candidates.",
+        )
+    }
+
+    /** Propose the next confirmed-plan payload from canonical state only; does not persist it. */
+    suspend fun proposeNextChapterPlan(
+        projectId: NovelProjectId,
+        branchId: NovelBranchId,
+        previousPlanSummary: String? = null,
+    ): app.amber.feature.novel.domain.NovelChapterPlanProposalV1 {
+        throw app.amber.feature.novel.domain.NovelError.InvalidInput(
+            "This novel runtime cannot propose the next chapter plan.",
+        )
+    }
 
     /**
      * Distill recent discuss-plan messages into a confirmable archive draft.
@@ -139,6 +185,69 @@ sealed interface NovelIntent {
         val selectedText: String,
         val target: NovelCollectionTarget,
         val runStateDelta: Boolean = true,
+        val source: NovelCollectionSource = NovelCollectionSource.User,
+        /** Optional write-ahead identities used by the durable ghostwrite job ledger. */
+        val operationId: app.amber.feature.novel.model.NovelOperationId? = null,
+        val newChapterVersionId: app.amber.feature.novel.model.NovelChapterVersionId? = null,
+        val newCheckpointId: NovelCheckpointId? = null,
+        val newStateSnapshotId: app.amber.feature.novel.model.NovelStateSnapshotId? = null,
+        /** Optional caller-owned compare-and-swap pins for durable background orchestration. */
+        val expectedProjectRevision: Long? = null,
+        val expectedConfigRevision: Long? = null,
+        val expectedBranchHeadRevision: Long? = null,
+    ) : NovelIntent
+
+    data class SetCollaborationMode(
+        val projectId: NovelProjectId,
+        val branchId: NovelBranchId,
+        val mode: NovelCollaborationMode,
+    ) : NovelIntent
+
+    data class SetPauseGhostwriteOnBlockingContinuity(
+        val projectId: NovelProjectId,
+        val enabled: Boolean,
+    ) : NovelIntent
+
+    data class UpsertChapterPlan(
+        val projectId: NovelProjectId,
+        val branchId: NovelBranchId,
+        val planId: NovelChapterPlanId,
+        val status: NovelChapterPlanStatus,
+        val outlinePlacement: String,
+        val goalAndConflict: String,
+        val mustHappen: List<String>,
+        val mustNotHappen: List<String>,
+        val endingHook: String,
+        val visibleFacts: List<String>,
+        val operationId: app.amber.feature.novel.model.NovelOperationId? = null,
+        /** Optional caller-owned compare-and-swap pins for durable background orchestration. */
+        val expectedProjectRevision: Long? = null,
+        val expectedConfigRevision: Long? = null,
+        val expectedBranchHeadRevision: Long? = null,
+    ) : NovelIntent
+
+    data class ClearChapterPlan(
+        val projectId: NovelProjectId,
+        val branchId: NovelBranchId,
+        val operationId: app.amber.feature.novel.model.NovelOperationId? = null,
+        /** When present, only this exact confirmed plan may be cleared. */
+        val expectedPlanId: NovelChapterPlanId? = null,
+        val expectedPlanDigest: String? = null,
+        /** Optional caller-owned compare-and-swap pins for durable background orchestration. */
+        val expectedProjectRevision: Long? = null,
+        val expectedConfigRevision: Long? = null,
+        val expectedBranchHeadRevision: Long? = null,
+    ) : NovelIntent
+
+    data class UpsertUpcomingArc(
+        val projectId: NovelProjectId,
+        val branchId: NovelBranchId,
+        val beats: List<String>,
+    ) : NovelIntent
+
+    data class ClearUpcomingArc(
+        val projectId: NovelProjectId,
+        val branchId: NovelBranchId,
     ) : NovelIntent
 
     data class ResolveProposal(
@@ -186,6 +295,16 @@ sealed interface NovelIntent {
         val projectId: NovelProjectId,
         val branchId: NovelBranchId,
         val runStateDelta: Boolean = true,
+        /** Ghostwrite uses strict mode: an incomplete rebuild must leave NeedsSync intact. */
+        val failClosed: Boolean = false,
+        /** Optional write-ahead identities used by the durable ghostwrite job ledger. */
+        val operationId: app.amber.feature.novel.model.NovelOperationId? = null,
+        val newCheckpointId: NovelCheckpointId? = null,
+        val newStateSnapshotId: app.amber.feature.novel.model.NovelStateSnapshotId? = null,
+        /** Optional caller-pinned source revisions; checked after exact replay reconciliation. */
+        val expectedProjectRevision: Long? = null,
+        val expectedConfigRevision: Long? = null,
+        val expectedBranchHeadRevision: Long? = null,
     ) : NovelIntent
 
     data class AdoptPolishCandidate(
@@ -250,6 +369,8 @@ sealed interface NovelIntent {
 }
 
 data class NovelRunRequest(
+    /** Optional caller-owned identity for durable write-ahead orchestration. */
+    val runId: NovelRunId? = null,
     val projectId: NovelProjectId,
     val branchId: NovelBranchId? = null,
     val userText: String,
@@ -257,6 +378,11 @@ data class NovelRunRequest(
     val granularity: NovelGenerationGranularityRequest? = null,
     val kind: NovelRunKindRequest? = null,
     val sourceChapterVersionId: app.amber.feature.novel.model.NovelChapterVersionId? = null,
+    val ghostwritePlanId: NovelChapterPlanId? = null,
+    /** Optional caller-owned compare-and-swap pins for durable background orchestration. */
+    val expectedProjectRevision: Long? = null,
+    val expectedConfigRevision: Long? = null,
+    val expectedBranchHeadRevision: Long? = null,
 )
 
 enum class NovelSessionModeRequest { WriteProse, DiscussPlan }
@@ -269,6 +395,8 @@ data class NovelInterruptRequest(
     val projectId: NovelProjectId,
     val runId: NovelRunId? = null,
     val reason: NovelInterruptReason = NovelInterruptReason.User,
+    /** Project-wide interruption can preserve app-owned background runs exactly. */
+    val excludedRunIds: Set<NovelRunId> = emptySet(),
 )
 
 enum class NovelInterruptReason { User, Background, RouteExit }

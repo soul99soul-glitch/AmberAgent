@@ -3,12 +3,15 @@ package app.amber.feature.novel.runtime
 import app.amber.feature.novel.domain.NovelError
 import app.amber.feature.novel.model.NovelBranchId
 import app.amber.feature.novel.model.NovelBranchLifecycle
+import app.amber.feature.novel.model.NovelBranchSyncStatus
+import app.amber.feature.novel.model.NovelCollaborationMode
 import app.amber.feature.novel.model.NovelInjectionMode
 import app.amber.feature.novel.model.NovelInjectionReceiptRecord
 import app.amber.feature.novel.model.NovelInjectionReceiptSectionRecord
 import app.amber.feature.novel.model.NovelInjectionSectionKind
 import app.amber.feature.novel.model.NovelInjectionSelectionReason
 import app.amber.feature.novel.model.NovelMaterialInjectionDecision
+import app.amber.feature.novel.model.NovelMaterialKind
 import app.amber.feature.novel.model.NovelProjectDocumentV1
 import app.amber.feature.novel.model.NovelProjectId
 import app.amber.feature.novel.model.NovelReceiptId
@@ -36,11 +39,101 @@ data class NovelInjectionPlan(
     )
 }
 
+data class NovelChapterPlanAcceptanceInput(
+    val prompt: NovelPromptTemplate,
+    val userText: String,
+)
+
+data class NovelChapterPlanProposalInput(
+    val prompt: NovelPromptTemplate,
+    val userText: String,
+)
+
 /**
  * Deterministic V1 injection planner (no embeddings).
  * Fixed prompt + current state + chapter tail + recent session + always materials + force includes.
  */
 object NovelInjectionPlanner {
+    /**
+     * Builds the isolated review request used by the ghostwrite acceptance step.
+     *
+     * This deliberately does not call [plan]: contract review receives only the
+     * confirmed plan, recent written beats, and the owned whole-chapter candidate.
+     */
+    fun chapterPlanAcceptanceInput(
+        confirmedPlan: String,
+        candidate: String,
+        recentWrittenHighlights: String,
+    ): NovelChapterPlanAcceptanceInput {
+        require(confirmedPlan.isNotBlank()) { "confirmed chapter plan must be non-blank" }
+        require(candidate.isNotBlank()) { "whole-chapter candidate must be non-blank" }
+        val highlights = recentWrittenHighlights.trim().ifEmpty { "(none)" }
+        return NovelChapterPlanAcceptanceInput(
+            prompt = NovelPromptCatalog.template(NovelPromptKind.ChapterPlanAcceptanceV1),
+            userText = buildString {
+                append("RECENT WRITTEN BEATS\n")
+                append(highlights)
+                append("\n\nCONFIRMED CHAPTER PLAN\n")
+                append(confirmedPlan)
+                append("\n\nWHOLE-CHAPTER CANDIDATE\n")
+                append(candidate)
+            },
+        )
+    }
+
+    /**
+     * Builds the isolated canonical context for automated next-chapter planning.
+     * Session messages and draft candidates are intentionally outside this input.
+     */
+    fun chapterPlanProposalInput(
+        document: NovelProjectDocumentV1,
+        branchId: NovelBranchId,
+        nextOrdinal: Int,
+        previousPlanSummary: String?,
+    ): NovelChapterPlanProposalInput {
+        val branch = document.branches.firstOrNull {
+            it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active
+        } ?: throw NovelError.BranchNotFound(branchId)
+        val sections = mutableListOf("NEXT CHAPTER ORDINAL\n${nextOrdinal.coerceAtLeast(1)}")
+
+        materialText(NovelMaterialKind.MasterOutline, document)?.let { outline ->
+            sections += "MASTER OUTLINE\n${clip(outline, 6_000)}"
+        }
+        materialText(NovelMaterialKind.WritingRequirements, document)?.let { requirements ->
+            sections += "WRITING REQUIREMENTS\n${clip(requirements, 2_000)}"
+        }
+
+        document.stateSnapshots.firstOrNull { it.id == branch.currentStateSnapshotID }?.let { state ->
+            val stateSections = buildList {
+                state.summary.trim().takeIf { it.isNotEmpty() }?.let { summary ->
+                    add("Summary:\n${clip(summary, 3_000)}")
+                }
+                state.branchOutline.trim().takeIf { it.isNotEmpty() }?.let { outline ->
+                    add("Branch outline:\n${clip(outline, 2_000)}")
+                }
+                state.injectionHighlightsText().trim().takeIf { it.isNotEmpty() }?.let { highlights ->
+                    add("Recent written beats:\n${clip(highlights, 2_000)}")
+                }
+            }
+            if (stateSections.isNotEmpty()) {
+                sections += "CURRENT STORY STATE\n${stateSections.joinToString("\n\n")}"
+            }
+        }
+
+        document.upcomingArc(branch.id)?.takeIf { it.beats.isNotEmpty() }?.let { arc ->
+            sections += "UPCOMING ARC\n${arc.injectionText()}"
+        }
+        previousPlanSummary?.trim()?.takeIf { it.isNotEmpty() }?.let { previous ->
+            sections += "PREVIOUS CHAPTER PLAN SUMMARY\n${clip(previous, 2_000)}"
+        }
+        sections += "CANON CHAPTER COUNT ON BRANCH\n${branch.workingChapterSelections.size}"
+
+        return NovelChapterPlanProposalInput(
+            prompt = NovelPromptCatalog.template(NovelPromptKind.ChapterPlanProposalV1),
+            userText = sections.joinToString("\n\n"),
+        )
+    }
+
     fun plan(
         document: NovelProjectDocumentV1,
         branchId: NovelBranchId,
@@ -55,9 +148,10 @@ object NovelInjectionPlanner {
     ): NovelInjectionPlan {
         val branch = document.branches.firstOrNull { it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active }
             ?: throw NovelError.BranchNotFound(branchId)
-        if (branch.syncStatus.name == "NeedsSync" &&
+        if (branch.syncStatus == NovelBranchSyncStatus.NeedsSync &&
             promptKind != NovelPromptKind.Discussion &&
-            promptKind != NovelPromptKind.QuickStart
+            promptKind != NovelPromptKind.QuickStart &&
+            promptKind != NovelPromptKind.ManualSyncV1
         ) {
             throw NovelError.InvalidInput("Branch needs sync before formal generation.")
         }
@@ -104,6 +198,32 @@ object NovelInjectionPlanner {
         }
 
         val state = document.stateSnapshots.firstOrNull { it.id == branch.currentStateSnapshotID }
+        if (promptKind == NovelPromptKind.ProseWholeChapter) {
+            document.confirmedChapterPlan(branch.id)?.let { plan ->
+                add(
+                    NovelInjectionSectionKind.ChapterPlan(plan.id),
+                    "CONFIRMED CHAPTER PLAN - BINDING OBLIGATIONS FOR THIS CHAPTER",
+                    plan.injectionText(),
+                    NovelInjectionSelectionReason.ConfirmedChapterPlan,
+                )
+            }
+            state?.injectionHighlightsText()?.let { highlights ->
+                add(
+                    NovelInjectionSectionKind.RecentWrittenHighlights(state.id),
+                    "RECENT WRITTEN BEATS - DO NOT REHASH AS FRESH PLOT",
+                    highlights,
+                    NovelInjectionSelectionReason.RecentWrittenHighlights,
+                )
+            }
+            document.upcomingArc(branch.id)?.let { arc ->
+                add(
+                    NovelInjectionSectionKind.UpcomingArc(branch.id),
+                    "UPCOMING ARC - SOFT DIRECTION FOR THE NEXT FEW CHAPTERS",
+                    arc.injectionText(),
+                    NovelInjectionSelectionReason.UpcomingArc,
+                )
+            }
+        }
         if (state != null) {
             val stateText = buildString {
                 appendLine("Summary: ${state.summary}")
@@ -150,7 +270,11 @@ object NovelInjectionPlanner {
                     )
                 }
             }
-        } else if (selections.isNotEmpty() && promptKind != NovelPromptKind.QuickStart) {
+        } else if (
+            selections.isNotEmpty() &&
+            promptKind != NovelPromptKind.QuickStart &&
+            promptKind != NovelPromptKind.ManualSyncV1
+        ) {
             val last = selections.last()
             val version = document.chapterVersions.firstOrNull { it.id == last.versionID }
             if (version != null) {
@@ -164,22 +288,30 @@ object NovelInjectionPlanner {
             }
         }
 
-        val session = document.sessions.firstOrNull { it.id == branch.sessionID }
-        val archiveFloor = when (val c = session?.archiveCursor) {
-            is app.amber.feature.novel.model.NovelSessionCursor.Through -> c.sequence
-            else -> -1L
-        }
-        session?.messages
-            ?.filter { it.sequence > archiveFloor }
-            ?.takeLast(recentMessages)
-            ?.forEach { msg ->
-                add(
-                    NovelInjectionSectionKind.SessionMessage(msg.id),
-                    "Session ${msg.role}",
-                    msg.content,
-                    NovelInjectionSelectionReason.RecentSession,
+        val excludesRecentSession =
+            promptKind == NovelPromptKind.ManualSyncV1 ||
+                (
+                promptKind == NovelPromptKind.ProseWholeChapter &&
+                    document.project.collaborationMode == NovelCollaborationMode.Ghostwrite
                 )
+        if (!excludesRecentSession) {
+            val session = document.sessions.firstOrNull { it.id == branch.sessionID }
+            val archiveFloor = when (val c = session?.archiveCursor) {
+                is app.amber.feature.novel.model.NovelSessionCursor.Through -> c.sequence
+                else -> -1L
             }
+            session?.messages
+                ?.filter { it.sequence > archiveFloor }
+                ?.takeLast(recentMessages)
+                ?.forEach { msg ->
+                    add(
+                        NovelInjectionSectionKind.SessionMessage(msg.id),
+                        "Session ${msg.role}",
+                        msg.content,
+                        NovelInjectionSelectionReason.RecentSession,
+                    )
+                }
+        }
 
         val materialDecisions = mutableListOf<NovelMaterialInjectionDecision>()
         for (material in document.materials.filter { !it.isDeleted }) {
@@ -336,4 +468,26 @@ object NovelInjectionPlanner {
     )
 
     private fun estimateTokens(text: String): Int = (text.length / 3).coerceAtLeast(1)
+
+    private fun materialText(
+        kind: NovelMaterialKind,
+        document: NovelProjectDocumentV1,
+    ): String? {
+        val chunks = document.materials
+            .filter { it.kind == kind && !it.isDeleted }
+            .mapNotNull { material ->
+                val revision = document.materialRevisions.firstOrNull {
+                    it.id == material.currentRevisionID
+                } ?: return@mapNotNull null
+                val body = revision.content.trim()
+                if (body.isEmpty()) return@mapNotNull null
+                revision.title.trim().takeIf { it.isNotEmpty() }
+                    ?.let { title -> "$title\n$body" }
+                    ?: body
+            }
+        return chunks.takeIf { it.isNotEmpty() }?.joinToString("\n\n")
+    }
+
+    private fun clip(text: String, limit: Int): String =
+        if (text.length <= limit) text else text.take(limit) + "…"
 }

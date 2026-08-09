@@ -18,10 +18,13 @@ import app.amber.feature.novel.model.NovelChapterId
 import app.amber.feature.novel.model.NovelCandidateStatus
 import app.amber.feature.novel.model.NovelRunInterruptionReason
 import app.amber.feature.novel.model.NovelRunStatus
+import app.amber.feature.novel.model.NovelRunId
 import app.amber.feature.novel.persistence.NovelFileProjectRepository
 import app.amber.feature.novel.persistence.NovelRecoveryStore
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
@@ -47,6 +50,57 @@ class NovelGenerationLifecycleTest {
             chunkSize = 8,
         )
         return DefaultNovelCreation(repo, model, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+    }
+
+    @Test
+    fun startUsesCallerOwnedRunIdForDurableWriteAhead() = runBlocking {
+        val nc = creation()
+        val created = nc.perform(
+            NovelIntent.CreateProject("DurableRun", NovelProjectCreationMode.Blank),
+        ) as NovelOutcome.ProjectCreated
+        val preparedRunId = NovelRunId.generate()
+
+        val run = nc.start(
+            NovelRunRequest(
+                runId = preparedRunId,
+                projectId = created.projectID,
+                branchId = created.branchID,
+                userText = "Write",
+            ),
+        )
+
+        assertEquals(preparedRunId, run.id)
+        run.events.filterIsInstance<NovelRunEvent.Completed>().first()
+        Unit
+    }
+
+    @Test
+    fun generationReserveRejectsCallerPinnedConfigDrift() = runBlocking {
+        val nc = creation()
+        val created = nc.perform(
+            NovelIntent.CreateProject("PinnedRun", NovelProjectCreationMode.Blank),
+        ) as NovelOutcome.ProjectCreated
+        val before = (nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project).document
+        nc.perform(NovelIntent.SetPolishPreference(created.projectID, "作者刚刚修改了配置"))
+        val current = (nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project).document
+        val branch = current.branches.single { it.id == created.branchID }
+
+        val run = nc.start(
+            NovelRunRequest(
+                projectId = created.projectID,
+                branchId = created.branchID,
+                userText = "Write",
+                expectedProjectRevision = current.project.revision,
+                expectedConfigRevision = before.project.configRevision,
+                expectedBranchHeadRevision = branch.headRevision,
+            ),
+        )
+        val failed = run.events.filterIsInstance<NovelRunEvent.Failed>().first()
+
+        assertEquals("stale_config_revision", failed.code)
+        val after = (nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project).document
+        assertTrue(after.activeRuns.isEmpty())
+        assertTrue(after.sessions.single().messages.isEmpty())
     }
 
     @Test
@@ -598,6 +652,123 @@ class NovelGenerationLifecycleTest {
     }
 
     @Test
+    fun projectWideInterrupt_excludesOwnedLiveRunAcrossBranches() = runBlocking {
+        val root = temp.newFolder("novel-interrupt-excluded")
+        val repo = NovelFileProjectRepository(root)
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val cancelledRunIds = ConcurrentHashMap.newKeySet<NovelRunId>()
+        val continuationChannels = ConcurrentHashMap<NovelRunId, Channel<String>>()
+        val hangingModel = object : NovelModelRunning {
+            override suspend fun resolveModel(policy: app.amber.feature.novel.model.NovelProjectModelPolicy) =
+                NovelResolvedModel(
+                    providerID = "scripted-provider",
+                    ownerProviderID = "scripted-provider",
+                    modelID = "scripted-model",
+                    wireModelID = "scripted-model",
+                    displayName = "Scripted",
+                    contextWindowTokens = 128_000,
+                )
+
+            override fun start(request: NovelModelRequest) =
+                Channel<String>(capacity = Channel.UNLIMITED).let { continuation ->
+                    continuationChannels[request.runID] = continuation
+                    flow {
+                        emit(NovelModelEvent.TextDelta("draft-${request.runID.rawValue}"))
+                        for (text in continuation) {
+                            emit(NovelModelEvent.TextDelta(text))
+                        }
+                    }
+                }
+
+            override fun cancel(runId: NovelRunId) {
+                cancelledRunIds += runId
+            }
+        }
+        val nc = DefaultNovelCreation(repo, hangingModel, scope, NovelRecoveryStore(root))
+        val created = nc.perform(
+            NovelIntent.CreateProject("Interrupt excluded", NovelProjectCreationMode.Blank),
+        ) as NovelOutcome.ProjectCreated
+        val initial = nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project
+        val mainBranch = initial.document.branches.single { it.id == created.branchID }
+        val forked = nc.perform(
+            NovelIntent.ForkBranch(
+                projectId = created.projectID,
+                sourceBranchId = created.branchID,
+                checkpointId = mainBranch.headCheckpointID,
+                name = "Sibling",
+            ),
+        ) as NovelOutcome.BranchForked
+
+        val ownedRun = nc.start(
+            NovelRunRequest(
+                projectId = created.projectID,
+                branchId = created.branchID,
+                userText = "owned",
+                mode = NovelSessionModeRequest.WriteProse,
+                kind = NovelRunKindRequest.Prose,
+            ),
+        )
+        ownedRun.events.filterIsInstance<NovelRunEvent.Delta>().first()
+        val siblingRun = nc.start(
+            NovelRunRequest(
+                projectId = created.projectID,
+                branchId = forked.branchID,
+                userText = "sibling",
+                mode = NovelSessionModeRequest.WriteProse,
+                kind = NovelRunKindRequest.Prose,
+            ),
+        )
+        siblingRun.events.filterIsInstance<NovelRunEvent.Delta>().first()
+        val beforeInterrupt = nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project
+        assertEquals(
+            setOf(ownedRun.id, siblingRun.id),
+            beforeInterrupt.document.activeRuns
+                .filter { it.status == NovelRunStatus.Running }
+                .mapTo(mutableSetOf()) { it.id },
+        )
+
+        nc.interrupt(
+            NovelInterruptRequest(
+                projectId = created.projectID,
+                reason = NovelInterruptReason.RouteExit,
+                excludedRunIds = setOf(ownedRun.id),
+            ),
+        )
+        siblingRun.events.filterIsInstance<NovelRunEvent.Interrupted>().first()
+
+        val afterProjectInterrupt =
+            nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project
+        val runsById = afterProjectInterrupt.document.activeRuns.associateBy { it.id }
+        assertEquals(NovelRunStatus.Running, runsById.getValue(ownedRun.id).status)
+        assertEquals(NovelRunStatus.Interrupted, runsById.getValue(siblingRun.id).status)
+        assertEquals(
+            NovelRunInterruptionReason.RouteExit,
+            runsById.getValue(siblingRun.id).interruptionReason,
+        )
+        assertEquals(setOf(siblingRun.id), cancelledRunIds)
+        continuationChannels.getValue(ownedRun.id).send("continued-after-project-interrupt")
+        ownedRun.events.filterIsInstance<NovelRunEvent.Delta>()
+            .first { it.text == "continued-after-project-interrupt" }
+
+        // Exact cleanup proves the excluded run stayed in the production liveRuns registry.
+        nc.interrupt(
+            NovelInterruptRequest(
+                projectId = created.projectID,
+                runId = ownedRun.id,
+                reason = NovelInterruptReason.User,
+            ),
+        )
+        ownedRun.events.filterIsInstance<NovelRunEvent.Interrupted>().first()
+        val afterCleanup = nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project
+        assertEquals(
+            NovelRunStatus.Interrupted,
+            afterCleanup.document.activeRuns.single { it.id == ownedRun.id }.status,
+        )
+        assertEquals(setOf(siblingRun.id, ownedRun.id), cancelledRunIds)
+        scope.cancel()
+    }
+
+    @Test
     fun collectPartialParagraphs_andSupersedesSiblingInterrupted() = runBlocking {
         val nc = creation(
             mapOf(NovelModelPurpose.Prose to "第一段。\n\n第二段。\n\n第三段。"),
@@ -770,6 +941,64 @@ class NovelGenerationLifecycleTest {
         """.trimIndent()
         val delta = app.amber.feature.novel.domain.NovelStructuredOutputDecoder.decodeStateDelta(json)
         assertEquals("S", delta.stateSummary)
+    }
+
+    @Test
+    fun strictManualSyncRejectsSummaryOnlyOutputAndKeepsNeedsSync() = runBlocking {
+        val nc = creation(
+            mapOf(
+                NovelModelPurpose.Prose to "主角在祭坛下找到失落的信物。",
+                NovelModelPurpose.StateExtraction to "not-json",
+                NovelModelPurpose.StateRebuild to
+                    """{"schemaVersion":1,"stateSummary":"看似成功但字段不完整"}""",
+            ),
+        )
+        val created = nc.perform(
+            NovelIntent.CreateProject("StrictSync", NovelProjectCreationMode.Blank),
+        ) as NovelOutcome.ProjectCreated
+        val run = nc.start(
+            NovelRunRequest(
+                projectId = created.projectID,
+                branchId = created.branchID,
+                userText = "写",
+                mode = NovelSessionModeRequest.WriteProse,
+                kind = NovelRunKindRequest.Prose,
+            ),
+        )
+        run.events.filterIsInstance<NovelRunEvent.Completed>().first()
+        val candidate = (nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project)
+            .document.candidates.single()
+        nc.perform(
+            NovelIntent.CollectCandidate(
+                projectId = created.projectID,
+                branchId = created.branchID,
+                candidateId = candidate.id,
+                selectedText = candidate.content,
+                target = NovelCollectionTarget.CreateNextChapter(
+                    chapterID = NovelChapterId.generate(),
+                    title = "第1章",
+                ),
+                runStateDelta = true,
+            ),
+        )
+
+        val failed = runCatching {
+            nc.perform(
+                NovelIntent.SyncManualEdits(
+                    projectId = created.projectID,
+                    branchId = created.branchID,
+                    failClosed = true,
+                ),
+            )
+        }
+        assertTrue(failed.isFailure)
+        val after = nc.snapshot(NovelQuery.Project(created.projectID)) as NovelSnapshot.Project
+        val branch = after.document.branches.first { it.id == created.branchID }
+        assertEquals(
+            app.amber.feature.novel.model.NovelBranchSyncStatus.NeedsSync,
+            branch.syncStatus,
+        )
+        assertEquals(1, after.document.chapters.size)
     }
 
     @Test

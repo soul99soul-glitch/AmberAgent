@@ -34,4 +34,17 @@ class StreamTerminationGuardTest {
         guard.observe(type = "message_stop", data = "{}")
         assertNull(guard.cleanEofCause())
     }
+
+    @Test
+    fun `google clean EOF requires a candidate finish reason`() {
+        val guard = StreamTerminationGuard(StreamProtocol.GOOGLE)
+
+        assertTrue(guard.cleanEofCause() is IncompleteStreamException)
+        guard.observeFinishReason(null)
+        assertTrue(guard.cleanEofCause() is IncompleteStreamException)
+        guard.observeFinishReason("FINISH_REASON_UNSPECIFIED")
+        assertTrue(guard.cleanEofCause() is IncompleteStreamException)
+        guard.observeFinishReason("STOP")
+        assertNull(guard.cleanEofCause())
+    }
 }

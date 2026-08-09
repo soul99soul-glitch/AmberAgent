@@ -3,9 +3,19 @@ package app.amber.feature.ui.pages.novel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.amber.feature.novel.NovelArchiveDecisionInput
+import app.amber.feature.novel.NovelBackgroundRunRegistry
 import app.amber.feature.novel.NovelCreation
 import app.amber.feature.novel.NovelDiscussionArchiveDraft
 import app.amber.feature.novel.NovelGenerationGranularityRequest
+import app.amber.feature.novel.NovelGhostwriteBatchCommandFailure
+import app.amber.feature.novel.NovelGhostwriteBatchCommandResult
+import app.amber.feature.novel.NovelGhostwriteBatchController
+import app.amber.feature.novel.NovelGhostwriteBatchProjectSnapshot
+import app.amber.feature.novel.NovelGhostwriteCoordinator
+import app.amber.feature.novel.NovelGhostwriteFailureReason
+import app.amber.feature.novel.NovelGhostwritePhase
+import app.amber.feature.novel.NovelGhostwriteProgress
+import app.amber.feature.novel.NovelGhostwriteStartResult
 import app.amber.feature.novel.NovelIntent
 import app.amber.feature.novel.NovelInterruptReason
 import app.amber.feature.novel.NovelInterruptRequest
@@ -15,6 +25,7 @@ import app.amber.feature.novel.NovelRunKindRequest
 import app.amber.feature.novel.NovelRunRequest
 import app.amber.feature.novel.NovelSessionModeRequest
 import app.amber.feature.novel.NovelSnapshot
+import app.amber.feature.novel.domain.NovelGhostwriteReadiness
 import app.amber.feature.novel.domain.NovelParagraphSelection
 import app.amber.feature.novel.model.NovelBranchId
 import app.amber.feature.novel.model.NovelBranchLifecycle
@@ -24,16 +35,26 @@ import app.amber.feature.novel.model.NovelCandidateId
 import app.amber.feature.novel.model.NovelCandidateKind
 import app.amber.feature.novel.model.NovelCandidateRecord
 import app.amber.feature.novel.model.NovelCandidateStatus
+import app.amber.feature.novel.model.NovelChapterPlanId
+import app.amber.feature.novel.model.NovelChapterPlanStatus
 import app.amber.feature.novel.model.NovelChapterId
 import app.amber.feature.novel.model.NovelCollectionTarget
+import app.amber.feature.novel.model.NovelCollaborationMode
+import app.amber.feature.novel.model.NovelGhostwriteJobId
+import app.amber.feature.novel.model.NovelGhostwriteJobStatus
+import app.amber.feature.novel.model.NovelGhostwriteJobV1
 import app.amber.feature.novel.model.NovelProjectCreationMode
 import app.amber.feature.novel.model.NovelProjectDocumentV1
 import app.amber.feature.novel.model.NovelProjectId
 import app.amber.feature.novel.model.NovelProjectLoadAccess
 import app.amber.feature.novel.model.NovelProjectModelPolicy
 import app.amber.feature.novel.model.NovelProposalId
+import app.amber.feature.novel.model.NovelRunId
 import app.amber.feature.novel.model.NovelSessionMessageRecord
 import app.amber.feature.novel.model.NovelSessionRole
+import app.amber.feature.novel.persistence.NovelGhostwriteJobLoadAccess
+import app.amber.feature.novel.persistence.NovelGhostwriteJobScanFailure
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -96,6 +117,23 @@ data class NovelArchiveSheetUi(
     val decisions: List<Pair<String, String>> = listOf("" to ""),
 )
 
+data class NovelGhostwriteBatchUiState(
+    val loading: Boolean = true,
+    val job: NovelGhostwriteJobV1? = null,
+    val access: NovelGhostwriteJobLoadAccess? = null,
+    val projectHasActiveJob: Boolean = false,
+    val scanFailures: List<NovelGhostwriteJobScanFailure> = emptyList(),
+    val loadFailure: String? = null,
+    val commandPending: Boolean = false,
+    val notificationRequired: Boolean = false,
+) {
+    val ledgerBlocked: Boolean
+        get() = scanFailures.isNotEmpty() || loadFailure != null
+
+    val bindingHasActiveJob: Boolean
+        get() = job?.isTerminal == false
+}
+
 data class NovelWorkspaceUiState(
     val loading: Boolean = true,
     val document: NovelProjectDocumentV1? = null,
@@ -120,18 +158,26 @@ data class NovelWorkspaceUiState(
     val batchPolishResults: List<NovelBatchPolishResult> = emptyList(),
     val continuityIssues: List<NovelContinuityUiIssue>? = null,
     val continuityConsistent: Boolean? = null,
+    /** App-owned single-chapter ghostwrite progress; survives this ViewModel instance. */
+    val ghostwriteProgress: NovelGhostwriteProgress? = null,
+    /** Durable multi-chapter ledger projection; it never owns the WorkManager execution. */
+    val ghostwriteBatch: NovelGhostwriteBatchUiState = NovelGhostwriteBatchUiState(),
 )
 
 class NovelWorkspaceViewModel(
     projectId: String,
     private val novelCreation: NovelCreation,
     private val uiSession: NovelProjectUiSession,
+    private val ghostwriteCoordinator: NovelGhostwriteCoordinator,
+    private val backgroundRunRegistry: NovelBackgroundRunRegistry,
+    private val ghostwriteBatchController: NovelGhostwriteBatchController,
 ) : ViewModel() {
     val projectId: NovelProjectId = NovelProjectId.parse(projectId)
     private val _state = MutableStateFlow(NovelWorkspaceUiState())
     val state: StateFlow<NovelWorkspaceUiState> = _state.asStateFlow()
     private var generateJob: Job? = null
     private var batchPolishJob: Job? = null
+    private var batchPolishEpoch = 0L
     private var continuityJob: Job? = null
     private var archiveDistillJob: Job? = null
     /** Bumps on each new send/polish so a cancelled job's finally cannot clear the newer run. */
@@ -141,8 +187,110 @@ class NovelWorkspaceViewModel(
      * Auto-kick once per successful attempt window. Failures clear the flag so retry works.
      */
     private var quickStartKickoffDone = false
+    private var ghostwriteOwnedBusy = false
+    private var ghostwriteStartPending = false
+    private var latestGhostwriteBatchSnapshot: NovelGhostwriteBatchProjectSnapshot? = null
 
-    init { refresh() }
+    init {
+        refresh()
+        viewModelScope.launch {
+            ghostwriteCoordinator.progress.collect { latest ->
+                val visible = ghostwriteProgressForBranch(
+                    progress = latest,
+                    projectId = this@NovelWorkspaceViewModel.projectId,
+                    branchId = _state.value.selectedBranchId,
+                )
+                val running = visible.isRunning()
+                val wasRunning = ghostwriteOwnedBusy
+                val wasStartPending = ghostwriteStartPending
+                val clearOwnedBusy = shouldClearGhostwriteBusy(
+                    progress = visible,
+                    wasRunning = wasRunning,
+                    startPending = wasStartPending,
+                )
+                when {
+                    running -> {
+                        ghostwriteOwnedBusy = true
+                        ghostwriteStartPending = false
+                    }
+                    clearOwnedBusy -> {
+                        ghostwriteOwnedBusy = false
+                        ghostwriteStartPending = false
+                    }
+                }
+                _state.value = _state.value.copy(
+                    ghostwriteProgress = visible,
+                    busy = when {
+                        running -> true
+                        clearOwnedBusy -> false
+                        else -> _state.value.busy
+                    },
+                    busyPhase = when {
+                        running -> "后台代笔…"
+                        clearOwnedBusy -> null
+                        else -> _state.value.busyPhase
+                    },
+                )
+                if (visible?.phase in setOf(
+                        NovelGhostwritePhase.Paused,
+                        NovelGhostwritePhase.WaitingUser,
+                        NovelGhostwritePhase.Failed,
+                    )
+                ) {
+                    refreshSuspend(quiet = true)
+                }
+            }
+        }
+        viewModelScope.launch {
+            ghostwriteBatchController.observeProject(
+                this@NovelWorkspaceViewModel.projectId,
+            ).collect { snapshot ->
+                val previous = _state.value.ghostwriteBatch.job
+                latestGhostwriteBatchSnapshot = snapshot
+                val currentBranchId = _state.value.selectedBranchId
+                val visibleBranchId = preferredBranchForActiveBatch(
+                    snapshot = snapshot,
+                    selectedBranchId = currentBranchId,
+                    isActiveBranch = { branchId ->
+                        _state.value.document?.branches?.any {
+                            it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active
+                        } == true
+                    },
+                ) ?: currentBranchId
+                if (visibleBranchId != null && visibleBranchId != currentBranchId) {
+                    archiveDistillJob?.cancel()
+                    archiveDistillJob = null
+                    uiSession.setSelectedBranch(this@NovelWorkspaceViewModel.projectId.rawValue, visibleBranchId)
+                }
+                val projected = projectGhostwriteBatchForBranch(
+                    snapshot = snapshot,
+                    branchId = visibleBranchId,
+                    previous = _state.value.ghostwriteBatch,
+                )
+                _state.value = _state.value.copy(
+                    selectedBranchId = visibleBranchId,
+                    ghostwriteProgress = ghostwriteProgressForBranch(
+                        progress = ghostwriteCoordinator.progress.value,
+                        projectId = this@NovelWorkspaceViewModel.projectId,
+                        branchId = visibleBranchId,
+                    ),
+                    ghostwriteBatch = projected,
+                    archiveSheet = if (visibleBranchId != currentBranchId) null else _state.value.archiveSheet,
+                )
+                val latest = projected.job
+                if (latest != null &&
+                    (latest.completedChapterCount != previous?.completedChapterCount ||
+                        latest.status != previous?.status)
+                ) {
+                    refreshSuspend(quiet = true)
+                } else {
+                    _state.value.document?.let { document ->
+                        maybeKickQuickStart(document, _state.value.selectedBranchId)
+                    }
+                }
+            }
+        }
+    }
 
     private var refreshSeq = 0L
 
@@ -172,18 +320,47 @@ class NovelWorkspaceViewModel(
                     val active = { id: NovelBranchId ->
                         doc.branches.any { it.id == id && it.lifecycle == NovelBranchLifecycle.Active }
                     }
+                    val activeBatchBranch = latestGhostwriteBatchSnapshot?.let { snapshot ->
+                        preferredBranchForActiveBatch(
+                            snapshot = snapshot,
+                            selectedBranchId = _state.value.selectedBranchId,
+                            isActiveBranch = active,
+                        )
+                    }
                     val branchId = listOfNotNull(
+                        activeBatchBranch,
                         uiSession.selectedBranch(projectId.rawValue),
                         _state.value.selectedBranchId,
                         doc.project.mainBranchID,
                     ).firstOrNull(active) ?: doc.project.mainBranchID
                     branchId?.let { uiSession.setSelectedBranch(projectId.rawValue, it) }
+                    val branchProgress = ghostwriteProgressForBranch(
+                        progress = ghostwriteCoordinator.progress.value,
+                        projectId = projectId,
+                        branchId = branchId,
+                    )
+                    val ghostwriteRunning = branchProgress.isRunning()
+                    if (ghostwriteRunning) {
+                        ghostwriteOwnedBusy = true
+                        ghostwriteStartPending = false
+                    }
+                    val batchProjection = latestGhostwriteBatchSnapshot?.let { batchSnapshot ->
+                        projectGhostwriteBatchForBranch(
+                            snapshot = batchSnapshot,
+                            branchId = branchId,
+                            previous = _state.value.ghostwriteBatch,
+                        )
+                    } ?: _state.value.ghostwriteBatch
                     _state.value = _state.value.copy(
                         loading = false,
                         document = doc,
                         access = snap.access,
                         primaryFailure = snap.primaryFailure,
                         selectedBranchId = branchId,
+                        ghostwriteProgress = branchProgress,
+                        ghostwriteBatch = batchProjection,
+                        busy = if (ghostwriteRunning) true else _state.value.busy,
+                        busyPhase = if (ghostwriteRunning) "后台代笔…" else _state.value.busyPhase,
                     )
                     // Always re-check after load (quiet or not) — create opens workspace empty.
                     maybeKickQuickStart(doc, branchId)
@@ -221,6 +398,21 @@ class NovelWorkspaceViewModel(
         if (branchId == null) return
         if (!needsQuickStartGeneration(doc)) return
         startQuickStartSuggestions(branchId = branchId, fromAuto = true)
+    }
+
+    private fun batchMutationBlockMessage(): String? = when {
+        _state.value.ghostwriteBatch.loading -> "正在检查连续代笔账本，请稍后再试"
+        _state.value.ghostwriteBatch.ledgerBlocked ->
+            "连续代笔账本异常；请先在创作控制中隔离损坏任务"
+        _state.value.ghostwriteBatch.projectHasActiveJob ->
+            "连续代笔批次尚未结束，请先取消批次再修改项目"
+        else -> null
+    }
+
+    private fun rejectIfBatchMutationBlocked(): Boolean {
+        val message = batchMutationBlockMessage() ?: return false
+        _state.value = _state.value.copy(errorMessage = message)
+        return true
     }
 
     /**
@@ -295,6 +487,19 @@ class NovelWorkspaceViewModel(
     }
     fun selectBranch(branchId: NovelBranchId) {
         val doc = _state.value.document ?: return
+        val switchingToActiveBatch = latestGhostwriteBatchSnapshot?.activeJobs.orEmpty().any {
+            it.job.branchID == branchId
+        }
+        if (branchId != _state.value.selectedBranchId && !switchingToActiveBatch) {
+            batchMutationBlockMessage()?.let { message ->
+                _state.value = _state.value.copy(errorMessage = message)
+                return
+            }
+        }
+        if (branchId != _state.value.selectedBranchId && ghostwriteCoordinator.owns(projectId)) {
+            _state.value = _state.value.copy(errorMessage = "代笔正在运行，请先暂停再切换分支")
+            return
+        }
         if (doc.branches.none { it.id == branchId && it.lifecycle == NovelBranchLifecycle.Active }) {
             _state.value = _state.value.copy(errorMessage = "Branch not found")
             return
@@ -312,9 +517,23 @@ class NovelWorkspaceViewModel(
         }
         uiSession.setSelectedBranch(projectId.rawValue, branchId)
         val clearArchive = branchId != _state.value.selectedBranchId
+        val branchProgress = ghostwriteProgressForBranch(
+            progress = ghostwriteCoordinator.progress.value,
+            projectId = projectId,
+            branchId = branchId,
+        )
+        val batchProjection = latestGhostwriteBatchSnapshot?.let { snapshot ->
+            projectGhostwriteBatchForBranch(
+                snapshot = snapshot,
+                branchId = branchId,
+                previous = _state.value.ghostwriteBatch,
+            )
+        } ?: _state.value.ghostwriteBatch
         _state.value = _state.value.copy(
             selectedBranchId = branchId,
             errorMessage = null,
+            ghostwriteProgress = branchProgress,
+            ghostwriteBatch = batchProjection,
             archiveSheet = if (clearArchive) null else _state.value.archiveSheet,
             busy = if (clearArchive && _state.value.archiveSheet?.distilling == true) {
                 false
@@ -413,6 +632,15 @@ class NovelWorkspaceViewModel(
         }
         if (_state.value.generating) {
             _state.value = _state.value.copy(errorMessage = "请先停止当前生成，再发送")
+            return
+        }
+        if (ghostwriteCoordinator.owns(projectId)) {
+            _state.value = _state.value.copy(errorMessage = "代笔正在后台运行，请先暂停")
+            return
+        }
+        batchMutationBlockMessage()?.let { message ->
+            if (forceKind == NovelRunKindRequest.QuickStart) quickStartKickoffDone = false
+            _state.value = _state.value.copy(errorMessage = message)
             return
         }
         if (_state.value.busy) {
@@ -604,15 +832,17 @@ class NovelWorkspaceViewModel(
                     statusMessage = null,
                 )
             } finally {
-                // Only the latest generation may clear flags (cancelled job must not clobber a newer run).
-                if (epoch == generationEpoch && (_state.value.generating || _state.value.busy)) {
-                    _state.value = _state.value.copy(generating = false, busy = false)
-                }
+                finishLegacyGeneration(epoch)
             }
         }
     }
 
     fun stop() {
+        val ghostwriteRunId = _state.value.ghostwriteProgress?.runId
+        if (ghostwriteRunId != null && ghostwriteCoordinator.owns(projectId, ghostwriteRunId)) {
+            pauseGhostwrite()
+            return
+        }
         novelCreation.interrupt(
             NovelInterruptRequest(projectId, reason = NovelInterruptReason.User),
         )
@@ -653,6 +883,25 @@ class NovelWorkspaceViewModel(
         if (epoch == generationEpoch) {
             _state.value = _state.value.copy(streamingText = "")
         }
+    }
+
+    private fun ghostwriteBusyNow(): Boolean = ghostwriteStartPending ||
+        ghostwriteOwnedBusy ||
+        ghostwriteCoordinator.owns(projectId)
+
+    /** A legacy generation may release only the busy state it still owns. */
+    private fun finishLegacyGeneration(epoch: Long) {
+        val current = _state.value
+        val busyAfterFinally = legacyOperationBusyAfterFinally(
+            operationTokenMatches = epoch == generationEpoch,
+            operationStillActive = current.generating,
+            ghostwriteOwnedOrPending = ghostwriteBusyNow(),
+        ) ?: return
+        _state.value = current.copy(
+            generating = false,
+            busy = busyAfterFinally,
+            busyPhase = if (busyAfterFinally) "后台代笔…" else null,
+        )
     }
 
     companion object {
@@ -900,6 +1149,7 @@ class NovelWorkspaceViewModel(
     }
 
     fun forkFromHead(name: String) {
+        if (rejectIfBatchMutationBlocked()) return
         val branch = currentBranch() ?: return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
@@ -1020,6 +1270,7 @@ class NovelWorkspaceViewModel(
     }
 
     fun setModelPolicy(policy: NovelProjectModelPolicy) {
+        if (rejectIfBatchMutationBlocked()) return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             runCatching {
@@ -1032,7 +1283,375 @@ class NovelWorkspaceViewModel(
         }
     }
 
+    fun setCollaborationMode(mode: NovelCollaborationMode) {
+        val doc = _state.value.document ?: return
+        val branchId = _state.value.selectedBranchId ?: return
+        if (doc.project.collaborationMode == mode) return
+        if (ghostwriteCoordinator.owns(projectId)) {
+            _state.value = _state.value.copy(errorMessage = "代笔正在运行，请先暂停再切换模式")
+            return
+        }
+        if (mode == NovelCollaborationMode.Ghostwrite) {
+            val issues = NovelGhostwriteReadiness.issues(
+                document = doc,
+                branchId = branchId,
+                requireChapterPlan = false,
+            )
+            if (issues.isNotEmpty()) {
+                _state.value = _state.value.copy(
+                    errorMessage = "无法切入代笔：" + issues.joinToString("；") { it.displayName },
+                )
+                return
+            }
+        }
+        mutateGhostwriteSetting(
+            successMessage = if (mode == NovelCollaborationMode.Ghostwrite) {
+                "已切换到代笔模式"
+            } else {
+                "已切换到共创模式"
+            },
+        ) {
+            novelCreation.perform(NovelIntent.SetCollaborationMode(projectId, branchId, mode))
+        }
+    }
+
+    fun setPauseGhostwriteOnBlockingContinuity(enabled: Boolean) {
+        mutateGhostwriteSetting(successMessage = "已更新连续性暂停设置") {
+            novelCreation.perform(
+                NovelIntent.SetPauseGhostwriteOnBlockingContinuity(projectId, enabled),
+            )
+        }
+    }
+
+    fun saveChapterPlan(draft: NovelChapterPlanDraft, status: NovelChapterPlanStatus) {
+        val doc = _state.value.document ?: return
+        val branchId = _state.value.selectedBranchId ?: return
+        val mustHappen = novelPlanLines(draft.mustHappen)
+        val mustNotHappen = novelPlanLines(draft.mustNotHappen)
+        val visibleFacts = novelPlanLines(draft.visibleFacts)
+        if (draft.goalAndConflict.isBlank()) {
+            _state.value = _state.value.copy(errorMessage = "请填写本章的目标与冲突")
+            return
+        }
+        if (status == NovelChapterPlanStatus.Confirmed && mustHappen.isEmpty()) {
+            _state.value = _state.value.copy(errorMessage = "确认计划时至少需要一条「必发生」")
+            return
+        }
+        if (listOf(mustHappen, mustNotHappen, visibleFacts).any { it.size > 32 }) {
+            _state.value = _state.value.copy(errorMessage = "计划中每组清单最多 32 条")
+            return
+        }
+        val planId = doc.chapterPlan(branchId)?.id ?: NovelChapterPlanId.generate()
+        mutateGhostwriteSetting(
+            successMessage = if (status == NovelChapterPlanStatus.Confirmed) {
+                "本章计划已确认，可以开始代笔"
+            } else {
+                "本章计划草稿已保存"
+            },
+        ) {
+            novelCreation.perform(
+                NovelIntent.UpsertChapterPlan(
+                    projectId = projectId,
+                    branchId = branchId,
+                    planId = planId,
+                    status = status,
+                    outlinePlacement = draft.outlinePlacement,
+                    goalAndConflict = draft.goalAndConflict,
+                    mustHappen = mustHappen,
+                    mustNotHappen = mustNotHappen,
+                    endingHook = draft.endingHook,
+                    visibleFacts = visibleFacts,
+                ),
+            )
+        }
+    }
+
+    fun clearChapterPlan() {
+        val branchId = _state.value.selectedBranchId ?: return
+        mutateGhostwriteSetting(successMessage = "本章计划已清除") {
+            novelCreation.perform(NovelIntent.ClearChapterPlan(projectId, branchId))
+        }
+    }
+
+    fun saveUpcomingArc(beats: List<String>) {
+        val branchId = _state.value.selectedBranchId ?: return
+        val normalized = beats.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+        if (normalized.isEmpty()) {
+            _state.value = _state.value.copy(errorMessage = "请至少填写一条往后几章的方向")
+            return
+        }
+        if (normalized.size > 8 || normalized.any { it.length > 160 }) {
+            _state.value = _state.value.copy(errorMessage = "往后几章最多 8 条，每条最多 160 字")
+            return
+        }
+        mutateGhostwriteSetting(successMessage = "往后几章的方向已保存") {
+            novelCreation.perform(NovelIntent.UpsertUpcomingArc(projectId, branchId, normalized))
+        }
+    }
+
+    fun clearUpcomingArc() {
+        val branchId = _state.value.selectedBranchId ?: return
+        mutateGhostwriteSetting(successMessage = "往后几章的备注已清除") {
+            novelCreation.perform(NovelIntent.ClearUpcomingArc(projectId, branchId))
+        }
+    }
+
+    fun startGhostwrite() {
+        val branchId = _state.value.selectedBranchId
+        if (branchId == null) {
+            _state.value = _state.value.copy(errorMessage = "未选择分支，无法开始代笔")
+            return
+        }
+        batchMutationBlockMessage()?.let { message ->
+            _state.value = _state.value.copy(errorMessage = message)
+            return
+        }
+        if (_state.value.busy || _state.value.generating) {
+            _state.value = _state.value.copy(errorMessage = "当前有操作正在进行")
+            return
+        }
+        ghostwriteStartPending = true
+        _state.value = _state.value.copy(
+            busy = true,
+            busyPhase = "准备后台代笔…",
+            errorMessage = null,
+            statusMessage = null,
+        )
+        viewModelScope.launch {
+            runCatching { ghostwriteCoordinator.start(projectId, branchId) }
+                .onSuccess { result ->
+                    when (result) {
+                        NovelGhostwriteStartResult.Started -> {
+                            _state.value = _state.value.copy(
+                                statusMessage = "代笔已在后台开始，离开页面也会继续",
+                            )
+                        }
+                        is NovelGhostwriteStartResult.Rejected -> {
+                            ghostwriteStartPending = false
+                            ghostwriteOwnedBusy = false
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                busyPhase = null,
+                                errorMessage = humanizeGhostwriteRejection(result),
+                            )
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    ghostwriteStartPending = false
+                    ghostwriteOwnedBusy = false
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        busyPhase = null,
+                        errorMessage = humanizeNovelError(null, error.message),
+                    )
+                }
+        }
+    }
+
+    fun pauseGhostwrite() {
+        val runId = _state.value.ghostwriteProgress?.runId
+        if (runId == null) {
+            _state.value = _state.value.copy(errorMessage = "找不到当前代笔任务，请刷新后重试")
+            return
+        }
+        if (ghostwriteCoordinator.pause(runId)) {
+            _state.value = _state.value.copy(statusMessage = "正在暂停代笔…", errorMessage = null)
+        } else {
+            _state.value = _state.value.copy(errorMessage = "代笔任务已变更，未中断新任务")
+        }
+    }
+
+    fun startGhostwriteBatch(targetChapterCount: Int) {
+        val branchId = _state.value.selectedBranchId
+        if (branchId == null) {
+            _state.value = _state.value.copy(errorMessage = "未选择分支，无法开始连续代笔")
+            return
+        }
+        if (_state.value.busy || _state.value.generating || ghostwriteCoordinator.owns(projectId)) {
+            _state.value = _state.value.copy(errorMessage = "当前有操作正在进行")
+            return
+        }
+        submitGhostwriteBatchCommand("正在创建连续代笔批次…") {
+            ghostwriteBatchController.start(projectId, branchId, targetChapterCount)
+        }
+    }
+
+    fun pauseGhostwriteBatch() {
+        val jobId = currentGhostwriteBatchJobId() ?: return
+        submitGhostwriteBatchCommand(
+            pendingMessage = "正在安全暂停批次…",
+            updatedMessage = "连续代笔批次已暂停",
+        ) {
+            ghostwriteBatchController.pause(jobId)
+        }
+    }
+
+    fun resumeGhostwriteBatch() {
+        val jobId = currentGhostwriteBatchJobId() ?: return
+        submitGhostwriteBatchCommand(
+            pendingMessage = "正在恢复后台批次…",
+            updatedMessage = "已提交恢复后台调度",
+        ) {
+            ghostwriteBatchController.resume(jobId)
+        }
+    }
+
+    fun cancelGhostwriteBatch() {
+        val jobId = currentGhostwriteBatchJobId() ?: return
+        submitGhostwriteBatchCommand(
+            pendingMessage = "正在取消批次…",
+            updatedMessage = "连续代笔批次已取消",
+        ) {
+            ghostwriteBatchController.cancel(jobId)
+        }
+    }
+
+    fun quarantineGhostwriteBatchFailure(token: String) {
+        submitGhostwriteBatchCommand("正在隔离损坏账本…") {
+            ghostwriteBatchController.quarantineScanFailure(token)
+        }
+    }
+
+    private fun currentGhostwriteBatchJobId(): NovelGhostwriteJobId? =
+        _state.value.ghostwriteBatch.job?.id ?: run {
+            _state.value = _state.value.copy(errorMessage = "找不到当前连续代笔批次，请稍后重试")
+            null
+        }
+
+    private fun submitGhostwriteBatchCommand(
+        pendingMessage: String,
+        updatedMessage: String? = null,
+        command: suspend () -> NovelGhostwriteBatchCommandResult,
+    ) {
+        val batch = _state.value.ghostwriteBatch
+        if (batch.commandPending) return
+        _state.value = _state.value.copy(
+            ghostwriteBatch = batch.copy(
+                commandPending = true,
+                notificationRequired = false,
+            ),
+            errorMessage = null,
+            statusMessage = pendingMessage,
+        )
+        viewModelScope.launch {
+            val result = try {
+                command()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    ghostwriteBatch = _state.value.ghostwriteBatch.copy(commandPending = false),
+                    errorMessage = humanizeNovelError(null, error.message),
+                    statusMessage = null,
+                )
+                return@launch
+            }
+            applyGhostwriteBatchCommandResult(result, updatedMessage)
+        }
+    }
+
+    private fun applyGhostwriteBatchCommandResult(
+        result: NovelGhostwriteBatchCommandResult,
+        updatedMessage: String?,
+    ) {
+        when (result) {
+            is NovelGhostwriteBatchCommandResult.Started -> {
+                publishGhostwriteBatchJob(result.job)
+                _state.value = _state.value.copy(
+                    statusMessage = "连续代笔批次已提交后台，可离开页面",
+                    errorMessage = null,
+                )
+            }
+            is NovelGhostwriteBatchCommandResult.Attached -> {
+                publishGhostwriteBatchJob(result.job)
+                _state.value = _state.value.copy(
+                    statusMessage = "已连接到现有连续代笔批次",
+                    errorMessage = null,
+                )
+            }
+            is NovelGhostwriteBatchCommandResult.Updated -> {
+                publishGhostwriteBatchJob(result.job)
+                _state.value = _state.value.copy(
+                    statusMessage = updatedMessage ?: when (result.job.status) {
+                        NovelGhostwriteJobStatus.Paused -> "连续代笔批次已暂停"
+                        NovelGhostwriteJobStatus.Cancelled -> "连续代笔批次已取消"
+                        else -> "连续代笔批次已恢复后台调度"
+                    },
+                    errorMessage = result.warning,
+                )
+            }
+            is NovelGhostwriteBatchCommandResult.Quarantined -> {
+                _state.value = _state.value.copy(
+                    ghostwriteBatch = _state.value.ghostwriteBatch.copy(commandPending = false),
+                    statusMessage = "损坏账本已隔离保留，可重新检查并启动",
+                    errorMessage = null,
+                )
+            }
+            is NovelGhostwriteBatchCommandResult.Rejected -> {
+                _state.value = _state.value.copy(
+                    ghostwriteBatch = _state.value.ghostwriteBatch.copy(
+                        commandPending = false,
+                        notificationRequired = result.reason ==
+                            NovelGhostwriteBatchCommandFailure.NotificationRequired,
+                    ),
+                    statusMessage = null,
+                    errorMessage = humanizeGhostwriteBatchRejection(result),
+                )
+            }
+        }
+    }
+
+    private fun publishGhostwriteBatchJob(job: NovelGhostwriteJobV1) {
+        val hasOtherActive = latestGhostwriteBatchSnapshot?.activeJobs.orEmpty().any {
+            it.job.id != job.id
+        }
+        _state.value = _state.value.copy(
+            ghostwriteBatch = _state.value.ghostwriteBatch.copy(
+                loading = false,
+                job = job,
+                access = NovelGhostwriteJobLoadAccess.ReadWrite,
+                projectHasActiveJob = !job.isTerminal || hasOtherActive,
+                commandPending = false,
+                notificationRequired = false,
+            ),
+        )
+    }
+
+    private fun mutateGhostwriteSetting(
+        successMessage: String,
+        block: suspend () -> Unit,
+    ) {
+        batchMutationBlockMessage()?.let { message ->
+            _state.value = _state.value.copy(errorMessage = message)
+            return
+        }
+        if (_state.value.busy || _state.value.generating || ghostwriteCoordinator.owns(projectId)) {
+            _state.value = _state.value.copy(errorMessage = "当前有生成或收录操作正在进行")
+            return
+        }
+        if (_state.value.access != NovelProjectLoadAccess.ReadWrite) {
+            _state.value = _state.value.copy(errorMessage = "项目处于只读恢复状态，请先恢复为可写")
+            return
+        }
+        _state.value = _state.value.copy(busy = true, errorMessage = null, statusMessage = null)
+        viewModelScope.launch {
+            runCatching { block() }
+                .onSuccess {
+                    refreshSuspend(quiet = true)
+                    _state.value = _state.value.copy(statusMessage = successMessage)
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        errorMessage = humanizeNovelError(null, error.message),
+                    )
+                }
+            _state.value = _state.value.copy(busy = false, busyPhase = null)
+        }
+    }
+
     fun restorePrevious() {
+        if (rejectIfBatchMutationBlocked()) return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             runCatching {
@@ -1124,14 +1743,17 @@ class NovelWorkspaceViewModel(
     }
 
     fun cancelBatchPolish() {
+        batchPolishEpoch += 1
         batchPolishJob?.cancel()
         batchPolishJob = null
+        val keepGhostwriteBusy = ghostwriteBusyNow()
         _state.value = _state.value.copy(
             batchPolishRunning = false,
-            busy = false,
+            busy = keepGhostwriteBusy,
             generating = false,
-            busyPhase = null,
+            busyPhase = if (keepGhostwriteBusy) "后台代笔…" else null,
             statusMessage = "已取消批量润色",
+            streamingText = "",
         )
     }
 
@@ -1178,6 +1800,7 @@ class NovelWorkspaceViewModel(
             busyPhase = "批量润色",
             streamingText = "",
         )
+        val epoch = ++batchPolishEpoch
         batchPolishJob?.cancel()
         batchPolishJob = viewModelScope.launch {
             val results = mutableListOf<NovelBatchPolishResult>()
@@ -1281,20 +1904,30 @@ class NovelWorkspaceViewModel(
                     streamingText = "",
                 )
             } catch (e: kotlinx.coroutines.CancellationException) {
-                _state.value = _state.value.copy(statusMessage = "已取消批量润色")
+                if (epoch == batchPolishEpoch) {
+                    _state.value = _state.value.copy(statusMessage = "已取消批量润色")
+                }
                 throw e
             } catch (e: Exception) {
                 _state.value = _state.value.copy(
                     errorMessage = humanizeNovelError(null, e.message),
                 )
             } finally {
-                _state.value = _state.value.copy(
-                    batchPolishRunning = false,
-                    busy = false,
-                    generating = false,
-                    busyPhase = null,
-                    streamingText = "",
+                val current = _state.value
+                val busyAfterFinally = legacyOperationBusyAfterFinally(
+                    operationTokenMatches = epoch == batchPolishEpoch,
+                    operationStillActive = current.batchPolishRunning,
+                    ghostwriteOwnedOrPending = ghostwriteBusyNow(),
                 )
+                if (busyAfterFinally != null) {
+                    _state.value = current.copy(
+                        batchPolishRunning = false,
+                        busy = busyAfterFinally,
+                        generating = false,
+                        busyPhase = if (busyAfterFinally) "后台代笔…" else null,
+                        streamingText = "",
+                    )
+                }
             }
         }
     }
@@ -1456,9 +2089,7 @@ class NovelWorkspaceViewModel(
                     streamingText = "",
                 )
             } finally {
-                if (epoch == generationEpoch && (_state.value.generating || _state.value.busy)) {
-                    _state.value = _state.value.copy(generating = false, busy = false)
-                }
+                finishLegacyGeneration(epoch)
             }
         }
     }
@@ -1572,9 +2203,7 @@ class NovelWorkspaceViewModel(
                     streamingText = "",
                 )
             } finally {
-                if (epoch == generationEpoch && (_state.value.generating || _state.value.busy)) {
-                    _state.value = _state.value.copy(generating = false, busy = false)
-                }
+                finishLegacyGeneration(epoch)
             }
         }
     }
@@ -1604,6 +2233,7 @@ class NovelWorkspaceViewModel(
     }
 
     fun setPolishPreference(text: String) {
+        if (rejectIfBatchMutationBlocked()) return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             runCatching {
@@ -1617,6 +2247,7 @@ class NovelWorkspaceViewModel(
     }
 
     fun renameBranch(branchId: NovelBranchId, name: String) {
+        if (rejectIfBatchMutationBlocked()) return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             runCatching {
@@ -1630,6 +2261,7 @@ class NovelWorkspaceViewModel(
     }
 
     fun setMainBranch(branchId: NovelBranchId) {
+        if (rejectIfBatchMutationBlocked()) return
         viewModelScope.launch {
             _state.value = _state.value.copy(busy = true, errorMessage = null)
             runCatching {
@@ -1649,6 +2281,7 @@ class NovelWorkspaceViewModel(
         materialId: app.amber.feature.novel.model.NovelMaterialId? = null,
         onSuccess: (() -> Unit)? = null,
     ) {
+        if (rejectIfBatchMutationBlocked()) return
         if (_state.value.busy) return
         if (_state.value.access != NovelProjectLoadAccess.ReadWrite) {
             _state.value = _state.value.copy(errorMessage = "项目处于只读恢复状态，请先恢复为可写")
@@ -1678,6 +2311,7 @@ class NovelWorkspaceViewModel(
         materialId: app.amber.feature.novel.model.NovelMaterialId,
         onSuccess: (() -> Unit)? = null,
     ) {
+        if (rejectIfBatchMutationBlocked()) return
         if (_state.value.busy) return
         if (_state.value.access != NovelProjectLoadAccess.ReadWrite) {
             _state.value = _state.value.copy(errorMessage = "项目处于只读恢复状态，请先恢复为可写")
@@ -2057,9 +2691,9 @@ class NovelWorkspaceViewModel(
     }
 
     override fun onCleared() {
-        novelCreation.interrupt(
-            NovelInterruptRequest(projectId = projectId, reason = NovelInterruptReason.RouteExit),
-        )
+        backgroundRunRegistry.withOwnedRunIds(projectId) { ownedRunIds ->
+            novelCreation.interrupt(novelRouteExitRequest(projectId, ownedRunIds))
+        }
         super.onCleared()
     }
 }
@@ -2090,4 +2724,124 @@ internal fun humanizeNovelError(code: String?, message: String?): String {
         msg.isBlank() -> "操作失败"
         else -> msg
     }
+}
+
+internal fun humanizeGhostwriteRejection(result: NovelGhostwriteStartResult.Rejected): String {
+    if (result.readinessIssues.isNotEmpty()) {
+        return "代笔条件尚未满足：" + result.readinessIssues.joinToString("；") { it.displayName }
+    }
+    if (result.reason == NovelGhostwriteFailureReason.NotificationPermissionRequired) {
+        return "请到系统设置中为 Amber 开启通知，再开始后台代笔"
+    }
+    result.detailMessage?.takeIf { it.isNotBlank() }?.let { return it }
+    return when (result.reason) {
+        NovelGhostwriteFailureReason.AlreadyRunning -> "已有代笔任务在运行"
+        NovelGhostwriteFailureReason.ProjectUnavailable -> "项目不可用，无法开始代笔"
+        NovelGhostwriteFailureReason.ProjectReadOnly -> "项目处于只读恢复状态"
+        NovelGhostwriteFailureReason.CollaborationModeRequired -> "请先切换到代笔模式"
+        NovelGhostwriteFailureReason.ReadinessBlocked -> "代笔条件尚未满足"
+        NovelGhostwriteFailureReason.NotificationPermissionRequired ->
+            "请到系统设置中为 Amber 开启通知，再开始后台代笔"
+        NovelGhostwriteFailureReason.ForegroundServiceUnavailable -> "无法启动后台生成服务"
+        NovelGhostwriteFailureReason.GenerationFailed -> "代笔生成失败"
+    }
+}
+
+internal fun humanizeGhostwriteBatchRejection(
+    result: NovelGhostwriteBatchCommandResult.Rejected,
+): String {
+    if (result.readinessIssues.isNotEmpty()) {
+        return "连续代笔条件尚未满足：" +
+            result.readinessIssues.joinToString("；") { it.displayName }
+    }
+    result.detail?.takeIf { it.isNotBlank() }?.let { return it }
+    return when (result.reason) {
+        NovelGhostwriteBatchCommandFailure.TargetOutOfRange -> "批次章数必须在 1 到 50 之间"
+        NovelGhostwriteBatchCommandFailure.LedgerBlocked ->
+            "批次账本损坏，请先隔离损坏任务后重试"
+        NovelGhostwriteBatchCommandFailure.LedgerReadOnly -> "批次账本处于只读恢复状态"
+        NovelGhostwriteBatchCommandFailure.ProjectUnavailable -> "项目或分支不可用"
+        NovelGhostwriteBatchCommandFailure.ProjectReadOnly -> "项目处于只读恢复状态"
+        NovelGhostwriteBatchCommandFailure.CollaborationModeRequired -> "请先切换到代笔模式"
+        NovelGhostwriteBatchCommandFailure.ReadinessBlocked -> "连续代笔条件尚未满足"
+        NovelGhostwriteBatchCommandFailure.NotificationRequired ->
+            "请到系统设置中为 Amber 开启通知，再开始后台连续代笔"
+        NovelGhostwriteBatchCommandFailure.InvalidState -> "当前批次状态不允许此操作"
+        NovelGhostwriteBatchCommandFailure.Conflict -> "批次状态已变化，请重试"
+        NovelGhostwriteBatchCommandFailure.SchedulingFailed -> "后台任务提交失败，请重试"
+        NovelGhostwriteBatchCommandFailure.StorageFailed -> "批次账本保存失败"
+    }
+}
+
+/**
+ * Returns the busy value an old operation may publish from `finally`, or null when it no longer owns the slot.
+ */
+internal fun legacyOperationBusyAfterFinally(
+    operationTokenMatches: Boolean,
+    operationStillActive: Boolean,
+    ghostwriteOwnedOrPending: Boolean,
+): Boolean? = if (operationTokenMatches && operationStillActive) {
+    ghostwriteOwnedOrPending
+} else {
+    null
+}
+
+internal fun novelRouteExitRequest(
+    projectId: NovelProjectId,
+    ownedRunIds: Set<NovelRunId>,
+): NovelInterruptRequest = NovelInterruptRequest(
+    projectId = projectId,
+    reason = NovelInterruptReason.RouteExit,
+    excludedRunIds = ownedRunIds,
+)
+
+/** Progress is branch-local after ownership ends; never offer recovery on a sibling branch. */
+internal fun ghostwriteProgressForBranch(
+    progress: NovelGhostwriteProgress?,
+    projectId: NovelProjectId,
+    branchId: NovelBranchId?,
+): NovelGhostwriteProgress? = progress?.takeIf {
+    branchId != null &&
+        it.binding?.projectId == projectId &&
+        it.binding?.branchId == branchId
+}
+
+internal fun projectGhostwriteBatchForBranch(
+    snapshot: NovelGhostwriteBatchProjectSnapshot,
+    branchId: NovelBranchId?,
+    previous: NovelGhostwriteBatchUiState,
+): NovelGhostwriteBatchUiState {
+    val loaded = branchId?.let(snapshot::latestForBinding)
+    val reasonCode = loaded?.job?.statusReasonCode
+    val notificationRequired = reasonCode in setOf(
+        "foreground_notification_unavailable",
+        "foreground_start_failed",
+        "foreground_update_failed",
+    )
+    return NovelGhostwriteBatchUiState(
+        loading = false,
+        job = loaded?.job,
+        access = loaded?.access,
+        projectHasActiveJob = snapshot.activeJobs.isNotEmpty(),
+        scanFailures = snapshot.scanFailures,
+        loadFailure = snapshot.loadFailure,
+        commandPending = previous.commandPending,
+        notificationRequired = previous.notificationRequired || notificationRequired,
+    )
+}
+
+/** Prefer the durable batch binding after process recreation; never strand its controls on another branch. */
+internal fun preferredBranchForActiveBatch(
+    snapshot: NovelGhostwriteBatchProjectSnapshot,
+    selectedBranchId: NovelBranchId?,
+    isActiveBranch: (NovelBranchId) -> Boolean,
+): NovelBranchId? {
+    val active = snapshot.activeJobs.filter { isActiveBranch(it.job.branchID) }
+    if (selectedBranchId != null && active.any { it.job.branchID == selectedBranchId }) {
+        return selectedBranchId
+    }
+    return active.maxWithOrNull(
+        compareBy<app.amber.feature.novel.persistence.NovelLoadedGhostwriteJob> { it.job.updatedAt }
+            .thenBy { it.job.id.rawValue },
+    )?.job?.branchID
 }

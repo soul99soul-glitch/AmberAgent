@@ -25,8 +25,19 @@ data class NovelProjectDocumentV1(
     val pendingOperations: List<NovelPendingOperationRecord> = emptyList(),
     val activeRuns: List<NovelActiveRunRecord> = emptyList(),
     val settingProposals: List<NovelSettingProposalRecord> = emptyList(),
+    val chapterPlans: List<NovelChapterPlanRecord> = emptyList(),
+    val upcomingArcs: List<NovelUpcomingArcRecord> = emptyList(),
     val appliedOperations: List<NovelAppliedOperationRecord> = emptyList(),
 ) {
+    fun chapterPlan(branchId: NovelBranchId): NovelChapterPlanRecord? =
+        chapterPlans.firstOrNull { it.branchID == branchId }
+
+    fun confirmedChapterPlan(branchId: NovelBranchId): NovelChapterPlanRecord? =
+        chapterPlan(branchId)?.takeIf { it.isConfirmed }
+
+    fun upcomingArc(branchId: NovelBranchId): NovelUpcomingArcRecord? =
+        upcomingArcs.firstOrNull { it.branchID == branchId }
+
     companion object {
         const val CURRENT_SCHEMA_VERSION = 1
     }

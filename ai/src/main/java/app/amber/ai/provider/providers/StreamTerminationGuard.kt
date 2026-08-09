@@ -7,6 +7,7 @@ internal enum class StreamProtocol {
     OPENAI_CHAT,
     OPENAI_RESPONSES,
     CLAUDE,
+    GOOGLE,
 }
 
 internal class IncompleteStreamException(protocol: StreamProtocol) :
@@ -25,8 +26,19 @@ internal class StreamTerminationGuard(
             StreamProtocol.OPENAI_RESPONSES ->
                 type == "response.completed" || type == "response.incomplete"
             StreamProtocol.CLAUDE -> type == "message_stop"
+            StreamProtocol.GOOGLE -> false
         }
         if (isTerminal) terminalSeen.set(true)
+    }
+
+    fun observeFinishReason(finishReason: String?) {
+        val normalized = finishReason?.trim()?.uppercase()
+        val isTerminal = !normalized.isNullOrEmpty() &&
+            normalized != "UNSPECIFIED" &&
+            normalized != "FINISH_REASON_UNSPECIFIED"
+        if (protocol == StreamProtocol.GOOGLE && isTerminal) {
+            terminalSeen.set(true)
+        }
     }
 
     fun cleanEofCause(): Throwable? =

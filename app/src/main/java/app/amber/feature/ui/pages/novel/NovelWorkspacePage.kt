@@ -1,6 +1,12 @@
 package app.amber.feature.ui.pages.novel
 
+import android.Manifest
 import android.content.ClipData
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -106,11 +112,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.agent.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.Screen
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
@@ -147,6 +155,7 @@ import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.theme.LocalDarkMode
+import app.amber.core.utils.NotificationUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -175,12 +184,69 @@ fun NovelWorkspacePage(
     val type = LocalAmberType.current
     val navController = LocalNavController.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
+    val fontScale = LocalDensity.current.fontScale
+    var showCreationControl by remember { mutableStateOf(false) }
+    var notificationPermissionDenied by remember { mutableStateOf(false) }
+    var pendingNotificationAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val notificationAvailable = granted && NotificationUtil.canShowNotification(
+            context,
+            CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID,
+        )
+        notificationPermissionDenied = !notificationAvailable
+        val action = pendingNotificationAction
+        pendingNotificationAction = null
+        if (notificationAvailable) action?.invoke()
+    }
+    val runWithNotificationPermission: (() -> Unit) -> Unit = { action ->
+        val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        if (needsPermission) {
+            pendingNotificationAction = action
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            val notificationAvailable = NotificationUtil.canShowNotification(
+                context,
+                CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID,
+            )
+            notificationPermissionDenied = !notificationAvailable
+            if (notificationAvailable) action()
+        }
+    }
+    val startGhostwriteWithPermission = {
+        runWithNotificationPermission(viewModel::startGhostwrite)
+    }
+    val openNotificationSettings: () -> Unit = {
+        val notificationSettings = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        }
+        runCatching { context.startActivity(notificationSettings) }
+            .onFailure {
+                context.startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", context.packageName, null),
+                    ),
+                )
+            }
+        Unit
+    }
 
     // Settings (and other stacks) write through NovelCreation; refresh when returning.
     // Use fromResume so an already-open workspace does not full-screen reload mid-generation.
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                notificationPermissionDenied = !NotificationUtil.canShowNotification(
+                    context,
+                    CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID,
+                )
                 viewModel.refresh(fromResume = true)
             }
         }
@@ -205,17 +271,26 @@ fun NovelWorkspacePage(
                             color = workspace.ink,
                             maxLines = 1,
                         )
-                        Text(
-                            "让对话落进正文，让资料随故事生长",
-                            style = type.meta,
-                            color = workspace.muted,
-                            maxLines = 1,
-                        )
+                        if (fontScale < 1.3f) {
+                            Text(
+                                "让对话落进正文，让资料随故事生长",
+                                style = type.meta,
+                                color = workspace.muted,
+                                maxLines = 1,
+                            )
+                        }
                     }
                 },
                 navigationIcon = { BackButton() },
                 colors = CustomColors.topBarColors,
                 actions = {
+                    NovelIconButton(
+                        icon = HugeIcons.QuillWrite01,
+                        contentDescription = "创作控制",
+                        onClick = { showCreationControl = true },
+                        enabled = document != null,
+                        tint = workspace.ink,
+                    )
                     NovelIconButton(
                         icon = HugeIcons.Settings03,
                         contentDescription = "小说设置",
@@ -342,6 +417,42 @@ fun NovelWorkspacePage(
                     }
                 }
             }
+        }
+    }
+
+    if (showCreationControl && document != null) {
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { showCreationControl = false },
+            sheetState = sheetState,
+            containerColor = workspace.canvas,
+        ) {
+            NovelGhostwritePanel(
+                state = state,
+                notificationPermissionDenied = notificationPermissionDenied,
+                onDismiss = { showCreationControl = false },
+                onSetMode = viewModel::setCollaborationMode,
+                onSetPauseOnBlockingContinuity =
+                    viewModel::setPauseGhostwriteOnBlockingContinuity,
+                onSavePlan = viewModel::saveChapterPlan,
+                onClearPlan = viewModel::clearChapterPlan,
+                onSaveUpcomingArc = viewModel::saveUpcomingArc,
+                onClearUpcomingArc = viewModel::clearUpcomingArc,
+                onStart = startGhostwriteWithPermission,
+                onPause = viewModel::pauseGhostwrite,
+                onStartBatch = { target ->
+                    runWithNotificationPermission {
+                        viewModel.startGhostwriteBatch(target)
+                    }
+                },
+                onPauseBatch = viewModel::pauseGhostwriteBatch,
+                onResumeBatch = {
+                    runWithNotificationPermission(viewModel::resumeGhostwriteBatch)
+                },
+                onCancelBatch = viewModel::cancelGhostwriteBatch,
+                onQuarantineBatchFailure = viewModel::quarantineGhostwriteBatchFailure,
+                onOpenNotificationSettings = { openNotificationSettings() },
+            )
         }
     }
 }
@@ -1641,7 +1752,7 @@ private fun NovelComposerBar(
                                 scaleX = modeScale
                                 scaleY = modeScale
                             }
-                            .size(40.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
                             .background(modeFill)
                             .border(1.dp, tokens.line, CircleShape)
@@ -1787,7 +1898,7 @@ private fun NovelComposerBar(
                             scaleX = sendScale
                             scaleY = sendScale
                         }
-                        .size(40.dp)
+                            .size(48.dp)
                         .clip(CircleShape)
                         .background(sendFill)
                         .clickable(
@@ -4061,5 +4172,3 @@ private fun livingKindLabel(kind: NovelMaterialKind): String = when (kind) {
 }
 
 // endregion
-
-

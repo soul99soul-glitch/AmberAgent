@@ -19,6 +19,8 @@ object NovelPromptVersions {
     const val POLISH_DRIFT = "novel.polish-drift.v1"
     const val CONTINUITY_AUDIT = "novel.continuity-audit.v1"
     const val DISCUSSION_ARCHIVE = "novel.discussion-archive.v1"
+    const val CHAPTER_PLAN_ACCEPTANCE = "novel.chapter-plan-acceptance.v2"
+    const val CHAPTER_PLAN_PROPOSAL = "novel.chapter-plan-proposal.v1"
 
     val all: List<String> = listOf(
         QUICK_START,
@@ -32,6 +34,8 @@ object NovelPromptVersions {
         POLISH_DRIFT,
         CONTINUITY_AUDIT,
         DISCUSSION_ARCHIVE,
+        CHAPTER_PLAN_ACCEPTANCE,
+        CHAPTER_PLAN_PROPOSAL,
     )
 }
 

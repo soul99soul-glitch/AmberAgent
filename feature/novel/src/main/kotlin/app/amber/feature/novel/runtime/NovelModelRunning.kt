@@ -21,6 +21,8 @@ enum class NovelModelPurpose {
     StateExtraction,
     StateRebuild,
     DriftCheck,
+    ChapterPlanAcceptance,
+    ChapterPlanProposal,
     ContinuityAudit,
     /** Discussion → DecisionLog distill (structured, non-durable until user confirms). */
     DiscussionArchive,

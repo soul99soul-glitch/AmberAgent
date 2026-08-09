@@ -133,6 +133,7 @@ fun ModelSelector(
     /** V3 settings-models.jsx inline 触发器：logo 块 + accent 模型名 + chevron-down。
      *  优先级排在 minimalText / compact 之后（互斥）。 */
     inline: Boolean = false,
+    enabled: Boolean = true,
     allowClear: Boolean = false,
     emptyLabel: String? = null,
     clearContentDescription: String? = null,
@@ -159,8 +160,9 @@ fun ModelSelector(
             val tokens = LocalAmberTokens.current
             Row(
                 modifier = modifier
+                    .heightIn(min = 48.dp)
                     .clip(androidx.compose.foundation.shape.CircleShape)
-                    .clickable { popup = true }
+                    .clickable(enabled = enabled) { popup = true }
                     .padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -188,7 +190,9 @@ fun ModelSelector(
             // settings-models.jsx 设计稿：22dp logo + 14.5sp accent W500 model name + 12dp chevron-down
             val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
             Row(
-                modifier = modifier.clickable { popup = true },
+                modifier = modifier
+                    .heightIn(min = 48.dp)
+                    .clickable(enabled = enabled) { popup = true },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -214,7 +218,8 @@ fun ModelSelector(
                 if (allowClear && model != null) {
                     IconButton(
                         onClick = { onClear?.invoke() ?: onSelect(Model()) },
-                        modifier = Modifier.size(28.dp),
+                        enabled = enabled,
+                        modifier = Modifier.size(48.dp),
                     ) {
                         Icon(
                             imageVector = HugeIcons.Cancel01,
@@ -231,6 +236,7 @@ fun ModelSelector(
             CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
                 Surface(
                     onClick = { popup = true },
+                    enabled = enabled,
                     modifier = modifier
                         .height(32.dp)
                         .widthIn(max = 156.dp),
@@ -264,7 +270,8 @@ fun ModelSelector(
                     onClick = {
                         popup = true
                     },
-                    modifier = modifier
+                    modifier = modifier,
+                    enabled = enabled,
                 ) {
                     model?.modelId?.let {
                         AutoAIIcon(
@@ -287,7 +294,8 @@ fun ModelSelector(
                     IconButton(
                         onClick = {
                             onClear?.invoke() ?: onSelect(Model())
-                        }
+                        },
+                        enabled = enabled,
                     ) {
                         Icon(
                             imageVector = HugeIcons.Cancel01,
@@ -302,6 +310,7 @@ fun ModelSelector(
             onClick = {
                 popup = true
             },
+            enabled = enabled,
         ) {
             if (model != null) {
                 AutoAIIcon(

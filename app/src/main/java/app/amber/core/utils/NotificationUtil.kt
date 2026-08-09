@@ -3,6 +3,7 @@ package app.amber.core.utils
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.PackageManager
@@ -100,10 +101,31 @@ object NotificationUtil {
      * 检查是否有通知权限
      */
     fun hasNotificationPermission(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
         return ActivityCompat.checkSelfPermission(
             context,
             Manifest.permission.POST_NOTIFICATIONS
         ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** True only when a foreground notification can remain visible to the user. */
+    fun canShowNotification(context: Context, channelId: String): Boolean {
+        if (!runCatching { hasNotificationPermission(context) }.getOrDefault(false)) return false
+        val appNotificationsEnabled = runCatching {
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+        }.getOrElse { return false }
+        if (!appNotificationsEnabled) return false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channelEnabled = runCatching {
+                val notificationManager = context.getSystemService(NotificationManager::class.java)
+                    ?: return@runCatching false
+                val channel = notificationManager.getNotificationChannel(channelId)
+                    ?: return@runCatching false
+                channel.importance != NotificationManager.IMPORTANCE_NONE
+            }.getOrDefault(false)
+            if (!channelEnabled) return false
+        }
+        return true
     }
 
     /**
@@ -122,7 +144,7 @@ object NotificationUtil {
         notificationId: Int,
         config: NotificationConfig.() -> Unit
     ): Boolean {
-        if (!hasNotificationPermission(context)) {
+        if (!canShowNotification(context, channelId)) {
             return false
         }
 

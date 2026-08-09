@@ -225,6 +225,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                         add(deltaObj)
                     }
                 })
+                val finishReason = claudeStreamFinishReason(dataJson)
                 // content_block_start/delta 事件顶层的 index 是并行 tool use 的唯一关联键:
                 // input_json_delta 不带 tool id, 不注入 index 时 merge 层只能回退到
                 // "最后一个 Tool", 并行 tool 的参数会串线
@@ -237,7 +238,12 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                     )
                 }
                 val tokenUsage = parseTokenUsage(dataJson)
-                if (deltaMessage.parts.isEmpty() && tokenUsage == null) return
+                val shouldEmit = shouldEmitClaudeStreamChunk(
+                    hasParts = deltaMessage.parts.isNotEmpty(),
+                    hasUsage = tokenUsage != null,
+                    finishReason = finishReason,
+                )
+                if (!shouldEmit) return
 
                 val messageChunk = MessageChunk(
                     id = id ?: "",
@@ -247,7 +253,7 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
                             index = 0,
                             delta = deltaMessage,
                             message = null,
-                            finishReason = null
+                            finishReason = finishReason
                         )
                     ),
                     usage = tokenUsage
@@ -293,6 +299,18 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             eventSource.cancel()
         }
     }
+
+    internal fun claudeStreamFinishReason(dataJson: JsonObject): String? =
+        (dataJson["delta"] as? JsonObject)
+            ?.get("stop_reason")
+            ?.jsonPrimitive
+            ?.contentOrNull
+
+    internal fun shouldEmitClaudeStreamChunk(
+        hasParts: Boolean,
+        hasUsage: Boolean,
+        finishReason: String?,
+    ): Boolean = hasParts || hasUsage || finishReason != null
 
     private fun buildMessageRequest(
         providerSetting: ProviderSetting.Claude,

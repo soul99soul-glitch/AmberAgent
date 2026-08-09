@@ -89,6 +89,52 @@ sealed class NovelOutcome {
         val configRevision: Long,
     ) : NovelOutcome()
 
+    data class CollaborationModeChanged(
+        val projectID: NovelProjectId,
+        val mode: NovelCollaborationMode,
+        val projectRevision: Long,
+        val configRevision: Long,
+    ) : NovelOutcome()
+
+    data class PauseGhostwriteOnBlockingContinuityChanged(
+        val projectID: NovelProjectId,
+        val enabled: Boolean,
+        val projectRevision: Long,
+        val configRevision: Long,
+    ) : NovelOutcome()
+
+    data class ChapterPlanUpserted(
+        val projectID: NovelProjectId,
+        val branchID: NovelBranchId,
+        val planID: NovelChapterPlanId,
+        val status: NovelChapterPlanStatus,
+        val contentDigest: String,
+        val projectRevision: Long,
+        val configRevision: Long,
+    ) : NovelOutcome()
+
+    data class ChapterPlanCleared(
+        val projectID: NovelProjectId,
+        val branchID: NovelBranchId,
+        val projectRevision: Long,
+        val configRevision: Long,
+    ) : NovelOutcome()
+
+    data class UpcomingArcUpserted(
+        val projectID: NovelProjectId,
+        val branchID: NovelBranchId,
+        val beatCount: Int,
+        val projectRevision: Long,
+        val configRevision: Long,
+    ) : NovelOutcome()
+
+    data class UpcomingArcCleared(
+        val projectID: NovelProjectId,
+        val branchID: NovelBranchId,
+        val projectRevision: Long,
+        val configRevision: Long,
+    ) : NovelOutcome()
+
     data class BranchForked(
         val projectID: NovelProjectId,
         val sourceBranchID: NovelBranchId,
@@ -458,6 +504,76 @@ sealed class NovelOutcome {
                         put("configRevision", value.configRevision)
                     },
                 )
+                is CollaborationModeChanged -> swiftAssociatedObject(
+                    "collaborationModeChanged",
+                    buildJsonObject {
+                        put("projectID", json.json.encodeToJsonElement(NovelProjectId.Serializer, value.projectID))
+                        put(
+                            "mode",
+                            when (value.mode) {
+                                NovelCollaborationMode.Cocreation -> "cocreation"
+                                NovelCollaborationMode.Ghostwrite -> "ghostwrite"
+                            },
+                        )
+                        put("projectRevision", value.projectRevision)
+                        put("configRevision", value.configRevision)
+                    },
+                )
+                is PauseGhostwriteOnBlockingContinuityChanged -> swiftAssociatedObject(
+                    "pauseGhostwriteOnBlockingContinuityChanged",
+                    buildJsonObject {
+                        put("projectID", json.json.encodeToJsonElement(NovelProjectId.Serializer, value.projectID))
+                        put("enabled", value.enabled)
+                        put("projectRevision", value.projectRevision)
+                        put("configRevision", value.configRevision)
+                    },
+                )
+                is ChapterPlanUpserted -> swiftAssociatedObject(
+                    "chapterPlanUpserted",
+                    buildJsonObject {
+                        put("projectID", json.json.encodeToJsonElement(NovelProjectId.Serializer, value.projectID))
+                        put("branchID", json.json.encodeToJsonElement(NovelBranchId.Serializer, value.branchID))
+                        put("planID", json.json.encodeToJsonElement(NovelChapterPlanId.Serializer, value.planID))
+                        put(
+                            "status",
+                            when (value.status) {
+                                NovelChapterPlanStatus.Draft -> "draft"
+                                NovelChapterPlanStatus.Confirmed -> "confirmed"
+                            },
+                        )
+                        put("contentDigest", value.contentDigest)
+                        put("projectRevision", value.projectRevision)
+                        put("configRevision", value.configRevision)
+                    },
+                )
+                is ChapterPlanCleared -> swiftAssociatedObject(
+                    "chapterPlanCleared",
+                    buildJsonObject {
+                        put("projectID", json.json.encodeToJsonElement(NovelProjectId.Serializer, value.projectID))
+                        put("branchID", json.json.encodeToJsonElement(NovelBranchId.Serializer, value.branchID))
+                        put("projectRevision", value.projectRevision)
+                        put("configRevision", value.configRevision)
+                    },
+                )
+                is UpcomingArcUpserted -> swiftAssociatedObject(
+                    "upcomingArcUpserted",
+                    buildJsonObject {
+                        put("projectID", json.json.encodeToJsonElement(NovelProjectId.Serializer, value.projectID))
+                        put("branchID", json.json.encodeToJsonElement(NovelBranchId.Serializer, value.branchID))
+                        put("beatCount", value.beatCount)
+                        put("projectRevision", value.projectRevision)
+                        put("configRevision", value.configRevision)
+                    },
+                )
+                is UpcomingArcCleared -> swiftAssociatedObject(
+                    "upcomingArcCleared",
+                    buildJsonObject {
+                        put("projectID", json.json.encodeToJsonElement(NovelProjectId.Serializer, value.projectID))
+                        put("branchID", json.json.encodeToJsonElement(NovelBranchId.Serializer, value.branchID))
+                        put("projectRevision", value.projectRevision)
+                        put("configRevision", value.configRevision)
+                    },
+                )
                 is BranchRenamed -> swiftAssociatedObject(
                     "branchRenamed",
                     buildJsonObject {
@@ -773,6 +889,58 @@ sealed class NovelOutcome {
                     projectId(),
                     associated.getValue("projectRevision").jsonPrimitive.long,
                     associated.getValue("configRevision").jsonPrimitive.long,
+                )
+                "collaborationModeChanged" -> CollaborationModeChanged(
+                    projectID = projectId(),
+                    mode = when (associated.getValue("mode").jsonPrimitive.content) {
+                        "cocreation" -> NovelCollaborationMode.Cocreation
+                        "ghostwrite" -> NovelCollaborationMode.Ghostwrite
+                        else -> error("Unknown collaboration mode")
+                    },
+                    projectRevision = associated.getValue("projectRevision").jsonPrimitive.long,
+                    configRevision = associated.getValue("configRevision").jsonPrimitive.long,
+                )
+                "pauseGhostwriteOnBlockingContinuityChanged" ->
+                    PauseGhostwriteOnBlockingContinuityChanged(
+                        projectID = projectId(),
+                        enabled = associated.getValue("enabled").jsonPrimitive.content.toBooleanStrict(),
+                        projectRevision = associated.getValue("projectRevision").jsonPrimitive.long,
+                        configRevision = associated.getValue("configRevision").jsonPrimitive.long,
+                    )
+                "chapterPlanUpserted" -> ChapterPlanUpserted(
+                    projectID = projectId(),
+                    branchID = branchId(),
+                    planID = json.json.decodeFromJsonElement(
+                        NovelChapterPlanId.Serializer,
+                        associated.getValue("planID"),
+                    ),
+                    status = when (associated.getValue("status").jsonPrimitive.content) {
+                        "draft" -> NovelChapterPlanStatus.Draft
+                        "confirmed" -> NovelChapterPlanStatus.Confirmed
+                        else -> error("Unknown chapter plan status")
+                    },
+                    contentDigest = associated.getValue("contentDigest").jsonPrimitive.content,
+                    projectRevision = associated.getValue("projectRevision").jsonPrimitive.long,
+                    configRevision = associated.getValue("configRevision").jsonPrimitive.long,
+                )
+                "chapterPlanCleared" -> ChapterPlanCleared(
+                    projectID = projectId(),
+                    branchID = branchId(),
+                    projectRevision = associated.getValue("projectRevision").jsonPrimitive.long,
+                    configRevision = associated.getValue("configRevision").jsonPrimitive.long,
+                )
+                "upcomingArcUpserted" -> UpcomingArcUpserted(
+                    projectID = projectId(),
+                    branchID = branchId(),
+                    beatCount = associated.getValue("beatCount").jsonPrimitive.content.toInt(),
+                    projectRevision = associated.getValue("projectRevision").jsonPrimitive.long,
+                    configRevision = associated.getValue("configRevision").jsonPrimitive.long,
+                )
+                "upcomingArcCleared" -> UpcomingArcCleared(
+                    projectID = projectId(),
+                    branchID = branchId(),
+                    projectRevision = associated.getValue("projectRevision").jsonPrimitive.long,
+                    configRevision = associated.getValue("configRevision").jsonPrimitive.long,
                 )
                 "branchRenamed" -> BranchRenamed(
                     projectId(),
