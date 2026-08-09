@@ -146,8 +146,12 @@ fun createImageGenToolDeclaration(): Tool = Tool(
         Generate raster images using AmberAgent iOS image generation. Use for photos, paintings,
         illustrations, posters, concept art, wallpapers, product mockups, and other visual results
         where pixels, lighting, texture, composition, or style matter. Prefer detailed English
-        prompts. Use SVG or markdown diagrams for precise editable charts and diagrams unless the
-        user explicitly asks for an artistic rendering.
+        prompts. When the user attached an image and wants a style transfer, remake, edit, or
+        based-on-this-image result, set use_attached_image=true so the host pads that attached
+        reference into Codex image2; do not rely on a text-only redraw of the attachment. You may
+        also pass source_image_url for a known earlier chat image URL. Use SVG or markdown diagrams
+        for precise editable charts and diagrams unless the user explicitly asks for an artistic
+        rendering.
     """.trimIndent().replace("\n", " "),
     parameters = { imageGenParameters() },
     execute = { emptyList() }
@@ -805,10 +809,9 @@ fun iosToolDeclarations(names: List<String>): List<Tool> = names.distinct().mapN
  * [Slice 3] Tool declaration for dispatching a sub-agent task.
  *
  * The model calls this with an `objective` describing the delegated task and an
- * optional `roleId`. The iOS ChatViewModel detects the call in onComplete and
- * dispatches it to SubAgentRunner.run(objective:) (which drives
- * IosSubAgentFactory.startInput + SubAgentManager), then resumes the stream with
- * the sub-agent's result text as the tool output.
+ * optional `roleId`. The iOS chat runtime dispatches it through
+ * `SubAgentRunner.runViaEngine`, backed by `IOSAgentToolEngine`, then resumes the
+ * stream with the sub-agent's result text as the tool output.
  *
  * NOTE: `execute` returns empty — actual execution lives in the Swift dispatch
  * (same pattern as createSearchWebToolDeclaration, whose real executor is
@@ -1498,6 +1501,20 @@ private fun imageGenParameters(): InputSchema = InputSchema.Obj(
         put("style", buildJsonObject {
             put("type", "string")
             put("description", "Optional style hint, for example photo, watercolor, poster, or product mockup.")
+        })
+        put("use_attached_image", buildJsonObject {
+            put("type", "boolean")
+            put(
+                "description",
+                "Set true when the latest user-attached chat image should be used as the Codex image2 reference/pad image for style transfer, remakes, or edits. The host injects that attachment; do not paste base64 into this tool call."
+            )
+        })
+        put("source_image_url", buildJsonObject {
+            put("type", "string")
+            put(
+                "description",
+                "Optional explicit reference image URL (amber-image-generation://, file://, https://, or data:). Prefer use_attached_image=true for the latest user attachment. Values attached/latest mean the same as use_attached_image=true."
+            )
         })
     },
     required = listOf("prompt")

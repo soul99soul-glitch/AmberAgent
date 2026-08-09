@@ -422,7 +422,7 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
 
 internal fun Tool.category(): String = when {
     name.startsWith("external_file_") -> "external_file"
-    name.startsWith("file_") || name.startsWith("archive_") ||
+    name.startsWith("workspace_") || name.startsWith("file_") || name.startsWith("archive_") ||
         name in setOf("download_file", "pdf_read", "pdf_render_page", "office_read", "image_info", "image_convert", "ocr_image") -> "workspace"
     name.startsWith("icloud_") -> "cloud"
     name.startsWith("officepro_") -> "office"
@@ -448,7 +448,8 @@ internal fun Tool.category(): String = when {
     name.startsWith("cron_task_") -> "cron"
     name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
     name in setOf("tool_policy_explain", "tool_search", "tools_list") -> "utility"
-    name.startsWith("subagent_") -> "subagent"
+    name.startsWith("subagent_") ||
+        name in setOf("spawn_agent", "list_agents", "interrupt_agent", "wait_agent", "send_message", "followup_task") -> "subagent"
     name.startsWith("model_council_") -> "model_council"
     name.startsWith("skill") || name == "use_skill" -> "skill"
     name.startsWith("mcp_") || name.startsWith("mcp__") -> "mcp"

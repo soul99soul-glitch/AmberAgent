@@ -199,6 +199,11 @@ class IosToolExposureBridgeTest {
             "lazy guidance must carry the tool_search discovery contract, got: $guidance",
         )
         assertTrue(TOOL_SEARCH_TOOL_NAME in guidance)
+        // 管线闭环：必须含行为规则——声称做不到之前先搜索（真机反馈的断链点）。
+        assertTrue(
+            "never claim inability" in guidance,
+            "guidance must tell the model to search before claiming inability, got: $guidance",
+        )
     }
 
     @Test

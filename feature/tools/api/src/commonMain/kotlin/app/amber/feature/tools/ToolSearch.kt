@@ -46,6 +46,7 @@ internal fun toolSearchDiscoveryGuidance(
         Tool discovery:
         - This run has ${registry.metadata.size} generated tools across categories: $categories.
         - If the needed tool is not currently visible, call `$TOOL_SEARCH_TOOL_NAME` with a concrete query. It exposes the best matching schemas for the next generation step.
+        - Before telling the user you cannot do something, call `$TOOL_SEARCH_TOOL_NAME` with a concrete intent first (e.g. "读取其它会话", "并行子任务", "网页操作"). Many capabilities — sub-agent threads, cross-session reading, web mount, MCP tools, script execution — stay hidden until searched; never claim inability based only on the currently visible tools.
         - `tools_list` is only a debug/catalog view. A hidden tool listed by `tools_list` is not callable until `$TOOL_SEARCH_TOOL_NAME` exposes it.
         - If you used `tools_list` to identify a tool name, call `$TOOL_SEARCH_TOOL_NAME` again with that exact tool name, then execute a name from `expanded_tools` on the next step.
         - Resident tools currently stay visible without search: $residentCount core tools plus discovered tools.
