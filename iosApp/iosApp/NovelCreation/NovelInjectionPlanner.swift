@@ -800,7 +800,7 @@ private extension NovelPromptKind {
         // 讨论规划不推进正史,needsSync 时仍可聊,但注入会带 stale 警告。
         case .quickStart, .characterProposal, .discussion,
              .stateDeltaV1, .manualSyncV1, .discussionArchiveV1, .polishDriftV1,
-             .continuityAuditV1, .chapterPlanAcceptanceV1:
+             .continuityAuditV1, .chapterPlanAcceptanceV1, .chapterPlanProposalV1:
             false
         }
     }
@@ -812,7 +812,7 @@ private extension NovelPromptKind {
              .continuityAuditV1:
             true
         case .quickStart, .characterProposal, .discussion, .stateDeltaV1, .manualSyncV1,
-             .discussionArchiveV1, .polishDriftV1, .chapterPlanAcceptanceV1:
+             .discussionArchiveV1, .polishDriftV1, .chapterPlanAcceptanceV1, .chapterPlanProposalV1:
             false
         }
     }

@@ -339,8 +339,8 @@ struct NovelSessionView: View {
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         // 2026-07-26 撤锚:`.defaultScrollAnchor(.bottom, for: .sizeChanges)` 曾被当作
-        // 流式底部锚点的唯一所有者,依据是 NovelSessionBottomAnchorProbeTests 的「逐帧
-        // 零欠账」——但那套探针用 Color.frame(height:) 代理流式气泡,只覆盖 SwiftUI
+        // 流式底部锚点的唯一所有者,依据是早期合成探针的「逐帧零欠账」——
+        // 但那套探针用 Color.frame(height:) 代理流式气泡,只覆盖 SwiftUI
         // 单次干净布局 pass,从未测过生产 ChatAssistantMarkdownView → vendor
         // ParagraphUIView(UITextView 增量 TextKit 布局 + 异步 invalidateIntrinsicContentSize)
         // 的真实异步增量路径。真机录屏(15fps 逐帧对齐)在小说「写整章」实测到连续

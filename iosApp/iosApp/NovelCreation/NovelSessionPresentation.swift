@@ -1809,8 +1809,8 @@ enum NovelSessionBottomFollowPolicy {
                 // 2026-07-26 撤锚更正:`.sizeChanges` 底锚已被真机录屏(15fps 逐帧对齐,
                 // 连续三次 −391/−398/−385px 结构性跳变)推翻——它在生产的
                 // ParagraphUIView 异步增量 TextKit 布局路径下并不能同步吸收增长
-                // (合成的 Color.frame(height:) 单次布局 pass 测不到这条路径,见
-                // NovelSessionBottomDebtProbeTests 顶部注释)。measured-geometry 回调
+                // (合成的 Color.frame(height:) 单次布局 pass 测不到这条路径)。
+                // measured-geometry 回调
                 // 重新成为流式跟随底部的唯一写者;命令必须是 animated:false——
                 // 执行侧 NovelSessionView.scrollToBottomWithoutAnimation() 用
                 // Transaction(animation: nil) 显式禁用动画,不经过

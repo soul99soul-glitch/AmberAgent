@@ -3,30 +3,76 @@ import UIKit
 
 @MainActor
 enum NovelTextInputCommitter {
+    /// Commits any IME marked text, resigns the first responder, then runs
+    /// `action` after SwiftUI bindings have a chance to catch up.
+    ///
+    /// Call this before reading `@State` / bindings on save, submit, rename,
+    /// sheet dismiss, or focus transitions. Never clear `FocusState` *before*
+    /// calling this — resigning without `unmarkText` can discard the last
+    /// Chinese composition so the subsequent binding read misses those glyphs.
     static func perform(
         firstResponder: UIView? = nil,
         _ action: @escaping @MainActor () -> Void
     ) {
+        commitMarkedText(in: firstResponder)
+        // SwiftUI TextField/TextEditor often apply UIKit text → Binding one
+        // main turn after `unmarkText`. A second turn covers cases where the
+        // first only runs resign-side bookkeeping.
+        DispatchQueue.main.async {
+            DispatchQueue.main.async {
+                action()
+            }
+        }
+    }
+
+    /// Whether the active text input still has an in-progress IME composition.
+    static func hasMarkedText(firstResponder: UIView? = nil) -> Bool {
+        let responder = firstResponder ?? activeFirstResponder()
+        guard let input = responder as? UITextInput else { return false }
+        return input.markedTextRange != nil
+    }
+
+    static func commitMarkedText(in firstResponder: UIView? = nil) {
         if let firstResponder {
             (firstResponder as? UITextInput)?.unmarkText()
             firstResponder.resignFirstResponder()
-        } else {
-            UIApplication.shared.sendAction(
-                #selector(UITextInput.unmarkText),
-                to: nil,
-                from: nil,
-                for: nil
-            )
-            UIApplication.shared.sendAction(
-                #selector(UIResponder.resignFirstResponder),
-                to: nil,
-                from: nil,
-                for: nil
-            )
+            return
         }
-        DispatchQueue.main.async {
-            action()
+        // unmark before resign: resign alone can drop marked text.
+        UIApplication.shared.sendAction(
+            #selector(UITextInput.unmarkText),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
+    private static func activeFirstResponder() -> UIView? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        for scene in scenes {
+            for window in scene.windows where !window.isHidden {
+                if let responder = findFirstResponder(in: window) {
+                    return responder
+                }
+            }
         }
+        return nil
+    }
+
+    private static func findFirstResponder(in view: UIView) -> UIView? {
+        if view.isFirstResponder { return view }
+        for subview in view.subviews {
+            if let responder = findFirstResponder(in: subview) {
+                return responder
+            }
+        }
+        return nil
     }
 }
 

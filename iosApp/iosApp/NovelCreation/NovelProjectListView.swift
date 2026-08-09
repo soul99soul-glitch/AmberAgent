@@ -784,7 +784,8 @@ struct NovelProjectRenameSheet: View {
     }
 
     private func commitNameAndSave() {
-        isNameFocused = false
+        // Do not clear FocusState before committer: that resigns without
+        // unmarkText and can drop the last IME composition from `name`.
         NovelTextInputCommitter.perform {
             save(name.trimmingCharacters(in: .whitespacesAndNewlines))
         }

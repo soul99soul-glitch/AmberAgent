@@ -7,6 +7,7 @@ enum NovelStructuredModelTaskKind: String, Codable, Equatable, CaseIterable, Sen
     case polishDrift
     case continuityAudit
     case chapterPlanAcceptance
+    case chapterPlanProposal
 }
 
 enum NovelStructuredModelTask: Equatable, Sendable {
@@ -18,6 +19,7 @@ enum NovelStructuredModelTask: Equatable, Sendable {
     /// 首块传空串。`manuscript` 是本块正文,含 `# Chapter N: 标题` 标头。
     case continuityAudit(priorFindings: String, manuscript: String)
     case chapterPlanAcceptance(plan: String, candidate: String, recentHighlights: String)
+    case chapterPlanProposal(context: String)
 }
 
 struct NovelStructuredModelExecutionRequest: Equatable, Sendable {
@@ -33,6 +35,7 @@ enum NovelStructuredModelOutput: Equatable, Sendable {
     case polishDrift(NovelPolishDriftV1)
     case continuityAudit(NovelContinuityAuditV1)
     case chapterPlanAcceptance(NovelChapterPlanAcceptanceV1)
+    case chapterPlanProposal(NovelChapterPlanProposalV1)
 }
 
 struct NovelStructuredModelExecutionEvidence: Equatable, Sendable {
@@ -610,6 +613,7 @@ private extension NovelStructuredModelTask {
         case .polishDrift: .polishDrift
         case .continuityAudit: .continuityAudit
         case .chapterPlanAcceptance: .chapterPlanAcceptance
+        case .chapterPlanProposal: .chapterPlanProposal
         }
     }
 
@@ -621,6 +625,7 @@ private extension NovelStructuredModelTask {
         case .polishDrift: .polishDriftV1
         case .continuityAudit: .continuityAuditV1
         case .chapterPlanAcceptance: .chapterPlanAcceptanceV1
+        case .chapterPlanProposal: .chapterPlanProposalV1
         }
     }
 
@@ -633,6 +638,8 @@ private extension NovelStructuredModelTask {
         case .continuityAudit: .continuityAudit
         // Reuse state-extraction purpose tagging; runtime model policy is `.review`.
         case .chapterPlanAcceptance: .stateExtraction
+        // Proposal uses creation model policy; purpose tag stays light-weight.
+        case .chapterPlanProposal: .stateExtraction
         }
     }
 
@@ -687,6 +694,11 @@ private extension NovelStructuredModelTask {
                         "\n\nWHOLE-CHAPTER CANDIDATE\n" + candidate
                 ),
             ]
+        case .chapterPlanProposal(let context):
+            return [
+                .init(role: .system, content: prompt.systemText),
+                .init(role: .user, content: context),
+            ]
         }
     }
 
@@ -710,6 +722,10 @@ private extension NovelStructuredModelTask {
             .chapterPlanAcceptance(
                 try NovelStructuredOutputDecoder.decodeChapterPlanAcceptance(from: text)
             )
+        case .chapterPlanProposal:
+            .chapterPlanProposal(
+                try NovelStructuredOutputDecoder.decodeChapterPlanProposal(from: text)
+            )
         }
     }
 }
@@ -725,14 +741,14 @@ extension NovelStructuredModelTaskKind {
         switch self {
         case .stateRebuild: 8_192
         case .stateDelta, .discussionArchive, .polishDrift, .continuityAudit,
-             .chapterPlanAcceptance:
+             .chapterPlanAcceptance, .chapterPlanProposal:
             4_096
         }
     }
 
     var parameters: NovelModelParameters {
         switch self {
-        case .stateDelta, .stateRebuild, .discussionArchive:
+        case .stateDelta, .stateRebuild, .discussionArchive, .chapterPlanProposal:
             .init(
                 temperature: 0.1,
                 topP: 0.8,

@@ -74,7 +74,7 @@ enum NovelCollaborationMode: String, Codable, CaseIterable, Sendable {
     var shortSummary: String {
         switch self {
         case .cocreation: "一起商量，你点收录才进书"
-        case .ghostwrite: "先定好这一章要写什么，再按章代写；过关后自动进书"
+        case .ghostwrite: "先定好这一章要写什么，再按章代笔；过关后自动进书"
         }
     }
 }

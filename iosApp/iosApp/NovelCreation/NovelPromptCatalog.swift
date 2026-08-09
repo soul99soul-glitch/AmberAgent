@@ -14,6 +14,7 @@ enum NovelPromptKind: String, Codable, CaseIterable, Sendable {
     case polishDriftV1
     case continuityAuditV1
     case chapterPlanAcceptanceV1
+    case chapterPlanProposalV1
 }
 
 struct NovelPromptTemplate: Codable, Equatable, Sendable {
@@ -72,7 +73,7 @@ enum NovelPromptCatalog {
                 "novel.whole-chapter-regeneration.v2",
             ])
         case .characterProposal, .discussionArchiveV1, .polishDriftV1, .continuityAuditV1,
-             .chapterPlanAcceptanceV1:
+             .chapterPlanAcceptanceV1, .chapterPlanProposalV1:
             break
         }
         return versions
@@ -366,6 +367,24 @@ enum NovelPromptCatalog {
                 Do not rewrite the prose. Return only the JSON object.
 
                 \(chapterPlanAcceptanceJSONContract)
+                """
+            )
+
+        case .chapterPlanProposalV1:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.chapter-plan-proposal.v1",
+                systemText: """
+                Propose the next chapter plan contract for automated ghostwriting.
+                Use the master outline, current story state, upcoming arc notes, and recent written beats.
+                Advance the plot one chapter only: concrete, checkable must-happen beats; do not rehash
+                recent written beats as new obligations. Prefer forward motion over recap.
+                mustHappen must contain at least one concrete event the chapter must deliver.
+                mustNotHappen lists clear bans (may be empty). endingHook and visibleFacts may be empty
+                strings / empty arrays when unused. outlinePlacement should name chapter position briefly.
+                Use the user's language. Return only the JSON object.
+
+                \(chapterPlanProposalJSONContract)
                 """
             )
         }
@@ -877,5 +896,23 @@ private extension NovelPromptCatalog {
         from the contract. If accepted is true, both arrays must be empty. If accepted is false, at least one
         of the two arrays must be non-empty.
         obviousRepetition lists clear rehashes of RECENT WRITTEN BEATS; use an empty array when none.
+        """
+
+    static let chapterPlanProposalJSONContract = """
+        Output contract: NovelChapterPlanProposalV1, schemaVersion 1.
+        Return exactly one raw JSON object. Do not use Markdown fences, comments, or trailing prose.
+        Every key shown below is required. Do not add unknown keys at any level.
+        Root shape:
+        {
+          "schemaVersion":1,
+          "outlinePlacement":"string (may be empty)",
+          "goalAndConflict":"non-empty string",
+          "mustHappen":["non-empty string"],
+          "mustNotHappen":[],
+          "endingHook":"string (may be empty)",
+          "visibleFacts":[]
+        }
+        mustHappen must contain at least one non-empty string. mustNotHappen and visibleFacts are arrays of
+        non-empty strings when present; use empty arrays when none.
         """
 }

@@ -673,6 +673,19 @@ struct NovelCollectCandidateSheet: View {
 
     private func refreshEditedTextAfterSelectionChange() {
         guard !hasEditedText else { return }
+        // Mid-IME composition may not yet be reflected in `editedText`, so
+        // hasEditedText is still false. Resetting here would clobber the
+        // TextEditor and drop the last marked glyphs.
+        if NovelTextInputCommitter.hasMarkedText() {
+            NovelTextInputCommitter.perform {
+                if editedText != selectedText {
+                    hasEditedText = true
+                } else {
+                    resetEditedText()
+                }
+            }
+            return
+        }
         resetEditedText()
     }
 
@@ -968,16 +981,25 @@ struct NovelWritingContextSheet: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+                    Button("取消") {
+                        // Plan / arc fields are plain TextFields; commit marked
+                        // text before tear-down so hasUnsaved-style checks (and
+                        // any future persistence) see the last IME glyphs.
+                        NovelTextInputCommitter.perform { dismiss() }
+                    }
                 }
                 ToolbarItemGroup(placement: .confirmationAction) {
                     if selectedTab == .context {
-                        Button("预览") { preview() }
+                        Button("预览") {
+                            NovelTextInputCommitter.perform { preview() }
+                        }
                             .disabled(!canPreview || workspace.isPerforming)
                     }
                     Button("应用") {
-                        onApply(overrides, budgetTokens)
-                        dismiss()
+                        NovelTextInputCommitter.perform {
+                            onApply(overrides, budgetTokens)
+                            dismiss()
+                        }
                     }
                     .disabled(workspace.isPerforming)
                 }
@@ -1727,9 +1749,11 @@ struct NovelWritingContextSheet: View {
             .filter { !$0.isEmpty }
     }
 
-    private func applyDraftBeforeTransition(_ transition: () -> Void) {
-        onApply(overrides, budgetTokens)
-        transition()
+    private func applyDraftBeforeTransition(_ transition: @escaping () -> Void) {
+        NovelTextInputCommitter.perform {
+            onApply(overrides, budgetTokens)
+            transition()
+        }
     }
 
     private var contextList: some View {

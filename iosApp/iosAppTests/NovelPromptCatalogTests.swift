@@ -9,6 +9,8 @@ final class NovelPromptCatalogTests: XCTestCase {
             "\($0.kind.rawValue)\n\($0.version)\n\($0.systemText)"
         }.joined(separator: "\n---\n")
 
+        // 2026-08-09 显式更新:新增 `.chapterPlanProposalV1`（代笔多章自动拟定下一章合同）。
+        //
         // 2026-08-08 显式更新:`.discussion` 升到 `novel.discussion.v6`。把「即使用户说
         // go ahead 也不许写整章/示例散文不得超过 3 段」的 HARD RULES 改写为状态说明 +
         // 软引导（讨论模式产出不会自动进正文；示例散文/片段允许；用户确认方向后建议
@@ -33,7 +35,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
         XCTAssertEqual(
             sha256(snapshot),
-            "b771137210b5878ecfdf403eeeb3ee5ac44fb6710e26ca353f2b26cd67eed431"
+            "67e03dddaef9d3e55d9317268cc298c35fb9c095f8d9f4cffa04cd4247a4b5be"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }

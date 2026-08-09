@@ -277,6 +277,22 @@ final class IOSNovelCreationWiringTests: XCTestCase {
 
         XCTAssertTrue(workspaceSheets.contains("struct NovelDiscussionArchiveOfferSheet"))
         XCTAssertTrue(workspaceSheets.contains(".presentationSizing(.fitted)"))
+        // 短 offer 不用 NavigationStack 撑高；双按钮横排且文案四字。
+        let offerStart = try XCTUnwrap(
+            workspaceSheets.range(of: "struct NovelDiscussionArchiveOfferSheet")
+        )
+        let nextStruct = workspaceSheets.range(
+            of: "\nstruct ",
+            range: offerStart.upperBound..<workspaceSheets.endIndex
+        )
+        let offerEnd = nextStruct?.lowerBound ?? workspaceSheets.endIndex
+        let offerBody = String(workspaceSheets[offerStart.lowerBound..<offerEnd])
+        XCTAssertFalse(offerBody.contains("NavigationStack"))
+        // label 内 frame 铺满半宽：Button { } label: { Text(...) }
+        XCTAssertTrue(offerBody.contains("Text(\"暂不归档\")"))
+        XCTAssertTrue(offerBody.contains("Text(\"归档讨论\")"))
+        XCTAssertTrue(offerBody.contains("HStack(spacing: 10)"))
+        XCTAssertTrue(offerBody.contains("maxWidth: .infinity, minHeight: 44"))
         XCTAssertTrue(projectList.contains("struct NovelProjectRenameSheet"))
         XCTAssertTrue(projectList.contains(".presentationSizing(.fitted)"))
         XCTAssertFalse(projectList.contains(".presentationDetents([.height(220)])"))
@@ -609,7 +625,8 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(sheets.contains("case .preferences: \"模式与偏好\""))
         XCTAssertTrue(sheets.contains("case .context: \"上下文注入\""))
         XCTAssertTrue(sheets.contains("Text(\"代笔进度\")"))
-        XCTAssertTrue(sheets.contains("Text(\"开始代写\")"))
+        XCTAssertTrue(sheets.contains("Text(ghostwriteAdvanceSectionTitle)"))
+        XCTAssertTrue(sheets.contains("return \"开始代笔\""))
         XCTAssertTrue(sheets.contains("Text(\"往后几章\")"))
         XCTAssertTrue(sheets.contains("Text(\"本章计划\")"))
         XCTAssertTrue(sheets.contains("upsertUpcomingArc"))

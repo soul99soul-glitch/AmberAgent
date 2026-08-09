@@ -507,6 +507,37 @@ struct NovelChapterPlanAcceptanceV1: Codable, Equatable, Sendable {
     }
 }
 
+/// Structured next-chapter contract for multi-chapter ghostwrite auto-planning.
+struct NovelChapterPlanProposalV1: Codable, Equatable, Sendable {
+    static let currentSchemaVersion = 1
+
+    let schemaVersion: Int
+    let outlinePlacement: String
+    let goalAndConflict: String
+    let mustHappen: [String]
+    let mustNotHappen: [String]
+    let endingHook: String
+    let visibleFacts: [String]
+
+    init(
+        schemaVersion: Int = currentSchemaVersion,
+        outlinePlacement: String,
+        goalAndConflict: String,
+        mustHappen: [String],
+        mustNotHappen: [String],
+        endingHook: String,
+        visibleFacts: [String]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.outlinePlacement = outlinePlacement
+        self.goalAndConflict = goalAndConflict
+        self.mustHappen = mustHappen
+        self.mustNotHappen = mustNotHappen
+        self.endingHook = endingHook
+        self.visibleFacts = visibleFacts
+    }
+}
+
 enum NovelContinuityIssueCategoryV1: String, Codable, CaseIterable, Sendable {
     /// 同一件事被写了两遍。
     case duplicatedPlot
@@ -681,6 +712,21 @@ enum NovelStructuredOutputDecoder {
         try StrictJSON.validateChapterPlanAcceptance(root.object)
         let value: NovelChapterPlanAcceptanceV1 = try decode(
             NovelChapterPlanAcceptanceV1.self,
+            from: root.data
+        )
+        try NovelStructuredOutputValidation.validate(value)
+        return value
+    }
+
+    static func decodeChapterPlanProposal(from text: String) throws -> NovelChapterPlanProposalV1 {
+        try decodeChapterPlanProposal(from: Data(text.utf8))
+    }
+
+    static func decodeChapterPlanProposal(from data: Data) throws -> NovelChapterPlanProposalV1 {
+        let root = try StrictJSON.rootObject(from: data)
+        try StrictJSON.validateChapterPlanProposal(root.object)
+        let value: NovelChapterPlanProposalV1 = try decode(
+            NovelChapterPlanProposalV1.self,
             from: root.data
         )
         try NovelStructuredOutputValidation.validate(value)
@@ -947,6 +993,61 @@ private enum NovelStructuredOutputValidation {
                 path: "$",
                 message: "A rejected chapter-plan result must list at least one violation."
             )
+        }
+    }
+
+    static func validate(_ value: NovelChapterPlanProposalV1) throws {
+        try schemaVersion(
+            value.schemaVersion,
+            expected: NovelChapterPlanProposalV1.currentSchemaVersion
+        )
+        try required(value.goalAndConflict, path: "$.goalAndConflict")
+        if value.goalAndConflict.count > 8_000 {
+            throw failure(
+                .invalidValue,
+                path: "$.goalAndConflict",
+                message: "The chapter-plan goal is too long."
+            )
+        }
+        if value.outlinePlacement.count > 500 {
+            throw failure(
+                .invalidValue,
+                path: "$.outlinePlacement",
+                message: "The chapter-plan placement note is too long."
+            )
+        }
+        if value.endingHook.count > 4_000 {
+            throw failure(
+                .invalidValue,
+                path: "$.endingHook",
+                message: "The chapter-plan ending hook is too long."
+            )
+        }
+        let mustHappen = NovelChapterPlanRecord.normalizedLines(value.mustHappen)
+        let mustNotHappen = NovelChapterPlanRecord.normalizedLines(value.mustNotHappen)
+        let visibleFacts = NovelChapterPlanRecord.normalizedLines(value.visibleFacts)
+        guard !mustHappen.isEmpty else {
+            throw failure(
+                .invalidValue,
+                path: "$.mustHappen",
+                message: "A confirmed chapter plan requires at least one must-happen item."
+            )
+        }
+        guard mustHappen.count <= 32, mustNotHappen.count <= 32, visibleFacts.count <= 32 else {
+            throw failure(
+                .invalidValue,
+                path: "$",
+                message: "The chapter plan has too many checklist items."
+            )
+        }
+        for (index, item) in mustHappen.enumerated() {
+            try required(item, path: "$.mustHappen[\(index)]")
+        }
+        for (index, item) in mustNotHappen.enumerated() {
+            try required(item, path: "$.mustNotHappen[\(index)]")
+        }
+        for (index, item) in visibleFacts.enumerated() {
+            try required(item, path: "$.visibleFacts[\(index)]")
         }
     }
 
@@ -1512,6 +1613,32 @@ private enum StrictJSON {
         if object["obviousRepetition"] != nil {
             try stringArray(object["obviousRepetition"], path: "$.obviousRepetition")
         }
+    }
+
+    static func validateChapterPlanProposal(_ object: Object) throws {
+        try keys(
+            object,
+            path: "$",
+            required: [
+                "schemaVersion",
+                "outlinePlacement",
+                "goalAndConflict",
+                "mustHappen",
+                "mustNotHappen",
+                "endingHook",
+                "visibleFacts",
+            ]
+        )
+        try schemaVersion(
+            object["schemaVersion"],
+            expected: NovelChapterPlanProposalV1.currentSchemaVersion
+        )
+        try string(object["outlinePlacement"], path: "$.outlinePlacement")
+        try string(object["goalAndConflict"], path: "$.goalAndConflict")
+        try string(object["endingHook"], path: "$.endingHook")
+        try stringArray(object["mustHappen"], path: "$.mustHappen")
+        try stringArray(object["mustNotHappen"], path: "$.mustNotHappen")
+        try stringArray(object["visibleFacts"], path: "$.visibleFacts")
     }
 
     static func validateContinuityAudit(_ object: Object) throws {

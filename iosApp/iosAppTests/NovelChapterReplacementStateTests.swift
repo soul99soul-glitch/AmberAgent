@@ -6,8 +6,7 @@ import XCTest
 /// 这些用例刻意走**活路径**：收录用 `commitCollectionWithoutStateSync`(→ `.needsSync`)，
 /// 再由 manual sync 事务重建状态。既有的 NovelManualEditSyncTests / NovelCollectionTests
 /// 用的是 `prepareCollection` + `finalizeCollection`，那条 `.stateDelta` 链路在生产里
-/// 没有调用点（NovelFactTransactionLifecycle.swift 的 executeCollectionTransaction 已标注
-/// 为死代码），因此不能用来判定线上行为。
+/// 没有生产调用点；旧的 `executeCollectionTransaction` 已移除，因此不能用来判定线上行为。
 final class NovelChapterReplacementStateTests: XCTestCase {
     private let origin = Date(timeIntervalSince1970: 1_700_300_000)
     private var clock: TimeInterval = 0
