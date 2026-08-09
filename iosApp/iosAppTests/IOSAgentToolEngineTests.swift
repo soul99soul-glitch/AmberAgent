@@ -194,6 +194,77 @@ final class IOSAgentToolEngineTests: XCTestCase {
         }
     }
 
+    /// A scripted provider that also records every `params` it was called
+    /// with, so tests can assert what the engine declared on later rounds
+    /// (P0-a: tool_search hits must be visible on the NEXT round's params).
+    final class ParamsRecordingProvider: IOSAgentTextProvider, @unchecked Sendable {
+        private var script: [UIMessage]
+        private(set) var recordedParams: [TextGenerationParams] = []
+        init(_ script: [UIMessage]) { self.script = script }
+
+        func generateText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams
+        ) async throws -> MessageChunk {
+            recordedParams.append(params)
+            if !script.isEmpty {
+                return chunk(with: script.removeFirst())
+            }
+            return chunk(with: UIMessage(
+                id: KotlinUuid.companion.random(),
+                role: MessageRole.assistant,
+                parts: [UIMessagePart.Text(text: "stop", metadata: nil)],
+                annotations: [],
+                createdAt: Kotlinx_datetimeLocalDateTime(year: 2026, month: 6, day: 19, hour: 0, minute: 0, second: 0, nanosecond: 0),
+                finishedAt: nil,
+                modelId: nil,
+                usage: nil,
+                translation: nil
+            ))
+        }
+
+        private func chunk(with message: UIMessage?) -> MessageChunk {
+            MessageChunk(
+                id: "chunk-\(UUID().uuidString)",
+                model: "test-model",
+                choices: [UIMessageChoice(index: 0, delta: nil, message: message, finishReason: "stop")],
+                usage: nil
+            )
+        }
+    }
+
+    /// Executes tool_search through a real KMP exposure bridge (local, no
+    /// network) so the hit becomes visible inside the bridge.
+    final class BridgeToolSearchExecutor: IOSToolExecutor {
+        private let bridge: IosToolExposureBridge
+        init(bridge: IosToolExposureBridge) { self.bridge = bridge }
+
+        func execute(
+            name: String,
+            arguments: String,
+            isUserInitiated: Bool
+        ) async -> IOSAgentToolOutcome {
+            .filled(bridge.executeToolSearch(argumentsJson: arguments))
+        }
+    }
+
+    /// Every tool name `iosToolDeclaration` can materialize (>40 → lazy mode).
+    private func fullIosDeclarations() -> [Tool] {
+        let names =
+            IOSWorkspaceToolCatalog.supportedToolNames
+            .union(IOSIshToolCatalog.supportedToolNames)
+            .union(IOSEmbeddedIshToolCatalog.supportedToolNames)
+            .union(IOSWebMountToolCatalog.supportedToolNames)
+            .union(IOSSkillToolCatalog.toolNames)
+            .union(IOSMcpManagementToolCatalog.toolNames)
+            .union([
+                "search_web", "scrape_web", "memory_tool", "generate_image",
+                "mcp_call", "subagent_dispatch", "model_council_run", "ask_user",
+            ])
+        return ToolKt.iosToolDeclarations(names: Array(names).sorted())
+    }
+
     final class ThrowingProvider: IOSAgentTextProvider, @unchecked Sendable {
         func generateText(
             providerSetting: ProviderSetting,
@@ -720,6 +791,162 @@ final class IOSAgentToolEngineTests: XCTestCase {
         XCTAssertEqual(output, "{\"error\":\"[engine] no executor registered for tool `ghost`\"}")
     }
 
+    func testToolSearchHitIsDeclaredOnNextEngineRoundViaRunBridge() async {
+        let declarations = fullIosDeclarations()
+        let bridge = IosToolExposureBridge(tools: declarations)
+        XCTAssertTrue(bridge.lazyModeEnabled())
+        XCTAssertFalse(bridge.visibleTools().map(\.name).contains("wm_type"))
+
+        // Round 1: the model calls tool_search (executed locally through the
+        // real bridge, which exposes wm_type). Round 2: plain text "done".
+        let provider = ParamsRecordingProvider([
+            toolCallMessage(toolCallId: "ts-1", toolName: "tool_search", input: #"{"query":"wm_type","limit":1}"#),
+            assistantText("done")
+        ])
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: ["tool_search": BridgeToolSearchExecutor(bridge: bridge)]
+        )
+        let model = Model(
+            modelId: "engine-exposure-test",
+            displayName: "engine-exposure-test",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let params = TextGenerationParams(
+            model: model,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: bridge.visibleTools(),
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("use wm_type")],
+            params: params,
+            toolExposureBridge: bridge
+        )
+
+        XCTAssertNil(result.pendingApproval)
+        XCTAssertFalse(result.wasCancelled)
+        XCTAssertFalse(result.hitStepLimit)
+        XCTAssertGreaterThanOrEqual(provider.recordedParams.count, 2, "engine must run a second model round after tool_search")
+        let secondRoundNames = Set(provider.recordedParams[1].tools.map(\.name))
+        XCTAssertTrue(
+            secondRoundNames.contains("wm_type"),
+            "the tool_search hit must be declared on the NEXT engine round's params"
+        )
+        XCTAssertFalse(
+            result.messages.contains { message in
+                message.parts.contains { ($0 as? UIMessagePart.Tool)?.output.isEmpty == true }
+            },
+            "all tool calls must be filled before the engine stops"
+        )
+    }
+
+    // MARK: - M2: 每轮 replacingTools 后 executor 表重建（命中工具下一轮可执行）
+
+    /// 红测试对应缺陷：executors 在 job 启动时按初始 params 注册一次，P0-a Fix C
+    /// 每轮刷新 params 后命中工具「可声明不可执行」（[engine] no executor registered）。
+    /// 修复后：传了 toolExposureBridge + executorRebuilder 的路径每轮重建表，
+    /// mock 宿主断言第二轮 wm_type 真实被调用。
+    func testExposedToolGetsExecutorOnNextRoundViaRebuilder() async {
+        let declarations = fullIosDeclarations()
+        let bridge = IosToolExposureBridge(tools: declarations)
+        XCTAssertTrue(bridge.lazyModeEnabled())
+        XCTAssertFalse(bridge.visibleTools().map(\.name).contains("wm_type"))
+
+        // 第一轮 tool_search 命中 wm_type；第二轮模型直接调 wm_type；第三轮收尾。
+        let provider = ParamsRecordingProvider([
+            toolCallMessage(toolCallId: "ts-1", toolName: "tool_search", input: #"{"query":"wm_type","limit":1}"#),
+            toolCallMessage(toolCallId: "wm-1", toolName: "wm_type", input: #"{"keys":"hello"}"#),
+            assistantText("done")
+        ])
+        let wmTypeExecutor = RecordingExecutor(.filled("{\"ok\":true,\"typed\":true}"))
+        // 与后台协调器同构的注册入口：按当轮 params.tools 注册（闭包捕获当轮 params）。
+        let rebuilder: (TextGenerationParams) -> [String: any IOSToolExecutor] = { params in
+            var executors: [String: any IOSToolExecutor] = [:]
+            for tool in params.tools {
+                if tool.name == "tool_search" {
+                    executors["tool_search"] = BridgeToolSearchExecutor(bridge: bridge)
+                } else if tool.name == "wm_type" {
+                    executors["wm_type"] = wmTypeExecutor
+                }
+            }
+            return executors
+        }
+        // 初始 params = 首轮可见工具（后台 handoff 同构：tool_search 在列）。
+        let initialParams = TextGenerationParams(
+            model: Model(
+                modelId: "engine-m2-test",
+                displayName: "engine-m2-test",
+                id: KotlinUuid.companion.random(),
+                type: ModelType.chat,
+                customHeaders: [],
+                customBodies: [],
+                inputModalities: [],
+                outputModalities: [],
+                abilities: [],
+                tools: Set<BuiltInTools>(),
+                contextWindowTokens: nil,
+                providerOverwrite: nil
+            ),
+            temperature: KotlinFloat(value: 0.7),
+            topP: nil,
+            maxTokens: nil,
+            tools: bridge.visibleTools(),
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: rebuilder(initialParams),
+            configuration: .init(maxSteps: 6, honorApprovalPause: false),
+            executorRebuilder: rebuilder
+        )
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("use wm_type")],
+            params: initialParams,
+            toolExposureBridge: bridge
+        )
+
+        XCTAssertNil(result.pendingApproval)
+        XCTAssertFalse(result.wasCancelled)
+        XCTAssertFalse(result.hitStepLimit)
+        XCTAssertGreaterThanOrEqual(provider.recordedParams.count, 3, "引擎必须跑三轮：tool_search → wm_type → 终答")
+        XCTAssertEqual(
+            wmTypeExecutor.calls.count, 1,
+            "tool_search 命中后下一轮该工具必须声明且可执行（mock 宿主断言真实调用），实际: \(wmTypeExecutor.calls.count)"
+        )
+        XCTAssertEqual(wmTypeExecutor.calls.first?.name, "wm_type")
+        XCTAssertFalse(
+            result.messages.contains { message in
+                message.parts.contains { ($0 as? UIMessagePart.Tool)?.output.isEmpty == true }
+            },
+            "所有工具调用必须填满（wm_type 不得落 [engine] no executor registered）"
+        )
+        let allOutput = result.messages.flatMap { message in
+            message.parts.compactMap { ($0 as? UIMessagePart.Tool)?.output.compactMap { ($0 as? UIMessagePart.Text)?.text } }
+        }.flatMap { $0 }.joined()
+        XCTAssertFalse(allOutput.contains("no executor registered"), "命中工具不得走未注册失败")
+        XCTAssertTrue(allOutput.contains("\"typed\":true"), "wm_type 必须真实执行并回灌结果")
+    }
+
     func testImageFailureReasonIgnoresSuccessfulImageOutputJSON() {
         let output: [UIMessagePart] = [
             UIMessagePart.Image(url: "amber-image://image-generation/file.png", metadata: nil),
@@ -1201,5 +1428,256 @@ final class IOSAgentToolEngineTests: XCTestCase {
         XCTAssertFalse(
             toolParts.first(where: { $0.toolCallId == "search-1" })?.output.isEmpty ?? true
         )
+    }
+
+    /// P3-a: exec 工具循环集成——脚本化 provider 让模型调用 exec，真实
+    /// JavaScriptCore 沙箱求值（IOSJsSandboxEngine），工具输出以
+    /// `{result, logs}` 回填并折入下一轮（完整 engine 循环，fake provider）。
+    func testExecToolRunsThroughEngineLoopWithRealSandbox() async {
+        let provider = ScriptedProvider([
+            toolCallMessage(
+                toolCallId: "tc-exec",
+                toolName: "exec",
+                input: #"{"code":"console.log('hi'); 6 * 7"}"#
+            ),
+            assistantText("done")
+        ])
+        let executor = RealJsSandboxExecutor()
+        let engine = IOSAgentToolEngine(
+            provider: provider,
+            executors: ["exec": executor],
+            configuration: .init(maxSteps: 4)
+        )
+
+        let result = await engine.run(
+            providerSetting: makeProviderSetting(),
+            messages: [userMessage("run js")],
+            params: makeParams(tools: ["exec"])
+        )
+
+        XCTAssertEqual(provider.callCount, 2, "engine should run the tool turn then the final text turn")
+        XCTAssertEqual(executor.calls.count, 1)
+        XCTAssertEqual(executor.calls.first?.name, "exec")
+        let toolMessage = result.messages[1]
+        let toolPart = toolMessage.parts.compactMap { $0 as? UIMessagePart.Tool }.first
+        let outputText = toolPart?.output.compactMap { $0 as? UIMessagePart.Text }.first?.text ?? ""
+        XCTAssertTrue(outputText.contains("\"result\":\"42\""), "tool output must carry the evaluated result: \(outputText)")
+        XCTAssertTrue(outputText.contains("[LOG] hi"), "tool output must carry console capture: \(outputText)")
+    }
+
+    // MARK: - P2-c: background engine citation stripping
+
+    /// P2-c 修复 1：后台引擎（`IOSAgentToolEngine`）流式输出含
+    /// `<amber-mem-cite>` 隐藏标记时，必须像前台一样在持久化前剥离——终态消息
+    /// 无标记、正文保留；引用 id 经 `markUsed(force:)`（bg 接线同款调用）落盘
+    /// 可读回。脚本化 streaming provider 驱动两轮：第一轮标签跨 chunk 拆分 +
+    /// 工具调用，第二轮再一个标签。
+    @MainActor
+    func testBackgroundEngineStripsCitationTagsAcrossRoundsAndMarksUsed() async throws {
+        try await withIsolatedPersistence { persistence, fileURL in
+            IosMemoryFactory.shared.replaceAll(records: [
+                makeMemoryRecord(id: 1, content: "favorite color blue", updatedAt: 10),
+                makeMemoryRecord(id: 2, content: "green project", updatedAt: 20),
+                makeMemoryRecord(id: 3, content: "untouched", updatedAt: 30),
+            ])
+
+            let round1Text = #"Your favorite color is blue. <amber-mem-cite>{"ids":[1]}</amber-mem-cite> And green too."#
+            let round2Text = #"<amber-mem-cite>{"ids":[2],"note":"fav"}</amber-mem-cite> Done."#
+            let engine = IOSAgentToolEngine(
+                provider: TwoRoundScriptedStreamingProvider(
+                    round1: [
+                        streamingDelta(#"Your favorite color is blue. <amber-mem-cite>{"ids":[1]}"#),
+                        streamingDelta(#"</amber-mem-cite> And green too."#),
+                        streamingFinal(makeMessage(
+                            role: MessageRole.assistant,
+                            parts: [
+                                UIMessagePart.Text(text: round1Text, metadata: nil),
+                                UIMessagePart.Tool(
+                                    toolCallId: "tc-1",
+                                    toolName: "echo",
+                                    input: "{}",
+                                    output: [],
+                                    approvalState: ToolApprovalState.Auto.shared,
+                                    streamIndex: nil,
+                                    metadata: nil
+                                ),
+                            ]
+                        )),
+                    ],
+                    round2: [
+                        streamingDelta(#"<amber-mem-cite>{"id"#),
+                        streamingDelta(#"s":[2],"note":"fav"}</amber-mem-cite> Done."#),
+                        streamingFinal(assistantText(round2Text)),
+                    ]
+                ),
+                executors: ["echo": RecordingExecutor(.filled("{\"ok\":true}"))],
+                configuration: .init(maxSteps: 4)
+            )
+            let tracker = IOSMemoryCitationTracker()
+            let result = await engine.run(
+                providerSetting: makeProviderSetting(),
+                messages: [userMessage("ask")],
+                params: makeParams(tools: ["echo"]),
+                citationTracker: tracker
+            )
+
+            // 两轮都跑完、工具输出已填、正常终态。
+            XCTAssertEqual(result.stepsExecuted, 2)
+            XCTAssertFalse(result.hitStepLimit)
+            XCTAssertNil(result.pendingApproval)
+            XCTAssertFalse(result.wasCancelled)
+
+            // 终态消息链（要持久化的内容）无标签；剥离后正文保留。
+            let assistantTexts = result.messages
+                .filter { $0.role == MessageRole.assistant }
+                .flatMap { message in message.parts.compactMap { ($0 as? UIMessagePart.Text)?.text } }
+                .joined()
+            XCTAssertFalse(assistantTexts.contains("<amber-mem-cite>"))
+            XCTAssertTrue(assistantTexts.contains("Your favorite color is blue."))
+            XCTAssertTrue(assistantTexts.contains("And green too."))
+            XCTAssertTrue(assistantTexts.contains(" Done."))
+
+            // 引用 id 收集齐全 → 与前台同款 markUsed（bg 接线 force: true）落盘读回。
+            XCTAssertEqual(tracker.citationIds, Set<Int32>([1, 2]))
+            XCTAssertTrue(persistence.markUsed(ids: tracker.citationIds, now: 999, force: true))
+            let reader = IOSMemoryPersistence(fileURL: fileURL)
+            reader.load()
+            XCTAssertEqual(reader.loadState, .loaded)
+            XCTAssertEqual(reader.records.first { $0.id == 1 }?.lastUsedAt?.int64Value, 999)
+            XCTAssertEqual(reader.records.first { $0.id == 2 }?.lastUsedAt?.int64Value, 999)
+            XCTAssertNil(reader.records.first { $0.id == 3 }?.lastUsedAt)
+        }
+    }
+
+    // MARK: - P2-c fixtures
+
+    /// 每轮（一次 streamStep）回放一组 chunk 的两轮 streaming provider。
+    private final class TwoRoundScriptedStreamingProvider: IOSAgentTextProvider, IOSAgentStreamingProvider, @unchecked Sendable {
+        private let round1: [MessageChunk]
+        private let round2: [MessageChunk]
+        private var roundIndex = 0
+
+        init(round1: [MessageChunk], round2: [MessageChunk]) {
+            self.round1 = round1
+            self.round2 = round2
+        }
+
+        func generateText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams
+        ) async throws -> MessageChunk {
+            roundIndex += 1
+            return (roundIndex == 1 ? round1 : round2).last
+                ?? MessageChunk(id: "empty", model: "test-model", choices: [], usage: nil)
+        }
+
+        func streamText(
+            providerSetting: ProviderSetting,
+            messages: [UIMessage],
+            params: TextGenerationParams,
+            onChunk: @escaping @Sendable (MessageChunk) -> Void,
+            onComplete: @escaping @Sendable () -> Void,
+            onError: @escaping @Sendable (KotlinThrowable) -> Void
+        ) -> Kotlinx_coroutines_coreJob? {
+            roundIndex += 1
+            let chunks = roundIndex == 1 ? round1 : round2
+            chunks.forEach(onChunk)
+            onComplete()
+            return nil
+        }
+    }
+
+    private func streamingDelta(_ text: String) -> MessageChunk {
+        MessageChunk(
+            id: UUID().uuidString,
+            model: "test-model",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: assistantText(text),
+                message: nil,
+                finishReason: nil
+            )],
+            usage: nil
+        )
+    }
+
+    private func streamingFinal(_ message: UIMessage) -> MessageChunk {
+        MessageChunk(
+            id: UUID().uuidString,
+            model: "test-model",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: nil,
+                message: message,
+                finishReason: "stop"
+            )],
+            usage: nil
+        )
+    }
+
+    @MainActor
+    private func withIsolatedPersistence(
+        _ body: (IOSMemoryPersistence, URL) async throws -> Void
+    ) async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IOSAgentToolEngineTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let fileURL = root.appendingPathComponent("memories.json")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+        let originalRecords = IosMemoryFactory.shared.snapshotRecords()
+        defer { IosMemoryFactory.shared.replaceAll(records: originalRecords) }
+        IosMemoryFactory.shared.replaceAll(records: [])
+        let persistence = IOSMemoryPersistence(fileURL: fileURL)
+        persistence.load()
+        try await body(persistence, fileURL)
+    }
+
+    private func makeMemoryRecord(id: Int32, content: String, updatedAt: Int64 = 0) -> MemoryRecord {
+        MemoryRecord(
+            id: id,
+            content: content,
+            scope: MemoryScope.core,
+            kind: MemoryKind.user,
+            assistantId: "__global__",
+            sourceConversationId: nil,
+            sourceMessageIds: [],
+            supersedesIds: [],
+            expiresAt: nil,
+            confidence: 1,
+            pinned: false,
+            archived: false,
+            createdAt: updatedAt,
+            updatedAt: updatedAt,
+            lastUsedAt: nil
+        )
+    }
+}
+
+/// P3-a: executor that runs `exec` calls through the real JS sandbox engine
+/// (same contract as the production dispatch: parse code from arguments,
+/// clamp timeout, format the payload with truncation).
+private final class RealJsSandboxExecutor: IOSToolExecutor {
+    private(set) var calls: [(name: String, arguments: String)] = []
+
+    func execute(name: String, arguments: String, isUserInitiated: Bool) async -> IOSAgentToolOutcome {
+        calls.append((name, arguments))
+        let sandbox = IOSJsSandboxEngine()
+        let args = ChatToolCallParsing.jsonObject(arguments)
+        let code = (args?["code"] as? String) ?? "undefined"
+        let timeoutMs = IOSJsSandboxEngine.clampTimeoutMs(
+            (args?["timeout_ms"] as? Int) ?? IOSJsSandboxEngine.defaultTimeoutMs
+        )
+        let result = await sandbox.evaluate(
+            code: code,
+            timeoutMs: timeoutMs,
+            maxOutputChars: IOSJsSandboxEngine.defaultMaxOutputChars
+        )
+        return .filled(IOSJsSandboxEngine.toolPayload(
+            result,
+            maxOutputChars: IOSJsSandboxEngine.defaultMaxOutputChars
+        ))
     }
 }

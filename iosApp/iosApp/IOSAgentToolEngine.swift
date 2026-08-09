@@ -323,6 +323,19 @@ public struct IOSPendingToolApproval: Sendable {
     public let reason: String
 }
 
+/// P1-d: mailbox drain 的返回盒。KMP `UIMessage` 非 Sendable，@MainActor 闭包
+/// 不能把 `[UIMessage]` 返回到 nonisolated 引擎上下文——照
+/// `IOSChatBackgroundRetryMessages` 先例用 @unchecked Sendable 盒跨边界
+/// （drain 闭包内不可变，引擎拿到后只读展开）。
+public struct IOSMailboxDrainResult: @unchecked Sendable {
+    /// drain 后应作为下一轮 working 的消息列表（含渲染信封追加）。
+    public let values: [UIMessage]
+
+    public init(values: [UIMessage]) {
+        self.values = values
+    }
+}
+
 /// A reusable, cancellable multi-turn model↔tool loop.
 ///
 /// Thread-safety: one engine instance should drive one run at a time. The
@@ -510,7 +523,17 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     }
 
     private let provider: any IOSAgentTextProvider
-    private let executors: [String: any IOSToolExecutor]
+    /// Executor table. Frozen by default (SubAgent/Novel paths). M2: when the
+    /// run carries `toolExposureBridge` + `executorRebuilder` (chat background
+    /// only), the table is rebuilt from the CURRENT round's effective params
+    /// after every executed batch — a tool_search hit from this round gets an
+    /// executor for the next round, so exposed tools are never "declared but
+    /// not executable".
+    private var executors: [String: any IOSToolExecutor]
+    /// M2: rebuilds `executors` from a params snapshot (same registration entry
+    /// point the caller used at init — see the background coordinator). Nil
+    /// keeps the frozen-table behavior for every existing caller.
+    private let executorRebuilder: ((TextGenerationParams) -> [String: any IOSToolExecutor])?
     private let configuration: Configuration
     // W1 durable ledger (I-1), optional and off by default so every existing
     // caller/test keeps building an engine with zero ledger traffic. Only
@@ -529,23 +552,33 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
         executors: [String: any IOSToolExecutor],
         configuration: Configuration = .init(),
         ledger: IOSAgentRunLedgering? = nil,
-        ledgerRunId: String? = nil
+        ledgerRunId: String? = nil,
+        executorRebuilder: ((TextGenerationParams) -> [String: any IOSToolExecutor])? = nil
     ) {
         self.provider = provider
         self.executors = executors
         self.configuration = configuration
         self.ledger = ledger
         self.ledgerRunId = ledgerRunId
+        self.executorRebuilder = executorRebuilder
     }
 
     /// Streams one model turn, accumulating chunks via the shared (500-fixed)
     /// MessageStreamAccumulator and surfacing the accumulating assistant text to
     /// [onAssistantText] token-by-token. Returns a MessageChunk wrapping the final
     /// assistant message so the rest of the loop stays unchanged.
+    ///
+    /// - Parameter citationTracker: P2-c. When non-nil, every incoming chunk is
+    ///   passed through `IOSMemoryCitationTracker.stripped` BEFORE the
+    ///   accumulator sees it (same semantics as the foreground sink: only
+    ///   assistant Text deltas are stripped; tool output / harness text never
+    ///   is), so the terminal snapshot carries no `<amber-mem-cite>` markers.
+    ///   Default nil keeps every existing caller (SubAgent, Novel) byte-identical.
     private func streamStep(
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
+        citationTracker: IOSMemoryCitationTracker?,
         onAssistantStage: (@Sendable (AgentActivityStage) -> Void)?,
         onAssistantText: (@Sendable (String) -> Void)?
     ) async throws -> MessageChunk {
@@ -599,8 +632,12 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                     messages: messages,
                     params: requestParams,
                     onChunk: { chunk in
-                        state.accumulator.append(chunk: chunk)
-                        let update = state.appendAssistantDelta(from: chunk)
+                        // P2-c: 后台流在进入 accumulator 前剥离 citation 隐藏
+                        // 标记（与前台 sink 同语义——所有下游消费者只见到已剥离的
+                        // 可见文本；nil → 原样零变化）。
+                        let strippedChunk = citationTracker?.stripped(chunk) ?? chunk
+                        state.accumulator.append(chunk: strippedChunk)
+                        let update = state.appendAssistantDelta(from: strippedChunk)
                         if let stage = update.stage {
                             onAssistantStage?(stage)
                         }
@@ -655,17 +692,77 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
     /// Runs the loop to completion (or until approval is required / the step
     /// limit is hit). Pure function over `messages`: returns the new list,
     /// never mutates the caller's array.
+    ///
+    /// - Parameter toolExposureBridge: P0-a Fix C. When non-nil, each executed
+    ///   batch is followed by `params.replacingTools(bridge.visibleTools())`
+    ///   before the NEXT model step — a `tool_search` hit expanded inside one
+    ///   round becomes declared on the next. Default nil keeps every existing
+    ///   caller (SubAgent, Novel) on the frozen-params behavior.
+    /// - Parameter mailboxDrain: P1-d. When non-nil, after each executed batch
+    ///   (same point as the toolExposureBridge refresh, before the next
+    ///   `streamStep`) the engine calls this closure and appends the returned
+    ///   messages (rendered mailbox envelopes) to the working list for the next
+    ///   round's upload; persisting the drained envelopes into the conversation
+    ///   is the closure's job (background runs have no UI, so fold = persist +
+    ///   working copy only). No input parameter: KMP `UIMessage` is
+    ///   non-Sendable, so the closure only ever RETURNS messages (wrapped in an
+    ///   @unchecked Sendable box, same precedent as
+    ///   `IOSChatBackgroundRetryMessages`) and never receives them. Default nil
+    ///   keeps every existing caller (SubAgent, Novel) behavior unchanged.
+    /// - Parameter citationTracker: P2-c. When non-nil, every streamed chunk in
+    ///   every step is stripped of `<amber-mem-cite>` markers before
+    ///   accumulation (see `streamStep`), and the run-terminal `finish()` flush
+    ///   merges any unclosed-tag remainder into the final messages — one
+    ///   per-run tracker, so the caller reads `citationIds` after `run`
+    ///   returns. Default nil keeps every existing caller (SubAgent, Novel)
+    ///   behavior byte-identical.
     public func run(
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
+        citationTracker: IOSMemoryCitationTracker? = nil,
+        toolExposureBridge: IosToolExposureBridge? = nil,
+        mailboxDrain: (@Sendable () async -> IOSMailboxDrainResult)? = nil,
         onAssistantTurnStarted: (@MainActor @Sendable () async -> Void)? = nil,
         onToolExecutionStarted: (@MainActor @Sendable (String) async -> Void)? = nil,
         onAssistantStage: (@Sendable (AgentActivityStage) -> Void)? = nil,
         onAssistantText: (@Sendable (String) -> Void)? = nil,
         onMessagesUpdated: (@Sendable ([UIMessage]) -> Void)? = nil
     ) async -> IOSAgentToolEngineResult {
+        let result = await runInternal(
+            providerSetting: providerSetting,
+            messages: messages,
+            params: params,
+            citationTracker: citationTracker,
+            toolExposureBridge: toolExposureBridge,
+            mailboxDrain: mailboxDrain,
+            onAssistantTurnStarted: onAssistantTurnStarted,
+            onToolExecutionStarted: onToolExecutionStarted,
+            onAssistantStage: onAssistantStage,
+            onAssistantText: onAssistantText,
+            onMessagesUpdated: onMessagesUpdated
+        )
+        return Self.finishingCitation(result, tracker: citationTracker)
+    }
+
+    /// The loop body; every terminal return path funnels through the `run`
+    /// wrapper's `finishingCitation` so the citation flush (P2-c) happens
+    /// exactly once per run regardless of how the run ended.
+    private func runInternal(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        citationTracker: IOSMemoryCitationTracker?,
+        toolExposureBridge: IosToolExposureBridge?,
+        mailboxDrain: (@Sendable () async -> IOSMailboxDrainResult)?,
+        onAssistantTurnStarted: (@MainActor @Sendable () async -> Void)?,
+        onToolExecutionStarted: (@MainActor @Sendable (String) async -> Void)?,
+        onAssistantStage: (@Sendable (AgentActivityStage) -> Void)?,
+        onAssistantText: (@Sendable (String) -> Void)?,
+        onMessagesUpdated: (@Sendable ([UIMessage]) -> Void)?
+    ) async -> IOSAgentToolEngineResult {
         var working = messages
+        var effectiveParams = params
         var steps = 0
         // I-5: one guard per `run()` invocation, never carried across runs.
         // The engine instance itself is long-lived/reused (SubAgent, chat
@@ -734,7 +831,8 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
                 chunk = try await streamStep(
                     providerSetting: providerSetting,
                     messages: working,
-                    params: params,
+                    params: effectiveParams,
+                    citationTracker: citationTracker,
                     onAssistantStage: onAssistantStage,
                     onAssistantText: onAssistantText
                 )
@@ -882,6 +980,35 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             working = applyToolOutputs(batchResult.outputs, to: working)
             onMessagesUpdated?(working)
 
+            // P0-a Fix C: re-derive the request params from the run bridge's
+            // CURRENT exposure after every executed batch, so a tool_search
+            // hit from THIS round is declared on the NEXT round (background
+            // handoff closed loop). Without a bridge the params stay frozen.
+            if let bridge = toolExposureBridge {
+                effectiveParams = effectiveParams.replacingTools(bridge.visibleTools())
+                // M2: same refresh point — rebuild the executor table for the
+                // current round's visible tools (chat background only; the
+                // rebuilder re-registers through backgroundToolExecutors with
+                // the round's params/bridge captured inside the closures).
+                // Without a rebuilder the table stays frozen (SubAgent/Novel).
+                if let executorRebuilder {
+                    executors = executorRebuilder(effectiveParams)
+                }
+            }
+
+            // P1-d: mailbox drain 与 replacingTools 同点——每轮批量执行后、下一轮
+            // streamStep 之前。drain 闭包把本会话信封渲染为 user 消息返回，
+            // 追加进 working（下一轮 upload 折入），闭包内完成持久化（后台无 UI
+            // 上屏）。SubAgent/Novel 不传 → 零影响；Room drain 的事务加固保证
+            // 同会话前后台双 drain 最多折入一次（loser 返回空）。
+            if let mailboxDrain {
+                let drained = (await mailboxDrain()).values
+                if !drained.isEmpty {
+                    working.append(contentsOf: drained)
+                    onMessagesUpdated?(working)
+                }
+            }
+
             // I-5: a repeated-signature stop ends the whole run here, mirroring
             // the maxSteps-exhausted return below — the stop output is already
             // filled in place above, so the caller sees a terminated loop with
@@ -905,6 +1032,29 @@ public final class IOSAgentToolEngine: @unchecked Sendable {
             stepsExecuted: steps,
             pendingApproval: nil,
             hitStepLimit: true
+        )
+    }
+
+    /// P2-c: run 终结统一收口——完成/失败/取消/限步/审批暂停的每个返回路径都
+    /// 经 `run` 包装层走到这里。`finish()` 幂等；flush 出的剩余可见文本（未闭合
+    /// 标签在 EOF 时按 codex 同款 auto-close 整段吞进 citation，不外泄）并入终态
+    /// 消息快照。nil → 原样返回，SubAgent/Novel 零变化。
+    private static func finishingCitation(
+        _ result: IOSAgentToolEngineResult,
+        tracker: IOSMemoryCitationTracker?
+    ) -> IOSAgentToolEngineResult {
+        guard let tracker else { return result }
+        let remainder = tracker.finish()
+        guard !remainder.isEmpty else { return result }
+        return IOSAgentToolEngineResult(
+            messages: IOSMemoryCitationTracker.appendingCitationRemainder(remainder, to: result.messages),
+            stepsExecuted: result.stepsExecuted,
+            pendingApproval: result.pendingApproval,
+            hitStepLimit: result.hitStepLimit,
+            providerFailureMessage: result.providerFailureMessage,
+            hitOutputLimit: result.hitOutputLimit,
+            wasCancelled: result.wasCancelled,
+            guardStopped: result.guardStopped
         )
     }
 

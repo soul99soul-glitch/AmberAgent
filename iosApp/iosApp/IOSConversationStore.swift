@@ -67,6 +67,17 @@ struct IOSConversationSearchResult: Identifiable {
     let updateAt: Int64
 }
 
+/// session_search 工具的聚合命中（每会话一条）。由 [IOSConversationStore.sessionSearchHits]
+/// 从 [IOSConversationSearchResult] 派生：snippet 优先取消息命中预览（含关键词上下文），
+/// messageCount 取会话摘要的真实消息数。
+struct IOSSessionSearchHit {
+    let conversationId: KotlinUuid
+    let title: String
+    let snippet: String
+    let updatedAt: Int64
+    let messageCount: Int32
+}
+
 struct IOSConversationWriteBaseline: Equatable {
     fileprivate let key: String
     fileprivate let sequence: UInt64
@@ -429,9 +440,29 @@ final class IOSConversationStore {
             if Self.sameMessageIdentity(current, baseMessages) {
                 nextMessages = completedMessages
             } else {
+                // M1: 后台 mailbox drain 折入的信封已在 drain 持久化时进入
+                // current（displayMessages 快照不含 drain）。终态保存若照旧把
+                // completedMessages 的整段 suffix 追加，折入信封会二次落盘，
+                // 且「会话期间已有新内容」notice 是误导（差异全部来自后台自己
+                // 折入的信封，不是用户新内容）。按消息 id 去重：已落盘的折入
+                // 信封跳过；差异全部来自 drain 时以 current 为终态不插 notice。
                 let generatedSuffix = Array(completedMessages.dropFirst(baseMessages.count))
-                let notice = UIMessage.companion.assistant(prompt: "后台生成已完成；当前会话期间已有新内容，以下是后台完成的结果。")
-                nextMessages = current + [notice] + generatedSuffix
+                let currentIds = Set(current.map { String(describing: $0.id) })
+                let freshSuffix = generatedSuffix.filter { !currentIds.contains(String(describing: $0.id)) }
+                let completedIds = Set(completedMessages.map { String(describing: $0.id) })
+                let differenceIsOnlyDrain = current.dropFirst(baseMessages.count).allSatisfy {
+                    completedIds.contains(String(describing: $0.id))
+                }
+                if freshSuffix.isEmpty {
+                    // 终态相对 base 的新增已全部落盘（折入信封先到）——不重复写。
+                    nextMessages = current
+                } else if differenceIsOnlyDrain {
+                    // 磁盘差异只是后台自己折入的信封：无用户侧新内容，不插 notice。
+                    nextMessages = current + freshSuffix
+                } else {
+                    let notice = UIMessage.companion.assistant(prompt: "后台生成已完成；当前会话期间已有新内容，以下是后台完成的结果。")
+                    nextMessages = current + [notice] + freshSuffix
+                }
             }
             guard await save(messages: nextMessages, to: id, ifUnchangedSince: baseline) else { continue }
             pendingBackgroundContentConversationIds.insert(String(describing: id))
@@ -525,6 +556,69 @@ final class IOSConversationStore {
         return false
     }
 
+    // MARK: - P1-c 线程编排（fork 会话持久化）
+
+    /// 保存一个已构造好的 Conversation（P1-c fork 结果）。与 [save] 不同：目标
+    /// 会话文件尚不存在，没有「消息写保留 metadata owner 字段」语义，直接落盘
+    /// 并刷新索引。仅当目标是当前会话时才切换 current（fork 目标是新会话，不会）。
+    @discardableResult
+    func saveForkedConversation(_ conversation: Conversation) async -> Bool {
+        guard !isDeletedConversation(conversation.id) else { return false }
+        do {
+            try await storage.saveConversation(conversation: conversation)
+        } catch {
+            publishIOError(operation: "保存 fork 会话", detail: "目标 \(conversation.id): \(error)")
+            return false
+        }
+        if currentConversation?.id == conversation.id {
+            setCurrent(conversation)
+        }
+        await refreshSummaries()
+        return true
+    }
+
+    /// 按 id 读取完整 Conversation（P1-c fork 源读取；当前会话优先走内存）。
+    func loadConversationForOrchestration(_ id: KotlinUuid) async throws -> Conversation? {
+        guard !isDeletedConversation(id) else { return nil }
+        return try await storage.loadConversation(id: id)
+    }
+
+    // MARK: - P2-a 会话记忆污染（memoryMode）
+
+    /// harness 置位：ENABLED→POLLUTED（KMP 层原子 RMW，幂等只升不降，不会被
+    /// 并发消息写回滚）。失败记日志不抛——置位不得阻塞工具结果。
+    @discardableResult
+    func markConversationMemoryPolluted(_ id: KotlinUuid) async -> Bool {
+        do {
+            return try await storage.updateMemoryMode(id: id, memoryMode: .polluted).boolValue
+        } catch {
+            publishIOError(operation: "标记会话记忆污染", detail: "目标 \(id): \(error)")
+            return false
+        }
+    }
+
+    /// 用户手动复位：POLLUTED→ENABLED（KMP 层唯一允许的降级路径）。
+    @discardableResult
+    func resetConversationMemoryPollution(_ id: KotlinUuid) async -> Bool {
+        do {
+            let updated = try await storage.updateMemoryMode(id: id, memoryMode: .enabled).boolValue
+            if updated {
+                await refreshSummaries()
+            }
+            return updated
+        } catch {
+            publishIOError(operation: "恢复会话记忆", detail: "目标 \(id): \(error)")
+            return false
+        }
+    }
+
+    /// 只列出 POLLUTED 会话（设置页「受外部内容影响的会话」列表投影）。实时读盘，
+    /// 不依赖内存 currentConversation。
+    func pollutedConversationSummaries() async -> [ConversationSummary] {
+        let all = (try? await storage.listSummaries()) ?? []
+        return all.filter { $0.memoryMode == .polluted }
+    }
+
     /// 重建一个仅 title 不同的 Conversation（Swift 侧无 partial copy，用全字段构造器）。
     /// 所有其他字段保持原值；updateAt 刷新到当前时刻以反映「最近修改」。
     private func retitledCopy(of conversation: Conversation, title: String) -> Conversation {
@@ -536,6 +630,7 @@ final class IOSConversationStore {
             chatSuggestions: conversation.chatSuggestions,
             isPinned: conversation.isPinned,
             autoApproveToolCalls: conversation.autoApproveToolCalls,
+            memoryMode: conversation.memoryMode,
             createAt: conversation.createAt,
             updateAt: nowInstant(),
             newConversation: conversation.newConversation
@@ -768,6 +863,56 @@ final class IOSConversationStore {
             if results.count >= limit { break }
         }
         return results
+    }
+
+    /// session_search 工具用：把 [searchConversations] 的逐条命中聚合为每会话一条。
+    /// 只读（不切当前会话、不 bump revision、不写盘）；snippet 优先取消息命中预览
+    /// （含关键词上下文），标题命中兜底；messageCount 取会话摘要的真实消息数。
+    func sessionSearchHits(query: String, limit: Int = 8) async -> [IOSSessionSearchHit] {
+        let results = await searchConversations(query: query, limit: limit)
+        guard !results.isEmpty else { return [] }
+
+        let sourceSummaries: [ConversationSummary]
+        if summaries.isEmpty {
+            sourceSummaries = (try? await storage.listSummaries()) ?? []
+        } else {
+            sourceSummaries = summaries
+        }
+        let countByConversation = Dictionary(
+            sourceSummaries.map { ($0.id.toHexDashString(), $0.messageCount) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var orderedKeys: [String] = []
+        var byConversation: [String: (id: KotlinUuid, title: String, titleSnippet: String?, messageSnippet: String?, updatedAt: Int64)] = [:]
+        for result in results {
+            let key = result.conversationId.toHexDashString()
+            if byConversation[key] == nil {
+                orderedKeys.append(key)
+                byConversation[key] = (result.conversationId, result.title, nil, nil, result.updateAt)
+            }
+            guard var entry = byConversation[key] else { continue }
+            if result.kind == .message {
+                if entry.messageSnippet == nil { entry.messageSnippet = result.preview }
+            } else if entry.titleSnippet == nil {
+                entry.titleSnippet = result.preview
+            }
+            entry.updatedAt = max(entry.updatedAt, result.updateAt)
+            byConversation[key] = entry
+        }
+
+        var hits: [IOSSessionSearchHit] = []
+        for key in orderedKeys {
+            guard let entry = byConversation[key] else { continue }
+            hits.append(IOSSessionSearchHit(
+                conversationId: entry.id,
+                title: entry.title,
+                snippet: entry.messageSnippet ?? entry.titleSnippet ?? "",
+                updatedAt: entry.updatedAt,
+                messageCount: countByConversation[key] ?? 0
+            ))
+        }
+        return hits
     }
 
     /// Read-only export for iOS Board chat-history collection.
@@ -1122,6 +1267,7 @@ final class IOSConversationStore {
             chatSuggestions: conversation.chatSuggestions,
             isPinned: conversation.isPinned,
             autoApproveToolCalls: conversation.autoApproveToolCalls,
+            memoryMode: conversation.memoryMode,
             createAt: conversation.createAt,
             updateAt: nowInstant(),
             newConversation: conversation.newConversation

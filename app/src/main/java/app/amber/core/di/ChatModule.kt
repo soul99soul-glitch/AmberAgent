@@ -7,6 +7,7 @@ import app.amber.core.service.UserInputPreprocessor
 import app.amber.core.service.orchestrator.BranchMessageOrchestrator
 import app.amber.core.service.orchestrator.RegenerateMessageOrchestrator
 import app.amber.core.service.orchestrator.SendMessageOrchestrator
+import app.amber.core.memory.pollution.PollutedConversationStore
 import org.koin.dsl.module
 
 /**
@@ -26,6 +27,9 @@ val chatModule = module {
     }
 
     single { UserInputPreprocessor(settingsStore = get()) }
+
+    // P2-a：POLLUTED 会话 id 集合（filesDir JSON，无 Room/SDK 迁移）。
+    single { PollutedConversationStore.create(context = get()) }
 
     single {
         ChatService(
@@ -55,6 +59,7 @@ val chatModule = module {
             memoryExtractor = get(),
             pendingMessageStore = get(),
             userInputPreprocessor = get(),
+            pollutedConversationStore = get(),
             agentRunner = get(),
         )
     }

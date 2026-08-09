@@ -6,6 +6,7 @@ struct MemoryOverviewView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(RouterPath.self) private var router
+    @Environment(IOSConversationStore.self) private var conversationStore
 
     @State private var persistence = IOSMemoryPersistence.shared
     @State private var query = ""
@@ -14,6 +15,8 @@ struct MemoryOverviewView: View {
     @State private var pendingDeleteRecord: MemoryRecord?
     @State private var operationError: String?
     @State private var showClearAuditConfirmation = false
+    /// P2-a: 受外部内容影响（POLLUTED）的会话列表；空态时整节不显示。
+    @State private var pollutedConversations: [ConversationSummary] = []
 
     private var filteredRecords: [MemoryRecord] {
         IOSMemoryLibrary.filteredRecords(records: persistence.records, query: query, scopeFilter: scopeFilter)
@@ -37,6 +40,7 @@ struct MemoryOverviewView: View {
                     intro
                     loadStatusSection
                     runtimeSection
+                    pollutionSection
                     searchSection
                     recallSection
                     recordsSection
@@ -191,6 +195,72 @@ struct MemoryOverviewView: View {
                         set: { sharedSettings.setMemoryRuntimeEnabled(longTerm: $0) }
                     )
                 )
+            }
+        }
+    }
+
+    /// P2-a：受外部内容影响的会话（memoryMode == POLLUTED）。这些会话作为记忆
+    /// 抽取源的资格已被暂停；每项可手动「恢复」回 ENABLED。空态不显示本小节。
+    @ViewBuilder
+    private var pollutionSection: some View {
+        if !pollutedConversations.isEmpty {
+            VStack(spacing: 0) {
+                AmberSectionLabel(text: "受外部内容影响的会话")
+                AmberFormGroup {
+                    ForEach(Array(pollutedConversations.enumerated()), id: \.element.id) { index, summary in
+                        HStack(spacing: 10) {
+                            Image(systemName: "globe")
+                                .accessibilityHidden(true)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(AmberTheme.accentAmber)
+                                .frame(width: 28, height: 28)
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(summary.title.isEmpty ? "未命名会话" : summary.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.foreground)
+                                    .lineLimit(1)
+                                Text("\(pollutedTime(summary.updateAt)) 曾接触外部内容，已暂停记忆抽取")
+                                    .font(.caption)
+                                    .foregroundStyle(AmberTheme.muted)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button("恢复") {
+                                restorePollutedConversation(summary.id)
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(AmberTheme.accent)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                            .accessibilityLabel("恢复「\(summary.title.isEmpty ? "未命名会话" : summary.title)」的记忆抽取")
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+
+                        if index < pollutedConversations.count - 1 {
+                            MemoryDivider(leading: 52)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func pollutedTime(_ updateAt: KotlinInstant) -> String {
+        let seconds = TimeInterval(updateAt.toEpochMilliseconds()) / 1000.0
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: Date(timeIntervalSince1970: seconds), relativeTo: Date())
+    }
+
+    private func restorePollutedConversation(_ id: KotlinUuid) {
+        Task { @MainActor in
+            if await conversationStore.resetConversationMemoryPollution(id) {
+                pollutedConversations = await conversationStore.pollutedConversationSummaries()
+            } else {
+                operationError = "恢复失败，请重试。"
             }
         }
     }
@@ -368,6 +438,9 @@ struct MemoryOverviewView: View {
 
     private func refresh() {
         persistence.refresh()
+        Task { @MainActor in
+            pollutedConversations = await conversationStore.pollutedConversationSummaries()
+        }
     }
 
     private func delete(_ record: MemoryRecord) {

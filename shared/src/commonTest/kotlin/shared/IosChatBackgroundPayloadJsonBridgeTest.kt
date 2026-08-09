@@ -8,7 +8,10 @@ import app.amber.ai.provider.CustomBody
 import app.amber.ai.provider.CustomHeader
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -62,6 +65,60 @@ class IosChatBackgroundPayloadJsonBridgeTest {
         assertEquals(emptyList(), decoded.params.customBody)
         assertFalse(decoded.generativeUiRequired)
         assertFalse(decoded.generativeUiFallbackAttempted)
+    }
+
+    @Test
+    fun encodePersistsFullToolNamesForBackgroundBridgeRebuild() {
+        val provider = ProviderSetting.OpenAI(
+            id = Uuid.random(),
+            apiKey = "secret",
+            models = listOf(Model(modelId = "gpt-test", displayName = "GPT Test")),
+        )
+        val fullToolNames = listOf("tool_search", "search_web", "wm_type", "ask_user")
+
+        val json = IosChatBackgroundPayloadJsonBridge.encode(
+            runId = "run-full-tools",
+            startedAt = 3L,
+            inputDigest = "digest",
+            conversationId = Uuid.random(),
+            providerSetting = provider,
+            params = TextGenerationParams(model = provider.models.first()),
+            uploadMessages = emptyList(),
+            displayMessages = emptyList(),
+            fullToolNames = fullToolNames,
+        )
+
+        val decoded = IosChatBackgroundPayloadJsonBridge.decode(json)
+        assertEquals(fullToolNames, decoded.fullToolNames)
+    }
+
+    @Test
+    fun decodePayloadWithoutFullToolNamesFallsBackToEmpty() {
+        val provider = ProviderSetting.OpenAI(
+            id = Uuid.random(),
+            apiKey = "secret",
+            models = listOf(Model(modelId = "gpt-test", displayName = "GPT Test")),
+        )
+
+        // Legacy payloads (pre-fullToolNames) must still decode: the field
+        // defaults to empty and the background job falls back to the
+        // handoff.params.tools path. Encode normally, then actually strip the
+        // key — encodeDefaults=true would otherwise write "fullToolNames":[]
+        // explicitly, which is not what a legacy payload looks like.
+        val jsonWithKey = IosChatBackgroundPayloadJsonBridge.encode(
+            runId = "run-legacy",
+            startedAt = 4L,
+            inputDigest = "digest",
+            conversationId = Uuid.random(),
+            providerSetting = provider,
+            params = TextGenerationParams(model = provider.models.first()),
+            uploadMessages = emptyList(),
+            displayMessages = emptyList(),
+        )
+        val json = JsonObject(Json.parseToJsonElement(jsonWithKey).jsonObject - "fullToolNames").toString()
+
+        val decoded = IosChatBackgroundPayloadJsonBridge.decode(json)
+        assertEquals(emptyList(), decoded.fullToolNames)
     }
 
     @Test

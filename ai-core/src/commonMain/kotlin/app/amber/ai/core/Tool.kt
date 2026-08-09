@@ -2,12 +2,17 @@ package app.amber.ai.core
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
@@ -342,6 +347,104 @@ fun createIosIshExecuteToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+/**
+ * P3-b: `exec` tool — runs JavaScript (ES2020) in a sandbox (iOS:
+ * JavaScriptCore via IOSJsSandboxEngine; Android: QuickJS via eval_javascript,
+ * which stays as its own legacy tool). No DOM, no Node, no fs, no network, no
+ * imports. The result is the value of the last expression (JSON-ified);
+ * console.log/info/warn/error are captured into `logs`. Inside the sandbox a
+ * `tools` object exposes the currently visible tool set: nested calls are
+ * SYNCHRONOUS (the JS thread blocks while the host executes; no
+ * await/Promise needed, Promise.all concurrency is not supported in v1) and
+ * inherit each tool's own approval policy — the exec container itself never
+ * asks for extra approval. Approval flags mirror Android `eval_javascript`
+ * (Tool defaults: needsApproval=false, allowsAutoApproval=true) — the
+ * per-assistant/global opt-in switch is the gate, not a per-call approval
+ * card. iOS execution lives in ChatToolRuntime (Swift); `execute` is empty
+ * here, same pattern as createSearchWebToolDeclaration.
+ */
+fun createExecToolDeclaration(): Tool = Tool(
+    name = "exec",
+    description = """
+        Run JavaScript (ES2020) in a sandbox. No DOM, no Node, no fs, no network, no imports.
+        Use console.log for output; the last expression's value is returned.
+        Inside the sandbox, `tools` exposes the tools visible in this run; tools.* calls are
+        synchronous (no await/Promise needed; Promise.all concurrency is not supported in v1),
+        and nested calls inherit each tool's own approval policy.
+        The global `ALL_TOOLS` lists every callable tool's `name` and `description`; filter it to discover tools instead of guessing names.
+        NOT for generating SVG/widgets/HTML.
+    """.trimIndent().replace("\n", " "),
+    parameters = { execParameters() },
+    needsApproval = false,
+    allowsAutoApproval = true,
+    execute = { emptyList() }
+)
+
+private fun execParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("code", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. The JavaScript source to evaluate (ES2020). Raw code, no markdown fences.")
+        })
+        put("timeout_ms", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional. Maximum evaluation time in milliseconds, clamped to [1000, 30000]; defaults to 10000. A timed-out script is abandoned: its result is discarded and its engine context is never reused.")
+        })
+        put("max_output_chars", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional. Maximum characters for the returned payload, clamped to [1, 100000]; defaults to 10000.")
+        })
+    },
+    required = listOf("code"),
+)
+
+/**
+ * P3-c: `wait` tool — continues a yielded `exec` cell. When an exec evaluation
+ * runs past its `timeout_ms`, the handle is NOT dropped: exec returns
+ * "Script running with cell ID {cell_id}" and the evaluation keeps running on
+ * its own queue. `wait` blocks on that cell until it reaches a terminal state
+ * (Completed | Terminated | Failed | interrupted) or the wait timeout elapses,
+ * and returns `{status, output, logs}`. `terminate=true` marks the cell
+ * Terminated (abandon semantics: JavaScriptCore cannot force-kill a runaway
+ * script, it keeps burning CPU until it ends by itself). Cells and the
+ * `store`/`load` KV are scoped per conversation and survive across runs;
+ * every wait consumes one ordinary tool-resume budget slot (no separate
+ * budget mechanism). Approval flags mirror `exec` — the container never asks
+ * for extra approval, the per-assistant/global opt-in switch is the gate.
+ * iOS execution lives in ChatToolRuntime (Swift); `execute` is empty here,
+ * same pattern as createExecToolDeclaration.
+ */
+fun createWaitToolDeclaration(): Tool = Tool(
+    name = "wait",
+    description = """
+        Wait for a running exec cell to finish. `cell_id` is returned by exec when a script times out (yield).
+        Blocks until the cell completes or the wait timeout elapses; returns {status, output, logs}.
+        terminate=true abandons the cell (status=terminated).
+    """.trimIndent().replace("\n", " "),
+    parameters = { waitParameters() },
+    needsApproval = false,
+    allowsAutoApproval = true,
+    execute = { emptyList() }
+)
+
+private fun waitParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("cell_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. The cell ID returned by exec when a script timed out (yield).")
+        })
+        put("timeout_ms", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional. Maximum wait in milliseconds, clamped to [1000, 60000]; defaults to 10000. A wait that elapses while the cell is still running returns its current running status instead of failing.")
+        })
+        put("terminate", buildJsonObject {
+            put("type", "boolean")
+            put("description", "Optional. When true, mark the cell terminated (abandon) and return its terminal status immediately instead of waiting.")
+        })
+    },
+    required = listOf("cell_id"),
+)
+
 fun createPermissionsStatusToolDeclaration(): Tool = Tool(
     name = "permissions_status",
     description = "Return AmberAgent iOS capability and permission status for tools available on this device.",
@@ -366,8 +469,270 @@ fun createSubAgentReportToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+/**
+ * P1-c: spawn a child agent thread. The child runs asynchronously with the same
+ * tools as this thread and can spawn its own subagents (depth is capped by the
+ * harness). The child's conversation is forked from this thread's history
+ * (optionally truncated by `fork_turns`), receives the initial `message` as a
+ * NEW_TASK, and its final answer is delivered back through the mailbox when it
+ * finishes. `task_name` must be lowercase letters, digits and underscores; the
+ * canonical agent path is `/root/{task_name}` (or `/root/{parent_task}/{task_name}`
+ * for grandchildren). Use `list_agents` to inspect threads and
+ * `interrupt_agent` to stop a child without destroying its thread.
+ */
+fun createSpawnAgentToolDeclaration(): Tool = Tool(
+    name = "spawn_agent",
+    description = """
+        Spawn a child agent thread that runs asynchronously. The spawned agent has
+        the same tools as you and can spawn its own subagents. The child receives a
+        fork of this thread's history (truncated by fork_turns) plus the initial
+        `message` as its NEW_TASK, and delivers its FINAL_ANSWER back to this thread
+        when it finishes. task_name must be lowercase letters, digits and underscores;
+        the canonical agent path is /root/{task_name} (or
+        /root/{parent_task}/{task_name} for grandchildren). Inspect threads with
+        list_agents; stop a child with interrupt_agent (the thread stays addressable).
+    """.trimIndent(),
+    parameters = { spawnAgentParameters() },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+/** P1-c: list the agent threads spawned from this thread (and their transitive children). */
+fun createListAgentsToolDeclaration(): Tool = Tool(
+    name = "list_agents",
+    description = """
+        List the agent threads spawned from this thread, including transitive
+        children: canonical agent path, child thread id, nickname, role assistant,
+        thread status (Open/Closed) and the latest run status of each child.
+        Optionally filter by a path prefix.
+    """.trimIndent(),
+    parameters = { listAgentsParameters() },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+/** P1-c: interrupt a child agent's active run. The thread itself stays Open and addressable. */
+fun createInterruptAgentToolDeclaration(): Tool = Tool(
+    name = "interrupt_agent",
+    description = """
+        Interrupt the active run of a spawned agent thread by its child_thread_id
+        or canonical agent path. The thread is preserved (stays Open and
+        addressable, e.g. for a later follow-up); only the running turn is
+        cancelled. Returns the previous run status; an idle thread returns
+        previous_status "idle" without error.
+    """.trimIndent(),
+    parameters = { interruptAgentParameters() },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+/**
+ * P1-d: deliver a message to a spawned agent thread without waking it. The
+ * message enters the target thread's mailbox but does not trigger a new turn:
+ * an idle target's messages stay queued until its next run, and a running
+ * target receives them at its next tool-loop boundary. Sending to your own
+ * thread or to a thread outside your tree is rejected.
+ */
+fun createSendMessageToolDeclaration(): Tool = Tool(
+    name = "send_message",
+    description = """
+        Deliver a message to a spawned agent thread (by child_thread_id or
+        canonical agent path) without waking it. It does not trigger a new turn:
+        an idle target's messages stay in its mailbox until its next run, and a
+        running target receives them at its next tool-loop boundary. You cannot
+        message your own thread; targets outside your thread tree are rejected.
+    """.trimIndent(),
+    parameters = { sendMessageParameters() },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+/**
+ * P1-d: deliver a follow-up task to a spawned agent thread and wake it when
+ * idle. Unlike send_message, an idle target starts a new run with the message
+ * immediately; a running target queues the message in its mailbox and folds it
+ * in at its next tool-loop boundary.
+ */
+fun createFollowupTaskToolDeclaration(): Tool = Tool(
+    name = "followup_task",
+    description = """
+        Deliver a follow-up task message to a spawned agent thread (by
+        child_thread_id or canonical agent path) and wake it. If the target is
+        idle (no active run) it starts a new run with the message immediately;
+        if it is running, the message is queued in its mailbox and folded in at
+        its next tool-loop boundary. You cannot send to your own thread;
+        targets outside your thread tree are rejected.
+    """.trimIndent(),
+    parameters = { followupTaskParameters() },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+/**
+ * P1-d: suspend this tool call until this thread's mailbox receives any
+ * activity (a message from another thread or a child's final answer), until
+ * the wait is interrupted by new user input, or until timeout_ms elapses.
+ * Returns immediately when the mailbox already has pending activity.
+ */
+fun createWaitAgentToolDeclaration(): Tool = Tool(
+    name = "wait_agent",
+    description = """
+        Suspend this tool call until this thread's mailbox receives any activity
+        (a message from another thread or a child's final answer), until the
+        wait is interrupted by new user input, or until timeout_ms elapses.
+        Returns immediately when the mailbox already has pending activity.
+        timeout_ms is clamped to [5000, 300000] milliseconds and defaults to
+        30000.
+    """.trimIndent(),
+    parameters = { waitAgentParameters() },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+/**
+ * Cross-session conversation read tools (`session_search` + `session_read`).
+ * Unlike Android's current-session `conversation_search`/`conversation_expand`,
+ * these search and read ALL persisted conversations on this device (titles and
+ * message text) — the agent can follow up on another session's past chat.
+ * Read-only: no approval, ledger classification is pure. iOS local execution
+ * lives in ChatToolRuntime (Swift); `execute` is empty here, same pattern as
+ * createSearchWebToolDeclaration. Declared via iosToolDeclaration, deferred
+ * (tool_search exposes them) — Android wiring is a follow-up.
+ */
+fun createSessionSearchToolDeclaration(): Tool = Tool(
+    name = "session_search",
+    description = """
+        Search across ALL conversations (titles and message text) on this device.
+        Use when the user references another session/conversation or past chat.
+        Returns matching sessions with snippets; follow up with `session_read` to read one.
+    """.trimIndent().replace("\n", " "),
+    parameters = { sessionSearchParameters() },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+fun createSessionReadToolDeclaration(): Tool = Tool(
+    name = "session_read",
+    description = """
+        Read recent messages of a conversation by id (from session_search results).
+        Returns the latest messages as text. Read-only.
+    """.trimIndent().replace("\n", " "),
+    parameters = { sessionReadParameters() },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+private fun sessionSearchParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("query", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. Keywords to search across all conversation titles and message text on this device.")
+        })
+        put("limit", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional. Maximum number of matching sessions to return, clamped to [1, 20]; defaults to 8.")
+        })
+    },
+    required = listOf("query"),
+)
+
+private fun sessionReadParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("conversation_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. The conversation id (UUID) of a session, taken from session_search results.")
+        })
+        put("max_messages", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional. Maximum number of latest messages to return, clamped to [1, 50]; defaults to 20.")
+        })
+    },
+    required = listOf("conversation_id"),
+)
+
+private fun spawnAgentParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("task_name", buildJsonObject {
+            put("type", "string")
+            put("pattern", "^[a-z0-9_]+$")
+            put("description", "Required. Lowercase letters, digits and underscores only; used for the canonical agent path (e.g. research_notes).")
+        })
+        put("message", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. The initial task message the spawned agent receives as its NEW_TASK.")
+        })
+        put("fork_turns", buildJsonObject {
+            put("type", "string")
+            put("description", "How much of this thread's history the child inherits: \"none\" (empty), \"all\" (full copy), or a positive-integer string N (last N user turns). Defaults to \"all\".")
+        })
+        put("role_assistant_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional assistant id the child conversation should use.")
+        })
+    },
+    required = listOf("task_name", "message"),
+)
+
+private fun listAgentsParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("path_prefix", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional agent path prefix to filter the listed threads (e.g. /root/research).")
+        })
+    },
+)
+
+private fun interruptAgentParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("target", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. child_thread_id (uuid) or canonical agent path of the agent thread to interrupt.")
+        })
+    },
+    required = listOf("target"),
+)
+
+private fun sendMessageParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("target", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. child_thread_id (uuid) or canonical agent path of the target thread.")
+        })
+        put("message", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. The message text to deliver. It does not trigger a new turn; an idle target's messages stay in its mailbox until its next run.")
+        })
+    },
+    required = listOf("target", "message"),
+)
+
+private fun followupTaskParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("target", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. child_thread_id (uuid) or canonical agent path of the target thread.")
+        })
+        put("message", buildJsonObject {
+            put("type", "string")
+            put("description", "Required. The follow-up task message. Wakes an idle target into a new run; a running target receives it at its next tool-loop boundary.")
+        })
+    },
+    required = listOf("target", "message"),
+)
+
+private fun waitAgentParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("timeout_ms", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional maximum wait in milliseconds, clamped to [5000, 300000]; defaults to 30000. The wait ends earlier on mailbox activity or when interrupted by new input.")
+        })
+    },
+)
+
 fun iosToolDeclaration(name: String): Tool? = when (name) {
     "ask_user" -> createAskUserToolDeclaration()
+    "exec" -> createExecToolDeclaration()
+    "wait" -> createWaitToolDeclaration()
     "search_web" -> createSearchWebToolDeclaration()
     "scrape_web" -> createScrapeWebToolDeclaration()
     "memory_tool" -> createMemoryToolDeclaration()
@@ -423,6 +788,14 @@ fun iosToolDeclaration(name: String): Tool? = when (name) {
     "permissions_status" -> createPermissionsStatusToolDeclaration()
     "tools_list" -> createToolsListToolDeclaration()
     "subagent_report" -> createSubAgentReportToolDeclaration()
+    "spawn_agent" -> createSpawnAgentToolDeclaration()
+    "list_agents" -> createListAgentsToolDeclaration()
+    "interrupt_agent" -> createInterruptAgentToolDeclaration()
+    "send_message" -> createSendMessageToolDeclaration()
+    "followup_task" -> createFollowupTaskToolDeclaration()
+    "wait_agent" -> createWaitAgentToolDeclaration()
+    "session_search" -> createSessionSearchToolDeclaration()
+    "session_read" -> createSessionReadToolDeclaration()
     else -> null
 }
 
@@ -603,6 +976,107 @@ fun createMcpImportFromSkillToolDeclaration(): Tool = Tool(
     needsApproval = true,
     execute = { emptyList() }
 )
+
+/**
+ * P0-b: one discovered MCP tool flattened into an independent declaration
+ * input. `inputSchema` is the raw `tools/list` JSON schema (nullable — some
+ * servers omit it). Swift cannot construct [JsonObject] directly (Kotlin/Native
+ * exports it as an opaque NSDictionary), so the secondary constructor parses
+ * the raw persisted schema JSON text that IOSMcpTool carries.
+ */
+@Serializable
+data class McpDiscoveredToolSpec(
+    val name: String,
+    val description: String? = null,
+    val inputSchema: JsonObject? = null,
+) {
+    constructor(name: String, description: String?, inputSchemaJson: String?) : this(
+        name = name,
+        description = description,
+        inputSchema = parseMcpSchemaJson(inputSchemaJson),
+    )
+}
+
+private fun parseMcpSchemaJson(text: String?): JsonObject? =
+    text?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+
+/** P0-b: flattened `mcp__{server}__{tool}` name (MCP community / Claude Code
+ *  convention). Each part is sanitized (non `[a-zA-Z0-9_-]` → `_`); the whole
+ *  name is truncated to 64 chars when overlong — deterministic by construction.
+ *  Sanitization is NOT reversible, so execution resolves back to a directory
+ *  (see `mcpExpandedToolDeclarations` consumers) instead of parsing strings. */
+fun expandedMcpToolName(server: String, tool: String): String {
+    val name = "mcp__${sanitizeMcpNamePart(server)}__${sanitizeMcpNamePart(tool)}"
+    return if (name.length <= MCP_EXPANDED_MAX_NAME_LENGTH) name else name.take(MCP_EXPANDED_MAX_NAME_LENGTH)
+}
+
+/** P0-b: `mcp__` prefix classifies expanded MCP tool calls for routing.
+ *  Distinct from the `mcp_call`/`mcp_list`/… management names (single `_`). */
+fun isExpandedMcpToolName(name: String): Boolean = name.startsWith(MCP_EXPANDED_PREFIX)
+
+/**
+ * P0-b: generate one flattened declaration per discovered tool. Description
+ * falls back to "MCP tool {tool} on {server}"; parameters are the normalized
+ * input schema; needsApproval/allowsAutoApproval/mandatoryApproval match the
+ * `mcp_call` passthrough declaration exactly. Sanitized name collisions within
+ * the server keep the first occurrence (never throws). Cross-server collisions
+ * (e.g. `srv.1` vs `srv_1`, both sanitizing to `srv_1`) are resolved by the
+ * caller: generate per server, then merge keeping the first occurrence.
+ */
+fun mcpExpandedToolDeclarations(
+    serverName: String,
+    discovered: List<McpDiscoveredToolSpec>,
+): List<Tool> {
+    val seenNames = mutableSetOf<String>()
+    return discovered.mapNotNull { spec ->
+        val name = expandedMcpToolName(serverName, spec.name)
+        if (!seenNames.add(name)) return@mapNotNull null
+        Tool(
+            name = name,
+            description = spec.description?.takeIf { it.isNotBlank() }
+                ?: "MCP tool ${spec.name} on ${serverName}",
+            parameters = { normalizeMcpInputSchema(spec.inputSchema) },
+            execute = { emptyList() },
+        )
+    }
+}
+
+/**
+ * P0-b: flatten an MCP JSON schema into the amber [InputSchema] shape.
+ * Object-like roots (type==object, or no type but `properties` present) keep
+ * their `properties` verbatim — `$ref`/`anyOf`/nested schemas pass through
+ * untouched (no recursive resolution) — with `required` taken as the string
+ * array when present. Non-object roots (array/string/…) are wrapped under an
+ * `input` property. null → empty object.
+ */
+fun normalizeMcpInputSchema(schema: JsonObject?): InputSchema {
+    if (schema == null) return InputSchema.Obj(properties = buildJsonObject { })
+    val type = (schema["type"] as? JsonPrimitive)?.contentOrNull
+    val objectLike = type == "object" || (type == null && schema["properties"] != null)
+    if (!objectLike) {
+        return InputSchema.Obj(
+            properties = buildJsonObject { put("input", schema) },
+            required = listOf("input"),
+        )
+    }
+    val properties = schema["properties"] as? JsonObject ?: buildJsonObject { }
+    val required = (schema["required"] as? JsonArray)?.let { array ->
+        val strings = array.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.contentOrNull }
+        if (strings.size == array.size) strings else null
+    }
+    return InputSchema.Obj(properties = properties, required = required)
+}
+
+private const val MCP_EXPANDED_PREFIX = "mcp__"
+private const val MCP_EXPANDED_MAX_NAME_LENGTH = 64
+
+private fun sanitizeMcpNamePart(value: String): String = value.map { char ->
+    if (char in 'a'..'z' || char in 'A'..'Z' || char in '0'..'9' || char == '-' || char == '_') {
+        char
+    } else {
+        '_'
+    }
+}.joinToString("")
 
 fun createSkillsListToolDeclaration(): Tool = Tool(
     name = "skills_list",

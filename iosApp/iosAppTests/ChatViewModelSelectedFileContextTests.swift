@@ -131,18 +131,24 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertNil(viewModel.pendingSelectedFilePreview)
     }
 
-    func testSendMessageIsRejectedWhenBackgroundGenerationIsActiveForCurrentConversation() {
+    func testSendMessageIsQueuedWhenBackgroundGenerationIsActiveForCurrentConversation() {
+        // P1-a 契约：生成激活期间发送 = 入队（不直接上屏、文本清空、返回 true），
+        // 在工具循环边界折入下一轮。旧契约"生成中拒绝发送"已被 steer 队列取代。
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             autoGenerateResponses: false
         )
         viewModel.generationActiveOverrideForTesting = { _ in true }
-        viewModel.inputText = "should not append while background generation is active"
+        viewModel.inputText = "should queue while background generation is active"
 
-        viewModel.sendMessage()
+        XCTAssertTrue(viewModel.sendMessage())
 
         XCTAssertTrue(viewModel.messages.isEmpty)
-        XCTAssertEqual(viewModel.inputText, "should not append while background generation is active")
+        XCTAssertEqual(viewModel.inputText, "")
+        XCTAssertEqual(
+            viewModel.steerQueue.map(\.text),
+            ["should queue while background generation is active"]
+        )
     }
 
     func testGenerateResponseIsRejectedWhenBackgroundGenerationIsActiveForCurrentConversation() {
@@ -1576,7 +1582,10 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         for toolName in alwaysOnToolNames {
             XCTAssertTrue(defaultNames.contains(toolName), "\(toolName) should be declared by default")
         }
-        XCTAssertTrue(defaultNames.contains { $0.hasPrefix("wm_") }, "WebMount tools should be declared by default")
+        // P0-a: WebMount tools are deferred behind tool_search in the default
+        // (>40 tools) config — tool_search itself is the resident discovery tool.
+        XCTAssertTrue(defaultNames.contains("tool_search"), "tool_search should be declared by default")
+        XCTAssertTrue(defaultNames.isDisjoint(with: IOSWebMountToolCatalog.supportedToolNames))
 
         let webMountDefaults = isolatedDefaults()
         let webMountSettings = IOSWebMountSettings(userDefaults: webMountDefaults)
@@ -1590,13 +1599,18 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             )
         )
         let webMountEnabledSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
-        let webMountEnabledNames = Set(ChatViewModel(
+        let webMountViewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             sharedSettings: webMountEnabledSettings,
             localToolExecutor: webMountExecutor,
             autoGenerateResponses: false
-        ).currentToolDeclarationNames())
-        XCTAssertTrue(webMountEnabledNames.contains { $0.hasPrefix("wm_") })
+        )
+        let webMountEnabledNames = Set(webMountViewModel.currentToolDeclarationNames())
+        XCTAssertTrue(webMountEnabledNames.isDisjoint(with: IOSWebMountToolCatalog.supportedToolNames))
+        // WebMount is still reachable: tool_search returns wm tools as expanded.
+        let webMountPayload = webMountViewModel.toolExposureBridgeForTesting()?
+            .executeToolSearch(argumentsJson: #"{"query":"wm_tab_list","limit":1}"#) ?? ""
+        XCTAssertTrue(webMountPayload.contains("wm_tab_list"))
 
         let enabledViewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -2346,7 +2360,9 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
                 searchTransport: transport,
                 liveActivityController: .shared,
                 autoGenerateResponses: false,
-                mcpManager: IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared)
+                mcpManager: IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared),
+                orchestrationToolService: nil,
+                memoryPollutionMarker: nil
             ),
             bindings: state.bindings()
         )

@@ -26,6 +26,11 @@ data class IosChatBackgroundPayload(
     val generativeUiExpectSlides: Boolean = false,
     val generativeUiExpectFullHtmlDeck: Boolean = false,
     val generativeUiFallbackAttempted: Boolean = false,
+    // P0-a Fix C: full catalog tool names so the background job can rebuild a
+    // lazy-mode exposure bridge (handoff.params.tools only carries the visible
+    // subset ≤40, which would silently disable lazy mode). Legacy payloads
+    // without this field decode as empty and fall back to params.tools.
+    val fullToolNames: List<String> = emptyList(),
 )
 
 /** Swift-facing bridge for persisted iOS chat background generation payloads. */
@@ -45,6 +50,7 @@ object IosChatBackgroundPayloadJsonBridge {
         generativeUiExpectSlides: Boolean = false,
         generativeUiExpectFullHtmlDeck: Boolean = false,
         generativeUiFallbackAttempted: Boolean = false,
+        fullToolNames: List<String> = emptyList(),
     ): String = JsonInstant.encodeToString(
         IosChatBackgroundPayload(
             runId = runId,
@@ -60,6 +66,7 @@ object IosChatBackgroundPayloadJsonBridge {
             generativeUiExpectSlides = generativeUiExpectSlides,
             generativeUiExpectFullHtmlDeck = generativeUiExpectFullHtmlDeck,
             generativeUiFallbackAttempted = generativeUiFallbackAttempted,
+            fullToolNames = fullToolNames,
         )
     )
 

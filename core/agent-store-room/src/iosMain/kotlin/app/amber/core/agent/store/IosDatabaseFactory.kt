@@ -18,8 +18,17 @@ object IosDatabaseFactory {
 
     fun createDatabase(): AgentRuntimeDatabase {
         val dbFilePath = documentDirectory() + "/agent_runtime.db"
-        return Room.databaseBuilder<AgentRuntimeDatabase>(name = dbFilePath)
+        return createDatabase(atFilePath = dbFilePath)
+    }
+
+    /**
+     * 指定路径建库（同一迁移链）。测试用它做隔离库，避免污染生产
+     * `Documents/agent_runtime.db`（既有测试先例直接写生产库文件）。
+     */
+    fun createDatabase(atFilePath: String): AgentRuntimeDatabase {
+        return Room.databaseBuilder<AgentRuntimeDatabase>(name = atFilePath)
             .setDriver(BundledSQLiteDriver())
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 

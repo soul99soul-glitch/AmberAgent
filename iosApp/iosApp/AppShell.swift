@@ -50,7 +50,8 @@ struct AppShell: View {
             sharedSettings: sharedSettingsStore,
             localToolExecutor: localToolExecutor,
             searchTransport: IOSURLSessionSearchHTTPTransport(),
-            mcpManager: backgroundMcpManager
+            mcpManager: backgroundMcpManager,
+            conversationStoreProvider: { [weak conversationStore] in conversationStore }
         )
         let chatViewModel = ChatViewModel(
             settingsStore: settingsStore,

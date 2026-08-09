@@ -69,6 +69,7 @@ enum ChatMemoryContextBuilder {
         <memory-context>
         \(lines.joined(separator: "\n"))
         </memory-context>
+        When you reference one of these memories in your reply, attach the hidden citation tag <amber-mem-cite>{"ids":[<memory id>]}</amber-mem-cite> right after the statement; the tag is stripped from the visible message and only records which memories you used.
         """, records: activeRecords)
     }
 

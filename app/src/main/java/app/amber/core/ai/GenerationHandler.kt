@@ -62,6 +62,8 @@ import app.amber.core.settings.resolveSessionDefaults
 import app.amber.core.context.ConversationContextEngine
 import app.amber.core.context.ConversationContextPlanner
 import app.amber.core.memory.recall.MemoryRecallStore
+import app.amber.core.memory.pollution.MemoryPollutionTools
+import app.amber.core.memory.pollution.PollutedConversationStore
 import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.Conversation
@@ -132,6 +134,7 @@ class GenerationHandler(
     private val aiLoggingManager: AILoggingManager,
     private val conversationContextEngine: ConversationContextEngine,
     private val toolDispatcher: AgentToolDispatcher,
+    private val pollutedConversationStore: PollutedConversationStore,
 ) : Generator {
     override fun generateText(
         settings: Settings,
@@ -364,6 +367,20 @@ class GenerationHandler(
                 break
             }
             toolExposure.observeExecutedTools(executedTools)
+
+            // P2-a: harness 置位（不经模型）——外部上下文工具的成功输出进会话即把该
+            // 会话标记 POLLUTED（抽取 gate 用；幂等只增）。失败输出不置位。conversation
+            // 是 generateText 的 run 锚定会话，切会话不会标错。
+            val conversationId = conversation?.id
+            if (conversationId != null) {
+                val hasExternalContextOutput = executedTools.any { tool ->
+                    MemoryPollutionTools.isPollutingToolName(tool.toolName) &&
+                        !MemoryPollutionTools.isFailureOutput(tool.output, json)
+                }
+                if (hasExternalContextOutput) {
+                    pollutedConversationStore.add(conversationId)
+                }
+            }
 
             // Update last message with executed tools (NOT create TOOL message)
             val lastMessage = messages.last()

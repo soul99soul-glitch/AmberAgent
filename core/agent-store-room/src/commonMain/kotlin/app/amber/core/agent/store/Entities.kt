@@ -102,3 +102,30 @@ data class PermissionIntentEntity(
     @ColumnInfo(name = "decided_at") val decidedAt: Long?,
     @ColumnInfo(name = "decided_by") val decidedBy: String?,
 )
+
+/**
+ * P1-b: mailbox 信封（线程编排的投递单元）。
+ *
+ * - 地址 = conversationId（现有会话都是根线程；agentPath 树形别名 P1-c 才引入）。
+ * - `deliveredAt` 为 null 表示未投递；投递后信封保留（清理/裁剪策略留 follow-up）。
+ * - `type` 为 wire 字符串（`MailboxEnvelopeType.wireName`），扩展新类型不动 schema。
+ * - `triggerTurn` 为 true 时投递给 idle 线程应唤醒一轮 run（P1-d 消费）。
+ */
+@Entity(
+    tableName = "mailbox_envelope",
+    indices = [
+        Index(value = ["recipient_thread_id", "delivered_at", "created_at"]),
+    ],
+)
+data class MailboxEnvelopeEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "author_thread_id") val authorThreadId: String,
+    @ColumnInfo(name = "recipient_thread_id") val recipientThreadId: String,
+    @ColumnInfo(name = "type") val type: String,
+    @ColumnInfo(name = "payload") val payload: String,
+    @ColumnInfo(name = "trigger_turn") val triggerTurn: Boolean,
+    @ColumnInfo(name = "parent_turn_id") val parentTurnId: String?,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "delivered_at") val deliveredAt: Long?,
+)

@@ -778,7 +778,15 @@ private extension IOSContextCompactionCoordinator {
             let candidate = systemMessages + selected
             if estimateTokens(candidate) > maxTokens {
                 selected.removeFirst()
-                if selected.isEmpty { selected.insert(message, at: 0) }
+                if selected.isEmpty {
+                    // 唯一候选超预算：不再整条硬保（那会撑爆 assertFitsRequest 让
+                    // 请求必败）——先就地截断其工具输出到预算内；无可截工具输出
+                    // （纯文本巨消息）才保留旧行为（宁超窗不丢消息）。
+                    selected.insert(
+                        messageFittedToTokenBudget(message, systemMessages: systemMessages, maxTokens: maxTokens),
+                        at: 0
+                    )
+                }
                 break
             }
         }
@@ -803,6 +811,57 @@ private extension IOSContextCompactionCoordinator {
             }
         }
         return appendingTruncationNotice(to: result, originalCount: originalCount, maxTokens: maxTokens)
+    }
+
+    /// 截尾兜底：唯一候选消息超预算时,先就地截断其工具输出到预算内(单条输出
+    /// 逐级压小 + 截断标记),让已持久化的巨量工具输出在请求时被救活;无可截的
+    /// 纯文本巨消息返回原样(旧行为:宁超窗不丢消息)。
+    static func messageFittedToTokenBudget(
+        _ message: UIMessage,
+        systemMessages: [UIMessage],
+        maxTokens: Int
+    ) -> UIMessage {
+        if estimateTokens(systemMessages + [message]) <= maxTokens { return message }
+        var fitted = message
+        var fit = false
+        for limit in [12_000, 8_000, 6_000, 4_000, 3_000, 2_000, 1_500, 1_000, 800, 600, 400, 200] {
+            fitted = truncatingToolOutputs(in: message, maxCharsPerOutput: limit)
+            if estimateTokens(systemMessages + [fitted]) <= maxTokens {
+                fit = true
+                break
+            }
+        }
+        return fit ? fitted : message
+    }
+
+    /// 就地截断消息中所有工具输出的文本部分。复用收口上限语义:JSON 形态保形
+    /// 截断、已带压缩标记的输出不二次截断、多模态输出不动。
+    static func truncatingToolOutputs(in message: UIMessage, maxCharsPerOutput: Int) -> UIMessage {
+        let parts = message.parts.map { part -> UIMessagePart in
+            guard let tool = part as? UIMessagePart.Tool, !tool.output.isEmpty else { return part }
+            let capped = ChatToolOutputFormatter.cappedToolOutputParts(tool.output, maxChars: maxCharsPerOutput)
+            guard capped != tool.output else { return part }
+            return UIMessagePart.Tool(
+                toolCallId: tool.toolCallId,
+                toolName: tool.toolName,
+                input: tool.input,
+                output: capped,
+                approvalState: tool.approvalState,
+                streamIndex: tool.streamIndex,
+                metadata: tool.metadata
+            )
+        }
+        return UIMessage(
+            id: message.id,
+            role: message.role,
+            parts: parts,
+            annotations: message.annotations,
+            createdAt: message.createdAt,
+            finishedAt: message.finishedAt,
+            modelId: message.modelId,
+            usage: message.usage,
+            translation: message.translation
+        )
     }
 
     /// 截尾不能静默:若 `fitMessagesToTokenBudget` 实际丢弃了消息,在注入侧追加一条

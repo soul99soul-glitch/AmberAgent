@@ -24,6 +24,34 @@ const val TOOL_SEARCH_DEFAULT_LIMIT = 5
 
 private val toolSearchJson = Json { ignoreUnknownKeys = true }
 
+/**
+ * The tool_search system-prompt guidance text for a registry. Shared by
+ * `createToolSearchTool`'s systemPrompt hook and the iOS exposure bridge's
+ * `discoveryGuidance()` (which needs the same text without constructing a
+ * Model + message list on the Swift side).
+ */
+internal fun toolSearchDiscoveryGuidance(
+    registry: ToolRegistry,
+    profile: MainAgentToolProfile? = null,
+): String {
+    val index = ToolSearchIndex(registry, profile)
+    val categories = index.categoryCounts().entries
+        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        .joinToString(", ") { "${it.key}:${it.value}" }
+    val residentCount = registry.tools().count { tool ->
+        val metadata = registry.metadataFor(tool.name)
+        ToolExposureState.isResidentTool(tool.name, metadata?.category)
+    }
+    return """
+        Tool discovery:
+        - This run has ${registry.metadata.size} generated tools across categories: $categories.
+        - If the needed tool is not currently visible, call `$TOOL_SEARCH_TOOL_NAME` with a concrete query. It exposes the best matching schemas for the next generation step.
+        - `tools_list` is only a debug/catalog view. A hidden tool listed by `tools_list` is not callable until `$TOOL_SEARCH_TOOL_NAME` exposes it.
+        - If you used `tools_list` to identify a tool name, call `$TOOL_SEARCH_TOOL_NAME` again with that exact tool name, then execute a name from `expanded_tools` on the next step.
+        - Resident tools currently stay visible without search: $residentCount core tools plus discovered tools.
+        """.trimIndent()
+}
+
 fun createToolSearchTool(
     registry: ToolRegistry,
     profile: MainAgentToolProfile? = null,
@@ -46,24 +74,7 @@ fun createToolSearchTool(
     },
     needsApproval = false,
     allowsAutoApproval = true,
-    systemPrompt = { _, _ ->
-        val index = ToolSearchIndex(registry, profile)
-        val categories = index.categoryCounts().entries
-            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-            .joinToString(", ") { "${it.key}:${it.value}" }
-        val residentCount = registry.tools().count { tool ->
-            val metadata = registry.metadataFor(tool.name)
-            ToolExposureState.isResidentTool(tool.name, metadata?.category)
-        }
-        """
-        Tool discovery:
-        - This run has ${registry.metadata.size} generated tools across categories: $categories.
-        - If the needed tool is not currently visible, call `$TOOL_SEARCH_TOOL_NAME` with a concrete query. It exposes the best matching schemas for the next generation step.
-        - `tools_list` is only a debug/catalog view. A hidden tool listed by `tools_list` is not callable until `$TOOL_SEARCH_TOOL_NAME` exposes it.
-        - If you used `tools_list` to identify a tool name, call `$TOOL_SEARCH_TOOL_NAME` again with that exact tool name, then execute a name from `expanded_tools` on the next step.
-        - Resident tools currently stay visible without search: $residentCount core tools plus discovered tools.
-        """.trimIndent()
-    },
+    systemPrompt = { _, _ -> toolSearchDiscoveryGuidance(registry, profile) },
     execute = { input ->
         val query = input.jsonObject["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
         val category = input.jsonObject["category"]?.jsonPrimitive?.contentOrNull?.ifBlank { null }
@@ -231,6 +242,26 @@ class ToolSearchIndex(
         if (name.startsWith("subagent_")) {
             addAll(listOf("子代理", "subagent", "副 agent", "副代理"))
         }
+        // P1-c: 线程编排六工具的增量中文词条（纯增量，不改既有别名）。
+        when (name) {
+            "spawn_agent" -> addAll(listOf("子代理", "开子代理", "并行任务", "子线程", "多线程", "编排"))
+            "list_agents" -> addAll(listOf("线程列表", "子代理列表", "并行列表", "编排"))
+            "interrupt_agent" -> addAll(listOf("中断子代理", "停止子线程", "打断", "取消子代理"))
+            "wait_agent" -> addAll(listOf("等待子代理", "等子线程", "等待线程"))
+            "send_message" -> addAll(listOf("发消息给子代理", "子线程消息", "通知子代理"))
+            "followup_task" -> addAll(listOf("跟进任务", "子代理追加", "追派任务"))
+        }
+        // P3-c: exec cell 续取工具的增量中文词条（纯增量）。wait 与 exec 同开关
+        // （execJavaScriptEnabled），非常驻 deferred 池——命中后模型才可调。
+        if (name == "wait") {
+            addAll(listOf("等待脚本", "脚本结果", "cell", "继续执行", "取回结果"))
+        }
+        // 跨会话读取工具（session_search/session_read）的增量中文词条（纯增量）。
+        // 与 Android 当前会话作用域的 conversation_search/conversation_expand 语义
+        // 错开：命中引导到跨会话读取，不引导到当前会话上下文工具。
+        if (name == "session_search" || name == "session_read") {
+            addAll(listOf("会话", "历史", "别的对话", "另一个会话", "session", "聊天记录", "过去的对话", "跨会话"))
+        }
         if (name.startsWith("model_council_")) {
             addAll(listOf("议会", "多模型", "council", "模型会议"))
         }
@@ -296,7 +327,12 @@ class ToolExposureState private constructor(
     }
 
     companion object {
-        fun from(tools: List<Tool>): ToolExposureState {
+        fun from(
+            tools: List<Tool>,
+            residentPolicy: (name: String, category: String?) -> Boolean = { name, category ->
+                isResidentTool(name, category)
+            },
+        ): ToolExposureState {
             val toolCount = tools.count { it.name !in DISCOVERY_UTILITY_TOOLS }
             val hasSearch = tools.any { it.name == TOOL_SEARCH_TOOL_NAME }
             if (toolCount <= TOOL_SEARCH_AUTO_THRESHOLD || !hasSearch) {
@@ -304,7 +340,7 @@ class ToolExposureState private constructor(
             }
             val registry = runCatching { ToolRegistry.from(tools) }.getOrNull()
             val initial = tools.filter { tool ->
-                isResidentTool(tool.name, registry?.metadataFor(tool.name)?.category)
+                residentPolicy(tool.name, registry?.metadataFor(tool.name)?.category)
             }.map { it.name }.toSet()
             return ToolExposureState(tools, lazyMode = true, initialExposedNames = initial)
         }
@@ -375,7 +411,7 @@ private fun UIMessagePart.Tool.expandedToolNames(): List<String> =
         }.getOrDefault(emptyList())
     }
 
-private fun Tool.schemaFootprintChars(): Int =
+internal fun Tool.schemaFootprintChars(): Int =
     name.length + description.length + (parameters()?.toString()?.length ?: 0)
 
 private fun stringProp(description: String) = buildJsonObject {

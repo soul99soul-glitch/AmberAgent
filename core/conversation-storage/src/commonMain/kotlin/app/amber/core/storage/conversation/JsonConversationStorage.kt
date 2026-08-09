@@ -2,6 +2,7 @@ package app.amber.core.storage.conversation
 
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.model.Conversation
+import app.amber.core.model.ConversationMemoryMode
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -137,6 +138,7 @@ class JsonConversationStorage(
             && existing.chatSuggestions == incoming.chatSuggestions
             && existing.isPinned == incoming.isPinned
             && existing.autoApproveToolCalls == incoming.autoApproveToolCalls
+            && existing.memoryMode == incoming.memoryMode
         ) {
             return incoming
         }
@@ -145,6 +147,13 @@ class JsonConversationStorage(
             chatSuggestions = existing.chatSuggestions,
             isPinned = existing.isPinned,
             autoApproveToolCalls = existing.autoApproveToolCalls,
+            // P2-a：POLLUTED 由 harness/用户显式写者拥有，旧消息快照回写不得把它
+            // 降级回 ENABLED（只升不降）。见 MemoryPollutionTest。
+            memoryMode = if (existing.memoryMode == ConversationMemoryMode.POLLUTED) {
+                existing.memoryMode
+            } else {
+                incoming.memoryMode
+            },
         )
     }
 
@@ -178,6 +187,29 @@ class JsonConversationStorage(
         saveConversationReplacingAllFieldsLocked(current.copy(title = title))
         true
     }
+
+    @Throws(Throwable::class)
+    override suspend fun updateMemoryMode(id: Uuid, memoryMode: ConversationMemoryMode): Boolean =
+        operationMutex.withLock {
+            val current = loadConversationUnlocked(id) ?: return@withLock false
+            // 幂等：已是 POLLUTED 时重复置位为空操作（成功返回，不报错不降级）。
+            if (memoryMode == ConversationMemoryMode.POLLUTED
+                && current.memoryMode == ConversationMemoryMode.POLLUTED
+            ) {
+                return@withLock true
+            }
+            // POLLUTED 只升不降（任意非 POLLUTED 态可升级）；POLLUTED 的唯一出口是
+            // ENABLED 复位；POLLUTED→DISABLED 被拒（值不变，返回 false），避免把
+            //「已污染」静默降级为「用户关闭」；ENABLED↔DISABLED 互转保留（用户开关）。
+            val effective = when {
+                memoryMode == ConversationMemoryMode.POLLUTED -> ConversationMemoryMode.POLLUTED
+                memoryMode == ConversationMemoryMode.DISABLED
+                    && current.memoryMode == ConversationMemoryMode.POLLUTED -> return@withLock false
+                else -> memoryMode
+            }
+            saveConversationReplacingAllFieldsLocked(current.copy(memoryMode = effective))
+            true
+        }
 
     // ---- 内部：index 维护 ----
 

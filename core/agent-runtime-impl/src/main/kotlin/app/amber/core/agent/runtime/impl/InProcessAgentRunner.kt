@@ -30,6 +30,12 @@ class InProcessAgentRunner(
     private val runScopeFactory: (AgentRunId, AgentInput) -> app.amber.core.agent.runtime.RunScope = { id, _ ->
         LegacyRunScope(runId = id)
     },
+    /**
+     * P1-e: 账本写失败的用户可见错误回调（iOS 已走 publishUserVisibleError；
+     * 默认空实现保持旧调用方零改动，注册点接线到 Android 的 ChatService.addError）。
+     * 账本说谎会让并发计数/恢复语义失真，写失败必须被用户看到，不能只 Log.w 吞掉。
+     */
+    private val onLedgerError: (AgentRunId, Throwable) -> Unit = { _, _ -> },
 ) : AgentRunner {
 
     private val runnerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -81,6 +87,7 @@ class InProcessAgentRunner(
                 eventStore.appendRun(record)
             } catch (e: Exception) {
                 runCatching { Log.w(TAG, "Failed to persist run record", e) }
+                onLedgerError(runId, e)
             }
 
             try {
@@ -101,6 +108,7 @@ class InProcessAgentRunner(
                     ))
                 } catch (e: Exception) {
                     runCatching { Log.w(TAG, "Failed to update run record", e) }
+                    onLedgerError(runId, e)
                 }
                 runCatching { Log.i(TAG, "Run $runId completed (${finishedAt - now}ms)") }
             } catch (e: CancellationException) {
@@ -113,6 +121,7 @@ class InProcessAgentRunner(
                     eventStore.markInterrupted(runId, "cancelled")
                 } catch (ex: Exception) {
                     runCatching { Log.w(TAG, "Failed to mark run interrupted", ex) }
+                    onLedgerError(runId, ex)
                 }
                 throw e
             } catch (e: Exception) {
@@ -129,6 +138,7 @@ class InProcessAgentRunner(
                     ))
                 } catch (ex: Exception) {
                     runCatching { Log.w(TAG, "Failed to update run record on failure", ex) }
+                    onLedgerError(runId, ex)
                 }
                 runCatching { Log.e(TAG, "Run $runId failed", e) }
             }

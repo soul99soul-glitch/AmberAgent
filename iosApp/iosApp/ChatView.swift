@@ -7,6 +7,9 @@ import PhotosUI
 enum ChatTopBarLayout {
     static let controlsHeight: CGFloat = 54
     static let toolbarButtonDiameter: CGFloat = 38
+    /// 顶栏 `safeAreaBar` 在控件下方再贡献一段高度，让原生
+    /// `scrollEdgeEffectStyle(.soft)` 的渐变模糊盖住返回键与标题岛。
+    static let softEdgeExtension: CGFloat = 36
 }
 
 private enum ComposerPanel: String, Identifiable {
@@ -39,6 +42,7 @@ private struct ChatListSummarySnapshot: Equatable {
             lhs.activeToolStep?.detail == rhs.activeToolStep?.detail &&
             lhs.activeToolStep?.state == rhs.activeToolStep?.state &&
             lhs.activeToolStep?.systemImage == rhs.activeToolStep?.systemImage &&
+            lhs.activeToolStep?.visualKind == rhs.activeToolStep?.visualKind &&
             lhs.failedToolStep?.id == rhs.failedToolStep?.id
     }
 }
@@ -197,7 +201,13 @@ struct ChatView: View {
             }
         }
         .safeAreaBar(edge: .top, spacing: 0) {
-            topBar
+            VStack(spacing: 0) {
+                topBar
+                // 透明延伸只扩大 safeAreaBar 几何，不画自定义材质；模糊仍走原生 soft edge。
+                Color.clear
+                    .frame(height: ChatTopBarLayout.softEdgeExtension)
+                    .allowsHitTesting(false)
+            }
         }
         // Composer pinned to the bottom safe area via `.safeAreaInset` (NOT `.safeAreaBar`).
         // safeAreaBar added an adaptive Liquid Glass bar, but it caused two problems: (a) it
@@ -588,7 +598,7 @@ struct ChatView: View {
 
         if let step = chatListSummary.activeToolStep {
             return ChatActivityIslandState.activity(
-                kind: step.systemImage == "photo.on.rectangle" ? .image : .tool,
+                kind: step.visualKind.isImageTool ? .image : .tool,
                 title: compactIslandText(step.title, limit: 18),
                 detail: step.detail.map { compactIslandText($0, limit: 20) },
                 systemImage: step.systemImage,
@@ -739,18 +749,7 @@ struct ChatView: View {
         case .done:
             return .green
         case .active:
-            switch step.systemImage {
-            case "magnifyingglass", "globe", "globe.badge.chevron.backward":
-                return .cyan
-            case "photo.on.rectangle":
-                return .green
-            case "person.2.fill", "person.3.sequence":
-                return .indigo
-            case "brain.head.profile":
-                return .amber
-            default:
-                return .accent
-            }
+            return step.visualKind.activeIslandTint
         }
     }
 
@@ -999,6 +998,14 @@ struct ChatView: View {
             }
 
             VStack(spacing: 8) {
+                    // P1-a: 生成中排队条（空队列零占位，不占高度）。
+                    if !viewModel.steerQueue.isEmpty {
+                        ChatSteerQueueStrip(
+                            entries: viewModel.steerQueue,
+                            onRemove: { viewModel.removeSteerMessage(id: $0) }
+                        )
+                    }
+
                     // Apple Music dock 风格:左侧输入胶囊 + 右侧独立圆形发送键,两块分离的原生
                     // Liquid Glass。`.bottom` 对齐让圆形发送键随胶囊向上增高时仍贴住底边。
                     HStack(alignment: .bottom, spacing: 8) {
@@ -1044,7 +1051,7 @@ struct ChatView: View {
                         .composerDockGlass(cornerRadius: 27)
 
                         ComposerDockSendButton(
-                            isLoading: isCurrentConversationRunActive || viewModel.isRecognizingImages,
+                            isLoading: isComposerStopMode,
                             sendEnabled: sendEnabled,
                             diameter: 54,
                             onSend: sendComposerMessage,
@@ -1080,10 +1087,10 @@ struct ChatView: View {
 
                             HStack(spacing: 8) {
                                 ComposerIconButton(
-                                    systemImage: "brain.head.profile",
+                                    koboyo: .solidThoughtCloud,
                                     accessibilityLabel: "设置思考等级",
                                     size: 34,
-                                    symbolSize: 14
+                                    symbolSize: 15
                                 ) {
                                     toggleComposerPanel(.thinking)
                                 }
@@ -1196,6 +1203,33 @@ struct ChatView: View {
         viewModel.isGenerationActiveForCurrentConversation ||
             hasPendingToolApproval ||
             viewModel.isLoading
+    }
+
+    /// P1-a: 生成中且有可发送文本时，发送键翻转为「发送（加入队列）」；
+    /// 无文本时保持「停止」。复核修复：run 激活但发送被拦截时（文本+附件、
+    /// 队列满）必须保持停止键，否则用户失去停止生成的控制。
+    private var isComposerStopMode: Bool {
+        Self.composerSendButtonIsStopMode(
+            isRunActive: isCurrentConversationRunActive,
+            isRecognizingImages: viewModel.isRecognizingImages,
+            hasSendableText: hasComposerSendableText,
+            sendEnabled: sendEnabled
+        )
+    }
+
+    static func composerSendButtonIsStopMode(
+        isRunActive: Bool,
+        isRecognizingImages: Bool,
+        hasSendableText: Bool,
+        sendEnabled: Bool
+    ) -> Bool {
+        guard isRunActive || isRecognizingImages else { return false }
+        if isRecognizingImages { return true }
+        return !hasSendableText || !sendEnabled
+    }
+
+    private var hasComposerSendableText: Bool {
+        !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var showsComposerMeta: Bool {

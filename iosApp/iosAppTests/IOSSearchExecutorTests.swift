@@ -165,6 +165,67 @@ final class IOSSearchExecutorTests: XCTestCase {
         XCTAssertTrue(output.contains("https://example.com/tavily"))
     }
 
+    func testExaRequestsHighlightsInsteadOfFullText() async throws {
+        // 真机事故回归：contents.text=true 会把整页正文塞进 snippet（单页 1MB+），
+        // 必须改要 highlights 摘录。
+        let store = makeIsolatedStore()
+        store.addSearchProvider(name: "Exa", apiKey: "exa-test", serviceType: "exa")
+        let transport = MockSearchTransport(responses: [
+            .json("""
+            {
+              "results": [
+                {
+                  "title": "Exa Result",
+                  "url": "https://example.com/exa",
+                  "highlights": ["第一段相关摘录", "第二段相关摘录"],
+                  "text": "这是整页全文，不应该被使用"
+                }
+              ]
+            }
+            """)
+        ])
+
+        let output = try await IOSSearchExecutor.execute(
+            toolInput: #"{"query":"少有邪曲 出处","max_results":1}"#,
+            settings: store.snapshot,
+            transport: transport
+        )
+        let request = try XCTUnwrap(transport.requests.first)
+        let body = try jsonObject(try XCTUnwrap(request.httpBody))
+
+        let contents = try XCTUnwrap(body["contents"] as? [String: Any])
+        XCTAssertEqual(contents["highlights"] as? Bool, true)
+        XCTAssertNil(contents["text"], "must not request full page text")
+        XCTAssertTrue(output.contains("第一段相关摘录"))
+        XCTAssertTrue(output.contains("第二段相关摘录"))
+        XCTAssertFalse(output.contains("这是整页全文"))
+    }
+
+    func testExaFallsBackToTextFieldWhenHighlightsMissing() async throws {
+        let store = makeIsolatedStore()
+        store.addSearchProvider(name: "Exa", apiKey: "exa-test", serviceType: "exa")
+        let transport = MockSearchTransport(responses: [
+            .json("""
+            {
+              "results": [
+                {
+                  "title": "Exa Result",
+                  "url": "https://example.com/exa",
+                  "text": "只有 text 字段的旧形态响应"
+                }
+              ]
+            }
+            """)
+        ])
+
+        let output = try await IOSSearchExecutor.execute(
+            toolInput: #"{"query":"test","max_results":1}"#,
+            settings: store.snapshot,
+            transport: transport
+        )
+        XCTAssertTrue(output.contains("只有 text 字段的旧形态响应"))
+    }
+
     func testBraveRoutePrefersOriginalThumbnailOverProxiedSrc() async throws {
         // Regression: Brave's proxied thumbnail `src` (imgs.search.brave.com) is
         // hot-link protected and 403s without a brave.com Referer → blank hero. The
@@ -461,6 +522,63 @@ final class IOSSearchExecutorTests: XCTestCase {
         XCTAssertEqual(results[0].snippet, "First snippet with markup.")
         XCTAssertEqual(results[1].url, "https://example.org/two")
         XCTAssertEqual(results[1].snippet, "Second snippet.")
+    }
+
+    func testSearchWebCapsGiantOutputWithTruncationMarker() async throws {
+        // 真机复现基线：Exa/Tavily 把全文灌进 snippet，format 无上限 → 1MB+ 输出
+        // 被持久化。格式化侧必须把总输出压到 IOSToolOutputLimits 内并追加截断标记。
+        let store = makeIsolatedStore()
+        store.addSearchProvider(name: "Tavily", apiKey: "tvly-test", serviceType: "tavily")
+        let giantSnippet = String(repeating: "巨型搜索结果内容段落。", count: 60_000) // 900K chars
+        let results = (0..<10).map { index in
+            """
+            {
+              "title": "Giant Result \(index)",
+              "url": "https://example.com/\(index)",
+              "content": "\(giantSnippet)"
+            }
+            """
+        }.joined(separator: ",\n")
+        let transport = MockSearchTransport(responses: [
+            .json("""
+            { "results": [ \(results) ] }
+            """)
+        ])
+
+        let output = try await IOSSearchExecutor.execute(
+            toolInput: #"{"query":"giant","max_results":10}"#,
+            settings: store.snapshot,
+            transport: transport
+        )
+
+        XCTAssertLessThanOrEqual(output.count, IOSToolOutputLimits.maxOutputChars + 64)
+        XCTAssertTrue(output.contains("…[truncated"))
+        // 头部内容保留（截尾语义），末尾被截断。
+        XCTAssertTrue(output.contains("Giant Result 0"))
+        XCTAssertTrue(output.contains("巨型搜索结果内容段落"))
+    }
+
+    func testScrapeWebCapsGiantOutputKeepingValidJSON() async throws {
+        let giantBody = """
+        <html><head><title>Giant Page</title></head><body><article>
+        \(String(repeating: "<p>页面正文内容段落。</p>", count: 6_000))
+        </article></body></html>
+        """
+        let transport = MockSearchTransport(responses: [.html(giantBody)])
+
+        let output = try await IOSSearchExecutor.execute(
+            toolName: "scrape_web",
+            toolInput: #"{"url":"https://example.com/giant","max_chars":40000}"#,
+            transport: transport
+        )
+
+        // JSON 形态输出必须保形：总长受限且仍可解析，status/ok 判定键不被破坏。
+        XCTAssertLessThanOrEqual(output.count, IOSToolOutputLimits.maxOutputChars + 64)
+        let payload = try XCTUnwrap(jsonObject(output))
+        XCTAssertEqual(payload["status"] as? String, "ok")
+        XCTAssertEqual(payload["title"] as? String, "Giant Page")
+        XCTAssertEqual(payload["truncated"] as? Bool, true)
+        XCTAssertTrue((payload["content"] as? String)?.contains("…[truncated") == true)
     }
 
     private func makeIsolatedStore(suiteName: String = "SearchExecutor-\(UUID().uuidString)") -> IOSSharedSettingsStore {

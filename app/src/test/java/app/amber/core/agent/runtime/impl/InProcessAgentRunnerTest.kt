@@ -178,4 +178,66 @@ class InProcessAgentRunnerTest {
         // Status should be RUNNING or COMPLETED depending on timing
         assertTrue(snapshot.status in setOf(AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED))
     }
+
+    // P1-e: 账本写失败不得被静默吞掉——必须走 onLedgerError（用户可见错误通道）。
+    // 即使账本写入失败，agent 本体照常执行（不把账本故障转嫁为 run 失败）。
+    @Test
+    fun `ledger append failure is published via onLedgerError and run still completes`() = runBlocking {
+        val store = ThrowingEventStore()
+        val handlerCallCount = AtomicInteger(0)
+        val registry = InMemoryAgentRegistry().apply {
+            register(
+                descriptor = AgentDescriptor(
+                    id = AgentDescriptorId("fake"),
+                    version = "1.0",
+                    displayName = "Fake",
+                    capabilities = setOf(AgentCapability.CHAT_TURN),
+                ),
+                inputClass = FakeInput::class,
+                inputSerializer = FakeInput.serializer(),
+                artifactSerializer = FakeArtifact.serializer(),
+                factory = {
+                    FakeAgent { handlerCallCount.incrementAndGet() }
+                },
+            )
+        }
+        val ledgerErrors = java.util.concurrent.CopyOnWriteArrayList<Pair<AgentRunId, Throwable>>()
+        val runner = InProcessAgentRunner(
+            registry,
+            store,
+            onLedgerError = { runId, error -> ledgerErrors.add(runId to error) },
+        )
+
+        val handle = runner.launch(AgentDescriptorId("fake"), FakeInput("x")).getOrThrow()
+
+        repeat(20) {
+            if (ledgerErrors.isNotEmpty() && handlerCallCount.get() > 0) return@repeat
+            delay(50)
+        }
+
+        assertEquals("agent must still execute despite ledger failure", 1, handlerCallCount.get())
+        assertTrue("ledger failure must be published, not swallowed", ledgerErrors.isNotEmpty())
+        assertEquals(handle.runId, ledgerErrors.first().first)
+        assertTrue(ledgerErrors.first().second.message?.contains("db broken") == true)
+    }
+
+    /// 账本每次写都抛错（模拟 Room 写失败），其余方法与 RecordingEventStore 相同。
+    private class ThrowingEventStore : AgentEventStore {
+        val events = mutableListOf<AgentEventRecord>()
+        override suspend fun appendRun(run: AgentRunRecord) {
+            throw IllegalStateException("db broken")
+        }
+
+        override suspend fun appendEvent(event: AgentEventRecord) {
+            events += event
+        }
+
+        override suspend fun appendSpan(span: TraceSpanRecord) {}
+
+        override fun observeRun(runId: AgentRunId): Flow<AgentRunSnapshot> = emptyFlow()
+
+        override suspend fun listUnfinishedRuns(): List<AgentRunRecord> = emptyList()
+
+        override suspend fun markInterrupted(runId: AgentRunId, reason: String) {}
+    }
 }

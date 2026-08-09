@@ -6,6 +6,9 @@ enum IOSExecutionPreferenceKeys {
     /// G7: 前台单轮工具循环上限（默认 12，clamp 4-24）。与
     /// ExecutionSettingsView 的 @AppStorage / SettingsStore 共用同一 key。
     static let chatMaxToolResumeCount = "app.amber.ios.execution.chatMaxToolResumeCount"
+    /// P3-a: exec 纯求值工具总开关（默认关）。与 ExecutionSettingsView 的
+    /// @AppStorage / SettingsStore 共用同一 key。
+    static let execJavaScriptEnabled = "app.amber.ios.execution.execJavaScriptEnabled"
 }
 
 struct AgentActivityOwnershipCandidate: Equatable {

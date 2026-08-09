@@ -599,16 +599,24 @@ struct IOSSearchExecutor {
                 "query": request.query,
                 "numResults": request.maxResults,
                 "type": "auto",
-                "contents": ["text": true]
+                // highlights（相关摘录）而非 text（整页全文）——text:true 会把整个网页
+                // 正文塞进每条结果，单页可达 1MB+，直接撞爆上下文预算（真机事故）。
+                "contents": ["highlights": true]
             ],
             headers: ["Authorization": "Bearer \(apiKey)"]
         )
         let object = try await jsonResponse(httpRequest, provider: "Exa", transport: transport)
-        let results = array(object["results"]).compactMap {
-            IOSSearchResult(
-                title: string($0["title"]),
-                url: string($0["url"]),
-                snippet: string($0["text"])
+        let results = array(object["results"]).compactMap { item -> IOSSearchResult? in
+            // 优先 highlights 摘录数组；旧形态/异常响应回退 text 字段（漏斗上限兜底）。
+            let highlights = (item["highlights"] as? [Any] ?? [])
+                .map { string($0) }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+            let snippet = highlights.isEmpty ? string(item["text"]) : highlights
+            return IOSSearchResult(
+                title: string(item["title"]),
+                url: string(item["url"]),
+                snippet: snippet
             )
         }
         guard !results.isEmpty else { throw IOSSearchExecutorError.emptyResponse("Exa") }
@@ -936,7 +944,40 @@ struct IOSSearchExecutor {
         // hero for hot-topic articles (parity with Android's fetchPageImages).
         let heroImages = extractHeroImageURLs(from: raw)
         if !heroImages.isEmpty { output["images"] = heroImages }
-        return jsonString(output)
+        return cappedScrapeOutput(output)
+    }
+
+    /// scrape_web 的 JSON 输出保形截断：总长超上限时收缩 content 字段（含截断
+    /// 标记），保持合法 JSON 可解析——status/ok 等判定键不被破坏。content 压到
+    /// 地板仍超限（巨型 title 等）时再收缩 title；仍超限则原样返回（保 JSON
+    /// 可解析优先，宁可略微超窗）。
+    private static func cappedScrapeOutput(_ output: [String: Any]) -> String {
+        var candidate = output
+        var string = jsonString(candidate)
+        guard string.count > IOSToolOutputLimits.maxOutputChars,
+              let content = candidate["content"] as? String, !content.isEmpty else {
+            return string
+        }
+        let originalChars = content.count
+        var contentLength = content.count
+        var iterations = 0
+        while string.count > IOSToolOutputLimits.maxOutputChars, contentLength > 256, iterations < 24 {
+            iterations += 1
+            contentLength = max(contentLength / 2, 256)
+            let truncated = String(content.prefix(contentLength))
+            candidate["content"] = truncated
+                + IOSToolOutputLimits.truncationMarker(droppedChars: max(originalChars - truncated.count, 0))
+            candidate["chars"] = (candidate["content"] as? String)?.count ?? truncated.count
+            candidate["truncated"] = true
+            string = jsonString(candidate)
+        }
+        if string.count > IOSToolOutputLimits.maxOutputChars,
+           let title = candidate["title"] as? String, title.count > 200 {
+            candidate["title"] = String(title.prefix(200))
+            candidate["truncated"] = true
+            string = jsonString(candidate)
+        }
+        return string
     }
 
     /// Pull og:image / twitter:image URLs out of page HTML (both meta-attribute
@@ -983,10 +1024,17 @@ struct IOSSearchExecutor {
             lines.append("\n[\(index + 1)] \(result.title)")
             lines.append(result.url)
             if !result.snippet.isEmpty {
-                lines.append(result.snippet)
+                // 单条 snippet 上限：Exa 等提供商会把全文灌进 text/content 字段。
+                lines.append(String(result.snippet.prefix(IOSToolOutputLimits.maxSnippetChars)))
             }
         }
-        return lines.joined(separator: "\n")
+        var output = lines.joined(separator: "\n")
+        if output.count > IOSToolOutputLimits.maxOutputChars {
+            let dropped = output.count - IOSToolOutputLimits.maxOutputChars
+            output = String(output.prefix(IOSToolOutputLimits.maxOutputChars))
+                + IOSToolOutputLimits.truncationMarker(droppedChars: dropped)
+        }
+        return output
     }
 
     private static func searchService(settings: Settings?, selection: IOSSearchProviderSelection) -> SearchServiceOptions? {

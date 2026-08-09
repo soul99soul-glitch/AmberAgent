@@ -33,6 +33,8 @@
 
 ## 仍开放但不是默认任务
 
+- [`AGENT_ORCHESTRATION_ADOPTION_PLAN.md`](AGENT_ORCHESTRATION_ADOPTION_PLAN.md)：借鉴 codex 编排体系的 P0–P3 Proposed 计划（tool_search → 线程 mailbox → 记忆 polluted/citation → code mode）；含 2026-08-08 四路代码复核事实与开工前复核清单，实施前须按清单重新核对实时代码。
+- [`IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md`](IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md)：iOS 主题系统完善计划（P0–P3 Active 完成；P4 资源包/沉浸色需产品闸门）；每个 Phase 下笔前须按文件内复核清单重核实时代码。设计契约见 [`IOS_THEME_PACK_DESIGN_SPEC.md`](IOS_THEME_PACK_DESIGN_SPEC.md)。
 - [`NOVEL_COCREATION_GHOSTWRITE_PLAN.md`](NOVEL_COCREATION_GHOSTWRITE_PLAN.md)：共创 / 代笔双模式 Proposed 计划；含共创补洞与代笔自动收录 MVP，实施前需再核对实时代码。
 - [`NOVEL_SESSION_MEMORY_PLAN_2026-07-19.md`](NOVEL_SESSION_MEMORY_PLAN_2026-07-19.md)：S1-S3 已完成，S4-S7 暂停，需真实 provider/真机证据后再决定。
 - [`IOS_AGENT_HARDENING_PLAN_2026-07-29.md`](IOS_AGENT_HARDENING_PLAN_2026-07-29.md)：iOS Agent 不变量补强设计稿；开始前必须重新核对当前代码是否已部分落地。

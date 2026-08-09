@@ -175,6 +175,8 @@ final class ChatStreamEventSink: @unchecked Sendable {
 private final class ChatStreamAccumulatorSession {
     let accumulator: MessageStreamAccumulator
     let eventSink: ChatStreamEventSink
+    /// P2-c: 本流（一条 assistant 消息）的 citation 隐藏标记跟踪器。
+    let citationTracker = IOSMemoryCitationTracker()
     var detectedToolCallIds = Set<String>()
     /// 本轮是否有 chunk 报告了输出上限 finish_reason。累加器只保留 delta/message/usage,
     /// 不透传 finishReason,所以必须在消费 chunk 的当下记录下来。
@@ -381,6 +383,13 @@ struct ChatGenerationDependencies {
     let liveActivityController: AgentLiveActivityController
     let autoGenerateResponses: Bool
     let mcpManager: IOSMcpManager
+    /// P1-c: 线程编排工具执行体（nil 时编排工具返回结构化不可用）。
+    let orchestrationToolService: IOSThreadOrchestrationToolService?
+    /// P2-a: 记忆污染置位回调（conversationId, toolName）。nil = 不置位。
+    let memoryPollutionMarker: ((KotlinUuid, String) -> Void)?
+    /// 跨会话读取工具（session_search/session_read）的会话存储源。var 带默认值，
+    /// 成员构造器给默认参数——既有调用点零改动；nil = 工具返回结构化不可用。
+    var conversationStoreProvider: (() -> IOSConversationStore?)? = nil
 }
 
 struct ChatMiniAppOutputApplication {
@@ -458,8 +467,24 @@ struct ChatGenerationBindings {
     let messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
     let userFacingGenerationError: (String, String?) -> String
     var memoryRecordIdsForRuntimeContext: ([UIMessage]) -> [Int32] = { _ in [] }
-    var recordMemoryUsage: @MainActor ([Int32]) -> Void = { _ in }
+    /// 第二个 Bool 为 P2-c 修复 2 的 force 标记：模型显式引用（citation flush）
+    /// 传 true 绕过 P2-b 同集去抖；召回标记传 false。
+    var recordMemoryUsage: @MainActor ([Int32], Bool) -> Void = { _, _ in }
     var generationSucceeded: @MainActor () -> Void = {}
+    /// P1-a: 工具循环边界消费 steer 队列——出队全部排队消息（owner 内部负责
+    /// 上屏 + 持久化），返回生成的 user 消息供下一轮 upload 折入。空队列零操作。
+    var drainSteerQueue: (KotlinUuid?) -> [UIMessage] = { _ in [] }
+    /// P1-b: 工具循环/新 run 首轮边界消费 mailbox——Room 事务 drain 未投递信封
+    /// （owner 内部渲染为带结构头的 user 消息上屏 + 持久化），返回生成的消息供
+    /// 下一轮 upload 折入（先于 steer）。空队列零操作；消费顺序由调用方保证。
+    /// @MainActor：async 闭包跨 actor 调用会 send 非 Sendable 的 KotlinUuid，
+    /// 消费点（coordinator/ViewModel）本身都在 MainActor，隔离到主线程无跳变。
+    var drainMailbox: @MainActor (KotlinUuid?) async -> [UIMessage] = { _ in [] }
+    /// P1-a: run 终态时把队列 leftover 恢复进 composer 文本（可见、不自动发起新生成）。
+    var restoreSteerQueueLeftover: (KotlinUuid?) -> Void = { _ in }
+    /// P1-c: run 终态回传钩子——编排服务据此向父线程 mailbox 投递 FINAL_ANSWER
+    /// （conversationId、runId、终态消息快照）。默认空实现零开销。
+    var onRunTerminal: @MainActor (KotlinUuid?, String, [UIMessage]) async -> Void = { _, _, _ in }
 }
 
 struct IOSGenerativeUiRequirement: Equatable {
@@ -712,11 +737,22 @@ final class ChatGenerationCoordinator {
         sharedSettings: dependencies.sharedSettings,
         localToolExecutor: dependencies.localToolExecutor,
         searchTransport: dependencies.searchTransport,
-        mcpManager: dependencies.mcpManager
+        mcpManager: dependencies.mcpManager,
+        orchestrationToolService: dependencies.orchestrationToolService,
+        memoryPollutionMarker: dependencies.memoryPollutionMarker,
+        conversationStoreProvider: dependencies.conversationStoreProvider
     )
     // W1 durable ledger (I-1): Started/Finished bookkeeping for every tool
     // execution on the foreground path, in the shared `agent_event` table.
-    private lazy var toolLedger: IOSAgentRunLedgering = IOSAgentRunLedger()
+    // Injectable for tests (default = Room-backed production ledger).
+    private var toolLedger: IOSAgentRunLedgering
+
+    /// P3-b: continuations of JS evaluations blocked on a nested tool's
+    /// approval card, keyed by the nested toolCallId. The finish methods
+    /// (`finishPending*Approval`) route through `completeApprovedToolCall`
+    /// and resume the matching waiter instead of continuing the run loop —
+    /// the outer `exec` call is still executing.
+    private var nestedExecApprovalWaiters: [String: CheckedContinuation<String, Never>] = [:]
 
     private var streamJob: Kotlinx_coroutines_coreJob? {
         get { streamJobBox.job }
@@ -730,6 +766,11 @@ final class ChatGenerationCoordinator {
     private var currentToolResumeCount = 0
     private var currentGenerativeUiRequirement: IOSGenerativeUiRequirement = .none
     private var currentGenerativeUiFallbackAttempted = false
+    /// P0-a tool discovery: run-level ownership of the shared KMP exposure
+    /// bridge. One bridge per run (built from the FULL static declarations at
+    /// start); all tool rounds of that run reuse it, so a `tool_search` hit
+    /// becomes visible to the NEXT round. New run → new bridge.
+    private var currentToolExposureBridge: IosToolExposureBridge?
     /// I-4 冻结快照(`ChatRunSnapshot`):与 `currentRunId` 一起设置、一起清空,
     /// run 内的压缩配置只从这里读,不再每轮 live 读 `dependencies.sharedSettings.snapshot`。
     private var currentRunSnapshot: ChatRunSnapshot?
@@ -779,12 +820,28 @@ final class ChatGenerationCoordinator {
     private weak var pendingBackgroundConversationStore: IOSConversationStore?
     private var foregroundToolExecutionTask: Task<ChatToolRuntimeResult, Never>?
     private var foregroundToolExecutionToken: UUID?
+    /// 在途前台工具执行的工具名与输入——`executeToolCall` 自动路径与
+    /// `executeApprovedAsyncTool` 审批路径在创建执行 task 时写入，teardown 清空。
+    /// 交接守卫用 `IOSToolEffectClassMapping.forToolName` 分类 .pure/.sideEffect：
+    /// wait_agent 的 kind 是 `.advanced`（forChatKind 会误判成 sideEffect），所以
+    /// 必须按原始工具名分类。
+    private var foregroundToolExecutionToolCall: (toolName: String, input: String)?
     private var foregroundApprovedToolContinuation: CheckedContinuation<ChatToolRuntimeResult?, Never>?
     private var foregroundImageToolExecutionTask: Task<[UIMessage], Never>?
     private var foregroundImageToolExecutionToken: UUID?
 
     var isRunning: Bool {
         currentRunId != nil
+    }
+
+    /// P1-c: 前台当前 run 的 conversation 归属（编排服务 interrupt 用）。
+    func activeForegroundRunId(matchingHex conversationHex: String) -> String? {
+        guard let runId = currentRunId,
+              let conversationId = currentConversationIdForRun,
+              conversationId.toHexDashString() == conversationHex else {
+            return nil
+        }
+        return runId
     }
 
     var activeConversationId: KotlinUuid? {
@@ -835,10 +892,12 @@ final class ChatGenerationCoordinator {
 
     init(
         dependencies: ChatGenerationDependencies,
-        bindings: ChatGenerationBindings
+        bindings: ChatGenerationBindings,
+        toolLedger: IOSAgentRunLedgering = IOSAgentRunLedger()
     ) {
         self.dependencies = dependencies
         self.bindings = bindings
+        self.toolLedger = toolLedger
     }
 
     func start(
@@ -846,7 +905,8 @@ final class ChatGenerationCoordinator {
         params: TextGenerationParams,
         inputDigest: String,
         conversationId: KotlinUuid?,
-        uploadMessages: [UIMessage]
+        uploadMessages: [UIMessage],
+        toolExposureBridge: IosToolExposureBridge? = nil
     ) {
         if isRunning {
             cancel()
@@ -859,6 +919,10 @@ final class ChatGenerationCoordinator {
         currentRunId = runId
         currentRunSnapshot = ChatRunSnapshot(runId: runId, settings: dependencies.sharedSettings.snapshot)
         currentToolLoopGuard = IOSToolLoopGuard()
+        // P0-a: adopt the run bridge built from the full declarations at the
+        // assembly point (or rebuild from the params tools when a caller does
+        // not pass one). params.tools are already the first-round visible set.
+        currentToolExposureBridge = toolExposureBridge ?? IosToolExposureBridge(tools: params.tools)
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
         currentConversationIdForRun = conversationId
@@ -981,6 +1045,8 @@ final class ChatGenerationCoordinator {
         // 留裂缝。
         currentRunSnapshot = ChatRunSnapshot(runId: runId, settings: dependencies.sharedSettings.snapshot)
         currentToolLoopGuard = IOSToolLoopGuard()
+        // 生图 run 没有工具循环/发现语义：不携带 exposure bridge。
+        currentToolExposureBridge = nil
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
         currentConversationIdForRun = conversationId
@@ -1240,6 +1306,9 @@ final class ChatGenerationCoordinator {
         drainPendingStreamChunksIntoAccumulator()
         let pendingStreamSnapshotAtCancellation = latestPendingStreamSnapshot()
         var messagesAtCancellation = pendingStreamSnapshotAtCancellation ?? bindings.getMessages()
+        if let session = activeStreamSession {
+            messagesAtCancellation = flushingCitationTracker(of: session, messages: messagesAtCancellation)
+        }
         // Cancel must close empty tool outputs (including ask_user). Otherwise a later
         // complete/resume path can re-pick the same unresolved tool as a fresh pending node.
         if toolRuntime.hasUnresolvedToolCall(in: messagesAtCancellation) {
@@ -1263,6 +1332,7 @@ final class ChatGenerationCoordinator {
         currentRunId = nil
         currentRunSnapshot = nil
         currentToolLoopGuard = IOSToolLoopGuard()
+        currentToolExposureBridge = nil
         currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -1275,6 +1345,8 @@ final class ChatGenerationCoordinator {
         clearPendingApprovals()
         bindings.setIsLoading(false)
         bindings.setContextCompactState(.idle)
+        // P1-a: 取消也是 run 终态——队列 leftover 恢复进 composer（可见、不静默丢）。
+        bindings.restoreSteerQueueLeftover(conversationId)
         if runId != nil {
             bindings.bumpMessageRevision(.generationCancelled)
         }
@@ -1306,6 +1378,16 @@ final class ChatGenerationCoordinator {
                 presentation: didPersist ? .cancelled() : .failed()
             )
             BackgroundGenerationKeepAlive.shared.end(runId)
+        }
+        // P1-c: 取消也是 run 终态——与 finishStreaming 同款终态回传（消息用
+        // cancel 终态快照）。cancel 与 finishStreaming 双触发时由服务按 runId
+        // 幂等去重（FINAL_ANSWER 信封 id = final-<runId>，enqueueIfAbsent/IGNORE），
+        // 不会向父线程双发。
+        let terminalConversationId = conversationId
+        let terminalRunId = runId
+        let terminalMessages = messagesAtCancellation
+        Task { @MainActor [bindings, terminalConversationId, terminalRunId, terminalMessages] in
+            await bindings.onRunTerminal(terminalConversationId, terminalRunId, terminalMessages)
         }
         return true
     }
@@ -1346,7 +1428,11 @@ final class ChatGenerationCoordinator {
                 displayMessages: displayMessages,
                 mode: .continueModel,
                 generativeUiRequirement: generativeUiRequirement,
-                generativeUiFallbackAttempted: generativeUiFallbackAttempted
+                generativeUiFallbackAttempted: generativeUiFallbackAttempted,
+                // P0-a Fix C: carry the FULL catalog names (not just the
+                // visible subset in params.tools) so the background job can
+                // rebuild a lazy-mode bridge that searches the whole catalog.
+                fullToolNames: currentToolExposureBridge?.fullToolDeclarations().map(\.name) ?? []
             )
         } else {
             backgroundHandoff = nil
@@ -1427,13 +1513,21 @@ final class ChatGenerationCoordinator {
             return false
         }
         guard !hasPendingToolApproval else { return false }
-        // Once a foreground tool request is already in flight, keep that request
-        // as the owner. BG handoff is not guaranteed to start immediately; if we
-        // cancel/clear the foreground run here, the in-flight result can be
-        // discarded and the user returns to an empty pending tool bubble.
-        guard foregroundToolExecutionTask == nil,
-              foregroundImageToolExecutionTask == nil else {
+        // 生图是真实副作用（可能已计费），防双重执行，一律拒绝交接。
+        if foregroundImageToolExecutionTask != nil {
             return false
+        }
+        if foregroundToolExecutionTask != nil {
+            // 在途 .pure 工具（wait_agent/tool_search/tools_list/session_read 等
+            // 本地只读调用）允许交接：取消前台任务后，遗留的 pending 工具 part
+            // 原样留在消息快照里（teardown 不改 part、不标失败），后台引擎
+            // `executePreExistingPendingTools` 重新执行，不会双重执行。在途
+            // .sideEffect 工具（workspace 写/MCP 调用/生图/send_message 等）
+            // 维持拒绝。分类按原始工具名（见 foregroundToolExecutionToolCall）。
+            let effectClass = foregroundToolExecutionToolCall.map {
+                IOSToolEffectClassMapping.forToolName($0.toolName, input: $0.input)
+            } ?? .sideEffect
+            guard effectClass == .pure else { return false }
         }
         guard let handoff = backgroundHandoff,
               let conversationStore else {
@@ -1446,7 +1540,12 @@ final class ChatGenerationCoordinator {
             return false
         }
         let startBackground = { [self] in
-            IOSChatBackgroundGenerationCoordinator.shared.start(
+#if DEBUG
+            if let override = backgroundStartOverrideForTesting {
+                return override(handoff, conversationStore)
+            }
+#endif
+            return IOSChatBackgroundGenerationCoordinator.shared.start(
                 handoff: handoff,
                 conversationStore: conversationStore,
                 toolRuntime: self.toolRuntime,
@@ -1466,8 +1565,11 @@ final class ChatGenerationCoordinator {
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
         drainPendingStreamChunksIntoAccumulator()
+        let citationFlushedSnapshot = activeStreamSession.map {
+            flushingCitationTracker(of: $0, messages: $0.accumulator.snapshot())
+        }
         cancelForegroundToolExecutions()
-        if let pendingStreamSnapshot = latestPendingStreamSnapshot() {
+        if let pendingStreamSnapshot = citationFlushedSnapshot ?? latestPendingStreamSnapshot() {
             // Background handoff bypasses the normal scheduleStreamSnapshotPublish
             // path, so without this the recorder would miss the last in-flight
             // snapshot before ownership moves to the background coordinator.
@@ -1485,6 +1587,7 @@ final class ChatGenerationCoordinator {
         currentRunId = nil
         currentRunSnapshot = nil
         currentToolLoopGuard = IOSToolLoopGuard()
+        currentToolExposureBridge = nil
         currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -1597,6 +1700,14 @@ final class ChatGenerationCoordinator {
         displayMessagesOverride: [UIMessage]? = nil
     ) async {
         guard currentRunId == runId else { return }
+        // P1-b: 新 run 首轮 catch-all 消费 mailbox（终态 leftover 与冷启动信封；
+        // continueAfterToolResult 已消费的轮次此处为空、零成本）。与 steer 不同：
+        // 未消费信封不回 composer，留在 Room 等下次 run。补绘重试轮
+        // （displayMessagesOverride 非 nil）不消费——该轮展示基线是显式快照。
+        let drainedMailboxMessages = await mailboxMessagesForNewRound(
+            conversationId: conversationId,
+            displayMessagesOverride: displayMessagesOverride
+        )
         let effectiveProvider: ProviderSetting
         do {
             effectiveProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
@@ -1706,7 +1817,8 @@ final class ChatGenerationCoordinator {
             return
         }
         let finalUploadMessages = ChatRuntimeContextBuilder.coalescingSystemMessages(finalizedUploadMessages)
-        bindings.recordMemoryUsage(selectedMemoryIds)
+        // 召回标记（P2-b）：不 force，去抖生效。
+        bindings.recordMemoryUsage(selectedMemoryIds, false)
         startStreaming(
             providerSetting: effectiveProvider,
             params: effectiveParams,
@@ -1714,7 +1826,8 @@ final class ChatGenerationCoordinator {
             startedAt: startedAt,
             inputDigest: inputDigest,
             conversationId: conversationId,
-            uploadMessages: finalUploadMessages,
+            // P1-b: 本轮头已消费的 mailbox 信封折入 upload（先于 startStreaming 头追加的 steer）。
+            uploadMessages: finalUploadMessages + drainedMailboxMessages,
             backgroundProviderSetting: providerSetting,
             generativeUiRequirement: effectiveGenerativeUiRequirement,
             generativeUiFallbackAttempted: generativeUiFallbackAttempted,
@@ -1794,6 +1907,17 @@ final class ChatGenerationCoordinator {
         generativeUiFallbackAttempted: Bool = false,
         displayMessagesOverride: [UIMessage]? = nil
     ) {
+        // P1-a: 模型轮次边界兜底消费 steer 队列（审批恢复等直接续流路径最终都经过
+        // 这里；continueAfterToolResult 已消费的轮次此处为空、零成本）。补绘重试轮
+        // （displayMessagesOverride 非 nil）不消费——该轮展示基线是显式快照，折入会
+        // 让排队消息从展示/落盘谱系丢失，统一走 run 终态 composer 恢复。
+        let drainedSteerMessages: [UIMessage]
+        if displayMessagesOverride == nil {
+            drainedSteerMessages = bindings.drainSteerQueue(conversationId)
+        } else {
+            drainedSteerMessages = []
+        }
+        let effectiveUploadMessages = uploadMessages + drainedSteerMessages
         let displayMessages = displayMessagesOverride ?? bindings.getMessages()
         currentGenerativeUiRequirement = generativeUiRequirement
         currentGenerativeUiFallbackAttempted = generativeUiFallbackAttempted
@@ -1811,7 +1935,7 @@ final class ChatGenerationCoordinator {
             providerSetting: providerSetting,
             backgroundProviderSetting: backgroundProviderSetting,
             params: params,
-            uploadMessages: uploadMessages,
+            uploadMessages: effectiveUploadMessages,
             displayMessages: displayMessages,
             generativeUiRequirement: generativeUiRequirement,
             generativeUiFallbackAttempted: generativeUiFallbackAttempted
@@ -1875,7 +1999,8 @@ final class ChatGenerationCoordinator {
                     )
                 case .complete:
                     self.cancelPendingStreamSnapshotPublish()
-                    let snapshot = accumulator.snapshot()
+                    var snapshot = accumulator.snapshot()
+                    snapshot = self.flushingCitationTracker(of: streamSession, messages: snapshot)
                     // Terminal hands authority to bindings/tool execution. Keeping this
                     // accumulator reachable would let a later cancel restore a stale pre-tool snapshot.
                     self.activeStreamSession = nil
@@ -1899,7 +2024,8 @@ final class ChatGenerationCoordinator {
                     return
                 case .error(let error):
                     self.cancelPendingStreamSnapshotPublish()
-                    let snapshot = accumulator.snapshot()
+                    var snapshot = accumulator.snapshot()
+                    snapshot = self.flushingCitationTracker(of: streamSession, messages: snapshot)
                     // The terminal snapshot is published below; it is no longer a cancel fallback.
                     self.activeStreamSession = nil
                     ChatStreamRecorder.shared.record(runId: runId, snapshot: snapshot)
@@ -1923,12 +2049,15 @@ final class ChatGenerationCoordinator {
             }
         }
 
+        let citationTracker = streamSession.citationTracker
         streamJob = dispatchStream(
             providerSetting: providerSetting,
-            messages: uploadMessages,
+            messages: effectiveUploadMessages,
             params: params,
             onChunk: { chunk in
-                eventSink.yield(.chunk(chunk))
+                // P2-c: 进入 sink 前剥离 citation 隐藏标记——sink 的所有消费者
+                // （MainActor 消费、后台交接 drain）都只见到已剥离的可见文本。
+                eventSink.yield(.chunk(citationTracker.stripped(chunk)))
             },
             onComplete: {
                 eventSink.yield(.complete())
@@ -2034,6 +2163,25 @@ final class ChatGenerationCoordinator {
         for chunk in activeStreamSession.eventSink.takePendingChunks() {
             activeStreamSession.accumulator.append(chunk: chunk)
         }
+    }
+
+    /// P2-c：流终结边界收口（complete/error/cancel/后台交接共用，finish 幂等）。
+    /// flush 剩余可见文本并入消息快照；收集到的引用 id 走 bindings.recordMemoryUsage
+    /// （生产接线 = IOSMemoryPersistence.markUsed，与 P2-b 召回侧标记叠加）。
+    ///
+    /// P2-c 修复 2：引用标记走 force（模型显式信号，不受 P2-b 同集去抖影响——
+    /// 与召回"注入即使用"的零模型依赖语义不同）。
+    private func flushingCitationTracker(
+        of session: ChatStreamAccumulatorSession,
+        messages: [UIMessage]
+    ) -> [UIMessage] {
+        let remainder = session.citationTracker.finish()
+        let ids = session.citationTracker.citationIds
+        if !ids.isEmpty {
+            bindings.recordMemoryUsage(ids.sorted(), true)
+        }
+        guard !remainder.isEmpty else { return messages }
+        return IOSMemoryCitationTracker.appendingCitationRemainder(remainder, to: messages)
     }
 
     private func cancelPendingStreamSnapshotPublish() {
@@ -2214,6 +2362,22 @@ final class ChatGenerationCoordinator {
                 conversationId: conversationId,
                 baseMessages: completedSnapshot
             )
+            return
+        }
+
+        // P0-a Fix B: a tool that exists in the full catalog but was not
+        // exposed this round is soft-failed with discovery guidance and the
+        // run continues; only truly unknown names reach the hard-fail below.
+        if await softFailUnexposedToolCallsIfNeeded(
+            in: completedSnapshot,
+            visibleToolNames: availableToolNames,
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId
+        ) {
             return
         }
 
@@ -2564,7 +2728,11 @@ final class ChatGenerationCoordinator {
                 conversationId: conversationId,
                 baseMessages: baseMessages
             )
-            let result = await toolRuntime.execute(pendingToolCall, context: invalidInputPending)
+            let result = await toolRuntime.execute(
+                pendingToolCall,
+                context: invalidInputPending,
+                toolExposureBridge: currentToolExposureBridge
+            )
             guard currentRunId == runId else { return }
             guard case .completed(let resolvedMessages) = result else { return }
             bindings.setMessages(resolvedMessages)
@@ -2706,12 +2874,24 @@ final class ChatGenerationCoordinator {
             return
         }
 
+        // P3-b: nested exec tools runner — the whitelist is the run exposure
+        // bridge's visible set minus the exec exclusions; nested calls execute
+        // through the SAME tool dispatch/approval/ledger machinery as top-level
+        // calls (`runNestedExecTool`). No bridge = no `tools` object (P3-a
+        // behavior, zero trace).
+        let nestedToolRunner = makeNestedExecToolRunner(parent: pending)
         let executionToken = UUID()
-        let executionTask = Task { @MainActor [toolRuntime] in
-            await toolRuntime.execute(pendingToolCall, context: pending)
+        let executionTask = Task { @MainActor [toolRuntime, bridge = currentToolExposureBridge] in
+            await toolRuntime.execute(
+                pendingToolCall,
+                context: pending,
+                toolExposureBridge: bridge,
+                nestedToolRunner: nestedToolRunner
+            )
         }
         foregroundToolExecutionToken = executionToken
         foregroundToolExecutionTask = executionTask
+        foregroundToolExecutionToolCall = (pendingToolCall.toolCall.toolName, pendingToolCall.toolCall.input)
         let result = await executionTask.value
         clearForegroundToolExecution(matching: executionToken)
 
@@ -2795,6 +2975,246 @@ final class ChatGenerationCoordinator {
         }
     }
 
+    /// P3-b: builds the nested exec tools runner for one exec dispatch —
+    /// whitelist from `currentToolExposureBridge`, execution via
+    /// `runNestedExecTool` (same dispatch/approval/ledger machinery as
+    /// top-level calls). Nil when the run has no exposure bridge.
+    private func makeNestedExecToolRunner(
+        parent: ChatPendingToolApproval
+    ) -> IosExecNestedToolRunner? {
+        guard let bridge = currentToolExposureBridge else { return nil }
+        let whitelist = ChatToolRuntime.execNestedToolWhitelist(
+            visibleToolNames: Set(bridge.visibleTools().map(\.name))
+        )
+        let runner: IosExecNestedToolRunner = { [weak self] name, arguments in
+            guard let self else {
+                return ChatGenerationCoordinator.nestedExecToolUnavailable(name: name)
+            }
+            return await self.runNestedExecTool(
+                name: name,
+                arguments: arguments,
+                parent: parent,
+                whitelist: whitelist
+            )
+        }
+        return runner
+    }
+
+    /// P3-b: execute one nested tool call from inside an `exec` evaluation.
+    ///
+    /// This is the SAME execution path as a top-level call: the call is
+    /// classified by `ChatToolRuntime.nextPendingToolCall` against the
+    /// whitelist, dispatched through `ChatToolRuntime.execute` (which runs
+    /// the tool's own approval gate, effect classification and output
+    /// formatting), and recorded in the ledger as a Started/Finished pair —
+    /// same payload shape as top-level calls; the `exec-nested-` toolCallId
+    /// prefix marks the provenance (a `via: "exec"` field was considered but
+    /// would have to change the shared ledger protocol for every caller, so
+    /// the shape is kept and the provenance is the id prefix).
+    ///
+    /// When the nested tool needs approval, the run pauses exactly like a
+    /// top-level call: the approval card shows and the JS thread stays
+    /// blocked on the sandbox's synchronous bridge; the user's decision
+    /// resumes the same `finish*Approval` path and the result text is handed
+    /// back to the JS script. The `exec` container itself never asks for
+    /// extra approval (its declaration keeps `needsApproval = false`).
+    @MainActor
+    func runNestedExecTool(
+        name: String,
+        arguments: String,
+        parent: ChatPendingToolApproval,
+        whitelist: Set<String>
+    ) async -> String {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "exec-nested-\(UUID().uuidString)",
+            toolName: name,
+            input: arguments,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let syntheticMessage = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [toolCall],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        guard let pendingToolCall = toolRuntime.nextPendingToolCall(
+            in: [syntheticMessage],
+            availableToolNames: whitelist
+        ) else {
+            // Whitelisted name that the runtime does not classify/execute in
+            // this context (e.g. a declared tool with no execution branch).
+            return Self.nestedExecToolUnavailable(name: name)
+        }
+        let nestedPending = ChatPendingToolApproval(
+            toolCall: toolCall,
+            providerSetting: parent.providerSetting,
+            params: parent.params,
+            runId: parent.runId,
+            startedAt: parent.startedAt,
+            inputDigest: parent.inputDigest,
+            conversationId: parent.conversationId,
+            baseMessages: [syntheticMessage]
+        )
+        // I-1 discipline for the nested call: Started durably lands before the
+        // tool runs; a failure here fail-closes the call (never execute with
+        // no durable trace).
+        let effectClass = IOSToolEffectClassMapping.forChatKind(
+            pendingToolCall.kind,
+            input: arguments
+        )
+        guard await toolLedger.recordToolCallStarted(
+            runId: parent.runId,
+            toolCallId: toolCall.toolCallId,
+            toolName: name,
+            argsDigest: chatInputDigest(for: arguments),
+            effectClass: effectClass
+        ) else {
+            return ChatToolOutputFormatter.toolFailureJSON(
+                toolName: name,
+                reason: "无法保存工具执行前状态，请检查存储空间后重试。",
+                status: "failed"
+            )
+        }
+        let result = await toolRuntime.execute(pendingToolCall, context: nestedPending)
+        switch result {
+        case .completed(let messages):
+            await toolLedger.recordToolCallFinished(
+                runId: parent.runId,
+                toolCallId: toolCall.toolCallId,
+                outcome: "completed"
+            )
+            return Self.nestedExecToolOutputText(from: messages, toolCallId: toolCall.toolCallId)
+        case .waitingForApproval(let prompt):
+            await toolLedger.recordToolCallFinished(
+                runId: parent.runId,
+                toolCallId: toolCall.toolCallId,
+                outcome: "paused_for_approval"
+            )
+            return await waitForNestedExecApproval(prompt, pending: nestedPending)
+        }
+    }
+
+    /// P3-b: show a nested tool's approval card and block until the user
+    /// decides. The waiter is registered BEFORE the card can be answered — a
+    /// tap landing between `pauseForApproval` and registration would
+    /// otherwise fall through to the top-level resume path and double-continue
+    /// the run. The card is in-memory only (no awaiting-permission marker, no
+    /// conversation persistence): the nested call is not a conversation
+    /// message, and the outer `exec` call's own durable trace covers a
+    /// process death (its ledger Started stays unresolved → honest
+    /// outcome-unknown recovery).
+    private func waitForNestedExecApproval(
+        _ prompt: ChatToolApprovalPrompt,
+        pending: ChatPendingToolApproval
+    ) async -> String {
+        await withCheckedContinuation { continuation in
+            nestedExecApprovalWaiters[pending.toolCall.toolCallId] = continuation
+            Task { @MainActor in
+                await self.pauseForApproval(prompt, pending: pending, isNestedExec: true)
+            }
+        }
+    }
+
+    static func nestedExecToolUnavailable(name: String) -> String {
+        ChatToolOutputFormatter.toolFailureJSON(
+            toolName: name,
+            reason: "tool not available in exec: \(name)",
+            status: "failed"
+        )
+    }
+
+    /// P3-b: extract the nested tool's output text from the messages produced
+    /// by `ChatToolRuntime.execute` (the synthetic base message + the finished
+    /// tool part carrying the output).
+    private static func nestedExecToolOutputText(
+        from messages: [UIMessage],
+        toolCallId: String
+    ) -> String {
+        for message in messages where message.role == MessageRole.assistant {
+            for part in message.parts {
+                guard let toolPart = part as? UIMessagePart.Tool,
+                      toolPart.toolCallId == toolCallId else { continue }
+                return toolPart.output.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
+            }
+        }
+        return #"{"ok":false,"error":"nested tool output not found"}"#
+    }
+
+    /// P0-a Fix B: when the model calls a tool that EXISTS in the run's full
+    /// catalog but was NOT exposed this round, soft-fail that call with
+    /// discovery guidance ("先调用 tool_search") and continue the run instead
+    /// of hard-failing the whole round. Truly unknown names are never touched
+    /// here — they keep the existing unresolved-tool hard-fail semantics.
+    /// Returns true when the branch consumed the round (guided continue or
+    /// budget-exhausted terminal).
+    private func softFailUnexposedToolCallsIfNeeded(
+        in snapshot: [UIMessage],
+        visibleToolNames: Set<String>,
+        providerSetting: ProviderSetting,
+        params: TextGenerationParams,
+        runId: String,
+        startedAt: Int64,
+        inputDigest: String,
+        conversationId: KotlinUuid?
+    ) async -> Bool {
+        guard let bridge = currentToolExposureBridge,
+              let guided = toolRuntime.messagesByGuidingUnexposedToolCalls(
+                  in: snapshot,
+                  fullCatalogNames: Set(bridge.fullToolDeclarations().map(\.name)),
+                  visibleToolNames: visibleToolNames
+              ) else {
+            return false
+        }
+        // A soft-fail round still costs a model round; cap it with the same
+        // budget as regular tool rounds so a stubborn model cannot loop.
+        guard currentToolResumeCount < maxToolResumeCount else {
+            await failPendingToolCalls(
+                snapshot: snapshot,
+                failureText: "工具调用未执行：已达到本轮工具循环上限（\(maxToolResumeCount) 次）。请继续对话或拆分任务后重试。",
+                runId: runId,
+                startedAt: startedAt,
+                inputDigest: inputDigest,
+                conversationId: conversationId
+            )
+            return true
+        }
+        currentToolResumeCount += 1
+        bindings.setMessages(guided.messages)
+        bindings.bumpMessageRevision(.toolResultAppended)
+        // 软失败账本语义：工具从未真正执行，不记 Started；只记
+        // Finished(failed) 留痕，供 W3 分类时区分「未执行」与「执行后失败」。
+        await toolLedger.recordToolCallFinished(
+            runId: runId,
+            toolCallId: guided.toolCallId,
+            outcome: "failed"
+        )
+        await continueAfterToolResult(
+            guided.messages,
+            providerSetting: providerSetting,
+            params: params,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId
+        )
+        return true
+    }
+
+    /// P0-a: rebuild request params with the run bridge's current visible tool
+    /// set. No bridge (e.g. image-only runs) → params unchanged.
+    private func paramsWithCurrentExposure(_ params: TextGenerationParams) -> TextGenerationParams {
+        guard let bridge = currentToolExposureBridge else { return params }
+        return params.replacingTools(bridge.visibleTools())
+    }
+
     private func continueAfterToolResult(
         _ resumedMessages: [UIMessage],
         providerSetting: ProviderSetting,
@@ -2806,7 +3226,13 @@ final class ChatGenerationCoordinator {
     ) async {
         guard currentRunId == runId else { return }
 
-        let availableToolNames = Set(params.tools.map(\.name))
+        // P0-a: each tool round re-derives the request params from the run
+        // bridge's CURRENT exposure. `tool_search` execution (which exposes its
+        // `expanded_tools` inside the bridge) therefore makes hits callable on
+        // this very next model step; the same round params flow into the
+        // background handoff so a lock-screen handoff carries the fresh set.
+        let roundParams = paramsWithCurrentExposure(params)
+        let availableToolNames = Set(roundParams.tools.map(\.name))
         if let pendingToolCall = toolRuntime.nextPendingToolCall(
             in: resumedMessages,
             availableToolNames: availableToolNames
@@ -2829,13 +3255,27 @@ final class ChatGenerationCoordinator {
             await executeToolCall(
                 pendingToolCall,
                 providerSetting: providerSetting,
-                params: params,
+                params: roundParams,
                 runId: runId,
                 startedAt: startedAt,
                 inputDigest: inputDigest,
                 conversationId: conversationId,
                 baseMessages: resumedMessages
             )
+            return
+        }
+
+        // P0-a Fix B: same soft-fail branch as the first-round exit.
+        if await softFailUnexposedToolCallsIfNeeded(
+            in: resumedMessages,
+            visibleToolNames: availableToolNames,
+            providerSetting: providerSetting,
+            params: roundParams,
+            runId: runId,
+            startedAt: startedAt,
+            inputDigest: inputDigest,
+            conversationId: conversationId
+        ) {
             return
         }
 
@@ -2853,15 +3293,17 @@ final class ChatGenerationCoordinator {
 
         // G7: continuation 参数原样保留（工具目录不清空）；只有预算耗尽时
         // 向本轮流式输入注入「总结收尾」系统提示，把收尾方式的选择权交给模型。
-        let continuationUploadMessages = Self.continuationMessagesAfterToolBudgetExhaustion(
-            resumedMessages,
-            resumeCount: currentToolResumeCount,
-            maxResumeCount: maxToolResumeCount
+        // P1-a/P1-b: 工具循环边界同时消费 mailbox + steer 队列——先 mailbox（Room
+        // 事务 drain，owner 渲染 + 上屏 + 持久化）再 steer，顺序折入下一轮 upload。
+        // 流式中途不 preempt：请求已在线上，v1 只按边界投递。
+        let continuationUploadMessages = await nextRoundMessagesAfterMailboxAndSteerConsumption(
+            baseMessages: resumedMessages,
+            conversationId: conversationId
         )
         if let handoffUploadMessages = await backgroundToolHandoffUploadMessages(
             from: continuationUploadMessages,
             providerSetting: providerSetting,
-            params: params,
+            params: roundParams,
             runId: runId,
             conversationId: conversationId
         ) {
@@ -2872,7 +3314,7 @@ final class ChatGenerationCoordinator {
                 conversationId: conversationId,
                 providerSetting: providerSetting,
                 backgroundProviderSetting: nil,
-                params: params,
+                params: roundParams,
                 uploadMessages: handoffUploadMessages,
                 displayMessages: resumedMessages,
                 generativeUiRequirement: currentGenerativeUiRequirement,
@@ -2895,7 +3337,7 @@ final class ChatGenerationCoordinator {
         )
         await prepareAndStartStreaming(
             providerSetting: providerSetting,
-            params: params,
+            params: roundParams,
             runId: runId,
             startedAt: startedAt,
             inputDigest: inputDigest,
@@ -2917,6 +3359,33 @@ final class ChatGenerationCoordinator {
         return [IOSGenerativeUiRequestPolicy.systemMessage(toolBudgetExhaustionPrompt(maxResumeCount: maxResumeCount))] + messages
     }
 
+    /// P1-a/P1-b: 工具循环边界消费 + 下一轮 upload 组装。顺序固定：mailbox 先于
+    /// steer——先 Room 事务 drain 信封（ChatViewModel 渲染为带结构头的 user 消息
+    /// 上屏 + 按既有路径持久化进会话），再出队全部 steer 消息，最后拼上
+    /// budget-exhaustion 收尾提示。
+    private func nextRoundMessagesAfterMailboxAndSteerConsumption(
+        baseMessages: [UIMessage],
+        conversationId: KotlinUuid?
+    ) async -> [UIMessage] {
+        let drainedMailboxMessages = await bindings.drainMailbox(conversationId)
+        let drainedSteerMessages = bindings.drainSteerQueue(conversationId)
+        return Self.continuationMessagesAfterToolBudgetExhaustion(
+            baseMessages + drainedMailboxMessages + drainedSteerMessages,
+            resumeCount: currentToolResumeCount,
+            maxResumeCount: maxToolResumeCount
+        )
+    }
+
+    /// P1-b: 新 run 首轮头消费（`prepareAndStartStreaming` 头调用；测试缝复用
+    /// 同一逻辑）。补绘重试轮（displayMessagesOverride 非 nil）不消费。
+    private func mailboxMessagesForNewRound(
+        conversationId: KotlinUuid?,
+        displayMessagesOverride: [UIMessage]?
+    ) async -> [UIMessage] {
+        guard displayMessagesOverride == nil else { return [] }
+        return await bindings.drainMailbox(conversationId)
+    }
+
     static func toolBudgetExhaustionPrompt(maxResumeCount: Int) -> String {
         """
         工具调用预算已用完（本轮最多 \(maxResumeCount) 次工具调用）。
@@ -2927,7 +3396,8 @@ final class ChatGenerationCoordinator {
 
     private func pauseForApproval(
         _ prompt: ChatToolApprovalPrompt,
-        pending: ChatPendingToolApproval
+        pending: ChatPendingToolApproval,
+        isNestedExec: Bool = false
     ) async {
         guard currentRunId == pending.runId else { return }
         let writeBaseline = bindings.capturePersistMessagesBaseline(pending.conversationId)
@@ -2957,6 +3427,17 @@ final class ChatGenerationCoordinator {
         case .askUser(let request):
             pendingAskUserToolApproval = pending
             bindings.setPendingAskUser(request)
+        }
+        // P3-b: a nested exec tool's approval shows ONLY the card. The nested
+        // call is not a conversation message, so the baseMessages
+        // persist/restore and the awaiting-permission marker below must not
+        // run — persisting the synthetic message list would overwrite the
+        // conversation, and a durable marker keyed by a toolCallId that does
+        // not exist in the conversation would confuse cold-start recovery.
+        // The outer exec call's own I-1 record is the durable trace; the
+        // card state is in-memory by design.
+        if isNestedExec {
+            return
         }
         bindings.setMessages(pending.baseMessages)
         bindings.bumpMessageRevision(.awaitingToolApproval)
@@ -3081,14 +3562,7 @@ final class ChatGenerationCoordinator {
                 toolCallId: pending.toolCall.toolCallId,
                 outcome: "completed"
             )
-            guard self.currentRunId == pending.runId else { return }
-            let resumedMessages = self.consumingPendingLoopReminder(
-                for: pending.toolCall.toolCallId,
-                in: executedMessages
-            )
-            self.bindings.setMessages(resumedMessages)
-            self.bindings.bumpMessageRevision(.toolResultAppended)
-            self.resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+            self.completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
         }
     }
 
@@ -3109,78 +3583,60 @@ final class ChatGenerationCoordinator {
         guard let pending = pendingSearchToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingSearchApproval()
-        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .pure, operation: {
+        guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .pure, operation: {
             await self.toolRuntime.finishSearchApproval(pending: pending, allow: allow)
         }) else { return }
-        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
-        bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
-        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
 
     private func finishPendingWebMountToolApproval(allow: Bool) async {
         guard let pending = pendingWebMountToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingWebMountApproval()
-        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
+        guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishWebMountApproval(pending: pending, allow: allow)
         }) else { return }
-        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
-        bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
-        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
 
     private func finishPendingWorkspaceToolApproval(allow: Bool) async {
         guard let pending = pendingWorkspaceToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingWorkspaceApproval()
-        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
+        guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishWorkspaceApproval(pending: pending, allow: allow)
         }) else { return }
-        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
-        bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
-        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
 
     private func finishPendingIshHandoffToolApproval(allow: Bool) async {
         guard let pending = pendingIshHandoffToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingIshHandoffApproval()
-        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
+        guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishIshHandoffApproval(pending: pending, allow: allow)
         }) else { return }
-        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
-        bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
-        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
 
     private func finishPendingMcpToolApproval(allow: Bool) async {
         guard let pending = pendingMcpToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingMcpApproval()
-        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
+        guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishMcpApproval(pending: pending, allow: allow)
         }) else { return }
-        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
-        bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
-        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
 
     private func finishPendingCouncilToolApproval(allow: Bool) async {
         guard let pending = pendingCouncilToolApproval else { return }
         guard currentRunId == pending.runId else { return }
         clearPendingCouncilApproval()
-        guard let executedMessages = await executeApprovedAsyncTool(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
+        guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishCouncilApproval(pending: pending, allow: allow)
         }) else { return }
-        let resumedMessages = consumingPendingLoopReminder(for: pending.toolCall.toolCallId, in: executedMessages)
-        bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
-        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+        completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
 
     @discardableResult
@@ -3239,16 +3695,111 @@ final class ChatGenerationCoordinator {
                 toolCallId: pending.toolCall.toolCallId,
                 outcome: "completed"
             )
-            guard self.currentRunId == pending.runId else { return }
-            let resumedMessages = self.consumingPendingLoopReminder(
-                for: pending.toolCall.toolCallId,
-                in: executedMessages
-            )
-            self.bindings.setMessages(resumedMessages)
-            self.bindings.bumpMessageRevision(.toolResultAppended)
-            self.resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
+            self.completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
         }
         return true
+    }
+
+    /// P3-b: post-approval execution dispatcher. A nested exec tool's approval
+    /// resolves back into the blocked JS evaluation (the outer `exec` call is
+    /// still executing — no keep-alive/continuation/handoff machinery, no run
+    /// loop resume); a top-level approval keeps the existing
+    /// `executeApprovedAsyncTool` path.
+    private func executeApprovedToolOrNested(
+        pending: ChatPendingToolApproval,
+        allow: Bool,
+        effectClass: IOSToolEffectClass,
+        operation: @escaping @MainActor () async -> [UIMessage]
+    ) async -> [UIMessage]? {
+        if nestedExecApprovalWaiters[pending.toolCall.toolCallId] != nil {
+            return await executeApprovedNestedTool(
+                pending: pending,
+                allow: allow,
+                effectClass: effectClass,
+                operation: operation
+            )
+        }
+        return await executeApprovedAsyncTool(
+            pending: pending,
+            allow: allow,
+            effectClass: effectClass,
+            operation: operation
+        )
+    }
+
+    /// P3-b: post-approval execution of a NESTED exec tool call. Mirrors the
+    /// top-level `executeApprovedAsyncTool` ledger discipline (a fresh
+    /// Started/Finished pair for THIS attempt — the first attempt already
+    /// wrote Started→Finished(paused_for_approval)) without its keep-alive /
+    /// approved-tool-continuation / handoff machinery, which belongs to the
+    /// outer run loop the nested call must not touch.
+    private func executeApprovedNestedTool(
+        pending: ChatPendingToolApproval,
+        allow: Bool,
+        effectClass: IOSToolEffectClass,
+        operation: @escaping @MainActor () async -> [UIMessage]
+    ) async -> [UIMessage]? {
+        // A denial never reaches the tool — `operation()` only produces a
+        // "user denied" JSON result, no side effect occurs, so there is
+        // nothing for the ledger to durably record.
+        guard allow else { return await operation() }
+        let didRecordStart = await toolLedger.recordToolCallStarted(
+            runId: pending.runId,
+            toolCallId: pending.toolCall.toolCallId,
+            toolName: pending.toolCall.toolName,
+            argsDigest: chatInputDigest(for: pending.toolCall.input),
+            effectClass: effectClass
+        )
+        guard didRecordStart else {
+            await presentStreamError(
+                rawMessage: "无法保存工具执行前状态，请检查存储空间后重试。",
+                modelId: pending.params.model.modelId,
+                runId: pending.runId,
+                startedAt: pending.startedAt,
+                inputDigest: pending.inputDigest,
+                conversationId: pending.conversationId
+            )
+            return nil
+        }
+        guard currentRunId == pending.runId else {
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "not_executed_run_replaced"
+            )
+            return nil
+        }
+        let executedMessages = await operation()
+        await toolLedger.recordToolCallFinished(
+            runId: pending.runId,
+            toolCallId: pending.toolCall.toolCallId,
+            outcome: "completed"
+        )
+        return executedMessages
+    }
+
+    /// P3-b: shared tail for every approval-finish path (F8 fix preserved).
+    /// A nested exec approval hands the tool's output text back to the
+    /// blocked JS evaluation instead of continuing the run loop; a top-level
+    /// approval keeps the existing setMessages + resumeAfterApproval flow.
+    private func completeApprovedToolCall(
+        pending: ChatPendingToolApproval,
+        executedMessages: [UIMessage]
+    ) {
+        let resumedMessages = consumingPendingLoopReminder(
+            for: pending.toolCall.toolCallId,
+            in: executedMessages
+        )
+        if let waiter = nestedExecApprovalWaiters.removeValue(forKey: pending.toolCall.toolCallId) {
+            waiter.resume(returning: Self.nestedExecToolOutputText(
+                from: resumedMessages,
+                toolCallId: pending.toolCall.toolCallId
+            ))
+            return
+        }
+        bindings.setMessages(resumedMessages)
+        bindings.bumpMessageRevision(.toolResultAppended)
+        resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
     private func executeApprovedAsyncTool(
@@ -3319,6 +3870,7 @@ final class ChatGenerationCoordinator {
             }
             foregroundToolExecutionToken = executionToken
             foregroundToolExecutionTask = executionTask
+            foregroundToolExecutionToolCall = (pending.toolCall.toolName, pending.toolCall.input)
         }
         defer { clearForegroundToolExecution(matching: executionToken) }
         // F10 fix (② approval path): `result` is `nil` exactly when
@@ -3522,6 +4074,7 @@ final class ChatGenerationCoordinator {
         terminalEvent: ChatMessageUpdateReason? = nil
     ) -> Bool {
         guard currentRunId == runId else { return false }
+        let runConversationId = currentConversationIdForRun
         cancelPendingStreamSnapshotPublish()
         cancelStreamEventConsumer()
         // 前台把这一轮跑完了，执行权到此为止。
@@ -3532,6 +4085,7 @@ final class ChatGenerationCoordinator {
         currentRunId = nil
         currentRunSnapshot = nil
         currentToolLoopGuard = IOSToolLoopGuard()
+        currentToolExposureBridge = nil
         currentLiveActivityStage = nil
         currentStartedAt = nil
         currentInputDigest = nil
@@ -3546,6 +4100,16 @@ final class ChatGenerationCoordinator {
         clearPendingApprovals()
         if let terminalEvent {
             bindings.bumpMessageRevision(terminalEvent)
+        }
+        // P1-a: run 终态把队列 leftover 恢复进 composer（可见、不静默丢、不自动发起新生成）。
+        bindings.restoreSteerQueueLeftover(runConversationId)
+        // P1-c: 终态回传——本会话若是某线程的 Open 子线程，编排服务向父线程
+        // mailbox 投递 FINAL_ANSWER（fire-and-forget；服务内幂等去重）。
+        let terminalMessages = bindings.getMessages()
+        let terminalConversationId = runConversationId
+        let terminalRunId = runId
+        Task { @MainActor [bindings, terminalConversationId, terminalRunId, terminalMessages] in
+            await bindings.onRunTerminal(terminalConversationId, terminalRunId, terminalMessages)
         }
         return true
     }
@@ -3562,6 +4126,7 @@ final class ChatGenerationCoordinator {
         foregroundToolExecutionTask?.cancel()
         foregroundToolExecutionTask = nil
         foregroundToolExecutionToken = nil
+        foregroundToolExecutionToolCall = nil
         let approvedToolContinuation = foregroundApprovedToolContinuation
         foregroundApprovedToolContinuation = nil
         approvedToolContinuation?.resume(returning: nil)
@@ -3573,6 +4138,7 @@ final class ChatGenerationCoordinator {
     private func clearForegroundToolExecutions() {
         foregroundToolExecutionTask = nil
         foregroundToolExecutionToken = nil
+        foregroundToolExecutionToolCall = nil
         foregroundImageToolExecutionTask = nil
         foregroundImageToolExecutionToken = nil
     }
@@ -3581,6 +4147,7 @@ final class ChatGenerationCoordinator {
         guard foregroundToolExecutionToken == token else { return }
         foregroundToolExecutionTask = nil
         foregroundToolExecutionToken = nil
+        foregroundToolExecutionToolCall = nil
     }
 
     private func completeApprovedToolExecution(
@@ -3613,6 +4180,16 @@ final class ChatGenerationCoordinator {
         // to a toolCallId whose approval card just got wiped without ever
         // being answered must not survive into some future, unrelated run.
         pendingLoopReminders.removeAll()
+        // P3-b: unblock any JS evaluations parked on a nested approval card
+        // whose card is being torn down (cancel/finish/handoff). The outer
+        // exec call was abandoned; leaving the waiter would leak a blocked
+        // JS thread waiting on a card nobody will ever answer. The error text
+        // flows back to the (abandoned) evaluation, which is discarded.
+        let blockedWaiters = nestedExecApprovalWaiters
+        nestedExecApprovalWaiters.removeAll()
+        for (toolCallId, waiter) in blockedWaiters {
+            waiter.resume(returning: ChatGenerationCoordinator.nestedExecToolUnavailable(name: toolCallId))
+        }
     }
 
     private func clearPendingMemoryApproval() {
@@ -3727,6 +4304,35 @@ final class ChatGenerationCoordinator {
     }
 
 #if DEBUG
+    /// 测试缝：替换「启动后台生成」闭包（生产为
+    /// `IOSChatBackgroundGenerationCoordinator.shared.start`，会提交真实 BGTask
+    /// 并落盘 payload）。测试注入替身以隔离系统副作用，同时观察「后台 start 被调」。
+    var backgroundStartOverrideForTesting: ((IOSChatBackgroundHandoff, IOSConversationStore) -> Bool)?
+
+    /// 交接守卫测试缝：直接安装 `backgroundHandoff`（生产由 start/executeToolCall
+    /// 内的 `refreshBackgroundHandoff` 写入），不驱动完整流式管线。
+    func installBackgroundHandoffForTesting(_ handoff: IOSChatBackgroundHandoff?) {
+        backgroundHandoff = handoff
+    }
+
+    /// 交接守卫测试缝：直接安装「前台工具执行中」状态（task + 工具标识），模拟
+    /// `executeToolCall` 自动路径或 `executeApprovedAsyncTool` 审批路径已进入执行段。
+    func installForegroundToolExecutionForTesting(
+        toolName: String,
+        input: String,
+        task: Task<ChatToolRuntimeResult, Never>? = nil
+    ) {
+        foregroundToolExecutionToken = UUID()
+        foregroundToolExecutionTask = task ?? Task { @MainActor in ChatToolRuntimeResult.completed([]) }
+        foregroundToolExecutionToolCall = (toolName: toolName, input: input)
+    }
+
+    /// 交接守卫测试缝：直接安装「前台生图执行中」状态（generate_image 一律拒绝交接）。
+    func installForegroundImageToolExecutionForTesting(task: Task<[UIMessage], Never>? = nil) {
+        foregroundImageToolExecutionToken = UUID()
+        foregroundImageToolExecutionTask = task ?? Task { @MainActor in [] }
+    }
+
     func installPendingSearchApprovalForTesting(
         pending: ChatPendingToolApproval,
         request: SearchToolApprovalRequest
@@ -3737,6 +4343,32 @@ final class ChatGenerationCoordinator {
         currentInputDigest = pending.inputDigest
         currentConversationIdForRun = pending.conversationId
         await pauseForApproval(.search(request), pending: pending)
+    }
+
+    /// P3-b 测试缝：不经过 start() 建立 run 状态（currentRunId 等）后执行一次
+    /// exec 求值，嵌套 runner 用与 executeToolCall 完全相同的组装
+    /// （`makeNestedExecToolRunner`）。供 IOSExecNestedToolTests 驱动嵌套
+    /// workspace 执行、账本记录与审批暂停/恢复。
+    func executeExecWithNestedToolsForTesting(
+        _ pendingToolCall: ChatPendingToolCall,
+        context: ChatPendingToolApproval,
+        toolExposureBridge: IosToolExposureBridge?
+    ) async -> ChatToolRuntimeResult {
+        streamJob = nil
+        currentRunId = context.runId
+        currentStartedAt = context.startedAt
+        currentInputDigest = context.inputDigest
+        currentConversationIdForRun = context.conversationId
+        if let toolExposureBridge {
+            currentToolExposureBridge = toolExposureBridge
+        }
+        let nestedRunner = makeNestedExecToolRunner(parent: context)
+        return await toolRuntime.execute(
+            pendingToolCall,
+            context: context,
+            toolExposureBridge: currentToolExposureBridge,
+            nestedToolRunner: nestedRunner
+        )
     }
 
     /// 模拟系统已通过 application-state gate 后收到的短腿到期结果；测试用它
@@ -3770,6 +4402,30 @@ final class ChatGenerationCoordinator {
         finishStreaming(runId: runId)
     }
 
+    /// P1-a/P1-b 测试缝：复用 continueAfterToolResult 的真实「mailbox + steer 边界消费 +
+    /// 下一轮 upload 组装」，不发起流式请求。
+    func nextRoundMessagesAfterMailboxAndSteerConsumptionForTesting(
+        baseMessages: [UIMessage],
+        conversationId: KotlinUuid?
+    ) async -> [UIMessage] {
+        await nextRoundMessagesAfterMailboxAndSteerConsumption(
+            baseMessages: baseMessages,
+            conversationId: conversationId
+        )
+    }
+
+    /// P1-b 测试缝：复用 `prepareAndStartStreaming` 头的真实「新 run 首轮 mailbox
+    /// 消费」（含补绘重试轮不消费的门控），不发起流式请求。
+    func drainMailboxAtNewRunHeadForTesting(
+        conversationId: KotlinUuid?,
+        displayMessagesOverride: [UIMessage]?
+    ) async -> [UIMessage] {
+        await mailboxMessagesForNewRound(
+            conversationId: conversationId,
+            displayMessagesOverride: displayMessagesOverride
+        )
+    }
+
     /// I-4 测试缝：`settingsSnapshot(forRun:)` 是 private,`IOSRunSnapshotTests`
     /// 通过这个薄包装验证冻结/新 turn 边界语义,不需要跑一整条真实生成流水线。
     func settingsSnapshotForTesting(runId: String) -> Settings {
@@ -3778,10 +4434,14 @@ final class ChatGenerationCoordinator {
 
     /// I-4 测试缝：直接安装 `currentRunId`/`currentRunSnapshot`,模拟
     /// `start()`/`runImageTool()` 真实入口已经完成的赋值,不需要驱动完整的
-    /// provider 解析 + 压缩 + 流式管线。
-    func installRunSnapshotForTesting(runId: String, snapshot: ChatRunSnapshot?) {
+    /// provider 解析 + 压缩 + 流式管线。`conversationId` 可选：传入时同时安装
+    /// `currentConversationIdForRun`（P1-c FINAL_ANSWER 终态回传测试需要）。
+    func installRunSnapshotForTesting(runId: String, snapshot: ChatRunSnapshot?, conversationId: KotlinUuid? = nil) {
         currentRunId = runId
         currentRunSnapshot = snapshot
+        if let conversationId {
+            currentConversationIdForRun = conversationId
+        }
     }
 
     func installRunMetadataForTesting(
@@ -3900,5 +4560,23 @@ extension ChatGenerationCoordinator {
             .joined()
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return WatchTaskText.clipped(text, maxLength: 280)
+    }
+}
+
+extension TextGenerationParams {
+    /// P0-a: a copy of these params carrying a different tool declaration list.
+    /// Kotlin data-class default args don't bridge to Swift, so rebuild all
+    /// fields explicitly (same shape makeTextGenerationParams uses).
+    func replacingTools(_ tools: [Tool]) -> TextGenerationParams {
+        TextGenerationParams(
+            model: model,
+            temperature: temperature,
+            topP: topP,
+            maxTokens: maxTokens,
+            tools: tools,
+            reasoningLevel: reasoningLevel,
+            customHeaders: customHeaders,
+            customBody: customBody
+        )
     }
 }

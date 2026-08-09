@@ -30,6 +30,8 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.ClassDiscriminatorMode
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.AppScope
@@ -133,10 +135,10 @@ class McpManager(
     suspend fun callTool(toolName: String, args: JsonObject): List<UIMessagePart> {
         val tools = getAllAvailableTools()
         val tool = tools.find { it.name == toolName }
-            ?: return listOf(UIMessagePart.Text("Failed to execute tool, because no such tool"))
+            ?: return mcpCallFailure(toolName, "Failed to execute tool, because no such tool")
         val client =
             clients.entries.find { it.key.commonOptions.tools.any { it.name == toolName } }?.value
-        if (client == null) return listOf(UIMessagePart.Text("Failed to execute tool, because no such mcp client for the tool"))
+        if (client == null) return mcpCallFailure(toolName, "Failed to execute tool, because no such mcp client for the tool")
         val config = clients.entries.first { it.value == client }.key
         Log.i(TAG, "callTool: $toolName keys=${args.keys}")
 
@@ -158,6 +160,25 @@ class McpManager(
             }
         }
     }
+
+    /**
+     * P2-a：MCP 调用失败的结构化输出（与 iOS `ChatToolOutputFormatter.toolFailureJSON`
+     * 同一契约：ok=false + reason/status=failed），使 `MemoryPollutionTools.isFailureOutput`
+     * 能识别失败、不把失败调用误置 POLLUTED。不抛异常——调用方（mcp__* 展开工具）拿到
+     * 的就是模型可见的最终输出。
+     */
+    private fun mcpCallFailure(toolName: String, message: String): List<UIMessagePart> =
+        listOf(
+            UIMessagePart.Text(
+                buildJsonObject {
+                    put("ok", false)
+                    put("tool", toolName)
+                    put("reason", message)
+                    put("message", message)
+                    put("status", "failed")
+                }.toString()
+            )
+        )
 
     suspend fun callConfiguredTool(
         serverId: String?,

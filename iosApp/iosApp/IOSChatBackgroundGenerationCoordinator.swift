@@ -4,6 +4,8 @@ import OSLog
 @preconcurrency import Shared
 
 private let backgroundRunLedgerLogger = Logger(subsystem: "app.amber.ios", category: "chat-bg-ledger")
+private let backgroundToolExposureLogger = Logger(subsystem: "app.amber.ios", category: "chat-bg-tools")
+private let backgroundMailboxLogger = Logger(subsystem: "app.amber.ios", category: "chat-bg-mailbox")
 
 private struct IOSChatBackgroundRuntimeJob {
     let runId: String
@@ -22,6 +24,11 @@ private struct IOSChatBackgroundRuntimeJob {
     let liveActivityController: AgentLiveActivityController
     let saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?)?
     let messagesSnapshot: IOSChatBackgroundMessagesSnapshot
+    /// P0-a: background-owned tool exposure bridge (rebuilt from the handoff's
+    /// visible declarations — the exposed set at handoff — since the persisted
+    /// payload cannot carry Kotlin Tool lists). Powers the background
+    /// `tool_search` executor.
+    let toolExposureBridge: IosToolExposureBridge
 }
 
 /// KMP message objects are not declared `Sendable`, but this retry snapshot is
@@ -51,6 +58,11 @@ struct IOSChatBackgroundHandoff {
     let mode: IOSChatBackgroundHandoffMode
     let generativeUiRequirement: IOSGenerativeUiRequirement
     let generativeUiFallbackAttempted: Bool
+    /// P0-a Fix C: the FULL catalog tool names of the run (params.tools only
+    /// carries the visible subset, which would silently disable lazy mode in
+    /// the background bridge). Empty for legacy payloads → fall back to
+    /// params.tools.
+    let fullToolNames: [String]
 }
 
 enum IOSChatBackgroundHandoffMode: String {
@@ -284,8 +296,15 @@ extension Notification.Name {
 }
 
 @MainActor
+extension IOSChatBackgroundGenerationCoordinator: IOSThreadOrchestrationToolService.BackgroundScheduling {}
+
+@MainActor
 final class IOSChatBackgroundGenerationCoordinator {
     static let shared = IOSChatBackgroundGenerationCoordinator()
+
+    /// P1-c: 后台 job 终态钩子（子线程完成/失败/截断/取消时向父线程投递
+    /// FINAL_ANSWER 由 ChatViewModel 接线到编排服务）。nil 时零开销。
+    var onRunTerminal: (@MainActor (KotlinUuid, String, [UIMessage]) async -> Void)?
 
     private var bundleIdentifier: String { Bundle.main.bundleIdentifier ?? "app.amber.ios" }
     private var permittedIdentifier: String { "\(bundleIdentifier).chat.*" }
@@ -413,6 +432,12 @@ final class IOSChatBackgroundGenerationCoordinator {
         !jobs(conversationId: conversationId).isEmpty
     }
 
+    /// P1-e: 后台活跃 job 总数（并发限额的活注册表计数源；与 restorableRunIds
+    /// 同集合，activeJobs 内每个 job 均有持久化 payload）。
+    var activeJobCount: Int {
+        activeJobs.count
+    }
+
     func activeRunId(conversationId: KotlinUuid) -> String? {
         jobs(conversationId: conversationId).values.max { lhs, rhs in
             if lhs.startedAt == rhs.startedAt {
@@ -420,6 +445,20 @@ final class IOSChatBackgroundGenerationCoordinator {
             }
             return lhs.startedAt < rhs.startedAt
         }?.runId
+    }
+
+    /// P1-c: 按 hex-dash conversation id 查活跃后台 run（编排服务 interrupt 用，
+    /// 避免在 Swift 侧重建 KotlinUuid）。
+    func activeRunId(conversationHex: String) -> String? {
+        activeJobs.values
+            .filter { String(describing: $0.conversationId) == conversationHex }
+            .max { lhs, rhs in
+                if lhs.startedAt == rhs.startedAt {
+                    return lhs.runId < rhs.runId
+                }
+                return lhs.startedAt < rhs.startedAt
+            }?
+            .runId
     }
 
     @discardableResult
@@ -491,6 +530,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                 inputDigest: job.inputDigest,
                 conversationId: job.conversationId
             )
+            self.notifyRunTerminal(job: job, runId: job.runId, finalMessages: cancelledMessages)
             _ = job.liveActivityController.adoptExistingActivity(
                 runId: job.runId,
                 conversationId: job.conversationId.toHexDashString()
@@ -539,6 +579,42 @@ final class IOSChatBackgroundGenerationCoordinator {
         return registered
     }
 
+    /// Builds the background run's exposure bridge. When the handoff carries
+    /// the full catalog the bridge is rebuilt over it (lazy mode stays on and
+    /// tool_search can search everything); otherwise it falls back to the
+    /// handoff's visible tool subset. Either way the bridge's initial exposure
+    /// is seeded with the tools that were visible at handoff time, so the
+    /// per-round `replacingTools(visibleTools())` refresh does not drop tools
+    /// the foreground had already exposed.
+    static func makeBackgroundToolExposureBridge(
+        fullToolNames: [String],
+        handoffVisibleTools: [Tool],
+        additionalDeclarations: [Tool] = []
+    ) -> IosToolExposureBridge {
+        let bridge: IosToolExposureBridge
+        if !fullToolNames.isEmpty {
+            var rebuilt = ToolKt.iosToolDeclarations(names: fullToolNames)
+            let rebuiltNames = Set(rebuilt.map(\.name))
+            // P0-b: dynamic `mcp__*` declarations cannot be rebuilt from a
+            // name (the payload has no server/tool directory), so exclude them
+            // from the static mismatch check and append the regenerated ones.
+            let staticNames = fullToolNames.filter { !ToolKt.isExpandedMcpToolName(name: $0) }
+            if rebuiltNames != Set(staticNames) {
+                backgroundToolExposureLogger.error(
+                    "background bridge catalog mismatch: \(rebuilt.count)/\(staticNames.count) declarations rebuilt — a tool name is missing from KMP iosToolDeclaration"
+                )
+            }
+            for tool in additionalDeclarations where !rebuiltNames.contains(tool.name) {
+                rebuilt.append(tool)
+            }
+            bridge = IosToolExposureBridge(tools: rebuilt)
+        } else {
+            bridge = IosToolExposureBridge(tools: handoffVisibleTools)
+        }
+        bridge.exposeToolNames(names: handoffVisibleTools.map(\.name))
+        return bridge
+    }
+
     private func runtimeJob(
         handoff: IOSChatBackgroundHandoff,
         conversationStore: IOSConversationStore,
@@ -546,7 +622,22 @@ final class IOSChatBackgroundGenerationCoordinator {
         liveActivityController: AgentLiveActivityController,
         saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?)?
     ) -> IOSChatBackgroundRuntimeJob {
-        IOSChatBackgroundRuntimeJob(
+        // P0-a Fix C: rebuild the exposure bridge over the FULL catalog when
+        // the handoff carried it (foreground bridges are built from the full
+        // static declarations, so lazy mode stays on and tool_search searches
+        // the whole catalog — hits become callable on the next round via
+        // IOSAgentToolEngine's per-round params refresh). Legacy payloads
+        // without fullToolNames fall back to the previous behavior (visible
+        // subset from handoff.params.tools, which may disable lazy mode).
+        let backgroundBridge = Self.makeBackgroundToolExposureBridge(
+            fullToolNames: handoff.fullToolNames,
+            handoffVisibleTools: handoff.params.tools,
+            // P0-b: regenerate the dynamic MCP surface from the runtime's own
+            // directory so background tool_search can expose (and the engine
+            // can execute) `mcp__*` tools like the foreground run could.
+            additionalDeclarations: toolRuntime.mcpExpandedDeclarations()
+        )
+        return IOSChatBackgroundRuntimeJob(
             runId: handoff.runId,
             startedAt: handoff.startedAt,
             inputDigest: handoff.inputDigest,
@@ -562,7 +653,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             toolRuntime: toolRuntime,
             liveActivityController: liveActivityController,
             saveMiniAppIfPresent: saveMiniAppIfPresent,
-            messagesSnapshot: IOSChatBackgroundMessagesSnapshot(handoff.uploadMessages)
+            messagesSnapshot: IOSChatBackgroundMessagesSnapshot(handoff.uploadMessages),
+            toolExposureBridge: backgroundBridge
         )
     }
 
@@ -713,16 +805,48 @@ final class IOSChatBackgroundGenerationCoordinator {
             executors: job.toolRuntime.backgroundToolExecutors(
                 providerSetting: requestProvider,
                 params: requestParams,
-                runId: job.runId
+                runId: job.runId,
+                toolExposureBridge: job.toolExposureBridge,
+                // P1-c: run 锚定会话——后台 job 的 spawn/list/interrupt 以
+                // 本 job 的 conversationId 为父，不读 VM 当前会话。
+                conversationId: job.conversationId
             ),
+            // M2: 传了 toolExposureBridge 的路径，每轮 replacingTools 后按当轮
+            // effectiveParams 重建 executor 表——tool_search 命中工具下一轮
+            // 「声明且可执行」；闭包捕获的是当轮 params/bridge（与首次注册
+            // 同一入口）。未传桥的 SubAgent/Novel 路径（本文件外构造点）保持
+            // 静态表不变。
             // G7: 后台续跑步数上限保持 6（引擎默认 8）。理由：后台续跑是前台预算
             // 之外的第二道防线，跑在无人盯屏的电池/流量预算上；前台上限已参数化
             // （默认 12），交互式长链由前台设置自控，后台保持较短预算以约束静默耗电。
             // 若后续发现后台续跑频繁在 6 步被掐断，再同步到引擎默认 8。
             configuration: .init(maxSteps: 6, honorApprovalPause: false),
             ledger: toolLedger,
-            ledgerRunId: job.runId
+            ledgerRunId: job.runId,
+            executorRebuilder: { params in
+                job.toolRuntime.backgroundToolExecutors(
+                    providerSetting: requestProvider,
+                    params: params,
+                    runId: job.runId,
+                    toolExposureBridge: job.toolExposureBridge,
+                    conversationId: job.conversationId
+                )
+            }
         )
+        // P1-d: 后台引擎 mailbox drain——每轮批量执行后把本会话信封渲染折入下一轮
+        // upload 并持久化进会话（后台无 UI 上屏，折入 = 持久化 + 入 working）。
+        // 前后台双 drain 由 MailboxDao.drainPending 的事务加固兜底（loser 返回空）。
+        let mailboxStore = IOSMailboxStore(mailboxDao: self.db.mailboxDao())
+        let mailboxDrain: @Sendable () async -> IOSMailboxDrainResult = { [weak self] in
+            guard let self else { return IOSMailboxDrainResult(values: []) }
+            // 渲染 + 会话持久化全部在 MainActor 助手内完成（KMP UIMessage 非
+            // Sendable，不跨隔离边界传递实体）；返回盒携带渲染出的 user 消息。
+            return await self.drainMailboxForBackgroundJob(
+                store: job.conversationStore,
+                mailboxStore: mailboxStore,
+                conversationId: job.conversationId
+            )
+        }
         let presentationEvents = AsyncStream<AgentActivityPresentation>.makeStream()
         let presentationConsumer = Task { @MainActor in
             for await presentation in presentationEvents.stream {
@@ -733,6 +857,14 @@ final class IOSChatBackgroundGenerationCoordinator {
                 )
             }
         }
+        // P2-c: 后台流 citation 隐藏标记剥离。每个 engine.run 一个 tracker
+        // （finish 幂等收口该 run 的未闭合标签；generative UI retry 是第二次
+        // 独立生成，不共享 tracker——跨 run 复用会把上一 run 的 citations 串进
+        // 下一 run）。引擎终结处已把剩余可见文本并入终态消息；run 结束后这里在
+        // MainActor 上把收集到的引用 id 落 markUsed——引用是模型显式信号 →
+        // force（不受 P2-b 召回同集去抖影响）。
+        let initialCitationTracker = IOSMemoryCitationTracker()
+        let retryCitationTracker = IOSMemoryCitationTracker()
         let operationTask = Task { () -> IOSAgentToolEngineResult in
             switch job.mode {
             case .continueModel:
@@ -740,6 +872,9 @@ final class IOSChatBackgroundGenerationCoordinator {
                     providerSetting: requestProvider,
                     messages: job.uploadMessages,
                     params: requestParams,
+                    citationTracker: initialCitationTracker,
+                    toolExposureBridge: job.toolExposureBridge,
+                    mailboxDrain: mailboxDrain,
                     onAssistantTurnStarted: {
                         assistantTextSnapshot.replace(with: "")
                         presentationEvents.continuation.yield(
@@ -818,6 +953,9 @@ final class IOSChatBackgroundGenerationCoordinator {
                     providerSetting: requestProvider,
                     messages: retryUpload.values,
                     params: retryParams,
+                    citationTracker: retryCitationTracker,
+                    toolExposureBridge: job.toolExposureBridge,
+                    mailboxDrain: mailboxDrain,
                     onAssistantTurnStarted: {
                         assistantTextSnapshot.replace(with: "")
                         presentationEvents.continuation.yield(
@@ -867,6 +1005,10 @@ final class IOSChatBackgroundGenerationCoordinator {
         runState.installOperationTask(operationTask)
         let result = await operationTask.value
         job.messagesSnapshot.replace(with: result.messages)
+        // P2-c: 引擎终结处 finish() 已把引用 id 收齐（幂等）；模型显式引用 →
+        // markUsed(force: true)，与前台 citation flush 同语义。空集合 no-op。
+        IOSMemoryPersistence.shared.markUsed(ids: initialCitationTracker.citationIds, force: true)
+        IOSMemoryPersistence.shared.markUsed(ids: retryCitationTracker.citationIds, force: true)
         presentationEvents.continuation.finish()
         await presentationConsumer.value
         runState.clearOperationTask()
@@ -1036,6 +1178,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
+        notifyRunTerminal(job: job, runId: job.runId, finalMessages: finalMessages)
         if succeeded {
             WatchTaskCoordinator.shared.publishCompleted(
                 runId: job.runId,
@@ -1113,6 +1256,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             )
             return
         }
+
+        notifyRunTerminal(job: job, runId: job.runId, finalMessages: finalMessages)
 
         await publishTruncatedTerminal(
             job: job,
@@ -1243,6 +1388,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
+        notifyRunTerminal(job: job, runId: job.runId, finalMessages: finalMessages)
         WatchTaskCoordinator.shared.publish(
             runId: job.runId,
             conversationId: job.conversationId.toHexDashString(),
@@ -1384,6 +1530,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
+        notifyRunTerminal(job: job, runId: job.runId, finalMessages: finalMessages)
         WatchTaskCoordinator.shared.publish(
             runId: job.runId,
             conversationId: job.conversationId.toHexDashString(),
@@ -1419,6 +1566,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
+        notifyRunTerminal(job: job, runId: job.runId, finalMessages: completedMessages)
         if succeeded {
             WatchTaskCoordinator.shared.publishCompleted(
                 runId: job.runId,
@@ -1511,7 +1659,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             generativeUiRequired: handoff.generativeUiRequirement.required,
             generativeUiExpectSlides: handoff.generativeUiRequirement.expectSlides,
             generativeUiExpectFullHtmlDeck: handoff.generativeUiRequirement.expectFullHtmlDeck,
-            generativeUiFallbackAttempted: handoff.generativeUiFallbackAttempted
+            generativeUiFallbackAttempted: handoff.generativeUiFallbackAttempted,
+            fullToolNames: handoff.fullToolNames
         )
         let directory = try jobsDirectory()
         let url = payloadURL(for: requestId, in: directory)
@@ -1537,7 +1686,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             displayMessages: displayMessages,
             mode: job.mode,
             generativeUiRequirement: job.generativeUiRequirement,
-            generativeUiFallbackAttempted: true
+            generativeUiFallbackAttempted: true,
+            fullToolNames: job.toolExposureBridge.fullToolDeclarations().map(\.name)
         )
         do {
             try persist(handoff: handoff, requestId: requestId)
@@ -1584,7 +1734,8 @@ final class IOSChatBackgroundGenerationCoordinator {
                     expectSlides: payload.generativeUiExpectSlides,
                     expectFullHtmlDeck: payload.generativeUiExpectFullHtmlDeck
                 ),
-                generativeUiFallbackAttempted: payload.generativeUiFallbackAttempted
+                generativeUiFallbackAttempted: payload.generativeUiFallbackAttempted,
+                fullToolNames: payload.fullToolNames
             )
         } catch {
             NSLog("[AmberChatBG] Failed to load background payload \(requestId): \(error)")
@@ -1682,6 +1833,58 @@ final class IOSChatBackgroundGenerationCoordinator {
                 continuation.resume()
             }
         }
+    }
+
+    /// P1-c: 后台 job 终态回传（FINAL_ANSWER 投递由接线方——编排服务——处理；
+    /// 每个终态路径调用一次；enqueue 按 runId 幂等去重）。
+    private func notifyRunTerminal(
+        job: IOSChatBackgroundRuntimeJob,
+        runId: String,
+        finalMessages: [UIMessage]
+    ) {
+        guard let onRunTerminal else { return }
+        let conversationId = job.conversationId
+        Task { @MainActor [onRunTerminal, conversationId, runId, finalMessages] in
+            await onRunTerminal(conversationId, runId, finalMessages)
+        }
+    }
+
+    /// P1-d: 后台 job 的 mailbox drain（引擎每轮批量执行后调用）。Room drain
+    /// （事务化 exactly-once）+ 渲染 + 会话持久化全部在 MainActor 内完成；
+    /// 返回渲染出的 user 消息（@unchecked Sendable 盒，KMP UIMessage 非
+    /// Sendable 不外传）。无信封时返回空盒（引擎零追加）。
+    private func drainMailboxForBackgroundJob(
+        store: IOSConversationStore,
+        mailboxStore: IOSMailboxStore,
+        conversationId: KotlinUuid
+    ) async -> IOSMailboxDrainResult {
+        let snapshots = await mailboxStore.drainPending(forConversationId: conversationId)
+        guard !snapshots.isEmpty else { return IOSMailboxDrainResult(values: []) }
+        let drained = snapshots.map { envelope in
+            UIMessage.companion.user(prompt: MailboxEnvelopeKt.renderMailboxEnvelopeToUserText(
+                authorThreadId: envelope.authorThreadId,
+                type: envelope.type,
+                payload: envelope.payload
+            ))
+        }
+        // 持久化：会话既有消息 + 渲染信封（复用既有写路径与 operationMutex，
+        // 不在 Swift 侧另建写通道；drain 事务保证信封不会重复落盘）。
+        let current: [UIMessage]
+        if store.currentConversation?.id == conversationId {
+            current = store.currentConversation?.currentMessages ?? []
+        } else {
+            current = (try? await store.loadConversationForOrchestration(conversationId))?.currentMessages ?? []
+        }
+        let baseline = store.writeBaseline(for: conversationId)
+        let persisted = await store.save(messages: current + drained, to: conversationId, ifUnchangedSince: baseline)
+        if !persisted {
+            // 信封已标 delivered，持久化失败时由终态 persist（working 含 drained）兜底；
+            // 只记录日志便于诊断，不回滚 drain（会丢投递记录）。
+            backgroundMailboxLogger.error(
+                "mailbox drain persist failed for \(conversationId) — terminal persist is the fallback"
+            )
+        }
+        return IOSMailboxDrainResult(values: drained)
     }
 
     private static func assistantMessage(_ text: String) -> UIMessage {

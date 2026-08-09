@@ -251,7 +251,9 @@ final class IOSRunSnapshotTests: XCTestCase {
                 searchTransport: NoopSearchTransport(),
                 liveActivityController: .shared,
                 autoGenerateResponses: false,
-                mcpManager: IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared)
+                mcpManager: IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared),
+                orchestrationToolService: nil,
+                memoryPollutionMarker: nil
             ),
             bindings: ChatGenerationBindings(
                 getMessages: { [] },

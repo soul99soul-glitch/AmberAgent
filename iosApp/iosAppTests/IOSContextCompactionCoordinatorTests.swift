@@ -171,4 +171,78 @@ final class IOSContextCompactionCoordinatorTests: XCTestCase {
         XCTAssertEqual(fitted.count, messages.count)
         XCTAssertFalse(fitted.map { $0.toText() }.joined(separator: "\n").contains("Context note:"))
     }
+
+    // MARK: - 截尾兜底学会截断（真机 1MB Exa 全文 → 请求必败的第三层）
+
+    func testFitMessagesToTokenBudgetTruncatesGiantToolOutputInsteadOfFailing() throws {
+        // 真机出事轮形态：巨量 search_web 输出消息是最后（最新）一条，前面只有
+        // 小消息——截尾兜底选中它时是唯一候选。旧行为把它整条硬保 → 估算远超
+        // 预算 → assertFitsRequest 抛错。新行为：就地截断工具输出到预算内。
+        let userTail = UIMessage.companion.user(prompt: "继续")
+        let giant = makeMessage(parts: [makeToolPart(toolName: "search_web", outputChars: 2_000_000)])
+
+        let fitted = ContextCompactionEditTestSupport.fittedMessagesWithBudget(
+            messages: [userTail, giant],
+            maxTokens: 1_000
+        )
+
+        let estimate = IOSContextCompactionCoordinator.estimatedTokensForRequest(fitted)
+        XCTAssertLessThanOrEqual(estimate, 1_000)
+        // 巨消息本身保留（宁超窗不丢消息语义不变），其工具输出被截断并带标记。
+        let giantKept = try XCTUnwrap(fitted.first { $0.id == giant.id })
+        let text = try XCTUnwrap(toolOutputText(giantKept))
+        XCTAssertTrue(text.contains("…[truncated"))
+        XCTAssertLessThan(text.count, 2_000_000)
+    }
+
+    func testFinalizedMessagesForRequestRecoversGiantOutputSession() throws {
+        // 真机复现形态：已持久化的巨量 search_web 输出在请求时被 fit 就地截断，
+        // finalizedMessagesForRequest 不再抛错，估算回到预算内。
+        let defaults = UserDefaults(suiteName: "Compaction-Giant-\(UUID().uuidString)")!
+        let settings = IOSSharedSettingsStore(userDefaults: defaults).snapshot
+        let params = TextGenerationParams(
+            model: Model(
+                modelId: "giant-output-test",
+                displayName: "Giant Output Test",
+                id: KotlinUuid.companion.random(),
+                type: ModelType.chat,
+                customHeaders: [],
+                customBodies: [],
+                inputModalities: [],
+                outputModalities: [],
+                abilities: [],
+                tools: Set<BuiltInTools>(),
+                contextWindowTokens: KotlinInt(value: 128_000),
+                providerOverwrite: nil
+            ),
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+        let giant = makeMessage(parts: [makeToolPart(toolName: "search_web", outputChars: 2_000_000)])
+        let userTail = UIMessage.companion.user(prompt: "继续")
+
+        let finalized = try IOSContextCompactionCoordinator.shared.finalizedMessagesForRequest(
+            [userTail, giant],
+            settings: settings,
+            params: params
+        )
+
+        let forceBudget = max(
+            Int(Double(128_000) * Double(settings.agentRuntime.contextCompaction.forceRatio)),
+            1
+        )
+        XCTAssertLessThanOrEqual(
+            IOSContextCompactionCoordinator.estimatedTokensForRequest(finalized),
+            forceBudget
+        )
+        let texts = finalized.flatMap(\.parts).compactMap { ($0 as? UIMessagePart.Tool)?.output }
+            .flatMap { $0.compactMap { ($0 as? UIMessagePart.Text)?.text } }
+            .joined(separator: "\n")
+        XCTAssertTrue(texts.contains("…[truncated"))
+    }
 }

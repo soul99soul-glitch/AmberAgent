@@ -101,12 +101,22 @@ final class SettingsStore {
         min(max(value, chatMaxToolResumeCountRange.lowerBound), chatMaxToolResumeCountRange.upperBound)
     }
 
+    /// P3-a: exec 纯求值工具总开关（默认关）。UserDefaults 独立 key 直读直写
+    /// （与 ExecutionSettingsView 的 @AppStorage 共用），不进 SettingsData blob，
+    /// 避免两处写同一 blob 互相覆盖。开时 exec 声明进桥输入 deferred 池
+    /// （tool_search 命中后可调用）；关时声明与执行路径零痕迹。
+    var execJavaScriptEnabled: Bool {
+        get { defaults.bool(forKey: Self.execJavaScriptEnabledKey) }
+        set { defaults.set(newValue, forKey: Self.execJavaScriptEnabledKey) }
+    }
+
     private static let storageKey = "app.amber.ios.settings"
     private static let apiKeyKeychainAccount = "app.amber.ios.apiKey"
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let storageKey: String
     @ObservationIgnored private let apiKeyStore: any SettingsAPIKeyStore
     private static let chatMaxToolResumeCountKey = IOSExecutionPreferenceKeys.chatMaxToolResumeCount
+    private static let execJavaScriptEnabledKey = IOSExecutionPreferenceKeys.execJavaScriptEnabled
 
     init(
         userDefaults: UserDefaults = .standard,

@@ -118,6 +118,7 @@ import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.files.FilesManager
 import app.amber.core.memory.extraction.MemoryExtractor
+import app.amber.core.memory.pollution.PollutedConversationStore
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.model.files
@@ -229,6 +230,7 @@ class ChatService(
     private val memoryExtractor: MemoryExtractor,
     private val pendingMessageStore: PendingMessageStore,
     private val userInputPreprocessor: UserInputPreprocessor,
+    private val pollutedConversationStore: PollutedConversationStore,
     private val agentRunner: app.amber.core.agent.runtime.AgentRunner? = null,
 ) : ConversationAccess {
     // 统一会话管理
@@ -1469,10 +1471,16 @@ class ChatService(
                 generateSuggestion(conversationId, finalConversation)
             }
             if (!finalConversation.hasPendingOrUnexecutedTools()) {
-                appScope.launch(Dispatchers.IO) {
-                    memoryExtractor.extractAfterConversation(
-                        loadFullConversationForGeneration(conversationId)
-                    )
+                // P2-a 抽取 gate：POLLUTED 会话（碰过外部上下文）暂停作为记忆抽取源；
+                // 语义边界——召回注入不受影响（召回侧不查此集合）。
+                if (pollutedConversationStore.contains(conversationId)) {
+                    Logging.log(TAG, "handleMessageComplete: skip memory extraction for polluted conversation $conversationId")
+                } else {
+                    appScope.launch(Dispatchers.IO) {
+                        memoryExtractor.extractAfterConversation(
+                            loadFullConversationForGeneration(conversationId)
+                        )
+                    }
                 }
             }
         }

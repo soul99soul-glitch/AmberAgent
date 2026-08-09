@@ -1,6 +1,7 @@
 package app.amber.core.storage.conversation
 
 import app.amber.core.model.Conversation
+import app.amber.core.model.ConversationMemoryMode
 import kotlinx.serialization.Serializable
 import kotlin.time.Instant
 import kotlin.uuid.Uuid
@@ -27,6 +28,8 @@ data class ConversationSummary(
     val updateAt: Instant,
     val isPinned: Boolean,
     val messageCount: Int,
+    /** P2-a：会话记忆模式。随 [Conversation.memoryMode] 派生，旧 index.json 缺字段解码为 ENABLED。 */
+    val memoryMode: ConversationMemoryMode = ConversationMemoryMode.ENABLED,
 )
 
 /**
@@ -74,6 +77,15 @@ interface ConversationStorageInterface {
     /** 仅当当前标题仍等于 [expectedTitle] 时更新标题；比较与写入必须处于同一锁内。 */
     @Throws(Throwable::class)
     suspend fun updateTitleIfCurrentTitleMatches(id: Uuid, title: String, expectedTitle: String): Boolean
+
+    /**
+     * 仅更新会话记忆模式（partial update，harness 置位 / 用户复位的专属写者）。
+     * 置 POLLUTED 只升不降且幂等（ENABLED/DISABLED→POLLUTED，POLLUTED→POLLUTED 空操作）；
+     * POLLUTED 的唯一出口是 ENABLED 复位（POLLUTED→ENABLED 允许；POLLUTED→DISABLED
+     * 被拒，值不变返回 false）；ENABLED↔DISABLED 互转保留（用户开关）。目标会话不存在返回 false。
+     */
+    @Throws(Throwable::class)
+    suspend fun updateMemoryMode(id: Uuid, memoryMode: ConversationMemoryMode): Boolean
 }
 
 /** 从完整 [Conversation] 派生摘要。供 save / index 重建复用。 */
@@ -85,4 +97,5 @@ fun Conversation.toSummary(): ConversationSummary = ConversationSummary(
     updateAt = updateAt,
     isPinned = isPinned,
     messageCount = messageNodes.size,
+    memoryMode = memoryMode,
 )

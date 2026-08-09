@@ -74,6 +74,18 @@ val agentRuntimeModule = module {
         InProcessAgentRunner(
             registry = get(),
             eventStore = get<RoomAgentEventStore>(),
+            // P1-e: 账本写失败不再静默吞掉——走用户可见错误通道（Android 侧
+            // ChatService.addError，对齐 iOS publishUserVisibleError）。惰性 get
+            // 避免 ChatService ↔ AgentRunner 构造期 DI 环（同 runScopeFactory 模式）。
+            onLedgerError = { runId, error ->
+                runCatching {
+                    get<app.amber.core.service.ChatService>().addError(
+                        error,
+                        conversationId = null,
+                        title = "运行状态记录失败",
+                    )
+                }
+            },
             runScopeFactory = { runId, input ->
                 if (input is ChatTurnInput) {
                     val projector: ChatEventProjector = get()

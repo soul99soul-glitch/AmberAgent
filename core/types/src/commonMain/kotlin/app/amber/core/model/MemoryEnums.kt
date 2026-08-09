@@ -28,6 +28,32 @@ enum class MemoryScope(val wireName: String) {
     }
 }
 
+/**
+ * 会话记忆模式（P2-a polluted 三态）。harness 在外部上下文（web 搜索/MCP 等）
+ * 成功进入会话时置 POLLUTED；该状态只影响「会话作为记忆抽取源」的资格，召回
+ * 注入不受影响。POLLUTED 只能由用户手动复位回 ENABLED，任何旧快照回写不得
+ * 自动降级。DISABLED 为预留态（当前无写者）。
+ *
+ * Wire names are STABLE — persisted in conversation JSON. Old JSON without the
+ * field decodes to [ENABLED] via the default parameter.
+ */
+@Serializable
+enum class ConversationMemoryMode(val wireName: String) {
+    @SerialName("enabled")
+    ENABLED("enabled"),
+
+    @SerialName("disabled")
+    DISABLED("disabled"),
+
+    @SerialName("polluted")
+    POLLUTED("polluted");
+
+    companion object {
+        fun fromWireName(value: String?): ConversationMemoryMode =
+            entries.firstOrNull { it.wireName == value } ?: ENABLED
+    }
+}
+
 @Serializable
 enum class MemoryKind(val wireName: String) {
     @SerialName("user")

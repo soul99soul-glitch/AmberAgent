@@ -21,5 +21,9 @@ kotlin {
             api(project(":feature:subagent:api"))
             api(libs.kotlinx.serialization.json)
         }
+
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
     }
 }

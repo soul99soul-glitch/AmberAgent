@@ -130,7 +130,10 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
     }
 
     /// The tool-declaration names must still include the expected core tools
-    /// after the params refactor (regression guard).
+    /// after the params refactor (regression guard). P0-a: the default config
+    /// declares >40 tools, so lazy mode hides the deferred set (wm_*, iSH,
+    /// skill management) behind tool_search on the first round; the resident
+    /// iOS core tools stay declared.
     func testToolDeclarationsStillIncludeCoreTools() {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
         let viewModel = ChatViewModel(
@@ -143,6 +146,8 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertTrue(names.contains("subagent_dispatch"))
         XCTAssertTrue(names.contains("model_council_run"))
         XCTAssertTrue(names.contains("ask_user"))
+        // P0-a: the discovery tool itself is always resident.
+        XCTAssertTrue(names.contains("tool_search"))
         // Workspace read AND write tools are always declared; the approval gate
         // and the injected workspace policy prompt (not keyword detection) stop
         // unsanctioned writes.
@@ -152,33 +157,18 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertTrue(names.contains("workspace_file_edit"))
         XCTAssertTrue(names.contains("workspace_file_move"))
         XCTAssertTrue(names.contains("workspace_artifact_delete"))
-        // iSH embedded execution (when compiled in) and external handoff are
-        // both always declared; the model picks per user intent and the
-        // approval gate guards execution.
-        XCTAssertTrue(names.contains("ish_handoff"))
-        XCTAssertEqual(
-            names.intersection(IOSEmbeddedIshToolCatalog.supportedToolNames),
-            IOSEmbeddedIshToolCatalog.supportedToolNames
-        )
-        XCTAssertTrue(names.contains("wm_tab_list"))
-        XCTAssertTrue(names.contains("wm_tab_new"))
-        XCTAssertTrue(names.contains("wm_tab_close"))
-        XCTAssertTrue(names.contains("wm_observe"))
-        XCTAssertTrue(names.contains("wm_visual_snapshot"))
-        XCTAssertTrue(names.contains("wm_screenshot"))
-        XCTAssertTrue(names.contains("wm_site_add"))
-        XCTAssertTrue(names.contains("wm_site_remove"))
-        XCTAssertTrue(names.contains("wm_click"))
-        XCTAssertTrue(names.contains("wm_tap"))
-        XCTAssertTrue(names.contains("wm_type"))
-        XCTAssertTrue(names.contains("wm_keys"))
-        XCTAssertTrue(names.contains("wm_scroll"))
-        XCTAssertTrue(names.contains("wm_select"))
-        XCTAssertTrue(names.contains("wm_find"))
-        XCTAssertTrue(names.contains("wm_wait"))
+        // P0-a: iSH execution/handoff and the WebMount catalog are deferred in
+        // the default (>40 tools) config — the model reaches them by calling
+        // tool_search with a concrete query, not on the first round.
+        XCTAssertFalse(names.contains("ish_handoff"))
+        XCTAssertTrue(names.isDisjoint(with: IOSEmbeddedIshToolCatalog.supportedToolNames))
+        XCTAssertTrue(names.isDisjoint(with: IOSWebMountToolCatalog.supportedToolNames))
     }
 
-    func testEmbeddedIshExecutionAndHandoffBothDeclaredForPlainIshRequest() {
+    /// P0-a: iSH tools are no longer first-round declarations in the default
+    /// heavy config — they are discovered via tool_search (which returns them
+    /// as expanded_tools for the next step).
+    func testIshToolsDeferredBehindToolSearchForPlainIshRequest() {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
@@ -189,14 +179,16 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         viewModel.sendMessage()
 
         let names = Set(viewModel.currentToolDeclarationNames())
-        XCTAssertTrue(names.contains("ish_handoff"))
-        XCTAssertEqual(
-            names.intersection(IOSEmbeddedIshToolCatalog.supportedToolNames),
-            IOSEmbeddedIshToolCatalog.supportedToolNames
-        )
+        XCTAssertTrue(names.contains("tool_search"))
+        XCTAssertFalse(names.contains("ish_handoff"))
+        XCTAssertTrue(names.isDisjoint(with: IOSEmbeddedIshToolCatalog.supportedToolNames))
+
+        let bridge = viewModel.toolExposureBridgeForTesting()
+        let payload = bridge?.executeToolSearch(argumentsJson: #"{"query":"ish_handoff","limit":1}"#) ?? ""
+        XCTAssertTrue(payload.contains("ish_handoff"))
     }
 
-    func testExternalIshHandoffCanBeRequestedExplicitly() {
+    func testExternalIshHandoffDiscoverableViaToolSearch() {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
             sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
@@ -207,11 +199,12 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         viewModel.sendMessage()
 
         let names = Set(viewModel.currentToolDeclarationNames())
-        XCTAssertTrue(names.contains("ish_handoff"))
-        XCTAssertEqual(
-            names.intersection(IOSEmbeddedIshToolCatalog.supportedToolNames),
-            IOSEmbeddedIshToolCatalog.supportedToolNames
-        )
+        XCTAssertTrue(names.contains("tool_search"))
+        XCTAssertFalse(names.contains("ish_handoff"))
+
+        let bridge = viewModel.toolExposureBridgeForTesting()
+        let payload = bridge?.executeToolSearch(argumentsJson: #"{"query":"ish_handoff","limit":1}"#) ?? ""
+        XCTAssertTrue(payload.contains("ish_handoff"))
     }
 
     /// Workspace write tools are always declared regardless of the latest user
@@ -301,6 +294,60 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertEqual(SettingsStore(userDefaults: defaults).chatMaxToolResumeCount, 9)
     }
 
+    // MARK: - P3-a: exec 工具开关（默认关，开时进 deferred 池）
+
+    func testExecSwitchDefaultsToOffAndPersists() {
+        let defaults = isolatedDefaults()
+        let store = SettingsStore(userDefaults: defaults)
+        XCTAssertFalse(store.execJavaScriptEnabled, "exec 开关默认关")
+
+        store.execJavaScriptEnabled = true
+        XCTAssertTrue(SettingsStore(userDefaults: defaults).execJavaScriptEnabled, "开关必须持久化")
+    }
+
+    func testExecZeroTraceInFullCatalogWhenSwitchOff() {
+        let defaults = isolatedDefaults()
+        let settingsStore = SettingsStore(userDefaults: defaults)
+        settingsStore.execJavaScriptEnabled = false
+        let viewModel = ChatViewModel(
+            settingsStore: settingsStore,
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: localToolExecutor(),
+            autoGenerateResponses: false
+        )
+        let names = Set(viewModel.currentToolDeclarationNames())
+        XCTAssertFalse(names.contains("exec"), "开关关时首轮声明不得含 exec")
+
+        // 零痕迹也覆盖桥输入全目录——tool_search 也搜不到 exec。
+        let bridge = viewModel.toolExposureBridgeForTesting()
+        let fullNames = bridge?.fullToolDeclarations().map(\.name) ?? []
+        XCTAssertFalse(fullNames.contains("exec"), "开关关时全目录也不得含 exec")
+    }
+
+    func testExecEntersDeferredPoolWhenSwitchOn() {
+        let defaults = isolatedDefaults()
+        let settingsStore = SettingsStore(userDefaults: defaults)
+        settingsStore.execJavaScriptEnabled = true
+        let viewModel = ChatViewModel(
+            settingsStore: settingsStore,
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: localToolExecutor(),
+            autoGenerateResponses: false
+        )
+        let names = Set(viewModel.currentToolDeclarationNames())
+        XCTAssertFalse(names.contains("exec"), "exec 非常驻：首轮声明不含（deferred 池）")
+
+        let bridge = viewModel.toolExposureBridgeForTesting()
+        let fullNames = bridge?.fullToolDeclarations().map(\.name) ?? []
+        XCTAssertTrue(fullNames.contains("exec"), "开关开时 exec 必须进桥输入全目录")
+
+        // tool_search 精确命中后，exec 进入下轮声明。
+        let payload = bridge?.executeToolSearch(argumentsJson: #"{"query":"exec","limit":1}"#) ?? ""
+        XCTAssertTrue(payload.contains("exec"), "tool_search 必须能命中 exec")
+        let visible = bridge?.visibleTools().map(\.name) ?? []
+        XCTAssertTrue(visible.contains("exec"), "命中后 exec 必须出现在下轮可见声明")
+    }
+
     func testLocalToolDeclarationsMatchCatalogAndCapabilityRegistry() {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -315,14 +362,23 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         let embeddedIshNames = IOSEmbeddedIshToolCatalog.supportedToolNames
         let webMountNames = IOSWebMountToolCatalog.supportedToolNames
 
+        // Workspace tools are resident and always declared; iSH + WebMount are
+        // deferred behind tool_search in the default (>40 tools) config.
         XCTAssertEqual(paramsNames.intersection(workspaceNames), workspaceNames)
-        XCTAssertEqual(paramsNames.intersection(ishNames), ishNames)
-        XCTAssertEqual(paramsNames.intersection(embeddedIshNames), embeddedIshNames)
-        XCTAssertEqual(paramsNames.intersection(webMountNames), webMountNames)
+        XCTAssertTrue(paramsNames.isDisjoint(with: ishNames))
+        XCTAssertTrue(paramsNames.isDisjoint(with: embeddedIshNames))
+        XCTAssertTrue(paramsNames.isDisjoint(with: webMountNames))
         XCTAssertEqual(executableNames.intersection(workspaceNames), workspaceNames)
         XCTAssertEqual(executableNames.intersection(ishNames), ishNames)
         XCTAssertEqual(executableNames.intersection(embeddedIshNames), embeddedIshNames)
         XCTAssertEqual(executableNames.intersection(webMountNames), webMountNames)
+
+        // tool_search is the discovery path for the deferred catalogs.
+        XCTAssertTrue(paramsNames.contains("tool_search"))
+        let bridge = viewModel.toolExposureBridgeForTesting()
+        let payload = bridge?.executeToolSearch(argumentsJson: #"{"query":"wm_tab_list","limit":1}"#) ?? ""
+        XCTAssertTrue(payload.contains("wm_tab_list"))
+        XCTAssertTrue(bridge?.visibleTools().map(\.name).contains("wm_tab_list") ?? false)
 
         viewModel.inputText = "创建 Workspace 文件 /workspace/check.md"
         viewModel.sendMessage()

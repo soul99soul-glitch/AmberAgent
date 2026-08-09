@@ -1,6 +1,23 @@
 import Foundation
 @preconcurrency import Shared
 
+/// 工具输出硬上限（对齐 exec 工具 `max_output_chars` 语义）。所有工具的文本输出
+/// 经统一收口：总输出超限时截断并追加可见标记；JSON 形态输出保形截断，不破坏
+/// ok/status/exit_code 等判定键。
+enum IOSToolOutputLimits {
+    /// 单次工具输出（search_web 格式化结果 / scrape_web JSON / 漏斗文本）总上限。
+    static let maxOutputChars = 12_000
+    /// 搜索结果单条 snippet 上限。
+    static let maxSnippetChars = 1_200
+    /// 与 IOSContextCompactionCoordinator.compactedToolOutputMarker 同文的压缩占位
+    /// 标记（压缩处理过的输出豁免收口截断，避免二次截断）。
+    static let compactedToolOutputMarker = "[tool output compacted]"
+    /// 截断标记：`\n…[truncated N chars]`
+    static func truncationMarker(droppedChars: Int) -> String {
+        "\n…[truncated \(droppedChars) chars]"
+    }
+}
+
 struct MemoryToolApprovalRequest: Identifiable, Equatable {
     let id: String
     let action: String
@@ -217,6 +234,31 @@ enum ChatToolCallParsing {
     }
 }
 
+/// P0-b: flattened `mcp__{server}__{tool}` declarations from the current MCP
+/// discovery directory, for ENABLED servers only. The caller (ChatViewModel)
+/// appends the result to the run exposure bridge's input tools — the bridge
+/// defers every `mcp__*` name behind tool_search, so MCP off / no discovered
+/// tools yields zero change. Cross-server sanitized name collisions keep the
+/// first occurrence (KMP `mcpExpandedToolDeclarations` dedups within a server).
+@MainActor
+func expandedMcpToolDeclarations(mcpManager: IOSMcpManager) -> [Tool] {
+    let enabledServerNames = Set(mcpManager.servers.filter(\.enabled).map(\.name))
+    var declarations: [Tool] = []
+    var seenNames = Set<String>()
+    for discovered in mcpManager.tools where enabledServerNames.contains(discovered.serverName) {
+        let spec = McpDiscoveredToolSpec(
+            name: discovered.tool.name,
+            description: discovered.tool.description,
+            inputSchemaJson: discovered.tool.inputSchema
+        )
+        for tool in ToolKt.mcpExpandedToolDeclarations(serverName: discovered.serverName, discovered: [spec]) {
+            guard seenNames.insert(tool.name).inserted else { continue }
+            declarations.append(tool)
+        }
+    }
+    return declarations
+}
+
 enum ChatToolApprovalRequestBuilder {
     static func search(
         for toolCall: UIMessagePart.Tool,
@@ -359,6 +401,25 @@ enum ChatToolApprovalRequestBuilder {
             serverName: server,
             toolName: tool,
             argumentsPreview: ChatToolCallParsing.truncatedMcpArguments(args["arguments"]),
+            reason: reason
+        )
+    }
+
+    /// P0-b: approval card for a flattened `mcp__{server}__{tool}` call. The
+    /// input carries the tool's OWN arguments (no `{server, tool, arguments}`
+    /// envelope), so the resolved directory target is passed in explicitly —
+    /// same display shape and gate as `mcp_call`.
+    static func expandedMcp(
+        for toolCall: UIMessagePart.Tool,
+        server: String,
+        tool: String,
+        reason: String
+    ) -> McpToolApprovalRequest {
+        McpToolApprovalRequest(
+            id: ChatToolCallParsing.requestId(for: toolCall),
+            serverName: server,
+            toolName: tool,
+            argumentsPreview: ChatToolCallParsing.truncatedMcpArguments(ChatToolCallParsing.jsonObject(toolCall.input)),
             reason: reason
         )
     }
@@ -653,13 +714,17 @@ enum ChatToolOutputFormatter {
         toolName: String,
         reason: String,
         denied: Bool = false,
-        cancelled: Bool = false
+        cancelled: Bool = false,
+        status: String? = nil
     ) -> String {
         var payload: [String: Any] = [
             "ok": false,
             "tool": toolName,
             "reason": reason
         ]
+        if let status {
+            payload["status"] = status
+        }
         if denied {
             payload["denied"] = true
             payload["policy"] = "user_denied"
@@ -698,6 +763,176 @@ enum ChatToolOutputFormatter {
             return "\(toolName) failed: tool_arguments_invalid: \(message)"
         }
         return text
+    }
+
+    /// 工具输出收口上限（对齐 exec 工具 `max_output_chars` 语义）：文本总量超
+    /// [maxChars] 时截断并追加可见标记。JSON 形态输出保形截断（保留所有键与
+    /// ok/status/exit_code 判定），普通文本保留头部、截断尾部。已带
+    /// `[tool output compacted]` 压缩标记的输出豁免，不二次截断。
+    static func cappedToolOutputParts(
+        _ parts: [UIMessagePart],
+        maxChars: Int = IOSToolOutputLimits.maxOutputChars
+    ) -> [UIMessagePart] {
+        let texts = parts.compactMap { $0 as? UIMessagePart.Text }
+        guard !texts.isEmpty else { return parts }
+        let totalChars = texts.reduce(0) { $0 + $1.text.count }
+        guard totalChars > maxChars else { return parts }
+        guard !partsContainsCompactedMarker(parts) else { return parts }
+        if texts.count == 1,
+           let only = texts.first,
+           let capped = cappedStructuredJSON(only.text, maxChars: maxChars) {
+            return [UIMessagePart.Text(text: capped, metadata: only.metadata)]
+        }
+        return cappedPlainTextParts(parts, maxChars: maxChars)
+    }
+
+    private static func partsContainsCompactedMarker(_ parts: [UIMessagePart]) -> Bool {
+        parts.contains { part in
+            guard let text = part as? UIMessagePart.Text else { return false }
+            return text.text.contains(IOSToolOutputLimits.compactedToolOutputMarker)
+        }
+    }
+
+    /// JSON 对象保形截断：从最长字符串值开始减半，保持所有键（含 ok/status/
+    /// exit_code 判定键）与结构，最终追加 truncated 标记。不可保形时返回 nil。
+    private static func cappedStructuredJSON(_ raw: String, maxChars: Int) -> String? {
+        guard let data = raw.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return nil
+        }
+        var working: [String: Any] = object
+        var string = jsonString(working)
+        guard string.count > maxChars else { return raw }
+        var truncated = false
+        var iterations = 0
+        while string.count > maxChars, iterations < 128 {
+            iterations += 1
+            // 地板 12：短于此的字符串值不再减半——判定键值（如 "timed_out"，9 字符）
+            // 被截断会让失败被误读为成功（checker 整体复核低级项）。
+            guard let longest = longestStringValue(in: working, minimumLength: 12),
+                  longest.value.count > 12 else { break }
+            let shorter = String(longest.value.prefix(max(longest.value.count / 2, 12)))
+            working = replacingStringValue(at: longest.path, in: working, with: shorter) as! [String: Any]
+            truncated = true
+            string = jsonString(working)
+        }
+        guard truncated else { return nil }
+        working["truncated"] = true
+        working["truncation_note"] = IOSToolOutputLimits.truncationMarker(
+            droppedChars: max(raw.count - string.count, 0)
+        )
+        string = jsonString(working)
+        if string.count > maxChars {
+            working["truncation_note"] = nil
+            string = jsonString(working)
+        }
+        return string
+    }
+
+    private static func cappedPlainTextParts(_ parts: [UIMessagePart], maxChars: Int) -> [UIMessagePart] {
+        var remaining = maxChars
+        var droppedChars = 0
+        var result: [UIMessagePart] = []
+        for part in parts {
+            guard let text = part as? UIMessagePart.Text else {
+                result.append(part)
+                continue
+            }
+            if remaining <= 0 {
+                droppedChars += text.text.count
+                continue
+            }
+            let keep = String(text.text.prefix(remaining))
+            droppedChars += text.text.count - keep.count
+            remaining -= keep.count
+            result.append(UIMessagePart.Text(text: keep, metadata: text.metadata))
+        }
+        guard droppedChars > 0, let lastTextIndex = result.indices.last(where: { result[$0] is UIMessagePart.Text }) else {
+            return result
+        }
+        let last = result[lastTextIndex] as! UIMessagePart.Text
+        let marked = UIMessagePart.Text(
+            text: last.text + IOSToolOutputLimits.truncationMarker(droppedChars: droppedChars),
+            metadata: last.metadata
+        )
+        result[lastTextIndex] = marked
+        return result
+    }
+
+    /// 树中（字典/数组递归）最长的字符串值及其路径。
+    private static func longestStringValue(
+        in value: Any,
+        minimumLength: Int,
+        path: [Any] = []
+    ) -> (path: [Any], value: String)? {
+        if let string = value as? String, string.count > minimumLength {
+            return (path, string)
+        }
+        if let dict = value as? [String: Any] {
+            var best: (path: [Any], value: String)?
+            for (key, child) in dict {
+                if let candidate = longestStringValue(in: child, minimumLength: minimumLength, path: path + [key]),
+                   candidate.value.count > (best?.value.count ?? 0) {
+                    best = candidate
+                }
+            }
+            return best
+        }
+        if let array = value as? [Any] {
+            var best: (path: [Any], value: String)?
+            for (index, child) in array.enumerated() {
+                if let candidate = longestStringValue(in: child, minimumLength: minimumLength, path: path + [index]),
+                   candidate.value.count > (best?.value.count ?? 0) {
+                    best = candidate
+                }
+            }
+            return best
+        }
+        return nil
+    }
+
+    /// 按路径（String 键 / Int 下标）替换树中的字符串值。
+    private static func replacingStringValue(
+        at path: [Any],
+        index: Int = 0,
+        in value: Any,
+        with replacement: String
+    ) -> Any {
+        guard index < path.count else { return value }
+        let key = path[index]
+        if let dict = value as? [String: Any], let keyString = key as? String {
+            var next = dict
+            if index == path.count - 1 {
+                next[keyString] = replacement
+            } else if let child = next[keyString] {
+                next[keyString] = replacingStringValue(at: path, index: index + 1, in: child, with: replacement)
+            }
+            return next
+        }
+        if let array = value as? [Any], let arrayIndex = key as? Int {
+            var next = array
+            if index == path.count - 1 {
+                next[arrayIndex] = replacement
+            } else if arrayIndex < next.count {
+                next[arrayIndex] = replacingStringValue(
+                    at: path,
+                    index: index + 1,
+                    in: next[arrayIndex],
+                    with: replacement
+                )
+            }
+            return next
+        }
+        return value
+    }
+
+    private static func jsonString(_ object: [String: Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
     }
 
     nonisolated static func failureReason(from output: [UIMessagePart]) -> String? {

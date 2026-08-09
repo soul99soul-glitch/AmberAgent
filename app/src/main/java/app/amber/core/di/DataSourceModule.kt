@@ -5,6 +5,8 @@ import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import android.content.Context
 import app.amber.core.agent.store.AgentRuntimeDatabase
+import app.amber.core.agent.store.MIGRATION_1_2
+import app.amber.core.agent.store.MIGRATION_2_3
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.http.HttpHeaders
@@ -177,6 +179,7 @@ val dataSourceModule = module {
 
     single {
         Room.databaseBuilder(get<Context>(), AgentRuntimeDatabase::class.java, "agent_runtime")
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
     }
 
@@ -347,6 +350,7 @@ val dataSourceModule = module {
             aiLoggingManager = get(),
             conversationContextEngine = get(),
             toolDispatcher = get(),
+            pollutedConversationStore = get(),
         )
     }
     single<Generator> { get<GenerationHandler>() }

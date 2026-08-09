@@ -19,6 +19,8 @@ data class Conversation(
     val chatSuggestions: List<String> = emptyList(),
     val isPinned: Boolean = false,
     val autoApproveToolCalls: Boolean = false,
+    /** P2-a：会话记忆模式。harness 置位、用户复位；旧 JSON 缺字段解码为 ENABLED。 */
+    val memoryMode: ConversationMemoryMode = ConversationMemoryMode.ENABLED,
     @Serializable(with = InstantSerializer::class)
     val createAt: Instant = Clock.System.now(),
     @Serializable(with = InstantSerializer::class)

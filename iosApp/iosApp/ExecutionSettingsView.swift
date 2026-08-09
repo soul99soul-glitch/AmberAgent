@@ -10,6 +10,8 @@ struct ExecutionSettingsView: View {
     @AppStorage(IOSExecutionPreferenceKeys.liveActivity) private var liveActivity = true
     @AppStorage(IOSExecutionPreferenceKeys.chatMaxToolResumeCount)
     private var chatMaxToolResumeCount = SettingsStore.defaultChatMaxToolResumeCount
+    @AppStorage(IOSExecutionPreferenceKeys.execJavaScriptEnabled)
+    private var execJavaScriptEnabled = false
     @State private var taskStore = IOSAdvancedTaskStore.shared
 
     var body: some View {
@@ -21,6 +23,7 @@ struct ExecutionSettingsView: View {
                     header
                     runSection
                     toolLoopSection
+                    execJavaScriptSection
                     recentTasksSection
                     liveActivitySection
                 }
@@ -100,6 +103,22 @@ struct ExecutionSettingsView: View {
                 .frame(minHeight: 58)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private var execJavaScriptSection: some View {
+        VStack(spacing: 0) {
+            AmberSectionLabel(text: "脚本执行")
+            AmberFormGroup {
+                ExecutionToggleRow(
+                    systemImage: "chevron.left.forwardslash.chevron.right",
+                    title: "JavaScript 沙箱执行",
+                    subtitle: "允许模型用 exec 工具运行隔离的 JavaScript（默认关闭；无网络、无文件访问）",
+                    isOn: execJavaScriptEnabled
+                ) {
+                    execJavaScriptEnabled.toggle()
+                }
             }
         }
     }

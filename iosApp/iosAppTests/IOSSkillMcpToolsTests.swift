@@ -162,6 +162,10 @@ final class IOSSkillMcpToolsTests: XCTestCase {
         XCTAssertTrue(mcpStore.servers.contains(where: { $0.name == "docs" }))
     }
 
+    /// P0-a: the chat declares the resident skill/MCP surface up front and
+    /// defers the mutating/management tools (skill_validate/import/enable/
+    /// disable, mcp_test, mcp_import_from_skill) behind tool_search in the
+    /// default (>40 tools) config.
     func testChatDeclaresSkillAndMcpManagementTools() {
         let viewModel = ChatViewModel(
             settingsStore: SettingsStore(),
@@ -174,11 +178,23 @@ final class IOSSkillMcpToolsTests: XCTestCase {
         )
         let names = Set(viewModel.currentToolDeclarationNames())
         for tool in [
-            "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable",
-            "mcp_list", "mcp_test", "mcp_describe_tool", "mcp_import_from_skill", "mcp_call",
+            "skills_list", "use_skill",
+            "mcp_list", "mcp_describe_tool", "mcp_call",
         ] {
             XCTAssertTrue(names.contains(tool), "\(tool) should be declared")
         }
+        for tool in [
+            "skill_validate", "skill_import", "skill_enable", "skill_disable",
+            "mcp_test", "mcp_import_from_skill",
+        ] {
+            XCTAssertFalse(names.contains(tool), "\(tool) should be deferred behind tool_search")
+        }
+        XCTAssertTrue(names.contains("tool_search"))
+
+        // The deferred set is reachable through tool_search (next-step exposure).
+        let bridge = viewModel.toolExposureBridgeForTesting()
+        let payload = bridge?.executeToolSearch(argumentsJson: #"{"query":"skill_import","limit":1}"#) ?? ""
+        XCTAssertTrue(payload.contains("skill_import"))
 
         viewModel.inputText = "帮我创建一个本地 skill，并连接 MCP 服务器"
         viewModel.sendMessage()

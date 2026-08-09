@@ -78,10 +78,27 @@ private struct PendingAssistantRegeneration {
 enum ChatComposerSendBlockReason: Equatable {
     case emptyInput
     case generationActive
+    case steerQueueFull
     case attachingSelectedFile
     case recognizingImages
     case pendingApproval
+    /// P1-e: 当前会话是编排子线程（存在 thread_edge 即只读，含 interrupt 取消/
+    /// 已完成线程）。UI 只消费 disabled 态；文案由 VM 提供（零 UI 改动）。
+    case orchestratedThread
     case configuration(ChatConfigurationIssue)
+
+    /// P1-e: 用户可见文案（现有 UI 只按 `== nil` 禁用发送键；文案留给后续
+    /// UI 分支/语音播报，测试断言使用）。
+    var userVisibleMessage: String? {
+        switch self {
+        case .orchestratedThread:
+            return "此会话由父线程编排，暂不支持直接输入"
+        case .configuration(let issue):
+            return issue.message
+        default:
+            return nil
+        }
+    }
 }
 
 @MainActor
@@ -131,6 +148,19 @@ final class ChatViewModel {
     var configurationError: String?
     var contextCompactState: ChatContextCompactState = .idle
 
+    // MARK: - Steer 队列（P1-a）
+
+    /// 生成激活期间排队、待折入下一轮模型请求的 user 消息（v1 仅文本 STEER）。
+    /// 内存队列唯一 owner 是本 ViewModel；`ChatGenerationCoordinator` 在工具循环
+    /// 边界经 bindings 消费，不持有第二份队列。切会话由 `reloadFromStore()` 重灌。
+    private(set) var steerQueue: [IOSSteerQueueEntry] = []
+    /// 磁盘镜像（Documents/steer-queue/{conversationId}.json），进程死亡后队列不丢。
+    @ObservationIgnored private let steerQueueStore: IOSSteerQueueStore
+    /// P1-b: mailbox 信封访问层（Room 即真相，无内存态；drain 事务化 exactly-once）。
+    @ObservationIgnored private let mailboxStore: IOSMailboxStore
+    /// P1-d: mailbox 活动广播（wait_agent 事件源；steer 打断 wait 的信号点）。
+    @ObservationIgnored private let mailboxActivityCenter: IOSMailboxActivityCenter
+
     /// 顶部活动岛「等待确认」聚合信号：与 sendMessage 的 pending 门禁集合保持一致。
     var hasPendingUserGate: Bool {
         pendingMemoryApproval != nil || pendingSearchApproval != nil ||
@@ -156,6 +186,31 @@ final class ChatViewModel {
     /// 留作快速访问；切换会话后由 reloadFromStore() 刷新。
     var currentConversationId: KotlinUuid? {
         conversationStore?.currentConversation?.id
+    }
+
+    // MARK: - P1-e 编排子线程只读缓存
+
+    /// 当前会话是否编排子线程（存在 thread_edge）。composerSendBlockReason 每条
+    /// keystroke 都读，必须缓存；会话切换时由 reloadFromStore() 异步刷新（经
+    /// 注入的编排服务查一次 Room）。测试可 `await orchestratedStatusRefreshTask?.value`。
+    @ObservationIgnored private(set) var currentConversationIsOrchestratedChild = false
+    @ObservationIgnored private(set) var orchestratedStatusRefreshTask: Task<Void, Never>?
+
+    /// 刷新当前会话的子线程判定（Room 查询一次）。reloadFromStore 与测试共用。
+    func refreshCurrentConversationOrchestratedStatus() async {
+        guard let conversationId = currentConversationId else {
+            currentConversationIsOrchestratedChild = false
+            return
+        }
+        currentConversationIsOrchestratedChild = await orchestrationToolService.isOrchestratedChild(
+            conversationId: conversationId
+        )
+    }
+
+    /// P1-e: 供会话列表徽标/只读标识查询（ConversationsView 在用户 WIP 中，本轮
+    /// 不加视觉徽标；此查询留待后续 UI 接线）。
+    func isOrchestratedChild(conversationId: KotlinUuid) async -> Bool {
+        await orchestrationToolService.isOrchestratedChild(conversationId: conversationId)
     }
 
     var contextSnapshot: ChatContextSnapshot {
@@ -253,7 +308,6 @@ final class ChatViewModel {
 #if DEBUG
     var generationActiveOverrideForTesting: ((KotlinUuid?) -> Bool)?
 #endif
-
     var isGenerationActive: Bool {
 #if DEBUG
         if generationActiveOverrideForTesting?(currentConversationId) == true { return true }
@@ -387,7 +441,20 @@ final class ChatViewModel {
         } else {
             canChangeConversation = handoffGenerationToBackgroundIfNeeded()
         }
-        guard canChangeConversation else { return false }
+        guard canChangeConversation else {
+            // 点按静默无效的收口：交接被拒（生成中且当前在途工具不满足交接条件）时，
+            // 把原因送到既有 app-level 用户可见错误通道（ChatView 已绑定
+            // conversationStore.lastUserVisibleError 的 alert）。首页列表自身的
+            // 渲染（homeContinueError）在 UI 层，这里只发布数据，不改 UI 文件。
+            conversationStore?.publishUserVisibleError(
+                IOSUserVisibleError(
+                    title: "暂时无法切换会话",
+                    message: "当前会话仍在生成中，正在执行的工具完成后才能切换。",
+                    severity: .warning
+                )
+            )
+            return false
+        }
 
         let changesConversation: Bool
         if let targetConversationId {
@@ -427,6 +494,11 @@ final class ChatViewModel {
                 == String(describing: conversationId) {
                 cancelGeneration()
             }
+        }
+        // P1-a: 删除会话时清掉其队列 sidecar，避免孤儿条目。
+        steerQueueStore.removeAll(for: conversationId)
+        if currentConversationId.map({ String(describing: $0) }) == String(describing: conversationId) {
+            steerQueue = []
         }
         IOSChatBackgroundGenerationCoordinator.shared.cancelJobs(conversationId: conversationId)
     }
@@ -482,7 +554,23 @@ final class ChatViewModel {
     func composerSendBlockReason(for text: String) -> ChatComposerSendBlockReason? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !pendingImages.isEmpty else { return .emptyInput }
-        guard !isGenerationActive else { return .generationActive }
+        // P1-e: 编排子线程只读（存在 thread_edge 即拦截，含生成中/已取消/已完成；
+        // 缓存判定在会话切换时刷新，不逐 keystroke 查 Room）。已知取舍：切换后到
+        // 刷新完成前的毫秒级窗口内按缓存（可能为 false）放行——接受该窗口（checker
+        // 评级低），未决期拦截的方案会让 Room 查询挂起/变慢时 composer 永久死锁，弃用。
+        if currentConversationIsOrchestratedChild {
+            return .orchestratedThread
+        }
+        if isGenerationActive {
+            // P1-a: 生成中文本发送不再拦截，改为入队（STEER）。v1 队列条目仅文本：
+            // 带图片/待发文件时保持原拦截（不静默丢附件）；队列满时回到禁用态。
+            if pendingImages.isEmpty, pendingSelectedFilePreview == nil {
+                return steerQueue.count >= IOSSteerQueueStore.maxPendingUserMessages
+                    ? .steerQueueFull
+                    : nil
+            }
+            return .generationActive
+        }
         guard !isAttachingSelectedFile else { return .attachingSelectedFile }
         guard !isRecognizingImages else { return .recognizingImages }
         guard !hasPendingUserGate else { return .pendingApproval }
@@ -504,11 +592,7 @@ final class ChatViewModel {
     private let auxiliaryTextProvider: any IOSAgentTextProvider
     private let liveActivityController: AgentLiveActivityController
     @ObservationIgnored private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
-    @ObservationIgnored private lazy var mcpManager: IOSMcpManager = {
-        // Build from the shared config store (same UserDefaults key as
-        // McpServersView) so callTool reaches the same configured servers.
-        IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared)
-    }()
+    @ObservationIgnored private let mcpManager: IOSMcpManager
     @ObservationIgnored private lazy var generationCoordinator = makeGenerationCoordinator()
     private var attachRequestId: UUID?
 
@@ -536,6 +620,99 @@ final class ChatViewModel {
     private var pendingAssistantRegeneration: PendingAssistantRegeneration?
     @ObservationIgnored private var suggestionRequestToken: UUID?
     @ObservationIgnored private var suggestionGenerationTask: Task<Void, Never>?
+    /// P0-a: the bridge built by the latest makeTextGenerationParams() assembly;
+    /// generateResponse hands it to the run coordinator, which owns it for the
+    /// whole run (run-level reuse is what makes tool_search hits callable on
+    /// the next round). Rebuilt on every message send — a new run gets a new
+    /// bridge with reset exposure.
+    @ObservationIgnored private var lastAssembledToolExposureBridge: IosToolExposureBridge?
+    /// P1-c: 线程编排工具服务（spawn/list/interrupt + FINAL_ANSWER 回传）。
+    /// 测试可注入隔离 DAO 的服务实例（照 mailboxStore 注入先例）；否则用默认
+    /// 懒实例（共享 Room + 当前 VM 依赖）。
+    @ObservationIgnored private let injectedOrchestrationToolService: IOSThreadOrchestrationToolService?
+    @ObservationIgnored private lazy var defaultOrchestrationToolService: IOSThreadOrchestrationToolService = {
+        let runtimeDao = db.agentRuntimeDao()
+        let mailboxDao = db.mailboxDao()
+        let threadEdgeDao = db.threadEdgeDao()
+        return IOSThreadOrchestrationToolService(
+            conversationStoreProvider: { [weak self] in self?.conversationStore },
+            mailboxDaoProvider: { mailboxDao },
+            threadEdgeDaoProvider: { threadEdgeDao },
+            agentRuntimeDaoProvider: { runtimeDao },
+            backgroundCoordinator: IOSChatBackgroundGenerationCoordinator.shared,
+            makeBackgroundToolRuntime: { [weak self] in
+                guard let self else {
+                    // self 已释放时无编排服务可注入（服务本体随 VM 析构），
+                    // 显式 nil 保证构造点不静默缺参；该分支只在 VM 销毁后才可达。
+                    return ChatToolRuntime(
+                        settingsStore: SettingsStore(),
+                        sharedSettings: IOSSharedSettingsStore(),
+                        localToolExecutor: nil,
+                        searchTransport: IOSURLSessionSearchHTTPTransport(),
+                        mcpManager: IOSMcpManager(sharedSettings: IOSSharedSettingsStore(), configStore: .shared),
+                        orchestrationToolService: nil
+                    )
+                }
+                return self.makeBackgroundToolRuntime()
+            },
+            currentConversationId: { [weak self] in self?.currentConversationId },
+            foregroundActiveRunId: { [weak self] childHex in
+                self?.generationCoordinator.activeForegroundRunId(matchingHex: childHex)
+            },
+            cancelForegroundRun: { [weak self] runId in
+                self?.generationCoordinator.cancel(runId: runId) ?? false
+            },
+            // P1-e: 前台活跃 run 全局 0/1（任意会话；与 P1-c activeForegroundRunId
+            // 同一来源 isRunning）。
+            foregroundRunActive: { [weak self] in
+                self?.generationCoordinator.isRunning ?? false
+            },
+            // M4: role_assistant_id 存在性校验——对照当前设置快照的 assistants。
+            roleAssistantExists: { [weak self] assistantId in
+                guard let self else { return false }
+                return self.sharedSettings.snapshot.assistants.contains { $0.id == assistantId }
+            }
+        )
+    }()
+    private var orchestrationToolService: IOSThreadOrchestrationToolService {
+        injectedOrchestrationToolService ?? defaultOrchestrationToolService
+    }
+
+    /// P1-c: 后台 job 工具 runtime 构造（spawnAgent 的 `makeBackgroundToolRuntime`
+    /// 闭包与测试缝共用同一构造点）。子线程在后台引擎里同样注册三编排工具，
+    /// 必须注入本 VM 的编排服务，否则孙线程 spawn 恒报「不可用」。
+    private func makeBackgroundToolRuntime() -> ChatToolRuntime {
+        ChatToolRuntime(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettings,
+            localToolExecutor: localToolExecutor,
+            searchTransport: searchTransport,
+            mcpManager: mcpManager,
+            orchestrationToolService: orchestrationToolService,
+            memoryPollutionMarker: memoryPollutionMarker,
+            conversationStoreProvider: { [weak self] in self?.conversationStore }
+        )
+    }
+
+    /// P2-a: harness 拥有的记忆污染置位接线。run 的工具输出收口处判定成功后回调
+    /// 这里，把 run 锚定会话写 POLLUTED（KMP 原子 RMW 只升不降）。fire-and-forget：
+    /// 失败只记日志，不阻塞工具结果；store 未接好时静默跳过（不会标记到别的会话）。
+    private var memoryPollutionMarker: ((KotlinUuid, String) -> Void)? {
+        { [weak self] conversationId, _ in
+            guard let self else { return }
+            Task { @MainActor [weak self] in
+                guard let self, let store = self.conversationStore else { return }
+                _ = await store.markConversationMemoryPolluted(conversationId)
+            }
+        }
+    }
+
+#if DEBUG
+    /// 测试缝：直接取真实闭包路径构造的后台工具 runtime（不驱动 spawn 全链路）。
+    func makeBackgroundToolRuntimeForTesting() -> ChatToolRuntime {
+        makeBackgroundToolRuntime()
+    }
+#endif
 
     // MARK: - Init
 
@@ -548,7 +725,12 @@ final class ChatViewModel {
         workspaceStore: IOSWorkspaceStore? = nil,
         autoGenerateResponses: Bool = true,
         auxiliaryTextProvider: any IOSAgentTextProvider = OpenAIKmpProviderAdapter(),
-        liveActivityController: AgentLiveActivityController? = nil
+        liveActivityController: AgentLiveActivityController? = nil,
+        mcpManager: IOSMcpManager? = nil,
+        steerQueueStore: IOSSteerQueueStore? = nil,
+        mailboxStore: IOSMailboxStore? = nil,
+        orchestrationToolService: IOSThreadOrchestrationToolService? = nil,
+        mailboxActivityCenter: IOSMailboxActivityCenter? = nil
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
@@ -559,6 +741,27 @@ final class ChatViewModel {
         self.autoGenerateResponses = autoGenerateResponses
         self.auxiliaryTextProvider = auxiliaryTextProvider
         self.liveActivityController = liveActivityController ?? .shared
+        // Build from the shared config store (same UserDefaults key as
+        // McpServersView) so callTool reaches the same configured servers;
+        // tests inject a manager with a deterministic directory instead.
+        self.mcpManager = mcpManager ?? IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared)
+        self.steerQueueStore = steerQueueStore ?? IOSSteerQueueStore()
+        self.mailboxStore = mailboxStore ?? IOSMailboxStore()
+        self.injectedOrchestrationToolService = orchestrationToolService
+        // P1-d: mailbox 活动广播（wait_agent 事件源）。测试注入独立实例隔离信号；
+        // 生产与编排服务共用 `.shared`。
+        self.mailboxActivityCenter = mailboxActivityCenter ?? .shared
+        // P1-c: 后台 job 终态（FINAL_ANSWER）由本 VM 的编排服务回传父线程。
+        // 单例协调器在 App 内只有一份 job 面；VM 重建时后注册者生效（App 实际
+        // 只有单个 VM，测试不驱动真实后台 job）。
+        IOSChatBackgroundGenerationCoordinator.shared.onRunTerminal = {
+            [weak self] conversationId, runId, finalMessages in
+            await self?.orchestrationToolService.notifyRunTerminal(
+                conversationId: conversationId,
+                runId: runId,
+                finalMessages: finalMessages
+            )
+        }
     }
 
     private func makeGenerationCoordinator() -> ChatGenerationCoordinator {
@@ -570,7 +773,10 @@ final class ChatViewModel {
                 searchTransport: searchTransport,
                 liveActivityController: liveActivityController,
                 autoGenerateResponses: autoGenerateResponses,
-                mcpManager: mcpManager
+                mcpManager: mcpManager,
+                orchestrationToolService: orchestrationToolService,
+                memoryPollutionMarker: memoryPollutionMarker,
+                conversationStoreProvider: { [weak self] in self?.conversationStore }
             ),
             bindings: ChatGenerationBindings(
                 getMessages: { [weak self] in
@@ -671,11 +877,27 @@ final class ChatViewModel {
                 memoryRecordIdsForRuntimeContext: { [weak self] messages in
                     self?.memoryRecordIdsForRuntimeContext(messages) ?? []
                 },
-                recordMemoryUsage: { [weak self] ids in
-                    self?.recordMemoryUsage(ids)
+                recordMemoryUsage: { [weak self] ids, force in
+                    self?.recordMemoryUsage(ids, force: force)
                 },
                 generationSucceeded: { [weak self] in
                     self?.onGenerationCompleted()
+                },
+                drainSteerQueue: { [weak self] conversationId in
+                    self?.drainSteerQueue(conversationId: conversationId) ?? []
+                },
+                drainMailbox: { [weak self] conversationId in
+                    await self?.drainMailbox(conversationId: conversationId) ?? []
+                },
+                restoreSteerQueueLeftover: { [weak self] conversationId in
+                    self?.restoreSteerQueueLeftoverToComposer(for: conversationId)
+                },
+                onRunTerminal: { [weak self] conversationId, runId, finalMessages in
+                    await self?.orchestrationToolService.notifyRunTerminal(
+                        conversationId: conversationId,
+                        runId: runId,
+                        finalMessages: finalMessages
+                    )
                 }
             )
         )
@@ -706,8 +928,15 @@ final class ChatViewModel {
         let storedMessages = store.currentMessages
         messages = messagesByTerminatingStaleSearches(in: storedMessages, store: store) ?? storedMessages
         contextCompactState = .idle
+        // P1-a: 队列随会话切换重灌（冷启动恢复：只进队列 UI，不自动发送）。
+        steerQueue = steerQueueStore.load(conversationId: currentConversationId)
         bumpMessageRevision(reason: reason)
         chatSuggestions = []
+        // P1-e: 会话切换时异步刷新子线程只读缓存（Room 一次查询；composer 判定
+        // 在切换后立即生效）。
+        orchestratedStatusRefreshTask = Task { @MainActor [weak self] in
+            await self?.refreshCurrentConversationOrchestratedStatus()
+        }
     }
 
     private func messagesByTerminatingStaleSearches(
@@ -1051,6 +1280,11 @@ final class ChatViewModel {
                 break
             }
         }
+        // P1-a: 生成激活期间发送 = 入队（不直接发、不 preempt；请求已在线上，
+        // 队列在工具循环边界折入下一轮）。图片路径已被 block reason 拦截，到不了这里。
+        if isGenerationActive {
+            return enqueueSteerMessage(text: text)
+        }
         configurationError = nil
         sendUserMessage(text: text, images: pendingImages)
         return true
@@ -1113,6 +1347,128 @@ final class ChatViewModel {
         let (digest, conversationId, _) = appendUserMessage(text: text, images: images)
         guard autoGenerateResponses else { return }
         generateResponse(inputDigest: digest, conversationId: conversationId)
+    }
+
+    // MARK: - Steer 队列（P1-a）
+
+    /// 生成激活期间把 composer 文本入队（v1 仅文本 STEER；队列满返回 false）。
+    /// 与 appendUserMessage 的输入收尾一致：清空输入框、建议与附件预览。
+    @discardableResult
+    func enqueueSteerMessage(text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard isGenerationActive else { return false }
+        guard steerQueue.count < IOSSteerQueueStore.maxPendingUserMessages else { return false }
+        steerQueue.append(IOSSteerQueueEntry(
+            id: UUID().uuidString,
+            text: trimmed,
+            createdAt: Date()
+        ))
+        persistSteerQueue()
+        // P1-d: steer 入队即打断同会话的 wait_agent（信号在入队成功后发射；
+        // wait_agent 事件后复查 mailbox 为空 → 返回 "Wait interrupted by new input."）。
+        if let conversationId = currentConversationId {
+            let center = mailboxActivityCenter
+            let hex = conversationId.toHexDashString()
+            Task { @MainActor in
+                await center.signal(conversationIdHex: hex)
+            }
+        }
+        inputText = ""
+        invalidateSuggestionRequest()
+        chatSuggestions = []
+        pendingSelectedFilePreview = nil
+        clearPendingImages()
+        selectedFileContextError = nil
+        return true
+    }
+
+    /// 撤销一条排队消息；同步更新 sidecar（exactly once）。
+    func removeSteerMessage(id: String) {
+        guard steerQueue.contains(where: { $0.id == id }) else { return }
+        steerQueue.removeAll { $0.id == id }
+        persistSteerQueue()
+    }
+
+    /// 工具循环边界消费：出队全部排队消息 → 作为真实 user 消息上屏并按既有路径
+    /// 持久化进会话，返回生成的消息供下一轮 upload 折入。队列为空或 run 不属于
+    /// 当前会话时零操作（不同会话的队列不串）。
+    @discardableResult
+    func drainSteerQueue(conversationId: KotlinUuid?) -> [UIMessage] {
+        guard !steerQueue.isEmpty else { return [] }
+        guard isCurrentConversation(conversationId) else { return [] }
+        let entries = steerQueue
+        steerQueue = []
+        persistSteerQueue()
+        let runConversationId = currentConversationId
+        let drained = entries.map { makeUserMessage(prompt: $0.text, images: []) }
+        // 与 appendUserMessage 同款上屏：真实 user 消息进 timeline（后续会话落盘
+        // 与工具轮次持久化共用既有 persistMessages 路径）。
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+            messages.append(contentsOf: drained)
+            bumpMessageRevision(reason: .userAppend)
+        }
+        invalidateSuggestionRequest()
+        chatSuggestions = []
+        selectedFileContextError = nil
+        Task { @MainActor [weak self] in
+            _ = await self?.persistMessages(conversationId: runConversationId)
+        }
+        return drained
+    }
+
+    /// run 终态恢复：队列 leftover 按顺序拼接回 composer 文本（可见、不静默丢、
+    /// 不自动发起新生成）。只恢复属于当前会话的队列。
+    func restoreSteerQueueLeftoverToComposer(for conversationId: KotlinUuid?) {
+        guard !steerQueue.isEmpty else { return }
+        guard isCurrentConversation(conversationId) else { return }
+        let entries = steerQueue
+        steerQueue = []
+        persistSteerQueue()
+        let joined = entries.map(\.text).joined(separator: "\n")
+        let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        inputText = current.isEmpty ? joined : current + "\n" + joined
+    }
+
+    // MARK: - Mailbox 消费（P1-b）
+
+    /// 工具循环/新 run 首轮边界消费 mailbox：Room 事务 drain 未投递信封（exactly-once，
+    /// 二次调用为空），渲染为带结构头的真实 user 消息上屏并按既有路径持久化进会话，
+    /// 返回生成的消息供下一轮 upload 折入。与 steer 不同：未消费信封不回 composer
+    /// （留在 Room 等下次 run），本阶段不写 UI。队列为空或 run 不属于当前会话时零操作。
+    @discardableResult
+    func drainMailbox(conversationId: KotlinUuid?) async -> [UIMessage] {
+        guard isCurrentConversation(conversationId) else { return [] }
+        let envelopes = await mailboxStore.drainPending(forConversationId: conversationId)
+        guard !envelopes.isEmpty else { return [] }
+        let runConversationId = currentConversationId
+        let drained = envelopes.map { envelope in
+            makeUserMessage(
+                prompt: MailboxEnvelopeKt.renderMailboxEnvelopeToUserText(
+                    authorThreadId: envelope.authorThreadId,
+                    type: envelope.type,
+                    payload: envelope.payload
+                ),
+                images: []
+            )
+        }
+        // 与 drainSteerQueue 同款上屏：真实 user 消息进 timeline（后续会话落盘
+        // 与工具轮次持久化共用既有 persistMessages 路径）。
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+            messages.append(contentsOf: drained)
+            bumpMessageRevision(reason: .userAppend)
+        }
+        invalidateSuggestionRequest()
+        chatSuggestions = []
+        selectedFileContextError = nil
+        Task { @MainActor [weak self] in
+            _ = await self?.persistMessages(conversationId: runConversationId)
+        }
+        return drained
+    }
+
+    private func persistSteerQueue() {
+        steerQueueStore.persist(steerQueue, for: currentConversationId)
     }
 
     private static func imageEditToolInput(
@@ -2057,7 +2413,8 @@ final class ChatViewModel {
     ///   retention is surfaced via selectVariant for nodes that already have
     ///   multiple siblings).
     func regenerate(atMessageIndex index: Int) {
-        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive else { return }
+        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive,
+              !currentConversationIsOrchestratedChild else { return }
         guard let store = conversationStore,
               let conversation = store.currentConversation,
               index >= 0, index < conversation.messageNodes.count else { return }
@@ -2104,7 +2461,8 @@ final class ChatViewModel {
     /// text replaces the selected variant; the conversation is truncated after
     /// the edited user turn (Android's editMessage = append-variant + re-run).
     func editMessage(atMessageIndex index: Int, newText: String) {
-        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive else { return }
+        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive,
+              !currentConversationIsOrchestratedChild else { return }
         let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard let store = conversationStore,
@@ -2135,7 +2493,8 @@ final class ChatViewModel {
 
     /// Delete a single message (and its node). No generation.
     func deleteMessage(atMessageIndex index: Int) {
-        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive, let store = conversationStore else { return }
+        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive,
+              !currentConversationIsOrchestratedChild, let store = conversationStore else { return }
         Task { @MainActor in
             await store.deleteMessage(messageIndex: index)
             if let updated = store.currentConversation {
@@ -2148,7 +2507,8 @@ final class ChatViewModel {
 
     /// Switch the visible variant of a node (no generation).
     func selectVariant(messageIndex: Int, variantIndex: Int) {
-        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive, let store = conversationStore else { return }
+        guard !rejectVisionRecognitionMutationIfNeeded(), !isGenerationActive,
+              !currentConversationIsOrchestratedChild, let store = conversationStore else { return }
         Task { @MainActor in
             await store.selectVariant(messageIndex: messageIndex, variantIndex: variantIndex)
             if let updated = store.currentConversation {
@@ -2190,6 +2550,23 @@ final class ChatViewModel {
 #if DEBUG
     func generateResponseForTesting(inputDigest: String, conversationId: KotlinUuid?) {
         generateResponse(inputDigest: inputDigest, conversationId: conversationId)
+    }
+
+    /// P1-a 测试缝：访问 ViewModel 自己的 generationCoordinator（其 bindings 指向本
+    /// ViewModel，drainSteerQueue/drainMailbox/restoreSteerQueueLeftover 走真实实现）。
+    var generationCoordinatorForTesting: ChatGenerationCoordinator {
+        generationCoordinator
+    }
+
+    /// P1-a/P1-b 测试缝：工具循环边界消费（mailbox 先于 steer）+ 下一轮 upload 组装
+    /// （复用 continueAfterToolResult 的真实生产函数，不发起流式请求）。
+    func nextRoundMessagesAfterMailboxAndSteerConsumptionForTesting(
+        baseMessages: [UIMessage]
+    ) async -> [UIMessage] {
+        await generationCoordinator.nextRoundMessagesAfterMailboxAndSteerConsumptionForTesting(
+            baseMessages: baseMessages,
+            conversationId: currentConversationId
+        )
     }
 
     func shouldApplyVisionRecognitionResultForTesting(
@@ -2248,18 +2625,31 @@ final class ChatViewModel {
             params: params,
             inputDigest: inputDigest,
             conversationId: conversationId,
-            uploadMessages: messages
+            uploadMessages: messages,
+            toolExposureBridge: lastAssembledToolExposureBridge
         )
     }
 
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
         let uploadableMessages = messages.filter { !Self.isLocalGenerationError($0) }
+        // P0-a Fix A: when the current run bridge is in lazy mode, prepend the
+        // tool_search discovery guidance as a standalone system fragment (the
+        // builder below runs with coalesceSystemMessages: false, so fragments
+        // stay separate), so the model knows hidden tools are "not callable
+        // until" tool_search exposes them. The bridge is assembled by
+        // makeTextGenerationParams() before this runs — messages are only
+        // injected inside a started run, after the bridge exists.
+        var uploadableWithGuidance = uploadableMessages
+        if let guidance = lastAssembledToolExposureBridge?.discoveryGuidance(),
+           !guidance.isEmpty {
+            uploadableWithGuidance = [UIMessage.companion.system(prompt: guidance)] + uploadableWithGuidance
+        }
         let withContext = ChatRuntimeContextBuilder(
             sharedSettings: sharedSettings,
             mcpTools: mcpManager.tools,
             miniAppRepository: miniAppRepository,
             miniAppRuntimeEnabled: isMiniAppRuntimeEnabled
-        ).injectingRuntimeContext(into: uploadableMessages, coalesceSystemMessages: false)
+        ).injectingRuntimeContext(into: uploadableWithGuidance, coalesceSystemMessages: false)
         return replacingImagesForNonVisionModel(withContext)
     }
 
@@ -2273,14 +2663,12 @@ final class ChatViewModel {
         ).memoryRecallResult(for: uploadableMessages).ids
     }
 
-    private func recordMemoryUsage(_ ids: [Int32]) {
-        guard !ids.isEmpty else { return }
-        let previousRecords = IosMemoryFactory.shared.snapshotRecords()
-        IosMemoryFactory.shared.touchMemories(
-            ids: ids.map { KotlinInt(value: $0) },
-            timestamp: Int64(Date().timeIntervalSince1970 * 1_000)
-        )
-        IOSMemoryPersistence.shared.persist(previousRecords: previousRecords)
+    private func recordMemoryUsage(_ ids: [Int32], force: Bool = false) {
+        // P2-b: 注入即使用（injected into upload = used）。去抖与原子写在
+        // IOSMemoryPersistence.markUsed 内：同一 run 同集合不重复写盘。
+        // P2-c 修复 2：模型显式引用（citation flush）传 force: true，绕过
+        // 同集去抖——引用是模型信号，与召回标记语义不同，应始终生效。
+        IOSMemoryPersistence.shared.markUsed(ids: Set(ids), force: force)
     }
 
     private static func isLocalGenerationError(_ message: UIMessage) -> Bool {
@@ -2838,6 +3226,35 @@ final class ChatViewModel {
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
             names: Array(IOSMcpManagementToolCatalog.toolNames).sorted()
         ))
+        // P0-b: flatten discovered MCP tools into `mcp__{server}__{tool}`
+        // declarations. They are appended to the BRIDGE's input (never to the
+        // final params — the bridge defers them behind tool_search; mcp_call
+        // stays as the always-on passthrough). MCP off / no discovered tools
+        // contributes nothing, so the P0-a baseline is unchanged.
+        toolDeclarations.append(contentsOf: expandedMcpToolDeclarations(mcpManager: mcpManager))
+        // P1-c/P1-d: 线程编排六工具声明。非常驻——照 mcp__* 展开先例只进 bridge
+        // 全目录（tool_search 命中后才进 params.tools），不加新设置项。
+        toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+            names: ["spawn_agent", "list_agents", "interrupt_agent", "send_message", "followup_task", "wait_agent"]
+        ))
+        // 跨会话读取工具声明（session_search/session_read）。非常驻——照线程编排
+        // 先例只进 bridge 全目录（tool_search 命中后才进 params.tools），无设置项。
+        toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+            names: ["session_search", "session_read"]
+        ))
+        // M5: discovery 引导（toolSearchDiscoveryGuidance）教模型用 tools_list
+        // 识别精确工具名——iOS 主目录声明它（常驻；KMP IOS_RESIDENT_TOOL_NAMES
+        // 与 DISCOVERY_UTILITY_TOOLS 已把它列为 resident），执行在桥本地。
+        toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(names: ["tools_list"]))
+        // P3-a: exec 纯求值工具（JavaScriptCore 沙箱，无 tools 桥）。默认关——
+        // 仅在开关开时进桥输入全目录（非常驻 deferred 池，tool_search 命中后才
+        // 可见可调）；关时零痕迹（声明与执行路径都不存在，模型调用走未知名
+        // 硬失败语义）。
+        // P3-c: wait 与 exec 同开关（cell 生命周期续取，无独立设置项）。
+        if settingsStore.execJavaScriptEnabled {
+            toolDeclarations.append(ToolKt.createExecToolDeclaration())
+            toolDeclarations.append(ToolKt.createWaitToolDeclaration())
+        }
         if isSlice3ToolEnabled("subagent_dispatch") {
             toolDeclarations.append(ToolKt.createSubAgentDispatchToolDeclaration())
         }
@@ -2846,6 +3263,14 @@ final class ChatViewModel {
         }
         // Standard chat can pause for a focused user decision, same tool surface as novel discussion.
         toolDeclarations.append(ToolKt.createAskUserToolDeclaration())
+        // P0-a tool discovery: wrap the full static declarations in the shared
+        // KMP exposure bridge and surface only the first-round visible subset
+        // (iOS resident tools + tool_search; everything deferred — wm_*, iSH,
+        // skill management, … — is exposed on demand via tool_search). The
+        // bridge instance is handed to the run coordinator, which owns it for
+        // the whole run so hits become callable on the NEXT round.
+        let exposureBridge = IosToolExposureBridge(tools: toolDeclarations)
+        lastAssembledToolExposureBridge = exposureBridge
         // Real params: temperature/topP from Assistant, maxTokens from
         // resolveSessionDefaults (Assistant → group default), reasoningLevel
         // resolved, custom headers/bodies merged. Mirrors GenerationHandler.
@@ -2855,7 +3280,7 @@ final class ChatViewModel {
             temperature: assistant.temperature.map { KotlinFloat(value: Float(truncating: $0)) },
             topP: assistant.topP.map { KotlinFloat(value: Float(truncating: $0)) },
             maxTokens: resolved.maxTokens.map { KotlinInt(value: Int32(truncating: $0)) },
-            tools: toolDeclarations,
+            tools: exposureBridge.visibleTools(),
             reasoningLevel: resolvedReasoningLevel,
             customHeaders: mergedHeaders,
             customBody: mergedBodies
@@ -2909,6 +3334,12 @@ final class ChatViewModel {
     /// Assistant/Model values + resolveSessionDefaults).
     func textGenerationParamsForTesting() -> TextGenerationParams {
         makeTextGenerationParams()
+    }
+
+    /// P0-a: the run bridge built by the latest assembly (nil until
+    /// makeTextGenerationParams ran). Test accessor for the exposure contract.
+    func toolExposureBridgeForTesting() -> IosToolExposureBridge? {
+        lastAssembledToolExposureBridge
     }
 
     func persistPendingAssistantRegenerationForTesting(

@@ -214,6 +214,9 @@ enum IOSToolEffectClassMapping {
         input: String
     ) -> IOSToolEffectClass {
         switch kind {
+        case .toolSearch:
+            // Local catalog search — no effect in the world.
+            .pure
         case .search:
             // search_web / scrape_web — read-only network calls.
             .pure
@@ -222,6 +225,9 @@ enum IOSToolEffectClassMapping {
         case .askUser:
             // Asking a question has no effect in the world.
             .pure
+        case .sessionRead:
+            // 跨会话读取（session_search/session_read）——本地只读检索，无副作用。
+            .pure
         case .workspace, .ish, .webMount, .image, .advanced:
             // advanced covers mcp_call / subagent_dispatch / model_council_run.
             .sideEffect
@@ -229,10 +235,24 @@ enum IOSToolEffectClassMapping {
     }
 
     static func forToolName(_ toolName: String, input: String) -> IOSToolEffectClass {
+        if toolName == "tool_search" {
+            // P0-a: local catalog search — no effect in the world.
+            return .pure
+        }
+        if toolName == "tools_list" {
+            // M5: tools_list 与 tool_search 同属本地目录调用（发现引导同一路径），
+            // 纯读无副作用——与 ChatToolRuntime 的 kind(.toolSearch) 分类对齐，
+            // 也保证生成中在途 tools_list 允许后台交接重放。
+            return .pure
+        }
         if IOSSearchExecutor.supportedToolNames.contains(toolName) {
             return .pure
         }
         if toolName == "ask_user" {
+            return .pure
+        }
+        // 跨会话读取工具：本地只读检索（搜索/读取其它会话），重放无副作用。
+        if toolName == "session_search" || toolName == "session_read" {
             return .pure
         }
         if toolName == "memory_tool" {
@@ -261,11 +281,38 @@ enum IOSToolEffectClassMapping {
             || toolName == "subagent_dispatch"
             || toolName == "model_council_run"
             || toolName == "mcp_call"
+            || ToolKt.isExpandedMcpToolName(name: toolName) // P0-b: flattened MCP calls
             || toolName == "mcp_test"
             || toolName == "mcp_import_from_skill"
             || toolName == "skill_import"
             || toolName == "skill_enable"
             || toolName == "skill_disable" {
+            return .sideEffect
+        }
+        // P1-c: 编排工具——spawn/interrupt 有真实副作用（建线程/取消 run），
+        // list_agents 只读。
+        if toolName == "spawn_agent" || toolName == "interrupt_agent" {
+            return .sideEffect
+        }
+        if toolName == "list_agents" {
+            return .pure
+        }
+        // P1-d: send/followup 投递信封（重放会重复投递）→ sideEffect；
+        // wait_agent 只等 mailbox 活动（无外部副作用）→ pure。
+        if toolName == "send_message" || toolName == "followup_task" {
+            return .sideEffect
+        }
+        if toolName == "wait_agent" {
+            return .pure
+        }
+        // P3-a: exec 运行任意 JS——重放会重复执行，按 shell 执行同类处理。
+        if toolName == "exec" {
+            return .sideEffect
+        }
+        // P3-c: wait 推进 cell 状态（terminate=true 真实变更；读取也消耗
+        // read-once 终态）——显式钉死为保守 sideEffect（fail-safe 默认同值）：
+        // 崩溃后不自动重试 wait，避免重试读到推进后的另一终态。
+        if toolName == "wait" {
             return .sideEffect
         }
         // Fail-safe default (I-3): a tool name this map doesn't know about

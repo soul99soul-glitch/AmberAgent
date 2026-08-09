@@ -818,6 +818,8 @@ final class IOSMemoryPersistence {
     private(set) var revision: Int = 0
     private(set) var loadState: LoadState = .notLoaded
     private(set) var lastErrorMessage: String?
+    /// P2-b 去抖：上次 markUsed 实际写盘的注入集合；集合不变则不重复写。
+    private var lastMarkedIds: Set<Int32> = []
 
     init(fileURL: URL, encoder: JSONEncoder = JSONEncoder(), decoder: JSONDecoder = JSONDecoder()) {
         self.fileURL = fileURL
@@ -901,6 +903,36 @@ final class IOSMemoryPersistence {
             rollback(to: previousRecords)
             return false
         }
+    }
+
+    /// P2-b: 记忆召回使用记录（零模型依赖）。
+    ///
+    /// "Injected into upload = used" —— 只要这些记忆被召回注入本次上传即视为已
+    /// 使用，不要求模型实际引用它们。只更新 `lastUsedAt`（不动 updatedAt/
+    /// content），内存 StateFlow 同步 + 原子写盘。
+    ///
+    /// 写盘去抖：同一 run 内注入集合不变时不重复写盘（工具循环每轮都注入同一
+    /// 批记忆，只有集合变化才再次写）。
+    ///
+    /// - Parameter force: P2-c 修复 2。模型显式引用（citation flush）与召回标记
+    ///   语义不同：引用是模型的显式信号，即使与上一 run 的召回集合完全一致也
+    ///   必须生效。`force: true` 绕过同集去抖（空集合 no-op 与去抖状态同步照
+    ///   旧）；默认 false 保持 P2-b 去抖行为不变。
+    /// - Returns: 本次调用是否发生了实际写盘。
+    @discardableResult
+    func markUsed(ids: Set<Int32>, now: Int64 = Int64(Date().timeIntervalSince1970 * 1_000), force: Bool = false) -> Bool {
+        // 最小去抖：同 run 内注入集合不变（工具循环每轮同集合）不重复写盘；
+        // force（模型显式引用）始终生效。
+        guard !ids.isEmpty, force || ids != lastMarkedIds else { return false }
+        let previousRecords = IosMemoryFactory.shared.snapshotRecords()
+        IosMemoryFactory.shared.touchMemories(
+            ids: ids.map { KotlinInt(value: $0) },
+            timestamp: now
+        )
+        let didPersist = persist(previousRecords: previousRecords)
+        guard didPersist else { return false }
+        lastMarkedIds = ids
+        return true
     }
 
     private func rollback(to previousRecords: [MemoryRecord]) {
