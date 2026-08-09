@@ -1,6 +1,44 @@
 import Foundation
 import Shared
 
+enum IOSSkillFileChangeKind: String, Equatable {
+    case added
+    case modified
+    case removed
+}
+
+struct IOSSkillFileChange: Equatable {
+    let path: String
+    let kind: IOSSkillFileChangeKind
+    let beforeText: String?
+    let afterText: String?
+}
+
+struct IOSSkillImportPreview: Equatable {
+    let name: String
+    let kind: IOSSkillMutationKind
+    let baseHash: String?
+    let candidateHash: String
+    let changedFiles: [IOSSkillFileChange]
+    let beforeSummary: String?
+    let afterSummary: String
+    let fileCount: Int
+    let containsMcpConfig: Bool
+
+    var approvalSummary: String {
+        let action = kind == .new ? "新增" : "更新"
+        return "\(action) Skill \(name)，\(changedFiles.count) 个文件有变化"
+    }
+}
+
+/// Small, in-memory approval context. The candidate bytes stay in Workspace and
+/// are read again when approval is granted, so stale candidates cannot be applied.
+struct IOSPreparedSkillImport: Equatable {
+    let workspacePath: String
+    let mergeExisting: Bool
+    let preview: IOSSkillImportPreview
+}
+
 enum IOSSkillToolCatalog {
     static let toolNames: Set<String> = [
         "skills_list",
@@ -38,6 +76,9 @@ enum IOSMcpManagementToolCatalog {
 @MainActor
 struct IOSSkillMcpToolService {
     private static let maximumSkillReadBytes = 256 * 1024
+    private static let maximumDiffTextBytes = 16 * 1024
+    private static let maximumDiffTextCharacters = 4_000
+    private static let maximumPackageSummaryCharacters = 600
 
     let skillStore: IOSSkillFileStore
     let sharedSettings: IOSSharedSettingsStore
@@ -56,7 +97,7 @@ struct IOSSkillMcpToolService {
             case "skill_validate":
                 return try skillValidateJSON(args)
             case "skill_import":
-                return try skillImportJSON(args)
+                return try skillImportPreviewJSON(args)
             case "skill_enable":
                 return try skillEnableJSON(args, enable: true)
             case "skill_disable":
@@ -152,68 +193,193 @@ struct IOSSkillMcpToolService {
         return Self.wrapSkillForMobileRuntime(skillName: dirName, pathLabel: pathLabel, body: content)
     }
 
+    func prepareSkillImport(arguments: String) throws -> IOSPreparedSkillImport {
+        guard let args = ChatToolCallParsing.jsonObject(arguments) else {
+            throw IOSSkillToolError.invalidArguments
+        }
+        return try prepareSkillImport(args).prepared
+    }
+
+    func applyPreparedSkillImport(_ prepared: IOSPreparedSkillImport) throws -> String {
+        let reread: (
+            prepared: IOSPreparedSkillImport,
+            package: IOSSkillPackagePreparation
+        )
+        do {
+            reread = try makeSkillImportPreparation(workspacePath: prepared.workspacePath)
+        } catch let error as IOSSkillToolError {
+            return Self.skillImportErrorJSON(
+                code: "stale_candidate",
+                message: error.errorDescription
+                    ?? "Workspace 候选包已无法读取或验证，请重新生成并预览。"
+            )
+        } catch let error as IOSSkillFileStoreError {
+            return Self.skillImportErrorJSON(
+                code: "stale_base",
+                message: error.errorDescription
+                    ?? "已安装 Skill 已无法读取或验证，请重新预览。"
+            )
+        } catch {
+            return Self.skillImportErrorJSON(
+                code: "stale_candidate",
+                message: "Workspace 候选包已无法读取，请重新生成并预览。"
+            )
+        }
+        guard reread.prepared.mergeExisting == prepared.mergeExisting,
+              reread.prepared.preview.name == prepared.preview.name else {
+            return Self.skillImportErrorJSON(
+                code: "stale_target",
+                message: "Skill 目标已变化，请重新预览后再批准。"
+            )
+        }
+        guard reread.prepared.preview.baseHash == prepared.preview.baseHash else {
+            return Self.skillImportErrorJSON(
+                code: "stale_base",
+                message: "已安装 Skill 在批准前发生变化，请重新预览。"
+            )
+        }
+        guard reread.prepared.preview.candidateHash == prepared.preview.candidateHash else {
+            return Self.skillImportErrorJSON(
+                code: "stale_candidate",
+                message: "Workspace 候选包在批准前发生变化，请重新预览。"
+            )
+        }
+
+        let name = prepared.preview.name
+        let enabledBefore = sharedSettings.isSkillEnabled(name)
+        let optionalSeedWasRemoved = IOSBuiltinSkills.isOptionalSeedRemoved(name, store: skillStore)
+        let receipt: IOSSkillPackageApplyReceipt
+        do {
+            receipt = try skillStore.applySkillPackage(
+                candidateFiles: reread.package.candidate.files,
+                name: name,
+                expectedBaseHash: prepared.preview.baseHash,
+                expectedCandidateHash: prepared.preview.candidateHash,
+                enabledBefore: enabledBefore,
+                optionalSeedWasRemoved: optionalSeedWasRemoved
+            )
+        } catch let error as IOSSkillFileStoreError {
+            switch error {
+            case .skillPackageBaseChanged:
+                return Self.skillImportErrorJSON(
+                    code: "stale_base",
+                    message: error.errorDescription ?? "已安装 Skill 在批准前发生变化，请重新预览。"
+                )
+            case .skillPackageCandidateChanged:
+                return Self.skillImportErrorJSON(
+                    code: "stale_candidate",
+                    message: error.errorDescription ?? "Workspace 候选包在批准前发生变化，请重新预览。"
+                )
+            default:
+                throw error
+            }
+        }
+
+        // A new Skill becomes immediately usable; an update keeps the current
+        // Assistant's latest enablement state.
+        if prepared.preview.kind == .new {
+            sharedSettings.setSkillEnabled(name: name, enabled: true)
+        }
+        IOSBuiltinSkills.clearOptionalSeedRemoved(name, store: skillStore)
+        return Self.json([
+            "success": true,
+            "status": receipt.outcome == .applied ? "applied" : "unchanged",
+            "name": receipt.name,
+            "hash": receipt.promotedHash,
+            "file_count": reread.package.candidate.files.count,
+            "enabled": sharedSettings.isSkillEnabled(name),
+            "contains_mcp_config": reread.prepared.preview.containsMcpConfig,
+        ])
+    }
+
     private func skillValidateJSON(_ args: [String: Any]) throws -> String {
         let name = (args["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let workspacePath = (args["workspace_path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let files: [String: String]
+        let files: [String: Data]
+        let expectedName: String?
         if let name, !name.isEmpty {
-            files = try collectInstalledSkillFiles(name: name)
+            let dirName = resolveInstalledDirName(name)
+            files = try collectInstalledSkillFiles(name: dirName)
+            expectedName = dirName
         } else if let workspacePath, !workspacePath.isEmpty {
             files = try collectWorkspaceSkillFiles(workspacePath: workspacePath)
+            expectedName = nil
         } else {
             throw IOSSkillToolError.missingArgument("name or workspace_path")
         }
-        let skillMd = files["SKILL.md"] ?? ""
-        let frontmatter = IOSSkillFileStore.parseFrontmatter(skillMd)
-        var issues: [String] = []
-        if skillMd.isEmpty { issues.append("缺少 SKILL.md") }
-        if frontmatter["name"].isNilOrEmpty { issues.append("SKILL.md 缺少 name") }
-        if frontmatter["description"].isNilOrEmpty { issues.append("SKILL.md 缺少 description") }
+        let validation = validateSkillPackage(files, expectedName: expectedName)
         return Self.json([
-            "valid": issues.isEmpty,
-            "name": frontmatter["name"] ?? "",
-            "description": frontmatter["description"] ?? "",
+            "valid": validation.issues.isEmpty,
+            "name": validation.name ?? "",
+            "description": validation.description ?? "",
             "file_count": files.count,
             "contains_mcp_config": files["mcp.json"] != nil,
-            "issues": issues,
+            "issues": validation.issues,
         ])
     }
 
-    private func skillImportJSON(_ args: [String: Any]) throws -> String {
-        let workspacePath = (args["workspace_path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    private func skillImportPreviewJSON(_ args: [String: Any]) throws -> String {
+        let prepared = try prepareSkillImport(args).prepared
+        let preview = prepared.preview
+        return Self.json([
+            "ok": true,
+            "status": "preview",
+            "requires_approval": true,
+            "name": preview.name,
+            "kind": preview.kind.rawValue,
+            "base_hash": preview.baseHash as Any? ?? NSNull(),
+            "candidate_hash": preview.candidateHash,
+            "file_count": preview.fileCount,
+            "contains_mcp_config": preview.containsMcpConfig,
+            "before_summary": preview.beforeSummary as Any? ?? NSNull(),
+            "after_summary": preview.afterSummary,
+            "changed_files": preview.changedFiles.map(Self.changeJSON),
+        ])
+    }
+
+    private func prepareSkillImport(_ args: [String: Any]) throws -> (
+        prepared: IOSPreparedSkillImport,
+        package: IOSSkillPackagePreparation
+    ) {
+        let workspacePath = (args["workspace_path"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !workspacePath.isEmpty else {
             throw IOSSkillToolError.missingArgument("workspace_path")
         }
-        let files = try collectWorkspaceSkillFiles(workspacePath: workspacePath)
-        let packageName = try previewSkillPackageName(files: files)
-        let existed = skillStore.listSkillDirNames().contains(packageName)
-        // 单文件 SKILL.md 导入只更新说明，合并保留本机已有附属资源；目录导入仍整包替换。
-        let mergeExisting = Self.isSingleSkillMarkdownImportPath(workspacePath)
-        let savedName = try skillStore.saveSkillFiles(files: files, mergeExisting: mergeExisting)
-        // 新技能默认启用；更新已有技能时保留用户当前启用状态（含可选出厂默认关闭）。
-        if !existed {
-            sharedSettings.setSkillEnabled(name: savedName, enabled: true)
-        }
-        IOSBuiltinSkills.clearOptionalSeedRemoved(savedName, store: skillStore)
-        let enabled = sharedSettings.isSkillEnabled(savedName)
-        return Self.json([
-            "success": true,
-            "name": savedName,
-            "file_count": files.count,
-            "enabled": enabled,
-            "contains_mcp_config": files["mcp.json"] != nil,
-        ])
+        return try makeSkillImportPreparation(workspacePath: workspacePath)
     }
 
-    private func previewSkillPackageName(files: [String: String]) throws -> String {
-        guard let skillMd = files["SKILL.md"] ?? files["skill.md"] else {
-            throw IOSSkillFileStoreError.missingSkillMarkdown
+    private func makeSkillImportPreparation(workspacePath: String) throws -> (
+        prepared: IOSPreparedSkillImport,
+        package: IOSSkillPackagePreparation
+    ) {
+        let resolvedWorkspacePath: String
+        if let record = workspaceStore.fileRecord(idOrPath: workspacePath) {
+            resolvedWorkspacePath = "/workspace/\(record.workspacePath)"
+        } else {
+            resolvedWorkspacePath = workspacePath
         }
-        let frontmatter = IOSSkillFileStore.parseFrontmatter(skillMd)
-        guard let declaredName = frontmatter["name"], !declaredName.isEmpty else {
-            throw IOSSkillFileStoreError.missingFrontmatterField("name")
+        let files = try collectWorkspaceSkillFiles(workspacePath: resolvedWorkspacePath)
+        let validation = validateSkillPackage(files, expectedName: nil)
+        guard validation.issues.isEmpty else {
+            throw IOSSkillToolError.invalidSkillPackage(validation.issues)
         }
-        return IOSSkillFileStore.normalizedSkillName(declaredName)
+
+        let mergeExisting = Self.isSingleSkillMarkdownImportPath(resolvedWorkspacePath)
+            && workspaceStore.fileRecord(idOrPath: resolvedWorkspacePath) != nil
+        let package = try skillStore.prepareSkillPackage(
+            importedFiles: files,
+            mergeExisting: mergeExisting
+        )
+        let preview = Self.makeImportPreview(package)
+        return (
+            IOSPreparedSkillImport(
+                workspacePath: resolvedWorkspacePath,
+                mergeExisting: mergeExisting,
+                preview: preview
+            ),
+            package
+        )
     }
 
     private func skillEnableJSON(_ args: [String: Any], enable: Bool) throws -> String {
@@ -405,47 +571,46 @@ struct IOSSkillMcpToolService {
         return normalized
     }
 
-    private func collectInstalledSkillFiles(name: String) throws -> [String: String] {
+    private func collectInstalledSkillFiles(name: String) throws -> [String: Data] {
         let dirName = resolveInstalledDirName(name)
         let directory = try skillStore.skillDirectoryURL(name: dirName)
         guard FileManager.default.fileExists(atPath: directory.path) else {
             throw IOSSkillFileStoreError.skillMissing(name)
         }
-        return try collectTextFiles(under: directory, root: directory)
+        return try collectRegularFiles(under: directory, root: directory)
     }
 
-    private func collectWorkspaceSkillFiles(workspacePath: String) throws -> [String: String] {
-        let normalized = workspacePath
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "^/workspace/", with: "", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !normalized.isEmpty else {
-            throw IOSSkillToolError.missingArgument("workspace_path")
-        }
+    private func collectWorkspaceSkillFiles(workspacePath: String) throws -> [String: Data] {
+        let directRecord = workspaceStore.fileRecord(idOrPath: workspacePath)
+        let normalized = try Self.normalizedWorkspaceSkillPath(
+            directRecord?.workspacePath ?? workspacePath
+        )
 
-        if let record = workspaceStore.fileRecord(idOrPath: workspacePath)
+        if let record = directRecord
+            ?? workspaceStore.fileRecord(idOrPath: workspacePath)
             ?? workspaceStore.fileRecord(idOrPath: "/workspace/\(normalized)")
             ?? workspaceStore.fileRecord(idOrPath: normalized) {
-            let url = workspaceStore.fileURL(for: record)
-            let content = try String(contentsOf: url, encoding: .utf8)
             if normalized.lowercased().hasSuffix(".zip") {
                 throw IOSSkillToolError.unsupportedZip
             }
             let relative = (normalized as NSString).lastPathComponent
-            let key = relative.lowercased() == "skill.md" ? "SKILL.md" : relative
-            var files = [key: content]
+            var files: [String: Data] = [:]
+            try Self.insertSkillFile(
+                try readWorkspaceFileData(record),
+                relativePath: relative,
+                into: &files
+            )
             // Single-file SKILL.md import: also pull sibling mcp.json when present.
-            if key == "SKILL.md" {
+            if relative.lowercased() == "skill.md" {
                 let parent = (normalized as NSString).deletingLastPathComponent
-                if !parent.isEmpty {
-                    let mcpRelative = parent + "/mcp.json"
-                    if let mcpRecord = workspaceStore.fileRecord(idOrPath: mcpRelative)
-                        ?? workspaceStore.fileRecord(idOrPath: "/workspace/\(mcpRelative)") {
-                        files["mcp.json"] = try String(
-                            contentsOf: workspaceStore.fileURL(for: mcpRecord),
-                            encoding: .utf8
-                        )
-                    }
+                let mcpRelative = parent.isEmpty ? "mcp.json" : parent + "/mcp.json"
+                if let mcpRecord = workspaceStore.fileRecord(idOrPath: mcpRelative)
+                    ?? workspaceStore.fileRecord(idOrPath: "/workspace/\(mcpRelative)") {
+                    try Self.insertSkillFile(
+                        try readWorkspaceFileData(mcpRecord),
+                        relativePath: "mcp.json",
+                        into: &files
+                    )
                 }
             }
             return files
@@ -459,8 +624,8 @@ struct IOSSkillMcpToolService {
         guard !matching.isEmpty else {
             throw IOSSkillToolError.workspacePathMissing(workspacePath)
         }
-        var files: [String: String] = [:]
-        for record in matching {
+        var files: [String: Data] = [:]
+        for record in matching.sorted(by: { $0.workspacePath < $1.workspacePath }) {
             let relative: String
             if record.workspacePath == prefix {
                 relative = record.displayName
@@ -469,35 +634,196 @@ struct IOSSkillMcpToolService {
             } else {
                 continue
             }
-            guard Self.isLikelyTextSkillFile(relative) else { continue }
-            let content = try String(contentsOf: workspaceStore.fileURL(for: record), encoding: .utf8)
-            let key = relative.lowercased() == "skill.md" ? "SKILL.md" : relative
-            files[key] = content
+            try Self.insertSkillFile(
+                try readWorkspaceFileData(record),
+                relativePath: relative,
+                into: &files
+            )
         }
         return files
     }
 
-    private func collectTextFiles(under directory: URL, root: URL) throws -> [String: String] {
-        var files: [String: String] = [:]
+    private func readWorkspaceFileData(_ record: IOSWorkspaceFileRecord) throws -> Data {
+        let url = workspaceStore.fileURL(for: record)
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true else {
+            throw IOSSkillToolError.invalidSkillPath(record.workspacePath)
+        }
+        return try Data(contentsOf: url)
+    }
+
+    private func collectRegularFiles(under directory: URL, root: URL) throws -> [String: Data] {
+        var files: [String: Data] = [:]
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+            options: []
         ) else {
             return [:]
         }
-        for case let fileURL as URL in enumerator {
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir),
-                  !isDir.boolValue else { continue }
-            let relative = fileURL.path
-                .replacingOccurrences(of: root.path + "/", with: "")
-                .replacingOccurrences(of: "\\", with: "/")
-            guard Self.isLikelyTextSkillFile(relative), !relative.contains("..") else { continue }
-            let key = relative.lowercased() == "skill.md" ? "SKILL.md" : relative
-            files[key] = try String(contentsOf: fileURL, encoding: .utf8)
+        let rootPath = root.standardizedFileURL.path
+        while let fileURL = enumerator.nextObject() as? URL {
+            let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            if values.isSymbolicLink == true {
+                enumerator.skipDescendants()
+                throw IOSSkillToolError.invalidSkillPath(fileURL.lastPathComponent)
+            }
+            guard values.isRegularFile == true else { continue }
+            let itemPath = fileURL.standardizedFileURL.path
+            guard itemPath.hasPrefix(rootPath + "/") else {
+                throw IOSSkillToolError.invalidSkillPath(fileURL.path)
+            }
+            let relative = String(itemPath.dropFirst(rootPath.count + 1))
+            try Self.insertSkillFile(
+                Data(contentsOf: fileURL),
+                relativePath: relative,
+                into: &files
+            )
         }
         return files
+    }
+
+    private func validateSkillPackage(
+        _ files: [String: Data],
+        expectedName: String?
+    ) -> IOSSkillPackageValidation {
+        var issues: [String] = []
+        var validatedPaths: [String] = []
+        for path in files.keys.sorted() {
+            do {
+                let canonical = try Self.canonicalSkillRelativePath(path)
+                guard Self.collidingSkillPath(in: validatedPaths, candidate: canonical) == nil else {
+                    issues.append("Skill 包含大小写冲突或重复路径：\(path)")
+                    continue
+                }
+                validatedPaths.append(canonical)
+            } catch {
+                issues.append("Skill 包含非法相对路径：\(path)")
+            }
+        }
+
+        guard let skillData = files["SKILL.md"] else {
+            issues.append("缺少 SKILL.md")
+            return IOSSkillPackageValidation(name: nil, description: nil, issues: issues)
+        }
+        guard let skillMarkdown = String(data: skillData, encoding: .utf8) else {
+            issues.append("SKILL.md 必须是 UTF-8 文本")
+            return IOSSkillPackageValidation(name: nil, description: nil, issues: issues)
+        }
+
+        let frontmatter = IOSSkillFileStore.parseFrontmatter(skillMarkdown)
+        let declaredName = frontmatter["name"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = frontmatter["description"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if declaredName.isNilOrEmpty {
+            issues.append("SKILL.md 缺少 name")
+        }
+        if description.isNilOrEmpty {
+            issues.append("SKILL.md 缺少 description")
+        }
+
+        var normalizedName: String?
+        if let declaredName, !declaredName.isEmpty {
+            let normalized = IOSSkillFileStore.normalizedSkillName(declaredName)
+            if normalized.isEmpty
+                || normalized == "."
+                || normalized == ".."
+                || normalized.hasPrefix(".")
+                || normalized.contains("\0")
+                || normalized.contains("/")
+                || normalized.contains("\\") {
+                issues.append("SKILL.md name 不是合法的 Skill 名称")
+            } else {
+                normalizedName = normalized
+                if let expectedName,
+                   IOSSkillFileStore.normalizedSkillName(expectedName) != normalized {
+                    issues.append("SKILL.md name 与已安装目录名不一致")
+                }
+            }
+        }
+        return IOSSkillPackageValidation(
+            name: normalizedName,
+            description: description,
+            issues: issues
+        )
+    }
+
+    private static func makeImportPreview(_ preparation: IOSSkillPackagePreparation) -> IOSSkillImportPreview {
+        let baseFiles = preparation.base?.files ?? [:]
+        let candidateFiles = preparation.candidate.files
+        let paths = Set(baseFiles.keys).union(candidateFiles.keys).sorted()
+        let changedFiles = paths.compactMap { path -> IOSSkillFileChange? in
+            let before = baseFiles[path]
+            let after = candidateFiles[path]
+            let kind: IOSSkillFileChangeKind
+            switch (before, after) {
+            case (.none, .some):
+                kind = .added
+            case (.some, .none):
+                kind = .removed
+            case (.some(let before), .some(let after)) where before != after:
+                kind = .modified
+            default:
+                return nil
+            }
+            return IOSSkillFileChange(
+                path: path,
+                kind: kind,
+                beforeText: before.flatMap(diffText),
+                afterText: after.flatMap(diffText)
+            )
+        }
+        return IOSSkillImportPreview(
+            name: preparation.candidate.name,
+            kind: preparation.kind,
+            baseHash: preparation.base?.hash,
+            candidateHash: preparation.candidate.hash,
+            changedFiles: changedFiles,
+            beforeSummary: preparation.base.map(packageSummary),
+            afterSummary: packageSummary(preparation.candidate),
+            fileCount: candidateFiles.count,
+            containsMcpConfig: candidateFiles["mcp.json"] != nil
+        )
+    }
+
+    private static func packageSummary(_ package: IOSSkillPackage) -> String {
+        guard let markdownData = package.files["SKILL.md"],
+              let markdown = String(data: markdownData, encoding: .utf8) else {
+            return "\(package.files.count) 个文件"
+        }
+        let frontmatter = IOSSkillFileStore.parseFrontmatter(markdown)
+        let description = frontmatter["description"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let body = IOSSkillFileStore.extractBody(from: markdown)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let combined = [description, body]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+        guard !combined.isEmpty else { return "\(package.files.count) 个文件" }
+        guard combined.count > maximumPackageSummaryCharacters else { return combined }
+        return String(combined.prefix(maximumPackageSummaryCharacters)) + "\n…（摘要已截断）"
+    }
+
+    private static func diffText(_ data: Data) -> String? {
+        guard data.count <= maximumDiffTextBytes,
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        if text.count <= maximumDiffTextCharacters { return text }
+        return String(text.prefix(maximumDiffTextCharacters)) + "\n…（已截断）"
+    }
+
+    private static func changeJSON(_ change: IOSSkillFileChange) -> [String: Any] {
+        var result: [String: Any] = [
+            "path": change.path,
+            "kind": change.kind.rawValue,
+        ]
+        if let beforeText = change.beforeText {
+            result["before"] = beforeText
+        }
+        if let afterText = change.afterText {
+            result["after"] = afterText
+        }
+        return result
     }
 
     private func statusString(_ status: IOSMcpConnectionStatus?) -> String {
@@ -523,22 +849,71 @@ struct IOSSkillMcpToolService {
         return content
     }
 
-    private static func isLikelyTextSkillFile(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower == "skill.md"
-            || lower == "skill.txt"
-            || lower == "mcp.json"
-            || lower.hasSuffix(".md")
-            || lower.hasSuffix(".json")
-            || lower.hasSuffix(".txt")
-            || lower.hasSuffix(".yaml")
-            || lower.hasSuffix(".yml")
-            || lower.hasSuffix(".js")
-            || lower.hasSuffix(".ts")
-            || lower.hasSuffix(".py")
-            || lower.hasSuffix(".sh")
-            || lower.hasSuffix(".html")
-            || lower.hasSuffix(".css")
+    private static func normalizedWorkspaceSkillPath(_ raw: String) throws -> String {
+        var path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, !path.contains("\\") else {
+            throw IOSSkillToolError.invalidSkillPath(raw)
+        }
+        if path == "/workspace" || path == "/workspace/" {
+            throw IOSSkillToolError.missingArgument("workspace_path")
+        }
+        if path.hasPrefix("/workspace/") {
+            path.removeFirst("/workspace/".count)
+        } else if path.hasPrefix("/") {
+            throw IOSSkillToolError.invalidSkillPath(raw)
+        }
+        while path.hasSuffix("/") { path.removeLast() }
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !components.isEmpty,
+              components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            throw IOSSkillToolError.invalidSkillPath(raw)
+        }
+        return components.map(String.init).joined(separator: "/")
+    }
+
+    private static func canonicalSkillRelativePath(_ raw: String) throws -> String {
+        let path = raw.precomposedStringWithCanonicalMapping
+        guard !path.isEmpty,
+              !path.hasPrefix("/"),
+              !path.hasSuffix("/"),
+              !path.contains("\0"),
+              !path.contains("\\") else {
+            throw IOSSkillToolError.invalidSkillPath(raw)
+        }
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !components.isEmpty,
+              components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            throw IOSSkillToolError.invalidSkillPath(raw)
+        }
+        if components.count == 1, components[0].lowercased() == "skill.md" {
+            return "SKILL.md"
+        }
+        return components.map(String.init).joined(separator: "/")
+    }
+
+    private static func collidingSkillPath(
+        in existingPaths: some Sequence<String>,
+        candidate: String
+    ) -> String? {
+        let candidateKey = candidate.lowercased()
+        return existingPaths.first { existing in
+            let existingKey = existing.lowercased()
+            return candidateKey == existingKey
+                || candidateKey.hasPrefix(existingKey + "/")
+                || existingKey.hasPrefix(candidateKey + "/")
+        }
+    }
+
+    private static func insertSkillFile(
+        _ data: Data,
+        relativePath: String,
+        into files: inout [String: Data]
+    ) throws {
+        let canonical = try canonicalSkillRelativePath(relativePath)
+        guard collidingSkillPath(in: files.keys, candidate: canonical) == nil else {
+            throw IOSSkillToolError.invalidSkillPath("重复或大小写冲突：\(relativePath)")
+        }
+        files[canonical] = data
     }
 
     private static func isSingleSkillMarkdownImportPath(_ workspacePath: String) -> Bool {
@@ -572,9 +947,20 @@ struct IOSSkillMcpToolService {
         }
         return text
     }
+
+    private static func skillImportErrorJSON(code: String, message: String) -> String {
+        json([
+            "ok": false,
+            "success": false,
+            "status": "stale",
+            "code": code,
+            "error": message,
+        ])
+    }
 }
 
 private enum IOSSkillToolError: LocalizedError {
+    case invalidArguments
     case missingArgument(String)
     case skillNotEnabled(String)
     case skillFileMissing(String)
@@ -582,10 +968,14 @@ private enum IOSSkillToolError: LocalizedError {
     case skillFileTooLarge(String, Int)
     case skillFileNotUTF8(String)
     case workspacePathMissing(String)
+    case invalidSkillPath(String)
+    case invalidSkillPackage([String])
     case unsupportedZip
 
     var errorDescription: String? {
         switch self {
+        case .invalidArguments:
+            "Tool arguments must be a JSON object."
         case .missingArgument(let name):
             "\(name) is required"
         case .skillNotEnabled(let name):
@@ -600,10 +990,20 @@ private enum IOSSkillToolError: LocalizedError {
             "File '\(path)' is not UTF-8 text."
         case .workspacePathMissing(let path):
             "Workspace path not found: \(path)"
+        case .invalidSkillPath(let path):
+            "Skill 包含非法路径：\(path)"
+        case .invalidSkillPackage(let issues):
+            issues.joined(separator: "；")
         case .unsupportedZip:
             "Zip skill import is not supported on iOS yet. Import a SKILL.md or skill folder from Workspace."
         }
     }
+}
+
+private struct IOSSkillPackageValidation {
+    let name: String?
+    let description: String?
+    let issues: [String]
 }
 
 private extension Optional where Wrapped == String {

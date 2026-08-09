@@ -246,14 +246,16 @@ allowed-tools: workspace_file_write skill_import skill_validate skills_list use_
 
 1. 起草 `SKILL.md`，frontmatter 至少包含 `name` 与 `description`。
 2. 用 `workspace_file_write` 写到技能目录（例如 `/workspace/skills/my-skill/SKILL.md`，可选同级 `mcp.json`）。
-3. 调用 `skill_import`，传入技能**目录**路径（例如 `/workspace/skills/my-skill`）；也可传单个 `SKILL.md` 路径，会顺带导入同级 `mcp.json`。
-4. 若包内有 `mcp.json`，再调用 `mcp_import_from_skill`，然后 `mcp_test`。
+3. 对同一 Workspace 路径调用 `skill_validate`，修正校验错误后再继续。
+4. 调用 `skill_import` 查看只读预览；核对目标技能、变更文件与前后摘要，等待用户一次显式批准。批准时系统会用预览中的 base/candidate hash 做 CAS 复核，再原子应用。
+5. 若包内有 `mcp.json`，再调用 `mcp_import_from_skill`，然后 `mcp_test`。
 
-更新已有技能（含本技能 `skill-creator`）时：同样走「写 workspace → `skill_import`」。导入会覆盖本机 `skills/<name>/`。不要改 frontmatter 的 `name`。
+更新已有技能（含本技能 `skill-creator`）时：同样走「写 Workspace → validate → import 预览与批准」。传单个 `SKILL.md` 时进入合并模式：覆盖 `SKILL.md`，Workspace 同级存在 `mcp.json` 时也一并覆盖，其余已安装资源保留；传技能目录时以该目录完整替换本机 `skills/<name>/`。不要改 frontmatter 的 `name`。
 
 ## 自迭代
 
 - 本技能允许被 agent 改进：发现流程过时、缺步骤、中文/英文混杂或工具名变更时，应主动修订并 `skill_import`。
+- 每次实际变更的导入会保留一个上一版本；用户可在技能详情回退，agent 不要自动触发回退。
 - 应用内嵌了出厂硬备份；用户可在技能详情「恢复出厂」还原，agent 不要伪造「已恢复」——只有用户或明确的恢复操作才会写回出厂文案。
 - 迭代时保持简洁，并保留仍正确的创建/导入步骤。不要引入桌面专用评测流水线（子代理并行 baseline、Python eval-viewer、`.skill` 打包等）；Amber 移动端只做轻量试跑与口头验收。
 

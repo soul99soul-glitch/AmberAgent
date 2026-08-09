@@ -26,13 +26,15 @@ object IosSkillFactory {
         if (!skillsDir.exists()) return emptyList()
         val result = mutableListOf<SkillMetadata>()
         for (subDir in skillsDir.listDirectories()) {
+            val dirName = subDir.path.substringAfterLast('/')
+            if (dirName.startsWith(".")) continue
             val skillFile = subDir.child("SKILL.md")
             if (!skillFile.exists()) continue
             val content = skillFile.readText() ?: continue
             val (name, desc) = parseFrontmatter(content)
             if (name.isNotBlank()) {
                 result.add(SkillMetadata(
-                    dirName = subDir.path.substringAfterLast('/'),
+                    dirName = dirName,
                     name = name,
                     description = desc,
                     enabled = true,
@@ -48,6 +50,7 @@ object IosSkillFactory {
         val result = mutableListOf<SkillScanIssue>()
         for (subDir in skillsDir.listDirectories()) {
             val dirName = subDir.path.substringAfterLast('/')
+            if (dirName.startsWith(".")) continue
             val skillFile = subDir.child("SKILL.md")
             if (!skillFile.exists()) {
                 result.add(SkillScanIssue(dirName, "缺少 SKILL.md"))

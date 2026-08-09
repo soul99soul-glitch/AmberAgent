@@ -500,6 +500,7 @@ struct McpToolApprovalCard: View {
     let request: McpToolApprovalRequest
     let onApprove: () -> Void
     let onDeny: () -> Void
+    @State private var showsFullSkillChanges = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -518,31 +519,35 @@ struct McpToolApprovalCard: View {
                     Text(request.reason)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(2)
+                        .lineLimit(request.skillImportPreview == nil ? 2 : nil)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Spacer(minLength: 0)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(request.serverName) / \(request.toolName)")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .lineLimit(1)
-                Text(request.argumentsPreview)
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
+            if let preview = request.skillImportPreview {
+                skillImportPreview(preview)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(request.serverName) / \(request.toolName)")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .lineLimit(1)
+                    Text(request.argumentsPreview)
+                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    AmberTheme.surface.opacity(0.72),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                AmberTheme.surface.opacity(0.72),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-            )
 
             HStack(spacing: 6) {
                 WebMountApprovalChip(systemImage: "server.rack", title: request.serverName)
@@ -563,7 +568,7 @@ struct McpToolApprovalCard: View {
                 }
                 .buttonStyle(.plain)
                 .chatApprovalHitTarget()
-                .accessibilityLabel("拒绝 MCP 工具")
+                .accessibilityLabel(request.skillImportPreview == nil ? "拒绝 MCP 工具" : "拒绝 Skill 导入")
 
                 Button(action: onApprove) {
                     Label("批准", systemImage: "checkmark")
@@ -575,7 +580,7 @@ struct McpToolApprovalCard: View {
                 }
                 .buttonStyle(.plain)
                 .chatApprovalHitTarget()
-                .accessibilityLabel("批准 MCP 工具")
+                .accessibilityLabel(request.skillImportPreview == nil ? "批准 MCP 工具" : "批准 Skill 导入")
             }
         }
         .padding(12)
@@ -583,6 +588,122 @@ struct McpToolApprovalCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(AmberTheme.accentCyan.opacity(0.34), lineWidth: 0.7)
+        }
+    }
+
+    private func skillImportPreview(_ preview: McpSkillImportPreview) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(preview.skillName)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                Text(preview.mutationKind == .new ? "新建" : "更新")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(preview.mutationKind == .new ? AmberTheme.accentGreen : AmberTheme.accentAmber)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        (preview.mutationKind == .new ? AmberTheme.accentGreen : AmberTheme.accentAmber).opacity(0.12),
+                        in: Capsule()
+                    )
+            }
+
+            Text("导入前摘要：\(preview.beforeSummary)")
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("批准后摘要：\(preview.afterSummary)")
+                .font(.caption)
+                .foregroundStyle(AmberTheme.foreground2)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("包哈希  \(shortHash(preview.baseHash) ?? "无") → \(shortHash(preview.candidateHash) ?? preview.candidateHash)")
+                .font(.caption2.monospaced().weight(.medium))
+                .foregroundStyle(AmberTheme.muted)
+                .textSelection(.enabled)
+
+            if !preview.changedFiles.isEmpty {
+                DisclosureGroup(isExpanded: $showsFullSkillChanges) {
+                    ScrollView(.vertical) {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(preview.changedFiles) { change in
+                                skillFileChange(change)
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
+                    .frame(maxHeight: 180)
+                } label: {
+                    Label("文件变更（\(preview.changedFiles.count) 个文件）", systemImage: "doc.text.magnifyingglass")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(AmberTheme.accentCyan)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                .tint(AmberTheme.accentCyan)
+            }
+
+            if preview.containsMcpConfig {
+                Label("包含 MCP 配置；批准不会自动连接。", systemImage: "point.3.connected.trianglepath.dotted")
+                    .font(.caption2)
+                    .foregroundStyle(AmberTheme.accentAmber)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            AmberTheme.surface.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+    }
+
+    private func skillFileChange(_ change: McpSkillImportFileChange) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(fileChangeTitle(change.kind))  \(change.path)")
+                .font(.caption2.monospaced().weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let before = change.beforeText {
+                Text("导入前\n\(before.isEmpty ? "（空文件）" : before)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(AmberTheme.muted)
+                    .textSelection(.enabled)
+            } else if change.kind != .added {
+                Text("导入前内容未展示（文件较大或非文本；已纳入包哈希）")
+                    .font(.caption2)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+            if let after = change.afterText {
+                Text("批准后\n\(after.isEmpty ? "（空文件）" : after)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .textSelection(.enabled)
+            } else if change.kind != .removed {
+                Text("批准后内容未展示（文件较大或非文本；已纳入包哈希）")
+                    .font(.caption2)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+        }
+        .padding(8)
+        .background(AmberTheme.surface2.opacity(0.55), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+
+    private func shortHash(_ hash: String?) -> String? {
+        guard let hash, !hash.isEmpty else { return nil }
+        return String(hash.prefix(10))
+    }
+
+    private func fileChangeTitle(_ kind: McpSkillImportFileChangeKind) -> String {
+        switch kind {
+        case .added: "新增"
+        case .modified: "修改"
+        case .removed: "删除"
         }
     }
 }

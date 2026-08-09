@@ -1886,8 +1886,83 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertEqual(harness.state.markedApprovalToolIds, ["search-approval-test"])
         XCTAssertEqual(
             harness.state.persistenceEvents,
-            ["capture-baseline", "mark-awaiting", "persist-snapshot"]
+            ["capture-baseline", "mark-awaiting", "persist-snapshot", "publish-card"]
         )
+    }
+
+    func testTopLevelApprovalPublishesCardOnlyAfterDurablePauseState() async {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        harness.state.shouldBlockApprovalMark = true
+
+        let installTask = Task { @MainActor in
+            await harness.coordinator.installPendingSearchApprovalForTesting(
+                pending: harness.pending,
+                request: harness.request
+            )
+        }
+        await harness.state.waitUntilApprovalMarkBlocks()
+
+        XCTAssertNil(harness.state.pendingSearchApproval)
+        XCTAssertEqual(
+            harness.state.persistenceEvents,
+            ["capture-baseline", "mark-awaiting"]
+        )
+
+        harness.state.resumeApprovalMark()
+        await installTask.value
+
+        XCTAssertEqual(harness.state.pendingSearchApproval?.id, harness.request.id)
+        XCTAssertEqual(
+            harness.state.persistenceEvents,
+            ["capture-baseline", "mark-awaiting", "persist-snapshot", "publish-card"]
+        )
+    }
+
+    func testMcpApprovalRejectsStaleRequestIdWithoutClearingCurrentCard() async {
+        let harness = makeGenerationCoordinatorHarness(
+            transport: ChatSearchTransport(responses: [])
+        )
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "mcp-approval-current",
+            toolName: "skill_import",
+            input: #"{"workspace_path":"/Skills/current"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let pending = ChatPendingToolApproval(
+            toolCall: toolCall,
+            providerSetting: harness.pending.providerSetting,
+            params: harness.pending.params,
+            runId: harness.pending.runId,
+            startedAt: harness.pending.startedAt,
+            inputDigest: harness.pending.inputDigest,
+            conversationId: harness.pending.conversationId,
+            baseMessages: harness.pending.baseMessages
+        )
+        let request = McpToolApprovalRequest(
+            id: ChatToolCallParsing.requestId(for: toolCall),
+            serverName: "local",
+            toolName: "skill_import",
+            argumentsPreview: "更新 current",
+            reason: "Test approval"
+        )
+        await harness.coordinator.installPendingMcpApprovalForTesting(
+            pending: pending,
+            request: request
+        )
+        let messagesBefore = harness.state.messages.map { $0.toText() }
+
+        await harness.coordinator.approvePendingMcpTool(requestId: "stale-request")
+        await harness.coordinator.denyPendingMcpTool(requestId: "stale-request")
+
+        XCTAssertEqual(harness.state.pendingMcpApproval?.id, request.id)
+        XCTAssertEqual(harness.state.messages.map { $0.toText() }, messagesBefore)
+        XCTAssertTrue(harness.coordinator.hasPendingApproval(runId: pending.runId))
+        harness.coordinator.cancel()
     }
 
     func testKeepAliveHandoffFailureCancelsCurrentRunAndPersistsTerminalState() async throws {
@@ -2529,6 +2604,7 @@ private final class ChatGenerationBindingState {
     var messageRevision = 0
     var isLoading = false
     var pendingSearchApproval: SearchToolApprovalRequest?
+    var pendingMcpApproval: McpToolApprovalRequest?
     var persistedCount = 0
     var persistedSnapshots: [[String]] = []
     var recordedRunStatuses: [String] = []
@@ -2537,6 +2613,10 @@ private final class ChatGenerationBindingState {
     var onRecordRun: (() -> Void)?
     var onBumpMessageRevision: ((ChatMessageUpdateReason) -> Void)?
     var messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage] = { $0 }
+    var shouldBlockApprovalMark = false
+    private var approvalMarkIsBlocked = false
+    private var approvalMarkContinuation: CheckedContinuation<Bool, Never>?
+    private var approvalMarkEnteredContinuation: CheckedContinuation<Void, Never>?
 
     init(messages: [UIMessage]) {
         self.messages = messages
@@ -2561,11 +2641,16 @@ private final class ChatGenerationBindingState {
             setPendingMemoryApproval: { _ in },
             setPendingSearchApproval: { [weak self] request in
                 self?.pendingSearchApproval = request
+                if request != nil {
+                    self?.persistenceEvents.append("publish-card")
+                }
             },
             setPendingWebMountApproval: { _ in },
             setPendingWorkspaceApproval: { _ in },
             setPendingIshHandoffApproval: { _ in },
-            setPendingMcpApproval: { _ in },
+            setPendingMcpApproval: { [weak self] request in
+                self?.pendingMcpApproval = request
+            },
             setPendingCouncilApproval: { _ in },
             setPendingAskUser: { _ in },
             setContextCompactState: { _ in },
@@ -2591,9 +2676,8 @@ private final class ChatGenerationBindingState {
                 }
             },
             markRunAwaitingPermission: { [weak self] _, toolCallId in
-                self?.markedApprovalToolIds.append(toolCallId)
-                self?.persistenceEvents.append("mark-awaiting")
-                return true
+                guard let self else { return false }
+                return await self.markRunAwaitingPermission(toolCallId: toolCallId)
             },
             startLiveActivity: { _, _, _ in },
             saveMiniAppIfPresent: { _, _ in nil },
@@ -2602,6 +2686,34 @@ private final class ChatGenerationBindingState {
             },
             userFacingGenerationError: { rawMessage, _ in rawMessage }
         )
+    }
+
+    func waitUntilApprovalMarkBlocks() async {
+        guard !approvalMarkIsBlocked else { return }
+        await withCheckedContinuation { continuation in
+            approvalMarkEnteredContinuation = continuation
+        }
+    }
+
+    func resumeApprovalMark() {
+        shouldBlockApprovalMark = false
+        approvalMarkIsBlocked = false
+        let continuation = approvalMarkContinuation
+        approvalMarkContinuation = nil
+        continuation?.resume(returning: true)
+    }
+
+    private func markRunAwaitingPermission(toolCallId: String) async -> Bool {
+        markedApprovalToolIds.append(toolCallId)
+        persistenceEvents.append("mark-awaiting")
+        guard shouldBlockApprovalMark else { return true }
+        approvalMarkIsBlocked = true
+        let enteredContinuation = approvalMarkEnteredContinuation
+        approvalMarkEnteredContinuation = nil
+        enteredContinuation?.resume()
+        return await withCheckedContinuation { continuation in
+            approvalMarkContinuation = continuation
+        }
     }
 }
 

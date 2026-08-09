@@ -897,10 +897,10 @@ struct ChatView: View {
                 McpToolApprovalCard(
                     request: request,
                     onApprove: {
-                        viewModel.approvePendingMcpTool()
+                        viewModel.approvePendingMcpTool(requestId: request.id)
                     },
                     onDeny: {
-                        viewModel.denyPendingMcpTool()
+                        viewModel.denyPendingMcpTool(requestId: request.id)
                     }
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))

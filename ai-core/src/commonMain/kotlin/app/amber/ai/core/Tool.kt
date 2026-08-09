@@ -1107,7 +1107,12 @@ fun createSkillValidateToolDeclaration(): Tool = Tool(
 
 fun createSkillImportToolDeclaration(): Tool = Tool(
     name = "skill_import",
-    description = "Import a skill folder or SKILL.md file from /workspace. Imported skills are enabled by default.",
+    description = """
+        Prepare a read-only import preview for a skill folder or SKILL.md file under /workspace.
+        The host requires one explicit user approval, then rechecks the previewed base and candidate
+        hashes (CAS) before atomically applying the package. New skills are enabled; existing skills
+        keep their current enabled state.
+    """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
@@ -1120,6 +1125,8 @@ fun createSkillImportToolDeclaration(): Tool = Tool(
         )
     },
     needsApproval = true,
+    allowsAutoApproval = false,
+    mandatoryApproval = true,
     execute = { emptyList() }
 )
 

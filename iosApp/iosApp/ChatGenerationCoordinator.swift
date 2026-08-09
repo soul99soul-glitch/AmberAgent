@@ -846,6 +846,9 @@ final class ChatGenerationCoordinator {
     private var pendingWorkspaceToolApproval: ChatPendingToolApproval?
     private var pendingIshHandoffToolApproval: ChatPendingToolApproval?
     private var pendingMcpToolApproval: ChatPendingToolApproval?
+    /// skill_import 的只读 preview/CAS 上下文只活在当前 pending MCP 槽中；
+    /// 不持久化，取消、拒绝、完成或冷启动都会清除。
+    private var pendingPreparedSkillImport: IOSPreparedSkillImport?
     private var pendingCouncilToolApproval: ChatPendingToolApproval?
     private var pendingAskUserToolApproval: ChatPendingToolApproval?
     /// F8 fix: I-5's "proceed and remind" verdict is computed in
@@ -1688,12 +1691,12 @@ final class ChatGenerationCoordinator {
         await finishPendingIshHandoffToolApproval(allow: false)
     }
 
-    func approvePendingMcpTool() async {
-        await finishPendingMcpToolApproval(allow: true)
+    func approvePendingMcpTool(requestId: String? = nil) async {
+        await finishPendingMcpToolApproval(allow: true, expectedRequestId: requestId)
     }
 
-    func denyPendingMcpTool() async {
-        await finishPendingMcpToolApproval(allow: false)
+    func denyPendingMcpTool(requestId: String? = nil) async {
+        await finishPendingMcpToolApproval(allow: false, expectedRequestId: requestId)
     }
 
     func approvePendingCouncilTool() async {
@@ -2990,7 +2993,14 @@ final class ChatGenerationCoordinator {
             )
         }
 
-        guard currentRunId == runId else { return }
+        guard currentRunId == runId else {
+            // Runtime 可能已完成 skill_import 的只读准备，但 run 在审批卡接管前
+            // 被替换；丢弃仅存内存的候选上下文，绝不跨 run 复用。
+            toolRuntime.discardPreparedSkillImportForApproval(
+                toolCallId: pendingToolCall.toolCall.toolCallId
+            )
+            return
+        }
 
         switch result {
         case .completed(let executedMessages):
@@ -3459,34 +3469,34 @@ final class ChatGenerationCoordinator {
         pending: ChatPendingToolApproval,
         isNestedExec: Bool = false
     ) async {
-        guard currentRunId == pending.runId else { return }
+        guard currentRunId == pending.runId else {
+            toolRuntime.discardPreparedSkillImportForApproval(
+                toolCallId: pending.toolCall.toolCallId
+            )
+            return
+        }
         let writeBaseline = bindings.capturePersistMessagesBaseline(pending.conversationId)
         switch prompt {
         case .memory(let request):
             pendingMemoryToolApproval = pending
             pendingMemoryExpectedUpdatedAt = request.expectedUpdatedAt
-            bindings.setPendingMemoryApproval(request)
-        case .search(let request):
+        case .search:
             pendingSearchToolApproval = pending
-            bindings.setPendingSearchApproval(request)
-        case .webMount(let request):
+        case .webMount:
             pendingWebMountToolApproval = pending
-            bindings.setPendingWebMountApproval(request)
-        case .workspace(let request):
+        case .workspace:
             pendingWorkspaceToolApproval = pending
-            bindings.setPendingWorkspaceApproval(request)
-        case .ish(let request):
+        case .ish:
             pendingIshHandoffToolApproval = pending
-            bindings.setPendingIshHandoffApproval(request)
-        case .mcp(let request):
+        case .mcp:
             pendingMcpToolApproval = pending
-            bindings.setPendingMcpApproval(request)
-        case .council(let request):
+            pendingPreparedSkillImport = toolRuntime.takePreparedSkillImportForApproval(
+                toolCallId: pending.toolCall.toolCallId
+            )
+        case .council:
             pendingCouncilToolApproval = pending
-            bindings.setPendingCouncilApproval(request)
-        case .askUser(let request):
+        case .askUser:
             pendingAskUserToolApproval = pending
-            bindings.setPendingAskUser(request)
         }
         // P3-b: a nested exec tool's approval shows ONLY the card. The nested
         // call is not a conversation message, so the baseMessages
@@ -3497,6 +3507,7 @@ final class ChatGenerationCoordinator {
         // The outer exec call's own I-1 record is the durable trace; the
         // card state is in-memory by design.
         if isNestedExec {
+            publishPendingApproval(prompt)
             return
         }
         bindings.setMessages(pending.baseMessages)
@@ -3540,8 +3551,14 @@ final class ChatGenerationCoordinator {
         // 等人点按钮不需要后台执行权——这一轮此刻不在算，在等人。必须等可见
         // baseMessages 已经耐久保存后再还租约，避免挂起/杀进程后连待确认节点都丢失。
         BackgroundGenerationKeepAlive.shared.end(pending.runId)
-        bindings.setIsLoading(false)
         currentLiveActivityStage = .waitingForConfirmation
+        await dependencies.liveActivityController.update(
+            runId: pending.runId,
+            presentation: .waitingForUser(kind: prompt.activityKind),
+            force: true
+        )
+        guard currentRunId == pending.runId else { return }
+        bindings.setIsLoading(false)
         if case .askUser(let request) = prompt {
             WatchTaskCoordinator.shared.publishAskUser(
                 runId: pending.runId,
@@ -3560,11 +3577,28 @@ final class ChatGenerationCoordinator {
                 prompt: prompt
             )
         }
-        await dependencies.liveActivityController.update(
-            runId: pending.runId,
-            presentation: .waitingForUser(kind: prompt.activityKind),
-            force: true
-        )
+        publishPendingApproval(prompt)
+    }
+
+    private func publishPendingApproval(_ prompt: ChatToolApprovalPrompt) {
+        switch prompt {
+        case .memory(let request):
+            bindings.setPendingMemoryApproval(request)
+        case .search(let request):
+            bindings.setPendingSearchApproval(request)
+        case .webMount(let request):
+            bindings.setPendingWebMountApproval(request)
+        case .workspace(let request):
+            bindings.setPendingWorkspaceApproval(request)
+        case .ish(let request):
+            bindings.setPendingIshHandoffApproval(request)
+        case .mcp(let request):
+            bindings.setPendingMcpApproval(request)
+        case .council(let request):
+            bindings.setPendingCouncilApproval(request)
+        case .askUser(let request):
+            bindings.setPendingAskUser(request)
+        }
     }
 
     // finishMemoryApproval is a synchronous, in-process, sub-millisecond write
@@ -3679,12 +3713,24 @@ final class ChatGenerationCoordinator {
         completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
 
-    private func finishPendingMcpToolApproval(allow: Bool) async {
+    private func finishPendingMcpToolApproval(
+        allow: Bool,
+        expectedRequestId: String?
+    ) async {
         guard let pending = pendingMcpToolApproval else { return }
         guard currentRunId == pending.runId else { return }
+        if let expectedRequestId,
+           ChatToolCallParsing.requestId(for: pending.toolCall) != expectedRequestId {
+            return
+        }
+        let preparedSkillImport = pendingPreparedSkillImport
         clearPendingMcpApproval()
         guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
-            await self.toolRuntime.finishMcpApproval(pending: pending, allow: allow)
+            await self.toolRuntime.finishMcpApproval(
+                pending: pending,
+                allow: allow,
+                preparedSkillImport: preparedSkillImport
+            )
         }) else { return }
         completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
@@ -4282,7 +4328,13 @@ final class ChatGenerationCoordinator {
     }
 
     private func clearPendingMcpApproval() {
+        if let pendingMcpToolApproval {
+            toolRuntime.discardPreparedSkillImportForApproval(
+                toolCallId: pendingMcpToolApproval.toolCall.toolCallId
+            )
+        }
         pendingMcpToolApproval = nil
+        pendingPreparedSkillImport = nil
         bindings.setPendingMcpApproval(nil)
     }
 
@@ -4406,6 +4458,18 @@ final class ChatGenerationCoordinator {
         currentInputDigest = pending.inputDigest
         currentConversationIdForRun = pending.conversationId
         await pauseForApproval(.search(request), pending: pending)
+    }
+
+    func installPendingMcpApprovalForTesting(
+        pending: ChatPendingToolApproval,
+        request: McpToolApprovalRequest
+    ) async {
+        streamJob = nil
+        currentRunId = pending.runId
+        currentStartedAt = pending.startedAt
+        currentInputDigest = pending.inputDigest
+        currentConversationIdForRun = pending.conversationId
+        await pauseForApproval(.mcp(request), pending: pending)
     }
 
     /// P3-b 测试缝：不经过 start() 建立 run 状态（currentRunId 等）后执行一次

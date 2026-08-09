@@ -91,12 +91,92 @@ struct SearchToolApprovalRequest: Identifiable, Equatable {
     }
 }
 
+enum McpSkillImportMutationKind: String, Codable, Equatable {
+    case new
+    case update
+}
+
+enum McpSkillImportFileChangeKind: String, Codable, Equatable {
+    case added
+    case modified
+    case removed
+}
+
+struct McpSkillImportFileChange: Identifiable, Codable, Equatable {
+    let path: String
+    let kind: McpSkillImportFileChangeKind
+    let beforeText: String?
+    let afterText: String?
+
+    var id: String { path }
+
+    init(
+        path: String,
+        kind: McpSkillImportFileChangeKind,
+        beforeText: String? = nil,
+        afterText: String? = nil
+    ) {
+        self.path = path
+        self.kind = kind
+        self.beforeText = beforeText
+        self.afterText = afterText
+    }
+}
+
+struct McpSkillImportPreview: Codable, Equatable {
+    let skillName: String
+    let mutationKind: McpSkillImportMutationKind
+    let baseHash: String?
+    let candidateHash: String
+    let beforeSummary: String
+    let afterSummary: String
+    let changedFiles: [McpSkillImportFileChange]
+    let containsMcpConfig: Bool
+
+    init(
+        skillName: String,
+        mutationKind: McpSkillImportMutationKind,
+        baseHash: String? = nil,
+        candidateHash: String,
+        beforeSummary: String,
+        afterSummary: String,
+        changedFiles: [McpSkillImportFileChange] = [],
+        containsMcpConfig: Bool = false
+    ) {
+        self.skillName = skillName
+        self.mutationKind = mutationKind
+        self.baseHash = baseHash
+        self.candidateHash = candidateHash
+        self.beforeSummary = beforeSummary
+        self.afterSummary = afterSummary
+        self.changedFiles = changedFiles
+        self.containsMcpConfig = containsMcpConfig
+    }
+}
+
 struct McpToolApprovalRequest: Identifiable, Equatable {
     let id: String
     let serverName: String
     let toolName: String
     let argumentsPreview: String
     let reason: String
+    let skillImportPreview: McpSkillImportPreview?
+
+    init(
+        id: String,
+        serverName: String,
+        toolName: String,
+        argumentsPreview: String,
+        reason: String,
+        skillImportPreview: McpSkillImportPreview? = nil
+    ) {
+        self.id = id
+        self.serverName = serverName
+        self.toolName = toolName
+        self.argumentsPreview = argumentsPreview
+        self.reason = reason
+        self.skillImportPreview = skillImportPreview
+    }
 
     var title: String {
         if toolName.hasPrefix("skill_") || toolName == "mcp_import_from_skill" || toolName == "mcp_test" {
@@ -426,7 +506,8 @@ enum ChatToolApprovalRequestBuilder {
 
     static func extensionMutation(
         for toolCall: UIMessagePart.Tool,
-        reason: String
+        reason: String,
+        skillImportPreview: McpSkillImportPreview? = nil
     ) -> McpToolApprovalRequest? {
         let args = ChatToolCallParsing.jsonObject(toolCall.input) ?? [:]
         let target = (args["name"] as? String)
@@ -434,13 +515,25 @@ enum ChatToolApprovalRequestBuilder {
             ?? (args["workspace_path"] as? String)
             ?? (args["server_id"] as? String)
             ?? toolCall.toolName
+        let argumentsPreview: String
+        if let preview = skillImportPreview {
+            let action = preview.mutationKind == .new ? "新建" : "更新"
+            let base = preview.baseHash.map { String($0.prefix(8)) } ?? "无"
+            let candidate = String(preview.candidateHash.prefix(8))
+            argumentsPreview = "\(action) \(preview.skillName) · \(preview.changedFiles.count) 个文件 · \(base)→\(candidate)"
+        } else {
+            // Always pass a JSON object; bare String fails JSONSerialization.
+            argumentsPreview = ChatToolCallParsing.truncatedMcpArguments(
+                args.isEmpty ? ["target": target] : args
+            )
+        }
         return McpToolApprovalRequest(
             id: ChatToolCallParsing.requestId(for: toolCall),
             serverName: "local",
             toolName: toolCall.toolName,
-            // Always pass a JSON object; bare String fails JSONSerialization.
-            argumentsPreview: ChatToolCallParsing.truncatedMcpArguments(args.isEmpty ? ["target": target] : args),
-            reason: reason
+            argumentsPreview: argumentsPreview,
+            reason: reason,
+            skillImportPreview: skillImportPreview
         )
     }
 

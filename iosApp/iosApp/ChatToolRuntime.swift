@@ -138,6 +138,10 @@ final class ChatToolRuntime {
     private let searchTransport: any IOSSearchHTTPTransport
     private let mcpManager: IOSMcpManager
     private let skillFileStore: IOSSkillFileStore
+    private let workspaceStore: IOSWorkspaceStore
+    /// `skill_import` 的获批应用上下文只在本次进程内、按 toolCallId 暂存。
+    /// Coordinator 接住审批卡时立即取走；冷启动不会恢复或静默应用候选包。
+    private var preparedSkillImportsForApproval: [String: IOSPreparedSkillImport] = [:]
     private let mcpConfigStore: IOSMcpConfigStore
     /// P1-c: 线程编排工具执行体（spawn_agent/list_agents/interrupt_agent）。
     /// 可选：未注入时三工具返回结构化「不可用」错误而不是静默缺失。
@@ -161,7 +165,7 @@ final class ChatToolRuntime {
     private lazy var skillMcpToolService = IOSSkillMcpToolService(
         skillStore: skillFileStore,
         sharedSettings: sharedSettings,
-        workspaceStore: .shared,
+        workspaceStore: workspaceStore,
         mcpConfigStore: mcpConfigStore,
         mcpManager: mcpManager
     )
@@ -173,6 +177,7 @@ final class ChatToolRuntime {
         searchTransport: any IOSSearchHTTPTransport,
         mcpManager: IOSMcpManager,
         skillFileStore: IOSSkillFileStore = IOSSkillFileStore(),
+        workspaceStore: IOSWorkspaceStore = .shared,
         mcpConfigStore: IOSMcpConfigStore = .shared,
         orchestrationToolService: IOSThreadOrchestrationToolService? = nil,
         memoryPollutionMarker: ((KotlinUuid, String) -> Void)? = nil,
@@ -185,11 +190,22 @@ final class ChatToolRuntime {
         self.searchTransport = searchTransport
         self.mcpManager = mcpManager
         self.skillFileStore = skillFileStore
+        self.workspaceStore = workspaceStore
         self.mcpConfigStore = mcpConfigStore
         self.orchestrationToolService = orchestrationToolService
         self.memoryPollutionMarker = memoryPollutionMarker
         self.jsCellRegistry = jsCellRegistry ?? .shared
         self.conversationStoreProvider = conversationStoreProvider
+    }
+
+    /// 把只读 preview 对应的 CAS 上下文交给 Coordinator 的 pending MCP 槽。
+    /// 取走即删除，避免批准恢复时重复消费同一个候选。
+    func takePreparedSkillImportForApproval(toolCallId: String) -> IOSPreparedSkillImport? {
+        preparedSkillImportsForApproval.removeValue(forKey: toolCallId)
+    }
+
+    func discardPreparedSkillImportForApproval(toolCallId: String) {
+        preparedSkillImportsForApproval.removeValue(forKey: toolCallId)
     }
 
     /// Tool set for the novel discussion agent. Ask User is always available;
@@ -455,6 +471,11 @@ final class ChatToolRuntime {
         for name in skillMcpNames where availableToolNames.contains(name) {
             executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
                 guard let self else { return .failed("Chat runtime is unavailable.") }
+                // skill_import 的 preview 是只读步骤，但真正应用必须经过前台的一次
+                // 显式批准；任何全局/高风险自动批准开关都不能让后台代为确认。
+                if toolName == "skill_import" {
+                    return .denied("Skill 导入需要查看候选变更并显式批准，请回到 App 内确认。")
+                }
                 let mutating = IOSSkillToolCatalog.mutatingToolNames.contains(toolName)
                     || IOSMcpManagementToolCatalog.mutatingToolNames.contains(toolName)
                 let highRisk = IOSMcpManagementToolCatalog.highRiskToolNames.contains(toolName)
@@ -905,7 +926,8 @@ final class ChatToolRuntime {
 
     func finishMcpApproval(
         pending: ChatPendingToolApproval,
-        allow: Bool
+        allow: Bool,
+        preparedSkillImport: IOSPreparedSkillImport? = nil
     ) async -> [UIMessage] {
         let audit: (capabilityId: String, actionName: String)
         if pending.toolCall.toolName == "mcp_call"
@@ -926,13 +948,35 @@ final class ChatToolRuntime {
 
         let resultText: String
         if allow {
-            resultText = await dispatchAdvancedToolCall(
-                pending.toolCall,
-                providerSetting: pending.providerSetting,
-                params: pending.params,
-                runId: pending.runId,
-                conversationId: pending.conversationId
-            )
+            if pending.toolCall.toolName == "skill_import" {
+                if let preparedSkillImport {
+                    do {
+                        resultText = try skillMcpToolService.applyPreparedSkillImport(preparedSkillImport)
+                    } catch {
+                        resultText = ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: pending.toolCall.toolName,
+                            reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                            status: "failed"
+                        )
+                    }
+                } else {
+                    // 冷启动或审批内存态丢失时 fail closed；绝不能退回普通
+                    // dispatch（那会重新 preview，或让未来实现意外绕过本次审批）。
+                    resultText = ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: pending.toolCall.toolName,
+                        reason: "Skill 导入预览已失效，请重新发起导入并确认最新变更。",
+                        status: "failed"
+                    )
+                }
+            } else {
+                resultText = await dispatchAdvancedToolCall(
+                    pending.toolCall,
+                    providerSetting: pending.providerSetting,
+                    params: pending.params,
+                    runId: pending.runId,
+                    conversationId: pending.conversationId
+                )
+            }
         } else {
             resultText = "用户拒绝执行 \(pending.toolCall.toolName)。"
         }
@@ -1715,10 +1759,50 @@ final class ChatToolRuntime {
         nestedTools: IOSJsSandboxTools? = nil,
         toolExposureBridge: IosToolExposureBridge? = nil
     ) async -> ChatToolRuntimeResult {
+        let toolName = pending.toolCall.toolName
+
+        // skill_import 与普通本机 mutation 不同：这里先做只读 preview，再无条件
+        // 暂停等待一次显式批准。此分支位于所有 auto-approve gate 之前，因此
+        // 全局和 high-risk 开关都不能把候选包静默应用。
+        if toolName == "skill_import" {
+            preparedSkillImportsForApproval.removeValue(forKey: pending.toolCall.toolCallId)
+            do {
+                let prepared = try skillMcpToolService.prepareSkillImport(
+                    arguments: pending.toolCall.input
+                )
+                guard let request = ChatToolApprovalRequestBuilder.extensionMutation(
+                    for: pending.toolCall,
+                    reason: "请核对候选 Skill 的文件变更；批准后会复核 CAS 并原子替换技能包。",
+                    skillImportPreview: Self.mcpSkillImportPreview(from: prepared.preview)
+                ) else {
+                    return .completed(messagesByFinishingToolCall(
+                        pending.toolCall,
+                        outputText: ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: toolName,
+                            reason: "无法构造 Skill 导入审批请求。",
+                            status: "failed"
+                        ),
+                        in: pending.baseMessages
+                    ))
+                }
+                preparedSkillImportsForApproval[pending.toolCall.toolCallId] = prepared
+                return .waitingForApproval(.mcp(request))
+            } catch {
+                return .completed(messagesByFinishingToolCall(
+                    pending.toolCall,
+                    outputText: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: toolName,
+                        reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                        status: "failed"
+                    ),
+                    in: pending.baseMessages
+                ))
+            }
+        }
+
         // MCP calls and MCP management can access remote services or import
         // connection configuration. Ordinary global auto-approve must not cross
         // this high-risk boundary.
-        let toolName = pending.toolCall.toolName
         let highRiskMcp = toolName == "mcp_call"
             || ToolKt.isExpandedMcpToolName(name: toolName)
             || IOSMcpManagementToolCatalog.highRiskToolNames.contains(toolName)
@@ -1796,6 +1880,38 @@ final class ChatToolRuntime {
             in: pending.baseMessages,
             conversationId: pending.conversationId
         ))
+    }
+
+    private static func mcpSkillImportPreview(
+        from preview: IOSSkillImportPreview
+    ) -> McpSkillImportPreview {
+        let mutationKind: McpSkillImportMutationKind = switch preview.kind {
+        case .new: .new
+        case .update: .update
+        }
+        let changedFiles = preview.changedFiles.map { change in
+            let kind: McpSkillImportFileChangeKind = switch change.kind {
+            case .added: .added
+            case .modified: .modified
+            case .removed: .removed
+            }
+            return McpSkillImportFileChange(
+                path: change.path,
+                kind: kind,
+                beforeText: change.beforeText,
+                afterText: change.afterText
+            )
+        }
+        return McpSkillImportPreview(
+            skillName: preview.name,
+            mutationKind: mutationKind,
+            baseHash: preview.baseHash,
+            candidateHash: preview.candidateHash,
+            beforeSummary: preview.beforeSummary ?? "尚未安装",
+            afterSummary: preview.afterSummary,
+            changedFiles: changedFiles,
+            containsMcpConfig: preview.containsMcpConfig
+        )
     }
 
     private func dispatchSearchToolCall(_ toolCall: UIMessagePart.Tool) async -> String {

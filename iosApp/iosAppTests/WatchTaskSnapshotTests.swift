@@ -242,6 +242,39 @@ final class WatchTaskSnapshotTests: XCTestCase {
         XCTAssertEqual(decision.options.map(\.id), ["deny", "approve", "open-phone"])
     }
 
+    func testBuilderSkillImportDecisionKeepsCandidateIdentityCompact() {
+        let request = McpToolApprovalRequest(
+            id: "skill-import-1",
+            serverName: "local",
+            toolName: "skill_import",
+            argumentsPreview: "this fallback must not define candidate identity",
+            reason: "请核对完整文件变更。",
+            skillImportPreview: McpSkillImportPreview(
+                skillName: "a-very-long-skill-name-that-needs-watch-truncation",
+                mutationKind: .update,
+                baseHash: "0123456789abcdef",
+                candidateHash: "fedcba9876543210",
+                beforeSummary: "before",
+                afterSummary: "after",
+                changedFiles: [
+                    McpSkillImportFileChange(path: "SKILL.md", kind: .modified),
+                    McpSkillImportFileChange(path: "mcp.json", kind: .added)
+                ]
+            )
+        )
+
+        let decision = WatchTaskSnapshotBuilder.decision(from: .mcp(request))
+
+        XCTAssertTrue(decision.body.contains("更新"))
+        XCTAssertTrue(decision.body.contains("a-very-long-skill-name-that-…"))
+        XCTAssertTrue(decision.body.contains("2 处变更"))
+        XCTAssertTrue(decision.body.contains("01234567"))
+        XCTAssertTrue(decision.body.contains("fedcba98"))
+        XCTAssertEqual(decision.options.map(\.id), ["deny", "approve", "open-phone"])
+        XCTAssertFalse(decision.body.contains("local.skill_import"))
+        XCTAssertFalse(decision.body.contains("SKILL.md"))
+    }
+
     func testBuilderClipsCompletedSummary() {
         let long = String(repeating: "总结", count: 200)
         let snapshot = WatchTaskSnapshotBuilder.make(

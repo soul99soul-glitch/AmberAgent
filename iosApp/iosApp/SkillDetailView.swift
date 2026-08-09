@@ -15,6 +15,10 @@ struct SkillDetailView: View {
     @State private var editorDraft: SkillEditorDraft?
     @State private var deleteConfirmationPresented = false
     @State private var restoreConfirmationPresented = false
+    @State private var rollbackConfirmationPresented = false
+    @State private var rollbackAvailability: IOSSkillRollbackAvailability = .unavailable(
+        "正在检查可回退版本。"
+    )
 
     init(
         sharedSettings: IOSSharedSettingsStore,
@@ -40,6 +44,7 @@ struct SkillDetailView: View {
                     triggerSection
                     toolsSection
                     infoSection
+                    rollbackSection
                     if hasFactoryBackup {
                         restoreSection
                     }
@@ -81,30 +86,42 @@ struct SkillDetailView: View {
         } message: {
             Text("会用应用内嵌的出厂文案覆盖当前本机内容，你或 agent 做过的修改会丢失。")
         }
+        .confirmationDialog(
+            "回退上一次导入",
+            isPresented: $rollbackConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("确认回退", role: .destructive) {
+                rollbackLastImport()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(rollbackAvailability.reason)
+        }
         .task(id: dirName ?? skillName) {
             loadSnapshot()
         }
     }
 
     private var header: some View {
-        HStack {
-            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回技能", size: 44, symbolSize: 20) {
-                dismiss()
-            }
-
-            Spacer()
-
+        ZStack {
             Text("技能详情")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AmberTheme.foreground)
 
-            Spacer()
+            HStack {
+                AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回技能", size: 44, symbolSize: 20) {
+                    dismiss()
+                }
 
-            SkillEditButton {
-                if let content = snapshot?.content {
-                    editorDraft = SkillEditorDraft(content: content)
-                } else {
-                    pendingAlert = .file
+                Spacer()
+
+                SkillEditButton {
+                    if let content = snapshot?.content {
+                        editorDraft = SkillEditorDraft(content: content)
+                    } else {
+                        pendingAlert = .file
+                    }
                 }
             }
         }
@@ -146,19 +163,18 @@ struct SkillDetailView: View {
     private var enableSection: some View {
         VStack(spacing: 0) {
             AmberFormGroup {
-                HStack(spacing: 12) {
-                    Text("启用状态")
-                        .font(.body)
-                        .foregroundStyle(AmberTheme.foreground)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Button {
-                        setSkillEnabled(!isEnabled)
-                    } label: {
-                        SkillDetailSwitch(isOn: isEnabled)
-                    }
-                    .buttonStyle(.plain)
-                }
+                Toggle(
+                    "启用状态",
+                    isOn: Binding(
+                        get: { isEnabled },
+                        set: { setSkillEnabled($0) }
+                    )
+                )
+                .toggleStyle(.switch)
+                .tint(AmberTheme.accent)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+                .disabled(snapshot == nil)
                 .frame(minHeight: 52)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 4)
@@ -214,6 +230,30 @@ struct SkillDetailView: View {
                 loadError
                     ?? footerHint
             )
+        }
+    }
+
+    private var rollbackSection: some View {
+        VStack(spacing: 0) {
+            AmberFormGroup {
+                Button {
+                    rollbackConfirmationPresented = true
+                } label: {
+                    Text("回退上一次导入")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(
+                            rollbackAvailability.canRollback ? AmberTheme.accent : AmberTheme.muted2
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 52)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!rollbackAvailability.canRollback)
+            }
+            .padding(.top, 20)
+
+            SkillDetailFooter(rollbackAvailability.reason)
         }
     }
 
@@ -311,6 +351,7 @@ struct SkillDetailView: View {
     }
 
     private func loadSnapshot() {
+        refreshRollbackAvailability()
         guard let dirName, !dirName.isEmpty else {
             snapshot = nil
             loadError = "未收到技能目录名；请从技能扫描列表进入详情。"
@@ -375,6 +416,51 @@ struct SkillDetailView: View {
             try IOSBuiltinSkills.restoreFactoryContent(name: dirName, into: skillStore)
             loadSnapshot()
         } catch {
+            pendingAlert = .operationFailed(error.localizedDescription)
+        }
+    }
+
+    private func refreshRollbackAvailability() {
+        guard let dirName, !dirName.isEmpty else {
+            rollbackAvailability = .unavailable("未收到技能目录名，无法检查可回退版本。")
+            return
+        }
+        do {
+            rollbackAvailability = try skillStore.rollbackAvailability(name: dirName)
+        } catch {
+            rollbackAvailability = .unavailable("检查可回退版本失败：\(error.localizedDescription)")
+        }
+    }
+
+    private func rollbackLastImport() {
+        guard let dirName, !dirName.isEmpty else {
+            pendingAlert = .operationFailed("未收到技能目录名；请从技能扫描列表进入详情。")
+            return
+        }
+        guard case .available(let expectedManifest) = rollbackAvailability else {
+            refreshRollbackAvailability()
+            pendingAlert = .operationFailed("可回退版本已经失效，请刷新后重试。")
+            return
+        }
+        do {
+            let receipt = try skillStore.rollbackSkillPackage(
+                name: dirName,
+                expectedManifest: expectedManifest
+            )
+            let manifest = receipt.manifest
+            if manifest.optionalSeedWasRemoved {
+                IOSBuiltinSkills.markOptionalSeedRemoved(manifest.name, store: skillStore)
+            }
+            switch manifest.kind {
+            case .update:
+                sharedSettings.setSkillEnabled(name: manifest.name, enabled: manifest.enabledBefore)
+                loadSnapshot()
+            case .new:
+                sharedSettings.removeSkillFromAllAssistants(name: manifest.name)
+                dismiss()
+            }
+        } catch {
+            refreshRollbackAvailability()
             pendingAlert = .operationFailed(error.localizedDescription)
         }
     }
@@ -479,31 +565,13 @@ private struct SkillEditButton: View {
             Text("编辑")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(AmberTheme.accent)
-                .frame(height: 36)
+                .frame(minHeight: 44)
                 .padding(.horizontal, 14)
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .amberGlass(cornerRadius: AmberTheme.radiusPill)
         .accessibilityLabel("编辑 SKILL.md")
-    }
-}
-
-private struct SkillDetailSwitch: View {
-    let isOn: Bool
-
-    var body: some View {
-        Capsule()
-            .fill(isOn ? AmberTheme.accent : AmberTheme.surface2)
-            .frame(width: 48, height: 28)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(Color.white)
-                    .frame(width: 24, height: 24)
-                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
-                    .padding(2)
-            }
-            .animation(.snappy(duration: 0.18), value: isOn)
     }
 }
 

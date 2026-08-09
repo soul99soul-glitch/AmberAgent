@@ -125,14 +125,20 @@ enum WatchTaskSnapshotBuilder {
                 risk: .high
             )
         case .mcp(let request):
-            return approvalDecision(
-                id: request.id,
-                title: request.title,
-                body: body(
+            let decisionBody: String
+            if let preview = request.skillImportPreview {
+                decisionBody = skillImportBody(preview)
+            } else {
+                decisionBody = body(
                     primary: "\(request.serverName).\(request.toolName)",
                     fallback: request.reason,
                     chips: [WatchTaskText.singleLine(request.argumentsPreview, maxLength: 80)].compactMap { $0 }
-                ),
+                )
+            }
+            return approvalDecision(
+                id: request.id,
+                title: request.title,
+                body: decisionBody,
                 risk: .high
             )
         case .council(let request):
@@ -238,6 +244,14 @@ enum WatchTaskSnapshotBuilder {
         return [primaryLine, chipLine, fallbackLine]
             .compactMap { $0 }
             .first ?? "需要你在手表上确认这一步。"
+    }
+
+    private static func skillImportBody(_ preview: McpSkillImportPreview) -> String {
+        let action = preview.mutationKind == .new ? "新建" : "更新"
+        let skillName = WatchTaskText.singleLine(preview.skillName, maxLength: 28) ?? "未命名 Skill"
+        let baseHash = preview.baseHash.map { String($0.prefix(8)) } ?? "无"
+        let candidateHash = String(preview.candidateHash.prefix(8))
+        return "\(action) \(skillName) · \(preview.changedFiles.count) 处变更 · \(baseHash)→\(candidateHash)"
     }
 }
 

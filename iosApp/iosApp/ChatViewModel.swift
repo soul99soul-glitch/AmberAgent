@@ -2362,15 +2362,15 @@ final class ChatViewModel {
         }
     }
 
-    func approvePendingMcpTool() {
+    func approvePendingMcpTool(requestId: String) {
         Task { @MainActor in
-            await generationCoordinator.approvePendingMcpTool()
+            await generationCoordinator.approvePendingMcpTool(requestId: requestId)
         }
     }
 
-    func denyPendingMcpTool() {
+    func denyPendingMcpTool(requestId: String) {
         Task { @MainActor in
-            await generationCoordinator.denyPendingMcpTool()
+            await generationCoordinator.denyPendingMcpTool(requestId: requestId)
         }
     }
 
