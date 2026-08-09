@@ -11,8 +11,9 @@ import XCTest
 ///    + 折入下一轮 upload。
 /// 3. 撤销同步删 sidecar 文件条目（exactly once）。
 /// 4. 队列满（20）时发送回到禁用态（`.steerQueueFull`）。
-/// 5. run 终态 leftover 按顺序拼接恢复进 composer 文本（可见、不静默丢、不自动发起新生成）。
+/// 5. run 成功终态自动发队列头一条；取消/失败才回填 composer（含附件留队）。
 /// 6. sidecar store 往返 + 冷启动（新实例读同一路径）恢复；不同会话不串。
+/// 7. 生成中可带图/选中文件入队；drain 折入 Image parts；旧纯文本 sidecar 仍可读。
 @MainActor
 final class IOSSteerQueueTests: XCTestCase {
 
@@ -198,9 +199,9 @@ final class IOSSteerQueueTests: XCTestCase {
         XCTAssertEqual(viewModel.steerQueue.count, IOSSteerQueueStore.maxPendingUserMessages)
     }
 
-    // MARK: - 5. run 终态 leftover → composer 恢复（多条拼接顺序）
+    // MARK: - 5. run 成功终态 → 自动发下一条；取消/失败 → 回填 composer
 
-    func testRunTerminalRestoresLeftoverToComposerInOrder() async throws {
+    func testRunTerminalAutoSendsNextQueuedMessage() async throws {
         let base = makeTempDirectory("SteerQueueTerminal")
         defer { try? FileManager.default.removeItem(at: base) }
         let store = makeConversationStore(directory: base)
@@ -215,7 +216,6 @@ final class IOSSteerQueueTests: XCTestCase {
         XCTAssertTrue(viewModel.sendMessage())
         viewModel.generationActiveOverrideForTesting = nil
 
-        // 无工具边界的简单问答：run 内队列不被消费，终态恢复 composer。
         let coordinator = viewModel.generationCoordinatorForTesting
         coordinator.installRunMetadataForTesting(
             runId: "run-steer-terminal",
@@ -223,17 +223,44 @@ final class IOSSteerQueueTests: XCTestCase {
             inputDigest: "steer-digest",
             conversationId: conversationId
         )
-        XCTAssertTrue(coordinator.finishStreamingForTesting(runId: "run-steer-terminal"))
+        XCTAssertTrue(coordinator.finishStreamingForTesting(
+            runId: "run-steer-terminal",
+            terminalEvent: .generationCompleted
+        ))
 
-        XCTAssertEqual(viewModel.inputText, "先排队的一条\n再排队的一条", "多条按队列顺序拼接")
+        // 成功终态：头一条上屏发出；下一条仍留队列；不回填 composer。
+        XCTAssertTrue(viewModel.inputText.isEmpty)
+        XCTAssertEqual(
+            viewModel.messages.filter { $0.role == MessageRole.user }.map { $0.toText() },
+            ["先排队的一条"]
+        )
+        XCTAssertEqual(viewModel.steerQueue.map(\.text), ["再排队的一条"])
+    }
+
+    func testRunCancelRestoresLeftoverToComposerInOrder() async throws {
+        let base = makeTempDirectory("SteerQueueCancelRestore")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeConversationStore(directory: base)
+        await store.newConversation()
+        let viewModel = makeViewModel(conversationStore: store, queueDirectory: base)
+
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+        viewModel.inputText = "先排队的一条"
+        XCTAssertTrue(viewModel.sendMessage())
+        viewModel.inputText = "再排队的一条"
+        XCTAssertTrue(viewModel.sendMessage())
+        viewModel.generationActiveOverrideForTesting = nil
+
+        viewModel.handleSteerQueueAtRunTerminal(
+            for: store.currentConversation?.id,
+            autoContinue: false
+        )
+
+        XCTAssertEqual(viewModel.inputText, "先排队的一条\n再排队的一条")
         XCTAssertTrue(viewModel.steerQueue.isEmpty)
         XCTAssertEqual(
             viewModel.messages.filter { $0.role == MessageRole.user }.count,
-            0,
-            "恢复只回填 composer，不落成消息"
-        )
-        XCTAssertTrue(
-            IOSSteerQueueStore(directoryURL: base).load(conversationId: conversationId).isEmpty
+            0
         )
     }
 
@@ -310,28 +337,242 @@ final class IOSSteerQueueTests: XCTestCase {
         )
     }
 
-    /// 发送键 stop/send 状态矩阵（P1-a 复核修复）：run 激活且发送被拦截时
-    ///（文本+附件、队列满）必须保持停止键，不能沦为禁用态丢失停止控制。
+    /// 发送键 stop/send 状态矩阵：run 激活且发送被拦截时（队列满）必须保持停止键。
     func testComposerSendButtonStopModeMatrix() {
         // 无 run：永不 stop（走普通发送逻辑）。
         XCTAssertFalse(ChatView.composerSendButtonIsStopMode(
-            isRunActive: false, isRecognizingImages: false, hasSendableText: true, sendEnabled: true
+            isRunActive: false, isRecognizingImages: false, hasSendableContent: true, sendEnabled: true
         ))
-        // run + 空文本：停止。
+        // run + 无可入队内容：停止。
         XCTAssertTrue(ChatView.composerSendButtonIsStopMode(
-            isRunActive: true, isRecognizingImages: false, hasSendableText: false, sendEnabled: false
+            isRunActive: true, isRecognizingImages: false, hasSendableContent: false, sendEnabled: false
         ))
-        // run + 纯文本可入队：发送（加入队列），非 stop。
+        // run + 可入队（文本/图/文件）：发送（加入队列），非 stop。
         XCTAssertFalse(ChatView.composerSendButtonIsStopMode(
-            isRunActive: true, isRecognizingImages: false, hasSendableText: true, sendEnabled: true
+            isRunActive: true, isRecognizingImages: false, hasSendableContent: true, sendEnabled: true
         ))
-        // run + 文本+附件/队列满（发送被拦截）：必须保持 stop。
+        // run + 队列满（发送被拦截）：必须保持 stop。
         XCTAssertTrue(ChatView.composerSendButtonIsStopMode(
-            isRunActive: true, isRecognizingImages: false, hasSendableText: true, sendEnabled: false
+            isRunActive: true, isRecognizingImages: false, hasSendableContent: true, sendEnabled: false
         ))
         // 识图中：恒 stop。
         XCTAssertTrue(ChatView.composerSendButtonIsStopMode(
-            isRunActive: false, isRecognizingImages: true, hasSendableText: true, sendEnabled: true
+            isRunActive: false, isRecognizingImages: true, hasSendableContent: true, sendEnabled: true
         ))
+    }
+
+    // MARK: - 7. 图/附件入队
+
+    func testSendWithImageDuringGenerationEnqueuesAttachments() async throws {
+        let base = makeTempDirectory("SteerQueueImageEnqueue")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeConversationStore(directory: base)
+        await store.newConversation()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = makeViewModel(conversationStore: store, queueDirectory: base)
+
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+        let preview = Data("preview".utf8)
+        let dataUrl = "data:image/png;base64,aaa"
+        viewModel.addPendingImage(dataUrl: dataUrl, previewData: preview)
+        viewModel.inputText = "看看这张图"
+        XCTAssertNil(viewModel.composerSendBlockReason(for: "看看这张图"))
+        XCTAssertTrue(viewModel.sendMessage())
+
+        XCTAssertEqual(viewModel.steerQueue.count, 1)
+        let entry = try XCTUnwrap(viewModel.steerQueue.first)
+        XCTAssertEqual(entry.text, "看看这张图")
+        XCTAssertEqual(entry.images.count, 1)
+        XCTAssertEqual(entry.images.first?.dataUrl, dataUrl)
+        XCTAssertTrue(viewModel.pendingImages.isEmpty, "入队后应清空 composer 附件")
+        XCTAssertEqual(
+            viewModel.messages.filter { $0.role == MessageRole.user }.count,
+            0,
+            "入队不上屏"
+        )
+
+        // sidecar 往返保留图片。
+        let cold = IOSSteerQueueStore(directoryURL: base).load(conversationId: conversationId)
+        XCTAssertEqual(cold.first?.images.first?.dataUrl, dataUrl)
+    }
+
+    func testDrainSteerQueueFoldsImagePartsIntoUserMessage() async throws {
+        let base = makeTempDirectory("SteerQueueImageDrain")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeConversationStore(directory: base)
+        await store.newConversation()
+        let viewModel = makeViewModel(conversationStore: store, queueDirectory: base)
+
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+        viewModel.addPendingImage(dataUrl: "data:image/jpeg;base64,bbb", previewData: Data("p".utf8))
+        viewModel.inputText = "带图插话"
+        XCTAssertTrue(viewModel.sendMessage())
+
+        let drained = viewModel.drainSteerQueue(conversationId: store.currentConversation?.id)
+        XCTAssertEqual(drained.count, 1)
+        let parts = drained[0].parts
+        XCTAssertTrue(parts.contains { $0 is UIMessagePart.Text })
+        XCTAssertTrue(parts.contains { $0 is UIMessagePart.Image })
+        XCTAssertTrue(viewModel.steerQueue.isEmpty)
+    }
+
+    func testTerminalKeepsAttachmentLeftoverInQueue() async throws {
+        let base = makeTempDirectory("SteerQueueImageTerminal")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeConversationStore(directory: base)
+        await store.newConversation()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = makeViewModel(conversationStore: store, queueDirectory: base)
+
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+        viewModel.addPendingImage(dataUrl: "data:image/png;base64,ccc", previewData: Data("q".utf8))
+        viewModel.inputText = "终态勿丢图"
+        XCTAssertTrue(viewModel.sendMessage())
+        viewModel.generationActiveOverrideForTesting = nil
+
+        let coordinator = viewModel.generationCoordinatorForTesting
+        coordinator.installRunMetadataForTesting(
+            runId: "run-steer-image-terminal",
+            startedAt: 1,
+            inputDigest: "steer-image",
+            conversationId: conversationId
+        )
+        // 取消/失败路径：含附件 leftover 不拼回 composer，留在队列条。
+        XCTAssertTrue(coordinator.finishStreamingForTesting(
+            runId: "run-steer-image-terminal",
+            terminalEvent: .generationCancelled
+        ))
+
+        XCTAssertTrue(viewModel.inputText.isEmpty)
+        XCTAssertEqual(viewModel.steerQueue.count, 1)
+        XCTAssertTrue(viewModel.steerQueue[0].hasAttachments)
+    }
+
+    func testLegacyTextOnlySidecarStillLoads() throws {
+        let base = makeTempDirectory("SteerQueueLegacy")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let conversationId = KotlinUuid.companion.random()
+        let url = base.appendingPathComponent("\(conversationId.toHexDashString()).json")
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        // 旧格式：仅 id/text/createdAt（无 images / selectedFile）。
+        struct LegacyEntry: Codable {
+            let id: String
+            let text: String
+            let createdAt: Date
+        }
+        let data = try JSONEncoder().encode([
+            LegacyEntry(id: "legacy-1", text: "旧排队", createdAt: Date(timeIntervalSince1970: 100))
+        ])
+        try data.write(to: url)
+        let loaded = IOSSteerQueueStore(directoryURL: base).load(conversationId: conversationId)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.text, "旧排队")
+        XCTAssertTrue(loaded.first?.images.isEmpty == true)
+        XCTAssertNil(loaded.first?.selectedFile)
+    }
+
+    func testImageOnlyDuringGenerationEnqueuesAndIsSendable() async throws {
+        let base = makeTempDirectory("SteerQueueImageOnly")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeConversationStore(directory: base)
+        await store.newConversation()
+        let viewModel = makeViewModel(conversationStore: store, queueDirectory: base)
+
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+        viewModel.addPendingImage(dataUrl: "data:image/png;base64,ddd", previewData: Data("r".utf8))
+        viewModel.inputText = ""
+        XCTAssertNil(viewModel.composerSendBlockReason(for: ""))
+        XCTAssertFalse(ChatView.composerSendButtonIsStopMode(
+            isRunActive: true, isRecognizingImages: false, hasSendableContent: true, sendEnabled: true
+        ))
+        XCTAssertTrue(viewModel.sendMessage())
+        XCTAssertEqual(viewModel.steerQueue.count, 1)
+        XCTAssertEqual(viewModel.steerQueue[0].text, "")
+        XCTAssertEqual(viewModel.steerQueue[0].images.count, 1)
+    }
+
+    func testFileOnlyDuringGenerationEnqueues() async throws {
+        let base = makeTempDirectory("SteerQueueFileOnly")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeConversationStore(directory: base)
+        await store.newConversation()
+        let viewModel = makeViewModel(conversationStore: store, queueDirectory: base)
+
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+        viewModel.pendingSelectedFilePreview = SelectedDocumentReadResult(
+            fileName: "notes.md",
+            fileType: "text/markdown",
+            totalBytes: 12,
+            bytesRead: 12,
+            characterCount: 5,
+            preview: "hello",
+            isTruncated: false,
+            note: nil
+        )
+        viewModel.inputText = ""
+        XCTAssertNil(viewModel.composerSendBlockReason(for: ""))
+        XCTAssertTrue(viewModel.sendMessage())
+        XCTAssertEqual(viewModel.steerQueue.count, 1)
+        XCTAssertEqual(viewModel.steerQueue[0].selectedFile?.fileName, "notes.md")
+        XCTAssertNil(viewModel.pendingSelectedFilePreview)
+    }
+
+    func testMixedLeftoverRestoresTextOnlyKeepsAttachments() async throws {
+        let base = makeTempDirectory("SteerQueueMixedLeftover")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeConversationStore(directory: base)
+        await store.newConversation()
+        let conversationId = try XCTUnwrap(store.currentConversation?.id)
+        let viewModel = makeViewModel(conversationStore: store, queueDirectory: base)
+
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+        viewModel.inputText = "纯文本插话"
+        XCTAssertTrue(viewModel.sendMessage())
+        viewModel.addPendingImage(dataUrl: "data:image/png;base64,eee", previewData: Data("s".utf8))
+        viewModel.inputText = "带图插话"
+        XCTAssertTrue(viewModel.sendMessage())
+        viewModel.generationActiveOverrideForTesting = nil
+
+        let coordinator = viewModel.generationCoordinatorForTesting
+        coordinator.installRunMetadataForTesting(
+            runId: "run-steer-mixed",
+            startedAt: 1,
+            inputDigest: "steer-mixed",
+            conversationId: conversationId
+        )
+        XCTAssertTrue(coordinator.finishStreamingForTesting(
+            runId: "run-steer-mixed",
+            terminalEvent: .generationCompleted
+        ))
+
+        // 成功终态先发纯文本头一条；带图条目仍留队列。
+        XCTAssertTrue(viewModel.inputText.isEmpty)
+        XCTAssertEqual(
+            viewModel.messages.filter { $0.role == MessageRole.user }.map { $0.toText() },
+            ["纯文本插话"]
+        )
+        XCTAssertEqual(viewModel.steerQueue.count, 1)
+        XCTAssertTrue(viewModel.steerQueue[0].hasAttachments)
+        XCTAssertEqual(viewModel.steerQueue[0].text, "带图插话")
+    }
+
+    func testQueueRowTitleShowsImageAndFile() {
+        let entry = IOSSteerQueueEntry(
+            id: "row",
+            text: "",
+            createdAt: Date(),
+            images: [IOSSteerQueueImage(dataUrl: "data:image/png;base64,x", previewData: Data("t".utf8))],
+            selectedFile: IOSSteerQueuedFile(SelectedDocumentReadResult(
+                fileName: "brief.pdf",
+                fileType: "application/pdf",
+                totalBytes: 1,
+                bytesRead: 1,
+                characterCount: 1,
+                preview: "x",
+                isTruncated: false,
+                note: nil
+            ))
+        )
+        XCTAssertEqual(ChatSteerQueueStrip.rowTitle(for: entry), "图片 · brief.pdf")
     }
 }

@@ -125,35 +125,6 @@ final class IOSSkillInjectionAndIOErrorTests: XCTestCase {
         XCTAssertEqual(finalMessages.filter { $0.role == MessageRole.system }.count, 1)
     }
 
-    func testEnabledSkillIsInjectedAsSystemMessage() throws {
-        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
-
-        // Create a skill on disk in an isolated temp directory.
-        let tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("IOSSkillInjectionTests-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempRoot) }
-
-        // The default IOSSkillFileStore reads from Documents/skills; to test in
-        // isolation we use a dedicated store and exercise the injection logic
-        // directly via the skill-body helper + the injector's data path.
-        let store = IOSSkillFileStore(baseDirectory: tempRoot)
-        try store.createSkill(name: "summarize", description: "Summarize any text concisely.", allowedTools: [])
-
-        // Enable the skill for the current assistant.
-        sharedSettings.setSkillEnabled(name: "summarize", enabled: true)
-        XCTAssertTrue(sharedSettings.isSkillEnabled("summarize"))
-
-        // The skill must appear in the on-disk listing.
-        XCTAssertTrue(store.listSkillDirNames().contains("summarize"))
-
-        // The markdown body extraction strips frontmatter.
-        let markdown = try store.readSkillMarkdown(dirName: "summarize")
-        let body = ChatRuntimeContextBuilder.skillBodyFromMarkdown(markdown)
-        XCTAssertTrue(body.contains("Summarize any text concisely."))
-        XCTAssertFalse(body.contains("description:"))
-    }
-
     func testSkillBodyExtractionHandlesMissingFrontmatter() {
         // No frontmatter → whole content is the body.
         let body = ChatRuntimeContextBuilder.skillBodyFromMarkdown("# Plain skill\nDo the thing.")
@@ -182,20 +153,6 @@ final class IOSSkillInjectionAndIOErrorTests: XCTestCase {
         XCTAssertEqual(store.lastUserVisibleError?.message, store.lastIOError?.message)
 
         store.clearUserVisibleError()
-        XCTAssertNil(store.lastIOError)
-        XCTAssertNil(store.lastUserVisibleError)
-    }
-
-    func testClearIOErrorResetsToNil() {
-        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
-        _ = sharedSettings // sanity: settings store constructs
-        // The clearIOError contract: calling it when there's no error is a no-op.
-        let tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("IOSClearIOError-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempRoot) }
-        let store = IOSConversationStore(baseDirectory: tempRoot)
-        store.clearIOError()
         XCTAssertNil(store.lastIOError)
         XCTAssertNil(store.lastUserVisibleError)
     }

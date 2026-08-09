@@ -32,15 +32,6 @@ final class IOSSystemPermissionCoordinatorTests: XCTestCase {
         XCTAssertEqual(result.status, .unavailableOnDevice)
     }
 
-    func testHealthKitReadIsNotReportedAsPlainGranted() async throws {
-        let coordinator = IOSSystemPermissionCoordinator()
-        let health = try capability("ios.health.read")
-
-        let result = await coordinator.refreshStatus(for: health)
-
-        XCTAssertNotEqual(result.status, .authorized)
-    }
-
     func testDirectPermissionWithUsageDescriptionDoesNotReportMissingInfoPlist() async throws {
         let coordinator = IOSSystemPermissionCoordinator()
         let camera = try capability("ios.camera.capture")

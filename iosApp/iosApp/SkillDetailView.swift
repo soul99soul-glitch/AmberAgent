@@ -14,6 +14,7 @@ struct SkillDetailView: View {
     @State private var isEnabled = false
     @State private var editorDraft: SkillEditorDraft?
     @State private var deleteConfirmationPresented = false
+    @State private var restoreConfirmationPresented = false
 
     init(
         sharedSettings: IOSSharedSettingsStore,
@@ -39,7 +40,10 @@ struct SkillDetailView: View {
                     triggerSection
                     toolsSection
                     infoSection
-                    if !isBuiltinSkill {
+                    if hasFactoryBackup {
+                        restoreSection
+                    }
+                    if !isRequiredBuiltinSkill {
                         deleteSection
                     }
                 }
@@ -69,6 +73,14 @@ struct SkillDetailView: View {
         } message: {
             Text("会删除这个本机技能，并从已启用它的助手中移除。")
         }
+        .confirmationDialog("恢复出厂", isPresented: $restoreConfirmationPresented, titleVisibility: .visible) {
+            Button("恢复出厂备份", role: .destructive) {
+                restoreFactorySkill()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("会用应用内嵌的出厂文案覆盖当前本机内容，你或 agent 做过的修改会丢失。")
+        }
         .task(id: dirName ?? skillName) {
             loadSnapshot()
         }
@@ -88,17 +100,11 @@ struct SkillDetailView: View {
 
             Spacer()
 
-            if isBuiltinSkill {
-                Color.clear
-                    .frame(width: 44, height: 44)
-                    .accessibilityHidden(true)
-            } else {
-                SkillEditButton {
-                    if let content = snapshot?.content {
-                        editorDraft = SkillEditorDraft(content: content)
-                    } else {
-                        pendingAlert = .file
-                    }
+            SkillEditButton {
+                if let content = snapshot?.content {
+                    editorDraft = SkillEditorDraft(content: content)
+                } else {
+                    pendingAlert = .file
                 }
             }
         }
@@ -184,12 +190,12 @@ struct SkillDetailView: View {
 
     private var toolsSection: some View {
         VStack(spacing: 0) {
-            AmberSectionLabel(text: "工具与权限")
+            AmberSectionLabel(text: "工具声明")
             AmberFormGroup {
-                SkillStaticValueRow(title: "允许的工具", value: allowedToolsSummary)
+                SkillStaticValueRow(title: "声明的工具", value: allowedToolsSummary)
             }
 
-            SkillDetailFooter("可通过右上角编辑按钮修改技能说明和权限。")
+            SkillDetailFooter("空表示未限制。此处只展示 frontmatter 声明，不会在运行时强制裁剪可用工具。")
         }
     }
 
@@ -204,7 +210,31 @@ struct SkillDetailView: View {
                 SkillStaticValueRow(title: "文件", value: snapshot?.relativePath ?? "SKILL.md", monospace: true)
             }
 
-            SkillDetailFooter(loadError ?? (isBuiltinSkill ? "这是 AmberAgent 必需的内置技能，不可编辑或删除。" : "编辑按钮会保存到这个本机技能。"))
+            SkillDetailFooter(
+                loadError
+                    ?? footerHint
+            )
+        }
+    }
+
+    private var restoreSection: some View {
+        VStack(spacing: 0) {
+            AmberFormGroup {
+                Button {
+                    restoreConfirmationPresented = true
+                } label: {
+                    Text("恢复出厂备份")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 52)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 20)
+
+            SkillDetailFooter("出厂文案嵌在应用内，恢复不会删除这个技能，只会覆盖 SKILL.md。")
         }
     }
 
@@ -247,7 +277,7 @@ struct SkillDetailView: View {
 
     private var allowedToolsSummary: String {
         guard let tools = snapshot?.allowedTools, !tools.isEmpty else {
-            return "未声明"
+            return "未限制"
         }
         return tools.joined(separator: ", ")
     }
@@ -262,8 +292,22 @@ struct SkillDetailView: View {
         dirName ?? skillName
     }
 
-    private var isBuiltinSkill: Bool {
+    private var isRequiredBuiltinSkill: Bool {
         IOSBuiltinSkills.requiredNames.contains(IOSSkillFileStore.normalizedSkillName(enableKey))
+    }
+
+    private var hasFactoryBackup: Bool {
+        IOSBuiltinSkills.factorySeedNames.contains(IOSSkillFileStore.normalizedSkillName(enableKey))
+    }
+
+    private var footerHint: String {
+        if isRequiredBuiltinSkill {
+            return "这是 AmberAgent 必需技能：可以编辑或由 agent 迭代；不可删除；需要时可恢复出厂备份。"
+        }
+        if hasFactoryBackup {
+            return "这是 AmberAgent 可选出厂技能，默认不启用。"
+        }
+        return "编辑按钮会保存到这个本机技能。"
     }
 
     private func loadSnapshot() {
@@ -315,7 +359,21 @@ struct SkillDetailView: View {
         do {
             try skillStore.deleteSkill(dirName: dirName)
             sharedSettings.removeSkillFromAllAssistants(name: enableKey)
+            IOSBuiltinSkills.markOptionalSeedRemoved(dirName, store: skillStore)
             dismiss()
+        } catch {
+            pendingAlert = .operationFailed(error.localizedDescription)
+        }
+    }
+
+    private func restoreFactorySkill() {
+        guard let dirName, !dirName.isEmpty else {
+            pendingAlert = .operationFailed("未收到技能目录名；请从技能扫描列表进入详情。")
+            return
+        }
+        do {
+            try IOSBuiltinSkills.restoreFactoryContent(name: dirName, into: skillStore)
+            loadSnapshot()
         } catch {
             pendingAlert = .operationFailed(error.localizedDescription)
         }

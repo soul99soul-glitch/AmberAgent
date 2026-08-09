@@ -198,7 +198,20 @@ enum NativeTimelineScrollCore {
                     ),
                     [.startFrameDriver]
                 )
-            case .idle, .pausedForUser:
+            case .idle:
+                // 终态 settle 交还所有权后，晚到的布局（终态重测二 pass、渲染态
+                // 延迟刷新）仍可能移动底部；近底时重新收锚一次，收敛后照常交还
+                // 所有权。远底（用户在阅读历史）不打扰。
+                guard geometry.isNearBottom else { return (state, []) }
+                return (
+                    .settlingAfterTerminal(
+                        virtualOffset: min(geometry.offsetY, geometry.bottomTarget),
+                        target: geometry.bottomTarget,
+                        lastLayoutAt: now
+                    ),
+                    [.startFrameDriver]
+                )
+            case .pausedForUser:
                 return (state, [])
             }
 
@@ -363,7 +376,7 @@ enum NativeTimelineScrollCore {
                 abs(newVirtual - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newVirtual)]
             )
 
-        case let .settlingAfterTerminal(virtualOffset, target, lastLayoutAt):
+        case let .settlingAfterTerminal(_, target, lastLayoutAt):
             guard !geometry.userInteracting else {
                 return (.pausedForUser, [.stopFrameDriver])
             }
@@ -374,12 +387,9 @@ enum NativeTimelineScrollCore {
             let targetChanged = abs(target - geometry.bottomTarget) >= arrivalEpsilon
             let newTarget = geometry.bottomTarget
             let quietSince = targetChanged ? now : lastLayoutAt
-            let baseVirtual = max(min(virtualOffset, newTarget), min(geometry.offsetY, newTarget))
-            let remaining = newTarget - baseVirtual
+            let remaining = newTarget - geometry.offsetY
 
             if abs(remaining) < arrivalEpsilon {
-                let writeActions: [NativeTimelineScrollAction] =
-                    abs(newTarget - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newTarget)]
                 guard now - quietSince >= idleStopInterval else {
                     return (
                         .settlingAfterTerminal(
@@ -387,21 +397,23 @@ enum NativeTimelineScrollCore {
                             target: newTarget,
                             lastLayoutAt: quietSince
                         ),
-                        writeActions
+                        []
                     )
                 }
-                return (.idle, writeActions + [.stopFrameDriver])
+                return (.idle, [.stopFrameDriver])
             }
 
-            let alpha = 1 - exp(-max(dt, 0) / tau)
-            let newVirtual = baseVirtual + remaining * alpha
+            // 终态收锚不做指数缓动：完成瞬间的布局落地（推理卡收口、终态重测）
+            // 会让 bottomTarget 在几帧内移动，缓动会拖着视口"再滑一段"，就是
+            // 用户感知的完成后不流畅。逐帧瞬时钉住 bottomTarget，观感等同流式
+            // 增长期的底部锚定——内容怎么变，视口都已经在底部。
             return (
                 .settlingAfterTerminal(
-                    virtualOffset: newVirtual,
+                    virtualOffset: newTarget,
                     target: newTarget,
                     lastLayoutAt: quietSince
                 ),
-                abs(newVirtual - geometry.offsetY) < arrivalEpsilon ? [] : [.writeOffsetY(newVirtual)]
+                [.writeOffsetY(newTarget)]
             )
 
         case .idle, .pausedForUser, .keyboardFocus:

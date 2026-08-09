@@ -47,10 +47,8 @@ struct IOSSkillFileStore {
     }
 
     func saveSkillMarkdown(dirName: String, expectedName: String, content: String) throws {
-        let normalizedName = Self.normalizedSkillName(dirName)
-        guard !IOSBuiltinSkills.requiredNames.contains(normalizedName) else {
-            throw IOSSkillFileStoreError.builtinSkillProtected(normalizedName)
-        }
+        // Required builtins (e.g. skill-creator) are editable for self-iteration;
+        // only create/delete stay protected.
         let directory = try resolveSkillDirectory(name: dirName)
         guard fileManager.fileExists(atPath: directory.path) else {
             throw IOSSkillFileStoreError.skillMissing(dirName)
@@ -76,12 +74,17 @@ struct IOSSkillFileStore {
 
     /// Writes a skill package (at least `SKILL.md`) into `skills/<name>/`.
     /// Frontmatter `name` is the authoritative package id. Overwrites an existing
-    /// user package, while reserved built-ins can only be seeded by IOSBuiltinSkills.
+    /// package, including editable required builtins such as `skill-creator`.
+    /// `allowBuiltinSkill` is retained for call-site clarity (seed/restore) and is unused for gating.
+    /// When `mergeExisting` is true and the package already exists, files not present in
+    /// `files` are kept from the previous package (for single-file SKILL.md updates).
     @discardableResult
     func saveSkillFiles(
         files: [String: String],
-        allowBuiltinSkill: Bool = false
+        allowBuiltinSkill: Bool = false,
+        mergeExisting: Bool = false
     ) throws -> String {
+        _ = allowBuiltinSkill
         guard let skillMd = files["SKILL.md"] ?? files["skill.md"] else {
             throw IOSSkillFileStoreError.missingSkillMarkdown
         }
@@ -93,9 +96,6 @@ struct IOSSkillFileStore {
             throw IOSSkillFileStoreError.missingFrontmatterField("description")
         }
         let packageName = Self.normalizedSkillName(declaredName)
-        guard allowBuiltinSkill || !IOSBuiltinSkills.requiredNames.contains(packageName) else {
-            throw IOSSkillFileStoreError.builtinSkillProtected(packageName)
-        }
         let skillDirectory = try resolveSkillDirectory(name: packageName)
         try fileManager.createDirectory(at: skillsDirectory, withIntermediateDirectories: true)
         let stagingDirectory = skillsDirectory.appendingPathComponent(
@@ -137,6 +137,9 @@ struct IOSSkillFileStore {
         }
 
         if fileManager.fileExists(atPath: skillDirectory.path) {
+            if mergeExisting {
+                try copyMissingSkillFiles(from: skillDirectory, into: stagingDirectory)
+            }
             // 原子替换：失败或进程强杀时原目录始终在位（replaceItemAt 先把
             // 新目录就位再移除旧的），没有「旧目录已移成 backup 后被杀」的窗口。
             _ = try fileManager.replaceItemAt(
@@ -152,6 +155,31 @@ struct IOSSkillFileStore {
         }
         _ = description
         return packageName
+    }
+
+    /// Copies files from an existing package that are absent in `destination`.
+    private func copyMissingSkillFiles(from source: URL, into destination: URL) throws {
+        guard let enumerator = fileManager.enumerator(
+            at: source,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+        let sourceRoot = source.standardizedFileURL.path
+        while let item = enumerator.nextObject() as? URL {
+            let values = try item.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            let itemPath = item.standardizedFileURL.path
+            guard itemPath.hasPrefix(sourceRoot + "/") else { continue }
+            let relative = String(itemPath.dropFirst(sourceRoot.count + 1))
+            guard !relative.isEmpty, !relative.contains("..") else { continue }
+            let target = destination.appendingPathComponent(relative)
+            guard !fileManager.fileExists(atPath: target.path) else { continue }
+            try fileManager.createDirectory(
+                at: target.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try fileManager.copyItem(at: item, to: target)
+        }
     }
 
     func skillDirectoryURL(name: String) throws -> URL {
@@ -321,7 +349,7 @@ enum IOSSkillFileStoreError: LocalizedError, Equatable {
         case .skillAlreadyExists(let name):
             "技能 \(name) 已存在。"
         case .builtinSkillProtected(let name):
-            "内置技能 \(name) 不允许被创建或覆盖。"
+            "内置技能 \(name) 不允许删除或通过「新建」重复创建；可以编辑，也可恢复出厂备份。"
         case .skillMissing(let name):
             "技能 \(name) 不存在。"
         case .skillNameChanged(let expected):

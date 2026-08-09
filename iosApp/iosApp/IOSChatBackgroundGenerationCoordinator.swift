@@ -809,7 +809,9 @@ final class IOSChatBackgroundGenerationCoordinator {
                 toolExposureBridge: job.toolExposureBridge,
                 // P1-c: run 锚定会话——后台 job 的 spawn/list/interrupt 以
                 // 本 job 的 conversationId 为父，不读 VM 当前会话。
-                conversationId: job.conversationId
+                conversationId: job.conversationId,
+                // Pad-image enrich must use the job-frozen display snapshot.
+                messages: job.displayMessages
             ),
             // M2: 传了 toolExposureBridge 的路径，每轮 replacingTools 后按当轮
             // effectiveParams 重建 executor 表——tool_search 命中工具下一轮
@@ -829,7 +831,8 @@ final class IOSChatBackgroundGenerationCoordinator {
                     params: params,
                     runId: job.runId,
                     toolExposureBridge: job.toolExposureBridge,
-                    conversationId: job.conversationId
+                    conversationId: job.conversationId,
+                    messages: job.displayMessages
                 )
             }
         )

@@ -582,7 +582,7 @@ private val AMBER_AGENT_REQUIRED_LOCAL_TOOLS: List<LocalToolOption> = listOf(
     LocalToolOption.ICloudDrive,
 )
 
-private val AMBER_AGENT_REQUIRED_SKILLS = setOf("skill-creator", "会议准备", "监控文档")
+private val AMBER_AGENT_REQUIRED_SKILLS = setOf("skill-creator")
 
 val DEFAULT_SYSTEM_TTS_ID = Uuid.parse("026a01a2-c3a0-4fd5-8075-80e03bdef200")
 val REMOVED_DEFAULT_TTS_PROVIDER_IDS = setOf(

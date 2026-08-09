@@ -25,6 +25,7 @@
 ## Input And Presentation
 
 - 涉及中文输入法的保存、提交、改名、sheet 关闭和焦点切换，先通过 `NovelTextInputCommitter` 提交 marked text，再读取绑定值；不要依赖最后一次 `onChange` 恰好先到达。
+- 不要在调用 committer **之前** 清空 `FocusState` 或自行 `resignFirstResponder`：先失焦会丢掉 marked text，随后读到的绑定会缺最后一次输入。主 composer 继续用 `ComposerInputController.committedText()` 直读 UITextView。
 - 资料建议确认面必须允许用户在写入前编辑关键字段；写入后编辑必须持久化并进入后续 Agent 上下文。
 - 复用现有三入口信息架构（创作 / 正文 / 设定）和现有视觉 token。按钮视觉可以紧凑，但交互热区至少 44pt；固定单行控件中的动态文案不得挤压、折行或覆盖相邻控件。
 - 小说列表复用 Native Timeline 的手势/跟随判定。用户浏览历史时冻结不可见流式尾部，回到底部后再追平；不以 GeometryReader 补偿或隐式动画掩盖高度变化。

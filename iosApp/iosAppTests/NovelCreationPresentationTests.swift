@@ -170,16 +170,41 @@ final class NovelCreationPresentationTests: XCTestCase {
         textField.selectedTextRange = textField.textRange(from: end, to: end)
         textField.setMarkedText("大来", selectedRange: NSRange(location: 2, length: 0))
         XCTAssertNotNil(textField.markedTextRange)
-        let action = expectation(description: "committed action runs on the next main turn")
+        XCTAssertTrue(NovelTextInputCommitter.hasMarkedText(firstResponder: textField))
+        let action = expectation(description: "committed action runs after binding flush turns")
+        var ranSynchronously = false
 
         NovelTextInputCommitter.perform(firstResponder: textField) {
             XCTAssertNil(textField.markedTextRange)
             XCTAssertEqual(textField.text, "赵大来")
+            XCTAssertFalse(
+                NovelTextInputCommitter.hasMarkedText(firstResponder: textField)
+            )
+            ranSynchronously = true
             action.fulfill()
         }
 
         XCTAssertNil(textField.markedTextRange)
+        XCTAssertFalse(
+            ranSynchronously,
+            "Action must wait for main-queue flush so SwiftUI bindings can catch unmarkText"
+        )
         await fulfillment(of: [action], timeout: 1)
+        XCTAssertTrue(ranSynchronously)
+    }
+
+    func testTextInputCommitterCommitMarkedTextDoesNotRequireAction() {
+        let textField = UITextField()
+        textField.text = "李"
+        let end = textField.endOfDocument
+        textField.selectedTextRange = textField.textRange(from: end, to: end)
+        textField.setMarkedText("雷", selectedRange: NSRange(location: 1, length: 0))
+        XCTAssertNotNil(textField.markedTextRange)
+
+        NovelTextInputCommitter.commitMarkedText(in: textField)
+
+        XCTAssertNil(textField.markedTextRange)
+        XCTAssertEqual(textField.text, "李雷")
     }
 
     func testPresentationUsesHistoricalCharacterNamesAsEffectiveAliases() throws {

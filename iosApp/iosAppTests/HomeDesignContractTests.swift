@@ -550,6 +550,26 @@ final class HomeDesignContractTests: XCTestCase {
             source.contains(".padding(.trailing, homeNewChatCapsuleTrailingInset)"),
             "浮层必须挂 trailing inset 常量，不能回退硬编码 16"
         )
+        // 视觉层级：新对话=强调色混色玻璃；Continue CTA=浅强调色+主墨字（非黑底白字）。
+        XCTAssertTrue(
+            source.contains(".amberProminentGlass(cornerRadius: height / 2, tint: AmberTheme.accent)"),
+            "右下新对话必须用 accent 混色玻璃，不能回退中性 homeGlassControl"
+        )
+        XCTAssertTrue(
+            source.contains("hovering || pressed ? AmberTheme.avatarActive : AmberTheme.accentTint"),
+            "Continue CTA 必须浅强调色底"
+        )
+        let continueCTAStart = try XCTUnwrap(source.range(of: "private func continueCTA(expands: Bool)"))
+        let continueCTAEnd = try XCTUnwrap(source.range(of: "private struct HomeCascade", range: continueCTAStart.upperBound..<source.endIndex))
+        let continueCTA = String(source[continueCTAStart.lowerBound..<continueCTAEnd.lowerBound])
+        XCTAssertTrue(
+            continueCTA.contains(".foregroundStyle(AmberTheme.foreground)"),
+            "Continue CTA 必须主墨字，不能黑底白字抢层级"
+        )
+        XCTAssertFalse(
+            continueCTA.contains("AmberTheme.background"),
+            "Continue CTA 不得再使用 on-black 白字"
+        )
         XCTAssertTrue(source.contains(".lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)"))
         XCTAssertTrue(source.contains("if dynamicTypeSize.isAccessibilitySize"))
         XCTAssertTrue(source.contains("ScrollView(.horizontal)"))

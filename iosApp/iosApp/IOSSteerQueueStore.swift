@@ -1,12 +1,95 @@
 import Foundation
 import Shared
 
-/// 一条生成中排队的 steer 消息（v1 仅文本；对齐 Android `PendingUserMessage` 的
-/// STEER 语义，但条目精简为 {id, text, createdAt}）。
+/// 排队图（与 composer `PendingChatImage` 同构；preview 用 base64 落盘）。
+struct IOSSteerQueueImage: Codable, Equatable {
+    let dataUrl: String
+    let previewBase64: String
+
+    init(dataUrl: String, previewData: Data) {
+        self.dataUrl = dataUrl
+        self.previewBase64 = previewData.base64EncodedString()
+    }
+
+    var previewData: Data {
+        Data(base64Encoded: previewBase64) ?? Data()
+    }
+}
+
+/// 排队选中文件预览（镜像 `SelectedDocumentReadResult`，供 sidecar Codable）。
+struct IOSSteerQueuedFile: Codable, Equatable {
+    let fileName: String
+    let fileType: String
+    let totalBytes: Int64
+    let bytesRead: Int
+    let characterCount: Int
+    let preview: String
+    let isTruncated: Bool
+    let note: String?
+
+    init(_ result: SelectedDocumentReadResult) {
+        fileName = result.fileName
+        fileType = result.fileType
+        totalBytes = result.totalBytes
+        bytesRead = result.bytesRead
+        characterCount = result.characterCount
+        preview = result.preview
+        isTruncated = result.isTruncated
+        note = result.note
+    }
+
+    var asSelectedDocument: SelectedDocumentReadResult {
+        SelectedDocumentReadResult(
+            fileName: fileName,
+            fileType: fileType,
+            totalBytes: totalBytes,
+            bytesRead: bytesRead,
+            characterCount: characterCount,
+            preview: preview,
+            isTruncated: isTruncated,
+            note: note
+        )
+    }
+}
+
+/// 一条生成中排队的 steer 消息。旧 sidecar 仅有 text 时 images/selectedFile 缺省为空。
 struct IOSSteerQueueEntry: Codable, Equatable, Identifiable {
     let id: String
     let text: String
     let createdAt: Date
+    var images: [IOSSteerQueueImage]
+    var selectedFile: IOSSteerQueuedFile?
+
+    var hasAttachments: Bool {
+        !images.isEmpty || selectedFile != nil
+    }
+
+    init(
+        id: String,
+        text: String,
+        createdAt: Date,
+        images: [IOSSteerQueueImage] = [],
+        selectedFile: IOSSteerQueuedFile? = nil
+    ) {
+        self.id = id
+        self.text = text
+        self.createdAt = createdAt
+        self.images = images
+        self.selectedFile = selectedFile
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, text, createdAt, images, selectedFile
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        images = try c.decodeIfPresent([IOSSteerQueueImage].self, forKey: .images) ?? []
+        selectedFile = try c.decodeIfPresent(IOSSteerQueuedFile.self, forKey: .selectedFile)
+    }
 }
 
 /// P1-a: per-conversation steer 队列 sidecar（对齐 Android `PendingMessageStore`：

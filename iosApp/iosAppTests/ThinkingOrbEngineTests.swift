@@ -51,27 +51,6 @@ final class ThinkingOrbEngineTests: XCTestCase {
         }
     }
 
-    // MARK: - Coordinates within bounds (3D modes)
-
-    func testCoordinatesWithinBounds() {
-        // We can't extract raw dots from the engine (it paints directly),
-        // but we can verify the rendered output stays within the canvas by
-        // checking that no pixels outside the expected radius are opaque.
-        let size = 64.0
-        let t = 2.5
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size))
-        for state in OrbState.allCases where state != .shaping {
-            let resolved = orbResolvePreset(state, .large)
-            let img = renderer.image { ctx in
-                orbDraw(resolved.mode, ctx.cgContext, size: size, t: t, dark: true, opts: resolved.opts)
-            }
-            // All drawn content must be within the image bounds (trivially
-            // true since CGContext clips to the context rect, but this
-            // verifies the draw call doesn't crash with out-of-bounds coords).
-            XCTAssertNotNil(img.cgImage, "\(state) must produce a valid image")
-        }
-    }
-
     // MARK: - Dark/light ink inversion
 
     func testDarkLightInkInversion() {

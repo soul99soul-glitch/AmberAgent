@@ -31,8 +31,7 @@ struct MemoryEditView: View {
                     sourceSection
                     contentSection
                     classificationSection
-                    saveSection
-                    deleteSection
+                    actionsSection
                 }
                 .padding(.bottom, 36)
             }
@@ -187,48 +186,51 @@ struct MemoryEditView: View {
                 .accessibilityValue(pinned ? "已置顶" : "未置顶")
                 .accessibilityAddTraits(.isButton)
             }
-
-            MemoryEditNote(text.isEmpty ? "待保存 · 空内容" : "待保存 · \(scope.title) · \(pinned ? "置顶" : "未置顶")")
-                .padding(.top, 2)
         }
     }
 
-    private var saveSection: some View {
-        AmberFormGroup {
+    /// 底栏动作：保存 / 删除左右并列；无图标、文案短、文字居中（避免左顶头）。
+    private var actionsSection: some View {
+        HStack(spacing: 12) {
             Button {
                 saveMemory()
             } label: {
-                Label(recordId == nil ? "保存到记忆库" : "保存修改", systemImage: "checkmark.circle.fill")
+                Text("保存")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(canSave ? AmberTheme.accent : AmberTheme.muted2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                     .frame(minHeight: 52)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(!canSave)
-        }
-        .padding(.top, 20)
-    }
+            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
+                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+            }
 
-    @ViewBuilder
-    private var deleteSection: some View {
-        if recordId != nil {
-            AmberFormGroup {
+            if recordId != nil {
                 Button(role: .destructive) {
                     showDeleteInfo = true
                 } label: {
-                    Text("删除这条记忆")
-                        .font(.body.weight(.medium))
+                    Text("删除")
+                        .font(.body.weight(.semibold))
                         .foregroundStyle(AmberTheme.accentRed)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: 52)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
+                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+                }
             }
-            .padding(.top, 20)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 20)
     }
 
     private var canSave: Bool {
@@ -508,23 +510,6 @@ private struct MemoryEditDivider: View {
             .fill(AmberTheme.borderSoft)
             .frame(height: 0.5)
             .padding(.leading, 14)
-    }
-}
-
-private struct MemoryEditNote: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
-    }
-
-    var body: some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(AmberTheme.muted2)
-            .lineSpacing(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
     }
 }
 

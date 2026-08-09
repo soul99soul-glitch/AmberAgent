@@ -22,14 +22,6 @@ struct MemoryOverviewView: View {
         IOSMemoryLibrary.filteredRecords(records: persistence.records, query: query, scopeFilter: scopeFilter)
     }
 
-    private var recallRecords: [MemoryRecord] {
-        IOSMemoryLibrary.recallCandidates(records: persistence.records, runtime: sharedSettings.agentRuntime)
-    }
-
-    private var recallRecordIds: Set<Int32> {
-        Set(recallRecords.map(\.id))
-    }
-
     var body: some View {
         ZStack {
             AmberTheme.background.ignoresSafeArea()
@@ -41,8 +33,6 @@ struct MemoryOverviewView: View {
                     loadStatusSection
                     runtimeSection
                     pollutionSection
-                    searchSection
-                    recallSection
                     recordsSection
                     auditSection
                 }
@@ -265,111 +255,64 @@ struct MemoryOverviewView: View {
         }
     }
 
-    private var searchSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "搜索与过滤")
-            VStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(AmberTheme.muted)
-                        .accessibilityHidden(true)
-                    TextField("搜索内容、来源或标签", text: $query)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    if !query.isEmpty {
-                        Button {
-                            query = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(AmberTheme.muted2)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("清除搜索")
+    /// 记忆库工具条：搜索 + 四枚范围过滤（等分铺开，不做横滑簇拥）。
+    private var libraryToolbar: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(AmberTheme.muted)
+                    .accessibilityHidden(true)
+                TextField("搜索内容、来源或标签", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(AmberTheme.muted2)
                     }
+                    .buttonStyle(.plain)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+                    .accessibilityLabel("清除搜索")
                 }
-                .font(.body)
-                .padding(.horizontal, 12)
-                .frame(height: 44)
-                .amberGlass(cornerRadius: AmberTheme.radiusLarge)
-                .overlay {
-                    RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
-                        .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
-                }
-
-                ScrollView(.horizontal) {
-                    HStack(spacing: 8) {
-                        ForEach(IOSMemoryScopeFilter.allCases) { filter in
-                            Button {
-                                scopeFilter = filter
-                            } label: {
-                                MemoryScopeFilterChip(
-                                    title: filter.title,
-                                    isSelected: scopeFilter == filter
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                            .accessibilityAddTraits(scopeFilter == filter ? .isSelected : [])
-                        }
-                    }
-                }
-                .scrollIndicators(.hidden)
             }
-            .padding(.horizontal, 16)
-        }
-    }
+            .font(.body)
+            .padding(.horizontal, 12)
+            .frame(height: 44)
+            .amberGlass(cornerRadius: AmberTheme.radiusLarge)
+            .overlay {
+                RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous)
+                    .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+            }
 
-    private var recallSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "召回解释")
-            AmberFormGroup {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(recallRecords.isEmpty ? AmberTheme.surface2 : AmberTheme.accentCyan.opacity(0.14))
-                            Image(systemName: recallRecords.isEmpty ? "brain.head.profile" : "brain.head.profile.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(recallRecords.isEmpty ? AmberTheme.muted2 : AmberTheme.accentCyan)
-                        }
-                        .frame(width: 32, height: 32)
-                        .accessibilityHidden(true)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(recallRecords.count) 条当前可参与召回")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                            Text(IOSMemoryLibrary.recallExplanation(records: persistence.records, runtime: sharedSettings.agentRuntime))
-                                .font(.caption)
-                                .foregroundStyle(AmberTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+            HStack(spacing: 8) {
+                ForEach(IOSMemoryScopeFilter.allCases) { filter in
+                    Button {
+                        scopeFilter = filter
+                    } label: {
+                        MemoryScopeFilterChip(
+                            title: filter.title,
+                            isSelected: scopeFilter == filter
+                        )
                     }
-
-                    if !recallRecords.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
-                            ForEach(recallRecords.prefix(3), id: \.id) { record in
-                                Text("• \(IOSMemoryLibrary.preview(record.content, limit: 80))")
-                                    .font(.caption)
-                                    .foregroundStyle(AmberTheme.foreground2)
-                                    .lineLimit(2)
-                            }
-                        }
-                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .accessibilityAddTraits(scopeFilter == filter ? .isSelected : [])
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
     }
 
     private var recordsSection: some View {
         VStack(spacing: 0) {
             AmberSectionLabel(text: "记忆库")
+            libraryToolbar
             if filteredRecords.isEmpty {
                 AmberFormGroup {
                     MemoryEmptyState(isSearching: !persistence.records.isEmpty)
@@ -379,7 +322,6 @@ struct MemoryOverviewView: View {
                     ForEach(Array(filteredRecords.enumerated()), id: \.element.id) { index, record in
                         MemoryRecordRow(
                             record: record,
-                            isRecallCandidate: recallRecordIds.contains(record.id),
                             onEdit: {
                                 router.navigate(to: .memoryEdit(
                                     recordId: Int(record.id),
@@ -469,7 +411,6 @@ struct MemoryOverviewView: View {
 
 private struct MemoryRecordRow: View {
     let record: MemoryRecord
-    let isRecallCandidate: Bool
     let onEdit: () -> Void
     let onDelete: () -> Void
 
@@ -512,14 +453,11 @@ private struct MemoryRecordRow: View {
             }
 
             HStack(spacing: 6) {
-                MemoryTag(text: "#\(record.id)")
+                // 不对用户暴露内部 id / 召回候选等控制台语义。
                 MemoryTag(text: IOSMemoryLibrary.scopeTitle(record.scope))
                 MemoryTag(text: IOSMemoryLibrary.kindTitle(record.kind))
                 if record.pinned {
                     MemoryTag(text: "置顶", tint: AmberTheme.accentAmber)
-                }
-                if isRecallCandidate {
-                    MemoryTag(text: "本次候选", tint: AmberTheme.accentCyan)
                 }
                 Spacer(minLength: 0)
             }
@@ -556,8 +494,8 @@ private struct MemoryAuditRow: View {
     }
 
     private var detail: String {
+        // 不对用户展示内部 memoryId（如 #12）；范围/类型/预览足够定位。
         var parts: [String] = []
-        if let memoryId = record.memoryId { parts.append("#\(memoryId)") }
         if let scope = record.scope { parts.append(IOSMemoryLibrary.scopeDisplay(scope)) }
         if let kind = record.kind { parts.append(IOSMemoryLibrary.kindDisplay(kind)) }
         if let contentPreview = record.contentPreview { parts.append(contentPreview) }
@@ -620,8 +558,8 @@ private struct MemoryScopeFilterChip: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(isSelected ? AmberTheme.accentInk : AmberTheme.foreground2)
             .lineLimit(1)
+            .frame(maxWidth: .infinity)
             .frame(height: 32)
-            .padding(.horizontal, 13)
             .background(
                 isSelected ? AmberTheme.accent : AmberTheme.surface,
                 in: Capsule()

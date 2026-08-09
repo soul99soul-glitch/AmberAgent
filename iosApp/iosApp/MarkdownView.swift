@@ -575,7 +575,7 @@ struct AmberMarkdownView: View {
         case .text:
             let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
             guard !raw.isEmpty else { return nil }
-            return AttributedString(raw)
+            return Self.repairRejectedStrong(in: raw)
 
         case .softBreak, .hardBreak:
             // Handled with neighbour context in buildInlineAttrString's loop so a soft
@@ -633,6 +633,51 @@ struct AmberMarkdownView: View {
 
     private func safeExternalURL(from raw: String) -> URL? {
         ChatMarkdownOpenURLPolicy.url(from: raw)
+    }
+
+    /// CommonMark flanking 规则会拒绝若干模型高频粗体形态（`**（重点）**`、
+    /// CJK 紧邻的 `__…__` 等），原生 pulldown-cmark AST 里它们只剩 Text 节点
+    /// 中的字面定界符。这里把残留在纯文本里的成对定界符修复回 strong——
+    /// 已被正常解析的粗体不在 Text 节点里，所以天然只作用于解析器拒绝的部分。
+    /// 与 vendor `RejectedEmphasisRepairRewriter` 同口径，两处正则必须同步。
+    // Swift Regex 不支持 lookbehind：把「内容不得以空白收尾」折进捕获组
+    // （内容末字符显式匹配为非空白、非定界符），与 vendor 侧保持同式。
+    private static let rejectedStarStrong = try? Regex("\\*\\*(?!\\s)([^*]*?[^\\s*])\\*\\*")
+    private static let rejectedUnderscoreStrong = try? Regex("__(?!\\s)([^_]*?[^\\s_])__")
+
+    /// internal 供定点测试直驱；生产只经 `.text` 分支调用。
+    static func repairRejectedStrong(in raw: String) -> AttributedString {
+        guard let star = rejectedStarStrong, let underscore = rejectedUnderscoreStrong else {
+            return AttributedString(raw)
+        }
+        var ranges: [Range<String.Index>] = []
+        ranges.append(contentsOf: raw.matches(of: star).map(\.range))
+        ranges.append(contentsOf: raw.matches(of: underscore).map(\.range))
+        guard !ranges.isEmpty else { return AttributedString(raw) }
+        ranges.sort { $0.lowerBound < $1.lowerBound }
+
+        // 重叠区间取最早一个，不做意图猜测（与 vendor rewriter 一致）。
+        var kept: [Range<String.Index>] = []
+        for range in ranges {
+            if let last = kept.last, range.lowerBound < last.upperBound { continue }
+            kept.append(range)
+        }
+
+        var result = AttributedString()
+        var cursor = raw.startIndex
+        for range in kept {
+            if cursor < range.lowerBound {
+                result.append(AttributedString(String(raw[cursor..<range.lowerBound])))
+            }
+            var strong = AttributedString(String(raw[range].dropFirst(2).dropLast(2)))
+            strong.inlinePresentationIntent = .stronglyEmphasized
+            result.append(strong)
+            cursor = range.upperBound
+        }
+        if cursor < raw.endIndex {
+            result.append(AttributedString(String(raw[cursor...])))
+        }
+        return result
     }
 
     /// Build a plain AttributedString by concatenating inline children.

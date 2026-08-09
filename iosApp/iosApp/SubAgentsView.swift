@@ -17,7 +17,7 @@ struct SubAgentsView: View {
 
     /// P4 parity fix (truth_matrix: subagent_standalone.exec_real): the
     /// standalone page dispatches through `SubAgentRunner.runViaEngine`
-    /// (IOSAgentToolEngine path), not the legacy `run` (SubAgentManager/KMP).
+    /// (the same IOSAgentToolEngine path used by chat tools).
     /// Both buttons call this thin wrapper, which delegates to the testable
     /// `dispatchStandalone` seam so the engine routing is verified end-to-end.
     @MainActor

@@ -216,7 +216,10 @@ final class ChatToolRuntime {
         params: TextGenerationParams,
         runId: String,
         toolExposureBridge: IosToolExposureBridge? = nil,
-        conversationId: KotlinUuid? = nil
+        conversationId: KotlinUuid? = nil,
+        /// Job-frozen display messages for generate_image pad-image enrich.
+        /// Must be the snapshot that owns this tool call — not a live store read.
+        messages: [UIMessage] = []
     ) -> [String: any IOSToolExecutor] {
         var executors: [String: any IOSToolExecutor] = [:]
         let availableToolNames = Set(params.tools.map(\.name))
@@ -318,9 +321,15 @@ final class ChatToolRuntime {
         }
 
         if availableToolNames.contains("generate_image") {
+            let enrichMessages = messages
             executors["generate_image"] = IOSClosureToolExecutor { [weak self] _, arguments, _ in
                 guard let self else { return .failed("Chat runtime is unavailable.") }
-                return .filledParts(await self.dispatchImageToolCall(self.toolCall(name: "generate_image", input: arguments)))
+                return .filledParts(
+                    await self.dispatchImageToolCall(
+                        self.toolCall(name: "generate_image", input: arguments),
+                        messages: enrichMessages
+                    )
+                )
             }
         }
 
@@ -669,6 +678,9 @@ final class ChatToolRuntime {
     static let execNestedToolExclusions: Set<String> = [
         "exec", "spawn_agent", "list_agents", "interrupt_agent",
         "send_message", "followup_task", "wait_agent", "tool_search", "ask_user",
+        // Nested exec only sees a synthetic assistant message — pad-image enrich
+        // cannot resolve user attachments, and image gen is a paid side effect.
+        "generate_image",
     ]
 
     /// P3-b: whitelist for one evaluation's `tools` object = the current
@@ -733,7 +745,7 @@ final class ChatToolRuntime {
         _ toolCall: UIMessagePart.Tool,
         in messages: [UIMessage]
     ) async -> [UIMessage] {
-        let resultParts = await dispatchImageToolCall(toolCall)
+        let resultParts = await dispatchImageToolCall(toolCall, messages: messages)
         return messagesByFinishingToolCall(
             toolCall,
             outputParts: resultParts,
@@ -1690,7 +1702,7 @@ final class ChatToolRuntime {
     }
 
     private func executeImageToolCall(_ pending: ChatPendingToolApproval) async -> ChatToolRuntimeResult {
-        let resultParts = await dispatchImageToolCall(pending.toolCall)
+        let resultParts = await dispatchImageToolCall(pending.toolCall, messages: pending.baseMessages)
         return .completed(messagesByFinishingToolCall(
             pending.toolCall,
             outputParts: resultParts,
@@ -1997,12 +2009,38 @@ final class ChatToolRuntime {
             : .allow)
     }
 
-    private func dispatchImageToolCall(_ toolCall: UIMessagePart.Tool) async -> [UIMessagePart] {
+    private func dispatchImageToolCall(
+        _ toolCall: UIMessagePart.Tool,
+        messages: [UIMessage] = []
+    ) async -> [UIMessagePart] {
+        let enrichedInput: String
+        switch ChatImageGenerationReference.enrichToolInput(toolCall.input, messages: messages) {
+        case .success(let input):
+            enrichedInput = input
+        case .failure(.attachedImageRequestedButMissing):
+            return [UIMessagePart.Text(
+                text: ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: "generate_image",
+                    reason: "当前消息没有可垫的附图。请先上传参考图，或改用文字描述重新生成。"
+                ),
+                metadata: nil
+            )]
+        }
+        let resolvedToolCall = UIMessagePart.Tool(
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+            input: enrichedInput,
+            output: toolCall.output,
+            approvalState: toolCall.approvalState,
+            streamIndex: toolCall.streamIndex,
+            metadata: toolCall.metadata
+        )
+
         do {
             switch codexImageConfig() {
             case .signedIn(let codex):
                 let request = try IOSImageGenerationRepository.shared.toolRequest(
-                    from: toolCall.input,
+                    from: resolvedToolCall.input,
                     modelId: IOSCodexOAuthConstants.imageModelId
                 )
                 let record = try await IOSImageGenerationRepository.shared.generateViaCodex(
@@ -2037,7 +2075,10 @@ final class ChatToolRuntime {
                     metadata: nil
                 )]
             }
-            let request = try IOSImageGenerationRepository.shared.toolRequest(from: toolCall.input, modelId: config.modelId)
+            let request = try IOSImageGenerationRepository.shared.toolRequest(
+                from: resolvedToolCall.input,
+                modelId: config.modelId
+            )
             if request.sourceImageURL != nil {
                 return [UIMessagePart.Text(
                     text: ChatToolOutputFormatter.toolFailureJSON(

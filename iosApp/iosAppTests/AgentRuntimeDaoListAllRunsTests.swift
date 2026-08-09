@@ -66,20 +66,4 @@ final class AgentRuntimeDaoListAllRunsTests: XCTestCase {
         )
     }
 
-    func testListAllRunsEmptyWhenNoRuns() async throws {
-        // A fresh DB on an isolated path would be ideal, but the factory uses
-        // a fixed Documents/agent_runtime.db. Instead assert listAllRuns never
-        // crashes and returns a list (possibly empty) — the AccountView
-        // empty-state ("暂无运行记录") is honest when this is empty.
-        let db = IosDatabaseFactory.shared.createDatabase()
-        let dao = db.agentRuntimeDao()
-
-        let total = await withCheckedContinuation { (cont: CheckedContinuation<Int, Never>) in
-            dao.listAllRuns { result, _ in
-                cont.resume(returning: (result ?? []).count)
-            }
-        }
-
-        XCTAssertGreaterThanOrEqual(total, 0, "listAllRuns must return a non-negative count")
-    }
 }

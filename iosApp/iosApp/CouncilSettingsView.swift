@@ -343,7 +343,7 @@ struct CouncilSettingsView: View {
 
 }
 
-private enum CouncilModelConnectivityViewState {
+enum CouncilModelConnectivityViewState {
     case idle
     case testing
     case results([IOSCouncilModelConnectivityResult])

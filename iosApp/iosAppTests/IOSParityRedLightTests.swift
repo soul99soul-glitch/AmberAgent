@@ -1833,6 +1833,9 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    /// 契约按真实耗时表述：拍间隔随节奏锚动态缩放后，「拍数」不再是耗时代理。
+    /// 24k 积压 → 节奏锚 1500 字/拍 × 8ms ≈ 0.13s whoosh；旧固定 48ms 口径下
+    /// 的「16 拍 ≈ 0.8s」被更严的 0.5s 真实耗时上限取代。
     func testForegroundTerminalDrainUsesIndependentBoundedBudget() {
         let user = UIMessage.companion.user(prompt: "question")
         let assistant = UIMessage.companion.assistant(prompt: "已显示")
@@ -1849,6 +1852,9 @@ final class IOSParityRedLightTests: XCTestCase {
         )
         let target = [user, targetAssistant]
 
+        let advance = ChatStreamPresentationPacer.terminalDrainAdvance(backlogCount: 24_000)
+        let delayNanos = ChatStreamPresentationPacer.terminalDrainDelayNanos(advance: advance)
+
         var current = [user, assistant]
         var ticks = 0
         var caughtUp = false
@@ -1856,7 +1862,8 @@ final class IOSParityRedLightTests: XCTestCase {
             let step = ChatStreamPresentationPacer.step(
                 current: current,
                 target: target,
-                mode: .terminalDrain
+                mode: .terminalDrain,
+                fixedTerminalAdvance: advance
             )
             current = step.snapshot
             caughtUp = step.isCaughtUp
@@ -1865,18 +1872,67 @@ final class IOSParityRedLightTests: XCTestCase {
 
         XCTAssertTrue(caughtUp)
         XCTAssertEqual(current.last?.toText(), targetAssistant.toText())
-        XCTAssertLessThanOrEqual(ticks, 16, "终态 2.4 万字积压应在约 0.8 秒内分批排空")
+        XCTAssertLessThanOrEqual(ticks, 16, "终态 2.4 万字积压应在 16 拍内排空")
+        let realtimeSeconds = Double(ticks) * Double(delayNanos) / 1_000_000_000
+        XCTAssertLessThanOrEqual(
+            realtimeSeconds,
+            0.5,
+            "大积压 whoosh 排空真实耗时不得超过 0.5s，实际 \(realtimeSeconds)s"
+        )
     }
 
-    /// 命中模型输出上限(finish_reason = length / max_tokens)必须被当成截断收尾,
-    /// 而不是静默按 `completed` 交付。
+    /// 收尾小积压必须按流式节拍排空，而不是快排一拍抛完。
     ///
-    /// 供应商侧确实把 finishReason 透传到了 Swift(`OpenAIKmpProvider` 会在末尾
-    /// chunk 上带出),`IOSAgentToolEngine` 也读了它;唯独前台 ChatGenerationCoordinator
-    /// 从不读——于是半截答案在 UI 上和完整答案毫无区别,run 也记成 completed。
-    /// 判定必须先于工具分支:截断点可能落在 tool_calls 的参数 JSON 中途,那串
-    /// 残缺 JSON 不能当成可执行的工具调用。
-    func testForegroundCompletionTreatsOutputLimitAsTruncationBeforeToolDispatch() throws {
+    /// 真机录像：模型略快于显示，收尾积压几十字；旧快排公式一拍倒 36+ 字
+    /// （约两行），底部锚定一次上移一格——「最后半句跳出来、往上跳一下」。
+    /// 契约：小积压单拍推进 ≤ 流式上限，且分多拍排空（读作打字的自然延续）；
+    /// 大积压快排由上一条用例锁。
+    func testForegroundTerminalDrainPacesSmallBacklogLikeStreaming() {
+        let user = UIMessage.companion.user(prompt: "question")
+        let assistant = UIMessage.companion.assistant(prompt: "已显示")
+        let tail = "需要我调整到更精确的 500 字、换主题，或者换个风格（议论文/说明文/故事）再写吗？"
+        let targetAssistant = UIMessage(
+            id: assistant.id,
+            role: assistant.role,
+            parts: [UIMessagePart.Text(text: "已显示" + tail, metadata: nil)],
+            annotations: assistant.annotations,
+            createdAt: assistant.createdAt,
+            finishedAt: nil,
+            modelId: assistant.modelId,
+            usage: assistant.usage,
+            translation: assistant.translation
+        )
+        let target = [user, targetAssistant]
+
+        var current = [user, assistant]
+        var ticks = 0
+        var caughtUp = false
+        var maximumAdvance = 0
+        while !caughtUp, ticks < 100 {
+            let before = current.last?.toText().count ?? 0
+            let step = ChatStreamPresentationPacer.step(
+                current: current,
+                target: target,
+                mode: .terminalDrain
+            )
+            current = step.snapshot
+            maximumAdvance = max(maximumAdvance, (current.last?.toText().count ?? 0) - before)
+            caughtUp = step.isCaughtUp
+            ticks += 1
+        }
+
+        XCTAssertTrue(caughtUp)
+        XCTAssertEqual(current.last?.toText(), targetAssistant.toText())
+        XCTAssertLessThanOrEqual(
+            maximumAdvance,
+            ChatStreamPresentationPacer.maximumTextAdvance,
+            "小积压终态排空单拍不得超流式上限，否则收尾跳变"
+        )
+        XCTAssertGreaterThan(ticks, 1, "小积压应分多拍排空，而不是一拍抛完")
+    }
+
+    /// 常见 provider 的输出上限终态必须统一识别，普通停止与工具调用不能误判。
+    func testForegroundCompletionRecognizesOutputLimitFinishReasons() {
         func chunk(finishReason: String?) -> MessageChunk {
             MessageChunk(
                 id: "chunk",

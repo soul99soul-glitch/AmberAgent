@@ -173,6 +173,42 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         XCTAssertEqual(settled.actions, [.stopFrameDriver])
     }
 
+    /// 终态收锚契约：晚到布局改变 bottomTarget 时，必须一拍钉住新底，
+    /// 不允许指数缓动的中间值（缓动拖出的"再滑一段"就是完成后的不流畅感）。
+    func testTerminalSettleSnapsToLateBottomTargetWithoutEasing() {
+        let terminal = NativeTimelineScrollState.settlingAfterTerminal(
+            virtualOffset: 520,
+            target: 520,
+            lastLayoutAt: 2
+        )
+        // 终态布局落地：内容收缩，bottomTarget 520 → 320（contentHeight 1000）。
+        let ticked = NativeTimelineScrollCore.tick(
+            state: terminal,
+            geometry: geometry(offsetY: 520, contentHeight: 1_000, distanceToBottom: 200),
+            now: 2 + 1.0 / 120.0,
+            dt: 1.0 / 120.0
+        )
+        XCTAssertEqual(ticked.actions, [.writeOffsetY(320)], "终态收锚必须一拍贴底")
+        XCTAssertEqual(
+            ticked.state,
+            .settlingAfterTerminal(
+                virtualOffset: 320,
+                target: 320,
+                lastLayoutAt: 2 + 1.0 / 120.0
+            )
+        )
+
+        // 目标稳定后静默期满交还所有权，不再有额外写入。
+        let settled = NativeTimelineScrollCore.tick(
+            state: ticked.state,
+            geometry: geometry(offsetY: 320, contentHeight: 1_000, distanceToBottom: 0),
+            now: 2 + 1.0 / 120.0 + NativeTimelineScrollCore.idleStopInterval + 0.01,
+            dt: 1.0 / 120.0
+        )
+        XCTAssertEqual(settled.state, .idle)
+        XCTAssertEqual(settled.actions, [.stopFrameDriver])
+    }
+
     func testGenerationTerminalDoesNotTakeBottomFromPausedUser() {
         let result = NativeTimelineScrollCore.reduce(
             state: .pausedForUser,

@@ -11,7 +11,7 @@ struct SkillAddView: View {
     @State private var triggerText = "Use when the user asks to investigate a topic, compare sources, or prepare a concise research brief."
     @State private var category: SkillDraftCategory = .task
     @State private var enabled = true
-    @State private var allowedTools = "read, rg, web_search"
+    @State private var allowedTools = ""
     @State private var isSaving = false
     @State private var saveError: SkillDraftSaveError?
 
@@ -118,7 +118,7 @@ struct SkillAddView: View {
                     enabled.toggle()
                 }
                 SkillDraftDivider()
-                SkillDraftTextFieldRow(title: "允许的工具", text: $allowedTools, placeholder: "留空表示未限制", monospace: true)
+                SkillDraftTextFieldRow(title: "声明的工具", text: $allowedTools, placeholder: "留空表示未限制", monospace: true)
             }
 
             SkillDraftNote("创建后可在技能详情里继续编辑或删除。")

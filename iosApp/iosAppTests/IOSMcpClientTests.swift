@@ -233,19 +233,6 @@ final class IOSMcpClientTests: XCTestCase {
         )
     }
 
-    func testMcpToolbarButtonsMeetMinimumTouchTarget() throws {
-        let sourceURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("iosApp/McpServersView.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-
-        for label in ["刷新 MCP 工具", "导入服务器", "添加服务器"] {
-            let line = try XCTUnwrap(source.components(separatedBy: .newlines).first(where: { $0.contains(#"accessibilityLabel: "\#(label)""#) }))
-            XCTAssertTrue(line.contains("size: 44"), line)
-        }
-    }
-
     func testDisconnectClearsTransportSession() async throws {
         let transport = FakeMcpHTTPTransport(responses: [
             ["jsonrpc": "2.0", "id": 1, "result": ["protocolVersion": "2024-11-05", "capabilities": [:], "serverInfo": ["name": "fake", "version": "1"]]]

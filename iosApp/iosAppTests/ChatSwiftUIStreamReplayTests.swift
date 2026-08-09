@@ -1612,6 +1612,152 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         )
     }
 
+    /// 终态稳定性必须覆盖「推理卡收起」这条最大的真实高度收缩路径，且从
+    /// `.assistantStreamClosed` 当轮开始采样（旧用例在 stream-closed 后 0.6s 才取
+    /// baseline，恰好漏掉终态重建那一轮）。断言：视口只朝新底部单调收敛——
+    /// 不允许「先向旧目标挪、再纠正」的两段式运动（用户感知的完成后跳变）。
+    func testTerminalWithReasoningCollapseSettlesMonotonically() {
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 6)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+
+        fixture.model.messages.append(makeUserMessage("请先思考再回答。"))
+        fixture.model.send(.userAppend)
+        pump(seconds: 0.3)
+
+        let assistantID = KotlinUuid.companion.random()
+        let reasoningText = String(
+            repeating: "推理过程需要逐步展开，确保每一步都有依据，避免凭空结论。",
+            count: 12
+        )
+        // 开头必须含 ScrollFrameProbe.streamingMarker，探针按它定位段落视图。
+        let finalText = "连续正文开始。" + String(
+            repeating: "终态收起推理卡时，视口只能一次性收敛到新底部，不能来回挪动。",
+            count: 12
+        )
+        let instant = KotlinInstant.companion.fromEpochMilliseconds(epochMilliseconds: 0)
+        func assistantMessage(reasoningFinished: Bool, finished: Bool) -> UIMessage {
+            UIMessage(
+                id: assistantID,
+                role: MessageRole.assistant,
+                parts: [
+                    UIMessagePart.Reasoning(
+                        reasoning: reasoningText,
+                        createdAt: instant,
+                        finishedAt: reasoningFinished ? instant : nil,
+                        metadata: nil
+                    ),
+                    UIMessagePart.Text(text: finalText, metadata: nil),
+                ],
+                annotations: [],
+                createdAt: chatNowLocalDateTime(),
+                finishedAt: finished ? chatNowLocalDateTime() : nil,
+                modelId: nil,
+                usage: nil,
+                translation: nil
+            )
+        }
+
+        // 流式期：推理进行中（未收口）+ 正文按 pacer 逐拍增长。
+        let streamingTarget = fixture.model.messages + [assistantMessage(reasoningFinished: false, finished: false)]
+        var presented = fixture.model.messages
+        while true {
+            let step = ChatStreamPresentationPacer.step(current: presented, target: streamingTarget)
+            presented = step.snapshot
+            fixture.model.messages = presented
+            fixture.model.send(.streamDelta)
+            if step.isCaughtUp { break }
+            pump(seconds: 0.048)
+        }
+
+        // stream-closed：全文就位但推理仍未收口（生成最后一刻才停止思考的真实形态），
+        // 让收起发生在终态采样窗口内，验证收起瞬间视口逐帧钉底。
+        let closedTarget = fixture.model.messages.dropLast() + [assistantMessage(reasoningFinished: false, finished: true)]
+        fixture.model.messages = Array(closedTarget)
+        fixture.model.send(.assistantStreamClosed)
+
+        guard let scrollView = fixture.scrollView else {
+            return XCTFail("Expected an attached scroll view")
+        }
+        let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
+        probe.start()
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            guard let paragraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
+                return false
+            }
+            return ScrollFrameProbe.streamingTextLength(in: paragraph) == finalText.utf16.count
+        })
+
+        // 终态：推理 finishedAt 落地 + run 结束 → 推理卡无动画收起（高度收缩）。
+        let terminal = fixture.model.messages.dropLast() + [assistantMessage(reasoningFinished: true, finished: true)]
+        fixture.model.messages = Array(terminal)
+        fixture.model.isGenerationActive = false
+        fixture.model.send(.generationCompleted)
+        // 留足窗口让负载下的晚到二 pass 布局落地再采尾段。
+        pump(seconds: 2.0)
+        probe.stop()
+
+        let terminalSamples = probe.samples.filter {
+            $0.paragraphLength == finalText.utf16.count
+        }
+        XCTAssertFalse(terminalSamples.isEmpty, "终态门禁必须真实采到最终正文")
+
+        if let first = terminalSamples.first, let last = terminalSamples.last {
+            XCTAssertLessThan(
+                last.contentHeight,
+                first.contentHeight,
+                "推理卡终态收起必须真实收缩内容高度，否则本用例没有覆盖到目标路径"
+            )
+        }
+
+        // 逐帧钉底：contentHeight − offsetY 即视口可见高度，贴底时恒为常数。
+        // 缓动病灶的签名是大幅持续漂移（本用例收缩 169pt，缓动会让漂移逼近该量级
+        // 并持续 150ms+）；collection 两 pass 布局的帧间残差只是小量一次性尖峰，
+        // 用「全窗口上限 + 尾段严格钉底」两级断言区分这两种形态。
+        let anchors = terminalSamples.map { $0.contentHeight - $0.contentOffsetY }
+        // 基准取收敛后的锚点：窗口开头允许存在尚未重锚定的过渡帧
+        // （snap 会在几帧内把它们拉回底部），断言针对「是否收敛并钉住」。
+        let settledAnchor = anchors.last ?? 0
+
+        let maximumAnchorDrift = anchors.map { abs($0 - settledAnchor) }.max() ?? 0
+        XCTAssertLessThanOrEqual(
+            maximumAnchorDrift,
+            25.0,
+            "终态窗口不允许缓动级漂移（两 pass 布局残差应远小于此）：\(maximumAnchorDrift)"
+        )
+
+        // 尾段严格钉底：过渡尖峰必须收敛，不允许持续漂移。
+        let tailLength = max(terminalSamples.count * 2 / 5, 3)
+        let tailAnchors = Array(anchors.suffix(tailLength))
+        let tailDrift = tailAnchors.map { abs($0 - settledAnchor) }.max() ?? 0
+        XCTAssertLessThanOrEqual(
+            tailDrift,
+            2.0,
+            "终态尾段视口必须逐帧钉在底部：\(tailDrift)"
+        )
+        // 单调收敛：尾段 offset 只允许朝新底部移动（收缩场景下非增），任何超过
+        // 1pt 的反向回升都是两段式运动/回跳。
+        let tailOffsets = terminalSamples.suffix(tailLength).map(\.contentOffsetY)
+        let maximumBackjump = zip(tailOffsets.dropFirst(), tailOffsets)
+            .map { next, previous in next - previous }
+            .max() ?? 0
+        XCTAssertLessThanOrEqual(
+            maximumBackjump,
+            1.0,
+            "终态尾段视口不得先向旧目标移动再纠正：\(maximumBackjump)"
+        )
+        XCTAssertTrue(
+            fixture.model.latestViewport.isAtBottom,
+            "终态收敛后必须贴底"
+        )
+    }
+
     func testGenerationEndSettleConvergesAfterLateLayout() {
         let fixture = makeFixture()
         defer { fixture.tearDown() }

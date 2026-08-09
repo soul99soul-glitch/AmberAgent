@@ -121,10 +121,11 @@ struct ChatAssistantText<Content: View>: View {
             .lineSpacing(4 * boundedScale)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Pi appWide lineGrid: keep body readable without a full bubble redesign.
-            // Only lineGrid paints under chat; sit stays shell-scoped so this is a no-op there.
+            // Custom appWide + lineGrid only: wash keeps body readable over grid.
+            // Builtin Pi is shell-scoped (chat is flat pi paper), so this is usually a no-op.
             .background {
-                if AmberThemeRuntime.shared.canvasStyle == .lineGrid {
+                if AmberThemeRuntime.shared.canvasStyle == .lineGrid,
+                   AmberThemeRuntime.shared.showsCanvasTexture(on: .app) {
                     AmberTheme.background.opacity(0.92)
                 }
             }

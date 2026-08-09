@@ -10,6 +10,7 @@ struct DisplayFontSettingsView: View {
     @AppStorage(IOSDisplayPreferenceKeys.agentName) private var agentName = true
     @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
     @AppStorage(IOSDisplayPreferenceKeys.activityIslandEdgeGlow) private var activityIslandEdgeGlow = false
+    @AppStorage(IOSDisplayPreferenceKeys.completionHaptic) private var completionHaptic = true
     private var selectedFont: IOSChatFont {
         IOSChatFont(rawValue: chatFont) ?? .default
     }
@@ -124,6 +125,16 @@ struct DisplayFontSettingsView: View {
             AmberSectionLabel(text: "消息显示")
             AmberFormGroup {
                 DisplayToggleRow(title: "显示 Agent 名字", isOn: agentName) { agentName.toggle() }
+
+                DisplayDivider()
+
+                DisplayToggleRow(
+                    title: "生成完成振动",
+                    subtitle: "回复生成完成时轻触一次。",
+                    isOn: completionHaptic
+                ) {
+                    completionHaptic.toggle()
+                }
             }
         }
     }

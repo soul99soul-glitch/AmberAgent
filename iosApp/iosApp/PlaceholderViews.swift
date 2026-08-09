@@ -554,6 +554,12 @@ final class AmberThemeRuntime {
         launchBrand = AmberLaunchBrandStyle(rawValue: d.string(forKey: Keys.launchBrand) ?? "") ?? .none
         assetMode = AmberThemeAssetMode(rawValue: d.string(forKey: Keys.assetMode) ?? "") ?? .builtinOnly
         immersivePolicy = AmberImmersivePolicy(rawValue: d.string(forKey: Keys.immersivePolicy) ?? "") ?? .hidden
+        // Pi builtin withdrew chat texture: migrate legacy appWide lineGrid on pi paper → shell.
+        // didSet 在 init 内不触发，需显式落盘，否则下次冷启动仍读到 appWide。
+        if paper == .pi, canvasStyle == .lineGrid, canvasScope == .appWide {
+            canvasScope = .shell
+            d.set(AmberCanvasScope.shell.rawValue, forKey: Keys.canvasScope)
+        }
     }
 
     func apply(_ option: AmberAccentOption) {
@@ -642,6 +648,7 @@ enum IOSDisplayPreferenceKeys {
     static let agentName = "app.amber.ios.display.agentName"
     static let followGeneration = "app.amber.ios.display.followGeneration"
     static let activityIslandEdgeGlow = "app.amber.ios.display.activityIslandEdgeGlow"
+    static let completionHaptic = "app.amber.ios.display.completionHaptic"
     static let streamingBlockMarkdown = "app.amber.ios.display.streamingBlockMarkdown"
     static let coalescedTextBlocks = "app.amber.ios.display.coalescedTextBlocks"
 }
@@ -695,6 +702,7 @@ extension UIColor {
 enum AmberHapticEvent {
     case lightImpact
     case mediumImpact
+    case rigidImpact
     case selection
     case success
     case warning
@@ -709,6 +717,9 @@ enum AmberHaptics {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .mediumImpact:
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        case .rigidImpact:
+            // 生成完成提示：单次刚性轻触，短促清脆，避免 notification 双连震的「蹦蹦」手感。
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         case .selection:
             UISelectionFeedbackGenerator().selectionChanged()
         case .success:
@@ -1756,15 +1767,15 @@ private struct HomeEmptyCard: View {
                     Group {
                         switch AmberThemeRuntime.shared.canvasStyle {
                         case .lineGrid:
-                            // Same 18pt lattice as page/cards; opacity only softens ink.
+                            // Keep quieter than page gutters; match HomeCardCanvasTexture scale.
                             AmberLineGridOverlay()
-                                .opacity(0.65)
+                                .opacity(HomeCardCanvasTexture.lineGridOpacity)
                         case .paperGrain:
                             AmberPaperGrainOverlay()
-                                .opacity(0.7)
+                                .opacity(HomeCardCanvasTexture.paperGrainOpacity)
                         case .dotGrid, .flat:
                             AmberDotGridOverlay()
-                                .opacity(0.55)
+                                .opacity(HomeCardCanvasTexture.dotGridOpacity)
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -1875,28 +1886,24 @@ private struct HomeContinueButton: View {
 
     @ViewBuilder
     private func continueCTA(expands: Bool) -> some View {
+        // 续接 CTA：浅强调色底 + 主墨字（次级动作）；主强调留给右下「新对话」混色玻璃。
         let label = Text(model.ctaTitle)
             .font(.system(size: continueCTAFontSize, weight: .semibold))
             .tracking(0.26)
-            .foregroundStyle(AmberTheme.background)
+            .foregroundStyle(AmberTheme.foreground)
+        let fill = hovering || pressed ? AmberTheme.avatarActive : AmberTheme.accentTint
         if expands {
             label
                 .padding(.vertical, 7)
                 .padding(.horizontal, 18)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(
-                    hovering || pressed ? AmberTheme.foreground2 : AmberTheme.foreground,
-                    in: Capsule()
-                )
+                .background(fill, in: Capsule())
         } else {
             label
                 .padding(.vertical, 7)
                 .padding(.horizontal, 18)
                 .frame(minHeight: 32)
-                .background(
-                    hovering || pressed ? AmberTheme.foreground2 : AmberTheme.foreground,
-                    in: Capsule()
-                )
+                .background(fill, in: Capsule())
                 .fixedSize(horizontal: true, vertical: false)
         }
     }
@@ -1925,7 +1932,8 @@ private extension View {
     func homeCascade(delay: Double, enabled: Bool = true) -> some View { modifier(HomeCascade(delay: delay, enabled: enabled)) }
 }
 
-/// 首页控制层专用玻璃（搜索胶囊 / 展开条 / 齿轮 / 右下新建浮层胶囊）。
+/// 首页控制层专用中性玻璃（搜索胶囊 / 展开条 / 齿轮）。
+/// 右下「新对话」走 `amberProminentGlass`，不经此 modifier。
 /// iOS 26+：原生 Liquid Glass（skill: 真 `glassEffect`，轻垫底保证暖灰画布上可读，不做假 solid chip）。
 /// 更早系统：ultraThinMaterial + E 版描边/投影回退。
 private struct HomeGlassControlModifier: ViewModifier {
@@ -2148,7 +2156,11 @@ struct ConversationsView: View {
             .scrollIndicators(.hidden)
             .environment(\.defaultMinListRowHeight, 0)
             .scrollEdgeEffectStyle(.soft, for: .top)
-            .scrollEdgeEffectStyle(.soft, for: .bottom)
+            // 有点阵/方格时底部 soft 会把会话外框下沿「透」成雾面；改 hard 保住卡壳不透明。
+            .scrollEdgeEffectStyle(
+                AmberThemeRuntime.shared.canvasStyle.hasTexture ? .hard : .soft,
+                for: .bottom
+            )
             // 点到非搜索区导致失焦时收起（与 Esc/取消一致）。
             .onChange(of: searchFocused) { _, focused in
                 if focused {
@@ -2275,8 +2287,8 @@ struct ConversationsView: View {
 
     /// 首页右下「新对话」浮层胶囊。
     /// skill 门禁：
-    /// - taste：accent 只点缀图标；壳子黑白/中性玻璃，不铺大面琥珀
-    /// - liquid glass：与搜索同族 `homeGlassControl` regular glass（非 glassProminent 实心）
+    /// - taste：主强调动作；强调色混色玻璃 + on-accent 墨，压过 Continue 浅色 CTA
+    /// - liquid glass：`amberProminentGlass`（accent 垫底 + `.regular.tint`），非中性 `homeGlassControl`
     /// - ui-patterns：拇指区 bottomTrailing 真浮层；非 top 难够、非 inset 假底栏
     private var homeNewChatCapsule: some View {
         let height = homeNewChatCapsuleHeight
@@ -2285,18 +2297,18 @@ struct ConversationsView: View {
         } label: {
             HStack(spacing: 6) {
                 HomePhosphorIcon(.pencil, size: 14)
-                    .foregroundStyle(AmberTheme.fab)
+                    .foregroundStyle(AmberTheme.fabInk)
                 Text("新对话")
                     .font(AmberChromeFont.system(size: 14, weight: .semibold))
                     .tracking(0.2)
-                    .foregroundStyle(AmberTheme.foreground)
+                    .foregroundStyle(AmberTheme.fabInk)
             }
             .padding(.horizontal, 14)
             .frame(height: height)
             .contentShape(Capsule())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.94, haptic: .lightImpact))
-        .homeGlassControl(cornerRadius: height / 2)
+        .amberProminentGlass(cornerRadius: height / 2, tint: AmberTheme.accent)
         .accessibilityLabel("新建聊天")
         .accessibilityAddTraits(.isButton)
     }

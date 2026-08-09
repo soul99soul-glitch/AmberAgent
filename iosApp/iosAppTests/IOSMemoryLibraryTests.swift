@@ -4,6 +4,46 @@ import XCTest
 
 @MainActor
 final class IOSMemoryLibraryTests: XCTestCase {
+    func testMemoryOverviewKeepsLibraryToolsUserFacing() throws {
+        // 用户页：搜索贴着记忆库、四标签等分；不挂召回解释 / 本次候选等控制台语义。
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/MemoryOverviewView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(source.contains("召回解释"))
+        XCTAssertFalse(source.contains("本次候选"))
+        XCTAssertFalse(source.contains("搜索与过滤"))
+        XCTAssertNil(source.range(of: "recallSection"))
+
+        let recordsStart = try XCTUnwrap(source.range(of: "private var recordsSection:"))
+        let auditStart = try XCTUnwrap(source.range(of: "private var auditSection:", range: recordsStart.upperBound..<source.endIndex))
+        let recordsBlock = String(source[recordsStart.lowerBound..<auditStart.lowerBound])
+        XCTAssertTrue(
+            recordsBlock.contains("libraryToolbar"),
+            "libraryToolbar 必须挂在 recordsSection 内，不能只是文件里另有定义"
+        )
+        XCTAssertTrue(recordsBlock.contains("AmberSectionLabel(text: \"记忆库\")"))
+
+        let toolbarStart = try XCTUnwrap(source.range(of: "private var libraryToolbar:"))
+        let toolbarEnd = try XCTUnwrap(source.range(of: "private var recordsSection:", range: toolbarStart.upperBound..<source.endIndex))
+        let toolbarBlock = String(source[toolbarStart.lowerBound..<toolbarEnd.lowerBound])
+        XCTAssertTrue(
+            toolbarBlock.contains(".frame(maxWidth: .infinity)"),
+            "四标签须等分铺开"
+        )
+        XCTAssertFalse(
+            toolbarBlock.contains("ScrollView(.horizontal)"),
+            "四枚固定短标签应等分铺开，不再横滑左簇拥"
+        )
+        XCTAssertFalse(
+            source.contains("parts.append(\"#\\(memoryId)\")") || source.contains("#\\(record.id)"),
+            "用户面不得再拼内部 memory id"
+        )
+    }
+
     func testFilteredRecordsSearchesContentSourceAndScope() {
         let core = memory(
             id: 1,
@@ -69,7 +109,11 @@ final class IOSMemoryLibraryTests: XCTestCase {
             supersedesIds: [1, 2, 3].map { KotlinInt(value: Int32($0)) }
         )
 
-        XCTAssertEqual(IOSMemoryLibrary.sourceSummary(record), "会话 conv-9 · 2 条消息 · 替代 3 条")
+        XCTAssertEqual(IOSMemoryLibrary.sourceSummary(record), "来自聊天 · 关联 2 条消息 · 替代 3 条旧记忆")
+        XCTAssertFalse(
+            IOSMemoryLibrary.sourceSummary(record).contains("conv-9"),
+            "用户面来源摘要不得泄漏 conversation id"
+        )
         XCTAssertTrue(IOSMemoryLibrary.preview(record.content, limit: 12).hasSuffix("..."))
         XCTAssertEqual(IOSMemoryLibrary.scopeTitle(.longTerm), "长期")
         XCTAssertEqual(IOSMemoryLibrary.kindTitle(.reference), "资料")

@@ -138,15 +138,16 @@ enum IOSMemoryLibrary {
     }
 
     static func sourceSummary(_ record: MemoryRecord) -> String {
+        // 用户面不暴露 conversation UUID / 内部 id；只保留可读来源语义。
         var parts: [String] = []
         if let sourceConversationId = record.sourceConversationId, !sourceConversationId.isEmpty {
-            parts.append("会话 \(sourceConversationId)")
+            parts.append("来自聊天")
         }
         if !record.sourceMessageIds.isEmpty {
-            parts.append("\(record.sourceMessageIds.count) 条消息")
+            parts.append("关联 \(record.sourceMessageIds.count) 条消息")
         }
         if !record.supersedesIds.isEmpty {
-            parts.append("替代 \(record.supersedesIds.count) 条")
+            parts.append("替代 \(record.supersedesIds.count) 条旧记忆")
         }
         return parts.isEmpty ? "手动或工具写入，未记录来源" : parts.joined(separator: " · ")
     }

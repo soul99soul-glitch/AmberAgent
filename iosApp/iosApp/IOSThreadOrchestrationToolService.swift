@@ -465,6 +465,29 @@ final class IOSThreadOrchestrationToolService {
         ) != nil
     }
 
+    /// 是否有子边（作为父线程）。供运行时上下文注入判定：只有参与线程树的
+    /// 会话才注入 mailbox 语义说明，普通会话不付这笔 token。
+    func hasOrchestrationChildren(conversationId: KotlinUuid) async -> Bool {
+        await withCheckedContinuation { cont in
+            threadEdgeDaoProvider().childrenOf(parentThreadId: conversationId.toHexDashString()) { result, _ in
+                cont.resume(returning: !(result ?? []).isEmpty)
+            }
+        }
+    }
+
+    /// 子线程首个后台 run 的编排语境（管线闭环场景 C）：子线程 upload 不经
+    /// ChatViewModel 注入管线，在 handoff 组装时直接注入子线程向文案。
+    static let childOrchestrationContextPrompt = """
+    You are a child agent thread in a thread-orchestration tree.
+    - Your task arrives as a `[mailbox NEW_TASK from /root/...]` message; `[mailbox MESSAGE|FINAL_ANSWER from /root/...]` are inter-agent mail, not user input.
+    - Your final answer is delivered to the parent thread automatically when this run ends — no need to contact the user.
+    - Reach the parent with send_message; block for new mail mid-run with wait_agent.
+    """
+
+    /// 子线程 run 的输出 token 地板（真机回归：子线程曾继承聊天的几千 token
+    /// 上限，长报告被截断为"达到输出上限"终态）。
+    static let childRunMinOutputTokens: Int32 = 32_768
+
     private func listAgents(arguments: String, conversationId: KotlinUuid?) async -> String {
         // 根 = run 锚定的会话（execute 透传）；currentConversationId() 仅兜底。
         guard let parentConversationId = conversationId ?? currentConversationId() else {
@@ -978,11 +1001,20 @@ final class IOSThreadOrchestrationToolService {
             startedAt: now,
             inputDigest: inputDigest
         )
+        // 管线闭环场景 C：子线程的后台 upload 不经 ChatViewModel 注入管线，
+        // 直接在 handoff 里注入子线程向编排语境（仅 upload，不进展示/持久化）。
+        let childContextMessage = UIMessage.companion.system(prompt: Self.childOrchestrationContextPrompt)
+        let uploadMessages = [childContextMessage] + targetMessages
         // M3: fullToolNames 取 run 的桥全目录（对齐 ChatGenerationCoordinator
         // handoff 的做法）——params.tools 只是当轮可见子集，子线程目录会被
         // 永久截断（未暴露的 wm_* 等永远不可 search/命中）。桥不可用回退现行为。
         let fullToolNames = toolExposureBridge?.fullToolDeclarations().map(\.name)
             ?? params.tools.map { $0.name }
+        // 子线程是干活线程，不能继承聊天取向的输出上限：聊天下每条回复的
+        // maxTokens 通常只有几千 token（或为 nil 吃服务商默认的小上限），长报告
+        // 必被截断成"达到输出上限"终态（真机观察到的子代理失败）。地板 32k，
+        // 父显式设了更大值则保留。
+        let childParams = params.withMaxTokenFloor(Self.childRunMinOutputTokens)
         let handoff = IOSChatBackgroundHandoff(
             runId: runId,
             startedAt: now,
@@ -990,9 +1022,10 @@ final class IOSThreadOrchestrationToolService {
             conversationId: targetConversationId,
             providerId: providerSetting.id.toHexDashString(),
             providerSetting: providerSetting,
-            // 同工具面：继承当前 run 的 params（含已暴露的编排工具，可 spawn 孙线程）。
-            params: params,
-            uploadMessages: targetMessages,
+            // 同工具面：继承当前 run 的 params（含已暴露的编排工具，可 spawn 孙线程），
+            // 仅 maxTokens 按上注做了地板提升。
+            params: childParams,
+            uploadMessages: uploadMessages,
             displayMessages: targetMessages,
             mode: .continueModel,
             generativeUiRequirement: .none,
@@ -1396,5 +1429,24 @@ final class IOSThreadOrchestrationToolService {
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
+    }
+}
+
+
+extension TextGenerationParams {
+    /// 输出上限地板：低于 floor（或 nil 吃服务商默认小上限）时提升到 floor。
+    func withMaxTokenFloor(_ floor: Int32) -> TextGenerationParams {
+        let current = maxTokens?.int32Value ?? 0
+        guard current < floor else { return self }
+        return TextGenerationParams(
+            model: model,
+            temperature: temperature,
+            topP: topP,
+            maxTokens: KotlinInt(value: floor),
+            tools: tools,
+            reasoningLevel: reasoningLevel,
+            customHeaders: customHeaders,
+            customBody: customBody
+        )
     }
 }

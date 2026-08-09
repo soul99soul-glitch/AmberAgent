@@ -5,11 +5,11 @@ import XCTest
 
 @MainActor
 final class IOSMemoryPersistenceTests: XCTestCase {
-    func testAddAndPersistThenReloadSurvivesRestart() throws {
+    func testPersistedAddAndDeleteSurviveSequentialRestarts() throws {
         try withIsolatedPersistence { persistence, _ in
             persistence.load()
             let previousRecords = IosMemoryFactory.shared.snapshotRecords()
-            IosMemoryFactory.shared.addMemory(
+            let record = IosMemoryFactory.shared.addMemory(
                 scope: .core,
                 kind: .note,
                 content: "persistence-round-trip",
@@ -24,23 +24,10 @@ final class IOSMemoryPersistenceTests: XCTestCase {
             XCTAssertEqual(persistence.loadState, .loaded)
             XCTAssertEqual(persistence.records.map(\.content), ["persistence-round-trip"])
             XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().map(\.content), ["persistence-round-trip"])
-        }
-    }
 
-    func testDeleteAndPersistThenReloadStaysDeleted() throws {
-        try withIsolatedPersistence { persistence, _ in
-            persistence.load()
-            let record = IosMemoryFactory.shared.addMemory(
-                scope: .longTerm,
-                kind: .note,
-                content: "delete-round-trip",
-                assistantId: IosMemoryFactory.shared.LONG_TERM_MEMORY_ID
-            )
-            XCTAssertTrue(persistence.persist(previousRecords: []))
-
-            let previousRecords = IosMemoryFactory.shared.snapshotRecords()
+            let reloadedRecords = IosMemoryFactory.shared.snapshotRecords()
             IosMemoryFactory.shared.deleteMemory(id: record.id)
-            XCTAssertTrue(persistence.persist(previousRecords: previousRecords))
+            XCTAssertTrue(persistence.persist(previousRecords: reloadedRecords))
 
             IosMemoryFactory.shared.replaceAll(records: [record])
             persistence.load()

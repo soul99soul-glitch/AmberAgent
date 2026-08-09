@@ -50,7 +50,7 @@ Amber 是 **安静、可工作的 AI agent 工作台**，不是皮肤商店。
 
 | 能力 | 范围 |
 |------|------|
-| 画布纹理（点阵等） | 由 `canvasScope` 控制：`homeOnly` 仅首页；`shell` = 首页 + 外观/账户；`appWide` = 已 opt-in 的工作页（聊天/看板/小说/议会/WebMount/小应用）。**点阵 · 陶土用 `shell`**，聊天与设置表单保持安静纸色 |
+| 画布纹理（点阵等） | 由 `canvasScope` 控制：`homeOnly` 仅首页；`shell` = 首页 + 外观/账户；`appWide` = 已 opt-in 的工作页（聊天/看板/小说/议会/WebMount/小应用）。**点阵 · 陶土 / 点阵 · Pi 均用 `shell`**，聊天只保留纸色、不铺方格 |
 | 品牌字 / 像素快捷 / chrome 字体 | **首页** 外壳为主 |
 | paper + accent 颜色 token | **全 app** `AmberTheme.*`；状态色 `accentAmber`/`statusAmber`（`#D98324`）固定，**不是**主题强调色 |
 | 气泡圆角 | `bubbleChrome` → `AmberTheme.radiusXLarge`（含用户气泡） |
@@ -243,20 +243,17 @@ AmberThemePack
 
 ## 7. 现有内置包（对照）
 
+内置只保留有辨识度的角色包；`paper × accent` 组合走外观页「自定义」，不再占预置格子。
+
 | id | 显示名 | paper | accent | 风格槽 |
 |----|--------|-------|--------|--------|
-| warm-amber | 暖灰 · 琥珀 | neutral | amberGold | 全默认（flat / system / phosphor / system） |
-| paper-amber | 暖纸 · 琥珀 | paper | amberGold | 默认 |
-| white-mist | 中性白 · 雾蓝 | white | mistBlue | 默认 |
-| warm-sage | 暖灰 · 鼠尾草 | neutral | sage | 默认 |
-| paper-rose | 暖纸 · 玫红 | paper | rose | 默认 |
-| white-ink | 中性白 · 墨 | white | ink | 默认 |
 | sit-terracotta | 点阵 · 陶土 | paper | terracotta | dotGrid + paintAMBER + pixelSit + rounded + shell |
-| pi-steel | 点阵 · Pi | pi（奶油稿纸） | steelBlue | **lineGrid 方格点阵** + serifWordmark + **monospace chrome** + **appWide**（含 chat） |
+| pi-steel | 点阵 · Pi | pi（奶油稿纸） | steelBlue | **lineGrid 方格点阵** + serifWordmark + **monospace chrome** + **shell**（chat 只留纸色） |
 | notion-blue | Notion · 暖白 | notion（暖白） | notionBlue `#0075de` | flat + system wordmark + phosphor + quieter glass；选中行中性晕 |
 
-**经典包** = 只换 paper × accent。
-**角色包** = 颜色 + 纹理 + 字标 + 五图标 + chrome/可选表面槽，整套叙事。
+曾存在的经典 6 包（`warm-amber` / `paper-amber` / `white-mist` / `warm-sage` / `paper-rose` / `white-ink`）已移出 builtins；导入旧 JSON 进入本机主题库并可再选中；未入库的临时组合显示「当前为自定义组合」。
+
+外观页：导入 → `AmberThemePackLibrary`（`Documents/theme-packs/library.json`）；右上角「管理」→ 多选导入包 → 一键移除。三个内置角色包不可移除。
 
 ---
 

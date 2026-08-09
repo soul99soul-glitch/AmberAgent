@@ -1485,9 +1485,13 @@ struct NovelWritingContextSheet: View {
         .scrollContentBackground(.hidden)
         .background(AmberTheme.background)
         .onChange(of: chapterPlanFieldSyncToken) { _, _ in
+            // Don't clobber an in-progress Chinese composition with the
+            // workspace snapshot; user can re-open or save after finishing IME.
+            guard !NovelTextInputCommitter.hasMarkedText() else { return }
             reloadPlanFieldsFromWorkspace()
         }
         .onChange(of: upcomingArcFieldSyncToken) { _, _ in
+            guard !NovelTextInputCommitter.hasMarkedText() else { return }
             reloadUpcomingArcFromWorkspace()
         }
     }

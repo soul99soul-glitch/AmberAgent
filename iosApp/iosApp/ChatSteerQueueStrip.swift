@@ -1,14 +1,15 @@
 import SwiftUI
 
-/// P1-a: composer 上方的生成中排队条。每条排队消息一行（单行截断）+ 44pt 撤销按钮，
-/// 顶部一行队列计数；空队列零占位（由调用方 `if !isEmpty` 挂载）。
-/// 视觉沿用 composer 附件族的 thinMaterial 圆角带（ComposerPendingFileCard 同款），
-/// 不引入新设计语言；字体走语义字号 + ScaledMetric，Reduce Motion 下无动画。
+/// P1-a: composer 上方排队条。与 dock 行同宽（右缘对齐发送键）；材质走
+/// `composerDockGlass`。空队列零占位；≤3 条按内容高度，超出才限高滚动。
 struct ChatSteerQueueStrip: View {
     let entries: [IOSSteerQueueEntry]
     let onRemove: (String) -> Void
 
-    @ScaledMetric(relativeTo: .caption) private var rowMinHeight: CGFloat = 44
+    private static let maxVisibleRows = 3
+    private static let cornerRadius: CGFloat = 18
+
+    @ScaledMetric(relativeTo: .caption) private var rowMinHeight: CGFloat = 36
     @ScaledMetric(relativeTo: .caption2) private var countFontSize: CGFloat = 12
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -18,15 +19,35 @@ struct ChatSteerQueueStrip: View {
                 .font(.system(size: countFontSize))
                 .foregroundStyle(AmberTheme.muted2)
                 .accessibilityHidden(true)
-                .padding(.bottom, 4)
+                .padding(.bottom, 2)
 
+            if entries.count > Self.maxVisibleRows {
+                ScrollView {
+                    rows
+                }
+                .frame(maxHeight: rowMinHeight * CGFloat(Self.maxVisibleRows) + CGFloat(Self.maxVisibleRows - 1))
+            } else {
+                rows
+            }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .composerDockGlass(cornerRadius: Self.cornerRadius)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("排队消息 \(entries.count) 条")
+        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                HStack(spacing: 10) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 13, weight: .medium))
+                HStack(spacing: 8) {
+                    Image(systemName: entry.hasAttachments ? "paperclip" : "clock.arrow.circlepath")
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(AmberTheme.muted2)
-                        .frame(width: 18)
-                    Text(entry.text)
+                        .frame(width: 16)
+                    Text(Self.rowTitle(for: entry))
                         .font(.caption)
                         .foregroundStyle(AmberTheme.foreground2)
                         .lineLimit(1)
@@ -36,11 +57,10 @@ struct ChatSteerQueueStrip: View {
                         onRemove(entry.id)
                     } label: {
                         Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(AmberTheme.muted)
-                            .frame(width: 26, height: 26)
-                            .frame(minWidth: 44, minHeight: 44)
-                            .contentShape(Rectangle())
+                            .frame(width: 28, height: 28)
+                            .contentShape(.interaction, Rectangle().inset(by: -8))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("撤销第 \(index + 1) 条排队消息")
@@ -48,17 +68,27 @@ struct ChatSteerQueueStrip: View {
                 .frame(minHeight: rowMinHeight)
                 if index < entries.count - 1 {
                     Rectangle()
-                        .fill(AmberTheme.borderSoft)
+                        .fill(AmberTheme.borderSoft.opacity(0.7))
                         .frame(height: 1)
-                        .padding(.leading, 28)
+                        .padding(.leading, 24)
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("排队消息 \(entries.count) 条")
-        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+    }
+
+    /// 测试与预览共用的行标题规则。
+    static func rowTitle(for entry: IOSSteerQueueEntry) -> String {
+        let trimmed = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        let imageLabel: String? = {
+            guard !entry.images.isEmpty else { return nil }
+            return entry.images.count == 1 ? "图片" : "\(entry.images.count) 张图片"
+        }()
+        if let imageLabel, let file = entry.selectedFile {
+            return "\(imageLabel) · \(file.fileName)"
+        }
+        if let imageLabel { return imageLabel }
+        if let file = entry.selectedFile { return file.fileName }
+        return "排队消息"
     }
 }

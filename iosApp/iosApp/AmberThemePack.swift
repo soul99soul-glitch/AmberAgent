@@ -285,14 +285,9 @@ struct AmberThemePack: Identifiable, Equatable, Hashable {
             || launchBrand != .none
     }
 
-    /// 内置主题包（仅非沉浸画布）。经典 6 色 + 角色包。
+    /// 内置主题包：只保留有辨识度的角色包。
+    /// paper×accent 经典组合留给「自定义画布与强调色」，不占预置格子。
     static let builtins: [AmberThemePack] = [
-        .init(id: "warm-amber", displayName: "暖灰 · 琥珀", paper: .neutral, accent: .amberGold),
-        .init(id: "paper-amber", displayName: "暖纸 · 琥珀", paper: .paper, accent: .amberGold),
-        .init(id: "white-mist", displayName: "中性白 · 雾蓝", paper: .white, accent: .mistBlue),
-        .init(id: "warm-sage", displayName: "暖灰 · 鼠尾草", paper: .neutral, accent: .sage),
-        .init(id: "paper-rose", displayName: "暖纸 · 玫红", paper: .paper, accent: .rose),
-        .init(id: "white-ink", displayName: "中性白 · 墨", paper: .white, accent: .ink),
         // Character: sit on home (+ appearance shell). Chat stays quiet paper.
         .init(
             id: "sit-terracotta",
@@ -312,7 +307,8 @@ struct AmberThemePack: Identifiable, Equatable, Hashable {
             assetMode: .builtinOnly,
             immersivePolicy: .hidden
         ),
-        // Open Design pi-dotgrid：奶油稿纸 + 方格点阵 + 衬线品牌 + mono chrome；chat 也吃纹理。
+        // Open Design pi-dotgrid：奶油稿纸 + 方格点阵 + 衬线品牌 + mono chrome。
+        // 纹理仅 shell（首页/外观）；chat 等 app 面只保留 pi 纸色——方格在消息/玻璃下不透且抢读。
         .init(
             id: "pi-steel",
             displayName: "点阵 · Pi",
@@ -322,7 +318,7 @@ struct AmberThemePack: Identifiable, Equatable, Hashable {
             brandMark: .serifWordmark,
             shortcutIconStyle: .phosphorFill,
             chromeTypeface: .monospace,
-            canvasScope: .appWide,
+            canvasScope: .shell,
             bubbleChrome: .standard,
             glassChrome: .quieter,
             emptyArt: .character,
@@ -373,12 +369,26 @@ struct AmberThemePack: Identifiable, Equatable, Hashable {
 }
 
 extension AmberThemeRuntime {
+    /// 匹配到的内置角色包（不含导入库）。
     var matchingPack: AmberThemePack? {
         AmberThemePack.builtins.first { $0.matches(runtime: self) }
     }
 
+    /// 匹配到的导入库配方（`AmberThemePackLibrary.shared`）。
+    @MainActor
+    var matchingInstalledDocument: AmberThemePackDocument? {
+        AmberThemePackLibrary.shared.installed.first { $0.matches(runtime: self) }
+    }
+
+    /// 内置或导入库命中的稳定 id；皆无则为自定义组合。
+    @MainActor
+    var matchingThemeId: String? {
+        matchingPack?.id ?? matchingInstalledDocument?.id
+    }
+
+    @MainActor
     var isCustomCombination: Bool {
-        matchingPack == nil
+        matchingThemeId == nil
     }
 
     func apply(_ pack: AmberThemePack) {
@@ -521,14 +531,16 @@ enum AmberColorContrast {
 }
 
 enum AmberThemePackTransfer {
-    /// Snapshot current runtime (uses matching builtin id/name when possible).
+    /// Snapshot current runtime (uses matching builtin / installed id/name when possible).
+    @MainActor
     static func document(from runtime: AmberThemeRuntime) -> AmberThemePackDocument {
-        let match = runtime.matchingPack
+        let builtin = runtime.matchingPack
+        let installed = runtime.matchingInstalledDocument
         return AmberThemePackDocument(
             format: AmberThemePackDocument.formatID,
             version: AmberThemePackDocument.currentVersion,
-            id: match?.id ?? "custom",
-            displayName: match?.displayName ?? "自定义",
+            id: builtin?.id ?? installed?.id ?? "custom",
+            displayName: builtin?.displayName ?? installed?.displayName ?? "自定义",
             paper: runtime.paper.rawValue,
             accentHex: hexString(runtime.accentHex),
             inkHex: hexString(runtime.accentInkHex),
@@ -679,6 +691,7 @@ enum AmberThemePackTransfer {
     }
 
     /// Write JSON to a temp file for the share sheet.
+    @MainActor
     static func writeExportFile(from runtime: AmberThemeRuntime) throws -> URL {
         let document = document(from: runtime)
         let data = try encode(document)
@@ -864,19 +877,25 @@ struct AmberPaperGrainOverlay: View {
 }
 
 /// Faint texture for **solid cards** (session rows / control card) when canvas is gridded.
-/// Same 18pt lattice as the page; opacity only softens ink so session stack / gutters stay one grid.
+/// Same lattice as the page; keep ink quiet so the card still reads as an opaque shell
+/// (Pi lineGrid especially — 0.55 looked like the page grid “showing through” the frame).
 struct HomeCardCanvasTexture: View {
+    /// Line/dot opacities locked by `AmberThemePackTests.testHomeCardCanvasTextureStaysQuiet`.
+    static let lineGridOpacity: Double = 0.22
+    static let dotGridOpacity: Double = 0.28
+    static let paperGrainOpacity: Double = 0.32
+
     var body: some View {
         switch AmberThemeRuntime.shared.canvasStyle {
         case .lineGrid:
             AmberLineGridOverlay()
-                .opacity(0.55)
+                .opacity(Self.lineGridOpacity)
         case .dotGrid:
             AmberDotGridOverlay()
-                .opacity(0.42)
+                .opacity(Self.dotGridOpacity)
         case .paperGrain:
             AmberPaperGrainOverlay()
-                .opacity(0.55)
+                .opacity(Self.paperGrainOpacity)
         case .flat:
             EmptyView()
         }

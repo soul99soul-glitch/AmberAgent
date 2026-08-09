@@ -195,16 +195,25 @@ final class ChatViewModel {
     /// 注入的编排服务查一次 Room）。测试可 `await orchestratedStatusRefreshTask?.value`。
     @ObservationIgnored private(set) var currentConversationIsOrchestratedChild = false
     @ObservationIgnored private(set) var orchestratedStatusRefreshTask: Task<Void, Never>?
+    /// 当前会话是否参与线程树（是子线程或有子线程）。参与的会话才注入 mailbox
+    /// 语义说明（普通会话不付这笔 token）；与只读判定同一刷新任务。
+    @ObservationIgnored private(set) var currentConversationHasOrchestrationLinks = false
 
     /// 刷新当前会话的子线程判定（Room 查询一次）。reloadFromStore 与测试共用。
     func refreshCurrentConversationOrchestratedStatus() async {
         guard let conversationId = currentConversationId else {
             currentConversationIsOrchestratedChild = false
+            currentConversationHasOrchestrationLinks = false
             return
         }
-        currentConversationIsOrchestratedChild = await orchestrationToolService.isOrchestratedChild(
-            conversationId: conversationId
-        )
+        let isChild = await orchestrationToolService.isOrchestratedChild(conversationId: conversationId)
+        currentConversationIsOrchestratedChild = isChild
+        if isChild {
+            currentConversationHasOrchestrationLinks = true
+        } else {
+            currentConversationHasOrchestrationLinks = await orchestrationToolService
+                .hasOrchestrationChildren(conversationId: conversationId)
+        }
     }
 
     /// P1-e: 供会话列表徽标/只读标识查询（ConversationsView 在用户 WIP 中，本轮
@@ -553,7 +562,9 @@ final class ChatViewModel {
     /// One derived contract shared by the composer and the send action.
     func composerSendBlockReason(for text: String) -> ChatComposerSendBlockReason? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !pendingImages.isEmpty else { return .emptyInput }
+        guard !trimmed.isEmpty || !pendingImages.isEmpty || pendingSelectedFilePreview != nil else {
+            return .emptyInput
+        }
         // P1-e: 编排子线程只读（存在 thread_edge 即拦截，含生成中/已取消/已完成；
         // 缓存判定在会话切换时刷新，不逐 keystroke 查 Room）。已知取舍：切换后到
         // 刷新完成前的毫秒级窗口内按缓存（可能为 false）放行——接受该窗口（checker
@@ -562,14 +573,10 @@ final class ChatViewModel {
             return .orchestratedThread
         }
         if isGenerationActive {
-            // P1-a: 生成中文本发送不再拦截，改为入队（STEER）。v1 队列条目仅文本：
-            // 带图片/待发文件时保持原拦截（不静默丢附件）；队列满时回到禁用态。
-            if pendingImages.isEmpty, pendingSelectedFilePreview == nil {
-                return steerQueue.count >= IOSSteerQueueStore.maxPendingUserMessages
-                    ? .steerQueueFull
-                    : nil
-            }
-            return .generationActive
+            // 生成中发送改为入队（含图/附件）；队列满时回到禁用态。
+            return steerQueue.count >= IOSSteerQueueStore.maxPendingUserMessages
+                ? .steerQueueFull
+                : nil
         }
         guard !isAttachingSelectedFile else { return .attachingSelectedFile }
         guard !isRecognizingImages else { return .recognizingImages }
@@ -889,6 +896,12 @@ final class ChatViewModel {
                 drainMailbox: { [weak self] conversationId in
                     await self?.drainMailbox(conversationId: conversationId) ?? []
                 },
+                handleSteerQueueAtTerminal: { [weak self] conversationId, autoContinue in
+                    self?.handleSteerQueueAtRunTerminal(
+                        for: conversationId,
+                        autoContinue: autoContinue
+                    )
+                },
                 restoreSteerQueueLeftover: { [weak self] conversationId in
                     self?.restoreSteerQueueLeftoverToComposer(for: conversationId)
                 },
@@ -898,6 +911,9 @@ final class ChatViewModel {
                         runId: runId,
                         finalMessages: finalMessages
                     )
+                },
+                refreshOrchestrationLinks: { [weak self] in
+                    await self?.refreshCurrentConversationOrchestratedStatus()
                 }
             )
         )
@@ -1265,7 +1281,16 @@ final class ChatViewModel {
             }
             return false
         }
-        // 发图前先按模型视觉能力判断（对齐安卓 ImageAttachmentValidator）：
+        // 生成中：图/附件整包入队，OCR/能力校验延到折入后再走正常发送路径
+        // （不走 fallback 直发抢跑）。仅硬拦超张数，避免无模型时误杀入队。
+        if isGenerationActive {
+            if hasImages, pendingImages.count > Self.maxImagesPerMessage {
+                selectedFileContextError = "一次最多发送 \(Self.maxImagesPerMessage) 张图片"
+                return false
+            }
+            return enqueueSteerMessage(text: text)
+        }
+        // 空闲发送：按模型视觉能力判断（对齐安卓 ImageAttachmentValidator）：
         // ready→直接发；fallback→先用视觉模型识别成文字再发；blocked→拦下提示，绝不静默丢弃。
         if hasImages {
             switch imageAttachmentState {
@@ -1280,11 +1305,6 @@ final class ChatViewModel {
                 break
             }
         }
-        // P1-a: 生成激活期间发送 = 入队（不直接发、不 preempt；请求已在线上，
-        // 队列在工具循环边界折入下一轮）。图片路径已被 block reason 拦截，到不了这里。
-        if isGenerationActive {
-            return enqueueSteerMessage(text: text)
-        }
         configurationError = nil
         sendUserMessage(text: text, images: pendingImages)
         return true
@@ -1294,9 +1314,11 @@ final class ChatViewModel {
         let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedSource = sourceImageURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rejectVisionRecognitionMutationIfNeeded() else { return }
-        guard !trimmedPrompt.isEmpty,
-              !trimmedSource.isEmpty,
-              !isGenerationActive else { return }
+        guard !trimmedPrompt.isEmpty, !trimmedSource.isEmpty else { return }
+        guard !isGenerationActive else {
+            selectedFileContextError = "请等当前回复结束后再修改图片"
+            return
+        }
 
         configurationError = nil
         let input = Self.imageEditToolInput(
@@ -1351,18 +1373,22 @@ final class ChatViewModel {
 
     // MARK: - Steer 队列（P1-a）
 
-    /// 生成激活期间把 composer 文本入队（v1 仅文本 STEER；队列满返回 false）。
+    /// 生成激活期间把 composer 内容入队（文本 / 图 / 选中文件）；队列满返回 false。
     /// 与 appendUserMessage 的输入收尾一致：清空输入框、建议与附件预览。
     @discardableResult
     func enqueueSteerMessage(text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
+        let images = pendingImages
+        let selectedFile = pendingSelectedFilePreview
+        guard !trimmed.isEmpty || !images.isEmpty || selectedFile != nil else { return false }
         guard isGenerationActive else { return false }
         guard steerQueue.count < IOSSteerQueueStore.maxPendingUserMessages else { return false }
         steerQueue.append(IOSSteerQueueEntry(
             id: UUID().uuidString,
             text: trimmed,
-            createdAt: Date()
+            createdAt: Date(),
+            images: images.map { IOSSteerQueueImage(dataUrl: $0.dataUrl, previewData: $0.previewData) },
+            selectedFile: selectedFile.map(IOSSteerQueuedFile.init)
         ))
         persistSteerQueue()
         // P1-d: steer 入队即打断同会话的 wait_agent（信号在入队成功后发射；
@@ -1401,7 +1427,16 @@ final class ChatViewModel {
         steerQueue = []
         persistSteerQueue()
         let runConversationId = currentConversationId
-        let drained = entries.map { makeUserMessage(prompt: $0.text, images: []) }
+        let drained = entries.map { entry -> UIMessage in
+            let prompt = Self.promptText(
+                userText: entry.text,
+                selectedFilePreview: entry.selectedFile?.asSelectedDocument
+            )
+            let images = entry.images.map {
+                PendingChatImage(dataUrl: $0.dataUrl, previewData: $0.previewData)
+            }
+            return makeUserMessage(prompt: prompt, images: images)
+        }
         // 与 appendUserMessage 同款上屏：真实 user 消息进 timeline（后续会话落盘
         // 与工具轮次持久化共用既有 persistMessages 路径）。
         withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
@@ -1417,15 +1452,56 @@ final class ChatViewModel {
         return drained
     }
 
-    /// run 终态恢复：队列 leftover 按顺序拼接回 composer 文本（可见、不静默丢、
-    /// 不自动发起新生成）。只恢复属于当前会话的队列。
+    /// run 终态：成功则出队头一条上屏并自动开下一轮；取消/失败则回填 composer。
+    func handleSteerQueueAtRunTerminal(for conversationId: KotlinUuid?, autoContinue: Bool) {
+        guard !steerQueue.isEmpty else { return }
+        guard isCurrentConversation(conversationId) else { return }
+        if autoContinue {
+            sendNextSteerQueueEntry(conversationId: conversationId)
+            return
+        }
+        restoreSteerQueueLeftoverToComposer(for: conversationId)
+    }
+
+    /// 出队头一条 → 上屏 →（若开启自动生成）立刻开下一轮。剩余条目继续留在队列。
+    private func sendNextSteerQueueEntry(conversationId: KotlinUuid?) {
+        guard let entry = steerQueue.first else { return }
+        steerQueue.removeFirst()
+        persistSteerQueue()
+        let images = entry.images.map {
+            PendingChatImage(dataUrl: $0.dataUrl, previewData: $0.previewData)
+        }
+        let prompt = Self.promptText(
+            userText: entry.text,
+            selectedFilePreview: entry.selectedFile?.asSelectedDocument
+        )
+        let digest = chatInputDigest(for: prompt.isEmpty ? "[image]" : prompt)
+        let userMsg = makeUserMessage(prompt: prompt, images: images)
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.8)) {
+            messages.append(userMsg)
+            bumpMessageRevision(reason: .userAppend)
+        }
+        invalidateSuggestionRequest()
+        chatSuggestions = []
+        selectedFileContextError = nil
+        let runConversationId = currentConversationId
+        Task { @MainActor [weak self] in
+            _ = await self?.persistMessages(conversationId: runConversationId)
+        }
+        guard autoGenerateResponses else { return }
+        generateResponse(inputDigest: digest, conversationId: conversationId ?? runConversationId)
+    }
+
+    /// 取消/失败终态：纯文本 leftover 拼回 composer；含附件条目留队防丢媒体。
     func restoreSteerQueueLeftoverToComposer(for conversationId: KotlinUuid?) {
         guard !steerQueue.isEmpty else { return }
         guard isCurrentConversation(conversationId) else { return }
-        let entries = steerQueue
-        steerQueue = []
+        let textOnly = steerQueue.filter { !$0.hasAttachments }
+        let withAttachments = steerQueue.filter(\.hasAttachments)
+        steerQueue = withAttachments
         persistSteerQueue()
-        let joined = entries.map(\.text).joined(separator: "\n")
+        guard !textOnly.isEmpty else { return }
+        let joined = textOnly.map(\.text).joined(separator: "\n")
         let current = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         inputText = current.isEmpty ? joined : current + "\n" + joined
     }
@@ -1698,6 +1774,7 @@ final class ChatViewModel {
                 \(text)
                 </image_context>
                 * 以上 image_context 是对用户上传图片的视觉识别结果，不是用户的提问。
+                * 若用户要根据这张附图做风格转换、改图或垫图生图，调用 generate_image 时必须设置 use_attached_image=true；宿主会注入原图像素，不要只根据文字描述重画。
                 """
             } catch {
                 return .failure(VisionRecognitionError(message: "视觉识别失败：\((error as NSError).localizedDescription)"))
@@ -1719,6 +1796,18 @@ final class ChatViewModel {
               pendingAskUser == nil else { return }
         guard let last = messages.last, last.role == MessageRole.assistant,
               !last.toText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        // 完成触觉：单次刚性轻触。iOS 本地偏好（默认开）；不复用 KMP
+        // enableMessageGenerationHapticEffect——那是 Android-only 接线且默认关，
+        // 动它会改变 Android 默认行为。
+        let hapticKey = IOSDisplayPreferenceKeys.completionHaptic
+        let defaults = UserDefaults.standard
+        let hapticEnabled = defaults.object(forKey: hapticKey) == nil
+            ? true
+            : defaults.bool(forKey: hapticKey)
+        if hapticEnabled {
+            AmberHaptics.trigger(.rigidImpact)
+        }
 
         generateChatSuggestions()
         let userMessageCount = messages.filter { $0.role == MessageRole.user }.count
@@ -2630,6 +2719,15 @@ final class ChatViewModel {
         )
     }
 
+    /// P1 管线闭环：参与线程树的会话注入的 mailbox 语义说明（仅在
+    /// currentConversationHasOrchestrationLinks 为真时出现在上传上下文）。
+    static let orchestrationContextPrompt = """
+    Thread orchestration is active for this conversation.
+    - Messages prefixed `[mailbox MESSAGE|NEW_TASK|FINAL_ANSWER from /root/...]` are inter-agent mail, not user input; FINAL_ANSWER is a child thread's completion report.
+    - Child threads run in the background and report back automatically; call wait_agent to block for new mail mid-run, send_message/followup_task to contact a child, interrupt_agent to stop one (the thread stays addressable).
+    - The user cannot type into child threads; relay important results to the user yourself.
+    """
+
     private func messagesByInjectingRuntimeContext(_ messages: [UIMessage]) -> [UIMessage] {
         let uploadableMessages = messages.filter { !Self.isLocalGenerationError($0) }
         // P0-a Fix A: when the current run bridge is in lazy mode, prepend the
@@ -2643,6 +2741,12 @@ final class ChatViewModel {
         if let guidance = lastAssembledToolExposureBridge?.discoveryGuidance(),
            !guidance.isEmpty {
             uploadableWithGuidance = [UIMessage.companion.system(prompt: guidance)] + uploadableWithGuidance
+        }
+        // 线程编排语境（管线闭环）：只有参与线程树的会话才注入 mailbox 语义——
+        // 信封以 user 消息形态折入（`[mailbox TYPE from ...]`），模型需要知道
+        // 这不是用户输入、子线程会自动回报，否则会把子线程报告当成用户话语。
+        if currentConversationHasOrchestrationLinks {
+            uploadableWithGuidance = [UIMessage.companion.system(prompt: Self.orchestrationContextPrompt)] + uploadableWithGuidance
         }
         let withContext = ChatRuntimeContextBuilder(
             sharedSettings: sharedSettings,

@@ -358,7 +358,8 @@ struct MessageBubbleView: View {
                 } else {
                     ChatGeneratedImageGrid(
                         images: [image],
-                        onModify: onModifyGeneratedImage
+                        onModify: onModifyGeneratedImage,
+                        allowsModify: !isChatGenerationActive
                     )
                 }
             } else if let miniApp = part as? UIMessagePart.MiniApp {
@@ -383,7 +384,8 @@ struct MessageBubbleView: View {
                         ChatGeneratedImageGrid(
                             images: images,
                             toolInput: tool.input,
-                            onModify: onModifyGeneratedImage
+                            onModify: onModifyGeneratedImage,
+                            allowsModify: !isChatGenerationActive
                         )
                             .id(ChatImageGenerationAnchorTarget.id(toolCallID: tool.toolCallId))
                             .accessibilityElement(children: .contain)
@@ -549,6 +551,7 @@ struct MessageBubbleView: View {
 /// 跟随同一组 Markdown 渲染偏好。默认走 App 自有同步渲染器(吃字体/排版偏好),
 /// 实验渲染器在这里互斥切换,避免两边各渲染各的、视觉不一致。
 struct ChatAssistantMarkdownView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let markdown: String
     var renderCacheNamespace: String?
     var displaySetting: DisplaySetting?
@@ -846,8 +849,13 @@ struct ChatAssistantMarkdownView: View {
             codeBackgroundColor: surface2,
             codeUnderlineColor: border
         )
+        // Reduce Motion 下流式淡入全关（与思考框 animatesStreamingBody 同语义）。
+        let animates = liveStreaming && !reduceMotion
         return SwiftStreamingMarkdown.MarkdownRenderConfig.default
-            .withShouldAnimateText(value: liveStreaming)
+            .withShouldAnimateText(value: animates)
+            // 逐拍尾段整体淡入 + 解除 window 门控：修「开头看不到淡入、一拍一跳」
+            // 与逐词淡入的 display-link 主线程开销（vendor 默认值不变）。
+            .withAnimatesAppendedTailAsUnit(value: animates)
             .withBlockQuoteStyle(value: blockQuoteStyle)
             .withHeadingStyle(value: headingStyle)
             .withOrderedListStyle(value: orderedListStyle)
@@ -883,6 +891,7 @@ struct ChatAssistantMarkdownView: View {
         let config = detection.markdownConfig(
             for: ChatStreamingDetectionBox.MarkdownConfigKey(
                 liveStreaming: liveStreaming,
+                reduceMotion: reduceMotion,
                 fontScale: boundedFontScale,
                 bodyPointSize: scaledBodyPointSize,
                 chatFont: chatFont,
@@ -1452,6 +1461,7 @@ private enum ChatStreamingMarkdownBlockParser {
 private final class ChatStreamingDetectionBox {
     struct MarkdownConfigKey: Hashable {
         let liveStreaming: Bool
+        let reduceMotion: Bool
         let fontScale: Double
         let bodyPointSize: CGFloat
         let chatFont: String
@@ -1742,6 +1752,7 @@ enum ChatStreamingMarkdownConfigCacheTestSupport {
             _ = detection.markdownConfig(
                 for: ChatStreamingDetectionBox.MarkdownConfigKey(
                     liveStreaming: true,
+                    reduceMotion: false,
                     fontScale: 1,
                     bodyPointSize: 17,
                     chatFont: IOSChatFont.default.rawValue,
@@ -2029,7 +2040,12 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
             : nil
         let renderable = await Task.detached(priority: .userInitiated) {
             let parser = SwiftStreamingMarkdown.MarkdownParserImpl()
-            let option = SwiftStreamingMarkdown.MarkdownParseOption(speculativeRewrite: animate)
+            // repairsRejectedStrongEmphasis：修复 CommonMark flanking 拒绝的粗体
+            // （**（重点）**、CJK 紧邻 __…__ 等），流式与完成态同修。
+            let option = SwiftStreamingMarkdown.MarkdownParseOption(
+                speculativeRewrite: animate,
+                repairsRejectedStrongEmphasis: true
+            )
             let result = await ChatPerfTrace.measure("MarkdownParse", count: { text.utf16.count }) {
                 await parser.parse(text: text, option: option)
             }
@@ -2159,7 +2175,12 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
     }
 
     private static func visualConfigHash(for config: SwiftStreamingMarkdown.MarkdownRenderConfig) -> Int {
-        config.withShouldAnimateText(value: false).hashValue
+        // 动画类 flag 全部归一：visual hash 只反映非动画视觉，
+        // 与「同 key 同渲染」的缓存契约对称。
+        config
+            .withShouldAnimateText(value: false)
+            .withAnimatesAppendedTailAsUnit(value: false)
+            .hashValue
     }
 
 #if DEBUG
@@ -2495,6 +2516,7 @@ private struct ChatGeneratedImageGrid: View {
     let images: [UIMessagePart.Image]
     var toolInput: String?
     var onModify: (String, String, String) -> Void = { _, _, _ in }
+    var allowsModify: Bool = true
 
     private var display: ChatGeneratedImageRequestDisplay {
         ChatGeneratedImageRequestDisplay(toolInput: toolInput)
@@ -2508,7 +2530,8 @@ private struct ChatGeneratedImageGrid: View {
                         ChatGeneratedImageTile(
                             urlString: image.url,
                             display: display,
-                            onModify: onModify
+                            onModify: onModify,
+                            allowsModify: allowsModify
                         )
                     }
                 }
@@ -2519,7 +2542,8 @@ private struct ChatGeneratedImageGrid: View {
                             ChatGeneratedImageTile(
                                 urlString: image.url,
                                 display: display,
-                                onModify: onModify
+                                onModify: onModify,
+                                allowsModify: allowsModify
                             )
                                 .frame(width: display.multiCardWidth)
                         }
@@ -2559,15 +2583,16 @@ private struct ChatGeneratedImageLoadingPlaceholder: View {
     @ViewBuilder
     private var placeholder: some View {
         if display.requestedCount > 1 {
-            LazyVGrid(
-                columns: [GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 8
-            ) {
-                ForEach(0..<display.requestedCount, id: \.self) { _ in
-                    ChatGeneratedImageDotPlaceholder(aspectRatio: display.aspectRatio)
+            // Match ChatGeneratedImageGrid success layout (horizontal strip).
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(0..<display.requestedCount, id: \.self) { _ in
+                        ChatGeneratedImageDotPlaceholder(aspectRatio: display.aspectRatio)
+                            .frame(width: display.multiCardWidth)
+                    }
                 }
+                .padding(.trailing, 16)
             }
-            .frame(maxWidth: display.multiCardWidth, alignment: .leading)
         } else if let maxWidth = display.singleCardMaxWidth {
             ChatGeneratedImageDotPlaceholder(aspectRatio: display.aspectRatio)
                 .frame(maxWidth: maxWidth, alignment: .leading)
@@ -2820,6 +2845,7 @@ private struct ChatGeneratedImageTile: View {
     let urlString: String
     var display = ChatGeneratedImageRequestDisplay(toolInput: nil)
     var onModify: (String, String, String) -> Void = { _, _, _ in }
+    var allowsModify: Bool = true
     @State private var saveState: ChatGeneratedImagePhotoSaveState = .idle
     @State private var saveAlert: ChatGeneratedImageSaveAlert?
     @State private var dataImageState: ChatDataImageLoadState = .loading
@@ -2881,10 +2907,10 @@ private struct ChatGeneratedImageTile: View {
             .onTapGesture {
                 previewTarget = ChatGeneratedImagePreviewTarget(urlString: urlString)
             }
-            .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous))
-            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
+            .background(AmberTheme.surface2, in: RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: AmberTheme.radiusMedium, style: .continuous)
+                RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous)
                     .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
             }
             .task(id: urlString) {
@@ -2931,12 +2957,13 @@ private struct ChatGeneratedImageTile: View {
                         ChatGeneratedImageActionLabel(
                             title: "修改",
                             systemImage: "wand.and.stars",
-                            foreground: AmberTheme.accent,
-                            fill: AmberTheme.accentTint
+                            foreground: allowsModify ? AmberTheme.accent : AmberTheme.muted,
+                            fill: allowsModify ? AmberTheme.accentTint : AmberTheme.surface2
                         )
                     }
                     .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .selection))
-                    .accessibilityLabel("修改图片")
+                    .disabled(!allowsModify)
+                    .accessibilityLabel(allowsModify ? "修改图片" : "生成中，暂不可修改图片")
                 }
             }
         }

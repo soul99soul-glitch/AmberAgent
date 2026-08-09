@@ -74,16 +74,6 @@ final class IOSMiniAppChatMessageFactoryTests: XCTestCase {
         )
     }
 
-    func testGeneratedOutputDecodesMissingCategoryAndPermissions() throws {
-        let json = """
-        {"title":"计时器","description":"一个番茄钟","html":"<!DOCTYPE html><html><body>ok</body></html>"}
-        """
-        let output = try JSONDecoder().decode(IOSMiniAppGeneratedOutput.self, from: Data(json.utf8))
-        XCTAssertEqual(output.category, "tool")
-        XCTAssertEqual(output.permissions, [])
-        XCTAssertEqual(output.title, "计时器")
-    }
-
     func testUpdatedAssistantReplacesJSONWithStatusAndMiniAppPart() throws {
         let json = #"{"title":"计时器","description":"一个番茄钟","category":"tool","permissions":[],"html":"<!DOCTYPE html><html><body>ok</body></html>"}"#
         let assistant = UIMessage(

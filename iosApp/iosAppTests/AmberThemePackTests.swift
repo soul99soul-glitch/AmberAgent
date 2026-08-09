@@ -60,7 +60,11 @@ final class AmberThemePackTests: XCTestCase {
     }
 
     func testBuiltinsUniqueIdsAndPaperAccentPairs() {
-        XCTAssertEqual(AmberThemePack.builtins.count, 9)
+        XCTAssertEqual(AmberThemePack.builtins.count, 3)
+        XCTAssertEqual(
+            Set(AmberThemePack.builtins.map(\.id)),
+            Set(["sit-terracotta", "pi-steel", "notion-blue"])
+        )
         var ids = Set<String>()
         var pairs = Set<String>()
         for pack in AmberThemePack.builtins {
@@ -78,23 +82,16 @@ final class AmberThemePackTests: XCTestCase {
         }
     }
 
-    func testDefaultPacksKeepFlatStyles() {
-        let classic = AmberThemePack.builtins.filter {
-            $0.id != "sit-terracotta" && $0.id != "pi-steel" && $0.id != "notion-blue"
-        }
-        XCTAssertEqual(classic.count, 6)
-        for pack in classic {
-            XCTAssertEqual(pack.canvasStyle, .flat, pack.id)
-            XCTAssertEqual(pack.brandMark, .systemWordmark, pack.id)
-            XCTAssertEqual(pack.shortcutIconStyle, .phosphorFill, pack.id)
-            XCTAssertEqual(pack.chromeTypeface, .system, pack.id)
-            XCTAssertEqual(pack.canvasScope, .homeOnly, pack.id)
-            XCTAssertEqual(pack.bubbleChrome, .standard, pack.id)
-            XCTAssertEqual(pack.glassChrome, .standard, pack.id)
-            XCTAssertEqual(pack.emptyArt, .none, pack.id)
-            XCTAssertFalse(pack.settingsChrome, pack.id)
-            XCTAssertEqual(pack.launchBrand, .none, pack.id)
-            XCTAssertFalse(pack.hasCharacterStyles, pack.id)
+    func testBuiltinsAreCharacterPacksOnly() {
+        for pack in AmberThemePack.builtins {
+            // Classic paper×accent grids are custom; builtins must carry a distinctive recipe.
+            XCTAssertTrue(
+                pack.hasCharacterStyles
+                    || pack.glassChrome != .standard
+                    || pack.paper == .notion
+                    || pack.paper == .pi,
+                "\(pack.id) should remain a character / branded recipe"
+            )
         }
     }
 
@@ -128,7 +125,7 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertEqual(pi.brandMark, .serifWordmark)
         XCTAssertEqual(pi.shortcutIconStyle, .phosphorFill)
         XCTAssertEqual(pi.chromeTypeface, .monospace)
-        XCTAssertEqual(pi.canvasScope, .appWide)
+        XCTAssertEqual(pi.canvasScope, .shell)
         XCTAssertEqual(pi.glassChrome, .quieter)
         XCTAssertEqual(pi.emptyArt, .character)
         XCTAssertEqual(pi.bubbleChrome, .standard)
@@ -143,7 +140,7 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertTrue(runtime.settingsChrome)
         XCTAssertTrue(runtime.showsCanvasTexture(on: .home))
         XCTAssertTrue(runtime.showsCanvasTexture(on: .shell))
-        XCTAssertTrue(runtime.showsCanvasTexture(on: .app))
+        XCTAssertFalse(runtime.showsCanvasTexture(on: .app), "Pi chat 只留纸色，方格不进 app 面")
         XCTAssertFalse(runtime.paper.isImmersive)
     }
 
@@ -180,24 +177,37 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertTrue(runtime.showsCanvasTexture(on: .app))
     }
 
+    /// Re-applying builtin Pi collapses legacy chat-wide grid to shell (paper color only on `.app`).
+    func testPiBuiltinClearsAppWideChatTexture() {
+        runtime.paper = .pi
+        runtime.canvasStyle = .lineGrid
+        runtime.canvasScope = .appWide
+        XCTAssertTrue(runtime.showsCanvasTexture(on: .app))
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "pi-steel" }!)
+        XCTAssertEqual(runtime.canvasScope, .shell)
+        XCTAssertFalse(runtime.showsCanvasTexture(on: .app))
+        XCTAssertTrue(runtime.showsCanvasTexture(on: .home))
+        XCTAssertEqual(runtime.matchingPack?.id, "pi-steel")
+    }
+
     func testCustomWhenAccentDiverges() {
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
-        XCTAssertEqual(runtime.matchingPack?.id, "warm-amber")
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
+        XCTAssertEqual(runtime.matchingPack?.id, "notion-blue")
         runtime.apply(.mistBlue)
         XCTAssertNil(runtime.matchingPack)
         XCTAssertTrue(runtime.isCustomCombination)
     }
 
     func testCustomWhenPaperDiverges() {
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
         runtime.paper = .white
         XCTAssertNil(runtime.matchingPack)
         XCTAssertTrue(runtime.isCustomCombination)
     }
 
     func testCustomWhenStyleSlotDiverges() {
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
-        XCTAssertEqual(runtime.matchingPack?.id, "warm-amber")
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
+        XCTAssertEqual(runtime.matchingPack?.id, "notion-blue")
         runtime.canvasStyle = .dotGrid
         XCTAssertNil(runtime.matchingPack)
         XCTAssertTrue(runtime.isCustomCombination)
@@ -239,12 +249,11 @@ final class AmberThemePackTests: XCTestCase {
     }
 
     func testRematchAfterCustomReturnsToBuiltin() {
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
         runtime.apply(.rose)
         XCTAssertTrue(runtime.isCustomCombination)
-        runtime.paper = .paper
-        runtime.apply(.rose)
-        XCTAssertEqual(runtime.matchingPack?.id, "paper-rose")
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
+        XCTAssertEqual(runtime.matchingPack?.id, "notion-blue")
     }
 
     func testApplyStylePackWritesAllSlotsIncludingChrome() {
@@ -289,7 +298,7 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertEqual(runtime.paper, .notion)
 
         let data = try AmberThemePackTransfer.encode(AmberThemePackTransfer.document(from: runtime))
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
         try runtime.apply(AmberThemePackTransfer.decode(data))
         XCTAssertEqual(runtime.matchingPack?.id, "notion-blue")
         XCTAssertEqual(runtime.paper, .notion)
@@ -300,8 +309,8 @@ final class AmberThemePackTests: XCTestCase {
     func testExportImportRoundTripPiSteel() throws {
         runtime.apply(AmberThemePack.builtins.first { $0.id == "pi-steel" }!)
         let data = try AmberThemePackTransfer.encode(AmberThemePackTransfer.document(from: runtime))
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
-        XCTAssertEqual(runtime.matchingPack?.id, "warm-amber")
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
+        XCTAssertEqual(runtime.matchingPack?.id, "notion-blue")
 
         let doc = try AmberThemePackTransfer.decode(data)
         try runtime.apply(doc)
@@ -311,7 +320,7 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertEqual(runtime.accentHex, 0x6B8CAD)
         XCTAssertEqual(runtime.accentInkHex, 0xFAF9F7)
         XCTAssertEqual(runtime.canvasStyle, .lineGrid)
-        XCTAssertEqual(runtime.canvasScope, .appWide)
+        XCTAssertEqual(runtime.canvasScope, .shell)
         XCTAssertEqual(runtime.chromeTypeface, .monospace)
         XCTAssertTrue(runtime.settingsChrome)
         XCTAssertEqual(runtime.glassChrome, .quieter)
@@ -325,7 +334,7 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertEqual(doc.canvasScope, "shell")
         XCTAssertEqual(doc.bubbleChrome, "soft")
 
-        // Pi pack after re-apply path covered elsewhere; legacy document without optional keys.
+        // Legacy classic paper×accent document: still imports as custom (no longer a builtin).
         let legacy = """
         {
           "format": "amber.theme.pack",
@@ -345,7 +354,10 @@ final class AmberThemePackTests: XCTestCase {
         try runtime.apply(legacyDoc)
         XCTAssertEqual(runtime.canvasScope, .homeOnly)
         XCTAssertEqual(runtime.bubbleChrome, .standard)
-        XCTAssertEqual(runtime.matchingPack?.id, "warm-amber")
+        XCTAssertNil(runtime.matchingPack)
+        XCTAssertTrue(runtime.isCustomCombination)
+        XCTAssertEqual(runtime.paper, .neutral)
+        XCTAssertEqual(runtime.accentHex, 0xB9863A)
     }
 
     func testChromeTypefaceDesigns() {
@@ -386,6 +398,19 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertGreaterThan(AmberPaperGrainOverlay.darkAlpha, 0.03)
     }
 
+    /// Session / control card in-card lattice must stay quieter than page gutters (Pi “框透太多”).
+    func testHomeCardCanvasTextureStaysQuiet() throws {
+        XCTAssertLessThanOrEqual(HomeCardCanvasTexture.lineGridOpacity, 0.28)
+        XCTAssertLessThanOrEqual(HomeCardCanvasTexture.dotGridOpacity, 0.35)
+        XCTAssertLessThanOrEqual(HomeCardCanvasTexture.paperGrainOpacity, 0.40)
+        let home = try source("iosApp/PlaceholderViews.swift")
+        XCTAssertTrue(
+            home.contains("themeRuntime.canvasStyle.hasTexture ? .hard : .soft")
+                || home.contains("AmberThemeRuntime.shared.canvasStyle.hasTexture ? .hard : .soft"),
+            "textured home must use hard bottom scroll edge so session shell stays opaque"
+        )
+    }
+
     func testSettingsChromeGateFollowsRuntimeFlag() {
         runtime.chromeTypeface = .monospace
         runtime.settingsChrome = false
@@ -403,6 +428,21 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertTrue(text.contains("AmberChromeFont.settings(.subheadline, weight: .semibold)"))
         let settingsFontCount = text.components(separatedBy: "AmberChromeFont.settings(").count - 1
         XCTAssertGreaterThanOrEqual(settingsFontCount, 3)
+    }
+
+    func testAppearanceModeSectionComesBeforeThemeSection() throws {
+        let text = try source("iosApp/AppearanceSettingsView.swift")
+        guard
+            let modeRange = text.range(of: "section(\"外观模式\")"),
+            let themeRange = text.range(of: "section(\"主题\")")
+        else {
+            return XCTFail("AppearanceSettingsView must declare 外观模式 and 主题 sections")
+        }
+        XCTAssertLessThan(
+            modeRange.lowerBound,
+            themeRange.lowerBound,
+            "外观模式应置顶，主题在其下"
+        )
     }
 
     func testAppearanceMiniPreviewPinsLightColorSchemeForCanvasInk() throws {
@@ -505,7 +545,7 @@ final class AmberThemePackTests: XCTestCase {
         d.set(IOSChatFont.serif.rawValue, forKey: fontKey)
 
         runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
 
         XCTAssertEqual(d.double(forKey: scaleKey), 1.18, accuracy: 0.0001)
         XCTAssertEqual(d.string(forKey: fontKey), IOSChatFont.serif.rawValue)
@@ -552,8 +592,8 @@ final class AmberThemePackTests: XCTestCase {
     func testExportImportRoundTripSitPack() throws {
         runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
         let data = try AmberThemePackTransfer.encode(AmberThemePackTransfer.document(from: runtime))
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
-        XCTAssertEqual(runtime.matchingPack?.id, "warm-amber")
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
+        XCTAssertEqual(runtime.matchingPack?.id, "notion-blue")
 
         let doc = try AmberThemePackTransfer.decode(data)
         try runtime.apply(doc)
@@ -575,7 +615,7 @@ final class AmberThemePackTests: XCTestCase {
         runtime.chromeTypeface = .system
 
         let data = try AmberThemePackTransfer.encode(AmberThemePackTransfer.document(from: runtime))
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
 
         let doc = try AmberThemePackTransfer.decode(data)
         try runtime.apply(doc)
@@ -614,7 +654,8 @@ final class AmberThemePackTests: XCTestCase {
         try runtime.apply(doc)
         XCTAssertEqual(runtime.accentHex, 0xB9863A)
         XCTAssertEqual(runtime.accentInkHex, 0x231602)
-        XCTAssertEqual(runtime.matchingPack?.id, "warm-amber")
+        XCTAssertNil(runtime.matchingPack)
+        XCTAssertTrue(runtime.isCustomCombination)
     }
 
     func testImportRejectsBadFormatImmersiveAndUnknownSlots() {
@@ -647,16 +688,16 @@ final class AmberThemePackTests: XCTestCase {
     }
 
     func testWriteExportFileRoundTrip() throws {
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "paper-rose" }!)
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
         let url = try AmberThemePackTransfer.writeExportFile(from: runtime)
         defer { try? FileManager.default.removeItem(at: url) }
-        XCTAssertTrue(url.lastPathComponent.contains("paper-rose"))
+        XCTAssertTrue(url.lastPathComponent.contains("sit-terracotta"))
         let data = try Data(contentsOf: url)
         let doc = try AmberThemePackTransfer.decode(data)
-        XCTAssertEqual(doc.id, "paper-rose")
-        try runtime.apply(AmberThemePack.builtins.first { $0.id == "white-ink" }!)
+        XCTAssertEqual(doc.id, "sit-terracotta")
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "pi-steel" }!)
         try runtime.apply(doc)
-        XCTAssertEqual(runtime.matchingPack?.id, "paper-rose")
+        XCTAssertEqual(runtime.matchingPack?.id, "sit-terracotta")
     }
 
     // MARK: - P1 dark palettes + import contrast
@@ -775,8 +816,10 @@ final class AmberThemePackTests: XCTestCase {
 
     /// Status amber is a fixed semantic ink; brand accent follows the active pack.
     func testStatusAmberStaysFixedWhileBrandAccentFollowsRuntime() {
-        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
+        runtime.paper = .neutral
+        runtime.apply(.amberGold)
         XCTAssertEqual(runtime.accentHex, AmberAccentOption.amberGold.accentHex)
+        XCTAssertNil(runtime.matchingPack)
 
         runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
         XCTAssertEqual(runtime.accentHex, AmberAccentOption.terracotta.accentHex)
@@ -785,8 +828,8 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertNotEqual(runtime.accentHex, AmberTheme.statusAmberHex)
     }
 
-    /// Home-entry work surfaces must opt into `AmberThemePageBackground(surface: .app)`
-    /// so `canvasScope == .appWide` (pi-steel) can paint texture; sit shell stays quiet.
+    /// Home-entry work surfaces keep `AmberThemePageBackground(surface: .app)` so a future /
+    /// imported `appWide` pack can still paint; builtins (sit / Pi) stay shell-quiet on `.app`.
     func testAppWideWorkSurfacesUsePageBackground() throws {
         let surfaces: [(path: String, needle: String)] = [
             ("iosApp/NovelCreation/NovelSessionView.swift", "AmberThemePageBackground(surface: .app)"),
@@ -803,7 +846,7 @@ final class AmberThemePackTests: XCTestCase {
             let text = try source(surface.path)
             XCTAssertTrue(
                 text.contains(surface.needle),
-                "\(surface.path) must use \(surface.needle) for appWide canvas texture"
+                "\(surface.path) must use \(surface.needle) for optional appWide canvas texture"
             )
         }
 
@@ -814,11 +857,12 @@ final class AmberThemePackTests: XCTestCase {
             "Novel workspace content ZStack must not cover PageBackground with AmberTheme.background"
         )
 
-        // Sit / shell must not force texture into chat (already PageBackground .app — scope gate).
+        // Builtin character packs: texture on home/shell only — chat stays flat paper color.
         runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
         XCTAssertFalse(runtime.showsCanvasTexture(on: .app))
         runtime.apply(AmberThemePack.builtins.first { $0.id == "pi-steel" }!)
-        XCTAssertTrue(runtime.showsCanvasTexture(on: .app))
+        XCTAssertFalse(runtime.showsCanvasTexture(on: .app))
+        XCTAssertTrue(runtime.showsCanvasTexture(on: .home))
     }
 
     /// Settings / provider primary chrome that is not a warning/running status uses runtime accent.
@@ -853,6 +897,130 @@ final class AmberThemePackTests: XCTestCase {
         } else {
             XCTFail("missing 需要登录 toggle")
         }
+    }
+
+    // MARK: - Installed theme library
+
+    func testThemeLibraryUpsertRemoveAndBuiltinSkip() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("amber-theme-lib-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let library = AmberThemePackLibrary(
+            fileURL: dir.appendingPathComponent("library.json")
+        )
+
+        let custom = AmberThemePackTransfer.document(from: AmberThemePack(
+            id: "fixture-rose",
+            displayName: "暖纸 · 玫红",
+            paper: .paper,
+            accent: .rose
+        ))
+        XCTAssertEqual(try library.upsert(custom), .installed)
+        XCTAssertEqual(library.installed.map(\.id), ["fixture-rose"])
+
+        var renamed = custom
+        renamed.displayName = "玫红改名"
+        XCTAssertEqual(try library.upsert(renamed), .installed)
+        XCTAssertEqual(library.installed.count, 1)
+        XCTAssertEqual(library.installed[0].displayName, "玫红改名")
+
+        let builtinDoc = AmberThemePackTransfer.document(from: AmberThemePack.builtins[0])
+        XCTAssertEqual(try library.upsert(builtinDoc), .builtinIdentity)
+        XCTAssertFalse(library.contains(id: builtinDoc.id))
+
+        XCTAssertEqual(try library.remove(ids: ["fixture-rose", "sit-terracotta"]), 1)
+        XCTAssertTrue(library.installed.isEmpty)
+
+        // Reload from disk after empty persist (file removed).
+        let reloaded = AmberThemePackLibrary(fileURL: dir.appendingPathComponent("library.json"))
+        XCTAssertTrue(reloaded.installed.isEmpty)
+    }
+
+    func testThemeLibraryPersistsAcrossInstances() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("amber-theme-lib-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("library.json")
+
+        let writer = AmberThemePackLibrary(fileURL: url)
+        let doc = AmberThemePackTransfer.document(from: AmberThemePack(
+            id: "fixture-mist",
+            displayName: "雾蓝",
+            paper: .white,
+            accent: .mistBlue
+        ))
+        try writer.upsert(doc)
+
+        let reader = AmberThemePackLibrary(fileURL: url)
+        XCTAssertEqual(reader.installed.map(\.id), ["fixture-mist"])
+    }
+
+    func testMatchingThemeIdIncludesInstalledLibraryPack() throws {
+        let shared = AmberThemePackLibrary.shared
+        let previous = shared.installed
+        defer {
+            // Restore shared library so other tests / device state stay isolated.
+            _ = try? shared.remove(ids: Set(shared.installed.map(\.id)))
+            for pack in previous {
+                _ = try? shared.upsert(pack)
+            }
+        }
+        _ = try? shared.remove(ids: Set(shared.installed.map(\.id)))
+
+        let doc = AmberThemePackTransfer.document(from: AmberThemePack(
+            id: "fixture-ink",
+            displayName: "中性白 · 墨",
+            paper: .white,
+            accent: .ink
+        ))
+        XCTAssertEqual(try shared.upsert(doc), .installed)
+        try runtime.apply(doc)
+        XCTAssertEqual(runtime.matchingThemeId, "fixture-ink")
+        XCTAssertNil(runtime.matchingPack)
+        XCTAssertFalse(runtime.isCustomCombination)
+
+        let exported = AmberThemePackTransfer.document(from: runtime)
+        XCTAssertEqual(exported.id, "fixture-ink")
+        XCTAssertEqual(exported.displayName, "中性白 · 墨")
+
+        XCTAssertEqual(try shared.remove(ids: ["fixture-ink"]), 1)
+        XCTAssertNil(runtime.matchingThemeId)
+        XCTAssertTrue(runtime.isCustomCombination)
+        let afterRemove = AmberThemePackTransfer.document(from: runtime)
+        XCTAssertEqual(afterRemove.id, "custom")
+    }
+
+    func testThemeLibraryUpsertRollsBackWhenPersistFails() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("amber-theme-lib-missing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Place a regular file where persist expects a directory parent.
+        let blocker = root.appendingPathComponent("no-such-dir")
+        try Data("not-a-dir".utf8).write(to: blocker)
+        let libraryURL = blocker.appendingPathComponent("library.json")
+
+        let library = AmberThemePackLibrary(fileURL: libraryURL)
+        let doc = AmberThemePackTransfer.document(from: AmberThemePack(
+            id: "fixture-fail",
+            displayName: "失败",
+            paper: .white,
+            accent: .rose
+        ))
+        XCTAssertThrowsError(try library.upsert(doc))
+        XCTAssertTrue(library.installed.isEmpty, "persist failure must not leave dirty memory")
+    }
+
+    func testAppearanceManageChromeContract() throws {
+        let text = try source("iosApp/AppearanceSettingsView.swift")
+        XCTAssertTrue(text.contains("Button(\"管理\")"))
+        XCTAssertTrue(text.contains("confirmRemoveSelectedThemes"))
+        XCTAssertTrue(text.contains("library.upsert"))
+        XCTAssertTrue(text.contains("useAccentSelection: !isManagingThemes"))
+        XCTAssertTrue(text.contains("AmberTheme.accentRed"))
+        XCTAssertTrue(text.contains("padding(.bottom, isManagingThemes ? 16 : 48)"))
     }
 
     private func source(_ relativePath: String) throws -> String {

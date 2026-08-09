@@ -73,7 +73,25 @@ struct ChatReasoningCard: View {
     var autoCloseThinking: Bool = true
     @State private var isExpanded: Bool
     @State private var userToggled = false
+    /// Reduce Motion 下的自动收起跳过动画（collection 终态即刻重测，动画会错相位）。
+    /// 用户手动 toggle 与思考开始展开前复位。
+    @State private var suppressesShowsBodyAnimation = false
+    /// 终态软收起：高度上限逐帧 ramp 到 0，cell 逐帧重测、滚动逐帧钉底，
+    /// 上方内容平滑上移——替代单帧砍掉 100+pt 的跳变。收起期间 body 保持挂载。
+    @State private var isCollapsingAtTerminal = false
+    @State private var collapseHeightLimit: CGFloat? = nil
+    @State private var collapseToken = UUID()
+    /// 思考正文是否被高度上限裁切——驱动 mask 底部渐变（未裁切不洗淡短正文）。
+    @State private var bodyIsClipped = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 正文可见 = 已展开，或终态软收起进行中（高度已 ramp 到 0 但尚未卸载）。
+    private var bodyPresent: Bool { showsBody || isCollapsingAtTerminal }
+
+    /// 正文高度上限：软收起期间用 ramp 值，否则思考中 180 / 完成后 260。
+    private var bodyHeightLimit: CGFloat {
+        collapseHeightLimit ?? (isThinking ? 180 : 260)
+    }
 
     init(
         bodyText: String,
@@ -136,6 +154,40 @@ struct ChatReasoningCard: View {
         }
     }
 
+    /// 终态软收起：高度上限从思考期上限逐帧 ramp 到 0（0.2s easeOut），
+    /// representable 每帧按新上限重测、collection 高度连续变化，滚动逐帧钉底——
+    /// 上方内容平滑上移，替代旧方案单帧砍掉百余 pt 的跳变。ramp 结束后再真正
+    /// 卸载正文（此刻高度已为 0，卸载不再产生任何尺寸变化）。
+    private func collapseSoftlyAtTerminal() {
+        guard showsBody else {
+            isExpanded = false
+            return
+        }
+        let token = UUID()
+        collapseToken = token
+        isCollapsingAtTerminal = true
+        // ramp 已驱动全部视觉运动；卸载时的 showsBody 翻转（chevron/圆角）
+        // 不再走 0.28s 动画，避免内容收口后的「二次动作」。
+        suppressesShowsBodyAnimation = true
+        collapseHeightLimit = 180
+        withAnimation(.easeOut(duration: 0.2)) {
+            collapseHeightLimit = 0
+        }
+        // 0.3s：easeOut 0.2s + 完成瞬间重帧叠加的余量（旧 0.26s 偏紧）。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard collapseToken == token else { return }
+            isExpanded = false
+            isCollapsingAtTerminal = false
+            collapseHeightLimit = nil
+        }
+    }
+
+    private func cancelPendingCollapse() {
+        collapseToken = UUID()
+        isCollapsingAtTerminal = false
+        collapseHeightLimit = nil
+    }
+
     private var capsuleFill: Color {
         AmberTheme.accent.opacity(isThinking ? 0.10 : 0.08)
     }
@@ -145,14 +197,21 @@ struct ChatReasoningCard: View {
     }
 
     /// 思考内容顶部底部的渐变模糊 mask。
-    /// 顶部 0→1(前 12pt 淡出),中间全不透明,底部 1→0(末 12pt 淡出)。
-    private var reasoningFadeMask: some View {
-        VStack(spacing: 0) {
-            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                .frame(height: 12)
-            Rectangle()
-            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: 12)
+    /// 顶部 0→1(前 band 淡出),中间全不透明；底部渐变只在内容被裁切时启用——
+    /// 短正文（≤2 行）时固定 12pt 双渐变会把整段洗灰、末行「追光」。
+    /// band 随高度自适应 min(12, h/3)。
+    private func reasoningFadeMask(isClipped: Bool) -> some View {
+        GeometryReader { geo in
+            let band = min(12, geo.size.height * 0.33)
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                    .frame(height: band)
+                Rectangle()
+                if isClipped {
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: band)
+                }
+            }
         }
     }
 
@@ -193,8 +252,10 @@ struct ChatReasoningCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                guard hasBodyText else { return }
+                // 软收起进行中忽略点击（0.2s 窗口），避免与 ramp 互相打架。
+                guard hasBodyText, !isCollapsingAtTerminal else { return }
                 userToggled = true
+                suppressesShowsBodyAnimation = false
                 setExpanded(!isExpanded, duration: 0.22)
             } label: {
                 HStack(spacing: 7) {
@@ -210,13 +271,13 @@ struct ChatReasoningCard: View {
 
                     // Collapsed: hug content (chevron sits right after the title). Expanded: push
                     // the chevron to the right edge, matching the full-width reading area below.
-                    if showsBody { Spacer(minLength: 6) }
+                    if bodyPresent { Spacer(minLength: 6) }
 
                     if hasBodyText {
                         Image(systemName: "chevron.down")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(AmberTheme.muted)
-                            .rotationEffect(.degrees(showsBody ? 180 : 0))
+                            .rotationEffect(.degrees(bodyPresent ? 180 : 0))
                     }
                 }
                 .padding(.horizontal, 12)
@@ -228,37 +289,41 @@ struct ChatReasoningCard: View {
             .contentShape(Rectangle())
             .accessibilityValue(hasBodyText ? (showsBody ? "已展开" : "已折叠") : "无思考正文")
 
-            if showsBody {
+            if bodyPresent {
                 // 推理正文增长不再经 SwiftUI ScrollViewReader 逐 chunk 重排并回写
                 // scrollTo。UITextView 自己维护文本与滚动位置，外层只接收真实高度。
                 ChatReasoningBodyTextView(
                     text: bodyText,
-                    maxHeight: isThinking ? 180 : 260,
+                    maxHeight: bodyHeightLimit,
                     followsBottomOnFirstPresentation: isThinking,
                     animatesNewWords: Self.animatesStreamingBody(
                         isThinking: isThinking,
                         reduceMotion: reduceMotion
-                    )
+                    ),
+                    onClippedChanged: { bodyIsClipped = $0 }
                 )
-                .frame(maxHeight: isThinking ? 180 : 260)
-                .mask(reasoningFadeMask)
+                .frame(maxHeight: bodyHeightLimit)
+                .mask(reasoningFadeMask(isClipped: bodyIsClipped))
                 // 从底部滑入/滑出:展开时从下往上出现,收回时从上往下消失(底部先收)。
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .background(
             capsuleFill,
-            in: RoundedRectangle(cornerRadius: showsBody ? AmberTheme.radiusLarge : 17, style: .continuous)
+            in: RoundedRectangle(cornerRadius: bodyPresent ? AmberTheme.radiusLarge : 17, style: .continuous)
         )
         .overlay {
-            RoundedRectangle(cornerRadius: showsBody ? AmberTheme.radiusLarge : 17, style: .continuous)
+            RoundedRectangle(cornerRadius: bodyPresent ? AmberTheme.radiusLarge : 17, style: .continuous)
                 .stroke(capsuleStroke, lineWidth: 0.7)
         }
         // Clip to the capsule so the collapsing content can never render outside / through it.
-        .clipShape(RoundedRectangle(cornerRadius: showsBody ? AmberTheme.radiusLarge : 17, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: bodyPresent ? AmberTheme.radiusLarge : 17, style: .continuous))
         // 统一驱动所有依赖 showsBody/isExpanded 的视觉变化(圆角、chevron、高度增删),
         // 覆盖自动展开/收回路径(它们不经过 withAnimation)和用户 toggle 路径。
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.28), value: showsBody)
+        .animation(
+            reduceMotion || suppressesShowsBodyAnimation ? nil : .easeInOut(duration: 0.28),
+            value: showsBody
+        )
         .onChange(of: bodyText) { _, newValue in
             guard isThinking, !userToggled else { return }
             if Self.hasVisibleText(newValue) {
@@ -268,9 +333,17 @@ struct ChatReasoningCard: View {
         .onChange(of: isThinking) { _, nowThinking in
             guard !userToggled else { return }
             if nowThinking {
+                suppressesShowsBodyAnimation = false
+                cancelPendingCollapse()
                 setExpanded(hasBodyText, duration: 0.28)
             } else if autoCloseThinking {
-                setExpanded(false, duration: 0.28)
+                if reduceMotion {
+                    // Reduce Motion：跳过动画，单次 layout 直接落到最终高度。
+                    suppressesShowsBodyAnimation = true
+                    isExpanded = false
+                } else {
+                    collapseSoftlyAtTerminal()
+                }
             }
         }
     }
@@ -282,9 +355,11 @@ private struct ChatReasoningBodyTextView: UIViewRepresentable {
     let maxHeight: CGFloat
     let followsBottomOnFirstPresentation: Bool
     let animatesNewWords: Bool
+    var onClippedChanged: (Bool) -> Void = { _ in }
 
     func makeUIView(context: Context) -> ChatReasoningTextView {
         let textView = ChatReasoningTextView()
+        textView.onClippedChanged = onClippedChanged
         textView.backgroundColor = .clear
         textView.isEditable = false
         textView.isSelectable = true
@@ -302,6 +377,7 @@ private struct ChatReasoningBodyTextView: UIViewRepresentable {
     }
 
     func updateUIView(_ textView: ChatReasoningTextView, context: Context) {
+        textView.onClippedChanged = onClippedChanged
         textView.apply(
             text: text,
             font: UIFont.preferredFont(forTextStyle: .caption2),
@@ -321,6 +397,9 @@ private struct ChatReasoningBodyTextView: UIViewRepresentable {
         context: Context
     ) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
+        // 注意：不要在这里 layoutIfNeeded——每拍多次测量时同步强制全量
+        // TextKit 布局会把主线程打出掉帧（思考动画 cadence 门禁翻红）。
+        // sizeThatFits 自身按提案尺寸现算，高度一段到位。
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
@@ -336,7 +415,6 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
     }
 
     private static let wordFadeDuration: CFTimeInterval = 0.5
-    private static let wordStaggerWindow: CFTimeInterval = 0.1
     private static let bottomTolerance: CGFloat = 8
     private static let followSpeed: CGFloat = 540
     private static let followSettleDuration: CFTimeInterval = 0.12
@@ -351,6 +429,19 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
     private var hasAppliedContent = false
     private var smoothsFollowing = true
     private var followSettleUntil: CFTimeInterval = 0
+    private var lastClipped: Bool?
+
+    /// 内容是否被高度上限裁切——供卡片决定 mask 底部渐变（短正文不洗淡）。
+    var onClippedChanged: ((Bool) -> Void)?
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let clipped = contentSize.height > bounds.height + 1
+        if clipped != lastClipped {
+            lastClipped = clipped
+            onClippedChanged?(clipped)
+        }
+    }
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -419,7 +510,7 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
                 textStorage.append(NSAttributedString(string: suffix, attributes: attributes))
                 renderedText = newText
                 if animatesNewWords {
-                    appendWordFades(in: NSRange(
+                    appendTailFade(in: NSRange(
                         location: oldLength,
                         length: newLength - oldLength
                     ))
@@ -436,7 +527,7 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
             attributedText = NSAttributedString(string: newText, attributes: attributes)
             renderedText = newText
             if oldText.isEmpty, animatesNewWords, !newText.isEmpty {
-                appendWordFades(in: NSRange(location: 0, length: textStorage.length))
+                appendTailFade(in: NSRange(location: 0, length: textStorage.length))
             }
         }
 
@@ -486,18 +577,16 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
         startDisplayLink()
     }
 
-    private func appendWordFades(in range: NSRange) {
-        let wordRanges = Self.wordRanges(in: textStorage.string, range: range)
-        guard !wordRanges.isEmpty else { return }
-        let baseStartTime = CACurrentMediaTime()
-        let delay = Self.wordStaggerWindow / Double(wordRanges.count)
-        for (index, wordRange) in wordRanges.enumerated() {
-            activeWordFades.append(WordFade(
-                startTime: baseStartTime + Double(index) * delay,
-                range: wordRange
-            ))
-        }
-        updateWordFades(at: baseStartTime)
+    /// 尾段整体淡入（与正文段落同构）：一拍一条 fade，替代逐词 N 条——
+    /// display link 每帧重写的属性范围从「全部词」降到 1 条，思考流式期
+    /// 主线程开销降一个量级。
+    private func appendTailFade(in range: NSRange) {
+        guard range.length > 0 else { return }
+        activeWordFades.append(WordFade(
+            startTime: CACurrentMediaTime(),
+            range: range
+        ))
+        updateWordFades(at: CACurrentMediaTime())
         startDisplayLink()
     }
 
@@ -538,6 +627,10 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
         }
     }
 
+    /// 限速连续跟随：内部滚动按 540pt/s 逐帧推进（cadence 门禁契约：
+    /// 单帧步进 ≤10pt，不能随 chunk 整行跳）。掉帧/乱跳的根因不在跟随
+    /// 策略，而在每帧开销——尾段整体淡入已把 display-link 属性重写从
+    /// 「全部词」降到 1 条。
     private func updateBottomFollow(displayLink: CADisplayLink, now: CFTimeInterval) {
         guard followsBottom else { return }
         if isTracking || isDragging || isDecelerating {
@@ -594,32 +687,6 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
         displayLink?.invalidate()
         displayLink = nil
         previousFrameTimestamp = nil
-    }
-
-    private static func wordRanges(in text: String, range: NSRange) -> [NSRange] {
-        let string = text as NSString
-        guard range.location != NSNotFound,
-              range.location >= 0,
-              NSMaxRange(range) <= string.length else {
-            return []
-        }
-
-        var ranges: [NSRange] = []
-        string.enumerateSubstrings(
-            in: range,
-            options: [.byWords, .localized, .substringNotRequired]
-        ) { _, wordRange, _, _ in
-            let gapStart = ranges.last.map(NSMaxRange) ?? range.location
-            if wordRange.location > gapStart {
-                ranges.append(NSRange(location: gapStart, length: wordRange.location - gapStart))
-            }
-            ranges.append(wordRange)
-        }
-        let trailingStart = ranges.last.map(NSMaxRange) ?? range.location
-        if trailingStart < NSMaxRange(range) {
-            ranges.append(NSRange(location: trailingStart, length: NSMaxRange(range) - trailingStart))
-        }
-        return ranges
     }
 
     private static func easeOut(_ progress: CGFloat) -> CGFloat {

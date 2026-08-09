@@ -26,6 +26,8 @@ struct SkillsView: View {
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        // 从详情删除返回后也要重扫；仅依赖首次 onAppear 会留下已删条目。
+        .onAppear { rescanSkills() }
     }
 
     private var header: some View {
@@ -66,7 +68,7 @@ struct SkillsView: View {
                     SkillEmptyState()
                 } else {
                     ForEach(Array(scannedSkills.enumerated()), id: \.offset) { index, skill in
-                        let enabled = sharedSettings.isSkillEnabled(skill.name)
+                        let enabled = sharedSettings.isSkillEnabled(skill.dirName)
                         Button {
                             router.navigate(to: .skillDetail(name: skill.name, dirName: skill.dirName))
                         } label: {
@@ -103,9 +105,6 @@ struct SkillsView: View {
                     }
                 }
             }
-        }
-        .onAppear {
-            rescanSkills()
         }
     }
 

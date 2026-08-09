@@ -41,7 +41,9 @@ final class IOSMemoryUsageMarkingTests: XCTestCase {
         }
     }
 
-    func testSameInjectedSetWritesToDiskOnlyOnce() throws {
+    /// 同一状态链覆盖：空集合 no-op、同集合去抖、集合变化写盘、force 绕过去抖，
+    /// 以及 force 后继续同步去抖状态。
+    func testMarkUsedDedupForceAndEmptySetStateMatrix() throws {
         try withIsolatedPersistence { persistence, _ in
             let records = [
                 makeRecord(id: 1, content: "user likes blue", scope: .core, kind: .user, updatedAt: 10),
@@ -50,6 +52,14 @@ final class IOSMemoryUsageMarkingTests: XCTestCase {
             IosMemoryFactory.shared.replaceAll(records: records)
 
             let revisionBefore = persistence.revision
+
+            // 空集合（含 force）始终 no-op，不写文件也不动时间戳。
+            XCTAssertFalse(persistence.markUsed(ids: [], now: 50))
+            XCTAssertFalse(persistence.markUsed(ids: [], now: 60, force: true))
+            XCTAssertEqual(persistence.revision, revisionBefore)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: persistenceFileURL.path))
+            XCTAssertNil(IosMemoryFactory.shared.getAllRecords().first?.lastUsedAt)
+
             XCTAssertTrue(persistence.markUsed(ids: Set<Int32>([1, 2]), now: 100))
             XCTAssertEqual(persistence.revision, revisionBefore + 1)
 
@@ -65,51 +75,21 @@ final class IOSMemoryUsageMarkingTests: XCTestCase {
             XCTAssertTrue(persistence.markUsed(ids: Set<Int32>([1, 2, 3]), now: 300))
             XCTAssertEqual(persistence.revision, revisionBefore + 2)
             XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().first { $0.id == 3 }?.lastUsedAt?.int64Value, 300)
-        }
-    }
-
-    /// P2-c 修复 2：模型显式引用（citation flush）与召回标记语义不同——引用是
-    /// 模型的显式信号，即使与上一 run 的召回集合完全一致也必须生效（刷新
-    /// lastUsedAt）。`force: true` 绕过同集去抖，但空集合 no-op 与去抖状态
-    /// 同步照旧。
-    func testCitationFlushWithForceBypassesSameSetDedup() throws {
-        try withIsolatedPersistence { persistence, _ in
-            let records = [
-                makeRecord(id: 1, content: "user likes blue", scope: .core, kind: .user, updatedAt: 10),
-                makeRecord(id: 2, content: "blue project", scope: .longTerm, kind: .project, updatedAt: 20),
-            ]
-            IosMemoryFactory.shared.replaceAll(records: records)
-
-            // run A 召回注入 {1,2}（不 force，去抖生效）。
-            XCTAssertTrue(persistence.markUsed(ids: Set<Int32>([1, 2]), now: 100))
-            // 同一 run 内同集合再次召回：仍被去抖。
-            XCTAssertFalse(persistence.markUsed(ids: Set<Int32>([1, 2]), now: 200))
 
             // citation flush 命中完全相同的集合：force 绕过去抖、刷新 lastUsedAt。
-            XCTAssertTrue(persistence.markUsed(ids: Set<Int32>([1, 2]), now: 300, force: true))
-            XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().first { $0.id == 1 }?.lastUsedAt?.int64Value, 300)
-            XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().first { $0.id == 2 }?.lastUsedAt?.int64Value, 300)
+            XCTAssertTrue(persistence.markUsed(ids: Set<Int32>([1, 2, 3]), now: 400, force: true))
+            XCTAssertEqual(persistence.revision, revisionBefore + 3)
+            XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().first { $0.id == 1 }?.lastUsedAt?.int64Value, 400)
+            XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().first { $0.id == 2 }?.lastUsedAt?.int64Value, 400)
 
             // force 写盘后去抖状态同步刷新：随后的非 force 同集合调用继续被去抖。
-            XCTAssertFalse(persistence.markUsed(ids: Set<Int32>([1, 2]), now: 400))
-            XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().first { $0.id == 1 }?.lastUsedAt?.int64Value, 300)
+            XCTAssertFalse(persistence.markUsed(ids: Set<Int32>([1, 2, 3]), now: 500))
+            XCTAssertEqual(persistence.revision, revisionBefore + 3)
+            XCTAssertEqual(IosMemoryFactory.shared.getAllRecords().first { $0.id == 1 }?.lastUsedAt?.int64Value, 400)
 
             // force 不改变空集合 no-op 守卫。
-            XCTAssertFalse(persistence.markUsed(ids: [], now: 500, force: true))
-        }
-    }
-
-    func testEmptyRecallResultDoesNotWrite() throws {
-        try withIsolatedPersistence { persistence, _ in
-            IosMemoryFactory.shared.replaceAll(records: [
-                makeRecord(id: 1, content: "user likes blue", scope: .core, kind: .user, updatedAt: 10),
-            ])
-            let revisionBefore = persistence.revision
-
-            XCTAssertFalse(persistence.markUsed(ids: [], now: 999))
-            XCTAssertEqual(persistence.revision, revisionBefore)
-            XCTAssertFalse(FileManager.default.fileExists(atPath: persistenceFileURL.path))
-            XCTAssertNil(IosMemoryFactory.shared.getAllRecords().first?.lastUsedAt)
+            XCTAssertFalse(persistence.markUsed(ids: [], now: 600, force: true))
+            XCTAssertEqual(persistence.revision, revisionBefore + 3)
         }
     }
 

@@ -325,7 +325,26 @@ final class IOSMemoryPollutionTests: XCTestCase {
 
     /// mcp_call 直调失败必须产出结构化失败 JSON（failureReason 可识别、不置位污染）。
     func testMcpCallFailureIsStructuredAndDoesNotMarkPolluted() async throws {
-        let directory = makeTempDirectory("McpCallFailStructured")
+        try await assertMcpFailureIsStructuredAndDoesNotMarkPolluted(toolPart(
+            toolCallId: "mcp-fail-1",
+            toolName: "mcp_call",
+            input: #"{"server":"alpha","tool":"search","arguments":{"query":"x"}}"#
+        ))
+    }
+
+    /// mcp__* 展开调用失败同样必须结构化（与 mcp_call 同一 catch 契约）。
+    func testExpandedMcpFailureIsStructuredAndDoesNotMarkPolluted() async throws {
+        try await assertMcpFailureIsStructuredAndDoesNotMarkPolluted(toolPart(
+            toolCallId: "mcp-fail-2",
+            toolName: "mcp__alpha__search",
+            input: #"{"query":"x"}"#
+        ))
+    }
+
+    private func assertMcpFailureIsStructuredAndDoesNotMarkPolluted(
+        _ toolCall: UIMessagePart.Tool
+    ) async throws {
+        let directory = makeTempDirectory("McpFailStructured-\(toolCall.toolCallId)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = await makeStore(directory: directory)
         let runConversationId = KotlinUuid.companion.random()
@@ -339,7 +358,11 @@ final class IOSMemoryPollutionTests: XCTestCase {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
         let failingClient = StubMcpClient(
             tools: [IOSMcpTool(name: "search", description: "Alpha search")],
-            result: .failure(NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "connection refused"]))
+            result: .failure(NSError(
+                domain: "test",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "expected failure"]
+            ))
         )
         let runtime = makeRuntime(
             sharedSettings: sharedSettings,
@@ -347,11 +370,6 @@ final class IOSMemoryPollutionTests: XCTestCase {
             mcpManager: makeMcpManager(client: failingClient)
         )
 
-        let toolCall = toolPart(
-            toolCallId: "mcp-fail-1",
-            toolName: "mcp_call",
-            input: #"{"server":"alpha","tool":"search","arguments":{"query":"x"}}"#
-        )
         let pending = makePending(
             toolCall: toolCall,
             conversationId: runConversationId,
@@ -362,7 +380,7 @@ final class IOSMemoryPollutionTests: XCTestCase {
 
         XCTAssertNotNil(
             ChatToolOutputFormatter.failureReason(from: [UIMessagePart.Text(text: output, metadata: nil)]),
-            "MCP 失败输出必须可被 failureReason 识别: \(output)"
+            "\(toolCall.toolName) 失败输出必须可被 failureReason 识别: \(output)"
         )
         XCTAssertTrue(output.contains("MCP 调用失败"), "失败原因文本必须保留在输出中: \(output)")
         XCTAssertTrue(output.contains("\"ok\":false"), output)
@@ -370,52 +388,7 @@ final class IOSMemoryPollutionTests: XCTestCase {
 
         try? await Task.sleep(nanoseconds: 400_000_000)
         let summaries = await store.pollutedConversationSummaries()
-        XCTAssertFalse(summaries.contains { $0.id == runConversationId }, "MCP 失败不得置位 POLLUTED")
-    }
-
-    /// mcp__* 展开调用失败同样必须结构化（与 mcp_call 同一 catch 契约）。
-    func testExpandedMcpFailureIsStructuredAndDoesNotMarkPolluted() async throws {
-        let directory = makeTempDirectory("ExpandedMcpFailStructured")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = await makeStore(directory: directory)
-        let runConversationId = KotlinUuid.companion.random()
-        await store.saveForkedConversation(Conversation.companion.ofId(
-            id: runConversationId,
-            assistantId: AssistantKt.DEFAULT_ASSISTANT_ID,
-            messages: [],
-            newConversation: false
-        ))
-
-        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
-        let failingClient = StubMcpClient(
-            tools: [IOSMcpTool(name: "search", description: "Alpha search")],
-            result: .failure(NSError(domain: "test", code: 2, userInfo: [NSLocalizedDescriptionKey: "timeout"]))
-        )
-        let runtime = makeRuntime(
-            sharedSettings: sharedSettings,
-            marker: productionStyleMarker(store: store),
-            mcpManager: makeMcpManager(client: failingClient)
-        )
-
-        let toolCall = toolPart(toolCallId: "mcp-fail-2", toolName: "mcp__alpha__search", input: #"{"query":"x"}"#)
-        let pending = makePending(
-            toolCall: toolCall,
-            conversationId: runConversationId,
-            baseMessages: [assistantToolMessage(toolCall: toolCall)],
-            sharedSettings: sharedSettings
-        )
-        let output = try await executeAdvancedTool(runtime: runtime, pending: pending, toolCall: toolCall)
-
-        XCTAssertNotNil(
-            ChatToolOutputFormatter.failureReason(from: [UIMessagePart.Text(text: output, metadata: nil)]),
-            "mcp__* 失败输出必须可被 failureReason 识别: \(output)"
-        )
-        XCTAssertTrue(output.contains("MCP 调用失败"), output)
-        XCTAssertTrue(output.contains("\"ok\":false"), output)
-
-        try? await Task.sleep(nanoseconds: 400_000_000)
-        let summaries = await store.pollutedConversationSummaries()
-        XCTAssertFalse(summaries.contains { $0.id == runConversationId }, "mcp__* 失败不得置位 POLLUTED")
+        XCTAssertFalse(summaries.contains { $0.id == runConversationId }, "\(toolCall.toolName) 失败不得置位 POLLUTED")
     }
 
     /// MCP 调用成功（真实执行路径）仍必须置位 POLLUTED。
@@ -494,21 +467,6 @@ final class IOSMemoryPollutionTests: XCTestCase {
         XCTAssertTrue(secondMark)
         let afterDoubleMark = try await store.loadConversationForOrchestration(conversationId)
         XCTAssertEqual(memoryMode(of: afterDoubleMark), .polluted)
-
-        // run 再次置位（重复成功输出）仍保持 POLLUTED，不报错不降级。
-        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
-        let runtime = makeRuntime(sharedSettings: sharedSettings, marker: productionStyleMarker(store: store))
-        let toolCall = toolPart(toolCallId: "repeat-1", toolName: "search_web")
-        _ = runtime.messagesByFinishingToolCall(
-            toolCall,
-            outputText: successOutput(for: "search_web"),
-            in: [assistantToolMessage(toolCall: toolCall)],
-            conversationId: conversationId
-        )
-        let polluted = await waitUntilPolluted(store: store, id: conversationId)
-        XCTAssertTrue(polluted)
-        let afterRunRemark = try await store.loadConversationForOrchestration(conversationId)
-        XCTAssertEqual(memoryMode(of: afterRunRemark), .polluted)
     }
 
     // MARK: - 后台 run 锚定

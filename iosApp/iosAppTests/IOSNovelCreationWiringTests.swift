@@ -484,9 +484,35 @@ final class IOSNovelCreationWiringTests: XCTestCase {
 
         XCTAssertTrue(support.contains("(firstResponder as? UITextInput)?.unmarkText()"))
         XCTAssertTrue(support.contains("DispatchQueue.main.async"))
+        XCTAssertTrue(
+            support.contains("unmark before resign")
+                || support.contains("unmarkText") && support.contains("resignFirstResponder"),
+            "Committer must unmark before resign so IME composition is not discarded"
+        )
+        XCTAssertTrue(
+            support.contains("DispatchQueue.main.async {\n            DispatchQueue.main.async"),
+            "Double main-async flush so SwiftUI bindings see committed text"
+        )
+        XCTAssertTrue(support.contains("static func hasMarkedText"))
         for file in [projectList, compendium, materials, branches, reader, sheets, bubble] {
             XCTAssertTrue(file.contains("NovelTextInputCommitter.perform"))
         }
+        // Rename must not clear FocusState before committer (that drops marked text).
+        let renameStart = try XCTUnwrap(projectList.range(of: "private func commitNameAndSave"))
+        let renameEnd = try XCTUnwrap(projectList.range(
+            of: "private func save(_ committedName",
+            range: renameStart.upperBound..<projectList.endIndex
+        ))
+        let renameBody = projectList[renameStart.lowerBound..<renameEnd.lowerBound]
+        XCTAssertTrue(renameBody.contains("NovelTextInputCommitter.perform"))
+        XCTAssertFalse(
+            renameBody.contains("isNameFocused = false"),
+            "Clearing FocusState before unmarkText discards the last IME composition"
+        )
+        // Writing-context toolbar must commit marked text before apply/dismiss.
+        XCTAssertTrue(sheets.contains(
+            "NovelTextInputCommitter.perform {\n                            onApply(overrides, budgetTokens)"
+        ) || sheets.contains("NovelTextInputCommitter.perform {\n                        onApply(overrides, budgetTokens)"))
     }
 
     func testHistoricalCharacterIdentityFlowsThroughSessionAndCharacterSurfaces() throws {

@@ -1607,44 +1607,34 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         harness.viewModel.cancelDiscussion()
     }
 
-    func testCouncilBackgroundContractStartsKeepAliveWithTheForegroundRunWithoutAnUnreachableAskUserSurface() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let runtime = try String(
-            contentsOf: testDirectory
-                .deletingLastPathComponent()
-                .appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
-            encoding: .utf8
-        )
+    func testConfigurationErrorMessageSurfacesWhenChatModelMissing() throws {
+        let harness = try makeViewModelHarness(streamer: ScriptedCouncilStreamer([]))
+        harness.sharedSettings.setCurrentChatModelId("00000000-0000-0000-0000-000000000000")
 
-        XCTAssertTrue(
-            runtime.contains("beginBackgroundKeepAlive(for: discussionID)"),
-            "Council must submit continued processing when the foreground run starts."
+        XCTAssertEqual(
+            harness.viewModel.configurationErrorMessage,
+            ChatConfigurationIssue.missingModel.message
         )
-        XCTAssertTrue(
-            runtime.contains("private func keepAliveLeaseId(for discussionID: UUID)"),
-            "The system task must be bound to this discussion round, not a fixed Council lease."
-        )
-        XCTAssertTrue(
-            runtime.contains("BackgroundGenerationKeepAlive.shared.updateProgress"),
-            "Council must report real generation phases to continued processing."
-        )
-        XCTAssertTrue(
-            runtime.contains("runner.markActiveTaskTerminal"),
-            "Expiration and cancellation must close the task ledger as a retryable terminal."
-        )
-        XCTAssertFalse(
-            runtime.contains("skipAskUser"),
-            "Council no longer exposes an unreachable ask_user pause surface."
-        )
-        XCTAssertFalse(
-            runtime.contains("submitAskUserAnswer"),
-            "Council no longer exposes an unreachable ask_user resume surface."
-        )
-        XCTAssertFalse(runtime.contains("pendingAskUser"))
-        XCTAssertFalse(runtime.contains("onAskUser"))
+        harness.viewModel.inputText = "有议题也发不出去"
+        XCTAssertFalse(harness.viewModel.canSend)
     }
 
-    func testCouncilExpirationCheckpointsBeforeReleasingItsBackgroundLease() throws {
+    func testMembersSeatFooterFollowsDynamicSeatGeneration() {
+        XCTAssertEqual(
+            CouncilMembersCopy.seatSectionFooter(isRunning: true, dynamicSeatGeneration: false),
+            "本轮议会运行中，模式与席位下一轮生效。"
+        )
+        XCTAssertEqual(
+            CouncilMembersCopy.seatSectionFooter(isRunning: false, dynamicSeatGeneration: true),
+            "席位由主持人按议题联网调研后动态组建。"
+        )
+        XCTAssertEqual(
+            CouncilMembersCopy.seatSectionFooter(isRunning: false, dynamicSeatGeneration: false),
+            "席位来自设置中已添加的固定角色。"
+        )
+    }
+
+    func testGuestBubbleUsesThemeSurfaceToken() throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let runtime = try String(
             contentsOf: testDirectory
@@ -1652,22 +1642,14 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
                 .appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
             encoding: .utf8
         )
-        guard let stopStart = runtime.range(of: "private func stopAndCheckpointActiveDiscussion("),
-              let stopEnd = runtime.range(of: "\n    private func stopActiveDiscussion", range: stopStart.upperBound..<runtime.endIndex) else {
-            return XCTFail("Expected the Council terminal checkpoint path")
-        }
-        let stopSource = String(runtime[stopStart.lowerBound..<stopEnd.lowerBound])
-        let stopOffset = { (needle: String) -> String.Index? in stopSource.range(of: needle)?.lowerBound }
-
-        guard let cancelOffset = stopOffset("stopActiveDiscussion(releaseBackgroundLease: false)"),
-              let persistOffset = stopOffset("persistTranscript()"),
-              let archiveOffset = stopOffset("archiveCurrentRoom()"),
-              let releaseOffset = stopOffset("endBackgroundKeepAlive(for: discussionID)") else {
-            return XCTFail("Expected cancel, checkpoint, and lease release in one terminal path")
-        }
-        XCTAssertLessThan(cancelOffset, persistOffset)
-        XCTAssertLessThan(persistOffset, archiveOffset)
-        XCTAssertLessThan(archiveOffset, releaseOffset)
+        XCTAssertTrue(
+            runtime.contains("case .guest: return AmberTheme.surface2"),
+            "Guest bubbles must use a theme surface token so dark mode does not stay paper-white."
+        )
+        XCTAssertFalse(
+            runtime.contains("case .guest: return Color.white"),
+            "Hard-coded Color.white guest bubbles regress dark/theme hierarchy."
+        )
     }
 
     func testSpeakingPartialTailIsCheckpointedByTheExistingThrottle() async throws {

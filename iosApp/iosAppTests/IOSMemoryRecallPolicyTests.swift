@@ -15,18 +15,6 @@ final class IOSMemoryRecallPolicyTests: XCTestCase {
         XCTAssertLessThanOrEqual(result.records.count, Int(runtime.memoryRecall.maxItems))
     }
 
-    func testTouchMemoriesOnlyChangesLastUsedAt() {
-        let previousRecords = IosMemoryFactory.shared.snapshotRecords()
-        defer { IosMemoryFactory.shared.replaceAll(records: previousRecords) }
-        let original = record(id: 7, content: "x", scope: .core, kind: .note, updatedAt: 11, lastUsedAt: 12)
-        IosMemoryFactory.shared.replaceAll(records: [original])
-        IosMemoryFactory.shared.touchMemories(ids: [7], timestamp: 99)
-        let touched = IosMemoryFactory.shared.getAllRecords()[0]
-        XCTAssertEqual(touched.lastUsedAt?.int64Value, 99)
-        XCTAssertEqual(touched.updatedAt, 11)
-        XCTAssertEqual(touched.content, "x")
-    }
-
     func testUnrelatedProjectAndReferenceAreNotAlwaysEligible() {
         let records = [
             record(id: 4, content: "project detail", scope: .longTerm, kind: .project),

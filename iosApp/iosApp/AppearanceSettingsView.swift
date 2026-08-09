@@ -7,18 +7,26 @@ struct AppearanceSettingsView: View {
 
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.system.rawValue
     private let runtime = AmberThemeRuntime.shared
+    private let library = AmberThemePackLibrary.shared
 
     @State private var showThemeImporter = false
     @State private var exportItem: ThemeExportItem?
     @State private var transferBanner: String?
     @State private var transferError: String?
+    @State private var isManagingThemes = false
+    @State private var selectedRemovableIds: Set<String> = []
+    @State private var showRemoveConfirm = false
 
     private var selectedMode: IOSAppearanceMode {
         IOSAppearanceMode(rawValue: appearanceMode) ?? .system
     }
 
-    private var matchingPack: AmberThemePack? {
-        runtime.matchingPack
+    private var matchingThemeId: String? {
+        runtime.matchingThemeId
+    }
+
+    private var canManageThemes: Bool {
+        !library.installed.isEmpty
     }
 
     var body: some View {
@@ -27,9 +35,12 @@ struct AppearanceSettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
+                    // 外观模式置顶：先定浅/深/跟随系统，再选主题配方。
+                    section("外观模式") { appearanceSegmented }
+
                     section("主题") {
                         themePackGrid
-                        if matchingPack == nil {
+                        if matchingThemeId == nil {
                             Text("当前为自定义组合")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
@@ -37,44 +48,47 @@ struct AppearanceSettingsView: View {
                         }
                     }
 
-                    // 外观模式保持一级，避免只想切深色还要展开「自定义」。
-                    section("外观模式") { appearanceSegmented }
-
-                    DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 22) {
-                            section("背景色") { backgroundCards }
-                            section("强调色") { accentSwatches }
+                    if !isManagingThemes {
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 22) {
+                                section("背景色") { backgroundCards }
+                                section("强调色") { accentSwatches }
+                            }
+                            .padding(.top, 12)
+                        } label: {
+                            Text("自定义画布与强调色")
+                                .font(AmberChromeFont.settings(.subheadline, weight: .semibold))
+                                .foregroundStyle(AmberTheme.foreground)
                         }
-                        .padding(.top, 12)
-                    } label: {
-                        Text("自定义画布与强调色")
-                            .font(AmberChromeFont.settings(.subheadline, weight: .semibold))
-                            .foregroundStyle(AmberTheme.foreground)
-                    }
-                    .tint(AmberTheme.muted)
+                        .tint(AmberTheme.muted)
 
-                    // 低频工具放在自定义之后，避免和主题选择抢层级。
-                    section("主题文件") {
-                        themeTransferRow
-                        Text("JSON 配方（颜色与风格槽）。不含图片资源；不改浅深模式与聊天字体。")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let transferBanner {
-                            Text(transferBanner)
+                        section("主题文件") {
+                            themeTransferRow
+                            Text("JSON 配方（颜色与风格槽）。导入会加入主题库；不含图片资源；不改浅深模式与聊天字体。")
                                 .font(.caption)
                                 .foregroundStyle(AmberTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let transferBanner {
+                                Text(transferBanner)
+                                    .font(.caption)
+                                    .foregroundStyle(AmberTheme.muted)
+                            }
                         }
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .padding(.bottom, 48)
+                .padding(.bottom, isManagingThemes ? 16 : 48)
             }
             .scrollEdgeEffectStyle(.soft, for: .top)
             .scrollIndicators(.hidden)
         }
         .safeAreaBar(edge: .top, spacing: 0) { header }
+        .safeAreaBar(edge: .bottom, spacing: 0) {
+            if isManagingThemes {
+                manageRemoveBar
+            }
+        }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .fileImporter(
@@ -99,6 +113,15 @@ struct AppearanceSettingsView: View {
         } message: {
             Text(transferError ?? "")
         }
+        .alert("移除主题", isPresented: $showRemoveConfirm) {
+            Button("取消", role: .cancel) {}
+            Button("移除", role: .destructive) { confirmRemoveSelectedThemes() }
+        } message: {
+            Text("将从主题库移除 \(selectedRemovableIds.count) 个导入配方。可随时重新导入。")
+        }
+        .onChange(of: library.installed.count) { _, count in
+            if count == 0 { exitThemeManagement() }
+        }
     }
 
     // MARK: Chrome
@@ -114,10 +137,69 @@ struct AppearanceSettingsView: View {
                     dismiss()
                 }
                 Spacer()
+                if isManagingThemes {
+                    Button("完成") { exitThemeManagement() }
+                        .font(AmberChromeFont.settings(.subheadline, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityLabel("完成管理主题")
+                } else if canManageThemes {
+                    Button("管理") {
+                        selectedRemovableIds = []
+                        isManagingThemes = true
+                    }
+                    .font(AmberChromeFont.settings(.subheadline, weight: .semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("管理导入主题")
+                }
             }
         }
         .padding(.horizontal, 16)
         .frame(height: 54)
+    }
+
+    private var manageRemoveBar: some View {
+        let count = selectedRemovableIds.count
+        return Button {
+            showRemoveConfirm = true
+        } label: {
+            Text(count == 0 ? "选择要移除的主题" : "移除 \(count) 个")
+                .font(AmberChromeFont.settings(.subheadline, weight: .semibold))
+                .foregroundStyle(count == 0 ? AmberTheme.muted : Color.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+                .background(
+                    count == 0 ? AmberTheme.surface2 : AmberTheme.accentRed,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(count == 0)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .accessibilityLabel(count == 0 ? "选择要移除的主题" : "移除已选主题")
+    }
+
+    private func exitThemeManagement() {
+        isManagingThemes = false
+        selectedRemovableIds = []
+        showRemoveConfirm = false
+    }
+
+    private func confirmRemoveSelectedThemes() {
+        do {
+            let removed = try library.remove(ids: selectedRemovableIds)
+            selectedRemovableIds = []
+            if removed > 0 {
+                transferBanner = "已移除 \(removed) 个主题"
+            }
+            if library.installed.isEmpty {
+                exitThemeManagement()
+            }
+        } catch {
+            transferError = userFacingTransferError(error)
+        }
     }
 
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
@@ -130,7 +212,7 @@ struct AppearanceSettingsView: View {
         }
     }
 
-    // MARK: 1 · 命名主题
+    // MARK: 1 · 外观模式 / 2 · 命名主题
 
     private var themePackGrid: some View {
         LazyVGrid(
@@ -140,23 +222,29 @@ struct AppearanceSettingsView: View {
             ForEach(AmberThemePack.builtins) { pack in
                 themePackCard(pack)
             }
+            ForEach(library.installed, id: \.id) { document in
+                installedThemePackCard(document)
+            }
         }
     }
 
     private func themePackCard(_ pack: AmberThemePack) -> some View {
-        let isSel = matchingPack?.id == pack.id
+        let isSel = matchingThemeId == pack.id
         // Previews always use the pack's light recipe; footer must match that light surface
         // so dark mode doesn't split cream preview + dark footer.
         let palette = pack.paper.lightPalette
         return Button {
+            guard !isManagingThemes else { return }
             runtime.apply(pack)
         } label: {
             themeCardChrome(
-                isSelected: isSel,
+                isSelected: isSel && !isManagingThemes,
                 footerTitle: pack.displayName,
                 footerBackground: Color(hex: palette.surface),
                 footerForeground: Color(hex: palette.foreground),
-                accessibilityLabel: "主题：\(pack.displayName)" + (isSel ? "，已选中" : "")
+                accessibilityLabel: "主题：\(pack.displayName)"
+                    + (isManagingThemes ? "，内置不可移除" : (isSel ? "，已选中" : "")),
+                showsLock: isManagingThemes
             ) {
                 miniPreview(
                     palette: palette,
@@ -168,9 +256,55 @@ struct AppearanceSettingsView: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(isManagingThemes)
     }
 
-    // MARK: 2 · 外观模式
+    private func installedThemePackCard(_ document: AmberThemePackDocument) -> some View {
+        let isActive = matchingThemeId == document.id
+        let isPicked = selectedRemovableIds.contains(document.id)
+        let paper = AmberThemeRuntime.Paper(rawValue: document.paper) ?? .neutral
+        let palette = paper.lightPalette
+        let accent = (try? AmberThemePackTransfer.parseHex(document.accentHex)) ?? AmberAccentOption.amberGold.accentHex
+        let canvas = AmberCanvasStyle(rawValue: document.canvasStyle) ?? .flat
+        let brand = AmberBrandMarkStyle(rawValue: document.brandMark) ?? .systemWordmark
+        return Button {
+            if isManagingThemes {
+                if isPicked {
+                    selectedRemovableIds.remove(document.id)
+                } else {
+                    selectedRemovableIds.insert(document.id)
+                }
+            } else {
+                do {
+                    try runtime.apply(document)
+                } catch {
+                    transferError = userFacingTransferError(error)
+                }
+            }
+        } label: {
+            themeCardChrome(
+                isSelected: isManagingThemes ? isPicked : isActive,
+                footerTitle: document.displayName,
+                footerBackground: Color(hex: palette.surface),
+                footerForeground: Color(hex: palette.foreground),
+                accessibilityLabel: "主题：\(document.displayName)"
+                    + (isManagingThemes
+                        ? (isPicked ? "，已选中待移除" : "，点按选择移除")
+                        : (isActive ? "，已选中" : "")),
+                // 管理多选不用 accent，避免和「当前主题」混淆。
+                useAccentSelection: !isManagingThemes
+            ) {
+                miniPreview(
+                    palette: palette,
+                    accent: Color(hex: accent),
+                    canvasStyle: canvas,
+                    paintBrandHint: brand == .paintAMBER,
+                    serifBrandHint: brand == .serifWordmark
+                )
+            }
+        }
+        .buttonStyle(.plain)
+    }
 
     private var appearanceSegmented: some View {
         HStack(spacing: 0) {
@@ -244,9 +378,13 @@ struct AppearanceSettingsView: View {
         footerBackground: Color,
         footerForeground: Color,
         accessibilityLabel: String,
+        showsLock: Bool = false,
+        useAccentSelection: Bool = true,
         @ViewBuilder preview: () -> Preview
     ) -> some View {
-        VStack(spacing: 0) {
+        let mark = useAccentSelection ? AmberTheme.accent : AmberTheme.foreground
+        let ink = useAccentSelection ? AmberTheme.accentInk : AmberTheme.background
+        return VStack(spacing: 0) {
             preview()
                 .frame(maxWidth: .infinity)
                 .frame(height: 120)
@@ -259,7 +397,15 @@ struct AppearanceSettingsView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
-                selectionIndicator(isSelected)
+                if showsLock {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(AmberTheme.muted2)
+                        .frame(width: 24, height: 24)
+                        .accessibilityHidden(true)
+                } else {
+                    selectionIndicator(isSelected, mark: mark, ink: ink)
+                }
             }
             .padding(.horizontal, 14)
             .frame(height: 48)
@@ -269,7 +415,7 @@ struct AppearanceSettingsView: View {
         .overlay {
             // Always 2pt so selection doesn't jump the tile's optical size by 1pt.
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(isSelected ? AmberTheme.accent : AmberTheme.borderSoft, lineWidth: 2)
+                .stroke(isSelected ? mark : AmberTheme.borderSoft, lineWidth: 2)
         }
         .accessibilityLabel(accessibilityLabel)
     }
@@ -342,13 +488,17 @@ struct AppearanceSettingsView: View {
         .clipped()
     }
 
-    private func selectionIndicator(_ isSel: Bool) -> some View {
+    private func selectionIndicator(
+        _ isSel: Bool,
+        mark: Color = AmberTheme.accent,
+        ink: Color = AmberTheme.accentInk
+    ) -> some View {
         ZStack {
             if isSel {
-                Circle().fill(AmberTheme.accent).frame(width: 24, height: 24)
+                Circle().fill(mark).frame(width: 24, height: 24)
                 Image(systemName: "checkmark")
                     .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(AmberTheme.accentInk)
+                    .foregroundStyle(ink)
             } else {
                 Circle().stroke(AmberTheme.muted2, lineWidth: 1.5).frame(width: 24, height: 24)
             }
@@ -463,8 +613,14 @@ struct AppearanceSettingsView: View {
                     throw AmberThemePackTransferError.fileTooLarge
                 }
                 let document = try AmberThemePackTransfer.decode(data)
+                let outcome = try library.upsert(document)
                 try runtime.apply(document)
-                transferBanner = "已导入：\(document.displayName)"
+                switch outcome {
+                case .installed:
+                    transferBanner = "已导入并加入主题库：\(document.displayName)"
+                case .builtinIdentity:
+                    transferBanner = "已应用内置配方：\(document.displayName)"
+                }
             } catch {
                 transferError = userFacingTransferError(error)
             }

@@ -202,6 +202,7 @@ struct CouncilChatRuntimeView: View {
                     stateProvider: { viewModel.state(for: $0) },
                     failedSpeakerIds: viewModel.failedSpeakerIds,
                     isRunning: viewModel.isRunning,
+                    dynamicSeatGeneration: viewModel.roomSettingsStore.dynamicSeatGeneration,
                     restartAction: { viewModel.startFreshRoom() }
                 )
                 .presentationDetents([.medium, .large])
@@ -211,6 +212,7 @@ struct CouncilChatRuntimeView: View {
             case .settings:
                 CouncilRoomSettingsSheet(
                     roomSettingsStore: viewModel.roomSettingsStore,
+                    sharedSettings: sharedSettings,
                     availableModelIds: viewModel.availableModelIds,
                     currentModelId: viewModel.currentModelId,
                     isReadOnly: viewModel.isRunning
@@ -641,6 +643,13 @@ struct CouncilChatRuntimeView: View {
                 ComposerAttachmentStatusLabel(status: .error(error))
             }
 
+            if let error = viewModel.configurationErrorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.accentAmber)
+                    .lineLimit(3)
+            }
+
             if viewModel.isPreparingMaterials {
                 ComposerAttachmentStatusLabel(
                     status: .preparing(viewModel.materialsPreparationStatus)
@@ -1030,6 +1039,18 @@ private struct CouncilDetailGroup: View {
     }
 }
 
+enum CouncilMembersCopy {
+    static func seatSectionFooter(isRunning: Bool, dynamicSeatGeneration: Bool) -> String {
+        if isRunning {
+            return "本轮议会运行中，模式与席位下一轮生效。"
+        }
+        if dynamicSeatGeneration {
+            return "席位由主持人按议题联网调研后动态组建。"
+        }
+        return "席位来自设置中已添加的固定角色。"
+    }
+}
+
 private struct CouncilMembersSheet: View {
     @Binding var selectedMode: CouncilDiscussionMode
     let participants: [CouncilParticipant]
@@ -1037,6 +1058,7 @@ private struct CouncilMembersSheet: View {
     let stateProvider: (CouncilParticipant) -> CouncilParticipantState
     let failedSpeakerIds: Set<String>
     let isRunning: Bool
+    let dynamicSeatGeneration: Bool
     let restartAction: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -1088,9 +1110,10 @@ private struct CouncilMembersSheet: View {
                 } header: {
                     Text("席位成员（\(participants.count)）")
                 } footer: {
-                    Text(isRunning
-                         ? "本轮议会运行中，模式与席位下一轮生效。"
-                         : "席位由主持人按议题联网调研后动态组建。")
+                    Text(CouncilMembersCopy.seatSectionFooter(
+                        isRunning: isRunning,
+                        dynamicSeatGeneration: dynamicSeatGeneration
+                    ))
                 }
             }
             // 隐藏系统 grouped 背景(那层会随 sheet 拉伸在冷灰之间切换,与暖色主题冲突),
@@ -1118,9 +1141,13 @@ private struct CouncilMembersSheet: View {
 
 private struct CouncilRoomSettingsSheet: View {
     @Bindable var roomSettingsStore: IOSCouncilRoomSettingsStore
+    let sharedSettings: IOSSharedSettingsStore
     let availableModelIds: [String]
     let currentModelId: String
     let isReadOnly: Bool
+
+    @State private var connectivityState: CouncilModelConnectivityViewState = .idle
+    @State private var connectivityTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -1132,6 +1159,62 @@ private struct CouncilRoomSettingsSheet: View {
                     Text(isReadOnly ? "运行中只读，下一轮生效。" : "设置会保存到本机，下一轮议会使用。")
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
+                }
+
+                settingsGroup(title: "模型连通性") {
+                    Button(action: testCurrentCouncilModels) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(AmberTheme.accent)
+                                .frame(width: 28)
+                            Text(connectivityState.isTesting ? "正在测试当前议会模型" : "测试当前议会模型")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Spacer(minLength: 8)
+                            Text(connectivityState.summary)
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(connectivityState.isTesting)
+
+                    switch connectivityState {
+                    case .idle, .testing:
+                        EmptyView()
+                    case .failure(let message):
+                        Divider().overlay(AmberTheme.borderSoft)
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.accentRed)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                    case .results(let results):
+                        ForEach(results) { result in
+                            Divider().overlay(AmberTheme.borderSoft)
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: result.isReachable ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(result.isReachable ? Color.green : AmberTheme.accentRed)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(result.configuredModelId)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(AmberTheme.foreground)
+                                    Text(result.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(result.isReachable ? AmberTheme.muted : AmberTheme.accentRed)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                        }
+                    }
                 }
 
                 settingsGroup(title: "主持人") {
@@ -1328,6 +1411,10 @@ private struct CouncilRoomSettingsSheet: View {
             .padding(20)
         }
         .background(AmberTheme.background)
+        .onDisappear {
+            connectivityTask?.cancel()
+            connectivityTask = nil
+        }
     }
 
     @ViewBuilder
@@ -1397,6 +1484,37 @@ private struct CouncilRoomSettingsSheet: View {
         .padding(.horizontal, 14)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
+    }
+
+    private func testCurrentCouncilModels() {
+        connectivityTask?.cancel()
+        guard let provider = sharedSettings.resolveCurrentProviderSetting() else {
+            connectivityState = .failure("当前没有可用的聊天服务商或模型。")
+            return
+        }
+        let settings = roomSettingsStore.settings
+        let dynamicSeatGeneration = roomSettingsStore.dynamicSeatGeneration
+        let modelId = currentModelId
+        connectivityState = .testing
+        connectivityTask = Task { @MainActor in
+            let tester = IOSCouncilModelConnectivityTester()
+            do {
+                let results = try await tester.test(
+                    settings: settings,
+                    dynamicSeatGeneration: dynamicSeatGeneration,
+                    providerSetting: provider,
+                    currentModelId: modelId
+                )
+                guard !Task.isCancelled else { return }
+                connectivityState = .results(results)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                connectivityState = .failure(error.localizedDescription)
+            }
+            connectivityTask = nil
+        }
     }
 }
 
@@ -1630,6 +1748,11 @@ final class CouncilChatViewModel {
         return hasText || hasPendingMaterials
     }
 
+    /// Composer 旁展示；与 `canSend` 共用同一配置判定，避免灰掉发送却无说明。
+    var configurationErrorMessage: String? {
+        currentConfigurationIssue?.message
+    }
+
     var composerPlaceholder: String {
         if canContinueCurrentCouncil {
             return "输入补充或追问，再讨论一轮"
@@ -1824,18 +1947,6 @@ final class CouncilChatViewModel {
 
     func send() {
         guard canSend, !isRunning, !isPreparingMaterials, !isReplay, activeDiscussionID == nil else { return }
-        if let issue = currentConfigurationIssue {
-            appendMessage(
-                kind: .system,
-                author: "议会",
-                body: issue.message,
-                systemImage: "exclamationmark.triangle",
-                tint: AmberTheme.accentRed,
-                subtitle: "配置阻塞",
-                status: .failed
-            )
-            return
-        }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let continuation = makeContinuationContext()
         if continuation != nil {
@@ -2895,7 +3006,7 @@ struct CouncilChatMessage: Identifiable {
         switch kind {
         case .user: return AmberTheme.accent
         case .host: return AmberTheme.surface
-        case .guest: return Color.white.opacity(0.56)
+        case .guest: return AmberTheme.surface2
         case .system: return AmberTheme.surface2.opacity(0.65)
         case .divider: return .clear
         }

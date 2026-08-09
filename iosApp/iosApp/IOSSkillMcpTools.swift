@@ -185,15 +185,35 @@ struct IOSSkillMcpToolService {
             throw IOSSkillToolError.missingArgument("workspace_path")
         }
         let files = try collectWorkspaceSkillFiles(workspacePath: workspacePath)
-        let packageName = try skillStore.saveSkillFiles(files: files)
-        sharedSettings.setSkillEnabled(name: packageName, enabled: true)
+        let packageName = try previewSkillPackageName(files: files)
+        let existed = skillStore.listSkillDirNames().contains(packageName)
+        // 单文件 SKILL.md 导入只更新说明，合并保留本机已有附属资源；目录导入仍整包替换。
+        let mergeExisting = Self.isSingleSkillMarkdownImportPath(workspacePath)
+        let savedName = try skillStore.saveSkillFiles(files: files, mergeExisting: mergeExisting)
+        // 新技能默认启用；更新已有技能时保留用户当前启用状态（含可选出厂默认关闭）。
+        if !existed {
+            sharedSettings.setSkillEnabled(name: savedName, enabled: true)
+        }
+        IOSBuiltinSkills.clearOptionalSeedRemoved(savedName, store: skillStore)
+        let enabled = sharedSettings.isSkillEnabled(savedName)
         return Self.json([
             "success": true,
-            "name": packageName,
+            "name": savedName,
             "file_count": files.count,
-            "enabled": true,
+            "enabled": enabled,
             "contains_mcp_config": files["mcp.json"] != nil,
         ])
+    }
+
+    private func previewSkillPackageName(files: [String: String]) throws -> String {
+        guard let skillMd = files["SKILL.md"] ?? files["skill.md"] else {
+            throw IOSSkillFileStoreError.missingSkillMarkdown
+        }
+        let frontmatter = IOSSkillFileStore.parseFrontmatter(skillMd)
+        guard let declaredName = frontmatter["name"], !declaredName.isEmpty else {
+            throw IOSSkillFileStoreError.missingFrontmatterField("name")
+        }
+        return IOSSkillFileStore.normalizedSkillName(declaredName)
     }
 
     private func skillEnableJSON(_ args: [String: Any], enable: Bool) throws -> String {
@@ -519,6 +539,13 @@ struct IOSSkillMcpToolService {
             || lower.hasSuffix(".sh")
             || lower.hasSuffix(".html")
             || lower.hasSuffix(".css")
+    }
+
+    private static func isSingleSkillMarkdownImportPath(_ workspacePath: String) -> Bool {
+        let normalized = workspacePath
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return (normalized as NSString).lastPathComponent.lowercased() == "skill.md"
     }
 
     private static func wrapSkillForMobileRuntime(skillName: String, pathLabel: String, body: String) -> String {

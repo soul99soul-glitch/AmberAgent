@@ -238,10 +238,46 @@ enum ChatStreamPresentationPacer {
         StreamPresentationPacingPolicy.textAdvance(backlogCount: backlogCount)
     }
 
-    private static func terminalTextAdvance(backlogCount: Int) -> Int {
+    /// 终态排空的节奏锚：整轮由完成时积压一次决定，不逐拍衰减。
+    /// 连续于积压、无阈值断点——小积压（几十字）≈12 字/拍 × 48ms，收尾读作
+    /// 打字的自然延续（真机录像里「最后半句一拍跳出、上跳一格」的载体是旧
+    /// 快排对小积压也一拍倒 36+ 字）；大积压趋近 1500 字/拍 × 8ms，16 拍
+    /// whoosh 平滑扫底，滚动层缓动把逐帧增长抹成连续快滚。逐拍衰减
+    /// （backlog/16 随剩余量缩小）会让后段掉回慢节拍，24k 实测拖到 2.4s。
+    static func terminalDrainAdvance(backlogCount: Int) -> Int {
         guard backlogCount > 0 else { return 0 }
         let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
-        return min(terminalMaximumTextAdvance, max(maximumTextAdvance, adaptive))
+        return min(terminalMaximumTextAdvance, max(minimumTextAdvance, adaptive))
+    }
+
+    /// 排空拍间隔：由整轮节奏锚决定。advance≤36 保持 48ms 流式节拍；
+    /// advance 1500 时 8ms（120Hz 逐帧）。
+    static func terminalDrainDelayNanos(advance: Int) -> UInt64 {
+        let intervalMs = min(48.0, max(8.0, 48.0 * 36.0 / Double(max(advance, 1))))
+        return UInt64(intervalMs * 1_000_000)
+    }
+
+    private static func terminalTextAdvance(
+        backlogCount: Int,
+        fixedAdvance: Int? = nil
+    ) -> Int {
+        guard backlogCount > 0 else { return 0 }
+        let adaptive = fixedAdvance ?? (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
+        return min(terminalMaximumTextAdvance, max(minimumTextAdvance, adaptive))
+    }
+
+    /// 排空循环取当前剩余积压，供动态拍间隔使用。
+    static func terminalDrainBacklog(current: [UIMessage], target: [UIMessage]) -> Int {
+        guard let targetAssistant = target.last,
+              targetAssistant.role == MessageRole.assistant else { return 0 }
+        if let currentAssistant = current.last, currentAssistant.id == targetAssistant.id {
+            return pendingTextBacklog(
+                currentParts: currentAssistant.parts,
+                targetParts: targetAssistant.parts
+            )
+        }
+        // 终态消息尚未上屏：按全文计。
+        return pendingTextBacklog(currentParts: [], targetParts: targetAssistant.parts)
     }
 
     /// 本轮所有 text part 的未显示字符总量,用来定这一拍的推进预算。
@@ -269,7 +305,8 @@ enum ChatStreamPresentationPacer {
     static func step(
         current: [UIMessage],
         target: [UIMessage],
-        mode: Mode = .streaming
+        mode: Mode = .streaming,
+        fixedTerminalAdvance: Int? = nil
     ) -> ChatStreamPresentationStep {
         guard let targetAssistant = target.last,
               targetAssistant.role == MessageRole.assistant else {
@@ -307,7 +344,7 @@ enum ChatStreamPresentationPacer {
             targetParts: targetAssistant.parts
         )
         var remainingBudget = mode == .terminalDrain
-            ? terminalTextAdvance(backlogCount: backlogCount)
+            ? terminalTextAdvance(backlogCount: backlogCount, fixedAdvance: fixedTerminalAdvance)
             : textAdvance(backlogCount: backlogCount)
         var caughtUp = true
         var pacedParts: [UIMessagePart] = []
@@ -480,11 +517,18 @@ struct ChatGenerationBindings {
     /// @MainActor：async 闭包跨 actor 调用会 send 非 Sendable 的 KotlinUuid，
     /// 消费点（coordinator/ViewModel）本身都在 MainActor，隔离到主线程无跳变。
     var drainMailbox: @MainActor (KotlinUuid?) async -> [UIMessage] = { _ in [] }
-    /// P1-a: run 终态时把队列 leftover 恢复进 composer 文本（可见、不自动发起新生成）。
+    /// P1-a: run 终态处理 leftover。`autoContinue == true`（成功收尾）时出队头一条并
+    /// 自动开下一轮；取消/失败时回填 composer（含附件条目留队）。
+    var handleSteerQueueAtTerminal: (KotlinUuid?, Bool) -> Void = { _, _ in }
+    /// 兼容旧绑定名：等价于 `handleSteerQueueAtTerminal(id, false)`。
     var restoreSteerQueueLeftover: (KotlinUuid?) -> Void = { _ in }
     /// P1-c: run 终态回传钩子——编排服务据此向父线程 mailbox 投递 FINAL_ANSWER
     /// （conversationId、runId、终态消息快照）。默认空实现零开销。
     var onRunTerminal: @MainActor (KotlinUuid?, String, [UIMessage]) async -> Void = { _, _, _ in }
+    /// 管线闭环修复：每轮组装前刷新编排链接缓存（spawn 发生在 run 中途、邮件
+    /// 在边界到达——只在会话切换时刷新会让这些轮次漏掉编排语境注入）。
+    /// 默认空实现零影响。
+    var refreshOrchestrationLinks: @MainActor () async -> Void = {}
 }
 
 struct IOSGenerativeUiRequirement: Equatable {
@@ -1793,6 +1837,9 @@ final class ChatGenerationCoordinator {
             preparedUploadMessages,
             params: effectiveParams
         )
+        // 每轮组装前刷新编排链接缓存：run 中途 spawn/邮件到达都会改变它，
+        // 只在会话切换时刷新会让这些轮次漏掉编排语境注入（checker 场景 A/B）。
+        await bindings.refreshOrchestrationLinks()
         let runtimePreparedMessages = bindings.messagesByInjectingRuntimeContext(promptedUploadMessages)
         let selectedMemoryIds = bindings.memoryRecordIdsForRuntimeContext(promptedUploadMessages)
         let finalizedUploadMessages: [UIMessage]
@@ -1873,13 +1920,7 @@ final class ChatGenerationCoordinator {
         guard params.tools.contains(where: { $0.name == "generate_image" }) else {
             return messages
         }
-        let prompt = """
-        Image-generation routing guidance for AmberAgent iOS:
-        - When the user asks for a photographic, painted, illustrated, poster, wallpaper, concept-art, or character-art image, call `generate_image` exactly once instead of answering with SVG/HTML.
-        - Preserve the user's subject, style, aspect-ratio cues, and language. Prefer a detailed prompt with subject, composition, lighting, mood, and visual style.
-        - If the request references named fiction/IP, avoid brittle prompt wording like "fan art of <character> from <franchise>". Use an original inspired depiction that keeps the user's requested vibe and recognizable high-level visual cues without asking for an exact copyrighted character, logo, actor, or celebrity likeness.
-        - If `generate_image` fails, report the failure honestly and ask whether to retry or adjust the prompt. Do not substitute an SVG/code sketch as if image generation succeeded unless the user explicitly asks for a fallback sketch.
-        """
+        let prompt = ChatImageGenerationReference.routingGuidancePrompt
         let systemMessage = UIMessage(
             id: KotlinUuid.companion.random(),
             role: MessageRole.system,
@@ -2112,13 +2153,15 @@ final class ChatGenerationCoordinator {
     private func publishPacedStreamSnapshot(
         _ target: [UIMessage],
         runId: String,
-        mode: ChatStreamPresentationPacer.Mode = .streaming
+        mode: ChatStreamPresentationPacer.Mode = .streaming,
+        fixedTerminalAdvance: Int? = nil
     ) -> Bool {
         let step = bindings.shouldPaceStreamPresentation()
             ? ChatStreamPresentationPacer.step(
                 current: bindings.getMessages(),
                 target: target,
-                mode: mode
+                mode: mode,
+                fixedTerminalAdvance: fixedTerminalAdvance
             )
             : ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
         ChatStreamRecorder.shared.record(runId: runId, snapshot: step.snapshot)
@@ -2132,13 +2175,29 @@ final class ChatGenerationCoordinator {
         // catches up. A cancellation during this short window must persist the
         // full provider result rather than the currently visible prefix.
         pendingStreamSnapshot = target
+        // 整轮节奏锚：完成时积压一次决定拍大小与拍间隔（连续曲线，无分档），
+        // 见 ChatStreamPresentationPacer.terminalDrainAdvance 注释。
+        let drainAdvance = ChatStreamPresentationPacer.terminalDrainAdvance(
+            backlogCount: ChatStreamPresentationPacer.terminalDrainBacklog(
+                current: bindings.getMessages(),
+                target: target
+            )
+        )
+        let drainDelayNanos = ChatStreamPresentationPacer.terminalDrainDelayNanos(
+            advance: drainAdvance
+        )
         while currentRunId == runId, !Task.isCancelled {
-            if publishPacedStreamSnapshot(target, runId: runId, mode: .terminalDrain) {
+            if publishPacedStreamSnapshot(
+                target,
+                runId: runId,
+                mode: .terminalDrain,
+                fixedTerminalAdvance: drainAdvance
+            ) {
                 pendingStreamSnapshot = nil
                 return true
             }
             do {
-                try await Task.sleep(nanoseconds: streamSnapshotFlushDelayNanos)
+                try await Task.sleep(nanoseconds: drainDelayNanos)
             } catch {
                 return false
             }
@@ -2584,9 +2643,11 @@ final class ChatGenerationCoordinator {
         UIMessage(
             id: KotlinUuid.companion.random(),
             role: MessageRole.assistant,
-            parts: [UIMessagePart.Text(
-                text: "模型没有返回任何内容。这可能是服务商的临时问题——请重新发送，或换一个模型试试。",
-                metadata: nil
+            // 本地终态通知不是模型输出：带 LOCAL_GENERATION_ERROR 标记，上传时
+            // 被 isLocalGenerationError 过滤（注入面审计 B11——此前会作为 assistant
+            // 历史重新喂给模型，造成角色混淆）。
+            parts: [MessageKt.localGenerationErrorTextPart(
+                text: "模型没有返回任何内容。这可能是服务商的临时问题——请重新发送，或换一个模型试试。"
             )],
             annotations: [],
             createdAt: chatNowLocalDateTime(),
@@ -2601,9 +2662,8 @@ final class ChatGenerationCoordinator {
         UIMessage(
             id: KotlinUuid.companion.random(),
             role: MessageRole.assistant,
-            parts: [UIMessagePart.Text(
-                text: "小应用生成失败：模型没有返回任何内容。请重试，或换一个模型后重新生成。",
-                metadata: nil
+            parts: [MessageKt.localGenerationErrorTextPart(
+                text: "小应用生成失败：模型没有返回任何内容。请重试，或换一个模型后重新生成。"
             )],
             annotations: [],
             createdAt: chatNowLocalDateTime(),
@@ -4101,8 +4161,11 @@ final class ChatGenerationCoordinator {
         if let terminalEvent {
             bindings.bumpMessageRevision(terminalEvent)
         }
-        // P1-a: run 终态把队列 leftover 恢复进 composer（可见、不静默丢、不自动发起新生成）。
-        bindings.restoreSteerQueueLeftover(runConversationId)
+        // P1-a: 成功收尾 → 自动发队列下一条；取消/失败 → 回填 composer。
+        bindings.handleSteerQueueAtTerminal(
+            runConversationId,
+            terminalEvent == .generationCompleted
+        )
         // P1-c: 终态回传——本会话若是某线程的 Open 子线程，编排服务向父线程
         // mailbox 投递 FINAL_ANSWER（fire-and-forget；服务内幂等去重）。
         let terminalMessages = bindings.getMessages()
@@ -4398,8 +4461,11 @@ final class ChatGenerationCoordinator {
     }
 
     @discardableResult
-    func finishStreamingForTesting(runId: String) -> Bool {
-        finishStreaming(runId: runId)
+    func finishStreamingForTesting(
+        runId: String,
+        terminalEvent: ChatMessageUpdateReason? = nil
+    ) -> Bool {
+        finishStreaming(runId: runId, terminalEvent: terminalEvent)
     }
 
     /// P1-a/P1-b 测试缝：复用 continueAfterToolResult 的真实「mailbox + steer 边界消费 +

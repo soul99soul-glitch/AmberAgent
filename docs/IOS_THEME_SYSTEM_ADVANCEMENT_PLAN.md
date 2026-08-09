@@ -11,7 +11,7 @@ Evidence base: 2026-08-08 对 `AmberThemePack.swift` / `PlaceholderViews.swift`�
 
 ### 0.1 现状一句话
 
-Theme Pack 架构已可用：核心槽 + 可选表面槽、9 个内置包、JSON 导入导出、全站动态 token、首页角色表达完整。完善空间不在「再造一套主题系统」，而在 **跨面一致性、深色角色感、预留槽位真假、外围表面（MiniApp / 系统卡）对齐**。
+Theme Pack 架构已可用：核心槽 + 可选表面槽、3 个角色内置包（点阵·陶土 / 点阵·Pi / Notion·暖白；经典 paper×accent 走自定义）、JSON 导入导出、全站动态 token、首页角色表达完整。完善空间不在「再造一套主题系统」，而在 **跨面一致性、深色角色感、预留槽位真假、外围表面（MiniApp / 系统卡）对齐**。
 
 ### 0.2 产品原则（继承规格，不可破）
 
@@ -110,7 +110,7 @@ rg -n "AmberTheme\.background\.ignoresSafeArea" iosApp/iosApp --glob '*.swift' |
 **成功标准：**
 
 1. 类 A 调用点不再钉死 `#D98324`；切换到 `terracotta` / `mistBlue` 后，小说顶栏 tint、关键 CTA、Chat 中同类控件跟随 runtime accent（模拟器或契约可证）。
-2. `pi-steel`（`canvasScope == .appWide`）下，已裁决的工作页绘制纹理；`sit-terracotta`（`.shell`）下 Chat **仍无**点阵（回归）。
+2. `pi-steel` / `sit-terracotta`（均为 `.shell`）下 Chat **无**点阵/方格（只留纸色）；首页/外观仍绘纹理。`appWide` 仅留给导入包或未来 opt-in。
 3. `docs/IOS_THEME_PACK_DESIGN_SPEC.md` 的 builtins / enum 表与代码一致（含 `pi`/`notion`/`lineGrid`/`serifWordmark`/`monospace`/`steelBlue`/`notionBlue`）。
 4. `AmberThemePackTests` + 受影响定点测试全绿；首页契约不回退。
 
@@ -179,7 +179,7 @@ rg -n "validate\(|invalidHex|immersivePaper" iosApp/iosApp/AmberThemePack.swift
 2. 深色下 `background ≠ surface ≠ surface2` 仍成立（契约测试）。
 3. 导入 JSON 时：accent 相对其 ink 未达约定对比度则拒绝并给出可读错误（阈值写入测试；初值 **3.0:1** large-text AA 量级，保住既有 steelBlue/mistBlue 配对；JSON v1 不含 palette，故不做 fg/bg 导入门禁）。
 4. 外观设置主题卡预览仍用 **light 配方**（现有行为保留，避免深色模式预览割裂）。
-5. 模拟器：系统深色 × 至少 `warm-amber` / `sit-terracotta` / `pi-steel` / `notion-blue` 四包抽查可读。
+5. 模拟器：系统深色 × 至少 `sit-terracotta` / `pi-steel` / `notion-blue` 三包 + 一组自定义 paper×accent 抽查可读。
 
 ### P1.2 设计要点
 
@@ -361,7 +361,7 @@ xcodebuild -quiet -project iosApp/AmberAgent.xcodeproj -scheme iosApp \
 
 | 包 | 浅色 | 深色（P1+） |
 |---|---|---|
-| warm-amber | 首页 + Chat + 设置 | 同左 |
+| 自定义（如暖灰×琥珀） | 首页 + Chat + 设置 | 同左 |
 | sit-terracotta | 首页有点阵；Chat 无点阵 | 同左 |
 | pi-steel | Chat/已 opt-in 工作页有线格 | 同左 |
 | notion-blue | 激活行中性晕、蓝仅点缀 | 同左 |

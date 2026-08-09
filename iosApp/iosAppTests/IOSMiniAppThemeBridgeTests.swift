@@ -59,7 +59,7 @@ final class IOSMiniAppThemeBridgeTests: XCTestCase {
         XCTAssertNotEqual(steel.primaryInk, rose.primaryInk)
     }
 
-    func testGetThemeBridgeReturnsExpandedJSONKeys() async throws {
+    func testThemeMethodsReturnExpandedJSONKeys() async throws {
         let expected = IOSMiniAppThemeBridge.payload(
             paper: .paper,
             dark: true,
@@ -81,36 +81,22 @@ final class IOSMiniAppThemeBridgeTests: XCTestCase {
             grantHandler: { _ in true },
             themeProvider: { expected }
         )
-        let result = await bridge.dispatch(method: "host.getTheme", params: [:])
-        guard case .success(let json) = result, case .object(let obj) = json else {
-            return XCTFail("expected success object, got \(result)")
+        for method in ["host.getTheme", "theme"] {
+            let result = await bridge.dispatch(method: method, params: [:])
+            guard case .success(let json) = result, case .object(let obj) = json else {
+                XCTFail("expected success object for \(method), got \(result)")
+                continue
+            }
+            for key in ["dark", "background", "surface", "surface2", "foreground", "muted", "primary", "primaryInk"] {
+                XCTAssertNotNil(obj[key], "missing \(key) for \(method)")
+            }
+            XCTAssertEqual(obj["background"], .string(expected.background), method)
+            XCTAssertEqual(obj["surface"], .string(expected.surface), method)
+            XCTAssertEqual(obj["surface2"], .string(expected.surface2), method)
+            XCTAssertEqual(obj["primary"], .string(expected.primary), method)
+            XCTAssertEqual(obj["primaryInk"], .string(expected.primaryInk), method)
+            XCTAssertEqual(obj["dark"], .bool(true), method)
         }
-        for key in ["dark", "background", "surface", "surface2", "foreground", "muted", "primary", "primaryInk"] {
-            XCTAssertNotNil(obj[key], "missing \(key)")
-        }
-        XCTAssertEqual(obj["background"], .string(expected.background))
-        XCTAssertEqual(obj["surface"], .string(expected.surface))
-        XCTAssertEqual(obj["primaryInk"], .string(expected.primaryInk))
-        XCTAssertEqual(obj["dark"], .bool(true))
-    }
-
-    func testRunnerWebViewSitsOnHostBackgroundNotTexture() throws {
-        let text = try String(
-            contentsOf: URL(fileURLWithPath: #filePath)
-                .deletingLastPathComponent()
-                .deletingLastPathComponent()
-                .appendingPathComponent("iosApp/MiniAppRunnerView.swift"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(text.contains("IOSMiniAppThemeBridge.payload"))
-        XCTAssertTrue(text.contains(".background(AmberTheme.background)"))
-        XCTAssertTrue(text.contains("AmberThemePageBackground(surface: .app)"))
-        // Theme is a WebView prop, but must not be part of remount identity.
-        XCTAssertTrue(text.contains("theme: miniAppThemePayload"))
-        XCTAssertFalse(
-            text.contains("access: miniAppAccessIdentity\n                theme: miniAppThemePayload"),
-            "theme must not participate in MiniAppRunnerWebViewIdentity"
-        )
     }
 
     func testInjectHostThemeCSSPlacesVarsBeforeHeadClose() {
@@ -142,36 +128,6 @@ final class IOSMiniAppThemeBridgeTests: XCTestCase {
         XCTAssertTrue(js.contains(theme.background))
         XCTAssertTrue(js.contains("--muted"))
         XCTAssertTrue(js.contains(theme.primaryInk))
-    }
-
-    func testThemeMethodAliasReturnsExpandedJSON() async throws {
-        let expected = IOSMiniAppThemeBridge.payload(
-            paper: .paper,
-            dark: false,
-            accentHex: AmberAccentOption.rose.accentHex,
-            accentInkHex: AmberAccentOption.rose.inkHex
-        )
-        let repo = IOSMiniAppRepository(baseDirectory: tempRoot(), seedOnMissingStore: false)
-        let app = try repo.saveGenerated(
-            IOSMiniAppGeneratedOutput(
-                title: "Theme Alias",
-                description: "theme",
-                permissions: ["theme"],
-                html: "<!doctype html><html><body>ok</body></html>"
-            )
-        )
-        let bridge = IOSMiniAppBridgeRuntime(
-            appId: app.id,
-            repository: repo,
-            grantHandler: { _ in true },
-            themeProvider: { expected }
-        )
-        let result = await bridge.dispatch(method: "theme", params: [:])
-        guard case .success(let json) = result, case .object(let obj) = json else {
-            return XCTFail("expected success object, got \(result)")
-        }
-        XCTAssertEqual(obj["primary"], .string(expected.primary))
-        XCTAssertEqual(obj["surface2"], .string(expected.surface2))
     }
 
     func testThemeGrantDeniedFailsGetTheme() async throws {

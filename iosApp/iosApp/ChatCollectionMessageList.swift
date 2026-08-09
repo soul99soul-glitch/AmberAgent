@@ -474,7 +474,7 @@ struct NativeChatTimelineView: View {
                 await Task.yield()
                 guard replayToken == nativeScrollFallbackReplayToken,
                       !nativeUserScrollActive else { return }
-                withAnimation(.easeOut(duration: 0.2)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                     scrollPosition.scrollTo(id: ChatLayout.bottomAnchorID, anchor: .bottom)
                 }
             }
@@ -931,7 +931,7 @@ struct NativeChatTimelineView: View {
               previous.visibleHeight - current.visibleHeight > 2,
               current.contentHeight > current.visibleHeight + ChatLayout.bottomStickThreshold else { return }
         guard !isNativeScrollDriverActive else { return }
-        withAnimation(.easeOut(duration: 0.18)) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) {
             scrollPosition.scrollTo(id: ChatLayout.bottomAnchorID, anchor: .bottom)
         }
     }
@@ -958,7 +958,7 @@ struct NativeChatTimelineView: View {
             )
             return
         }
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
             scrollPosition.scrollTo(id: ChatLayout.bottomAnchorID, anchor: .bottom)
         }
     }
@@ -1062,7 +1062,7 @@ struct NativeChatTimelineView: View {
     private func requestNativeSwiftUIFallbackBottom(animated: Bool) {
         guard !nativeUserScrollActive else { return }
         if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                 scrollPosition.scrollTo(id: ChatLayout.bottomAnchorID, anchor: .bottom)
             }
         } else {

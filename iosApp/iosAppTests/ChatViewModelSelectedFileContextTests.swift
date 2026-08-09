@@ -272,6 +272,25 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         XCTAssertFalse(prepared.contains { $0.toText().contains("local provider failure") })
     }
 
+    func testEmptyResponseNoticesAreExcludedFromUpload() {
+        // 注入面审计 B11：空回复通知是本地终态文案，不应作为 assistant 历史上传。
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+
+        let prepared = viewModel.preparedUploadMessagesForTesting([
+            UIMessage.companion.user(prompt: "再问一次"),
+            ChatGenerationCoordinator.emptyResponseNotice(),
+        ])
+
+        XCTAssertFalse(prepared.contains { $0.toText().contains("模型没有返回任何内容") })
+        XCTAssertEqual(
+            prepared.filter { $0.role == MessageRole.user }.map { $0.toText() },
+            ["再问一次"]
+        )
+    }
+
     func testBranchMutationsAreRejectedWhileVisionRecognitionIsPending() async throws {
         let baseDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ChatViewModelVisionRecognitionBranchGuard-")
@@ -491,6 +510,22 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
 
         XCTAssertEqual(viewModel.selectedFileContextError, "图片识别中，请稍候")
         XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testModifyGeneratedImageSurfacesErrorWhileGenerationActive() {
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false
+        )
+        viewModel.generationActiveOverrideForTesting = { _ in true }
+
+        viewModel.modifyGeneratedImage(
+            sourceImageURL: "file:///tmp/source.png",
+            prompt: "make it brighter",
+            aspectRatio: "1:1"
+        )
+
+        XCTAssertEqual(viewModel.selectedFileContextError, "请等当前回复结束后再修改图片")
     }
 
     func testAttachSuccessAddsPreviewToNextMessageAndClearsIt() async throws {

@@ -86,7 +86,7 @@ final class IOSOrchestrationToolTests: XCTestCase {
         )
     }
 
-    private func makeParams() -> TextGenerationParams {
+    private func makeParams(maxTokens: Int32? = nil) -> TextGenerationParams {
         let model = Model(
             modelId: "test-model",
             displayName: "test-model",
@@ -105,7 +105,7 @@ final class IOSOrchestrationToolTests: XCTestCase {
             model: model,
             temperature: KotlinFloat(value: 0.7),
             topP: nil,
-            maxTokens: nil,
+            maxTokens: maxTokens.map { KotlinInt(value: $0) },
             tools: [],
             reasoningLevel: .off,
             customHeaders: [],
@@ -251,7 +251,9 @@ final class IOSOrchestrationToolTests: XCTestCase {
         // 后台 start 被调且 payload 正确。
         let handoff = try XCTUnwrap(scheduler.startedHandoff)
         XCTAssertEqual(handoff.conversationId.toHexDashString(), childHex)
-        XCTAssertEqual(handoff.uploadMessages.count, childMessages.count)
+        // 场景 C 修复后：upload 首条为子线程向编排语境（system），其后与持久化一致。
+        XCTAssertEqual(handoff.uploadMessages.count, childMessages.count + 1)
+        XCTAssertEqual(handoff.uploadMessages.first?.role, MessageRole.system)
         XCTAssertEqual(
             handoff.uploadMessages.filter { $0.role == MessageRole.user }.last?.toText(),
             "[mailbox NEW_TASK from /root]\n调研房价"
@@ -1371,6 +1373,121 @@ final class IOSOrchestrationToolTests: XCTestCase {
         await viewModel.orchestratedStatusRefreshTask?.value
         XCTAssertNil(viewModel.composerSendBlockReason(for: "你好"))
     }
+    /// 管线闭环：mailbox 语义说明只注入参与线程树的会话（父或子），普通会话不注入。
+    func testOrchestrationContextPromptInjectedOnlyForLinkedConversations() async throws {
+        let base = makeTempDirectory("OrchestrationPrompt")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeStore(directory: base)
+        await store.newConversation()
+        let parentId = try XCTUnwrap(store.currentConversation?.id)
+        let db = makeDatabase(directory: base)
+        let scheduler = FakeBackgroundScheduler()
+        let service = makeService(
+            store: store, db: db, scheduler: scheduler,
+            currentConversationId: { store.currentConversation?.id }
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            autoGenerateResponses: false,
+            orchestrationToolService: service
+        )
+        viewModel.conversationStore = store
+
+        func injectedSystemText(_ viewModel: ChatViewModel) -> String {
+            viewModel.preparedUploadMessagesForTesting([UIMessage.companion.user(prompt: "hi")])
+                .filter { $0.role == MessageRole.system }
+                .map { $0.toText() }
+                .joined(separator: "\n")
+        }
+
+        // 普通会话：不注入编排语境。
+        viewModel.reloadFromStore()
+        await viewModel.orchestratedStatusRefreshTask?.value
+        XCTAssertFalse(injectedSystemText(viewModel).contains("[mailbox"))
+
+        // spawn 后父会话（有子边）：注入。
+        let spawnResult = parseJSON(await service.execute(
+            toolName: "spawn_agent",
+            arguments: spawnArguments(taskName: "child"),
+            providerSetting: makeProviderSetting(),
+            params: makeParams(),
+            runId: "r1",
+            conversationId: parentId
+        ))
+        XCTAssertEqual(spawnResult["ok"] as? Bool, true)
+        viewModel.reloadFromStore()
+        await viewModel.orchestratedStatusRefreshTask?.value
+        let parentText = injectedSystemText(viewModel)
+        XCTAssertTrue(parentText.contains("[mailbox"))
+        XCTAssertTrue(parentText.contains("FINAL_ANSWER"))
+
+        // 切到子会话（有父边）：同样注入。
+        let childHex = try XCTUnwrap(spawnResult["child_thread_id"] as? String)
+        let childId = KotlinUuid.companion.parse(uuidString: childHex)
+        await store.selectConversation(id: childId)
+        viewModel.reloadFromStore()
+        await viewModel.orchestratedStatusRefreshTask?.value
+        XCTAssertTrue(injectedSystemText(viewModel).contains("[mailbox"))
+    }
+
+    /// 管线闭环场景 A/B：spawn 后不切换会话，run 级刷新路径（bindings.refreshOrchestrationLinks
+    /// 每轮组装前调用）必须让缓存跟上——否则信封折入时模型看不到编排语境。
+    func testOrchestrationLinksRefreshWithoutConversationSwitch() async throws {
+        let base = makeTempDirectory("OrchestrationRefresh")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let store = makeStore(directory: base)
+        await store.newConversation()
+        let parentId = try XCTUnwrap(store.currentConversation?.id)
+        let db = makeDatabase(directory: base)
+        let scheduler = FakeBackgroundScheduler()
+        let service = makeService(
+            store: store, db: db, scheduler: scheduler,
+            currentConversationId: { store.currentConversation?.id }
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            autoGenerateResponses: false,
+            orchestrationToolService: service
+        )
+        viewModel.conversationStore = store
+
+        viewModel.reloadFromStore()
+        await viewModel.orchestratedStatusRefreshTask?.value
+        XCTAssertFalse(viewModel.currentConversationHasOrchestrationLinks)
+
+        let spawnResult = parseJSON(await service.execute(
+            toolName: "spawn_agent",
+            arguments: spawnArguments(taskName: "child"),
+            providerSetting: makeProviderSetting(),
+            params: makeParams(),
+            runId: "r1",
+            conversationId: parentId
+        ))
+        XCTAssertEqual(spawnResult["ok"] as? Bool, true)
+
+        // 不 reloadFromStore（不切会话）——直接走 run 级刷新路径。
+        await viewModel.refreshCurrentConversationOrchestratedStatus()
+        XCTAssertTrue(viewModel.currentConversationHasOrchestrationLinks)
+
+        // 场景 C：子线程 handoff 的 upload 首条是子线程向编排语境，display 不带。
+        let handoff = try XCTUnwrap(scheduler.startedHandoff)
+        XCTAssertEqual(handoff.uploadMessages.first?.role, MessageRole.system)
+        XCTAssertTrue(handoff.uploadMessages.first?.toText().contains("child agent thread") == true)
+        XCTAssertFalse(handoff.displayMessages.first?.toText().contains("child agent thread") == true)
+        // 真机回归：子线程 handoff 的 maxTokens 被地板提升（makeParams 为 nil）。
+        XCTAssertEqual(handoff.params.maxTokens?.int32Value, 32_768)
+    }
+
+    /// 子线程 maxTokens 地板 helper：nil/小值 → 32k；显式大值保留；其余字段不动。
+    func testChildRunMaxTokenFloorHelper() {
+        XCTAssertEqual(makeParams().withMaxTokenFloor(32_768).maxTokens?.int32Value, 32_768)
+        XCTAssertEqual(makeParams(maxTokens: 4_000).withMaxTokenFloor(32_768).maxTokens?.int32Value, 32_768)
+        XCTAssertEqual(makeParams(maxTokens: 65_536).withMaxTokenFloor(32_768).maxTokens?.int32Value, 65_536)
+        XCTAssertEqual(makeParams(maxTokens: 65_536).withMaxTokenFloor(32_768).reasoningLevel, .off)
+    }
+
 }
 
 /// Sendable 桥：跨 await 调 non-Sendable 的 `any IOSToolExecutor`（照
@@ -1393,4 +1510,6 @@ private final class IOSToolExecutorBox: @unchecked Sendable {
             isUserInitiated: isUserInitiated
         )
     }
+
+
 }

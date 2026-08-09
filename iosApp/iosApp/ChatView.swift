@@ -7,9 +7,10 @@ import PhotosUI
 enum ChatTopBarLayout {
     static let controlsHeight: CGFloat = 54
     static let toolbarButtonDiameter: CGFloat = 38
-    /// 顶栏 `safeAreaBar` 在控件下方再贡献一段高度，让原生
-    /// `scrollEdgeEffectStyle(.soft)` 的渐变模糊盖住返回键与标题岛。
-    static let softEdgeExtension: CGFloat = 36
+    /// 顶栏 `safeAreaBar` 在控件下方的透明延伸，驱动原生 soft edge 几何。
+    /// 模拟器会把 soft edge 画满整段 bar（易显「模糊带偏长」）；真机 Liquid Glass 更短。
+    /// 取小延伸：盖住按钮下沿即可，避免 Simulator 上大面积雾带。
+    static let softEdgeExtension: CGFloat = 8
 }
 
 private enum ComposerPanel: String, Identifiable {
@@ -998,7 +999,7 @@ struct ChatView: View {
             }
 
             VStack(spacing: 8) {
-                    // P1-a: 生成中排队条（空队列零占位，不占高度）。
+                    // P1-a: 排队条与整行 dock 同宽（右缘对齐发送键），空队列零占位。
                     if !viewModel.steerQueue.isEmpty {
                         ChatSteerQueueStrip(
                             entries: viewModel.steerQueue,
@@ -1006,16 +1007,14 @@ struct ChatView: View {
                         )
                     }
 
-                    // Apple Music dock 风格:左侧输入胶囊 + 右侧独立圆形发送键,两块分离的原生
-                    // Liquid Glass。`.bottom` 对齐让圆形发送键随胶囊向上增高时仍贴住底边。
+                    // Apple Music dock：左侧输入胶囊 + 右侧发送键；底对齐。
                     HStack(alignment: .bottom, spacing: 8) {
-                        // 外高对齐发送键 54：内容行 max(附件 44, 文本 ≥40) + 上下 5。
-                        // 旧 vertical 7 → 44+14=58，比发送高 4pt，底对齐时顶边会「差一截」。
                         HStack(alignment: .center, spacing: 6) {
                             ComposerAttachToggleButton(
                                 isExpanded: isAttachExpanded,
                                 isBusy: viewModel.isAttachingSelectedFile,
-                                isDisabled: viewModel.isLoading
+                                // 生成中允许加附件以便入队；识图中/审批中/读文件中仍禁用。
+                                isDisabled: viewModel.isRecognizingImages
                                     || viewModel.isAttachingSelectedFile
                                     || hasPendingToolApproval
                             ) {
@@ -1126,6 +1125,10 @@ struct ChatView: View {
         .padding(.top, 8)
         .padding(.bottom, 8)
         .animation(.spring(response: 0.26, dampingFraction: 0.86), value: showsComposerMeta)
+        // 完成瞬间建议条插入会让 composer 长高一截：旧实现里转场动画只管建议条
+        // 自己，时间轴可用高度一帧被吃掉 → 底部锚定内容跳一下。给建议条显隐加
+        // 布局动画，高度连续变化，滚动层逐帧重锚，内容平滑上移。
+        .animation(.easeOut(duration: 0.2), value: viewModel.chatSuggestions.isEmpty)
     }
 
     private var sendEnabled: Bool {
@@ -1205,14 +1208,13 @@ struct ChatView: View {
             viewModel.isLoading
     }
 
-    /// P1-a: 生成中且有可发送文本时，发送键翻转为「发送（加入队列）」；
-    /// 无文本时保持「停止」。复核修复：run 激活但发送被拦截时（文本+附件、
-    /// 队列满）必须保持停止键，否则用户失去停止生成的控制。
+    /// P1-a: 生成中且有可入队内容（文本/图/文件）时，发送键翻转为「发送（加入队列）」；
+    /// 无内容时保持「停止」。run 激活但发送被拦截（队列满）时保持停止键。
     private var isComposerStopMode: Bool {
         Self.composerSendButtonIsStopMode(
             isRunActive: isCurrentConversationRunActive,
             isRecognizingImages: viewModel.isRecognizingImages,
-            hasSendableText: hasComposerSendableText,
+            hasSendableContent: hasComposerSendableContent,
             sendEnabled: sendEnabled
         )
     }
@@ -1220,16 +1222,18 @@ struct ChatView: View {
     static func composerSendButtonIsStopMode(
         isRunActive: Bool,
         isRecognizingImages: Bool,
-        hasSendableText: Bool,
+        hasSendableContent: Bool,
         sendEnabled: Bool
     ) -> Bool {
         guard isRunActive || isRecognizingImages else { return false }
         if isRecognizingImages { return true }
-        return !hasSendableText || !sendEnabled
+        return !hasSendableContent || !sendEnabled
     }
 
-    private var hasComposerSendableText: Bool {
+    private var hasComposerSendableContent: Bool {
         !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !viewModel.pendingImages.isEmpty
+            || viewModel.pendingSelectedFilePreview != nil
     }
 
     private var showsComposerMeta: Bool {

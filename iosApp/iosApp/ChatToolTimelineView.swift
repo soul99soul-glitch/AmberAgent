@@ -435,8 +435,11 @@ struct ChatToolStepModel: Identifiable {
             "read_health": "读取健康数据"
         ]
         if let mapped = known[name] { return mapped }
-        if name.hasPrefix("mcp__") { return "MCP " + name.replacingOccurrences(of: "mcp__", with: "") }
-        return name.isEmpty ? "工具调用" : "调用 \(name)"
+        // 动态工具名同样受列宽预算约束（见 combinedLine 注释），完整名在详情 sheet。
+        if name.hasPrefix("mcp__") {
+            return "MCP " + widthCappedPrefix(name.replacingOccurrences(of: "mcp__", with: ""), units: 32)
+        }
+        return name.isEmpty ? "工具调用" : "调用 \(widthCappedPrefix(name, units: 32))"
     }
 
     private static func scrapeURL(from input: String) -> String? {
@@ -531,11 +534,31 @@ struct ChatToolStepModel: Identifiable {
 
     /// "<verb> <subject>" on one line; the subject (query / prompt / target / task) is folded in
     /// so the pill reads like the action, not just a status word. Trimmed and length-capped.
+    ///
+    /// 上限按聊天列宽预算倒推（footnote 字号下 verb≤6 字 + subject 14 字 + 图标/
+    /// 状态/内边距 ≈ 330pt ≤ 361pt 列宽）：cell 自 sizing 用无界提案询问理想宽度时
+    /// `lineLimit(1)` 不生效，超长 subject 会把胶囊理想宽撑过列宽——轻则列宽随
+    /// toolCallStarted/完成换词跳变，重则整行居中裁切、文字顶到屏幕两端。
+    /// 完整内容在详情 sheet，胶囊只是状态芯片。
     private static func combinedLine(_ verb: String, _ subject: String?) -> String {
         guard let subject else { return verb }
         let oneLine = subject.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespaces)
         guard !oneLine.isEmpty else { return verb }
-        return "\(verb) \(String(oneLine.prefix(56)))"
+        return "\(verb) \(widthCappedPrefix(oneLine, units: 28))"
+    }
+
+    /// 按显示宽度预算截断（CJK 计 2、ASCII 计 1）：纯按 Character 数会让
+    /// ASCII subject 过短（14 个英文字母 ≈ 98pt，远低于列宽预算，信息白白损失），
+    /// CJK 与混合文本仍守在 361pt 列宽内。
+    private static func widthCappedPrefix(_ text: String, units: Int) -> String {
+        var used = 0
+        var count = 0
+        for character in text {
+            used += character.isASCII ? 1 : 2
+            if used > units { break }
+            count += 1
+        }
+        return String(text.prefix(count))
     }
 
     private static func searchQuery(from input: String) -> String? {

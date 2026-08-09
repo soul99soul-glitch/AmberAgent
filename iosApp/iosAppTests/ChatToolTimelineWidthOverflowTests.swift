@@ -44,6 +44,54 @@ final class ChatToolTimelineWidthOverflowTests: XCTestCase {
         XCTAssertFalse(title.contains("https://"), "不应退回整段 URL，实际=\(title)")
     }
 
+    /// cell 自 sizing 用无界提案询问理想宽度：胶囊理想宽必须自身就在列宽预算内，
+    /// 否则列宽随 toolCallStarted/完成换词跳变、超长行被居中裁切顶到屏幕两端。
+    /// 有界提案下的 truncation 由上一条用例覆盖，这里只锁理想宽。
+    func testToolCapsuleIdealWidthStaysWithinColumnUnderUnboundedProposal() {
+        let longCJK = String(repeating: "长", count: 40)
+        let tools: [UIMessagePart.Tool] = [
+            UIMessagePart.Tool(
+                toolCallId: "call_search_long",
+                toolName: "search_web",
+                input: #"{"query":""# + longCJK + #""}"#,
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            ),
+            UIMessagePart.Tool(
+                toolCallId: "call_image_long",
+                toolName: "generate_image",
+                input: #"{"prompt":""# + longCJK + #""}"#,
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            ),
+            UIMessagePart.Tool(
+                toolCallId: "call_mcp_long",
+                toolName: "mcp__a_very_long_server_name__a_very_long_tool_name",
+                input: "{}",
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            ),
+        ]
+        for tool in tools {
+            let host = UIHostingController(rootView: ChatToolTimeline(steps: [ChatToolStepModel(tool: tool)]))
+            let fitted = host.sizeThatFits(in: CGSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: UIView.layoutFittingExpandedSize.height
+            ))
+            XCTAssertLessThanOrEqual(
+                fitted.width,
+                columnWidth + 1,
+                "胶囊理想宽超出列宽（\(tool.toolName)）：fitted=\(fitted)"
+            )
+        }
+    }
+
     func testLongWebMountToolTitleFitsWhenColumnWidthIsProposed() {
         let input = """
         {"display_name":"GitHub","homepage_url":"https://github.com/openai/codex","site_id":"user_github","timeout_ms":15000}

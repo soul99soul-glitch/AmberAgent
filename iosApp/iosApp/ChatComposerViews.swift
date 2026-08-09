@@ -1167,7 +1167,7 @@ struct ComposerPendingImageStrip: View {
                                     .resizable()
                                     .scaledToFill()
                                     .frame(width: 56, height: 56)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .clipShape(RoundedRectangle(cornerRadius: AmberTheme.radiusXLarge, style: .continuous))
                             }
                             Button {
                                 onRemove(item.id)

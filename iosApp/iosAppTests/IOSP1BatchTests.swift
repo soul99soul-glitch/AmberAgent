@@ -2,59 +2,11 @@ import XCTest
 @preconcurrency import Shared
 @testable import iosApp
 
-/// P1 batch tests: PPTX parsing + memory recall relevance scoring. These are
-/// the pure-algorithm/document-parsing fixes that don't need a real model.
-/// (P1-1 annotation render + P1-13 nickname are UI/bridge changes verified by
-/// build + the existing annotation/nickname data flowing through.)
+/// P1 memory recall relevance-scoring tests that don't need a real model.
+/// P1-1 annotation render and P1-13 nickname remain UI/bridge behavior verified
+/// by the build and their existing data flow.
 @MainActor
 final class IOSP1BatchTests: XCTestCase {
-
-    // MARK: - P1-11 PPTX text extraction
-
-    /// `extractPptxText` is private; verify via the slide-XML shape it parses.
-    /// We mirror the DrawingML `<a:t>` structure a real PPTX slide uses.
-    func testPptxSlideTextExtractionFromDrawingML() throws {
-        // A minimal PPTX slide body: two paragraphs with text runs in <a:t>.
-        let slideXML = """
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-          <p:cSld><p:spTree>
-            <p:sp><p:txBody>
-              <a:p><a:r><a:t>Title Slide</a:t></a:r></a:p>
-              <a:p><a:r><a:t>Bullet point one</a:t></a:r></a:p>
-              <a:p><a:r><a:t>Items &amp; notes</a:t></a:r></a:p>
-            </p:txBody></p:sp>
-          </p:spTree></p:cSld>
-        </p:sld>
-        """
-        // Drive the extractor via the same regex the production code uses, by
-        // constructing a DocumentAccessStore-owned static reflection is not
-        // possible (private). Instead assert the <a:t> content is present after
-        // a reference extraction pass — this guards the contract the reader
-        // relies on.
-        let texts = extractATElements(from: slideXML)
-        XCTAssertTrue(texts.contains("Title Slide"))
-        XCTAssertTrue(texts.contains("Bullet point one"))
-        XCTAssertTrue(texts.contains("Items & notes"), "XML entities must be decoded")
-    }
-
-    /// Reference `<a:t>` extractor mirroring the production regex, used to
-    /// assert the contract the PPTX reader depends on (so a regex change here
-    /// would surface in this test even though extractPptxText is private).
-    private func extractATElements(from xml: String) -> [String] {
-        let prepared = xml.replacingOccurrences(of: "</a:p>", with: "<a:t>\n</a:t>")
-        let pattern = #"<a:t(?:\s[^>]*)?>(.*?)</a:t>"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) else {
-            return []
-        }
-        let matches = regex.matches(in: prepared, range: NSRange(prepared.startIndex..., in: prepared))
-        return matches.compactMap { match -> String? in
-            guard match.numberOfRanges >= 2,
-                  let range = Range(match.range(at: 1), in: prepared) else { return nil }
-            return String(prepared[range])
-                .replacingOccurrences(of: "&amp;", with: "&")
-        }
-    }
 
     // MARK: - P1-3 Memory recall relevance scoring
 
