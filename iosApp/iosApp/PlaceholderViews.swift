@@ -2847,11 +2847,11 @@ private struct ConversationSummaryRow: View {
         .buttonStyle(HomePressStateStyle(pressed: $pressed, scale: 0.98, scaleAnchor: .leading))
         .accessibilityLabel(accessibilityRowLabel)
         // 主操作:Apple Music 同款左右滑动(原生 List swipeActions，iOS 26 自带 Liquid Glass 渲染)。
-        // 右滑→删除(整行划到底即删) / 重命名;左滑→置顶切换。删除仍走二次确认弹窗，避免误删。
+        // 右滑→删除(整行划到底触发确认) / 重命名;左滑→置顶切换。删除只打开二次确认，真正删在 alert 确认后。
+        // 故意不用 role: .destructive：List 会把它当“立即删除”先把行动画移走，数据还在时确认弹窗下就会闪一下又弹回。
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            // 删除是危险动作:显式 .tint(.red) 强制红色，否则会继承 AppShell 的全局
-            // 强调色 tint(.swipeActions 的 destructive 默认色会被环境 tint 覆盖)。
-            Button(role: .destructive, action: onDelete) {
+            // 危险色靠显式 .tint(.red)；不用 role: .destructive（见上）。未设 tint 时会继承 AppShell 强调色。
+            Button(action: onDelete) {
                 Label("删除", systemImage: "trash")
             }
             .tint(.red)

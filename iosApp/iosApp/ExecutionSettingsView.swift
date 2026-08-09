@@ -73,7 +73,8 @@ struct ExecutionSettingsView: View {
     }
 
     private var toolLoopSection: some View {
-        VStack(spacing: 0) {
+        let clampedCount = SettingsStore.clampChatMaxToolResumeCount(chatMaxToolResumeCount)
+        return VStack(spacing: 0) {
             AmberSectionLabel(text: "工具循环")
             AmberFormGroup {
                 HStack(spacing: 12) {
@@ -93,12 +94,23 @@ struct ExecutionSettingsView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Stepper(
-                        "\(SettingsStore.clampChatMaxToolResumeCount(chatMaxToolResumeCount)) 次",
-                        value: $chatMaxToolResumeCount,
-                        in: SettingsStore.chatMaxToolResumeCountRange
-                    )
-                    .fixedSize()
+                    // 数值与 Stepper 分列：等宽数字 + 固定标签宽，避免「16 次 / 17 次」
+                    // 因比例数字宽窄不同把左侧说明挤成 2/3 行来回跳。
+                    HStack(spacing: 6) {
+                        Text("\(clampedCount) 次")
+                            .font(.body.monospacedDigit())
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(1)
+                            // 覆盖 range 上限「24 次」的宽度，数值变化时不改列宽。
+                            .frame(width: 44, alignment: .trailing)
+                        Stepper(
+                            "",
+                            value: $chatMaxToolResumeCount,
+                            in: SettingsStore.chatMaxToolResumeCountRange
+                        )
+                        .labelsHidden()
+                        .fixedSize()
+                    }
                 }
                 .frame(minHeight: 58)
                 .padding(.horizontal, 14)
