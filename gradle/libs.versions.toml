@@ -7,7 +7,6 @@ kotlin = "2.3.21"
 coreKtx = "1.18.0"
 junit = "4.13.2"
 robolectric = "4.14.1"
-kotest = "6.0.0.M4"
 junitVersion = "1.3.0"
 espressoCore = "3.7.0"
 commons-text = "1.15.0"
@@ -51,8 +50,6 @@ security-crypto = "1.1.0-alpha07"
 credentials = "1.6.0"
 googleid = "1.1.1"
 play-services-auth = "21.4.0"
-appcompat = "1.7.1"
-material = "1.13.0"
 ucrop = "2.2.11-native"
 haze = "1.7.2"
 uiautomator = "2.4.0-beta02"
@@ -63,7 +60,6 @@ ktor = "3.4.3"
 jmdns = "3.6.3"
 slf4j = "2.0.17"
 sqlite-android = "-SNAPSHOT"
-skie = "0.9.5"
 
 [libraries]
 androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "cameraCore" }
@@ -77,8 +73,6 @@ jlatexmath-font-greek = { module = "com.github.rikkahub.jlatexmath-android:jlate
 jlatexmath-font-cyrillic = { module = "com.github.rikkahub.jlatexmath-android:jlatexmath-font-cyrillic", version.ref = "jlatexmath" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
-kotest-runner-junit5 = { group = "io.kotest", name = "kotest-runner-junit5", version.ref = "kotest" }
-kotest-property = { group = "io.kotest", name = "kotest-property", version.ref = "kotest" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycleRuntimeKtx" }
@@ -151,8 +145,6 @@ androidx-credentials = { group = "androidx.credentials", name = "credentials", v
 androidx-credentials-play-services-auth = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
 play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "play-services-auth" }
-androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 ucrop = { group = "com.github.yalantis", name = "ucrop", version.ref = "ucrop" }
 haze = { module = "dev.chrisbanes.haze:haze", version.ref = "haze" }
 haze-materials = { module = "dev.chrisbanes.haze:haze-materials", version.ref = "haze" }
@@ -181,4 +173,3 @@ android-test = { id = "com.android.test", version.ref = "agp" }
 baselineprofile = { id = "androidx.baselineprofile", version.ref = "baselineprofile" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 androidx-room = { id = "androidx.room", version.ref = "room" }
-skie = { id = "co.touchlab.skie", version.ref = "skie" }

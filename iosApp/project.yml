@@ -12,6 +12,14 @@ settings:
     SWIFT_VERSION: "6.1"
     IPHONEOS_DEPLOYMENT_TARGET: "26.0"
     WATCHOS_DEPLOYMENT_TARGET: "11.0"
+  configs:
+    Debug:
+      SHARED_FRAMEWORK_CONFIGURATION: debugFramework
+    Release:
+      SHARED_FRAMEWORK_CONFIGURATION: releaseFramework
+      EXCLUDED_SOURCE_FILE_NAMES:
+        - chat-perf-growing-table.jsonl
+        - chat-perf-long-prose.jsonl
 
 configs:
   Debug: debug
@@ -26,9 +34,6 @@ packages:
     exactVersion: 0.13.0
   SwiftStreamingMarkdown:
     path: vendor/SwiftStreamingMarkdown
-  MarkdownView:
-    url: https://github.com/LiYanan2004/MarkdownView.git
-    revision: c1254af
   ChatLayout:
     url: https://github.com/ekazaev/ChatLayout.git
     exactVersion: 2.4.2
@@ -42,6 +47,8 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+        excludes:
+          - NovelCreation/AGENTS.md
       - path: SharedWatch
       # Deep Read editorial reader fonts — reference the already-tracked Android
       # font assets (no duplicate binary in the repo); bundled as app resources.
@@ -114,10 +121,10 @@ targets:
           - iphoneos
           - iphonesimulator
         FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]:
-          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/debugFramework"
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
         FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
-          - "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework"
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
         LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
@@ -140,8 +147,6 @@ targets:
         product: NIOSSH
       - package: SwiftStreamingMarkdown
         product: SwiftStreamingMarkdown
-      - package: MarkdownView
-        product: MarkdownView
       - package: ChatLayout
         product: ChatLayout
       - target: AmberAgentActivityWidget
@@ -167,10 +172,10 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/iosApp.app/iosApp"
         BUNDLE_LOADER: "$(TEST_HOST)"
         FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]:
-          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/debugFramework"
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
         FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
-          - "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework"
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
         LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
@@ -232,6 +237,8 @@ targets:
     platform: iOS
     sources:
       - path: iosApp
+        excludes:
+          - NovelCreation/AGENTS.md
       - path: SharedWatch
       - path: ../app/src/main/res/font/noto_serif_sc.otf
         buildPhase: resources
@@ -304,10 +311,10 @@ targets:
           - iphoneos
           - iphonesimulator
         FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]:
-          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/debugFramework"
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
         FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
-          - "$(SRCROOT)/../shared/build/bin/iosArm64/debugFramework"
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
         LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
           - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
@@ -333,8 +340,6 @@ targets:
         product: NIOSSH
       - package: SwiftStreamingMarkdown
         product: SwiftStreamingMarkdown
-      - package: MarkdownView
-        product: MarkdownView
       - package: ChatLayout
         product: ChatLayout
       - package: ish-arm64-pkg

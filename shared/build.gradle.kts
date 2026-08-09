@@ -1,12 +1,7 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
-    // SKIE disabled: version 0.9.5 does not support Kotlin 2.3.21 yet.
-    // Re-enable once SKIE releases a compatible version.
-    // alias(libs.plugins.skie)
 }
-
-// skie { isEnabled = false } // Uncomment if skie plugin is applied but should be disabled
 
 kotlin {
     jvm()
