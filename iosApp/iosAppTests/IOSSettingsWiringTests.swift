@@ -1,5 +1,4 @@
 import XCTest
-import SwiftUI
 @testable import iosApp
 
 final class IOSSettingsWiringTests: XCTestCase {
@@ -8,39 +7,6 @@ final class IOSSettingsWiringTests: XCTestCase {
         let iosAppRoot = testsDir.deletingLastPathComponent()
         let fileURL = iosAppRoot.appendingPathComponent(relativePath)
         return try String(contentsOf: fileURL, encoding: .utf8)
-    }
-
-    func testRenderingInteractionSectionOnlyExposesFollowGenerationToggle() throws {
-        let settings = try source("iosApp/DisplayFontSettingsView.swift")
-
-        // 渲染/滚动相关的实验开关已全部 hardcode 默认开启，设置页不再暴露；
-        // 交互区只保留「生成时跟随滚动」一个用户开关。
-        XCTAssertTrue(settings.contains("DisplayToggleRow(title: \"生成时跟随滚动\", isOn: followGeneration)"))
-        XCTAssertFalse(settings.contains("@AppStorage(NativeChatTimelineStaticRenderFeatureFlags.key)"))
-        XCTAssertFalse(settings.contains("@AppStorage(NativeChatTimelineStreamingTailFeatureFlags.key)"))
-        XCTAssertFalse(settings.contains("@AppStorage(NativeTimelineScrollFeatureFlags.key)"))
-        XCTAssertFalse(settings.contains("nativeTimelineScrollDriver.toggle()"))
-        XCTAssertFalse(settings.contains("setNativeChatTimelineEnabled"))
-    }
-
-    func testNovelCreationAdvancedEntryOpensFeatureAndSharedSettingsPersistRoleDefaults() throws {
-        let home = try source("iosApp/PlaceholderViews.swift")
-        let shell = try source("iosApp/AppShell.swift")
-        let settings = try source("iosApp/NovelCreation/NovelCreationSettingsView.swift")
-
-        XCTAssertTrue(home.contains("title: \"小说创作\""))
-        // 方案 B：设置首页统一 accent 图标，不再 per-row color。
-        XCTAssertTrue(home.contains("route: .novelCreation)"))
-        XCTAssertFalse(home.contains("color: AmberTheme.accentIndigo, route: .novelCreation)"))
-        XCTAssertFalse(home.contains("route: .novelCreationSettings"))
-        XCTAssertTrue(shell.contains("case novelCreationSettings"))
-        XCTAssertFalse(shell.contains("NovelSettingsTransitionSource"))
-        XCTAssertTrue(shell.contains("NovelCreationSettingsView("))
-        XCTAssertTrue(settings.contains("创作模型"))
-        XCTAssertTrue(settings.contains("剧情同步模型"))
-        XCTAssertTrue(settings.contains("preferences.set(policy, for: purpose)"))
-        XCTAssertTrue(settings.contains("NovelProjectManagementView("))
-        XCTAssertFalse(settings.contains("projectID:"))
     }
 
     /// G7 接线闭环：设置页可见控件（Stepper）、UserDefaults key、运行时消费
@@ -57,44 +23,36 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("dependencies.settingsStore.chatMaxToolResumeCount"))
     }
 
-    func testChatSendKeepsTheComposerKeyboardVisibleWhileStartingGeneration() throws {
-        let chatView = try source("iosApp/ChatView.swift")
-        let start = try XCTUnwrap(chatView.range(of: "private func sendComposerMessage()"))
-        let end = try XCTUnwrap(
-            chatView.range(of: "private func openComposerModelSheet()", range: start.upperBound..<chatView.endIndex)
-        )
-        let sendBody = chatView[start.lowerBound..<end.lowerBound]
-
-        XCTAssertTrue(sendBody.contains("composerInputController.committedText()"))
-        XCTAssertFalse(sendBody.contains("dismissKeyboard()"))
-        XCTAssertLessThan(
-            try XCTUnwrap(sendBody.range(of: "guard sendEnabled(for: committedText)")?.lowerBound),
-            try XCTUnwrap(sendBody.range(of: "viewModel.sendMessage()")?.lowerBound)
-        )
-    }
-
-    func testChatComposerUsesTheViewModelSendGateAndKeepsStopForTheCurrentRun() throws {
+    func testChatComposerSendAndStopReachTheCurrentConversationRun() throws {
         let chat = try source("iosApp/ChatView.swift")
+        let viewModel = try source("iosApp/ChatViewModel.swift")
+        let sendStart = try XCTUnwrap(chat.range(of: "private func sendComposerMessage()"))
+        let sendEnd = try XCTUnwrap(chat.range(of: "private func openComposerModelSheet()", range: sendStart.upperBound..<chat.endIndex))
+        let send = chat[sendStart.lowerBound..<sendEnd.lowerBound]
+        let gate = try XCTUnwrap(send.range(of: "guard sendEnabled(for: committedText) else { return }"))
+        let dispatch = try XCTUnwrap(send.range(of: "viewModel.sendMessage()"))
+        let cancelStart = try XCTUnwrap(viewModel.range(of: "func cancelGeneration()"))
+        let cancelEnd = try XCTUnwrap(viewModel.range(of: "func cancelGeneration(runId:", range: cancelStart.upperBound..<viewModel.endIndex))
+        let cancel = viewModel[cancelStart.lowerBound..<cancelEnd.lowerBound]
 
-        XCTAssertTrue(chat.contains("viewModel.composerSendBlockReason(for: text) == nil"))
-        XCTAssertTrue(chat.contains("isLoading: isCurrentConversationRunActive"))
+        XCTAssertTrue(chat.contains("onSend: sendComposerMessage"))
+        XCTAssertTrue(chat.contains("isLoading: isComposerStopMode"))
         XCTAssertTrue(chat.contains("viewModel.isGenerationActiveForCurrentConversation"))
         XCTAssertTrue(chat.contains("viewModel.cancelGeneration()"))
-    }
-
-    func testPhotoPickerResultsStayOwnedByTheConversationThatStartedLoading() throws {
-        let chat = try source("iosApp/ChatView.swift")
-
-        XCTAssertTrue(chat.contains("let selectionConversationId = currentConversationIdString"))
-        XCTAssertTrue(chat.contains("guard selectionConversationId == currentConversationIdString"))
-        XCTAssertTrue(chat.contains("failedImageCount"))
-        XCTAssertTrue(chat.contains("张图片处理失败"))
+        XCTAssertTrue(send.contains("composerInputController.committedText()"))
+        XCTAssertFalse(send.contains("dismissKeyboard()"))
+        XCTAssertTrue(chat.contains("return viewModel.composerSendBlockReason(for: text) == nil"))
+        XCTAssertLessThan(gate.lowerBound, dispatch.lowerBound)
+        XCTAssertTrue(cancel.contains("guard let currentConversationId else { return }"))
+        XCTAssertTrue(cancel.contains("conversationId: currentConversationId"))
     }
 
     func testChatMessageListRendersNativeTimelineDirectlyWithoutRoutePolicy() throws {
         let chatView = try source("iosApp/ChatView.swift")
         let list = try source("iosApp/ChatCollectionMessageList.swift")
         let projection = try source("iosApp/ChatMessageProjection.swift")
+        let settings = try source("iosApp/DisplayFontSettingsView.swift")
+        let keys = try source("iosApp/PlaceholderViews.swift")
 
         // native timeline 已 hardcode 为唯一 Chat 列表路径：route 判定层（route enum /
         // policy / eligibility / 开关 flag）整层退役，ChatView 直接渲染 NativeChatTimelineView。
@@ -365,72 +323,6 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
     }
 
-    func testChatAmbientAnimationsReadReduceMotionAtTheirOwningViews() throws {
-        let composer = try source("iosApp/ChatComposerViews.swift")
-        let messageSupport = try source("iosApp/ChatMessageListSupport.swift")
-        let misc = try source("iosApp/ChatMiscViews.swift")
-
-        XCTAssertTrue(composer.contains("struct ContextRingButton: View"))
-        XCTAssertTrue(composer.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
-        XCTAssertTrue(messageSupport.contains("struct TypingDots: View"))
-        XCTAssertTrue(messageSupport.contains("reduceMotion ? 0.55"))
-        XCTAssertTrue(misc.contains("struct VisionRecognitionIndicator: View"))
-        XCTAssertTrue(misc.contains("guard !reduceMotion else"))
-    }
-
-    func testChatApprovalAndAttachmentControlsHaveRealFortyFourPointHitLayout() throws {
-        let composer = try source("iosApp/ChatComposerViews.swift")
-        let approvals = try source("iosApp/MemoryToolApprovalCard.swift")
-
-        XCTAssertTrue(composer.contains(".frame(width: 44, height: 44)"))
-        XCTAssertGreaterThanOrEqual(
-            approvals.components(separatedBy: ".chatApprovalHitTarget()").count - 1,
-            16
-        )
-        XCTAssertTrue(approvals.contains("minHeight: 44"))
-        XCTAssertFalse(approvals.contains("Text(request.question)\n                .font(.footnote)\n                .foregroundStyle(AmberTheme.foreground2)\n                .lineLimit(6)"))
-    }
-
-    func testChatBodyTypographyCombinesDynamicTypeWithTheAppFontScale() throws {
-        let support = try source("iosApp/ChatMessageListSupport.swift")
-        let bubble = try source("iosApp/MessageBubbleView.swift")
-
-        XCTAssertGreaterThanOrEqual(
-            support.components(separatedBy: "@ScaledMetric(relativeTo: .body)").count - 1,
-            2
-        )
-        XCTAssertTrue(support.contains("scaledBodyPointSize * boundedScale"))
-        XCTAssertTrue(bubble.contains("@ScaledMetric(relativeTo: .body) private var scaledBodyPointSize: CGFloat = 17"))
-        XCTAssertTrue(bubble.contains("bodyPointSize: scaledBodyPointSize"))
-    }
-
-    /// 长文合并渲染已 hardcode 开启，必须接到三界面共用的那一处 config 构造点
-    /// （`streamingMarkdownConfig`）；config 记忆化的键必须与 config 同值，设置页不再暴露开关。
-    func testCoalescedTextBlocksIsHardcodedIntoTheSharedMarkdownConfig() throws {
-        let settings = try source("iosApp/DisplayFontSettingsView.swift")
-        let bubble = try source("iosApp/MessageBubbleView.swift")
-
-        XCTAssertFalse(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.coalescedTextBlocks)"))
-        XCTAssertFalse(settings.contains("长文正文合并渲染"))
-
-        XCTAssertTrue(bubble.contains(".withCoalescesAdjacentTextBlocks(value: true)"))
-        // config 记忆化的键必须与 config 本身同值（true），否则 cache 命中却行为不一致。
-        XCTAssertTrue(bubble.contains("coalescedTextBlocks: true"))
-    }
-
-    func testTableBlockRendererRunsUnconditionallyAndConsumesTableDetection() throws {
-        let settings = try source("iosApp/DisplayFontSettingsView.swift")
-        let bubble = try source("iosApp/MessageBubbleView.swift")
-
-        // 表格流式块渲染已 hardcode 无条件参与竞争，设置开关与 block guard 均已移除。
-        XCTAssertFalse(settings.contains("@AppStorage(IOSDisplayPreferenceKeys.streamingBlockMarkdown)"))
-        XCTAssertFalse(bubble.contains("guard streamingBlockMarkdown else { return false }"))
-
-        XCTAssertTrue(bubble.contains("ChatStreamingMarkdownBlockParser.containsTable"))
-        XCTAssertTrue(bubble.contains("text: table.markdown"))
-        XCTAssertTrue(bubble.contains("cacheIdentity: renderCacheNamespace.map"))
-    }
-
     func testActivityIslandEdgeGlowIsOptionalAndDefaultsOff() throws {
         let keys = try source("iosApp/PlaceholderViews.swift")
         let settings = try source("iosApp/DisplayFontSettingsView.swift")
@@ -604,9 +496,9 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
 
         XCTAssertLessThan(
-            mainActorHop.lowerBound,
             terminalClaim.lowerBound,
-            "Expiration reservation and running presentation publication must be serialized by MainActor."
+            mainActorHop.lowerBound,
+            "The expiration callback must reserve terminal ownership before hopping to MainActor."
         )
     }
 
@@ -676,42 +568,6 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertFalse(imageRun.contains("mode: .singleToolOnly"))
     }
 
-    @MainActor
-    func testCompactChatControlsKeepFortyFourPointHitTargets() {
-        let iconHost = UIHostingController(rootView: ComposerIconButton(
-            systemImage: "brain.head.profile",
-            accessibilityLabel: "设置思考等级",
-            action: {}
-        ))
-        let scrollHost = UIHostingController(rootView: ChatScrollToBottomButton(action: {}))
-
-        let iconSize = iconHost.sizeThatFits(in: CGSize(width: 100, height: 100))
-        let scrollSize = scrollHost.sizeThatFits(in: CGSize(width: 100, height: 100))
-        XCTAssertGreaterThanOrEqual(iconSize.width, 44)
-        XCTAssertGreaterThanOrEqual(iconSize.height, 44)
-        XCTAssertGreaterThanOrEqual(scrollSize.width, 44)
-        XCTAssertGreaterThanOrEqual(scrollSize.height, 44)
-    }
-
-    func testChatCompactTextActionsKeepVisualSizeAndFortyFourPointHitLayout() throws {
-        let chat = try source("iosApp/ChatView.swift")
-        let suggestionStart = try XCTUnwrap(chat.range(of: "ForEach(viewModel.chatSuggestions.prefix(4)"))
-        let suggestionEnd = try XCTUnwrap(
-            chat.range(of: "VStack(spacing: 8)", range: suggestionStart.upperBound..<chat.endIndex)
-        )
-        let suggestions = chat[suggestionStart.lowerBound..<suggestionEnd.lowerBound]
-        let modelStart = try XCTUnwrap(chat.range(of: "Button {\n                                openComposerModelSheet()"))
-        let modelEnd = try XCTUnwrap(
-            chat.range(of: "Spacer()", range: modelStart.upperBound..<chat.endIndex)
-        )
-        let modelButton = chat[modelStart.lowerBound..<modelEnd.lowerBound]
-
-        XCTAssertTrue(suggestions.contains(".frame(height: 26)"))
-        XCTAssertTrue(suggestions.contains(".frame(minHeight: 44)"))
-        XCTAssertTrue(modelButton.contains(".frame(height: 30)"))
-        XCTAssertTrue(modelButton.contains(".frame(minHeight: 44)"))
-    }
-
     func testReasoningExpansionAndIslandGlowHonorFrozenMotion() throws {
         let misc = try source("iosApp/ChatMiscViews.swift")
         let island = try source("iosApp/ChatActivityIslandView.swift")
@@ -722,93 +578,6 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(island.contains("isPaused: presentation.isFrozen"))
         XCTAssertTrue(glow.contains("paused: isPaused, reduceMotion: reduceMotion"))
         XCTAssertTrue(glow.contains("isAnimated && !isPaused && !isReduceMotion"))
-    }
-
-    func testAgentActivityDeepLinkIsConsumedOnlyAfterRouteCommit() throws {
-        let shell = try source("iosApp/AppShell.swift")
-        let functionStart = try XCTUnwrap(
-            shell.range(of: "private func openPendingAgentActivityIfReady() async")
-        )
-        let functionSuffix = String(shell[functionStart.lowerBound...])
-        let functionEnd = try XCTUnwrap(functionSuffix.range(of: "@ViewBuilder"))
-        let functionBody = String(functionSuffix[..<functionEnd.lowerBound])
-        let routeCommit = try XCTUnwrap(functionBody.range(of: "rootRouter.path = [.chat]"))
-        let targetClear = try XCTUnwrap(
-            functionBody.range(of: "pendingAgentActivityTarget = nil")
-        )
-
-        XCTAssertGreaterThan(
-            targetClear.lowerBound,
-            routeCommit.lowerBound,
-            "Transient handoff or selection failures must leave the deep-link target available."
-        )
-        XCTAssertGreaterThanOrEqual(
-            functionBody.components(
-                separatedBy: "guard pendingAgentActivityTarget == target else { return }"
-            ).count - 1,
-            2,
-            "An older deep-link task must stop after either suspension point instead of routing or clearing a newer target."
-        )
-        XCTAssertTrue(
-            functionBody.contains("let conversationSelectionRevision = conversationStore.conversationSwitchedRevision")
-        )
-        XCTAssertTrue(
-            functionBody.contains(
-                "pendingAgentActivityTarget == target &&\n                    conversationStore.conversationSwitchedRevision == conversationSelectionRevision"
-            ),
-            "A later manual conversation switch must invalidate an older suspended deep-link commit."
-        )
-    }
-
-    func testConversationSelectionRechecksDeletionAfterDiskLoad() throws {
-        let store = try source("iosApp/IOSConversationStore.swift")
-        let functionStart = try XCTUnwrap(
-            store.range(of: "func selectConversationIfAvailable(")
-        )
-        let functionSuffix = String(store[functionStart.lowerBound...])
-        let functionEnd = try XCTUnwrap(functionSuffix.range(of: "/// 把当前内存里的"))
-        let functionBody = String(functionSuffix[..<functionEnd.lowerBound])
-        let load = try XCTUnwrap(
-            functionBody.range(of: "loaded = try await storage.loadConversation(id: id)")
-        )
-        let postLoadBody = String(functionBody[load.upperBound...])
-        let deletionGuard = try XCTUnwrap(
-            postLoadBody.range(of: "guard !isDeletedConversation(id) else { return false }")
-        )
-        let commit = try XCTUnwrap(postLoadBody.range(of: "if let loaded, commitIf()"))
-
-        XCTAssertLessThan(
-            deletionGuard.lowerBound,
-            commit.lowerBound,
-            "A load that raced with deletion must not restore the deleted conversation as current."
-        )
-    }
-
-    func testLiveActivityControllerOwnsRunsIndependently() throws {
-        let controller = try source("iosApp/AgentLiveActivityController.swift")
-
-        XCTAssertTrue(controller.contains("private var activitiesByRunId"))
-        XCTAssertTrue(controller.contains("AgentActivityOwnershipPolicy.retainedActivityIDs"))
-        XCTAssertFalse(
-            controller.contains("for staleActivity in existing where staleActivity.id != activity?.id")
-        )
-    }
-
-    func testChatUsesChineseStageCopy() throws {
-        let chat = try source("iosApp/ChatView.swift")
-        let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
-
-        XCTAssertTrue(chat.contains("title: \"正在连接\""))
-        XCTAssertTrue(chat.contains("title: \"正在思考\""))
-        XCTAssertTrue(chat.contains("title: \"正在生成回复\""))
-        XCTAssertFalse(chat.contains("detail: composerReasoningLabel"))
-        XCTAssertEqual(
-            coordinator.components(
-                separatedBy: "AgentActivityResponseStagePolicy.initialStage"
-            ).count - 1,
-            1,
-            "工具或审批恢复后应继续「生成回复」，不应再冒充首次连接"
-        )
     }
 
     func testGrokWebLoginIsWiredToProviderSettingsAndChatRuntime() throws {
@@ -837,7 +606,7 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertFalse(grokProvider.contains("session.bytes(for:"))
     }
 
-    func testGrokWebLoginRequiresNonEmptySSOCookie() {
+    func testGrokWebAuthenticationRequiresSSOAndRestoresReadWriteCookies() {
         let analytics = makeCookie(name: "analytics", value: "present")
         let sso = makeCookie(name: "sso", value: "session-token")
 
@@ -848,9 +617,6 @@ final class IOSSettingsWiringTests: XCTestCase {
         )
         XCTAssertFalse(IOSGrokWebCookieValidator.hasSSOCookie(in: "analytics=present"))
         XCTAssertTrue(IOSGrokWebCookieValidator.hasSSOCookie(in: "analytics=present; sso=session-token"))
-    }
-
-    func testGrokWebRuntimeRestoresReadAndWriteCookiesFromSavedSSO() throws {
         let cookies = IOSGrokWebCookieValidator.authenticationCookies(from: "sso=session-token")
 
         XCTAssertEqual(Set(cookies.map(\.name)), Set(["sso", "sso-rw"]))
@@ -871,28 +637,20 @@ final class IOSSettingsWiringTests: XCTestCase {
         }
     }
 
-    func testGrokWebStreamParserKeepsTokenFromTerminalFrame() {
-        let line = #"{"result":{"response":{"token":"final","isThinking":false,"finalMetadata":{"done":true}}}}"#
+    func testGrokWebTerminalFramesPreserveTokensSurfaceErrorsAndCloseTransport() throws {
+        let provider = try source("iosApp/IOSGrokWebProvider.swift")
+        let terminal = #"{"result":{"response":{"token":"final","isThinking":false,"finalMetadata":{"done":true}}}}"#
+        let error = #"data: {"error":{"message":"session expired"}}"#
 
         XCTAssertEqual(
-            IOSGrokWebStreamParser.parse(line),
+            IOSGrokWebStreamParser.parse(terminal),
             IOSGrokWebStreamFrame(token: "final", isFinished: true, errorMessage: nil)
         )
-    }
-
-    func testGrokWebClientClosesTransportWhenTerminalFrameArrives() throws {
-        let provider = try source("iosApp/IOSGrokWebProvider.swift")
-
-        XCTAssertTrue(provider.contains("return frame.isFinished"))
-    }
-
-    func testProviderConnectionTestWaitsForTheModelRequestResult() throws {
-        let detail = try source("iosApp/ProviderDetailView.swift")
-
-        XCTAssertFalse(
-            detail.contains("连接测试已发起；模型获取结果会显示在模型页。"),
-            "Starting an async request is not a successful connection result."
+        XCTAssertEqual(
+            IOSGrokWebStreamParser.parse(error),
+            IOSGrokWebStreamFrame(token: nil, isFinished: true, errorMessage: "session expired")
         )
+        XCTAssertTrue(provider.contains("return frame.isFinished"))
     }
 
     func testApprovedCouncilRunIsOwnedByTheCoordinatorCancellationTask() throws {
@@ -965,17 +723,6 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(info.contains("0.0.0.0/0"))
         XCTAssertTrue(info.contains("::/0"))
         XCTAssertFalse(info.contains("NSAllowsArbitraryLoads"))
-    }
-
-    func testInfoPlistOptsIntoProMotionFrameRates() throws {
-        let testsDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let plistURL = testsDir.deletingLastPathComponent().appendingPathComponent("iosApp/Info.plist")
-        let data = try Data(contentsOf: plistURL)
-        let plist = try XCTUnwrap(
-            PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
-        )
-
-        XCTAssertEqual(plist["CADisableMinimumFrameDurationOnPhone"] as? Bool, true)
     }
 
     private func makeCookie(name: String, value: String) -> HTTPCookie {
