@@ -31,9 +31,40 @@ protocol NovelProjectPersisting: AnyObject, Sendable {
     func listRecoverySidecars() async throws -> [NovelRecoverySidecarV1]
     func writeRecoverySidecar(_ sidecar: NovelRecoverySidecarV1) async throws
     func removeRecoverySidecar(projectID: NovelProjectID, runID: NovelRunID) async throws
+    /// 多章代笔批进度 sidecar（跨进程恢复）；默认实现为空，文件仓覆盖。
+    func loadGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelGhostwriteBatchProgressRecord?
+    func saveGhostwriteBatchProgress(_ record: NovelGhostwriteBatchProgressRecord) async throws
+    func removeGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws
 }
 
 extension NovelProjectPersisting {
+    func loadGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelGhostwriteBatchProgressRecord? {
+        _ = projectID
+        _ = branchID
+        return nil
+    }
+
+    func saveGhostwriteBatchProgress(_ record: NovelGhostwriteBatchProgressRecord) async throws {
+        _ = record
+    }
+
+    func removeGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws {
+        _ = projectID
+        _ = branchID
+    }
+
     func commitProject(
         _ document: NovelProjectDocumentV1,
         expectedRevision: Int64
@@ -907,6 +938,30 @@ actor DefaultNovelCreation: NovelCreation {
         default:
             return false
         }
+    }
+
+    func loadGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelGhostwriteBatchProgressRecord? {
+        try await repository.loadGhostwriteBatchProgress(
+            projectID: projectID,
+            branchID: branchID
+        )
+    }
+
+    func saveGhostwriteBatchProgress(_ record: NovelGhostwriteBatchProgressRecord) async throws {
+        try await repository.saveGhostwriteBatchProgress(record)
+    }
+
+    func removeGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws {
+        try await repository.removeGhostwriteBatchProgress(
+            projectID: projectID,
+            branchID: branchID
+        )
     }
 }
 

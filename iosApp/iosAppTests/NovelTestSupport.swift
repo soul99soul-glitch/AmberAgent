@@ -224,7 +224,17 @@ actor InMemoryNovelProjectRepository: NovelProjectPersisting {
     private var lifecycleOperations: [
         NovelLifecycleOperationKey: NovelProjectLifecycleOperationRecord
     ] = [:]
+    private var ghostwriteProgress: [
+        String: NovelGhostwriteBatchProgressRecord
+    ] = [:]
     private var nextWriteFailure: NovelError?
+
+    private func ghostwriteProgressKey(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> String {
+        "\(projectID.description)|\(branchID.description)"
+    }
 
     func failNextWrite(with error: NovelError = .repositoryFailure("Injected write failure.")) {
         nextWriteFailure = error
@@ -428,6 +438,30 @@ actor InMemoryNovelProjectRepository: NovelProjectPersisting {
     func removeRecoverySidecar(projectID: NovelProjectID, runID: NovelRunID) async throws {
         try consumeWriteFailureIfNeeded()
         recoveries[NovelRecoveryKey(projectID: projectID, runID: runID)] = nil
+    }
+
+    func loadGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelGhostwriteBatchProgressRecord? {
+        ghostwriteProgress[ghostwriteProgressKey(projectID: projectID, branchID: branchID)]
+    }
+
+    func saveGhostwriteBatchProgress(_ record: NovelGhostwriteBatchProgressRecord) async throws {
+        try consumeWriteFailureIfNeeded()
+        let key = ghostwriteProgressKey(
+            projectID: record.projectID,
+            branchID: record.branchID
+        )
+        ghostwriteProgress[key] = record
+    }
+
+    func removeGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws {
+        try consumeWriteFailureIfNeeded()
+        ghostwriteProgress[ghostwriteProgressKey(projectID: projectID, branchID: branchID)] = nil
     }
 
     private func consumeWriteFailureIfNeeded() throws {

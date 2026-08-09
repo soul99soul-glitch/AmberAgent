@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-08
+Last updated: 2026-08-09 (ghostwrite self-heal P0/P1)
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
@@ -9,8 +9,8 @@ Last updated: 2026-08-08
 - Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
 - Tracking: `origin/feat/ios-provider-parity-claude`；本批提交完成后为 `11 ahead / 0 behind`，尚未 push。
-- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准（短 hash `3af394d41`）。2026-08-09 09:1x 覆盖安装当前工作区 Debug 包到 iPhone Air（iPhone18,4，`94918570-0680-5B93-8E38-7E6B355D4426`，未卸载）：Team `89QRFX9548`，`codesign --verify --deep --strict` 通过，新容器 `36E0C2AB-238A-446B-96DF-82C8E6D1C20C/iosApp.app`，数据库 UUID 保持 `AC96CD34-4AD9-4317-A4CD-6BB64DC7FD3F`（数据保留），主进程启动后存活验证通过。**本包 = P0–P3 全部 + 整体复核 8 项修复 + 真机反馈三项（session 读取/切会话回归/巨型输出超窗+Exa highlights）+ 用户主题包 WIP**。上一容器 `93F8DFB5-5848-4CCE-AB01-F3B8EB7F078D` 不再是装机基线。
-- Worktree: 主题/编排/Chat 等改动仍未提交；以实时 `git status --short` 为准。
+- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准（短 hash `fdcc4573c`）。2026-08-09 16:43 覆盖安装当前工作区 Debug 包到 iPhone Air（iPhone18,4，`94918570-0680-5B93-8E38-7E6B355D4426`，未卸载）：Team `89QRFX9548`，`codesign --verify --deep --strict` 通过，`app.amber.ios` 已 launch。装机容器 `876CE3B1-568A-4DA8-94A5-A129A7808DA2`。**含 skill-creator 2.2 + 附属文件保留修复 + Steer/主题/编排/Chat WIP**；vendor `rejectedEmphasisRepairRewriter` 改 `var` 以过真机编译。
+- Worktree: 主题/编排/Chat 等改动仍未提交；另含模型议会真问题精修 + 技能精修（未提交）。**主题 builtins 3 角色包** + **导入主题库**（审查最小修补已收口）。**Steer 闭环修补（2026-08-09 16:x）**：排队条与 dock 同宽（右对齐发送键）；≤3 条按内容高度（修 ScrollView 虚高）；成功终态自动发队列头一条，取消/失败才回填 composer。门禁：`IOSSteerQueueTests` **18/18**，已覆盖安装真机。**可选出厂 skill `visual-svg`**（diagram/illustration → `show-widget`，默认不启用）已接入。**Codex image2 垫图（2026-08-09）**：`generate_image` 声明加 `use_attached_image`/`source_image_url`；宿主在执行前把最近用户附图注入 `source_image_url`，经既有 Codex Responses `input_image` 路径垫图；路由提示 + OCR 回灌文案引导模型开开关。审查修补：后台 enrich 改用 `job.displayMessages`（不再读 live store）；`exec` 嵌套白名单排除 `generate_image`；生图卡圆角与 loading 横向条同构；生成中改图禁用并提示。未验证：真机 Codex OAuth 端到端垫图。议会 WIP 同前。以实时 `git status --short` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
 
 ## 编排体系借鉴计划（P0–P3 全部完成 2026-08-08，iOS 侧）
@@ -18,7 +18,7 @@ Last updated: 2026-08-08
 - 计划文档 `docs/AGENT_ORCHESTRATION_ADOPTION_PLAN.md`（含 P0 完成记录）。**P0（tool_search/工具暴露 + MCP `mcp__*` 展开）已按实现代理 + 独立 checker 复核 + 精准修复闭环**：iOS 静态工具 51+ 默认进 lazy 模式（首轮 24 常驻 + `tool_search`，命中下轮可见）；MCP 发现工具展开为独立声明默认 deferred；后台桥经 handoff `fullToolNames` 全目录重建并按轮刷新 params。
 - 关键行为变化：未暴露工具调用从"整轮硬失败"改为"软失败 + 搜索引导"（未知名仍硬失败）；lazy 时注入发现引导 system 片段；`type` 为数组的 MCP schema 不再崩溃。度量：20 个 MCP 工具展开后首轮可见 schema +0 字节。
 - 验证：xcodebuild 四套件（IOSToolSearchExposure/IOSMcpExpandedTool/IOSSkillMcpTool/IOSAgentToolEngine）+ KMP `:ai-core/:feature:tools:api/:shared` jvmTest 全绿（JDK 21 用 `~/.gradle/jdks` 工具链，本机无默认 JAVA_HOME）；checker 两轮对抗复核，无越界（用户并发 WIP 均未触碰）。
-- **P1-a（iOS steer 队列）已完成 2026-08-08**：生成激活期间 composer 发送不再被 `.generationActive` 拦截，改为入队（v1 仅文本 STEER，上限 20 对齐 Android `MAX_PENDING_USER_MESSAGES`）；消费时机 = 工具循环边界（`continueAfterToolResult` 折入下一轮 upload + `startStreaming` 头兜底，补绘重试轮不消费）；无边界简单问答在 run 终态（finishStreaming/cancel）把 leftover 按顺序拼接恢复进 composer（可见、不静默丢、不自动发起新生成）；持久化走 per-conversation sidecar `Documents/steer-queue/{conversationId}.json`（原子写、空删文件、冷启动恢复只进队列 UI 不自动发送）；UI 为 composer 上方排队条（ChatSteerQueueStrip：单行截断 + 44pt 撤销 + 计数，ScaledMetric/Reduce Motion/VoiceOver 标签），生成中发送键有文本时翻转为「加入队列」（无文本仍「停止」）。门禁：新增 `IOSSteerQueueTests` 8/8 + 回归三套件（ChatViewModelGenerationParams/IOSConversationStore/IOSToolSearchExposure）共 60/60 全绿；模拟器截图四态（两条排队/大字号/深色/空队列零占位）。未验证：真实 provider 下的端到端生成中排队（测试用 `generationActiveOverrideForTesting` 驱动）、后台 run 的队列消费（v1 前台边界专用，后台 run 的 leftover 留在队列 UI 待用户撤销或下个前台边界）、真机。
+- **P1-a（iOS steer 队列）已完成 2026-08-08，附件扩展+闭环修补 2026-08-09**：生成中发送入队（上限 20，含图/文件）；生成中附件钮可用（识图/审批/读文件中仍禁）；仅附件可入队；混合 leftover 分流；排队条最多可见 3 行可滚。门禁：`IOSSteerQueueTests` 17/17。未验证：真实 provider 端到端、后台 run 队列消费、真机。
 - **P1-b（mailbox 存储 + 折入）与 P1-c（spawn/list/interrupt + FINAL_ANSWER 回传）已完成 2026-08-08**（工作区未提交）：Room `mailbox_envelope`/`thread_edge` + `MailboxDao`（drainPending 事务化 exactly-once，`AND delivered_at IS NULL` 并发加固 loser 返回空）；前台两边界消费（continueAfterToolResult 末尾 + prepareAndStartStreaming 头门控 displayMessagesOverride==nil）；`IOSThreadOrchestrationToolService`（spawn 三模式 fork/边/durable 后台 run，深度上限 2、并发上限 4，start 失败回收 running 行，cancel/finishStreaming 双触发 FINAL_ANSWER 幂等去重，空转录也回传终态）；KMP 三工具声明 + 中文别名（ToolSearch.kt 六工具词条 P1-c 已加）+ `OrchestrationToolDeclarationsTest`。
 - **P1-d（线程间消息：send_message/followup_task/wait_agent + 后台引擎 mailbox drain）已完成 2026-08-08**（工作区未提交）：三工具声明进 `iosToolDeclaration`（非常驻 deferred 池；send 描述明示不唤醒、wait 描述含 steer 打断与 [5000,300000] clamp）；`IOSMailboxActivityCenter`（进程内 actor 广播，订阅在 actor 内同步注册 + bufferingNewest(1)，wait_agent 先订阅后查 pending 两窗口不丢）；`send_message` 入队不唤醒、`followup_task` 空闲目标走 spawn 同款 bootstrap（信封渲染直写目标会话 + delivered + durable 后台 run，抽取 `persistTargetMessages`/`startDurableBackgroundRun` 与 spawn 共用）、运行中目标仅入队等边界 drain；`wait_agent` 五出口（已有 pending 立即返回 / mailbox 活动事件 / steer 打断固定文案 / 超时 clamp 并在返回里说明 / Task 取消立即返回（引擎下一边界收口 wasCancelled，不吞、不等超时）；后台引擎 `IOSAgentToolEngine.run` 新增可选 `mailboxDrain`（默认 nil 零影响，SubAgent/Novel 不传），后台协调器接 `IOSMailboxStore.drainPending` + 会话持久化（复用既有写路径），调用点与 replacingTools 同点；信号点 = send/followup enqueue、notifyRunTerminal（FINAL_ANSWER）、`enqueueSteerMessage`；账本分类 wait_agent=pure、send/followup=sideEffect。门禁：`IOSThreadMessagingTests` 11/11（同树入队+边界折入/非树自身拒绝/followup idle bootstrap 与 running 仅入队（前后台两路径）/wait 五出口含 clamp 与取消/引擎两轮脚本 drain 折入+delivered+持久化）+ 回归四套件（IOSOrchestrationTool/IOSMailboxDelivery/IOSSteerQueue/IOSAgentToolEngine）共 66/66 全绿；`:ai-core:jvmTest :core:agent-store-room:jvmTest` 全绿（声明测试 6 项含三新工具）。残余：wait_agent 的 preempt-sampling 不做（v1 只在工具边界投递）、编排 UI（P1-e）、Android 接线；真机未验证。
 - **P1-e（限额与控制面）已完成**：并发计数从全局账本改活注册表（前台 run + 后台 activeJobs + 在途 bootstrap，检查+占槽 MainActor 原子）——崩溃残留 running 行不再误伤 spawn；子线程会话只读（composer `.orchestratedThread` + 四守卫；会话列表徽标未做，ConversationsView 当时在用户 WIP，VM 层 `isOrchestratedChild` 查询就绪）；Android `InProcessAgentRunner` 账本吞异常修复（`onLedgerError` 接线 `ChatService.addError`，无 SDK 未编译验证）。
@@ -28,6 +28,7 @@ Last updated: 2026-08-08
 - **整体复核轮（2026-08-08，两路独立审查 + 终验 PASS）**：逐阶段复核之外的整体复核抓到 1 个严重 + 5 个一般级跨阶段问题并全部修复——**S1：`send_message`/`followup_task`/`wait_agent` 声明从未进 `makeTextGenerationParams` 组装点**（P1-d 子系统生产不可达，逐阶段测试绕过了组装链；已补声明 + 生产链端到端契约测试）；M1 后台 drain 折入与终态保存谱系漂移（信封重复落盘+误导 notice → `saveBackgroundCompletion` 按消息 id 去重 + 差异全来自 drain 不插 notice）；M2 后台引擎 executor 表冻结（tool_search 命中"可声明不可执行" → 每轮 executorRebuilder 重建）；M3 spawn/followup 的 fullToolNames 被父可见子集截断（→ 桥全目录）；M4 `role_assistant_id` 入库不生效（→ fork 应用 + UUID 预校验，顺带拆掉 K/N `Uuid.parse` 非法输入终止进程雷）；M5 引导引用未声明的 `tools_list`（→ 补声明 + 本地执行）；M6 cell wait 无取消感知（→ 取消收口 + terminate 唤醒同 cell waiter）。终验：KMP 135/135 + iOS 九套件 176/176，PASS 零遗留。
 - **真机反馈增补（2026-08-09，均过 checker 复核）**：①跨会话读取 `session_search`/`session_read`（iOS；Android 的 conversation_search 只读当前会话，跨会话读取两端此前都没有；复用 iOS 存储层 `searchConversations`；非法 UUID 预校验防 K/N parse 终止进程；只读 pure 分类）；②**生成中切会话回归修复**：根因是交接守卫在任何前台工具执行中拒绝交接（wait_agent 把窗口从毫秒拉到分钟级）——纯工具（wait_agent/tool_search/session_* 等）在途时允许交接后台重放，副作用工具与生图维持拦截，被拦时经 publishUserVisibleError 提示；③**巨型工具输出超窗**：真机事故（Exa `contents.text=true` 把 1.09MB 全文灌进 search_web 输出并持久化，CJK 加权 ≈103 万 token 超 85 万预算，会话卡死）——三层修复：搜索输出 12,000 字符上限、工具输出漏斗统一截断（JSON 保形、判定键保护、地板 12）、`fitMessagesToTokenBudget` 兜底就地截断巨型工具输出（探针实证卡死会话 103 万 → 16,793 token 正常过窗，无需删历史）；**Exa 源头改为 `contents.highlights`**（相关摘录取代整页全文，text 字段回退保留）。门禁：iOS 各套件全绿（含 IOSSearchExecutorTests 新增 2 Exa 测试）+ KMP 绿。探针基线保留在 `IOSOverheadProbeTests`（真机数据复现）。
 - 未验证/跟进：Android 后续专项（P0-b 接线/P1 消费点与编排工具/P2 编译验证/P3 exec executor 与 QuickJS 桥，全部无 SDK 未编译验证）；真机清单（JSC 终止限制、后台 BGTask 内 wait/cell/mailbox drain、真实 provider 全链、真实 MCP server、会话列表徽标 UI 接线）。
+- **提示词管线闭环轮（2026-08-09，真机反馈驱动）**：用户报"直接问 agent 读其它 session 它说不能，告诉工具才行"——确诊为发现引导缺行为规则（非工具注入问题）。全量盘点 31 个注入面 + 55 工具声明 + 7 辅助提示后按"管线闭环"修断链点：①发现引导加行为规则（"声称做不到之前先 tool_search"+ 领域提示）；②`category()` 补 iOS 工具名映射（workspace_/编排六名→subagent，此前全落 utility 致领域计数无信息量）；③MCP 注入文案补 `mcp__server__tool` 直接调用路径；④新增编排语境条件注入（仅参与线程树的会话注入 mailbox 语义说明）；⑤checker 复核抓出刷新生命周期缺口并修复——缓存原只在会话切换时刷新（spawn 中涂/邮件到达全漏），改为 `bindings.refreshOrchestrationLinks` 每轮组装前刷新 + 子线程 handoff 注入子线程向变体文案（只进 upload 不进持久化）；⑥B11 空回复/小应用失败通知补 `LOCAL_GENERATION_ERROR` 标记（此前会作为 assistant 历史重新上传致角色混淆）。门禁：iOS 四套件 134/134 + KMP 绿（含"never claim inability"断言与刷新路径/子线程 handoff 注入测试）。
 - **P3-c（exec cell 生命周期：wait + store/load + cell 持久化 + 后台约束）已完成 2026-08-08**（工作区未提交）：`wait` KMP 声明（cell_id 必填、timeout_ms 默认 10000 clamp [1000,60000]、terminate 布尔；描述含「cell 完成前 wait 会阻塞到输出或超时」）+ ToolSearch 中文词条；开关与 exec 同源（`execJavaScriptEnabled` 关时声明/执行路径零痕迹，wait 与 exec 同进 deferred 池）。`IOSJsCellRegistry` 为 cell + store 唯一 owner（actor 单写者，按 conversationId 键会话作用域、跨 run/前后台共享，run 结束 cell 不死；并发上限每会话 4，超限 exec 返回结构化错误；store/load 单 key 64KB/总会话 1MB，超限抛 JS 错误；sidecar `Documents/js-cells/{conversationId}.json` 原子写、空删文件、同文件存 cells+store；冷启动 sweep Running→interrupted 不假 completion，照 IOSChatBackgroundSuspensionRecord 语义）。exec 超时不再丢句柄：yield 返回 `Script running with cell ID {cell_id}`（照 codex 文案），求值在自己队列继续跑，引擎新增 completion 通道把终态交回注册表；cell 状态机 Running→Completed|Terminated|Failed（interrupted 为 sweep 专用第五态）；Completed 输出不保证跨进程恢复（v1 注释说明）。wait 三路径：完成返回 {status,output,logs} 且读一次清除 / terminate 标 Terminated（JSC 无强杀 API，失控脚本继续烧 CPU 至自终，注释写明）/ cell 不存在结构化错误；wait 阻塞期超时返回 running 状态可再 wait。嵌套 tools 桥选型：**yield 后 cell 内 tools 调用返回诚实错误**（hostCall 绑首轮 run 的协调器/账本上下文，续跑期不可复用；per-evaluation gate 在 abandon 时关闭，JS 侧报 "nested tools unavailable after the exec call yielded"）。store/load 为 JS 全局（pristine stringify 序列化、缺失 key 返回 undefined、跨 cell 会话共享、新持久化实例读回）。后台 executor 注册 exec+wait（后台可 wait 本会话 cell）；wait 是普通工具调用，天然占 maxToolResumeCount/maxSteps 预算，无新预算机制。门禁：`IOSJsCellTests` 11/11（yield→wait 闭环 / wait 三路径+clamp / 并发 5th 拒绝 / store 共享+超限+持久化读回 / 冷启动 interrupted / 引擎级 exec yield→模型 wait→回灌 3 步预算）+ 回归 IOSJsSandboxEngineTests、IOSAgentToolEngineTests、IOSToolSearchExposureTests、IOSChatBackgroundSuspensionTests、ChatViewModelGenerationParamsTests 合计 101/101 全绿；`:ai-core:jvmTest`（WaitToolDeclarationTest 3/3）与 `:feature:tools:api:jvmTest` 全绿；`git diff --check` 仅余 docs/IOS_THEME_PACK_DESIGN_SPEC.md:443 既有 WIP 尾随空格（未触碰）。未验证：真实 provider 下模型真实调用 exec/wait、后台 run 的 wait 端到端、JSC 终止限制真机证据、真机。
 
 ## 代码库瘦身（2026-08-08，已提交）
@@ -55,12 +56,27 @@ Last updated: 2026-08-08
 - 环境限制：本机无 Android SDK，Android 删除靠 rg 全仓零引用兜底（含 res/Manifest）；iOS test target 未编译（引用已按含 iosAppTests 的 rg 覆盖），未跑套件。
 - 挂起/留待裁决（非本轮纯删范围）：过度防御 top10 语义修复（DocumentAccessStore.swift:519 读失败回退陈旧快照再写盘最危，需红测试先行）；6 处位于并发 WIP 文件的 iOS 死成员（AppShell sheetBinding、SettingsStore deleteSSHProfile、PlaceholderViews placeholder、CouncilChatRuntimeView appendToken、IOSMiniAppModels parseOrNull、ChatToolTimelineView iconFill）；架构级——KMP 21 个 ≤3 文件模块合并、SseEvent 三份单源化、工具声明双轨单源化（39 同名重复）、iOS 测试脚手架重复约 2000 行、wiring 源码断言 2655 行去留、docs 约 2.8 万行归档。
 
+## Chat 流式生成五项修复轮（2026-08-09，未提交，真机反馈驱动）
+
+- ① 淡入：vendor `MarkdownRenderConfig` 新增 `animatesAppendedTailAsUnit`（默认 false、共享默认不变、全部 builder 透传）；三界面共用 `streamingMarkdownConfig` 启用——流式 append 改**逐拍尾段整体淡入**（替代逐词 display-link alpha 重写，长表格门禁 p95 36.1→16.7ms）并解除 window 门控（修 cell 配置窗口期节拍无淡入、直跳显）。
+- ② 宽度：工具胶囊 `combinedLine` subject 上限 56→14 字、动态工具名 16 字（按列宽预算倒推；无界提案下 lineLimit 不生效，超长 subject 曾把胶囊理想宽撑破列宽→列宽随 toolCallStarted/完成换词跳变、居中裁切顶边）；`ChatToolTimelineWidthOverflowTests` 新增无界提案理想宽契约测试。
+- ③ 终态跳变：推理卡生成结束自动收起改**无动画单帧收口**（`suppressesShowsBodyAnimation`；展开/用户 toggle 动画保留）——0.28s 收起动画与 collection 终态重测错相位是最大单体跳变源；新回放测试在 `.assistantStreamClosed` 当轮采样（旧用例 0.6s 后才取 baseline，漏掉终态重建），推理卡收起 fixture 断言视口单调收敛、无两段式回跳。
+- ④ 粗体：探针抓到两个被 CommonMark flanking 拒绝的真实形态——`**（重点）**说明`（定界符贴全角括号）与 CJK 紧邻 `__…__`——swift-markdown 与 pulldown-cmark **双链路**都渲染成字面星号；vendor 新增 `RejectedEmphasisRepairRewriter`（`MarkdownParseOption.repairsRejectedStrongEmphasis` 默认 false，聊天侧显式开启、独立于 speculativeRewrite）+ `AmberMarkdownView` 渲染层同源修复（两处正则同式）；只作用于解析器已拒绝、残留在 Text 节点的字面定界符，自限性+默认关回归锁齐备。踩坑记录：Swift Regex 不支持 lookbehind；带捕获组的字符串正则运行时类型是 `Regex<(Substring, Substring)>`，显式标注 `Regex<Substring>` 会运行时 cast 失败静默 nil（用 `AnyRegexOutput`）。顺带发现 vendor LaTexPreProcessor 的美元符正则含 lookbehind、同样静默 nil（记录未动，非本轮范围）。
+- ⑤ 完成触觉：全仓穷尽确认完成路径原本**零触觉/声音/通知**（含 KMP iosMain/Watch/Live Activity）；新增 `AmberHapticEvent.rigidImpact` 单次刚性轻触，`ChatViewModel.onGenerationCompleted` 触发（仅成功完成、审批暂停不触发）；iOS 本地偏好 `completionHaptic` 默认开 +「显示与字体→消息显示」开关 + wiring 测试绿。刻意不复用 KMP `enableMessageGenerationHapticEffect`（Android-only 接线、默认关，动它改 Android 默认）。用户报告完成时「物理振动」与代码无振源矛盾，装机后 `log stream` haptic 谓词取证；大概率是 ③ 视觉跳变误感知，待真机复核。
+- 门禁：必跑三套件 + 定点——ChatSwiftUIStreamReplayTests 23/24（唯一失败=已知不稳的 growing-table perf 探针 max 85.45>80 单尖峰、p95 16.67ms，未放宽阈值）、NativeTimelineScrollCore 4/4、ChatViewportPolicy 41/41、CJKEmphasis 6/6、ToolTimelineWidth 4/4；IOSSettingsWiringTests 2 失败与本圈无关（用户 WIP 源断言漂移：ChatView `isLoading: isCurrentConversationRunActive` 缺失、ChatGenerationCoordinator expiration MainActor 序断言）。
+- **第二轮（手感追问：流式增长顺、完成那几下不顺 + 思考内容小幅跳变）**：①终态 settle 从 tau=0.06 指数缓动改**逐帧瞬时钉底**——完成瞬间布局落地期 bottomTarget 移动时缓动会拖出"再滑一段"，就是完成后不流畅的载体；core 新增 snap 契约测试（晚到布局一拍贴底、静默期满交还所有权、无缓动中间值）。②**第三个病灶**：`viewportChanged` 从 `.idle` 原为 no-op——终态 settle 交还所有权后，负载下晚到的二 pass 布局（终态重测/渲染态延迟刷新）再移动底部时无人重锚，确定性搁浅 16pt（旧缓动存活更久恰好掩盖）；修为 idle 近底（resumeEpsilon 48）时重进 settle 收锚、收敛后照常交还所有权。③思考正文 UITextView **测量竞态**：textStorage 追加后 TextKit 布局晚一帧，SwiftUI sizeThatFits 先读旧 contentSize → cell 高度两段到位=思考内容小幅跳变；`ChatReasoningBodyTextView.sizeThatFits` 测量前 `layoutIfNeeded()` 同步布局。④回放测试升级为「基准=收敛锚点、全窗口漂移≤25pt（缓动签名捕获）、尾段逐帧钉底≤2pt、无回跳」；窗口开头的过渡帧（snap 3 帧内拉回）不作为基准。门禁 **120/120 全绿**（含 perf 探针本轮通过）。
+- **第六轮（双路 subagent 收尾 review）**：checker 验闭环 A–G 全闭环（flag 透传/粗体双链路/排空/软收起/滚动/触觉/建议条动画），H 套件被一次外部临时切 main 阻塞后在恢复的工作区补跑 **49/49 绿**（期间工作区经并行工具切回 feat，75 文件改动完整在盘）。UI 审查发现并修复：①Reduce Motion 下正文流式淡入未门控（与思考框语义不一致）→ `streamingMarkdownConfig` 两动画 flag 加 `!reduceMotion`，`MarkdownConfigKey` 增 reduceMotion 字段（无默认值设计抓到第二构造点）；②短思考正文被固定 12pt 双渐变洗灰 → mask 渐变带 `min(12, h/3)` 自适应 + 底部渐变仅裁切时启用（`onClippedChanged` 回调）；③软收起卸载时的 chevron/圆角二次动画 → 软收路径置 `suppressesShowsBodyAnimation`，asyncAfter 余量 0.26→0.3s；④工具胶囊截断改宽度预算（CJK=2/ASCII=1，subject 28/名 32 单位），ASCII 信息损失修复；⑤`visualConfigHash` 归一化补 `animatesAppendedTailAsUnit` 对称；⑥SwiftUI fallback 四处 `withAnimation` 补 reduceMotion 门控。不采纳项（记录理由）：settle 速度上限（收 ramp 本身 ≤900pt/s，snap 与之同步，加限反而 reintroduce 滞后）；思考卡 maxHeight 随 Dynamic Type（标注可接受，内容可滚不丢数据）。126 测试 1 失败=已知负载敏感 perf 探针单尖峰。
+- **第五轮（思考框流式乱跳/不流畅）**：三处。①逐词淡入改**尾段整体淡入**（与正文段落同构）：display-link 每帧属性重写从「全部词 N 条」降到 1 条；②撤掉上轮加在 `ChatReasoningBodyTextView.sizeThatFits` 的 `layoutIfNeeded()`——每拍多次测量时同步全量 TextKit 布局是掉帧源（cadence 门禁 p95 71ms→33ms）；③内部滚动**恢复 540pt/s 限速连续跟随**（曾误改逐帧钉底：主列表钉底不动视口，思考框钉底=每 chunk 整行跳，cadence 门禁 maxStep≤10pt 契约翻红后回正）。思考卡门禁 10/10 绿（p95 33ms≤40、maxStep 9pt≤10、淡入只作用新增段）。
+- **第四轮（真机录像逐帧：收尾半句一次性跳出、上跳一格）**：根因=终态排空 `terminalDrain` 快排公式对小积压也一拍倒 36+ 字（约两行）。用户拍板「前台以顺滑输出结束为锚点、节奏应随 provider 速度连续加速、不要分档」→ 终版**连续节奏曲线**：节奏锚 `terminalDrainAdvance = clamp(backlog/16, 12, 1536)` 由完成时积压**一次决定、不逐拍衰减**（逐拍衰减会让后段掉回慢节拍，24k 实测拖 2.4s）；拍间隔 `clamp(48ms×36/advance, 8, 48)` 连续缩短。小积压≈12 字/拍×48ms 打字收尾；大积压≈1500 字/拍×8ms 逐帧 whoosh、滚动缓动抹成连续快滚；中间无断点。24k 契约改按真实耗时（≤0.5s，实际≈0.13s；旧「16 拍」口径在动态间隔下不再是耗时代理，断言过时按规则说明后更新）。新增小积压契约测试。横线=模型输出的 `---` 分隔符，非 UI 残影。
+- **第三轮（完成瞬间仍跳一下）**：钉死两个残余跳源并修复。①带思考场景=思考卡终态收起的**高度砍除事件本身**（回放实测一帧 −169pt；滚动一直钉底，跳的是内容不是视口）→ 改**软收起**：高度上限 180→0 按 0.2s easeOut 逐帧 ramp，representable 逐帧重测、collection 高度连续变化、滚动逐帧钉底，ramp 结束（高度已 0）再卸载正文；Reduce Motion 保持瞬时收；软收期间忽略手动 toggle；`cancelPendingCollapse` token 防串。②无思考场景=**完成瞬间建议条插入** composer（minHeight 44）而转场动画只管建议条自己、时间轴可用高度一帧被吃 → 给 composer 容器加建议条显隐的布局动画（easeOut 0.2），高度连续变化 + 滚动逐帧重锚。活动岛高度跨状态稳定有既有测试锁，排除。定点 48/48 绿（含终态回放/wiring/scroll core）。
+- 未验证：淡入/宽度/终态滚动/软收起的真机手感、物理振源取证、完成触觉真机观感。
+
 ## Home E 版视觉落地（已提交）
 
 目标：把定稿 E 版首页设计（home-replica.html 同源规格）落到 `ConversationsView` 与全局主题令牌，并让顶部续接位只展示真实未完成工作。
 
 - 全局令牌：三画布——暖纸 `paperLight`、暖灰 `neutralLight`（默认）、中性白 `whiteLight`（`#F5F5F4`/`#FFFFFF`/`#EEEEED`）；`Paper.white` 已加入外观设置三卡。`fab`/`fabInk`/`focusRing`/`activeAvatarGlow` 绑定 runtime accent（可选色板生效），不再钉死琥珀金。默认仍为暖灰 × 琥珀金。用户已持久化偏好不受影响。
-- 首页：搜索胶囊原位展开为玻璃搜索条（品牌/齿轮/头像让位，Esc/取消收起清空，保留提交进全文搜索）；控制卡顶部改为跨功能续接位，稳定优先级为「待处理 > 运行中 > 可恢复 > 可查看结果 > 草稿」，候选来自当前议会房间、深度阅读持久任务、小说项目、AI 生图和最新版本尚未运行的小应用；普通完成态、损坏小说、已运行的小应用版本均不出现，无候选时整行收起，只保留五入口。五入口为单墨色 Phosphor fill 语义图标，顺序为深度阅读/小说创作/模型议会/小应用/WebMount；会话列表恢复切片一体卡外框（72pt、顶/底投影、卡内左缩进 hairline；激活 `activeCard` 随 accent 浅染；空态同卡壳）；控制卡外框保留；新建为右下拇指区浮层中性玻璃胶囊「新对话」（高 42、主墨字、琥珀仅图标；`homeGlassControl`；非满幅琥珀、非圆 FAB、非假底栏）。列表 scroll 留白 + soft bottom edge。Continue 黑 CTA；账户 38；Continue 显隐 0.30s。入场级联 40ms stagger 且尊重 Reduce Motion。玻璃为搜索胶囊/展开条、齿轮与底胶囊；内容卡零描边，深度仅来自两层 `cardShadow`。
+- 首页：搜索胶囊原位展开为玻璃搜索条（品牌/齿轮/头像让位，Esc/取消收起清空，保留提交进全文搜索）；控制卡顶部改为跨功能续接位，稳定优先级为「待处理 > 运行中 > 可恢复 > 可查看结果 > 草稿」，候选来自当前议会房间、深度阅读持久任务、小说项目、AI 生图和最新版本尚未运行的小应用；普通完成态、损坏小说、已运行的小应用版本均不出现，无候选时整行收起，只保留五入口。五入口为单墨色 Phosphor fill 语义图标，顺序为深度阅读/小说创作/模型议会/小应用/WebMount；会话列表恢复切片一体卡外框（72pt、顶/底投影、卡内左缩进 hairline；激活 `activeCard` 随 accent 浅染；空态同卡壳）；控制卡外框保留；新建为右下拇指区浮层强调色混色玻璃胶囊「新对话」（高 42、on-accent 墨；`amberProminentGlass`；非圆 FAB、非假底栏）。列表 scroll 留白 + soft bottom edge。Continue 浅强调色 CTA + 主墨字；账户 38；Continue 显隐 0.30s。入场级联 40ms stagger 且尊重 Reduce Motion。玻璃为搜索胶囊/展开条、齿轮与底胶囊；内容卡零描边，深度仅来自两层 `cardShadow`。
 - 图标体系（review 轮重做）：新增 `iosApp/iosApp/HomePhosphorIcons.swift`——21 个 Phosphor fill 字形（路径数据与 home-replica.html 内嵌 symbol 同源；chatCircle/pushPin/imageSquare 取自 phosphor-icons/core 同名资源）+ 最小 SVG path 解析器（M/L/H/V/C/S/Q/T/A/Z，椭圆弧按 SVG 1.1 F.6.5 转三次贝塞尔）。映射修正：剑=sword（原 shield）、天平=scales（原 medal）、AI 生图=imageSquare（原 pen）、crown 关键词补「在位」；swipe/context menu 系统图标保留 SF（系统 UI 层，不在设计约束内）。
 - Review 轮修复（4 只读审查代理：逻辑链/几何/渲染/taste）：①会话卡投影从「逐行切片各带阴影」改为「仅 bottom/single 行携带」——消除 72pt 行间阴影接缝，保留原生 swipeActions 的 List 结构（卡顶/侧边投影略弱为已知取舍）；②全局 `glass/glassStrong` 恢复原值（`base(\.background, 0.72/0.85)`），首页三件玻璃改用首页专用 `homeGlass*` 令牌（浅 .78→.58 / 深 .14→.08 白渐变 + 双层投影），与内页材质完全隔离；③几何：header 去掉多余 top 6（精确 42）、「会话」标题与首卡补 12pt、搜索胶囊固定 78×38、展开条 gap7/左12右6/取消 h30 横8/输入 tracking 0.13、会话 meta 接 `.monospacedDigit()`、FAB 底部改 `max(67-safeAreaInsets.bottom, 12)`；④focus 环接入展开搜索条（3px `focusRing`，聚焦时显示）；⑤搜索延迟聚焦改可取消 `Task`（收起/离场撤销，不再残留 FocusState）；⑥`loadProjects` 加 latest-wins revision（首页 onAppear 与项目列表 .task 并发时旧快照不得回写）；⑦级联入场加一次性门控（0.9s 后重建行不再重播）；⑧暖纸 `avatarActive` 修正 `#EADBCC`→`#EADCBC`；⑨节标题用独立 `section` 令牌（与 foreground2 数值同构、语义独立）。
 - 第二轮补充修复（多行运行时实测发现）：bottom 行投影向上越界，在上一行底部形成 Δ≤3 暗带并压暗该处 hairline（`#E8E7E6` vs 正常 `#ECEBE9`）；给 bottom/single 行投影加 mask，裁掉行界以上晕影（左右/下方延伸保留卡侧与卡底投影；single 上方是画布，向上晕影与控制卡外投影一致，不裁）。
@@ -81,7 +97,8 @@ Last updated: 2026-08-08
 - 多会话多行态运行时验证（容器种子化 4 条会话，updateAt 倒序、首条激活）：行高各 72pt；激活行通栏 `#EFE9DF` + 头像 `#E8DDC6`/`#6F5019`；idle 行 `#F6F5F3` + 头像 `#EDEBE7`/`#8F8B85`；行间 hairline 恰为 sep 合成值 `#ECEBE9`、左缩进 70/右距 16（屏上 x=86..370，与标题字框左缘 86 对齐）；行间零阴影接缝（经第二轮补充修复后 hairline 上下为纯卡色），末行下方 18pt 卡投影带与卡侧投影完整。种子化教训：会话 JSON 时间戳须为合法 ISO8601（`...T14:40:00.Z` 空小数位非法），非法时 `JsonConversationStorage` 按 index 损坏路径扫描重建——实测该容错路径按设计工作（丢弃不可解码条目并自动建新会话）。
 - 首页当前会话 meta 交错（时间·条数 ↔ LLM 浓缩预览）：复用 titleModelId；FG/BG 共用 ConversationListPreviewGenerator（latest-wins）；setListPreview 拒绝已删 id；预览落盘 list-previews.json；光晕 56pt 自裁、按压 leading、meta 0.4s 淡切；Reduce Motion 不轮播。
 - 当前会话头像呼吸光晕（E 版 `hm-breathe`）：`isCurrent` 头像琥珀 glow 3.4s / 延迟 1.6s，Reduce Motion 关闭；`HomeCurrentAvatarBreath` 强度契约 + 接线源码断言已纳入 `HomeDesignContractTests`。
-- 首页 taste 可达性回正（2026-08-07）：右下拇指区浮层「新对话」胶囊（非圆 FAB、非顶栏、非假底栏）。Continue 黑 CTA、色带 0.16s、呼吸 glow、切片投影保留。
+- 首页 taste 可达性回正（2026-08-07）：右下拇指区浮层「新对话」胶囊（非圆 FAB、非顶栏、非假底栏）。Continue CTA、色带 0.16s、呼吸 glow、切片投影保留。
+- 首页视觉层级（2026-08-09）：Continue CTA 改为浅强调色底+主墨字；右下「新对话」改为 accent 混色玻璃+on-accent 墨（`amberProminentGlass`），主强调从黑 CTA 挪到新建。
 - Simulator 真实交互复验：搜索胶囊原位展开且 focus 环可见；输入「红酒」后实时只保留匹配会话；Esc 与「取消」均收起、清空并恢复完整列表。相邻页面抽查设置页与 Chat 页，暖灰画布/暖白分组表面层级仍清楚，首页专用玻璃没有泄漏到内页。
 - Dynamic Type 实拍复验：iPhone 17 Pro 的 accessibility XXXL 下，Continue 标题/状态/主按钮完整，五入口可横向滚动且标签不压缩为单字列；恢复 Large 后卡片、72pt 会话行、FAB 与原 E 版默认几何一致。截图存于当前 Codex visualization 的 `home-resume-fix/02-max-dynamic-type.jpg` 与 `03-default-restored.jpg`。
 - 未覆盖：真实 VoiceOver 开关下的播报顺序/焦点迁移、按压 0.98 回弹的触感/中间帧（自动化只能稳定取得释放后终态）、真机观感与 swipe 手感；模拟器没有可复用的真实生图记录，未支付调用真实 provider，因此「生成完成后从首页进入并滚到真实图片」仍缺一轮真实账号手工验收。「还没有会话」空态卡为生产不可达路径（`bootstrap()` 与 `deleteConversation()` 在列表为空时都自动 `newConversation()`；唯一可达空态是搜索过滤后的「没有匹配的会话」）——结构事实记录，非验证遗漏。
@@ -111,13 +128,14 @@ Last updated: 2026-08-08
 
 目标：对齐 Android Chat 创建本机 Skill / 连接 MCP 的最小闭环，不过度设计。
 
-- 启动 seed：`IOSBuiltinSkills.installIfMissing` 写入并启用 `skill-creator`、`会议准备`、`监控文档`（内容嵌入，不依赖 Bundle 资源目录）。
+- 启动 seed：`IOSBuiltinSkills.installIfMissing` 写入并**启用**必需出厂 `skill-creator`；另 seed 可选出厂 `visual-svg`（**不**默认启用，可删、可恢复出厂）。启动时移除历史 `会议准备`/`监控文档`。`skill-creator` 可编辑/`skill_import` 自迭代，不可删除；未改动的旧英文 / 中文 2.1 出厂快照会自动刷到 **2.2**（吸收上游方法论的移动端轻量版：对话抽意图、小访谈、更主动的 description、写作手法、渐进披露、2～3 条试跑；显式拒绝桌面 eval harness）。详情页空 `allowed-tools` 显示「未限制」；有声明只展示、不运行时裁剪。恢复出厂 / 未改动快照刷新只写 `SKILL.md`；单文件 `skill_import(.../SKILL.md)` `mergeExisting` 保留附属文件，目录导入仍整包替换。
+- `visual-svg`（2026-08-09）：一个 skill、两条画法（diagram / illustration），统一 `show-widget`；可选 seed 默认不启用。审查修复：`skill_import` 仅新包启用、可选删除用 `.removed-optional-seeds` 防冷启动回种、描述与 GenerativeUi「直接画图」对齐、`SkillsView` 启用徽标改 `dirName`。
 - Chat 工具：`skills_list` / `use_skill` / `skill_validate` / `skill_import` / `skill_enable` / `skill_disable`，以及 `mcp_list` / `mcp_test` / `mcp_import_from_skill`（另保留既有 `mcp_call`）。声明在 KMP `Tool.kt`，执行在 `IOSSkillMcpToolService`。
 - 写工具门控：用户说创建/连接/做一个 skill 或 MCP 时也会声明 `workspace_file_write`，不再要求必须出现 `/workspace` 字样。
 - 创建路径：`use_skill(skill-creator)` → `workspace_file_write` → `skill_import`；若有 `mcp.json` 再 `mcp_import_from_skill` → `mcp_test` / `mcp_call`。
 - Review 精准修复：skill enable/list/use 统一以目录名为键；单文件 `SKILL.md` import 顺带 sibling `mcp.json`；`mcp_import_from_skill` 跳过已存在同名 server；前台 `maxToolResumeCount` 4→6（与后台一致）。
-- 定点测试：`IOSSkillMcpToolsTests` + `IOSSkillFileStoreTests` + `ChatViewModelGenerationParamsTests` **22 passed / 0 failed**。`project.yml` 排除已知 API 漂移的 `IOSMemoryRecallPolicyTests` / `NovelCollaborationModeTests`。
-- 未覆盖：真机对话闭环、zip skill 导入、按 MCP 工具展开为 `mcp__*` 声明。
+- 定点测试：`IOSSkillMcpToolsTests` + `IOSSkillFileStoreTests`（含 optional `visual-svg` seed/恢复/删除）**TEST SUCCEEDED**。`project.yml` 排除已知 API 漂移的 `IOSMemoryRecallPolicyTests` / `NovelCollaborationModeTests`。
+- 未覆盖：真机对话闭环（启用 `visual-svg` 后画流程/插画）、zip skill 导入、按 MCP 工具展开为 `mcp__*` 声明。
 
 ## Current Product Truth
 
@@ -161,16 +179,30 @@ Last updated: 2026-08-08
 - 分支级 `NovelUpcomingArcRecord`（最多 8 条）；整章 prose 注入 `UPCOMING ARC`；面板「下一弧」保存/清除；续写不注入。
 - 面板拆「代笔看板」（只读回执）与「代笔推进」（Toggle/按钮）；审稿显示走 effectivePolicy + displayName；步骤回执用短码，暂停原因只在 detail。
 
+### Phase 5 — 多章代笔自纠正（2026-08-09）
+
+- 设计：`docs/superpowers/specs/2026-08-09-ghostwrite-self-heal-loop-design.md`。
+- **已落地**：P0–P3；P2 基建重试/指纹熔断/复读 mustNot；**单条 must 措辞对齐**（仅缺 1 条、无禁止与复读、每章一次，允许等价表达并记 amendments）；跨进程 sidecar 进度。
+- **未落地**：真机多章批跑 + 杀进程恢复验收。
+- 门禁：`NovelCollaborationModeTests` **36/36 PASSED**。
+
+
+### Phase 4 — 有界多章代笔（最多 10 章，2026-08-09）
+
+- 全自动连写（方案 1）：**首章仍须用户确认本章合同**；第 2～N 章走结构化 `chapterPlanProposal`（创作模型）自动拟合同并 `upsert confirmed`，再写→验→收录→同步。
+- 批字段挂 `NovelGhostwriteProgress`：`targetChapterCount`/`completedChapterCount`/`currentChapterIndex`（1…10）；相位新增 `planning`；暂停原因 `planProposalFailed`/`batchCompleted`；**`pendingSyncChapterCredit`**（收录+清合同后待同步记账，防 syncFailed 续跑少计章越过 N）。
+- 失败即停（验收/复读/严重连续性/收录/同步/拟合同/用户暂停）；同步成功前不得开下一章；收录成功仍立即清合同。
+- 续跑：`syncFailed`/`planProposalFailed`/待记账 可不带确认合同继续；复读/严重连续性继续强制重写。
+- 面板：Stepper 选本批 N；按钮「开始代笔本章」或「开始代笔 · N 章」；批完成后显示「开始」非「继续」；看板 k/N。
+- 新文件：`NovelChapterPlanProposalLifecycle.swift`；XcodeGen 已重新生成工程。
+- Review 收口：逻辑 S1（syncFailed 计章）+ M1（planning 取消）+ UI M1/M2/M3 已修；定点 35/35 绿。
+
 ### Verification
 
-- `NovelCollaborationModeTests` **22/22 PASSED**（含下一弧 upsert/clear、整章注入、看板步骤回执）。
-- `NovelProjectConfigurationTests` 审稿模型独立持久化 + 偏好三角色、相关 wiring 两项 **PASSED**。
-- `NovelPromptCatalogTests/testCatalogSnapshot` 已随 acceptance v2 更新哈希。
-- 完成后 review 定点与配置/协作回归 **158/158 PASSED**；Session、reducer、注入、连续性、生命周期、恢复、文档与 prompt 扩大回归 **296/296 PASSED**，两组共 **454 passed / 0 failed**。
-- 最新 Simulator Debug 包已重新安装并成功启动；当前自动化无法稳定进入小说深层页面，且随后 CoreSimulatorService 连接失效，因此这里不把启动或静态读码当成深层视觉验收。
-- 文案提交 `52794d2de` 的 3 项受影响定点测试 **3/3 PASSED**；已用 Team `89QRFX9548` 完成 iPhone Air（iOS 27.0）Debug arm64 增量构建与严格签名校验。2026-08-06 覆盖安装并成功启动 `app.amber.ios`，安装容器 `85B13522-2E02-41F4-9CD0-3EEE65C4B6CC/iosApp.app`；数据库 UUID 保持 `AC96CD34-4AD9-4317-A4CD-6BB64DC7FD3F`，未先卸载，现有 App 数据应保留。
-- 真机：代笔单章闭环、审稿模型生效、下一弧注入、看板回执 — 仍待设备验收。
-- 下一刀：真机 Phase 2/3a/3b/3c 验收。
+- `NovelCollaborationModeTests` **29/29 PASSED**（含批 clamp/看板、pendingSyncCredit、proposal decoder fail-closed、proposal context）。
+- `NovelPromptCatalogTests` **6/6**；与协作合计 **35/35 PASSED**（2026-08-09）。此前结构化执行器 10/10 亦绿。
+- 真机：代笔多章批跑 2～3 章、自动拟合同质量、后台寿命 — 仍待设备验收。
+- 下一刀：真机批跑验收。
 
 ## Current Review Fixes
 
@@ -290,7 +322,9 @@ Last updated: 2026-08-08
 - 共创 / 代笔计划：`docs/NOVEL_COCREATION_GHOSTWRITE_PLAN.md`
 - 模型自主性护栏拆除计划（Draft，待裁决）：`docs/MODEL_AUTONOMY_GUARDRAILS_PLAN.md`
 - iOS 主题系统完善计划（Active；P0–P3 已落地并 review 收口：MiniApp host CSS 注入消 FOUC、theme 热更新不重建 WebView、跨端字段差写入生成 prompt；Widget 静态回退已文档化；Appearance `miniPreview` 在深色系统下固定 light 纹理墨色。下一刀 **P4 需产品闸门**）：`docs/IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md`；设计契约：`docs/IOS_THEME_PACK_DESIGN_SPEC.md`
-- 首页「新对话」胶囊 trailing：16→28（相对会话卡 16 内缩 12pt，消相切）；原型 `docs/HOME_NEW_CHAT_FAB_PROTOTYPE.html`；已装机试看。
+- 首页「新对话」胶囊 trailing：16→28（相对会话卡 16 内缩 12pt，消相切）；原型 `docs/HOME_NEW_CHAT_FAB_PROTOTYPE.html`。视觉层级：新对话 accent 混色玻璃 / Continue 浅强调色黑字；已装机试看。
+- 点阵 · Pi：`canvasScope` appWide→shell；chat/工作页只留奶油纸色，方格仅首页/外观。冷启动迁移 legacy `pi+lineGrid+appWide`。
+- 核心记忆页用户面精修：去掉「召回解释」与「本次候选/#id」控制台语义；搜索并入记忆库工具条；四范围标签等分铺开。库内 `recallExplanation` 仍保留给测试。
 - Live Activity 视觉：`docs/ACTIVITY_ISLAND_REDESIGN.md`
 
 ## Update Contract

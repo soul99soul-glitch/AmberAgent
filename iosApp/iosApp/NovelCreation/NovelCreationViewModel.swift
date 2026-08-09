@@ -245,6 +245,52 @@ final class NovelCreationViewModel {
         self.creation = creation
     }
 
+    /// 跨进程：写入本批代笔进度 sidecar；不该保留时删除。
+    func persistGhostwriteBatchProgress(_ progress: NovelGhostwriteProgress) {
+        let record = NovelGhostwriteBatchProgressRecord.from(progress: progress)
+        Task { @MainActor in
+            do {
+                if record.shouldPersist {
+                    try await creation.saveGhostwriteBatchProgress(record)
+                } else {
+                    try await creation.removeGhostwriteBatchProgress(
+                        projectID: record.projectID,
+                        branchID: record.branchID
+                    )
+                }
+            } catch {
+                // 进度落盘失败不挡代笔主路径；下次 mutate 会再试。
+            }
+        }
+    }
+
+    func loadGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async -> NovelGhostwriteProgress? {
+        do {
+            guard let record = try await creation.loadGhostwriteBatchProgress(
+                projectID: projectID,
+                branchID: branchID
+            ) else { return nil }
+            return record.makeProgress()
+        } catch {
+            return nil
+        }
+    }
+
+    func clearGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) {
+        Task { @MainActor in
+            try? await creation.removeGhostwriteBatchProgress(
+                projectID: projectID,
+                branchID: branchID
+            )
+        }
+    }
+
     func composerDraft(
         projectID: NovelProjectID,
         branchID: NovelBranchID
@@ -1843,6 +1889,23 @@ final class NovelCreationViewModel {
             branchID: branchID,
             candidateID: candidateID
         )
+    }
+
+    func proposeAndConfirmNextChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        nextChapterOrdinal: Int,
+        previousPlanSummary: String?
+    ) async throws -> NovelChapterPlanRecord {
+        let plan = try await creation.proposeAndConfirmNextChapterPlan(
+            projectID: projectID,
+            branchID: branchID,
+            nextChapterOrdinal: nextChapterOrdinal,
+            previousPlanSummary: previousPlanSummary
+        )
+        // 自动确认合同后刷新快照，供代笔 pipeline 立刻读到新 digest。
+        try await refreshCurrentSelection(projectID: projectID)
+        return plan
     }
 
     func auditContinuityIncludingCandidate(

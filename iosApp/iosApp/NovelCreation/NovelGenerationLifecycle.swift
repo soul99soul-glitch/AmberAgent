@@ -209,11 +209,14 @@ extension DefaultNovelCreation {
             promptKind: promptKind,
             userText: request.userText,
             sourceChapterVersionID: request.sourceChapterVersionID,
+            sessionCursorLimit: request.suppressRecentSessionMessages ? .empty : nil,
             overrides: request.injectionOverrides,
             budget: NovelInjectionBudget(
                 maxEstimatedInputTokens: effectiveInputBudget,
                 chapterTailCharacterLimit: generationPolicy.chapterTailCharacterLimit,
-                maximumRecentSessionMessages: generationPolicy.maximumRecentSessionMessages
+                maximumRecentSessionMessages: request.suppressRecentSessionMessages
+                    ? 0
+                    : generationPolicy.maximumRecentSessionMessages
             )
         )
         let plan: NovelInjectionPlan

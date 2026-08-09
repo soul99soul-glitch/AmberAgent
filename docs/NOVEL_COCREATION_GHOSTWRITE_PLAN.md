@@ -5,6 +5,8 @@
 > Phase 0: Completed (2026-08-05) — `needsSync` blocks formal prose across UI/reducer/injection/retry; sync banner copy updated; retry syncs composer mode/granularity.
 > Phase 1: Completed (2026-08-05) — ChapterPlan + digest + injection; project `collaborationMode`; title-panel mode switch & readiness; ghostwrite whole-chapter requires confirmed plan; manual collect still.
 > Phase 2: Completed (2026-08-06) — Single-chapter ghostwrite loop with structured plan acceptance (stateSync model), digest-bound auto-collect, pause/continue, hard-cut guard while running.
+> Phase 4: Completed (2026-08-09) — Bounded multi-chapter ghostwrite (max 10): chapter 1 user-confirmed plan; chapters 2…N auto-propose+confirm; fail-closed pause.
+> Phase 5: In progress (2026-08-09) — Self-heal loop (A′+thin C′): no same-draft re-accept; bounded auto-rewrite + failure receipt; polish-first human recovery. Spec: `docs/superpowers/specs/2026-08-09-ghostwrite-self-heal-loop-design.md`.
 > Product names: **共创模式** / **代笔模式**
 > Depends on: [`NOVEL_CREATION_SPEC.md`](NOVEL_CREATION_SPEC.md)、[`adr/0007-novel-creation-owns-project-state.md`](adr/0007-novel-creation-owns-project-state.md)、[`../CONTEXT.md`](../CONTEXT.md)
 

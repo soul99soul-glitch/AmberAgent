@@ -674,12 +674,60 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         }
     }
 
+    func loadGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelGhostwriteBatchProgressRecord? {
+        try ensureDirectories()
+        let url = ghostwriteProgressURL(projectID: projectID, branchID: branchID)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+        let data = try Data(contentsOf: url)
+        let record = try makeDecoder().decode(NovelGhostwriteBatchProgressRecord.self, from: data)
+        guard record.projectID == projectID, record.branchID == branchID else {
+            return nil
+        }
+        return record
+    }
+
+    func saveGhostwriteBatchProgress(_ record: NovelGhostwriteBatchProgressRecord) async throws {
+        try ensureDirectories()
+        if isDeletionTombstoned(record.projectID) || isReplacementMarked(record.projectID) {
+            throw NovelError.projectNotFound(record.projectID)
+        }
+        guard fileManager.fileExists(atPath: primaryURL(for: record.projectID).path)
+            || fileManager.fileExists(atPath: previousURL(for: record.projectID).path)
+        else {
+            throw NovelError.projectNotFound(record.projectID)
+        }
+        let url = ghostwriteProgressURL(
+            projectID: record.projectID,
+            branchID: record.branchID
+        )
+        let data = try makeEncoder().encode(record)
+        try data.write(to: url, options: [.atomic])
+    }
+
+    func removeGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws {
+        try ensureDirectories()
+        let url = ghostwriteProgressURL(projectID: projectID, branchID: branchID)
+        if fileManager.fileExists(atPath: url.path) {
+            try fileManager.removeItem(at: url)
+        }
+    }
+
     private var projectDirectory: URL {
         rootDirectory.appendingPathComponent("projects", isDirectory: true)
     }
 
     private var recoveryDirectory: URL {
         rootDirectory.appendingPathComponent("recovery", isDirectory: true)
+    }
+
+    private var ghostwriteProgressDirectory: URL {
+        rootDirectory.appendingPathComponent("ghostwrite-progress", isDirectory: true)
     }
 
     private var tombstoneDirectory: URL {
@@ -721,6 +769,15 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     private func recoveryURL(projectID: NovelProjectID, runID: NovelRunID) -> URL {
         recoveryDirectory.appendingPathComponent(
             "\(projectID.description)-\(runID.description).json"
+        )
+    }
+
+    private func ghostwriteProgressURL(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> URL {
+        ghostwriteProgressDirectory.appendingPathComponent(
+            "\(projectID.description)-\(branchID.description).json"
         )
     }
 
@@ -867,6 +924,10 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             )
             try fileManager.createDirectory(
                 at: lifecycleDirectory,
+                withIntermediateDirectories: true
+            )
+            try fileManager.createDirectory(
+                at: ghostwriteProgressDirectory,
                 withIntermediateDirectories: true
             )
         } catch {

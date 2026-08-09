@@ -44,56 +44,79 @@ struct NovelDiscussionArchiveOfferSheet: View {
     let onContinue: () -> Void
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                Label("本章正文已收录", systemImage: "checkmark.circle.fill")
-                    .font(.headline)
+        // 短内容贴内容高度；避免导航容器把 sheet 撑成大白页。
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(AmberTheme.accent)
-                Text("可以把本章讨论中已经确认的决定整理成长期记忆。整理结果会先给你确认，不会直接写入项目。")
-                    .font(.body)
-                    .foregroundStyle(AmberTheme.foreground2)
-                if isSyncing {
-                    HStack(spacing: 9) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("正在同步剧情状态，完成后即可归档")
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(AmberTheme.muted)
-                } else if let syncFailureMessage {
-                    Label(syncFailureMessage, systemImage: "exclamationmark.triangle")
-                        .font(.subheadline)
-                        .foregroundStyle(AmberTheme.accentRed)
-                    Button("重试同步", systemImage: "arrow.clockwise") {
-                        onRetrySync()
-                    }
-                    .buttonStyle(.bordered)
-                } else if needsSync {
-                    Label("剧情状态同步完成后可归档", systemImage: "arrow.triangle.2.circlepath")
-                        .font(.subheadline)
-                        .foregroundStyle(AmberTheme.muted)
-                    Button("开始同步", systemImage: "arrow.clockwise") {
-                        onRetrySync()
-                    }
-                    .buttonStyle(.bordered)
-                } else if !isReady {
-                    Label("当前有其他操作正在处理，完成后即可归档", systemImage: "clock")
-                        .font(.subheadline)
+                Text("收录完成")
+                    .font(.headline)
+                Spacer(minLength: 0)
+            }
+
+            Text("正文已进书。可选把本章已确认的讨论整理成长期记忆，先给你确认再写入。")
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.foreground2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isSyncing {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("同步剧情中…")
+                        .font(.footnote)
                         .foregroundStyle(AmberTheme.muted)
                 }
-                Button("归档本章讨论", systemImage: "archivebox") {
+            } else if let syncFailureMessage {
+                Label {
+                    Text(syncFailureMessage)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .foregroundStyle(AmberTheme.accentRed)
+                Button("重试同步") { onRetrySync() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            } else if needsSync {
+                Label("同步完成后可归档", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+                Button("开始同步") { onRetrySync() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            } else if !isReady {
+                Label("其他操作结束后可归档", systemImage: "clock")
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    dismiss()
+                } label: {
+                    Text("暂不归档")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                Button {
                     onContinue()
+                } label: {
+                    Text("归档讨论")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!isReady)
-                Button("暂不归档") { dismiss() }
-                    .buttonStyle(.bordered)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
-            .navigationTitle("收录完成")
-            .navigationBarTitleDisplayMode(.inline)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 16)
         .presentationSizing(.fitted)
         .presentationDragIndicator(.visible)
     }
@@ -845,6 +868,7 @@ struct NovelWritingContextSheet: View {
     @State private var modeSwitchMessage: String?
     @State private var pauseToggleMessage: String?
     @State private var planMessage: String?
+    @State private var isPresentingGhostwriteRevision = false
     @State private var planMessageIsError = false
     @State private var arcMessage: String?
     @State private var arcMessageIsError = false
@@ -991,6 +1015,32 @@ struct NovelWritingContextSheet: View {
         } message: {
             Text("清除后，写整章时就不再参考这些备注。")
         }
+        .sheet(isPresented: $isPresentingGhostwriteRevision) {
+            let receipt = session.ghostwriteProgress?.lastFailureReceipt
+            NovelGhostwriteRevisionSheet(
+                recommendedBrief: receipt?.recommendedRevisionBrief() ?? "",
+                // 中断摘要用审稿意见，不把离页/重启元信息塞进「原因」。
+                detail: {
+                    let summary = receipt?.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let summary, !summary.isEmpty { return summary }
+                    let missing = receipt?.missingMustHappen.filter {
+                        !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    } ?? []
+                    if !missing.isEmpty {
+                        return "须补写：\n" + missing.map { "· \($0)" }.joined(separator: "\n")
+                    }
+                    return nil
+                }(),
+                onCancel: { isPresentingGhostwriteRevision = false },
+                onStart: { brief in
+                    let started = session.startGhostwriteRevision(brief: brief)
+                    if started {
+                        isPresentingGhostwriteRevision = false
+                    }
+                    return started
+                }
+            )
+        }
     }
 
     private var preferencesList: some View {
@@ -1045,40 +1095,65 @@ struct NovelWritingContextSheet: View {
             if collaborationMode == .ghostwrite {
                 Section {
                     if let progress = session.ghostwriteProgress {
-                        LabeledContent("状态", value: progress.statusLabel)
+                        LabeledContent("状态") {
+                            Text(progress.statusLabel)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         LabeledContent("进度") {
+                            // 进度只报步骤码 + 已收录；章序号留给「状态」，避免两行两套 x/5。
                             Text(progress.boardStepSummary)
                                 .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         LabeledContent("本章计划", value: planStatusLabel)
-                        LabeledContent(
-                            "本轮已收录",
-                            value: "\(progress.autoCollectedCandidateIDs.count) 章"
-                        )
+                        // 多章时「进度」已有「已收 k/N」；仅待同步计章时单独标出。
+                        if progress.pendingSyncChapterCredit {
+                            let counted = progress.completedChapterCount + 1
+                            LabeledContent("本批已收录", value: "\(counted) 章（待同步计章）")
+                        } else if progress.targetChapterCount == 1 {
+                            LabeledContent(
+                                "本批已收录",
+                                value: "\(progress.completedChapterCount) 章"
+                            )
+                        }
                         LabeledContent("审稿模型", value: reviewModelLabel)
                         LabeledContent("往后几章", value: upcomingArcStatusLabel)
                         if let detail = progress.detailMessage, !detail.isEmpty {
                             let detailIsError = progress.phase == .failed
+                                || progress.pauseReason == .healBudgetExhausted
                                 || (
                                     progress.phase == .paused
                                         && progress.pauseReason != .userPaused
                                         && progress.pauseReason != .cancelled
                                 )
                             if detailIsError {
-                                Label(detail, systemImage: "exclamationmark.triangle")
-                                    .font(.footnote)
-                                    .foregroundStyle(AmberTheme.accentRed)
+                                // 与同文件同步失败 Label 一致：顶对齐 + 多行可长。
+                                HStack(alignment: .top, spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .font(.footnote)
+                                        .foregroundStyle(AmberTheme.accentRed)
+                                    Text(detail)
+                                        .font(.footnote)
+                                        .foregroundStyle(AmberTheme.accentRed)
+                                        .multilineTextAlignment(.leading)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .padding(.top, 2)
+                                .accessibilityElement(children: .combine)
                             } else {
                                 Text(detail)
                                     .font(.footnote)
                                     .foregroundStyle(AmberTheme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                     } else {
                         LabeledContent("本章计划", value: planStatusLabel)
                         LabeledContent("审稿模型", value: reviewModelLabel)
                         LabeledContent("往后几章", value: upcomingArcStatusLabel)
-                        Text("先确认本章计划，再开始代笔。")
+                        Text("先确认本章计划，再开始代笔。首章计划由你确认；多章时后续计划会自动拟定。")
                             .font(.footnote)
                             .foregroundStyle(AmberTheme.muted)
                     }
@@ -1105,6 +1180,28 @@ struct NovelWritingContextSheet: View {
                             .foregroundStyle(AmberTheme.accentRed)
                     }
 
+                    Stepper(
+                        value: Binding(
+                            get: { ghostwriteDisplayedTargetCount },
+                            set: { session.ghostwriteTargetChapterCount = NovelGhostwriteBatch.clamp($0) }
+                        ),
+                        in: NovelGhostwriteBatch.minChapterCount...NovelGhostwriteBatch.maxChapterCount
+                    ) {
+                        Text(
+                            shouldShowContinueGhostwrite
+                                ? "本批固定 \(ghostwriteDisplayedTargetCount) 章"
+                                : "本批目标 \(ghostwriteDisplayedTargetCount) 章"
+                        )
+                    }
+                    // 进行中或本批未终态续跑：N 已锁定，禁止改 Stepper 误导用户。
+                    .disabled(
+                        session.isGhostwriting
+                            || workspace.isPerforming
+                            || shouldShowContinueGhostwrite
+                    )
+                    .accessibilityLabel("本批目标章数")
+                    .accessibilityValue("\(ghostwriteDisplayedTargetCount) 章")
+
                     if !session.isGhostwriting,
                        let blocker = session.ghostwriteBlocker,
                        !session.canStartGhostwriteChapter {
@@ -1113,42 +1210,78 @@ struct NovelWritingContextSheet: View {
                             .foregroundStyle(AmberTheme.muted)
                     }
 
-                    HStack(spacing: 12) {
+                    Group {
                         if session.isGhostwriting {
-                            Button("暂停") {
+                            Button {
                                 session.pauseGhostwrite()
+                            } label: {
+                                Text("暂停")
+                                    .frame(maxWidth: .infinity, minHeight: 44)
                             }
                             .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .frame(minHeight: 44)
+                            .controlSize(.regular)
                             .contentShape(Rectangle())
-                        } else if session.ghostwriteProgress?.phase == .waitingUser ||
-                                    session.ghostwriteProgress?.phase == .paused ||
-                                    session.ghostwriteProgress?.phase == .failed {
-                            Button("继续代笔") {
-                                _ = session.continueGhostwriteChapter()
+                        } else if shouldShowContinueGhostwrite {
+                            if session.ghostwriteProgress?.shouldOfferRevisionSheet == true {
+                                Button {
+                                    isPresentingGhostwriteRevision = true
+                                } label: {
+                                    Text("按审稿意见润修")
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.85)
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.regular)
+                                .contentShape(Rectangle())
+                                .disabled(!session.canStartGhostwriteChapter)
+
+                                Button {
+                                    _ = session.continueGhostwriteChapter()
+                                } label: {
+                                    Text(continueGhostwriteButtonTitle)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.regular)
+                                .contentShape(Rectangle())
+                                .disabled(!session.canStartGhostwriteChapter)
+                            } else {
+                                Button {
+                                    _ = session.continueGhostwriteChapter()
+                                } label: {
+                                    Text(continueGhostwriteButtonTitle)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.regular)
+                                .contentShape(Rectangle())
+                                .disabled(!session.canStartGhostwriteChapter)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                            .disabled(!session.canStartGhostwriteChapter)
                         } else {
-                            Button("开始代笔本章") {
-                                _ = session.startGhostwriteChapter()
+                            let n = NovelGhostwriteBatch.clamp(session.ghostwriteTargetChapterCount)
+                            Button {
+                                _ = session.startGhostwriteChapter(targetChapterCount: n)
+                            } label: {
+                                Text(n == 1 ? "开始代笔本章" : "开始代笔 · \(n) 章")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
                             }
                             .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .frame(minHeight: 44)
+                            .controlSize(.regular)
                             .contentShape(Rectangle())
                             .disabled(!session.canStartGhostwriteChapter)
                         }
-                        Spacer(minLength: 0)
                     }
                 } header: {
-                    Text("开始代写")
+                    Text(ghostwriteAdvanceSectionTitle)
                 } footer: {
-                    Text("写完一章并同步后会停住；下一章要先定好计划再继续。")
+                    Text(ghostwriteAdvanceSectionFooter)
                 }
             }
 
@@ -1354,9 +1487,60 @@ struct NovelWritingContextSheet: View {
     private var modeSectionFooter: String {
         var parts = [collaborationMode.shortSummary]
         if collaborationMode == .ghostwrite {
-            parts.append("可用「开始代写」自动写整章并验收收录；也可以继续自己点。")
+            if shouldShowContinueGhostwrite {
+                parts.append("本批未完成：可继续；质量问题会自动改写几次，仍不过再停住。")
+            } else if session.isGhostwriting {
+                parts.append("代笔进行中，可在下方暂停。")
+            } else {
+                parts.append("可用「开始代笔」按批自动写整章并验收收录；也可以继续自己点。")
+            }
         }
         return parts.joined(separator: " ")
+    }
+
+    /// 与 `NovelGhostwriteProgress.shouldContinueSameBatch` 一致：完批/取消后显示「开始」。
+    private var shouldShowContinueGhostwrite: Bool {
+        guard let progress = session.ghostwriteProgress else { return false }
+        return progress.shouldContinueSameBatch
+    }
+
+    private var ghostwriteAdvanceSectionTitle: String {
+        if session.isGhostwriting { return "代笔进行中" }
+        if shouldShowContinueGhostwrite { return "继续本批代笔" }
+        return "开始代笔"
+    }
+
+    private var ghostwriteAdvanceSectionFooter: String {
+        if shouldShowContinueGhostwrite {
+            if session.ghostwriteProgress?.shouldOfferRevisionSheet == true {
+                return "建议先「按审稿意见润修」（可改要求）；也可整章重写或先改本章计划。不会用旧稿再验。"
+            }
+            if session.ghostwriteProgress?.mustRewriteCandidateOnResume == true {
+                return "继续将重写本章，不会用同一篇旧稿再验收。"
+            }
+            return "继续本批：先处理同步或拟定计划，再往下写。"
+        }
+        return "最多连续 \(NovelGhostwriteBatch.maxChapterCount) 章。首章需已确认计划；之后自动拟计划并连写。写不过会自动改写几次，仍不过会停，不会假装写完。"
+    }
+
+    /// 质量失败时标明「将重写」，避免用户以为再点继续是复验旧稿。
+    private var continueGhostwriteButtonTitle: String {
+        guard let progress = session.ghostwriteProgress else { return "继续代笔" }
+        if progress.pauseReason == .healBudgetExhausted {
+            return "继续重写本章"
+        }
+        if progress.mustRewriteCandidateOnResume {
+            return "继续代笔 · 将重写"
+        }
+        return "继续代笔"
+    }
+
+    private var ghostwriteDisplayedTargetCount: Int {
+        if shouldShowContinueGhostwrite,
+           let fixed = session.ghostwriteProgress?.targetChapterCount {
+            return NovelGhostwriteBatch.clamp(fixed)
+        }
+        return NovelGhostwriteBatch.clamp(session.ghostwriteTargetChapterCount)
     }
 
     private var currentChapterPlan: NovelChapterPlanRecord? {
@@ -1876,6 +2060,116 @@ struct NovelWritingContextSheet: View {
                 false
             }
         }
+    }
+}
+
+/// 代笔质量门失败后的人工润修确认面：预填审稿 brief，可改后开写。
+struct NovelGhostwriteRevisionSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let recommendedBrief: String
+    /// 展示给用户的中断摘要（优先审稿意见，不含离页/重启元信息）。
+    let detail: String?
+    let onCancel: () -> Void
+    /// 返回是否已开始；false 时 sheet 留在原地并显示错误。
+    let onStart: (String) -> Bool
+
+    @State private var brief: String
+    @State private var hasCustomized = false
+    @State private var startError: String?
+
+    init(
+        recommendedBrief: String,
+        detail: String?,
+        onCancel: @escaping () -> Void,
+        onStart: @escaping (String) -> Bool
+    ) {
+        self.recommendedBrief = recommendedBrief
+        self.detail = detail
+        self.onCancel = onCancel
+        self.onStart = onStart
+        _brief = State(initialValue: recommendedBrief)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let detail, !detail.isEmpty {
+                    Section {
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } header: {
+                        Text("审稿意见")
+                    }
+                }
+
+                if let startError, !startError.isEmpty {
+                    Section {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.footnote)
+                            Text(startError)
+                                .font(.footnote)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundStyle(AmberTheme.accentRed)
+                    }
+                }
+
+                Section {
+                    TextField("润修要求", text: $brief, axis: .vertical)
+                        .lineLimit(8...16)
+                        .onChange(of: brief) { _, _ in
+                            hasCustomized = true
+                            startError = nil
+                        }
+                    if hasCustomized, brief != recommendedBrief {
+                        Button("重置为推荐") {
+                            NovelTextInputCommitter.perform {
+                                brief = recommendedBrief
+                                hasCustomized = false
+                            }
+                        }
+                        .frame(minHeight: 44)
+                    }
+                } header: {
+                    Text("润修要求")
+                } footer: {
+                    Text("会按本章合同重写整章，并重新验收；不会把失败旧稿整篇塞进上下文。")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(AmberTheme.background)
+            .navigationTitle("按审稿意见润修")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        NovelTextInputCommitter.perform {
+                            onCancel()
+                            dismiss()
+                        }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("开始润修") {
+                        NovelTextInputCommitter.perform {
+                            let started = onStart(brief)
+                            if started {
+                                dismiss()
+                            } else {
+                                startError = "代笔暂时不能开始，请检查本章计划后重试。"
+                            }
+                        }
+                    }
+                    .disabled(brief.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .interactiveDismissDisabled(false)
     }
 }
 

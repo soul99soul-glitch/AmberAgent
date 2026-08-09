@@ -64,6 +64,8 @@ struct NovelSessionRunDraft: Equatable, Sendable {
     let inputBudgetTokens: Int
     var contextualCharacterMention: String? = nil
     var ghostwritePlanID: NovelChapterPlanID? = nil
+    /// 代笔自愈/润修：不注入近期会话全文，避免失败稿污染下一 attempt。
+    var suppressRecentSessionMessages: Bool = false
 }
 
 /// Absolute presentation target for one streaming run identity.
@@ -275,9 +277,13 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var isBatchStartingRun = false
     /// 与 `batchPolishProgressStorage` 一样可观察，面板才能跟相位刷新。
     private var ghostwriteProgressStorage: NovelGhostwriteProgress?
+    /// 面板选择的目标章数（1...10）；开跑时写入 progress。
+    var ghostwriteTargetChapterCount: Int = NovelGhostwriteBatch.minChapterCount
     @ObservationIgnored var ghostwriteTask: Task<Void, Never>?
     @ObservationIgnored var ghostwriteTaskBinding: NovelSessionBinding?
     @ObservationIgnored var ghostwriteOwnedRunID: NovelRunID?
+    /// pause / 离页取消时置 true：catch 不得把本批标成 `.cancelled`（会丢续跑与 sidecar）。
+    @ObservationIgnored var ghostwriteCancelAsUserPause = false
     /// 代笔 pipeline 自己发起整章时短暂置真，避免 `isGhostwriting` 折进 `isBusy` 挡掉自己的 start。
     @ObservationIgnored var isGhostwriteStartingRun = false
     @ObservationIgnored private var projectionCache: NovelSessionProjectionCacheEntry?
@@ -650,6 +656,7 @@ final class NovelSessionViewModel {
         }
         consumerAttachmentDesired = true
         hydrateTerminalState()
+        await restoreGhostwriteProgressIfNeeded(for: next)
         let currentActiveRun = activeRun
         if let run = currentActiveRun,
            consumerTask == nil || transientTail?.runID != run.id {
@@ -1022,14 +1029,33 @@ final class NovelSessionViewModel {
         target: NovelCollectionTarget,
         source: NovelCollectionSource = .user
     ) async -> Bool {
+        guard snapshotMatchesBinding else {
+            operationErrorMessage = "会话已切换，无法收录。"
+            return false
+        }
         guard let project = workspace.projectSnapshot,
-              let branch = workspace.branchSnapshot,
-              let candidate = candidate(id: candidateID),
+              let branch = workspace.branchSnapshot else {
+            operationErrorMessage = "项目未就绪，无法收录。"
+            return false
+        }
+        guard let candidate = candidate(id: candidateID),
               candidate.kind == .prose,
-              candidate.status == .available || candidate.status == .interrupted,
-              branch.branch.syncStatus == .synchronized,
-              branchPendingOperations.isEmpty,
-              snapshotMatchesBinding else { return false }
+              candidate.status == .available || candidate.status == .interrupted else {
+            operationErrorMessage = "没有可收录的完整正文候选。"
+            return false
+        }
+        guard branch.branch.syncStatus == .synchronized else {
+            operationErrorMessage = "分支待同步，无法收录正文。"
+            return false
+        }
+        guard branchPendingOperations.isEmpty else {
+            operationErrorMessage = "仍有未完成的同步或事务，无法收录。"
+            return false
+        }
+        guard branch.branch.activeRunID == nil else {
+            operationErrorMessage = "生成尚未完全结束，无法收录。"
+            return false
+        }
         do {
             _ = try NovelParagraphParser.selectedText(for: selection, in: candidate.content)
         } catch {
@@ -1050,7 +1076,24 @@ final class NovelSessionViewModel {
             factCompatibilityID: UUID(),
             source: source
         ))
-        guard await perform(action) != nil else { return false }
+        // beginAction 失败时 perform 会静默返回 nil，这里先占锁并给出明确原因。
+        guard beginAction() else {
+            operationErrorMessage = workspace.requiresReload
+                ? "项目需要重新载入，无法收录。"
+                : "有其他操作进行中，无法收录。"
+            return false
+        }
+        let outcome: NovelOutcome?
+        do {
+            outcome = try await workspace.performSessionAction(action)
+            operationErrorMessage = nil
+        } catch {
+            outcome = nil
+            operationErrorMessage = describe(error)
+        }
+        endAction()
+        _ = await refreshDurable(binding: binding, token: bindingToken)
+        guard outcome != nil else { return false }
         workspace.scheduleAutomaticStateSync(
             projectID: project.project.id,
             branchID: branch.branch.id
@@ -1996,6 +2039,7 @@ private extension NovelSessionViewModel {
             ghostwritePlanID: draft.ghostwritePlanID,
             injectionOverrides: draft.injectionOverrides,
             inputBudgetTokens: draft.inputBudgetTokens,
+            suppressRecentSessionMessages: draft.suppressRecentSessionMessages,
             expectedProjectRevision: project.project.revision,
             expectedConfigRevision: project.project.configRevision,
             expectedBranchHeadRevision: branch.branch.headRevision
@@ -2294,6 +2338,7 @@ private extension NovelSessionViewModel {
             ghostwritePlanID: run.ghostwritePlanID,
             injectionOverrides: draft.injectionOverrides,
             inputBudgetTokens: draft.inputBudgetTokens,
+            suppressRecentSessionMessages: draft.suppressRecentSessionMessages,
             expectedProjectRevision: project.project.revision,
             expectedConfigRevision: project.project.configRevision,
             expectedBranchHeadRevision: branch.branch.headRevision
@@ -2872,7 +2917,7 @@ private extension NovelSessionViewModel {
     }
 }
 
-// MARK: - 代笔单章 pipeline
+// MARK: - 代笔有界多章 pipeline（最多 10 章）
 
 extension NovelSessionViewModel {
     var ghostwriteProgress: NovelGhostwriteProgress? {
@@ -2884,15 +2929,23 @@ extension NovelSessionViewModel {
 
     var isGhostwriting: Bool {
         switch ghostwriteProgress?.phase {
-        case .writing, .accepting, .collecting, .syncing: true
+        case .writing, .accepting, .collecting, .syncing, .planning, .revising: true
         case .paused, .waitingUser, .failed, nil: false
         }
+    }
+
+    /// 批中合同已消费、同步失败或拟计划失败时，允许无确认合同续跑。
+    private var canResumeGhostwriteWithoutPlan: Bool {
+        guard let progress = ghostwriteProgressStorage,
+              progress.binding == binding,
+              progress.canResumeWithoutConfirmedPlan else { return false }
+        return true
     }
 
     var ghostwriteReadinessIssue: NovelGhostwriteReadinessIssue? {
         guard let project = workspace.projectSnapshot,
               let branchID = binding?.branchID else { return .branchNeedsSync }
-        return NovelGhostwriteReadiness.issues(
+        var issues = NovelGhostwriteReadiness.issues(
             materials: project.materials,
             materialRevisions: project.materialRevisions,
             branches: project.branches,
@@ -2902,17 +2955,22 @@ extension NovelSessionViewModel {
             chapterPlans: project.chapterPlans,
             mainBranchID: project.project.mainBranchID,
             branchID: branchID,
-            requireChapterPlan: true
-        ).first
+            requireChapterPlan: !canResumeGhostwriteWithoutPlan
+        )
+        // 批中续跑「同步失败」：由 pipeline 内 await sync，不在入口硬挡。
+        if canResumeGhostwriteWithoutPlan {
+            issues.removeAll { $0 == .branchNeedsSync || $0 == .missingChapterPlan }
+        }
+        return issues.first
     }
 
     var canStartGhostwriteChapter: Bool {
         guard ghostwriteBlocker == nil,
               let branchID = binding?.branchID,
-              workspace.projectSnapshot?.project.collaborationMode == .ghostwrite,
-              workspace.projectSnapshot?.confirmedChapterPlan(for: branchID) != nil
+              workspace.projectSnapshot?.project.collaborationMode == .ghostwrite
         else { return false }
-        return true
+        if canResumeGhostwriteWithoutPlan { return true }
+        return workspace.projectSnapshot?.confirmedChapterPlan(for: branchID) != nil
     }
 
     var ghostwriteBlocker: NovelSessionActionBlocker? {
@@ -2921,7 +2979,8 @@ extension NovelSessionViewModel {
         if isGhostwriting { return .transactionInProgress }
         if isBatchPolishing { return .transactionInProgress }
         if isRunning { return .generationRunning }
-        if needsSync { return .branchNeedsSync }
+        // 续跑「同步失败」时允许在 needsSync 下点继续，pipeline 内再等同步。
+        if needsSync, !canResumeGhostwriteWithoutPlan { return .branchNeedsSync }
         if !branchPendingOperations.isEmpty || !unresolvedBranchPolishTransactions.isEmpty {
             return .pendingOperation
         }
@@ -2934,11 +2993,10 @@ extension NovelSessionViewModel {
     }
 
     @discardableResult
-    func startGhostwriteChapter() -> Bool {
+    func startGhostwriteChapter(targetChapterCount: Int? = nil) -> Bool {
         guard ghostwriteTask == nil,
               let binding,
-              canStartGhostwriteChapter,
-              let plan = workspace.projectSnapshot?.confirmedChapterPlan(for: binding.branchID)
+              canStartGhostwriteChapter
         else {
             let blocker = ghostwriteBlocker
             if blocker == .ghostwriteRequirementsMissing,
@@ -2949,44 +3007,121 @@ extension NovelSessionViewModel {
             }
             return false
         }
-        operationErrorMessage = nil
         let previous = ghostwriteProgressStorage
         let sameBinding = previous?.binding == binding
-        let retainedCollected = sameBinding ? (previous?.autoCollectedCandidateIDs ?? []) : []
-        // 复读 / 严重连续性：继续必须重写。其余暂停原因保留候选供复验。
+        // 与面板「继续代笔」同义，避免 cancelled 显示「开始」却仍续旧批。
+        let resumingBatch = sameBinding && (previous?.shouldContinueSameBatch == true)
+        let target = NovelGhostwriteBatch.clamp(
+            resumingBatch
+                ? (previous?.targetChapterCount ?? ghostwriteTargetChapterCount)
+                : (targetChapterCount ?? ghostwriteTargetChapterCount)
+        )
+        let confirmedPlan = workspace.projectSnapshot?.confirmedChapterPlan(for: binding.branchID)
+        if confirmedPlan == nil, !canResumeGhostwriteWithoutPlan {
+            operationErrorMessage = "代笔需要已确认的本章计划。"
+            return false
+        }
+        operationErrorMessage = nil
+        // 续跑保留本批幂等集合；新批清空，避免「进度 0/N」却显示「本批已收录 5 章」。
+        let retainedCollected = resumingBatch
+            ? (previous?.autoCollectedCandidateIDs ?? [])
+            : []
+        // 质量失败：继续必须重写，禁止同稿再验（验收不过 / 复读 / 连续性 / 不完整等）。
         let retainedCandidate: NovelCandidateID? = {
-            guard sameBinding else { return nil }
-            switch previous?.pauseReason {
-            case .obviousRepetition, .blockingContinuity: return nil
-            default: return previous?.candidateID
+            guard resumingBatch else { return nil }
+            if previous?.mustRewriteCandidateOnResume == true { return nil }
+            return previous?.candidateID
+        }()
+        let retainedSuperseded: Set<NovelCandidateID> = {
+            guard resumingBatch else { return [] }
+            var set = previous?.supersededCandidateIDs ?? []
+            if previous?.mustRewriteCandidateOnResume == true,
+               let old = previous?.candidateID {
+                set.insert(old)
             }
+            return set
+        }()
+        let completed = resumingBatch ? (previous?.completedChapterCount ?? 0) : 0
+        let currentIndex = resumingBatch
+            ? max(previous?.currentChapterIndex ?? 1, completed + 1)
+            : 1
+        if resumingBatch, let previousTarget = previous?.targetChapterCount {
+            // 本批 N 在开跑时固定；面板 Stepper 不得在续跑时改写目标。
+            ghostwriteTargetChapterCount = previousTarget
+        }
+        let openingPhase: NovelGhostwritePhase = {
+            if resumingBatch, previous?.pendingSyncChapterCredit == true { return .syncing }
+            if confirmedPlan == nil { return .planning }
+            if resumingBatch, previous?.revisionBriefOverride != nil { return .revising }
+            return .writing
         }()
         ghostwriteProgressStorage = NovelGhostwriteProgress(
             binding: binding,
-            phase: .writing,
-            pauseReason: sameBinding ? previous?.pauseReason : nil,
-            detailMessage: nil,
+            phase: openingPhase,
+            pauseReason: resumingBatch ? previous?.pauseReason : nil,
+            detailMessage: resumingBatch ? previous?.detailMessage : nil,
             candidateID: retainedCandidate,
-            chapterPlanDigest: plan.contentDigest,
+            chapterPlanDigest: confirmedPlan?.contentDigest,
             autoCollectedCandidateIDs: retainedCollected,
-            startedAt: sameBinding ? (previous?.startedAt ?? Date()) : Date()
+            startedAt: resumingBatch ? (previous?.startedAt ?? Date()) : Date(),
+            targetChapterCount: target,
+            completedChapterCount: completed,
+            currentChapterIndex: currentIndex,
+            lastCompletedPlanSummary: resumingBatch ? previous?.lastCompletedPlanSummary : nil,
+            pendingSyncChapterCredit: resumingBatch
+                ? (previous?.pendingSyncChapterCredit ?? false)
+                : false,
+            // 人手点继续/润修后给新的自动改写预算，并清空指纹环（避免立刻熔断）。
+            qualityAttemptIndex: {
+                guard resumingBatch else { return 0 }
+                if previous?.mustRewriteCandidateOnResume == true { return 0 }
+                return previous?.qualityAttemptIndex ?? 0
+            }(),
+            maxQualityAttempts: resumingBatch
+                ? (previous?.maxQualityAttempts ?? NovelGhostwriteHeal.defaultMaxQualityAttempts)
+                : NovelGhostwriteHeal.defaultMaxQualityAttempts,
+            lastFailureReceipt: resumingBatch ? previous?.lastFailureReceipt : nil,
+            supersededCandidateIDs: retainedSuperseded,
+            recentFailureFingerprints: {
+                guard resumingBatch else { return [] }
+                // 人手续跑：清 fuse，避免「两次同指纹后继续」第一次就熔断。
+                if previous?.mustRewriteCandidateOnResume == true
+                    || previous?.revisionBriefOverride != nil {
+                    return []
+                }
+                return previous?.recentFailureFingerprints ?? []
+            }(),
+            revisionBriefOverride: resumingBatch ? previous?.revisionBriefOverride : nil,
+            didThinContractAmendThisChapter: resumingBatch
+                ? (previous?.didThinContractAmendThisChapter ?? false)
+                : false,
+            contractAmendments: resumingBatch ? (previous?.contractAmendments ?? []) : [],
+            infraRetryCount: 0
         )
         ghostwriteTaskBinding = binding
         ghostwriteTask = Task { @MainActor [weak self] in
-            await self?.runGhostwriteChapter(binding: binding)
+            await self?.runGhostwriteBatch(binding: binding)
             guard self?.ghostwriteTaskBinding == binding else { return }
             self?.ghostwriteTask = nil
             self?.ghostwriteTaskBinding = nil
             self?.ghostwriteOwnedRunID = nil
             self?.isGhostwriteStartingRun = false
         }
+        if let progress = ghostwriteProgressStorage {
+            persistGhostwriteProgress(progress)
+        }
         return true
     }
 
     func pauseGhostwrite() {
         guard ghostwriteTask != nil else { return }
+        ghostwriteCancelAsUserPause = true
         mutateGhostwriteProgress {
             $0.pauseReason = .userPaused
+            if $0.phase == .writing || $0.phase == .accepting || $0.phase == .collecting
+                || $0.phase == .planning || $0.phase == .revising {
+                $0.phase = .paused
+            }
         }
         ghostwriteTask?.cancel()
     }
@@ -2994,6 +3129,60 @@ extension NovelSessionViewModel {
     @discardableResult
     func continueGhostwriteChapter() -> Bool {
         guard ghostwriteTask == nil else { return false }
+        return startGhostwriteChapter()
+    }
+
+    /// 人工润修：写入可编辑 brief 后按自愈写路径重开本章（隔离会话历史）。
+    @discardableResult
+    func startGhostwriteRevision(brief: String) -> Bool {
+        guard ghostwriteTask == nil, binding != nil else {
+            operationErrorMessage = "代笔暂时不能开始。"
+            return false
+        }
+        let trimmed = brief.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            operationErrorMessage = "请先填写润修要求。"
+            return false
+        }
+        guard var progress = ghostwriteProgressStorage,
+              progress.binding == binding,
+              progress.shouldOfferRevisionSheet
+        else {
+            operationErrorMessage = "当前没有可润修的代笔中断状态。"
+            return false
+        }
+        // 保留 pauseReason 使 shouldContinueSameBatch 仍为 true；brief 在 start 重建 progress 时带上。
+        // receipt.sourceCandidateID 供 obtain 取上一稿正文；candidateID 仍作废以免同稿再验。
+        if let old = progress.candidateID {
+            if progress.lastFailureReceipt?.sourceCandidateID == nil {
+                if let receipt = progress.lastFailureReceipt {
+                    progress.lastFailureReceipt = NovelGhostwriteFailureReceipt.make(
+                        reason: receipt.reason,
+                        summary: receipt.summary,
+                        missingMustHappen: receipt.missingMustHappen,
+                        repetitionBeats: receipt.repetitionBeats,
+                        continuityNotes: receipt.continuityNotes,
+                        attemptIndex: receipt.attemptIndex,
+                        sourceCandidateID: old,
+                        planDigest: receipt.planDigest
+                    )
+                } else {
+                    progress.lastFailureReceipt = NovelGhostwriteFailureReceipt.make(
+                        reason: progress.pauseReason ?? .healBudgetExhausted,
+                        summary: progress.detailMessage ?? "",
+                        attemptIndex: progress.qualityAttemptIndex,
+                        sourceCandidateID: old,
+                        planDigest: progress.chapterPlanDigest
+                    )
+                }
+            }
+            progress.supersededCandidateIDs.insert(old)
+        }
+        progress.candidateID = nil
+        progress.revisionBriefOverride = trimmed
+        progress.qualityAttemptIndex = 0
+        progress.detailMessage = "按审稿意见润修中…"
+        ghostwriteProgressStorage = progress
         return startGhostwriteChapter()
     }
 
@@ -3005,31 +3194,185 @@ extension NovelSessionViewModel {
             return
         }
         if ghostwriteTaskBinding == expectedBinding, let task = ghostwriteTask {
+            // 先落盘暂停态再取消：切分支/退页后仍可从 sidecar 续本批。
+            ghostwriteCancelAsUserPause = true
             mutateGhostwriteProgress {
-                $0.pauseReason = .cancelled
+                if $0.pendingSyncChapterCredit {
+                    $0.phase = .failed
+                    $0.pauseReason = .syncFailed
+                } else {
+                    $0.phase = .paused
+                    $0.pauseReason = .userPaused
+                }
+                $0.detailMessage = Self.mergeGhostwriteDetail(
+                    $0.detailMessage,
+                    "离开页面时已保存本批进度，回来可继续。"
+                )
             }
             task.cancel()
             await task.value
         }
+        // 只清内存；sidecar 按 project+branch 保留，bind 时 restore。
         if ghostwriteProgressStorage?.binding == expectedBinding {
             ghostwriteProgressStorage = nil
         }
     }
 
-    private func runGhostwriteChapter(binding expectedBinding: NovelSessionBinding) async {
-        do {
-            try Task.checkCancellation()
-            _ = await refreshDurable(binding: binding, token: bindingToken)
+    private static func mergeGhostwriteDetail(_ existing: String?, _ note: String) -> String {
+        let base = existing?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if base.isEmpty { return note }
+        if base.contains(note) { return base }
+        return base + "\n" + note
+    }
 
-            let plan = try requireConfirmedGhostwritePlan(for: expectedBinding)
-            // 合同对应候选已进正史：不得再写一章。常见于收录后清合同失败 / 取消。
-            if let alreadyCollected = candidates(kind: .prose).first(where: {
-                NovelGhostwriteCandidateOwnership.belongs($0, to: plan) && $0.status == .collected
-            }) {
-                mutateGhostwriteProgress(binding: expectedBinding) {
-                    $0.autoCollectedCandidateIDs.insert(alreadyCollected.id)
-                    $0.candidateID = alreadyCollected.id
+    private func runGhostwriteBatch(binding expectedBinding: NovelSessionBinding) async {
+        do {
+            while true {
+                try Task.checkCancellation()
+                _ = await refreshDurable(binding: binding, token: bindingToken)
+                guard ghostwriteProgressStorage?.binding == expectedBinding else { return }
+
+                // 已收录待同步：先完成记账，禁止少计章后再开写下一章。
+                if ghostwriteProgressStorage?.pendingSyncChapterCredit == true {
+                    let credited = try await settlePendingGhostwriteSyncCredit(
+                        expectedBinding: expectedBinding
+                    )
+                    if !credited { return }
+                    if ghostwriteProgressStorage?.isBatchComplete == true {
+                        finishGhostwriteBatch(
+                            binding: expectedBinding,
+                            candidateID: ghostwriteProgressStorage?.candidateID
+                        )
+                        return
+                    }
+                    continue
                 }
+
+                let target = ghostwriteProgressStorage?.targetChapterCount
+                    ?? NovelGhostwriteBatch.minChapterCount
+                let completed = ghostwriteProgressStorage?.completedChapterCount ?? 0
+                if completed >= target {
+                    finishGhostwriteBatch(
+                        binding: expectedBinding,
+                        candidateID: ghostwriteProgressStorage?.candidateID
+                    )
+                    return
+                }
+
+                mutateGhostwriteProgress(binding: expectedBinding) {
+                    $0.currentChapterIndex = completed + 1
+                }
+
+                // 每章入口取最新确认合同；章内 Tier2 改合同后也会在 loop 内刷新。
+                let plan: NovelChapterPlanRecord
+                if let existing = workspace.projectSnapshot?.confirmedChapterPlan(
+                    for: expectedBinding.branchID
+                ) {
+                    plan = existing
+                } else {
+                    guard let proposed = try await proposeNextGhostwritePlan(
+                        expectedBinding: expectedBinding
+                    ) else { return }
+                    plan = proposed
+                }
+
+                let chapterOK = try await runOneGhostwriteChapter(
+                    initialPlan: plan,
+                    expectedBinding: expectedBinding
+                )
+                if !chapterOK { return }
+
+                // runOne 在 collect+clear 后已标 pending；成功同步后在此记账。
+                let candidateID = ghostwriteProgressStorage?.candidateID
+                let planSummary = workspace.projectSnapshot?
+                    .confirmedChapterPlan(for: expectedBinding.branchID)?
+                    .ghostwriteBatchSummary()
+                    ?? ghostwriteProgressStorage?.lastCompletedPlanSummary
+                mutateGhostwriteProgress(binding: expectedBinding) {
+                    if let planSummary {
+                        $0.lastCompletedPlanSummary = planSummary
+                    }
+                    _ = $0.applyPendingSyncChapterCredit()
+                }
+
+                if (ghostwriteProgressStorage?.completedChapterCount ?? 0) >= target {
+                    finishGhostwriteBatch(
+                        binding: expectedBinding,
+                        candidateID: candidateID
+                    )
+                    return
+                }
+                // 下一章：循环顶部会自动拟合同。
+            }
+        } catch is CancellationError {
+            await stopOwnedGhostwriteRun(binding: expectedBinding, reason: .user)
+            let reason = ghostwriteCancellationPauseReason()
+            pauseGhostwritePipeline(
+                binding: expectedBinding,
+                reason: reason,
+                detail: nil,
+                candidateID: ghostwriteProgressStorage?.candidateID
+            )
+            ghostwriteCancelAsUserPause = false
+        } catch let failure as NovelStructuredModelExecutionFailure where failure.failure.code == "cancelled" {
+            await stopOwnedGhostwriteRun(binding: expectedBinding, reason: .user)
+            let reason = ghostwriteCancellationPauseReason()
+            pauseGhostwritePipeline(
+                binding: expectedBinding,
+                reason: reason,
+                detail: nil,
+                candidateID: ghostwriteProgressStorage?.candidateID
+            )
+            ghostwriteCancelAsUserPause = false
+        } catch {
+            ghostwriteCancelAsUserPause = false
+            pauseGhostwritePipeline(
+                binding: expectedBinding,
+                reason: .failedReason(from: error),
+                detail: describe(error),
+                candidateID: ghostwriteProgressStorage?.candidateID
+            )
+        }
+    }
+
+    /// 协作取消：默认视为用户暂停（可续跑），绝不因 heal 清 pauseReason 而落到 `.cancelled`。
+    private func ghostwriteCancellationPauseReason() -> NovelGhostwritePauseReason {
+        if ghostwriteProgressStorage?.pendingSyncChapterCredit == true {
+            return .syncFailed
+        }
+        if ghostwriteCancelAsUserPause {
+            return .userPaused
+        }
+        switch ghostwriteProgressStorage?.pauseReason {
+        case .userPaused, .syncFailed:
+            return ghostwriteProgressStorage?.pauseReason ?? .userPaused
+        case .healBudgetExhausted, .acceptanceFailed, .obviousRepetition,
+             .blockingContinuity, .continuityAuditIncomplete:
+            // 质量停机中途再被取消：保留可续跑的质量终态语义。
+            return ghostwriteProgressStorage?.pauseReason ?? .userPaused
+        default:
+            // 批内协作取消一律可续，不把本批作废。
+            return .userPaused
+        }
+    }
+
+    /// 单章闭环：写→验→（可选）连续性→收录→清合同→同步。
+    /// 验收/复读失败时在预算内自动改写；用尽或严重连续性则暂停。成功 true；已暂停 false。
+    /// Tier2 改合同后会刷新 live plan，避免 digest 与 collect 错配。
+    private func runOneGhostwriteChapter(
+        initialPlan: NovelChapterPlanRecord,
+        expectedBinding: NovelSessionBinding
+    ) async throws -> Bool {
+        var plan = initialPlan
+        // 合同对应候选已进正史：不得再写一章。常见于收录后清合同失败 / 取消。
+        if let alreadyCollected = candidates(kind: .prose).first(where: {
+            NovelGhostwriteCandidateOwnership.belongs($0, to: plan) && $0.status == .collected
+        }) {
+            mutateGhostwriteProgress(binding: expectedBinding) {
+                $0.autoCollectedCandidateIDs.insert(alreadyCollected.id)
+                $0.candidateID = alreadyCollected.id
+            }
+            if workspace.projectSnapshot?.chapterPlan(for: expectedBinding.branchID) != nil {
                 let planCleared = await workspace.clearChapterPlan(
                     branchID: expectedBinding.branchID
                 )
@@ -3040,33 +3383,44 @@ extension NovelSessionViewModel {
                         detail: "本章已收录，但未能清除计划。请手动清除后再继续。",
                         candidateID: alreadyCollected.id
                     )
-                    return
+                    return false
                 }
-                mutateGhostwriteProgress(binding: expectedBinding) {
-                    $0.chapterPlanDigest = nil
-                    $0.phase = .syncing
-                }
-                let synced = await awaitGhostwriteStateSync(expectedBinding: expectedBinding)
-                try Task.checkCancellation()
-                if !synced {
-                    pauseGhostwritePipeline(
-                        binding: expectedBinding,
-                        reason: .syncFailed,
-                        detail: "本章已收录，本章计划已用完；同步完成后请先定好下一章计划再继续。",
-                        candidateID: alreadyCollected.id
-                    )
-                    return
-                }
-                mutateGhostwriteProgress(binding: expectedBinding) {
-                    $0.phase = .waitingUser
-                    $0.pauseReason = .chapterCompleted
-                    $0.detailMessage = NovelGhostwritePauseReason.chapterCompleted.displayMessage
-                    $0.candidateID = alreadyCollected.id
-                    $0.chapterPlanDigest = nil
-                }
-                return
             }
+            mutateGhostwriteProgress(binding: expectedBinding) {
+                $0.chapterPlanDigest = nil
+                $0.phase = .syncing
+                $0.pendingSyncChapterCredit = true
+                $0.lastCompletedPlanSummary = plan.ghostwriteBatchSummary()
+            }
+            let synced = await awaitGhostwriteStateSync(expectedBinding: expectedBinding)
+            try Task.checkCancellation()
+            if !synced {
+                pauseGhostwritePipeline(
+                    binding: expectedBinding,
+                    reason: .syncFailed,
+                    detail: "本章已收录；同步完成后可继续本批下一章。",
+                    candidateID: alreadyCollected.id
+                )
+                return false
+            }
+            return true
+        }
 
+        while true {
+            try Task.checkCancellation()
+            // Tier2 改合同后 digest 会变：每轮写前刷新 live 确认合同，避免 accept/collect 错配。
+            if let live = workspace.projectSnapshot?
+                .confirmedChapterPlan(for: expectedBinding.branchID) {
+                plan = live
+            } else {
+                pauseGhostwritePipeline(
+                    binding: expectedBinding,
+                    reason: .planMismatch,
+                    detail: "本章计划已不存在或未确认，无法继续代笔。",
+                    candidateID: ghostwriteProgressStorage?.candidateID
+                )
+                return false
+            }
             let candidateID = try await obtainGhostwriteCandidate(
                 plan: plan,
                 expectedBinding: expectedBinding
@@ -3084,29 +3438,41 @@ extension NovelSessionViewModel {
                 candidateID: candidateID
             )
             try Task.checkCancellation()
-            guard acceptance.accepted else {
+            if !acceptance.accepted {
                 let detail = acceptance.summary.isEmpty
                     ? acceptance.missingMustHappen.joined(separator: "；")
                     : acceptance.summary
-                pauseGhostwritePipeline(
+                let healed = await registerGhostwriteQualityFailure(
                     binding: expectedBinding,
                     reason: .acceptanceFailed,
                     detail: detail,
-                    candidateID: candidateID
+                    missingMustHappen: acceptance.missingMustHappen,
+                    forbiddenViolations: acceptance.forbiddenViolations,
+                    repetitionBeats: acceptance.obviousRepetition,
+                    continuityNotes: [],
+                    candidateID: candidateID,
+                    planDigest: plan.contentDigest
                 )
-                return
+                if healed { continue }
+                return false
             }
             if !acceptance.obviousRepetition.isEmpty {
                 let detail = acceptance.obviousRepetition.joined(separator: "；")
-                pauseGhostwritePipeline(
+                let healed = await registerGhostwriteQualityFailure(
                     binding: expectedBinding,
                     reason: .obviousRepetition,
                     detail: detail.isEmpty
                         ? NovelGhostwritePauseReason.obviousRepetition.displayMessage
                         : detail,
-                    candidateID: candidateID
+                    missingMustHappen: [],
+                    forbiddenViolations: [],
+                    repetitionBeats: acceptance.obviousRepetition,
+                    continuityNotes: [],
+                    candidateID: candidateID,
+                    planDigest: plan.contentDigest
                 )
-                return
+                if healed { continue }
+                return false
             }
 
             let pauseOnBlockingContinuity = workspace.projectSnapshot?.project
@@ -3120,13 +3486,30 @@ extension NovelSessionViewModel {
                 try Task.checkCancellation()
                 if let reason = NovelGhostwriteContinuityGate.pauseReason(for: continuityReport),
                    let detail = NovelGhostwriteContinuityGate.pauseDetail(for: continuityReport) {
+                    // 严重连续性：默认不停自动改写空转，直接等人润修/处理。
+                    let receipt = NovelGhostwriteFailureReceipt.make(
+                        reason: reason,
+                        summary: detail,
+                        missingMustHappen: [],
+                        repetitionBeats: [],
+                        continuityNotes: NovelGhostwriteContinuityGate
+                            .blockingIssueSummaries(in: continuityReport),
+                        attemptIndex: (ghostwriteProgressStorage?.qualityAttemptIndex ?? 0) + 1,
+                        sourceCandidateID: candidateID,
+                        planDigest: plan.contentDigest
+                    )
+                    mutateGhostwriteProgress(binding: expectedBinding) {
+                        $0.qualityAttemptIndex += 1
+                        $0.lastFailureReceipt = receipt
+                        $0.supersededCandidateIDs.insert(candidateID)
+                    }
                     pauseGhostwritePipeline(
                         binding: expectedBinding,
                         reason: reason,
                         detail: detail,
                         candidateID: candidateID
                     )
-                    return
+                    return false
                 }
             }
 
@@ -3139,18 +3522,21 @@ extension NovelSessionViewModel {
                 plan: plan
             )
             guard collected else {
+                // 用户暂停/取消时 settle 会 return false，勿标成「收录失败」。
+                try Task.checkCancellation()
                 pauseGhostwritePipeline(
                     binding: expectedBinding,
                     reason: .collectFailed,
                     detail: operationErrorMessage,
                     candidateID: candidateID
                 )
-                return
+                return false
             }
             // 收录成功立刻记入幂等集合，避免清合同前取消导致同合同再写一章。
             mutateGhostwriteProgress(binding: expectedBinding) {
                 $0.autoCollectedCandidateIDs.insert(candidateID)
                 $0.candidateID = candidateID
+                $0.resetChapterHealState()
             }
             // 收录成功即消费合同：同步失败也不得用同一合同开下一章。
             let planCleared = await workspace.clearChapterPlan(
@@ -3163,11 +3549,13 @@ extension NovelSessionViewModel {
                     detail: "本章已收录，但未能清除计划。请手动清除后再继续。",
                     candidateID: candidateID
                 )
-                return
+                return false
             }
             mutateGhostwriteProgress(binding: expectedBinding) {
                 $0.chapterPlanDigest = nil
                 $0.phase = .syncing
+                $0.pendingSyncChapterCredit = true
+                $0.lastCompletedPlanSummary = plan.ghostwriteBatchSummary()
             }
 
             let synced = await awaitGhostwriteStateSync(expectedBinding: expectedBinding)
@@ -3175,7 +3563,7 @@ extension NovelSessionViewModel {
             guard synced else {
                 let syncDetail = [
                     workspace.errorMessage,
-                    "本章已收录，本章计划已用完；同步完成后请先定好下一章计划再继续。",
+                    "本章已收录；同步完成后可继续本批下一章。",
                 ]
                 .compactMap { $0 }
                 .joined(separator: " ")
@@ -3185,53 +3573,369 @@ extension NovelSessionViewModel {
                     detail: syncDetail,
                     candidateID: candidateID
                 )
-                return
+                return false
             }
+            return true
+        }
+    }
 
-            let highlightCount = ghostwriteRecentHighlightCount(for: expectedBinding)
-            let completionDetail: String
-            if highlightCount > 0 {
-                completionDetail =
-                    "本章已收录并同步。已记入 \(highlightCount) 条近期要点，方便下一章少复读。请先定好下一章计划再继续。"
+    /// 登记质量失败；若预算允许则准备自动改写并返回 true（调用方 `continue` 重写）。
+    /// 预算/指纹用尽时：复读可 mustNot 薄升级；仅缺 1 条 must 可措辞对齐；否则 pause。
+    @discardableResult
+    private func registerGhostwriteQualityFailure(
+        binding expectedBinding: NovelSessionBinding,
+        reason: NovelGhostwritePauseReason,
+        detail: String,
+        missingMustHappen: [String],
+        forbiddenViolations: [String],
+        repetitionBeats: [String],
+        continuityNotes: [String],
+        candidateID: NovelCandidateID,
+        planDigest: String?
+    ) async -> Bool {
+        let priorIndex = ghostwriteProgressStorage?.qualityAttemptIndex ?? 0
+        let receipt = NovelGhostwriteFailureReceipt.make(
+            reason: reason,
+            summary: detail,
+            missingMustHappen: missingMustHappen,
+            repetitionBeats: repetitionBeats,
+            continuityNotes: continuityNotes,
+            attemptIndex: priorIndex + 1,
+            sourceCandidateID: candidateID,
+            planDigest: planDigest
+        )
+        var healResult = (willRewrite: false, blockedByFingerprint: false)
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            healResult = $0.registerQualityFailureForHeal(
+                reason: reason,
+                receipt: receipt,
+                failedCandidateID: candidateID
+            )
+        }
+        if healResult.willRewrite {
+            return true
+        }
+
+        let alreadyAmended = ghostwriteProgressStorage?.didThinContractAmendThisChapter ?? false
+
+        // Tier2a：复读 → 追加 mustNot 后再给一轮（每章一次）。
+        if NovelGhostwriteHeal.shouldAttemptMustNotAmend(
+            reason: reason,
+            receipt: receipt,
+            alreadyAmendedThisChapter: alreadyAmended
+        ) {
+            let amended = await attemptThinMustNotAmend(
+                expectedBinding: expectedBinding,
+                receipt: receipt
+            )
+            if amended {
+                return true
+            }
+        }
+
+        // Tier2b：仅缺 1 条 must → 放宽该条措辞对齐后再给一轮（每章一次）。
+        if NovelGhostwriteHeal.shouldAttemptMustAlign(
+            reason: reason,
+            receipt: receipt,
+            forbiddenViolations: forbiddenViolations,
+            alreadyAmendedThisChapter: ghostwriteProgressStorage?.didThinContractAmendThisChapter
+                ?? false
+        ) {
+            let amended = await attemptThinMustAlign(
+                expectedBinding: expectedBinding,
+                receipt: receipt
+            )
+            if amended {
+                return true
+            }
+        }
+
+        let maxAttempts = ghostwriteProgressStorage?.maxQualityAttempts
+            ?? NovelGhostwriteHeal.defaultMaxQualityAttempts
+        let exhaustedDetail: String
+        if reason.allowsAutomaticQualityHeal {
+            var lines = [detail]
+            if healResult.blockedByFingerprint {
+                lines.append("连续两次同一类问题，已停止空转改写。")
             } else {
-                completionDetail = "本章已收录并同步。请先定好下一章计划再继续。"
+                lines.append(
+                    "已自动改写 \(max(0, maxAttempts - 1)) 次仍未过关。"
+                )
             }
-            mutateGhostwriteProgress(binding: expectedBinding) {
-                $0.phase = .waitingUser
-                $0.pauseReason = .chapterCompleted
-                $0.detailMessage = completionDetail
-                $0.candidateID = candidateID
-                $0.chapterPlanDigest = nil
+            lines.append("可按审稿意见润修，或整章重写 / 改计划。")
+            exhaustedDetail = lines.joined(separator: "\n")
+        } else {
+            exhaustedDetail = detail
+        }
+        pauseGhostwritePipeline(
+            binding: expectedBinding,
+            reason: reason.allowsAutomaticQualityHeal ? .healBudgetExhausted : reason,
+            detail: exhaustedDetail,
+            candidateID: candidateID
+        )
+        // 预算用尽时 pauseReason 用 healBudgetExhausted，但 receipt.reason 保留原始质量原因。
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            $0.lastFailureReceipt = receipt
+        }
+        return false
+    }
+
+    /// 把复读 beat 写入本章合同 mustNot，digest 更新后准备再写一轮。
+    private func attemptThinMustNotAmend(
+        expectedBinding: NovelSessionBinding,
+        receipt: NovelGhostwriteFailureReceipt
+    ) async -> Bool {
+        guard let plan = workspace.projectSnapshot?
+            .confirmedChapterPlan(for: expectedBinding.branchID)
+        else { return false }
+        let existing = Set(
+            plan.mustNotHappen.map {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            }.filter { !$0.isEmpty }
+        )
+        var additions: [String] = []
+        for beat in receipt.repetitionBeats {
+            let trimmed = beat.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let already = existing.contains { old in
+                old == trimmed || old.contains(trimmed) || trimmed.contains(old)
             }
-        } catch is CancellationError {
-            await stopOwnedGhostwriteRun(binding: expectedBinding, reason: .user)
-            let reason = ghostwriteProgressStorage?.pauseReason == .userPaused
-                ? NovelGhostwritePauseReason.userPaused
-                : .cancelled
+            if !already {
+                additions.append(trimmed)
+            }
+        }
+        guard !additions.isEmpty else { return false }
+
+        let newMustNot = plan.mustNotHappen + additions
+        let beforeDigest = plan.contentDigest
+        // upsert 使用 workspace 当前选中分支；代笔主线要求主分支且与 session binding 一致。
+        guard workspace.selectedBranchID == expectedBinding.branchID else { return false }
+        let saved = await workspace.upsertChapterPlan(
+            planID: plan.id,
+            status: .confirmed,
+            outlinePlacement: plan.outlinePlacement,
+            goalAndConflict: plan.goalAndConflict,
+            mustHappen: plan.mustHappen,
+            mustNotHappen: newMustNot,
+            endingHook: plan.endingHook,
+            visibleFacts: plan.visibleFacts
+        )
+        guard saved else { return false }
+        _ = await refreshDurable(binding: binding, token: bindingToken)
+        let afterDigest = workspace.projectSnapshot?
+            .confirmedChapterPlan(for: expectedBinding.branchID)?
+            .contentDigest
+        let chapterIndex = ghostwriteProgressStorage?.currentChapterIndex ?? 1
+        let amendment = NovelGhostwriteContractAmendment(
+            kind: .appendMustNot,
+            detail: additions.joined(separator: "；"),
+            chapterIndex: chapterIndex,
+            beforeDigest: beforeDigest,
+            afterDigest: afterDigest
+        )
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            $0.prepareAfterThinContractAmend(
+                amendment: amendment,
+                newPlanDigest: afterDigest
+            )
+            // 注入：禁止项写进 brief，避免只靠合同遗漏。
+            $0.revisionBriefOverride = """
+            合同已更新禁止项，请勿再写：
+            \(additions.map { "- \($0)" }.joined(separator: "\n"))
+            开篇换新，落实本章必发生，避免与近期节拍复读。
+            """
+        }
+        return true
+    }
+
+    /// 仅缺 1 条 must：放宽该条合同措辞（允许等价表达），再写一轮；不删 must、不改 goal。
+    private func attemptThinMustAlign(
+        expectedBinding: NovelSessionBinding,
+        receipt: NovelGhostwriteFailureReceipt
+    ) async -> Bool {
+        guard let plan = workspace.projectSnapshot?
+            .confirmedChapterPlan(for: expectedBinding.branchID)
+        else { return false }
+        guard let missing = receipt.missingMustHappen.first else { return false }
+        guard let rephrase = NovelGhostwriteHeal.rephraseSingleMust(
+            planMustHappen: plan.mustHappen,
+            missingItem: missing,
+            acceptanceSummary: receipt.summary
+        ) else { return false }
+
+        var newMust = plan.mustHappen
+        guard rephrase.index >= 0, rephrase.index < newMust.count else { return false }
+        newMust[rephrase.index] = rephrase.rewritten
+
+        let beforeDigest = plan.contentDigest
+        guard workspace.selectedBranchID == expectedBinding.branchID else { return false }
+        let saved = await workspace.upsertChapterPlan(
+            planID: plan.id,
+            status: .confirmed,
+            outlinePlacement: plan.outlinePlacement,
+            goalAndConflict: plan.goalAndConflict,
+            mustHappen: newMust,
+            mustNotHappen: plan.mustNotHappen,
+            endingHook: plan.endingHook,
+            visibleFacts: plan.visibleFacts
+        )
+        guard saved else { return false }
+        _ = await refreshDurable(binding: binding, token: bindingToken)
+        let afterDigest = workspace.projectSnapshot?
+            .confirmedChapterPlan(for: expectedBinding.branchID)?
+            .contentDigest
+        let chapterIndex = ghostwriteProgressStorage?.currentChapterIndex ?? 1
+        let amendment = NovelGhostwriteContractAmendment(
+            kind: .alignSingleMust,
+            detail: "「\(rephrase.original)」→「\(rephrase.rewritten)」",
+            chapterIndex: chapterIndex,
+            beforeDigest: beforeDigest,
+            afterDigest: afterDigest
+        )
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            $0.prepareAfterThinContractAmend(
+                amendment: amendment,
+                newPlanDigest: afterDigest
+            )
+            $0.revisionBriefOverride = """
+            本章合同已放宽一条必发生措辞（保留意图，允许等价表达）：
+            - 原：\(rephrase.original)
+            - 现：\(rephrase.rewritten)
+
+            请重写整章，明确写出可辨认的对应情绪/动作，不要只靠暗示；开篇换新，勿复读近期节拍。
+            """
+            $0.detailMessage = "已放宽 1 条必发生措辞，再写一轮…"
+        }
+        return true
+    }
+
+    /// 处理「已收录、待同步记账」：同步成功后 completed+=1，不重写、不新拟合同。
+    private func settlePendingGhostwriteSyncCredit(
+        expectedBinding: NovelSessionBinding
+    ) async throws -> Bool {
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            $0.phase = .syncing
+            $0.pauseReason = nil
+            $0.detailMessage = nil
+        }
+        let synced = await awaitGhostwriteStateSync(expectedBinding: expectedBinding)
+        try Task.checkCancellation()
+        guard synced else {
             pauseGhostwritePipeline(
                 binding: expectedBinding,
-                reason: reason,
-                detail: nil,
+                reason: .syncFailed,
+                detail: "本章已收录；同步完成后可继续本批下一章。",
                 candidateID: ghostwriteProgressStorage?.candidateID
             )
-        } catch let failure as NovelStructuredModelExecutionFailure where failure.failure.code == "cancelled" {
-            await stopOwnedGhostwriteRun(binding: expectedBinding, reason: .user)
-            let reason = ghostwriteProgressStorage?.pauseReason == .userPaused
-                ? NovelGhostwritePauseReason.userPaused
-                : .cancelled
+            return false
+        }
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            _ = $0.applyPendingSyncChapterCredit()
+        }
+        return true
+    }
+
+    private func proposeNextGhostwritePlan(
+        expectedBinding: NovelSessionBinding
+    ) async throws -> NovelChapterPlanRecord? {
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            $0.phase = .planning
+            $0.pauseReason = nil
+            $0.detailMessage = nil
+            $0.chapterPlanDigest = nil
+        }
+        let synced = await awaitGhostwriteStateSync(expectedBinding: expectedBinding)
+        try Task.checkCancellation()
+        guard synced else {
             pauseGhostwritePipeline(
                 binding: expectedBinding,
-                reason: reason,
-                detail: nil,
+                reason: .syncFailed,
+                detail: "拟定下一章计划前需要完成剧情同步。",
                 candidateID: ghostwriteProgressStorage?.candidateID
             )
-        } catch {
-            pauseGhostwritePipeline(
-                binding: expectedBinding,
-                reason: .failedReason(from: error),
-                detail: describe(error),
-                candidateID: ghostwriteProgressStorage?.candidateID
-            )
+            return nil
+        }
+        let ordinal = (ghostwriteProgressStorage?.completedChapterCount ?? 0) + 1
+        let previousSummary = ghostwriteProgressStorage?.lastCompletedPlanSummary
+        let maxProposalAttempts = NovelGhostwriteHeal.defaultMaxInfraRetries
+        var lastError: Error?
+        for attempt in 1...maxProposalAttempts {
+            do {
+                try Task.checkCancellation()
+                if attempt > 1 {
+                    mutateGhostwriteProgress(binding: expectedBinding) {
+                        $0.detailMessage = "拟定计划重试 \(attempt)/\(maxProposalAttempts)…"
+                    }
+                    try? await Task.sleep(for: .milliseconds(400 * attempt))
+                }
+                let plan = try await workspace.proposeAndConfirmNextChapterPlan(
+                    projectID: expectedBinding.projectID,
+                    branchID: expectedBinding.branchID,
+                    nextChapterOrdinal: ordinal,
+                    previousPlanSummary: previousSummary
+                )
+                _ = await refreshDurable(binding: binding, token: bindingToken)
+                mutateGhostwriteProgress(binding: expectedBinding) {
+                    $0.chapterPlanDigest = plan.contentDigest
+                    $0.phase = .writing
+                    $0.detailMessage = nil
+                }
+                return plan
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let failure as NovelStructuredModelExecutionFailure
+                where failure.failure.code == "cancelled" {
+                throw CancellationError()
+            } catch let failure as NovelStructuredModelExecutionFailure
+                where failure.failure.isRetryable && attempt < maxProposalAttempts {
+                lastError = failure
+                continue
+            } catch {
+                lastError = error
+                // 非 retryable 或最后一次：退出循环
+                if attempt >= maxProposalAttempts { break }
+                // 未知错误也允许再试一次
+                continue
+            }
+        }
+        pauseGhostwritePipeline(
+            binding: expectedBinding,
+            reason: .planProposalFailed,
+            detail: lastError.map(describe) ?? "自动拟定下一章计划失败。",
+            candidateID: ghostwriteProgressStorage?.candidateID
+        )
+        return nil
+    }
+
+    private func finishGhostwriteBatch(
+        binding expectedBinding: NovelSessionBinding,
+        candidateID: NovelCandidateID?
+    ) {
+        let target = ghostwriteProgressStorage?.targetChapterCount
+            ?? NovelGhostwriteBatch.minChapterCount
+        let completed = ghostwriteProgressStorage?.completedChapterCount ?? 0
+        let highlightCount = ghostwriteRecentHighlightCount(for: expectedBinding)
+        let reason: NovelGhostwritePauseReason = target > 1 ? .batchCompleted : .chapterCompleted
+        var detail: String
+        if target > 1 {
+            detail = "本批 \(completed) 章已收录并同步。"
+        } else {
+            detail = "本章已收录并同步。"
+        }
+        if highlightCount > 0 {
+            detail += " 已记入 \(highlightCount) 条近期要点，方便下一章少复读。"
+        }
+        if target == 1 {
+            detail += " 请先定好下一章计划再继续。"
+        } else {
+            detail += " 下一批请先确认首章计划。"
+        }
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            $0.phase = .waitingUser
+            $0.pauseReason = reason
+            $0.detailMessage = detail
+            $0.candidateID = candidateID ?? $0.candidateID
+            $0.chapterPlanDigest = nil
         }
     }
 
@@ -3257,16 +3961,19 @@ extension NovelSessionViewModel {
         plan: NovelChapterPlanRecord,
         expectedBinding: NovelSessionBinding
     ) async throws -> NovelCandidateID {
-        // 验收失败后继续：只复用本轮 progress 记下的候选，不扫同 digest 的人手稿。
-        // 明显复读 / 严重连续性除外：同稿再验必再停，继续应重写。
+        let superseded = ghostwriteProgressStorage?.supersededCandidateIDs ?? []
+        // 质量失败 / 自动改写中：必须产新稿，禁止复用已作废或当前失败候选。
         let mustRewrite: Bool = {
-            switch ghostwriteProgressStorage?.pauseReason {
-            case .obviousRepetition, .blockingContinuity: true
-            default: false
+            if ghostwriteProgressStorage?.lastFailureReceipt != nil,
+               (ghostwriteProgressStorage?.qualityAttemptIndex ?? 0) > 0,
+               ghostwriteProgressStorage?.phase == .writing {
+                return true
             }
+            return ghostwriteProgressStorage?.pauseReason?.requiresRewriteOnContinue == true
         }()
         if !mustRewrite,
            let ownedID = ghostwriteProgressStorage?.candidateID,
+           !superseded.contains(ownedID),
            let owned = candidate(id: ownedID),
            owned.status == .available,
            NovelGhostwriteCandidateOwnership.belongs(owned, to: plan),
@@ -3275,19 +3982,45 @@ extension NovelSessionViewModel {
         }
         if !mustRewrite,
            let recovered = candidates(kind: .prose)
-            .filter({ $0.status == .available && NovelGhostwriteCandidateOwnership.belongs($0, to: plan) })
+            .filter({
+                $0.status == .available
+                    && NovelGhostwriteCandidateOwnership.belongs($0, to: plan)
+                    && !superseded.contains($0.id)
+            })
             .max(by: { $0.createdAt < $1.createdAt }) {
             mutateGhostwriteProgress(binding: expectedBinding) {
                 $0.candidateID = recovered.id
             }
             return recovered.id
         }
+        let healReceipt = ghostwriteProgressStorage?.lastFailureReceipt
+        let revisionBrief = ghostwriteProgressStorage?.revisionBriefOverride
+        let isHealRewrite = healReceipt != nil
+            || revisionBrief != nil
+            || (ghostwriteProgressStorage?.qualityAttemptIndex ?? 0) > 0
+            || ghostwriteProgressStorage?.phase == .revising
+        // 人工润修：带上一稿正文（有界）；自动改写仍只靠 receipt，避免每轮灌全文。
+        let sourceDraft: String? = {
+            guard revisionBrief != nil else { return nil }
+            let sourceID = healReceipt?.sourceCandidateID
+            guard let sourceID, let body = candidate(id: sourceID)?.content else { return nil }
+            let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }()
+        let userText = NovelGhostwriteProgress.writeUserText(
+            receipt: healReceipt,
+            revisionBrief: revisionBrief,
+            sourceDraft: sourceDraft
+        )
         mutateGhostwriteProgress(binding: expectedBinding) {
-            $0.phase = .writing
+            $0.phase = revisionBrief == nil ? .writing : .revising
             $0.chapterPlanDigest = plan.contentDigest
             $0.candidateID = nil
             $0.pauseReason = nil
-            $0.detailMessage = nil
+            $0.revisionBriefOverride = nil // 只消费一次
+            if $0.detailMessage == nil || $0.qualityAttemptIndex == 0 {
+                $0.detailMessage = revisionBrief == nil ? nil : "按审稿意见润修中…"
+            }
         }
         let preexisting = Set(
             candidates(kind: .prose)
@@ -3299,12 +4032,13 @@ extension NovelSessionViewModel {
             kind: .prose,
             mode: .writeProse,
             granularity: .wholeChapter,
-            userText: "请按本章计划写完整一章正文。",
+            userText: userText,
             sourceChapterVersionID: nil,
             askUserResponse: nil,
             injectionOverrides: .none,
             inputBudgetTokens: 16_000,
-            ghostwritePlanID: plan.id
+            ghostwritePlanID: plan.id,
+            suppressRecentSessionMessages: isHealRewrite
         ))
         ghostwriteOwnedRunID = activeRunID
         isGhostwriteStartingRun = false
@@ -3368,14 +4102,34 @@ extension NovelSessionViewModel {
         _ candidateID: NovelCandidateID,
         plan: NovelChapterPlanRecord
     ) async -> Bool {
-        guard let candidate = candidate(id: candidateID),
-              candidate.status == .available,
-              NovelGhostwriteCandidateOwnership.belongs(candidate, to: plan) else {
-            operationErrorMessage = "这篇稿和当前计划对不上，无法自动收录。"
-            return false
+        // 只等生成 run 从分支上摘掉；同步/锁由 collectCandidate 门禁负责。
+        _ = await refreshDurable(binding: binding, token: bindingToken)
+        let settleDeadline = Date().addingTimeInterval(3)
+        while Date() < settleDeadline {
+            if Task.isCancelled { return false }
+            if workspace.branchSnapshot?.branch.activeRunID == nil { break }
+            try? await Task.sleep(for: .milliseconds(150))
+            _ = await refreshDurable(binding: binding, token: bindingToken)
         }
+        if Task.isCancelled { return false }
+
         if ghostwriteProgressStorage?.autoCollectedCandidateIDs.contains(candidateID) == true {
             return true
+        }
+        guard let candidate = candidate(id: candidateID),
+              candidate.status == .available else {
+            operationErrorMessage = "找不到可自动收录的完整正文候选。"
+            return false
+        }
+        // 与领域 systemAutoCollect 一致：以合同 digest 绑定为准。
+        // ghostwritePlanID 仅作增强校验——有则必须匹配，缺省不挡（旧候选/恢复路径）。
+        guard candidate.chapterPlanDigest == plan.contentDigest else {
+            operationErrorMessage = "这篇稿没有绑定当前本章计划，无法自动收录。"
+            return false
+        }
+        if let boundPlanID = candidate.ghostwritePlanID, boundPlanID != plan.id {
+            operationErrorMessage = "这篇稿和当前计划对不上，无法自动收录。"
+            return false
         }
         let paragraphs = NovelParagraphParser.paragraphs(in: candidate.content)
         guard !paragraphs.isEmpty else {
@@ -3388,7 +4142,7 @@ extension NovelSessionViewModel {
             paragraphIDs: paragraphs.map(\.id),
             editedText: nil
         )
-        return await collectCandidate(
+        let collected = await collectCandidate(
             candidateID,
             selection: selection,
             target: .createNextChapter(
@@ -3397,12 +4151,20 @@ extension NovelSessionViewModel {
             ),
             source: .systemAutoCollect
         )
+        if !collected,
+           operationErrorMessage == nil || operationErrorMessage?.isEmpty == true {
+            operationErrorMessage = "自动收录失败。"
+        }
+        return collected
     }
 
     private func awaitGhostwriteStateSync(
         expectedBinding: NovelSessionBinding
     ) async -> Bool {
         let startedAt = Date()
+        var infraRetries = 0
+        let maxInfra = NovelGhostwriteHeal.defaultMaxInfraRetries
+        var lastKickAt: Date?
         while true {
             if Task.isCancelled { return false }
             _ = await refreshDurable(binding: binding, token: bindingToken)
@@ -3410,18 +4172,45 @@ extension NovelSessionViewModel {
             let branch = workspace.branchSnapshot?.branch
             let pending = branchPendingOperations
             if branch?.syncStatus == .synchronized, pending.isEmpty {
+                mutateGhostwriteProgress(binding: expectedBinding) {
+                    $0.infraRetryCount = 0
+                }
                 return true
             }
-            if branch?.syncStatus == .needsSync,
-               pending.isEmpty,
-               workspace.stateSyncActivity == nil,
-               Date().timeIntervalSince(startedAt) > 2 {
-                return false
-            }
-            if workspace.automaticStateSyncFailureMessage(
+
+            let syncFailedMessage = workspace.automaticStateSyncFailureMessage(
                 projectID: expectedBinding.projectID,
                 branchID: expectedBinding.branchID
-            ) != nil {
+            )
+            let idleNeedsSync = branch?.syncStatus == .needsSync
+                && pending.isEmpty
+                && workspace.stateSyncActivity == nil
+            let shouldKick = (idleNeedsSync || syncFailedMessage != nil)
+                && infraRetries < maxInfra
+                && (lastKickAt.map { Date().timeIntervalSince($0) >= 1.5 } ?? true)
+
+            if shouldKick {
+                infraRetries += 1
+                lastKickAt = Date()
+                mutateGhostwriteProgress(binding: expectedBinding) {
+                    $0.phase = .syncing
+                    $0.infraRetryCount = infraRetries
+                    $0.detailMessage = "剧情同步重试 \(infraRetries)/\(maxInfra)…"
+                }
+                workspace.retryStateSync(
+                    projectID: expectedBinding.projectID,
+                    branchID: expectedBinding.branchID
+                )
+                try? await Task.sleep(for: .milliseconds(500))
+                continue
+            }
+
+            if idleNeedsSync,
+               infraRetries >= maxInfra,
+               Date().timeIntervalSince(startedAt) > 3 {
+                return false
+            }
+            if syncFailedMessage != nil, infraRetries >= maxInfra {
                 return false
             }
             if Date().timeIntervalSince(startedAt) > 240 {
@@ -3431,17 +4220,6 @@ extension NovelSessionViewModel {
         }
     }
 
-    private func requireConfirmedGhostwritePlan(
-        for expectedBinding: NovelSessionBinding
-    ) throws -> NovelChapterPlanRecord {
-        guard let plan = workspace.projectSnapshot?.confirmedChapterPlan(
-            for: expectedBinding.branchID
-        ) else {
-            throw NovelError.invalidInput("代笔需要已确认的本章计划。")
-        }
-        return plan
-    }
-
     private func pauseGhostwritePipeline(
         binding expectedBinding: NovelSessionBinding,
         reason: NovelGhostwritePauseReason,
@@ -3449,9 +4227,11 @@ extension NovelSessionViewModel {
         candidateID: NovelCandidateID?
     ) {
         let phase: NovelGhostwritePhase = switch reason {
-        case .chapterCompleted: .waitingUser
+        case .chapterCompleted, .batchCompleted: .waitingUser
+        case .healBudgetExhausted: .waitingUser
         case .acceptanceFailed, .obviousRepetition, .blockingContinuity,
-             .continuityAuditIncomplete, .userPaused, .cancelled:
+             .continuityAuditIncomplete, .userPaused, .cancelled,
+             .planProposalFailed:
             .paused
         case .collectFailed, .syncFailed, .incompleteCandidate, .planMismatch:
             .failed
@@ -3461,8 +4241,11 @@ extension NovelSessionViewModel {
             $0.pauseReason = reason
             $0.detailMessage = detail ?? reason.displayMessage
             $0.candidateID = candidateID ?? $0.candidateID
+            if reason.requiresRewriteOnContinue, let candidateID {
+                $0.supersededCandidateIDs.insert(candidateID)
+            }
         }
-        if reason != .chapterCompleted {
+        if reason != .chapterCompleted, reason != .batchCompleted {
             operationErrorMessage = detail ?? reason.displayMessage
         }
     }
@@ -3490,5 +4273,46 @@ extension NovelSessionViewModel {
         if let expectedBinding, progress.binding != expectedBinding { return }
         body(&progress)
         ghostwriteProgressStorage = progress
+        persistGhostwriteProgress(progress)
+    }
+
+    /// 冷启动 / 重绑会话：从 sidecar 恢复本批代笔进度（不抢正在跑的 task）。
+    private func restoreGhostwriteProgressIfNeeded(
+        for expectedBinding: NovelSessionBinding
+    ) async {
+        guard ghostwriteTask == nil else { return }
+        if let current = ghostwriteProgressStorage, current.binding == expectedBinding {
+            return
+        }
+        guard let restored = await workspace.loadGhostwriteBatchProgress(
+            projectID: expectedBinding.projectID,
+            branchID: expectedBinding.branchID
+        ) else {
+            if ghostwriteProgressStorage?.binding != expectedBinding {
+                ghostwriteProgressStorage = nil
+            }
+            return
+        }
+        guard restored.binding == expectedBinding else { return }
+        // 完批记录不应继续占面板；清掉磁盘脏文件。
+        if restored.isBatchComplete, restored.pendingSyncChapterCredit != true {
+            clearPersistedGhostwriteProgress(for: expectedBinding)
+            if ghostwriteProgressStorage?.binding == expectedBinding {
+                ghostwriteProgressStorage = nil
+            }
+            return
+        }
+        ghostwriteProgressStorage = restored
+    }
+
+    private func persistGhostwriteProgress(_ progress: NovelGhostwriteProgress) {
+        workspace.persistGhostwriteBatchProgress(progress)
+    }
+
+    private func clearPersistedGhostwriteProgress(for binding: NovelSessionBinding) {
+        workspace.clearGhostwriteBatchProgress(
+            projectID: binding.projectID,
+            branchID: binding.branchID
+        )
     }
 }

@@ -945,7 +945,655 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertEqual(progress.boardStepSummary, "写✓验✓收✓同✓")
 
         progress.pauseReason = .obviousRepetition
-        XCTAssertEqual(progress.boardStepSummary, "已中断")
+        // 质量失败：看板标明继续将重写，避免「再验旧稿」误解。
+        XCTAssertEqual(progress.boardStepSummary, "已中断·将重写")
+    }
+
+    func testGhostwriteBatchClampAndProgressLabels() {
+        XCTAssertEqual(NovelGhostwriteBatch.clamp(0), 1)
+        XCTAssertEqual(NovelGhostwriteBatch.clamp(3), 3)
+        XCTAssertEqual(NovelGhostwriteBatch.clamp(99), 10)
+
+        let binding = NovelSessionBinding(
+            projectID: NovelProjectID(),
+            branchID: NovelBranchID()
+        )
+        var progress = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .writing,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 5,
+            completedChapterCount: 2,
+            currentChapterIndex: 3
+        )
+        XCTAssertEqual(progress.batchProgressLabel, "第 3/5 章")
+        XCTAssertTrue(progress.statusLabel.contains("3/5"))
+        XCTAssertTrue(progress.boardStepSummary.contains("已收2/5"))
+        XCTAssertFalse(progress.isBatchComplete)
+
+        progress.phase = .planning
+        XCTAssertTrue(progress.boardStepSummary.contains("拟定下一章"))
+
+        progress.completedChapterCount = 5
+        progress.currentChapterIndex = 5
+        progress.phase = .waitingUser
+        progress.pauseReason = .batchCompleted
+        XCTAssertTrue(progress.isBatchComplete)
+        XCTAssertEqual(progress.boardStepSummary, "写✓验✓收✓同✓ · 已收5/5")
+        XCTAssertEqual(progress.statusLabel, "本批已完成 · 5/5 章")
+        progress.pauseReason = .chapterCompleted
+        progress.targetChapterCount = 1
+        progress.currentChapterIndex = 1
+        progress.completedChapterCount = 1
+        XCTAssertEqual(progress.statusLabel, "本章已完成")
+        XCTAssertTrue(NovelGhostwritePauseReason.syncFailed.resumesWithoutConfirmedPlan)
+        XCTAssertTrue(NovelGhostwritePauseReason.planProposalFailed.resumesWithoutConfirmedPlan)
+        XCTAssertFalse(NovelGhostwritePauseReason.acceptanceFailed.resumesWithoutConfirmedPlan)
+        progress.targetChapterCount = 5
+        progress.completedChapterCount = 2
+        progress.pauseReason = .syncFailed
+        XCTAssertTrue(progress.canResumeWithoutConfirmedPlan)
+
+        // syncFailed 待记账：续跑先计章，避免越过 N 再写。
+        var pending = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .failed,
+            pauseReason: .syncFailed,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 1,
+            completedChapterCount: 0,
+            currentChapterIndex: 1,
+            pendingSyncChapterCredit: true
+        )
+        XCTAssertTrue(pending.shouldContinueSameBatch)
+        XCTAssertTrue(pending.canResumeWithoutConfirmedPlan)
+        XCTAssertTrue(pending.applyPendingSyncChapterCredit())
+        XCTAssertEqual(pending.completedChapterCount, 1)
+        XCTAssertFalse(pending.pendingSyncChapterCredit)
+        XCTAssertTrue(pending.isBatchComplete)
+        XCTAssertFalse(pending.shouldContinueSameBatch)
+
+        // N=2：记账后未达批上限，应继续同批（下一章拟合同），而不是完批。
+        var mid = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .failed,
+            pauseReason: .syncFailed,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 2,
+            completedChapterCount: 0,
+            currentChapterIndex: 1,
+            pendingSyncChapterCredit: true
+        )
+        XCTAssertFalse(mid.applyPendingSyncChapterCredit())
+        XCTAssertEqual(mid.completedChapterCount, 1)
+        XCTAssertFalse(mid.isBatchComplete)
+
+        // 取消且无待记账：显示「开始」、不得续旧批。
+        var cancelled = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .paused,
+            pauseReason: .cancelled,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 3,
+            completedChapterCount: 1,
+            currentChapterIndex: 2
+        )
+        XCTAssertFalse(cancelled.shouldContinueSameBatch)
+
+        // 取消但有待同步记账：必须先续跑记账。
+        cancelled.pendingSyncChapterCredit = true
+        XCTAssertTrue(cancelled.shouldContinueSameBatch)
+    }
+
+    func testGhostwriteQualityFailureRequiresRewriteNotReaccept() {
+        XCTAssertTrue(NovelGhostwritePauseReason.acceptanceFailed.requiresRewriteOnContinue)
+        XCTAssertTrue(NovelGhostwritePauseReason.obviousRepetition.requiresRewriteOnContinue)
+        XCTAssertTrue(NovelGhostwritePauseReason.blockingContinuity.requiresRewriteOnContinue)
+        XCTAssertTrue(NovelGhostwritePauseReason.healBudgetExhausted.requiresRewriteOnContinue)
+        XCTAssertTrue(NovelGhostwritePauseReason.acceptanceFailed.allowsAutomaticQualityHeal)
+        XCTAssertTrue(NovelGhostwritePauseReason.obviousRepetition.allowsAutomaticQualityHeal)
+        XCTAssertFalse(NovelGhostwritePauseReason.blockingContinuity.allowsAutomaticQualityHeal)
+        XCTAssertFalse(NovelGhostwritePauseReason.syncFailed.requiresRewriteOnContinue)
+
+        let binding = NovelSessionBinding(
+            projectID: NovelProjectID(),
+            branchID: NovelBranchID()
+        )
+        let failedID = NovelCandidateID()
+        var progress = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .paused,
+            pauseReason: .acceptanceFailed,
+            candidateID: failedID,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 5,
+            completedChapterCount: 0,
+            currentChapterIndex: 1
+        )
+        XCTAssertTrue(progress.mustRewriteCandidateOnResume)
+        XCTAssertTrue(progress.shouldContinueSameBatch)
+
+        let receipt = NovelGhostwriteFailureReceipt.make(
+            reason: .acceptanceFailed,
+            summary: "缺必发生：主角心里不爽",
+            missingMustHappen: ["主角觉得京娘有点碍事、心里不爽"],
+            repetitionBeats: ["赵大放缓步子等京娘"],
+            attemptIndex: 1,
+            sourceCandidateID: failedID,
+            planDigest: "digest-1"
+        )
+        let first = progress.registerQualityFailureForHeal(
+            reason: .acceptanceFailed,
+            receipt: receipt,
+            failedCandidateID: failedID
+        )
+        XCTAssertTrue(first.willRewrite)
+        XCTAssertFalse(first.blockedByFingerprint)
+        XCTAssertEqual(progress.qualityAttemptIndex, 1)
+        XCTAssertNil(progress.candidateID)
+        XCTAssertTrue(progress.supersededCandidateIDs.contains(failedID))
+        XCTAssertEqual(progress.phase, .writing)
+        XCTAssertNil(progress.pauseReason)
+        XCTAssertTrue(
+            NovelGhostwriteHeal.writeUserText(receipt: receipt).contains("禁止再写")
+                || NovelGhostwriteHeal.writeUserText(receipt: receipt).contains("赵大")
+        )
+
+        // 第 2 次失败仍可改写；第 3 次失败后（index==3）不再自动改写。
+        // 使用不同 fingerprint 的 receipt，避免指纹熔断抢先挡住预算路径。
+        let receipt2 = NovelGhostwriteFailureReceipt.make(
+            reason: .acceptanceFailed,
+            summary: "缺必发生：另一条",
+            missingMustHappen: ["另一条节拍"],
+            attemptIndex: 2,
+            sourceCandidateID: nil,
+            planDigest: "digest-1"
+        )
+        let second = progress.registerQualityFailureForHeal(
+            reason: .acceptanceFailed,
+            receipt: receipt2,
+            failedCandidateID: NovelCandidateID()
+        )
+        XCTAssertTrue(second.willRewrite)
+        XCTAssertEqual(progress.qualityAttemptIndex, 2)
+        let receipt3 = NovelGhostwriteFailureReceipt.make(
+            reason: .acceptanceFailed,
+            summary: "缺必发生：第三条",
+            missingMustHappen: ["第三条节拍"],
+            attemptIndex: 3,
+            sourceCandidateID: nil,
+            planDigest: "digest-1"
+        )
+        let third = progress.registerQualityFailureForHeal(
+            reason: .acceptanceFailed,
+            receipt: receipt3,
+            failedCandidateID: NovelCandidateID()
+        )
+        XCTAssertFalse(third.willRewrite)
+        XCTAssertEqual(progress.qualityAttemptIndex, 3)
+        XCTAssertFalse(
+            NovelGhostwriteHeal.shouldAutoRewrite(
+                afterFailureCount: 3,
+                maxAttempts: 3,
+                reason: .acceptanceFailed
+            )
+        )
+    }
+
+    func testGhostwriteFingerprintFuseStopsSameFailureLoop() {
+        let binding = NovelSessionBinding(
+            projectID: NovelProjectID(),
+            branchID: NovelBranchID()
+        )
+        var progress = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .writing,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 5,
+            maxQualityAttempts: 5
+        )
+        let same = NovelGhostwriteFailureReceipt.make(
+            reason: .obviousRepetition,
+            summary: "开篇复读",
+            repetitionBeats: ["赵大放缓步子等京娘"],
+            attemptIndex: 1,
+            sourceCandidateID: nil,
+            planDigest: "d"
+        )
+        let a = progress.registerQualityFailureForHeal(
+            reason: .obviousRepetition,
+            receipt: same,
+            failedCandidateID: NovelCandidateID()
+        )
+        XCTAssertTrue(a.willRewrite)
+        let b = progress.registerQualityFailureForHeal(
+            reason: .obviousRepetition,
+            receipt: same,
+            failedCandidateID: NovelCandidateID()
+        )
+        // 连续相同 fingerprint → 熔断，即使预算未用尽。
+        XCTAssertFalse(b.willRewrite)
+        XCTAssertTrue(b.blockedByFingerprint)
+        XCTAssertTrue(NovelGhostwriteHeal.isStuckOnSameFingerprint(progress.recentFailureFingerprints))
+        XCTAssertTrue(
+            NovelGhostwriteHeal.shouldAttemptMustNotAmend(
+                reason: .obviousRepetition,
+                receipt: same,
+                alreadyAmendedThisChapter: false
+            )
+        )
+        XCTAssertFalse(
+            NovelGhostwriteHeal.shouldAttemptMustNotAmend(
+                reason: .obviousRepetition,
+                receipt: same,
+                alreadyAmendedThisChapter: true
+            )
+        )
+
+        progress.resetChapterHealState()
+        XCTAssertEqual(progress.qualityAttemptIndex, 0)
+        XCTAssertNil(progress.lastFailureReceipt)
+        XCTAssertTrue(progress.supersededCandidateIDs.isEmpty)
+    }
+
+    func testGhostwriteRevisionUserTextIncludesSourceDraft() {
+        let briefOnly = NovelGhostwriteProgress.writeUserText(
+            receipt: nil,
+            revisionBrief: "补写碍事情绪",
+            sourceDraft: nil
+        )
+        XCTAssertTrue(briefOnly.contains("补写碍事情绪"))
+        XCTAssertFalse(briefOnly.contains("上一稿正文"))
+
+        let withDraft = NovelGhostwriteProgress.writeUserText(
+            receipt: nil,
+            revisionBrief: "补写碍事情绪",
+            sourceDraft: "沈砚心里一沉，只觉京娘站在一旁碍眼。"
+        )
+        XCTAssertTrue(withDraft.contains("【上一稿正文】"))
+        XCTAssertTrue(withDraft.contains("碍眼"))
+        XCTAssertTrue(withDraft.contains("【润修要求】"))
+        // 自动改写路径不带 brief 时仍走 receipt 模板
+        let auto = NovelGhostwriteProgress.writeUserText(
+            receipt: NovelGhostwriteFailureReceipt.make(
+                reason: .acceptanceFailed,
+                summary: "缺拍",
+                missingMustHappen: ["A"],
+                attemptIndex: 1,
+                sourceCandidateID: nil,
+                planDigest: nil
+            ),
+            revisionBrief: nil,
+            sourceDraft: "不该出现"
+        )
+        XCTAssertFalse(auto.contains("不该出现"))
+        XCTAssertTrue(auto.contains("缺拍") || auto.contains("必须补写"))
+    }
+
+    func testGhostwriteCancellationPauseReasonPrefersUserPause() {
+        // 契约：协作取消不得落到「取消本批」语义——由 progress 续跑字段表达。
+        XCTAssertTrue(NovelGhostwritePauseReason.userPaused.requiresRewriteOnContinue == false)
+        XCTAssertTrue(
+            NovelGhostwriteProgress(
+                binding: NovelSessionBinding(
+                    projectID: NovelProjectID(),
+                    branchID: NovelBranchID()
+                ),
+                phase: .paused,
+                pauseReason: .userPaused,
+                startedAt: Date(timeIntervalSince1970: 0),
+                targetChapterCount: 5,
+                completedChapterCount: 2
+            ).shouldContinueSameBatch
+        )
+        XCTAssertFalse(
+            NovelGhostwriteProgress(
+                binding: NovelSessionBinding(
+                    projectID: NovelProjectID(),
+                    branchID: NovelBranchID()
+                ),
+                phase: .paused,
+                pauseReason: .cancelled,
+                startedAt: Date(timeIntervalSince1970: 0),
+                targetChapterCount: 5,
+                completedChapterCount: 2
+            ).shouldContinueSameBatch
+        )
+    }
+
+    func testGhostwriteSingleMustAlignGateAndRephrase() {
+        let missingReceipt = NovelGhostwriteFailureReceipt.make(
+            reason: .acceptanceFailed,
+            summary: "主角吃醋与自觉多余已写出，但「碍事」字面未点明",
+            missingMustHappen: ["主角觉得京娘有点碍事、心里不爽"],
+            attemptIndex: 3,
+            sourceCandidateID: nil,
+            planDigest: "d"
+        )
+        XCTAssertTrue(
+            NovelGhostwriteHeal.shouldAttemptMustAlign(
+                reason: .acceptanceFailed,
+                receipt: missingReceipt,
+                forbiddenViolations: [],
+                alreadyAmendedThisChapter: false
+            )
+        )
+        // 有禁止项违反 → 不改 must
+        XCTAssertFalse(
+            NovelGhostwriteHeal.shouldAttemptMustAlign(
+                reason: .acceptanceFailed,
+                receipt: missingReceipt,
+                forbiddenViolations: ["出现了禁止的死亡"],
+                alreadyAmendedThisChapter: false
+            )
+        )
+        // 同时有复读 → 不改 must（走 mustNot 路径）
+        let withRep = NovelGhostwriteFailureReceipt.make(
+            reason: .acceptanceFailed,
+            summary: "缺 must 且复读",
+            missingMustHappen: ["A"],
+            repetitionBeats: ["旧 beat"],
+            attemptIndex: 3,
+            sourceCandidateID: nil,
+            planDigest: "d"
+        )
+        XCTAssertFalse(
+            NovelGhostwriteHeal.shouldAttemptMustAlign(
+                reason: .acceptanceFailed,
+                receipt: withRep,
+                forbiddenViolations: [],
+                alreadyAmendedThisChapter: false
+            )
+        )
+        // 缺 2 条 must → 不改
+        let two = NovelGhostwriteFailureReceipt.make(
+            reason: .acceptanceFailed,
+            summary: "缺两条",
+            missingMustHappen: ["A", "B"],
+            attemptIndex: 3,
+            sourceCandidateID: nil,
+            planDigest: "d"
+        )
+        XCTAssertFalse(
+            NovelGhostwriteHeal.shouldAttemptMustAlign(
+                reason: .acceptanceFailed,
+                receipt: two,
+                forbiddenViolations: [],
+                alreadyAmendedThisChapter: false
+            )
+        )
+
+        let planMust = ["主角觉得京娘有点碍事、心里不爽", "章末钩子落地"]
+        let rephrase = NovelGhostwriteHeal.rephraseSingleMust(
+            planMustHappen: planMust,
+            missingItem: "主角觉得京娘有点碍事、心里不爽",
+            acceptanceSummary: "已写出吃醋，未点明碍事"
+        )
+        XCTAssertEqual(rephrase?.index, 0)
+        XCTAssertTrue(rephrase?.rewritten.contains("允许等价") == true)
+        XCTAssertTrue(rephrase?.rewritten.contains("吃醋") == true)
+        // 已放宽过不再叠
+        let again = NovelGhostwriteHeal.rephraseSingleMust(
+            planMustHappen: [rephrase!.rewritten],
+            missingItem: rephrase!.rewritten,
+            acceptanceSummary: "再来"
+        )
+        XCTAssertNil(again)
+        XCTAssertEqual(
+            NovelGhostwriteContractAmendment.Kind.alignSingleMust.rawValue,
+            "alignSingleMust"
+        )
+    }
+
+    func testGhostwriteRevisionBriefPrefillsFromReceipt() {
+        let receipt = NovelGhostwriteFailureReceipt.make(
+            reason: .obviousRepetition,
+            summary: "开篇复读",
+            repetitionBeats: ["赵大放缓步子等京娘"],
+            attemptIndex: 2,
+            sourceCandidateID: nil,
+            planDigest: nil
+        )
+        let brief = receipt.recommendedRevisionBrief()
+        XCTAssertTrue(brief.contains("赵大放缓步子等京娘"))
+        XCTAssertFalse(brief.isEmpty)
+
+        let binding = NovelSessionBinding(
+            projectID: NovelProjectID(),
+            branchID: NovelBranchID()
+        )
+        let progress = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .paused,
+            pauseReason: .acceptanceFailed,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 5
+        )
+        XCTAssertTrue(progress.boardStepSummary.contains("将重写"))
+
+        let exhausted = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .waitingUser,
+            pauseReason: .healBudgetExhausted,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 5,
+            qualityAttemptIndex: 3
+        )
+        XCTAssertTrue(exhausted.boardStepSummary.contains("待润修"))
+        XCTAssertTrue(exhausted.shouldContinueSameBatch)
+        XCTAssertTrue(exhausted.mustRewriteCandidateOnResume)
+        XCTAssertTrue(exhausted.shouldOfferRevisionSheet)
+
+        let revisionText = NovelGhostwriteProgress.writeUserText(
+            receipt: receipt,
+            revisionBrief: "补写京娘碍事的内心；开篇禁止放缓步子。"
+        )
+        XCTAssertTrue(revisionText.contains("补写京娘碍事"))
+        XCTAssertTrue(revisionText.contains("润修要求") || revisionText.contains("本章计划"))
+    }
+
+    func testGhostwriteBatchProgressRecordRoundTripAndColdStart() throws {
+        let binding = NovelSessionBinding(
+            projectID: NovelProjectID(),
+            branchID: NovelBranchID()
+        )
+        let failedID = NovelCandidateID()
+        var live = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .writing,
+            pauseReason: nil,
+            detailMessage: "验收未过，自动改写 1/3…",
+            candidateID: failedID,
+            chapterPlanDigest: "digest",
+            autoCollectedCandidateIDs: [NovelCandidateID()],
+            startedAt: Date(timeIntervalSince1970: 100),
+            targetChapterCount: 5,
+            completedChapterCount: 2,
+            currentChapterIndex: 3,
+            lastCompletedPlanSummary: "Goal: x",
+            pendingSyncChapterCredit: false,
+            qualityAttemptIndex: 1,
+            maxQualityAttempts: 3,
+            lastFailureReceipt: NovelGhostwriteFailureReceipt.make(
+                reason: .acceptanceFailed,
+                summary: "缺拍",
+                missingMustHappen: ["A"],
+                attemptIndex: 1,
+                sourceCandidateID: failedID,
+                planDigest: "digest"
+            ),
+            supersededCandidateIDs: [failedID],
+            recentFailureFingerprints: ["fp1"],
+            revisionBriefOverride: nil,
+            didThinContractAmendThisChapter: true,
+            contractAmendments: [
+                NovelGhostwriteContractAmendment(
+                    kind: .appendMustNot,
+                    detail: "复读 beat",
+                    chapterIndex: 3,
+                    beforeDigest: "a",
+                    afterDigest: "b"
+                ),
+            ]
+        )
+        live.phase = .writing
+        let encoded = NovelGhostwriteBatchProgressRecord.from(progress: live)
+        XCTAssertTrue(encoded.shouldPersist)
+
+        let data = try JSONEncoder().encode(encoded)
+        let decoded = try JSONDecoder().decode(NovelGhostwriteBatchProgressRecord.self, from: data)
+        XCTAssertEqual(decoded.completedChapterCount, 2)
+        XCTAssertEqual(decoded.targetChapterCount, 5)
+        XCTAssertEqual(decoded.qualityAttemptIndex, 1)
+        XCTAssertEqual(decoded.contractAmendments.count, 1)
+
+        let restored = decoded.makeProgress()
+        // 写稿中杀进程 → 冷启动收成暂停可续。
+        XCTAssertEqual(restored.phase, .paused)
+        XCTAssertEqual(restored.pauseReason, .userPaused)
+        XCTAssertEqual(restored.completedChapterCount, 2)
+        XCTAssertTrue(restored.shouldContinueSameBatch)
+        XCTAssertTrue(restored.detailMessage?.contains("恢复") == true)
+
+        var pending = encoded
+        pending.phase = .syncing
+        pending.pendingSyncChapterCredit = true
+        pending.pauseReason = nil
+        let afterSyncKill = pending.makeProgress()
+        XCTAssertEqual(afterSyncKill.pauseReason, .syncFailed)
+        XCTAssertTrue(afterSyncKill.pendingSyncChapterCredit)
+        XCTAssertTrue(afterSyncKill.shouldContinueSameBatch)
+
+        var done = encoded
+        done.completedChapterCount = 5
+        done.phase = .waitingUser
+        done.pauseReason = .batchCompleted
+        XCTAssertFalse(done.shouldPersist)
+    }
+
+    func testGhostwriteBatchProgressSidecarRepositoryRoundTrip() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ghostwrite-progress-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        let document = try NovelTestFixtures.document()
+        _ = try await repository.createProject(document)
+
+        let binding = NovelSessionBinding(
+            projectID: document.project.id,
+            branchID: document.project.mainBranchID
+        )
+        let progress = NovelGhostwriteProgress(
+            binding: binding,
+            phase: .paused,
+            pauseReason: .healBudgetExhausted,
+            detailMessage: "待润修",
+            startedAt: Date(timeIntervalSince1970: 1),
+            targetChapterCount: 4,
+            completedChapterCount: 1,
+            currentChapterIndex: 2,
+            qualityAttemptIndex: 3
+        )
+        let record = NovelGhostwriteBatchProgressRecord.from(progress: progress)
+        try await repository.saveGhostwriteBatchProgress(record)
+        let loaded = try await repository.loadGhostwriteBatchProgress(
+            projectID: binding.projectID,
+            branchID: binding.branchID
+        )
+        XCTAssertEqual(loaded?.completedChapterCount, 1)
+        XCTAssertEqual(loaded?.pauseReason, .healBudgetExhausted)
+        XCTAssertEqual(loaded?.targetChapterCount, 4)
+
+        try await repository.removeGhostwriteBatchProgress(
+            projectID: binding.projectID,
+            branchID: binding.branchID
+        )
+        let gone = try await repository.loadGhostwriteBatchProgress(
+            projectID: binding.projectID,
+            branchID: binding.branchID
+        )
+        XCTAssertNil(gone)
+    }
+
+    func testGhostwriteHealInjectionUsesEmptySessionCursorContract() {
+        // GenerationLifecycle 在 suppressRecentSessionMessages 时传 sessionCursorLimit=.empty 且 max messages 0。
+        // 这里锁 planner 契约：empty cursor → 无近期会话段。
+        let request = NovelInjectionPlanningRequest(
+            branchID: NovelBranchID(),
+            promptKind: .proseWholeChapter,
+            userText: "重写",
+            sessionCursorLimit: .empty,
+            budget: NovelInjectionBudget(
+                maxEstimatedInputTokens: 16_000,
+                chapterTailCharacterLimit: 6_000,
+                maximumRecentSessionMessages: 0
+            )
+        )
+        XCTAssertEqual(request.sessionCursorLimit, .empty)
+        XCTAssertEqual(request.budget.maximumRecentSessionMessages, 0)
+    }
+
+    func testChapterPlanProposalDecoderFailClosed() throws {
+        let ok = try NovelStructuredOutputDecoder.decodeChapterPlanProposal(from: """
+        {
+          "schemaVersion": 1,
+          "outlinePlacement": "第 4 章 · 中段",
+          "goalAndConflict": "揭露身份并逼主角表态",
+          "mustHappen": ["身份被当众揭穿"],
+          "mustNotHappen": ["主角死亡"],
+          "endingHook": "门外响起脚步声",
+          "visibleFacts": ["主角已知信封来源"]
+        }
+        """)
+        XCTAssertEqual(ok.mustHappen, ["身份被当众揭穿"])
+        XCTAssertEqual(ok.goalAndConflict, "揭露身份并逼主角表态")
+
+        XCTAssertThrowsError(try NovelStructuredOutputDecoder.decodeChapterPlanProposal(from: """
+        {
+          "schemaVersion": 1,
+          "outlinePlacement": "第 4 章",
+          "goalAndConflict": "只有目标没有义务",
+          "mustHappen": [],
+          "mustNotHappen": [],
+          "endingHook": "",
+          "visibleFacts": []
+        }
+        """))
+
+        XCTAssertThrowsError(try NovelStructuredOutputDecoder.decodeChapterPlanProposal(from: """
+        {
+          "schemaVersion": 1,
+          "outlinePlacement": "第 4 章",
+          "goalAndConflict": "",
+          "mustHappen": ["有义务"],
+          "mustNotHappen": [],
+          "endingHook": "",
+          "visibleFacts": []
+        }
+        """))
+    }
+
+    func testChapterPlanProposalContextIncludesBoundedSections() throws {
+        var document = try NovelTestFixtures.document()
+        document = try NovelReducer.apply(.upsertUpcomingArc(NovelUpsertUpcomingArcCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            beats: ["使者身份曝光"]
+        )), to: document).document
+        let branch = document.branches[0]
+        let context = DefaultNovelCreation.chapterPlanProposalContext(
+            document: document,
+            branch: branch,
+            nextChapterOrdinal: 3,
+            previousPlanSummary: "Placement: 第 2 章\nGoal: 试探"
+        )
+        XCTAssertTrue(context.contains("NEXT CHAPTER ORDINAL"))
+        XCTAssertTrue(context.contains("3"))
+        XCTAssertTrue(context.contains("UPCOMING ARC"))
+        XCTAssertTrue(context.contains("使者身份曝光"))
+        XCTAssertTrue(context.contains("PREVIOUS CHAPTER PLAN SUMMARY"))
+        XCTAssertTrue(context.contains("试探"))
     }
 
     func testWholeChapterHighlightsCountTowardRequiredBudget() throws {

@@ -1473,6 +1473,8 @@ struct NovelRunRequest: Equatable, Sendable {
     let ghostwritePlanID: NovelChapterPlanID?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
+    /// 代笔自愈/润修：规划时不带近期会话消息（仍注入合同/状态/要点）。
+    let suppressRecentSessionMessages: Bool
     let expectedProjectRevision: Int64
     let expectedConfigRevision: Int64
     let expectedBranchHeadRevision: Int64
@@ -1497,6 +1499,7 @@ struct NovelRunRequest: Equatable, Sendable {
         ghostwritePlanID: NovelChapterPlanID? = nil,
         injectionOverrides: NovelInjectionOverrides = .none,
         inputBudgetTokens: Int = 16_000,
+        suppressRecentSessionMessages: Bool = false,
         expectedProjectRevision: Int64,
         expectedConfigRevision: Int64,
         expectedBranchHeadRevision: Int64
@@ -1527,6 +1530,7 @@ struct NovelRunRequest: Equatable, Sendable {
             }
         )
         self.inputBudgetTokens = inputBudgetTokens
+        self.suppressRecentSessionMessages = suppressRecentSessionMessages
         self.expectedProjectRevision = expectedProjectRevision
         self.expectedConfigRevision = expectedConfigRevision
         self.expectedBranchHeadRevision = expectedBranchHeadRevision
@@ -1553,7 +1557,8 @@ struct NovelRunRequest: Equatable, Sendable {
             contextualCharacterMention: contextualCharacterMention,
             ghostwritePlanID: ghostwritePlanID,
             injectionOverrides: injectionOverrides,
-            inputBudgetTokens: inputBudgetTokens
+            inputBudgetTokens: inputBudgetTokens,
+            suppressRecentSessionMessages: suppressRecentSessionMessages
         )
         let data = try encoder.encode(payload)
         return SHA256.hash(data: data)
@@ -1581,6 +1586,7 @@ private struct NovelCanonicalRunPayload: Codable {
     let ghostwritePlanID: NovelChapterPlanID?
     let injectionOverrides: NovelInjectionOverrides
     let inputBudgetTokens: Int
+    let suppressRecentSessionMessages: Bool
 }
 
 struct NovelRunReceipt: Codable, Equatable, Sendable {
@@ -1681,9 +1687,47 @@ protocol NovelCreation: Sendable {
         branchID: NovelBranchID,
         candidateID: NovelCandidateID
     ) async throws -> NovelChapterPlanAcceptanceV1
+    /// 代笔多章：自动拟定并确认下一章合同（创作模型）。首章仍须用户确认。
+    func proposeAndConfirmNextChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        nextChapterOrdinal: Int,
+        previousPlanSummary: String?
+    ) async throws -> NovelChapterPlanRecord
+    /// 跨进程代笔批进度 sidecar。
+    func loadGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelGhostwriteBatchProgressRecord?
+    func saveGhostwriteBatchProgress(_ record: NovelGhostwriteBatchProgressRecord) async throws
+    func removeGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws
 }
 
 extension NovelCreation {
+    func loadGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws -> NovelGhostwriteBatchProgressRecord? {
+        _ = projectID
+        _ = branchID
+        return nil
+    }
+
+    func saveGhostwriteBatchProgress(_ record: NovelGhostwriteBatchProgressRecord) async throws {
+        _ = record
+    }
+
+    func removeGhostwriteBatchProgress(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws {
+        _ = projectID
+        _ = branchID
+    }
+
     func resumeDetachedGenerationRuns() async {
         // Test doubles and non-live runtimes do not own resumable provider jobs.
     }
@@ -1728,6 +1772,15 @@ extension NovelCreation {
         candidateID: NovelCandidateID
     ) async throws -> NovelChapterPlanAcceptanceV1 {
         throw NovelError.invalidInput("This novel runtime cannot accept chapter-plan candidates.")
+    }
+
+    func proposeAndConfirmNextChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        nextChapterOrdinal: Int,
+        previousPlanSummary: String?
+    ) async throws -> NovelChapterPlanRecord {
+        throw NovelError.invalidInput("This novel runtime cannot propose chapter plans.")
     }
 
     func interruptRun(_ command: NovelCancelRunCommand) async throws {
