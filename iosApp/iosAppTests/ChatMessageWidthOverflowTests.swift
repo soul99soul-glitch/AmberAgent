@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Combine
 import Shared
 @testable import iosApp
 
@@ -88,6 +89,253 @@ final class ChatMessageWidthOverflowTests: XCTestCase {
 
         XCTAssertFalse(source.contains("text=%{public}@"))
         XCTAssertFalse(source.contains("String(paragraphContents.string.prefix"))
+    }
+
+    func testNativeUserBubbleBoundaryMatrix() throws {
+        let longText = Array(
+            repeating: "九天应元雷声普化天尊转世，用户气泡必须按真实内容完整撑开。",
+            count: 42
+        ).joined(separator: "\n")
+        let firstPart = Array(repeating: "第一段多 part 内容必须独立测量。", count: 24).joined(separator: "\n")
+        let secondPart = Array(repeating: "第二段与 variant 控件不能越出边界。", count: 18).joined(separator: "\n")
+        let cjk = "想写一本都市灵异小说，主角是九天应元雷声普化天尊转世，也就是道教的雷祖，对于妖魔鬼怪天生克制，大杀四方的爽文"
+        let imageText = Array(repeating: "带图片的用户消息也必须撑开完整高度。", count: 10).joined(separator: "\n")
+        let cases: [(String, [UIMessagePart], IOSConversationStore.VariantInfo?)] = [
+            ("long", [UIMessagePart.Text(text: longText, metadata: nil)], nil),
+            (
+                "multipart-variant",
+                [
+                    UIMessagePart.Text(text: firstPart, metadata: nil),
+                    UIMessagePart.Text(text: secondPart, metadata: nil),
+                ],
+                .init(variantCount: 3, selectedIndex: 1)
+            ),
+            (
+                "cjk-variant",
+                [UIMessagePart.Text(text: cjk, metadata: nil)],
+                .init(variantCount: 8, selectedIndex: 7)
+            ),
+            (
+                "text-image",
+                [
+                    UIMessagePart.Text(text: imageText, metadata: nil),
+                    UIMessagePart.Image(url: Self.pngDataURL(), metadata: nil),
+                ],
+                nil
+            ),
+        ]
+
+        for (label, parts, variantInfo) in cases {
+            let defaults = isolatedDefaults(label: label)
+            let environment = UserBubbleLayoutEnvironment()
+            let fixture = makeUserBubbleFixture(
+                message: userMessage(parts: parts),
+                variantInfo: variantInfo,
+                defaults: defaults,
+                environment: environment
+            )
+            let metrics = try measureUserBubble(fixture)
+
+            assertUserBubbleBoundary(metrics, label: label)
+            fixture.window.isHidden = true
+            fixture.window.rootViewController = nil
+            defaults.removePersistentDomain(forName: defaultsSuiteName(label: label))
+        }
+    }
+
+    func testVisibleNativeUserBubbleRelayoutsForRuntimeFontChanges() throws {
+        let label = "runtime-font"
+        let defaults = isolatedDefaults(label: label)
+        defaults.set(0.88, forKey: IOSDisplayPreferenceKeys.fontScale)
+        defaults.set(IOSChatFont.default.rawValue, forKey: IOSDisplayPreferenceKeys.chatFont)
+        let environment = UserBubbleLayoutEnvironment()
+        let text = Array(
+            repeating: "可见长用户消息在字体和字号变化后必须重新撑开布局。",
+            count: 24
+        ).joined(separator: "\n")
+        let fixture = makeUserBubbleFixture(
+            message: userMessage(parts: [UIMessagePart.Text(text: text, metadata: nil)]),
+            variantInfo: nil,
+            defaults: defaults,
+            environment: environment
+        )
+        let compact = try measureUserBubble(fixture)
+
+        defaults.set(1.25, forKey: IOSDisplayPreferenceKeys.fontScale)
+        defaults.set(IOSChatFont.serif.rawValue, forKey: IOSDisplayPreferenceKeys.chatFont)
+        environment.dynamicTypeSize = .accessibility3
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: defaults)
+        let expanded = try measureUserBubble(fixture)
+
+        XCTAssertGreaterThan(
+            expanded.size.height,
+            compact.size.height + 40,
+            "运行时字体环境变化必须触发可观测的 user bubble 高度重排"
+        )
+        assertUserBubbleBoundary(compact, label: "\(label)-compact")
+        assertUserBubbleBoundary(expanded, label: "\(label)-expanded")
+        fixture.window.isHidden = true
+        fixture.window.rootViewController = nil
+        defaults.removePersistentDomain(forName: defaultsSuiteName(label: label))
+    }
+
+    private static let nativeTimelineContentWidth: CGFloat = 393 - 32
+    private static let layoutGuardInset: CGFloat = 20
+
+    private struct UserBubbleMetrics {
+        let size: CGSize
+        let paintedBounds: CGRect
+    }
+
+    private struct UserBubbleFixture {
+        let window: UIWindow
+        let host: UIHostingController<AnyView>
+    }
+
+    private func makeUserBubbleFixture(
+        message: UIMessage,
+        variantInfo: IOSConversationStore.VariantInfo?,
+        defaults: UserDefaults,
+        environment: UserBubbleLayoutEnvironment
+    ) -> UserBubbleFixture {
+        let content = AnyView(
+            UserBubbleLayoutHost(
+                message: message,
+                variantInfo: variantInfo,
+                workspaceStore: workspaceStore,
+                environment: environment
+            )
+            .defaultAppStorage(defaults)
+            .frame(width: Self.nativeTimelineContentWidth, alignment: .leading)
+            .padding(Self.layoutGuardInset)
+        )
+        let host = UIHostingController(rootView: content)
+        host.view.backgroundColor = .clear
+        host.view.isOpaque = false
+
+        let window: UIWindow
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+            window = UIWindow(windowScene: scene)
+        } else {
+            window = UIWindow(frame: .zero)
+        }
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        return UserBubbleFixture(window: window, host: host)
+    }
+
+    private func measureUserBubble(_ fixture: UserBubbleFixture) throws -> UserBubbleMetrics {
+        let width = Self.nativeTimelineContentWidth + Self.layoutGuardInset * 2
+        for _ in 0..<2 {
+            let size = fixture.host.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude))
+            fixture.window.frame = CGRect(x: 0, y: 0, width: width, height: ceil(size.height))
+            fixture.host.view.frame = fixture.window.bounds
+            fixture.window.layoutIfNeeded()
+            let deadline = Date().addingTimeInterval(0.1)
+            while Date() < deadline {
+                _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            }
+        }
+
+        let size = fixture.window.bounds.size
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            fixture.host.view.layer.render(in: context.cgContext)
+        }
+        return UserBubbleMetrics(size: size, paintedBounds: try alphaBounds(in: image))
+    }
+
+    private func assertUserBubbleBoundary(_ metrics: UserBubbleMetrics, label: String) {
+        let contentRight = Self.layoutGuardInset + Self.nativeTimelineContentWidth
+        let contentLeft = contentRight - ChatLayout.userMaxWidth
+        XCTAssertGreaterThanOrEqual(metrics.paintedBounds.minX, contentLeft - 2, "[\(label)] user 内容越过 300pt 左边界")
+        XCTAssertLessThanOrEqual(metrics.paintedBounds.maxX, contentRight + 2, "[\(label)] user 内容越过 Native 行右边界")
+        XCTAssertLessThanOrEqual(metrics.paintedBounds.width, ChatLayout.userMaxWidth + 4, "[\(label)] user 内容宽于 300pt")
+        XCTAssertGreaterThanOrEqual(metrics.paintedBounds.minY, Self.layoutGuardInset - 2, "[\(label)] user 内容向上越出自报高度")
+        XCTAssertLessThanOrEqual(
+            metrics.paintedBounds.maxY,
+            metrics.size.height - Self.layoutGuardInset + 2,
+            "[\(label)] user 内容向下越出自报高度"
+        )
+    }
+
+    private func alphaBounds(in image: UIImage) throws -> CGRect {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let width = cgImage.width
+        let height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        var drewImage = false
+        pixels.withUnsafeMutableBytes { bytes in
+            guard let context = CGContext(
+                data: bytes.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            drewImage = true
+        }
+        XCTAssertTrue(drewImage, "无法创建 user bubble 像素测量上下文")
+
+        var minX = width
+        var minY = height
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<height {
+            for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 4 {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        XCTAssertGreaterThanOrEqual(maxX, minX, "user bubble 未产生可测量像素")
+        return CGRect(
+            x: CGFloat(minX),
+            y: CGFloat(minY),
+            width: CGFloat(maxX - minX + 1),
+            height: CGFloat(maxY - minY + 1)
+        )
+    }
+
+    private func userMessage(parts: [UIMessagePart]) -> UIMessage {
+        UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.user,
+            parts: parts,
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: chatNowLocalDateTime(),
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+    }
+
+    private static func pngDataURL() -> String {
+        let size = CGSize(width: 40, height: 200)
+        let image = UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.systemOrange.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        return "data:image/png;base64,\((image.pngData() ?? Data()).base64EncodedString())"
+    }
+
+    private func isolatedDefaults(label: String) -> UserDefaults {
+        let defaults = UserDefaults(suiteName: defaultsSuiteName(label: label))!
+        defaults.removePersistentDomain(forName: defaultsSuiteName(label: label))
+        return defaults
+    }
+
+    private func defaultsSuiteName(label: String) -> String {
+        "ChatMessageWidthOverflowTests-\(label)"
     }
 
     // MARK: - Configurations
@@ -451,5 +699,22 @@ private struct TransitioningBubbleHost: View {
                 isGenerating = false
             }
         }
+    }
+}
+
+private final class UserBubbleLayoutEnvironment: ObservableObject {
+    @Published var dynamicTypeSize: DynamicTypeSize = .large
+}
+
+private struct UserBubbleLayoutHost: View {
+    let message: UIMessage
+    let variantInfo: IOSConversationStore.VariantInfo?
+    let workspaceStore: IOSWorkspaceStore
+    @ObservedObject var environment: UserBubbleLayoutEnvironment
+
+    var body: some View {
+        MessageBubbleView(message: message, variantInfo: variantInfo)
+            .environment(workspaceStore)
+            .environment(\.dynamicTypeSize, environment.dynamicTypeSize)
     }
 }

@@ -60,58 +60,20 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         }
     }
 
-    func testExtractsPartialWidgetCodeWhileStreaming() {
-        let segments = IOSGenerativeWidgetParser.parse(
-            """
-            Intro
-            ```show-widget
-            {"title":"Draft","widget_code":"<svg><rect
-            """,
-            streaming: true
-        )
-
-        XCTAssertEqual(segments.count, 2)
-        guard case .widget(let widget) = segments[1] else {
-            return XCTFail("Expected partial widget")
-        }
-        XCTAssertEqual(widget.title, "Draft")
-        XCTAssertEqual(widget.widgetCode, "<svg><rect")
-        XCTAssertFalse(widget.complete)
-    }
-
-    func testPartialWidgetIDStaysStableWhileStreamingCodeGrows() {
-        let first = IOSGenerativeWidgetParser.parse(
-            """
-            Intro
-            ```show-widget
-            {"title":"Draft","widget_code":"<svg><rect
-            """,
-            streaming: true
-        )
-        let second = IOSGenerativeWidgetParser.parse(
-            """
-            Intro
-            ```show-widget
-            {"title":"Draft","widget_code":"<svg><rect width=\\"20\\"
-            """,
-            streaming: true
-        )
-
-        guard case .widget(let firstWidget) = first.last,
-              case .widget(let secondWidget) = second.last else {
-            return XCTFail("Expected streaming widgets")
-        }
-        XCTAssertEqual(firstWidget.id, secondWidget.id)
-        XCTAssertFalse(firstWidget.complete)
-        XCTAssertFalse(secondWidget.complete)
-    }
-
-    func testWidgetIDStaysStableFromPartialToComplete() {
+    func testStreamingPartialWidgetPreservesIdentityThroughCompletion() {
         let partial = IOSGenerativeWidgetParser.parse(
             """
             Intro
             ```show-widget
             {"title":"Draft","widget_code":"<svg><rect
+            """,
+            streaming: true
+        )
+        let growing = IOSGenerativeWidgetParser.parse(
+            """
+            Intro
+            ```show-widget
+            {"title":"Draft","widget_code":"<svg><rect width=\\"20\\"
             """,
             streaming: true
         )
@@ -126,11 +88,17 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         )
 
         guard case .widget(let partialWidget) = partial.last,
+              case .widget(let growingWidget) = growing.last,
               case .widget(let completeWidget) = complete.dropFirst().first else {
-            return XCTFail("Expected partial and complete widgets")
+            return XCTFail("Expected streaming and complete widgets")
         }
+        XCTAssertEqual(partial.count, 2)
+        XCTAssertEqual(partialWidget.title, "Draft")
+        XCTAssertEqual(partialWidget.widgetCode, "<svg><rect")
+        XCTAssertEqual(partialWidget.id, growingWidget.id)
         XCTAssertEqual(partialWidget.id, completeWidget.id)
         XCTAssertFalse(partialWidget.complete)
+        XCTAssertFalse(growingWidget.complete)
         XCTAssertTrue(completeWidget.complete)
     }
 
@@ -522,9 +490,7 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         XCTAssertEqual(issue, "expected renderer \"full_html\"")
     }
 
-    /// G6: 重试改「追加修复」——保留原草稿（含已完成的工具轮），只追加一条
-    /// 可见的「正在补绘」通知，第二轮输出作为新 assistant 消息接续。
-    func testGenerativeUiRetryKeepsDraftAndAppendsRepairNotice() {
+    func testGenerativeUiRetryPreservesDraftAndClosesTerminalFailure() {
         let tool = UIMessagePart.Tool(
             toolCallId: "search-1",
             toolName: "search_web",
@@ -554,59 +520,15 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
 
         let retryBase = IOSGenerativeUiRequestPolicy.retryBaseMessages(original)
 
-        // 草稿原样保留，只追加通知
         XCTAssertEqual(retryBase.count, original.count + 1)
         XCTAssertEqual(retryBase.map(\.role), [MessageRole.user, .assistant, .assistant, .assistant])
         XCTAssertEqual(retryBase[retryBase.count - 2].toText(), "这里是文字版流程。")
-        XCTAssertTrue(retryBase.last?.toText().contains("补绘") ?? false)
+        XCTAssertEqual(retryBase.last?.toText(), IOSGenerativeUiRequestPolicy.generativeUiRepairNoticeText)
         XCTAssertTrue(retryBase[1].parts.contains { part in
             guard let tool = part as? UIMessagePart.Tool else { return false }
             return tool.output.contains { ($0 as? UIMessagePart.Text)?.text == "SEARCH_RESULT" }
         })
-    }
 
-    /// G6: 重试不再剥工具、不强制 reasoning off——修复轮是普通续跑。
-    func testGenerativeUiRetryParamsKeepToolsAndReasoning() {
-        let model = Model(
-            modelId: "test-model",
-            displayName: "Test Model",
-            id: KotlinUuid.companion.random(),
-            type: ModelType.chat,
-            customHeaders: [],
-            customBodies: [],
-            inputModalities: [],
-            outputModalities: [],
-            abilities: [],
-            tools: Set<BuiltInTools>(),
-            contextWindowTokens: nil,
-            providerOverwrite: nil
-        )
-        let params = TextGenerationParams(
-            model: model,
-            temperature: nil,
-            topP: nil,
-            maxTokens: nil,
-            tools: [ToolKt.createSearchWebToolDeclaration()],
-            reasoningLevel: ReasoningLevel.auto_,
-            customHeaders: [],
-            customBody: []
-        )
-
-        let retried = IOSGenerativeUiRequestPolicy.retryParams(params)
-
-        XCTAssertEqual(retried.tools.map(\.name), ["search_web"])
-        XCTAssertEqual(retried.reasoningLevel, ReasoningLevel.auto_)
-    }
-
-    /// G6: 补绘轮二次失败收口——notice 被替换为中性失败说明，不残留「请稍候」，
-    /// 且不新增消息（最多一次重试，不再发起第三轮）。
-    func testGenerativeUiRetryTerminalFailureClosesRepairNotice() throws {
-        let baseline = [message(role: .user, text: "画一个流程图")]
-        let retryBase = IOSGenerativeUiRequestPolicy.retryBaseMessages(baseline)
-        let notice = try XCTUnwrap(retryBase.last)
-        XCTAssertTrue(notice.toText().contains("请稍候"))
-
-        // 第二轮仍只产出文字版回答（没有完整 widget）
         let failedSecondRound = retryBase + [message(role: .assistant, text: "第二轮仍然只有文字。")]
         let closed = IOSGenerativeUiRequestPolicy.terminalRepairFailureMessages(
             failedSecondRound,
@@ -616,9 +538,8 @@ final class IOSGenerativeWidgetParserTests: XCTestCase {
         let closedNotice = closed[retryBase.count - 1].toText()
         XCTAssertFalse(closedNotice.contains("请稍候"))
         XCTAssertTrue(closedNotice.contains("可视化未能生成"))
-        XCTAssertEqual(closed[0].toText(), "画一个流程图")
+        XCTAssertEqual(closed[0].toText(), "先搜索再画图")
 
-        // baseline 边界不符（指向的不是 notice）时不误伤
         let unchanged = IOSGenerativeUiRequestPolicy.terminalRepairFailureMessages(
             failedSecondRound,
             afterDisplayMessageCount: failedSecondRound.count

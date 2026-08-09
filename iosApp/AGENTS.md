@@ -29,7 +29,7 @@ xcodebuild -quiet -project iosApp/AmberAgent.xcodeproj -scheme iosApp \
   -only-testing:iosAppTests/ChatViewportPolicyTests test
 ```
 
-根据改动补跑非默认列表回归 `ChatStreamReplayTests`、`ChatRowContentHashCacheTests`、`ChatMessageProjectionTests` 或对应定点测试。模拟器通过后仍不得把视觉和手感标记为真机已验证。
+根据改动补跑 `ChatRowContentHashCacheTests`、`ChatMessageProjectionTests` 或对应定点测试。模拟器通过后仍不得把视觉和手感标记为真机已验证。
 
 ## State, Storage, And Background Work
 

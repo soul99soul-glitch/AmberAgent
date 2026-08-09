@@ -349,23 +349,6 @@ final class ProviderRegistryStoreTests: XCTestCase {
         )
     }
 
-    // MARK: - Pre-existing failure (NOT part of ios-parity-closure goal)
-    // Symbol `ModelDefaultsChatModelSource` was removed in commit 326e870af
-    // ("Close iOS provider configuration loop", 2026-06-21) but this test was not updated.
-    // Temporarily skipped via XCTSkip so the iosAppTests bundle compiles and the
-    // goal's red-light tests can run. Tracked in docs/ios-port/PHASE_LOG.md.
-    // Restoring this test requires rebuilding the chat-model-id resolution API it relied on.
-    func testModelDefaultsOnlyExposeCurrentProviderChatModels() throws {
-        // Pre-existing failure (NOT part of ios-parity-closure goal).
-        // Symbol `ModelDefaultsChatModelSource` was removed in commit 326e870af
-        // ("Close iOS provider configuration loop", 2026-06-21) but this test was not updated.
-        // `#if false` is used (rather than XCTSkipIf) because the symbol does not exist, so the
-        // body cannot even compile. The whole body is disabled so the iosAppTests bundle compiles
-        // and the goal's red-light tests can run. Tracked in docs/ios-port/PHASE_LOG.md.
-        // Restoring this test requires rebuilding the chat-model-id resolution API it relied on.
-        throw XCTSkip("pre-existing: ModelDefaultsChatModelSource removed in 326e870af; see PHASE_LOG.md")
-    }
-
     private func makeSettings(
         baseUrl: String = "https://api.example.com/v1",
         apiKey: String,
