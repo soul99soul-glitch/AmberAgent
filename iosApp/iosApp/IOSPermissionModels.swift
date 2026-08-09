@@ -171,10 +171,6 @@ struct IOSPlatformCapability: Identifiable, Hashable {
     let canOpenSettings: Bool
     let gate: IOSPlatformToolGate
 
-    var displayActionNames: [String] {
-        uiActionNames + modelToolNames + blockedToolNames
-    }
-
     var canRequestInApp: Bool {
         requestKind.canRequestInApp && status != .unsupported
     }

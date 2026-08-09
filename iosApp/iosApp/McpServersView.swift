@@ -362,10 +362,6 @@ struct McpImportView: View {
         }
     }
 
-    private var hasWarnings: Bool {
-        !jsonText.contains("\"mcpServers\"") || parsedServers.isEmpty
-    }
-
     private var validationText: String {
         if !jsonText.contains("\"mcpServers\"") {
             return "未检测到 mcpServers 文本；保存不会写入配置。"

@@ -216,17 +216,6 @@ struct SearchProviderView: View {
         }
     }
 
-    private var credentialPreview: String {
-        if providerType == .bing {
-            return "无需 Key"
-        }
-        if providerType == .searXNG {
-            let hasURL = !searXNGURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            return hasURL ? "URL 已填写，未保存" : "URL 待填写"
-        }
-        return apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "API Key 待填写" : "API Key 已填写，未保存"
-    }
-
     private var canSave: Bool {
         if providerType.requiresAPIKey {
             return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

@@ -285,20 +285,6 @@ internal fun sandboxStatusLabel(status: ToolActivityStatus): String = when (stat
     ToolActivityStatus.CANCELLED -> "已取消"
 }
 
-internal fun sandboxStatusContainerColor(status: ToolActivityStatus): Color = when (status) {
-    ToolActivityStatus.RUNNING -> Color(0xFF34C96E)
-    ToolActivityStatus.WAITING_FOR_PERMISSION -> Color(0xFFFFC44D)
-    ToolActivityStatus.SUCCEEDED -> Color(0xFF34C96E)
-    ToolActivityStatus.FAILED -> Color(0xFFE45A5A)
-    ToolActivityStatus.CANCELLED -> Color(0xFFB8C0CC)
-}
-
-internal fun sandboxStatusOnContainerColor(status: ToolActivityStatus): Color = when (status) {
-    ToolActivityStatus.WAITING_FOR_PERMISSION,
-    ToolActivityStatus.CANCELLED -> Color(0xFF1B1C20)
-    else -> Color.White
-}
-
 internal fun SandboxActivityUiState.operationPreviewKind(): String = when {
     toolName == "agent_idle" -> "agent"
     toolName == "search_web" -> "web search"

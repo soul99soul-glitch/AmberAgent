@@ -342,6 +342,7 @@ struct IOSMiniAppOutputParser {
     搜索只能通过 await Amber.search({ query, limit })，必须声明 search 权限；返回值为 {items:[{title,url,snippet,source,publishedAt?}]}。
     剪贴板写入只能用 await Amber.clipboard.copy(text)，必须声明 clipboard.copy；读取只能用 await Amber.clipboard.read()，必须声明 clipboard.read 且会弹确认。
     持久化用 await Amber.storage.get/set/remove，提示用 await Amber.toast，主题用 await Amber.host.getTheme。
+    iOS getTheme 返回 {dark,background,surface,surface2,foreground,muted,primary,primaryInk}；Android 目前仅 dark/background/foreground/primary——读扩展字段前请做存在性判断。
     宿主上下文只能通过 await Amber.host.getConversationContext({mode:"summary", maxChars:8000}) 读取最小上下文，必须声明 host.context；不要假设能拿到完整聊天历史。
     写回宿主只能通过 await Amber.host.sendToConversation({text, mode:"draft"}) 或 await Amber.host.createArtifact({title,type,content})，必须声明对应权限，且会弹确认。
     AI 只能通过 await Amber.ai.generate({prompt, system, maxOutputChars, temperature})，必须声明 ai.generate，且会弹确认和较宽松的每日限额。
@@ -551,7 +552,7 @@ enum IOSMiniAppFixtures {
     )
 
     static let sampleHtml = """
-    <!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><style>:root{--bg:#fff;--fg:#1f2937;--sub:#f3f4f6;--primary:#2563eb}*{box-sizing:border-box}body{margin:0;padding:14px;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-size:1rem;line-height:1.45;overflow-wrap:anywhere}button{min-width:44px;min-height:44px;font:inherit;font-weight:600;padding:10px 12px;margin:4px;border:0;border-radius:9px;background:var(--primary);color:#fff}button:focus-visible{outline:3px solid currentColor;outline-offset:2px}pre{white-space:pre-wrap;background:var(--sub);padding:10px;border-radius:10px}@media(prefers-color-scheme:dark){:root{--bg:#111216;--fg:#f4f1ed;--sub:#24262d;--primary:#6ea8ff}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}</style></head>
+    <!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><style>:root{--bg:#fff;--fg:#1f2937;--sub:#f3f4f6;--primary:#2563eb;--primary-ink:#fff}*{box-sizing:border-box}body{margin:0;padding:14px;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;font-size:1rem;line-height:1.45;overflow-wrap:anywhere}button{min-width:44px;min-height:44px;font:inherit;font-weight:600;padding:10px 12px;margin:4px;border:0;border-radius:9px;background:var(--primary);color:var(--primary-ink)}button:focus-visible{outline:3px solid currentColor;outline-offset:2px}pre{white-space:pre-wrap;background:var(--sub);padding:10px;border-radius:10px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}</style></head>
     <body>
     <h3>Amber 小应用示例</h3>
     <p>点击按钮试用小应用提供的本机能力。</p>
@@ -566,11 +567,23 @@ enum IOSMiniAppFixtures {
     <script>
       function show(v){ document.getElementById('out').textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2); }
       function fail(e){ show({error: String(e && e.message ? e.message : e)}); }
+      function applyTheme(t){
+        if (!t || typeof t !== 'object') return;
+        var r = document.documentElement.style;
+        if (t.background) r.setProperty('--bg', t.background);
+        if (t.foreground) r.setProperty('--fg', t.foreground);
+        if (t.surface2 || t.surface) r.setProperty('--sub', t.surface2 || t.surface);
+        if (t.surface) r.setProperty('--surface', t.surface);
+        if (t.muted) r.setProperty('--muted', t.muted);
+        if (t.primary) r.setProperty('--primary', t.primary);
+        if (t.primaryInk) r.setProperty('--primary-ink', t.primaryInk);
+      }
       async function callInfo(){ try { show(await AmberNative.postMessage({method:'app.info'})); } catch(e) { fail(e); } }
       async function saveStorage(){ try { await Amber.storage.set('hello','world'); show(await Amber.storage.get('hello')); } catch(e) { fail(e); } }
-      async function readTheme(){ try { show(await Amber.host.getTheme()); } catch(e) { fail(e); } }
+      async function readTheme(){ try { var t = await Amber.host.getTheme(); applyTheme(t); show(t); } catch(e) { fail(e); } }
       async function toast(){ try { show(await Amber.toast('MiniApp bridge 已连接')); } catch(e) { fail(e); } }
       async function publishEvent(){ try { var sub = await Amber.eventBus.subscribe({topic:'demo'}, function(evt){ show(evt); }); await Amber.eventBus.publish({topic:'demo', payload:{ok:true, subscriptionId:sub.subscriptionId}}); } catch(e) { fail(e); } }
+      (async function bootTheme(){ try { applyTheme(await Amber.host.getTheme()); } catch(e) {} })();
     </script>
     </body></html>
     """

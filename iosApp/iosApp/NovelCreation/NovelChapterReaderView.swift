@@ -39,7 +39,7 @@ struct NovelChapterReaderView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 chapterNavigation
             }
-            .background(AmberTheme.background.ignoresSafeArea())
+            .background { AmberThemePageBackground(surface: .app) }
             .toolbarBackground(AmberTheme.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)

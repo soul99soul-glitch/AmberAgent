@@ -115,10 +115,6 @@ final class IOSLocalToolExecutor {
         self.webMountController = webMountController ?? IOSWebMountController.shared
     }
 
-    var webMountGlobalEnabled: Bool {
-        true
-    }
-
     func execute(
         _ request: IOSLocalToolExecutionRequest,
         now: Date = Date()
@@ -916,12 +912,6 @@ final class IOSWebMountSettings {
             self.evalEnabled = false
         }
         persist()
-    }
-
-    func addAllowedHosts(_ hosts: [String]) {
-        let normalized = hosts.compactMap { IOSWebMountURLPolicy.normalizedHost($0) }
-        guard !normalized.isEmpty else { return }
-        allowedHosts.formUnion(normalized)
     }
 
     func syncAllowedHosts(_ hosts: [String]) {

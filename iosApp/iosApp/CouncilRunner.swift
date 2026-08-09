@@ -2742,17 +2742,6 @@ final class CouncilRunner {
         }
     }
 
-    private func mapStatus(_ status: String) -> IOSAdvancedTaskStatus {
-        let normalized = status.lowercased()
-        if normalized.contains("completed") || normalized.contains("partial_failed") { return .completed }
-        if normalized.contains("cancel") { return .cancelled }
-        if normalized.contains("timed") || normalized.contains("timeout") { return .timedOut }
-        if normalized.contains("interrupt") { return .interrupted }
-        if normalized.contains("error") || normalized.contains("fail") { return .failed }
-        if normalized.contains("running") { return .running }
-        return normalized == "(unknown)" ? .failed : .completed
-    }
-
     private static func defaultSeatDescriptors() -> [IOSCouncilSeatDescriptor] {
         [
             IOSCouncilSeatDescriptor(id: "host", name: "Host", role: "主持、串联、综合", modelLabel: "当前模型"),

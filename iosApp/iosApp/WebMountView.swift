@@ -211,7 +211,7 @@ struct WebMountView: View {
 
     var body: some View {
         ZStack {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .app)
 
             VStack(spacing: 0) {
                 header
@@ -337,7 +337,7 @@ struct WebMountView: View {
                                 title: "需要登录",
                                 subtitle: "保存登录提示，不会自动打开登录流程。",
                                 systemImage: "person.badge.key",
-                                tint: AmberTheme.accentAmber,
+                                tint: AmberTheme.accent,
                                 isOn: $addNeedsLogin
                             )
                             if addNeedsLogin {
@@ -450,7 +450,7 @@ struct WebMountSiteView: View {
 
     var body: some View {
         ZStack {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .app)
 
             VStack(spacing: 0) {
                 header

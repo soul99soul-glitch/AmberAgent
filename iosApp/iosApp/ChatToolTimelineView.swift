@@ -1,5 +1,122 @@
 import SwiftUI
+import UIKit
 import Shared
+
+/// 工具胶囊视觉族：驱动 Koboyo 实心图标；并行保留 SF `systemImage` 给顶栏活动岛。
+enum ChatToolVisualKind: String, Equatable, CaseIterable {
+    case search
+    case web
+    case webMount
+    case webMountObserve
+    case webMountCapture
+    case workspaceRead
+    case workspaceWrite
+    case workspaceDelete
+    case image
+    case terminal
+    case mcp
+    case subagent
+    case council
+    case memory
+    case code
+    case generic
+
+    static func resolve(toolName: String) -> ChatToolVisualKind {
+        let name = toolName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.contains("subagent_dispatch") { return .subagent }
+        switch name {
+        case "search_web": return .search
+        case "scrape_web": return .web
+        case "memory_tool": return .memory
+        case "mcp_call": return .mcp
+        case "model_council_run": return .council
+        case "generate_image": return .image
+        case "ish_handoff", "ios_ish_execute": return .terminal
+        case "workspace_file_write": return .workspaceWrite
+        case "workspace_artifact_delete": return .workspaceDelete
+        case "workspace_file_read", "workspace_artifact_read": return .workspaceRead
+        default:
+            break
+        }
+        if name.hasPrefix("wm_") {
+            switch name {
+            case "wm_screenshot", "wm_visual_snapshot":
+                return .webMountCapture
+            case "wm_observe", "wm_extract", "wm_get":
+                return .webMountObserve
+            default:
+                return .webMount
+            }
+        }
+        if IOSWorkspaceToolCatalog.supportedToolNames.contains(name) {
+            return .workspaceRead
+        }
+        let lower = name.lowercased()
+        if lower.contains("search") { return .search }
+        if lower.contains("code") || lower.contains("swift") { return .code }
+        if lower.contains("read") || lower.contains("file") { return .workspaceRead }
+        return .generic
+    }
+
+    /// 胶囊 leading：Koboyo 实心剪影。
+    var koboyoMark: ChatKoboyoMark {
+        switch self {
+        case .search: .solidSearch
+        case .web: .solidGlobe
+        case .webMount: .solidMonitor
+        case .webMountObserve: .solidEye
+        case .webMountCapture: .solidCamera
+        case .workspaceRead: .solidDocument
+        case .workspaceWrite: .solidPen
+        case .workspaceDelete: .solidWrench
+        case .image: .solidImage
+        case .terminal: .solidTerminal
+        case .mcp: .solidPuzzle
+        case .subagent: .solidUsers
+        case .council: .solidPeopleGroup
+        case .memory: .solidBrain
+        case .code: .solidCode
+        case .generic: .solidWrench
+        }
+    }
+
+    /// 顶栏活动岛 / Live Activity 继续用 SF。
+    var systemImage: String {
+        switch self {
+        case .search: "magnifyingglass"
+        case .web: "globe"
+        case .webMount, .webMountObserve, .webMountCapture: "globe.badge.chevron.backward"
+        case .workspaceRead: "doc.text"
+        case .workspaceWrite, .workspaceDelete: "folder"
+        case .image: "photo.on.rectangle"
+        case .terminal: "terminal"
+        case .mcp: "puzzlepiece.extension"
+        case .subagent: "person.2.fill"
+        case .council: "person.3.sequence"
+        case .memory: "brain.head.profile"
+        case .code: "chevron.left.forwardslash.chevron.right"
+        case .generic: "wrench.and.screwdriver"
+        }
+    }
+
+    var isImageTool: Bool { self == .image }
+
+    var activeIslandTint: ChatActivityIslandTint {
+        switch self {
+        case .search, .web, .webMount, .webMountObserve, .webMountCapture:
+            .cyan
+        case .image:
+            .green
+        case .subagent, .council:
+            .indigo
+        case .memory:
+            .amber
+        default:
+            .accent
+        }
+    }
+}
+
 
 enum ChatToolStepState: Equatable {
     case done
@@ -73,7 +190,9 @@ enum ChatToolStepState: Equatable {
 
 struct ChatToolStepModel: Identifiable {
     let id: String
+    /// 顶栏活动岛 / Live Activity 用的 SF Symbol（胶囊 leading 用 `koboyoMark`）。
     let systemImage: String
+    let visualKind: ChatToolVisualKind
     let title: String
     let detail: String?
     let state: ChatToolStepState
@@ -81,9 +200,11 @@ struct ChatToolStepModel: Identifiable {
     /// Carried for subagent steps so the detail sheet can read the live prompt + streaming output.
     let tool: UIMessagePart.Tool?
 
+    var koboyoMark: ChatKoboyoMark { visualKind.koboyoMark }
+
     init(
         id: String = UUID().uuidString,
-        systemImage: String,
+        visualKind: ChatToolVisualKind,
         title: String,
         detail: String? = nil,
         state: ChatToolStepState,
@@ -91,7 +212,8 @@ struct ChatToolStepModel: Identifiable {
         tool: UIMessagePart.Tool? = nil
     ) {
         self.id = id
-        self.systemImage = systemImage
+        self.visualKind = visualKind
+        self.systemImage = visualKind.systemImage
         self.title = title
         self.detail = detail
         self.state = state
@@ -101,6 +223,7 @@ struct ChatToolStepModel: Identifiable {
 
     init(tool: UIMessagePart.Tool) {
         let stableID = Self.stableID(for: tool)
+        let kind = ChatToolVisualKind.resolve(toolName: tool.toolName)
         // `.contains` (不是 `==`):流式合并偶发把工具名拼成 "subagent_dispatchsubagent_dispatch",
         // 用包含匹配才不会漏判、掉进裸名回退。
         if tool.toolName.contains("subagent_dispatch") {
@@ -108,7 +231,7 @@ struct ChatToolStepModel: Identifiable {
             let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
-                systemImage: "person.2.fill",
+                visualKind: .subagent,
                 title: Self.subAgentTitle(from: tool.input),
                 detail: failureReason ?? Self.subAgentDetail(from: tool.input),
                 state: Self.state(executed: executed, failureReason: failureReason),
@@ -124,7 +247,7 @@ struct ChatToolStepModel: Identifiable {
             let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
-                systemImage: "magnifyingglass",
+                visualKind: .search,
                 title: Self.combinedLine(executed ? "已搜索" : "正在搜索", query),
                 detail: executed ? (failureReason ?? Self.searchResultSummary(from: tool.output)) : query.map { "关键词：\($0)" },
                 state: Self.state(executed: executed, failureReason: failureReason)
@@ -138,7 +261,7 @@ struct ChatToolStepModel: Identifiable {
             let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
-                systemImage: "globe",
+                visualKind: .web,
                 title: Self.combinedLine(executed ? "已读取网页" : "正在读取网页", url),
                 detail: executed ? (failureReason ?? Self.searchResultSummary(from: tool.output)) : url.map { "链接：\($0)" },
                 state: Self.state(executed: executed, failureReason: failureReason)
@@ -151,7 +274,7 @@ struct ChatToolStepModel: Identifiable {
             let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
-                systemImage: "brain.head.profile",
+                visualKind: .memory,
                 title: executed ? "已更新核心记忆" : "正在更新核心记忆",
                 detail: failureReason,
                 state: Self.state(executed: executed, failureReason: failureReason)
@@ -164,7 +287,7 @@ struct ChatToolStepModel: Identifiable {
             let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
-                systemImage: "puzzlepiece.extension",
+                visualKind: .mcp,
                 title: Self.combinedLine(executed ? "已调用 MCP" : "正在调用 MCP", Self.mcpName(from: tool.input)),
                 detail: failureReason,
                 state: Self.state(executed: executed, failureReason: failureReason)
@@ -177,7 +300,7 @@ struct ChatToolStepModel: Identifiable {
             let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
-                systemImage: "person.3.sequence",
+                visualKind: .council,
                 title: executed
                     ? (failureReason == nil ? "模型议会已完成" : "模型议会失败")
                     : "模型议会进行中",
@@ -194,7 +317,7 @@ struct ChatToolStepModel: Identifiable {
             if executed && imageCount == 0 {
                 self.init(
                     id: stableID,
-                    systemImage: "photo.on.rectangle",
+                    visualKind: .image,
                     title: Self.combinedLine("图片生成失败", prompt),
                     detail: ChatToolOutputFormatter.imageFailureReason(from: tool.output) ?? "没有返回图片",
                     state: .failed
@@ -203,7 +326,7 @@ struct ChatToolStepModel: Identifiable {
             }
             self.init(
                 id: stableID,
-                systemImage: "photo.on.rectangle",
+                visualKind: .image,
                 title: Self.combinedLine(executed ? "图片已生成" : "正在生成图片", prompt),
                 detail: executed ? "\(imageCount) 张图片" : prompt.map { "提示词：\($0)" },
                 state: executed ? .done : .active
@@ -216,7 +339,7 @@ struct ChatToolStepModel: Identifiable {
             let failed = executed && Self.ishToolResultIndicatesFailure(tool.output)
             self.init(
                 id: stableID,
-                systemImage: "terminal",
+                visualKind: .terminal,
                 title: failed ? "iSH 交接失败" : (executed ? "iSH 交接已准备" : "准备 iSH 交接"),
                 detail: executed ? Self.ishHandoffResultSummary(from: tool.output) : Self.ishHandoffInputSummary(from: tool.input),
                 state: failed ? .failed : (executed ? .done : .active)
@@ -229,7 +352,7 @@ struct ChatToolStepModel: Identifiable {
             let failed = executed && Self.ishToolResultIndicatesFailure(tool.output)
             self.init(
                 id: stableID,
-                systemImage: "terminal",
+                visualKind: .terminal,
                 title: failed ? "内置 iSH 执行失败" : (executed ? "内置 iSH 已执行" : "准备执行内置 iSH"),
                 detail: executed ? Self.ishExecuteResultSummary(from: tool.output) : Self.ishHandoffInputSummary(from: tool.input),
                 state: failed ? .failed : (executed ? .done : .active)
@@ -242,7 +365,7 @@ struct ChatToolStepModel: Identifiable {
             let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
-                systemImage: "globe.badge.chevron.backward",
+                visualKind: kind,
                 title: Self.combinedLine(
                     executed ? Self.webMountCompletedTitle(for: tool) : Self.webMountPendingTitle(for: tool.toolName),
                     Self.webMountInputSummary(from: tool.input)
@@ -258,7 +381,7 @@ struct ChatToolStepModel: Identifiable {
             let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
             self.init(
                 id: stableID,
-                systemImage: "folder",
+                visualKind: kind,
                 title: Self.combinedLine(
                     executed ? Self.workspaceCompletedTitle(for: tool.toolName) : Self.workspacePendingTitle(for: tool.toolName),
                     Self.workspaceInputSummary(from: tool.input)
@@ -273,7 +396,7 @@ struct ChatToolStepModel: Identifiable {
         let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
         self.init(
             id: stableID,
-            systemImage: Self.icon(for: tool.toolName),
+            visualKind: kind,
             title: Self.friendlyToolTitle(tool.toolName, executed: executed),
             detail: failureReason ?? (tool.input.isEmpty ? nil : tool.input),
             state: Self.state(executed: executed, failureReason: failureReason)
@@ -495,11 +618,20 @@ struct ChatToolStepModel: Identifiable {
         guard !trimmedInput.isEmpty else { return nil }
         if let data = trimmedInput.data(using: .utf8),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let redacted = IOSWebMountRedactor.redactedJSONObject(object)
-            let json = IOSWebMountController.json(redacted)
-            return String(json.prefix(160))
+            let redactedAny = IOSWebMountRedactor.redactedJSONObject(object)
+            let redacted = redactedAny as? [String: Any] ?? object
+            // Prefer a short human label over raw JSON — long JSON titles expand
+            // hug-content capsules and were part of the chat-column width overflow.
+            for key in ["display_name", "name", "url", "homepage_url", "site_id", "selector", "text"] {
+                if let value = redacted[key] as? String {
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { return String(trimmed.prefix(80)) }
+                }
+            }
+            let json = IOSWebMountController.json(redactedAny)
+            return String(json.prefix(80))
         }
-        return String(IOSWebMountRedactor.redactedText(trimmedInput).prefix(160))
+        return String(IOSWebMountRedactor.redactedText(trimmedInput).prefix(80))
     }
 
     private static func ishHandoffInputSummary(from input: String) -> String? {
@@ -674,20 +806,6 @@ struct ChatToolStepModel: Identifiable {
         return "已返回 WebMount 结果"
     }
 
-    private static func icon(for title: String) -> String {
-        let lowercased = title.lowercased()
-
-        if lowercased.contains("search") || title.contains("搜索") {
-            return "magnifyingglass"
-        }
-        if lowercased.contains("read") || lowercased.contains("file") || title.contains("读取") {
-            return "doc.text"
-        }
-        if lowercased.contains("code") || lowercased.contains("swift") || title.contains("生成") {
-            return "chevron.left.forwardslash.chevron.right"
-        }
-        return "wrench.and.screwdriver"
-    }
 }
 
 struct ChatToolTimeline: View {
@@ -718,12 +836,21 @@ struct ChatToolTimeline: View {
     @ViewBuilder
     private func row(_ step: ChatToolStepModel, chevron: Bool) -> some View {
         HStack(spacing: 7) {
-            Image(systemName: step.systemImage)
-                .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(step.state.color)
-                .frame(width: 16)
-                .contentTransition(.symbolEffect(.replace.downUp))
-                .symbolEffect(.variableColor.iterative.reversing, isActive: step.state == .active && !reduceMotion)
+            // Koboyo 实心剪影：与思考胶囊同系；进行中轻呼吸（不用 SF symbolEffect）。
+            Group {
+                if step.state == .active {
+                    ChatKoboyoSpinningIcon(
+                        mark: step.koboyoMark,
+                        pointSize: 14,
+                        tint: UIColor(step.state.color),
+                        isActive: !reduceMotion
+                    )
+                } else {
+                    ChatKoboyoIcon(step.koboyoMark, size: 14)
+                        .foregroundStyle(step.state.color)
+                }
+            }
+            .frame(width: 16, height: 16)
 
             Text(step.title)
                 .font(.footnote.weight(.medium))
@@ -741,13 +868,16 @@ struct ChatToolTimeline: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        // Hug content (chip-style); a long title still truncates because the message column
-        // bounds the available width. No maxWidth:.infinity → pills don't stretch full-width.
+        // Background first (hug the HStack), then cap at the column proposal so long
+        // titles truncate without expanding ScrollView content width. Short titles
+        // stay chip-sized and leading-aligned — do not use fixedSize(horizontal:false)
+        // here or the capsule stretches to full column width.
         .background(step.state.rowFill, in: Capsule(style: .continuous))
         .overlay {
             Capsule(style: .continuous)
                 .stroke(step.state.stroke, lineWidth: 0.7)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Capsule(style: .continuous))
         .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.84), value: step.state)
     }

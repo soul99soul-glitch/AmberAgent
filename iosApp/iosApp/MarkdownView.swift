@@ -348,13 +348,21 @@ struct AmberMarkdownView: View {
                         .padding(.leading, 12)
                 }
                 .buttonStyle(.plain)
-            } else {
+            } else if autoWrap {
                 Text(code)
                     .font(.system(.body, design: .monospaced))
-                    .lineLimit(autoWrap ? nil : nil)
-                    .fixedSize(horizontal: !autoWrap, vertical: false)
                     .padding(12)
-                    .frame(maxWidth: autoWrap ? .infinity : nil, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                // 不换行时必须自己横滑；裸 fixedSize(horizontal:true) 会把外层
+                // ScrollView 内容宽撑破，触发聊天列左右对称裁切。
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(code)
+                        .font(.system(.body, design: .monospaced))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(12)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .background(Color(.systemGray6))
@@ -416,6 +424,8 @@ struct AmberMarkdownView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator), lineWidth: 0.5))
             }
+            // 限制在列宽内横滑；否则宽表 ideal width 会撑破外层聊天 ScrollView。
+            .frame(maxWidth: .infinity, alignment: .leading)
         )
     }
 

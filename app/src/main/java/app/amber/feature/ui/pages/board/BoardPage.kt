@@ -1089,50 +1089,6 @@ private fun TaskArtifactBlock(artifact: BoardTaskArtifact) {
 }
 
 @Composable
-private fun TodoRow(item: BoardItemEntity, onComplete: () -> Unit, onChat: () -> Unit) {
-    val completed = item.status == "completed"
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        color = workspaceColors().paper,
-        border = workspaceBorder(),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                modifier = Modifier.size(28.dp),
-                shape = CircleShape,
-                color = if (completed) MaterialTheme.colorScheme.primaryContainer else workspaceColors().paper,
-                border = workspaceBorder(),
-                onClick = { if (!completed) onComplete() },
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    if (completed) Icon(HugeIcons.Tick01, contentDescription = null, modifier = Modifier.size(14.dp))
-                }
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    item.title,
-                    style = LocalAmberType.current.sessionTitle.copy(
-                        fontStyle = if (completed) FontStyle.Italic else FontStyle.Normal,
-                    ),
-                    color = if (completed) workspaceColors().muted else MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    "${sourceLabel(item.sourceType)} · ${timeAgo(item.signalTime)}",
-                    style = LocalAmberType.current.meta,
-                    color = workspaceColors().muted,
-                )
-                if (item.reason.isNotBlank()) {
-                    Text(item.reason, style = LocalAmberType.current.secondary, color = workspaceColors().muted)
-                }
-            }
-            WorkspaceTextButton(text = "聊一下", onClick = onChat, tone = WorkspaceTone.Neutral)
-        }
-    }
-}
-
-@Composable
 private fun SectionTitle(title: String, subtitle: String? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         SectionLabel(title)

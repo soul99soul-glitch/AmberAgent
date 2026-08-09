@@ -69,39 +69,6 @@ struct BoardSettingsView: View {
         sharedSettings.todayBoard
     }
 
-    private var createSourceSection: some View {
-        BoardSettingsSection(title: "自定义来源") {
-            Button {
-                showCreateSheet = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(AmberTheme.accent)
-                        .frame(width: 30, height: 30)
-                        .background(AmberTheme.accentTint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("手动创建深度阅读")
-                            .font(.body)
-                            .foregroundStyle(AmberTheme.foreground)
-                        Text("手动文本 / 搜索 / 文件 / WebMount 页面")
-                            .font(.caption)
-                            .foregroundStyle(AmberTheme.muted)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AmberTheme.muted2)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
     private var header: some View {
         HStack {
             AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回深度阅读", size: 44, symbolSize: 20) {
@@ -835,19 +802,6 @@ private struct BoardTemplateWorkbenchSheet: View {
         } catch {
             setError(error.localizedDescription)
         }
-    }
-
-    private func resolvedModelId() -> String {
-        let fallback = settingsStore.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let boardModelId = sharedSettings.todayBoard.boardModelId?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !boardModelId.isEmpty else {
-            return fallback
-        }
-        // Resolve the board model across all configured providers (shared
-        // settings), not just the legacy registry's selected provider.
-        return sharedSettings.availableChatModels()
-            .first { $0.id.caseInsensitiveCompare(boardModelId) == .orderedSame }?.modelId
-            ?? fallback
     }
 
     private func previewTask(templateId: String) -> IOSDeepReadTask {

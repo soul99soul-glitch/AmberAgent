@@ -188,7 +188,7 @@ struct ChatReasoningCard: View {
         }
     }
 
-    // Compact cream pill: brain + "思考中 N 秒 · Auto" (live) / "思考了 N 秒 · Auto" (done) +
+    // Compact cream pill: thought-cloud + "思考中 N 秒 · Auto" (live) / "思考了 N 秒 · Auto" (done) +
     // chevron. Expands to a height-capped, auto-scrolling view of the streaming reasoning text.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -198,13 +198,10 @@ struct ChatReasoningCard: View {
                 setExpanded(!isExpanded, duration: 0.22)
             } label: {
                 HStack(spacing: 7) {
-                    // 用 brain 表达「思考」语义(时钟更像倒计时/耗时)。
-                    // variableColor 动画仍走 UIKit addSymbolEffect,避免 SwiftUI
-                    // 永动 symbolEffect 把 ViewGraphDisplayLink 钉在 60fps。
-                    ChatUIKitVariableColorSymbol(
-                        systemName: "brain.head.profile",
-                        pointSize: 12.5,
-                        weight: .semibold,
+                    // Koboyo 实心思维泡：一眼是「在想」，小尺寸仍饱满；进行中轻呼吸。
+                    ChatKoboyoSpinningIcon(
+                        mark: .solidThoughtCloud,
+                        pointSize: 14,
                         tint: UIColor(AmberTheme.accentAmber),
                         isActive: isThinking && !reduceMotion
                     )
@@ -227,7 +224,7 @@ struct ChatReasoningCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(AmberPressFeedbackStyle(pressedScale: hasBodyText ? 0.98 : 1, haptic: hasBodyText ? .selection : nil))
-            .frame(minHeight: 44)
+            // 与工具胶囊同款 hug 高度（勿再钉 44pt，否则奶油壳被撑高一截）。
             .contentShape(Rectangle())
             .accessibilityValue(hasBodyText ? (showsBody ? "已展开" : "已折叠") : "无思考正文")
 

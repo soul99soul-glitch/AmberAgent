@@ -48,7 +48,7 @@ struct AppearanceSettingsView: View {
                         .padding(.top, 12)
                     } label: {
                         Text("自定义画布与强调色")
-                            .font(.subheadline.weight(.semibold))
+                            .font(AmberChromeFont.settings(.subheadline, weight: .semibold))
                             .foregroundStyle(AmberTheme.foreground)
                     }
                     .tint(AmberTheme.muted)
@@ -106,7 +106,7 @@ struct AppearanceSettingsView: View {
     private var header: some View {
         ZStack {
             Text("外观")
-                .font(.headline)
+                .font(AmberChromeFont.settings(.headline, weight: .semibold))
                 .foregroundStyle(AmberTheme.foreground)
 
             HStack {
@@ -161,10 +161,9 @@ struct AppearanceSettingsView: View {
                 miniPreview(
                     palette: palette,
                     accent: Color(hex: pack.accent.accentHex),
-                    showDotGrid: pack.canvasStyle.hasTexture,
+                    canvasStyle: pack.canvasStyle,
                     paintBrandHint: pack.brandMark == .paintAMBER,
-                    serifBrandHint: pack.brandMark == .serifWordmark,
-                    lineGrid: pack.canvasStyle == .lineGrid
+                    serifBrandHint: pack.brandMark == .serifWordmark
                 )
             }
         }
@@ -280,10 +279,9 @@ struct AppearanceSettingsView: View {
     private func miniPreview(
         palette p: AmberPalette,
         accent: Color,
-        showDotGrid: Bool = false,
+        canvasStyle: AmberCanvasStyle = .flat,
         paintBrandHint: Bool = false,
-        serifBrandHint: Bool = false,
-        lineGrid: Bool = false
+        serifBrandHint: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 9) {
@@ -326,14 +324,20 @@ struct AppearanceSettingsView: View {
         .background {
             ZStack {
                 Color(hex: p.background)
-                if showDotGrid {
-                    if lineGrid {
-                        AmberLineGridOverlay()
-                    } else {
-                        AmberDotGridOverlay()
-                    }
+                switch canvasStyle {
+                case .flat:
+                    EmptyView()
+                case .dotGrid:
+                    AmberDotGridOverlay()
+                case .lineGrid:
+                    AmberLineGridOverlay()
+                case .paperGrain:
+                    AmberPaperGrainOverlay()
                 }
             }
+            // Pack/background cards always paint the light recipe; overlays resolve ink via
+            // UIColor traits, so pin light here or dark Appearance washes out grain/grid.
+            .environment(\.colorScheme, .light)
         }
         .clipped()
     }
@@ -485,6 +489,8 @@ struct AppearanceSettingsView: View {
             return "配方含不支持的选项"
         case .invalidHex:
             return "配方颜色无效"
+        case .insufficientContrast:
+            return e.localizedDescription
         }
     }
 }

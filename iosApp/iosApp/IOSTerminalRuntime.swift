@@ -342,18 +342,6 @@ final class IOSAdvancedTaskStore {
         persist()
     }
 
-    @discardableResult
-    func markRetryRequested(id: String, now: Date = Date()) -> IOSAdvancedTaskRecord? {
-        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return nil }
-        tasks[index].status = .queued
-        tasks[index].retryable = false
-        tasks[index].cancelCapability = false
-        tasks[index].error = ""
-        tasks[index].updatedAt = now
-        persist()
-        return tasks[index]
-    }
-
     func recent(kind: IOSAdvancedTaskKind? = nil, limit: Int = 8) -> [IOSAdvancedTaskRecord] {
         tasks
             .filter { kind == nil || $0.kind == kind }

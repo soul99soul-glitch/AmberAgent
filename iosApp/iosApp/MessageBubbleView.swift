@@ -1771,68 +1771,6 @@ enum ChatStreamingTableDetectionTestSupport {
 
 #endif
 
-private struct ChatStreamingMarkdownTableRowView: View, Equatable {
-    let cells: [String]
-    let isHeader: Bool
-    let isLastRow: Bool
-    let columnWidth: CGFloat
-    let fontScale: Double
-    let bodyPointSize: CGFloat
-    let chatFontRawValue: String
-
-    private var selectedFont: IOSChatFont {
-        IOSChatFont(rawValue: chatFontRawValue) ?? .default
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(Array(cells.enumerated()), id: \.offset) { index, cell in
-                tableCell(cell, isHeader: isHeader, isLastColumn: index == cells.count - 1)
-            }
-        }
-        .background(isHeader ? AmberTheme.surface2 : Color.clear)
-        .overlay(alignment: .bottom) {
-            if !isLastRow {
-                Rectangle()
-                    .fill(AmberTheme.border)
-                    .frame(height: 0.6)
-            }
-        }
-    }
-
-    private func tableCell(_ rawText: String, isHeader: Bool, isLastColumn: Bool) -> some View {
-        Text(inlineDisplayText(rawText))
-            .font(.system(
-                size: bodyPointSize * (isHeader ? 16 / 17 : 16.5 / 17) * fontScale,
-                weight: isHeader ? .semibold : .regular,
-                design: selectedFont.design
-            ))
-            .foregroundStyle(AmberTheme.foreground)
-            .lineSpacing(3 * fontScale)
-            .multilineTextAlignment(.leading)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(width: columnWidth, alignment: .topLeading)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .overlay(alignment: .trailing) {
-                if !isLastColumn {
-                    Rectangle()
-                        .fill(AmberTheme.border)
-                        .frame(width: 0.6)
-                }
-            }
-    }
-
-    private func inlineDisplayText(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: #"**"#, with: "")
-            .replacingOccurrences(of: #"`"#, with: "")
-            .replacingOccurrences(of: #"<br>"#, with: "\n")
-            .replacingOccurrences(of: #"<br/>"#, with: "\n")
-            .replacingOccurrences(of: #"<br />"#, with: "\n")
-    }
-}
-
 private struct ChatStableStreamingMarkdownView: View {
     let text: String
     let config: SwiftStreamingMarkdown.MarkdownRenderConfig
@@ -2513,19 +2451,6 @@ enum ChatStableStreamingMarkdownControllerTestSupport {
     }
 }
 #endif
-
-private extension UIView {
-    func chatAncestor<T: UIView>(of type: T.Type) -> T? {
-        var current = superview
-        while let view = current {
-            if let match = view as? T {
-                return match
-            }
-            current = view.superview
-        }
-        return nil
-    }
-}
 
 private extension UIFont {
     /// 给已有字体叠加斜体符号特征,用于构造流式渲染器排版对齐所需的 boldItalic 变体。

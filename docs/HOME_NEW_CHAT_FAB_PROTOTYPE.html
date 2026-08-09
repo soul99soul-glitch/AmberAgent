@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Amber Home · 新对话胶囊原型</title>
+<style>
+  :root {
+    /* pi light + homePaper chrome — PlaceholderViews */
+    --bg: #F3F0EB;
+    --card: #FAF9F7;
+    --fg: #1C1B19;
+    --fg2: #4A4640;
+    --muted: #6A6560;
+    --muted2: #9A948C;
+    --section: #5B5449;
+    --accent: #B9863A;
+    --active-card: #F4EAD8;
+    --avatar-active: #EADCBC;
+    --avatar-active-ink: #6F5019;
+    --avatar-idle: #F0EBE2;
+    --avatar-idle-ink: #918A80;
+    --hairline: rgba(28, 27, 25, 0.08);
+    --shadow-contact: rgba(76, 59, 34, 0.09);
+    --shadow-ambient: rgba(76, 59, 34, 0.06);
+    --glass-shadow-a: rgba(40, 36, 28, 0.10);
+    --glass-shadow-c: rgba(40, 36, 28, 0.06);
+
+    --page-pad: 16px;
+    --card-radius: 22px;
+    --row-h: 72px;
+    --grid: 18px;
+    --avatar: 40px;
+
+    --fab-trailing: 28px;
+    --fab-bottom: 52px;
+    --fab-h: 42px;
+    --fab-pad-x: 14px;
+
+    --phone-w: 393px;
+    --phone-h: 852px;
+    --status-h: 54px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: #141311;
+    color: #f4f1ed;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+      "Helvetica Neue", "Noto Sans SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .stage {
+    min-height: 100vh;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 28px;
+    padding: 24px 18px 36px;
+  }
+
+  .phone {
+    width: var(--phone-w);
+    height: var(--phone-h);
+    border-radius: 47px;
+    overflow: hidden;
+    position: relative;
+    background: var(--bg);
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.07),
+      0 0 0 10px #0c0b0a,
+      0 36px 70px rgba(0,0,0,0.55);
+  }
+
+  .canvas {
+    position: absolute; inset: 0;
+    background-color: var(--bg);
+    background-image: radial-gradient(circle, rgba(40, 32, 20, 0.055) 0.7px, transparent 0.75px);
+    background-size: var(--grid) var(--grid);
+    background-position: calc(var(--grid) * 0.5) calc(var(--grid) * 0.5);
+  }
+
+  .status-bar {
+    position: absolute; left: 0; right: 0; top: 0;
+    height: var(--status-h);
+    z-index: 4;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 28px 12px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg);
+    letter-spacing: -0.2px;
+  }
+  .island {
+    position: absolute;
+    left: 50%; top: 11px;
+    transform: translateX(-50%);
+    width: 124px; height: 36px;
+    border-radius: 20px;
+    background: #050505;
+  }
+  .sb-right {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; font-weight: 700;
+  }
+  .sb-right .sig {
+    width: 17px; height: 11px; position: relative;
+    background:
+      linear-gradient(var(--fg), var(--fg)) 0 100%/3px 40%,
+      linear-gradient(var(--fg), var(--fg)) 5px 100%/3px 60%,
+      linear-gradient(var(--fg), var(--fg)) 10px 100%/3px 80%,
+      linear-gradient(var(--fg), var(--fg)) 15px 100%/3px 100%;
+    background-repeat: no-repeat;
+  }
+  .sb-right .bat {
+    width: 24px; height: 12px; border: 1.5px solid var(--fg);
+    border-radius: 3px; position: relative; opacity: 0.92;
+  }
+  .sb-right .bat::after {
+    content: ""; position: absolute; left: 2px; top: 2px; bottom: 2px; width: 14px;
+    background: var(--fg); border-radius: 1px;
+  }
+  .sb-right .bat::before {
+    content: ""; position: absolute; right: -3.5px; top: 3px;
+    width: 2px; height: 4px; background: var(--fg); border-radius: 0 1px 1px 0;
+  }
+
+  .scroll {
+    position: absolute;
+    inset: var(--status-h) 0 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    z-index: 1;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .scroll::-webkit-scrollbar { display: none; }
+
+  .content {
+    padding: 4px 0 0;
+    /* list clearance: fab h 42 + 36 */
+    padding-bottom: calc(var(--fab-h) + 36px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 38px;
+    padding: 0 var(--page-pad);
+  }
+  .brand {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.64px;
+    color: var(--fg);
+    line-height: 1;
+  }
+  .header .spacer { flex: 1; min-width: 8px; }
+
+  .glass {
+    background: linear-gradient(180deg, rgba(255,255,255,0.78), rgba(255,255,255,0.58));
+    backdrop-filter: blur(18px) saturate(1.2);
+    -webkit-backdrop-filter: blur(18px) saturate(1.2);
+    border: 0.5px solid rgba(255,255,255,0.5);
+    box-shadow:
+      0 10px 14px var(--glass-shadow-a),
+      0 2px 4px var(--glass-shadow-c),
+      inset 0 0.5px 0 rgba(255,255,255,0.9);
+  }
+
+  .search-chip {
+    width: 78px; height: 38px;
+    border-radius: 19px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.26px;
+  }
+  .search-chip svg { flex: 0 0 auto; }
+
+  .gear-btn, .avatar {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    display: grid; place-items: center;
+    flex: 0 0 auto;
+  }
+  .gear-btn { color: var(--accent); }
+  .avatar {
+    background: var(--avatar-idle);
+    color: var(--avatar-idle-ink);
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .control-card {
+    margin: 20px var(--page-pad) 0;
+    border-radius: var(--card-radius);
+    background: var(--card);
+    box-shadow:
+      0 1px 1px var(--shadow-contact),
+      0 5px 14px -6px var(--shadow-ambient);
+    overflow: hidden;
+    position: relative;
+  }
+  .card-texture {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle, rgba(40, 32, 20, 0.023) 0.7px, transparent 0.75px);
+    background-size: var(--grid) var(--grid);
+    pointer-events: none;
+  }
+  .shortcuts {
+    position: relative;
+    display: flex;
+    padding: 9px 0 11px;
+  }
+  .shortcut {
+    flex: 1;
+    appearance: none;
+    border: 0;
+    background: transparent;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 6px 2px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.11px;
+    line-height: 1.2;
+    cursor: default;
+  }
+  .shortcut span {
+    max-width: 100%;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .section-label {
+    padding: 26px var(--page-pad) 12px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.11px;
+    color: var(--section);
+  }
+
+  .session-stack {
+    margin: 0 var(--page-pad);
+    border-radius: var(--card-radius);
+    background: var(--card);
+    box-shadow:
+      0 1px 1px var(--shadow-contact),
+      0 5px 14px -6px var(--shadow-ambient);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .row {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    min-height: var(--row-h);
+    padding: 12px 16px 12px 17px;
+  }
+  .row.active { background: var(--active-card); }
+  .row + .row::before {
+    content: "";
+    position: absolute;
+    left: 70px; right: 16px; top: 0;
+    height: 0.5px;
+    background: var(--hairline);
+  }
+  .row-avatar {
+    width: var(--avatar); height: var(--avatar);
+    border-radius: 50%;
+    display: grid; place-items: center;
+    flex: 0 0 auto;
+    background: var(--avatar-idle);
+    color: var(--avatar-idle-ink);
+  }
+  .row.active .row-avatar {
+    background: var(--avatar-active);
+    color: var(--avatar-active-ink);
+    box-shadow: 0 0 0 8px rgba(185, 134, 58, 0.10);
+  }
+  .row-body { min-width: 0; flex: 1; }
+  .row-title {
+    font-size: 16px; font-weight: 600;
+    letter-spacing: -0.08px;
+    color: var(--fg);
+    line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .row-meta {
+    margin-top: 7px;
+    font-size: 11px;
+    letter-spacing: 0.11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  .fab {
+    position: absolute;
+    right: var(--fab-trailing);
+    bottom: var(--fab-bottom);
+    z-index: 5;
+    height: var(--fab-h);
+    padding: 0 var(--fab-pad-x);
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: default;
+    user-select: none;
+  }
+  .fab svg { color: var(--accent); flex: 0 0 auto; }
+
+  .guide-card-edge,
+  .guide-fab-edge {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 0;
+    border-right: 1px dashed rgba(200, 60, 40, 0.5);
+    z-index: 6;
+    pointer-events: none;
+    display: none;
+  }
+  .phone.show-guides .guide-card-edge,
+  .phone.show-guides .guide-fab-edge { display: block; }
+  .guide-card-edge { right: var(--page-pad); }
+  .guide-fab-edge { right: var(--fab-trailing); }
+  .guide-gap-label {
+    position: absolute;
+    right: max(var(--fab-trailing), var(--page-pad));
+    bottom: calc(var(--fab-bottom) + var(--fab-h) + 10px);
+    transform: translateX(50%);
+    z-index: 7;
+    font-size: 11px;
+    font-weight: 650;
+    color: #b83220;
+    background: rgba(255,255,255,0.88);
+    padding: 2px 7px;
+    border-radius: 6px;
+    display: none;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .phone.show-guides .guide-gap-label { display: block; }
+
+  .home-indicator {
+    position: absolute;
+    left: 50%; bottom: 8px;
+    transform: translateX(-50%);
+    width: 134px; height: 5px;
+    border-radius: 3px;
+    background: var(--fg);
+    opacity: 0.9;
+    z-index: 8;
+    pointer-events: none;
+  }
+
+  .panel {
+    width: min(360px, 100%);
+    background: #221f1c;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 18px;
+    padding: 18px 18px 16px;
+  }
+  .panel h1 {
+    margin: 0 0 4px;
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.2px;
+  }
+  .panel .sub {
+    margin: 0 0 16px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: rgba(244,241,237,0.62);
+  }
+  .panel .sub code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: #f0d7a8;
+  }
+  .panel label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 12px;
+    color: rgba(244,241,237,0.72);
+    margin-bottom: 6px;
+  }
+  .panel label strong {
+    font-variant-numeric: tabular-nums;
+    color: #f4f1ed;
+    font-size: 13px;
+  }
+  .panel input[type="range"] { width: 100%; margin: 0 0 14px; }
+  .presets {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 14px;
+  }
+  .presets button, .toggle {
+    appearance: none;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.06);
+    color: #f4f1ed;
+    border-radius: 999px;
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .presets button.active {
+    background: rgba(185, 134, 58, 0.28);
+    border-color: rgba(185, 134, 58, 0.55);
+  }
+  .note {
+    margin-top: 4px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.04);
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(244,241,237,0.7);
+  }
+  .note b { color: #f0d7a8; font-weight: 650; }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="phone show-guides" id="phone">
+      <div class="canvas"></div>
+
+      <div class="status-bar">
+        <span>9:41</span>
+        <div class="island" aria-hidden="true"></div>
+        <div class="sb-right">
+          <span class="sig" aria-hidden="true"></span>
+          <span class="bat" aria-hidden="true"></span>
+        </div>
+      </div>
+
+      <div class="scroll" id="scroll">
+        <div class="content">
+          <div class="header">
+            <div class="brand">Amber</div>
+            <div class="spacer"></div>
+            <div class="search-chip glass">
+              <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M168,112a56,56,0,1,1-56-56A56,56,0,0,1,168,112Zm61.66,117.66a8,8,0,0,1-11.32,0l-50.06-50.07a88,88,0,1,1,11.32-11.31l50.06,50.06A8,8,0,0,1,229.66,229.66ZM112,184a72,72,0,1,0-72-72A72.08,72.08,0,0,0,112,184Z"/></svg>
+              <span>搜索</span>
+            </div>
+            <div class="gear-btn glass"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M216,130.16q.06-2.16,0-4.32l14.92-18.64a8,8,0,0,0,1.48-7.06,107.6,107.6,0,0,0-10.88-26.25,8,8,0,0,0-6-3.93l-23.72-2.64q-1.48-1.56-3-3L186,40.54a8,8,0,0,0-3.94-6,107.29,107.29,0,0,0-26.25-10.86,8,8,0,0,0-7.06,1.48L130.16,40Q128,40,125.84,40L107.2,25.11a8,8,0,0,0-7.06-1.48A107.6,107.6,0,0,0,73.89,34.51a8,8,0,0,0-3.93,6L67.32,64.27q-1.56,1.49-3,3L40.54,70a8,8,0,0,0-6,3.94,107.71,107.71,0,0,0-10.87,26.25,8,8,0,0,0,1.49,7.06L40,125.84Q40,128,40,130.16L25.11,148.8a8,8,0,0,0-1.48,7.06,107.6,107.6,0,0,0,10.88,26.25,8,8,0,0,0,6,3.93l23.72,2.64q1.49,1.56,3,3L70,215.46a8,8,0,0,0,3.94,6,107.71,107.71,0,0,0,26.25,10.87,8,8,0,0,0,7.06-1.49L125.84,216q2.16.06,4.32,0l18.64,14.92a8,8,0,0,0,7.06,1.48,107.21,107.21,0,0,0,26.25-10.88,8,8,0,0,0,3.93-6l2.64-23.72q1.56-1.48,3-3L215.46,186a8,8,0,0,0,6-3.94,107.71,107.71,0,0,0,10.87-26.25,8,8,0,0,0-1.49-7.06ZM128,168a40,40,0,1,1,40-40A40,40,0,0,1,128,168Z"/></svg></div>
+            <div class="avatar">A</div>
+          </div>
+
+          <div class="control-card">
+            <div class="card-texture"></div>
+            <div class="shortcuts">
+              <button type="button" class="shortcut"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M240,56V200a8,8,0,0,1-8,8H160a24,24,0,0,0-24,23.94,7.9,7.9,0,0,1-5.12,7.55A8,8,0,0,1,120,232a24,24,0,0,0-24-24H24a8,8,0,0,1-8-8V56a8,8,0,0,1,8-8H88a32,32,0,0,1,32,32v87.73a8.17,8.17,0,0,0,7.47,8.25,8,8,0,0,0,8.53-8V80a32,32,0,0,1,32-32h64A8,8,0,0,1,240,56Z"/></svg><span>深度阅读</span></button>
+<button type="button" class="shortcut"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM80,208H48V48H80Zm96-56H112a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm0-32H112a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Z"/></svg><span>小说创作</span></button>
+<button type="button" class="shortcut"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24ZM84,140a12,12,0,1,1,12-12A12,12,0,0,1,84,140Zm44,0a12,12,0,1,1,12-12A12,12,0,0,1,128,140Zm44,0a12,12,0,1,1,12-12A12,12,0,0,1,172,140Z"/></svg><span>模型议会</span></button>
+<button type="button" class="shortcut"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M120,56v48a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V56A16,16,0,0,1,56,40h48A16,16,0,0,1,120,56Zm80-16H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm-96,96H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm96,0H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Z"/></svg><span>小应用</span></button>
+<button type="button" class="shortcut"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24h0A104,104,0,1,0,232,128,104.12,104.12,0,0,0,128,24Zm78.36,64H170.71a135.28,135.28,0,0,0-22.3-45.6A88.29,88.29,0,0,1,206.37,88ZM216,128a87.61,87.61,0,0,1-3.33,24H174.16a157.44,157.44,0,0,0,0-48h38.51A87.61,87.61,0,0,1,216,128ZM128,43a115.27,115.27,0,0,1,26,45H102A115.11,115.11,0,0,1,128,43ZM102,168H154a115.11,115.11,0,0,1-26,45A115.27,115.27,0,0,1,102,168Zm-3.9-16a140.84,140.84,0,0,1,0-48h59.88a140.84,140.84,0,0,1,0,48Zm50.35,61.6a135.28,135.28,0,0,0,22.3-45.6h35.66A88.29,88.29,0,0,1,148.41,213.6Z"/></svg><span>WebMount</span></button>
+            </div>
+          </div>
+
+          <div class="section-label">会话</div>
+
+          <div class="session-stack" id="sessionStack">
+            <div class="card-texture"></div>
+            
+            <div class="row active">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M232,128A104,104,0,0,1,79.12,219.82L45.07,231.17a16,16,0,0,1-20.24-20.24l11.35-34.05A104,104,0,1,1,232,128Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">首页新对话按钮边距</div>
+                <div class="row-meta" data-preview="对比胶囊与会话外框的右缘关系">刚刚 · 12 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M235.33,104l-53.47,53.65c4.56,12.67,6.45,33.89-13.19,60A15.93,15.93,0,0,1,157,224c-.38,0-.75,0-1.13,0a16,16,0,0,1-11.32-4.69L96.29,171,53.66,213.66a8,8,0,0,1-11.32-11.32L85,159.71l-48.3-48.3A16,16,0,0,1,38,87.63c25.42-20.51,49.75-16.48,60.4-13.14L152,20.7a16,16,0,0,1,22.63,0l60.69,60.68A16,16,0,0,1,235.33,104Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">主题系统 P0–P3 验收</div>
+                <div class="row-meta">昨天 · 48 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M212,76V72a44,44,0,0,0-74.86-31.31,3.93,3.93,0,0,0-1.14,2.8v88.72a4,4,0,0,0,6.2,3.33A47.67,47.67,0,0,1,167.68,128a8.18,8.18,0,0,1,8.31,7.58,8,8,0,0,1-8,8.42,32,32,0,0,0-32,32v33.88a4,4,0,0,0,1.49,3.12,47.92,47.92,0,0,0,74.21-17.16,4,4,0,0,0-4.49-5.56A68.06,68.06,0,0,1,192,192h-7.73a8.18,8.18,0,0,1-8.25-7.47,8,8,0,0,1,8-8.53h8a51.6,51.6,0,0,0,24-5.88v0A52,52,0,0,0,212,76Zm-12,36h-4a36,36,0,0,1-36-36V72a8,8,0,0,1,16,0v4a20,20,0,0,0,20,20h4a8,8,0,0,1,0,16ZM88,28A44.05,44.05,0,0,0,44,72v4a52,52,0,0,0-4,94.12h0A51.6,51.6,0,0,0,64,176h7.73A8.18,8.18,0,0,1,80,183.47,8,8,0,0,1,72,192H64a67.48,67.48,0,0,1-15.21-1.73,4,4,0,0,0-4.5,5.55A47.93,47.93,0,0,0,118.51,213a4,4,0,0,0,1.49-3.12V176a32,32,0,0,0-32-32,8,8,0,0,1-8-8.42A8.18,8.18,0,0,1,88.32,128a47.67,47.67,0,0,1,25.48,7.54,4,4,0,0,0,6.2-3.33V43.49a4,4,0,0,0-1.14-2.81A43.85,43.85,0,0,0,88,28Zm8,48a36,36,0,0,1-36,36H56a8,8,0,0,1,0-16h4A20,20,0,0,0,80,76V72a8,8,0,0,1,16,0Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">编排体系 steer 队列</div>
+                <div class="row-meta">昨天 · 31 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM80,208H48V48H80Zm96-56H112a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Zm0-32H112a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">小说共创模式复核</div>
+                <div class="row-meta">周一 · 76 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M120,56v48a16,16,0,0,1-16,16H56a16,16,0,0,1-16-16V56A16,16,0,0,1,56,40h48A16,16,0,0,1,120,56Zm80-16H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm-96,96H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm96,0H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">MiniApp getTheme 热更新</div>
+                <div class="row-meta">周一 · 19 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM92.8,145.6a8,8,0,1,1-9.6,12.8l-32-24a8,8,0,0,1,0-12.8l32-24a8,8,0,0,1,9.6,12.8L69.33,128Zm58.89-71.4-32,112a8,8,0,1,1-15.38-4.4l32-112a8,8,0,0,1,15.38,4.4Zm53.11,60.2-32,24a8,8,0,0,1-9.6-12.8L186.67,128,163.2,110.4a8,8,0,1,1,9.6-12.8l32,24a8,8,0,0,1,0,12.8Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">Chat 宽度溢出修复</div>
+                <div class="row-meta">周日 · 54 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24h0A104,104,0,1,0,232,128,104.12,104.12,0,0,0,128,24Zm78.36,64H170.71a135.28,135.28,0,0,0-22.3-45.6A88.29,88.29,0,0,1,206.37,88ZM216,128a87.61,87.61,0,0,1-3.33,24H174.16a157.44,157.44,0,0,0,0-48h38.51A87.61,87.61,0,0,1,216,128ZM128,43a115.27,115.27,0,0,1,26,45H102A115.11,115.11,0,0,1,128,43ZM102,168H154a115.11,115.11,0,0,1-26,45A115.27,115.27,0,0,1,102,168Zm-3.9-16a140.84,140.84,0,0,1,0-48h59.88a140.84,140.84,0,0,1,0,48Zm50.35,61.6a135.28,135.28,0,0,0,22.3-45.6h35.66A88.29,88.29,0,0,1,148.41,213.6Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">WebMount 登录态 accent</div>
+                <div class="row-meta">周日 · 9 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M216,32H152a8,8,0,0,0-6.34,3.12l-64,83.21L72,108.69a16,16,0,0,0-22.64,0l-8.69,8.7a16,16,0,0,0,0,22.63l22,22-32,32a16,16,0,0,0,0,22.63l8.69,8.68a16,16,0,0,0,22.62,0l32-32,22,22a16,16,0,0,0,22.64,0l8.69-8.7a16,16,0,0,0,0-22.63l-9.64-9.64,83.21-64A8,8,0,0,0,224,104V40A8,8,0,0,0,216,32Zm-8,68.06-81.74,62.88L115.32,152l50.34-50.34a8,8,0,0,0-11.32-11.31L104,140.68,93.07,129.74,155.94,48H208Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">模型议会归档投影</div>
+                <div class="row-meta">上周 · 27 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M208,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V48A16,16,0,0,0,208,32ZM48,48H208v77.38l-24.69-24.7a16,16,0,0,0-22.62,0L53.37,208H48ZM80,96a16,16,0,1,1,16,16A16,16,0,0,1,80,96Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">AI 生图续接锚点</div>
+                <div class="row-meta">上周 · 15 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M176,232a8,8,0,0,1-8,8H88a8,8,0,0,1,0-16h80A8,8,0,0,1,176,232Zm40-128a87.55,87.55,0,0,1-33.64,69.21A16.24,16.24,0,0,0,176,186v6a16,16,0,0,1-16,16H96a16,16,0,0,1-16-16v-6a16,16,0,0,0-6.23-12.66A87.59,87.59,0,0,1,40,104.49C39.74,56.83,78.26,17.14,125.88,16A88,88,0,0,1,216,104Zm-32.11-9.34a57.6,57.6,0,0,0-46.56-46.55,8,8,0,0,0-2.66,15.78c16.57,2.79,30.63,16.85,33.44,33.45A8,8,0,0,0,176,104a9,9,0,0,0,1.35-.11A8,8,0,0,0,183.89,94.66Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">Appearance 深色预览纹理</div>
+                <div class="row-meta">上周 · 22 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M221.69,199.77,160,96.92V40h8a8,8,0,0,0,0-16H88a8,8,0,0,0,0,16h8V96.92L34.31,199.77A16,16,0,0,0,48,224H208a16,16,0,0,0,13.72-24.23Zm-90.08-42.91c-15.91-8.05-31.05-12.32-45.22-12.81l24.47-40.8A7.93,7.93,0,0,0,112,99.14V40h32V99.14a7.93,7.93,0,0,0,1.14,4.11L183.36,167C171.4,169.34,154.29,168.34,131.61,156.86Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">对比度门禁 3.0:1</div>
+                <div class="row-meta">3月2日 · 11 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M200,48H136V16a8,8,0,0,0-16,0V48H56A32,32,0,0,0,24,80V192a32,32,0,0,0,32,32H200a32,32,0,0,0,32-32V80A32,32,0,0,0,200,48ZM172,96a12,12,0,1,1-12,12A12,12,0,0,1,172,96ZM96,184H80a16,16,0,0,1,0-32H96ZM84,120a12,12,0,1,1,12-12A12,12,0,0,1,84,120Zm60,64H112V152h32Zm32,0H160V152h16a16,16,0,0,1,0,32Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">MCP 工具展开 deferred</div>
+                <div class="row-meta">3月1日 · 38 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,128v80a16,16,0,0,1-16,16H48a16,16,0,0,1-16-16V48A16,16,0,0,1,48,32h80a8,8,0,0,1,0,16H48V208H208V128a8,8,0,0,1,16,0Zm5.66-58.34-96,96A8,8,0,0,1,128,168H96a8,8,0,0,1-8-8V128a8,8,0,0,1,2.34-5.66l96-96a8,8,0,0,1,11.32,0l32,32A8,8,0,0,1,229.66,69.66Zm-17-5.66L192,43.31,179.31,56,200,76.69Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">章节阅读器 PageBackground</div>
+                <div class="row-meta">2月28日 · 6 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M240,56V200a8,8,0,0,1-8,8H160a24,24,0,0,0-24,23.94,7.9,7.9,0,0,1-5.12,7.55A8,8,0,0,1,120,232a24,24,0,0,0-24-24H24a8,8,0,0,1-8-8V56a8,8,0,0,1,8-8H88a32,32,0,0,1,32,32v87.73a8.17,8.17,0,0,0,7.47,8.25,8,8,0,0,0,8.53-8V80a32,32,0,0,1,32-32h64A8,8,0,0,1,240,56Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">深度阅读续接卡片</div>
+                <div class="row-meta">2月27日 · 41 条</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="row-avatar"><svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,0,0,36.18,176.88L24.83,210.93a16,16,0,0,0,20.24,20.24l34.05-11.35A104,104,0,1,0,128,24ZM84,140a12,12,0,1,1,12-12A12,12,0,0,1,84,140Zm44,0a12,12,0,1,1,12-12A12,12,0,0,1,128,140Zm44,0a12,12,0,1,1,12-12A12,12,0,0,1,172,140Z"/></svg></div>
+              <div class="row-body">
+                <div class="row-title">议会房间可恢复态</div>
+                <div class="row-meta">2月26日 · 17 条</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="guide-card-edge" title="session card right = 16"></div>
+      <div class="guide-fab-edge" title="fab trailing"></div>
+      <div class="guide-gap-label" id="gapLabel">内缩 12</div>
+
+      <div class="fab glass" id="fab" aria-label="新建聊天">
+        <svg width="14" height="14" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M227.31,73.37,182.63,28.68a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96a16,16,0,0,0,0-22.63ZM51.31,160l90.35-90.35,16.68,16.69L68,176.68ZM48,179.31,76.69,208H48Zm48,25.38L79.31,188l90.35-90.35h0l16.68,16.69Z"/></svg>
+        新对话
+      </div>
+
+      <div class="home-indicator"></div>
+    </div>
+
+    <aside class="panel">
+      <h1>新对话 × 会话外框</h1>
+      <p class="sub">
+        几何对齐生产：卡 <code>h-pad 16</code>、行高 <code>72</code>、圆角 <code>22</code>、
+        头像 <code>40</code>、搜索 <code>78×38</code>、胶囊 <code>h42 / trailing28 / bottom52</code>
+        （相对卡边 16 内缩 12pt，消相切）。列表可滚，便于对照胶囊与会话外框。
+      </p>
+
+      <label>
+        <span>fab trailing</span>
+        <strong id="fabTrailingVal">28px</strong>
+      </label>
+      <input id="fabTrailing" type="range" min="12" max="36" step="1" value="28" />
+
+      <label>
+        <span>fab bottom</span>
+        <strong id="fabBottomVal">52px</strong>
+      </label>
+      <input id="fabBottom" type="range" min="24" max="72" step="1" value="52" />
+
+      <div class="presets">
+        <button type="button" data-trailing="16">现状 16（相切）</button>
+        <button type="button" data-trailing="24">内缩 24</button>
+        <button type="button" data-trailing="28" class="active">内缩 28</button>
+        <button type="button" data-trailing="20">轻移 20</button>
+      </div>
+
+      <button type="button" class="toggle" id="toggleGuides">隐藏辅助线</button>
+      <button type="button" class="toggle" id="scrollToFab" style="margin-left:8px">滚到胶囊附近</button>
+
+      <div class="note">
+        <b>读法：</b>红虚线左 = 会话卡右缘（16）；右 = 胶囊右缘（可调）。
+        <span id="gapNote">当前 gap = 12pt → 胶囊相对卡边内缩。</span>
+      </div>
+    </aside>
+  </div>
+
+<script>
+  const root = document.documentElement;
+  const phone = document.getElementById('phone');
+  const fabTrailing = document.getElementById('fabTrailing');
+  const fabBottom = document.getElementById('fabBottom');
+  const fabTrailingVal = document.getElementById('fabTrailingVal');
+  const fabBottomVal = document.getElementById('fabBottomVal');
+  const gapLabel = document.getElementById('gapLabel');
+  const gapNote = document.getElementById('gapNote');
+  const pagePad = 16;
+
+  function sync() {
+    const t = Number(fabTrailing.value);
+    const b = Number(fabBottom.value);
+    root.style.setProperty('--fab-trailing', t + 'px');
+    root.style.setProperty('--fab-bottom', b + 'px');
+    fabTrailingVal.textContent = t + 'px';
+    fabBottomVal.textContent = b + 'px';
+    const gap = t - pagePad;
+    const abs = Math.abs(gap);
+    let msg;
+    if (gap === 0) msg = 'gap = 0 → 相切';
+    else if (gap > 0) msg = `gap = ${gap}pt → 胶囊相对卡边内缩`;
+    else msg = `gap = ${gap}pt → 胶囊探出卡边 ${abs}pt`;
+    gapLabel.textContent = gap === 0 ? 'gap 0' : (gap > 0 ? `内缩 ${gap}` : `探出 ${abs}`);
+    gapNote.textContent = '当前 ' + msg + '。';
+    document.querySelectorAll('.presets button').forEach(btn => {
+      btn.classList.toggle('active', Number(btn.dataset.trailing) === t);
+    });
+  }
+
+  fabTrailing.addEventListener('input', sync);
+  fabBottom.addEventListener('input', sync);
+  document.querySelectorAll('.presets button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      fabTrailing.value = btn.dataset.trailing;
+      sync();
+    });
+  });
+  document.getElementById('toggleGuides').addEventListener('click', (e) => {
+    phone.classList.toggle('show-guides');
+    e.currentTarget.textContent = phone.classList.contains('show-guides')
+      ? '隐藏辅助线' : '显示辅助线';
+  });
+  document.getElementById('scrollToFab').addEventListener('click', () => {
+    const sc = document.getElementById('scroll');
+    // Scroll so lower session rows sit behind the FAB — where tangency is felt.
+    sc.scrollTo({ top: sc.scrollHeight * 0.42, behavior: 'smooth' });
+  });
+  sync();
+  // Stay at top: long session card extends under the FAB so tangency is visible
+  // without hiding header / control card. Use「滚到胶囊附近」to inspect mid-list.
+</script>
+</body>
+</html>

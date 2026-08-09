@@ -9,12 +9,6 @@ kotlin {
     iosArm64()
     iosSimulatorArm64()
 
-    sourceSets {
-        commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
-        }
-    }
-
     // Configure cinterop + linker for iOS targets
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         val slice = if (target.name.contains("Simulator")) "ios-arm64-sim" else "ios-arm64"

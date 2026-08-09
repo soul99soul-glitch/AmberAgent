@@ -544,6 +544,12 @@ final class HomeDesignContractTests: XCTestCase {
         XCTAssertTrue(source.contains("@ScaledMetric(relativeTo: .body) private var conversationTitleSize: CGFloat = 16"))
         XCTAssertTrue(source.contains(".frame(maxWidth: .infinity, minHeight: 44)"))
         XCTAssertTrue(source.contains(".frame(minHeight: 72)"))
+        // 新对话胶囊相对会话卡 16 内缩：trailing 28 → 与卡边 gap 12，避免相切。
+        XCTAssertTrue(source.contains("private var homeNewChatCapsuleTrailingInset: CGFloat { 28 }"))
+        XCTAssertTrue(
+            source.contains(".padding(.trailing, homeNewChatCapsuleTrailingInset)"),
+            "浮层必须挂 trailing inset 常量，不能回退硬编码 16"
+        )
         XCTAssertTrue(source.contains(".lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)"))
         XCTAssertTrue(source.contains("if dynamicTypeSize.isAccessibilitySize"))
         XCTAssertTrue(source.contains("ScrollView(.horizontal)"))

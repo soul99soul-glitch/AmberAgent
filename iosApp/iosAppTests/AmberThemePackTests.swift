@@ -132,12 +132,15 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertEqual(pi.glassChrome, .quieter)
         XCTAssertEqual(pi.emptyArt, .character)
         XCTAssertEqual(pi.bubbleChrome, .standard)
+        // P2: mono chrome also drives Appearance section labels.
+        XCTAssertTrue(pi.settingsChrome)
         XCTAssertEqual(AmberTheme.piLight.background, 0xF3F0EB)
         XCTAssertEqual(AmberTheme.piLight.surface, 0xFAF9F7)
         runtime.apply(pi)
         XCTAssertEqual(runtime.matchingPack?.id, "pi-steel")
         XCTAssertEqual(runtime.canvasStyle, .lineGrid)
         XCTAssertEqual(runtime.chromeTypeface, .monospace)
+        XCTAssertTrue(runtime.settingsChrome)
         XCTAssertTrue(runtime.showsCanvasTexture(on: .home))
         XCTAssertTrue(runtime.showsCanvasTexture(on: .shell))
         XCTAssertTrue(runtime.showsCanvasTexture(on: .app))
@@ -310,6 +313,7 @@ final class AmberThemePackTests: XCTestCase {
         XCTAssertEqual(runtime.canvasStyle, .lineGrid)
         XCTAssertEqual(runtime.canvasScope, .appWide)
         XCTAssertEqual(runtime.chromeTypeface, .monospace)
+        XCTAssertTrue(runtime.settingsChrome)
         XCTAssertEqual(runtime.glassChrome, .quieter)
         XCTAssertEqual(runtime.emptyArt, .character)
     }
@@ -353,6 +357,137 @@ final class AmberThemePackTests: XCTestCase {
         _ = AmberChromeTypeface.rounded.font(size: 12, weight: .semibold)
         _ = AmberChromeTypeface.monospace.font(size: 11, weight: .semibold)
         _ = AmberChromeFont.system(size: 11, weight: .semibold)
+    }
+
+    // MARK: - P2 reserved slots
+
+    func testEveryCanvasStyleHasVisibleTextureOrIsFlat() throws {
+        for style in AmberCanvasStyle.allCases {
+            switch style {
+            case .flat:
+                XCTAssertFalse(style.hasTexture)
+            case .dotGrid, .lineGrid, .paperGrain:
+                XCTAssertTrue(style.hasTexture, "\(style.rawValue) must paint a texture")
+            }
+        }
+        let packSource = try source("iosApp/AmberThemePack.swift")
+        XCTAssertTrue(packSource.contains("AmberPaperGrainOverlay()"))
+        XCTAssertFalse(
+            packSource.contains("case .paperGrain:\n            EmptyView()"),
+            "paperGrain must not be an empty canvas overlay"
+        )
+    }
+
+    func testPaperGrainInkAlphaStaysQuiet() {
+        // Below dot-grid dark 0.08 / light 0.055 so grain never dirties session titles.
+        XCTAssertLessThan(AmberPaperGrainOverlay.lightAlpha, AmberDotGridOverlay.lightAlpha)
+        XCTAssertLessThan(AmberPaperGrainOverlay.darkAlpha, AmberDotGridOverlay.darkAlpha)
+        XCTAssertGreaterThan(AmberPaperGrainOverlay.lightAlpha, 0.02)
+        XCTAssertGreaterThan(AmberPaperGrainOverlay.darkAlpha, 0.03)
+    }
+
+    func testSettingsChromeGateFollowsRuntimeFlag() {
+        runtime.chromeTypeface = .monospace
+        runtime.settingsChrome = false
+        XCTAssertNil(AmberChromeFont.settingsPackDesign)
+        runtime.settingsChrome = true
+        XCTAssertEqual(AmberChromeFont.settingsPackDesign, .monospaced)
+        runtime.chromeTypeface = .rounded
+        XCTAssertEqual(AmberChromeFont.settingsPackDesign, .rounded)
+    }
+
+    func testAppearanceSettingsUsesGatedChromeFont() throws {
+        let text = try source("iosApp/AppearanceSettingsView.swift")
+        XCTAssertTrue(text.contains("AmberChromeFont.settings(size: 12, weight: .semibold)"))
+        XCTAssertTrue(text.contains("AmberChromeFont.settings(.headline, weight: .semibold)"))
+        XCTAssertTrue(text.contains("AmberChromeFont.settings(.subheadline, weight: .semibold)"))
+        let settingsFontCount = text.components(separatedBy: "AmberChromeFont.settings(").count - 1
+        XCTAssertGreaterThanOrEqual(settingsFontCount, 3)
+    }
+
+    func testAppearanceMiniPreviewPinsLightColorSchemeForCanvasInk() throws {
+        // Light-recipe cards must not resolve overlay ink against dark Appearance traits.
+        let text = try source("iosApp/AppearanceSettingsView.swift")
+        XCTAssertTrue(text.contains("AmberDotGridOverlay()"))
+        XCTAssertTrue(text.contains("AmberPaperGrainOverlay()"))
+        XCTAssertTrue(
+            text.contains(".environment(\\.colorScheme, .light)"),
+            "miniPreview canvas overlays must pin light so grain/grid stay visible in dark Appearance"
+        )
+    }
+
+    func testAssetModeRemainsBuiltinOnly() {
+        XCTAssertEqual(AmberThemeAssetMode.allCases.map(\.rawValue), ["builtinOnly"])
+    }
+
+    func testImmersivePolicyRemainsHiddenOnly() {
+        XCTAssertEqual(AmberImmersivePolicy.allCases.map(\.rawValue), ["hidden"])
+    }
+
+    func testLaunchBrandMatchIsWiredOnAccount() throws {
+        let account = try source("iosApp/AccountView.swift")
+        XCTAssertTrue(account.contains("launchBrand == .matchBrand"))
+        XCTAssertTrue(account.contains("AmberBrandMarkView()"))
+        // Packs keep none (dual-brand risk); import of matchBrand still works.
+        for pack in AmberThemePack.builtins {
+            XCTAssertEqual(pack.launchBrand, .none, pack.id)
+        }
+    }
+
+    func testImportPaperGrainAppliesCanvasAndScope() throws {
+        let json = """
+        {"format":"amber.theme.pack","version":1,"id":"grain","displayName":"grain","paper":"paper",
+         "accentHex":"0xB9863A","inkHex":"0x231602","canvasStyle":"paperGrain","canvasScope":"shell",
+         "brandMark":"systemWordmark","shortcutIconStyle":"phosphorFill","chromeTypeface":"system"}
+        """
+        try runtime.apply(try AmberThemePackTransfer.decode(Data(json.utf8)))
+        XCTAssertEqual(runtime.canvasStyle, .paperGrain)
+        XCTAssertTrue(runtime.canvasStyle.hasTexture)
+        XCTAssertEqual(runtime.canvasScope, .shell)
+        XCTAssertTrue(runtime.showsCanvasTexture(on: .home))
+        XCTAssertTrue(runtime.showsCanvasTexture(on: .shell))
+        XCTAssertFalse(runtime.showsCanvasTexture(on: .app))
+    }
+
+    func testImportSettingsChromeMonospaceWithoutBuiltinPack() throws {
+        let json = """
+        {"format":"amber.theme.pack","version":1,"id":"custom-mono","displayName":"custom","paper":"neutral",
+         "accentHex":"0xB9863A","inkHex":"0x231602","canvasStyle":"flat",
+         "brandMark":"systemWordmark","shortcutIconStyle":"phosphorFill","chromeTypeface":"monospace",
+         "settingsChrome":true}
+        """
+        try runtime.apply(try AmberThemePackTransfer.decode(Data(json.utf8)))
+        XCTAssertTrue(runtime.settingsChrome)
+        XCTAssertEqual(runtime.chromeTypeface, .monospace)
+        XCTAssertEqual(AmberChromeFont.settingsPackDesign, .monospaced)
+        XCTAssertNil(runtime.matchingPack)
+    }
+
+    func testImportLaunchBrandMatchBrand() throws {
+        let json = """
+        {"format":"amber.theme.pack","version":1,"id":"branded","displayName":"branded","paper":"paper",
+         "accentHex":"0xB8623A","inkHex":"0xFFFFFF","canvasStyle":"dotGrid",
+         "brandMark":"paintAMBER","shortcutIconStyle":"phosphorFill","chromeTypeface":"rounded",
+         "launchBrand":"matchBrand"}
+        """
+        try runtime.apply(try AmberThemePackTransfer.decode(Data(json.utf8)))
+        XCTAssertEqual(runtime.launchBrand, .matchBrand)
+        XCTAssertEqual(runtime.brandMarkStyle, .paintAMBER)
+    }
+
+    func testImportRejectsUnknownAssetMode() {
+        let json = """
+        {"format":"amber.theme.pack","version":1,"id":"x","displayName":"x","paper":"neutral",
+         "accentHex":"0xB9863A","inkHex":"0x231602","canvasStyle":"flat",
+         "brandMark":"systemWordmark","shortcutIconStyle":"phosphorFill","chromeTypeface":"system",
+         "assetMode":"zipPack"}
+        """
+        XCTAssertThrowsError(try AmberThemePackTransfer.decode(Data(json.utf8))) { error in
+            XCTAssertEqual(
+                error as? AmberThemePackTransferError,
+                .unknownOptionalSlot("assetMode=zipPack")
+            )
+        }
     }
 
     func testApplyThemeDoesNotTouchChatBodyFontKeys() {
@@ -522,5 +657,222 @@ final class AmberThemePackTests: XCTestCase {
         try runtime.apply(AmberThemePack.builtins.first { $0.id == "white-ink" }!)
         try runtime.apply(doc)
         XCTAssertEqual(runtime.matchingPack?.id, "paper-rose")
+    }
+
+    // MARK: - P1 dark palettes + import contrast
+
+    func testNonImmersivePapersHaveDistinctDarkBackgrounds() {
+        let papers: [AmberThemeRuntime.Paper] = [.paper, .neutral, .white, .pi, .notion]
+        var backgrounds = Set<UInt32>()
+        for paper in papers {
+            let dark = paper.darkPalette
+            XCTAssertNotEqual(dark.background, dark.surface, "\(paper.rawValue) dark bg≠surface")
+            XCTAssertNotEqual(dark.surface, dark.surface2, "\(paper.rawValue) dark surface≠surface2")
+            XCTAssertNotEqual(dark.background, dark.surface2, "\(paper.rawValue) dark bg≠surface2")
+            XCTAssertGreaterThan(
+                AmberColorContrast.contrastRatio(dark.foreground, dark.background),
+                4.5,
+                "\(paper.rawValue) dark text AA"
+            )
+            XCTAssertTrue(backgrounds.insert(dark.background).inserted, "duplicate dark bg \(paper.rawValue)")
+        }
+        // E-edition canonical dark remains the warm-gray / neutral workbench.
+        XCTAssertEqual(AmberThemeRuntime.Paper.neutral.darkPalette.background, AmberTheme.darkPalette.background)
+        XCTAssertEqual(AmberTheme.darkPalette.background, 0x0E0D10)
+    }
+
+    func testNonNeutralDarkPaletteDesignValues() {
+        // Lock the four split tables so they cannot silent-drift to neutral.
+        XCTAssertEqual(AmberTheme.paperDark.background, 0x14110E)
+        XCTAssertEqual(AmberTheme.paperDark.surface, 0x221E19)
+        XCTAssertEqual(AmberTheme.paperDark.surface2, 0x2E2822)
+        XCTAssertEqual(AmberTheme.whiteDark.background, 0x111111)
+        XCTAssertEqual(AmberTheme.whiteDark.surface2, 0x282828)
+        XCTAssertEqual(AmberTheme.piDark.background, 0x12110F)
+        XCTAssertEqual(AmberTheme.piDark.surface2, 0x2A2722)
+        XCTAssertEqual(AmberTheme.notionDark.background, 0x191919)
+        XCTAssertEqual(AmberTheme.notionDark.surface2, 0x2F2F2F)
+        XCTAssertEqual(AmberTheme.notionDark.foreground2, 0xB4B4B4)
+    }
+
+    func testDarkHomeChromeTracksNonNeutralPaperSurfaces() {
+        let dark = UITraitCollection(userInterfaceStyle: .dark)
+
+        runtime.paper = .neutral
+        XCTAssertEqual(resolvedHex(AmberTheme.avatarIdle, traits: dark), 0x2B2930)
+        XCTAssertEqual(resolvedHex(AmberTheme.hoverCard, traits: dark), 0x29262D)
+
+        runtime.paper = .notion
+        XCTAssertEqual(resolvedHex(AmberTheme.avatarIdle, traits: dark), AmberTheme.notionDark.surface2)
+        XCTAssertEqual(resolvedHex(AmberTheme.hoverCard, traits: dark), AmberTheme.notionDark.surface2)
+        XCTAssertEqual(resolvedHex(AmberTheme.section, traits: dark), AmberTheme.notionDark.foreground2)
+        XCTAssertEqual(resolvedHex(AmberTheme.avatarIdleInk, traits: dark), AmberTheme.notionDark.muted)
+
+        runtime.paper = .pi
+        XCTAssertEqual(resolvedHex(AmberTheme.avatarIdle, traits: dark), AmberTheme.piDark.surface2)
+        XCTAssertEqual(resolvedHex(AmberTheme.hoverCard, traits: dark), AmberTheme.piDark.surface2)
+
+        runtime.paper = .paper
+        XCTAssertEqual(resolvedHex(AmberTheme.avatarIdle, traits: dark), AmberTheme.paperDark.surface2)
+
+        runtime.paper = .white
+        XCTAssertEqual(resolvedHex(AmberTheme.avatarIdle, traits: dark), AmberTheme.whiteDark.surface2)
+    }
+
+    func testBuiltinPacksSurviveExportImportContrastGate() throws {
+        for pack in AmberThemePack.builtins {
+            let data = try AmberThemePackTransfer.encode(AmberThemePackTransfer.document(from: pack))
+            let doc = try AmberThemePackTransfer.decode(data)
+            XCTAssertEqual(doc.id, pack.id, pack.id)
+            try runtime.apply(doc)
+            XCTAssertEqual(runtime.matchingPack?.id, pack.id, pack.id)
+        }
+    }
+
+    func testMiniAppThemeBridgeReadsPaletteHexNotNeutralFallback() throws {
+        let text = try source("iosApp/MiniAppRunnerView.swift")
+        XCTAssertTrue(text.contains("IOSMiniAppThemeBridge.payload"))
+        XCTAssertTrue(text.contains("accentInkHex: AmberThemeRuntime.shared.accentInkHex"))
+        XCTAssertFalse(
+            text.contains("return colorScheme == .dark ? \"#0E0D10\""),
+            "MiniApp theme bridge must not fall back to neutral-only hex"
+        )
+    }
+
+    func testImportRejectsLowAccentInkContrast() {
+        let ok = """
+        {"format":"amber.theme.pack","version":1,"id":"ok","displayName":"ok","paper":"neutral",
+         "accentHex":"0xB9863A","inkHex":"0x231602","canvasStyle":"flat",
+         "brandMark":"systemWordmark","shortcutIconStyle":"phosphorFill","chromeTypeface":"system"}
+        """
+        XCTAssertNoThrow(try AmberThemePackTransfer.decode(Data(ok.utf8)))
+
+        let bad = """
+        {"format":"amber.theme.pack","version":1,"id":"bad","displayName":"bad","paper":"neutral",
+         "accentHex":"0x808080","inkHex":"0x909090","canvasStyle":"flat",
+         "brandMark":"systemWordmark","shortcutIconStyle":"phosphorFill","chromeTypeface":"system"}
+        """
+        XCTAssertThrowsError(try AmberThemePackTransfer.decode(Data(bad.utf8))) { error in
+            guard let err = error as? AmberThemePackTransferError,
+                  case .insufficientContrast(let ratio) = err else {
+                return XCTFail("expected insufficientContrast, got \(error)")
+            }
+            XCTAssertLessThan(ratio, AmberColorContrast.minimumAccentInkRatio)
+        }
+    }
+
+    func testBuiltinAccentInkPairsMeetImportContrastGate() {
+        for option in AmberAccentOption.allCases {
+            XCTAssertGreaterThanOrEqual(
+                AmberColorContrast.contrastRatio(option.accentHex, option.inkHex),
+                AmberColorContrast.minimumAccentInkRatio,
+                "\(option.rawValue) accent/ink must remain importable"
+            )
+        }
+    }
+
+    // MARK: - P0 consistency (theme advancement)
+
+    /// Status amber is a fixed semantic ink; brand accent follows the active pack.
+    func testStatusAmberStaysFixedWhileBrandAccentFollowsRuntime() {
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "warm-amber" }!)
+        XCTAssertEqual(runtime.accentHex, AmberAccentOption.amberGold.accentHex)
+
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
+        XCTAssertEqual(runtime.accentHex, AmberAccentOption.terracotta.accentHex)
+        // Fixed semantic status amber `#D98324` must not track pack accent.
+        XCTAssertEqual(AmberTheme.statusAmberHex, 0xD98324)
+        XCTAssertNotEqual(runtime.accentHex, AmberTheme.statusAmberHex)
+    }
+
+    /// Home-entry work surfaces must opt into `AmberThemePageBackground(surface: .app)`
+    /// so `canvasScope == .appWide` (pi-steel) can paint texture; sit shell stays quiet.
+    func testAppWideWorkSurfacesUsePageBackground() throws {
+        let surfaces: [(path: String, needle: String)] = [
+            ("iosApp/NovelCreation/NovelSessionView.swift", "AmberThemePageBackground(surface: .app)"),
+            ("iosApp/NovelCreation/NovelProjectListView.swift", "AmberThemePageBackground(surface: .app)"),
+            ("iosApp/NovelCreation/NovelProjectWorkspaceView.swift", "AmberThemePageBackground(surface: .app)"),
+            ("iosApp/NovelCreation/NovelChapterReaderView.swift", "AmberThemePageBackground(surface: .app)"),
+            ("iosApp/CouncilView.swift", "AmberThemePageBackground(surface: .app)"),
+            ("iosApp/CouncilChatRuntimeView.swift", "AmberThemePageBackground(surface: .app)"),
+            ("iosApp/WebMountView.swift", "AmberThemePageBackground(surface: .app)"),
+            ("iosApp/MiniAppListView.swift", "AmberThemePageBackground(surface: .app)"),
+            ("iosApp/MiniAppRunnerView.swift", "AmberThemePageBackground(surface: .app)"),
+        ]
+        for surface in surfaces {
+            let text = try source(surface.path)
+            XCTAssertTrue(
+                text.contains(surface.needle),
+                "\(surface.path) must use \(surface.needle) for appWide canvas texture"
+            )
+        }
+
+        let workspace = try source("iosApp/NovelCreation/NovelProjectWorkspaceView.swift")
+        // Tab content must not paint an opaque full-bleed paper over the page canvas.
+        XCTAssertFalse(
+            workspace.contains("return ZStack {\n            AmberTheme.background\n            if let mounted"),
+            "Novel workspace content ZStack must not cover PageBackground with AmberTheme.background"
+        )
+
+        // Sit / shell must not force texture into chat (already PageBackground .app — scope gate).
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
+        XCTAssertFalse(runtime.showsCanvasTexture(on: .app))
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "pi-steel" }!)
+        XCTAssertTrue(runtime.showsCanvasTexture(on: .app))
+    }
+
+    /// Settings / provider primary chrome that is not a warning/running status uses runtime accent.
+    func testBrandInteractiveSettingsUseRuntimeAccentNotFixedAmber() throws {
+        let miniAppSettings = try source("iosApp/MiniAppSettingsView.swift")
+        XCTAssertFalse(
+            miniAppSettings.contains("tint: AmberTheme.accentAmber"),
+            "MiniApp settings toggles should follow runtime accent"
+        )
+        XCTAssertTrue(miniAppSettings.contains("tint: AmberTheme.accent"))
+
+        let provider = try source("iosApp/ProviderDetailView.swift")
+        XCTAssertTrue(
+            provider.contains("ProviderActionRow(systemImage: \"plus.circle\", title: \"手动添加\", tint: AmberTheme.accent)"),
+            "手动添加 is a primary action — brand accent, not status amber"
+        )
+        // Keep attention/testing semantics on fixed status amber.
+        XCTAssertTrue(provider.contains("tint: AmberTheme.accentAmber") || provider.contains("AmberTheme.statusAmber"))
+
+        let webMount = try source("iosApp/WebMountView.swift")
+        XCTAssertTrue(
+            webMount.contains("title: \"需要登录\"") && webMount.contains("tint: AmberTheme.accent"),
+            "WebMount add-site login toggle row icon follows runtime accent"
+        )
+        // Narrow: the login-toggle row must not still pin status amber.
+        if let toggleRange = webMount.range(of: "title: \"需要登录\"") {
+            let window = webMount[toggleRange.lowerBound...].prefix(280)
+            XCTAssertFalse(
+                window.contains("tint: AmberTheme.accentAmber"),
+                "需要登录 row tint must not be fixed status amber"
+            )
+        } else {
+            XCTFail("missing 需要登录 toggle")
+        }
+    }
+
+    private func source(_ relativePath: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        return try String(
+            contentsOf: testsDirectory.deletingLastPathComponent().appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
+    private func resolvedHex(_ color: Color, traits: UITraitCollection) -> UInt32 {
+        let resolved = UIColor(color).resolvedColor(with: traits)
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        XCTAssertTrue(resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+        let r = UInt32((red * 255).rounded())
+        let g = UInt32((green * 255).rounded())
+        let b = UInt32((blue * 255).rounded())
+        return (r << 16) | (g << 8) | b
     }
 }

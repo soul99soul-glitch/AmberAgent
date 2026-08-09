@@ -2997,11 +2997,6 @@ extension NovelSessionViewModel {
         return startGhostwriteChapter()
     }
 
-    func clearGhostwriteProgress() {
-        guard ghostwriteTask == nil else { return }
-        ghostwriteProgressStorage = nil
-    }
-
     func cancelGhostwriteForBindingChange(
         from expectedBinding: NovelSessionBinding?
     ) async {

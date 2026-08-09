@@ -2267,10 +2267,6 @@ struct ChatSwiftUIMessageList: View {
         )
     }
 
-    private var canAutoFollow: Bool {
-        followGeneration && runtime.followMode == .followingBottom
-    }
-
     private func updateStreamedMessageIDs(event: ChatEvent, messages: [UIMessage]) {
         // delta 热路径:chunk 不增删消息,只需登记尾行 id。全量 id 重建/求交是
         // O(消息数) 的 KMP 桥接,且无条件重写 @State 会让每个 chunk 都额外触发

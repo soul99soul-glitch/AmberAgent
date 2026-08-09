@@ -576,7 +576,7 @@ struct ProviderDetailView: View {
                 Button {
                     modelDraft = ProviderModelDraft()
                 } label: {
-                    ProviderActionRow(systemImage: "plus.circle", title: "手动添加", tint: AmberTheme.accentAmber)
+                    ProviderActionRow(systemImage: "plus.circle", title: "手动添加", tint: AmberTheme.accent)
                 }
                 .buttonStyle(.plain)
             }

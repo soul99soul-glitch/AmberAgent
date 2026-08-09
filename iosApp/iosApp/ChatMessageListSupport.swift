@@ -55,18 +55,6 @@ struct ChatAgentName: View {
     }
 }
 
-struct ChatMetaLine: View {
-    let text: String
-    var alignment: Alignment = .leading
-
-    var body: some View {
-        Text(text)
-            .font(.caption2.monospacedDigit())
-            .foregroundStyle(AmberTheme.muted2)
-            .frame(maxWidth: .infinity, alignment: alignment)
-    }
-}
-
 struct ChatUserBubble: View {
     let text: String
     @AppStorage(IOSDisplayPreferenceKeys.fontScale) private var fontScale = 1.0

@@ -79,9 +79,20 @@ struct ParagraphView: UIViewRepresentable {
 
   // If we don't implement this function, the snapshot tests will fail with incorrect sizing.
   func sizeThatFits(_ proposal: ProposedViewSize, uiView: ParagraphUIView, context: Context) -> CGSize? {
-    guard let width = proposal.width, width > 0, width.isFinite else {
+    // Vendored fix (AmberAgent): a nil proposal used to fall through to
+    // screen-width intrinsic and widen the chat column. Reuse the last finite
+    // proposal from this representable; otherwise defer to intrinsicContentSize
+    // (which no longer advertises screen width).
+    let width: CGFloat
+    if let proposed = proposal.width, proposed > 0, proposed.isFinite {
+      width = proposed
+      context.coordinator.lastProposedWidth = proposed
+    } else if let last = context.coordinator.lastProposedWidth, last > 0, last.isFinite {
+      width = last
+    } else {
       return nil
     }
+
     // Vendored fix (AmberAgent): test-only observation hook, see the enum below.
     #if DEBUG
     ParagraphViewSizeThatFitsTestHook.recordCall()
@@ -125,6 +136,9 @@ struct ParagraphView: UIViewRepresentable {
     var sizeCache: [CGFloat: CGSize] = [:]
     var lastContents: NSMutableAttributedString?
     var lastLineSpacing: CGFloat?
+    /// Last finite width SwiftUI proposed. Used when a later pass sends a nil
+    /// proposal so we do not fall back to the screen-width intrinsic guess.
+    var lastProposedWidth: CGFloat?
   }
 }
 

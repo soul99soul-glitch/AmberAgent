@@ -11,7 +11,7 @@ enum AmberCanvasStyle: String, CaseIterable, Hashable, Identifiable {
     case dotGrid
     /// Square graph paper (Pi draft): 1pt h/v lines + light intersection dots.
     case lineGrid
-    /// Optional paper grain (reserved).
+    /// Fine paper grain (sparse noise; quieter than dotGrid).
     case paperGrain
 
     var id: String { rawValue }
@@ -19,8 +19,8 @@ enum AmberCanvasStyle: String, CaseIterable, Hashable, Identifiable {
     /// Whether this style draws a texture overlay (for previews / empty art).
     var hasTexture: Bool {
         switch self {
-        case .flat, .paperGrain: false
-        case .dotGrid, .lineGrid: true
+        case .flat: false
+        case .dotGrid, .lineGrid, .paperGrain: true
         }
     }
 }
@@ -86,11 +86,25 @@ enum AmberChromeFont {
     }
 
     /// Settings/shell labels: only follows pack when `settingsChrome` is on.
+    /// Fixed-size path (section captions that intentionally stay 12pt).
     static func settings(size: CGFloat, weight: Font.Weight = .regular) -> Font {
         if AmberThemeRuntime.shared.settingsChrome {
             return system(size: size, weight: weight)
         }
         return .system(size: size, weight: weight)
+    }
+
+    /// Dynamic Type path for Appearance header / disclosure (restores Text Style scaling).
+    static func settings(_ style: Font.TextStyle, weight: Font.Weight = .regular) -> Font {
+        if AmberThemeRuntime.shared.settingsChrome {
+            return .system(style, design: typeface.design).weight(weight)
+        }
+        return .system(style).weight(weight)
+    }
+
+    /// Pack chrome design used by `settings` when the gate is on; `nil` when off.
+    static var settingsPackDesign: Font.Design? {
+        AmberThemeRuntime.shared.settingsChrome ? typeface.design : nil
     }
 }
 
@@ -144,14 +158,15 @@ enum AmberLaunchBrandStyle: String, CaseIterable, Hashable, Identifiable {
     var id: String { rawValue }
 }
 
-/// Custom asset packages (zip) — reserved; only builtin enums resolve today.
+/// Asset resolution mode. Only `builtinOnly` ships today; zip packages are Future (P4).
+/// Kept in the pack schema so imports stay stable — not a user-facing control.
 enum AmberThemeAssetMode: String, CaseIterable, Hashable, Identifiable {
     case builtinOnly
 
     var id: String { rawValue }
 }
 
-/// Immersive full-bleed papers in pickers — still hidden until contrast ships.
+/// Immersive full-bleed papers in pickers. Only `hidden` until P4 contrast work ships.
 enum AmberImmersivePolicy: String, CaseIterable, Hashable, Identifiable {
     case hidden
 
@@ -311,7 +326,7 @@ struct AmberThemePack: Identifiable, Equatable, Hashable {
             bubbleChrome: .standard,
             glassChrome: .quieter,
             emptyArt: .character,
-            settingsChrome: false,
+            settingsChrome: true,
             launchBrand: .none,
             assetMode: .builtinOnly,
             immersivePolicy: .hidden
@@ -441,6 +456,8 @@ enum AmberThemePackTransferError: LocalizedError, Equatable {
     case unknownChromeTypeface(String)
     case unknownOptionalSlot(String)
     case invalidHex(String)
+    /// Accent vs on-accent ink contrast below `AmberColorContrast.minimumAccentInkRatio`.
+    case insufficientContrast(Double)
 
     var errorDescription: String? {
         switch self {
@@ -468,7 +485,38 @@ enum AmberThemePackTransferError: LocalizedError, Equatable {
             "未知可选槽：\(value)"
         case .invalidHex(let value):
             "无效颜色：\(value)"
+        case .insufficientContrast(let ratio):
+            String(
+                format: "强调色与上墨色对比度不足（%.2f:1，至少 %.1f:1）",
+                ratio,
+                AmberColorContrast.minimumAccentInkRatio
+            )
         }
+    }
+}
+
+/// WCAG relative-luminance contrast for theme import gates (accent ↔ ink).
+enum AmberColorContrast {
+    /// UI / large-text AA floor. Keeps existing builtin accent/ink pairs importable.
+    static let minimumAccentInkRatio: Double = 3.0
+
+    static func contrastRatio(_ a: UInt32, _ b: UInt32) -> Double {
+        let la = relativeLuminance(a)
+        let lb = relativeLuminance(b)
+        let lighter = max(la, lb)
+        let darker = min(la, lb)
+        return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    static func relativeLuminance(_ hex: UInt32) -> Double {
+        let r = srgbLinear(Double((hex >> 16) & 0xFF) / 255)
+        let g = srgbLinear(Double((hex >> 8) & 0xFF) / 255)
+        let b = srgbLinear(Double(hex & 0xFF) / 255)
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+
+    private static func srgbLinear(_ channel: Double) -> Double {
+        channel <= 0.03928 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
     }
 }
 
@@ -549,8 +597,12 @@ enum AmberThemePackTransfer {
             throw AmberThemePackTransferError.unsupportedVersion(document.version)
         }
         _ = try resolvedPaper(document.paper)
-        _ = try parseHex(document.accentHex)
-        _ = try parseHex(document.inkHex)
+        let accent = try parseHex(document.accentHex)
+        let ink = try parseHex(document.inkHex)
+        let accentInkRatio = AmberColorContrast.contrastRatio(accent, ink)
+        guard accentInkRatio >= AmberColorContrast.minimumAccentInkRatio else {
+            throw AmberThemePackTransferError.insufficientContrast(accentInkRatio)
+        }
         guard AmberCanvasStyle(rawValue: document.canvasStyle) != nil else {
             throw AmberThemePackTransferError.unknownCanvasStyle(document.canvasStyle)
         }
@@ -692,7 +744,7 @@ struct AmberCanvasBackground: View {
         case .lineGrid:
             AmberLineGridOverlay()
         case .paperGrain:
-            EmptyView()
+            AmberPaperGrainOverlay()
         }
     }
 }
@@ -729,6 +781,8 @@ struct AmberDotGridOverlay: View {
     /// Brand-spec cream draft cell size (page / card / empty share this).
     var spacing: CGFloat = 18
     var radius: CGFloat = 0.7
+    static let lightAlpha: Double = 0.055
+    static let darkAlpha: Double = 0.08
 
     var body: some View {
         let color = Self.dotColor
@@ -759,7 +813,52 @@ struct AmberDotGridOverlay: View {
             let dark = trait.userInterfaceStyle == .dark
             // Light: rgba(40,32,20,0.055) ≈ warm draft ink; dark: soft pale.
             let hex: UInt32 = dark ? 0xF4F1ED : 0x281F14
-            return UIColor(hex: hex, alpha: dark ? 0.08 : 0.055)
+            return UIColor(hex: hex, alpha: dark ? darkAlpha : lightAlpha)
+        })
+    }
+}
+
+/// Fine paper grain: deterministic sparse 1pt flecks, quieter than `dotGrid`.
+struct AmberPaperGrainOverlay: View {
+    /// Sample cell; only a subset of cells receive a fleck (hash gate).
+    var cell: CGFloat = 4
+    static let lightAlpha: Double = 0.04
+    static let darkAlpha: Double = 0.065
+
+    var body: some View {
+        let color = Self.grainColor
+        GeometryReader { geo in
+            let origin = geo.frame(in: .global).origin
+            let x0 = AmberCanvasGridPhase.firstLocal(globalOrigin: origin.x, spacing: cell)
+            let y0 = AmberCanvasGridPhase.firstLocal(globalOrigin: origin.y, spacing: cell)
+            Canvas { context, size in
+                var y = y0 - cell
+                while y < size.height + cell {
+                    var x = x0 - cell
+                    while x < size.width + cell {
+                        // Stable sparse pattern (≈1/5 cells) — no per-frame random.
+                        let gx = Int(((origin.x + x) / cell).rounded(.down))
+                        let gy = Int(((origin.y + y) / cell).rounded(.down))
+                        let h = (gx &* 374_761) &+ (gy &* 668_265)
+                        if h & 0x7 == 0 {
+                            context.fill(
+                                Path(CGRect(x: x, y: y, width: 1, height: 1)),
+                                with: .color(color)
+                            )
+                        }
+                        x += cell
+                    }
+                    y += cell
+                }
+            }
+        }
+    }
+
+    static var grainColor: Color {
+        Color(uiColor: UIColor { trait in
+            let dark = trait.userInterfaceStyle == .dark
+            let hex: UInt32 = dark ? 0xF4F1ED : 0x281F14
+            return UIColor(hex: hex, alpha: dark ? darkAlpha : lightAlpha)
         })
     }
 }
@@ -775,7 +874,10 @@ struct HomeCardCanvasTexture: View {
         case .dotGrid:
             AmberDotGridOverlay()
                 .opacity(0.42)
-        case .flat, .paperGrain:
+        case .paperGrain:
+            AmberPaperGrainOverlay()
+                .opacity(0.55)
+        case .flat:
             EmptyView()
         }
     }

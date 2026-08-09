@@ -197,21 +197,6 @@ class PackedAstNode: Identifiable {
         return String(bytes: destBytes, encoding: .utf8)
     }
 
-    /// Title for a link or image.
-    func linkTitle() -> String? {
-        guard (type == .link || type == .image) else { return nil }
-        var cursor = 0
-        // Skip dest
-        let (destLen, n1) = Self.readVarint(blob: extras, start: cursor); cursor = n1
-        cursor += Int(destLen)
-        guard cursor < extras.count else { return nil }
-        let (titleLen, n2) = Self.readVarint(blob: extras, start: cursor); cursor = n2
-        let len = Int(titleLen)
-        guard cursor + len <= extras.count else { return nil }
-        let titleBytes = Array(extras[cursor..<(cursor + len)])
-        return String(bytes: titleBytes, encoding: .utf8)
-    }
-
     // MARK: - Internal
 
     private func readHeader() -> NodeHeader {

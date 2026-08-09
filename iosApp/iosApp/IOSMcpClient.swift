@@ -22,10 +22,6 @@ struct IOSMcpTool: Codable, Equatable, Identifiable {
     func withEnabled(_ enabled: Bool) -> IOSMcpTool {
         IOSMcpTool(name: name, description: description, enabled: enabled, inputSchema: inputSchema)
     }
-
-    func withDescription(_ description: String?) -> IOSMcpTool {
-        IOSMcpTool(name: name, description: description, enabled: enabled, inputSchema: inputSchema)
-    }
 }
 
 enum IOSMcpServerConfig: Equatable, Identifiable {

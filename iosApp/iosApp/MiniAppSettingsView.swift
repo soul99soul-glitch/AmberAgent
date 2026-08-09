@@ -119,7 +119,7 @@ struct MiniAppSettingsView: View {
                     title: "AI 生成",
                     subtitle: "允许已授权小应用调用宿主 AI 生成文本；缺少 API Key 时会返回错误。",
                     systemImage: "sparkles",
-                    tint: AmberTheme.accentAmber,
+                    tint: AmberTheme.accent,
                     isOn: Binding(
                         get: { sharedSettings.agentRuntime.miniApp.aiEnabled },
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(aiEnabled: enabled) } }
@@ -163,7 +163,7 @@ struct MiniAppSettingsView: View {
                     title: "深度阅读摘要",
                     subtitle: "允许已授权小应用更新自己的深度阅读摘要。",
                     systemImage: "book.pages",
-                    tint: AmberTheme.accentAmber,
+                    tint: AmberTheme.accent,
                     isOn: Binding(
                         get: { sharedSettings.agentRuntime.miniApp.boardSummaryUpdateEnabled },
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(boardSummaryUpdateEnabled: enabled) } }
@@ -229,7 +229,7 @@ struct MiniAppSettingsView: View {
                     title: "读取剪贴板",
                     subtitle: "允许声明 clipboard.read 权限的小应用读取当前剪贴板文本。",
                     systemImage: "clipboard",
-                    tint: AmberTheme.accentAmber,
+                    tint: AmberTheme.accent,
                     isOn: Binding(
                         get: { sharedSettings.agentRuntime.miniApp.clipboardReadEnabled },
                         set: { enabled in sharedSettings.updateMiniAppRuntime { _ in MiniAppSettingPatch(clipboardReadEnabled: enabled) } }

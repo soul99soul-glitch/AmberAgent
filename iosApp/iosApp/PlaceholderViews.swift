@@ -43,11 +43,35 @@ enum AmberTheme {
         foreground: 0x1A1918, foreground2: 0x31302E, muted: 0x615D59, muted2: 0xA39E98,
         border: 0xE6E5E3, borderSoft: 0xF0EFED
     )
-    // 深色（设计 E 版）：画布 #0E0D10、卡片 #1F1D23，玻璃改 10% 白、投影改黑系。
+    // 深色 · 暖灰工作台（E 版 / neutral）：画布 #0E0D10、卡片 #1F1D23。
     static let darkPalette = AmberPalette(
         background: 0x0E0D10, surface: 0x1F1D23, surface2: 0x2B2930,
         foreground: 0xF4F1ED, foreground2: 0xC3BEC5, muted: 0xAAA5AD, muted2: 0x6E6760,
         border: 0x3A3741, borderSoft: 0x2A2830
+    )
+    // 深色 · 暖纸：偏棕墨底，保留纸本气质。
+    static let paperDark = AmberPalette(
+        background: 0x14110E, surface: 0x221E19, surface2: 0x2E2822,
+        foreground: 0xF5F0E8, foreground2: 0xC8BDB0, muted: 0xA89888, muted2: 0x6E6258,
+        border: 0x3D342C, borderSoft: 0x2A241E
+    )
+    // 深色 · 中性白：冷中性灰阶，避免偏紫底。
+    static let whiteDark = AmberPalette(
+        background: 0x111111, surface: 0x1C1C1C, surface2: 0x282828,
+        foreground: 0xF5F5F5, foreground2: 0xBDBDBD, muted: 0x8E8E8E, muted2: 0x6B6B6B,
+        border: 0x383838, borderSoft: 0x2A2A2A
+    )
+    // 深色 · Pi 稿纸：暖橄榄底，对齐奶油稿纸角色。
+    static let piDark = AmberPalette(
+        background: 0x12110F, surface: 0x1E1C18, surface2: 0x2A2722,
+        foreground: 0xF3F0EB, foreground2: 0xC4BEB4, muted: 0x9A948C, muted2: 0x6A6560,
+        border: 0x3A3630, borderSoft: 0x28251F
+    )
+    // 深色 · Notion 暖白：冷灰工作台（近 Notion dark）。
+    static let notionDark = AmberPalette(
+        background: 0x191919, surface: 0x252525, surface2: 0x2F2F2F,
+        foreground: 0xEBEBEB, foreground2: 0xB4B4B4, muted: 0x9B9B9B, muted2: 0x6F6F6F,
+        border: 0x373737, borderSoft: 0x2C2C2C
     )
 
     // ── Immersive single-hue canvases (Apple-Music-style full-bleed color). Each is a
@@ -117,8 +141,13 @@ enum AmberTheme {
     static var accentInk: Color { Color(hex: AmberThemeRuntime.shared.accentInkHex) }
 
     // Semantic status colors stay fixed (status is always color + symbol/label elsewhere).
+    // `accentAmber` / `statusAmber` = warning · running · attention chrome — NOT the user theme accent.
+    // Brand / selected / primary interactive chrome must use `accent` + `accentInk`.
+    static let statusAmberHex: UInt32 = 0xD98324
     static let accentIndigo = Color(hex: 0x5856D6)
-    static let accentAmber = Color(hex: 0xD98324)
+    static let accentAmber = Color(hex: statusAmberHex)
+    /// Alias for call sites that want the semantic name (same as `accentAmber`).
+    static var statusAmber: Color { accentAmber }
     static let accentGreen = Color(hex: 0x3DA35D)
     static let accentCyan = Color(hex: 0x2AA0BC)
     static let accentRed = Color(hex: 0xC8402F)
@@ -297,8 +326,13 @@ enum AmberTheme {
     private static func homeTokens(for paper: AmberThemeRuntime.Paper, dark: Bool) -> AmberHomeTokens {
         if dark {
             switch paper {
-            case .paper, .neutral, .white, .pi, .notion:
+            case .neutral:
+                // E-edition warm-gray chrome stays the canonical dark home table.
                 return homeDark
+            case .paper, .white, .pi, .notion:
+                // Only retint idle/hover/section against that paper's dark surfaces;
+                // glass/shadow geometry stay on homeDark (no full per-paper home tables).
+                return homeDarkAligned(to: paper.darkPalette)
             case .garnet, .ochre, .turmeric, .magenta, .lotus:
                 break
             }
@@ -326,6 +360,25 @@ enum AmberTheme {
             shadowContactAlpha: 0.25, shadowAmbientAlpha: 0.30,
             glassTopAlpha: 0.14, glassBottomAlpha: 0.08, glassEdgeAlpha: 0.16, glassHighlightAlpha: 0.16,
             glassShadow: 0x000000, glassShadowAmbientAlpha: 0.30, glassShadowContactAlpha: 0.22
+        )
+    }
+
+    /// Dark home chrome that tracks `paper.darkPalette` for surfaces next to the card face.
+    private static func homeDarkAligned(to palette: AmberPalette) -> AmberHomeTokens {
+        AmberHomeTokens(
+            sep: homeDark.sep, press: homeDark.press,
+            hoverCard: palette.surface2, activeCard: homeDark.activeCard,
+            sepAlpha: homeDark.sepAlpha, pressAlpha: homeDark.pressAlpha,
+            section: palette.foreground2,
+            avatarActive: homeDark.avatarActive, avatarActiveInk: homeDark.avatarActiveInk,
+            avatarIdle: palette.surface2, avatarIdleInk: palette.muted,
+            shadowContact: homeDark.shadowContact, shadowAmbient: homeDark.shadowAmbient,
+            shadowContactAlpha: homeDark.shadowContactAlpha, shadowAmbientAlpha: homeDark.shadowAmbientAlpha,
+            glassTopAlpha: homeDark.glassTopAlpha, glassBottomAlpha: homeDark.glassBottomAlpha,
+            glassEdgeAlpha: homeDark.glassEdgeAlpha, glassHighlightAlpha: homeDark.glassHighlightAlpha,
+            glassShadow: homeDark.glassShadow,
+            glassShadowAmbientAlpha: homeDark.glassShadowAmbientAlpha,
+            glassShadowContactAlpha: homeDark.glassShadowContactAlpha
         )
     }
 
@@ -384,7 +437,11 @@ final class AmberThemeRuntime {
 
         var darkPalette: AmberPalette {
             switch self {
-            case .paper, .neutral, .white, .pi, .notion: AmberTheme.darkPalette
+            case .neutral: AmberTheme.darkPalette
+            case .paper: AmberTheme.paperDark
+            case .white: AmberTheme.whiteDark
+            case .pi: AmberTheme.piDark
+            case .notion: AmberTheme.notionDark
             case .garnet: AmberTheme.garnetPalette
             case .ochre: AmberTheme.ochrePalette
             case .turmeric: AmberTheme.turmericPalette
@@ -1702,7 +1759,10 @@ private struct HomeEmptyCard: View {
                             // Same 18pt lattice as page/cards; opacity only softens ink.
                             AmberLineGridOverlay()
                                 .opacity(0.65)
-                        default:
+                        case .paperGrain:
+                            AmberPaperGrainOverlay()
+                                .opacity(0.7)
+                        case .dotGrid, .flat:
                             AmberDotGridOverlay()
                                 .opacity(0.55)
                         }
@@ -2099,8 +2159,9 @@ struct ConversationsView: View {
             }
 
             // 右下拇指区：内容贴合胶囊浮在内容上（局部琥珀；非满幅条）。
+            // trailing 28（非卡边 16）：相对会话外框内缩 12pt，避免胶囊右缘与卡边相切。
             homeNewChatCapsule
-                .padding(.trailing, 16)
+                .padding(.trailing, homeNewChatCapsuleTrailingInset)
                 .padding(
                     .bottom,
                     dynamicTypeSize.isAccessibilitySize
@@ -2200,6 +2261,9 @@ struct ConversationsView: View {
     private var homeNewChatCapsuleHeight: CGFloat {
         dynamicTypeSize.isAccessibilitySize ? 48 : 42
     }
+
+    /// 相对屏右 inset：大于会话卡 16，使胶囊相对外框内缩约 12pt。
+    private var homeNewChatCapsuleTrailingInset: CGFloat { 28 }
 
     /// 相对屏底 inset（拇指区）。
     private var homeNewChatCapsuleBottomInset: CGFloat { 52 }

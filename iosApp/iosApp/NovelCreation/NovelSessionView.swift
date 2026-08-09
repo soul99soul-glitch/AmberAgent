@@ -116,7 +116,7 @@ struct NovelSessionView: View {
         let listSignal = makeListSignal(from: listModel)
 
         ZStack {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .app)
             transcript(listModel: listModel, listSignal: listSignal)
 
             if followState.showsBottomButton, !(listModel?.rows.isEmpty ?? true) {

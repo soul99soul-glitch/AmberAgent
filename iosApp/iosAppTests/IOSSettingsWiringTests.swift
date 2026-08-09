@@ -207,6 +207,7 @@ final class IOSSettingsWiringTests: XCTestCase {
     func testChatTopBarUsesStableControlDimensions() {
         XCTAssertEqual(ChatTopBarLayout.controlsHeight, 54)
         XCTAssertEqual(ChatTopBarLayout.toolbarButtonDiameter, 38)
+        XCTAssertEqual(ChatTopBarLayout.softEdgeExtension, 36)
     }
 
     @MainActor
@@ -319,6 +320,8 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(
             chatView.contains(".frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)")
         )
+        // 用透明延伸拉高 safeAreaBar，让原生 soft edge 盖住返回/标题；禁止再叠自定义 fade 材质。
+        XCTAssertTrue(chatView.contains("ChatTopBarLayout.softEdgeExtension"))
         XCTAssertFalse(chatView.contains("edgeEffectTail"))
         XCTAssertFalse(chatView.contains("edgeEffectHeight"))
         XCTAssertFalse(chatView.contains("GlassEffectContainer(spacing: 12)"))

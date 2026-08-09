@@ -57,8 +57,6 @@ dependencies {
     api("io.github.petterpx:floatingx-compose:2.3.7")
 
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

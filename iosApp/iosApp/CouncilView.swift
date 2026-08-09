@@ -14,7 +14,7 @@ struct CouncilView: View {
 
     var body: some View {
         ZStack {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .app)
 
             VStack(spacing: 0) {
                 header

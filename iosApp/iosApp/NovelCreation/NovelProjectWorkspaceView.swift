@@ -72,7 +72,7 @@ struct NovelProjectWorkspaceView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(AmberTheme.background.ignoresSafeArea())
+        .background { AmberThemePageBackground(surface: .app) }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(AmberTheme.background, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -341,8 +341,8 @@ struct NovelProjectWorkspaceView: View {
     // 点击当帧不做建视图的活,「点下去卡住」的观感由此消除。
     private var content: some View {
         let mounted: NovelWorkspaceSection? = mountedSection == section ? section : nil
+        // No opaque paper fill here — page canvas is `AmberThemePageBackground` on the root.
         return ZStack {
-            AmberTheme.background
             if let mounted {
                 sectionContent(mounted)
                     .transition(.opacity)

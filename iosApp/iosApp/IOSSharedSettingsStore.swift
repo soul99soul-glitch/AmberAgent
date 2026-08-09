@@ -17,10 +17,6 @@ enum IOSCapabilityGate: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
-    var isAlwaysAvailable: Bool {
-        true
-    }
-
     var title: String {
         switch self {
         case .skills: "技能"
@@ -998,14 +994,6 @@ final class IOSSharedSettingsStore {
             id: serviceId,
             enabled: enabled
         )
-        restoreSnapshot(merged)
-    }
-
-    func selectSearchProvider(serviceId: String) {
-        guard let index = snapshot.searchServices.firstIndex(where: { $0.id.description() == serviceId }) else {
-            return
-        }
-        let merged = IosSettingsMutations.shared.selectSearchService(settings: snapshot, index: Int32(index))
         restoreSnapshot(merged)
     }
 

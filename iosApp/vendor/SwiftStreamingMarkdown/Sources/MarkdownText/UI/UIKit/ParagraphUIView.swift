@@ -116,13 +116,28 @@ class ParagraphUIView: UITextView {
       return cachedSize.size
     }
     var targetWidth = bounds.width
+    // When we only have a screen-width guess, still measure height there, but do
+    // not advertise that width as the ideal — SwiftUI would center a screen-wide
+    // row inside the padded chat column and clip both edges.
+    var reportFlexibleWidth = false
     if targetWidth <= 0 || targetWidth.isInfinite {
-      // When bounds.width is not valid, we have to give a best guess, otherwise Chat becomes blank in some cases sometimes. It may be related to LazyVStack.
-      targetWidth = UIScreen.main.bounds.width
+      // Prefer the SwiftUI/UIKit parent column over the full screen.
+      if let superWidth = superview?.bounds.width, superWidth > 0, superWidth.isFinite {
+        targetWidth = superWidth
+      } else {
+        // Last-resort measure width so LazyVStack first pass is not blank.
+        targetWidth = UIScreen.main.bounds.width
+        reportFlexibleWidth = true
+      }
     }
     let targetSize = CGSize(width: targetWidth, height: .greatestFiniteMagnitude)
     let contentSize = sizeThatFits(targetSize)
-    let roundedUpSize = CGSize(width: contentSize.width.rounded(.up), height: contentSize.height.rounded(.up))
+    let roundedUpSize = CGSize(
+      width: reportFlexibleWidth
+        ? UIView.noIntrinsicMetric
+        : min(contentSize.width.rounded(.up), targetWidth),
+      height: contentSize.height.rounded(.up)
+    )
     cachedSize = CachedParagraphUIViewSize(size: roundedUpSize, targetWidth: targetWidth)
     return roundedUpSize
   }
@@ -153,8 +168,9 @@ class ParagraphUIView: UITextView {
     // known-slow API here and must not be used on the streaming path.
     _ = layoutManager.glyphRange(for: textContainer)
     let used = layoutManager.usedRect(for: textContainer)
+    let measuredWidth = (used.width + textContainerInset.left + textContainerInset.right).rounded(.up)
     return CGSize(
-      width: (used.width + textContainerInset.left + textContainerInset.right).rounded(.up),
+      width: min(measuredWidth, size.width),
       height: (used.height + textContainerInset.top + textContainerInset.bottom).rounded(.up)
     )
   }

@@ -173,14 +173,6 @@ struct SubAgentRoleView: View {
     }
 }
 
-private struct SubAgentRoleStatus: Identifiable {
-    let id = UUID()
-    let title: String
-    let subtitle: String
-    let value: String
-    let color: Color
-}
-
 private struct SubAgentRoleDetail {
     let roleId: String
     let name: String

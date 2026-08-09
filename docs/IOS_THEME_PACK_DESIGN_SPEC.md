@@ -29,7 +29,7 @@ Amber 是 **安静、可工作的 AI agent 工作台**，不是皮肤商店。
 | 层 | 英文槽位 | 改什么 | 不改什么 |
 |----|----------|--------|----------|
 | **画布色** | `paper` | 暖纸 / 暖灰 / 中性白等底色 token | 页面信息架构 |
-| **画布纹理** | `canvasStyle` | 纯色 / 点阵 /（预留）纸纹 | 列表行结构 |
+| **画布纹理** | `canvasStyle` | 纯色 / 点阵 / 方格 / 纸纹 | 列表行结构 |
 | **强调色** | `accent` | 按钮点缀、选中、FAB 图标 tint、active 条 | 大面积色块刷屏 |
 | **品牌字** | `brandMark` | 首页顶栏 `Amber` 字标样式 | 右侧搜索 / 设置 / 头像布局 |
 | **快捷入口图标** | `shortcutIconStyle` | **仅 5 个**首页快捷入口的 glyph 皮肤 | 入口数量、顺序、HStack 布局 |
@@ -50,9 +50,9 @@ Amber 是 **安静、可工作的 AI agent 工作台**，不是皮肤商店。
 
 | 能力 | 范围 |
 |------|------|
-| 画布纹理（点阵等） | 由 `canvasScope` 控制：`homeOnly` 仅首页；`shell` = 首页 + 外观/账户；`appWide` = 已 opt-in 的工作页（聊天/看板）。**点阵 · 陶土用 `shell`**，聊天保持安静纸色 |
+| 画布纹理（点阵等） | 由 `canvasScope` 控制：`homeOnly` 仅首页；`shell` = 首页 + 外观/账户；`appWide` = 已 opt-in 的工作页（聊天/看板/小说/议会/WebMount/小应用）。**点阵 · 陶土用 `shell`**，聊天与设置表单保持安静纸色 |
 | 品牌字 / 像素快捷 / chrome 字体 | **首页** 外壳为主 |
-| paper + accent 颜色 token | **全 app** `AmberTheme.*` |
+| paper + accent 颜色 token | **全 app** `AmberTheme.*`；状态色 `accentAmber`/`statusAmber`（`#D98324`）固定，**不是**主题强调色 |
 | 气泡圆角 | `bubbleChrome` → `AmberTheme.radiusXLarge`（含用户气泡） |
 | 玻璃垫底 | `glassChrome` **仅首页** Liquid Glass 控件 |
 | 外观设置页 | 主题卡片 + 自定义；**不**强制浅深 |
@@ -86,6 +86,8 @@ AmberThemePack
 | `paper` | 暖纸 | 偏暖纸本，适合角色包 |
 | `neutral` | 暖灰 | E 版默认工作台 |
 | `white` | 中性白 | 冷静、偏工具 |
+| `pi` | 奶油稿纸 | Pi 角色包专用 |
+| `notion` | 暖白 | Notion 式工作台 |
 
 （沉浸色画布现已接线但 **不对用户开放**，新主题勿依赖。）
 
@@ -97,6 +99,8 @@ AmberThemePack
 | `terracotta` | `#B8623A` | 白 | 陶土 |
 | `sage` | `#5E9C6E` | 深墨 | 偏亮，必须深墨 |
 | `mistBlue` | `#4F86D6` | 白 | |
+| `steelBlue` | `#6B8CAD` | 奶油墨 `#FAF9F7` | Pi |
+| `notionBlue` | `#0075DE` | 白 | Notion |
 | `wisteria` | `#9277C4` | 白 | |
 | `rose` | `#C2607A` | 白 | |
 | `ink` | `#222226` | 白 | |
@@ -109,9 +113,10 @@ AmberThemePack
 |----|------|----------|
 | `flat` | 纯色 | 默认 |
 | `dotGrid` | 浅点阵 | 低对比；不能脏列表字（列表行有实底卡片） |
-| `paperGrain` | 纸纹（预留） | 未实现前勿作为交付依赖 |
+| `lineGrid` | 方格线 + 交点 | Pi 稿纸；间距约 18pt |
+| `paperGrain` | 细纸纹 | 稀疏 1pt fleck；浅 α≈0.04、深 α≈0.065（须低于点阵） |
 
-点阵参数经验（首页）：间距约 15pt、点半径约 0.7、浅色 α≈0.05、深色 α≈0.08。宁稀勿脏。
+点阵参数经验（首页）：间距约 15–18pt、点半径约 0.7、浅色 α≈0.055、深色 α≈0.08。宁稀勿脏。
 
 **`brandMark`**
 
@@ -119,6 +124,7 @@ AmberThemePack
 |----|------|----------|
 | `systemWordmark` | `Amber` 系统粗体约 32pt | 默认 |
 | `paintAMBER` | 粗体大写 AMBER / 手绘感 | 光学宽度勿挤爆右侧三控件；顶栏行高约 34–38 |
+| `serifWordmark` | 衬线斜体 Amber | Pi 角色包 |
 
 **`shortcutIconStyle`**
 
@@ -143,7 +149,8 @@ AmberThemePack
 |----|------|
 | `system` | 默认 UI |
 | `rounded` | 圆润角色包 |
-| `serif` | 预留衬线外壳（勿动聊天正文） |
+| `serif` | 衬线外壳（勿动聊天正文） |
+| `monospace` | 等宽外壳（Pi section / meta） |
 
 ---
 
@@ -161,7 +168,17 @@ AmberThemePack
 | `muted` / `muted2` | 次要 / 更淡 | 标签、闲置 |
 | `border` / `borderSoft` | 描边 | 软分隔 |
 
-深色：非沉浸画布共用一套 dark palette（`#0E0D10` 画布系）。主题包 **不单独定义深色配方**（除非未来产品升级）。
+深色：按 `paper` 分表（工程 `Paper.darkPalette`），**不**写入 Theme Pack JSON v1：
+
+| paper | dark 画布气质 | background（约） |
+|-------|---------------|------------------|
+| `neutral` | E 版工作台（权威 `AmberTheme.darkPalette`） | `#0E0D10` |
+| `paper` | 暖棕墨 | `#14110E` |
+| `white` | 冷中性灰 | `#111111` |
+| `pi` | 暖橄榄稿纸 | `#12110F` |
+| `notion` | 冷灰工作台 | `#191919` |
+
+约束：深色下仍须 `background ≠ surface ≠ surface2`；主墨对画布 ≥ 4.5:1。导入主题时校验 **accent ↔ ink ≥ 3.0:1**（UI/大字 AA；见 `AmberColorContrast`）。
 
 强调色只做 **点缀**：FAB 图标 tint、选中描边、active 条、强调按钮。禁止整屏大色块主题（沉浸色已隐藏正是因此）。
 
@@ -256,7 +273,7 @@ accent:
   # 若新色：
   # accentHex: "0x2A2A2E"
   # inkHex: "0xFFFFFF"   # 或深墨
-canvasStyle: flat     # flat | dotGrid | paperGrain
+canvasStyle: flat     # flat | dotGrid | lineGrid | paperGrain
 brandMark: systemWordmark   # systemWordmark | paintAMBER | <newStyleId>
 shortcutIconStyle: phosphorFill  # phosphorFill | pixelSit | <newStyleId>
 chromeTypeface: system      # system | rounded | serif
@@ -409,10 +426,22 @@ checks:
 | `bubbleChrome` | standard / soft / crisp | 气泡/卡片圆角档 | soft |
 | `glassChrome` | standard / quieter / solid | **仅首页** 玻璃垫底 | quieter |
 | `emptyArt` | none / character | 首页空会话装饰 | character |
-| `settingsChrome` | bool | 外观 section 跟 chrome 字体（接线窄，角色包默认关） | **false** |
-| `launchBrand` | none / matchBrand | 账户页品牌字（易成双品牌，角色包默认关） | **none** |
-| `assetMode` | builtinOnly | 资源包预留 | builtinOnly |
-| `immersivePolicy` | hidden | 沉浸色仍隐藏 | hidden |
+| `settingsChrome` | bool | 外观页标题/section 跟 `chromeTypeface`（`AmberChromeFont.settings`） | **true**（Pi）；sit/经典 **false** |
+| `launchBrand` | none / matchBrand | 账户页复用品牌字；双品牌风险 → 内置包保持 **none**；导入 `matchBrand` 有接线 | **none** |
+| `assetMode` | builtinOnly | 仅内置资源；zip 包见 Future（P4），非用户旋钮 | builtinOnly |
+| `immersivePolicy` | hidden | 沉浸色 picker 仍隐藏 → Future（P4） | hidden |
+
+### Future（非本规格交付面）
+
+- 自定义图标 / 资源 zip（`assetMode` 扩展）
+- 沉浸色 paper 上架与对比度验收
+- 为角色包默认打开 `launchBrand: matchBrand`（需先过双品牌验收）
+- Live Activity / Widget 跟随 Theme Pack（当前扩展目标**无** App Group 主题快照，使用静态暖橙 `amberAccent` 回退色，不假装已对齐）
+
+### MiniApp `host.getTheme`（iOS）
+
+字段（颜色 only，无点阵纹理）：`dark`、`background`、`surface`、`surface2`、`foreground`、`muted`、`primary`、`primaryInk`。  
+组装：`IOSMiniAppThemeBridge.payload`（随当前 `paper` 浅/深 palette + runtime accent/ink）。
 
 ## 12. 导入 / 导出（工程 v1）
 
@@ -427,7 +456,7 @@ checks:
 
 ---
 
-## 12. 维护说明
+## 13. 维护说明
 
 | 变更类型 | 谁改 | 注意 |
 |----------|------|------|

@@ -86,7 +86,12 @@ struct CodeBlockView: View {
         }
       }
 
-    }.transaction { transaction in
+    }
+    // Keep the horizontal scroller inside the proposed column width; otherwise a
+    // long unbroken code line expands the parent vertical ScrollView and the chat
+    // column is centered/clipped on both edges.
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .transaction { transaction in
       // The horizontal scrollView resizing animation was causing the code block to animate
       // all janky.
       transaction.animation = nil

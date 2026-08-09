@@ -25,12 +25,13 @@ struct OrderedListView: View {
               ListItemContentWrapper(paragraphContents: contents) {
                 SingleBlockView(renderable: firstChild)
               }
+              .frame(maxWidth: .infinity, alignment: .leading)
               .accessibilityLabel(Text(markdownListAccessibilityLabel(for: contents.string, at: idx, length: items.count)))
             } else {
               SingleBlockView(renderable: firstChild)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
           }
-          Spacer()
         }
         if items[idx].children.count > 1 {
           BlockView(renderables: Array(items[idx].children.dropFirst()))

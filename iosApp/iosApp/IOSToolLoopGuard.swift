@@ -22,7 +22,6 @@ struct IOSToolLoopGuard {
     /// maxToolResumeCount=6、引擎 maxSteps=8——预算里重复到第 3 次已经烧掉
     /// 大半,没有"慢慢提醒几次"的空间,所以阈值直接定在 2/3。
     private static let remindAtCount = 2
-    private static let stopAtCount = 3
 
     static let reminderText =
         "你刚以完全相同的参数调用过此工具，结果如上。请改变参数或调整策略，不要重复相同调用。"

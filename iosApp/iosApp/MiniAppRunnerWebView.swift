@@ -141,6 +141,8 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
                 forMainFrameOnly: true
             ))
         }
+        context.coordinator.currentTheme = theme
+        let coordinator = context.coordinator
         let runtime = IOSMiniAppBridgeRuntime(
             appId: appId,
             repository: repository,
@@ -154,7 +156,9 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
             sensorUnsubscribeHandler: sensorUnsubscribeHandler,
             sensitiveConfirmationHandler: sensitiveConfirmationHandler,
             toastHandler: onToast,
-            themeProvider: { theme }
+            themeProvider: { [weak coordinator] in
+                coordinator?.currentTheme ?? theme
+            }
         )
         let bridge = MiniAppBridge(
             runtime: runtime,
@@ -392,10 +396,7 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
         context.coordinator.loadedHTML = html
         context.coordinator.externalImagesAllowed = externalImagesAllowed
         context.coordinator.prepareForTrustedDocumentLoad()
-        webView.loadHTMLString(
-            IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(html, allowExternalImages: externalImagesAllowed),
-            baseURL: nil
-        )
+        webView.loadHTMLString(sandboxedHTML(html, theme: theme, externalImages: externalImagesAllowed), baseURL: nil)
         return webView
     }
 
@@ -408,18 +409,27 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
                 try MiniAppHtmlValidator.validate(html)
                 context.coordinator.loadedHTML = html
                 context.coordinator.externalImagesAllowed = externalImagesAllowed
+                context.coordinator.currentTheme = theme
                 context.coordinator.prepareForTrustedDocumentLoad()
                 webView.loadHTMLString(
-                    IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(
-                        html,
-                        allowExternalImages: externalImagesAllowed
-                    ),
+                    sandboxedHTML(html, theme: theme, externalImages: externalImagesAllowed),
                     baseURL: nil
                 )
             } catch {
                 onValidationError((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
+            return
         }
+        // Theme-only change: refresh getTheme snapshot + CSS vars; do not remount WKWebView.
+        if context.coordinator.currentTheme != theme {
+            context.coordinator.currentTheme = theme
+            webView.evaluateJavaScript(IOSMiniAppThemeBridge.applyThemeJavaScript(theme), completionHandler: nil)
+        }
+    }
+
+    private func sandboxedHTML(_ html: String, theme: IOSMiniAppThemePayload, externalImages: Bool) -> String {
+        let gated = IOSMiniAppHTMLSandbox.enforceBridgeOnlyNetwork(html, allowExternalImages: externalImages)
+        return IOSMiniAppThemeBridge.injectHostThemeCSS(gated, theme: theme)
     }
 
     private var allowsExternalImages: Bool {
@@ -461,6 +471,12 @@ struct MiniAppRunnerWebView: UIViewRepresentable {
         var bridge: MiniAppBridge?
         var loadedHTML = ""
         var externalImagesAllowed = false
+        var currentTheme = IOSMiniAppThemeBridge.payload(
+            paper: .neutral,
+            dark: false,
+            accentHex: 0x2563EB,
+            accentInkHex: 0xFFFFFF
+        )
         private var isClosed = false
         private var isAwaitingTrustedDocument = false
         private var isTrustedMainDocument = false

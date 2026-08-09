@@ -9,13 +9,9 @@ pluginManagement {
         }
         mavenCentral()
         gradlePluginPortal()
-        maven("https://repo.itextsupport.com/android")
     }
     resolutionStrategy {
         eachPlugin {
-            if (requested.id.id == "io.objectbox") {
-                useModule("io.objectbox:objectbox-gradle-plugin:${requested.version}")
-            }
             // (Removed) `org.mozilla.rust-android-gradle.rust-android` override:
             // it mapped to a non-existent module
             // `gradle.plugin.org.mozilla.rust-android-gradle:plugin:0.9.6` and

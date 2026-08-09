@@ -1571,31 +1571,6 @@ struct BoardCapabilityNote: View {
     }
 }
 
-private enum BoardSourceLabels {
-    static func title(for sourceType: String) -> String {
-        switch sourceType {
-        case IOSBoardSignalSourceType.chatHistory:
-            return "聊天历史"
-        case IOSBoardSignalSourceType.calendar:
-            return "日历"
-        case IOSBoardSignalSourceType.reminder:
-            return "提醒事项"
-        case IOSBoardSignalSourceType.hotlist:
-            return "热榜"
-        case IOSBoardSignalSourceType.time:
-            return "时间锚点"
-        case IOSBoardSignalSourceType.notification:
-            return "通知"
-        case IOSBoardSignalSourceType.feishuMessage:
-            return "飞书消息"
-        case IOSBoardSignalSourceType.feishuDocument:
-            return "飞书文档"
-        default:
-            return sourceType
-        }
-    }
-}
-
 // MARK: - 榜单条目操作面板(底部滑入)
 
 private struct TopicActionSheet: View {

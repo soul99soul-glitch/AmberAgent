@@ -43,16 +43,106 @@ enum IOSMiniAppBridgeDispatchResult: Equatable {
 struct IOSMiniAppThemePayload: Equatable, Hashable {
     var dark: Bool
     var background: String
+    var surface: String
+    var surface2: String
     var foreground: String
+    var muted: String
     var primary: String
+    var primaryInk: String
 
     var json: IOSMiniAppJSONValue {
         .object([
             "dark": .bool(dark),
             "background": .string(background),
+            "surface": .string(surface),
+            "surface2": .string(surface2),
             "foreground": .string(foreground),
+            "muted": .string(muted),
             "primary": .string(primary),
+            "primaryInk": .string(primaryInk),
         ])
+    }
+
+    /// Compact JSON object literal for `evaluateJavaScript` (host-owned hex only).
+    var jsonLiteral: String {
+        let pairs: [(String, String)] = [
+            ("dark", dark ? "true" : "false"),
+            ("background", quote(background)),
+            ("surface", quote(surface)),
+            ("surface2", quote(surface2)),
+            ("foreground", quote(foreground)),
+            ("muted", quote(muted)),
+            ("primary", quote(primary)),
+            ("primaryInk", quote(primaryInk)),
+        ]
+        return "{" + pairs.map { "\($0.0):\($0.1)" }.joined(separator: ",") + "}"
+    }
+
+    private func quote(_ value: String) -> String {
+        "\"\(value)\""
+    }
+}
+
+/// Host → MiniApp theme snapshot (colors only; no canvas texture).
+enum IOSMiniAppThemeBridge {
+    static func payload(
+        paper: AmberThemeRuntime.Paper,
+        dark: Bool,
+        accentHex: UInt32,
+        accentInkHex: UInt32
+    ) -> IOSMiniAppThemePayload {
+        let palette = dark ? paper.darkPalette : paper.lightPalette
+        return IOSMiniAppThemePayload(
+            dark: dark,
+            background: cssHex(palette.background),
+            surface: cssHex(palette.surface),
+            surface2: cssHex(palette.surface2),
+            foreground: cssHex(palette.foreground),
+            muted: cssHex(palette.muted),
+            primary: cssHex(accentHex),
+            primaryInk: cssHex(accentInkHex)
+        )
+    }
+
+    static func cssHex(_ value: UInt32) -> String {
+        String(format: "#%06X", value & 0x00FF_FFFF)
+    }
+
+    /// Inject host CSS vars before first paint (avoids light `:root` FOUC on dark host).
+    static func injectHostThemeCSS(_ html: String, theme: IOSMiniAppThemePayload) -> String {
+        let block = """
+        <style id="amber-host-theme">:root{--bg:\(theme.background);--fg:\(theme.foreground);--sub:\(theme.surface2);--surface:\(theme.surface);--muted:\(theme.muted);--primary:\(theme.primary);--primary-ink:\(theme.primaryInk)}</style>
+        """
+        let ns = html as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        let headClose = ns.range(of: "</head>", options: [.caseInsensitive], range: full)
+        if headClose.location != NSNotFound {
+            return ns.replacingCharacters(in: NSRange(location: headClose.location, length: 0), with: block)
+        }
+        let headOpen = ns.range(of: #"<head\b[^>]*>"#, options: [.caseInsensitive, .regularExpression], range: full)
+        if headOpen.location != NSNotFound {
+            let insertion = headOpen.location + headOpen.length
+            return ns.replacingCharacters(in: NSRange(location: insertion, length: 0), with: block)
+        }
+        return "<head>\(block)</head>\(html)"
+    }
+
+    /// Apply CSS vars into a live document without reloading WKWebView.
+    static func applyThemeJavaScript(_ theme: IOSMiniAppThemePayload) -> String {
+        // Keep keys aligned with sample `applyTheme` + host inject.
+        """
+        (function(t){
+          var r = document.documentElement && document.documentElement.style;
+          if (!r) return;
+          if (t.background) r.setProperty('--bg', t.background);
+          if (t.foreground) r.setProperty('--fg', t.foreground);
+          if (t.surface2 || t.surface) r.setProperty('--sub', t.surface2 || t.surface);
+          if (t.surface) r.setProperty('--surface', t.surface);
+          if (t.muted) r.setProperty('--muted', t.muted);
+          if (t.primary) r.setProperty('--primary', t.primary);
+          if (t.primaryInk) r.setProperty('--primary-ink', t.primaryInk);
+        })(\(theme.jsonLiteral));
+        """
     }
 }
 
@@ -157,7 +247,12 @@ final class IOSMiniAppBridgeRuntime {
             #endif
         },
         themeProvider: @escaping () -> IOSMiniAppThemePayload = {
-            IOSMiniAppThemePayload(dark: false, background: "#FFFFFF", foreground: "#111827", primary: "#2563EB")
+            IOSMiniAppThemeBridge.payload(
+                paper: .neutral,
+                dark: false,
+                accentHex: 0x2563EB,
+                accentInkHex: 0xFFFFFF
+            )
         },
         eventEmitter: EventEmitter? = nil
     ) {

@@ -78,7 +78,7 @@ struct NovelProjectListView: View {
                 projectList
             }
         }
-        .background(AmberTheme.background.ignoresSafeArea())
+        .background { AmberThemePageBackground(surface: .app) }
         .safeAreaInset(edge: .top, spacing: 0) {
             if viewModel.isContinuityOperationRunning {
                 continuityOperationBanner

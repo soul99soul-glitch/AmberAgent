@@ -882,12 +882,6 @@ final class DocumentAccessStore {
         return newGrant
     }
 
-    func clearGrant() {
-        grant = nil
-        lastRead = nil
-        errorMessage = nil
-    }
-
     func readSelectedDocumentForDeepRead(now: Date = Date()) async -> Result<IOSDeepReadSource, DocumentAccessError> {
         let request = requestForCurrentGrant(isUserInitiated: true)
         let result = await consumeSelectedFileRead(request: request, now: now)

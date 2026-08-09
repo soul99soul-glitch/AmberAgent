@@ -39,7 +39,12 @@ extension View {
 }
 
 struct ComposerIconButton: View {
-    let systemImage: String
+    enum Glyph {
+        case system(String)
+        case koboyo(ChatKoboyoMark)
+    }
+
+    let glyph: Glyph
     let accessibilityLabel: String
     var size: CGFloat = 34
     var symbolSize: CGFloat = 15
@@ -47,16 +52,59 @@ struct ComposerIconButton: View {
     var prominent = false
     let action: () -> Void
 
+    init(
+        systemImage: String,
+        accessibilityLabel: String,
+        size: CGFloat = 34,
+        symbolSize: CGFloat = 15,
+        tint: Color = AmberTheme.foreground2,
+        prominent: Bool = false,
+        action: @escaping () -> Void
+    ) {
+        self.glyph = .system(systemImage)
+        self.accessibilityLabel = accessibilityLabel
+        self.size = size
+        self.symbolSize = symbolSize
+        self.tint = tint
+        self.prominent = prominent
+        self.action = action
+    }
+
+    init(
+        koboyo: ChatKoboyoMark,
+        accessibilityLabel: String,
+        size: CGFloat = 34,
+        symbolSize: CGFloat = 15,
+        tint: Color = AmberTheme.foreground2,
+        prominent: Bool = false,
+        action: @escaping () -> Void
+    ) {
+        self.glyph = .koboyo(koboyo)
+        self.accessibilityLabel = accessibilityLabel
+        self.size = size
+        self.symbolSize = symbolSize
+        self.tint = tint
+        self.prominent = prominent
+        self.action = action
+    }
+
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: symbolSize, weight: .semibold))
-                .foregroundStyle(prominent ? Color.white : tint)
-                .frame(width: size, height: size)
-                // 与输入条/发送键统一为原生 Liquid Glass:中性按钮用无色调玻璃,prominent 时染 tint。
-                .modifier(ComposerDockCircleGlass(tint: prominent ? tint : nil))
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Circle())
+            Group {
+                switch glyph {
+                case .system(let name):
+                    Image(systemName: name)
+                        .font(.system(size: symbolSize, weight: .semibold))
+                case .koboyo(let mark):
+                    ChatKoboyoIcon(mark, size: symbolSize)
+                }
+            }
+            .foregroundStyle(prominent ? Color.white : tint)
+            .frame(width: size, height: size)
+            // 与输入条/发送键统一为原生 Liquid Glass:中性按钮用无色调玻璃,prominent 时染 tint。
+            .modifier(ComposerDockCircleGlass(tint: prominent ? tint : nil))
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Circle())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.9, haptic: .selection))
         .accessibilityLabel(accessibilityLabel)

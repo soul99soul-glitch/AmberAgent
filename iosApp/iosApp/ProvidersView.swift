@@ -658,26 +658,6 @@ enum ProviderProtocolOption: String, CaseIterable, Identifiable {
         }
     }
 
-    var detailTitle: String {
-        switch self {
-        case .openAI: "OpenAI 兼容"
-        case .codexOAuth: "Codex OAuth"
-        case .google: "Gemini"
-        case .anthropic: "Anthropic 兼容"
-        case .custom: "自定义"
-        }
-    }
-
-    var defaultPath: String {
-        switch self {
-        case .openAI: "/chat/completions"
-        case .codexOAuth: "/responses"
-        case .google: "/models/{model}:generateContent"
-        case .anthropic: "/messages"
-        case .custom: "/chat/completions"
-        }
-    }
-
     /// Protocols the "add provider" flow can actually create and run in the iOS
     /// chat chain today. Gemini/Custom stay out of the picker until they get a
     /// KMP executor bridge.
@@ -796,24 +776,6 @@ private struct ProviderDraftValueRow: View {
         .frame(minHeight: 58)
         .padding(.horizontal, 15)
         .padding(.vertical, 8)
-    }
-}
-
-private struct ProviderDraftSwitch: View {
-    let isOn: Bool
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(isOn ? AmberTheme.accent : AmberTheme.border)
-            .frame(width: 48, height: 30)
-            .overlay(alignment: isOn ? .trailing : .leading) {
-                Circle()
-                    .fill(.white)
-                    .frame(width: 26, height: 26)
-                    .shadow(color: .black.opacity(0.14), radius: 3, y: 1)
-                    .padding(2)
-            }
-            .animation(.snappy(duration: 0.18), value: isOn)
     }
 }
 

@@ -42,34 +42,35 @@ struct SingleBlockView: View {
       switch renderable {
       case .heading(_, _, let contents):
         let usesTextKit1 = shouldUseTextKit1(for: contents)
-        HStack(spacing: 0) {
-          ParagraphView(
-            contents: contents,
-            lineSpacing: config.headingLineSpacing,
-            usesTextKit1: usesTextKit1,
-            suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
-          )
-            .id(usesTextKit1)
-            .transition(.opacity)
-            .accessibilityAddTraits(.isHeader)
-            .onAppear { hasMountedText = true }
-          Spacer()
-        }
+        // Vendored fix (AmberAgent): bind to the proposed column width instead of
+        // HStack { ParagraphView; Spacer() }. The spacer pattern lets UITextView's
+        // screen-width intrinsic ideal expand the chat column; SwiftUI then centers
+        // the oversized row and clips both edges (and eats horizontal padding).
+        ParagraphView(
+          contents: contents,
+          lineSpacing: config.headingLineSpacing,
+          usesTextKit1: usesTextKit1,
+          suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
+        )
+          .id(usesTextKit1)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .transition(.opacity)
+          .accessibilityAddTraits(.isHeader)
+          .onAppear { hasMountedText = true }
       case .paragraph(_, let contents):
         let usesTextKit1 = shouldUseTextKit1(for: contents)
-        HStack(spacing: 0) {
-          ParagraphView(
-            contents: contents,
-            lineSpacing: config.paragraphLineSpacing,
-            usesTextKit1: usesTextKit1,
-            suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
-          )
-            .id(usesTextKit1)
-            .fixedSize(horizontal: false, vertical: true)
-            .transition(.opacity)
-            .onAppear { hasMountedText = true }
-          Spacer()
-        }
+        ParagraphView(
+          contents: contents,
+          lineSpacing: config.paragraphLineSpacing,
+          usesTextKit1: usesTextKit1,
+          suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
+        )
+          .id(usesTextKit1)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .transition(.opacity)
+          .onAppear { hasMountedText = true }
       case .coalescedText(_, let contents):
         // Vendored addition (AmberAgent): line spacing and block spacing are
         // already baked into `contents`' paragraph styles, so `lineSpacing` must
@@ -77,19 +78,17 @@ struct SingleBlockView: View {
         // overwrite the merged styles on the appended suffix and flatten the
         // paragraph gaps. See RenderableDocument+Coalescing.swift.
         let usesTextKit1 = shouldUseTextKit1(for: contents)
-        HStack(spacing: 0) {
-          ParagraphView(
-            contents: contents,
-            lineSpacing: nil,
-            usesTextKit1: usesTextKit1,
-            suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
-          )
-            .id(usesTextKit1)
-            .fixedSize(horizontal: false, vertical: true)
-            .transition(.opacity)
-            .onAppear { hasMountedText = true }
-          Spacer()
-        }
+        ParagraphView(
+          contents: contents,
+          lineSpacing: nil,
+          usesTextKit1: usesTextKit1,
+          suppressesInitialFade: hasMountedText && usesTextKit1ForAttachmentFreeText
+        )
+          .id(usesTextKit1)
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .transition(.opacity)
+          .onAppear { hasMountedText = true }
       case .latex(_, let latexString):
         ScrollView(.horizontal) {
           HStack(spacing: 0) {
@@ -100,7 +99,9 @@ struct SingleBlockView: View {
             )
             Spacer()
           }
-        }.scrollIndicators(.hidden)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .scrollIndicators(.hidden)
       case .orderedList(_, let items):
         OrderedListView(items: items)
       case .unorderedList(_, let items, let nestedLevel):

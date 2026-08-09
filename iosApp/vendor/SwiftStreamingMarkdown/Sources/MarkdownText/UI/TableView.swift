@@ -67,22 +67,19 @@ struct TableView: View {
   }
 
   private func headerView(colIdx: Int) -> some View {
-    HStack(spacing: 0) {
-      TableCellTextView(
-        attributedString: headings[colIdx],
-        foregroundColor: config.tableStyle.headerTextColor,
-        shouldAnimate: shouldAnimateTableText(headings[colIdx]),
-        usesLayerBackedAnimation: usesLayerBackedTableAnimation
-      )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .accessibilityValue(String.itemPositionInTable(rowIndex: 1, totalRow: numOfRows + 1, columnIndex: colIdx + 1, totalColumn: headings.count))
-      Spacer()
-    }
-    .padding(.horizontal, config.tableCellHorizontalPadding)
-    .padding(.vertical, config.tableCellVerticalPadding)
-    .id("\(colIdx)-heading")
-    .background(Color(config.tableStyle.headerBackgroundColor))
-    .applyHeaderBorder(colIndex: colIdx, colCount: headings.count, color: Color(config.tableStyle.borderColor))
+    TableCellTextView(
+      attributedString: headings[colIdx],
+      foregroundColor: config.tableStyle.headerTextColor,
+      shouldAnimate: shouldAnimateTableText(headings[colIdx]),
+      usesLayerBackedAnimation: usesLayerBackedTableAnimation
+    )
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+      .accessibilityValue(String.itemPositionInTable(rowIndex: 1, totalRow: numOfRows + 1, columnIndex: colIdx + 1, totalColumn: headings.count))
+      .padding(.horizontal, config.tableCellHorizontalPadding)
+      .padding(.vertical, config.tableCellVerticalPadding)
+      .id("\(colIdx)-heading")
+      .background(Color(config.tableStyle.headerBackgroundColor))
+      .applyHeaderBorder(colIndex: colIdx, colCount: headings.count, color: Color(config.tableStyle.borderColor))
   }
 
   @ViewBuilder
@@ -118,34 +115,30 @@ struct TableView: View {
     let content = rows[rowIdx][colIdx]
     switch content {
     case .containsAttachment(let nsAttributedString):
-      HStack(spacing: 0) {
-        ParagraphView(contents: applyTypographyThemingAndGetContent(nsAttributedString))
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-          .accessibilityValue(String.itemPositionInTable(rowIndex: rowIdx + 2, totalRow: numOfRows + 1, columnIndex: colIdx + 1, totalColumn: headings.count))
-        Spacer()
-      }
-      .frame(maxHeight: .infinity)
-      .padding(.horizontal, config.tableCellHorizontalPadding)
-      .padding(.vertical, config.tableCellVerticalPadding)
-      .id("\(colIdx)-\(rowIdx)")
-      .applyCellBorder(colIndex: colIdx, colCount: headings.count, rowIndex: rowIdx, rowCount: numOfRows, color: Color(config.tableStyle.borderColor))
+      // Vendored fix (AmberAgent): no trailing Spacer — it let Paragraph ideal
+      // width expand the cell/column the same way chat paragraphs used to.
+      ParagraphView(contents: applyTypographyThemingAndGetContent(nsAttributedString))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityValue(String.itemPositionInTable(rowIndex: rowIdx + 2, totalRow: numOfRows + 1, columnIndex: colIdx + 1, totalColumn: headings.count))
+        .frame(maxHeight: .infinity)
+        .padding(.horizontal, config.tableCellHorizontalPadding)
+        .padding(.vertical, config.tableCellVerticalPadding)
+        .id("\(colIdx)-\(rowIdx)")
+        .applyCellBorder(colIndex: colIdx, colCount: headings.count, rowIndex: rowIdx, rowCount: numOfRows, color: Color(config.tableStyle.borderColor))
     case .text(let attributedString):
-      HStack(spacing: 0) {
-        TableCellTextView(
-          attributedString: attributedString,
-          foregroundColor: config.tableStyle.regularTextColor,
-          shouldAnimate: shouldAnimateTableText(attributedString),
-          usesLayerBackedAnimation: usesLayerBackedTableAnimation
-        )
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-          .accessibilityValue(String.itemPositionInTable(rowIndex: rowIdx + 2, totalRow: numOfRows + 1, columnIndex: colIdx + 1, totalColumn: headings.count))
-        Spacer()
-      }
-      .frame(maxHeight: .infinity)
-      .padding(.horizontal, config.tableCellHorizontalPadding)
-      .padding(.vertical, config.tableCellVerticalPadding)
-      .id("\(colIdx)-\(rowIdx)")
-      .applyCellBorder(colIndex: colIdx, colCount: headings.count, rowIndex: rowIdx, rowCount: numOfRows, color: Color(config.tableStyle.borderColor))
+      TableCellTextView(
+        attributedString: attributedString,
+        foregroundColor: config.tableStyle.regularTextColor,
+        shouldAnimate: shouldAnimateTableText(attributedString),
+        usesLayerBackedAnimation: usesLayerBackedTableAnimation
+      )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityValue(String.itemPositionInTable(rowIndex: rowIdx + 2, totalRow: numOfRows + 1, columnIndex: colIdx + 1, totalColumn: headings.count))
+        .frame(maxHeight: .infinity)
+        .padding(.horizontal, config.tableCellHorizontalPadding)
+        .padding(.vertical, config.tableCellVerticalPadding)
+        .id("\(colIdx)-\(rowIdx)")
+        .applyCellBorder(colIndex: colIdx, colCount: headings.count, rowIndex: rowIdx, rowCount: numOfRows, color: Color(config.tableStyle.borderColor))
     }
   }
 

@@ -144,6 +144,16 @@ final class ChatReasoningCardTests: XCTestCase {
     /// 三倍以上余量,不依赖具体机器性能。
     ///
     /// 每次迭代取用独立实例,防止编译器把循环不变的调用外提。
+    func testKoboyoThinkingMarksParseToNonEmptyPaths() {
+        for mark in ChatKoboyoMark.allCases {
+            let bounds = mark.renderedPath.boundingRect
+            XCTAssertFalse(
+                bounds.isNull || bounds.isEmpty || bounds.width < 1 || bounds.height < 1,
+                "\(mark.rawValue) path should parse to a drawable glyph"
+            )
+        }
+    }
+
     func testVisibleTextCostDoesNotScaleWithLeadingWhitespaceBody() {
         let iterations = 50
         let filler = String(repeating: "推理内容。", count: 200_000)

@@ -67,7 +67,7 @@ struct MiniAppRunnerView: View {
 
     var body: some View {
         ZStack {
-            AmberTheme.background.ignoresSafeArea()
+            AmberThemePageBackground(surface: .app)
 
             if !didInitialLoad || !isRunnerActive {
                 loadingSection
@@ -314,11 +314,12 @@ struct MiniAppRunnerView: View {
                     hostConfirmationOwner.reopen()
                 }
             )
+            // Transparent WKWebView must sit on paper, not page texture.
+            .background(AmberTheme.background)
             .id(MiniAppRunnerWebViewIdentity(
                 htmlHash: repository.sha256(loadedHtml),
                 policy: bridgePolicy,
-                access: miniAppAccessIdentity,
-                theme: miniAppThemePayload
+                access: miniAppAccessIdentity
             ))
 
             if let runnerError {
@@ -704,29 +705,11 @@ struct MiniAppRunnerView: View {
     }
 
     private var miniAppThemePayload: IOSMiniAppThemePayload {
-        IOSMiniAppThemePayload(
+        IOSMiniAppThemeBridge.payload(
+            paper: AmberThemeRuntime.shared.paper,
             dark: colorScheme == .dark,
-            background: resolvedHex(AmberTheme.background),
-            foreground: resolvedHex(AmberTheme.foreground),
-            primary: resolvedHex(AmberTheme.accent)
-        )
-    }
-
-    private func resolvedHex(_ color: Color) -> String {
-        let style: UIUserInterfaceStyle = colorScheme == .dark ? .dark : .light
-        let resolved = UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
-        var red: CGFloat = 0
-        var green: CGFloat = 0
-        var blue: CGFloat = 0
-        var alpha: CGFloat = 0
-        guard resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
-            return colorScheme == .dark ? "#0E0D10" : "#ECE8E4"
-        }
-        return String(
-            format: "#%02X%02X%02X",
-            Int((red * 255).rounded()),
-            Int((green * 255).rounded()),
-            Int((blue * 255).rounded())
+            accentHex: AmberThemeRuntime.shared.accentHex,
+            accentInkHex: AmberThemeRuntime.shared.accentInkHex
         )
     }
 
@@ -1045,7 +1028,6 @@ private struct MiniAppRunnerWebViewIdentity: Hashable {
     let htmlHash: String
     let policy: IOSMiniAppBridgePolicy
     let access: MiniAppRunnerAccessIdentity
-    let theme: IOSMiniAppThemePayload
 }
 
 private struct MiniAppRunnerAccessIdentity: Hashable {
