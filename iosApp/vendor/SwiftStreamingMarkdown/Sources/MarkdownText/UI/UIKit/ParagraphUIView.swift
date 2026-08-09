@@ -121,14 +121,23 @@ class ParagraphUIView: UITextView {
     // row inside the padded chat column and clip both edges.
     var reportFlexibleWidth = false
     if targetWidth <= 0 || targetWidth.isInfinite {
-      // Prefer the SwiftUI/UIKit parent column over the full screen.
+      // Prefer the SwiftUI/UIKit parent column over the full screen for the
+      // height guess...
       if let superWidth = superview?.bounds.width, superWidth > 0, superWidth.isFinite {
         targetWidth = superWidth
       } else {
         // Last-resort measure width so LazyVStack first pass is not blank.
         targetWidth = UIScreen.main.bounds.width
-        reportFlexibleWidth = true
       }
+      // Vendored fix (AmberAgent): any width derived without valid bounds is a
+      // guess — never advertise it as the ideal. The parent column (superview)
+      // can be the full hosting width rather than the padded chat column, and a
+      // screen-wide ideal propagates up `.frame(maxWidth: .infinity)` chains,
+      // widening the row past the column; SwiftUI then centers the oversized row
+      // and the paragraph's leading inset is eaten / both edges are clipped
+      // (real-device report: long unbroken-CJK paragraph at leading ≈ 4pt
+      // instead of the column inset).
+      reportFlexibleWidth = true
     }
     let targetSize = CGSize(width: targetWidth, height: .greatestFiniteMagnitude)
     let contentSize = sizeThatFits(targetSize)
@@ -147,6 +156,29 @@ class ParagraphUIView: UITextView {
     if bounds.width != cachedSize?.targetWidth {
       invalidateCachedSize()
     }
+    // Vendored fix (AmberAgent): `sizeThatFits` resizes the text container to
+    // the SwiftUI proposal as a measurement side effect. If the view's final
+    // frame is narrower than that proposal, the stale wide container makes
+    // TextKit lay out (and keep) line fragments wider than the visible bounds —
+    // the rendered text then overflows the view and gets clipped. The view's
+    // bounds are the authoritative width: resync the container whenever they
+    // diverge and force the fragments to re-layout at the real width.
+    if usesTextKit1, bounds.width > 0, bounds.width.isFinite {
+      let containerWidth = bounds.width
+        - textContainerInset.left - textContainerInset.right
+      if containerWidth > 0, containerWidth.isFinite,
+         abs(textContainer.size.width - containerWidth) > 0.5 {
+        textContainer.size = CGSize(
+          width: containerWidth,
+          height: ParagraphUIView.unboundedMeasuringHeight
+        )
+        layoutManager.invalidateLayout(
+          forCharacterRange: NSRange(location: 0, length: textStorage.length),
+          actualCharacterRange: nil
+        )
+        setNeedsDisplay()
+      }
+    }
     invalidateIntrinsicContentSize()
   }
 
@@ -161,11 +193,65 @@ class ParagraphUIView: UITextView {
     let containerWidth = size.width
       - textContainerInset.left - textContainerInset.right
     let measuringSize = CGSize(width: containerWidth, height: ParagraphUIView.unboundedMeasuringHeight)
-    if textContainer.size != measuringSize {
+    // Vendored fix (AmberAgent): `layoutSubviews` is the single authoritative
+    // writer of `textContainer.size` (bounds-derived). This measurement only
+    // re-sizes + re-lays-out on a real width transition — the view has no valid
+    // bounds yet (first real measurement) or the proposed width differs from the
+    // current container by >= 0.5pt (tolerance guards sub-pixel oscillation) —
+    // and it restores the container afterwards, so no transient width survives
+    // the call. That keeps the streaming append fast path (stable width)
+    // incremental and stops the table cell measurement chain (makeCache's
+    // unspecified-width pass vs. column-width pass) from swinging the container
+    // on every pass, which used to force a full re-layout of every cell on
+    // every appended row.
+    let boundsInvalid = bounds.width <= 0 || bounds.width.isInfinite
+    // Width comparison carries the sub-pixel tolerance (the table measurement
+    // chain oscillates by fractions of a point). The height must also stay at
+    // the unbounded sentinel: UITextView's attributedText setter resets the
+    // container to the view's frame size (e.g. height 1 on a not-yet-laid-out
+    // view), and a non-sentinel height truncates the laid-out lines, so
+    // `usedRect` would report a constant (first-line) height.
+    let widthDiffers = abs(textContainer.size.width - containerWidth) >= 0.5
+    let heightDiffers = textContainer.size.height != ParagraphUIView.unboundedMeasuringHeight
+    let shouldRelayout = boundsInvalid || widthDiffers || heightDiffers
+    if shouldRelayout {
+      let previousContainerWidth = textContainer.size.width
       textContainer.size = measuringSize
+      // A real width transition must re-lay the fragments at the proposed
+      // width: TextKit 1's incremental layout keeps fragments at their previous
+      // width, and `usedRect(for:)`/`ensureLayout` do not re-lay fragments
+      // invalidated by a container resize — they keep reporting the stale
+      // width. `invalidateLayout` + `glyphRange(for:)` force the re-layout
+      // (glyphRange is the only measurement API that re-lays container-dirty
+      // fragments); the rects are then read directly because `usedRect` can lag
+      // a just-invalidated layout by one query. This path only runs on a
+      // genuine width transition (>= 0.5pt), a height-sentinel repair, or the
+      // first measurement — never on the steady-state streaming path.
+      layoutManager.invalidateLayout(
+        forCharacterRange: NSRange(location: 0, length: textStorage.length),
+        actualCharacterRange: nil
+      )
+      _ = layoutManager.glyphRange(for: textContainer)
+      let used = Self.laidOutBounds(layoutManager: layoutManager, textContainer: textContainer)
+      // Restore the width so no transient measurement width survives the call
+      // (single-writer contract: `layoutSubviews` owns the container width).
+      // The height stays at the unbounded sentinel — restoring a view-height
+      // value would truncate the laid-out lines and corrupt the next measure.
+      textContainer.size = CGSize(
+        width: previousContainerWidth,
+        height: ParagraphUIView.unboundedMeasuringHeight
+      )
+      let measuredWidth = (used.width + textContainerInset.left + textContainerInset.right).rounded(.up)
+      return CGSize(
+        width: min(measuredWidth, size.width),
+        height: (used.height + textContainerInset.top + textContainerInset.bottom).rounded(.up)
+      )
     }
-    // glyphRange(for:) forces any missing layout; ensureLayout(for:) is the
-    // known-slow API here and must not be used on the streaming path.
+    // Steady state (including the table measurement chain's repeated
+    // same-width passes): measure against the container as-is, no invalidation.
+    // `glyphRange(for:)` lays out only the appended glyphs, so the height stays
+    // incremental; ensureLayout(for:) is the known-slow API and must not be used
+    // on the streaming path.
     _ = layoutManager.glyphRange(for: textContainer)
     let used = layoutManager.usedRect(for: textContainer)
     let measuredWidth = (used.width + textContainerInset.left + textContainerInset.right).rounded(.up)
@@ -175,7 +261,34 @@ class ParagraphUIView: UITextView {
     )
   }
 
-  func setParagraphContents(_ newContents: NSMutableAttributedString, lineSpacing: CGFloat? = nil, animatedByWord: Bool) {
+  /// Union of the actually laid-out line fragments. `usedRect(for:)` can lag a
+  /// just-invalidated layout by one query; reading the fragments directly gives
+  /// the width the text will really render at. O(line count) — only called on
+  /// container-width transitions, never on the steady-state streaming path.
+  private static func laidOutBounds(
+    layoutManager: NSLayoutManager,
+    textContainer: NSTextContainer
+  ) -> CGRect {
+    let glyphCount = layoutManager.numberOfGlyphs
+    guard glyphCount > 0 else { return .zero }
+    var bounds = CGRect.null
+    var glyphIndex = 0
+    while glyphIndex < glyphCount {
+      var range = NSRange(location: 0, length: 0)
+      let rect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: &range)
+      bounds = bounds.union(rect)
+      guard range.length > 0 else { break }
+      glyphIndex = range.location + range.length
+    }
+    return bounds.isNull ? .zero : bounds
+  }
+
+  func setParagraphContents(
+    _ newContents: NSMutableAttributedString,
+    lineSpacing: CGFloat? = nil,
+    animatedByWord: Bool,
+    appendsTailFadeAsUnit: Bool = false
+  ) {
     // Keep the cached interface style up to date for citation preview rendering.
     // This runs on the main thread so it's safe to read traitCollection here.
     InlineCitationAttachment.updateInterfaceStyle(traitCollection.userInterfaceStyle)
@@ -213,7 +326,7 @@ class ParagraphUIView: UITextView {
       accessibilityLabel = textStorage.string
       accessibilityCustomActions = nil
       invalidateIntrinsicContentSize()
-      appendFadeAnimations(in: appendedRange)
+      appendFadeAnimations(in: appendedRange, asUnit: appendsTailFadeAsUnit)
       return
     }
 
@@ -280,7 +393,8 @@ class ParagraphUIView: UITextView {
     if animatedByWord,
        changedContentLength > 0 {
       appendFadeAnimations(
-        in: NSRange(location: commonPrefixLength, length: changedContentLength)
+        in: NSRange(location: commonPrefixLength, length: changedContentLength),
+        asUnit: appendsTailFadeAsUnit
       )
     } else {
       // If no animation needed anymore, clean up all existings animations if any.
@@ -288,20 +402,34 @@ class ParagraphUIView: UITextView {
     }
   }
 
-  private func appendFadeAnimations(in newContentRange: NSRange) {
+  private func appendFadeAnimations(in newContentRange: NSRange, asUnit: Bool = false) {
     guard newContentRange.length > 0 else { return }
-    // Animate word by word
-    let wordRanges = attributedText.splitIntoWords(withIn: newContentRange)
-    let wordCount = wordRanges.count
-    let delayBetweenWords: Double = 0.1 / Double(wordCount)
     let baseStartTime = CACurrentMediaTime()
-    for (index, wordRange) in wordRanges.enumerated() {
-      let animationData = FadeAnimationData(
-        startTime: baseStartTime + Double(index) * delayBetweenWords,
+    if asUnit {
+      // Vendored addition (AmberAgent): fade the whole appended tail as one
+      // animation. Streaming publishes ~12-36 characters per beat, so a single
+      // fade per beat reads as continuous progressive appearance while costing
+      // one display-link animation entry instead of one per word (each entry
+      // rewrites foreground-color alpha across its range every frame — the
+      // per-word fan-out dominated main-thread time during fast streams).
+      activeAnimations.append(FadeAnimationData(
+        startTime: baseStartTime,
         duration: Self.animationDuration,
-        range: wordRange
-      )
-      activeAnimations.append(animationData)
+        range: newContentRange
+      ))
+    } else {
+      // Animate word by word
+      let wordRanges = attributedText.splitIntoWords(withIn: newContentRange)
+      let wordCount = wordRanges.count
+      let delayBetweenWords: Double = 0.1 / Double(wordCount)
+      for (index, wordRange) in wordRanges.enumerated() {
+        let animationData = FadeAnimationData(
+          startTime: baseStartTime + Double(index) * delayBetweenWords,
+          duration: Self.animationDuration,
+          range: wordRange
+        )
+        activeAnimations.append(animationData)
+      }
     }
 
     updateTextViewWithCurrentAnimations()
@@ -514,6 +642,13 @@ class ParagraphUIView: UITextView {
     lineSpacing = nil
     attributedText = NSAttributedString()
     invalidateCachedSize()
+    // Vendored fix (AmberAgent): also drop the previous context's frame. A
+    // recycled view keeps its old bounds (e.g. a wide table cell); with valid
+    // bounds, `intrinsicContentSize` trusts them and advertises the stale wide
+    // width as the ideal, which widens the chat row past the column and clips
+    // both edges. SwiftUI re-frames the view during layout, so resetting to
+    // zero only affects the measurement window before the new frame lands.
+    frame = .zero
     setNeedsLayout()
   }
 

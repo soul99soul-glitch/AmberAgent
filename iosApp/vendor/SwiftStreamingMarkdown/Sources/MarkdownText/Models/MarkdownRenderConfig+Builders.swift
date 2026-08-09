@@ -27,7 +27,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -52,7 +53,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -77,7 +79,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -102,7 +105,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -127,7 +131,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -152,7 +157,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -177,7 +183,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -203,7 +210,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -228,7 +236,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -253,7 +262,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -278,7 +288,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -303,7 +314,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -328,7 +340,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -353,7 +366,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -378,7 +392,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: value,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -403,7 +418,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: value,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -428,7 +444,8 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: value,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
     )
   }
 
@@ -454,7 +471,35 @@ extension MarkdownRenderConfig {
       tableMaxColumnWidth: tableMaxColumnWidth,
       unorderedListBulletWidth: unorderedListBulletWidth,
       collapsesSoftBreaks: collapsesSoftBreaks,
-      coalescesAdjacentTextBlocks: value
+      coalescesAdjacentTextBlocks: value,
+      animatesAppendedTailAsUnit: animatesAppendedTailAsUnit
+    )
+  }
+
+  /// Vendored addition (AmberAgent): returns a copy with
+  /// `animatesAppendedTailAsUnit` replaced.
+  public func withAnimatesAppendedTailAsUnit(value: Bool) -> MarkdownRenderConfig {
+    MarkdownRenderConfig(
+      shouldAnimateText: shouldAnimateText,
+      blockQuoteStyle: blockQuoteStyle,
+      headingStyle: headingStyle,
+      orderedListStyle: orderedListStyle,
+      paragraphStyle: paragraphStyle,
+      tableStyle: tableStyle,
+      inlineStyle: inlineStyle,
+      textContextMenu: textContextMenu,
+      citationConfig: citationConfig,
+      blockSpacing: blockSpacing,
+      paragraphLineSpacing: paragraphLineSpacing,
+      tableCellHorizontalPadding: tableCellHorizontalPadding,
+      tableCellVerticalPadding: tableCellVerticalPadding,
+      listItemSpacing: listItemSpacing,
+      headingLineSpacing: headingLineSpacing,
+      tableMaxColumnWidth: tableMaxColumnWidth,
+      unorderedListBulletWidth: unorderedListBulletWidth,
+      collapsesSoftBreaks: collapsesSoftBreaks,
+      coalescesAdjacentTextBlocks: coalescesAdjacentTextBlocks,
+      animatesAppendedTailAsUnit: value
     )
   }
 }

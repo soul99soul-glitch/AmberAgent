@@ -63,8 +63,19 @@ struct ParagraphView: UIViewRepresentable {
     // paragraph per pass and dominated long-document streaming profiles.
     let contentsUnchanged = view.paragraphContents === contents || view.paragraphContents == contents
     if !contentsUnchanged || view.lineSpacing != lineSpacing {
-      let shouldAnimate = view.window != nil && config.shouldAnimateText // only animate when visible
-      view.setParagraphContents(contents, lineSpacing: lineSpacing, animatedByWord: shouldAnimate)
+      // Vendored fix (AmberAgent): streaming publishes land while cells are
+      // still being configured (window == nil), so the window gate silently
+      // skipped the fade and whole beats popped in unfaded. Unit-tail mode
+      // animates regardless of attachment; the legacy per-word mode keeps the
+      // original gate.
+      let shouldAnimate = config.shouldAnimateText
+        && (config.animatesAppendedTailAsUnit || view.window != nil)
+      view.setParagraphContents(
+        contents,
+        lineSpacing: lineSpacing,
+        animatedByWord: shouldAnimate,
+        appendsTailFadeAsUnit: config.animatesAppendedTailAsUnit
+      )
       // Vendored fix (AmberAgent): sizeThatFits runs BEFORE updateUIView in the
       // same layout pass, so it measures the old UITextView content and caches
       // the wrong height.  Clear the cache here so the next sizeThatFits (triggered

@@ -64,6 +64,13 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
   /// Defaults to `false`, which keeps upstream's one-view-per-block behavior.
   /// See `RenderableDocument+Coalescing.swift`.
   public let coalescesAdjacentTextBlocks: Bool
+  /// Vendored addition (AmberAgent). When `true`, streaming append fades the
+  /// whole appended tail as a single unit instead of one animation per word,
+  /// and animates even before the view is attached to a window (streaming
+  /// publishes land during cell configuration). Both cut main-thread work and
+  /// stop beats from popping in unfaded. Defaults to `false` (upstream
+  /// per-word, window-gated behavior).
+  public let animatesAppendedTailAsUnit: Bool
 
   /// Font and color style for a uniformly-styled run of markdown text.
   public struct MarkdownTextStyle: Hashable, Sendable {
@@ -299,7 +306,8 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
     tableMaxColumnWidth: CGFloat = MarkdownRenderConfig.defaultTableMaxColumnWidth,
     unorderedListBulletWidth: CGFloat = MarkdownRenderConfig.defaultUnorderedListBulletWidth,
     collapsesSoftBreaks: Bool = false,
-    coalescesAdjacentTextBlocks: Bool = false
+    coalescesAdjacentTextBlocks: Bool = false,
+    animatesAppendedTailAsUnit: Bool = false
   ) {
     self.shouldAnimateText = shouldAnimateText
     self.blockQuoteStyle = blockQuoteStyle
@@ -320,6 +328,7 @@ public struct MarkdownRenderConfig: Hashable, Sendable {
     self.unorderedListBulletWidth = unorderedListBulletWidth
     self.collapsesSoftBreaks = collapsesSoftBreaks
     self.coalescesAdjacentTextBlocks = coalescesAdjacentTextBlocks
+    self.animatesAppendedTailAsUnit = animatesAppendedTailAsUnit
   }
 
   /// The default render config, equivalent to calling `init()` with no

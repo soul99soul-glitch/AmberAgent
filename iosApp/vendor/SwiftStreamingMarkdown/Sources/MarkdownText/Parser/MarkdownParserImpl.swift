@@ -13,6 +13,12 @@ public final class MarkdownParserImpl: MarkdownParser {
     PartialTableMarkupPostParsingRewriter()
   ]
 
+  /// Vendored addition (AmberAgent): repairs flanking-rejected strong emphasis.
+  /// Runs after the speculative rewriters so a speculatively closed span is not
+  /// double-processed; only literal delimiter pairs the parser rejected remain
+  /// in `Text` nodes for it to find.
+  private var rejectedEmphasisRepairRewriter = RejectedEmphasisRepairRewriter()
+
   private let latexPreprocessor: LaTexPreProcessor
 
   /// Create a new parser instance using the default LaTeX preprocessor.
@@ -34,6 +40,18 @@ public final class MarkdownParserImpl: MarkdownParser {
         if let rewrittenDoc = rewriter.rewriteIfApplicable(document: result.document) {
           result = MarkdownParseResult(document: rewrittenDoc, speculativeRewritten: true)
         }
+      }
+    }
+
+    // Not gated on speculativeRewrite: rejected emphasis occurs in completed
+    // input too, and the repair only touches literal delimiters the parser
+    // already failed on.
+    if option.repairsRejectedStrongEmphasis {
+      if let repaired = rejectedEmphasisRepairRewriter.visit(result.document) as? Document {
+        result = MarkdownParseResult(
+          document: repaired,
+          speculativeRewritten: result.speculativeRewritten
+        )
       }
     }
     return result
